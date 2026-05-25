@@ -82,7 +82,7 @@ export class WorkflowLogger {
       `Shannon Pentest - Workflow Log`,
       `================================================================================`,
       `Workflow ID: ${this.workflowId ?? this.sessionMetadata.id}`,
-      `Target URL:  ${this.sessionMetadata.webUrl}`,
+      `Target URL:  ${this.sessionMetadata.webUrl ?? '(offline)'}`,
       `Started:     ${formatTimestamp()}`,
       `================================================================================`,
       ``,

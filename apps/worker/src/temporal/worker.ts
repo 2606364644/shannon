@@ -50,25 +50,30 @@ const PROGRESS_QUERY = 'getProgress';
 // === CLI Argument Parsing ===
 
 interface CliArgs {
-  webUrl: string;
+  webUrl?: string;
   repoPath: string;
   taskQueue: string;
   configPath?: string;
   outputPath?: string;
   pipelineTestingMode: boolean;
   resumeFromWorkspace?: string;
+  whiteboxOnly: boolean;
+  blackboxOnly: boolean;
 }
 
 function showUsage(): void {
   console.log('\nShannon Worker');
   console.log('Combined worker + client for pentest pipeline\n');
   console.log('Usage:');
-  console.log('  node dist/temporal/worker.js <webUrl> <repoPath> --task-queue <name> [options]\n');
+  console.log('  node dist/temporal/worker.js [webUrl] <repoPath> --task-queue <name> [options]\n');
   console.log('Options:');
   console.log('  --task-queue <name>    Task queue name (required)');
   console.log('  --config <path>        Configuration file path');
   console.log('  --workspace <name>     Resume from existing workspace');
   console.log('  --pipeline-testing     Use minimal prompts for fast testing\n');
+  console.log('Mode (set via env vars from CLI):');
+  console.log('  SHANNON_WHITEBOX_ONLY=1   Run whitebox-only (static analysis)');
+  console.log('  SHANNON_BLACKBOX_ONLY=1   Run blackbox-only (exploitation)\n');
 }
 
 function parseCliArgs(argv: string[]): CliArgs {
@@ -122,8 +127,23 @@ function parseCliArgs(argv: string[]): CliArgs {
     }
   }
 
-  if (!webUrl || !repoPath) {
-    console.error('Error: webUrl and repoPath are required');
+  const whiteboxOnly = process.env.SHANNON_WHITEBOX_ONLY === '1';
+  const blackboxOnly = process.env.SHANNON_BLACKBOX_ONLY === '1';
+
+  if (!repoPath) {
+    console.error('Error: repoPath is required');
+    showUsage();
+    process.exit(1);
+  }
+
+  if (!whiteboxOnly && !webUrl) {
+    console.error('Error: webUrl is required (unless SHANNON_WHITEBOX_ONLY=1)');
+    showUsage();
+    process.exit(1);
+  }
+
+  if (blackboxOnly && !webUrl) {
+    console.error('Error: webUrl is required for blackbox-only mode');
     showUsage();
     process.exit(1);
   }
@@ -135,10 +155,12 @@ function parseCliArgs(argv: string[]): CliArgs {
   }
 
   return {
-    webUrl,
+    ...(webUrl && { webUrl }),
     repoPath,
     taskQueue,
     pipelineTestingMode,
+    whiteboxOnly,
+    blackboxOnly,
     ...(configPath && { configPath }),
     ...(outputPath && { outputPath }),
     ...(resumeFromWorkspace && { resumeFromWorkspace }),
@@ -150,7 +172,7 @@ function parseCliArgs(argv: string[]): CliArgs {
 interface SessionJson {
   session: {
     id: string;
-    webUrl: string;
+    webUrl?: string;
     originalWorkflowId?: string;
     resumeAttempts?: Array<{ workflowId: string }>;
   };
@@ -213,7 +235,7 @@ async function terminateExistingWorkflows(client: Client, workspaceName: string)
 
 async function resolveWorkspace(client: Client, args: CliArgs): Promise<WorkspaceResolution> {
   if (!args.resumeFromWorkspace) {
-    const hostname = sanitizeHostname(args.webUrl);
+    const hostname = args.webUrl ? sanitizeHostname(args.webUrl) : `static-${Date.now()}`;
     const workflowId = `${hostname}_shannon-${Date.now()}`;
     return {
       workflowId,
@@ -237,7 +259,7 @@ async function resolveWorkspace(client: Client, args: CliArgs): Promise<Workspac
     }
 
     const session = await readJson<SessionJson>(sessionPath);
-    if (session.session.webUrl !== args.webUrl) {
+    if (args.webUrl && session.session.webUrl !== args.webUrl) {
       console.error('ERROR: URL mismatch with workspace');
       console.error(`  Workspace URL: ${session.session.webUrl}`);
       console.error(`  Provided URL:  ${args.webUrl}`);
@@ -310,7 +332,7 @@ function buildPipelineInput(
   orchestration: OrchestrationConfig,
 ): PipelineInput {
   return {
-    webUrl: args.webUrl,
+    ...(args.webUrl && { webUrl: args.webUrl }),
     repoPath: args.repoPath,
     workflowId: workspace.workflowId,
     sessionId: workspace.sessionId,
@@ -321,6 +343,8 @@ function buildPipelineInput(
     ...(Object.keys(orchestration.pipelineConfig).length > 0 && { pipelineConfig: orchestration.pipelineConfig }),
     ...(orchestration.vulnClasses && { vulnClasses: orchestration.vulnClasses }),
     ...(orchestration.exploit !== undefined && { exploit: orchestration.exploit }),
+    ...(args.whiteboxOnly && { whiteboxOnly: true }),
+    ...(args.blackboxOnly && { blackboxOnly: true }),
   };
 }
 
@@ -435,14 +459,22 @@ async function run(): Promise<void> {
     const workerDone = worker.run();
 
     // 6. Submit workflow to the same task queue
+    const workflowType = args.whiteboxOnly
+      ? 'whiteboxPipelineWorkflow'
+      : args.blackboxOnly
+        ? 'blackboxPipelineWorkflow'
+        : 'pentestPipelineWorkflow';
+
     const handle = await client.workflow.start<(input: PipelineInput) => Promise<PipelineState>>(
-      'pentestPipelineWorkflow',
+      workflowType,
       {
         taskQueue: args.taskQueue,
         workflowId: workspace.workflowId,
         args: [input],
       },
     );
+
+    console.log(`Workflow started: ${workflowType} (id: ${workspace.workflowId})`);
 
     // 7. Wait for workflow result
     await waitForWorkflowResult(handle, workspace);

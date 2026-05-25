@@ -16,7 +16,7 @@ import { resolveConfig, resolveRepo } from '../paths.js';
 import { displaySplash } from '../splash.js';
 
 export interface StartArgs {
-  url: string;
+  url?: string;
   repo: string;
   config?: string;
   workspace?: string;
@@ -24,6 +24,8 @@ export interface StartArgs {
   pipelineTesting: boolean;
   debug: boolean;
   version: string;
+  whiteboxOnly: boolean;
+  blackboxOnly: boolean;
 }
 
 export async function start(args: StartArgs): Promise<void> {
@@ -58,7 +60,10 @@ export async function start(args: StartArgs): Promise<void> {
 
   // 7. Generate workspace name if not provided
   const workspace =
-    args.workspace ?? `${new URL(args.url).hostname.replace(/[^a-zA-Z0-9-]/g, '-')}_shannon-${Date.now()}`;
+    args.workspace ??
+    (args.url
+      ? `${new URL(args.url).hostname.replace(/[^a-zA-Z0-9-]/g, '-')}_shannon-${Date.now()}`
+      : `${path.basename(repo.hostPath)}_static-${Date.now()}`);
 
   // 8. Create writable overlay directories (mounted over :ro repo paths inside container)
   // Workspace dir must be 0o777 so the container user (UID 1001) can create audit subdirs
@@ -113,6 +118,8 @@ export async function start(args: StartArgs): Promise<void> {
     workspace,
     ...(args.pipelineTesting && { pipelineTesting: true }),
     ...(args.debug && { debug: true }),
+    ...(args.whiteboxOnly && { whiteboxOnly: true }),
+    ...(args.blackboxOnly && { blackboxOnly: true }),
   });
 
   // 14. Bail if `docker run -d` itself fails (mount error, image missing, etc.)
@@ -226,7 +233,7 @@ function printInfo(
   const logsCmd = isLocal() ? `./shannon logs ${workspace}` : `npx @keygraph/shannon logs ${workspace}`;
   const reportsPath = path.join(workspacesDir, workspace);
 
-  console.log(`  Target:     ${args.url}`);
+  console.log(`  Target:     ${args.url ?? '(offline — source code analysis only)'}`);
   console.log(`  Repository: ${repoPath}`);
   console.log(`  Workspace:  ${workspace}`);
   if (args.config) {
@@ -234,6 +241,10 @@ function printInfo(
   }
   if (args.pipelineTesting) {
     console.log('  Mode:       Pipeline Testing');
+  } else if (args.whiteboxOnly) {
+    console.log('  Mode:       Whitebox-Only (static analysis)');
+  } else if (args.blackboxOnly) {
+    console.log('  Mode:       Blackbox-Only (exploitation)');
   }
   console.log('');
   console.log('  Monitor:');

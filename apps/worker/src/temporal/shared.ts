@@ -7,7 +7,7 @@ import type { ErrorCode } from '../types/errors.js';
 import type { AgentMetrics } from '../types/metrics.js';
 
 export interface PipelineInput {
-  webUrl: string;
+  webUrl?: string;
   repoPath: string;
   configPath?: string;
   outputPath?: string;
@@ -31,6 +31,8 @@ export interface PipelineInput {
   providerConfig?: ProviderConfig; // LLM provider configuration (Bedrock, Vertex, etc.)
   vulnClasses?: VulnClass[]; // omitted = all five
   exploit?: boolean; // false skips the exploitation phase
+  whiteboxOnly?: boolean; // NEW: run whitebox-only (static analysis)
+  blackboxOnly?: boolean; // NEW: run blackbox-only (exploitation from prior whitebox)
 }
 
 export interface ResumeState {

@@ -601,7 +601,7 @@ async function validateTargetUrl(targetUrl: string, logger: ActivityLogger): Pro
  * Returns on first failure.
  */
 export async function runPreflightChecks(
-  targetUrl: string,
+  targetUrl: string | undefined,
   repoPath: string,
   configPath: string | undefined,
   logger: ActivityLogger,
@@ -640,10 +640,14 @@ export async function runPreflightChecks(
     return credResult;
   }
 
-  // 5. Target URL reachability check (cheap — 1 HTTP round-trip)
-  const urlResult = await validateTargetUrl(targetUrl, logger);
-  if (!urlResult.ok) {
-    return urlResult;
+  // 5. Target URL reachability check (skipped when no URL — whitebox-only mode)
+  if (targetUrl) {
+    const urlResult = await validateTargetUrl(targetUrl, logger);
+    if (!urlResult.ok) {
+      return urlResult;
+    }
+  } else {
+    logger.info('Skipping target URL check (no URL — offline/static analysis mode)');
   }
 
   logger.info('All preflight checks passed');

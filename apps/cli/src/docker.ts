@@ -147,7 +147,7 @@ function addHostFlag(): string[] {
 
 export interface WorkerOptions {
   version: string;
-  url: string;
+  url?: string;
   repo: { hostPath: string; containerPath: string };
   workspacesDir: string;
   taskQueue: string;
@@ -160,6 +160,8 @@ export interface WorkerOptions {
   workspace: string;
   pipelineTesting?: boolean;
   debug?: boolean;
+  whiteboxOnly?: boolean;
+  blackboxOnly?: boolean;
 }
 
 /**
@@ -214,6 +216,14 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   // Environment
   args.push(...opts.envFlags);
 
+  // Mode flags
+  if (opts.whiteboxOnly) {
+    args.push('-e', 'SHANNON_WHITEBOX_ONLY=1');
+  }
+  if (opts.blackboxOnly) {
+    args.push('-e', 'SHANNON_BLACKBOX_ONLY=1');
+  }
+
   // Container settings
   args.push('--shm-size', '2gb', '--security-opt', 'seccomp=unconfined');
 
@@ -221,7 +231,11 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   args.push(getWorkerImage(opts.version));
 
   // Worker command
-  args.push('node', 'apps/worker/dist/temporal/worker.js', opts.url, opts.repo.containerPath);
+  if (opts.url) {
+    args.push('node', 'apps/worker/dist/temporal/worker.js', opts.url, opts.repo.containerPath);
+  } else {
+    args.push('node', 'apps/worker/dist/temporal/worker.js', opts.repo.containerPath);
+  }
   args.push('--task-queue', opts.taskQueue);
   if (opts.config) {
     args.push('--config', opts.config.containerPath);

@@ -50,15 +50,6 @@ export class AuditSession {
         ErrorCode.CONFIG_VALIDATION_FAILED,
       );
     }
-    if (!this.sessionMetadata.webUrl) {
-      throw new PentestError(
-        'sessionMetadata.webUrl is required',
-        'config',
-        false,
-        { field: 'sessionMetadata.webUrl' },
-        ErrorCode.CONFIG_VALIDATION_FAILED,
-      );
-    }
 
     // Components
     this.metricsTracker = new MetricsTracker(sessionMetadata);

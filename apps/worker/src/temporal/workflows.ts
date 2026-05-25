@@ -623,3 +623,395 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
 export async function pentestPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
   return pentestPipeline(input);
 }
+
+const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf'];
+
+export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
+  if (!input.repoPath || input.repoPath.includes('..')) {
+    throw ApplicationFailure.nonRetryable(
+      `Invalid repoPath: path traversal not allowed (received: ${input.repoPath ?? '<empty>'})`,
+      'ConfigurationError',
+    );
+  }
+  if (!input.repoPath.startsWith('/')) {
+    throw ApplicationFailure.nonRetryable(
+      `Invalid repoPath: absolute path required (received: ${input.repoPath})`,
+      'ConfigurationError',
+    );
+  }
+
+  const { workflowId } = workflowInfo();
+
+  function selectActivityProxy(pipelineInput: PipelineInput) {
+    if (pipelineInput.pipelineTestingMode) return testActs;
+    if (pipelineInput.pipelineConfig?.retry_preset === 'subscription') return subscriptionActs;
+    return acts;
+  }
+
+  const a = selectActivityProxy(input);
+
+  const state: PipelineState = {
+    status: 'running',
+    currentPhase: null,
+    currentAgent: null,
+    completedAgents: [],
+    failedAgent: null,
+    error: null,
+    startTime: Date.now(),
+    agentMetrics: {},
+    summary: null,
+  };
+
+  setHandler(
+    getProgress,
+    (): PipelineProgress => ({
+      ...state,
+      workflowId,
+      elapsedMs: Date.now() - state.startTime,
+    }),
+  );
+
+  const sessionId = input.sessionId || workflowId;
+
+  const activityInput: ActivityInput = {
+    repoPath: input.repoPath,
+    workflowId,
+    sessionId,
+    ...(input.configPath !== undefined && { configPath: input.configPath }),
+    ...(input.outputPath !== undefined && { outputPath: input.outputPath }),
+    ...(input.pipelineTestingMode !== undefined && { pipelineTestingMode: input.pipelineTestingMode }),
+    ...(input.configYAML !== undefined && { configYAML: input.configYAML }),
+    ...(input.apiKey !== undefined && { apiKey: input.apiKey }),
+    ...(input.deliverablesSubdir !== undefined && { deliverablesSubdir: input.deliverablesSubdir }),
+    ...(input.auditDir !== undefined && { auditDir: input.auditDir }),
+    ...(input.promptDir !== undefined && { promptDir: input.promptDir }),
+    ...(input.sastSarifPath !== undefined && { sastSarifPath: input.sastSarifPath }),
+    ...(input.skipGitCheck !== undefined && { skipGitCheck: input.skipGitCheck }),
+    ...(input.providerConfig !== undefined && { providerConfig: input.providerConfig }),
+    whiteboxOnly: true,
+  };
+
+  const vulnClasses = WHITEBOX_VULN_CLASSES;
+  const exploit = false;
+
+  await a.persistOrValidateRunScope(activityInput, [...vulnClasses], exploit);
+
+  async function runSequentialPhase(
+    phaseName: string,
+    agentName: AgentName,
+    runAgent: (input: ActivityInput) => Promise<AgentMetrics>,
+    phaseInput?: ActivityInput,
+  ): Promise<void> {
+    state.currentPhase = phaseName;
+    state.currentAgent = agentName;
+    await a.logPhaseTransition(phaseInput ?? activityInput, phaseName, 'start');
+    state.agentMetrics[agentName] = await runAgent(phaseInput ?? activityInput);
+    state.completedAgents.push(agentName);
+    if (input.checkpointsEnabled) {
+      await a.saveCheckpoint(phaseInput ?? activityInput, agentName, phaseName, state);
+    }
+    await a.logPhaseTransition(phaseInput ?? activityInput, phaseName, 'complete');
+  }
+
+  try {
+    // === Preflight (lite) — no URL check ===
+    state.currentPhase = 'preflight';
+    state.currentAgent = null;
+    await preflightActs.runPreflightValidation(activityInput);
+    log.info('Preflight validation passed (whitebox lite)');
+
+    // === Initialize Deliverables Git ===
+    await a.initDeliverableGit(activityInput);
+
+    // === Sync SDK deny rules ===
+    await a.syncCodePathDenyRules(activityInput);
+
+    log.info(`Whitebox run scope: vuln_classes=[${vulnClasses.join(', ')}] exploit=false`);
+
+    // === Phase 1: Pre-Reconnaissance ===
+    await runSequentialPhase('pre-recon', 'pre-recon', a.runPreReconAgent);
+
+    // === Phase 2: Reconnaissance (static) ===
+    const reconInput: ActivityInput = { ...activityInput, promptOverride: 'recon-static' };
+    await runSequentialPhase('recon', 'recon', a.runReconAgent, reconInput);
+
+    // === Phase 3: Vulnerability Analysis (4 agents, no XSS) ===
+    state.currentPhase = 'vulnerability-analysis';
+    state.currentAgent = 'pipelines';
+    await a.logPhaseTransition(activityInput, 'vulnerability-analysis', 'start');
+
+    const vulnAgents: Array<{
+      vulnType: VulnType;
+      agentName: string;
+      runAgent: (input: ActivityInput) => Promise<AgentMetrics>;
+    }> = [
+      { vulnType: 'injection', agentName: 'injection-vuln', runAgent: a.runInjectionVulnAgent },
+      { vulnType: 'auth', agentName: 'auth-vuln', runAgent: a.runAuthVulnAgent },
+      { vulnType: 'authz', agentName: 'authz-vuln', runAgent: a.runAuthzVulnAgent },
+      { vulnType: 'ssrf', agentName: 'ssrf-vuln', runAgent: a.runSsrfVulnAgent },
+    ];
+
+    const vulnThunks = vulnAgents.map(({ vulnType, agentName, runAgent }) => {
+      return async (): Promise<VulnExploitPipelineResult> => {
+        state.agentMetrics[agentName] = await runAgent(activityInput);
+        state.completedAgents.push(agentName);
+        if (input.checkpointsEnabled) {
+          await a.saveCheckpoint(activityInput, agentName, 'vulnerability-analysis', state);
+        }
+
+        await a.mergeFindingsIntoQueue(activityInput, vulnType);
+
+        const decision = await a.checkExploitationQueue(activityInput, vulnType);
+
+        return {
+          vulnType,
+          vulnMetrics: state.agentMetrics[agentName],
+          exploitMetrics: null,
+          exploitDecision: { shouldExploit: decision.shouldExploit, vulnerabilityCount: decision.vulnerabilityCount },
+          error: null,
+        };
+      };
+    });
+
+    const vulnResults = await Promise.allSettled(vulnThunks.map((t) => t()));
+    aggregatePipelineResults(vulnResults);
+
+    state.currentPhase = 'vulnerability-analysis';
+    state.currentAgent = null;
+    await a.logPhaseTransition(activityInput, 'vulnerability-analysis', 'complete');
+
+    // === Phase 4: Reporting ===
+    state.currentPhase = 'reporting';
+    state.currentAgent = 'report';
+    await a.logPhaseTransition(activityInput, 'reporting', 'start');
+
+    await a.assembleReportActivity(activityInput, false);
+    state.agentMetrics.report = await a.runReportAgent(activityInput);
+    state.completedAgents.push('report');
+    await a.injectReportMetadataActivity(activityInput);
+    await a.logPhaseTransition(activityInput, 'reporting', 'complete');
+
+    await a.generateReportOutputActivity(activityInput);
+
+    state.status = 'completed';
+    state.currentPhase = null;
+    state.currentAgent = null;
+    state.summary = computeSummary(state);
+
+    await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'completed'));
+
+    return state;
+  } catch (error) {
+    if (isCancellation(error)) {
+      state.status = 'cancelled';
+      state.error = `Cancelled during phase: ${state.currentPhase ?? 'unknown'}`;
+      state.summary = computeSummary(state);
+      await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'cancelled'));
+      return state;
+    }
+
+    state.status = 'failed';
+    state.failedAgent = state.currentAgent;
+    state.error = formatWorkflowError(error, state.currentPhase, state.currentAgent);
+    const errorCode = classifyErrorCode(error);
+    if (errorCode) {
+      state.errorCode = errorCode;
+    }
+    state.summary = computeSummary(state);
+
+    await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'failed'));
+
+    throw error;
+  }
+}
+
+// === BLACKBOX-ONLY WORKFLOW ===
+
+export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
+  if (!input.repoPath || input.repoPath.includes('..')) {
+    throw ApplicationFailure.nonRetryable(
+      `Invalid repoPath: path traversal not allowed (received: ${input.repoPath ?? '<empty>'})`,
+      'ConfigurationError',
+    );
+  }
+  if (!input.repoPath.startsWith('/')) {
+    throw ApplicationFailure.nonRetryable(
+      `Invalid repoPath: absolute path required (received: ${input.repoPath})`,
+      'ConfigurationError',
+    );
+  }
+  if (!input.webUrl) {
+    throw ApplicationFailure.nonRetryable(
+      'Blackbox-only mode requires a target URL',
+      'ConfigurationError',
+    );
+  }
+
+  const { workflowId } = workflowInfo();
+
+  function selectActivityProxy(pipelineInput: PipelineInput) {
+    if (pipelineInput.pipelineTestingMode) return testActs;
+    if (pipelineInput.pipelineConfig?.retry_preset === 'subscription') return subscriptionActs;
+    return acts;
+  }
+
+  const a = selectActivityProxy(input);
+
+  const state: PipelineState = {
+    status: 'running',
+    currentPhase: null,
+    currentAgent: null,
+    completedAgents: [],
+    failedAgent: null,
+    error: null,
+    startTime: Date.now(),
+    agentMetrics: {},
+    summary: null,
+  };
+
+  setHandler(
+    getProgress,
+    (): PipelineProgress => ({
+      ...state,
+      workflowId,
+      elapsedMs: Date.now() - state.startTime,
+    }),
+  );
+
+  const sessionId = input.sessionId || workflowId;
+
+  const activityInput: ActivityInput = {
+    webUrl: input.webUrl,
+    repoPath: input.repoPath,
+    workflowId,
+    sessionId,
+    ...(input.configPath !== undefined && { configPath: input.configPath }),
+    ...(input.outputPath !== undefined && { outputPath: input.outputPath }),
+    ...(input.pipelineTestingMode !== undefined && { pipelineTestingMode: input.pipelineTestingMode }),
+    ...(input.configYAML !== undefined && { configYAML: input.configYAML }),
+    ...(input.apiKey !== undefined && { apiKey: input.apiKey }),
+    ...(input.deliverablesSubdir !== undefined && { deliverablesSubdir: input.deliverablesSubdir }),
+    ...(input.auditDir !== undefined && { auditDir: input.auditDir }),
+    ...(input.promptDir !== undefined && { promptDir: input.promptDir }),
+    ...(input.sastSarifPath !== undefined && { sastSarifPath: input.sastSarifPath }),
+    ...(input.skipGitCheck !== undefined && { skipGitCheck: input.skipGitCheck }),
+    ...(input.providerConfig !== undefined && { providerConfig: input.providerConfig }),
+    blackboxOnly: true,
+  };
+
+  try {
+    // === Preflight (full — with URL check) ===
+    state.currentPhase = 'preflight';
+    state.currentAgent = null;
+    await preflightActs.runPreflightValidation(activityInput);
+    log.info('Preflight validation passed');
+
+    // === Playwright stealth config ===
+    await preflightActs.syncPlaywrightStealthConfig(activityInput);
+
+    // === Authentication Validation ===
+    state.currentPhase = 'auth-validation';
+    state.currentAgent = 'validate-authentication';
+    await authValidationActs.runAuthenticationValidation(activityInput);
+    state.currentAgent = null;
+
+    // === Initialize Deliverables Git (idempotent) ===
+    await a.initDeliverableGit(activityInput);
+
+    // === Sync SDK deny rules ===
+    await a.syncCodePathDenyRules(activityInput);
+
+    // === Validate deliverables from prior whitebox run ===
+    state.currentPhase = 'validate-deliverables';
+    const vulnTypesWithQueues = await a.validateDeliverablesExist(activityInput);
+    log.info(`Found deliverables for exploit types: ${vulnTypesWithQueues.join(', ')}`);
+
+    // === Exploitation Phase ===
+    state.currentPhase = 'exploitation';
+    state.currentAgent = 'pipelines';
+    await a.logPhaseTransition(activityInput, 'exploitation', 'start');
+
+    const exploitAgents: Record<VulnType, (input: ActivityInput) => Promise<AgentMetrics>> = {
+      injection: a.runInjectionExploitAgent,
+      xss: a.runXssExploitAgent,
+      auth: a.runAuthExploitAgent,
+      ssrf: a.runSsrfExploitAgent,
+      authz: a.runAuthzExploitAgent,
+    };
+
+    const exploitThunks = vulnTypesWithQueues.map((vulnType) => {
+      return async (): Promise<VulnExploitPipelineResult> => {
+        const exploitAgentName = `${vulnType}-exploit`;
+
+        const decision = await a.checkExploitationQueue(activityInput, vulnType);
+        let exploitMetrics: AgentMetrics | null = null;
+
+        if (decision.shouldExploit) {
+          exploitMetrics = await exploitAgents[vulnType](activityInput);
+          state.agentMetrics[exploitAgentName] = exploitMetrics;
+          state.completedAgents.push(exploitAgentName);
+          if (input.checkpointsEnabled) {
+            await a.saveCheckpoint(activityInput, exploitAgentName, 'exploitation', state);
+          }
+        }
+
+        return {
+          vulnType,
+          vulnMetrics: null,
+          exploitMetrics,
+          exploitDecision: { shouldExploit: decision.shouldExploit, vulnerabilityCount: decision.vulnerabilityCount },
+          error: null,
+        };
+      };
+    });
+
+    const exploitResults = await Promise.allSettled(exploitThunks.map((t) => t()));
+    aggregatePipelineResults(exploitResults);
+
+    state.currentAgent = null;
+    await a.logPhaseTransition(activityInput, 'exploitation', 'complete');
+
+    // === Reporting ===
+    state.currentPhase = 'reporting';
+    state.currentAgent = 'report';
+    await a.logPhaseTransition(activityInput, 'reporting', 'start');
+
+    await a.assembleReportActivity(activityInput, true);
+    state.agentMetrics.report = await a.runReportAgent(activityInput);
+    state.completedAgents.push('report');
+    await a.injectReportMetadataActivity(activityInput);
+    await a.logPhaseTransition(activityInput, 'reporting', 'complete');
+
+    await a.generateReportOutputActivity(activityInput);
+
+    state.status = 'completed';
+    state.currentPhase = null;
+    state.currentAgent = null;
+    state.summary = computeSummary(state);
+
+    await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'completed'));
+
+    return state;
+  } catch (error) {
+    if (isCancellation(error)) {
+      state.status = 'cancelled';
+      state.error = `Cancelled during phase: ${state.currentPhase ?? 'unknown'}`;
+      state.summary = computeSummary(state);
+      await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'cancelled'));
+      return state;
+    }
+
+    state.status = 'failed';
+    state.failedAgent = state.currentAgent;
+    state.error = formatWorkflowError(error, state.currentPhase, state.currentAgent);
+    const errorCode = classifyErrorCode(error);
+    if (errorCode) {
+      state.errorCode = errorCode;
+    }
+    state.summary = computeSummary(state);
+
+    await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'failed'));
+
+    throw error;
+  }
+}

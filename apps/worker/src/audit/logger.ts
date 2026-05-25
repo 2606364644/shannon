@@ -66,7 +66,7 @@ export class AgentLogger {
       `Attempt: ${this.attemptNumber}`,
       `Started: ${formatTimestamp(this.timestamp)}`,
       `Session: ${this.sessionMetadata.id}`,
-      `Web URL: ${this.sessionMetadata.webUrl}`,
+      `Web URL: ${this.sessionMetadata.webUrl ?? '(offline)'}`,
       `========================================\n`,
     ].join('\n');
 
@@ -107,7 +107,7 @@ export class AgentLogger {
       `# Prompt Snapshot: ${agentName}`,
       ``,
       `**Session:** ${sessionMetadata.id}`,
-      `**Web URL:** ${sessionMetadata.webUrl}`,
+      `**Web URL:** ${sessionMetadata.webUrl ?? '(offline)'}`,
       `**Saved:** ${formatTimestamp()}`,
       ``,
       `---`,

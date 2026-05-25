@@ -61,7 +61,7 @@ const HEARTBEAT_INTERVAL_MS = 2000;
  * flow through to getOrCreateContainer() for path and credential configuration.
  */
 export interface ActivityInput {
-  webUrl: string;
+  webUrl?: string;
   repoPath: string;
   configPath?: string;
   outputPath?: string;
@@ -78,6 +78,9 @@ export interface ActivityInput {
   sastSarifPath?: string;
   skipGitCheck?: boolean;
   providerConfig?: ProviderConfig;
+  whiteboxOnly?: boolean;
+  blackboxOnly?: boolean;
+  promptOverride?: string;
 }
 
 /**
@@ -188,6 +191,7 @@ async function runAgentActivity(agentName: AgentName, input: ActivityInput): Pro
         ...(input.providerConfig !== undefined && { providerConfig: input.providerConfig }),
         ...(input.promptDir !== undefined && { promptDir: input.promptDir }),
         ...(input.configYAML !== undefined && { configYAML: input.configYAML }),
+        ...(input.promptOverride !== undefined && { promptOverride: input.promptOverride }),
       },
       auditSession,
       logger,
@@ -411,7 +415,7 @@ export async function runAuthenticationValidation(input: ActivityInput): Promise
     const result = await validateAuthentication({
       distributedConfig,
       repoPath: input.repoPath,
-      webUrl: input.webUrl,
+      webUrl: input.webUrl ?? '',
       logger,
       auditSession,
       attemptNumber,
@@ -601,7 +605,7 @@ interface RunScope {
 interface SessionJson {
   session: {
     id: string;
-    webUrl: string;
+    webUrl?: string;
     repoPath?: string;
     originalWorkflowId?: string;
     resumeAttempts?: ResumeAttempt[];
@@ -988,4 +992,52 @@ export async function generateReportOutputActivity(input: ActivityInput): Promis
   if (result.outputPath) {
     logger.info(`Report output written to ${result.outputPath}`);
   }
+}
+
+/**
+ * Validate that deliverables from a prior whitebox run exist for blackbox-only mode.
+ * Returns the list of VulnTypes that have non-empty exploitation queues.
+ */
+export async function validateDeliverablesExist(input: ActivityInput): Promise<VulnType[]> {
+  const logger = createActivityLogger();
+  const delivPath = deliverablesDir(input.repoPath, input.deliverablesSubdir);
+
+  const reconPath = path.join(delivPath, 'recon_deliverable.md');
+  const reconExists = await fileExists(reconPath);
+  if (!reconExists) {
+    throw ApplicationFailure.nonRetryable(
+      `Blackbox-only requires prior whitebox deliverables. Missing: ${reconPath}`,
+      'MissingDeliverablesError',
+    );
+  }
+
+  const queuePattern = /_exploitation_queue\.json$/;
+  const VulnTypeValues: VulnType[] = ['injection', 'xss', 'auth', 'ssrf', 'authz'];
+  const typesWithQueues: VulnType[] = [];
+
+  for (const vt of VulnTypeValues) {
+    const queuePath = path.join(delivPath, `${vt}_exploitation_queue.json`);
+    try {
+      const exists = await fileExists(queuePath);
+      if (exists) {
+        const content = await fs.readFile(queuePath, 'utf8');
+        const parsed = JSON.parse(content) as unknown[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          typesWithQueues.push(vt);
+        }
+      }
+    } catch {
+      // Non-parseable or missing — skip
+    }
+  }
+
+  if (typesWithQueues.length === 0) {
+    throw ApplicationFailure.nonRetryable(
+      `Blackbox-only requires at least one non-empty *_exploitation_queue.json in ${delivPath}`,
+      'MissingDeliverablesError',
+    );
+  }
+
+  logger.info(`Found deliverables for vuln types: ${typesWithQueues.join(', ')}`);
+  return typesWithQueues;
 }

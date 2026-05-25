@@ -82,11 +82,13 @@ Usage:${
   ${prefix} help                                         Show this help
 
 Options for 'start':
-  -u, --url <url>           Target URL (required)
+  -u, --url <url>           Target URL (required, unless --whitebox-only)
   -r, --repo <path>         Repository path${mode === 'local' ? ' or bare name' : ''} (required)
   -c, --config <path>       Configuration file (YAML)
   -o, --output <path>       Copy deliverables to this directory after run
   -w, --workspace <name>    Named workspace (auto-resumes if exists)
+      --whitebox-only       Static analysis only (no URL needed, skips exploits)
+      --blackbox-only       Exploitation only (reads prior whitebox deliverables)
       --pipeline-testing    Use minimal prompts for fast testing
       --debug               Preserve worker container after exit for log inspection
 
@@ -107,23 +109,27 @@ Monitor workflows at http://localhost:8233
 }
 
 interface ParsedStartArgs {
-  url: string;
+  url?: string;
   repo: string;
   config?: string;
   workspace?: string;
   output?: string;
   pipelineTesting: boolean;
   debug: boolean;
+  whiteboxOnly: boolean;
+  blackboxOnly: boolean;
 }
 
 function parseStartArgs(argv: string[]): ParsedStartArgs {
-  let url = '';
+  let url: string | undefined;
   let repo = '';
   let config: string | undefined;
   let workspace: string | undefined;
   let output: string | undefined;
   let pipelineTesting = false;
   let debug = false;
+  let whiteboxOnly = false;
+  let blackboxOnly = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -171,6 +177,12 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
       case '--debug':
         debug = true;
         break;
+      case '--whitebox-only':
+        whiteboxOnly = true;
+        break;
+      case '--blackbox-only':
+        blackboxOnly = true;
+        break;
       default:
         console.error(`Unknown option: ${arg}`);
         console.error(`Run "${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} help" for usage`);
@@ -178,17 +190,35 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
     }
   }
 
-  if (!url || !repo) {
-    console.error('ERROR: --url and --repo are required');
+  if (whiteboxOnly && blackboxOnly) {
+    console.error('ERROR: --whitebox-only and --blackbox-only are mutually exclusive');
+    process.exit(1);
+  }
+
+  if (blackboxOnly && !url) {
+    console.error('ERROR: --blackbox-only requires --url');
+    process.exit(1);
+  }
+
+  if (!whiteboxOnly && !url) {
+    console.error('ERROR: --url is required (use --whitebox-only to scan without a URL)');
     console.error(`Usage: ${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} start -u <url> -r <path>`);
     process.exit(1);
   }
 
+  if (!repo) {
+    console.error('ERROR: --repo is required');
+    console.error(`Usage: ${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} start -r <path>`);
+    process.exit(1);
+  }
+
   return {
-    url,
+    ...(url && { url }),
     repo,
     pipelineTesting,
     debug,
+    whiteboxOnly,
+    blackboxOnly,
     ...(config && { config }),
     ...(workspace && { workspace }),
     ...(output && { output }),

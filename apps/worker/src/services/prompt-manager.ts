@@ -116,7 +116,7 @@ function renderReportFilterRules(report: ReportConfig | undefined): string {
 }
 
 interface PromptVariables {
-  webUrl: string;
+  webUrl?: string;
   repoPath: string;
   PLAYWRIGHT_SESSION?: string;
 }
@@ -281,14 +281,16 @@ async function interpolateVariables(
       });
     }
 
-    if (!variables || !variables.webUrl || !variables.repoPath) {
-      throw new PentestError('Variables must include webUrl and repoPath', 'validation', false, {
+    if (!variables || !variables.repoPath) {
+      throw new PentestError('Variables must include repoPath', 'validation', false, {
         variables: Object.keys(variables || {}),
       });
     }
 
+    const effectiveWebUrl = variables.webUrl || '(offline — source code analysis only)';
+
     let result = template
-      .replace(/{{WEB_URL}}/g, variables.webUrl)
+      .replace(/{{WEB_URL}}/g, effectiveWebUrl)
       .replace(/{{REPO_PATH}}/g, variables.repoPath)
       .replace(/{{PLAYWRIGHT_SESSION}}/g, variables.PLAYWRIGHT_SESSION || 'agent1')
       .replace(/{{AUTH_CONTEXT}}/g, buildAuthContext(config))

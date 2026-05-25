@@ -55,7 +55,7 @@ export interface ResumeAttempt {
 interface SessionData {
   session: {
     id: string;
-    webUrl: string;
+    webUrl?: string;
     repoPath?: string;
     status: 'in-progress' | 'completed' | 'failed' | 'cancelled';
     createdAt: string;

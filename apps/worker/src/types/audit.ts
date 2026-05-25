@@ -13,7 +13,7 @@
  */
 export interface SessionMetadata {
   id: string;
-  webUrl: string;
+  webUrl?: string;
   repoPath?: string;
   outputPath?: string;
   [key: string]: unknown;

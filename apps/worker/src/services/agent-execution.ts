@@ -42,7 +42,7 @@ import { loadPrompt } from './prompt-manager.js';
  * Input for agent execution.
  */
 export interface AgentExecutionInput {
-  webUrl: string;
+  webUrl?: string;
   repoPath: string;
   deliverablesPath: string;
   configPath?: string | undefined;
@@ -53,6 +53,7 @@ export interface AgentExecutionInput {
   apiKey?: string | undefined;
   promptDir?: string | undefined;
   providerConfig?: import('../types/config.js').ProviderConfig | undefined;
+  promptOverride?: string | undefined;
 }
 
 interface FailAgentOpts {
@@ -117,7 +118,7 @@ export class AgentExecutionService {
     const distributedConfig = configResult.value;
 
     // 2. Load prompt
-    const promptTemplate = AGENTS[agentName].promptTemplate;
+    const promptTemplate = input.promptOverride ?? AGENTS[agentName].promptTemplate;
     let prompt: string;
     try {
       prompt = await loadPrompt(
