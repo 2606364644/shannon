@@ -145,6 +145,12 @@ cat my-repo/.shannon/deliverables/comprehensive_security_assessment_report.md
 
 白盒和黑盒各自动创建独立 workspace，通过 repo 中的 `.shannon/deliverables/` 目录共享产出物。
 
+### 交接机制
+
+白盒扫描的产出物写入 `<repo>/.shannon/deliverables/`（通过 Docker volume overlay）。黑盒扫描在同一 repo 上运行时，会读取该目录中的 `*_exploitation_queue.json` 文件作为输入。
+
+**重要**：两次扫描必须使用同一个 repo 路径。黑白盒各自的 workspace 是独立的 Temporal workflow，但共享 repo 的 deliverables 目录。如果黑盒扫描找不到白盒产物，会报错退出并提示缺失的文件。
+
 ## 约束
 
 - `--whitebox-only` 和 `--blackbox-only` 互斥，不能同时使用

@@ -38,7 +38,7 @@ import { validateAuthentication } from '../services/validate-authentication.js';
 import { AGENTS } from '../session-manager.js';
 import type { AgentName } from '../types/agents.js';
 import { ALL_AGENTS } from '../types/agents.js';
-import type { ContainerConfig, ProviderConfig, VulnClass } from '../types/config.js';
+import { ALL_VULN_CLASSES, type ContainerConfig, type ProviderConfig, type VulnClass } from '../types/config.js';
 import { ErrorCode } from '../types/errors.js';
 import { isErr } from '../types/result.js';
 import { atomicWrite, fileExists, readJson } from '../utils/file-io.js';
@@ -1011,11 +1011,9 @@ export async function validateDeliverablesExist(input: ActivityInput): Promise<V
     );
   }
 
-  const queuePattern = /_exploitation_queue\.json$/;
-  const VulnTypeValues: VulnType[] = ['injection', 'xss', 'auth', 'ssrf', 'authz'];
   const typesWithQueues: VulnType[] = [];
 
-  for (const vt of VulnTypeValues) {
+  for (const vt of ALL_VULN_CLASSES) {
     const queuePath = path.join(delivPath, `${vt}_exploitation_queue.json`);
     try {
       const exists = await fileExists(queuePath);

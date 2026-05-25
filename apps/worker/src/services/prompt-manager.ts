@@ -8,7 +8,7 @@ import { fs, path } from 'zx';
 import { PROMPTS_DIR } from '../paths.js';
 import { PLAYWRIGHT_SESSION_MAPPING } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
-import type { Authentication, DistributedConfig, ReportConfig, Rule, VulnClass } from '../types/config.js';
+import { ALL_VULN_CLASSES, type Authentication, type DistributedConfig, type ReportConfig, type Rule, type VulnClass } from '../types/config.js';
 import { isGlobPattern } from '../utils/glob.js';
 import { handlePromptError, PentestError } from './error-handling.js';
 
@@ -333,7 +333,7 @@ async function interpolateVariables(
     const vulnClasses = config?.vuln_classes ?? [];
     result = result.replace(
       /{{VULN_CLASSES_TESTED}}/g,
-      vulnClasses.length > 0 ? vulnClasses.join(', ') : 'injection, xss, auth, authz, ssrf',
+      vulnClasses.length > 0 ? vulnClasses.join(', ') : ALL_VULN_CLASSES.join(', '),
     );
     result = result.replace(/{{VULN_SUMMARY_SUBSECTIONS}}/g, renderVulnSummarySubsections(vulnClasses));
 

@@ -166,6 +166,27 @@ function computeSummary(state: PipelineState): PipelineSummary {
 }
 
 /**
+ * Log warnings for any rejected pipeline promises.
+ * Shared across all workflow variants.
+ */
+function aggregatePipelineResults(results: PromiseSettledResult<VulnExploitPipelineResult>[]): void {
+  const failedPipelines: string[] = [];
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      failedPipelines.push(errorMsg);
+    }
+  }
+
+  if (failedPipelines.length > 0) {
+    log.warn(`${failedPipelines.length} pipeline(s) failed`, {
+      failures: failedPipelines,
+    });
+  }
+}
+
+/**
  * Core pipeline orchestration. Coordinates the pentest pipeline stages.
  *
  * IMPORTANT: This function uses Temporal workflow APIs internally (proxyActivities,
@@ -373,26 +394,6 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
     ];
   }
 
-  // Aggregate errors from settled pipeline promises.
-  // Metrics and completedAgents are updated incrementally inside runVulnExploitPipeline
-  // so that getProgress queries reflect real-time status during execution.
-  function aggregatePipelineResults(results: PromiseSettledResult<VulnExploitPipelineResult>[]): void {
-    const failedPipelines: string[] = [];
-
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        failedPipelines.push(errorMsg);
-      }
-    }
-
-    if (failedPipelines.length > 0) {
-      log.warn(`${failedPipelines.length} pipeline(s) failed`, {
-        failures: failedPipelines,
-      });
-    }
-  }
-
   // Run thunks with a concurrency limit, returning PromiseSettledResult for each.
   // When limit >= thunks.length (default), all launch concurrently — identical to Promise.allSettled.
   // NOTE: Results are in completion order, not input order. Callers must key on value fields, not index.
@@ -526,7 +527,7 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
       };
     }
 
-    const maxConcurrent = input.pipelineConfig?.max_concurrent_pipelines ?? 5;
+    const maxConcurrent = input.pipelineConfig?.max_concurrent_pipelines ?? ALL_VULN_CLASSES.length;
 
     const pipelineConfigs = buildPipelineConfigs();
     const pipelineThunks: Array<() => Promise<VulnExploitPipelineResult>> = [];
