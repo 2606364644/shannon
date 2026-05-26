@@ -62,6 +62,13 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     promptTemplate: 'vuln-authz',
     deliverableFilename: 'authz_analysis_deliverable.md',
   },
+  'misconfig-vuln': {
+    name: 'misconfig-vuln',
+    displayName: 'Misconfig vuln agent',
+    prerequisites: ['recon'],
+    promptTemplate: 'vuln-misconfig',
+    deliverableFilename: 'misconfig_analysis_deliverable.md',
+  },
   'injection-exploit': {
     name: 'injection-exploit',
     displayName: 'Injection exploit agent',
@@ -97,10 +104,24 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     promptTemplate: 'exploit-authz',
     deliverableFilename: 'authz_exploitation_evidence.md',
   },
+  'misconfig-exploit': {
+    name: 'misconfig-exploit',
+    displayName: 'Misconfig exploit agent',
+    prerequisites: ['misconfig-vuln'],
+    promptTemplate: 'exploit-misconfig',
+    deliverableFilename: 'misconfig_exploitation_evidence.md',
+  },
   report: {
     name: 'report',
     displayName: 'Report agent',
-    prerequisites: ['injection-exploit', 'xss-exploit', 'auth-exploit', 'ssrf-exploit', 'authz-exploit'],
+    prerequisites: [
+      'injection-exploit',
+      'xss-exploit',
+      'auth-exploit',
+      'ssrf-exploit',
+      'authz-exploit',
+      'misconfig-exploit',
+    ],
     promptTemplate: 'report-executive',
     deliverableFilename: 'comprehensive_security_assessment_report.md',
   },
@@ -116,13 +137,15 @@ export const AGENT_PHASE_MAP: Readonly<Record<AgentName, PhaseName>> = Object.fr
   'injection-vuln': 'vulnerability-analysis',
   'xss-vuln': 'vulnerability-analysis',
   'auth-vuln': 'vulnerability-analysis',
-  'authz-vuln': 'vulnerability-analysis',
   'ssrf-vuln': 'vulnerability-analysis',
+  'authz-vuln': 'vulnerability-analysis',
+  'misconfig-vuln': 'vulnerability-analysis',
   'injection-exploit': 'exploitation',
   'xss-exploit': 'exploitation',
   'auth-exploit': 'exploitation',
-  'authz-exploit': 'exploitation',
   'ssrf-exploit': 'exploitation',
+  'authz-exploit': 'exploitation',
+  'misconfig-exploit': 'exploitation',
   report: 'reporting',
 });
 
@@ -166,13 +189,15 @@ export const PLAYWRIGHT_SESSION_MAPPING: Record<string, PlaywrightSession> = Obj
   'vuln-auth': 'agent3',
   'vuln-ssrf': 'agent4',
   'vuln-authz': 'agent5',
+  'vuln-misconfig': 'agent6',
 
-  // Phase 4: Exploitation (5 parallel agents - same as vuln counterparts)
+  // Phase 4: Exploitation (6 parallel agents - same as vuln counterparts)
   'exploit-injection': 'agent1',
   'exploit-xss': 'agent2',
   'exploit-auth': 'agent3',
   'exploit-ssrf': 'agent4',
   'exploit-authz': 'agent5',
+  'exploit-misconfig': 'agent6',
 
   // Phase 5: Reporting
   'report-executive': 'agent3',
@@ -198,6 +223,7 @@ export const AGENT_VALIDATORS: Record<AgentName, AgentValidator> = Object.freeze
   'auth-vuln': createVulnValidator('auth'),
   'ssrf-vuln': createVulnValidator('ssrf'),
   'authz-vuln': createVulnValidator('authz'),
+  'misconfig-vuln': createVulnValidator('misconfig'),
 
   // Exploitation agents
   'injection-exploit': createExploitValidator('injection'),
@@ -205,6 +231,7 @@ export const AGENT_VALIDATORS: Record<AgentName, AgentValidator> = Object.freeze
   'auth-exploit': createExploitValidator('auth'),
   'ssrf-exploit': createExploitValidator('ssrf'),
   'authz-exploit': createExploitValidator('authz'),
+  'misconfig-exploit': createExploitValidator('misconfig'),
 
   // Executive report agent
   report: async (sourceDir: string, logger: ActivityLogger): Promise<boolean> => {

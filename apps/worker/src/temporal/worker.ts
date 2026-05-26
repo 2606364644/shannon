@@ -465,14 +465,11 @@ async function run(): Promise<void> {
         ? 'blackboxPipelineWorkflow'
         : 'pentestPipelineWorkflow';
 
-    const handle = await client.workflow.start<(input: PipelineInput) => Promise<PipelineState>>(
-      workflowType,
-      {
-        taskQueue: args.taskQueue,
-        workflowId: workspace.workflowId,
-        args: [input],
-      },
-    );
+    const handle = await client.workflow.start<(input: PipelineInput) => Promise<PipelineState>>(workflowType, {
+      taskQueue: args.taskQueue,
+      workflowId: workspace.workflowId,
+      args: [input],
+    });
 
     console.log(`Workflow started: ${workflowType} (id: ${workspace.workflowId})`);
 

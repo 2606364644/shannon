@@ -17,7 +17,14 @@
  */
 
 import { fs, path } from 'zx';
-import type { AuthFinding, AuthzFinding, InjectionFinding, SsrfFinding, XssFinding } from '../ai/queue-schemas.js';
+import type {
+  AuthFinding,
+  AuthzFinding,
+  InjectionFinding,
+  MisconfigFinding,
+  SsrfFinding,
+  XssFinding,
+} from '../ai/queue-schemas.js';
 import { deliverablesDir } from '../paths.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import type { VulnClass } from '../types/config.js';
@@ -134,6 +141,18 @@ function renderXssEntry(e: XssFinding): string {
   );
 }
 
+function renderMisconfigEntry(e: MisconfigFinding): string {
+  const rows: Array<string | null> = [
+    summaryRow('Vulnerable location', formatLocation(e.source_endpoint, e.vulnerable_code_location)),
+    summaryRow('Overview', e.missing_defense),
+    summaryRow('Impact', e.exploitation_hypothesis),
+  ];
+  if (e.vulnerable_parameter) rows.push(summaryRow('Parameter', e.vulnerable_parameter));
+  if (e.redirect_sink) rows.push(summaryRow('Redirect sink', e.redirect_sink));
+  if (e.existing_validation) rows.push(summaryRow('Existing validation', e.existing_validation));
+  return buildEntry(e.ID, e.vulnerability_type, rows, e.notes);
+}
+
 // === Class Registry ===
 
 const CLASSES: Record<VulnClass, ClassConfig<unknown>> = {
@@ -171,6 +190,13 @@ const CLASSES: Record<VulnClass, ClassConfig<unknown>> = {
     queueFile: 'ssrf_exploitation_queue.json',
     findingsFile: 'ssrf_findings.md',
     renderEntry: (e) => renderSsrfEntry(e as SsrfFinding),
+  },
+  misconfig: {
+    heading: 'Security Misconfiguration',
+    noneFoundLabel: 'misconfiguration',
+    queueFile: 'misconfig_exploitation_queue.json',
+    findingsFile: 'misconfig_findings.md',
+    renderEntry: (e) => renderMisconfigEntry(e as MisconfigFinding),
   },
 };
 

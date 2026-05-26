@@ -4,8 +4,8 @@
 # Description of the target environment (optional, max 500 chars)
 description: "Next.js e-commerce app on PostgreSQL. Local dev environment — .env files contain local-only credentials, not deployed to production."
 
-# Limit which vulnerability classes run end-to-end (optional, default: all five)
-# vuln_classes: [injection, xss, auth, authz, ssrf]
+# Limit which vulnerability classes run end-to-end (optional, default: all six)
+# vuln_classes: [injection, xss, auth, authz, ssrf, misconfig]
 
 # Skip the exploitation phase (optional, default: "true")
 # exploit: "false"
@@ -105,4 +105,4 @@ rules:
 # Pipeline execution settings (optional)
 # pipeline:
 #   retry_preset: subscription          # 'default' or 'subscription' (6h max retry for rate limit recovery)
-#   max_concurrent_pipelines: 2         # 1-5, default: 5 (reduce to lower API usage spikes)
+#   max_concurrent_pipelines: 2         # 1-6, default: 6 (reduce to lower API usage spikes)

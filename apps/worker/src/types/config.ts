@@ -21,9 +21,9 @@ export interface Rules {
   focus?: Rule[];
 }
 
-export type VulnClass = 'injection' | 'xss' | 'auth' | 'authz' | 'ssrf';
+export type VulnClass = 'injection' | 'xss' | 'auth' | 'authz' | 'ssrf' | 'misconfig';
 
-export const ALL_VULN_CLASSES: readonly VulnClass[] = ['injection', 'xss', 'auth', 'authz', 'ssrf'];
+export const ALL_VULN_CLASSES: readonly VulnClass[] = ['injection', 'xss', 'auth', 'authz', 'ssrf', 'misconfig'];
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 export type Confidence = 'low' | 'medium' | 'high';

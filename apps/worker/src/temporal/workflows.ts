@@ -391,6 +391,13 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
         runVuln: () => a.runAuthzVulnAgent(activityInput),
         runExploit: () => a.runAuthzExploitAgent(activityInput),
       },
+      {
+        vulnType: 'misconfig',
+        vulnAgent: 'misconfig-vuln',
+        exploitAgent: 'misconfig-exploit',
+        runVuln: () => a.runMisconfigVulnAgent(activityInput),
+        runExploit: () => a.runMisconfigExploitAgent(activityInput),
+      },
     ];
   }
 
@@ -625,7 +632,7 @@ export async function pentestPipelineWorkflow(input: PipelineInput): Promise<Pip
   return pentestPipeline(input);
 }
 
-const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf'];
+const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf', 'misconfig'];
 
 export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
   if (!input.repoPath || input.repoPath.includes('..')) {
@@ -750,6 +757,7 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       { vulnType: 'auth', agentName: 'auth-vuln', runAgent: a.runAuthVulnAgent },
       { vulnType: 'authz', agentName: 'authz-vuln', runAgent: a.runAuthzVulnAgent },
       { vulnType: 'ssrf', agentName: 'ssrf-vuln', runAgent: a.runSsrfVulnAgent },
+      { vulnType: 'misconfig', agentName: 'misconfig-vuln', runAgent: a.runMisconfigVulnAgent },
     ];
 
     const vulnThunks = vulnAgents.map(({ vulnType, agentName, runAgent }) => {
@@ -842,10 +850,7 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     );
   }
   if (!input.webUrl) {
-    throw ApplicationFailure.nonRetryable(
-      'Blackbox-only mode requires a target URL',
-      'ConfigurationError',
-    );
+    throw ApplicationFailure.nonRetryable('Blackbox-only mode requires a target URL', 'ConfigurationError');
   }
 
   const { workflowId } = workflowInfo();
@@ -938,6 +943,7 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       auth: a.runAuthExploitAgent,
       ssrf: a.runSsrfExploitAgent,
       authz: a.runAuthzExploitAgent,
+      misconfig: a.runMisconfigExploitAgent,
     };
 
     const exploitThunks = vulnTypesWithQueues.map((vulnType) => {

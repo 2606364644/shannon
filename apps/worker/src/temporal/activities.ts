@@ -298,6 +298,14 @@ export async function runAuthzExploitAgent(input: ActivityInput): Promise<AgentM
   return runAgentActivity('authz-exploit', input);
 }
 
+export async function runMisconfigVulnAgent(input: ActivityInput): Promise<AgentMetrics> {
+  return runAgentActivity('misconfig-vuln', input);
+}
+
+export async function runMisconfigExploitAgent(input: ActivityInput): Promise<AgentMetrics> {
+  return runAgentActivity('misconfig-exploit', input);
+}
+
 export async function runReportAgent(input: ActivityInput): Promise<AgentMetrics> {
   return runAgentActivity('report', input);
 }

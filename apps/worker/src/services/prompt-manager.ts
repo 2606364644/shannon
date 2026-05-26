@@ -8,7 +8,14 @@ import { fs, path } from 'zx';
 import { PROMPTS_DIR } from '../paths.js';
 import { PLAYWRIGHT_SESSION_MAPPING } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
-import { ALL_VULN_CLASSES, type Authentication, type DistributedConfig, type ReportConfig, type Rule, type VulnClass } from '../types/config.js';
+import {
+  ALL_VULN_CLASSES,
+  type Authentication,
+  type DistributedConfig,
+  type ReportConfig,
+  type Rule,
+  type VulnClass,
+} from '../types/config.js';
 import { isGlobPattern } from '../utils/glob.js';
 import { handlePromptError, PentestError } from './error-handling.js';
 
@@ -54,6 +61,11 @@ const VULN_SUMMARY_SPECS: Record<VulnClass, VulnSummarySpec> = {
     heading: 'Server-Side Request Forgery (SSRF) Vulnerabilities',
     evidenceSection: 'SSRF Exploitation Evidence',
     noneFoundLabel: 'SSRF',
+  },
+  misconfig: {
+    heading: 'Security Misconfiguration Vulnerabilities',
+    evidenceSection: 'Security Misconfiguration Exploitation Evidence',
+    noneFoundLabel: 'security misconfiguration',
   },
 };
 
