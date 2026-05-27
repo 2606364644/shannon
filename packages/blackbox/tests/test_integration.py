@@ -1,7 +1,6 @@
 import json
 import subprocess
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES
@@ -94,7 +93,6 @@ async def test_full_blackbox_pipeline_independent(mock_repo, prompts_dir):
 @pytest.mark.asyncio
 async def test_full_blackbox_pipeline_continuation(mock_repo, prompts_dir):
     repo, deliverables = mock_repo
-    web_url = "https://example.com"
 
     for vt in ["injection"]:
         queue_data = {"vulnerabilities": [

@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from shannon_blackbox.services.report_assembler import ReportAssembler
 

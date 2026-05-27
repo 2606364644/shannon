@@ -4,9 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 
 [tool.uv.sources]
-shannon-core = { path = "packages/core" }
-shannon-whitebox = { path = "packages/whitebox" }
-shannon-blackbox = { path = "packages/blackbox" }
+shannon-core = { workspace = true }
+shannon-whitebox = { workspace = true }
+shannon-blackbox = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]

@@ -2,8 +2,7 @@ from pathlib import Path
 
 from temporalio import activity
 
-from shannon_core.models.agents import AgentName, AGENTS
-from shannon_core.models.metrics import AgentMetrics
+from shannon_core.models.agents import AgentName
 from shannon_whitebox.agents.executor import AgentExecutor
 from shannon_whitebox.prompts.manager import PromptManager
 

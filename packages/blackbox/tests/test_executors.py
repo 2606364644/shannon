@@ -1,8 +1,7 @@
 import json
 import subprocess
 import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 from shannon_core.models.agents import AgentName
 from shannon_core.models.metrics import AgentMetrics
