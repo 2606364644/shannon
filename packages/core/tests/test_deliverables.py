@@ -17,3 +17,19 @@ def test_deliverable_filenames_match_ts():
     assert DELIVERABLE_FILENAMES[DeliverableType.AUTH_ANALYSIS] == "auth_analysis_deliverable.md"
     assert DELIVERABLE_FILENAMES[DeliverableType.AUTHZ_ANALYSIS] == "authz_analysis_deliverable.md"
     assert DELIVERABLE_FILENAMES[DeliverableType.SSRF_ANALYSIS] == "ssrf_analysis_deliverable.md"
+
+def test_blackbox_deliverable_type_values():
+    assert DeliverableType.INJECTION_EVIDENCE == "INJECTION_EVIDENCE"
+    assert DeliverableType.XSS_EVIDENCE == "XSS_EVIDENCE"
+    assert DeliverableType.AUTH_EVIDENCE == "AUTH_EVIDENCE"
+    assert DeliverableType.AUTHZ_EVIDENCE == "AUTHZ_EVIDENCE"
+    assert DeliverableType.SSRF_EVIDENCE == "SSRF_EVIDENCE"
+    assert DeliverableType.REPORT == "REPORT"
+
+def test_evidence_filenames_match_ts():
+    assert DELIVERABLE_FILENAMES[DeliverableType.INJECTION_EVIDENCE] == "injection_exploitation_evidence.md"
+    assert DELIVERABLE_FILENAMES[DeliverableType.XSS_EVIDENCE] == "xss_exploitation_evidence.md"
+    assert DELIVERABLE_FILENAMES[DeliverableType.AUTH_EVIDENCE] == "auth_exploitation_evidence.md"
+    assert DELIVERABLE_FILENAMES[DeliverableType.AUTHZ_EVIDENCE] == "authz_exploitation_evidence.md"
+    assert DELIVERABLE_FILENAMES[DeliverableType.SSRF_EVIDENCE] == "ssrf_exploitation_evidence.md"
+    assert DELIVERABLE_FILENAMES[DeliverableType.REPORT] == "comprehensive_security_assessment_report.md"
