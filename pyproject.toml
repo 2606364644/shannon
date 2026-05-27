@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 [tool.uv.sources]
 shannon-core = { path = "packages/core" }
 shannon-whitebox = { path = "packages/whitebox" }
+shannon-blackbox = { path = "packages/blackbox" }
 
 [tool.uv.workspace]
 members = ["packages/*"]
