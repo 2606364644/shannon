@@ -27,7 +27,7 @@ from .queue_schemas import (
     VulnerabilityQueue,
     XssVulnerability,
 )
-from .result import WhiteboxScanResult
+from .result import BlackboxScanResult, WhiteboxScanResult
 
 __all__ = [
     "AGENTS",
@@ -62,6 +62,7 @@ __all__ = [
     "VulnClass",
     "VulnType",
     "VulnerabilityQueue",
+    "BlackboxScanResult",
     "WhiteboxScanResult",
     "XssVulnerability",
 ]
