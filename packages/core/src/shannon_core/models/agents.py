@@ -13,6 +13,13 @@ class AgentName(str, Enum):
     AUTH_VULN = "auth-vuln"
     SSRF_VULN = "ssrf-vuln"
     AUTHZ_VULN = "authz-vuln"
+    RECON_BLACKBOX = "recon-blackbox"
+    INJECTION_EXPLOIT = "injection-exploit"
+    XSS_EXPLOIT = "xss-exploit"
+    AUTH_EXPLOIT = "auth-exploit"
+    SSRF_EXPLOIT = "ssrf-exploit"
+    AUTHZ_EXPLOIT = "authz-exploit"
+    REPORT = "report"
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -73,6 +80,57 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         prerequisites=[AgentName.RECON],
         prompt_template="vuln-authz",
         deliverable_filename="authz_analysis_deliverable.md",
+    ),
+    AgentName.RECON_BLACKBOX: AgentDefinition(
+        name=AgentName.RECON_BLACKBOX,
+        display_name="Reconnaissance (Black-Box)",
+        prerequisites=[],
+        prompt_template="recon-blackbox",
+        deliverable_filename="recon_deliverable.md",
+    ),
+    AgentName.INJECTION_EXPLOIT: AgentDefinition(
+        name=AgentName.INJECTION_EXPLOIT,
+        display_name="Injection Exploitation",
+        prerequisites=[AgentName.RECON],
+        prompt_template="injection-exploit",
+        deliverable_filename="injection_exploitation_evidence.md",
+    ),
+    AgentName.XSS_EXPLOIT: AgentDefinition(
+        name=AgentName.XSS_EXPLOIT,
+        display_name="XSS Exploitation",
+        prerequisites=[AgentName.RECON],
+        prompt_template="xss-exploit",
+        deliverable_filename="xss_exploitation_evidence.md",
+    ),
+    AgentName.AUTH_EXPLOIT: AgentDefinition(
+        name=AgentName.AUTH_EXPLOIT,
+        display_name="Auth Exploitation",
+        prerequisites=[AgentName.RECON],
+        prompt_template="auth-exploit",
+        deliverable_filename="auth_exploitation_evidence.md",
+    ),
+    AgentName.SSRF_EXPLOIT: AgentDefinition(
+        name=AgentName.SSRF_EXPLOIT,
+        display_name="SSRF Exploitation",
+        prerequisites=[AgentName.RECON],
+        prompt_template="ssrf-exploit",
+        deliverable_filename="ssrf_exploitation_evidence.md",
+    ),
+    AgentName.AUTHZ_EXPLOIT: AgentDefinition(
+        name=AgentName.AUTHZ_EXPLOIT,
+        display_name="Authz Exploitation",
+        prerequisites=[AgentName.RECON],
+        prompt_template="authz-exploit",
+        deliverable_filename="authz_exploitation_evidence.md",
+    ),
+    AgentName.REPORT: AgentDefinition(
+        name=AgentName.REPORT,
+        display_name="Report Generator",
+        prerequisites=[AgentName.INJECTION_EXPLOIT, AgentName.XSS_EXPLOIT,
+                        AgentName.AUTH_EXPLOIT, AgentName.SSRF_EXPLOIT,
+                        AgentName.AUTHZ_EXPLOIT],
+        prompt_template="report-executive",
+        deliverable_filename="comprehensive_security_assessment_report.md",
     ),
 }
 

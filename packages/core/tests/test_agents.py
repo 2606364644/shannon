@@ -47,3 +47,36 @@ def test_vuln_agents_depend_on_recon():
 def test_vuln_type():
     vt: VulnType = "injection"
     assert vt == "injection"
+
+def test_blackbox_agent_name_values():
+    assert AgentName.RECON_BLACKBOX == "recon-blackbox"
+    assert AgentName.INJECTION_EXPLOIT == "injection-exploit"
+    assert AgentName.XSS_EXPLOIT == "xss-exploit"
+    assert AgentName.AUTH_EXPLOIT == "auth-exploit"
+    assert AgentName.SSRF_EXPLOIT == "ssrf-exploit"
+    assert AgentName.AUTHZ_EXPLOIT == "authz-exploit"
+    assert AgentName.REPORT == "report"
+
+def test_blackbox_agents_in_registry():
+    expected_blackbox = [
+        AgentName.RECON_BLACKBOX, AgentName.INJECTION_EXPLOIT,
+        AgentName.XSS_EXPLOIT, AgentName.AUTH_EXPLOIT,
+        AgentName.SSRF_EXPLOIT, AgentName.AUTHZ_EXPLOIT,
+        AgentName.REPORT,
+    ]
+    for name in expected_blackbox:
+        assert name in AGENTS, f"Missing blackbox agent: {name}"
+
+def test_exploit_agents_have_correct_prerequisites():
+    for agent_name in [AgentName.INJECTION_EXPLOIT, AgentName.XSS_EXPLOIT,
+                        AgentName.AUTH_EXPLOIT, AgentName.SSRF_EXPLOIT,
+                        AgentName.AUTHZ_EXPLOIT]:
+        defn = AGENTS[agent_name]
+        assert AgentName.RECON in defn.prerequisites or AgentName.RECON_BLACKBOX in defn.prerequisites
+
+def test_recon_blackbox_has_no_prerequisites():
+    assert AGENTS[AgentName.RECON_BLACKBOX].prerequisites == []
+
+def test_report_agent_prerequisites():
+    defn = AGENTS[AgentName.REPORT]
+    assert len(defn.prerequisites) > 0
