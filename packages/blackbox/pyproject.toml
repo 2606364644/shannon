@@ -1,0 +1,11 @@
+[project]
+name = "shannon-blackbox"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "shannon-core",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
