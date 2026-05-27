@@ -87,5 +87,10 @@ class PromptManager:
 
         result = result.replace("{{LOGIN_INSTRUCTIONS}}", "")
 
+        for key, value in variables.items():
+            token = "{{" + key.upper() + "}}"
+            if token in result:
+                result = result.replace(token, value)
+
         result = re.sub(r"\n{3,}", "\n\n", result)
         return result

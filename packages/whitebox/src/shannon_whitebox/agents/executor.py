@@ -27,6 +27,7 @@ class AgentExecutor:
         config_path: str | None = None,
         api_key: str | None = None,
         pipeline_testing: bool = False,
+        prompt_variables: dict[str, str] | None = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -38,9 +39,12 @@ class AgentExecutor:
             config = parse_config(config_path)
         distributed = distribute_config(config)
 
+        variables = {"web_url": web_url, "repo_path": str(repo)}
+        if prompt_variables:
+            variables.update(prompt_variables)
         prompt = self.prompt_manager.load_sync(
             defn.prompt_template,
-            variables={"web_url": web_url, "repo_path": str(repo)},
+            variables=variables,
             config=distributed,
             pipeline_testing=pipeline_testing,
         )
