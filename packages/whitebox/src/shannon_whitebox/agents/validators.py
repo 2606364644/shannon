@@ -19,6 +19,8 @@ def get_vuln_type(agent_name: AgentName) -> str | None:
     value = agent_name.value
     if value.endswith("-vuln"):
         return value.replace("-vuln", "")
+    if value.endswith("-exploit"):
+        return value.replace("-exploit", "")
     return None
 
 def get_queue_filename(agent_name: AgentName) -> str | None:

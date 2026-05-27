@@ -22,3 +22,15 @@ async def test_validate_deliverable_exists(tmp_path):
 async def test_validate_deliverable_missing(tmp_path):
     with pytest.raises(Exception, match="Missing deliverable"):
         await validate_deliverable(tmp_path, AgentName.PRE_RECON)
+
+def test_get_vuln_type_exploit_agents():
+    assert get_vuln_type(AgentName.INJECTION_EXPLOIT) == "injection"
+    assert get_vuln_type(AgentName.XSS_EXPLOIT) == "xss"
+    assert get_vuln_type(AgentName.AUTH_EXPLOIT) == "auth"
+    assert get_vuln_type(AgentName.SSRF_EXPLOIT) == "ssrf"
+    assert get_vuln_type(AgentName.AUTHZ_EXPLOIT) == "authz"
+
+def test_get_queue_filename_exploit_agents():
+    assert get_queue_filename(AgentName.INJECTION_EXPLOIT) == "injection_exploitation_queue.json"
+    assert get_queue_filename(AgentName.XSS_EXPLOIT) == "xss_exploitation_queue.json"
+    assert get_queue_filename(AgentName.AUTH_EXPLOIT) == "auth_exploitation_queue.json"
