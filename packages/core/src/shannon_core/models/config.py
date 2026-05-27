@@ -36,7 +36,7 @@ class Authentication(BaseModel):
     login_url: str
     credentials: Credentials
     login_flow: list[str] | None = None
-    success_condition: SuccessCondition | None = None
+    success_condition: SuccessCondition
 
 class PipelineConfig(BaseModel):
     retry_preset: Literal["default", "subscription"] | None = None
