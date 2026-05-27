@@ -109,9 +109,9 @@ function buildSessionMetadata(input: ActivityInput): SessionMetadata {
   const { webUrl, repoPath, outputPath, sessionId } = input;
   return {
     id: sessionId,
-    webUrl,
+    ...(webUrl !== undefined && { webUrl }),
     repoPath,
-    ...(outputPath && { outputPath }),
+    ...(outputPath !== undefined && { outputPath }),
   };
 }
 
@@ -181,7 +181,7 @@ async function runAgentActivity(agentName: AgentName, input: ActivityInput): Pro
     const endResult = await container.agentExecution.executeOrThrow(
       agentName,
       {
-        webUrl,
+        ...(webUrl !== undefined && { webUrl }),
         repoPath,
         deliverablesPath,
         configPath,
@@ -635,7 +635,7 @@ interface SessionJson {
  */
 export async function loadResumeState(
   workspaceName: string,
-  expectedUrl: string,
+  expectedUrl: string | undefined,
   expectedRepoPath: string,
   deliverablesSubdir?: string,
 ): Promise<ResumeState> {

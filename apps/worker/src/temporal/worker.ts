@@ -130,6 +130,11 @@ function parseCliArgs(argv: string[]): CliArgs {
   const whiteboxOnly = process.env.SHANNON_WHITEBOX_ONLY === '1';
   const blackboxOnly = process.env.SHANNON_BLACKBOX_ONLY === '1';
 
+  if (whiteboxOnly && webUrl && !repoPath) {
+    repoPath = webUrl;
+    webUrl = undefined;
+  }
+
   if (!repoPath) {
     console.error('Error: repoPath is required');
     showUsage();

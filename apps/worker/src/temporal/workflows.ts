@@ -247,7 +247,7 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
   const sessionId = input.sessionId || input.resumeFromWorkspace || workflowId;
 
   const activityInput: ActivityInput = {
-    webUrl: input.webUrl,
+    ...(input.webUrl !== undefined && { webUrl: input.webUrl }),
     repoPath: input.repoPath,
     workflowId,
     sessionId,
@@ -887,7 +887,7 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
   const sessionId = input.sessionId || workflowId;
 
   const activityInput: ActivityInput = {
-    webUrl: input.webUrl,
+    ...(input.webUrl !== undefined && { webUrl: input.webUrl }),
     repoPath: input.repoPath,
     workflowId,
     sessionId,

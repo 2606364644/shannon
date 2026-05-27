@@ -118,7 +118,7 @@ export class MetricsTracker {
     const sessionData: SessionData = {
       session: {
         id: this.sessionMetadata.id,
-        webUrl: this.sessionMetadata.webUrl,
+        ...(this.sessionMetadata.webUrl !== undefined && { webUrl: this.sessionMetadata.webUrl }),
         status: 'in-progress',
         createdAt: (this.sessionMetadata as { createdAt?: string }).createdAt || formatTimestamp(),
         resumeAttempts: [],

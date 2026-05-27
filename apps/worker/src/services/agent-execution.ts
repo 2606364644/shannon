@@ -123,7 +123,7 @@ export class AgentExecutionService {
     try {
       prompt = await loadPrompt(
         promptTemplate,
-        { webUrl, repoPath },
+        { ...(webUrl !== undefined && { webUrl }), repoPath },
         distributedConfig,
         pipelineTestingMode,
         logger,

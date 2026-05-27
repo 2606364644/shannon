@@ -37,7 +37,7 @@ export interface PipelineInput {
 
 export interface ResumeState {
   workspaceName: string;
-  originalUrl: string;
+  originalUrl: string | undefined;
   completedAgents: string[];
   checkpointHash: string;
   originalWorkflowId: string;
