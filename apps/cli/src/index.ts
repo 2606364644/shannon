@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from './commands/build.js';
+import { localStart } from './commands/local-start.js';
 import { logs } from './commands/logs.js';
 import { setup } from './commands/setup.js';
 import { start } from './commands/start.js';
@@ -20,7 +21,7 @@ import { status } from './commands/status.js';
 import { stop } from './commands/stop.js';
 import { uninstall } from './commands/uninstall.js';
 import { workspaces } from './commands/workspaces.js';
-import { getMode } from './mode.js';
+import { getMode, isLocal } from './mode.js';
 import { displaySplash } from './splash.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,7 +83,7 @@ Usage:${
   ${prefix} help                                         Show this help
 
 Options for 'start':
-  -u, --url <url>           Target URL (required, unless --whitebox-only)
+  -u, --url <url>           Target URL (optional, omit for whitebox-only static analysis)
   -r, --repo <path>         Repository path${mode === 'local' ? ' or bare name' : ''} (required)
   -c, --config <path>       Configuration file (YAML)
   -o, --output <path>       Copy deliverables to this directory after run
@@ -91,6 +92,7 @@ Options for 'start':
       --blackbox-only       Exploitation only (reads prior whitebox deliverables)
       --pipeline-testing    Use minimal prompts for fast testing
       --debug               Preserve worker container after exit for log inspection
+      --concurrency <n>     Max parallel vuln agents in whitebox mode (default: 3)
 
 Examples:
   ${prefix} start -u https://example.com -r ${mode === 'local' ? 'my-repo' : './my-repo'}
@@ -201,9 +203,8 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
   }
 
   if (!whiteboxOnly && !url) {
-    console.error('ERROR: --url is required (use --whitebox-only to scan without a URL)');
-    console.error(`Usage: ${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} start -u <url> -r <path>`);
-    process.exit(1);
+    console.log('No target URL provided — running in whitebox-only (static analysis) mode');
+    whiteboxOnly = true;
   }
 
   if (!repo) {
@@ -235,7 +236,11 @@ const command = args[0];
 switch (command) {
   case 'start': {
     const parsed = parseStartArgs(args.slice(1));
-    await start({ ...parsed, version: getVersion() });
+    if (parsed.whiteboxOnly && isLocal()) {
+      await localStart({ ...parsed, version: getVersion() });
+    } else {
+      await start({ ...parsed, version: getVersion() });
+    }
     break;
   }
   case 'stop':

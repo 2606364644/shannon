@@ -1,4 +1,4 @@
-URL: {{WEB_URL}}
+<if-live>URL: {{WEB_URL}}</if-live><if-static>Mode: Offline static code analysis (no live target)</if-static>
 
 Filesystem:
 - {{REPO_PATH}}/ (read only)

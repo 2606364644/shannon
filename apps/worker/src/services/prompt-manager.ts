@@ -277,6 +277,17 @@ function buildAuthContext(config: DistributedConfig | null): string {
   return lines.join('\n');
 }
 
+function stripConditionalBlocks(content: string, hasWebUrl: boolean): string {
+  if (hasWebUrl) {
+    content = content.replace(/<if-static>[\s\S]*?<\/if-static>\s*/g, '');
+    content = content.replace(/<if-live>([\s\S]*?)<\/if-live>\s*/g, '$1');
+  } else {
+    content = content.replace(/<if-live>[\s\S]*?<\/if-live>\s*/g, '');
+    content = content.replace(/<if-static>([\s\S]*?)<\/if-static>\s*/g, '$1');
+  }
+  return content;
+}
+
 // Pure function: Variable interpolation
 async function interpolateVariables(
   template: string,
@@ -299,9 +310,11 @@ async function interpolateVariables(
       });
     }
 
-    const effectiveWebUrl = variables.webUrl || '(offline — source code analysis only)';
+    let result = stripConditionalBlocks(template, !!variables.webUrl);
 
-    let result = template
+    const effectiveWebUrl = variables.webUrl || '';
+
+    result = result
       .replace(/{{WEB_URL}}/g, effectiveWebUrl)
       .replace(/{{REPO_PATH}}/g, variables.repoPath)
       .replace(/{{PLAYWRIGHT_SESSION}}/g, variables.PLAYWRIGHT_SESSION || 'agent1')

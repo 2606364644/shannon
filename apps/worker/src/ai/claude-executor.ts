@@ -10,6 +10,7 @@ import { type JsonSchemaOutputFormat, query } from '@anthropic-ai/claude-agent-s
 import { fs, path } from 'zx';
 import type { AuditSession } from '../audit/index.js';
 import { deliverablesDir } from '../paths.js';
+import { attemptDeliverableRecovery } from '../services/deliverable-recovery.js';
 import { isRetryableError, PentestError } from '../services/error-handling.js';
 import { AGENT_VALIDATORS } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
@@ -110,11 +111,22 @@ export async function validateAgentOutput(
 
     if (validationResult) {
       logger.info('Validation passed: Required files/structure present');
-    } else {
-      logger.error('Validation failed: Missing required deliverable files');
+      return true;
     }
 
-    return validationResult;
+    logger.warn('Validation failed: attempting deliverable recovery');
+    const recovered = await attemptDeliverableRecovery(agentName as keyof typeof AGENT_VALIDATORS, sourceDir, logger);
+    if (recovered) {
+      const revalidation = await validator(sourceDir, logger);
+      if (revalidation) {
+        logger.info('Validation passed after deliverable recovery');
+        return true;
+      }
+      logger.warn('Deliverable recovered but validation still fails');
+    }
+
+    logger.error('Validation failed: Missing required deliverable files');
+    return false;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error(`Validation failed with error: ${errMsg}`);

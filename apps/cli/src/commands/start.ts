@@ -105,7 +105,7 @@ export async function start(args: StartArgs): Promise<void> {
   // 13. Spawn worker container
   const proc = spawnWorker({
     version: args.version,
-    url: args.url,
+    ...(args.url && { url: args.url }),
     repo,
     workspacesDir,
     taskQueue,

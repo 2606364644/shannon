@@ -141,20 +141,28 @@ function parseCliArgs(argv: string[]): CliArgs {
     process.exit(1);
   }
 
-  if (!whiteboxOnly && !webUrl) {
-    console.error('Error: webUrl is required (unless SHANNON_WHITEBOX_ONLY=1)');
+  if (!taskQueue) {
+    console.error('Error: --task-queue is required');
     showUsage();
     process.exit(1);
+  }
+
+  if (!whiteboxOnly && !webUrl) {
+    console.log('No target URL provided — running in whitebox-only (static analysis) mode');
+    return {
+      repoPath,
+      taskQueue,
+      pipelineTestingMode,
+      whiteboxOnly: true,
+      blackboxOnly: false,
+      ...(configPath && { configPath }),
+      ...(outputPath && { outputPath }),
+      ...(resumeFromWorkspace && { resumeFromWorkspace }),
+    };
   }
 
   if (blackboxOnly && !webUrl) {
     console.error('Error: webUrl is required for blackbox-only mode');
-    showUsage();
-    process.exit(1);
-  }
-
-  if (!taskQueue) {
-    console.error('Error: --task-queue is required');
     showUsage();
     process.exit(1);
   }

@@ -39,30 +39,31 @@ Areas to Focus On:
 <scope_boundaries>
 # Penetration Test Scope & Boundaries
 
-**Primary Directive:** Your reconnaissance analysis is strictly limited to the **network-accessible attack surface** of the application. All subsequent analysis must adhere to this scope. Before mapping any component, endpoint, or input vector, you must first verify it meets the "In-Scope" criteria.
+**Primary Directive:** Your reconnaissance analysis is focused on the **application's attack surface as revealed through source code analysis**. All subsequent analysis must adhere to this scope. Before mapping any component, endpoint, or input vector, you must first verify it meets the "In-Scope" criteria.
 
-### In-Scope: Network-Reachable Components
-A component is considered **in-scope** if its execution can be initiated, directly or indirectly, by a network request that the deployed application server is capable of receiving. This includes:
-- Publicly exposed web pages and API endpoints accessible through the target URL
-- Endpoints requiring authentication via the application's standard login mechanisms
-- Any developer utility, debug console, or script that has been mistakenly exposed through a web route
-- Administrative interfaces accessible through the web application
+### In-Scope: Code Paths Reachable Through Web Entry Points
+A component is considered **in-scope** if its execution can be initiated, directly or indirectly, through a web request handler, API route, or other HTTP-exposed entry point found in the source code. This includes:
+- Web route handlers and API endpoints defined in the application code
+- Authentication mechanisms and session management code
+- Middleware, guards, and request processing pipelines
+- Data access layers called from web-accessible handlers
+- Any code path that processes externally-originating input (form data, query parameters, headers, cookies)
 
-### Out-of-Scope: Locally Executable Only
-A component is **out-of-scope** if it **cannot** be invoked through the running application's network interface and requires an execution context completely external to the application's request-response cycle. This includes:
+### Out-of-Scope: Non-Web Code Paths
+A component is **out-of-scope** if it **cannot** be reached through any web entry point in the application and exists only as a local-only tool or process. This includes:
 - Command-line interface tools (e.g., `go run ./cmd/...`, `python scripts/...`)
 - Development environment tooling (e.g., build scripts, test harnesses, local dev servers)
 - CI/CD pipeline scripts or build tools (e.g., GitHub Actions, Docker build files)
 - Database migration scripts, backup tools, or maintenance utilities
 - Local development servers, debugging utilities, or IDE-specific tools
 - Static files or scripts that require manual opening in a browser (not served by the application)
-- Local configuration files not exposed through web endpoints
+- Local configuration files not consumed by web-accessible code paths
 
-**Application to Analysis:** When mapping endpoints, input vectors, or injection sources, only include components that can be reached through the target web application. Exclude any findings that originate from local-only development tools, build processes, or scripts that cannot be invoked via network requests to the target application.
+**Application to Analysis:** When mapping endpoints, input vectors, or injection sources, only include components reachable through web entry points discovered in the source code. Exclude findings from local-only development tools, build processes, or scripts that cannot be invoked through the application's request handling logic.
 </scope_boundaries>
 
 <attacker_perspective>
-**EXTERNAL ATTACKER CONTEXT:** Analyze from the perspective of an external attacker with NO internal network access, VPN access, or administrative privileges. Focus on vulnerabilities exploitable via public internet.
+**ATTACKER CONTEXT:** Analyze from the perspective of an external attacker targeting code paths reachable through web entry points. Focus on vulnerabilities exploitable through the application's HTTP interface — input handling, authentication flows, authorization boundaries, and data processing logic discoverable in the source code.
 </attacker_perspective>
 
 <cli_tools>
