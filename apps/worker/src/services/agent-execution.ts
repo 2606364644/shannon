@@ -21,6 +21,7 @@
  * No Temporal dependencies - pure domain logic.
  */
 
+import os from 'node:os';
 import { fs, path } from 'zx';
 import { type ClaudePromptResult, runClaudePrompt, validateAgentOutput } from '../ai/claude-executor.js';
 import { getOutputFormat, getQueueFilename } from '../ai/queue-schemas.js';
@@ -257,7 +258,51 @@ export class AgentExecutionService {
     logger: ActivityLogger,
     opts: FailAgentOpts,
   ): Promise<Result<AgentEndResult, PentestError>> {
+    // 1. Snapshot deliverable files before rollback
+    let snapshotDir: string | undefined;
+    const agent = AGENTS[agentName];
+    if (agent) {
+      const filename = agent.deliverableFilename;
+      const deliverableFile = path.join(deliverablesPath, filename);
+      try {
+        if (await fs.pathExists(deliverableFile)) {
+          snapshotDir = path.join(os.tmpdir(), `shannon-snapshot-${agentName}-${Date.now()}`);
+          await fs.ensureDir(snapshotDir);
+          await fs.copy(deliverableFile, path.join(snapshotDir, filename));
+          logger.info(`Snapshotted deliverable before rollback`, {
+            file: filename,
+            snapshotDir,
+          });
+        }
+      } catch (snapshotError) {
+        const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
+        logger.warn(`Failed to snapshot deliverable before rollback: ${msg}`);
+      }
+    }
+
+    // 2. Rollback
     await rollbackGitWorkspace(deliverablesPath, opts.rollbackReason, logger);
+
+    // 3. Restore snapshot if one was taken
+    if (snapshotDir && agent) {
+      const filename = agent.deliverableFilename;
+      const snapshotFile = path.join(snapshotDir, filename);
+      try {
+        if (await fs.pathExists(snapshotFile)) {
+          await fs.ensureDir(deliverablesPath);
+          const targetPath = path.join(deliverablesPath, filename);
+          await fs.copy(snapshotFile, targetPath);
+          logger.info(`Restored deliverable snapshot after rollback`, {
+            file: filename,
+            to: targetPath,
+          });
+        }
+        await fs.remove(snapshotDir);
+      } catch (restoreError) {
+        const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
+        logger.warn(`Failed to restore deliverable snapshot: ${msg}`);
+      }
+    }
 
     const endResult: AgentEndResult = {
       attemptNumber: opts.attemptNumber,
