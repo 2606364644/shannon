@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from shannon_core.utils.file_io import async_path_exists, async_read_file, async_write_file
 
@@ -9,6 +10,7 @@ class ReportAssembler:
         deliverables_path: Path,
         vuln_classes: list[str],
         report_path: Path,
+        report_config: dict[str, Any] | None = None,
     ) -> None:
         sections: list[str] = []
         for vuln_class in vuln_classes:

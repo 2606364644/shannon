@@ -3,6 +3,9 @@ from pathlib import Path
 from temporalio import activity
 
 from shannon_core.models.agents import AgentName
+from shannon_core.models.errors import ErrorCode, PentestError
+from shannon_core.utils.security import validate_target_url, check_url_reachable
+from shannon_core.utils.credential_validator import validate_credentials
 from shannon_whitebox.agents.executor import AgentExecutor
 from shannon_whitebox.prompts.manager import PromptManager
 
@@ -18,7 +21,59 @@ def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
 
 @activity.defn
 async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
-    pass
+    # URL safety and reachability checks (mandatory for blackbox)
+    if input.web_url:
+        validate_target_url(input.web_url)
+        reachable = await check_url_reachable(input.web_url)
+        if not reachable:
+            raise PentestError(
+                f"Target URL is not reachable: {input.web_url}",
+                category="preflight",
+                error_code=ErrorCode.TARGET_UNREACHABLE,
+            )
+
+    # Config parsing validation
+    if input.config_path:
+        from shannon_core.config.parser import parse_config
+        try:
+            parse_config(input.config_path)
+        except PentestError:
+            raise
+        except Exception as exc:
+            raise PentestError(
+                f"Config parsing failed: {exc}",
+                category="config",
+                error_code=ErrorCode.CONFIG_PARSE_ERROR,
+            ) from exc
+
+    # Repo is optional for blackbox — skip git checks entirely
+
+
+@activity.defn
+async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
+    from shannon_whitebox.services.validate_authentication import validate_authentication
+    from shannon_whitebox.prompts.manager import PromptManager
+    from shannon_whitebox.agents.executor import AgentExecutor
+
+    prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+    executor = AgentExecutor(prompt_manager)
+
+    result = await validate_authentication(
+        web_url=input.web_url,
+        config_path=input.config_path,
+        prompt_manager=prompt_manager,
+        executor=executor,
+        repo_path=input.repo_path or "",
+        api_key=input.api_key,
+    )
+    if not result.success:
+        raise PentestError(
+            f"Authentication validation failed: {result.failure_detail or 'unknown'}",
+            category="preflight",
+            retryable=False,
+            error_code=ErrorCode.AUTH_LOGIN_FAILED,
+        )
 
 
 @activity.defn
@@ -69,9 +124,10 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
 @activity.defn
 async def assemble_report(input: BlackboxActivityInput) -> None:
     from shannon_blackbox.services.report_assembler import ReportAssembler
+    from shannon_core.models.agents import ALL_VULN_CLASSES
 
     deliverables = _get_deliverables_path(input)
-    vuln_classes: list[str] = ["injection", "xss", "auth", "ssrf", "authz"]
+    vuln_classes: list[str] = list(ALL_VULN_CLASSES)
     report_path = deliverables / "comprehensive_security_assessment_report.md"
     await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
 
