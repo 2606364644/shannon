@@ -49,6 +49,7 @@ async def run_agent(input: ActivityInput) -> dict:
         config_path=input.config_path,
         api_key=input.api_key,
         pipeline_testing=input.pipeline_testing_mode,
+        prompt_override=input.prompt_override,
     )
     return metrics.model_dump()
 

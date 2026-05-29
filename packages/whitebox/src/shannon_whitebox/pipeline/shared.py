@@ -15,6 +15,7 @@ class PipelineInput:
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     deliverables_subdir: str = ".shannon/deliverables"
+    prompt_override: str | None = None
 
 @dataclass
 class PipelineState:
@@ -33,3 +34,4 @@ class ActivityInput:
     deliverables_subdir: str = ".shannon/deliverables"
     pipeline_testing_mode: bool = False
     api_key: str | None = None
+    prompt_override: str | None = None

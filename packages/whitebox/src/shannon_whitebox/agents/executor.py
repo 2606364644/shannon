@@ -28,6 +28,7 @@ class AgentExecutor:
         api_key: str | None = None,
         pipeline_testing: bool = False,
         prompt_variables: dict[str, str] | None = None,
+        prompt_override: str | None = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -42,8 +43,9 @@ class AgentExecutor:
         variables = {"web_url": web_url, "repo_path": str(repo)}
         if prompt_variables:
             variables.update(prompt_variables)
+        template_name = prompt_override or defn.prompt_template
         prompt = self.prompt_manager.load_sync(
-            defn.prompt_template,
+            template_name,
             variables=variables,
             config=distributed,
             pipeline_testing=pipeline_testing,
