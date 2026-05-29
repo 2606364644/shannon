@@ -42,3 +42,12 @@ def test_distributed_config():
     assert len(d.avoid) == 1
     assert d.vuln_classes == ["injection"]
     assert d.exploit is True
+
+def test_misconfig_in_vuln_class():
+    c = Config(vuln_classes=["misconfig"])
+    assert c.vuln_classes == ["misconfig"]
+
+def test_all_vuln_classes_includes_misconfig():
+    from shannon_core.models.config import ALL_VULN_CLASSES
+    assert "misconfig" in ALL_VULN_CLASSES
+    assert len(ALL_VULN_CLASSES) == 6

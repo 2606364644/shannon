@@ -39,7 +39,7 @@ def test_parse_url_path_without_slash(tmp_path):
 def test_distribute_config_none():
     d = distribute_config(None)
     assert d.description == ""
-    assert len(d.vuln_classes) == 5
+    assert len(d.vuln_classes) == 6
     assert d.exploit is True
 
 def test_distribute_config_full():

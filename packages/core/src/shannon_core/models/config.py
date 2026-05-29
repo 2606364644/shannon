@@ -13,7 +13,7 @@ class Rules(BaseModel):
     avoid: list[Rule] = []
     focus: list[Rule] = []
 
-VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf"]
+VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
 Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
 
@@ -62,4 +62,4 @@ class Config(BaseModel):
     report: ReportConfig | None = None
     rules_of_engagement: str | None = None
 
-ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
+ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
