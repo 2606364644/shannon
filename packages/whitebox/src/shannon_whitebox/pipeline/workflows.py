@@ -31,6 +31,7 @@ class WhiteboxScanWorkflow:
             deliverables_subdir=input.deliverables_subdir,
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
+            prompt_override=input.prompt_override,
         )
         await workflow.execute_activity(
             activities.run_preflight, act_input,
