@@ -132,7 +132,7 @@ You must follow this methodical four-step process:
     - Launch these agents IN PARALLEL using multiple Task tool calls in a single message:
       - **Route Mapper Agent**: "Find all backend routes and controllers that handle the discovered endpoints: [list endpoints]. Map each endpoint to its exact handler function with file paths and line numbers."
       - **Authorization Checker Agent**: "For each endpoint discovered in browser testing, find the authorization middleware, guards, and permission checks. Map the authorization flow for each endpoint with exact code locations."
-      - **Input Validator Agent**: "Analyze the input validation logic for all discovered form fields and API parameters. Find validation rules, sanitization, and data processing for each input with exact file paths."
+      - **Input Validator Agent**: "Analyze the input validation logic for all discovered form fields and API parameters. Find validation rules, sanitization, and data processing for each input with exact file paths. Additionally, enumerate ALL fields from the application's input type definitions (TypeScript interfaces, Zod schemas, Joi schemas, Pydantic models, JSON Schema). Report wildcard or catch-all fields (e.g., `[key: string]: unknown`) alongside explicit fields, noting that additional undeclared parameters may pass through. Provide a complete parameter inventory for each endpoint."
       - **Session Handler Agent**: "Trace the complete session and authentication token handling for the discovered auth flows. Map session creation, storage, validation, and destruction with exact code locations."
 
 3.5 **Authorization Architecture Analysis using Task Agents:**
@@ -223,6 +223,18 @@ Your output MUST be a list of filepaths with line numbers, or specific reference
 - **POST Body Fields (JSON/Form):** [e.g., `username`, `password`, `search_query`, `profile.description`]
 - **HTTP Headers:** [e.g., `X-Forwarded-For` if used by the app, custom headers]
 - **Cookie Values:** [e.g., `preferences_cookie`, `tracking_id`]
+
+**Parameter Completeness Verification (MANDATORY for endpoints with template rendering):** For each endpoint that renders templates or views, include a cross-reference table verifying parameter coverage:
+
+| Endpoint | Input Type Fields | Template Variables | Hidden Parameters | Extraction Code Location |
+|---|---|---|---|---|
+| `/api/render` | `site`, `lang`, `channel` | `seoPath`, `global_content`, `oneTapConfig`, `site`, `lang` | `seoPath`, `global_content`, `oneTapConfig` (via wildcard) | `BuildCommonParamsService.build()` |
+| **Input Type Fields:** Explicitly declared fields in the endpoint's input type definition
+| **Template Variables:** All variable names used in the rendered template(s)
+| **Hidden Parameters:** Variables present in templates but NOT in explicit type definitions (arriving through wildcards, middleware, or server-side construction)
+| **Extraction Code Location:** Where hidden parameters are extracted from input or constructed
+
+If all template variables map to explicitly typed input fields or server-computed values, confirm "all template variables accounted for" for that endpoint.
 
 ## 6. Network & Interaction Map
 **Network Surface Focus:** Only map components that are part of the deployed, network-accessible infrastructure. Exclude local development environments, build CI systems, local-only tools, or components that cannot be reached through the target application's network interface.
@@ -355,7 +367,7 @@ Multi-step workflow endpoints that assume prior steps were completed.
 
 ## 9. Injection Sources (Command Injection, SQL Injection, LFI/RFI, SSTI, Path Traversal, Deserialization)
 **TASK AGENT COORDINATION:** Launch a dedicated **Injection Source Tracer Agent** to identify these sources:
-"Find all injection sources in the codebase: SQL injection, command injection, file inclusion/path traversal (LFI/RFI), server-side template injection (SSTI), and insecure deserialization. Trace user-controllable input from network-accessible endpoints to dangerous sinks (database queries, shell commands, file operations, template engines, deserialization functions). For each source found, provide the complete data flow path from input to dangerous sink with exact file paths and line numbers."
+"Find all injection sources in the codebase: SQL injection, command injection, file inclusion/path traversal (LFI/RFI), server-side template injection (SSTI), and insecure deserialization. Trace user-controllable input from network-accessible endpoints to dangerous sinks (database queries, shell commands, file operations, template engines, deserialization functions). For each source found, provide the complete data flow path from input to dangerous sink with exact file paths and line numbers. Additionally, extract all variable names used in template rendering (from template files) and cross-reference them against the input type definitions and parameter construction code. Any variable in a template that could originate from user input but is NOT in the explicit input type definition MUST be reported as a potentially hidden parameter."
 
 **Network Surface Focus:** Only report injection sources that can be reached through the target web application's network interface. Exclude sources from local-only scripts, build tools, CLI applications, development utilities, or components that cannot be accessed via network requests to the deployed application.
 

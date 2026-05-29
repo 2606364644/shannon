@@ -76,6 +76,21 @@ export async function start(args: StartArgs): Promise<void> {
     fs.chmodSync(dirPath, 0o777);
   }
 
+  // 8.5. For blackbox-only: seed overlay with existing deliverables from prior whitebox
+  if (args.blackboxOnly) {
+    const srcDir = path.join(repo.hostPath, '.shannon', 'deliverables');
+    const dstDir = path.join(workspacePath, 'deliverables');
+    if (fs.existsSync(srcDir)) {
+      const entries = fs.readdirSync(srcDir);
+      for (const entry of entries) {
+        if (entry === '.git') continue;
+        const src = path.join(srcDir, entry);
+        const dst = path.join(dstDir, entry);
+        fs.cpSync(src, dst, { recursive: true });
+      }
+    }
+  }
+
   // 9. Pre-create overlay mount points (:ro mounts can't auto-create them)
   const shannonDir = path.join(repo.hostPath, '.shannon');
   for (const dir of ['deliverables', 'scratchpad', '.playwright-cli']) {

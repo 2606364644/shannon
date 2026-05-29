@@ -32,7 +32,7 @@ import { ExploitationCheckerService } from '../services/exploitation-checker.js'
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
 import { runPreflightChecks } from '../services/preflight.js';
-import type { ExploitationDecision, VulnType } from '../services/queue-validation.js';
+import { type ExploitationDecision, type VulnType, validateQueueSafe } from '../services/queue-validation.js';
 import { assembleFinalReport, injectModelIntoReport } from '../services/reporting.js';
 import { validateAuthentication } from '../services/validate-authentication.js';
 import { AGENTS } from '../session-manager.js';
@@ -40,7 +40,7 @@ import type { AgentName } from '../types/agents.js';
 import { ALL_AGENTS } from '../types/agents.js';
 import { ALL_VULN_CLASSES, type ContainerConfig, type ProviderConfig, type VulnClass } from '../types/config.js';
 import { ErrorCode } from '../types/errors.js';
-import { isErr } from '../types/result.js';
+import { isErr, isOk } from '../types/result.js';
 import { atomicWrite, fileExists, readJson } from '../utils/file-io.js';
 import { createActivityLogger } from './activity-logger.js';
 import type { AgentMetrics, PipelineState, ResumeState } from './shared.js';
@@ -1022,18 +1022,9 @@ export async function validateDeliverablesExist(input: ActivityInput): Promise<V
   const typesWithQueues: VulnType[] = [];
 
   for (const vt of ALL_VULN_CLASSES) {
-    const queuePath = path.join(delivPath, `${vt}_exploitation_queue.json`);
-    try {
-      const exists = await fileExists(queuePath);
-      if (exists) {
-        const content = await fs.readFile(queuePath, 'utf8');
-        const parsed = JSON.parse(content) as unknown[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          typesWithQueues.push(vt);
-        }
-      }
-    } catch {
-      // Non-parseable or missing — skip
+    const result = await validateQueueSafe(vt, delivPath);
+    if (isOk(result) && result.value.shouldExploit) {
+      typesWithQueues.push(vt);
     }
   }
 
