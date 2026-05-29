@@ -6,6 +6,8 @@ import httpx
 
 from shannon_core.models.errors import ErrorCode, PentestError
 
+_DEFAULT_TIMEOUT = 15
+
 # Minimal Anthropic messages request to test API key validity
 _ANTHROPIC_TEST_BODY = {
     "model": "claude-haiku-4-5-20251001",
@@ -17,7 +19,7 @@ _ANTHROPIC_TEST_BODY = {
 async def _validate_anthropic(api_key: str) -> None:
     """POST a minimal request to the Anthropic messages API."""
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -99,25 +101,31 @@ async def validate_credentials(
     elif provider == "vertex":
         await _validate_vertex()
     elif provider == "litellm_router":
-        if base_url and auth_token:
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    resp = await client.get(
-                        f"{base_url}/health",
-                        headers={"Authorization": f"Bearer {auth_token}"},
+        if not base_url or not auth_token:
+            raise PentestError(
+                "LiteLLM router requires both base_url and auth_token",
+                category="preflight",
+                retryable=False,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+        try:
+            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+                resp = await client.get(
+                    f"{base_url}/health",
+                    headers={"Authorization": f"Bearer {auth_token}"},
+                )
+                if resp.status_code in (401, 403):
+                    raise PentestError(
+                        f"LiteLLM router auth failed (HTTP {resp.status_code})",
+                        category="preflight",
+                        retryable=False,
+                        error_code=ErrorCode.AUTH_FAILED,
                     )
-                    if resp.status_code in (401, 403):
-                        raise PentestError(
-                            f"LiteLLM router auth failed (HTTP {resp.status_code})",
-                            category="preflight",
-                            retryable=False,
-                            error_code=ErrorCode.AUTH_FAILED,
-                        )
-            except httpx.ConnectError as exc:
-                raise PentestError(
-                    f"Cannot reach LiteLLM router at {base_url}: {exc}",
-                    category="preflight",
-                    retryable=True,
-                    error_code=ErrorCode.AUTH_FAILED,
-                ) from exc
+        except httpx.ConnectError as exc:
+            raise PentestError(
+                f"Cannot reach LiteLLM router at {base_url}: {exc}",
+                category="preflight",
+                retryable=True,
+                error_code=ErrorCode.AUTH_FAILED,
+            ) from exc
     # Unknown providers: skip silently
