@@ -65,6 +65,58 @@ class TestSyncCodePathDenyRules:
         deny_list = data["permissions"]["deny"]
         assert "Read(./secrets/**)" in deny_list
 
+    def test_empty_pattern_produces_no_deny_entries(self, fake_home):
+        rules = Rules(
+            avoid=[
+                Rule(description="empty", type="code_path", value=""),
+                Rule(description="whitespace", type="code_path", value="   "),
+                Rule(description="valid", type="code_path", value="secrets/**"),
+            ],
+            focus=[],
+        )
+        sync_code_path_deny_rules(rules.avoid)
+        settings_path = fake_home / "settings.json"
+        data = json.loads(settings_path.read_text())
+        deny_list = data["permissions"]["deny"]
+        # Only the valid pattern should produce entries (2 tools)
+        assert len(deny_list) == 2
+        assert "Read(./secrets/**)" in deny_list
+        assert "Edit(./secrets/**)" in deny_list
+
+    def test_creates_parent_directory(self, tmp_path, monkeypatch):
+        """Verify ~/.claude/ is created when it doesn't exist yet."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        assert not (tmp_path / ".claude").exists()
+
+        rules = Rules(
+            avoid=[Rule(description="secrets", type="code_path", value="secrets/**")],
+            focus=[],
+        )
+        sync_code_path_deny_rules(rules.avoid)
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert settings_path.exists()
+        data = json.loads(settings_path.read_text())
+        assert "Read(./secrets/**)" in data["permissions"]["deny"]
+
+    def test_merges_into_existing_settings(self, fake_home):
+        settings_path = fake_home / "settings.json"
+        settings_path.write_text(json.dumps({
+            "someOtherKey": "preserved",
+            "permissions": {"allow": ["Bash(git log)"]},
+        }))
+
+        rules = Rules(
+            avoid=[Rule(description="secrets", type="code_path", value="secrets/**")],
+            focus=[],
+        )
+        sync_code_path_deny_rules(rules.avoid)
+
+        data = json.loads(settings_path.read_text())
+        assert data["someOtherKey"] == "preserved"
+        assert data["permissions"]["allow"] == ["Bash(git log)"]
+        assert "Read(./secrets/**)" in data["permissions"]["deny"]
+
 
 class TestCleanupSettings:
     def test_removes_settings_file(self, fake_home):

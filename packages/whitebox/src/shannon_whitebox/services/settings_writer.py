@@ -32,7 +32,10 @@ def _deny_entries_for(pattern: str) -> list[str]:
 
 def sync_code_path_deny_rules(avoid_rules: list[Rule]) -> None:
     """Write deny rules for all code_path avoid patterns; remove file when none."""
-    code_path_patterns = [r.value for r in avoid_rules if r.type == "code_path"]
+    code_path_patterns = [
+        r.value for r in avoid_rules
+        if r.type == "code_path" and r.value and r.value.strip()
+    ]
 
     settings_path = _settings_path()
 
@@ -41,15 +44,21 @@ def sync_code_path_deny_rules(avoid_rules: list[Rule]) -> None:
             settings_path.unlink()
         return
 
-    settings = {
-        "permissions": {
-            "deny": [
-                entry
-                for pattern in code_path_patterns
-                for entry in _deny_entries_for(pattern)
-            ],
-        },
-    }
+    # Read existing settings or start fresh
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            settings = {}
+
+    # Merge deny rules
+    permissions = settings.setdefault("permissions", {})
+    permissions["deny"] = [
+        entry
+        for pattern in code_path_patterns
+        for entry in _deny_entries_for(pattern)
+    ]
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2))
