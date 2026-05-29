@@ -1,5 +1,4 @@
 # shannon-py/packages/core/tests/test_security.py
-import ipaddress
 from unittest.mock import patch, AsyncMock
 
 import httpx
@@ -33,6 +32,12 @@ class TestResolveHost:
             ip = resolve_host("https://nonexistent.invalid")
             assert ip is None
 
+    def test_returns_none_on_empty_string(self):
+        assert resolve_host("") is None
+
+    def test_returns_none_on_invalid_url(self):
+        assert resolve_host("not-a-url") is None
+
 
 class TestCheckSsrf:
     def test_allows_public_ip(self):
@@ -58,6 +63,9 @@ class TestCheckLoopback:
 
     def test_blocks_zero(self):
         assert check_loopback("0.0.0.0") is True
+
+    def test_blocks_ipv6_wildcard(self):
+        assert check_loopback("::") is True
 
     def test_allows_public(self):
         assert check_loopback("93.184.216.34") is False
@@ -96,3 +104,9 @@ class TestValidateTargetUrl:
         with patch("shannon_core.utils.security.resolve_host", return_value="93.184.216.34"):
             # Should not raise
             validate_target_url("https://example.com")
+
+    def test_rejects_unresolvable_host(self):
+        with patch("shannon_core.utils.security.resolve_host", return_value=None):
+            with pytest.raises(PentestError) as exc_info:
+                validate_target_url("https://unresolvable.invalid")
+            assert exc_info.value.error_code == ErrorCode.TARGET_UNREACHABLE

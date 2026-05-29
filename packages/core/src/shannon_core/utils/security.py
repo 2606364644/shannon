@@ -38,12 +38,13 @@ def check_ssrf(ip: str) -> bool:
 def check_loopback(ip: str) -> bool:
     """Return ``True`` if *ip* is a loopback or wildcard address."""
     addr = ipaddress.ip_address(ip)
-    return addr.is_loopback or ip == "0.0.0.0"
+    return addr.is_loopback or addr.is_unspecified
 
 
 async def check_url_reachable(url: str, timeout: int = 10) -> bool:
-    """Return ``True`` when an HTTP HEAD to *url* succeeds (any 2xx/3xx/4xx)."""
+    """Return ``True`` when an HTTP HEAD to *url* succeeds (any HTTP response)."""
     try:
+        # verify=False is intentional: pentest targets often use self-signed certs
         async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
             resp = await client.head(url, follow_redirects=True)
             return True
