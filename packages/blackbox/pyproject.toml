@@ -4,7 +4,6 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "shannon-core",
-    "shannon-whitebox",
     "temporalio>=1.0",
     "click>=8.0",
     "aiofiles>=23.0",

@@ -6,8 +6,8 @@ from shannon_core.models.agents import AgentName
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.utils.security import validate_target_url, check_url_reachable
 from shannon_core.utils.credential_validator import validate_credentials
-from shannon_whitebox.agents.executor import AgentExecutor
-from shannon_whitebox.prompts.manager import PromptManager
+from shannon_core.agents.executor import AgentExecutor
+from shannon_core.prompts.manager import PromptManager
 
 from .shared import BlackboxActivityInput
 
@@ -51,9 +51,9 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
 
 @activity.defn
 async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
-    from shannon_whitebox.services.validate_authentication import validate_authentication
-    from shannon_whitebox.prompts.manager import PromptManager
-    from shannon_whitebox.agents.executor import AgentExecutor
+    from shannon_core.services.validate_authentication import validate_authentication
+    from shannon_core.prompts.manager import PromptManager
+    from shannon_core.agents.executor import AgentExecutor
 
     prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
     prompt_manager = PromptManager(prompts_dir)

@@ -3,7 +3,7 @@ from pathlib import Path
 from shannon_core.models.agents import AgentName
 from shannon_core.models.metrics import AgentMetrics
 
-from shannon_whitebox.agents.executor import AgentExecutor
+from shannon_core.agents.executor import AgentExecutor
 
 
 class ReconExecutor:

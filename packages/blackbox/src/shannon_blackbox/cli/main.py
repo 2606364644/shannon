@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 from shannon_core.models.agents import ALL_VULN_CLASSES
-from shannon_whitebox.session import SessionManager
+from shannon_core.session import SessionManager
 
 
 @click.group()
