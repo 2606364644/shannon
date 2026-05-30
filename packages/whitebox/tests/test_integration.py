@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 from shannon_core.models.agents import AgentName, AGENTS
 from shannon_core.models.metrics import AgentMetrics
-from shannon_whitebox.agents.executor import AgentExecutor
-from shannon_whitebox.prompts.manager import PromptManager
-from shannon_whitebox.session import SessionManager
-from shannon_whitebox.agents.runner import ClaudeRunResult
+from shannon_core.agents.executor import AgentExecutor
+from shannon_core.prompts.manager import PromptManager
+from shannon_core.session import SessionManager
+from shannon_core.agents.runner import ClaudeRunResult
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ async def test_full_pipeline_mocked(mock_repo, prompts_dir):
         call_count += 1
         return mock_results.get("pre-recon", ClaudeRunResult(success=True, text="ok"))
 
-    with patch("shannon_whitebox.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
+    with patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
         deliverables = mock_repo / ".shannon" / "deliverables"
         deliverables.mkdir(parents=True, exist_ok=True)
 

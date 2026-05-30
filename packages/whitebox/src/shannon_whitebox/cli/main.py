@@ -2,7 +2,7 @@ import asyncio
 import click
 from pathlib import Path
 
-from shannon_whitebox.session import SessionManager
+from shannon_core.session import SessionManager
 from shannon_whitebox.pipeline.shared import PipelineInput
 
 @click.group()
