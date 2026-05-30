@@ -70,7 +70,7 @@ class PromptManager:
 
         if config:
             result = result.replace("{{DESCRIPTION}}", f"Description: {config.description}" if config.description else "")
-            result = result.replace("{{AUTH_CONTEXT}}", "No authentication configured" if not config.authentication else f"Login type: {config.authentication.login_type}")
+            result = result.replace("{{AUTH_CONTEXT}}", self._build_auth_context(config))
             avoid_str = "\n".join(f"- {r.description}" for r in config.avoid) if config.avoid else "None"
             focus_str = "\n".join(f"- {r.description}" for r in config.focus) if config.focus else "None"
             result = result.replace("{{RULES_AVOID}}", avoid_str)
@@ -149,3 +149,16 @@ class PromptManager:
                 f"Key findings: {{1-2 sentence summary}}"
             )
         return "\n\n".join(lines)
+
+    def _build_auth_context(self, config: DistributedConfig) -> str:
+        if not config.authentication:
+            return "No authentication configured - unauthenticated testing only"
+        auth = config.authentication
+        lines = [
+            f"- Login type: {auth.login_type.upper()}",
+            f"- Username: {auth.credentials.username}",
+            f"- Login URL: {auth.login_url}",
+        ]
+        if auth.credentials.totp_secret:
+            lines.append("- MFA: TOTP enabled")
+        return "\n".join(lines)
