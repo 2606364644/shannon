@@ -107,6 +107,14 @@ class PromptManager:
         else:
             result = result.replace("{{LOGIN_INSTRUCTIONS}}", "")
 
+        # Remove <shared_authenticated_session> block when no auth configured
+        if not (config and config.authentication):
+            result = re.sub(
+                r"<shared_authenticated_session>[\s\S]*?</shared_authenticated_session>\s*",
+                "",
+                result,
+            )
+
         for key, value in variables.items():
             token = "{{" + key.upper() + "}}"
             if token in result:

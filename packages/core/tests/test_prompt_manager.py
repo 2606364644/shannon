@@ -222,3 +222,48 @@ def test_build_login_instructions_empty_login_flow(login_prompts_dir):
     assert "Common instructions" in result
     # The {{user_instructions}} placeholder should be replaced with empty string
     assert "{{user_instructions}}" not in result
+
+
+def test_shared_session_block_removed_without_auth(prompts_dir):
+    """When no authentication configured, the shared_authenticated_session block is removed."""
+    (prompts_dir / "session-test.txt").write_text(
+        "Before\n"
+        "<shared_authenticated_session>\n"
+        "Use session file: {{AUTH_STATE_FILE}}\n"
+        "</shared_authenticated_session>\n"
+        "After\n"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("session-test", {"web_url": "https://example.com", "repo_path": "/r"})
+    assert "shared_authenticated_session" not in result
+    assert "Before" in result
+    assert "After" in result
+
+
+def test_shared_session_block_preserved_with_auth(prompts_dir):
+    """When authentication is configured, the block stays and variables are interpolated."""
+    (prompts_dir / "session-test.txt").write_text(
+        "Before\n"
+        "<shared_authenticated_session>\n"
+        "Use session file: {{AUTH_STATE_FILE}}\n"
+        "</shared_authenticated_session>\n"
+        "After\n"
+    )
+    auth = _make_auth()
+    config = _make_dist_config(authentication=auth)
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("session-test", {"web_url": "https://example.com", "repo_path": "/r"}, config=config)
+    assert "shared_authenticated_session" in result
+    assert "Use session file:" in result
+
+
+def test_shared_session_block_removed_when_config_none(prompts_dir):
+    """When config is None, the block is removed."""
+    (prompts_dir / "session-test.txt").write_text(
+        "Before\n"
+        "<shared_authenticated_session>inner</shared_authenticated_session>\n"
+        "After\n"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("session-test", {"web_url": "https://example.com", "repo_path": "/r"}, config=None)
+    assert "shared_authenticated_session" not in result
