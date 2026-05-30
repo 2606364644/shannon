@@ -26,10 +26,16 @@ class SuccessCondition(BaseModel):
     type: Literal["url_contains", "element_present", "url_equals_exactly", "text_contains"]
     value: str
 
+class EmailLogin(BaseModel):
+    address: str
+    password: str
+    totp_secret: str | None = None
+
 class Credentials(BaseModel):
     username: str
     password: str | None = None
     totp_secret: str | None = None
+    email_login: EmailLogin | None = None
 
 class Authentication(BaseModel):
     login_type: Literal["form", "sso", "api", "basic"]

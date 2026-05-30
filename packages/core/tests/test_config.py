@@ -51,3 +51,44 @@ def test_all_vuln_classes_includes_misconfig():
     from shannon_core.models.config import ALL_VULN_CLASSES
     assert "misconfig" in ALL_VULN_CLASSES
     assert len(ALL_VULN_CLASSES) == 6
+
+def test_email_login_model():
+    from shannon_core.models.config import EmailLogin
+    el = EmailLogin(address="user@example.com", password="secret")
+    assert el.address == "user@example.com"
+    assert el.password == "secret"
+    assert el.totp_secret is None
+
+def test_email_login_with_totp():
+    from shannon_core.models.config import EmailLogin
+    el = EmailLogin(address="user@example.com", password="secret", totp_secret="JBSWY3DPEHPK3PXP")
+    assert el.totp_secret == "JBSWY3DPEHPK3PXP"
+
+def test_credentials_with_email_login():
+    from shannon_core.models.config import Credentials, EmailLogin
+    creds = Credentials(
+        username="admin",
+        password="pass123",
+        email_login=EmailLogin(address="admin@corp.com", password="email-pass"),
+    )
+    assert creds.email_login.address == "admin@corp.com"
+    assert creds.email_login.password == "email-pass"
+
+def test_credentials_without_email_login():
+    from shannon_core.models.config import Credentials
+    creds = Credentials(username="admin", password="pass123")
+    assert creds.email_login is None
+
+def test_authentication_with_email_login():
+    from shannon_core.models.config import Authentication, Credentials, EmailLogin, SuccessCondition
+    auth = Authentication(
+        login_type="form",
+        login_url="https://example.com/login",
+        credentials=Credentials(
+            username="admin",
+            password="pass123",
+            email_login=EmailLogin(address="admin@corp.com", password="email-pass"),
+        ),
+        success_condition=SuccessCondition(type="url_contains", value="/dashboard"),
+    )
+    assert auth.credentials.email_login.address == "admin@corp.com"
