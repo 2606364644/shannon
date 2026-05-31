@@ -47,7 +47,7 @@ def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
 
                     if ".route(" in decorator:
                         route = m.group(1) if m.lastindex >= 1 else None
-                        method_match = re.search(r"methods\s*=\s*\['(\w+)'\]", decorator)
+                        method_match = re.search(r"""methods\s*=\s*\[['"](\w+)['"]\]""", decorator)
                         http_method = method_match.group(1) if method_match else "GET"
 
                     elif re.match(r"@router\.(get|post|put|delete|patch)", decorator):
