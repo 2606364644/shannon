@@ -37,3 +37,12 @@ def test_claude_run_result_with_values():
 async def test_run_claude_prompt_not_implemented():
     with pytest.raises(NotImplementedError, match="Claude Agent SDK"):
         await run_claude_prompt(prompt="test", repo_path="/tmp")
+
+
+def test_run_claude_prompt_accepts_structured_output_schema():
+    """Verify run_claude_prompt signature accepts structured_output_schema parameter."""
+    import inspect
+    from shannon_core.agents.runner import run_claude_prompt as _run
+    sig = inspect.signature(_run)
+    assert "structured_output_schema" in sig.parameters
+    assert sig.parameters["structured_output_schema"].default is None

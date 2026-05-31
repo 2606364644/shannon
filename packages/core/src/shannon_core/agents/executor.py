@@ -29,6 +29,7 @@ class AgentExecutor:
         pipeline_testing: bool = False,
         prompt_variables: dict[str, str] | None = None,
         prompt_override: str | None = None,
+        structured_output_schema: dict | None = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -60,6 +61,7 @@ class AgentExecutor:
             model_tier=defn.model_tier,
             api_key=api_key,
             deliverables_subdir=str(deliverables.relative_to(repo)) if deliverables.is_relative_to(repo) else None,
+            structured_output_schema=structured_output_schema,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -95,4 +97,5 @@ class AgentExecutor:
             cost_usd=result.cost,
             num_turns=result.turns,
             model=result.model,
+            structured_output=result.structured_output,
         )

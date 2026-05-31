@@ -18,6 +18,7 @@ async def run_claude_prompt(
     repo_path: str,
     model_tier: str = "medium",
     output_format: dict | None = None,
+    structured_output_schema: dict | None = None,
     api_key: str | None = None,
     deliverables_subdir: str | None = None,
     provider_config: dict | None = None,
