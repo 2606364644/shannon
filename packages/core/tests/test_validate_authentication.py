@@ -223,3 +223,194 @@ async def test_auth_validation_verifies_state_content(tmp_path):
         )
 
     assert result.success is True
+
+
+# --- AUTH_VALIDATION_SCHEMA tests ---
+
+def test_auth_validation_schema_constant():
+    """AUTH_VALIDATION_SCHEMA has the expected structure."""
+    from shannon_core.services.validate_authentication import AUTH_VALIDATION_SCHEMA
+    assert AUTH_VALIDATION_SCHEMA["type"] == "object"
+    assert "login_success" in AUTH_VALIDATION_SCHEMA["properties"]
+    assert AUTH_VALIDATION_SCHEMA["properties"]["login_success"]["type"] == "boolean"
+    assert "login_success" in AUTH_VALIDATION_SCHEMA["required"]
+    fp = AUTH_VALIDATION_SCHEMA["properties"]["failure_point"]
+    assert set(fp["enum"]) == {"username_or_password", "totp_secret", "out_of_band"}
+
+
+# --- Structured output integration tests ---
+
+@pytest.mark.asyncio
+async def test_auth_validation_uses_validate_auth_agent(tmp_path):
+    """validate_authentication uses AgentName.VALIDATE_AUTH, not PRE_RECON."""
+    state_file = tmp_path / "auth-state.json"
+
+    async def fake_execute(**kwargs):
+        state_file.write_text(json.dumps({
+            "cookies": [{"name": "session", "value": "abc"}],
+            "origins": [],
+        }))
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={"login_success": True},
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        from shannon_core.models.agents import AgentName
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    assert result.success is True
+    call_kwargs = mock_executor.execute.call_args.kwargs
+    assert call_kwargs["agent_name"] == AgentName.VALIDATE_AUTH
+    assert call_kwargs.get("structured_output_schema") is not None
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_structured_output_failure_username(tmp_path):
+    """Structured output with login_success=False and failure_point=username_or_password."""
+    async def fake_execute(**kwargs):
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={
+                "login_success": False,
+                "failure_point": "username_or_password",
+                "failure_detail": "Invalid username or password",
+            },
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    assert result.success is False
+    assert result.failure_point == "username_or_password"
+    assert "Invalid username or password" in result.failure_detail
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_structured_output_failure_totp(tmp_path):
+    """Structured output with failure_point=totp_secret."""
+    async def fake_execute(**kwargs):
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={
+                "login_success": False,
+                "failure_point": "totp_secret",
+                "failure_detail": "TOTP code rejected",
+            },
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    assert result.success is False
+    assert result.failure_point == "totp_secret"
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_structured_output_failure_out_of_band(tmp_path):
+    """Structured output with failure_point=out_of_band."""
+    async def fake_execute(**kwargs):
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={
+                "login_success": False,
+                "failure_point": "out_of_band",
+                "failure_detail": "Email verification required",
+            },
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    assert result.success is False
+    assert result.failure_point == "out_of_band"
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
+    """When structured output is None, fall back to verify_auth_state."""
+    state_file = tmp_path / "auth-state.json"
+
+    async def fake_execute(**kwargs):
+        # Simulate agent writing a valid state file
+        state_file.write_text(json.dumps({
+            "cookies": [{"name": "session", "value": "abc"}],
+            "origins": [],
+        }))
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=5000)  # No structured_output
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    # Falls back to verify_auth_state, which checks the file
+    assert result.success is True
