@@ -13,6 +13,7 @@ with workflow.unsafe.imports_passed_through():
     from . import activities
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
+    from shannon_core.services.validate_authentication import cleanup_auth_state_sync
 
 
 @workflow.defn
@@ -137,3 +138,4 @@ class BlackboxScanWorkflow:
             cleanup_settings()
             if input.repo_path:
                 cleanup_stealth_config(input.repo_path)
+                cleanup_auth_state_sync(input.repo_path)

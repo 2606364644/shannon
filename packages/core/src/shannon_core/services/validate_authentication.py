@@ -33,6 +33,13 @@ async def cleanup_auth_state(workspace_path: str | Path) -> None:
         await aiofiles.os.remove(state_file)
 
 
+def cleanup_auth_state_sync(workspace_path: str | Path) -> None:
+    """Synchronous version of cleanup_auth_state for use in workflow finally blocks."""
+    state_file = auth_state_path(workspace_path)
+    if state_file.exists():
+        state_file.unlink()
+
+
 async def verify_auth_state(state_file: Path) -> AuthValidationResult:
     """Verify the auth-state.json file was saved correctly."""
     if not await async_path_exists(state_file):

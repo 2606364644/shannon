@@ -1,5 +1,6 @@
 import asyncio
 from datetime import timedelta
+from pathlib import Path
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -13,6 +14,7 @@ with workflow.unsafe.imports_passed_through():
     from . import activities
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
+    from shannon_core.services.validate_authentication import cleanup_auth_state_sync
 
 @workflow.defn
 class WhiteboxScanWorkflow:
@@ -115,3 +117,8 @@ class WhiteboxScanWorkflow:
         finally:
             cleanup_settings()
             cleanup_stealth_config(input.repo_path)
+            if input.workspace_name:
+                ws_path = str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
+            else:
+                ws_path = input.repo_path
+            cleanup_auth_state_sync(ws_path)
