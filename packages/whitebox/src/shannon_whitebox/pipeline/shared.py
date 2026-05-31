@@ -35,3 +35,4 @@ class ActivityInput:
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     prompt_override: str | None = None
+    workspace_path: str | None = None

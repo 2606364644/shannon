@@ -104,6 +104,7 @@ async def run_auth_validation(input: ActivityInput) -> None:
         executor=executor,
         repo_path=input.repo_path,
         api_key=input.api_key,
+        workspace_path=input.workspace_path or "",
     )
     if not result.success:
         raise PentestError(
