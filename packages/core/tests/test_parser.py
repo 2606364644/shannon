@@ -47,3 +47,129 @@ def test_distribute_config_full():
     d = distribute_config(c)
     assert d.description == "My app"
     assert d.vuln_classes == ["injection"]
+
+
+from pathlib import Path
+
+
+def _write_config(tmp_path: Path, content: str) -> str:
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(content, encoding="utf-8")
+    return str(config_file)
+
+
+def test_login_flow_step_exceeds_max_length(tmp_path):
+    """A login_flow step > 500 characters raises PentestError."""
+    long_step = "A" * 501
+    config_path = _write_config(tmp_path, f"""
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  login_flow:
+    - "{long_step}"
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    with pytest.raises(PentestError, match="login_flow step 1 exceeds 500 characters"):
+        parse_config(config_path)
+
+
+def test_login_flow_step_dangerous_pattern(tmp_path):
+    """A login_flow step with < or > raises PentestError."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  login_flow:
+    - "Click the <script>alert(1)</script> button"
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
+        parse_config(config_path)
+
+
+def test_login_flow_step_path_traversal(tmp_path):
+    """A login_flow step with ../ raises PentestError."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  login_flow:
+    - "Navigate to ../../etc/passwd"
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
+        parse_config(config_path)
+
+
+def test_login_flow_valid_steps_pass(tmp_path):
+    """Valid login_flow steps under 500 chars with no dangerous patterns pass."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  login_flow:
+    - "Navigate to login page"
+    - "Enter $username in username field"
+    - "Click submit"
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    config = parse_config(config_path)
+    assert config.authentication is not None
+    assert len(config.authentication.login_flow) == 3
+
+
+def test_login_flow_none_is_ok(tmp_path):
+    """When login_flow is not set, validation passes."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    config = parse_config(config_path)
+    assert config.authentication is not None
+    assert config.authentication.login_flow is None
+
+
+def test_login_flow_javascript_uri_rejected(tmp_path):
+    """A login_flow step with javascript: URI raises PentestError."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
+  login_flow:
+    - "Navigate to javascript:alert(1)"
+  success_condition:
+    type: url_contains
+    value: /dashboard
+""")
+    with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
+        parse_config(config_path)

@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 from shannon_core.models.config import (
     ALL_VULN_CLASSES,
+    Authentication,
     Config,
     DistributedConfig,
     ReportConfig,
@@ -38,6 +39,19 @@ def _validate_config_security(config: Config) -> None:
     if config.authentication:
         _check_dangerous_patterns(config.authentication.login_url, "authentication.login_url")
         _check_dangerous_patterns(config.authentication.credentials.username, "credentials.username")
+
+def _validate_login_flow(authentication: Authentication) -> None:
+    """Validate login_flow steps for length and dangerous patterns."""
+    if not authentication.login_flow:
+        return
+    for i, step in enumerate(authentication.login_flow):
+        if len(step) > 500:
+            raise PentestError(
+                f"login_flow step {i + 1} exceeds 500 characters",
+                "config",
+                error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
+            )
+        _check_dangerous_patterns(step, f"login_flow step {i + 1}")
 
 def _validate_url_path_rules(rules: list[Rule], rule_type: str) -> None:
     for i, rule in enumerate(rules):
@@ -94,6 +108,8 @@ def parse_config(config_path: str) -> Config:
         ) from e
 
     _validate_config_security(config)
+    if config.authentication:
+        _validate_login_flow(config.authentication)
     if config.rules:
         _validate_url_path_rules(config.rules.avoid, "avoid")
         _validate_url_path_rules(config.rules.focus, "focus")
