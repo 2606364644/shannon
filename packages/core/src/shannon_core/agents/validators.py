@@ -5,6 +5,8 @@ from shannon_core.models.errors import ErrorCode, PentestError
 
 async def validate_deliverable(deliverables_path: Path, agent_name: AgentName) -> bool:
     defn = AGENTS[agent_name]
+    if defn.deliverable_filename is None:
+        return True
     deliverable_file = deliverables_path / defn.deliverable_filename
     if not deliverable_file.exists():
         raise PentestError(
