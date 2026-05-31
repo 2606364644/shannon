@@ -38,3 +38,4 @@ class BlackboxActivityInput:
     api_key: str | None = None
     agent_name: str | None = None
     vuln_type: str | None = None
+    workspace_path: str | None = None

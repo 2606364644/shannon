@@ -62,6 +62,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
     result = await validate_authentication(
         web_url=input.web_url,
         config_path=input.config_path,
+        workspace_path=input.workspace_path or "",
         prompt_manager=prompt_manager,
         executor=executor,
         repo_path=input.repo_path or "",
