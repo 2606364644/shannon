@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from shannon_core.models.metrics import AgentMetrics
 from shannon_core.services.validate_authentication import (
     AuthValidationResult,
     auth_state_path,
@@ -141,7 +142,8 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
             "cookies": [{"name": "session", "value": "new"}],
             "origins": [],
         }))
-        return MagicMock(duration_ms=5000, cost_usd=0.01, num_turns=3, model="claude-sonnet-4-6")
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
 
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(side_effect=fake_execute)
@@ -171,9 +173,7 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
 async def test_auth_validation_detects_missing_state_file(tmp_path):
     """When executor runs but no auth-state.json is saved, return failure."""
     mock_executor = MagicMock()
-    mock_executor.execute = AsyncMock(return_value=MagicMock(
-        duration_ms=5000, cost_usd=0.01, num_turns=3, model="claude-sonnet-4-6",
-    ))
+    mock_executor.execute = AsyncMock(return_value=AgentMetrics(duration_ms=5000))
     mock_pm = MagicMock()
 
     mock_dist_config = MagicMock()
@@ -203,7 +203,8 @@ async def test_auth_validation_verifies_state_content(tmp_path):
             "cookies": [{"name": "session", "value": "abc"}],
             "origins": [],
         }))
-        return MagicMock(duration_ms=5000, cost_usd=0.01, num_turns=3, model="claude-sonnet-4-6")
+        from shannon_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
 
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(side_effect=fake_execute)
@@ -414,3 +415,34 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
 
     # Falls back to verify_auth_state, which checks the file
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_structured_success_but_missing_state_file(tmp_path):
+    """Agent claims login_success=True via structured output but fails to write auth state."""
+    async def fake_execute(**kwargs):
+        # Agent returns success but does NOT write the state file
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={"login_success": True},
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    # Double-verification catches the lie: structured output says success but file is missing
+    assert result.success is False
+    assert result.failure_point == "out_of_band"
