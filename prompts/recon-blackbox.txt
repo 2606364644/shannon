@@ -13,6 +13,7 @@ Map the complete attack surface of the target application through:
 </objective>
 
 @include(shared/_target.txt)
+@include(shared/_shared-session.txt)
 
 <context>
 Authentication Context:
