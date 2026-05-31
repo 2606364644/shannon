@@ -7,6 +7,7 @@ class AgentMetrics(BaseModel):
     cost_usd: float | None = None
     num_turns: int | None = None
     model: str | None = None
+    structured_output: dict | None = None
 
 class SessionMetadata(BaseModel):
     model_config = {"extra": "allow"}

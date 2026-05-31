@@ -8,6 +8,7 @@ def test_agent_metrics_defaults():
     assert m.cost_usd is None
     assert m.num_turns is None
     assert m.model is None
+    assert m.structured_output is None
 
 def test_agent_metrics_full():
     m = AgentMetrics(
@@ -31,3 +32,29 @@ def test_session_metadata():
 def test_session_metadata_extra_fields():
     s = SessionMetadata(id="test", web_url="https://x.com", custom_field="value")
     assert s.custom_field == "value"
+
+
+def test_agent_metrics_structured_output_none():
+    from shannon_core.models.metrics import AgentMetrics
+    m = AgentMetrics(duration_ms=100)
+    assert m.structured_output is None
+
+
+def test_agent_metrics_structured_output_dict():
+    from shannon_core.models.metrics import AgentMetrics
+    m = AgentMetrics(
+        duration_ms=100,
+        structured_output={"login_success": True},
+    )
+    assert m.structured_output == {"login_success": True}
+
+
+def test_agent_metrics_structured_output_nested():
+    from shannon_core.models.metrics import AgentMetrics
+    data = {
+        "login_success": False,
+        "failure_point": "totp_secret",
+        "failure_detail": "TOTP code rejected",
+    }
+    m = AgentMetrics(duration_ms=200, structured_output=data)
+    assert m.structured_output["failure_point"] == "totp_secret"
