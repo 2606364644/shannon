@@ -116,3 +116,25 @@ def test_session_mapping_values_unique():
     values = list(PLAYWRIGHT_SESSION_MAPPING.values())
     for v in values:
         assert v.startswith("agent"), f"Unexpected session name: {v}"
+
+
+def test_validate_auth_agent_name():
+    assert AgentName.VALIDATE_AUTH == "validate-authentication"
+
+
+def test_validate_auth_in_registry():
+    assert AgentName.VALIDATE_AUTH in AGENTS
+
+
+def test_validate_auth_definition():
+    defn = AGENTS[AgentName.VALIDATE_AUTH]
+    assert defn.display_name == "Authentication Validation"
+    assert defn.prerequisites == []
+    assert defn.prompt_template == "validate-authentication"
+    assert defn.deliverable_filename is None
+    assert defn.model_tier == "medium"
+
+
+def test_validate_auth_in_session_mapping():
+    assert AgentName.VALIDATE_AUTH.value in PLAYWRIGHT_SESSION_MAPPING
+    assert PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] == "agent1"

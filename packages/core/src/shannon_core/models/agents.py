@@ -22,6 +22,7 @@ class AgentName(str, Enum):
     MISCONFIG_VULN = "misconfig-vuln"
     MISCONFIG_EXPLOIT = "misconfig-exploit"
     REPORT = "report"
+    VALIDATE_AUTH = "validate-authentication"
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -29,7 +30,7 @@ class AgentDefinition(BaseModel):
     display_name: str
     prerequisites: list[AgentName]
     prompt_template: str
-    deliverable_filename: str
+    deliverable_filename: str | None = None
     model_tier: Literal["small", "medium", "large"] = "medium"
 
 AGENTS: dict[AgentName, AgentDefinition] = {
@@ -148,8 +149,18 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         prompt_template="report-executive",
         deliverable_filename="comprehensive_security_assessment_report.md",
     ),
+    AgentName.VALIDATE_AUTH: AgentDefinition(
+        name=AgentName.VALIDATE_AUTH,
+        display_name="Authentication Validation",
+        prerequisites=[],
+        prompt_template="validate-authentication",
+        deliverable_filename=None,
+        model_tier="medium",
+    ),
 }
 
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz", "misconfig"]
 
 PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
+# VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
+PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
