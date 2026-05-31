@@ -24,6 +24,7 @@ class PipelineState:
     agent_metrics: dict[str, dict] = field(default_factory=dict)
     start_time: float = 0.0
     error: str | None = None
+    code_index_stats: dict | None = None
 
 @dataclass
 class ActivityInput:

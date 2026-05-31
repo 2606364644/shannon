@@ -113,3 +113,20 @@ async def run_auth_validation(input: ActivityInput) -> None:
             retryable=False,
             error_code=ErrorCode.AUTH_LOGIN_FAILED,
         )
+
+
+@activity.defn
+async def run_code_index(input: ActivityInput) -> dict:
+    from shannon_core.code_index import build_code_index, write_index_files
+
+    repo, deliverables, _ = _get_paths(input)
+    index = build_code_index(str(repo))
+    json_path, summary_path = write_index_files(index, str(deliverables))
+
+    return {
+        "total_blocks": index.total_blocks,
+        "total_entry_points": index.total_entry_points,
+        "total_chains": index.total_chains,
+        "json_path": str(json_path),
+        "summary_path": str(summary_path),
+    }

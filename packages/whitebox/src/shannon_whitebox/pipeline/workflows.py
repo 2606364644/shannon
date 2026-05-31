@@ -61,6 +61,13 @@ class WhiteboxScanWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
         )
 
+        # Code Index — deterministic AST analysis before PRE_RECON
+        code_index_result = await workflow.execute_activity(
+            activities.run_code_index, act_input,
+            start_to_close_timeout=timedelta(minutes=10),
+        )
+        self._state.code_index_stats = code_index_result
+
         # Write code path deny rules (S6)
         if input.config_path:
             from shannon_core.config.parser import parse_config

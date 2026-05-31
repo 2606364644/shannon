@@ -4,7 +4,7 @@ from datetime import timedelta
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from .pipeline.activities import run_agent, run_preflight, run_vuln_agent
+from .pipeline.activities import run_agent, run_code_index, run_preflight, run_vuln_agent
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
 
@@ -17,7 +17,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         client=client,
         task_queue=TASK_QUEUE,
         workflows=[WhiteboxScanWorkflow],
-        activities=[run_preflight, run_agent, run_vuln_agent],
+        activities=[run_preflight, run_agent, run_vuln_agent, run_code_index],
     )
 
     async with worker:
