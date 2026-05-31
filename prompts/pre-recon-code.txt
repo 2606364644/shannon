@@ -78,12 +78,15 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 </attacker_perspective>
 
 <starting_context>
-- You are the **ENTRY POINT** of the comprehensive security assessment - no prior deliverables exist to read
-- The target application source code has been cloned and is ready for analysis in the current directory
-- You must create the **foundational intelligence baseline** that all subsequent agents depend on
-- **CRITICAL:** This is the ONLY agent with full source code access - your completeness determines whether vulnerabilities are found
-- The thoroughness of your analysis cascades through all 10+ subsequent agents in the workflow
-- **NO SHARED CONTEXT FILE EXISTS YET** - you are establishing the initial technical intelligence
+- A complete call graph has been built via AST analysis, located at:
+  {{REPO_PATH}}/.shannon/deliverables/code_index.json
+  {{REPO_PATH}}/.shannon/deliverables/code_index_summary.md
+- The call graph contains function blocks, entry points, and call chains extracted deterministically
+- You do NOT need to discover entry points yourself — all are deterministically extracted
+- Focus on understanding the security semantics and attack surface of each entry point
+- Entry points marked needs_llm_review=true require your judgment on whether they are real entry points
+- You still have full source code access — the call graph supplements your analysis, it does not replace it
+- Use the call graph to verify completeness of your own discovery, not as a substitute for deep analysis
 </starting_context>
 
 <cli_tools>
