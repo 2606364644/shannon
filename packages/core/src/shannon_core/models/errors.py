@@ -18,6 +18,7 @@ class ErrorCode(str, Enum):
     AUTH_FAILED = "AUTH_FAILED"
     AUTH_LOGIN_FAILED = "AUTH_LOGIN_FAILED"
     BILLING_ERROR = "BILLING_ERROR"
+    CODE_INDEX_FAILED = "CODE_INDEX_FAILED"
 
 PentestErrorType = str
 
