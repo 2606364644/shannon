@@ -27,6 +27,12 @@ class WhiteboxScanWorkflow:
 
         selected_classes: list[VulnType] = input.vuln_classes or list(ALL_VULN_CLASSES)
 
+        # Compute workspace_path so activities know where to write auth-state.json
+        if input.workspace_name:
+            workspace_path = str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
+        else:
+            workspace_path = input.repo_path
+
         act_input = ActivityInput(
             repo_path=input.repo_path,
             web_url=input.web_url,
@@ -36,6 +42,7 @@ class WhiteboxScanWorkflow:
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
             prompt_override=input.prompt_override,
+            workspace_path=workspace_path,
         )
         await workflow.execute_activity(
             activities.run_preflight, act_input,
@@ -117,8 +124,4 @@ class WhiteboxScanWorkflow:
         finally:
             cleanup_settings()
             cleanup_stealth_config(input.repo_path)
-            if input.workspace_name:
-                ws_path = str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
-            else:
-                ws_path = input.repo_path
-            cleanup_auth_state_sync(ws_path)
+            cleanup_auth_state_sync(workspace_path)

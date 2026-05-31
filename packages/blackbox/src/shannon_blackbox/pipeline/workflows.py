@@ -35,6 +35,7 @@ class BlackboxScanWorkflow:
             deliverables_subdir=input.deliverables_subdir,
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
+            workspace_path=input.repo_path,
         )
 
         retry_policy = RetryPolicy(
@@ -138,4 +139,4 @@ class BlackboxScanWorkflow:
             cleanup_settings()
             if input.repo_path:
                 cleanup_stealth_config(input.repo_path)
-                cleanup_auth_state_sync(input.repo_path)
+                cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
