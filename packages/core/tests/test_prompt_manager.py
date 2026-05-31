@@ -267,3 +267,50 @@ def test_shared_session_block_removed_when_config_none(prompts_dir):
     manager = PromptManager(prompts_dir)
     result = manager.load_sync("session-test", {"web_url": "https://example.com", "repo_path": "/r"}, config=None)
     assert "shared_authenticated_session" not in result
+
+
+def test_shared_session_include_resolves(prompts_dir):
+    """@include(shared/_shared-session.txt) resolves when the file exists."""
+    session_partial = (
+        "<shared_authenticated_session>\n"
+        "The preflight already logged in.\n"
+        "Restore session: playwright-cli state-load {{AUTH_STATE_FILE}}\n"
+        "</shared_authenticated_session>\n"
+    )
+    (prompts_dir / "shared" / "_shared-session.txt").write_text(session_partial)
+    (prompts_dir / "with-session.txt").write_text(
+        "Before\n@include(shared/_shared-session.txt)\nAfter\n"
+    )
+    auth = _make_auth()
+    config = _make_dist_config(authentication=auth)
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync(
+        "with-session",
+        {"web_url": "https://example.com", "repo_path": "/r", "auth_state_file": "/tmp/auth-state.json"},
+        config=config,
+    )
+    assert "shared_authenticated_session" in result
+    assert "/tmp/auth-state.json" in result
+    assert "Before" in result
+    assert "After" in result
+
+
+def test_shared_session_include_removed_without_auth(prompts_dir):
+    """When no auth configured, the included session block is removed."""
+    session_partial = (
+        "<shared_authenticated_session>\n"
+        "Restore session: {{AUTH_STATE_FILE}}\n"
+        "</shared_authenticated_session>\n"
+    )
+    (prompts_dir / "shared" / "_shared-session.txt").write_text(session_partial)
+    (prompts_dir / "with-session.txt").write_text(
+        "Before\n@include(shared/_shared-session.txt)\nAfter\n"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync(
+        "with-session",
+        {"web_url": "https://example.com", "repo_path": "/r"},
+    )
+    assert "shared_authenticated_session" not in result
+    assert "Before" in result
+    assert "After" in result
