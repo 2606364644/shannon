@@ -15,6 +15,7 @@ class DeliverableType(str, Enum):
     SSRF_EVIDENCE = "SSRF_EVIDENCE"
     REPORT = "REPORT"
     CODE_INDEX = "CODE_INDEX"
+    ENTRY_POINTS = "ENTRY_POINTS"
 
 DELIVERABLE_FILENAMES: dict[DeliverableType, str] = {
     DeliverableType.CODE_ANALYSIS: "pre_recon_deliverable.md",
@@ -31,4 +32,5 @@ DELIVERABLE_FILENAMES: dict[DeliverableType, str] = {
     DeliverableType.SSRF_EVIDENCE: "ssrf_exploitation_evidence.md",
     DeliverableType.REPORT: "comprehensive_security_assessment_report.md",
     DeliverableType.CODE_INDEX: "code_index.json",
+    DeliverableType.ENTRY_POINTS: "entry_points.json",
 }

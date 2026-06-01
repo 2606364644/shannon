@@ -1,4 +1,16 @@
 from pydantic import BaseModel, ConfigDict
+from enum import Enum
+
+
+class Verdict(str, Enum):
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    RECLASSIFIED = "reclassified"
+
+
+class EntryPointSource(str, Enum):
+    CODE_INDEX = "code_index"
+    LLM_DISCOVERY = "llm_discovery"
 
 
 class FuncBlock(BaseModel):
@@ -57,3 +69,19 @@ class CodeIndex(BaseModel):
     edges: list[CallEdge]
     entry_points: list[EntryPoint]
     chains: list[CallChain]
+
+
+class AdjudicatedEntryPoint(BaseModel):
+    func_block_id: str
+    verdict: Verdict
+    entry_type: str
+    route: str | None = None
+    http_method: str | None = None
+    evidence: str
+    source: EntryPointSource
+
+
+class AdjudicationResult(BaseModel):
+    repository: str
+    language: str
+    adjudicated_entry_points: list[AdjudicatedEntryPoint]

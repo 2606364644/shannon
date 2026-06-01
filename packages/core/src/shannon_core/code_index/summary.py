@@ -50,8 +50,8 @@ def generate_summary(index: CodeIndex) -> str:
     resolved_count = sum(1 for e in index.edges if e.resolved)
     unresolved_count = sum(1 for e in index.edges if not e.resolved)
     total_edges = len(index.edges)
-    chains_with_unresolved = sum(1 for c in index.chains if c.has_unresolved)
-    max_chain_depth = max((c.depth for c in index.chains), default=0)
+    chains_with_unresolved = sum(1 for c in index.chains if c.has_unresolved) if index.chains else 0
+    max_chain_depth = max((c.depth for c in index.chains), default=0) if index.chains else 0
 
     ep_ids = {ep.func_block_id for ep in index.entry_points}
     chain_block_ids: set[str] = set()

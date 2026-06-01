@@ -5,8 +5,9 @@ import logging
 from pathlib import Path
 
 from shannon_core.code_index.models import CodeIndex
+from shannon_core.code_index.models import AdjudicationResult, Verdict, EntryPointSource
 from shannon_core.code_index.parser import detect_language, discover_source_files
-from shannon_core.code_index.call_graph import build_call_chains, resolve_edges
+from shannon_core.code_index.call_graph import resolve_edges, build_call_chains
 from shannon_core.code_index.entry_points import detect_entry_points
 from shannon_core.code_index.summary import generate_summary
 from shannon_core.code_index.parsers import get_parser
@@ -61,26 +62,20 @@ def build_code_index(repo_path: str) -> CodeIndex:
             logger.warning("Failed to parse %s: %s", file_path, exc)
             continue
 
-    # Resolve call edges
     resolved_edges = resolve_edges(all_edges, all_blocks)
 
-    # Detect entry points
     entry_points = detect_entry_points(all_blocks, language)
-
-    # Build call chains
-    entry_ids = [ep.func_block_id for ep in entry_points]
-    chains = build_call_chains(entry_ids, resolved_edges, blocks=all_blocks)
 
     return CodeIndex(
         repository=str(repo),
         language=language,
         total_blocks=len(all_blocks),
         total_entry_points=len(entry_points),
-        total_chains=len(chains),
+        total_chains=0,
         blocks=all_blocks,
         edges=resolved_edges,
         entry_points=entry_points,
-        chains=chains,
+        chains=[],
     )
 
 
@@ -96,3 +91,72 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     summary_path.write_text(generate_summary(index))
 
     return json_path, summary_path
+
+
+def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
+    """Rebuild call chains from adjudicated entry points.
+
+    Reads entry_points.json for confirmed entry point IDs, reads
+    code_index.json for blocks/edges, calls build_call_chains() with
+    confirmed IDs only, and writes updated code_index.json.
+    """
+    from shannon_core.models.errors import ErrorCode, PentestError
+
+    out = Path(deliverables_dir)
+
+    code_index_path = out / "code_index.json"
+    entry_points_path = out / "entry_points.json"
+
+    if not code_index_path.exists():
+        raise PentestError(
+            f"code_index.json not found in {deliverables_dir}",
+            category="code_index",
+            error_code=ErrorCode.CODE_INDEX_FAILED,
+        )
+
+    index = CodeIndex.model_validate_json(code_index_path.read_text())
+
+    if not entry_points_path.exists():
+        logger.warning("entry_points.json not found; skipping chain rebuild")
+        return index
+
+    adjudication = AdjudicationResult.model_validate_json(entry_points_path.read_text())
+
+    block_id_set = {b.id for b in index.blocks}
+    confirmed_ids: list[str] = []
+    for ep in adjudication.adjudicated_entry_points:
+        if ep.verdict != Verdict.CONFIRMED:
+            continue
+        if ep.func_block_id not in block_id_set:
+            if ep.source == EntryPointSource.LLM_DISCOVERY:
+                logger.warning(
+                    "Unresolved LLM-discovered entry point: %s", ep.func_block_id
+                )
+            continue
+        confirmed_ids.append(ep.func_block_id)
+
+    chains = build_call_chains(confirmed_ids, index.edges, blocks=index.blocks)
+
+    updated = CodeIndex(
+        repository=index.repository,
+        language=index.language,
+        total_blocks=index.total_blocks,
+        total_entry_points=index.total_entry_points,
+        total_chains=len(chains),
+        blocks=index.blocks,
+        edges=index.edges,
+        entry_points=index.entry_points,
+        chains=chains,
+    )
+
+    code_index_path.write_text(updated.model_dump_json(indent=2))
+    summary_path = out / "code_index_summary.md"
+    summary_path.write_text(generate_summary(updated))
+
+    logger.info(
+        "Rebuilt %d call chains from %d confirmed entry points",
+        len(chains),
+        len(confirmed_ids),
+    )
+
+    return updated

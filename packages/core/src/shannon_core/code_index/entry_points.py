@@ -1,5 +1,6 @@
 import re
 import logging
+from pathlib import PurePosixPath
 
 from shannon_core.code_index.models import EntryPoint, FuncBlock
 
@@ -31,6 +32,21 @@ _PYTHON_RULES: list[tuple[str, re.Pattern, str | None, float]] = [
     ("http_route", re.compile(r"@(api_view|require_http_methods)"), None, 0.90),
     ("message_consumer", re.compile(r"@(celery\.task|app\.task|shared_task)"), None, 0.90),
 ]
+
+
+def _should_skip_async_catchall(block: FuncBlock) -> bool:
+    if block.function_name.startswith("_"):
+        return True
+
+    file_name = PurePosixPath(block.file_path).name
+    if file_name.startswith("test_") or file_name.endswith("_test.py") or file_name == "conftest.py":
+        return True
+
+    parts = PurePosixPath(block.file_path).parts
+    if any(p in ("tests", "test", "spec") for p in parts):
+        return True
+
+    return False
 
 
 def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
@@ -69,10 +85,13 @@ def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
                 break
 
         if not matched and block.source_code.strip().startswith("async def "):
+            if _should_skip_async_catchall(block):
+                continue
+
             entry_points.append(EntryPoint(
                 func_block_id=block.id,
                 entry_type="unknown",
-                confidence=0.30,
+                confidence=0.40,
                 evidence="async def with no known decorator",
                 needs_llm_review=True,
             ))

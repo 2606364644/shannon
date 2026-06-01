@@ -82,9 +82,11 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 async def run_credential_check(input: ActivityInput) -> None:
     import os
     provider = os.environ.get("SHANNON_AI_PROVIDER", "anthropic_api")
-    api_key = input.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    # Priority: input.api_key > SHANNON_API_KEY > ANTHROPIC_API_KEY
+    api_key = input.api_key or os.environ.get("SHANNON_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    base_url = os.environ.get("SHANNON_BASE_URL")
     if api_key or provider != "anthropic_api":
-        await validate_credentials(provider, api_key=api_key)
+        await validate_credentials(provider, api_key=api_key, base_url=base_url)
 
 
 @activity.defn
@@ -129,4 +131,18 @@ async def run_code_index(input: ActivityInput) -> dict:
         "total_chains": index.total_chains,
         "json_path": str(json_path),
         "summary_path": str(summary_path),
+    }
+
+
+@activity.defn
+async def run_rebuild_call_chains(input: ActivityInput) -> dict:
+    from shannon_core.code_index import rebuild_call_chains
+
+    repo, deliverables, _ = _get_paths(input)
+    updated = rebuild_call_chains(str(deliverables))
+
+    return {
+        "total_blocks": updated.total_blocks,
+        "total_entry_points": updated.total_entry_points,
+        "total_chains": updated.total_chains,
     }
