@@ -114,7 +114,7 @@ class BlackboxScanWorkflow:
                     for i, result in enumerate(results):
                         vt, agent_name, _ = exploit_tasks[i]
                         if isinstance(result, Exception):
-                            self._state.error = f"{agent_name.value}: {result}"
+                            self._state.errors.append(f"{agent_name.value}: {result}")
                         else:
                             self._state.completed_agents.append(agent_name.value)
                             self._state.agent_metrics[agent_name.value] = result
