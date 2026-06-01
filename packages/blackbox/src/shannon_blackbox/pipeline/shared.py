@@ -24,7 +24,7 @@ class BlackboxPipelineState:
     agent_metrics: dict[str, dict] = field(default_factory=dict)
     has_whitebox_results: bool = False
     start_time: float = 0.0
-    error: str | None = None
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass
