@@ -120,6 +120,12 @@ class WhiteboxScanWorkflow:
                         workflow.execute_activity(
                             activities.run_vuln_agent, vuln_input,
                             start_to_close_timeout=timedelta(hours=2),
+                            retry_policy=RetryPolicy(
+                                maximum_attempts=3,
+                                initial_interval=timedelta(seconds=30),
+                                maximum_interval=timedelta(minutes=5),
+                                backoff_coefficient=2.0,
+                            ),
                         )
                     )
 
