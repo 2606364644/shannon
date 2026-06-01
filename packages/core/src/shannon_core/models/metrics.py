@@ -4,6 +4,8 @@ class AgentMetrics(BaseModel):
     duration_ms: int
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
     cost_usd: float | None = None
     num_turns: int | None = None
     model: str | None = None
