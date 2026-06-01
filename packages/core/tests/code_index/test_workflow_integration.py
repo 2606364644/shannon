@@ -86,17 +86,11 @@ class TestCodeIndexToPreReconHandoff:
         assert ("/api/users", "GET") in routes
         assert ("/api/users/<int:user_id>", "POST") in routes
 
-    def test_call_chains_reach_db_functions(self, flask_repo):
-        """Verify call chains reach the database layer."""
+    def test_call_chains_deferred(self, flask_repo):
+        """Verify call chains are deferred (empty) after code_index."""
         index = build_code_index(str(flask_repo))
-
-        all_funcs_in_chains = set()
-        for chain in index.chains:
-            for block_id in chain.path:
-                all_funcs_in_chains.add(block_id)
-
-        has_db = any("db_query" in bid or "db_update" in bid for bid in all_funcs_in_chains)
-        assert has_db, f"Expected db_query/db_update in chains. Got: {all_funcs_in_chains}"
+        assert index.total_chains == 0
+        assert index.chains == []
 
     def test_no_entry_points_proceeds_gracefully(self, tmp_path):
         """Verify that a repo with no entry points still produces valid output."""

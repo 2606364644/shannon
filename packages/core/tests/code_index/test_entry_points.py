@@ -76,7 +76,62 @@ class TestPythonEntryPoints:
         eps = detect_entry_points([block], "python")
         assert len(eps) == 1
         assert eps[0].needs_llm_review is True
-        assert eps[0].confidence == 0.30
+        assert eps[0].confidence == 0.40
+
+    def test_async_private_function_excluded(self):
+        block = _block(
+            source_code="async def _internal(): pass",
+            function_name="_internal",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 0
+
+    def test_async_in_test_file_excluded(self):
+        block = _block(
+            source_code="async def test_handler(): pass",
+            function_name="test_handler",
+            file_path="tests/test_app.py",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 0
+
+    def test_async_in_conftest_excluded(self):
+        block = _block(
+            source_code="async def setup_fixtures(): pass",
+            function_name="setup_fixtures",
+            file_path="conftest.py",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 0
+
+    def test_async_in_test_suffix_file_excluded(self):
+        block = _block(
+            source_code="async def helper(): pass",
+            function_name="helper",
+            file_path="src/app_test.py",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 0
+
+    def test_async_in_spec_dir_excluded(self):
+        block = _block(
+            source_code="async def run_spec(): pass",
+            function_name="run_spec",
+            file_path="spec/runner.py",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 0
+
+    def test_async_valid_candidate_detected(self):
+        block = _block(
+            source_code="async def handle_request(): pass",
+            function_name="handle_request",
+            file_path="app/handlers.py",
+        )
+        eps = detect_entry_points([block], "python")
+        assert len(eps) == 1
+        assert eps[0].confidence == 0.40
+        assert eps[0].entry_type == "unknown"
 
     def test_plain_function_no_entry_point(self):
         block = _block(function_name="helper")

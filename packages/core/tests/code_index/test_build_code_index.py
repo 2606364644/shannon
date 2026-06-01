@@ -40,9 +40,10 @@ class TestBuildCodeIndex:
                     ep_names.add(b.function_name)
         assert "hello" in ep_names
 
-    def test_builds_call_chains(self, python_repo):
+    def test_defers_call_chains(self, python_repo):
         index = build_code_index(str(python_repo))
-        assert index.total_chains >= 1
+        assert index.total_chains == 0
+        assert index.chains == []
 
     def test_resolves_edges(self, python_repo):
         index = build_code_index(str(python_repo))

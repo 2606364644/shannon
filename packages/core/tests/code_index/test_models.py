@@ -7,6 +7,10 @@ from shannon_core.code_index.models import (
     EntryPoint,
     CallChain,
     CodeIndex,
+    AdjudicatedEntryPoint,
+    AdjudicationResult,
+    Verdict,
+    EntryPointSource,
 )
 
 
@@ -201,5 +205,74 @@ def test_func_block_missing_required_field():
             id="a:f:1",
             file_path="a",
             function_name="f",
-            # missing start_line, end_line, source_code, parameters, language
         )
+
+
+def test_adjudicated_entry_point_confirmed():
+    ep = AdjudicatedEntryPoint(
+        func_block_id="app.py:list_users:5",
+        verdict=Verdict.CONFIRMED,
+        entry_type="http_route",
+        route="/api/users",
+        http_method="GET",
+        evidence="Flask @app.route decorator",
+        source=EntryPointSource.CODE_INDEX,
+    )
+    assert ep.verdict == Verdict.CONFIRMED
+    assert ep.source == EntryPointSource.CODE_INDEX
+
+
+def test_adjudicated_entry_point_rejected():
+    ep = AdjudicatedEntryPoint(
+        func_block_id="app.py:helper:10",
+        verdict=Verdict.REJECTED,
+        entry_type="unknown",
+        evidence="Internal utility function",
+        source=EntryPointSource.CODE_INDEX,
+    )
+    assert ep.verdict == Verdict.REJECTED
+    assert ep.route is None
+
+
+def test_adjudicated_entry_point_llm_discovery():
+    ep = AdjudicatedEntryPoint(
+        func_block_id="routes.yaml:create_user",
+        verdict=Verdict.CONFIRMED,
+        entry_type="http_route",
+        route="/users",
+        http_method="POST",
+        evidence="Found in routes.yaml configuration",
+        source=EntryPointSource.LLM_DISCOVERY,
+    )
+    assert ep.source == EntryPointSource.LLM_DISCOVERY
+
+
+def test_adjudication_result():
+    result = AdjudicationResult(
+        repository="test-repo",
+        language="python",
+        adjudicated_entry_points=[
+            AdjudicatedEntryPoint(
+                func_block_id="app.py:hello:1",
+                verdict=Verdict.CONFIRMED,
+                entry_type="http_route",
+                evidence="decorated",
+                source=EntryPointSource.CODE_INDEX,
+            ),
+        ],
+    )
+    assert len(result.adjudicated_entry_points) == 1
+    assert result.repository == "test-repo"
+
+
+def test_adjudication_result_serialization():
+    result = AdjudicationResult(
+        repository="repo",
+        language="python",
+        adjudicated_entry_points=[],
+    )
+    data = result.model_dump()
+    assert data["repository"] == "repo"
+    assert data["adjudicated_entry_points"] == []
+    json_str = result.model_dump_json()
+    assert '"repository":"repo"' in json_str.replace(" ", "")
