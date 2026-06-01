@@ -94,6 +94,14 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
                 self._state.agent_metrics[AgentName.PRE_RECON.value] = metrics
 
+                rebuild_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
+                rebuild_result = await workflow.execute_activity(
+                    activities.run_rebuild_call_chains, rebuild_input,
+                    start_to_close_timeout=timedelta(minutes=5),
+                )
+                if self._state.code_index_stats:
+                    self._state.code_index_stats["total_chains"] = rebuild_result.get("total_chains", 0)
+
             if AgentName.RECON.value not in self._state.completed_agents:
                 recon_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.RECON.value})
                 metrics = await workflow.execute_activity(
@@ -121,7 +129,7 @@ class WhiteboxScanWorkflow:
                     vt = selected_classes[i]
                     agent_name = AgentName(f"{vt}-vuln")
                     if isinstance(result, Exception):
-                        self._state.error = f"{agent_name.value}: {result}"
+                        self._state.errors.append(f"{agent_name.value}: {result}")
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
