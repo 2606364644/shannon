@@ -1,0 +1,272 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "bge-m3",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-reasoner",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-chat",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-r1",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-v3",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen3-32B-FP8",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen2.5-VL-32B-Instruct-Public",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "bge-reranker-v2-m3",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen2.5-VL-72B-Instruct-HK",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen2.5-VL-32B-Instruct-JP",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen2.5-VL-32B-Instruct-HK",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek_v3_hk",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "qwen3-embedding-0.6B-VOC",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "bert-base-multilingual-cased-ner-hrl",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "lid",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen3-Embedding-4B-VOC",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "DeepSeek-V3.1",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "bert-base-multilingual-cased-ner-hrl-hk",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen3-8B-rl_lora",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "bert-base-multilingual-cased-ner-hrl-sg",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "qwen3-embedding-4b",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "roberta-large-ner-english",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "bert-base-multilingual-cased-ner-hrl-us",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "qwen3-vl-235b-a22b-instruct-fp8",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-v3.2",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "news_undup_bge_m3_ranker_ft_copy",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen3-VL-235B-A22B-Instruct",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "Qwen2.5-VL-32B-Instruct-Public-test",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "llp-qwen3-embedding-4b-test",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "glm-5.0v",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "glm-5",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "gemma-4-31b-it",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "qwen3.5-122b-a10b",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "qwen3.5-35b-a3b",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "faster-whisper-large-v3-va",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "glm-5.1-coder",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "object": "model",
+      "created": 1780296240,
+      "owned_by": "system",
+      "provider": "private"
+    }
+  ],
+  "timestamp": "2026-06-01T14:44:00.819578"
+}

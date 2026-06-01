@@ -55,10 +55,21 @@ Temporal Workflow 启动 (WhiteboxScanWorkflow)
 run_preflight (验证仓库存在性)
     │
     ▼
+run_code_index (确定性 AST 分析)
+    build_code_index() → write_index_files()
+    │
+    ▼
 run_agent (pre-recon)
     PromptManager 加载模板 → GitManager.checkpoint()
     → run_claude_prompt() → validate_deliverable()
+    → Phase 0: 裁决入口点, 输出 entry_points.json
+    → Phase 1-3: 补充发现 + 漏洞分析
     → GitManager.commit()
+    │
+    ▼
+run_rebuild_call_chains (确定性后处理)
+    读 entry_points.json → 确认入口点 → build_call_chains()
+    → 更新 code_index.json (填充 CallChains)
     │
     ▼
 run_agent (recon)
@@ -138,19 +149,24 @@ BlackboxPipelineState 返回 (status="completed")
 **执行阶段：**
 
 ```
-preflight → pre-recon → recon → [5x vuln agents 并行] → complete
+preflight → code_index → pre-recon → rebuild_call_chains → recon → [5x vuln agents 并行] → complete
 ```
 
 | 阶段 | Activity | 超时 | 重试策略 |
 |------|----------|------|----------|
 | Preflight | `run_preflight` | 2 分钟 | 无 |
+| Code Index | `run_code_index` | 10 分钟 | 无 |
 | Pre-recon | `run_agent` | 2 小时 | 最大 50 次，初始间隔 5 分钟，最大间隔 30 分钟，退避系数 2.0 |
+| Rebuild Chains | `run_rebuild_call_chains` | 5 分钟 | 无 |
 | Recon | `run_agent` | 2 小时 | 默认重试 |
 | Vuln Agents (×5) | `run_vuln_agent` | 各 2 小时 | 默认重试 |
 
 **关键行为：**
 
+- Code Index 通过确定性 AST 分析提取函数块、调用边和候选入口点，不构建 CallChain
 - Pre-recon 使用激进的重试策略（50 次），应对 LLM 调用可能的临时失败
+- Pre-recon Phase 0 裁决候选入口点，Phase 1 补充发现 code_index 无法覆盖的模式
+- `rebuildCallChains` 在 Pre-recon 完成后从确认入口点构建 CallChain
 - 5 个漏洞分析 Agent 通过 `asyncio.gather` 并行执行
 - 单个 Vuln Agent 失败会记录到 `PipelineState.error`，但不会中断其他 Agent
 - Workflow 通过 `PipelineState.completed_agents` 跟踪已完成的 Agent，支持断点续跑

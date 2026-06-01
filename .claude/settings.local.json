@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(curl -s \"https://llm-proxy.futuoa.com/doc\")",
+      "Bash(curl -s \"https://llm-proxy.futuoa.com/openapi.json\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({'info':d.get\\('info'\\), 'paths':list\\(d.get\\('paths',{}\\).keys\\(\\)\\)}, indent=2\\)\\)\")",
+      "Bash(openspec status *)"
+    ]
+  }
+}

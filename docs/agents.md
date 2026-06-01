@@ -62,15 +62,18 @@ preflight → recon-blackbox → [injection-exploit, xss-exploit, auth-exploit, 
 ### 3.1 pre-recon（预侦察 Agent）
 
 - **职责**：作为流水线中唯一拥有完整源代码访问权限的 Agent，对目标代码库进行全面的安全架构分析，生成供所有后续 Agent 使用的基础情报。分析涵盖架构、认证机制、攻击面、XSS/SSRF sink、数据安全等方面。
-- **输入**：目标应用源代码（位于工作目录）、项目描述（`DESCRIPTION`）、待测试漏洞类型列表（`VULN_CLASSES_TESTED`）
-- **输出**：`pre_recon_deliverable.md`，包含执行摘要、架构与技术栈、认证与授权、数据安全、攻击面分析、基础设施安全、代码索引、关键文件路径、XSS Sinks、SSRF Sinks 等结构化章节。同时复制发现的 API schema 文件到 `schemas/` 目录。
+- **输入**：目标应用源代码（位于工作目录）、项目描述（`DESCRIPTION`）、待测试漏洞类型列表（`VULN_CLASSES_TESTED`）、确定性 code_index 产物（`code_index.json`、`code_index_summary.md`）
+- **输出**：`pre_recon_deliverable.md`，包含执行摘要、架构与技术栈、认证与授权、数据安全、攻击面分析、基础设施安全、代码索引、关键文件路径、XSS Sinks、SSRF Sinks 等结构化章节。同时输出 `entry_points.json`（裁决结果）并复制发现的 API schema 文件到 `schemas/` 目录。
 - **Prompt 策略要点**：
-  - 采用三阶段并行 Task Agent 策略：Phase 1 启动 Architecture Scanner、Entry Point Mapper、Security Pattern Hunter；Phase 2 启动 XSS/Injection Sink Hunter、SSRF/External Request Tracer、Data Security Auditor；Phase 3 综合所有发现生成报告
+  - **Phase 0 入口点裁决**：系统性地审查 code_index 产出的每个候选入口点，高置信度（≥0.8）自动确认，低置信度（`needs_llm_review=true`）由 LLM 读取源码上下文后判定 confirmed/rejected/reclassified，输出 `entry_points.json`
+  - **Phase 1 补充发现**：Entry Point Mapper Agent 从"全知全能的发现者"转为"补充发现者"，专注于 code_index 确定性规则无法覆盖的模式（配置文件路由、动态注册、未知框架）
+  - Phase 1 启动 Architecture Scanner、Entry Point Mapper（补充发现）、Security Pattern Hunter；Phase 2 启动 XSS/Injection Sink Hunter、SSRF/External Request Tracer、Data Security Auditor；Phase 3 综合所有发现生成报告
   - 强调"瀑布影响"：此 Agent 的分析不完整将导致后续 10+ 个 Agent 出现盲区
   - 所有源代码分析必须通过 Task Agent 完成，禁止直接使用 Read/Glob/Grep
   - 从外部攻击者视角分析，仅关注网络可达的攻击面
   - 使用 TodoWrite 工具追踪各阶段进度
   - 采用分块写入（CHUNKED WRITING）避免超出 32K token 限制
+  - 裁决完成后，确定性 `rebuildCallChains` activity 从确认的入口点构建 CallChain，更新 `code_index.json`
 
 ### 3.2 recon（侦察 Agent - 白盒）
 

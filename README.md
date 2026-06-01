@@ -30,6 +30,49 @@ uv sync
 temporal server start-dev
 ```
 
+## 配置
+
+### AI Provider 配置
+
+Shannon-py 支持多种 AI Provider，通过环境变量配置：
+
+```bash
+# 复制示例配置文件
+cp .env.example .env
+
+# 编辑 .env 文件，设置你的 API Key 和 Provider
+```
+
+**支持的 Provider:**
+
+| Provider | 说明 | 配置示例 |
+|----------|------|----------|
+| `anthropic_api` | Anthropic 官方 API | `SHANNON_API_KEY=sk-ant-...` |
+| `bedrock` | AWS Bedrock | `AWS_REGION=us-east-1` |
+| `vertex` | Google Cloud Vertex AI | `SHANNON_PROJECT_ID=...` |
+| `openai_compatible` | OpenAI 兼容接口 | `SHANNON_BASE_URL=https://...` |
+| `litellm_router` | LiteLLM 路由器 | `SHANNON_AUTH_TOKEN=...` |
+
+**环境变量优先级:**
+
+1. `provider_config` 参数（代码中直接传入）
+2. `SHANNON_*` 环境变量
+3. `ANTHROPIC_*` 环境变量（向后兼容）
+
+**成本估算:**
+
+- Claude SDK Provider：返回精确成本
+- OpenAI 兼容 Provider：基于公开定价估算
+- 建议设置 `SHANNON_MAX_BUDGET` 限制单次调用花费
+
+### Temporal 配置
+
+默认使用本地 Temporal Server (`localhost:7233`)，可通过环境变量修改：
+
+```bash
+TEMPORAL_ADDRESS=your-temporal-server:7233
+```
+
 ## 使用方法
 
 ### 白盒扫描
