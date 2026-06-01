@@ -12,6 +12,6 @@
 
 - [x] 2.1 Run `pnpm run build` to compile worker TypeScript
 - [x] 2.2 Run `pnpm biome` and `pnpm run check` — zero new issues
-- [ ] 2.3 Run `./shannon build` to rebuild Docker image with fix
-- [ ] 2.4 Run `./shannon start -u https://testheader.futunn.com -r /root/code/official_common_header_footer --blackbox-only --debug`
-- [ ] 2.5 Confirm `validateDeliverablesExist` passes and exploit agents begin execution
+- [x] 2.3 Run `./shannon build` to rebuild Docker image with fix
+- [x] 2.4 Run `./shannon start -u https://testheader.futunn.com -r /root/code/official_common_header_footer --blackbox-only --debug`
+- [x] 2.5 Confirm `validateDeliverablesExist` passes and exploit agents begin execution
