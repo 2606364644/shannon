@@ -78,15 +78,15 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 </attacker_perspective>
 
 <starting_context>
-- A complete call graph has been built via AST analysis, located at:
+- A deterministic code index has been built via AST analysis, located at:
   {{REPO_PATH}}/.shannon/deliverables/code_index.json
   {{REPO_PATH}}/.shannon/deliverables/code_index_summary.md
-- The call graph contains function blocks, entry points, and call chains extracted deterministically
-- You do NOT need to discover entry points yourself — all are deterministically extracted
-- Focus on understanding the security semantics and attack surface of each entry point
-- Entry points marked needs_llm_review=true require your judgment on whether they are real entry points
-- You still have full source code access — the call graph supplements your analysis, it does not replace it
-- Use the call graph to verify completeness of your own discovery, not as a substitute for deep analysis
+- The code index contains function blocks, call edges, and candidate entry points extracted deterministically
+- Entry points are marked with confidence levels and a `needs_llm_review` flag
+- CallChains have NOT been built yet — they will be constructed after you complete adjudication
+- The call graph (CallEdge[]) is available in the code index for your analysis
+- Your role is to adjudicate low-confidence candidates (Phase 0) and supplement with discoveries the code_index could not make (Phase 1)
+- You MUST output an `entry_points.json` file with your adjudication results using `save-deliverable --type ENTRY_POINTS` before starting Phase 1
 </starting_context>
 
 <cli_tools>
@@ -111,6 +111,37 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 
 **PHASED ANALYSIS APPROACH:**
 
+## Phase 0: Entry Point Adjudication (MUST complete before Phase 1)
+
+You MUST systematically adjudicate all candidate entry points from the code index:
+
+1. Read `code_index.json` and identify all entry points
+2. For entry points with `confidence >= 0.8` and `needs_llm_review=false`: auto-confirm them with `verdict=confirmed`, `source=code_index`
+3. For entry points with `needs_llm_review=true`: use Task Agents to read the surrounding source code context and determine if each is a real entry point. For each, assign one of:
+   - `confirmed`: This is a real entry point (e.g., an actual HTTP handler, webhook, message consumer)
+   - `rejected`: This is NOT a real entry point (e.g., internal utility, helper function)
+   - `reclassified`: This is an entry point but of a different type than detected
+4. Write the adjudication results to `entry_points.json` using `save-deliverable --type ENTRY_POINTS`
+
+The `entry_points.json` must be a JSON file with the following structure:
+```json
+{
+  "repository": "repo-name",
+  "language": "python",
+  "adjudicated_entry_points": [
+    {
+      "func_block_id": "file.py:func_name:line",
+      "verdict": "confirmed|rejected|reclassified",
+      "entry_type": "http_route|rpc|cli|message_consumer|unknown",
+      "route": "/path or null",
+      "http_method": "GET|POST|... or null",
+      "evidence": "brief justification",
+      "source": "code_index|llm_discovery"
+    }
+  ]
+}
+```
+
 ## Phase 1: Discovery Agents (Launch in Parallel)
 
 Launch these three discovery agents simultaneously to understand the codebase structure:
@@ -118,11 +149,13 @@ Launch these three discovery agents simultaneously to understand the codebase st
 1. **Architecture Scanner Agent**:
    "Map the application's structure, technology stack, and critical components. Identify frameworks, languages, architectural patterns, and security-relevant configurations. Determine if this is a web app, API service, microservices, or hybrid. Output a comprehensive tech stack summary with security implications."
 
-2. **Entry Point Mapper Agent**:
-   "Find ALL network-accessible entry points in the codebase. Catalog API endpoints, web routes, webhooks, file uploads, and externally-callable functions. ALSO identify and catalog API schema files (OpenAPI/Swagger *.json/*.yaml/*.yml, GraphQL *.graphql/*.gql, JSON Schema *.schema.json) that document these endpoints. Distinguish between public endpoints and those requiring authentication. Exclude local-only dev tools, CLI scripts, and build processes. Provide exact file paths and route definitions for both endpoints and schemas."
+2. **Entry Point Mapper Agent** (Supplementary Discovery):
+   "Find entry points that the deterministic code_index may have MISSED. Focus on patterns the AST analysis cannot detect: configuration-file routes (e.g., urls.py, routes.yaml, router configs), dynamic route registration, unknown framework conventions, and implicitly registered handlers. Do NOT report entry points already detected by code_index — only report genuinely new discoveries."
 
 3. **Security Pattern Hunter Agent**:
    "Identify authentication flows, authorization mechanisms, session management, and security middleware. Find JWT handling, OAuth flows, RBAC implementations, permission validators, and security headers configuration. Map the complete security architecture with exact file locations."
+
+If the Entry Point Mapper discovers new entry points not in the code_index, append them to `entry_points.json` with `source=llm_discovery` and re-save using `save-deliverable --type ENTRY_POINTS`.
 
 ## Phase 2: Vulnerability Analysis Agents (Launch All After Phase 1)
 
@@ -154,16 +187,20 @@ After Phase 1 completes, launch all three vulnerability-focused agents in parall
 - **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **EXECUTION PATTERN:**
-1. **Use TodoWrite to create task list** tracking: Phase 1 agents, Phase 2 agents, and report synthesis
-2. **Phase 1:** Launch all three Phase 1 agents in parallel using multiple Task tool calls in a single message
-3. **Wait for ALL Phase 1 agents to complete** - do not proceed until you have findings from Architecture Scanner, Entry Point Mapper, AND Security Pattern Hunter
-4. **Mark Phase 1 todos as completed** and review all findings
-5. **Phase 2:** Launch all three Phase 2 agents in parallel using multiple Task tool calls in a single message
-6. **Wait for ALL Phase 2 agents to complete** - ensure you have findings from all vulnerability analysis agents
-7. **Mark Phase 2 todos as completed**
-8. **Phase 3:** Mark synthesis todo as in-progress and synthesize all findings into comprehensive security report
+1. **Use TodoWrite to create task list** tracking: Phase 0 adjudication, Phase 1 agents, Phase 2 agents, and report synthesis
+2. **Phase 0:** Read code_index.json, adjudicate all entry points, write entry_points.json
+3. **Mark Phase 0 todos as completed**
+4. **Phase 1:** Launch all three Phase 1 agents in parallel using multiple Task tool calls in a single message
+5. **Wait for ALL Phase 1 agents to complete** - do not proceed until you have findings from Architecture Scanner, Entry Point Mapper, AND Security Pattern Hunter
+6. **Mark Phase 1 todos as completed** and review all findings
+7. **Phase 2:** Launch all three Phase 2 agents in parallel using multiple Task tool calls in a single message
+8. **Wait for ALL Phase 2 agents to complete** - ensure you have findings from all vulnerability analysis agents
+9. **Mark Phase 2 todos as completed**
+10. **Phase 3:** Mark synthesis todo as in-progress and synthesize all findings into comprehensive security report
 
-**CRITICAL TIMING RULE:** You MUST complete ALL agents in a phase before proceeding to the next phase. Do not start Phase 2 until ALL Phase 1 agents have completed and returned their findings.
+**CRITICAL TIMING RULES:**
+- Phase 0 MUST complete before Phase 1 begins
+- You MUST complete ALL agents in a phase before proceeding to the next phase. Do not start Phase 2 until ALL Phase 1 agents have completed and returned their findings.
 
 **AGENT-TO-SECTION MAPPING:**
 - **Section 2 (Architecture & Technology Stack):** Use Architecture Scanner Agent findings

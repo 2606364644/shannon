@@ -1,3 +1,5 @@
 @include(shared/_filesystem.txt)
 
-Run: `save-deliverable --type CODE_ANALYSIS --content 'Pre-recon analysis complete'`. Then say "Done".
+Phase 0: Read {{REPO_PATH}}/.shannon/deliverables/code_index.json (if it exists). Write an empty adjudication result to entry_points.json using: `save-deliverable --type ENTRY_POINTS --content '{"repository":"test","language":"python","adjudicated_entry_points":[]}'`
+
+Phase 1-3: Run: `save-deliverable --type CODE_ANALYSIS --content 'Pre-recon analysis complete'`. Then say "Done".
