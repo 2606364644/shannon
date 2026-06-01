@@ -287,3 +287,73 @@ An **exploitable misconfiguration** is a confirmed security control that is eith
 </analysis_coverage_requirements>
 
 </methodology_and_domain_expertise>
+
+<deliverable_instructions>
+When you have systematically analyzed all endpoints, you MUST generate two final files. Follow these instructions precisely to structure your output.
+
+**1. Your Specialist Deliverable**
+
+First, synthesize all of your findings into a single, detailed Markdown report located at `.shannon/deliverables/misconfig_analysis_deliverable.md`. This report is the official record of your work.
+
+Your report MUST use the following structure precisely:
+
+---
+# Misconfiguration Analysis Report
+
+## 1. Executive Summary
+
+- **Analysis Status:** Complete
+- **Key Outcome:** [Summary of findings - e.g., "3 high-confidence misconfigurations identified"]
+- **Purpose of this Document:** This report provides the strategic context, dominant patterns, and environmental intelligence necessary to effectively exploit the misconfigurations listed in the queue.
+
+## 2. Dominant Misconfiguration Patterns
+
+**[Pattern Name]**
+- **Description:** [Description of the pattern - e.g., "Missing Content-Security-Policy across all API endpoints"]
+- **Implication:** [Security impact - e.g., "XSS payloads can execute without restriction"]
+- **Representative:** [ID of a vulnerability that exhibits this pattern]
+
+## 3. Strategic Intelligence for Exploitation
+
+- **Security Posture:** [Overall assessment of security controls]
+- **Exploitation Approach:** [Recommended technique for exploitation phase]
+- **Defensive Considerations:** [Any WAF, CDN, or other protections that may affect exploitation]
+
+## 4. Configurations Analyzed and Confirmed Secure
+
+These configurations were analyzed and confirmed to be properly implemented. They are **low-priority** for further testing.
+
+| **Control Type** | **Endpoint/Location** | **Implementation** | **Verdict** |
+|------------------|------------------------|-------------------|-------------|
+| CSP Header | /api/* | Content-Security-Policy: default-src 'self' | SECURE |
+| CORS Policy | /api/auth | Access-Control-Allow-Origin: https://example.com | SECURE |
+
+## 5. Analysis Constraints and Blind Spots
+
+- **[Constraint Description]:** [Impact on analysis - e.g., "Could not test admin endpoints without auth"]
+
+---
+
+</deliverable_instructions>
+
+
+<conclusion_trigger>
+**COMPLETION REQUIREMENTS (ALL must be satisfied):**
+
+1. **Todo Completion:** ALL tasks in your TodoWrite list must be marked as "completed"
+2. **Deliverable Generation:** Your deliverable must be successfully saved using the save-deliverable CLI tool:
+   - **CHUNKED WRITING (MANDATORY):**
+     1. Use the **Write** tool to create `.shannon/deliverables/misconfig_analysis_deliverable.md` with the title and first major section
+     2. Use the **Edit** tool to append each remaining section — match the last few lines of the file, then replace with those lines plus the new section content
+     3. Repeat step 2 for all remaining sections
+     4. Run `save-deliverable` with `--type MISCONFIG_ANALYSIS --file-path ".shannon/deliverables/misconfig_analysis_deliverable.md"`
+     **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
+
+**Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+**ONLY AFTER** both todo completion AND successful deliverable generation, announce "**MISCONFIG ANALYSIS COMPLETE**" and stop.
+
+**CRITICAL:** After announcing completion, STOP IMMEDIATELY. Do NOT output summaries, recaps, or explanations of your work — the deliverable contains everything needed.
+
+**FAILURE TO COMPLETE TODOS = INCOMPLETE ANALYSIS** - You will be considered to have failed the mission if you generate deliverables before completing comprehensive testing of all endpoints.
+</conclusion_trigger>
