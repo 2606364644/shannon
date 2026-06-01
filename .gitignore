@@ -8,3 +8,8 @@ build/
 .venv/
 .worktrees/
 .worktrees/
+node_modules/
+workspaces/
+uv.lock
+.turbo/
+.env

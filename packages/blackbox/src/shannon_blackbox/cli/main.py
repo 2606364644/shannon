@@ -3,6 +3,8 @@ from pathlib import Path
 
 import click
 
+from dotenv import load_dotenv
+
 from shannon_core.models.agents import ALL_VULN_CLASSES
 from shannon_core.session import SessionManager
 
@@ -10,6 +12,7 @@ from shannon_core.session import SessionManager
 @click.group()
 def cli():
     """Shannon Black-Box Scanner - Runtime vulnerability verification."""
+    load_dotenv()
 
 
 @cli.command()

@@ -76,6 +76,40 @@ async def _validate_vertex() -> None:
         ) from exc
 
 
+async def _validate_openai_compatible(api_key: str, base_url: str) -> None:
+    """Call /v1/models endpoint to verify OpenAI-compatible API credentials."""
+    # Remove trailing slash from base_url for consistent URL construction
+    base_url = base_url.rstrip("/")
+
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+            resp = await client.get(
+                f"{base_url}/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if resp.status_code in (401, 403):
+            raise PentestError(
+                f"OpenAI-compatible API key rejected (HTTP {resp.status_code})",
+                category="preflight",
+                retryable=False,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+        elif resp.status_code != 200:
+            raise PentestError(
+                f"OpenAI-compatible API returned unexpected status (HTTP {resp.status_code})",
+                category="preflight",
+                retryable=True,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+    except httpx.ConnectError as exc:
+        raise PentestError(
+            f"Cannot reach OpenAI-compatible API at {base_url}: {exc}",
+            category="preflight",
+            retryable=True,
+            error_code=ErrorCode.AUTH_FAILED,
+        ) from exc
+
+
 async def validate_credentials(
     provider: str,
     *,
@@ -100,6 +134,22 @@ async def validate_credentials(
         await _validate_bedrock()
     elif provider == "vertex":
         await _validate_vertex()
+    elif provider == "openai_compatible":
+        if not api_key:
+            raise PentestError(
+                "OpenAI-compatible provider requires api_key (SHANNON_API_KEY or ANTHROPIC_API_KEY)",
+                category="preflight",
+                retryable=False,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+        if not base_url:
+            raise PentestError(
+                "OpenAI-compatible provider requires base_url (SHANNON_BASE_URL)",
+                category="preflight",
+                retryable=False,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+        await _validate_openai_compatible(api_key, base_url)
     elif provider == "litellm_router":
         if not base_url or not auth_token:
             raise PentestError(

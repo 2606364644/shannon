@@ -2,12 +2,15 @@ import asyncio
 import click
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from shannon_core.session import SessionManager
 from shannon_whitebox.pipeline.shared import PipelineInput
 
 @click.group()
 def cli():
     """Shannon White-Box Scanner - Source code vulnerability analysis."""
+    load_dotenv()
 
 @cli.command()
 @click.option("-r", "--repo", required=True, help="Target repository path")
