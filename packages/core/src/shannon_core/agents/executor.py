@@ -9,8 +9,8 @@ from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.models.metrics import AgentMetrics
 from shannon_core.utils.billing import is_spending_cap_behavior
 
-from shannon_core.agents.runner import ClaudeRunResult, run_claude_prompt
-from shannon_core.agents.validators import get_queue_filename, get_vuln_type, validate_deliverable
+from shannon_core.agents.runner import run_claude_prompt
+from shannon_core.agents.validators import get_queue_filename, validate_deliverable
 from shannon_core.git_manager import GitManager
 from shannon_core.prompts.manager import PromptManager
 
@@ -98,4 +98,8 @@ class AgentExecutor:
             num_turns=result.turns,
             model=result.model,
             structured_output=result.structured_output,
+            input_tokens=result.tokens.input_tokens if result.tokens else None,
+            output_tokens=result.tokens.output_tokens if result.tokens else None,
+            cache_read_tokens=result.tokens.cache_read_input_tokens if result.tokens else None,
+            cache_creation_tokens=result.tokens.cache_creation_input_tokens if result.tokens else None,
         )
