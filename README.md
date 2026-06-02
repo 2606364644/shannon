@@ -75,38 +75,49 @@ TEMPORAL_ADDRESS=your-temporal-server:7233
 
 ## 使用方法
 
+所有 CLI 命令通过 `uv run` 执行，或先激活虚拟环境：
+
+```bash
+# 方式一：uv run（推荐）
+uv run shannon-whitebox start --repo /path/to/target-repo
+
+# 方式二：激活 venv
+source .venv/bin/activate
+shannon-whitebox start --repo /path/to/target-repo
+```
+
 ### 白盒扫描
 
 ```bash
-shannon-whitebox start --repo /path/to/target-repo
+uv run shannon-whitebox start --repo /path/to/target-repo
 
-shannon-whitebox start --repo /path/to/repo --output ./results --workspace my-scan --config scan.yaml
+uv run shannon-whitebox start --repo /path/to/repo --output ./results --workspace my-scan --config scan.yaml
 
-shannon-whitebox start --repo /path/to/repo --pipeline-testing --temporal-address localhost:7233
+uv run shannon-whitebox start --repo /path/to/repo --pipeline-testing --temporal-address localhost:7233
 ```
 
 查看工作区和日志：
 
 ```bash
-shannon-whitebox workspaces
-shannon-whitebox logs my-scan
+uv run shannon-whitebox workspaces
+uv run shannon-whitebox logs my-scan
 ```
 
 ### 黑盒扫描
 
 ```bash
-shannon-blackbox start --url https://target.example.com
+uv run shannon-blackbox start --url https://target.example.com
 
-shannon-blackbox start --url https://target.example.com --vuln-classes injection --vuln-classes xss --no-exploit
+uv run shannon-blackbox start --url https://target.example.com --vuln-classes injection --vuln-classes xss --no-exploit
 
-shannon-blackbox start --url https://target.example.com --config scan.yaml --output ./results --workspace my-scan
+uv run shannon-blackbox start --url https://target.example.com --config scan.yaml --output ./results --workspace my-scan
 ```
 
 查看工作区和日志：
 
 ```bash
-shannon-blackbox workspaces
-shannon-blackbox logs my-scan
+uv run shannon-blackbox workspaces
+uv run shannon-blackbox logs my-scan
 ```
 
 ## 文档

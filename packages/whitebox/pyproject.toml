@@ -9,6 +9,9 @@ dependencies = [
     "aiofiles>=23.0",
 ]
 
+[project.scripts]
+shannon-whitebox = "shannon_whitebox.cli.main:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

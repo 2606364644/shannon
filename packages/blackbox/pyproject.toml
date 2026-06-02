@@ -9,6 +9,9 @@ dependencies = [
     "aiofiles>=23.0",
 ]
 
+[project.scripts]
+shannon-blackbox = "shannon_blackbox.cli.main:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
