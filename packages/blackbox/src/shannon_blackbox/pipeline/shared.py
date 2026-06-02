@@ -23,6 +23,7 @@ class BlackboxPipelineState:
     completed_agents: list[str] = field(default_factory=list)
     agent_metrics: dict[str, dict] = field(default_factory=dict)
     has_whitebox_results: bool = False
+    found_whitebox_classes: list[str] = field(default_factory=list)
     start_time: float = 0.0
     errors: list[str] = field(default_factory=list)
 

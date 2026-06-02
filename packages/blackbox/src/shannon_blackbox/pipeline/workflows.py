@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import timedelta
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from temporalio.common import RetryPolicy
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
 
 from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState
+
+logger = logging.getLogger(__name__)
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
@@ -93,6 +96,19 @@ class BlackboxScanWorkflow:
                     has_whitebox_results = True
                     found_classes.append(vt)
             self._state.has_whitebox_results = has_whitebox_results
+            self._state.found_whitebox_classes = found_classes
+            if has_whitebox_results:
+                logger.info(
+                    "Whitebox results detected at %s for classes: %s — skipping RECON_BLACKBOX",
+                    deliverables,
+                    found_classes,
+                )
+            else:
+                logger.warning(
+                    "No whitebox results found at %s — running RECON_BLACKBOX from scratch. "
+                    "Tip: pass --repo <path> to reuse whitebox scan results.",
+                    deliverables,
+                )
 
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
                 recon_input = BlackboxActivityInput(**{**act_input.__dict__})

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
 
 
 def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
@@ -65,3 +65,19 @@ def test_path_resolution_pure_fallback(tmp_path, monkeypatch):
     )
     result = _resolve_deliverables(input)
     assert result == Path("workspaces") / "my-scan" / ".shannon" / "deliverables"
+
+
+def test_state_tracks_found_classes_with_results(tmp_path):
+    """When exploitation_queue.json exists, found classes should be tracked in state."""
+    state = BlackboxPipelineState(
+        has_whitebox_results=True,
+        found_whitebox_classes=["injection", "xss"],
+    )
+    assert state.has_whitebox_results is True
+    assert state.found_whitebox_classes == ["injection", "xss"]
+
+
+def test_state_defaults_no_found_classes():
+    """Default state should have empty found_whitebox_classes."""
+    state = BlackboxPipelineState()
+    assert state.found_whitebox_classes == []

@@ -44,10 +44,15 @@ def start(url, repo, output, workspace, config_path, vuln_classes, no_exploit, p
     )
     click.echo(f"Starting black-box scan on {url}")
     result = asyncio.run(run_scan(input, temporal_address))
-    if result.get("status") == "completed":
-        click.echo("Scan completed successfully")
+    if result.status == "completed":
+        if result.has_whitebox_results:
+            classes = result.found_whitebox_classes
+            click.echo(f"Scan completed (leveraged whitebox results for: {', '.join(classes)})")
+        else:
+            click.echo("Scan completed (standalone — no whitebox results found)")
     else:
-        click.echo(f"Scan failed: {result.get('error', 'unknown error')}")
+        error_msg = result.errors[-1] if result.errors else "unknown error"
+        click.echo(f"Scan failed: {error_msg}")
         raise SystemExit(1)
 
 

@@ -4,7 +4,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from shannon_blackbox.cli.main import cli
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
 
 
 def test_cli_help():
@@ -36,10 +36,10 @@ def test_start_wires_repo_param():
 
     captured_input: BlackboxPipelineInput | None = None
 
-    async def fake_run_scan(input: BlackboxPipelineInput, temporal_address: str) -> dict:
+    async def fake_run_scan(input: BlackboxPipelineInput, temporal_address: str) -> BlackboxPipelineState:
         nonlocal captured_input
         captured_input = input
-        return {"status": "completed"}
+        return BlackboxPipelineState(status="completed")
 
     with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
         runner = CliRunner()
