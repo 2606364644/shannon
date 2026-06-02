@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
 from shannon_core.models.agents import VulnType
 from shannon_core.models.metrics import AgentMetrics
 
@@ -14,7 +15,7 @@ class PipelineInput:
     vuln_classes: list[VulnType] | None = None
     pipeline_testing_mode: bool = False
     api_key: str | None = None
-    deliverables_subdir: str = ".shannon/deliverables"
+    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
     prompt_override: str | None = None
 
 @dataclass
@@ -32,7 +33,7 @@ class ActivityInput:
     web_url: str = ""
     config_path: str | None = None
     workspace_name: str | None = None
-    deliverables_subdir: str = ".shannon/deliverables"
+    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     prompt_override: str | None = None

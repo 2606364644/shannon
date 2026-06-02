@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+
 
 @dataclass
 class BlackboxPipelineInput:
@@ -13,7 +15,7 @@ class BlackboxPipelineInput:
     exploit: bool = True
     pipeline_testing_mode: bool = False
     api_key: str | None = None
-    deliverables_subdir: str = ".shannon/deliverables"
+    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
 
 
 @dataclass
@@ -34,7 +36,7 @@ class BlackboxActivityInput:
     repo_path: str | None = None
     config_path: str | None = None
     workspace_name: str | None = None
-    deliverables_subdir: str = ".shannon/deliverables"
+    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     agent_name: str | None = None
