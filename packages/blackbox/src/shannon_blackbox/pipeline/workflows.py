@@ -11,6 +11,7 @@ from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipeli
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
+    from ..services.exploitation_checker import ExploitationChecker
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
@@ -89,11 +90,15 @@ class BlackboxScanWorkflow:
                 self._state.agent_metrics[AgentName.RECON_BLACKBOX.value] = metrics
 
             if input.exploit:
-                # Queue gating: only run exploit agents for vuln types that have findings
+                # Queue gating: validate queue files before scheduling exploit agents
                 exploit_tasks = []
                 for vt in selected_classes:
-                    queue_file = deliverables / f"{vt}_exploitation_queue.json"
-                    if not queue_file.exists():
+                    should_run = await ExploitationChecker.should_exploit(
+                        deliverables_path=deliverables,
+                        vuln_type=vt,
+                        exploit_enabled=input.exploit,
+                    )
+                    if not should_run:
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
                     if agent_name.value not in self._state.completed_agents:
