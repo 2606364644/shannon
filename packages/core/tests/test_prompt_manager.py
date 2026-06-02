@@ -314,3 +314,67 @@ def test_shared_session_include_removed_without_auth(prompts_dir):
     assert "shared_authenticated_session" not in result
     assert "Before" in result
     assert "After" in result
+
+
+# --- Conditional block tests ---
+
+def test_if_live_block_kept_when_web_url_present(prompts_dir):
+    """When WEB_URL is provided, <if-live> content stays, <if-static> is removed."""
+    (prompts_dir / "cond-test.txt").write_text(
+        "<if-live>URL: {{WEB_URL}}</if-live><if-static>Mode: Offline</if-static>\nFooter"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("cond-test", {"web_url": "https://example.com", "repo_path": "/r"})
+    assert "URL: https://example.com" in result
+    assert "Offline" not in result
+    assert "Footer" in result
+    assert "<if-live>" not in result
+    assert "<if-static>" not in result
+
+
+def test_if_static_block_kept_when_no_web_url(prompts_dir):
+    """When WEB_URL is empty, <if-static> content stays, <if-live> is removed."""
+    (prompts_dir / "cond-test.txt").write_text(
+        "<if-live>URL: {{WEB_URL}}</if-live><if-static>Mode: Offline</if-static>\nFooter"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("cond-test", {"web_url": "", "repo_path": "/r"})
+    assert "Mode: Offline" in result
+    assert "URL:" not in result
+    assert "Footer" in result
+    assert "<if-live>" not in result
+    assert "<if-static>" not in result
+
+
+def test_no_conditional_blocks_unchanged(prompts_dir):
+    """Templates without conditional blocks are not affected."""
+    (prompts_dir / "plain-test.txt").write_text("Hello {{WEB_URL}} world")
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("plain-test", {"web_url": "https://x.com", "repo_path": "/r"})
+    assert result == "Hello https://x.com world"
+
+
+def test_conditional_blocks_in_included_file(prompts_dir):
+    """Conditional blocks work inside @include'd shared files."""
+    (prompts_dir / "shared" / "_cond.txt").write_text(
+        "<if-live>LIVE</if-live><if-static>STATIC</if-static>"
+    )
+    (prompts_dir / "inc-cond-test.txt").write_text("Start @include(shared/_cond.txt) End")
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("inc-cond-test", {"web_url": "", "repo_path": "/r"})
+    assert "STATIC" in result
+    assert "LIVE" not in result
+    assert "Start" in result
+    assert "End" in result
+
+
+def test_multiline_conditional_block(prompts_dir):
+    """Multi-line <if-static> blocks are stripped correctly."""
+    (prompts_dir / "multi-cond.txt").write_text(
+        "<if-live>URL: {{WEB_URL}}</if-live><if-static>Mode: Offline static code analysis\nLine 2\nLine 3</if-static>"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("multi-cond", {"web_url": "", "repo_path": "/r"})
+    assert "Line 2" in result
+    assert "Line 3" in result
+    assert "URL:" not in result

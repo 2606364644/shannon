@@ -5,6 +5,18 @@ from shannon_core.models.agents import PLAYWRIGHT_SESSION_MAPPING
 from shannon_core.models.config import Authentication, DistributedConfig
 from shannon_core.models.errors import ErrorCode, PentestError
 
+
+def strip_conditional_blocks(text: str, has_web_url: bool) -> str:
+    """Select <if-live> or <if-static> content based on whether WEB_URL is present."""
+    if has_web_url:
+        text = re.sub(r'<if-static>.*?</if-static>', '', text, flags=re.DOTALL)
+        text = text.replace('<if-live>', '').replace('</if-live>', '')
+    else:
+        text = re.sub(r'<if-live>.*?</if-live>', '', text, flags=re.DOTALL)
+        text = text.replace('<if-static>', '').replace('</if-static>', '')
+    return text
+
+
 class PromptManager:
     def __init__(self, prompts_dir: Path):
         self.prompts_dir = prompts_dir
@@ -31,6 +43,8 @@ class PromptManager:
 
         template = template_path.read_text(encoding="utf-8")
         template = self._process_includes(template, base_dir)
+        has_web_url = bool(variables.get("web_url"))
+        template = strip_conditional_blocks(template, has_web_url)
         template = self._interpolate(template, variables, config, template_name)
         return template
 
