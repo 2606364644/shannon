@@ -8,15 +8,17 @@ from shannon_core.utils.security import validate_target_url, check_url_reachable
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
+from shannon_core.utils.paths import resolve_deliverables_path
 
 from .shared import BlackboxActivityInput
 
 
 def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
-    if input.repo_path:
-        return Path(input.repo_path) / input.deliverables_subdir
-    base = Path("workspaces") / (input.workspace_name or "default")
-    return base / input.deliverables_subdir
+    return resolve_deliverables_path(
+        repo_path=input.repo_path,
+        deliverables_subdir=input.deliverables_subdir,
+        workspace_name=input.workspace_name,
+    )
 
 
 @activity.defn

@@ -7,6 +7,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
+from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results
 
 from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState
 
@@ -31,6 +32,12 @@ class BlackboxScanWorkflow:
 
         selected_classes: list[str] = input.vuln_classes or list(ALL_VULN_CLASSES)
 
+        # Compute workspace_path consistent with whitebox (workspaces/<name>/)
+        if input.workspace_name:
+            workspace_path = str(resolve_workspaces_dir(input.repo_path) / input.workspace_name)
+        else:
+            workspace_path = input.repo_path
+
         act_input = BlackboxActivityInput(
             web_url=input.web_url,
             repo_path=input.repo_path,
@@ -39,7 +46,7 @@ class BlackboxScanWorkflow:
             deliverables_subdir=input.deliverables_subdir,
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
-            workspace_path=input.repo_path,
+            workspace_path=workspace_path,
         )
 
         retry_policy = RetryPolicy(
@@ -73,26 +80,19 @@ class BlackboxScanWorkflow:
             )
 
         try:
-            # Resolve deliverables path: prefer explicit repo_path, fall back to session data, then default
-            deliverables = None
-            if input.repo_path:
-                deliverables = Path(input.repo_path) / input.deliverables_subdir
-            elif input.workspace_name:
-                session_file = Path("workspaces") / input.workspace_name / "session.json"
-                if session_file.exists():
-                    import json as _json
-                    session_data = _json.loads(session_file.read_text())
-                    saved_repo = session_data.get("repo_path")
-                    if saved_repo:
-                        deliverables = Path(saved_repo) / input.deliverables_subdir
-            if not deliverables:
-                deliverables = Path("workspaces") / (input.workspace_name or "default") / input.deliverables_subdir
+            # Resolve deliverables path using shared utility
+            deliverables = resolve_deliverables_path(
+                repo_path=input.repo_path,
+                deliverables_subdir=input.deliverables_subdir,
+                workspace_name=input.workspace_name,
+                workspaces_root=resolve_workspaces_dir(input.repo_path),
+            )
 
             has_whitebox_results = False
             found_classes: list[str] = []
             for vt in selected_classes:
                 queue_file = deliverables / f"{vt}_exploitation_queue.json"
-                if queue_file.exists():
+                if has_valid_whitebox_results(queue_file):
                     has_whitebox_results = True
                     found_classes.append(vt)
             self._state.has_whitebox_results = has_whitebox_results
