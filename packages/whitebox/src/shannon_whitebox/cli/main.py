@@ -1,16 +1,27 @@
 import asyncio
+import time
+
 import click
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from shannon_core.services.temporal_infra import (
+    ensure_infra,
+    get_temporal_status,
+    is_temporal_ready,
+    start_temporal,
+    stop_temporal,
+)
 from shannon_core.session import SessionManager
 from shannon_whitebox.pipeline.shared import PipelineInput
+
 
 @click.group()
 def cli():
     """Shannon White-Box Scanner - Source code vulnerability analysis."""
     load_dotenv()
+
 
 @cli.command()
 @click.option("-r", "--repo", required=True, help="Target repository path")
@@ -31,12 +42,50 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         pipeline_testing_mode=pipeline_testing,
     )
     click.echo(f"Starting white-box scan on {repo}")
+    asyncio.run(ensure_infra(address=temporal_address))
     result = asyncio.run(run_scan(input, temporal_address))
     if result.get("status") == "completed":
         click.echo("Scan completed successfully")
     else:
         click.echo(f"Scan failed: {result.get('error', 'unknown error')}")
         raise SystemExit(1)
+
+
+@cli.group()
+def infra():
+    """Manage Temporal infrastructure."""
+
+
+@infra.command()
+def up():
+    """Start Temporal server."""
+    start_temporal()
+    click.echo("Waiting for Temporal to be ready...")
+    for _ in range(30):
+        if asyncio.run(is_temporal_ready()):
+            click.echo("Temporal is ready!")
+            return
+        time.sleep(2)
+    click.echo("Warning: Temporal may not be ready yet. Check `docker compose logs`.")
+
+
+@infra.command()
+def down():
+    """Stop Temporal server."""
+    stop_temporal()
+    click.echo("Temporal stopped.")
+
+
+@infra.command()
+def status():
+    """Check Temporal server status."""
+    result = asyncio.run(get_temporal_status())
+    container = result.get("container", "unknown")
+    healthy = result.get("healthy", False)
+    health_str = "healthy" if healthy else "not healthy"
+    click.echo(f"Container: {container}")
+    click.echo(f"Health: {health_str}")
+
 
 @cli.command()
 @click.argument("workspace_name")
@@ -53,6 +102,7 @@ def logs(workspace_name):
     else:
         click.echo("No logs found")
 
+
 @cli.command()
 def workspaces():
     """List all workspaces."""
@@ -62,6 +112,7 @@ def workspaces():
         url = data.get("web_url", "unknown")
         agents = len(data.get("completed_agents", []))
         click.echo(f"  {ws.name}  url={url}  agents={agents}")
+
 
 def main():
     cli()
