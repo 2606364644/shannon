@@ -105,8 +105,9 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 			"ID": "unique ID for each vulnerability (e.g., INJ-VULN-XX)",
 			"vulnerability_type": "SQLi | CommandInjection | LFI | RFI | SSTI | PathTraversal | InsecureDeserialization",
 			"externally_exploitable": true | false,
-			"source": "param name & file:line.",
-			"combined_sources": "list if multiple sources were merged (with order).",
+			"source": "param name & file:line. MUST be a SINGLE source — see Source Completeness Rule below.",
+			"authentication_required": "true | false — whether login is required to reach this sink via this route. Check the route definition in the router file for authentication middleware (e.g., thirtyLogin, authGuard, passport). A route WITHOUT auth middleware means the vulnerability is exploitable WITHOUT authentication.",
+			"accessible_routes": "list ALL routes whose handlers reach this sink, with their middleware chains. Format: 'METHOD /path [middleware1, middleware2, ...]' — one entry per route. Example: 'GET /preview/v2 [thirtyLogin()]' and 'GET /preview/iframe-demo []'.",
 			"path": "brief hop list (controller → fn → sink).",
 			"sink_call": "file:line and function/method.",
 			"slot_type": "SQL-val | SQL-like | SQL-num | SQL-enum | SQL-ident | CMD-argument | CMD-part-of-string | FILE-path | FILE-include | TEMPLATE-expression | DESERIALIZE-object | PATH-component",
@@ -119,6 +120,8 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 			"notes": "assumptions, untraversed branches, anything unusual."
 		}
   </exploitation_queue_format>
+
+  **Source Completeness Rule:** When multiple user-controllable sources can reach the same sink, you MUST create a SEPARATE vulnerability entry for EACH source. Do NOT merge multiple sources into a single entry. For example, if both `ctx.query.bizEntity` (a URL parameter) and `ctx.user.uid` (session data) reach the same template sink, create two entries — one per source. Each entry must independently trace from its own source to the sink, with its own `authentication_required` and `accessible_routes`. The source with the easiest exploitability (e.g., URL parameter on an unauthenticated route) should appear FIRST in the queue.
 
 </data_format_specifications>
 
@@ -158,8 +161,9 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
     - **QUEUE INCLUSION CRITERIA:** ONLY include vulnerabilities where `externally_exploitable = true`. Exclude any vulnerability requiring internal network access, VPN, or direct server access.
 
     - **fields:**
-		    - `source` (param & file:line)
-		    - `combined_sources` (all merged inputs + order)
+		    - `source` (param & file:line — one source per entry, do NOT merge)
+		    - `authentication_required` (true/false — check router file for auth middleware)
+		    - `accessible_routes` (all routes reaching this sink with middleware chains)
 		    - `path` (controller → fn → DAO)
 		    - `sink_call` (file:line, function/method)
 		    - `slot_type` (`val` / `like` / `num` / `enum` / `ident`)
@@ -270,8 +274,9 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 
 * Use the following fields for every analyzed path:
 
-  * `source`
-  * `combined_sources`
+  * `source` (one source per entry — do NOT merge multiple sources)
+  * `authentication_required`
+  * `accessible_routes`
   * `path`
   * `sink_call`
   * `slot_type`
