@@ -1,16 +1,11 @@
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
 
 
 def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
     """Replicate the path resolution logic from BlackboxScanWorkflow for unit testing."""
-    from pathlib import Path
-
     deliverables_path = None
     if input.repo_path:
         deliverables_path = Path(input.repo_path) / input.deliverables_subdir
