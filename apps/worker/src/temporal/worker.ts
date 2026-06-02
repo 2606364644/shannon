@@ -272,7 +272,7 @@ async function resolveWorkspace(client: Client, args: CliArgs): Promise<Workspac
     }
 
     const session = await readJson<SessionJson>(sessionPath);
-    if (args.webUrl && session.session.webUrl !== args.webUrl) {
+    if (args.webUrl && session.session.webUrl && session.session.webUrl !== args.webUrl) {
       console.error('ERROR: URL mismatch with workspace');
       console.error(`  Workspace URL: ${session.session.webUrl}`);
       console.error(`  Provided URL:  ${args.webUrl}`);
