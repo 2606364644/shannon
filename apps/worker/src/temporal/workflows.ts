@@ -632,7 +632,7 @@ export async function pentestPipelineWorkflow(input: PipelineInput): Promise<Pip
   return pentestPipeline(input);
 }
 
-const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf', 'misconfig'];
+const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf'];
 
 export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
   if (!input.repoPath || input.repoPath.includes('..')) {
