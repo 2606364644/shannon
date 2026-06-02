@@ -51,6 +51,50 @@ def test_start_wires_repo_param():
     assert captured_input.repo_path == expected_repo_path
 
 
+def test_start_shows_whitebox_completion_message():
+    """When whitebox results are found, completion message should mention them."""
+    async def fake_run_scan(input, temporal_address):
+        return BlackboxPipelineState(
+            status="completed",
+            has_whitebox_results=True,
+            found_whitebox_classes=["injection", "xss"],
+        )
+
+    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
+
+    assert result.exit_code == 0
+    assert "leveraged whitebox results" in result.output
+    assert "injection" in result.output
+
+
+def test_start_shows_standalone_completion_message():
+    """When no whitebox results, completion message should say standalone."""
+    async def fake_run_scan(input, temporal_address):
+        return BlackboxPipelineState(status="completed")
+
+    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
+
+    assert result.exit_code == 0
+    assert "standalone" in result.output
+
+
+def test_start_shows_error_on_failure():
+    """When scan fails, CLI should show error and exit 1."""
+    async def fake_run_scan(input, temporal_address):
+        return BlackboxPipelineState(status="failed", errors=["something broke"])
+
+    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
+
+    assert result.exit_code == 1
+    assert "something broke" in result.output
+
+
 def test_workspaces_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["workspaces", "--help"])

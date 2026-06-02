@@ -11,12 +11,12 @@ from .pipeline.activities import (
     run_report_agent,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
-from .pipeline.shared import BlackboxPipelineInput
+from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
 
 TASK_QUEUE = "shannon-blackbox"
 
 
-async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233") -> dict:
+async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233") -> BlackboxPipelineState:
     client = await Client.connect(temporal_address)
 
     worker = Worker(
