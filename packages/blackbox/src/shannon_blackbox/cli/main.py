@@ -17,6 +17,7 @@ def cli():
 
 @cli.command()
 @click.option("--url", required=True, help="Target URL to scan")
+@click.option("-r", "--repo", default=None, help="Target repository path (to reuse whitebox results)")
 @click.option("-o", "--output", default=None, help="Output directory for deliverables")
 @click.option("-w", "--workspace", default=None, help="Workspace name (resume if exists)")
 @click.option("-c", "--config", "config_path", default=None, help="YAML configuration file")
@@ -24,7 +25,7 @@ def cli():
 @click.option("--no-exploit", is_flag=True, help="Skip exploitation phase")
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
-def start(url, output, workspace, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address):
+def start(url, repo, output, workspace, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -33,6 +34,7 @@ def start(url, output, workspace, config_path, vuln_classes, no_exploit, pipelin
 
     input = BlackboxPipelineInput(
         web_url=url,
+        repo_path=str(Path(repo).resolve()) if repo else None,
         workspace_name=workspace,
         config_path=config_path,
         output_path=str(Path(output).resolve()) if output else None,
