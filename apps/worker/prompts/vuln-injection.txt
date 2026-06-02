@@ -107,7 +107,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 			"vulnerability_type": "SQLi | CommandInjection | LFI | RFI | SSTI | PathTraversal | InsecureDeserialization",
 			"externally_exploitable": true | false,
 			"source": "param name & file:line.",
-			"combined_sources": "list if multiple sources were merged (with order).",
+			"combined_sources": "informational only — other sources that merge into the same sink on this path, with merge order. Each source MUST have its own independent entry with its own source-to-sink trace and verdict.",
 			"path": "brief hop list (controller → fn → sink).",
 			"sink_call": "file:line and function/method.",
 			"slot_type": "SQL-val | SQL-like | SQL-num | SQL-enum | SQL-ident | CMD-argument | CMD-part-of-string | FILE-path | FILE-include | TEMPLATE-expression | DESERIALIZE-object | PATH-component",
@@ -160,7 +160,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 
     - **fields:**
 		    - `source` (param & file:line)
-		    - `combined_sources` (all merged inputs + order)
+		    - `combined_sources` (informational: other inputs merging at the same point, in order — does NOT replace independent per-source entries)
 		    - `path` (controller → fn → DAO)
 		    - `sink_call` (file:line, function/method)
 		    - `slot_type` (`val` / `like` / `num` / `enum` / `ident`)
@@ -272,7 +272,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 * Use the following fields for every analyzed path:
 
   * `source`
-  * `combined_sources`
+  * `combined_sources` (informational merge-point metadata — each source still requires its own entry)
   * `path`
   * `sink_call`
   * `slot_type`
