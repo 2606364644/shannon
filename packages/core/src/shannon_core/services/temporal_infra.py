@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 from subprocess import CalledProcessError
@@ -99,3 +100,33 @@ async def get_temporal_status(
 
     healthy = await is_temporal_ready(address)
     return {"container": container_status, "healthy": healthy}
+
+
+async def ensure_infra(
+    compose_file: Path | None = None,
+    address: str = "localhost:7233",
+) -> None:
+    """Ensure Temporal infrastructure is available.
+
+    1. If Temporal is already ready, return immediately.
+    2. Otherwise, start the container via docker compose.
+    3. Poll until healthy (30 attempts × 2s interval).
+    4. Raise RuntimeError on timeout.
+    """
+    if await is_temporal_ready(address):
+        return
+
+    logger.info("Temporal not ready — starting infrastructure...")
+    start_temporal(compose_file)
+
+    logger.info("Waiting for Temporal to become ready...")
+    for i in range(_READY_POLL_ATTEMPTS):
+        if await is_temporal_ready(address):
+            logger.info("Temporal is ready!")
+            return
+        await asyncio.sleep(_READY_POLL_INTERVAL)
+
+    raise RuntimeError(
+        "Timed out waiting for Temporal to become ready. "
+        "Check `docker compose logs` for errors."
+    )

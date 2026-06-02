@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from shannon_core.services.temporal_infra import (
+    ensure_infra,
     get_compose_file,
     get_temporal_status,
     is_temporal_ready,
@@ -107,3 +108,45 @@ class TestGetTemporalStatus:
             result = await get_temporal_status()
         assert result["container"] == "not found"
         assert result["healthy"] is False
+
+
+class TestEnsureInfra:
+    @pytest.mark.asyncio
+    async def test_returns_immediately_if_already_ready(self):
+        with patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready:
+            mock_ready.return_value = True
+            with patch("shannon_core.services.temporal_infra.start_temporal") as mock_start:
+                await ensure_infra()
+        mock_start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_starts_temporal_and_waits_until_ready(self):
+        ready_count = 0
+
+        async def fake_ready(address="localhost:7233"):
+            nonlocal ready_count
+            ready_count += 1
+            return ready_count > 1  # ready on 2nd poll
+
+        with (
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
+            patch("shannon_core.services.temporal_infra.start_temporal") as mock_start,
+        ):
+            await ensure_infra()
+
+        mock_start.assert_called_once()
+        assert ready_count >= 2  # polled at least twice
+
+    @pytest.mark.asyncio
+    async def test_raises_on_timeout(self):
+        async def never_ready(address="localhost:7233"):
+            return False
+
+        with (
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=never_ready),
+            patch("shannon_core.services.temporal_infra.start_temporal"),
+            patch("shannon_core.services.temporal_infra._READY_POLL_ATTEMPTS", 3),
+            patch("shannon_core.services.temporal_infra._READY_POLL_INTERVAL", 0),
+        ):
+            with pytest.raises(RuntimeError, match="Timed out waiting for Temporal"):
+                await ensure_infra()
