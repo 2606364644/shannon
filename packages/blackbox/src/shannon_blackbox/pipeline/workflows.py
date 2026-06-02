@@ -70,13 +70,28 @@ class BlackboxScanWorkflow:
             )
 
         try:
-            deliverables = Path(input.repo_path or "") / input.deliverables_subdir if input.repo_path else Path("workspaces") / (input.workspace_name or "default") / input.deliverables_subdir
+            # Resolve deliverables path: prefer explicit repo_path, fall back to session data, then default
+            deliverables = None
+            if input.repo_path:
+                deliverables = Path(input.repo_path) / input.deliverables_subdir
+            elif input.workspace_name:
+                session_file = Path("workspaces") / input.workspace_name / "session.json"
+                if session_file.exists():
+                    import json as _json
+                    session_data = _json.loads(session_file.read_text())
+                    saved_repo = session_data.get("repo_path")
+                    if saved_repo:
+                        deliverables = Path(saved_repo) / input.deliverables_subdir
+            if not deliverables:
+                deliverables = Path("workspaces") / (input.workspace_name or "default") / input.deliverables_subdir
+
             has_whitebox_results = False
+            found_classes: list[str] = []
             for vt in selected_classes:
                 queue_file = deliverables / f"{vt}_exploitation_queue.json"
                 if queue_file.exists():
                     has_whitebox_results = True
-                    break
+                    found_classes.append(vt)
             self._state.has_whitebox_results = has_whitebox_results
 
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
