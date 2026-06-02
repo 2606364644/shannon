@@ -277,6 +277,106 @@ class TestAnthropicProvider:
         assert result.cost == 0.001
 
 
+class TestAnthropicProviderBuildOptions:
+    """测试 AnthropicProvider._build_options 的零配置行为"""
+
+    def test_no_env_override_with_anthropic_key_only(self):
+        """当只有 ANTHROPIC_API_KEY 时，不应设置 options.env（SDK 自动读取）"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            options = provider._build_options(
+                cwd="/tmp",
+                model="claude-sonnet-4-6",
+            )
+
+        assert options.env is None or options.env == {}
+
+    def test_env_override_with_shannon_api_key(self):
+        """当 SHANNON_API_KEY 显式设置时，应传入 options.env"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {
+            "SHANNON_API_KEY": "shannon-key",
+            "ANTHROPIC_API_KEY": "anthropic-key",
+        }):
+            options = provider._build_options(
+                cwd="/tmp",
+                model="claude-sonnet-4-6",
+            )
+
+        assert options.env is not None
+        assert options.env["ANTHROPIC_API_KEY"] == "shannon-key"
+
+    def test_env_override_with_shannon_base_url(self):
+        """当 SHANNON_BASE_URL 显式设置时，应传入 options.env"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+            "SHANNON_BASE_URL": "https://custom.example.com",
+        }):
+            options = provider._build_options(
+                cwd="/tmp",
+                model="claude-sonnet-4-6",
+            )
+
+        assert options.env is not None
+        assert options.env["ANTHROPIC_BASE_URL"] == "https://custom.example.com"
+
+    def test_both_shannon_overrides(self):
+        """当 SHANNON_API_KEY 和 SHANNON_BASE_URL 同时设置时"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {
+            "SHANNON_API_KEY": "shannon-key",
+            "SHANNON_BASE_URL": "https://custom.example.com",
+        }):
+            options = provider._build_options(
+                cwd="/tmp",
+                model="claude-sonnet-4-6",
+            )
+
+        assert options.env is not None
+        assert options.env["ANTHROPIC_API_KEY"] == "shannon-key"
+        assert options.env["ANTHROPIC_BASE_URL"] == "https://custom.example.com"
+
+    def test_bedrock_env_still_set(self):
+        """Bedrock provider 仍应设置 options.env（不受改动影响）"""
+        config = ProviderConfig(type="bedrock", region="us-west-2")
+        provider = AnthropicProvider(config)
+
+        options = provider._build_options(
+            cwd="/tmp",
+            model="us.anthropic.claude-sonnet-4-6",
+        )
+
+        assert options.env is not None
+        assert options.env["AWS_REGION"] == "us-west-2"
+
+    def test_vertex_env_still_set(self):
+        """Vertex provider 仍应设置 options.env（不受改动影响）"""
+        config = ProviderConfig(
+            type="vertex",
+            region="us-central1",
+            project_id="test-project",
+        )
+        provider = AnthropicProvider(config)
+
+        options = provider._build_options(
+            cwd="/tmp",
+            model="claude-sonnet-4-6@latest",
+        )
+
+        assert options.env is not None
+        assert options.env["CLOUD_ML_REGION"] == "us-central1"
+        assert options.env["ANTHROPIC_VERTEX_PROJECT_ID"] == "test-project"
+
+
 class TestOpenAIProvider:
     """测试 OpenAIProvider"""
 
