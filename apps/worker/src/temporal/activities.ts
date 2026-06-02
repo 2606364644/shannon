@@ -662,7 +662,7 @@ export async function loadResumeState(
     );
   }
 
-  if (session.session.webUrl !== expectedUrl) {
+  if (session.session.webUrl && expectedUrl && session.session.webUrl !== expectedUrl) {
     throw ApplicationFailure.nonRetryable(
       `URL mismatch with workspace\n  Workspace URL: ${session.session.webUrl}\n  Provided URL:  ${expectedUrl}`,
       'URLMismatchError',
