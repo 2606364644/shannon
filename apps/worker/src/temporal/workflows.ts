@@ -921,6 +921,24 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     await authValidationActs.runAuthenticationValidation(activityInput);
     state.currentAgent = null;
 
+    // === Resume session registration (when continuing from prior whitebox) ===
+    if (input.resumeFromWorkspace) {
+      const resumeState = await a.loadResumeState(
+        input.resumeFromWorkspace,
+        input.webUrl,
+        input.repoPath,
+        input.deliverablesSubdir,
+      );
+
+      await a.recordResumeAttempt(
+        activityInput,
+        input.terminatedWorkflows || [],
+        resumeState.checkpointHash,
+        resumeState.originalWorkflowId,
+        resumeState.completedAgents,
+      );
+    }
+
     // === Initialize Deliverables Git (idempotent) ===
     await a.initDeliverableGit(activityInput);
 
