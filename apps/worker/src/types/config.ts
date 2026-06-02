@@ -23,7 +23,8 @@ export interface Rules {
 
 export type VulnClass = 'injection' | 'xss' | 'auth' | 'authz' | 'ssrf' | 'misconfig';
 
-export const ALL_VULN_CLASSES: readonly VulnClass[] = ['injection', 'xss', 'auth', 'authz', 'ssrf', 'misconfig'];
+// NOTE: 'misconfig' is excluded from defaults — enable via vuln_classes config when needed.
+export const ALL_VULN_CLASSES: readonly VulnClass[] = ['injection', 'xss', 'auth', 'authz', 'ssrf'];
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 export type Confidence = 'low' | 'medium' | 'high';
