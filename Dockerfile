@@ -45,6 +45,10 @@ FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
 
 # Install only runtime dependencies
 USER root
+# NOTE: fontconfig trigger (fc-cache) fails on Wolfi because libfontconfig.so.1
+# isn't on the library path yet when the trigger runs. All packages install
+# correctly; only the post-install font cache generation fails. Tolerate the
+# exit code and regenerate the cache in a separate step.
 RUN apk update && apk add --no-cache \
     # Core utilities
     git \
@@ -71,7 +75,11 @@ RUN apk update && apk add --no-cache \
     libxrandr \
     mesa-gbm \
     # Font rendering
-    fontconfig
+    fontconfig \
+    || true
+
+# Regenerate font cache now that libraries are on the path
+RUN fc-cache -f 2>/dev/null || true
 
 # Create non-root user
 RUN addgroup -g 1001 pentest && \
