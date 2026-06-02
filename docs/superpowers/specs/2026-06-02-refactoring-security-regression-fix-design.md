@@ -239,9 +239,16 @@ for vt in selected_classes:
 - `billing_error`
 - `credit balance is too low`
 - `insufficient credits`
-- `usage limit`
-- `monthly limit`
+- `usage is blocked due to insufficient credits`
+- `please visit plans & billing`
+- `please visit plans and billing`
+- `usage limit reached`
 - `quota exceeded`
+- `daily rate limit`
+- `limit will reset`
+- `billing limit reached`
+- `monthly limit`
+- `cap reached`
 - `spending limit`
 
 ### 修复方案
