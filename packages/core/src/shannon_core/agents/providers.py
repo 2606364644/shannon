@@ -144,16 +144,19 @@ def build_provider_config(
     """
     从环境变量和参数构建 ProviderConfig
 
-    环境变量优先级: SHANNON_* > ANTHROPIC_*
+    零配置用法: 只需设置 ANTHROPIC_API_KEY 环境变量即可。
+    SHANNON_* 变量用于覆盖默认行为。
+
+    环境变量优先级: 参数 > SHANNON_* > ANTHROPIC_*
 
     Args:
-        provider_type: Provider 类型
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
-        region: 区域
-        project_id: 项目 ID
-        auth_token: 认证 Token
+        provider_type: Provider 类型（默认 anthropic_api）
+        api_key: API Key（默认从 SHANNON_API_KEY > ANTHROPIC_API_KEY 读取）
+        base_url: Base URL（默认从 SHANNON_BASE_URL > ANTHROPIC_BASE_URL 读取）
+        model: 模型名称（默认从 SHANNON_MODEL > ANTHROPIC_MODEL 读取）
+        region: 区域（用于 Bedrock / Vertex）
+        project_id: 项目 ID（用于 Vertex）
+        auth_token: 认证 Token（用于 LiteLLM）
 
     Returns:
         ProviderConfig: 配置对象
