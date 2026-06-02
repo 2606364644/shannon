@@ -103,11 +103,19 @@ class AnthropicProvider:
 
         # 添加 Provider 特定配置
         if self.type == "anthropic_api":
-            if self.config.api_key:
-                options.env = {"ANTHROPIC_API_KEY": self.config.api_key}
-            if self.config.base_url:
-                options.env = options.env or {}
-                options.env["ANTHROPIC_BASE_URL"] = self.config.base_url
+            # 零配置: SDK 自动从进程环境读取 ANTHROPIC_API_KEY
+            # 只有 SHANNON_* 显式覆盖时才传递给 SDK
+            explicit_env = {}
+            shannon_api_key = os.getenv("SHANNON_API_KEY")
+            shannon_base_url = os.getenv("SHANNON_BASE_URL")
+
+            if shannon_api_key:
+                explicit_env["ANTHROPIC_API_KEY"] = shannon_api_key
+            if shannon_base_url:
+                explicit_env["ANTHROPIC_BASE_URL"] = shannon_base_url
+
+            if explicit_env:
+                options.env = explicit_env
 
         elif self.type == "bedrock":
             options.env = {
