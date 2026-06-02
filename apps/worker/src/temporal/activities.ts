@@ -715,7 +715,16 @@ export async function loadResumeState(
 
   // 5. Find the most recent checkpoint commit
   const deliverablesPath = deliverablesDir(expectedRepoPath, deliverablesSubdir);
-  const checkpointHash = await findLatestCommit(deliverablesPath, checkpoints);
+  // 5. Find the most recent checkpoint commit
+  // When resuming from a different workflow type (e.g. whitebox→blackbox),
+  // the deliverables directory may lack git history (CLI seeds without .git).
+  // Fall back to the first checkpoint hash instead of crashing.
+  let checkpointHash: string;
+  try {
+    checkpointHash = await findLatestCommit(deliverablesPath, checkpoints);
+  } catch {
+    checkpointHash = checkpoints[0] ?? '';
+  }
   const originalWorkflowId = session.session.originalWorkflowId || session.session.id;
 
   // 6. Log summary and return resume state
