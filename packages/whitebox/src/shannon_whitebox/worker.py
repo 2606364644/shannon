@@ -8,6 +8,7 @@ from temporalio.worker import Worker
 from .pipeline.activities import run_agent, run_code_index, run_preflight, run_vuln_agent, run_rebuild_call_chains
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
+from shannon_core.utils.paths import resolve_workspaces_dir
 
 TASK_QUEUE = "shannon-whitebox"
 
@@ -17,7 +18,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
 
     # Persist session data so blackbox can discover repo_path
     if input.workspace_name:
-        workspaces_dir = Path(input.repo_path).parent / "workspaces"
+        workspaces_dir = resolve_workspaces_dir(input.repo_path)
         mgr = SessionManager(workspaces_dir)
         mgr.create_workspace(
             web_url=input.web_url or "",

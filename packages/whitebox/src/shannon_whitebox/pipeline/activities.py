@@ -7,6 +7,7 @@ from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, Vuln
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.models.metrics import AgentMetrics
 from shannon_core.utils.security import validate_target_url
+from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
@@ -16,8 +17,12 @@ from shannon_whitebox.audit.session import AuditSession
 from .shared import ActivityInput
 
 def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
+    deliverables = resolve_deliverables_path(
+        repo_path=input.repo_path,
+        deliverables_subdir=input.deliverables_subdir,
+        workspace_name=input.workspace_name,
+    )
     repo = Path(input.repo_path)
-    deliverables = repo / input.deliverables_subdir
     workspaces = repo.parent / "workspaces"
     return repo, deliverables, workspaces
 
