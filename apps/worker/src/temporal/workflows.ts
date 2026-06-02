@@ -906,22 +906,9 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
   };
 
   try {
-    // === Preflight (full — with URL check) ===
-    state.currentPhase = 'preflight';
-    state.currentAgent = null;
-    await preflightActs.runPreflightValidation(activityInput);
-    log.info('Preflight validation passed');
-
-    // === Playwright stealth config ===
-    await preflightActs.syncPlaywrightStealthConfig(activityInput);
-
-    // === Authentication Validation ===
-    state.currentPhase = 'auth-validation';
-    state.currentAgent = 'validate-authentication';
-    await authValidationActs.runAuthenticationValidation(activityInput);
-    state.currentAgent = null;
-
-    // === Resume session registration (when continuing from prior whitebox) ===
+    // === Session initialization (before any heavy work) ===
+    // Must run first so the CLI detects the workflow within its 120s polling window.
+    // Resume path: write resumeAttempts entry. New workspace: write originalWorkflowId.
     if (input.resumeFromWorkspace) {
       const resumeState = await a.loadResumeState(
         input.resumeFromWorkspace,
@@ -937,7 +924,25 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
         resumeState.originalWorkflowId,
         resumeState.completedAgents,
       );
+    } else {
+      // New workspace: initialize session.json so CLI sees originalWorkflowId
+      await a.persistOrValidateRunScope(activityInput, [], true);
     }
+
+    // === Preflight (full — with URL check) ===
+    state.currentPhase = 'preflight';
+    state.currentAgent = null;
+    await preflightActs.runPreflightValidation(activityInput);
+    log.info('Preflight validation passed');
+
+    // === Playwright stealth config ===
+    await preflightActs.syncPlaywrightStealthConfig(activityInput);
+
+    // === Authentication Validation ===
+    state.currentPhase = 'auth-validation';
+    state.currentAgent = 'validate-authentication';
+    await authValidationActs.runAuthenticationValidation(activityInput);
+    state.currentAgent = null;
 
     // === Initialize Deliverables Git (idempotent) ===
     await a.initDeliverableGit(activityInput);
