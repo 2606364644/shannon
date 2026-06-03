@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationFailure
@@ -27,8 +28,12 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
     try:
         # URL safety and reachability checks (mandatory for blackbox)
         if input.web_url:
-            validate_target_url(input.web_url)
-            reachable = await check_url_reachable(input.web_url)
+            pinned_ip = validate_target_url(input.web_url)
+            reachable = await check_url_reachable(
+                input.web_url,
+                pinned_ip=pinned_ip,
+                original_host=urlparse(input.web_url).hostname,
+            )
             if not reachable:
                 raise PentestError(
                     f"Target URL is not reachable: {input.web_url}",
