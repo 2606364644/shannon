@@ -52,7 +52,7 @@ class AgentExecutor:
             pipeline_testing=pipeline_testing,
         )
 
-        GitManager.create_checkpoint(deliverables, agent_name)
+        await GitManager.create_checkpoint(deliverables, agent_name)
 
         start_time = time.monotonic()
         result = await run_claude_prompt(
@@ -66,7 +66,7 @@ class AgentExecutor:
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
         if result.success and is_spending_cap_behavior(result.turns, result.cost, result.text):
-            GitManager.rollback(deliverables, "spending cap detected")
+            await GitManager.rollback(deliverables, "spending cap detected")
             raise PentestError(
                 f"Spending cap likely reached (turns={result.turns}, cost=${result.cost})",
                 "billing",
@@ -75,7 +75,7 @@ class AgentExecutor:
             )
 
         if not result.success:
-            GitManager.rollback(deliverables, "execution failure")
+            await GitManager.rollback(deliverables, "execution failure")
             raise PentestError(
                 result.error or f"Agent {agent_name.value} execution failed",
                 "validation",
@@ -90,7 +90,7 @@ class AgentExecutor:
 
         await validate_deliverable(deliverables, agent_name)
 
-        GitManager.commit(deliverables, agent_name)
+        await GitManager.commit(deliverables, agent_name)
 
         return AgentMetrics(
             duration_ms=duration_ms,
