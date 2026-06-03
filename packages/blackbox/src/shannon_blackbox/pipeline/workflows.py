@@ -175,6 +175,11 @@ class BlackboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.REPORT.value)
                 self._state.agent_metrics[AgentName.REPORT.value] = metrics
 
+            await workflow.execute_activity(
+                activities.finalize_report, act_input,
+                start_to_close_timeout=timedelta(minutes=5),
+            )
+
             self._state.status = "completed"
             return self._state
         finally:

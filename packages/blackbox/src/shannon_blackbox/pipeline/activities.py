@@ -158,10 +158,19 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
     try:
         from shannon_blackbox.services.report_assembler import ReportAssembler
         from shannon_core.models.agents import ALL_VULN_CLASSES
+        from shannon_core.services.findings_renderer import FindingsRenderer
 
         deliverables = _get_deliverables_path(input)
         vuln_classes: list[str] = list(ALL_VULN_CLASSES)
         report_path = deliverables / "comprehensive_security_assessment_report.md"
+
+        report_config = None
+        if input.config_path:
+            from shannon_core.config.parser import parse_config
+            cfg = parse_config(input.config_path)
+            report_config = cfg.report
+        await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
+
         await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
@@ -188,6 +197,29 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
             pipeline_testing=input.pipeline_testing_mode,
         )
         return metrics.model_dump()
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def finalize_report(input: BlackboxActivityInput) -> None:
+    try:
+        from shannon_blackbox.services.report_assembler import ReportAssembler
+        from shannon_core.interfaces.report_output_provider import NoOpReportOutputProvider
+
+        deliverables = _get_deliverables_path(input)
+        report_path = deliverables / "comprehensive_security_assessment_report.md"
+
+        session_path = Path(input.workspace_path) / "session.json" if input.workspace_path else None
+        if session_path:
+            await ReportAssembler.inject_model_info(report_path, session_path)
+
+        provider = NoOpReportOutputProvider()
+        await provider.generate(report_path, deliverables)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
