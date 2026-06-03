@@ -14,3 +14,4 @@ from shannon_core.services.validate_authentication import (
     validate_authentication,
     verify_auth_state,
 )
+from shannon_core.services.findings_renderer import FindingsRenderer
