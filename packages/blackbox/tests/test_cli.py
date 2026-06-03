@@ -155,3 +155,22 @@ def test_infra_status():
     assert result.exit_code == 0
     assert "running" in result.output.lower()
     assert "healthy" in result.output.lower()
+
+
+def test_start_calls_ensure_infra():
+    """start command should call ensure_infra before run_scan."""
+    async def fake_ensure(*a, **kw):
+        pass
+
+    async def fake_run_scan(input, temporal_address):
+        return BlackboxPipelineState(status="completed")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", side_effect=fake_ensure) as mock_ensure,
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    mock_ensure.assert_called_once()

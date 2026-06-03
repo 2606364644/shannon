@@ -51,6 +51,7 @@ def start(url, repo, output, workspace, config_path, vuln_classes, no_exploit, p
         pipeline_testing_mode=pipeline_testing,
     )
     click.echo(f"Starting black-box scan on {url}")
+    asyncio.run(ensure_infra(address=temporal_address))
     result = asyncio.run(run_scan(input, temporal_address))
     if result.status == "completed":
         if result.has_whitebox_results:
