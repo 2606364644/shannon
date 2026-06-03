@@ -152,3 +152,113 @@ async def test_rollback_returns_changed_files(git_repo: Path):
     result = await GitManager.rollback(git_repo, "multi-file")
     assert result.success is True
     assert len(result.changed_files) >= 2
+
+
+# ---- Concurrency ----
+
+
+async def test_concurrent_checkpoints_serialized(git_repo: Path):
+    """Multiple concurrent create_checkpoint calls should not raise lock errors."""
+    (git_repo / "concurrent.txt").write_text("data")
+
+    results = await asyncio.gather(
+        GitManager.create_checkpoint(git_repo, "agent-a", attempt=1),
+        GitManager.create_checkpoint(git_repo, "agent-b", attempt=1),
+        GitManager.create_checkpoint(git_repo, "agent-c", attempt=1),
+    )
+    assert all(r.success for r in results)
+
+
+# ---- Retry mechanism ----
+
+
+async def test_retry_on_lock_error(git_repo: Path, monkeypatch):
+    """Verify retry is attempted when a lock error occurs."""
+    call_count = 0
+    original_run_git = GitManager._run_git
+
+    async def mock_run_git(repo_path: Path, *args: str):
+        nonlocal call_count
+        result = await original_run_git(repo_path, *args)
+        # Inject a lock error on the first commit call
+        if args and args[0] == "commit":
+            call_count += 1
+            if call_count == 1:
+                result = subprocess.CompletedProcess(
+                    args=["git", *args],
+                    returncode=1,
+                    stdout="",
+                    stderr="fatal: Unable to create 'index.lock': File exists.",
+                )
+        return result
+
+    monkeypatch.setattr(GitManager, "_run_git", staticmethod(mock_run_git))
+    # Reset lock for clean state
+    GitManager._git_lock = asyncio.Lock()
+
+    result = await GitManager.create_checkpoint(git_repo, "retry-agent")
+    assert result.success is True
+    assert call_count >= 2  # Initial call + at least 1 retry
+
+
+# ---- Error handling ----
+
+
+async def test_create_checkpoint_raises_on_persistent_failure(git_repo: Path, monkeypatch):
+    """When git commit keeps failing with non-lock errors, PentestError is raised."""
+    async def mock_run_git_with_retry(repo_path: Path, *args: str, max_retries: int = 5):
+        return subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=1,
+            stdout="",
+            stderr="some non-lock error",
+        )
+
+    monkeypatch.setattr(GitManager, "_run_git_with_retry", staticmethod(mock_run_git_with_retry))
+
+    with pytest.raises(PentestError) as exc_info:
+        await GitManager.create_checkpoint(git_repo, "failing-agent")
+
+    assert exc_info.value.error_code is not None
+    assert "GIT_CHECKPOINT_FAILED" in str(exc_info.value.error_code)
+
+
+async def test_commit_raises_on_failure(git_repo: Path, monkeypatch):
+    async def mock_run_git_with_retry(repo_path: Path, *args: str, max_retries: int = 5):
+        return subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=1,
+            stdout="",
+            stderr="commit error",
+        )
+
+    monkeypatch.setattr(GitManager, "_run_git_with_retry", staticmethod(mock_run_git_with_retry))
+
+    with pytest.raises(PentestError) as exc_info:
+        await GitManager.commit(git_repo, "failing-agent")
+
+    assert "GIT_CHECKPOINT_FAILED" in str(exc_info.value.error_code)
+
+
+# ---- execute_with_retry ----
+
+
+async def test_execute_with_retry_success(git_repo: Path):
+    result = await GitManager.execute_with_retry(git_repo, "status", "--porcelain")
+    assert result.returncode == 0
+
+
+# ---- Change tracking ----
+
+
+async def test_changed_files_tracked_on_commit(git_repo: Path):
+    (git_repo / "new_file.py").write_text("print('hello')")
+    result = await GitManager.commit(git_repo, "tracker-agent")
+    assert result.success
+    assert any("new_file.py" in f for f in result.changed_files)
+
+
+async def test_no_changes_returns_empty_list(git_repo: Path):
+    result = await GitManager.commit(git_repo, "no-change-agent")
+    assert result.success
+    assert result.changed_files == []
