@@ -132,7 +132,8 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
 
 @cli.command()
 @click.argument("workspace_name")
-def logs(workspace_name):
+@click.option("--follow", is_flag=True, help="Tail the log in real-time (auto-exits on completion)")
+def logs(workspace_name, follow):
     """View workspace execution logs."""
     workspaces_dir = Path("workspaces")
     ws = workspaces_dir / workspace_name
@@ -140,10 +141,14 @@ def logs(workspace_name):
         click.echo(f"Workspace not found: {workspace_name}")
         raise SystemExit(1)
     log_file = ws / "workflow.log"
-    if log_file.exists():
-        click.echo(log_file.read_text())
-    else:
+    if not log_file.exists():
         click.echo("No logs found")
+        return
+    if follow:
+        from shannon_core.cli.logs import tail_workflow_log
+        tail_workflow_log(workspace_name)
+    else:
+        click.echo(log_file.read_text())
 
 
 @cli.command()

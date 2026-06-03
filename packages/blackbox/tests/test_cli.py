@@ -401,3 +401,30 @@ def test_workspace_show_not_found(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
+
+
+def test_logs_command_accepts_follow_flag(tmp_path, monkeypatch):
+    """The logs command should accept a --follow flag."""
+    runner = CliRunner()
+    # Create a workspace with a workflow.log
+    ws = tmp_path / "workspaces" / "test-ws"
+    ws.mkdir(parents=True)
+    (ws / "workflow.log").write_text("line 1\n")
+    monkeypatch.chdir(tmp_path)
+    # Just test that --follow is accepted as an option (it will error on missing watchdog setup in test, but the flag should parse)
+    result = runner.invoke(cli, ["logs", "test-ws", "--follow"])
+    # We expect it to either work or fail at runtime, not at argument parsing
+    assert "--follow" not in (result.output or "")  # --follow shouldn't appear as an error about unknown option
+
+
+def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
+    """Without --follow, logs command should cat the file."""
+    runner = CliRunner()
+    # Create workspaces directory
+    ws = tmp_path / "workspaces" / "test-ws"
+    ws.mkdir(parents=True)
+    (ws / "workflow.log").write_text("hello from log\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(cli, ["logs", "test-ws"])
+    assert result.exit_code == 0
+    assert "hello from log" in result.output
