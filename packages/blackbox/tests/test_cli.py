@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
@@ -112,3 +112,34 @@ def test_infra_help():
     result = runner.invoke(cli, ["infra", "--help"])
     assert result.exit_code == 0
     assert "Manage Temporal infrastructure" in result.output
+
+
+def test_infra_up():
+    with (
+        patch("shannon_blackbox.cli.main.start_temporal"),
+        patch("shannon_blackbox.cli.main.is_temporal_ready", new_callable=AsyncMock, return_value=True),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["infra", "up"])
+    assert result.exit_code == 0
+    assert "ready" in result.output.lower()
+
+
+def test_infra_down():
+    with patch("shannon_blackbox.cli.main.stop_temporal"):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["infra", "down"])
+    assert result.exit_code == 0
+    assert "stopped" in result.output.lower()
+
+
+def test_infra_status():
+    async def fake_status(**kwargs):
+        return {"container": "running", "healthy": True}
+
+    with patch("shannon_blackbox.cli.main.get_temporal_status", side_effect=fake_status):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["infra", "status"])
+    assert result.exit_code == 0
+    assert "running" in result.output.lower()
+    assert "healthy" in result.output.lower()
