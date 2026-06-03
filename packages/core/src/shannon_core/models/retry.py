@@ -7,6 +7,8 @@ from shannon_core.models.errors import NON_RETRYABLE_TYPES
 # Non-retryable error types for all policies
 NON_RETRYABLE = sorted(NON_RETRYABLE_TYPES)
 
+# PREFLIGHT_RETRY and AUTH_VALIDATION_RETRY are intentionally decoupled
+# for independent tuning despite currently sharing the same parameters.
 PREFLIGHT_RETRY = RetryPolicy(
     maximum_attempts=3,
     initial_interval=timedelta(seconds=10),
@@ -31,6 +33,7 @@ PRODUCTION_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
+# Presets for future use by testing and subscription pipelines.
 TESTING_RETRY = RetryPolicy(
     maximum_attempts=5,
     initial_interval=timedelta(seconds=10),

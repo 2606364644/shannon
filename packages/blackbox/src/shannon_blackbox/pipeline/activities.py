@@ -54,6 +54,9 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
@@ -86,6 +89,9 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
@@ -109,6 +115,9 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
         )
         return metrics.model_dump()
     except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -139,6 +148,9 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
@@ -152,6 +164,9 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
         report_path = deliverables / "comprehensive_security_assessment_report.md"
         await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
     except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -174,5 +189,8 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
         )
         return metrics.model_dump()
     except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

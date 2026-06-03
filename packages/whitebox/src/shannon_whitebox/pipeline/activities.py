@@ -64,6 +64,9 @@ async def run_preflight(input: ActivityInput) -> None:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 @activity.defn
 async def run_agent(input: ActivityInput) -> dict:
@@ -86,14 +89,13 @@ async def run_agent(input: ActivityInput) -> dict:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 @activity.defn
 async def run_vuln_agent(input: ActivityInput) -> dict:
-    try:
-        return await run_agent(input)
-    except PentestError as e:
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    return await run_agent(input)
 
 
 @activity.defn
@@ -107,6 +109,9 @@ async def run_credential_check(input: ActivityInput) -> None:
         if api_key or provider != "anthropic_api":
             await validate_credentials(provider, api_key=api_key, base_url=base_url)
     except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -141,6 +146,9 @@ async def run_auth_validation(input: ActivityInput) -> None:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
@@ -162,6 +170,9 @@ async def run_code_index(input: ActivityInput) -> dict:
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
@@ -178,5 +189,8 @@ async def run_rebuild_call_chains(input: ActivityInput) -> dict:
             "total_chains": updated.total_chains,
         }
     except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
