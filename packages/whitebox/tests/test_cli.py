@@ -138,3 +138,42 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     assert "Black-box workspaces:" in result.output
     assert "wb-1" in result.output
     assert "bb-1" in result.output
+
+
+def test_workspace_show(tmp_path, monkeypatch):
+    """workspace show should display detailed workspace info."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://myapp.com", "/repo", name="myapp-wb", scan_type="whitebox")
+    mgr.mark_completed(ws)
+    deliverables = ws / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+    )
+    (deliverables / "executive_summary.md").write_text("# Summary", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "show", "myapp-wb"])
+
+    assert result.exit_code == 0
+    assert "myapp-wb" in result.output
+    assert "whitebox" in result.output
+    assert "https://myapp.com" in result.output
+    assert "injection_exploitation_queue.json" in result.output
+    assert "executive_summary.md" in result.output
+
+
+def test_workspace_show_not_found(tmp_path, monkeypatch):
+    """workspace show with nonexistent name should exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "show", "nonexistent"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()

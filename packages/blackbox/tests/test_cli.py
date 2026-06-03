@@ -370,3 +370,34 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "White-box workspaces:" in result.output
     assert "Black-box workspaces:" in result.output
+
+
+def test_workspace_show(tmp_path, monkeypatch):
+    """workspace show should display detailed workspace info."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://myapp.com", "/repo", name="myapp-bb", scan_type="blackbox")
+    mgr.set_parent_workspace(ws, "wb-parent")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "show", "myapp-bb"])
+
+    assert result.exit_code == 0
+    assert "myapp-bb" in result.output
+    assert "blackbox" in result.output
+    assert "wb-parent" in result.output
+
+
+def test_workspace_show_not_found(tmp_path, monkeypatch):
+    """workspace show with nonexistent name should exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "show", "nonexistent"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()

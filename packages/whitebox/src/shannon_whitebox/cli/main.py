@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 
 import click
@@ -159,6 +160,93 @@ def workspaces():
 
     if not whitebox and not blackbox:
         click.echo("No workspaces found.")
+
+
+@cli.group()
+def workspace():
+    """Workspace management commands."""
+
+
+@workspace.command()
+@click.argument("workspace_name")
+def show(workspace_name):
+    """Show detailed workspace information."""
+    from shannon_core.workspace import compute_deliverables_summary, get_workspace_info
+
+    mgr = SessionManager(Path("workspaces"))
+    ws = mgr.get_workspace(workspace_name)
+    if ws is None:
+        click.echo(f"Workspace not found: {workspace_name}")
+        raise SystemExit(1)
+
+    info = get_workspace_info(ws)
+
+    click.echo(f"\nWorkspace: {info['name']}")
+    click.echo(f"  Type:           {info['scan_type']}")
+    click.echo(f"  Target:         {info['web_url'] or 'unknown'}")
+    click.echo(f"  Repo:           {info['repo_path'] or 'unknown'}")
+    click.echo(f"  Status:         {info['status']}")
+
+    created = info["created_at"]
+    completed = info["completed_at"]
+    click.echo(f"  Created:        {created or 'unknown'}")
+    click.echo(f"  Completed:      {completed or 'N/A'}")
+
+    # Duration
+    if created and completed:
+        try:
+            c_time = float(created)
+            e_time = float(completed)
+            duration_secs = int(e_time - c_time)
+            hours, remainder = divmod(duration_secs, 3600)
+            minutes, secs = divmod(remainder, 60)
+            click.echo(f"  Duration:       {hours}h {minutes}m {secs}s")
+        except (ValueError, TypeError):
+            pass
+
+    # Deliverables
+    summary = info["deliverables_summary"]
+    if summary["vuln_queues"] or summary["reports"]:
+        click.echo("\n  Deliverables:")
+        deliverables_dir = ws / "deliverables"
+        for vc in summary["vuln_queues"]:
+            filename = f"{vc}_exploitation_queue.json"
+            filepath = deliverables_dir / filename
+            if filepath.exists():
+                try:
+                    data = json.loads(filepath.read_text(encoding="utf-8"))
+                    count = len(data.get("vulnerabilities", []))
+                    click.echo(f"    OK {filename}  ({count} findings)")
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    click.echo(f"    WARN {filename}  (invalid)")
+            else:
+                click.echo(f"    OK {filename}")
+
+        for report in summary["reports"]:
+            click.echo(f"    OK {report}")
+
+    # Links
+    links = info["links"]
+    children = links.get("child_workspaces", [])
+    if children:
+        click.echo("\n  Linked black-box scans:")
+        for child in children:
+            child_ws = mgr.get_workspace(child)
+            if child_ws:
+                child_status = mgr.get_status(child_ws)
+                click.echo(f"    - {child} ({child_status})")
+            else:
+                click.echo(f"    - {child}")
+
+    parent = links.get("parent_workspace")
+    if parent:
+        click.echo(f"\n  Parent workspace: {parent}")
+
+    # Reuse command
+    url = info["web_url"]
+    if url and info["scan_type"] == "whitebox":
+        click.echo(f"\n  Reuse command:")
+        click.echo(f"    shannon-blackbox start --url {url} -w {info['name']}")
 
 
 def main():
