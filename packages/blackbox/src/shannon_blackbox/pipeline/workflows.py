@@ -127,12 +127,15 @@ class BlackboxScanWorkflow:
                 # Queue gating: validate queue files before scheduling exploit agents
                 exploit_tasks = []
                 for vt in selected_classes:
-                    should_run = await ExploitationChecker.should_exploit(
+                    validation = await ExploitationChecker.validate_queue(
                         deliverables_path=deliverables,
                         vuln_type=vt,
-                        exploit_enabled=input.exploit,
                     )
-                    if not should_run:
+                    if not validation.valid:
+                        if validation.reason not in ("queue_file_missing",):
+                            logger.info(
+                                "Skipping exploit for %s: %s", vt, validation.reason
+                            )
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
                     if agent_name.value not in self._state.completed_agents:
