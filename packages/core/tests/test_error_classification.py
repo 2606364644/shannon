@@ -35,6 +35,8 @@ class TestIsRetryableErrorNonRetryable:
             "ENOENT: no such file or directory",
             "no such file or directory",
             "config value is missing",
+            "max turns reached",
+            "budget exceeded",
         ],
     )
     def test_non_retryable_patterns(self, message):
@@ -67,8 +69,6 @@ class TestIsRetryableErrorRetryable:
             "HTTP 500 Internal Server Error",
             "HTTP 502 Bad Gateway",
             "HTTP 503 Service Unavailable",
-            "max turns reached",
-            "budget exceeded",
         ],
     )
     def test_retryable_patterns(self, message):

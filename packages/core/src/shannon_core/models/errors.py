@@ -57,6 +57,8 @@ NON_RETRYABLE_PATTERNS: list[re.Pattern] = [
     re.compile(r"enoent", re.IGNORECASE),
     re.compile(r"no such file", re.IGNORECASE),
     re.compile(r"config", re.IGNORECASE),
+    re.compile(r"max turns", re.IGNORECASE),
+    re.compile(r"budget", re.IGNORECASE),
 ]
 
 RETRYABLE_PATTERNS: list[re.Pattern] = [
@@ -69,8 +71,6 @@ RETRYABLE_PATTERNS: list[re.Pattern] = [
     re.compile(r"500", re.IGNORECASE),
     re.compile(r"502", re.IGNORECASE),
     re.compile(r"503", re.IGNORECASE),
-    re.compile(r"max turns", re.IGNORECASE),
-    re.compile(r"budget", re.IGNORECASE),
 ]
 
 
@@ -177,6 +177,9 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
     return ("TransientError", True)
 
 
+# Types that are ALWAYS non-retryable.
+# For types that may or may not be retryable (AgentExecutionError, UnknownError),
+# use the boolean returned by classify_error_for_temporal().
 NON_RETRYABLE_TYPES = frozenset({
     "AuthenticationError", "AuthLoginFailedError", "PermissionError",
     "ConfigurationError", "InvalidRequestError", "RequestTooLargeError",
