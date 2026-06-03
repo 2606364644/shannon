@@ -15,7 +15,7 @@ from shannon_core.services.temporal_infra import (
     stop_temporal,
 )
 from shannon_core.session import SessionManager
-from shannon_core.workspace import compute_deliverables_summary, find_latest_workspace
+from shannon_core.workspace import compute_deliverables_summary, find_latest_workspace, find_workspaces_by_url
 
 
 @click.group()
@@ -58,6 +58,47 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         click.echo(f"Found white-box results in workspace '{wb_ws.name}'")
         click.echo(f"   Vulnerability queues found: {queues}")
         click.echo("   Skipping recon phase — leveraging white-box findings directly.")
+
+    elif not workspace and not latest:
+        # Auto-detect: find whitebox workspaces for the same target URL
+        matches = find_workspaces_by_url(Path("workspaces"), url, scan_type="whitebox")
+
+        if len(matches) == 1:
+            ws_path, summary = matches[0]
+            click.echo(f"Detected white-box results for '{url}' (workspace: {ws_path.name})")
+            if click.confirm("   Reuse these results?", default=True):
+                resolved_workspace = ws_path.name
+                queues = ", ".join(summary["vuln_queues"])
+                click.echo(f"   Using workspace '{ws_path.name}' ({queues})")
+            else:
+                click.echo("Running standalone black-box scan.")
+
+        elif len(matches) > 1:
+            click.echo(f"Found {len(matches)} white-box workspaces for '{url}':")
+            for i, (ws_path, summary) in enumerate(matches, 1):
+                queues = ", ".join(summary["vuln_queues"])
+                click.echo(f"  [{i}] {ws_path.name}  ({queues})")
+            click.echo("")
+            choice = click.prompt(
+                "Select workspace to reuse [1-{}] or 'n' for standalone".format(len(matches)),
+                default="1",
+            )
+            if choice.strip().lower() == "n":
+                click.echo("Running standalone black-box scan.")
+            else:
+                try:
+                    idx = int(choice.strip()) - 1
+                    if 0 <= idx < len(matches):
+                        resolved_workspace = matches[idx][0].name
+                        click.echo(f"   Using workspace '{resolved_workspace}'")
+                    else:
+                        click.echo("Invalid selection. Running standalone.")
+                except ValueError:
+                    click.echo("Invalid selection. Running standalone.")
+
+        else:
+            click.echo("No white-box results found for this target. Running standalone black-box scan.")
+            click.echo("   Tip: run white-box first, then use --latest to reuse results.")
 
     input = BlackboxPipelineInput(
         web_url=url,
