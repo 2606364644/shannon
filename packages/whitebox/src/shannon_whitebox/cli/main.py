@@ -45,7 +45,21 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     asyncio.run(ensure_infra(address=temporal_address))
     result = asyncio.run(run_scan(input, temporal_address))
     if result.get("status") == "completed":
-        click.echo("Scan completed successfully")
+        ws_name = result.get("workspace_name", "unknown")
+        deliverables_path = result.get("deliverables_path", "")
+        web_url = result.get("web_url", "<target-url>")
+
+        click.echo("")
+        click.echo("White-box scan complete.")
+        click.echo("")
+        click.echo(f"  Workspace:     {ws_name}")
+        if deliverables_path:
+            click.echo(f"  Deliverables:  {deliverables_path}")
+        click.echo("")
+        click.echo("  Next steps:")
+        click.echo(f"    shannon-blackbox start --url {web_url} -w {ws_name}")
+        click.echo("    # or use --latest to reuse the most recent white-box results:")
+        click.echo(f"    shannon-blackbox start --url {web_url} --latest")
     else:
         click.echo(f"Scan failed: {result.get('error', 'unknown error')}")
         raise SystemExit(1)

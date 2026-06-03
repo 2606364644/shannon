@@ -85,3 +85,27 @@ def test_start_calls_ensure_infra():
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     mock_ensure.assert_called_once()
+
+
+def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
+    """Completion output should show workspace name, deliverables path, and next-step commands."""
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_ensure(*a, **kw):
+        pass
+
+    async def fake_run_scan(input, temporal_address):
+        return {"status": "completed", "workspace_name": "myapp-20260603-143022"}
+
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Workspace:" in result.output
+    assert "Next steps:" in result.output
+    assert "shannon-blackbox start" in result.output
+    assert "--latest" in result.output
