@@ -9,7 +9,7 @@ class SessionManager:
         self.workspaces_dir = workspaces_dir
         self.workspaces_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_workspace(self, web_url: str, repo_path: str, name: str | None = None) -> Path:
+    def create_workspace(self, web_url: str, repo_path: str, name: str | None = None, *, scan_type: str = "whitebox") -> Path:
         if not name:
             hostname = web_url.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "-")
             session_id = f"shannon-{int(time.time() * 1000)}"
@@ -22,6 +22,11 @@ class SessionManager:
             "web_url": web_url,
             "repo_path": repo_path,
             "created_at": time.time(),
+            "scan_type": scan_type,
+            "status": "running",
+            "completed_at": None,
+            "links": {"parent_workspace": None, "child_workspaces": []},
+            "deliverables_summary": None,
             "completed_agents": [],
             "metrics": {"agents": {}},
         }
@@ -67,3 +72,83 @@ class SessionManager:
     def is_agent_completed(self, workspace_path: Path, agent_name: AgentName) -> bool:
         data = self.get_session_data(workspace_path)
         return agent_name.value in data.get("completed_agents", [])
+
+    def get_scan_type(self, workspace_path: Path) -> str:
+        """Read scan_type from session.json, inferring from workspace name as fallback."""
+        data = self.get_session_data(workspace_path)
+        if "scan_type" in data:
+            return data["scan_type"]
+        session = data.get("session", {})
+        if "scan_type" in session:
+            return session["scan_type"]
+        name = workspace_path.name.lower()
+        if "blackbox" in name:
+            return "blackbox"
+        return "whitebox"
+
+    def get_status(self, workspace_path: Path) -> str:
+        """Read status from session.json, handling both flat and nested formats."""
+        data = self.get_session_data(workspace_path)
+        if "status" in data:
+            return data["status"]
+        session = data.get("session", {})
+        if "status" in session:
+            return session["status"]
+        metrics = data.get("metrics", {})
+        agents = metrics.get("agents", {})
+        if agents:
+            return "completed"
+        return "unknown"
+
+    def get_web_url(self, workspace_path: Path) -> str | None:
+        """Read web_url from session.json, handling both flat and nested formats."""
+        data = self.get_session_data(workspace_path)
+        if "web_url" in data:
+            return data["web_url"]
+        session = data.get("session", {})
+        return session.get("webUrl") or session.get("web_url")
+
+    def get_created_at(self, workspace_path: Path) -> str | None:
+        """Read created_at timestamp from session.json, handling both formats."""
+        data = self.get_session_data(workspace_path)
+        if "created_at" in data:
+            return data["created_at"]
+        session = data.get("session", {})
+        return session.get("createdAt") or session.get("created_at")
+
+    def get_completed_at(self, workspace_path: Path) -> str | None:
+        """Read completed_at timestamp from session.json."""
+        data = self.get_session_data(workspace_path)
+        if "completed_at" in data:
+            return data["completed_at"]
+        session = data.get("session", {})
+        return session.get("completedAt") or session.get("completed_at")
+
+    def get_links(self, workspace_path: Path) -> dict:
+        """Read links from session.json, returning defaults if absent."""
+        data = self.get_session_data(workspace_path)
+        if "links" in data:
+            return data["links"]
+        return {"parent_workspace": None, "child_workspaces": []}
+
+    def set_parent_workspace(self, workspace_path: Path, parent_name: str) -> None:
+        """Set the parent workspace link for a black-box workspace."""
+        links = self.get_links(workspace_path)
+        links["parent_workspace"] = parent_name
+        self.update_session(workspace_path, {"links": links})
+
+    def add_child_workspace(self, workspace_path: Path, child_name: str) -> None:
+        """Add a child workspace link to a white-box workspace."""
+        links = self.get_links(workspace_path)
+        children = links.get("child_workspaces", [])
+        if child_name not in children:
+            children.append(child_name)
+        links["child_workspaces"] = children
+        self.update_session(workspace_path, {"links": links})
+
+    def mark_completed(self, workspace_path: Path) -> None:
+        """Mark workspace status as completed with timestamp."""
+        self.update_session(workspace_path, {
+            "status": "completed",
+            "completed_at": time.time(),
+        })

@@ -32,3 +32,79 @@ def test_session_json_contains_url(tmp_path):
     ws = mgr.create_workspace("https://test.com", "/repo")
     data = json.loads((ws / "session.json").read_text())
     assert data["web_url"] == "https://test.com"
+
+def test_create_workspace_includes_scan_type(tmp_path):
+    """create_workspace should accept and persist scan_type."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", scan_type="whitebox")
+    data = json.loads((ws / "session.json").read_text())
+    assert data["scan_type"] == "whitebox"
+
+
+def test_create_workspace_defaults_scan_type(tmp_path):
+    """create_workspace should default scan_type to 'whitebox'."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    data = json.loads((ws / "session.json").read_text())
+    assert data["scan_type"] == "whitebox"
+
+
+def test_create_workspace_blackbox_scan_type(tmp_path):
+    """create_workspace with scan_type='blackbox'."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", scan_type="blackbox")
+    data = json.loads((ws / "session.json").read_text())
+    assert data["scan_type"] == "blackbox"
+
+
+def test_get_scan_type_explicit(tmp_path):
+    """get_scan_type returns explicit scan_type from session.json."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", scan_type="blackbox")
+    assert mgr.get_scan_type(ws) == "blackbox"
+
+
+def test_get_scan_type_inferred_from_name(tmp_path):
+    """get_scan_type infers from workspace name containing 'blackbox'."""
+    ws = tmp_path / "workspaces" / "myapp-blackbox-123"
+    ws.mkdir(parents=True)
+    (ws / "session.json").write_text(json.dumps({"web_url": "https://example.com"}))
+    mgr = SessionManager(tmp_path / "workspaces")
+    assert mgr.get_scan_type(ws) == "blackbox"
+
+
+def test_get_scan_type_defaults_whitebox(tmp_path):
+    """get_scan_type defaults to whitebox when no clue exists."""
+    ws = tmp_path / "workspaces" / "myapp-123"
+    ws.mkdir(parents=True)
+    (ws / "session.json").write_text(json.dumps({"web_url": "https://example.com"}))
+    mgr = SessionManager(tmp_path / "workspaces")
+    assert mgr.get_scan_type(ws) == "whitebox"
+
+
+def test_get_status_from_session(tmp_path):
+    """get_status reads status field from session.json."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    assert mgr.get_status(ws) == "running"
+
+
+def test_get_status_legacy_format(tmp_path):
+    """get_status handles legacy nested session.status format."""
+    ws = tmp_path / "workspaces" / "legacy-ws"
+    ws.mkdir(parents=True)
+    (ws / "session.json").write_text(json.dumps({
+        "session": {"id": "legacy-ws", "status": "completed"},
+        "metrics": {},
+    }))
+    mgr = SessionManager(tmp_path / "workspaces")
+    assert mgr.get_status(ws) == "completed"
+
+
+def test_get_status_unknown_when_empty(tmp_path):
+    """get_status returns 'unknown' when no status info exists."""
+    ws = tmp_path / "workspaces" / "empty-ws"
+    ws.mkdir(parents=True)
+    (ws / "session.json").write_text(json.dumps({"web_url": "https://example.com"}))
+    mgr = SessionManager(tmp_path / "workspaces")
+    assert mgr.get_status(ws) == "unknown"
