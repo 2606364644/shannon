@@ -22,3 +22,16 @@ async def run_with_concurrency_limit(
             raise item
         results.append(item)
     return results
+
+
+class SessionMutex:
+    """Per-sessionId async mutex with FIFO queue semantics."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    async def lock(self, session_id: str) -> Callable[[], None]:
+        if session_id not in self._locks:
+            self._locks[session_id] = asyncio.Lock()
+        await self._locks[session_id].acquire()
+        return self._locks[session_id].release
