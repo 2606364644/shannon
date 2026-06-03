@@ -105,3 +105,10 @@ def test_logs_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["logs", "--help"])
     assert result.exit_code == 0
+
+
+def test_infra_help():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["infra", "--help"])
+    assert result.exit_code == 0
+    assert "Manage Temporal infrastructure" in result.output

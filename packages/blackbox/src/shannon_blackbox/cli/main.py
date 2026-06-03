@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 
 import click
@@ -6,6 +7,13 @@ import click
 from dotenv import load_dotenv
 
 from shannon_core.models.agents import ALL_VULN_CLASSES
+from shannon_core.services.temporal_infra import (
+    ensure_infra,
+    get_temporal_status,
+    is_temporal_ready,
+    start_temporal,
+    stop_temporal,
+)
 from shannon_core.session import SessionManager
 
 
@@ -81,6 +89,42 @@ def workspaces():
         url = data.get("web_url", "unknown")
         agents = len(data.get("completed_agents", []))
         click.echo(f"  {ws.name}  url={url}  agents={agents}")
+
+
+@cli.group()
+def infra():
+    """Manage Temporal infrastructure."""
+
+
+@infra.command()
+def up():
+    """Start Temporal server."""
+    start_temporal()
+    click.echo("Waiting for Temporal to be ready...")
+    for _ in range(30):
+        if asyncio.run(is_temporal_ready()):
+            click.echo("Temporal is ready!")
+            return
+        time.sleep(2)
+    click.echo("Warning: Temporal may not be ready yet. Check `docker compose logs`.")
+
+
+@infra.command()
+def down():
+    """Stop Temporal server."""
+    stop_temporal()
+    click.echo("Temporal stopped.")
+
+
+@infra.command()
+def status():
+    """Check Temporal server status."""
+    result = asyncio.run(get_temporal_status())
+    container = result.get("container", "unknown")
+    healthy = result.get("healthy", False)
+    health_str = "healthy" if healthy else "not healthy"
+    click.echo(f"Container: {container}")
+    click.echo(f"Health: {health_str}")
 
 
 def main():
