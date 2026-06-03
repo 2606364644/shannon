@@ -41,3 +41,10 @@ class ResumeInfo(BaseModel):
     new_workflow_id: str
     checkpoint_hash: str
     completed_agents: list[str]
+
+
+class PhaseMetrics(BaseModel):
+    duration_ms: int = 0
+    duration_percentage: float = 0.0
+    cost_usd: float = 0.0
+    agent_count: int = 0

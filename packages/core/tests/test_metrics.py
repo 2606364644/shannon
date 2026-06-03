@@ -1,4 +1,5 @@
 from shannon_core.models.metrics import AgentMetrics, SessionMetadata
+from shannon_core.models.audit import PhaseMetrics
 
 def test_agent_metrics_defaults():
     m = AgentMetrics(duration_ms=1000)
@@ -64,3 +65,24 @@ def test_agent_metrics_structured_output_nested():
     }
     m = AgentMetrics(duration_ms=200, structured_output=data)
     assert m.structured_output["failure_point"] == "totp_secret"
+
+
+def test_phase_metrics_defaults():
+    pm = PhaseMetrics()
+    assert pm.duration_ms == 0
+    assert pm.duration_percentage == 0.0
+    assert pm.cost_usd == 0.0
+    assert pm.agent_count == 0
+
+
+def test_phase_metrics_with_values():
+    pm = PhaseMetrics(
+        duration_ms=15000,
+        duration_percentage=12.5,
+        cost_usd=0.10,
+        agent_count=1,
+    )
+    assert pm.duration_ms == 15000
+    assert pm.duration_percentage == 12.5
+    assert pm.cost_usd == 0.10
+    assert pm.agent_count == 1

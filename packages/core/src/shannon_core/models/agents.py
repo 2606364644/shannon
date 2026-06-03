@@ -164,3 +164,23 @@ ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz",
 PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
 # VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
 PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
+
+AGENT_PHASE_MAP: dict[str, str] = {
+    "pre-recon": "pre-recon",
+    "recon": "recon",
+    "injection-vuln": "vulnerability-analysis",
+    "xss-vuln": "vulnerability-analysis",
+    "auth-vuln": "vulnerability-analysis",
+    "ssrf-vuln": "vulnerability-analysis",
+    "authz-vuln": "vulnerability-analysis",
+    "misconfig-vuln": "vulnerability-analysis",
+    "recon-blackbox": "recon",
+    "injection-exploit": "exploitation",
+    "xss-exploit": "exploitation",
+    "auth-exploit": "exploitation",
+    "ssrf-exploit": "exploitation",
+    "authz-exploit": "exploitation",
+    "misconfig-exploit": "exploitation",
+    "report": "reporting",
+    "validate-authentication": "pre-recon",
+}
