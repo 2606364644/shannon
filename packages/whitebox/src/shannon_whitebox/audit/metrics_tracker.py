@@ -50,7 +50,7 @@ class MetricsTracker:
             }
 
     async def end_agent(self, agent_name: str, result: AgentEndResult) -> None:
-        """Persist agent results and update running totals."""
+        """Persist agent results, update running totals, and aggregate phase metrics."""
         agents = self._data["metrics"]["agents"]
         if agent_name not in agents:
             agents[agent_name] = {}
@@ -67,7 +67,47 @@ class MetricsTracker:
         self._data["metrics"]["total_duration_ms"] += result.duration_ms
         self._data["metrics"]["total_cost_usd"] += result.cost_usd
 
+        # Phase aggregation — only for successful agents
+        if result.success:
+            self._aggregate_phase(agent_name, result)
+
         await self._atomic_write()
+
+    def _aggregate_phase(self, agent_name: str, result: AgentEndResult) -> None:
+        """Accumulate metrics for the agent's phase and recalculate percentages."""
+        from shannon_core.models.agents import AGENT_PHASE_MAP
+
+        phase_name = AGENT_PHASE_MAP.get(agent_name)
+        if phase_name is None:
+            return
+
+        phases = self._data["metrics"]["phases"]
+        if phase_name not in phases:
+            phases[phase_name] = {
+                "duration_ms": 0,
+                "duration_percentage": 0.0,
+                "cost_usd": 0.0,
+                "agent_count": 0,
+            }
+
+        phases[phase_name]["duration_ms"] += result.duration_ms
+        phases[phase_name]["cost_usd"] += result.cost_usd
+        phases[phase_name]["agent_count"] += 1
+
+        self._recalculate_phase_percentages()
+
+    def _recalculate_phase_percentages(self) -> None:
+        """Recalculate duration_percentage for all phases based on total duration."""
+        total = self._data["metrics"]["total_duration_ms"]
+        phases = self._data["metrics"]["phases"]
+        if total == 0:
+            for phase_data in phases.values():
+                phase_data["duration_percentage"] = 0.0
+            return
+        for phase_data in phases.values():
+            phase_data["duration_percentage"] = round(
+                phase_data["duration_ms"] / total * 100, 2
+            )
 
     async def update_session_status(self, status: str) -> None:
         """Update the session status field."""

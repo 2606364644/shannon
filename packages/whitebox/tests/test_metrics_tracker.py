@@ -1,4 +1,5 @@
 import json
+import pytest
 from pathlib import Path
 
 from shannon_core.models.metrics import SessionMetadata
@@ -168,3 +169,100 @@ async def test_atomic_write_uses_temp_file(tmp_path: Path):
     audit_dir = _audit_dir(tmp_path)
     tmp_files = list(audit_dir.glob("*.tmp"))
     assert len(tmp_files) == 0
+
+
+async def test_end_agent_populates_phases(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("recon", 1)
+    await tracker.end_agent("recon", AgentEndResult(success=True, duration_ms=30000, cost_usd=0.20))
+    data = _read_session_json(tmp_path)
+    assert "phases" in data["metrics"]
+    assert "recon" in data["metrics"]["phases"]
+    assert data["metrics"]["phases"]["recon"]["duration_ms"] == 30000
+    assert data["metrics"]["phases"]["recon"]["cost_usd"] == 0.20
+    assert data["metrics"]["phases"]["recon"]["agent_count"] == 1
+
+
+async def test_end_agent_accumulates_across_phases(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("recon", 1)
+    await tracker.end_agent("recon", AgentEndResult(success=True, duration_ms=30000, cost_usd=0.20))
+    tracker.start_agent("injection-vuln", 1)
+    await tracker.end_agent("injection-vuln", AgentEndResult(success=True, duration_ms=15000, cost_usd=0.10))
+    data = _read_session_json(tmp_path)
+    assert data["metrics"]["phases"]["recon"]["duration_ms"] == 30000
+    assert data["metrics"]["phases"]["recon"]["agent_count"] == 1
+    assert data["metrics"]["phases"]["vulnerability-analysis"]["duration_ms"] == 15000
+    assert data["metrics"]["phases"]["vulnerability-analysis"]["agent_count"] == 1
+
+
+async def test_end_agent_calculates_duration_percentages(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("recon", 1)
+    await tracker.end_agent("recon", AgentEndResult(success=True, duration_ms=30000, cost_usd=0.20))
+    tracker.start_agent("injection-vuln", 1)
+    await tracker.end_agent("injection-vuln", AgentEndResult(success=True, duration_ms=15000, cost_usd=0.10))
+    data = _read_session_json(tmp_path)
+    assert data["metrics"]["total_duration_ms"] == 45000
+    assert data["metrics"]["phases"]["recon"]["duration_percentage"] == pytest.approx(66.67, abs=0.1)
+    assert data["metrics"]["phases"]["vulnerability-analysis"]["duration_percentage"] == pytest.approx(33.33, abs=0.1)
+
+
+async def test_end_agent_skips_failed_agents_in_phase_aggregation(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("recon", 1)
+    await tracker.end_agent("recon", AgentEndResult(success=True, duration_ms=30000, cost_usd=0.20))
+    tracker.start_agent("injection-vuln", 1)
+    await tracker.end_agent("injection-vuln", AgentEndResult(success=False, duration_ms=1000, cost_usd=0.01, error="failed"))
+    data = _read_session_json(tmp_path)
+    # Failed agent should NOT be counted in phases
+    assert "vulnerability-analysis" not in data["metrics"]["phases"]
+    assert data["metrics"]["phases"]["recon"]["duration_percentage"] == 100.0
+
+
+async def test_end_agent_multiple_agents_same_phase(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("injection-vuln", 1)
+    await tracker.end_agent("injection-vuln", AgentEndResult(success=True, duration_ms=10000, cost_usd=0.10))
+    tracker.start_agent("xss-vuln", 1)
+    await tracker.end_agent("xss-vuln", AgentEndResult(success=True, duration_ms=8000, cost_usd=0.08))
+    data = _read_session_json(tmp_path)
+    phase = data["metrics"]["phases"]["vulnerability-analysis"]
+    assert phase["duration_ms"] == 18000
+    assert phase["cost_usd"] == pytest.approx(0.18)
+    assert phase["agent_count"] == 2
+    assert phase["duration_percentage"] == 100.0
+
+
+async def test_initialize_creates_empty_phases(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    data = _read_session_json(tmp_path)
+    assert data["metrics"]["phases"] == {}
+
+
+async def test_phases_backward_compatible_missing_field(tmp_path: Path):
+    """Reading a session.json without 'phases' should not crash."""
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    # Manually strip phases to simulate old format
+    data = _read_session_json(tmp_path)
+    del data["metrics"]["phases"]
+    session_path = _audit_dir(tmp_path) / "session.json"
+    session_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    await tracker.reload()
+    metrics = tracker.get_metrics()
+    # Should not crash; phases defaults to empty
+    assert metrics.get("phases", {}) == {}
