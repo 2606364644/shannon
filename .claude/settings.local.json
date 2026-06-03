@@ -6,7 +6,11 @@
       "Bash(curl -s \"https://llm-proxy.futuoa.com/openapi.json\")",
       "Bash(python3 -m json.tool)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({'info':d.get\\('info'\\), 'paths':list\\(d.get\\('paths',{}\\).keys\\(\\)\\)}, indent=2\\)\\)\")",
-      "Bash(openspec status *)"
+      "Bash(openspec status *)",
+      "Bash(.venv/bin/python -c \"from shannon_whitebox.cli.main import cli; print\\('whitebox CLI importable'\\)\")",
+      "Bash(.venv/bin/python -c \"from shannon_blackbox.cli.main import cli; print\\('blackbox CLI importable'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m 'docs: add report generation gap fix plan and CLI import permissions *)"
     ]
   }
 }
