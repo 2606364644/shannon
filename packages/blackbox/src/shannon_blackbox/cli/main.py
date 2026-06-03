@@ -143,13 +143,46 @@ def logs(workspace_name):
 
 @cli.command()
 def workspaces():
-    """List all workspaces."""
+    """List all workspaces grouped by scan type."""
+    from shannon_core.workspace import compute_deliverables_summary
+
     mgr = SessionManager(Path("workspaces"))
-    for ws in mgr.list_workspaces():
-        data = mgr.get_session_data(ws)
-        url = data.get("web_url", "unknown")
-        agents = len(data.get("completed_agents", []))
-        click.echo(f"  {ws.name}  url={url}  agents={agents}")
+    all_ws = mgr.list_workspaces()
+
+    whitebox = []
+    blackbox = []
+    for ws in all_ws:
+        info = {
+            "name": ws.name,
+            "url": mgr.get_web_url(ws) or "unknown",
+            "status": mgr.get_status(ws),
+            "scan_type": mgr.get_scan_type(ws),
+            "summary": compute_deliverables_summary(ws),
+            "links": mgr.get_links(ws),
+        }
+        if info["scan_type"] == "blackbox":
+            blackbox.append(info)
+        else:
+            whitebox.append(info)
+
+    if whitebox:
+        click.echo("")
+        click.echo("White-box workspaces:")
+        click.echo(f"  {'NAME':<30} {'TARGET':<25} {'STATUS':<12} {'VULN QUEUES':<20}")
+        for info in whitebox:
+            queues = ", ".join(info["summary"]["vuln_queues"]) or "-"
+            click.echo(f"  {info['name']:<30} {info['url']:<25} {info['status']:<12} {queues:<20}")
+
+    if blackbox:
+        click.echo("")
+        click.echo("Black-box workspaces:")
+        click.echo(f"  {'NAME':<30} {'TARGET':<25} {'STATUS':<12} {'PARENT WORKSPACE':<30}")
+        for info in blackbox:
+            parent = info["links"].get("parent_workspace") or "-"
+            click.echo(f"  {info['name']:<30} {info['url']:<25} {info['status']:<12} {parent:<30}")
+
+    if not whitebox and not blackbox:
+        click.echo("No workspaces found.")
 
 
 @cli.group()

@@ -343,3 +343,30 @@ def test_auto_detect_no_match(tmp_path, monkeypatch):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No white-box results found" in result.output
     assert "--latest" in result.output
+
+
+def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
+    """workspaces command should group output by scan_type."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    wb = mgr.create_workspace("https://myapp.com", "/repo", name="wb-1", scan_type="whitebox")
+    mgr.mark_completed(wb)
+    deliverables = wb / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+    )
+
+    bb = mgr.create_workspace("https://myapp.com", "/repo", name="bb-1", scan_type="blackbox")
+    mgr.set_parent_workspace(bb, "wb-1")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspaces"])
+
+    assert result.exit_code == 0
+    assert "White-box workspaces:" in result.output
+    assert "Black-box workspaces:" in result.output
