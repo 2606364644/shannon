@@ -8,7 +8,11 @@ from shannon_core.session import SessionManager
 
 
 def normalize_url(url: str) -> str:
-    """Normalize a URL for comparison: strip trailing slash, default ports, lowercase host."""
+    """Normalize a URL for comparison: strip trailing slash, default ports, lowercase host.
+
+    Note: Query strings and fragments are intentionally stripped since they are
+    not relevant for workspace URL matching.
+    """
     parsed = urlparse(url)
 
     scheme = parsed.scheme.lower()

@@ -58,6 +58,44 @@ class TestUrlsMatch:
     def test_default_port_vs_no_port(self):
         assert urls_match("https://example.com:443", "https://example.com") is True
 
+    def test_non_default_port_vs_no_port_matches(self):
+        """Non-default explicit port matches URL without port (permissive matching)."""
+        assert urls_match("https://example.com:8443", "https://example.com") is True
+
+
+class TestGetWorkspaceInfo:
+    def test_returns_expected_keys(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", "/repo", name="test-ws", scan_type="whitebox")
+        mgr.mark_completed(ws)
+
+        info = get_workspace_info(ws)
+        assert info["name"] == "test-ws"
+        assert info["scan_type"] == "whitebox"
+        assert info["status"] == "completed"
+        assert info["web_url"] == "https://myapp.com"
+        assert info["repo_path"] == "/repo"
+        assert info["created_at"] is not None
+        assert info["completed_at"] is not None
+        assert "parent_workspace" in info["links"]
+        assert "deliverables_summary" in info
+
+    def test_includes_deliverables(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", "/repo", name="test-ws2")
+        deliverables = ws / "deliverables"
+        deliverables.mkdir()
+        (deliverables / "injection_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+        )
+
+        info = get_workspace_info(ws)
+        assert "injection" in info["deliverables_summary"]["vuln_queues"]
+
 
 class TestComputeDeliverablesSummary:
     def test_empty_workspace(self, tmp_path):
