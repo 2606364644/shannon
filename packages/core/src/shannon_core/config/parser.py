@@ -220,6 +220,20 @@ def parse_config(config_path: str) -> Config:
             context={"original_error": str(e)},
         ) from e
 
+    # Post-Pydantic sanitization (defense-in-depth)
+    if config.authentication:
+        sanitized_auth = _sanitize_authentication(config.authentication)
+        config = config.model_copy(update={"authentication": sanitized_auth})
+    if config.rules:
+        sanitized_avoid = [_sanitize_rule(r) for r in config.rules.avoid] if config.rules.avoid else []
+        sanitized_focus = [_sanitize_rule(r) for r in config.rules.focus] if config.rules.focus else []
+        config = config.model_copy(update={
+            "rules": config.rules.model_copy(update={
+                "avoid": sanitized_avoid,
+                "focus": sanitized_focus,
+            })
+        })
+
     _validate_config_security(config)
     if config.authentication:
         _validate_login_flow(config.authentication)
