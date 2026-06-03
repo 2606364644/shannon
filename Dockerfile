@@ -2,8 +2,13 @@
 # Multi-stage Dockerfile for Pentest Agent
 # Uses Chainguard Wolfi for minimal attack surface and supply chain security
 
+# Override npm/pnpm registry (e.g. --build-arg NPM_REGISTRY=https://registry.npmjs.org)
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
 # Builder stage - Install tools and dependencies
 FROM cgr.dev/chainguard/wolfi-base:latest AS builder
+ARG NPM_REGISTRY
+ENV npm_config_registry=${NPM_REGISTRY}
 
 # Install system dependencies available in Wolfi
 RUN apk update && apk add --no-cache \
@@ -42,6 +47,8 @@ RUN rm -rf node_modules apps/*/node_modules && pnpm install --frozen-lockfile --
 
 # Runtime stage - Minimal production image
 FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
+ARG NPM_REGISTRY
+ENV npm_config_registry=${NPM_REGISTRY}
 
 # Install only runtime dependencies
 USER root
