@@ -67,5 +67,6 @@ class Config(BaseModel):
     exploit: bool = True
     report: ReportConfig | None = None
     rules_of_engagement: str | None = None
+    auto_detect_whitebox: bool = True
 
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf", "misconfig"]

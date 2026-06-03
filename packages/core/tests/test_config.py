@@ -92,3 +92,15 @@ def test_authentication_with_email_login():
         success_condition=SuccessCondition(type="url_contains", value="/dashboard"),
     )
     assert auth.credentials.email_login.address == "admin@corp.com"
+
+
+def test_auto_detect_whitebox_default():
+    """auto_detect_whitebox should default to True."""
+    c = Config()
+    assert c.auto_detect_whitebox is True
+
+
+def test_auto_detect_whitebox_disabled():
+    """auto_detect_whitebox can be set to False."""
+    c = Config(auto_detect_whitebox=False)
+    assert c.auto_detect_whitebox is False
