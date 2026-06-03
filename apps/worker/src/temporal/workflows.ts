@@ -758,7 +758,6 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       { vulnType: 'auth', agentName: 'auth-vuln', runAgent: a.runAuthVulnAgent },
       { vulnType: 'authz', agentName: 'authz-vuln', runAgent: a.runAuthzVulnAgent },
       { vulnType: 'ssrf', agentName: 'ssrf-vuln', runAgent: a.runSsrfVulnAgent },
-      { vulnType: 'misconfig', agentName: 'misconfig-vuln', runAgent: a.runMisconfigVulnAgent },
     ];
 
     const vulnThunks = vulnAgents.map(({ vulnType, agentName, runAgent }) => {
