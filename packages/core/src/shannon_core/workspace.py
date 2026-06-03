@@ -35,8 +35,8 @@ def normalize_url(url: str) -> str:
 
 def urls_match(url_a: str, url_b: str) -> bool:
     """Check if two URLs refer to the same target (scheme-tolerant, path-prefix aware)."""
-    a = urlparse(url_a)
-    b = urlparse(url_b)
+    a = urlparse(normalize_url(url_a))
+    b = urlparse(normalize_url(url_b))
 
     # Hostname must match exactly
     host_a = (a.hostname or "").lower()
@@ -44,22 +44,15 @@ def urls_match(url_a: str, url_b: str) -> bool:
     if host_a != host_b:
         return False
 
-    # Port comparison (scheme-tolerant: only compare when ports are explicit)
+    # Port comparison (only compare if both have explicit non-default ports)
     port_a = a.port
     port_b = b.port
-    # Normalize default ports for comparison
-    if port_a and (a.scheme == "https" and port_a == 443 or a.scheme == "http" and port_a == 80):
-        port_a = None
-    if port_b and (b.scheme == "https" and port_b == 443 or b.scheme == "http" and port_b == 80):
-        port_b = None
     if port_a is not None and port_b is not None and port_a != port_b:
         return False
 
     # Path prefix match
     path_a = (a.path or "/").rstrip("/") or "/"
     path_b = (b.path or "/").rstrip("/") or "/"
-
-    # One path must be a prefix of the other
     return path_a.startswith(path_b) or path_b.startswith(path_a)
 
 
@@ -94,7 +87,7 @@ def compute_deliverables_summary(workspace_path: Path) -> dict:
     # Also check the generic exploitation_queue.json
     generic_queue = deliverables_dir / "exploitation_queue.json"
     if generic_queue.exists() and _is_valid_queue_file(generic_queue):
-        if "" not in vuln_queues:
+        if "general" not in vuln_queues:
             vuln_queues.insert(0, "general")
 
     # Collect report files (*.md)
