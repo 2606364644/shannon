@@ -36,7 +36,9 @@ def cli():
 @click.option("--no-exploit", is_flag=True, help="Skip exploitation phase")
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
-def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address):
+@click.option("--max-concurrent", default=3, type=int, help="Max concurrent exploit agents (default: 3)")
+@click.option("--retry-profile", "retry_profile", default=None, type=click.Choice(["production", "testing", "subscription"]), help="Retry policy profile")
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -110,6 +112,8 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         vuln_classes=selected,
         exploit=not no_exploit,
         pipeline_testing_mode=pipeline_testing,
+        max_concurrent=max_concurrent,
+        retry_profile=retry_profile,
     )
     click.echo(f"Starting black-box scan on {url}")
     asyncio.run(ensure_infra(address=temporal_address))

@@ -81,3 +81,15 @@ def test_state_defaults_no_found_classes():
     """Default state should have empty found_whitebox_classes."""
     state = BlackboxPipelineState()
     assert state.found_whitebox_classes == []
+
+
+def test_pipeline_input_max_concurrent_default():
+    """Default max_concurrent should be 3."""
+    input = BlackboxPipelineInput(web_url="https://example.com")
+    assert input.max_concurrent == 3
+
+
+def test_pipeline_input_max_concurrent_custom():
+    """Custom max_concurrent should be respected."""
+    input = BlackboxPipelineInput(web_url="https://example.com", max_concurrent=5)
+    assert input.max_concurrent == 5

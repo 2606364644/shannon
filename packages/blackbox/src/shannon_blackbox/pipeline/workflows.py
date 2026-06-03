@@ -149,8 +149,16 @@ class BlackboxScanWorkflow:
                         )))
 
                 if exploit_tasks:
+                    semaphore = asyncio.Semaphore(input.max_concurrent)
+
+                    async def bounded_exploit(
+                        coro, vt: str, agent_name: AgentName
+                    ):
+                        async with semaphore:
+                            return await coro
+
                     results = await asyncio.gather(
-                        *[task for _, _, task in exploit_tasks],
+                        *[bounded_exploit(task, vt, agent_name) for vt, agent_name, task in exploit_tasks],
                         return_exceptions=True,
                     )
                     for i, result in enumerate(results):
