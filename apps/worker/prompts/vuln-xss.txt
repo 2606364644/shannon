@@ -132,6 +132,8 @@ Structure: The vulnerability JSON object MUST follow this exact format:
 ### **1) Create a todo item for each XSS sink using the TodoWrite tool**
 Read .shannon/deliverables/pre_recon_deliverable.md section ##9. XSS Sinks and Render Contexts## and use the **TodoWrite tool** to create a todo item for each discovered sink-context pair that needs analysis.
 
+**Note on server-rendered templates:** Pay special attention to template render calls (`ctx.render`, `res.render`) where template context variables originate from URL query parameters (`ctx.query.*`). These are reflected XSS candidates even when the injection agent has already analyzed SSTI for the same template — the xss agent provides independent render-context analysis (e.g., `JSON.stringify()` inside a `<script>` tag does not escape `</script>`, making it unsafe for JAVASCRIPT_STRING context).
+
 ### **2) Trace Each Sink Backward (Backward Taint Analysis)**
 For each pending item in your todo list (managed via TodoWrite tool), trace the origin of the data variable backward from the sink through the application logic. Your goal is to find either a valid sanitizer or an untrusted source. Mark each todo item as completed after you've fully analyzed that sink.
 

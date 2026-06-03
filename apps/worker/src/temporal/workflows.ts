@@ -632,7 +632,7 @@ export async function pentestPipelineWorkflow(input: PipelineInput): Promise<Pip
   return pentestPipeline(input);
 }
 
-const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'auth', 'authz', 'ssrf'];
+const WHITEBOX_VULN_CLASSES: readonly VulnClass[] = ['injection', 'xss', 'auth', 'authz', 'ssrf'];
 
 export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<PipelineState> {
   if (!input.repoPath || input.repoPath.includes('..')) {
@@ -743,7 +743,7 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     const reconInput: ActivityInput = { ...activityInput, promptOverride: 'recon-static' };
     await runSequentialPhase('recon', 'recon', a.runReconAgent, reconInput);
 
-    // === Phase 3: Vulnerability Analysis (4 agents, no XSS) ===
+    // === Phase 3: Vulnerability Analysis (6 agents) ===
     state.currentPhase = 'vulnerability-analysis';
     state.currentAgent = 'pipelines';
     await a.logPhaseTransition(activityInput, 'vulnerability-analysis', 'start');
@@ -754,6 +754,7 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       runAgent: (input: ActivityInput) => Promise<AgentMetrics>;
     }> = [
       { vulnType: 'injection', agentName: 'injection-vuln', runAgent: a.runInjectionVulnAgent },
+      { vulnType: 'xss', agentName: 'xss-vuln', runAgent: a.runXssVulnAgent },
       { vulnType: 'auth', agentName: 'auth-vuln', runAgent: a.runAuthVulnAgent },
       { vulnType: 'authz', agentName: 'authz-vuln', runAgent: a.runAuthzVulnAgent },
       { vulnType: 'ssrf', agentName: 'ssrf-vuln', runAgent: a.runSsrfVulnAgent },
