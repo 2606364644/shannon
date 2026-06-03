@@ -194,3 +194,23 @@ async def run_rebuild_call_chains(input: ActivityInput) -> dict:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def render_findings(input: ActivityInput) -> None:
+    try:
+        from shannon_core.services.findings_renderer import FindingsRenderer
+        from shannon_core.config.parser import parse_config
+
+        _, deliverables, _ = _get_paths(input)
+        report_config = None
+        if input.config_path:
+            cfg = parse_config(input.config_path)
+            report_config = cfg.report
+        await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

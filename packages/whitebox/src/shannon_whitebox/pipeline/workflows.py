@@ -142,6 +142,11 @@ class WhiteboxScanWorkflow:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
 
+            await workflow.execute_activity(
+                activities.render_findings, act_input,
+                start_to_close_timeout=timedelta(minutes=5),
+            )
+
             self._state.status = "completed"
             return self._state
         finally:
