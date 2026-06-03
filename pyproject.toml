@@ -18,6 +18,9 @@ members = ["packages/*"]
 [tool.pytest.ini_options]
 testpaths = ["packages/*/tests"]
 asyncio_mode = "auto"
+# Use importlib mode to avoid module name conflicts between packages with
+# identically-named test files (e.g. whitebox/test_cli.py vs blackbox/test_cli.py)
+addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 120
