@@ -108,7 +108,7 @@ class SessionManager:
         session = data.get("session", {})
         return session.get("webUrl") or session.get("web_url")
 
-    def get_created_at(self, workspace_path: Path) -> str | None:
+    def get_created_at(self, workspace_path: Path) -> float | None:
         """Read created_at timestamp from session.json, handling both formats."""
         data = self.get_session_data(workspace_path)
         if "created_at" in data:
@@ -116,7 +116,7 @@ class SessionManager:
         session = data.get("session", {})
         return session.get("createdAt") or session.get("created_at")
 
-    def get_completed_at(self, workspace_path: Path) -> str | None:
+    def get_completed_at(self, workspace_path: Path) -> float | None:
         """Read completed_at timestamp from session.json."""
         data = self.get_session_data(workspace_path)
         if "completed_at" in data:

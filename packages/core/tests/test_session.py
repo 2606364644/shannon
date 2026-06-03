@@ -108,3 +108,74 @@ def test_get_status_unknown_when_empty(tmp_path):
     (ws / "session.json").write_text(json.dumps({"web_url": "https://example.com"}))
     mgr = SessionManager(tmp_path / "workspaces")
     assert mgr.get_status(ws) == "unknown"
+
+
+def test_get_web_url(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    assert mgr.get_web_url(ws) == "https://example.com"
+
+
+def test_get_web_url_legacy_format(tmp_path):
+    ws = tmp_path / "workspaces" / "legacy-ws"
+    ws.mkdir(parents=True)
+    (ws / "session.json").write_text(json.dumps({"session": {"webUrl": "https://legacy.com"}}))
+    mgr = SessionManager(tmp_path / "workspaces")
+    assert mgr.get_web_url(ws) == "https://legacy.com"
+
+
+def test_get_created_at(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    assert mgr.get_created_at(ws) is not None
+    assert isinstance(mgr.get_created_at(ws), float)
+
+
+def test_get_completed_at_before_completion(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    assert mgr.get_completed_at(ws) is None
+
+
+def test_get_links(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    links = mgr.get_links(ws)
+    assert links["parent_workspace"] is None
+    assert links["child_workspaces"] == []
+
+
+def test_set_parent_workspace(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", scan_type="blackbox")
+    mgr.set_parent_workspace(ws, "wb-parent")
+    links = mgr.get_links(ws)
+    assert links["parent_workspace"] == "wb-parent"
+
+
+def test_add_child_workspace(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    mgr.add_child_workspace(ws, "bb-child-1")
+    links = mgr.get_links(ws)
+    assert "bb-child-1" in links["child_workspaces"]
+
+
+def test_add_child_workspace_deduplicates(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    mgr.add_child_workspace(ws, "bb-child-1")
+    mgr.add_child_workspace(ws, "bb-child-1")
+    links = mgr.get_links(ws)
+    assert links["child_workspaces"].count("bb-child-1") == 1
+
+
+def test_mark_completed(tmp_path):
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo")
+    assert mgr.get_status(ws) == "running"
+    assert mgr.get_completed_at(ws) is None
+    mgr.mark_completed(ws)
+    assert mgr.get_status(ws) == "completed"
+    assert mgr.get_completed_at(ws) is not None
+    assert isinstance(mgr.get_completed_at(ws), float)
