@@ -28,7 +28,7 @@ from .queue_schemas import (
     VulnerabilityQueue,
     XssVulnerability,
 )
-from .result import BlackboxScanResult, WhiteboxScanResult
+from .result import BlackboxScanResult, GitResult, WhiteboxScanResult
 
 __all__ = [
     "AGENTS",
@@ -49,6 +49,7 @@ __all__ = [
     "DistributedConfig",
     "EmailLogin",
     "ErrorCode",
+    "GitResult",
     "InjectionVulnerability",
     "PentestError",
     "PentestErrorType",
