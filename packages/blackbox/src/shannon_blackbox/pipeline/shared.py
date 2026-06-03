@@ -16,6 +16,8 @@ class BlackboxPipelineInput:
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
+    retry_profile: str | None = None          # "production" | "testing" | "subscription"
+    max_concurrent: int = 3                     # max concurrent exploit agents
 
 
 @dataclass

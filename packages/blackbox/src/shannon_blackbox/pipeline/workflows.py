@@ -21,6 +21,7 @@ with workflow.unsafe.imports_passed_through():
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
     from shannon_core.models.retry import (
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
+        get_retry_policy,
     )
 
 
@@ -52,12 +53,8 @@ class BlackboxScanWorkflow:
             workspace_path=workspace_path,
         )
 
-        retry_policy = RetryPolicy(
-            maximum_attempts=3,
-            initial_interval=timedelta(seconds=30),
-            maximum_interval=timedelta(minutes=5),
-            backoff_coefficient=2.0,
-            non_retryable_error_types=NON_RETRYABLE,
+        retry_policy = get_retry_policy(
+            "testing" if input.pipeline_testing_mode else (input.retry_profile or "production")
         )
 
         await workflow.execute_activity(

@@ -49,3 +49,16 @@ SUBSCRIPTION_RETRY = RetryPolicy(
     backoff_coefficient=2.0,
     non_retryable_error_types=NON_RETRYABLE,
 )
+
+
+def get_retry_policy(mode: str | None = None) -> RetryPolicy:
+    """Select a retry policy by mode name.
+
+    Returns PRODUCTION_RETRY when *mode* is ``None`` or unrecognised.
+    """
+    profiles = {
+        "production": PRODUCTION_RETRY,
+        "testing": TESTING_RETRY,
+        "subscription": SUBSCRIPTION_RETRY,
+    }
+    return profiles.get(mode or "production", PRODUCTION_RETRY)
