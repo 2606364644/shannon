@@ -11,7 +11,7 @@ import { executeGitCommandWithRetry } from '../services/git-manager.js';
 import { runPreflightChecks } from '../services/preflight.js';
 import { assembleFinalReport, injectModelIntoReport } from '../services/reporting.js';
 import type { AgentName } from '../types/agents.js';
-import type { DistributedConfig, ProviderConfig } from '../types/config.js';
+import { ALL_VULN_CLASSES, type DistributedConfig, type ProviderConfig } from '../types/config.js';
 import { ConsoleActivityLogger } from './console-logger.js';
 import { Semaphore } from './semaphore.js';
 
@@ -19,7 +19,9 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 30_000;
 const MAX_DELAY_MS = 300_000;
 
-const WHITEBOX_VULN_AGENTS: AgentName[] = ['injection-vuln', 'auth-vuln', 'authz-vuln', 'ssrf-vuln', 'misconfig-vuln'];
+const WHITEBOX_VULN_AGENTS = ALL_VULN_CLASSES.map(
+  (cls) => `${cls}-vuln` as AgentName,
+);
 
 interface RunnerArgs {
   repoPath: string;
