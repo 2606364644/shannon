@@ -19,6 +19,9 @@ dependencies = [
     "openai>=1.50",
 ]
 
+[project.scripts]
+generate-totp = "shannon_core.scripts.generate_totp:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
