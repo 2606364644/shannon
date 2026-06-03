@@ -19,6 +19,9 @@ with workflow.unsafe.imports_passed_through():
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
+    from shannon_core.models.retry import (
+        PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
+    )
 
 
 @workflow.defn
@@ -54,11 +57,13 @@ class BlackboxScanWorkflow:
             initial_interval=timedelta(seconds=30),
             maximum_interval=timedelta(minutes=5),
             backoff_coefficient=2.0,
+            non_retryable_error_types=NON_RETRYABLE,
         )
 
         await workflow.execute_activity(
             activities.run_blackbox_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
+            retry_policy=PREFLIGHT_RETRY,
         )
 
         # Write code path deny rules (S6)
@@ -76,7 +81,8 @@ class BlackboxScanWorkflow:
         if input.config_path:
             await workflow.execute_activity(
                 activities.run_blackbox_auth_validation, act_input,
-                start_to_close_timeout=timedelta(minutes=5),
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=AUTH_VALIDATION_RETRY,
             )
 
         try:
