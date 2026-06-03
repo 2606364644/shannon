@@ -14,6 +14,6 @@ class AgentMetrics(BaseModel):
 class SessionMetadata(BaseModel):
     model_config = {"extra": "allow"}
     id: str
-    web_url: str
+    web_url: str | None = None
     repo_path: str | None = None
     output_path: str | None = None

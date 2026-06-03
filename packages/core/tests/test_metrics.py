@@ -29,6 +29,12 @@ def test_session_metadata():
     assert s.repo_path is None
     assert s.output_path is None
 
+def test_session_metadata_optional_web_url():
+    s = SessionMetadata(id="test-123")
+    assert s.id == "test-123"
+    assert s.web_url is None
+
+
 def test_session_metadata_extra_fields():
     s = SessionMetadata(id="test", web_url="https://x.com", custom_field="value")
     assert s.custom_field == "value"

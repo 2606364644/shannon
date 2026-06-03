@@ -18,6 +18,13 @@ from .config import (
 )
 from .deliverables import DELIVERABLE_FILENAMES, DeliverableType
 from .errors import ErrorCode, PentestError, PentestErrorType
+from .audit import (
+    AgentEndResult,
+    AgentLogDetails,
+    AgentMetricsSummary,
+    ResumeInfo,
+    WorkflowSummary,
+)
 from .metrics import AgentMetrics, SessionMetadata
 from .queue_schemas import (
     AuthVulnerability,
@@ -35,7 +42,10 @@ __all__ = [
     "ALL_VULN_CLASSES",
     "Authentication",
     "AgentDefinition",
+    "AgentEndResult",
+    "AgentLogDetails",
     "AgentMetrics",
+    "AgentMetricsSummary",
     "AgentName",
     "AuthVulnerability",
     "AuthzVulnerability",
@@ -54,6 +64,7 @@ __all__ = [
     "PentestError",
     "PentestErrorType",
     "PipelineConfig",
+    "ResumeInfo",
     "ReportConfig",
     "Rule",
     "RuleType",
@@ -67,5 +78,6 @@ __all__ = [
     "VulnerabilityQueue",
     "BlackboxScanResult",
     "WhiteboxScanResult",
+    "WorkflowSummary",
     "XssVulnerability",
 ]
