@@ -25,13 +25,20 @@ async def run_with_concurrency_limit(
 
 
 class SessionMutex:
-    """Per-sessionId async mutex with FIFO queue semantics."""
+    """Per-sessionId async mutex with FIFO queue semantics.
+
+    Lifecycle: call ``remove(session_id)`` when a session ends to prevent
+    unbounded growth of the internal lock table.
+    """
 
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def lock(self, session_id: str) -> Callable[[], None]:
-        if session_id not in self._locks:
-            self._locks[session_id] = asyncio.Lock()
+        self._locks.setdefault(session_id, asyncio.Lock())
         await self._locks[session_id].acquire()
         return self._locks[session_id].release
+
+    def remove(self, session_id: str) -> None:
+        """Remove a session's lock. Call when a session ends to prevent unbounded growth."""
+        self._locks.pop(session_id, None)
