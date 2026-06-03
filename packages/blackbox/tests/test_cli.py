@@ -41,7 +41,10 @@ def test_start_wires_repo_param():
         captured_input = input
         return BlackboxPipelineState(status="completed")
 
-    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com", "--repo", fake_repo])
 
@@ -60,7 +63,10 @@ def test_start_shows_whitebox_completion_message():
             found_whitebox_classes=["injection", "xss"],
         )
 
-    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
 
@@ -74,7 +80,10 @@ def test_start_shows_standalone_completion_message():
     async def fake_run_scan(input, temporal_address):
         return BlackboxPipelineState(status="completed")
 
-    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
 
@@ -87,7 +96,10 @@ def test_start_shows_error_on_failure():
     async def fake_run_scan(input, temporal_address):
         return BlackboxPipelineState(status="failed", errors=["something broke"])
 
-    with patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
 
