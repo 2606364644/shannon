@@ -15,6 +15,7 @@ from shannon_core.services.temporal_infra import (
     stop_temporal,
 )
 from shannon_core.session import SessionManager
+from shannon_core.workspace import compute_deliverables_summary, find_latest_workspace
 
 
 @click.group()
@@ -28,22 +29,40 @@ def cli():
 @click.option("-r", "--repo", default=None, help="Target repository path (to reuse whitebox results)")
 @click.option("-o", "--output", default=None, help="Output directory for deliverables")
 @click.option("-w", "--workspace", default=None, help="Workspace name (resume if exists)")
+@click.option("--latest", is_flag=True, help="Reuse the most recent white-box workspace deliverables")
 @click.option("-c", "--config", "config_path", default=None, help="YAML configuration file")
 @click.option("--vuln-classes", multiple=True, help="Vuln classes to test (default: all)")
 @click.option("--no-exploit", is_flag=True, help="Skip exploitation phase")
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
-def start(url, repo, output, workspace, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address):
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
 
     selected = list(vuln_classes) if vuln_classes else list(ALL_VULN_CLASSES)
 
+    # Resolve --latest: find most recent whitebox workspace with deliverables
+    resolved_workspace = workspace
+    if latest and not workspace:
+        wb_ws = find_latest_workspace(Path("workspaces"), scan_type="whitebox", url=url)
+        if wb_ws is None:
+            click.echo("No white-box workspaces found. Run a white-box scan first.")
+            raise SystemExit(1)
+        summary = compute_deliverables_summary(wb_ws)
+        if not summary["vuln_queues"]:
+            click.echo("Latest workspace has no deliverables. Specify a workspace with -w.")
+            raise SystemExit(1)
+        resolved_workspace = wb_ws.name
+        queues = ", ".join(summary["vuln_queues"])
+        click.echo(f"Found white-box results in workspace '{wb_ws.name}'")
+        click.echo(f"   Vulnerability queues found: {queues}")
+        click.echo("   Skipping recon phase — leveraging white-box findings directly.")
+
     input = BlackboxPipelineInput(
         web_url=url,
         repo_path=str(Path(repo).resolve()) if repo else None,
-        workspace_name=workspace,
+        workspace_name=resolved_workspace,
         config_path=config_path,
         output_path=str(Path(output).resolve()) if output else None,
         vuln_classes=selected,

@@ -157,6 +157,14 @@ def test_infra_status():
     assert "healthy" in result.output.lower()
 
 
+def test_start_help_shows_latest_option():
+    """Blackbox start --help should list --latest."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["start", "--help"])
+    assert result.exit_code == 0
+    assert "--latest" in result.output
+
+
 def test_start_calls_ensure_infra():
     """start command should call ensure_infra before run_scan."""
     async def fake_ensure(*a, **kw):
@@ -174,3 +182,75 @@ def test_start_calls_ensure_infra():
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     mock_ensure.assert_called_once()
+
+
+def test_latest_resolves_to_workspace(tmp_path, monkeypatch):
+    """--latest should resolve to the most recent whitebox workspace with deliverables."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://myapp.com", "/repo", name="myapp-wb", scan_type="whitebox")
+    mgr.mark_completed(ws)
+    deliverables = ws / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+    )
+
+    captured_input = None
+
+    async def fake_run_scan(input, temporal_address):
+        nonlocal captured_input
+        captured_input = input
+        return BlackboxPipelineState(status="completed")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "--latest"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert captured_input is not None
+    assert captured_input.workspace_name == "myapp-wb"
+    assert "Found white-box results" in result.output
+
+
+def test_latest_no_workspaces(tmp_path, monkeypatch):
+    """--latest with no workspaces should print error and exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "--latest"])
+
+    assert result.exit_code == 1
+    assert "No white-box workspaces found" in result.output
+
+
+def test_w_takes_precedence_over_latest(tmp_path, monkeypatch):
+    """When both -w and --latest are given, -w wins."""
+    monkeypatch.chdir(tmp_path)
+
+    captured_input = None
+
+    async def fake_run_scan(input, temporal_address):
+        nonlocal captured_input
+        captured_input = input
+        return BlackboxPipelineState(status="completed")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "-w", "my-ws", "--latest"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert captured_input.workspace_name == "my-ws"
