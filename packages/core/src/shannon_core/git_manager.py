@@ -58,8 +58,8 @@ class GitManager:
     async def is_git_repository(repo_path: Path) -> bool:
         """Check if *repo_path* is inside a git repository."""
         try:
-            await GitManager._run_git(repo_path, "rev-parse", "--git-dir")
-            return True
+            result = await GitManager._run_git(repo_path, "rev-parse", "--git-dir")
+            return result.returncode == 0
         except Exception:
             return False
 
