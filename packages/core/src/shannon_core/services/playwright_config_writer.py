@@ -1,12 +1,29 @@
 """Write stealth Playwright config + anti-detection init script.
 
 Direct port of shannon/apps/worker/src/ai/playwright-config-writer.ts.
+Enhanced with per-agent session isolation for concurrent exploit agents.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+# Maps agent names to isolated browser session IDs.
+AGENT_SESSION_MAPPING: dict[str, str] = {
+    "injection-exploit": "agent-injection",
+    "xss-exploit": "agent-xss",
+    "auth-exploit": "agent-auth",
+    "ssrf-exploit": "agent-ssrf",
+    "authz-exploit": "agent-authz",
+    "misconfig-exploit": "agent-misconfig",
+}
+
+
+def get_session_id(agent_name: str) -> str:
+    """Return the browser session ID for a given agent name."""
+    return AGENT_SESSION_MAPPING.get(agent_name, "default")
+
 
 _STEALTH_INIT_SCRIPT = """\
 // Remove navigator.webdriver flag set by Playwright/Chrome automation
@@ -38,8 +55,13 @@ window.chrome.runtime = window.chrome.runtime || {
 """
 
 
-def _build_stealth_config(init_script_path: str) -> dict:
-    return {
+def _build_stealth_config(init_script_path: str, session_id: str | None = None) -> dict:
+    """Build Playwright stealth config dict.
+
+    When *session_id* is provided, adds a session-specific ``storageState`` path
+    so each agent gets isolated cookies/localStorage.
+    """
+    config: dict = {
         "browser": {
             "browserName": "chromium",
             "launchOptions": {
@@ -59,15 +81,28 @@ def _build_stealth_config(init_script_path: str) -> dict:
             "initScript": [init_script_path],
         },
     }
+    if session_id and session_id != "default":
+        config["browser"]["contextOptions"]["storageState"] = f".playwright/state/{session_id}/storage.json"
+    return config
 
 
-def write_stealth_config(source_dir: str) -> dict:
-    """Write .playwright/cli.config.json + scripts/stealth.js under *source_dir*.
+def write_stealth_config(source_dir: str, session_id: str | None = None) -> dict:
+    """Write Playwright stealth config under *source_dir*.
+
+    When *session_id* is provided, writes a session-specific config file
+    (e.g., ``.playwright/cli.config.agent-injection.json``) with isolated storage.
+    When *session_id* is ``None`` or ``"default"``, writes the shared default config.
 
     Returns ``{"result": "wrote"|"skipped-existing", "configPath": str}``.
     """
     playwright_dir = Path(source_dir) / ".playwright"
-    config_path = playwright_dir / "cli.config.json"
+
+    if session_id and session_id != "default":
+        config_filename = f"cli.config.{session_id}.json"
+    else:
+        config_filename = "cli.config.json"
+
+    config_path = playwright_dir / config_filename
 
     if config_path.exists():
         return {"result": "skipped-existing", "configPath": str(config_path)}
@@ -76,7 +111,12 @@ def write_stealth_config(source_dir: str) -> dict:
     init_script_path.parent.mkdir(parents=True, exist_ok=True)
     init_script_path.write_text(_STEALTH_INIT_SCRIPT)
 
-    config = _build_stealth_config(str(init_script_path))
+    # Ensure storage directory exists for session-specific configs
+    if session_id and session_id != "default":
+        state_dir = playwright_dir / "state" / session_id
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+    config = _build_stealth_config(str(init_script_path), session_id=session_id)
     config_path.write_text(json.dumps(config, indent=2))
 
     return {"result": "wrote", "configPath": str(config_path)}
@@ -89,3 +129,16 @@ def cleanup_stealth_config(source_dir: str) -> None:
     pw_dir = Path(source_dir) / ".playwright"
     if pw_dir.exists():
         shutil.rmtree(pw_dir)
+
+
+def cleanup_session_config(source_dir: str, session_id: str) -> None:
+    """Remove a session-specific config file (not the entire .playwright/ dir)."""
+    pw_dir = Path(source_dir) / ".playwright"
+    config_path = pw_dir / f"cli.config.{session_id}.json"
+    if config_path.exists():
+        config_path.unlink()
+    # Clean up session state dir
+    state_dir = pw_dir / "state" / session_id
+    if state_dir.exists():
+        import shutil
+        shutil.rmtree(state_dir)

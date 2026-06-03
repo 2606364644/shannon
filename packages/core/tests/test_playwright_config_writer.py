@@ -7,6 +7,9 @@ import pytest
 from shannon_core.services.playwright_config_writer import (
     write_stealth_config,
     cleanup_stealth_config,
+    get_session_id,
+    cleanup_session_config,
+    AGENT_SESSION_MAPPING,
 )
 
 
@@ -56,3 +59,48 @@ class TestCleanupStealthConfig:
 
     def test_noop_when_no_dir(self, tmp_path):
         cleanup_stealth_config(str(tmp_path))  # Should not raise
+
+
+class TestGetSessionId:
+    def test_known_agent(self):
+        assert get_session_id("injection-exploit") == "agent-injection"
+
+    def test_known_agent_xss(self):
+        assert get_session_id("xss-exploit") == "agent-xss"
+
+    def test_unknown_agent_returns_default(self):
+        assert get_session_id("unknown-agent") == "default"
+
+
+class TestWriteSessionConfig:
+    def test_creates_session_specific_config(self, tmp_path):
+        result = write_stealth_config(str(tmp_path), session_id="agent-injection")
+        assert result["result"] == "wrote"
+        config_path = Path(result["configPath"])
+        assert "agent-injection" in str(config_path)
+        assert config_path.exists()
+
+    def test_session_config_has_isolated_storage(self, tmp_path):
+        result = write_stealth_config(str(tmp_path), session_id="agent-xss")
+        config_path = Path(result["configPath"])
+        config = json.loads(config_path.read_text())
+        # Verify storageState path is session-specific
+        storage = config["browser"].get("contextOptions", {}).get("storageState", "")
+        assert "agent-xss" in storage
+
+    def test_no_session_creates_default_config(self, tmp_path):
+        result = write_stealth_config(str(tmp_path))
+        config_path = Path(result["configPath"])
+        assert "agent-" not in str(config_path)
+
+
+class TestCleanupSessionConfig:
+    def test_cleanup_session_config(self, tmp_path):
+        write_stealth_config(str(tmp_path), session_id="agent-ssrf")
+        config_path = tmp_path / ".playwright" / "cli.config.agent-ssrf.json"
+        assert config_path.exists()
+        cleanup_session_config(str(tmp_path), "agent-ssrf")
+        assert not config_path.exists()
+
+    def test_cleanup_noop_when_no_config(self, tmp_path):
+        cleanup_session_config(str(tmp_path), "agent-auth")  # Should not raise

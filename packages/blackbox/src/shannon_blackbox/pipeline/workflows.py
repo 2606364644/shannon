@@ -17,7 +17,12 @@ with workflow.unsafe.imports_passed_through():
     from . import activities
     from ..services.exploitation_checker import ExploitationChecker
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
-    from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
+    from shannon_core.services.playwright_config_writer import (
+        write_stealth_config,
+        cleanup_stealth_config,
+        get_session_id,
+        AGENT_SESSION_MAPPING,
+    )
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
     from shannon_core.models.retry import (
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
@@ -139,6 +144,8 @@ class BlackboxScanWorkflow:
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
                     if agent_name.value not in self._state.completed_agents:
+                        session_id = get_session_id(agent_name.value)
+                        write_stealth_config(input.repo_path, session_id=session_id)
                         exploit_input = BlackboxActivityInput(
                             **{**act_input.__dict__, "agent_name": agent_name.value, "vuln_type": vt}
                         )
@@ -193,5 +200,9 @@ class BlackboxScanWorkflow:
         finally:
             cleanup_settings()
             if input.repo_path:
+                # Clean up session-specific configs
+                for session_id in set(AGENT_SESSION_MAPPING.values()):
+                    from shannon_core.services.playwright_config_writer import cleanup_session_config
+                    cleanup_session_config(input.repo_path, session_id)
                 cleanup_stealth_config(input.repo_path)
                 cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
