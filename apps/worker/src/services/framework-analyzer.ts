@@ -78,10 +78,7 @@ async function detectFramework(
   pattern: FrameworkPattern,
   logger: ActivityLogger,
 ): Promise<boolean> {
-  const allPatterns = [
-    ...(pattern.detectionPatterns.import ?? []),
-    ...(pattern.detectionPatterns.initialize ?? []),
-  ];
+  const allPatterns = [...(pattern.detectionPatterns.import ?? []), ...(pattern.detectionPatterns.initialize ?? [])];
 
   if (allPatterns.length === 0) return false;
 
@@ -194,10 +191,7 @@ async function discoverModels(
 /**
  * Generate inferred endpoints from framework templates and discovered models.
  */
-function generateInferredEndpoints(
-  framework: FrameworkPattern,
-  models: readonly string[],
-): InferredEndpoint[] {
+function generateInferredEndpoints(framework: FrameworkPattern, models: readonly string[]): InferredEndpoint[] {
   const endpoints: InferredEndpoint[] = [];
 
   for (const model of models) {
@@ -229,10 +223,7 @@ function generateInferredEndpoints(
 /**
  * Build security recommendations based on detected framework and endpoints.
  */
-function buildRecommendations(
-  framework: FrameworkPattern,
-  endpoints: readonly InferredEndpoint[],
-): string[] {
+function buildRecommendations(framework: FrameworkPattern, endpoints: readonly InferredEndpoint[]): string[] {
   const recommendations: string[] = [
     `Framework ${framework.name} detected — auto-generated endpoints may lack ownership validation`,
   ];
@@ -246,9 +237,7 @@ function buildRecommendations(
 
   const putEndpoints = endpoints.filter((ep) => ep.method === 'PUT');
   if (putEndpoints.length > 0) {
-    recommendations.push(
-      `${putEndpoints.length} PUT endpoint(s) auto-generated — verify role-based access control`,
-    );
+    recommendations.push(`${putEndpoints.length} PUT endpoint(s) auto-generated — verify role-based access control`);
   }
 
   recommendations.push(...framework.vulnerabilityPatterns);

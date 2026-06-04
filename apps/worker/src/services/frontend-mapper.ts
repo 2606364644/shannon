@@ -54,10 +54,7 @@ export interface FrontendAnalysisResult {
  * Map frontend routes to their API dependencies.
  * Scans frontend source files for route definitions and API call patterns.
  */
-export async function mapFrontendRoutes(
-  codebasePath: string,
-  logger: ActivityLogger,
-): Promise<FrontendAnalysisResult> {
+export async function mapFrontendRoutes(codebasePath: string, logger: ActivityLogger): Promise<FrontendAnalysisResult> {
   const routes: FrontendRoute[] = [];
 
   // 1. Detect frontend framework
@@ -115,11 +112,7 @@ async function detectFrontendFramework(
 /**
  * Find frontend route definition files based on framework.
  */
-async function findRouteFiles(
-  codebasePath: string,
-  framework: string,
-  _logger: ActivityLogger,
-): Promise<string[]> {
+async function findRouteFiles(codebasePath: string, framework: string, _logger: ActivityLogger): Promise<string[]> {
   const files: string[] = [];
 
   const searchDirs = [
@@ -156,11 +149,7 @@ async function findRouteFiles(
  * Parse route definitions from a file.
  * Extracts route paths, components, and API call patterns.
  */
-async function parseRoutes(
-  filePath: string,
-  framework: string,
-  logger: ActivityLogger,
-): Promise<FrontendRoute[]> {
+async function parseRoutes(filePath: string, framework: string, logger: ActivityLogger): Promise<FrontendRoute[]> {
   const routes: FrontendRoute[] = [];
 
   try {
@@ -182,7 +171,8 @@ async function parseRoutes(
         routes.push({
           path,
           component,
-          authenticated: content.includes('AuthGuard') || content.includes('canActivate') || content.includes('requireAuth'),
+          authenticated:
+            content.includes('AuthGuard') || content.includes('canActivate') || content.includes('requireAuth'),
           apiCalls: [],
           userInputs: [],
         });
