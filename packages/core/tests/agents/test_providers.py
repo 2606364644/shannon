@@ -922,3 +922,62 @@ class TestSpendingCapDetection:
 
         assert result.success is True
         assert result.error is None
+
+
+class TestHandleErrorClassification:
+    """Test _handle_error uses classify_error_for_temporal and sets error_code."""
+
+    def test_auth_error_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("authentication failed"), 100, "claude-sonnet-4-6")
+        assert result.error_code == "AuthenticationError"
+        assert result.retryable is False
+        assert result.success is False
+
+    def test_permission_error_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("403 Forbidden"), 100, "claude-sonnet-4-6")
+        assert result.error_code == "PermissionError"
+        assert result.retryable is False
+
+    def test_rate_limit_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("rate limit exceeded"), 100, "claude-sonnet-4-6")
+        # "rate limit" maps to BillingError in classify_error_for_temporal Level 2
+        assert result.error_code == "BillingError"
+        assert result.retryable is True
+
+    def test_spending_cap_sets_billing_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("spending limit reached"), 100, "claude-sonnet-4-6")
+        assert result.error_code == "BillingError"
+        assert result.retryable is True
+        assert result.text != ""
+
+    def test_config_error_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("ENOENT: no such file"), 100, "claude-sonnet-4-6")
+        assert result.error_code == "ConfigurationError"
+        assert result.retryable is False
+
+    def test_transient_error_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("network timeout"), 100, "claude-sonnet-4-6")
+        # "timeout" matches RETRYABLE_PATTERNS, but classify_error_for_temporal
+        # Level 2 doesn't have a specific "network" or "timeout" pattern,
+        # so it falls through to the default: TransientError.
+        assert result.error_code == "TransientError"
+        assert result.retryable is True
+
+    def test_invalid_target_sets_error_code(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = provider._handle_error(Exception("invalid URL format"), 100, "claude-sonnet-4-6")
+        assert result.error_code == "InvalidTargetError"
+        assert result.retryable is False

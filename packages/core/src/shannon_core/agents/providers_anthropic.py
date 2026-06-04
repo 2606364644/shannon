@@ -14,6 +14,8 @@ import time
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+from shannon_core.models.errors import classify_error_for_temporal
+
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
 
 
@@ -288,10 +290,10 @@ class AnthropicProvider:
         duration: int,
         model: str,
     ) -> ClaudeRunResult:
-        """处理错误"""
+        """处理错误 — 使用 classify_error_for_temporal 进行集中式分类"""
         error_msg = str(error)
 
-        # 检查是否是花费上限错误
+        # 检查是否是花费上限错误（Layer 3 异常级检测）
         if self._is_spending_cap_error(error_msg):
             return ClaudeRunResult(
                 text=error_msg,
@@ -302,10 +304,11 @@ class AnthropicProvider:
                 model=model,
                 error=f"花费上限: {error_msg}",
                 retryable=True,
+                error_code="BillingError",
             )
 
-        # 分类错误
-        retryable = self._is_retryable_error(error)
+        # 使用集中式错误分类
+        error_type, retryable = classify_error_for_temporal(error)
 
         return ClaudeRunResult(
             text="",
@@ -316,6 +319,7 @@ class AnthropicProvider:
             model=model,
             error=error_msg,
             retryable=retryable,
+            error_code=error_type,
         )
 
     def _is_spending_cap_error(self, error_msg: str) -> bool:
