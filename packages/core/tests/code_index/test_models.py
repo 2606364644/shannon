@@ -11,6 +11,9 @@ from shannon_core.code_index.models import (
     AdjudicationResult,
     Verdict,
     EntryPointSource,
+    # New models
+    ParameterSource, TypedParameter, UnifiedEntryPoint,
+    FileEntry, FileManifest, DegradationLevel, CoverageGap,
 )
 
 
@@ -276,3 +279,88 @@ def test_adjudication_result_serialization():
     assert data["adjudicated_entry_points"] == []
     json_str = result.model_dump_json()
     assert '"repository":"repo"' in json_str.replace(" ", "")
+
+
+# === New model tests ===
+
+def test_parameter_source_enum():
+    assert ParameterSource.QUERY_PARAM == "query"
+    assert ParameterSource.BODY_FIELD == "body"
+    assert ParameterSource.PATH_PARAM == "path"
+
+
+def test_typed_parameter_full():
+    tp = TypedParameter(
+        name="user_id",
+        type_annotation="int",
+        default_value=None,
+        is_variadic=False,
+        is_keyword_variadic=False,
+        is_optional=False,
+    )
+    assert tp.name == "user_id"
+    assert tp.type_annotation == "int"
+    assert tp.is_variadic is False
+
+
+def test_typed_parameter_kwargs():
+    tp = TypedParameter(
+        name="kwargs",
+        type_annotation=None,
+        default_value=None,
+        is_variadic=False,
+        is_keyword_variadic=True,
+    )
+    assert tp.is_keyword_variadic is True
+
+
+def test_unified_entry_point():
+    ep = UnifiedEntryPoint(
+        uid="app.py:handler:10",
+        name="handler",
+        file_path="app.py",
+        confidence=0.95,
+        source="gitnexus",
+        entry_type="http_route",
+        route="/api/users",
+        http_method="GET",
+    )
+    assert ep.source == "gitnexus"
+    assert ep.confidence == 0.95
+
+
+def test_file_entry():
+    fe = FileEntry(
+        file_path="templates/index.html",
+        file_type="template",
+        size_bytes=1024,
+    )
+    assert fe.file_type == "template"
+
+
+def test_file_manifest():
+    fm = FileManifest(
+        entries=[
+            FileEntry(file_path="a.html", file_type="template", size_bytes=100),
+            FileEntry(file_path="b.yaml", file_type="config", size_bytes=200),
+        ]
+    )
+    assert fm.total_count == 2
+    assert fm.by_type["template"] == 1
+    assert fm.by_type["config"] == 1
+
+
+def test_coverage_gap():
+    gap = CoverageGap(
+        capability="cross_file_call_resolution",
+        reason="BFS uses name matching",
+        affected_phases=["Phase 0"],
+        estimated_coverage_loss="30-50%",
+    )
+    assert gap.capability == "cross_file_call_resolution"
+
+
+def test_degradation_level_enum():
+    assert DegradationLevel.FULL == "full"
+    assert DegradationLevel.DEGRADED == "degraded"
+    assert DegradationLevel.MINIMAL == "minimal"

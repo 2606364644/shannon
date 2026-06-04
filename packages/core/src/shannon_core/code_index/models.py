@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from collections import Counter
+
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
 
@@ -85,3 +87,81 @@ class AdjudicationResult(BaseModel):
     repository: str
     language: str
     adjudicated_entry_points: list[AdjudicatedEntryPoint]
+
+
+class ParameterSource(str, Enum):
+    """HTTP parameter source for taint tracking."""
+    QUERY_PARAM = "query"
+    PATH_PARAM = "path"
+    BODY_FIELD = "body"
+    FORM_FIELD = "form"
+    HEADER = "header"
+    COOKIE = "cookie"
+    FILE_UPLOAD = "file"
+    SESSION_ATTR = "session"
+    INTERNAL = "internal"
+    UNKNOWN = "unknown"
+
+
+class TypedParameter(BaseModel):
+    """Full parameter info — foundation for taint analysis."""
+    name: str
+    type_annotation: str | None = None
+    default_value: str | None = None
+    is_variadic: bool = False          # *args
+    is_keyword_variadic: bool = False  # **kwargs
+    is_optional: bool = False          # TypeScript ? modifier
+    source: ParameterSource | None = None
+
+
+class UnifiedEntryPoint(BaseModel):
+    """Entry point from any source, with unified scoring."""
+    model_config = ConfigDict(frozen=True)
+
+    uid: str                    # "file_path:function_name:start_line"
+    name: str
+    file_path: str
+    confidence: float
+    source: str                 # "gitnexus" | "schema_file" | "framework_convention" | "code_index" | "llm_batch"
+    entry_type: str
+    route: str | None = None
+    http_method: str | None = None
+    evidence: str = ""
+
+
+class FileEntry(BaseModel):
+    """A file discovered in the repository with its security classification."""
+    file_path: str
+    file_type: str              # "template" | "config" | "schema" | "query" | "source"
+    size_bytes: int
+
+
+class FileManifest(BaseModel):
+    """Complete manifest of all security-relevant files."""
+    entries: list[FileEntry] = Field(default_factory=list)
+
+    @property
+    def total_count(self) -> int:
+        return len(self.entries)
+
+    @property
+    def by_type(self) -> dict[str, int]:
+        return dict(Counter(e.file_type for e in self.entries))
+
+    def filter_by_type(self, file_type: str) -> list[FileEntry]:
+        return [e for e in self.entries if e.file_type == file_type]
+
+
+class DegradationLevel(str, Enum):
+    """Degradation level for the code indexing engine."""
+    FULL = "full"           # GitNexus + MCP full
+    DEGRADED = "degraded"   # AST BFS fallback
+    MINIMAL = "minimal"     # Pure LLM analysis
+
+
+class CoverageGap(BaseModel):
+    """A single coverage gap in degraded mode."""
+    capability: str
+    reason: str
+    affected_phases: list[str]
+    estimated_coverage_loss: str
