@@ -32,7 +32,7 @@ class TestValidateQueue:
         result = await ExploitationChecker.validate_queue("xss", tmp_path)
         assert result.valid is False
         assert result.reason == "json_parse_error"
-        assert result.retryable is False
+        assert result.retryable is True
 
     @pytest.mark.asyncio
     async def test_queue_missing_vulnerabilities_key(self, tmp_path):
@@ -61,7 +61,7 @@ class TestValidateQueue:
         result = await ExploitationChecker.validate_queue("injection", tmp_path)
         assert result.valid is False
         assert result.reason == "deliverable_missing"
-        assert result.retryable is False
+        assert result.retryable is True
 
     @pytest.mark.asyncio
     async def test_queue_empty_vulnerabilities(self, tmp_path):

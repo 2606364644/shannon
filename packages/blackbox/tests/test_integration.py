@@ -66,6 +66,8 @@ async def test_full_blackbox_pipeline_independent(mock_repo, prompts_dir):
                 {"ID": f"{vt.upper()}-001", "vulnerability_type": vt, "externally_exploitable": True, "confidence": "high"},
             ]}
             (deliverables / f"{vt}_exploitation_queue.json").write_text(json.dumps(queue_data))
+            # Deliverable must exist for validation to pass (Level 4 symmetry check)
+            (deliverables / f"{vt}_analysis_deliverable.md").write_text(f"# {vt} analysis")
             should = await ExploitationChecker.should_exploit(deliverables, vt)
             assert should is True
 
