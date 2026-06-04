@@ -35,8 +35,15 @@ def build_call_chains(
     max_depth: int = 15,
     max_width: int = 50,
     blocks: list[FuncBlock] | None = None,
+    preserve_diamonds: bool = False,
 ) -> list[CallChain]:
-    """Build call chains from entry points using BFS."""
+    """Build call chains from entry points using BFS.
+
+    Args:
+        preserve_diamonds: If True, allow diamond paths (A→B→D and A→C→D)
+            as separate chains. The cycle check only prevents revisiting a
+            node within the SAME path. Default False for backward compatibility.
+    """
     # Build a lookup from (file, name) to full FuncBlock ID (includes line number)
     block_lookup: dict[tuple[str, str], str] = {}
     if blocks:
@@ -51,6 +58,8 @@ def build_call_chains(
 
     for ep_id in entry_point_ids:
         queue: list[tuple[list[str], int, bool]] = [([ep_id], 0, False)]
+        # Global visited set to prevent diamond paths when preserve_diamonds=False
+        visited: set[str] = {ep_id} if not preserve_diamonds else set()
 
         while queue:
             path, depth, has_unresolved = queue.pop(0)
@@ -92,15 +101,31 @@ def build_call_chains(
                 else:
                     callee_id = edge.callee_name
 
-                if callee_id in path:
-                    # Cycle detected: emit the chain without the duplicate node
-                    chains.append(CallChain(
-                        entry_point_id=ep_id,
-                        path=path,
-                        depth=depth,
-                        has_unresolved=True,
-                    ))
-                    continue
+                # Cycle detection
+                if preserve_diamonds:
+                    # Only check if callee is already in current path
+                    # This allows same node to be visited via different paths
+                    if callee_id in path:
+                        # Cycle detected: emit the chain without the duplicate node
+                        chains.append(CallChain(
+                            entry_point_id=ep_id,
+                            path=path,
+                            depth=depth,
+                            has_unresolved=True,
+                        ))
+                        continue
+                else:
+                    # Check global visited set to prevent diamond paths
+                    if callee_id in visited:
+                        # Already visited via another path: skip
+                        chains.append(CallChain(
+                            entry_point_id=ep_id,
+                            path=path,
+                            depth=depth,
+                            has_unresolved=True,
+                        ))
+                        continue
+                    visited.add(callee_id)
 
                 new_unresolved = has_unresolved or len(unresolved_outgoing) > 0
                 queue.append((path + [callee_id], depth + 1, new_unresolved))
