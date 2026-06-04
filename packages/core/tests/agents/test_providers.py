@@ -720,3 +720,190 @@ class TestCallWithTurnCount:
 
         assert result.success is True
         assert result.turns == 3
+
+
+class TestSpendingCapDetection:
+    """Test 3-layer spending cap detection."""
+
+    def test_detect_spending_cap_behavior_trigger(self):
+        """Low turns + zero cost + not successful triggers behavioral detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = ClaudeRunResult(
+            text="",
+            success=False,
+            cost=0.0,
+            turns=0,
+        )
+        assert provider._detect_spending_cap_behavior(result, turn_count=1) is True
+
+    def test_detect_spending_cap_behavior_no_trigger_success(self):
+        """Successful result does not trigger behavioral detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = ClaudeRunResult(
+            text="done",
+            success=True,
+            cost=0.0,
+            turns=0,
+        )
+        assert provider._detect_spending_cap_behavior(result, turn_count=1) is False
+
+    def test_detect_spending_cap_behavior_no_trigger_high_turns(self):
+        """Multiple turns do not trigger behavioral detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = ClaudeRunResult(
+            text="",
+            success=False,
+            cost=0.0,
+            turns=3,
+        )
+        assert provider._detect_spending_cap_behavior(result, turn_count=3) is False
+
+    def test_detect_spending_cap_behavior_no_trigger_nonzero_cost(self):
+        """Non-zero cost does not trigger behavioral detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        result = ClaudeRunResult(
+            text="",
+            success=False,
+            cost=0.05,
+            turns=0,
+        )
+        assert provider._detect_spending_cap_behavior(result, turn_count=1) is False
+
+    @pytest.mark.asyncio
+    async def test_layer1_message_level_detection(self):
+        """Layer 1: spending cap keywords in assistant text set success=False, retryable=True."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        assistant_event = MagicMock()
+        assistant_event.type = "assistant"
+        block = MagicMock()
+        block.text = "your spending limit has been reached"
+        assistant_event.content = [block]
+        assistant_event.error = None
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=50,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+            total_cost_usd=0.0,
+        )
+
+        events = [assistant_event, mock_result]
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(
+                prompt="do work",
+                cwd="/tmp",
+                model_tier="medium",
+            )
+
+        assert result.success is False
+        assert result.retryable is True
+        assert "spending cap" in result.error
+        assert "message-level" in result.error
+
+    @pytest.mark.asyncio
+    async def test_layer2_behavioral_detection(self):
+        """Layer 2: low turns + zero cost + failure triggers behavioral detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=50,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+            total_cost_usd=0.0,
+        )
+
+        events = [mock_result]
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(
+                prompt="do work",
+                cwd="/tmp",
+                model_tier="medium",
+            )
+
+        assert result.success is False
+        assert result.retryable is True
+        assert "behavioral" in result.error
+
+    @pytest.mark.asyncio
+    async def test_layer3_exception_detection(self):
+        """Layer 3: exception with spending cap keyword triggers _handle_error detection."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        async def mock_query(*, prompt, options):
+            raise Exception("spending limit reached")
+            yield  # make it a generator
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(
+                prompt="do work",
+                cwd="/tmp",
+                model_tier="medium",
+            )
+
+        assert result.success is False
+        assert result.retryable is True
+        assert "花费上限" in result.error
+
+    @pytest.mark.asyncio
+    async def test_no_false_positive_on_success(self):
+        """Successful execution is not flagged as spending cap."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        assistant_event = MagicMock()
+        assistant_event.type = "assistant"
+        block = MagicMock()
+        block.text = "completed successfully"
+        assistant_event.content = [block]
+        assistant_event.error = None
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=2000,
+            duration_api_ms=1000,
+            is_error=False,
+            num_turns=3,
+            session_id="test",
+            total_cost_usd=0.05,
+            result="completed successfully",
+        )
+
+        events = [assistant_event, mock_result]
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(
+                prompt="do work",
+                cwd="/tmp",
+                model_tier="medium",
+            )
+
+        assert result.success is True
+        assert result.error is None

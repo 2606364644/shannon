@@ -76,7 +76,24 @@ class AnthropicProvider:
 
             # 提取结果（使用 dispatcher 的 turn_count）
             turn_count = getattr(result_message, "turn_count", 1)
-            return self._extract_result(result_message, duration, model, turn_count)
+            result = self._extract_result(result_message, duration, model, turn_count)
+
+            # Layer 1: message-level spending cap detection
+            dispatcher_cap_detected = getattr(result_message, "_dispatcher_spending_cap", False)
+            if dispatcher_cap_detected:
+                result.success = False
+                result.retryable = True
+                result.error = result.error or "spending cap (message-level detection)"
+                return result
+
+            # Layer 2: behavioral spending cap detection
+            if self._detect_spending_cap_behavior(result, turn_count):
+                result.success = False
+                result.retryable = True
+                result.error = result.error or "spending cap (behavioral detection)"
+                return result
+
+            return result
 
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
@@ -169,6 +186,12 @@ class AnthropicProvider:
         env_value = os.getenv("CLAUDE_ADAPTIVE_THINKING", "true").lower()
         return env_value != "false"
 
+    def _detect_spending_cap_behavior(self, result: ClaudeRunResult, turn_count: int) -> bool:
+        """Layer 2: behavioral heuristic — low turns + zero cost + no output = suspected cap."""
+        if turn_count <= 1 and result.cost == 0.0 and not result.text:
+            return True
+        return False
+
     async def _execute_query(
         self,
         prompt: str,
@@ -193,6 +216,7 @@ class AnthropicProvider:
 
         final_result.collected_text = dispatcher.collected_text
         final_result.turn_count = dispatcher.turn_count
+        final_result._dispatcher_spending_cap = dispatcher.spending_cap_detected
         return final_result
 
     def _extract_result(
