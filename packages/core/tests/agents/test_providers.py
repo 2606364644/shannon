@@ -14,6 +14,7 @@ from shannon_core.agents.providers import (
     build_provider_config,
     create_provider,
 )
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
 from shannon_core.agents.providers_anthropic import AnthropicProvider
 from shannon_core.agents.providers_openai import OpenAIProvider
 from shannon_core.agents.runner import ClaudeRunResult, ProviderConfig, TokenUsage
@@ -281,7 +282,7 @@ class TestAnthropicProviderBuildOptions:
     """测试 AnthropicProvider._build_options 的零配置行为"""
 
     def test_no_env_override_with_anthropic_key_only(self):
-        """当只有 ANTHROPIC_API_KEY 时，不应设置 options.env（SDK 自动读取）"""
+        """当只有 ANTHROPIC_API_KEY 时，options.env 应包含从进程继承的 key（SDK 不再自动读取）"""
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
 
@@ -291,34 +292,29 @@ class TestAnthropicProviderBuildOptions:
                 model="claude-sonnet-4-6",
             )
 
-        assert options.env is None or options.env == {}
+        assert options.env is not None
+        assert options.env.get("ANTHROPIC_API_KEY") == "sk-ant-test"
 
     def test_env_override_with_shannon_api_key(self):
-        """当 SHANNON_API_KEY 显式设置时，应传入 options.env"""
-        config = ProviderConfig(type="anthropic_api")
+        """当 config.api_key 设置时，应传入 options.env"""
+        config = ProviderConfig(type="anthropic_api", api_key="config-key")
         provider = AnthropicProvider(config)
 
-        with patch.dict(os.environ, {
-            "SHANNON_API_KEY": "shannon-key",
-            "ANTHROPIC_API_KEY": "anthropic-key",
-        }):
+        with patch.dict(os.environ, {}, clear=True):
             options = provider._build_options(
                 cwd="/tmp",
                 model="claude-sonnet-4-6",
             )
 
         assert options.env is not None
-        assert options.env["ANTHROPIC_API_KEY"] == "shannon-key"
+        assert options.env["ANTHROPIC_API_KEY"] == "config-key"
 
     def test_env_override_with_shannon_base_url(self):
-        """当 SHANNON_BASE_URL 显式设置时，应传入 options.env"""
+        """当 ANTHROPIC_BASE_URL 在进程环境中时，应传入 options.env"""
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
 
-        with patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "sk-ant-test",
-            "SHANNON_BASE_URL": "https://custom.example.com",
-        }):
+        with patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://custom.example.com"}, clear=True):
             options = provider._build_options(
                 cwd="/tmp",
                 model="claude-sonnet-4-6",
@@ -328,21 +324,18 @@ class TestAnthropicProviderBuildOptions:
         assert options.env["ANTHROPIC_BASE_URL"] == "https://custom.example.com"
 
     def test_both_shannon_overrides(self):
-        """当 SHANNON_API_KEY 和 SHANNON_BASE_URL 同时设置时"""
-        config = ProviderConfig(type="anthropic_api")
+        """当 config.api_key 和 ANTHROPIC_BASE_URL 同时设置时"""
+        config = ProviderConfig(type="anthropic_api", api_key="config-key")
         provider = AnthropicProvider(config)
 
-        with patch.dict(os.environ, {
-            "SHANNON_API_KEY": "shannon-key",
-            "SHANNON_BASE_URL": "https://custom.example.com",
-        }):
+        with patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://custom.example.com"}, clear=True):
             options = provider._build_options(
                 cwd="/tmp",
                 model="claude-sonnet-4-6",
             )
 
         assert options.env is not None
-        assert options.env["ANTHROPIC_API_KEY"] == "shannon-key"
+        assert options.env["ANTHROPIC_API_KEY"] == "config-key"
         assert options.env["ANTHROPIC_BASE_URL"] == "https://custom.example.com"
 
     def test_bedrock_env_still_set(self):
@@ -439,3 +432,157 @@ class TestClaudeRunResult:
         )
         assert result.tokens.input_tokens == 100
         assert result.tokens.output_tokens == 50
+
+
+class TestBuildSdkEnv:
+    """Test AnthropicProvider._build_sdk_env() env var passthrough."""
+
+    def test_anthropic_api_with_config_api_key(self):
+        """Config api_key is forwarded as ANTHROPIC_API_KEY."""
+        config = ProviderConfig(type="anthropic_api", api_key="cfg-key")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env.get("ANTHROPIC_API_KEY") == "cfg-key"
+
+    def test_anthropic_api_passthrough_from_process_env(self):
+        """Without config override, inherits ANTHROPIC_API_KEY from process env."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env.get("ANTHROPIC_API_KEY") == "env-key"
+
+    def test_anthropic_api_config_overrides_env(self):
+        """Config api_key takes precedence over process env ANTHROPIC_API_KEY."""
+        config = ProviderConfig(type="anthropic_api", api_key="cfg-key")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["ANTHROPIC_API_KEY"] == "cfg-key"
+
+    def test_bedrock_sets_flags(self):
+        """Bedrock provider sets CLAUDE_CODE_USE_BEDROCK and AWS_REGION."""
+        config = ProviderConfig(type="bedrock", region="us-west-2")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["CLAUDE_CODE_USE_BEDROCK"] == "1"
+        assert env["AWS_REGION"] == "us-west-2"
+
+    def test_vertex_sets_flags(self):
+        """Vertex provider sets CLAUDE_CODE_USE_VERTEX, CLOUD_ML_REGION, ANTHROPIC_VERTEX_PROJECT_ID."""
+        config = ProviderConfig(type="vertex", region="europe-west1", project_id="proj-123")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
+        assert env["CLOUD_ML_REGION"] == "europe-west1"
+        assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "proj-123"
+
+    def test_litellm_router_sets_base_url_and_auth_token(self):
+        """LiteLLM router forwards base_url and auth_token."""
+        config = ProviderConfig(
+            type="litellm_router",
+            base_url="https://router.example.com",
+            auth_token="tok-abc",
+        )
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["ANTHROPIC_BASE_URL"] == "https://router.example.com"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "tok-abc"
+
+    def test_passthrough_inherits_home_and_path(self):
+        """HOME and PATH are always inherited from process env."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"HOME": "/home/test", "PATH": "/usr/bin"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["HOME"] == "/home/test"
+        assert env["PATH"] == "/usr/bin"
+
+    def test_passthrough_inherits_oauth_token(self):
+        """CLAUDE_CODE_OAUTH_TOKEN is inherited from process env."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-tok"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-tok"
+
+    def test_passthrough_inherits_playwright_path(self):
+        """PLAYWRIGHT_MCP_EXECUTABLE_PATH is inherited from process env."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"PLAYWRIGHT_MCP_EXECUTABLE_PATH": "/usr/local/bin/npx"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["PLAYWRIGHT_MCP_EXECUTABLE_PATH"] == "/usr/local/bin/npx"
+
+    def test_max_output_tokens_forwarded(self):
+        """CLAUDE_CODE_MAX_OUTPUT_TOKENS is forwarded when set."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "128000"
+
+    def test_default_max_output_tokens(self):
+        """CLAUDE_CODE_MAX_OUTPUT_TOKENS defaults to 64000."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "64000"
+
+    def test_bedrock_inherits_bearer_token(self):
+        """Bedrock inherits AWS_BEARER_TOKEN_BEDROCK from process env."""
+        config = ProviderConfig(type="bedrock", region="us-east-1")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"AWS_BEARER_TOKEN_BEDROCK": "bearer-tok"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["AWS_BEARER_TOKEN_BEDROCK"] == "bearer-tok"
+
+    def test_vertex_inherits_google_credentials(self):
+        """Vertex inherits GOOGLE_APPLICATION_CREDENTIALS from process env."""
+        config = ProviderConfig(type="vertex", region="us-central1", project_id="proj")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json"}, clear=True):
+            env = provider._build_sdk_env()
+
+        assert env["GOOGLE_APPLICATION_CREDENTIALS"] == "/path/to/creds.json"
+
+    def test_no_empty_values(self):
+        """No empty-string values appear in the result."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = provider._build_sdk_env()
+
+        for key, val in env.items():
+            assert val != "", f"Empty value for {key}"

@@ -79,6 +79,61 @@ class AnthropicProvider:
             duration = int((time.time() - start_time) * 1000)
             return self._handle_error(e, duration, model)
 
+    def _build_sdk_env(self) -> dict[str, str]:
+        """Build SDK subprocess environment variables (aligned with TS claude-executor.ts)."""
+        sdk_env: dict[str, str] = {}
+
+        # Base config
+        max_tokens = os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
+        if max_tokens:
+            sdk_env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = max_tokens
+
+        # Provider-specific config
+        if self.type == "anthropic_api":
+            if self.config.api_key:
+                sdk_env["ANTHROPIC_API_KEY"] = self.config.api_key
+        elif self.type == "bedrock":
+            sdk_env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+            if self.config.region:
+                sdk_env["AWS_REGION"] = self.config.region
+        elif self.type == "vertex":
+            sdk_env["CLAUDE_CODE_USE_VERTEX"] = "1"
+            if self.config.region:
+                sdk_env["CLOUD_ML_REGION"] = self.config.region
+            if self.config.project_id:
+                sdk_env["ANTHROPIC_VERTEX_PROJECT_ID"] = self.config.project_id
+        elif self.type == "litellm_router":
+            if self.config.base_url:
+                sdk_env["ANTHROPIC_BASE_URL"] = self.config.base_url
+            if self.config.auth_token:
+                sdk_env["ANTHROPIC_AUTH_TOKEN"] = self.config.auth_token
+
+        # Conditional passthrough: inherit from process env if not set above
+        PASSTHROUGH_VARS = [
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "AWS_REGION",
+            "AWS_BEARER_TOKEN_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLOUD_ML_REGION",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "HOME",
+            "PATH",
+            "PLAYWRIGHT_MCP_EXECUTABLE_PATH",
+        ]
+
+        for var in PASSTHROUGH_VARS:
+            if var not in sdk_env:
+                val = os.getenv(var)
+                if val:
+                    sdk_env[var] = val
+
+        return sdk_env
+
     def _build_options(
         self,
         cwd: str,
@@ -101,33 +156,8 @@ class AnthropicProvider:
             from claude_agent_sdk.types import ThinkingConfigAdaptive
             options.thinking = ThinkingConfigAdaptive()
 
-        # 添加 Provider 特定配置
-        if self.type == "anthropic_api":
-            # 零配置: SDK 自动从进程环境读取 ANTHROPIC_API_KEY
-            # 只有 SHANNON_* 显式覆盖时才传递给 SDK
-            explicit_env = {}
-            shannon_api_key = os.getenv("SHANNON_API_KEY")
-            shannon_base_url = os.getenv("SHANNON_BASE_URL")
-
-            if shannon_api_key:
-                explicit_env["ANTHROPIC_API_KEY"] = shannon_api_key
-            if shannon_base_url:
-                explicit_env["ANTHROPIC_BASE_URL"] = shannon_base_url
-
-            if explicit_env:
-                options.env = explicit_env
-
-        elif self.type == "bedrock":
-            options.env = {
-                "AWS_REGION": self.config.region or "us-east-1",
-            }
-            # Bedrock 使用 AWS 环境变量或默认凭证链
-
-        elif self.type == "vertex":
-            options.env = {
-                "ANTHROPIC_VERTEX_PROJECT_ID": self.config.project_id or "",
-                "CLOUD_ML_REGION": self.config.region or "us-central1",
-            }
+        # Environment variables via _build_sdk_env
+        options.env = self._build_sdk_env()
 
         return options
 
