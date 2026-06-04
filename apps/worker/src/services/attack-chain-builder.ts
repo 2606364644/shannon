@@ -24,10 +24,7 @@ export type { AttackChain, AttackChainStep } from './route-chain-builder.js';
  * Combines framework analysis, endpoint inventory, frontend routes,
  * and vulnerability findings into complete attack scenarios.
  */
-export async function buildAttackChains(
-  knowledge: SharedKnowledge,
-  logger: ActivityLogger,
-): Promise<AttackChain[]> {
+export async function buildAttackChains(knowledge: SharedKnowledge, logger: ActivityLogger): Promise<AttackChain[]> {
   const frameworkEndpoints = knowledge.frameworkAnalysis?.inferredEndpoints ?? [];
   const frontendRoutes = knowledge.frontendRoutes?.routes ?? [];
   const xssChains = knowledge.frontendRoutes?.xssVectors ?? [];

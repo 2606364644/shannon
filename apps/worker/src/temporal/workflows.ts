@@ -36,6 +36,7 @@ import { ALL_AGENTS } from '../types/agents.js';
 import { ALL_VULN_CLASSES, type VulnClass } from '../types/config.js';
 import type * as activities from './activities.js';
 import type { ActivityInput } from './activities.js';
+import { buildAttackChainsActivity } from './activities.js';
 import {
   type AgentMetrics,
   getProgress,
@@ -48,7 +49,6 @@ import {
 } from './shared.js';
 import { toWorkflowSummary } from './summary-mapper.js';
 import { classifyErrorCode, formatWorkflowError } from './workflow-errors.js';
-import { buildAttackChainsActivity } from './activities.js';
 
 /** Agents this run is expected to produce — drives the resume short-circuit. */
 function computeExpectedAgents(vulnClasses: readonly VulnClass[], exploit: boolean): string[] {

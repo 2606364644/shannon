@@ -13,9 +13,8 @@
  */
 
 import { fs } from 'zx';
-
-import type { SessionMetadata } from '../types/audit.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
+import type { SessionMetadata } from '../types/audit.js';
 import type { SharedKnowledge } from '../types/shared-knowledge.js';
 import { EMPTY_KNOWLEDGE } from '../types/shared-knowledge.js';
 import { generateAuditPath } from './utils.js';

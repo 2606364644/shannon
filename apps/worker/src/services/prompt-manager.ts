@@ -281,11 +281,13 @@ export function buildSharedKnowledgeContext(sharedKnowledgeJson: string): string
     const lines: string[] = [];
 
     // Framework analysis
-    const framework = knowledge.frameworkAnalysis as {
-      detectedFrameworks?: string[];
-      inferredEndpoints?: { method: string; path: string; model?: string }[];
-      recommendations?: string[];
-    } | undefined;
+    const framework = knowledge.frameworkAnalysis as
+      | {
+          detectedFrameworks?: string[];
+          inferredEndpoints?: { method: string; path: string; model?: string }[];
+          recommendations?: string[];
+        }
+      | undefined;
     if (framework?.detectedFrameworks?.length) {
       lines.push('### Framework Analysis');
       lines.push(`Detected frameworks: ${framework.detectedFrameworks.join(', ')}`);
@@ -306,9 +308,17 @@ export function buildSharedKnowledgeContext(sharedKnowledgeJson: string): string
     }
 
     // Endpoint inventory
-    const endpoints = knowledge.endpointInventory as {
-      endpoints?: { path: string; methods: string[]; authentication: string; frameworkOrigin: string; ownershipValidation: string }[];
-    } | undefined;
+    const endpoints = knowledge.endpointInventory as
+      | {
+          endpoints?: {
+            path: string;
+            methods: string[];
+            authentication: string;
+            frameworkOrigin: string;
+            ownershipValidation: string;
+          }[];
+        }
+      | undefined;
     if (endpoints?.endpoints?.length) {
       lines.push('');
       lines.push('### Endpoint Security Context');
@@ -316,14 +326,18 @@ export function buildSharedKnowledgeContext(sharedKnowledgeJson: string): string
       lines.push('|--------|------|------|-----------|-----------|');
       for (const ep of endpoints.endpoints) {
         const methods = ep.methods.join('/');
-        lines.push(`| ${methods} | ${ep.path} | ${ep.authentication} | ${ep.frameworkOrigin} | ${ep.ownershipValidation} |`);
+        lines.push(
+          `| ${methods} | ${ep.path} | ${ep.authentication} | ${ep.frameworkOrigin} | ${ep.ownershipValidation} |`,
+        );
       }
     }
 
     // Attack chains
-    const chains = knowledge.attackChains as {
-      chains?: { id: string; name: string; vulnType: string; severity: string; confidence: string }[];
-    } | undefined;
+    const chains = knowledge.attackChains as
+      | {
+          chains?: { id: string; name: string; vulnType: string; severity: string; confidence: string }[];
+        }
+      | undefined;
     if (chains?.chains?.length) {
       lines.push('');
       lines.push('### Pre-assembled Attack Chains');
@@ -332,7 +346,9 @@ export function buildSharedKnowledgeContext(sharedKnowledgeJson: string): string
       }
     }
 
-    return lines.length > 0 ? lines.join('\n') : 'Shared knowledge loaded but contains no relevant data for this agent.';
+    return lines.length > 0
+      ? lines.join('\n')
+      : 'Shared knowledge loaded but contains no relevant data for this agent.';
   } catch {
     return `Shared knowledge available but could not be parsed. Raw data: ${sharedKnowledgeJson.slice(0, 200)}...`;
   }
