@@ -132,7 +132,7 @@ You must follow this methodical four-step process:
 3.  **Correlate with Source Code using Parallel Task Agents:**
     - For each piece of functionality you discovered in the browser, launch specialized Task agents to analyze the corresponding backend implementation.
     - Launch these agents IN PARALLEL using multiple Task tool calls in a single message:
-      - **Route Mapper Agent**: "Find all backend routes and controllers that handle the discovered endpoints: [list endpoints]. Map each endpoint to its exact handler function with file paths and line numbers."
+      - **Route Mapper Agent**: "Find all backend routes and controllers that handle the discovered endpoints: [list endpoints]. Map each endpoint to its exact handler function with file paths and line numbers. **Group detection:** Identify all routes that map to the SAME handler function — these share identical processing logic, and a vulnerability in the handler affects every route in the group. For each group, note whether routes differ in authentication middleware. Include the router definition file:line (e.g., router.js:40-42) for each group so downstream agents can cross-reference."
       - **Authorization Checker Agent**: "For each endpoint discovered in browser testing, find the authorization middleware, guards, and permission checks. Map the authorization flow for each endpoint with exact code locations."
       - **Input Validator Agent**: "Analyze the input validation logic for all discovered form fields and API parameters. Find validation rules, sanitization, and data processing for each input with exact file paths. Additionally, enumerate ALL fields from the application's input type definitions (TypeScript interfaces, Zod schemas, Joi schemas, Pydantic models, JSON Schema). Report wildcard or catch-all fields (e.g., `[key: string]: unknown`) alongside explicit fields, noting that additional undeclared parameters may pass through. Provide a complete parameter inventory for each endpoint."
       - **Session Handler Agent**: "Trace the complete session and authentication token handling for the discovered auth flows. Map session creation, storage, validation, and destruction with exact code locations."
@@ -225,6 +225,25 @@ available on one route just because you found it there first.
 Example: If `GET /preview/v2` and `GET /preview/iframe-demo` both route to `controller.index.preview`,
 and the handler reads `ctx.query.bizEntity`, then BOTH route rows must list `bizEntity` as a parameter —
 even if one route has no authentication middleware.
+
+### 4.1 Shared Controller Route Groups
+
+When multiple routes map to the same handler function, a vulnerability in that
+handler affects ALL routes in the group. You MUST produce this summary table so
+downstream vulnerability agents can enumerate every affected route and flag
+pre-auth (unauthenticated) variants.
+
+| Handler (file:line) | Router Definition | Routes (method + path) | Auth Middleware per Route |
+|---|---|---|---|
+| controller.index.preview (index.js:32) | router.js:40-42 | GET /preview (thirtyLogin), GET /preview/v2 (thirtyLogin), GET /preview/iframe-demo (none) | /preview/iframe-demo has NO auth middleware → pre-auth risk |
+| controller.users.getProfile (users.js:45) | router.js:18-19 | GET /api/users/me (requireAuth), GET /api/admin/users/profile (requireAdmin) | Different auth levels |
+
+**Rules for this table:**
+- Only include groups where ≥2 routes share the same handler function.
+- For each route, note the exact auth middleware (or "none" if absent).
+- Highlight routes with NO auth middleware — these are pre-auth variants of any vulnerability found in the handler.
+- Include the handler's file:line location for downstream agents to trace.
+- Include the router definition file:line range where the routes are registered. Downstream agents can use this as a cross-reference anchor when their handler name doesn't exactly match the one in this table — they can read the router file to confirm the mapping.
 
 ## 5. Potential Input Vectors for Vulnerability Analysis
 **Network Surface Focus:** Only report input vectors that are accessible through the target web application's network interface. Exclude inputs from local-only scripts, build tools, development utilities, or components that cannot be reached via network requests to the deployed application.
