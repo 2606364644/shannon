@@ -60,7 +60,7 @@ export async function localStart(args: LocalStartArgs): Promise<void> {
   }
 
   // 3. Parse --concurrency from raw CLI args (not parsed by parseStartArgs in index.ts)
-  const concurrency = parseConcurrency() ?? 3;
+  const concurrency = parseConcurrency();
 
   if (isLocal()) {
     await localStartBare(args, concurrency);
@@ -69,7 +69,7 @@ export async function localStart(args: LocalStartArgs): Promise<void> {
   }
 }
 
-async function localStartBare(args: LocalStartArgs, concurrency: number): Promise<void> {
+async function localStartBare(args: LocalStartArgs, concurrency: number | undefined): Promise<void> {
   const repo = resolveRepo(args.repo);
   const runnerDistPath = path.resolve('apps/worker/dist/local/runner.js');
 
@@ -94,14 +94,19 @@ async function localStartBare(args: LocalStartArgs, concurrency: number): Promis
   console.log('  Shannon — Local Whitebox Scan');
   console.log(`  Repository:  ${repo.hostPath}`);
   console.log(`  Workspace:   ${workspace}`);
-  console.log(`  Concurrency: ${concurrency}`);
+  if (concurrency !== undefined) {
+    console.log(`  Concurrency: ${concurrency}`);
+  }
   if (args.config) {
     console.log(`  Config:      ${path.resolve(args.config)}`);
   }
   console.log('');
 
   // Build runner arguments
-  const runnerArgs = ['--repo', repo.hostPath, '--workspace', workspace, '--concurrency', String(concurrency)];
+  const runnerArgs = ['--repo', repo.hostPath, '--workspace', workspace];
+  if (concurrency !== undefined) {
+    runnerArgs.push('--concurrency', String(concurrency));
+  }
   if (args.config) {
     const configResolved = resolveConfig(args.config);
     runnerArgs.push('--config', configResolved.hostPath);
@@ -132,7 +137,7 @@ async function localStartBare(args: LocalStartArgs, concurrency: number): Promis
   process.exit(exitCode);
 }
 
-async function localStartNpx(args: LocalStartArgs, concurrency: number): Promise<void> {
+async function localStartNpx(args: LocalStartArgs, concurrency: number | undefined): Promise<void> {
   const repo = resolveRepo(args.repo);
   ensureImage(args.version);
 
@@ -163,7 +168,9 @@ async function localStartNpx(args: LocalStartArgs, concurrency: number): Promise
   console.log('  Shannon — Whitebox Scan (Docker, no Temporal)');
   console.log(`  Repository:  ${repo.hostPath}`);
   console.log(`  Workspace:   ${workspace}`);
-  console.log(`  Concurrency: ${concurrency}`);
+  if (concurrency !== undefined) {
+    console.log(`  Concurrency: ${concurrency}`);
+  }
   if (args.config) {
     console.log(`  Config:      ${path.resolve(args.config)}`);
   }
@@ -202,7 +209,9 @@ async function localStartNpx(args: LocalStartArgs, concurrency: number): Promise
   // Run local runner instead of Temporal worker
   dockerArgs.push('node', 'apps/worker/dist/local/runner.js');
   dockerArgs.push('--repo', repo.containerPath);
-  dockerArgs.push('--concurrency', String(concurrency));
+  if (concurrency !== undefined) {
+    dockerArgs.push('--concurrency', String(concurrency));
+  }
   dockerArgs.push('--workspace', workspace);
 
   if (args.config) {

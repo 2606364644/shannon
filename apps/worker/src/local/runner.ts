@@ -39,7 +39,7 @@ function parseArgs(argv: string[]): RunnerArgs {
   let repoPath = '';
   let configPath: string | undefined;
   let workspace: string | undefined;
-  let concurrency = 3;
+  let concurrency = ALL_VULN_CLASSES.length;
   let pipelineTestingMode = false;
   let apiKey: string | undefined;
   let promptDir: string | undefined;
