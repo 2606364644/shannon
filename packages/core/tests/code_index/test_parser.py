@@ -1,7 +1,10 @@
 import pytest
 from pathlib import Path
 
-from shannon_core.code_index.parser import detect_language, discover_source_files
+from shannon_core.code_index.parser import (
+    detect_language, discover_source_files,
+    detect_all_languages, discover_all_source_files,
+)
 
 
 class TestDetectLanguage:
@@ -81,3 +84,45 @@ class TestDiscoverSourceFiles:
         (tmp_path / "src" / "app.py").write_text("x = 1")
         files = discover_source_files(tmp_path, "python")
         assert len(files) == 1
+
+
+class TestDetectAllLanguages:
+    def test_single_language(self, tmp_path):
+        (tmp_path / "app.py").write_text("pass")
+        result = detect_all_languages(tmp_path)
+        assert result == ["python"]
+
+    def test_polyglot_project(self, tmp_path):
+        (tmp_path / "app.py").write_text("pass")
+        (tmp_path / "index.ts").write_text("console.log()")
+        result = detect_all_languages(tmp_path)
+        assert "python" in result
+        assert "typescript" in result
+
+    def test_empty_repo(self, tmp_path):
+        with pytest.raises(ValueError, match="No source files found"):
+            detect_all_languages(tmp_path)
+
+    def test_ordered_by_count(self, tmp_path):
+        for i in range(5):
+            (tmp_path / f"module_{i}.py").write_text("pass")
+        (tmp_path / "app.ts").write_text("console.log()")
+        result = detect_all_languages(tmp_path)
+        assert result[0] == "python"  # more Python files
+
+
+class TestDiscoverAllSourceFiles:
+    def test_finds_files_across_languages(self, tmp_path):
+        (tmp_path / "app.py").write_text("pass")
+        (tmp_path / "index.ts").write_text("console.log()")
+        result = discover_all_source_files(tmp_path, ["python", "typescript"])
+        extensions = {f.suffix for f in result}
+        assert ".py" in extensions
+        assert ".ts" in extensions
+
+    def test_skips_hidden_dirs(self, tmp_path):
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / ".hidden" / "secret.py").write_text("pass")
+        (tmp_path / "app.py").write_text("pass")
+        result = discover_all_source_files(tmp_path, ["python"])
+        assert len(result) == 1
