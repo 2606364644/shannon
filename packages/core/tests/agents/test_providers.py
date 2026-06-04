@@ -437,6 +437,21 @@ class TestClaudeRunResult:
         assert result.tokens.input_tokens == 100
         assert result.tokens.output_tokens == 50
 
+    def test_result_with_error_code(self):
+        """测试 error_code 字段"""
+        result = ClaudeRunResult(
+            text="",
+            success=False,
+            error="authentication failed",
+            error_code="AuthenticationError",
+        )
+        assert result.error_code == "AuthenticationError"
+
+    def test_error_code_defaults_to_none(self):
+        """测试 error_code 默认为 None"""
+        result = ClaudeRunResult()
+        assert result.error_code is None
+
 
 class TestBuildSdkEnv:
     """Test AnthropicProvider._build_sdk_env() env var passthrough."""

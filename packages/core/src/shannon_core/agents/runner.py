@@ -74,6 +74,7 @@ class ClaudeRunResult:
     structured_output: Any | None = None
     error: str | None = None
     retryable: bool = True
+    error_code: str | None = None
     tokens: TokenUsage = field(default_factory=TokenUsage)
 
 async def run_claude_prompt(
