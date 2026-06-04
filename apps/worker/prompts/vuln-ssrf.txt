@@ -197,6 +197,9 @@ For each sink, trace the origin of its data variable backward through the applic
     If sanitization is valid **and** no unsafe mutations exist, terminate this path as **SAFE**.
     
 - **Path Forking:** If a sink variable can be populated from multiple branches, trace each branch independently.
+
+@include(shared/_cross-route-enumeration.txt)
+
 - **Track Mutations:** Record concatenations, redirect logic, or transformations. Any mutation **after sanitization** invalidates protections.
 - **Source Check (Termination):**
     - If the trace reaches **immediate user input** (param, header, form) without proper sanitization → **Reflected SSRF**.
@@ -304,6 +307,8 @@ These components were analyzed and found to have robust defenses. They are low-p
       **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+3. Cross-Route Verification: For every vulnerability finding, confirm that `affected_routes` lists all routes sharing the same handler per Section 4.1 of the recon deliverable. Findings missing `affected_routes` or `authentication_required` are INCOMPLETE. Findings with `authentication_required: false` MUST have a corresponding pre-auth route in `affected_routes`.
 
 **ONLY AFTER** both systematic analysis AND successful deliverable generation, announce "**SSRF ANALYSIS COMPLETE**" and stop.
 
