@@ -142,6 +142,8 @@ From `.shannon/deliverables/pre_recon_deliverable.md`, use Section 3 and 6 to he
 **If validation absent or bypassable → classify:** `Open_Redirect` → **suggested attack:** `open_redirect_protocol_bypass` / `open_redirect_encoding_bypass` / `open_redirect_domain_bypass`.
 **If validation sufficient → mark safe in "Secure by Design" section.**
 
+@include(shared/_cross-route-enumeration.txt)
+
 ## 4) Open Redirect — Phase D: Impact Assessment
 - For each confirmed Open Redirect, assess impact: is this a login/callback redirect (high impact — token leakage, phishing)? A general redirect (medium impact — phishing)? A post-action redirect (lower impact)?
 - Note whether tokens or sensitive data appear in URLs during the redirect flow.
@@ -280,6 +282,8 @@ These components were analyzed and found to have robust defenses. They are low-p
       **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+3. Cross-Route Verification: For every vulnerability finding, confirm that `affected_routes` lists all routes sharing the same handler per Section 4.1 of the recon deliverable. Findings missing `affected_routes` or `authentication_required` are INCOMPLETE. Findings with `authentication_required: false` MUST have a corresponding pre-auth route in `affected_routes`.
 
 **ONLY AFTER** both systematic analysis AND successful deliverable generation, announce "**MISCONFIG ANALYSIS COMPLETE**" and stop.
 
