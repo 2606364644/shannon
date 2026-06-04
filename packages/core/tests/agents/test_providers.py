@@ -673,3 +673,50 @@ class TestExecuteQueryWithDispatcher:
             )
 
         mock_audit.log_tool_start.assert_awaited_once_with("bash", {"command": "ls"})
+
+
+class TestCallWithTurnCount:
+    """Test that call() passes dispatcher turn_count to _extract_result."""
+
+    @pytest.mark.asyncio
+    async def test_call_returns_correct_turn_count(self):
+        """call() returns turn_count from dispatcher, not hardcoded 1."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        # Create 3 assistant events to simulate 3 turns
+        events = []
+        for i in range(3):
+            event = MagicMock()
+            event.type = "assistant"
+            block = MagicMock()
+            block.text = f"turn {i + 1}"
+            event.content = [block]
+            event.error = None
+            events.append(event)
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=3000,
+            duration_api_ms=1500,
+            is_error=False,
+            num_turns=3,
+            session_id="test",
+            total_cost_usd=0.01,
+            result="done",
+        )
+        events.append(mock_result)
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(
+                prompt="multi-turn test",
+                cwd="/tmp",
+                model_tier="medium",
+            )
+
+        assert result.success is True
+        assert result.turns == 3

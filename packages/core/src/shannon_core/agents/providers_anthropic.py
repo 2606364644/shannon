@@ -74,8 +74,9 @@ class AnthropicProvider:
             # 计算耗时
             duration = int((time.time() - start_time) * 1000)
 
-            # 提取结果
-            return self._extract_result(result_message, duration, model)
+            # 提取结果（使用 dispatcher 的 turn_count）
+            turn_count = getattr(result_message, "turn_count", 1)
+            return self._extract_result(result_message, duration, model, turn_count)
 
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
@@ -199,6 +200,7 @@ class AnthropicProvider:
         result_message: ResultMessage,
         duration: int,
         model: str,
+        turn_count: int = 1,
     ) -> ClaudeRunResult:
         """从 ResultMessage 提取结果"""
         # 提取文本内容
@@ -223,15 +225,11 @@ class AnthropicProvider:
         if hasattr(result_message, "structured_output") and result_message.structured_output:
             structured_output = result_message.structured_output
 
-        # 统计轮次
-        turns = 1
-        # 查询可能返回多个 result message
-
         return ClaudeRunResult(
             text=text,
             success=True,
             duration=duration,
-            turns=turns,
+            turns=turn_count,
             cost=cost,
             model=model,
             structured_output=structured_output,
