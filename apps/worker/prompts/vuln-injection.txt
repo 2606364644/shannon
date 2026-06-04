@@ -135,6 +135,8 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
     - **2) Trace Data Flow Paths from Source to Sink**
 		    - For each source, your goal is to identify every unique "Data Flow Path" to a database sink. A path is a distinct route the data takes through the code.
 		    - **Path Forking:** If a single source variable is used in a way that leads to multiple, different database queries (sinks), you must treat each route as a **separate and independent path for analysis**. For example, if `userInput` is passed to both `updateProfile()` and `auditLog()`, you will analyze the "userInput → updateProfile → DB_UPDATE" path and the "userInput → auditLog → DB_INSERT" path as two distinct units.
+
+@include(shared/_cross-route-enumeration.txt)
 		    - **Branch Path Exhaustion:** When a controller method contains conditional branches (if/else, early returns) that lead to different data transformations for the same output variable, you MUST trace every branch independently. Do NOT assume a parameter is safe because one branch validates it — another branch may read the same parameter directly from user input without validation.
 		    - **For each distinct path, you must record:**
 		      - **A. The full sequence of transformations:** Document all assignments, function calls, and string operations from the controller to the data access layer.
@@ -366,6 +368,8 @@ These input vectors were traced and confirmed to have robust, context-appropriat
      **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+3. Cross-Route Verification: For every vulnerability finding, confirm that `affected_routes` lists all routes sharing the same handler per Section 4.1 of the recon deliverable. Findings missing `affected_routes` or `authentication_required` are INCOMPLETE. Findings with `authentication_required: false` MUST have a corresponding pre-auth route in `affected_routes`.
 
 **ONLY AFTER** both todo completion AND successful deliverable generation, announce "**INJECTION ANALYSIS COMPLETE**" and stop.
 
