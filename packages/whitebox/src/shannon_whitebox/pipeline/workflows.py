@@ -4,6 +4,7 @@ from pathlib import Path
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import PentestError
@@ -18,6 +19,7 @@ with workflow.unsafe.imports_passed_through():
     from shannon_core.models.retry import (
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, PRODUCTION_RETRY, NON_RETRYABLE,
     )
+    from shannon_core.models.errors import classify_error_for_temporal
 
 @workflow.defn
 class WhiteboxScanWorkflow:
@@ -138,6 +140,7 @@ class WhiteboxScanWorkflow:
                     agent_name = AgentName(f"{vt}-vuln")
                     if isinstance(result, Exception):
                         self._state.errors.append(f"{agent_name.value}: {result}")
+                        self._state.failed_agents.append(agent_name.value)
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
@@ -147,7 +150,17 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=5),
             )
 
-            self._state.status = "completed"
+            # Set final status based on whether any agents failed
+            if self._state.failed_agents:
+                self._state.status = "failed"
+                first_error_msg = self._state.errors[0].split(": ", 1)[-1] if self._state.errors else ""
+                error_type, _ = classify_error_for_temporal(Exception(first_error_msg))
+                self._state.error_code = error_type
+            else:
+                self._state.status = "completed"
+            return self._state
+        except CancelledError:
+            self._state.status = "cancelled"
             return self._state
         finally:
             cleanup_settings()
