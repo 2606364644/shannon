@@ -23,6 +23,7 @@ class AgentName(str, Enum):
     MISCONFIG_EXPLOIT = "misconfig-exploit"
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
+    AUDIT_TIER1 = "audit-tier1"
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -157,6 +158,14 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,
         model_tier="medium",
     ),
+    AgentName.AUDIT_TIER1: AgentDefinition(
+        name=AgentName.AUDIT_TIER1,
+        display_name="Tier 1 Combined Audit",
+        prerequisites=[AgentName.RECON],
+        prompt_template="audit-tier1",
+        deliverable_filename=None,  # Findings collected, no separate deliverable
+        model_tier="small",
+    ),
 }
 
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz", "misconfig"]
@@ -164,6 +173,7 @@ ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz",
 PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
 # VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
 PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
+PLAYWRIGHT_SESSION_MAPPING[AgentName.AUDIT_TIER1.value] = f"agent{len(AgentName)}"
 
 AGENT_PHASE_MAP: dict[str, str] = {
     "pre-recon": "pre-recon",
@@ -183,4 +193,5 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "misconfig-exploit": "exploitation",
     "report": "reporting",
     "validate-authentication": "pre-recon",
+    "audit-tier1": "vulnerability-analysis",
 }

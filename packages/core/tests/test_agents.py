@@ -138,3 +138,12 @@ def test_validate_auth_definition():
 def test_validate_auth_in_session_mapping():
     assert AgentName.VALIDATE_AUTH.value in PLAYWRIGHT_SESSION_MAPPING
     assert PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] == "agent1"
+
+
+def test_audit_tier1_agent_registered():
+    from shannon_core.models.agents import AgentName, AGENTS
+    assert hasattr(AgentName, "AUDIT_TIER1")
+    assert AgentName.AUDIT_TIER1 in AGENTS
+    agent = AGENTS[AgentName.AUDIT_TIER1]
+    assert agent.prompt_template == "audit-tier1"
+    assert agent.model_tier == "small"
