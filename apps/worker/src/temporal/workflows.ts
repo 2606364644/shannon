@@ -906,11 +906,13 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
   };
 
   try {
+    let resumeState: ResumeState | undefined;
+
     // === Session initialization (before any heavy work) ===
     // Must run first so the CLI detects the workflow within its 120s polling window.
     // Resume path: write resumeAttempts entry. New workspace: write originalWorkflowId.
     if (input.resumeFromWorkspace) {
-      const resumeState = await a.loadResumeState(
+      resumeState = await a.loadResumeState(
         input.resumeFromWorkspace,
         input.webUrl,
         input.repoPath,
