@@ -17,3 +17,4 @@
  */
 
 export { AuditSession } from './audit-session.js';
+export * from './knowledge-store.js';
