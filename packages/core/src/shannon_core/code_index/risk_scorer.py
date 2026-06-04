@@ -87,18 +87,17 @@ class ChainRiskScore(BaseModel):
         # Depth: call chain length
         depth = min(10, len(chain.path))
 
-        logger.debug("Scored chain %s: sink=%d taint=%d auth=%d depth=%d total=%d tier=%d",
-                     chain_id, sink_danger, taint_completeness, auth_gap, depth,
-                     sink_danger + taint_completeness + auth_gap + depth,
-                     3 if sink_danger + taint_completeness + auth_gap + depth >= 30 else (2 if sink_danger + taint_completeness + auth_gap + depth >= 15 else 1))
-
-        return cls(
+        score = cls(
             chain_id=chain_id,
             sink_danger=sink_danger,
             taint_completeness=taint_completeness,
             auth_gap=auth_gap,
             depth=depth,
         )
+        logger.debug("Scored chain %s: sink=%d taint=%d auth=%d depth=%d total=%d tier=%d",
+                     chain_id, sink_danger, taint_completeness, auth_gap, depth,
+                     score.total, score.tier)
+        return score
 
 
 class AuditBudget(BaseModel):

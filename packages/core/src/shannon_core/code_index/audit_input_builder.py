@@ -64,8 +64,7 @@ def build_chain_audit_input(
             else:
                 sink_label = sink_label.upper()
             sinks.append(
-                f"- {flow.sink_func_id}: {sink_label} "
-                f"sink at {flow.sink_func_id}"
+                f"- {sink_label} sink at {flow.sink_func_id}"
             )
     if sinks:
         sections.append("## Sinks in this chain\n" + "\n".join(sinks) + "\n")
