@@ -931,6 +931,9 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       await a.persistOrValidateRunScope(activityInput, [], true);
     }
 
+    const shouldSkip = (agentName: string): boolean =>
+      resumeState?.completedAgents.includes(agentName) ?? false;
+
     // === Preflight (full — with URL check) ===
     state.currentPhase = 'preflight';
     state.currentAgent = null;
