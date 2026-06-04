@@ -197,6 +197,71 @@ async def run_rebuild_call_chains(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_risk_scoring(input: ActivityInput) -> dict:
+    """Score call chains and produce tiered audit plan."""
+    try:
+        from shannon_core.code_index.models import CodeIndex
+        from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+        from shannon_core.code_index.risk_scorer import AuditBudget
+        from shannon_core.code_index.tiered_audit import TieredAuditPlanner
+
+        repo, deliverables, _ = _get_paths(input)
+
+        # Load code index
+        code_index_path = deliverables / "code_index.json"
+        if not code_index_path.exists():
+            return {"total_chains": 0, "tier3_count": 0, "tier2_count": 0, "tier1_count": 0}
+
+        index = CodeIndex.model_validate_json(code_index_path.read_text())
+
+        # Load parameter graph
+        param_graph_path = deliverables / "parameter_graph.json"
+        taint_flows_by_chain: dict[str, list] = {}
+        if param_graph_path.exists():
+            pgraph = ParameterPropagationGraph.model_validate_json(
+                param_graph_path.read_text()
+            )
+            for flow in pgraph.taint_flows:
+                taint_flows_by_chain.setdefault(flow.entry_point_id, []).append(flow)
+
+        # Build block lookup
+        blocks_by_id = {b.id: b for b in index.blocks}
+
+        # Auth middleware detection: simple heuristic — functions with
+        # auth/login/token/verify in name or decorators
+        auth_ids: set[str] = set()
+        for block in index.blocks:
+            combined = f"{block.function_name} {' '.join(block.decorators)}".lower()
+            if any(kw in combined for kw in ("auth", "login", "token", "verify", "session")):
+                auth_ids.add(block.id)
+
+        # Plan
+        planner = TieredAuditPlanner(
+            chains=index.chains,
+            blocks_by_id=blocks_by_id,
+            taint_flows_by_chain=taint_flows_by_chain,
+            auth_middleware_ids=auth_ids,
+            budget=AuditBudget(),
+        )
+        plan = planner.plan()
+
+        # Write audit plan
+        plan_path = deliverables / "audit_plan.json"
+        plan_path.write_text(plan.to_json())
+
+        return {
+            "total_chains": plan.total_chains,
+            "tier3_count": plan.tier3_count,
+            "tier2_count": plan.tier2_count,
+            "tier1_count": plan.tier1_count,
+            "estimated_llm_calls": plan.estimated_llm_calls,
+        }
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def render_findings(input: ActivityInput) -> None:
     try:
         from shannon_core.services.findings_renderer import FindingsRenderer

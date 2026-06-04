@@ -114,6 +114,13 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.RECON.value)
                 self._state.agent_metrics[AgentName.RECON.value] = metrics
 
+            # Risk scoring — produce tiered audit plan
+            risk_result = await workflow.execute_activity(
+                activities.run_risk_scoring, act_input,
+                start_to_close_timeout=timedelta(minutes=5),
+            )
+            self._state.audit_plan_stats = risk_result
+
             vuln_tasks = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")
