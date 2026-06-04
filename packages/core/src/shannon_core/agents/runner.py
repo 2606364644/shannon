@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from shannon_core.models.errors import classify_error_for_temporal
+
 
 @dataclass
 class TokenUsage:
@@ -135,11 +137,13 @@ async def run_claude_prompt(
             result.success = False
             result.retryable = True
             result.error = result.error or "检测到花费上限限制"
+            result.error_code = "BillingError"
 
         return result
 
     except Exception as e:
         # 捕获未处理的异常
+        error_type, retryable = classify_error_for_temporal(e)
         return ClaudeRunResult(
             text="",
             success=False,
@@ -148,7 +152,8 @@ async def run_claude_prompt(
             cost=0.0,
             model=None,
             error=f"未处理的异常: {str(e)}",
-            retryable=True,
+            retryable=retryable,
+            error_code=error_type,
         )
 
 

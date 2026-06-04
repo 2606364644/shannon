@@ -18,7 +18,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
 from shannon_core.agents.providers_anthropic import AnthropicProvider
 from shannon_core.agents.message_dispatcher import MessageDispatcher
 from shannon_core.agents.providers_openai import OpenAIProvider
-from shannon_core.agents.runner import ClaudeRunResult, ProviderConfig, TokenUsage
+from shannon_core.agents.runner import ClaudeRunResult, ProviderConfig, TokenUsage, run_claude_prompt
 
 
 class TestProviderConfig:
@@ -980,4 +980,42 @@ class TestHandleErrorClassification:
         provider = AnthropicProvider(config)
         result = provider._handle_error(Exception("invalid URL format"), 100, "claude-sonnet-4-6")
         assert result.error_code == "InvalidTargetError"
+        assert result.retryable is False
+
+
+class TestRunClaudePromptErrorCode:
+    """Test run_claude_prompt sets error_code on error paths."""
+
+    @pytest.mark.asyncio
+    async def test_spending_cap_behavior_sets_billing_error_code(self):
+        """_is_spending_cap_behavior path sets error_code=BillingError."""
+        mock_provider = AsyncMock()
+        mock_provider.call = AsyncMock(return_value=ClaudeRunResult(
+            text="",
+            success=False,
+            error="spending limit reached",
+            retryable=True,
+        ))
+
+        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+                result = await run_claude_prompt(
+                    prompt="test",
+                    repo_path="/tmp",
+                )
+
+        assert result.error_code == "BillingError"
+        assert result.retryable is True
+
+    @pytest.mark.asyncio
+    async def test_exception_handler_sets_error_code(self):
+        """Catch-all exception handler classifies and sets error_code."""
+        with patch("shannon_core.agents.providers.build_provider_config", side_effect=Exception("authentication failed")):
+            result = await run_claude_prompt(
+                prompt="test",
+                repo_path="/tmp",
+            )
+
+        assert result.success is False
+        assert result.error_code == "AuthenticationError"
         assert result.retryable is False
