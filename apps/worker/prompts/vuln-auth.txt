@@ -175,6 +175,8 @@ From `.shannon/deliverables/pre_recon_deliverable.md`, use Section 3 and 6 to he
 - nOAuth check: Verify user identification uses the immutable `sub` (subject) claim, NOT deterministic/mutable attributes like `email`, `preferred_username`, `name`, or other user-controllable claims. Using mutable attributes allows attackers to create their own OAuth tenant, set matching attributes, and impersonate users.
 **If failed → classify:** `login_flow_logic` or `token_management_issue` → **suggested attack:** oauth_code_interception / token_replay / noauth_attribute_hijack.
 
+@include(shared/_cross-route-enumeration.txt)
+
 # Confidence scoring (analysis phase; applies to all checks above)
 - **High** — The flaw is directly established and deterministic in the target context. You have direct evidence or equivalent (code/config that creates the condition, or a single safe interaction that shows it) with no material alternate control. Scope is clear (which endpoints/flows).
 - **Medium** — The flaw is strongly indicated but there is at least one material uncertainty (e.g., possible upstream control, conditional behavior, or partial coverage). Signals are mostly consistent but a reasonable alternative explanation remains.
@@ -255,6 +257,8 @@ These components were analyzed and found to have robust defenses. They are low-p
       **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+3. Cross-Route Verification: For every vulnerability finding, confirm that `affected_routes` lists all routes sharing the same handler per Section 4.1 of the recon deliverable. Findings missing `affected_routes` or `authentication_required` are INCOMPLETE. Findings with `authentication_required: false` MUST have a corresponding pre-auth route in `affected_routes`.
 
 **ONLY AFTER** both systematic analysis AND successful deliverable generation, announce "**AUTH ANALYSIS COMPLETE**" and stop.
 
