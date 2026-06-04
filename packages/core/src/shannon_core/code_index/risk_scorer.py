@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from shannon_core.code_index.models import CallChain, FuncBlock
 from shannon_core.code_index.parameter_models import SinkType, TaintFlow
+from shannon_core.code_index.taint_propagator import classify_sink
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,6 @@ class ChainRiskScore(BaseModel):
         if sink_node_id:
             sink_block = blocks_by_id.get(sink_node_id)
             if sink_block:
-                from shannon_core.code_index.taint_propagator import classify_sink
                 sink_type = classify_sink(sink_block)
                 sink_danger = SINK_DANGER_SCORES.get(sink_type, 0)
 
@@ -86,6 +86,11 @@ class ChainRiskScore(BaseModel):
 
         # Depth: call chain length
         depth = min(10, len(chain.path))
+
+        logger.debug("Scored chain %s: sink=%d taint=%d auth=%d depth=%d total=%d tier=%d",
+                     chain_id, sink_danger, taint_completeness, auth_gap, depth,
+                     sink_danger + taint_completeness + auth_gap + depth,
+                     3 if sink_danger + taint_completeness + auth_gap + depth >= 30 else (2 if sink_danger + taint_completeness + auth_gap + depth >= 15 else 1))
 
         return cls(
             chain_id=chain_id,

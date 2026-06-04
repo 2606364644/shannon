@@ -52,7 +52,7 @@
 
 Add new models needed by all subsequent tasks. These extend the existing models without breaking them.
 
-- [ ] **Step 1: Write failing tests for new models**
+- [x] **Step 1: Write failing tests for new models**
 
 Add to `packages/core/tests/code_index/test_models.py`:
 
@@ -147,12 +147,12 @@ def test_degradation_level_enum():
     assert DegradationLevel.MINIMAL == "minimal"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_models.py -v -k "parameter_source or typed_parameter or unified_entry or file_entry or file_manifest or coverage_gap or degradation_level"`
 Expected: FAIL — imports not found
 
-- [ ] **Step 3: Add new models to models.py**
+- [x] **Step 3: Add new models to models.py**
 
 Add these models at the end of `packages/core/src/shannon_core/code_index/models.py` (after `AdjudicationResult`):
 
@@ -236,17 +236,17 @@ class CoverageGap(BaseModel):
     estimated_coverage_loss: str
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_models.py -v -k "parameter_source or typed_parameter or unified_entry or file_entry or file_manifest or coverage_gap or degradation_level"`
 Expected: PASS
 
-- [ ] **Step 5: Run full model test suite to ensure no regressions**
+- [x] **Step 5: Run full model test suite to ensure no regressions**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_models.py -v`
 Expected: All tests PASS (old + new)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/models.py packages/core/tests/code_index/test_models.py
@@ -267,7 +267,7 @@ foundation for the GitNexus-powered code index (Plan A, P0)."
 
 Isolated module with no external dependencies — models + factory functions.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_degradation.py`:
 
@@ -312,12 +312,12 @@ class TestDegradationReport:
         assert data["gaps"] == []
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_degradation.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement degradation.py**
+- [x] **Step 3: Implement degradation.py**
 
 Create `packages/core/src/shannon_core/code_index/degradation.py`:
 
@@ -395,7 +395,7 @@ def build_degradation_report(level: DegradationLevel) -> DegradationReport:
         return DegradationReport(level=level, gaps=list(MINIMAL_GAPS))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_degradation.py -v`
 Expected: All 5 tests PASS
@@ -534,12 +534,12 @@ class TestDiscoverSecurityFiles:
         assert templates[0].file_path.endswith("a.html")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_file_discovery.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement file_discovery.py**
+- [x] **Step 3: Implement file_discovery.py**
 
 Create `packages/core/src/shannon_core/code_index/file_discovery.py`:
 
@@ -622,7 +622,7 @@ def discover_security_files(repo_root: Path) -> FileManifest:
     return FileManifest(entries=entries)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_file_discovery.py -v`
 Expected: All 10 tests PASS
@@ -748,12 +748,12 @@ class TestMarkHttpParameterSources:
         assert len(marked) == 2
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_enhanced_parameters.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement enhanced_parameters.py**
+- [x] **Step 3: Implement enhanced_parameters.py**
 
 Create `packages/core/src/shannon_core/code_index/enhanced_parameters.py`:
 
@@ -1026,7 +1026,7 @@ def _infer_source(
     return None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_enhanced_parameters.py -v`
 Expected: All tests PASS
@@ -1123,12 +1123,12 @@ class TestGitNexusEngineCLI:
             assert engine.is_available() is False
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_gitnexus_engine.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement gitnexus_engine.py**
+- [x] **Step 3: Implement gitnexus_engine.py**
 
 Create `packages/core/src/shannon_core/code_index/gitnexus_engine.py`:
 
@@ -1234,7 +1234,7 @@ class GitNexusEngine:
         return result.stdout
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_gitnexus_engine.py -v`
 Expected: All 7 tests PASS
@@ -1348,12 +1348,12 @@ class TestGitNexusMCPClient:
         assert client._request_id == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_gitnexus_mcp.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement gitnexus_mcp.py**
+- [x] **Step 3: Implement gitnexus_mcp.py**
 
 Create `packages/core/src/shannon_core/code_index/gitnexus_mcp.py`:
 
@@ -1475,7 +1475,7 @@ class GitNexusMCPClient:
         return result
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_gitnexus_mcp.py -v`
 Expected: All 6 tests PASS
@@ -1610,12 +1610,12 @@ class TestMergeEntryPoints:
         assert result[0].http_method == "POST"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_entry_point_fusion.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement entry_point_fusion.py**
+- [x] **Step 3: Implement entry_point_fusion.py**
 
 Create `packages/core/src/shannon_core/code_index/entry_point_fusion.py`:
 
@@ -1702,7 +1702,7 @@ def merge_entry_points(
     return result
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_entry_point_fusion.py -v`
 Expected: All 9 tests PASS
@@ -1780,7 +1780,7 @@ class TestDiscoverAllSourceFiles:
         assert len(result) == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_parser.py -v -k "detect_all_languages or discover_all_source_files"`
 Expected: FAIL — import error
@@ -1834,17 +1834,17 @@ def discover_all_source_files(repo_root: Path, languages: list[str]) -> list[Pat
     return sorted(files)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_parser.py -v -k "detect_all_languages or discover_all_source_files"`
 Expected: All 5 new tests PASS
 
-- [ ] **Step 5: Run full parser test suite**
+- [x] **Step 5: Run full parser test suite**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_parser.py -v`
 Expected: All tests PASS (old + new)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parser.py packages/core/tests/code_index/test_parser.py
@@ -1917,7 +1917,7 @@ class TestDiamondPathPreservation:
         assert len(chains) >= 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_call_graph.py::TestDiamondPathPreservation -v`
 Expected: FAIL — `preserve_diamonds` keyword argument not found
@@ -2013,7 +2013,7 @@ def build_call_chains(
     return chains
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_call_graph.py -v`
 Expected: All tests PASS (old + new)
@@ -2142,7 +2142,7 @@ class TestWriteIndexFilesExtended:
         )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_build_code_index.py -v -k "gitnexus"`
 Expected: FAIL — `build_code_index_with_gitnexus` not found
@@ -2218,17 +2218,17 @@ def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
     return index
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_build_code_index.py -v -k "gitnexus"`
 Expected: Tests PASS (may need minor adjustments for mock setup)
 
-- [ ] **Step 5: Run full code_index test suite**
+- [x] **Step 5: Run full code_index test suite**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/__init__.py packages/core/tests/code_index/test_build_code_index.py

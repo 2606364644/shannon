@@ -1,4 +1,3 @@
-import pytest
 from shannon_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
 from shannon_core.code_index.models import FuncBlock, CallChain, ParameterSource
 from shannon_core.code_index.parameter_models import TaintFlow, SinkType, PropagationStep
