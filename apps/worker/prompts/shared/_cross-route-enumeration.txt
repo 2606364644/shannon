@@ -1,0 +1,50 @@
+<cross_route_enumeration>
+**Pre-Documentation Checklist: Cross-Route Enumeration (Shared Handlers)**
+
+This checklist MUST be completed IMMEDIATELY BEFORE you document any vulnerability
+finding in your exploitation queue. Do NOT proceed to write a finding without completing
+all four steps below.
+
+### Step CR-1: Read Shared Controller Groups
+
+Read Section 4.1 (Shared Controller Route Groups) in
+`.shannon/deliverables/recon_deliverable.md`. If this section does not exist or is empty,
+skip to Step CR-4 and use single-route defaults.
+
+### Step CR-2: Locate Your Handler
+
+Find the row in Section 4.1 whose handler matches the vulnerable function you just analyzed.
+Match by any of these (in order of reliability):
+1. Handler function name + file:line (e.g., `preview` at `index.js:32`).
+2. Router definition file:line range — read the router file and confirm your handler is
+   referenced at those lines.
+
+If no matching row exists, the handler is unique to one route. Skip to Step CR-4.
+
+### Step CR-3: Enumerate Affected Routes
+
+For every route listed in the matching group:
+
+- **Pre-auth route** (auth middleware is "none" or absent): Create a **separate** finding.
+  Set `externally_exploitable: true`.
+- **Same auth across all routes**: Document all routes in a single finding, listing every
+  route in `affected_routes`.
+- **Different auth tiers**: Create **separate findings per auth tier** to preserve
+  exploitation context for downstream agents.
+
+### Step CR-4: Attach Required Fields
+
+Add the following fields to EVERY finding in your exploitation queue. A finding without
+these fields is **INCOMPLETE** and must not be submitted.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `affected_routes` | `string[]` | **MANDATORY** | Every route (METHOD /path) affected by this finding, with auth middleware noted in parentheses. Example: `["GET /preview (thirtyLogin)", "GET /preview/v2 (thirtyLogin)", "GET /preview/iframe-demo (none)"]`. If handler maps to one route only, use a single-element array. |
+| `authentication_required` | `boolean` | **MANDATORY** | `false` if ANY route in the group lacks auth middleware (pre-auth). `true` if all routes require authentication. For single-route handlers, set based on that route's middleware. |
+
+**Self-check before proceeding:** Does `affected_routes` list every route from the
+Section 4.1 group row? If any route is missing, the finding is incomplete.
+
+Do NOT collapse multiple routes into a single finding unless they have identical
+authentication requirements AND identical exploitation characteristics.
+</cross_route_enumeration>
