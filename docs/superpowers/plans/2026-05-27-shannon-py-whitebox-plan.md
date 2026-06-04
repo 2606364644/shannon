@@ -1,6 +1,6 @@
 # Shannon-Py Whitebox Scanner Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement a Python 3.12 white-box security scanner that analyzes source code repositories and produces structured vulnerability deliverables compatible with the TypeScript Shannon version.
 
@@ -98,7 +98,7 @@
 - Create: `shannon-py/packages/whitebox/src/shannon_whitebox/__init__.py`
 - Create: all `__init__.py` files for sub-packages
 
-- [ ] **Step 1: Create root pyproject.toml**
+- [x] **Step 1: Create root pyproject.toml**
 
 ```toml
 # shannon-py/pyproject.toml
@@ -123,7 +123,7 @@ line-length = 120
 target-version = "py312"
 ```
 
-- [ ] **Step 2: Create packages/core/pyproject.toml**
+- [x] **Step 2: Create packages/core/pyproject.toml**
 
 ```toml
 # shannon-py/packages/core/pyproject.toml
@@ -144,7 +144,7 @@ build-backend = "hatchling.build"
 packages = ["src/shannon_core"]
 ```
 
-- [ ] **Step 3: Create packages/whitebox/pyproject.toml**
+- [x] **Step 3: Create packages/whitebox/pyproject.toml**
 
 ```toml
 # shannon-py/packages/whitebox/pyproject.toml
@@ -167,7 +167,7 @@ build-backend = "hatchling.build"
 packages = ["src/shannon_whitebox"]
 ```
 
-- [ ] **Step 4: Create packages/blackbox/pyproject.toml (placeholder)**
+- [x] **Step 4: Create packages/blackbox/pyproject.toml (placeholder)**
 
 ```toml
 # shannon-py/packages/blackbox/pyproject.toml
@@ -184,7 +184,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 ```
 
-- [ ] **Step 5: Create all __init__.py files**
+- [x] **Step 5: Create all __init__.py files**
 
 Create empty `__init__.py` files for all packages and sub-packages:
 - `packages/core/src/shannon_core/__init__.py`
@@ -198,16 +198,16 @@ Create empty `__init__.py` files for all packages and sub-packages:
 - `packages/whitebox/src/shannon_whitebox/prompts/__init__.py`
 - `packages/whitebox/src/shannon_whitebox/audit/__init__.py`
 
-- [ ] **Step 6: Create tests directories and configs**
+- [x] **Step 6: Create tests directories and configs**
 
 Create `packages/core/tests/__init__.py` and `packages/whitebox/tests/__init__.py` (empty).
 
-- [ ] **Step 7: Verify project structure**
+- [x] **Step 7: Verify project structure**
 
 Run: `find shannon-py -type f -name '*.toml' -o -name '*.py' | sort`
 Expected: All files from steps 1-6 listed.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add shannon-py/
@@ -224,7 +224,7 @@ git commit -m "feat: scaffold shannon-py monorepo structure"
 - Create: `packages/core/tests/test_errors.py`
 - Create: `packages/core/tests/test_metrics.py`
 
-- [ ] **Step 1: Write failing test for ErrorCode and PentestError**
+- [x] **Step 1: Write failing test for ErrorCode and PentestError**
 
 ```python
 # packages/core/tests/test_errors.py
@@ -274,12 +274,12 @@ def test_all_error_codes_exist():
         assert hasattr(ErrorCode, name), f"Missing ErrorCode.{name}"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_errors.py -v`
 Expected: FAIL (module not found)
 
-- [ ] **Step 3: Implement ErrorCode and PentestError**
+- [x] **Step 3: Implement ErrorCode and PentestError**
 
 ```python
 # packages/core/src/shannon_core/models/errors.py
@@ -323,12 +323,12 @@ class PentestError(Exception):
         self.context = context or {}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_errors.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Write failing test for AgentMetrics and SessionMetadata**
+- [x] **Step 5: Write failing test for AgentMetrics and SessionMetadata**
 
 ```python
 # packages/core/tests/test_metrics.py
@@ -367,12 +367,12 @@ def test_session_metadata_extra_fields():
     assert s.custom_field == "value"
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_metrics.py -v`
 Expected: FAIL
 
-- [ ] **Step 7: Implement AgentMetrics and SessionMetadata**
+- [x] **Step 7: Implement AgentMetrics and SessionMetadata**
 
 ```python
 # packages/core/src/shannon_core/models/metrics.py
@@ -394,12 +394,12 @@ class SessionMetadata(BaseModel):
     output_path: str | None = None
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_metrics.py -v`
 Expected: All PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/errors.py packages/core/src/shannon_core/models/metrics.py packages/core/tests/test_errors.py packages/core/tests/test_metrics.py
@@ -417,7 +417,7 @@ git commit -m "feat(core): add error and metrics models"
 - Create: `packages/core/tests/test_agents.py`
 - Create: `packages/core/tests/test_deliverables.py`
 
-- [ ] **Step 1: Write failing test for agents**
+- [x] **Step 1: Write failing test for agents**
 
 ```python
 # packages/core/tests/test_agents.py
@@ -472,12 +472,12 @@ def test_vuln_type():
     assert vt == "injection"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_agents.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement agent models**
+- [x] **Step 3: Implement agent models**
 
 ```python
 # packages/core/src/shannon_core/models/agents.py
@@ -562,12 +562,12 @@ AGENTS: dict[AgentName, AgentDefinition] = {
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_agents.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Write failing test for deliverables**
+- [x] **Step 5: Write failing test for deliverables**
 
 ```python
 # packages/core/tests/test_deliverables.py
@@ -592,12 +592,12 @@ def test_deliverable_filenames_match_ts():
     assert DELIVERABLE_FILENAMES[DeliverableType.SSRF_ANALYSIS] == "ssrf_analysis_deliverable.md"
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_deliverables.py -v`
 Expected: FAIL
 
-- [ ] **Step 7: Implement deliverable models**
+- [x] **Step 7: Implement deliverable models**
 
 ```python
 # packages/core/src/shannon_core/models/deliverables.py
@@ -623,12 +623,12 @@ DELIVERABLE_FILENAMES: dict[DeliverableType, str] = {
 }
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_deliverables.py -v`
 Expected: All PASS
 
-- [ ] **Step 9: Create result model**
+- [x] **Step 9: Create result model**
 
 ```python
 # packages/core/src/shannon_core/models/result.py
@@ -644,7 +644,7 @@ class WhiteboxScanResult(BaseModel):
     workspace_path: str | None = None
 ```
 
-- [ ] **Step 10: Update models __init__.py with re-exports**
+- [x] **Step 10: Update models __init__.py with re-exports**
 
 ```python
 # packages/core/src/shannon_core/models/__init__.py
@@ -687,7 +687,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add packages/core/
@@ -702,7 +702,7 @@ git commit -m "feat(core): add agent, deliverable, and result models"
 - Create: `packages/core/src/shannon_core/models/queue_schemas.py`
 - Create: `packages/core/tests/test_queue_schemas.py`
 
-- [ ] **Step 1: Write failing test for queue schemas**
+- [x] **Step 1: Write failing test for queue schemas**
 
 ```python
 # packages/core/tests/test_queue_schemas.py
@@ -826,12 +826,12 @@ def test_queue_json_matches_ts_format():
     assert "mismatch_reason" in entry
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_queue_schemas.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement queue schemas**
+- [x] **Step 3: Implement queue schemas**
 
 ```python
 # packages/core/src/shannon_core/models/queue_schemas.py
@@ -895,12 +895,12 @@ class VulnerabilityQueue(BaseModel):
     vulnerabilities: list[BaseVulnerability] = []
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_queue_schemas.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/queue_schemas.py packages/core/tests/test_queue_schemas.py
@@ -917,7 +917,7 @@ git commit -m "feat(core): add vulnerability queue schema models"
 - Create: `packages/core/tests/test_config.py`
 - Create: `packages/core/tests/test_parser.py`
 
-- [ ] **Step 1: Write failing test for config models**
+- [x] **Step 1: Write failing test for config models**
 
 ```python
 # packages/core/tests/test_config.py
@@ -967,12 +967,12 @@ def test_distributed_config():
     assert d.exploit is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_config.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement config models**
+- [x] **Step 3: Implement config models**
 
 ```python
 # packages/core/src/shannon_core/models/config.py
@@ -1043,7 +1043,7 @@ class Config(BaseModel):
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
 ```
 
-- [ ] **Step 4: Implement config parser**
+- [x] **Step 4: Implement config parser**
 
 ```python
 # packages/core/src/shannon_core/config/parser.py
@@ -1169,12 +1169,12 @@ def distribute_config(config: Config | None) -> DistributedConfig:
     )
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_config.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Write parser tests**
+- [x] **Step 6: Write parser tests**
 
 ```python
 # packages/core/tests/test_parser.py
@@ -1247,12 +1247,12 @@ def test_distribute_config_full():
     assert d.vuln_classes == ["injection"]
 ```
 
-- [ ] **Step 7: Run parser tests**
+- [x] **Step 7: Run parser tests**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_parser.py -v`
 Expected: All PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/
@@ -1270,7 +1270,7 @@ git commit -m "feat(core): add config models and YAML parser with security valid
 - Create: `packages/core/src/shannon_core/utils/concurrency.py`
 - Create: `packages/core/tests/test_billing.py`
 
-- [ ] **Step 1: Implement formatting utilities**
+- [x] **Step 1: Implement formatting utilities**
 
 ```python
 # packages/core/src/shannon_core/utils/formatting.py
@@ -1285,7 +1285,7 @@ def truncate_text(text: str, max_length: int = 200) -> str:
     return text[:max_length] + "..."
 ```
 
-- [ ] **Step 2: Implement file I/O utilities**
+- [x] **Step 2: Implement file I/O utilities**
 
 ```python
 # packages/core/src/shannon_core/utils/file_io.py
@@ -1316,7 +1316,7 @@ async def async_write_json(path: str | Path, data: dict | list, indent: int = 2)
     await async_write_file(path, json.dumps(data, indent=indent, ensure_ascii=False))
 ```
 
-- [ ] **Step 3: Write failing test for billing detection**
+- [x] **Step 3: Write failing test for billing detection**
 
 ```python
 # packages/core/tests/test_billing.py
@@ -1339,12 +1339,12 @@ def test_spending_cap_keywords():
     assert is_spending_cap_behavior(turns=1, cost=0.0, text="credit limit")
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [x] **Step 4: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_billing.py -v`
 Expected: FAIL
 
-- [ ] **Step 5: Implement billing detection**
+- [x] **Step 5: Implement billing detection**
 
 Reference the TS version at `shannon/apps/worker/src/utils/billing-detection.ts` for the exact keywords and logic.
 
@@ -1372,12 +1372,12 @@ def is_spending_cap_behavior(turns: int, cost: float, text: str) -> bool:
     return False
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/core/tests/test_billing.py -v`
 Expected: All PASS
 
-- [ ] **Step 7: Implement concurrency utility**
+- [x] **Step 7: Implement concurrency utility**
 
 ```python
 # packages/core/src/shannon_core/utils/concurrency.py
@@ -1407,7 +1407,7 @@ async def run_with_concurrency_limit(
     return results
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/
@@ -1422,7 +1422,7 @@ git commit -m "feat(core): add formatting, file_io, billing, and concurrency uti
 - Create: `packages/whitebox/src/shannon_whitebox/prompts/manager.py`
 - Create: `packages/whitebox/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write failing test for prompt manager**
+- [x] **Step 1: Write failing test for prompt manager**
 
 ```python
 # packages/whitebox/tests/test_prompt_manager.py
@@ -1468,12 +1468,12 @@ def test_missing_template_raises(prompts_dir):
         manager.load_sync("nonexistent", {"web_url": "https://x.com", "repo_path": "/r"})
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_prompt_manager.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement prompt manager**
+- [x] **Step 3: Implement prompt manager**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/prompts/manager.py
@@ -1571,12 +1571,12 @@ class PromptManager:
         return result
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_prompt_manager.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/prompts/ packages/whitebox/tests/test_prompt_manager.py
@@ -1591,7 +1591,7 @@ git commit -m "feat(whitebox): add prompt manager with template loading and vari
 - Create: `packages/whitebox/src/shannon_whitebox/git_manager.py`
 - Create: `packages/whitebox/tests/test_git_manager.py`
 
-- [ ] **Step 1: Write failing test for git manager**
+- [x] **Step 1: Write failing test for git manager**
 
 ```python
 # packages/whitebox/tests/test_git_manager.py
@@ -1641,12 +1641,12 @@ def test_get_commit_hash(git_repo):
     assert len(h) == 40
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_git_manager.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement git manager**
+- [x] **Step 3: Implement git manager**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/git_manager.py
@@ -1711,12 +1711,12 @@ class GitManager:
         return None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_git_manager.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/git_manager.py packages/whitebox/tests/test_git_manager.py
@@ -1734,7 +1734,7 @@ git commit -m "feat(whitebox): add git manager for checkpoint/rollback/commit"
 - Create: `packages/whitebox/tests/test_validators.py`
 - Create: `packages/whitebox/tests/test_executor.py`
 
-- [ ] **Step 1: Implement validators**
+- [x] **Step 1: Implement validators**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/agents/validators.py
@@ -1768,7 +1768,7 @@ def get_queue_filename(agent_name: AgentName) -> str | None:
     return None
 ```
 
-- [ ] **Step 2: Write failing test for validators**
+- [x] **Step 2: Write failing test for validators**
 
 ```python
 # packages/whitebox/tests/test_validators.py
@@ -1798,12 +1798,12 @@ async def test_validate_deliverable_missing(tmp_path):
         await validate_deliverable(tmp_path, AgentName.PRE_RECON)
 ```
 
-- [ ] **Step 3: Run test to verify it passes**
+- [x] **Step 3: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_validators.py -v`
 Expected: All PASS
 
-- [ ] **Step 4: Implement Claude runner (stub)**
+- [x] **Step 4: Implement Claude runner (stub)**
 
 The actual Claude Agent SDK Python integration will depend on the SDK's availability. This is a stub that defines the interface:
 
@@ -1855,7 +1855,7 @@ async def run_claude_prompt(
     )
 ```
 
-- [ ] **Step 5: Implement agent executor**
+- [x] **Step 5: Implement agent executor**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/agents/executor.py
@@ -1962,7 +1962,7 @@ class AgentExecutor:
         )
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/agents/ packages/whitebox/tests/test_validators.py
@@ -1977,7 +1977,7 @@ git commit -m "feat(whitebox): add agent executor, runner stub, and validators"
 - Create: `packages/whitebox/src/shannon_whitebox/audit/log_stream.py`
 - Create: `packages/whitebox/src/shannon_whitebox/audit/session.py`
 
-- [ ] **Step 1: Implement log stream**
+- [x] **Step 1: Implement log stream**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/audit/log_stream.py
@@ -2000,7 +2000,7 @@ class LogStream:
             await self.append(line)
 ```
 
-- [ ] **Step 2: Implement audit session**
+- [x] **Step 2: Implement audit session**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/audit/session.py
@@ -2050,7 +2050,7 @@ class AuditSession:
         session_path.write_text(json.dumps(session_data, indent=2, default=str), encoding="utf-8")
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/
@@ -2065,7 +2065,7 @@ git commit -m "feat(whitebox): add audit log stream and session tracking"
 - Create: `packages/whitebox/src/shannon_whitebox/session.py`
 - Create: `packages/whitebox/tests/test_session.py`
 
-- [ ] **Step 1: Write failing test for session management**
+- [x] **Step 1: Write failing test for session management**
 
 ```python
 # packages/whitebox/tests/test_session.py
@@ -2105,12 +2105,12 @@ def test_session_json_contains_url(tmp_path):
     assert data["web_url"] == "https://test.com"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_session.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement session manager**
+- [x] **Step 3: Implement session manager**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/session.py
@@ -2185,12 +2185,12 @@ class SessionManager:
         return agent_name.value in data.get("completed_agents", [])
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_session.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/session.py packages/whitebox/tests/test_session.py
@@ -2206,7 +2206,7 @@ git commit -m "feat(whitebox): add workspace session management"
 - Create: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
 - Create: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
 
-- [ ] **Step 1: Implement shared types**
+- [x] **Step 1: Implement shared types**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/pipeline/shared.py
@@ -2247,7 +2247,7 @@ class ActivityInput:
     api_key: str | None = None
 ```
 
-- [ ] **Step 2: Implement activities**
+- [x] **Step 2: Implement activities**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/pipeline/activities.py
@@ -2311,7 +2311,7 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
     return await run_agent(input)
 ```
 
-- [ ] **Step 3: Implement workflow**
+- [x] **Step 3: Implement workflow**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -2409,7 +2409,7 @@ class WhiteboxScanWorkflow:
         return self._state
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/
@@ -2423,7 +2423,7 @@ git commit -m "feat(whitebox): add Temporal workflow, activities, and shared typ
 **Files:**
 - Create: `packages/whitebox/src/shannon_whitebox/worker.py`
 
-- [ ] **Step 1: Implement worker**
+- [x] **Step 1: Implement worker**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/worker.py
@@ -2465,7 +2465,7 @@ def main():
     asyncio.run(run_scan(PipelineInput(repo_path=sys.argv[1] if len(sys.argv) > 1 else ".")))
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/worker.py
@@ -2480,7 +2480,7 @@ git commit -m "feat(whitebox): add Temporal worker entry point"
 - Create: `packages/whitebox/src/shannon_whitebox/cli/main.py`
 - Create: `packages/whitebox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing test for CLI**
+- [x] **Step 1: Write failing test for CLI**
 
 ```python
 # packages/whitebox/tests/test_cli.py
@@ -2510,12 +2510,12 @@ def test_logs_help():
     assert result.exit_code == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_cli.py -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement CLI**
+- [x] **Step 3: Implement CLI**
 
 ```python
 # packages/whitebox/src/shannon_whitebox/cli/main.py
@@ -2585,12 +2585,12 @@ def main():
     cli()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/ packages/whitebox/tests/test_cli.py
@@ -2610,7 +2610,7 @@ git commit -m "feat(whitebox): add Click CLI with start, logs, workspaces comman
 - Create: `shannon-py/prompts/vuln-ssrf.txt`
 - Create: `shannon-py/prompts/vuln-authz.txt`
 
-- [ ] **Step 1: Copy prompt templates from TS version**
+- [x] **Step 1: Copy prompt templates from TS version**
 
 Copy prompt template files from `shannon/apps/worker/prompts/` to `shannon-py/prompts/`. The variable placeholders (`{{WEB_URL}}`, `{{REPO_PATH}}`, etc.) and `@include()` directives must be preserved exactly.
 
@@ -2626,12 +2626,12 @@ Files to copy:
 
 Run: `cp -r shannon/apps/worker/prompts/*.txt shannon-py/prompts/ && cp -r shannon/apps/worker/prompts/shared shannon-py/prompts/shared`
 
-- [ ] **Step 2: Verify prompts are identical**
+- [x] **Step 2: Verify prompts are identical**
 
 Run: `diff <(ls shannon/apps/worker/prompts/*.txt) <(ls shannon-py/prompts/*.txt)`
 Expected: No differences (except exploit-*.txt which belong to black-box)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add shannon-py/prompts/
@@ -2645,7 +2645,7 @@ git commit -m "feat: copy prompt templates from TS version"
 **Files:**
 - Create: `packages/whitebox/tests/test_integration.py`
 
-- [ ] **Step 1: Write integration test for full pipeline (mocked)**
+- [x] **Step 1: Write integration test for full pipeline (mocked)**
 
 ```python
 # packages/whitebox/tests/test_integration.py
@@ -2739,12 +2739,12 @@ async def test_full_pipeline_mocked(mock_repo, prompts_dir):
     assert len(files) == 7
 ```
 
-- [ ] **Step 2: Run integration test**
+- [x] **Step 2: Run integration test**
 
 Run: `cd shannon-py && python -m pytest packages/whitebox/tests/test_integration.py -v`
 Expected: All PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/whitebox/tests/test_integration.py
@@ -2755,22 +2755,22 @@ git commit -m "test(whitebox): add integration test for full pipeline with mocke
 
 ## Task 17: Final Verification
 
-- [ ] **Step 1: Run all tests**
+- [x] **Step 1: Run all tests**
 
 Run: `cd shannon-py && python -m pytest packages/ -v`
 Expected: All tests pass
 
-- [ ] **Step 2: Verify project structure**
+- [x] **Step 2: Verify project structure**
 
 Run: `find shannon-py/packages -name '*.py' -not -name '__pycache__' | sort`
 Expected: All files from tasks 1-16 listed
 
-- [ ] **Step 3: Verify core package imports**
+- [x] **Step 3: Verify core package imports**
 
 Run: `cd shannon-py && python -c "from shannon_core.models import AGENTS, AgentName, Config, ErrorCode, PentestError; print('Core imports OK')"`
 Expected: "Core imports OK"
 
-- [ ] **Step 4: Verify whitebox package imports**
+- [x] **Step 4: Verify whitebox package imports**
 
 Run: `cd shannon-py && python -c "from shannon_whitebox.cli.main import cli; from shannon_whitebox.session import SessionManager; print('Whitebox imports OK')"`
 Expected: "Whitebox imports OK"

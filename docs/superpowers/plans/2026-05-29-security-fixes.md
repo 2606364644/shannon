@@ -1,6 +1,6 @@
 # Security Fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix 9 security-effectiveness defects in shannon-py to reach parity with the TypeScript version's security scanning capabilities.
 
@@ -68,7 +68,7 @@
 - Create: `shannon-py/packages/core/src/shannon_core/utils/security.py`
 - Create: `shannon-py/packages/core/tests/test_security.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # shannon-py/packages/core/tests/test_security.py
@@ -168,12 +168,12 @@ class TestValidateTargetUrl:
             validate_target_url("https://example.com")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_security.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.utils.security'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # shannon-py/packages/core/src/shannon_core/utils/security.py
@@ -261,12 +261,12 @@ def validate_target_url(url: str) -> None:
 
 Add `httpx` to the core dependencies in `shannon-py/packages/core/pyproject.toml` under `[project] dependencies`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_security.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/core/src/shannon_core/utils/security.py \
@@ -282,7 +282,7 @@ git commit -m "feat(security): add URL safety utilities — SSRF, loopback, DNS 
 - Create: `shannon-py/packages/core/src/shannon_core/utils/credential_validator.py`
 - Create: `shannon-py/packages/core/tests/test_credential_validator.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # shannon-py/packages/core/tests/test_credential_validator.py
@@ -347,12 +347,12 @@ class TestValidateUnknownProvider:
         await validate_credentials("unknown_provider")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_credential_validator.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # shannon-py/packages/core/src/shannon_core/utils/credential_validator.py
@@ -479,12 +479,12 @@ async def validate_credentials(
     # Unknown providers: skip silently
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_credential_validator.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/core/src/shannon_core/utils/credential_validator.py \
@@ -500,7 +500,7 @@ git commit -m "feat(security): add credential validator for AI providers (S7)"
 - Create: `shannon-py/packages/whitebox/src/shannon_whitebox/services/settings_writer.py`
 - Create: `shannon-py/packages/whitebox/tests/test_settings_writer.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # shannon-py/packages/whitebox/tests/test_settings_writer.py
@@ -583,12 +583,12 @@ class TestCleanupSettings:
         cleanup_settings()  # Should not raise
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_settings_writer.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # shannon-py/packages/whitebox/src/shannon_whitebox/services/settings_writer.py
@@ -642,12 +642,12 @@ def cleanup_settings() -> None:
         _SETTINGS_PATH.unlink()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_settings_writer.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/services/settings_writer.py \
@@ -663,7 +663,7 @@ git commit -m "feat(security): add settings writer for code_path deny rules (S6)
 - Create: `shannon-py/packages/whitebox/src/shannon_whitebox/services/playwright_config_writer.py`
 - Create: `shannon-py/packages/whitebox/tests/test_playwright_config_writer.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # shannon-py/packages/whitebox/tests/test_playwright_config_writer.py
@@ -726,12 +726,12 @@ class TestCleanupStealthConfig:
         cleanup_stealth_config(str(tmp_path))  # Should not raise
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_playwright_config_writer.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # shannon-py/packages/whitebox/src/shannon_whitebox/services/playwright_config_writer.py
@@ -825,12 +825,12 @@ def cleanup_stealth_config(source_dir: str) -> None:
         shutil.rmtree(pw_dir)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_playwright_config_writer.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/services/playwright_config_writer.py \
@@ -850,7 +850,7 @@ git commit -m "feat(security): add Playwright stealth config writer (S5)"
 - Test: `shannon-py/packages/core/tests/test_config.py`
 - Test: `shannon-py/packages/core/tests/test_queue_schemas.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `shannon-py/packages/core/tests/test_agents.py`:
 
@@ -938,12 +938,12 @@ def test_misconfig_in_vulnerability_union():
     assert "MISCONFIG-VULN-001" in json_str
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_agents.py packages/core/tests/test_config.py packages/core/tests/test_queue_schemas.py -v`
 Expected: FAIL — `AttributeError` for missing enum members, assertions fail
 
-- [ ] **Step 3: Modify `agents.py`**
+- [x] **Step 3: Modify `agents.py`**
 
 Add to the `AgentName` enum (after `AUTHZ_VULN`):
 
@@ -1025,7 +1025,7 @@ PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {
 }
 ```
 
-- [ ] **Step 4: Modify `config.py`**
+- [x] **Step 4: Modify `config.py`**
 
 Update `VulnClass`:
 
@@ -1039,7 +1039,7 @@ Update `ALL_VULN_CLASSES`:
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
 ```
 
-- [ ] **Step 5: Modify `queue_schemas.py`**
+- [x] **Step 5: Modify `queue_schemas.py`**
 
 Add after `AuthzVulnerability`:
 
@@ -1066,12 +1066,12 @@ Vulnerability = Union[
 ]
 ```
 
-- [ ] **Step 6: Run all three test files to verify they pass**
+- [x] **Step 6: Run all three test files to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_agents.py packages/core/tests/test_config.py packages/core/tests/test_queue_schemas.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add shannon-py/packages/core/src/shannon_core/models/agents.py \
@@ -1091,7 +1091,7 @@ git commit -m "feat(security): add misconfig vuln class, session mapping, model 
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/shared.py`
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/agents/executor.py`
 
-- [ ] **Step 1: Add `prompt_override` to data models**
+- [x] **Step 1: Add `prompt_override` to data models**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/shared.py`, add `prompt_override` field to both `PipelineInput` and `ActivityInput`:
 
@@ -1103,7 +1103,7 @@ prompt_override: str | None = None
 prompt_override: str | None = None
 ```
 
-- [ ] **Step 2: Add `prompt_override` parameter to `AgentExecutor.execute()`**
+- [x] **Step 2: Add `prompt_override` parameter to `AgentExecutor.execute()`**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/agents/executor.py`, add parameter:
 
@@ -1135,7 +1135,7 @@ Then inside the method, modify the template name resolution:
     )
 ```
 
-- [ ] **Step 3: Pass `prompt_override` through activity**
+- [x] **Step 3: Pass `prompt_override` through activity**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/activities.py`, update `run_agent` to pass the parameter:
 
@@ -1153,12 +1153,12 @@ metrics = await executor.execute(
 )
 ```
 
-- [ ] **Step 4: Run existing tests to verify nothing broke**
+- [x] **Step 4: Run existing tests to verify nothing broke**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: All existing tests PASS (new field has default `None`)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/shared.py \
@@ -1174,7 +1174,7 @@ git commit -m "feat(security): add prompt_override support for static recon (S8)
 **Files:**
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/prompts/manager.py`
 
-- [ ] **Step 1: Add PLAYWRIGHT_SESSION lookup from mapping**
+- [x] **Step 1: Add PLAYWRIGHT_SESSION lookup from mapping**
 
 In `manager.py`, inside `_interpolate`, replace the hardcoded `{{PLAYWRIGHT_SESSION}}` substitution with a lookup:
 
@@ -1219,7 +1219,7 @@ def _interpolate(
     # ... rest unchanged ...
 ```
 
-- [ ] **Step 2: Add report filter variable generation**
+- [x] **Step 2: Add report filter variable generation**
 
 Add three new methods to `PromptManager`:
 
@@ -1281,12 +1281,12 @@ if config is not None:
     template = template.replace("{{VULN_SUMMARY_SUBSECTIONS}}", vuln_subsections)
 ```
 
-- [ ] **Step 3: Run existing prompt manager tests**
+- [x] **Step 3: Run existing prompt manager tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_prompt_manager.py -v`
 Expected: All tests PASS (new variables default to empty when not in template)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/prompts/manager.py
@@ -1301,7 +1301,7 @@ git commit -m "feat(security): enhance PromptManager with session mapping and re
 - Create: `shannon-py/packages/whitebox/src/shannon_whitebox/services/validate_authentication.py`
 - Create: `shannon-py/packages/whitebox/tests/test_validate_authentication.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # shannon-py/packages/whitebox/tests/test_validate_authentication.py
@@ -1358,12 +1358,12 @@ async def test_auth_validation_no_config():
     assert result.success is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_validate_authentication.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write implementation**
+- [x] **Step 3: Write implementation**
 
 ```python
 # shannon-py/packages/whitebox/src/shannon_whitebox/services/validate_authentication.py
@@ -1435,12 +1435,12 @@ async def validate_authentication(
     return AuthValidationResult(success=True)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/test_validate_authentication.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/services/validate_authentication.py \
@@ -1455,7 +1455,7 @@ git commit -m "feat(security): add auth validation service (S4)"
 **Files:**
 - Create: `shannon-py/prompts/shared/_exploit-methodology.txt`
 
-- [ ] **Step 1: Create the shared partial**
+- [x] **Step 1: Create the shared partial**
 
 Create `shannon-py/prompts/shared/_exploit-methodology.txt` with the OWASP 3-stage exploitation workflow. This content is extracted from the TS exploit prompts' common sections:
 
@@ -1515,7 +1515,7 @@ When exploitation is blocked by a WAF or similar security control:
 5. Do not attempt more than 5 alternative payloads — escalate to BLOCKED_BY_SECURITY if all fail
 ```
 
-- [ ] **Step 2: Verify the file loads through PromptManager**
+- [x] **Step 2: Verify the file loads through PromptManager**
 
 Run a quick check that the @include directive resolves:
 
@@ -1536,7 +1536,7 @@ print('OK: shared partial loads correctly')
 ```
 Expected: `OK: shared partial loads correctly`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add shannon-py/prompts/shared/_exploit-methodology.txt
@@ -1550,7 +1550,7 @@ git commit -m "feat(security): add shared exploit methodology partial (S2)"
 **Files:**
 - Create: `shannon-py/prompts/vuln-misconfig.txt`
 
-- [ ] **Step 1: Create the misconfig vuln analysis prompt**
+- [x] **Step 1: Create the misconfig vuln analysis prompt**
 
 Create `shannon-py/prompts/vuln-misconfig.txt`. This is a new prompt (the TS version doesn't have a dedicated misconfig vuln prompt — the spec describes the content). Structure it following the patterns of existing vuln prompts:
 
@@ -1646,7 +1646,7 @@ For each vulnerability found, also add an entry to `.shannon/deliverables/miscon
 </critical>
 ```
 
-- [ ] **Step 2: Verify the prompt loads**
+- [x] **Step 2: Verify the prompt loads**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
@@ -1661,7 +1661,7 @@ print('OK: vuln-misconfig loads correctly')
 ```
 Expected: `OK: vuln-misconfig loads correctly`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add shannon-py/prompts/vuln-misconfig.txt
@@ -1712,7 +1712,7 @@ Write your findings to `.shannon/deliverables/{type}_exploitation_evidence.md`.
 </critical>
 ```
 
-- [ ] **Step 1: Port `injection-exploit.txt` from TS**
+- [x] **Step 1: Port `injection-exploit.txt` from TS**
 
 Source: `shannon/apps/worker/prompts/exploit-injection.txt` (451 lines)
 
@@ -1723,31 +1723,31 @@ Source: `shannon/apps/worker/prompts/exploit-injection.txt` (451 lines)
 5. Keep the injection-specific guidance (SQLi payloads, command injection techniques, blind injection)
 6. Ensure `{{VULNERABILITY_ENTRIES}}`, `{{WEB_URL}}`, `{{AUTH_CONTEXT}}`, `{{PLAYWRIGHT_SESSION}}` variables are present
 
-- [ ] **Step 2: Port `xss-exploit.txt` from TS**
+- [x] **Step 2: Port `xss-exploit.txt` from TS**
 
 Source: `shannon/apps/worker/prompts/exploit-xss.txt` (442 lines)
 
 Same restructuring: extract shared methodology/scope/target into includes, keep XSS-specific content (reflected/stored/DOM XSS PoC construction, CSP bypass, context-aware encoding).
 
-- [ ] **Step 3: Port `auth-exploit.txt` from TS**
+- [x] **Step 3: Port `auth-exploit.txt` from TS**
 
 Source: `shannon/apps/worker/prompts/exploit-auth.txt` (423 lines)
 
 Keep auth-specific content (session fixation/hijacking, JWT manipulation, OAuth abuse).
 
-- [ ] **Step 4: Port `authz-exploit.txt` from TS**
+- [x] **Step 4: Port `authz-exploit.txt` from TS**
 
 Source: `shannon/apps/worker/prompts/exploit-authz.txt` (425 lines)
 
 Keep authorization-specific content (horizontal/vertical privilege escalation, workflow bypass, IDOR).
 
-- [ ] **Step 5: Port `ssrf-exploit.txt` from TS**
+- [x] **Step 5: Port `ssrf-exploit.txt` from TS**
 
 Source: `shannon/apps/worker/prompts/exploit-ssrf.txt` (502 lines)
 
 Keep SSRF-specific content (cloud metadata, internal service probing, DNS rebinding, redirect abuse).
 
-- [ ] **Step 6: Create `misconfig-exploit.txt`**
+- [x] **Step 6: Create `misconfig-exploit.txt`**
 
 This is a new prompt. Create `shannon-py/prompts/misconfig-exploit.txt`:
 
@@ -1812,7 +1812,7 @@ For each vulnerability:
 </critical>
 ```
 
-- [ ] **Step 7: Verify all exploit prompts load**
+- [x] **Step 7: Verify all exploit prompts load**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
@@ -1829,7 +1829,7 @@ print('All exploit prompts loaded successfully')
 ```
 Expected: All 6 prompts print `OK`
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add shannon-py/prompts/injection-exploit.txt \
@@ -1849,7 +1849,7 @@ git commit -m "feat(security): port and restructure exploit prompts with shared 
 - Replace: `shannon-py/prompts/recon-blackbox.txt`
 - Create: `shannon-py/prompts/recon-static.txt`
 
-- [ ] **Step 1: Enhance `recon-blackbox.txt`**
+- [x] **Step 1: Enhance `recon-blackbox.txt`**
 
 Source reference: `shannon/apps/worker/prompts/recon.txt` for browser automation methodology. Target: 150-200 lines.
 
@@ -1969,7 +1969,7 @@ Write your findings to `.shannon/deliverables/recon_deliverable.md` with these s
 </critical>
 ```
 
-- [ ] **Step 2: Create `recon-static.txt`**
+- [x] **Step 2: Create `recon-static.txt`**
 
 This is a new prompt for whitebox recon without browser access. Source: spec describes it as 380 lines with a 3-phase Task Agent strategy. Key characteristics:
 - No browser/HTTP tool usage (pure source code analysis)
@@ -2109,7 +2109,7 @@ Write your findings to `.shannon/deliverables/recon_deliverable.md` with these s
 </critical>
 ```
 
-- [ ] **Step 3: Verify both prompts load**
+- [x] **Step 3: Verify both prompts load**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
@@ -2124,7 +2124,7 @@ for name in ['recon-blackbox', 'recon-static']:
 ```
 Expected: Both prompts load and are substantial
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add shannon-py/prompts/recon-blackbox.txt \
@@ -2140,7 +2140,7 @@ git commit -m "feat(security): enhance recon-blackbox prompt, add recon-static p
 - Replace: `shannon-py/prompts/report-executive.txt`
 - Create: `shannon-py/prompts/validate-authentication.txt`
 
-- [ ] **Step 1: Replace `report-executive.txt` with TS version**
+- [x] **Step 1: Replace `report-executive.txt` with TS version**
 
 Source: `shannon/apps/worker/prompts/report-executive.txt` (113 lines). Port directly, preserving:
 - `{{WEB_URL}}`, `{{DESCRIPTION}}`, `{{REPO_PATH}}` (from `_target.txt` include or inline)
@@ -2151,7 +2151,7 @@ Source: `shannon/apps/worker/prompts/report-executive.txt` (113 lines). Port dir
 
 Copy the TS `report-executive.txt` content to `shannon-py/prompts/report-executive.txt`. The content is the 113-line version shown in the TS source exploration above. No restructuring needed — the variable names already match.
 
-- [ ] **Step 2: Create `validate-authentication.txt`**
+- [x] **Step 2: Create `validate-authentication.txt`**
 
 Source: `shannon/apps/worker/prompts/validate-authentication.txt` (34 lines). Port directly:
 
@@ -2191,7 +2191,7 @@ Run this only when login_success is true. Skip it on failure.
 </critical>
 ```
 
-- [ ] **Step 3: Verify both prompts load**
+- [x] **Step 3: Verify both prompts load**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
@@ -2206,7 +2206,7 @@ for name in ['report-executive', 'validate-authentication']:
 ```
 Expected: Both prompts load successfully
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add shannon-py/prompts/report-executive.txt \
@@ -2222,7 +2222,7 @@ git commit -m "feat(security): port report-executive and validate-authentication
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
 
-- [ ] **Step 1: Enhance `activities.py` — preflight and auth validation**
+- [x] **Step 1: Enhance `activities.py` — preflight and auth validation**
 
 Add imports and new activity:
 
@@ -2313,7 +2313,7 @@ async def run_auth_validation(input: ActivityInput) -> None:
         )
 ```
 
-- [ ] **Step 2: Enhance `workflows.py` — integration wiring**
+- [x] **Step 2: Enhance `workflows.py` — integration wiring**
 
 Modify the `WhiteboxScanWorkflow.run()` method to add preflight enhancements and pass `prompt_override` for recon:
 
@@ -2356,12 +2356,12 @@ finally:
     cleanup_stealth_config(input.repo_path)
 ```
 
-- [ ] **Step 3: Run existing whitebox tests**
+- [x] **Step 3: Run existing whitebox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/activities.py \
@@ -2378,7 +2378,7 @@ git commit -m "feat(security): integrate security services into whitebox pipelin
 - Modify: `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
 - Modify: `shannon-py/packages/blackbox/src/shannon_blackbox/services/report_assembler.py`
 
-- [ ] **Step 1: Enhance `activities.py` — preflight, auth, credential checks**
+- [x] **Step 1: Enhance `activities.py` — preflight, auth, credential checks**
 
 Same pattern as whitebox. Add to imports and define activities:
 
@@ -2470,7 +2470,7 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
     await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
 ```
 
-- [ ] **Step 2: Enhance `workflows.py` — queue gating, settings, stealth**
+- [x] **Step 2: Enhance `workflows.py` — queue gating, settings, stealth**
 
 Add imports:
 
@@ -2547,7 +2547,7 @@ finally:
         cleanup_stealth_config(input.repo_path)
 ```
 
-- [ ] **Step 3: Enhance `report_assembler.py` — filter variable injection**
+- [x] **Step 3: Enhance `report_assembler.py` — filter variable injection**
 
 Modify `ReportAssembler.assemble()` to accept and pass report config:
 
@@ -2576,12 +2576,12 @@ class ReportAssembler:
         await async_write_file(report_path, report_content)
 ```
 
-- [ ] **Step 4: Run all blackbox tests**
+- [x] **Step 4: Run all blackbox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/blackbox/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/workflows.py \

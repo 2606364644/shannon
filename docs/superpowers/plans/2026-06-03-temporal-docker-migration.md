@@ -1,6 +1,6 @@
 # Temporal Docker 容器配置迁移 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 完成 Temporal 基础设施管理的最后缺失部分——创建 docker-compose.yml 并为 blackbox CLI 添加 infra 命令组和自动启动能力，使两个 CLI 都能"开箱即用"。
 
@@ -26,7 +26,7 @@
 - Create: `docker-compose.yml`
 - Test: `packages/core/tests/test_temporal_infra.py::TestGetComposeFile::test_returns_docker_compose_yml_in_project_root`
 
-- [ ] **Step 1: Write the docker-compose.yml**
+- [x] **Step 1: Write the docker-compose.yml**
 
 在项目根目录创建 `docker-compose.yml`。容器名 `shannon-py-temporal`，网络 `shannon-py-net`，与原始 TypeScript 项目不冲突。
 
@@ -56,17 +56,17 @@ volumes:
   temporal-data:
 ```
 
-- [ ] **Step 2: Run the previously failing test to verify it passes**
+- [x] **Step 2: Run the previously failing test to verify it passes**
 
 Run: `uv run pytest packages/core/tests/test_temporal_infra.py::TestGetComposeFile::test_returns_docker_compose_yml_in_project_root -v`
 Expected: PASS
 
-- [ ] **Step 3: Run the full temporal_infra test suite to confirm no regressions**
+- [x] **Step 3: Run the full temporal_infra test suite to confirm no regressions**
 
 Run: `uv run pytest packages/core/tests/test_temporal_infra.py -v`
 Expected: 13 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -82,7 +82,7 @@ git commit -m "feat: add docker-compose.yml for Temporal dev server"
 
 对齐 whitebox CLI 的 infra 命令，添加 `infra` 组和 `up`、`down`、`status` 子命令，并在 `start` 命令中调用 `ensure_infra()`。
 
-- [ ] **Step 1: Write the failing test for blackbox infra help**
+- [x] **Step 1: Write the failing test for blackbox infra help**
 
 在 `packages/blackbox/tests/test_cli.py` 末尾添加：
 
@@ -94,12 +94,12 @@ def test_infra_help():
     assert "Manage Temporal infrastructure" in result.output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_infra_help -v`
 Expected: FAIL — `No such command: 'infra'`
 
-- [ ] **Step 3: Add infra imports to blackbox CLI**
+- [x] **Step 3: Add infra imports to blackbox CLI**
 
 在 `packages/blackbox/src/shannon_blackbox/cli/main.py` 顶部添加 import（在现有 import 之后）：
 
@@ -117,7 +117,7 @@ from shannon_core.services.temporal_infra import (
 
 注意：保留现有的 `import asyncio`（`run_scan` 仍在使用）和 `from shannon_core.models.agents import ALL_VULN_CLASSES`（`start` 命令仍在使用）。只添加 `import time` 和 temporal_infra 的 import。
 
-- [ ] **Step 4: Add infra command group and subcommands**
+- [x] **Step 4: Add infra command group and subcommands**
 
 在 `packages/blackbox/src/shannon_blackbox/cli/main.py` 的 `workspaces` 命令之后、`main()` 函数之前添加：
 
@@ -158,12 +158,12 @@ def status():
     click.echo(f"Health: {health_str}")
 ```
 
-- [ ] **Step 5: Run test to verify infra help passes**
+- [x] **Step 5: Run test to verify infra help passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_infra_help -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py
@@ -177,7 +177,7 @@ git commit -m "feat(blackbox): add infra command group with up/down/status"
 **Files:**
 - Modify: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Add blackbox infra up test**
+- [x] **Step 1: Add blackbox infra up test**
 
 在 `packages/blackbox/tests/test_cli.py` 末尾添加 import 和测试：
 
@@ -201,12 +201,12 @@ def test_infra_up():
     assert "ready" in result.output.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_infra_up -v`
 Expected: PASS
 
-- [ ] **Step 3: Add blackbox infra down test**
+- [x] **Step 3: Add blackbox infra down test**
 
 ```python
 def test_infra_down():
@@ -217,12 +217,12 @@ def test_infra_down():
     assert "stopped" in result.output.lower()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_infra_down -v`
 Expected: PASS
 
-- [ ] **Step 5: Add blackbox infra status test**
+- [x] **Step 5: Add blackbox infra status test**
 
 ```python
 def test_infra_status():
@@ -237,12 +237,12 @@ def test_infra_status():
     assert "healthy" in result.output.lower()
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_infra_status -v`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/blackbox/tests/test_cli.py
@@ -264,7 +264,7 @@ git commit -m "test(blackbox): add infra up/down/status CLI tests"
 - `test_start_shows_standalone_completion_message`
 - `test_start_shows_error_on_failure`
 
-- [ ] **Step 1: Add ensure_infra mock helper and update existing tests**
+- [x] **Step 1: Add ensure_infra mock helper and update existing tests**
 
 在 `packages/blackbox/tests/test_cli.py` 中，首先在文件顶部 import 区域添加 `AsyncMock`：
 
@@ -364,12 +364,12 @@ def test_start_shows_error_on_failure():
     assert "something broke" in result.output
 ```
 
-- [ ] **Step 2: Run existing tests to verify they still pass (without ensure_infra call yet)**
+- [x] **Step 2: Run existing tests to verify they still pass (without ensure_infra call yet)**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py -v --ignore-glob="*infra*"`
 Expected: All existing tests pass (the mock is in place but ensure_infra call hasn't been added yet)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/blackbox/tests/test_cli.py
@@ -386,7 +386,7 @@ git commit -m "test(blackbox): prepare start tests for ensure_infra integration"
 
 在 blackbox 的 `start` 命令中，在调用 `run_scan` 之前添加 `ensure_infra()` 调用，与 whitebox 对齐。
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 在 `packages/blackbox/tests/test_cli.py` 末尾添加：
 
@@ -410,12 +410,12 @@ def test_start_calls_ensure_infra():
     mock_ensure.assert_called_once()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_start_calls_ensure_infra -v`
 Expected: FAIL — `ensure_infra` not called (mock assertion fails)
 
-- [ ] **Step 3: Modify blackbox start command to call ensure_infra**
+- [x] **Step 3: Modify blackbox start command to call ensure_infra**
 
 在 `packages/blackbox/src/shannon_blackbox/cli/main.py` 的 `start` 函数中，在 `click.echo` 和 `run_scan` 之间添加 `ensure_infra` 调用。
 
@@ -434,17 +434,17 @@ Expected: FAIL — `ensure_infra` not called (mock assertion fails)
     result = asyncio.run(run_scan(input, temporal_address))
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_start_calls_ensure_infra -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full blackbox CLI test suite to confirm no regressions**
+- [x] **Step 5: Run full blackbox CLI test suite to confirm no regressions**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py -v`
 Expected: All tests pass (existing + new infra + ensure_infra tests)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_cli.py
@@ -457,17 +457,17 @@ git commit -m "feat(blackbox): auto-ensure Temporal infra in start command"
 
 **Files:** 无变更
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `uv run pytest packages/core/tests/test_temporal_infra.py packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py -v`
 Expected: All tests pass (13 + 9 + existing + new ≈ 22+ tests)
 
-- [ ] **Step 2: Verify blackbox CLI infra help output**
+- [x] **Step 2: Verify blackbox CLI infra help output**
 
 Run: `uv run shannon-blackbox infra --help`
 Expected: 输出包含 `up`、`down`、`status` 子命令
 
-- [ ] **Step 3: Verify whitebox CLI still works**
+- [x] **Step 3: Verify whitebox CLI still works**
 
 Run: `uv run shannon-whitebox infra --help`
 Expected: 输出包含 `up`、`down`、`status` 子命令（无回归）

@@ -3,6 +3,11 @@
 > **核心目标**: 入口找的全 · 路由准确 · Sink 找的全 · 调用链横向全+纵向深 · 污点参数分析全
 >
 > **核心原则**: 确定性工具保证**不遗漏**（覆盖度），LLM 保证**深度分析**（准确度）。两者结合实现既完整又深入的白盒审计。
+>
+> **核心引擎**: 以 **GitNexus** (https://github.com/nicepkg/GitNexus) 作为代码知识图谱引擎，替代自建 BFS。
+> GitNexus 提供 14 语言支持、Import 解析、继承链推断、Constructor 推断、Framework 检测、
+> Entry Point 打分、Process 追踪、Community Detection、Confidence 评分等能力。
+> 我们在此基础上叠加安全扫描专有层：参数污点追踪、Sink 发现、授权架构分析。
 
 ---
 

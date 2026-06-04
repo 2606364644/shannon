@@ -1,6 +1,6 @@
 # Shannon-Py Blackbox Scanner Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement the `shannon-blackbox` package that handles runtime/DAST scanning (recon + exploitation), reusing whitebox infrastructure and matching TS project output formats.
 
@@ -66,7 +66,7 @@
 - Modify: `packages/core/src/shannon_core/models/__init__.py`
 - Test: `packages/core/tests/test_agents.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/core/tests/test_agents.py`:
 
@@ -105,12 +105,12 @@ def test_report_agent_prerequisites():
     assert len(defn.prerequisites) > 0
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_agents.py::test_blackbox_agent_name_values -v`
 Expected: FAIL — `AgentName` has no `RECON_BLACKBOX` member
 
-- [ ] **Step 3: Update AgentName enum**
+- [x] **Step 3: Update AgentName enum**
 
 In `packages/core/src/shannon_core/models/agents.py`, add new enum values after `AUTHZ_VULN`:
 
@@ -132,7 +132,7 @@ class AgentName(str, Enum):
     REPORT = "report"
 ```
 
-- [ ] **Step 4: Add blackbox agent definitions to AGENTS registry**
+- [x] **Step 4: Add blackbox agent definitions to AGENTS registry**
 
 Append to the `AGENTS` dict in the same file:
 
@@ -190,12 +190,12 @@ Append to the `AGENTS` dict in the same file:
     ),
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_agents.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/agents.py packages/core/tests/test_agents.py
@@ -210,7 +210,7 @@ git commit -m "feat(core): add blackbox AgentName values and AGENTS registry ent
 - Modify: `packages/core/src/shannon_core/models/deliverables.py`
 - Test: `packages/core/tests/test_deliverables.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/core/tests/test_deliverables.py`:
 
@@ -232,12 +232,12 @@ def test_evidence_filenames_match_ts():
     assert DELIVERABLE_FILENAMES[DeliverableType.REPORT] == "comprehensive_security_assessment_report.md"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_deliverables.py::test_blackbox_deliverable_type_values -v`
 Expected: FAIL
 
-- [ ] **Step 3: Update DeliverableType enum and DELIVERABLE_FILENAMES**
+- [x] **Step 3: Update DeliverableType enum and DELIVERABLE_FILENAMES**
 
 Replace the entire content of `packages/core/src/shannon_core/models/deliverables.py`:
 
@@ -276,12 +276,12 @@ DELIVERABLE_FILENAMES: dict[DeliverableType, str] = {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_deliverables.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/deliverables.py packages/core/tests/test_deliverables.py
@@ -296,7 +296,7 @@ git commit -m "feat(core): add evidence and report DeliverableType values"
 - Modify: `packages/core/src/shannon_core/models/result.py`
 - Modify: `packages/core/src/shannon_core/models/__init__.py`
 
-- [ ] **Step 1: Add BlackboxScanResult model**
+- [x] **Step 1: Add BlackboxScanResult model**
 
 Append to `packages/core/src/shannon_core/models/result.py`:
 
@@ -310,7 +310,7 @@ class BlackboxScanResult(BaseModel):
     workspace_path: str | None = None
 ```
 
-- [ ] **Step 2: Update barrel exports in `__init__.py`**
+- [x] **Step 2: Update barrel exports in `__init__.py`**
 
 In `packages/core/src/shannon_core/models/__init__.py`, update the import line:
 
@@ -320,12 +320,12 @@ from .result import BlackboxScanResult, WhiteboxScanResult
 
 And add `"BlackboxScanResult"` to the `__all__` list.
 
-- [ ] **Step 3: Run all core tests**
+- [x] **Step 3: Run all core tests**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ -v`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/result.py packages/core/src/shannon_core/models/__init__.py
@@ -340,7 +340,7 @@ git commit -m "feat(core): add BlackboxScanResult model"
 - Modify: `packages/whitebox/src/shannon_whitebox/agents/executor.py`
 - Modify: `packages/whitebox/src/shannon_whitebox/prompts/manager.py`
 
-- [ ] **Step 1: Add prompt_variables parameter to AgentExecutor.execute()**
+- [x] **Step 1: Add prompt_variables parameter to AgentExecutor.execute()**
 
 In `packages/whitebox/src/shannon_whitebox/agents/executor.py`, change the `execute` method signature to add the parameter, and pass it through:
 
@@ -374,7 +374,7 @@ Inside the method, merge the extra variables into the prompt call. Find the `sel
 
 The rest of the method stays the same.
 
-- [ ] **Step 2: Update PromptManager to handle extra variables**
+- [x] **Step 2: Update PromptManager to handle extra variables**
 
 The existing `PromptManager._interpolate()` only handles hardcoded tokens. Add a final pass that interpolates any remaining `{{KEY}}` patterns from the `variables` dict, so `prompt_variables` like `vulnerability_entries` → `{{VULNERABILITY_ENTRIES}}` work.
 
@@ -393,12 +393,12 @@ In `packages/whitebox/src/shannon_whitebox/prompts/manager.py`, add after the `{
 
 This runs after all hardcoded replacements, so specific tokens take precedence. Extra variables from `prompt_variables` get interpolated by their uppercase key name.
 
-- [ ] **Step 3: Run existing whitebox tests to verify no regressions**
+- [x] **Step 3: Run existing whitebox tests to verify no regressions**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/ -v`
 Expected: All PASS (the new parameter is optional with default `None`)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/agents/executor.py
@@ -413,7 +413,7 @@ git commit -m "feat(whitebox): add prompt_variables parameter to AgentExecutor.e
 - Modify: `packages/whitebox/src/shannon_whitebox/agents/validators.py`
 - Test: `packages/whitebox/tests/test_validators.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/whitebox/tests/test_validators.py`:
 
@@ -431,12 +431,12 @@ def test_get_queue_filename_exploit_agents():
     assert get_queue_filename(AgentName.AUTH_EXPLOIT) == "auth_exploitation_queue.json"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_validators.py::test_get_vuln_type_exploit_agents -v`
 Expected: FAIL — `get_vuln_type` doesn't handle `-exploit` suffix
 
-- [ ] **Step 3: Update validators**
+- [x] **Step 3: Update validators**
 
 Replace the `get_vuln_type` and `get_queue_filename` functions in `packages/whitebox/src/shannon_whitebox/agents/validators.py`:
 
@@ -452,12 +452,12 @@ def get_vuln_type(agent_name: AgentName) -> str | None:
 
 `get_queue_filename` already calls `get_vuln_type`, so it will work for exploit agents too. No changes needed there.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_validators.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/agents/validators.py packages/whitebox/tests/test_validators.py
@@ -472,7 +472,7 @@ git commit -m "feat(whitebox): support exploit agents in validators"
 - Modify: `packages/blackbox/pyproject.toml`
 - Modify: `pyproject.toml` (root)
 
-- [ ] **Step 1: Update blackbox pyproject.toml**
+- [x] **Step 1: Update blackbox pyproject.toml**
 
 Replace `packages/blackbox/pyproject.toml`:
 
@@ -497,7 +497,7 @@ build-backend = "hatchling.build"
 packages = ["src/shannon_blackbox"]
 ```
 
-- [ ] **Step 2: Update root pyproject.toml to add shannon-blackbox source**
+- [x] **Step 2: Update root pyproject.toml to add shannon-blackbox source**
 
 In `pyproject.toml` (root), add the blackbox source:
 
@@ -508,7 +508,7 @@ shannon-whitebox = { path = "packages/whitebox" }
 shannon-blackbox = { path = "packages/blackbox" }
 ```
 
-- [ ] **Step 3: Create blackbox package directory structure**
+- [x] **Step 3: Create blackbox package directory structure**
 
 ```bash
 mkdir -p packages/blackbox/src/shannon_blackbox/{pipeline,agents,services,cli}
@@ -520,7 +520,7 @@ touch packages/blackbox/src/shannon_blackbox/services/__init__.py
 touch packages/blackbox/src/shannon_blackbox/cli/__init__.py
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/blackbox/ pyproject.toml
@@ -535,7 +535,7 @@ git commit -m "feat(blackbox): set up package structure and dependencies"
 - Create: `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py`
 - Test: `packages/blackbox/tests/test_exploitation_checker.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/blackbox/tests/test_exploitation_checker.py`:
 
@@ -583,12 +583,12 @@ async def test_should_exploit_invalid_json(tmp_path):
     assert await ExploitationChecker.should_exploit(tmp_path, "ssrf") is False
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_exploitation_checker.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement ExploitationChecker**
+- [x] **Step 3: Implement ExploitationChecker**
 
 Create `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py`:
 
@@ -620,12 +620,12 @@ class ExploitationChecker:
         return len(data.get("vulnerabilities", [])) > 0
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_exploitation_checker.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py packages/blackbox/tests/test_exploitation_checker.py
@@ -640,7 +640,7 @@ git commit -m "feat(blackbox): implement ExploitationChecker service"
 - Create: `packages/blackbox/src/shannon_blackbox/services/report_assembler.py`
 - Test: `packages/blackbox/tests/test_report_assembler.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/blackbox/tests/test_report_assembler.py`:
 
@@ -713,12 +713,12 @@ async def test_assemble_with_no_vuln_classes(tmp_path):
     assert report_path.exists()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_report_assembler.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement ReportAssembler**
+- [x] **Step 3: Implement ReportAssembler**
 
 Create `packages/blackbox/src/shannon_blackbox/services/report_assembler.py`:
 
@@ -750,12 +750,12 @@ class ReportAssembler:
         await async_write_file(report_path, report_content)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_report_assembler.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/services/report_assembler.py packages/blackbox/tests/test_report_assembler.py
@@ -771,7 +771,7 @@ git commit -m "feat(blackbox): implement ReportAssembler service"
 - Create: `packages/blackbox/src/shannon_blackbox/agents/recon_executor.py`
 - Test: `packages/blackbox/tests/test_executors.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/blackbox/tests/test_executors.py`:
 
@@ -858,12 +858,12 @@ async def test_recon_executor_delegates(mock_repo):
     )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_executors.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement ExploitExecutor**
+- [x] **Step 3: Implement ExploitExecutor**
 
 Create `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`:
 
@@ -911,7 +911,7 @@ class ExploitExecutor:
         )
 ```
 
-- [ ] **Step 4: Implement ReconExecutor**
+- [x] **Step 4: Implement ReconExecutor**
 
 Create `packages/blackbox/src/shannon_blackbox/agents/recon_executor.py`:
 
@@ -948,12 +948,12 @@ class ReconExecutor:
         )
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_executors.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/agents/ packages/blackbox/tests/test_executors.py
@@ -967,7 +967,7 @@ git commit -m "feat(blackbox): implement ExploitExecutor and ReconExecutor"
 **Files:**
 - Create: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`
 
-- [ ] **Step 1: Create pipeline shared dataclasses**
+- [x] **Step 1: Create pipeline shared dataclasses**
 
 Create `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`:
 
@@ -1017,7 +1017,7 @@ class BlackboxActivityInput:
     vuln_type: str | None = None
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/shared.py
@@ -1031,7 +1031,7 @@ git commit -m "feat(blackbox): add pipeline shared data models"
 **Files:**
 - Create: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
 
-- [ ] **Step 1: Create activity wrappers**
+- [x] **Step 1: Create activity wrappers**
 
 Create `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`:
 
@@ -1134,7 +1134,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
     return metrics.model_dump()
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/activities.py
@@ -1148,7 +1148,7 @@ git commit -m "feat(blackbox): add Temporal activity wrappers"
 **Files:**
 - Create: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
 
-- [ ] **Step 1: Create the workflow**
+- [x] **Step 1: Create the workflow**
 
 Create `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`:
 
@@ -1266,7 +1266,7 @@ class BlackboxScanWorkflow:
         return self._state
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -1280,7 +1280,7 @@ git commit -m "feat(blackbox): implement BlackboxScanWorkflow"
 **Files:**
 - Create: `packages/blackbox/src/shannon_blackbox/worker.py`
 
-- [ ] **Step 1: Create worker**
+- [x] **Step 1: Create worker**
 
 Create `packages/blackbox/src/shannon_blackbox/worker.py`:
 
@@ -1329,7 +1329,7 @@ def main():
     asyncio.run(run_scan(BlackboxPipelineInput(web_url=url)))
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/worker.py
@@ -1344,7 +1344,7 @@ git commit -m "feat(blackbox): add Temporal worker entry point"
 - Create: `packages/blackbox/src/shannon_blackbox/cli/main.py`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/blackbox/tests/test_cli.py`:
 
@@ -1379,12 +1379,12 @@ def test_logs_help():
     assert result.exit_code == 0
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_cli.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement CLI**
+- [x] **Step 3: Implement CLI**
 
 Create `packages/blackbox/src/shannon_blackbox/cli/main.py`:
 
@@ -1468,12 +1468,12 @@ def main():
     cli()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_cli.py
@@ -1493,7 +1493,7 @@ git commit -m "feat(blackbox): add Click CLI"
 - Create: `prompts/authz-exploit.txt`
 - Create: `prompts/report-executive.txt`
 
-- [ ] **Step 1: Create recon-blackbox.txt**
+- [x] **Step 1: Create recon-blackbox.txt**
 
 Create `prompts/recon-blackbox.txt`:
 
@@ -1523,7 +1523,7 @@ Output a comprehensive recon deliverable in markdown format covering all finding
 Save it as `recon_deliverable.md` in the deliverables directory.
 ```
 
-- [ ] **Step 2: Create exploit prompt templates**
+- [x] **Step 2: Create exploit prompt templates**
 
 Create `prompts/injection-exploit.txt`:
 
@@ -1645,7 +1645,7 @@ Output your findings as `authz_exploitation_evidence.md` in the deliverables dir
 Include for each vulnerability: proof of exploitation, role escalation steps, and impact assessment.
 ```
 
-- [ ] **Step 3: Create report-executive.txt**
+- [x] **Step 3: Create report-executive.txt**
 
 Create `prompts/report-executive.txt`:
 
@@ -1674,7 +1674,7 @@ Your task:
 Save the enhanced report as `comprehensive_security_assessment_report.md` in the deliverables directory.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add prompts/recon-blackbox.txt prompts/injection-exploit.txt prompts/xss-exploit.txt prompts/auth-exploit.txt prompts/ssrf-exploit.txt prompts/authz-exploit.txt prompts/report-executive.txt
@@ -1688,7 +1688,7 @@ git commit -m "feat(blackbox): add prompt templates for blackbox agents"
 **Files:**
 - Test: `packages/blackbox/tests/test_integration.py`
 
-- [ ] **Step 1: Write the integration test**
+- [x] **Step 1: Write the integration test**
 
 Create `packages/blackbox/tests/test_integration.py`:
 
@@ -1814,12 +1814,12 @@ async def test_full_blackbox_pipeline_continuation(mock_repo, prompts_dir):
     assert should_xss is False
 ```
 
-- [ ] **Step 2: Run integration tests**
+- [x] **Step 2: Run integration tests**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_integration.py -v`
 Expected: All PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/blackbox/tests/test_integration.py
@@ -1830,17 +1830,17 @@ git commit -m "test(blackbox): add integration test for full pipeline"
 
 ### Task 17: Final verification — run all tests
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m pytest packages/*/tests/ -v`
 Expected: All PASS across core, whitebox, and blackbox
 
-- [ ] **Step 2: Run ruff lint check**
+- [x] **Step 2: Run ruff lint check**
 
 Run: `cd /root/shannon-refactor/shannon-py && python -m ruff check packages/blackbox/`
 Expected: No errors
 
-- [ ] **Step 3: Commit (if any lint fixes needed)**
+- [x] **Step 3: Commit (if any lint fixes needed)**
 
 ```bash
 git add -A

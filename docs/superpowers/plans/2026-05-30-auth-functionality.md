@@ -1,6 +1,6 @@
 # Auth Functionality Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement 6 core auth features in shannon-py to align with the TypeScript Shannon implementation: EmailLogin model, buildLoginInstructions, buildAuthContext, shared_authenticated_session block handling, auth-state verification, and auth-state cleanup.
 
@@ -39,7 +39,7 @@
 - Modify: `shannon-py/packages/core/tests/test_config.py`
 - Modify: `shannon-py/packages/core/src/shannon_core/models/__init__.py`
 
-- [ ] **Step 1: Write the failing test for EmailLogin model**
+- [x] **Step 1: Write the failing test for EmailLogin model**
 
 Add these tests to the end of `shannon-py/packages/core/tests/test_config.py`:
 
@@ -86,12 +86,12 @@ def test_authentication_with_email_login():
     assert auth.credentials.email_login.address == "admin@corp.com"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_config.py::test_email_login_model -v`
 Expected: FAIL with `ImportError: cannot import name 'EmailLogin' from 'shannon_core.models.config'`
 
-- [ ] **Step 3: Implement EmailLogin model and extend Credentials**
+- [x] **Step 3: Implement EmailLogin model and extend Credentials**
 
 In `shannon-py/packages/core/src/shannon_core/models/config.py`, add the `EmailLogin` class after the `SuccessCondition` class (after line 28) and update the `Credentials` class to include the `email_login` field:
 
@@ -112,12 +112,12 @@ class Credentials(BaseModel):
     email_login: EmailLogin | None = None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_config.py -v`
 Expected: All tests PASS (existing + new)
 
-- [ ] **Step 5: Update `__init__.py` re-export**
+- [x] **Step 5: Update `__init__.py` re-export**
 
 In `shannon-py/packages/core/src/shannon_core/models/__init__.py`, add `EmailLogin` to the import from `.config` (line 3-17). Add it to the import block and the `__all__` list:
 
@@ -149,12 +149,12 @@ Add `"EmailLogin"` to the `__all__` list (after `"DistributedConfig"`):
     "ErrorCode",
 ```
 
-- [ ] **Step 6: Run full test suite to verify no regressions**
+- [x] **Step 6: Run full test suite to verify no regressions**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -170,7 +170,7 @@ git commit -m "feat: add EmailLogin model and extend Credentials with email_logi
 - Modify: `shannon-py/packages/core/src/shannon_core/prompts/manager.py`
 - Modify: `shannon-py/packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write the failing test for _build_auth_context**
+- [x] **Step 1: Write the failing test for _build_auth_context**
 
 Add these tests to the end of `shannon-py/packages/core/tests/test_prompt_manager.py`:
 
@@ -243,12 +243,12 @@ def test_auth_context_without_totp(prompts_dir):
     assert "TOTP" not in context
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py::test_auth_context_no_authentication -v`
 Expected: FAIL with `AttributeError: 'PromptManager' object has no attribute '_build_auth_context'`
 
-- [ ] **Step 3: Implement `_build_auth_context()` method**
+- [x] **Step 3: Implement `_build_auth_context()` method**
 
 Add the following method to `PromptManager` in `shannon-py/packages/core/src/shannon_core/prompts/manager.py`, after the `_build_vuln_summary_subsections` method (after line 151):
 
@@ -267,7 +267,7 @@ Add the following method to `PromptManager` in `shannon-py/packages/core/src/sha
         return "\n".join(lines)
 ```
 
-- [ ] **Step 4: Update `_interpolate()` to use `_build_auth_context()`**
+- [x] **Step 4: Update `_interpolate()` to use `_build_auth_context()`**
 
 In `shannon-py/packages/core/src/shannon_core/prompts/manager.py`, replace the `{{AUTH_CONTEXT}}` handling in `_interpolate()`.
 
@@ -299,17 +299,17 @@ Note: When `config` is `None`, the `else` branch runs. We need to handle that ca
 
 No change needed on line 94 — it already handles the `config is None` case correctly.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -325,7 +325,7 @@ git commit -m "feat: add _build_auth_context method for richer auth context in p
 - Modify: `shannon-py/packages/core/src/shannon_core/prompts/manager.py`
 - Modify: `shannon-py/packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write the failing test for build_login_instructions**
+- [x] **Step 1: Write the failing test for build_login_instructions**
 
 Add these tests to the end of `shannon-py/packages/core/tests/test_prompt_manager.py`:
 
@@ -450,12 +450,12 @@ def test_build_login_instructions_empty_login_flow(login_prompts_dir):
     assert "{{user_instructions}}" not in result
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py::test_build_login_instructions_form_type -v`
 Expected: FAIL with `AttributeError: 'PromptManager' object has no attribute 'build_login_instructions'`
 
-- [ ] **Step 3: Implement `build_login_instructions()` method**
+- [x] **Step 3: Implement `build_login_instructions()` method**
 
 Add the following import at the top of `shannon-py/packages/core/src/shannon_core/prompts/manager.py` (after the existing imports, around line 1-4):
 
@@ -538,7 +538,7 @@ Add the following method to `PromptManager` in `shannon-py/packages/core/src/sha
         return login_instructions
 ```
 
-- [ ] **Step 4: Update `_interpolate()` to use `build_login_instructions()`**
+- [x] **Step 4: Update `_interpolate()` to use `build_login_instructions()`**
 
 In `shannon-py/packages/core/src/shannon_core/prompts/manager.py`, replace line 104:
 
@@ -556,17 +556,17 @@ With:
             result = result.replace("{{LOGIN_INSTRUCTIONS}}", "")
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -582,7 +582,7 @@ git commit -m "feat: add build_login_instructions with credential interpolation"
 - Modify: `shannon-py/packages/core/src/shannon_core/prompts/manager.py`
 - Modify: `shannon-py/packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write the failing test for shared_authenticated_session block**
+- [x] **Step 1: Write the failing test for shared_authenticated_session block**
 
 Add these tests to the end of `shannon-py/packages/core/tests/test_prompt_manager.py`:
 
@@ -632,12 +632,12 @@ def test_shared_session_block_removed_when_config_none(prompts_dir):
     assert "shared_authenticated_session" not in result
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py::test_shared_session_block_removed_without_auth -v`
 Expected: FAIL — the `<shared_authenticated_session>` block is still present in output
 
-- [ ] **Step 3: Implement shared_authenticated_session block handling**
+- [x] **Step 3: Implement shared_authenticated_session block handling**
 
 In `shannon-py/packages/core/src/shannon_core/prompts/manager.py`, in the `_interpolate()` method, add the block removal right after the `{{LOGIN_INSTRUCTIONS}}` replacement (the code added in Task 3, Step 4). After the `else` block of the LOGIN_INSTRUCTIONS handling, add:
 
@@ -669,17 +669,17 @@ The final LOGIN_INSTRUCTIONS + session block section of `_interpolate()` should 
             )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -696,7 +696,7 @@ git commit -m "feat: handle shared_authenticated_session block in prompt interpo
 - Modify: `shannon-py/packages/core/tests/test_validate_authentication.py`
 - Modify: `shannon-py/packages/core/src/shannon_core/services/__init__.py`
 
-- [ ] **Step 1: Write the failing tests for auth-state verification**
+- [x] **Step 1: Write the failing tests for auth-state verification**
 
 Replace the entire contents of `shannon-py/packages/core/tests/test_validate_authentication.py` with:
 
@@ -922,12 +922,12 @@ async def test_auth_validation_verifies_state_content(tmp_path):
     assert result.success is True
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_validate_authentication.py -v`
 Expected: FAIL with multiple import errors and `TypeError` for missing `workspace_path` parameter
 
-- [ ] **Step 3: Rewrite validate_authentication.py**
+- [x] **Step 3: Rewrite validate_authentication.py**
 
 Replace the entire contents of `shannon-py/packages/core/src/shannon_core/services/validate_authentication.py` with:
 
@@ -1046,7 +1046,7 @@ async def validate_authentication(
     return await verify_auth_state(state_file)
 ```
 
-- [ ] **Step 4: Update services `__init__.py`**
+- [x] **Step 4: Update services `__init__.py`**
 
 In `shannon-py/packages/core/src/shannon_core/services/__init__.py`, add re-exports for the new functions. The file is currently empty (1 line). Replace its contents with:
 
@@ -1060,17 +1060,17 @@ from shannon_core.services.validate_authentication import (
 )
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_validate_authentication.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS (note: callers haven't been updated yet so whitebox/blackbox tests may fail if they exist — but core tests should all pass)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -1086,7 +1086,7 @@ git commit -m "feat: rewrite auth-state verification with real validation logic"
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/shared.py`
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
 
-- [ ] **Step 1: Add `workspace_path` to `ActivityInput`**
+- [x] **Step 1: Add `workspace_path` to `ActivityInput`**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/shared.py`, add a `workspace_path` field to `ActivityInput`:
 
@@ -1104,7 +1104,7 @@ class ActivityInput:
     workspace_path: str | None = None
 ```
 
-- [ ] **Step 2: Update `run_auth_validation` to pass `workspace_path`**
+- [x] **Step 2: Update `run_auth_validation` to pass `workspace_path`**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/activities.py`, update the `run_auth_validation` activity (lines 90-114) to pass `workspace_path`:
 
@@ -1137,12 +1137,12 @@ async def run_auth_validation(input: ActivityInput) -> None:
         )
 ```
 
-- [ ] **Step 3: Verify no import errors**
+- [x] **Step 3: Verify no import errors**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run python -c "from shannon_whitebox.pipeline.activities import run_auth_validation; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -1158,7 +1158,7 @@ git commit -m "feat: pass workspace_path to validate_authentication in whitebox 
 - Modify: `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/shared.py`
 - Modify: `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
 
-- [ ] **Step 1: Add `workspace_path` to `BlackboxActivityInput`**
+- [x] **Step 1: Add `workspace_path` to `BlackboxActivityInput`**
 
 In `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/shared.py`, add a `workspace_path` field to `BlackboxActivityInput`:
 
@@ -1177,7 +1177,7 @@ class BlackboxActivityInput:
     workspace_path: str | None = None
 ```
 
-- [ ] **Step 2: Update `run_blackbox_auth_validation` to pass `workspace_path`**
+- [x] **Step 2: Update `run_blackbox_auth_validation` to pass `workspace_path`**
 
 In `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/activities.py`, update the `run_blackbox_auth_validation` activity (lines 52-76) to pass `workspace_path`:
 
@@ -1210,12 +1210,12 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         )
 ```
 
-- [ ] **Step 3: Verify no import errors**
+- [x] **Step 3: Verify no import errors**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run python -c "from shannon_blackbox.pipeline.activities import run_blackbox_auth_validation; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py
@@ -1231,7 +1231,7 @@ git commit -m "feat: pass workspace_path to validate_authentication in blackbox 
 - Modify: `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
 - Modify: `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
 
-- [ ] **Step 1: Add auth-state cleanup to whitebox workflow**
+- [x] **Step 1: Add auth-state cleanup to whitebox workflow**
 
 In `shannon-py/packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, update the `with workflow.unsafe.imports_passed_through()` block (line 12-14) to add the cleanup import:
 
@@ -1308,7 +1308,7 @@ with workflow.unsafe.imports_passed_through():
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
 ```
 
-- [ ] **Step 2: Add auth-state cleanup to blackbox workflow**
+- [x] **Step 2: Add auth-state cleanup to blackbox workflow**
 
 In `shannon-py/packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, update the `with workflow.unsafe.imports_passed_through()` block (line 12-15):
 
@@ -1330,17 +1330,17 @@ Then, in the `finally` block (lines 136-139), add auth-state cleanup:
                 cleanup_auth_state_sync(input.repo_path)
 ```
 
-- [ ] **Step 3: Verify imports work**
+- [x] **Step 3: Verify imports work**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run python -c "from shannon_core.services.validate_authentication import cleanup_auth_state_sync; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 4: Run full test suite**
+- [x] **Step 4: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/mango/project/shannon-refactor/shannon-py

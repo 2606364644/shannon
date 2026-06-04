@@ -1,6 +1,6 @@
 # Whitebox→Blackbox Flow Fix Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix the whitebox→blackbox handoff so that blackbox scans can reliably discover and reuse whitebox results.
 
@@ -30,7 +30,7 @@
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py:19-49`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/blackbox/tests/test_cli.py`:
 
@@ -52,12 +52,12 @@ def test_start_accepts_repo_param():
     assert "--repo" in result.output
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_cli.py::test_start_help_shows_repo_option -v`
 Expected: FAIL — `--repo` not in help output
 
-- [ ] **Step 3: Add `--repo` to the CLI**
+- [x] **Step 3: Add `--repo` to the CLI**
 
 In `packages/blackbox/src/shannon_blackbox/cli/main.py`, add the `--repo` option and pass `repo_path` into `BlackboxPipelineInput`. The full updated `start` function:
 
@@ -98,12 +98,12 @@ def start(url, repo, output, workspace, config_path, vuln_classes, no_exploit, p
         raise SystemExit(1)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_cli.py::test_start_help_shows_repo_option packages/blackbox/tests/test_cli.py::test_start_accepts_repo_param -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_cli.py
@@ -118,7 +118,7 @@ git commit -m "feat(blackbox): add --repo CLI option for whitebox result reuse"
 - Modify: `packages/whitebox/src/shannon_whitebox/worker.py`
 - Test: `packages/whitebox/tests/test_worker.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/whitebox/tests/test_worker.py`:
 
@@ -166,12 +166,12 @@ async def test_run_scan_persists_session_data(tmp_path):
     assert data["repo_path"] == str(repo)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_worker.py::test_run_scan_persists_session_data -v`
 Expected: FAIL — session.json not created by current `run_scan`
 
-- [ ] **Step 3: Implement session data persistence in whitebox worker**
+- [x] **Step 3: Implement session data persistence in whitebox worker**
 
 In `packages/whitebox/src/shannon_whitebox/worker.py`, add workspace creation before starting the Temporal workflow. The full updated file:
 
@@ -227,12 +227,12 @@ def main():
     asyncio.run(run_scan(PipelineInput(repo_path=sys.argv[1] if len(sys.argv) > 1 else ".")))
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_worker.py::test_run_scan_persists_session_data -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/worker.py packages/whitebox/tests/test_worker.py
@@ -247,7 +247,7 @@ git commit -m "feat(whitebox): persist repo_path to session.json via SessionMana
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py:72-80`
 - Test: `packages/blackbox/tests/test_workflows.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/blackbox/tests/test_workflows.py`:
 
@@ -326,14 +326,14 @@ def test_path_resolution_pure_fallback(tmp_path, monkeypatch):
     assert result == Path("workspaces") / "my-scan" / ".shannon" / "deliverables"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_workflows.py -v`
 Expected: The `test_path_resolution_fallback_to_session_data` test will fail because the current workflow code doesn't have the session-data fallback logic yet. The other two may pass since the current code handles the with-repo and pure-fallback cases.
 
 Note: These tests replicate the path logic for unit testing. The actual workflow change comes in Step 3.
 
-- [ ] **Step 3: Implement unified path resolution in the workflow**
+- [x] **Step 3: Implement unified path resolution in the workflow**
 
 Replace lines 72-80 in `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py` with:
 
@@ -364,12 +364,12 @@ Replace lines 72-80 in `packages/blackbox/src/shannon_blackbox/pipeline/workflow
             self._state.has_whitebox_results = has_whitebox_results
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_workflows.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/tests/test_workflows.py
@@ -385,7 +385,7 @@ git commit -m "fix(blackbox): unify deliverables path resolution with session-da
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py:44-49`
 - Test: `packages/blackbox/tests/test_workflows.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/blackbox/tests/test_workflows.py`:
 
@@ -413,12 +413,12 @@ def test_state_defaults_no_found_classes():
     assert state.found_whitebox_classes == []
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_workflows.py::test_state_tracks_found_classes_with_results -v`
 Expected: FAIL — `BlackboxPipelineState` doesn't have `found_whitebox_classes` field yet
 
-- [ ] **Step 3: Add `found_whitebox_classes` to state model**
+- [x] **Step 3: Add `found_whitebox_classes` to state model**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`, update `BlackboxPipelineState`:
 
@@ -435,7 +435,7 @@ class BlackboxPipelineState:
     errors: list[str] = field(default_factory=list)
 ```
 
-- [ ] **Step 4: Add logging to workflow**
+- [x] **Step 4: Add logging to workflow**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, add the import and logging calls after the `has_whitebox_results` block. Add at the top of the file (after the existing imports inside the `with workflow.unsafe.imports_passed_through():` block is NOT suitable for stdlib logging — add it at the module level):
 
@@ -473,7 +473,7 @@ Then after the `self._state.has_whitebox_results = has_whitebox_results` line (f
                 )
 ```
 
-- [ ] **Step 5: Update CLI completion message**
+- [x] **Step 5: Update CLI completion message**
 
 In `packages/blackbox/src/shannon_blackbox/cli/main.py`, update the completion block:
 
@@ -505,12 +505,12 @@ Note: `result` is a `BlackboxPipelineState` dataclass, not a plain dict. Access 
         raise SystemExit(1)
 ```
 
-- [ ] **Step 6: Run all blackbox tests**
+- [x] **Step 6: Run all blackbox tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/shared.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_workflows.py
@@ -524,17 +524,17 @@ git commit -m "feat(blackbox): add logging and CLI feedback for whitebox result 
 **Files:**
 - No new files
 
-- [ ] **Step 1: Run complete test suite**
+- [x] **Step 1: Run complete test suite**
 
 Run: `cd /root/shannon-py && python -m pytest packages/ -v`
 Expected: ALL PASS — no regressions
 
-- [ ] **Step 2: Verify backward compatibility — blackbox without `--repo` still works**
+- [x] **Step 2: Verify backward compatibility — blackbox without `--repo` still works**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_cli.py -v`
 Expected: ALL PASS — existing CLI tests (help, basic invocation) unchanged
 
-- [ ] **Step 3: Verify the design spec is fully covered**
+- [x] **Step 3: Verify the design spec is fully covered**
 
 Check each spec requirement against the tasks:
 
@@ -548,7 +548,7 @@ Check each spec requirement against the tasks:
 | Logging when whitebox results found/not found | Task 4 |
 | CLI completion message shows whitebox status | Task 4 |
 
-- [ ] **Step 4: Final commit (if any test fixes needed)**
+- [x] **Step 4: Final commit (if any test fixes needed)**
 
 ```bash
 git add -A

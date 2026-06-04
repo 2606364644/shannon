@@ -1,6 +1,6 @@
 # Git State Management Gap Remediation — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix 5 critical gaps where the Python GitManager/AgentExecutor is functionally inferior to the TypeScript original.
 
@@ -28,7 +28,7 @@
 **Files:**
 - Modify: `packages/core/src/shannon_core/models/errors.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/core/tests/test_errors.py`:
 
@@ -108,12 +108,12 @@ class TestErrorClassification:
         assert result.error_type == "UnknownError"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_errors.py::TestErrorClassification -v`
 Expected: FAIL — `ImportError: cannot import name 'ErrorClassification' from 'shannon_core.models.errors'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add to the end of `packages/core/src/shannon_core/models/errors.py`:
 
@@ -169,12 +169,12 @@ def classify_error(error: PentestError) -> ErrorClassification:
     return ErrorClassification("UnknownError", error.retryable)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_errors.py -v`
 Expected: All tests PASS (both existing and new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/errors.py packages/core/tests/test_errors.py
@@ -190,7 +190,7 @@ git commit -m "feat(core): add ErrorClassification and classify_error for workfl
 - Modify: `packages/core/src/shannon_core/git_manager.py:139-152` (rollback — move reset/clean into lock)
 - Modify: `packages/core/tests/test_git_manager.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_git_manager.py`:
 
@@ -220,12 +220,12 @@ async def test_rollback_holds_lock_during_reset_and_clean(git_repo: Path, monkey
     )
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_git_manager.py::test_rollback_holds_lock_during_reset_and_clean -v`
 Expected: FAIL — `AssertionError` because `lock_held_during` contains `False` entries.
 
-- [ ] **Step 3: Fix `rollback()` lock scope**
+- [x] **Step 3: Fix `rollback()` lock scope**
 
 In `packages/core/src/shannon_core/git_manager.py`, replace the `rollback` method (lines 138–152) with:
 
@@ -247,7 +247,7 @@ In `packages/core/src/shannon_core/git_manager.py`, replace the `rollback` metho
         return GitResult(success=True, changed_files=changed)
 ```
 
-- [ ] **Step 4: Fix `create_checkpoint()` lock scope**
+- [x] **Step 4: Fix `create_checkpoint()` lock scope**
 
 In `packages/core/src/shannon_core/git_manager.py`, replace the `create_checkpoint` method (lines 67–105) with:
 
@@ -294,12 +294,12 @@ In `packages/core/src/shannon_core/git_manager.py`, replace the `create_checkpoi
         return GitResult(success=True, changed_files=changed)
 ```
 
-- [ ] **Step 5: Run all git manager tests**
+- [x] **Step 5: Run all git manager tests**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_git_manager.py -v`
 Expected: All tests PASS (including new lock test and all existing tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/git_manager.py packages/core/tests/test_git_manager.py
@@ -314,7 +314,7 @@ git commit -m "fix(core): expand GitManager lock scope to cover reset/clean oper
 - Modify: `packages/core/src/shannon_core/git_manager.py` (rollback method from Task 2)
 - Modify: `packages/core/tests/test_git_manager.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_git_manager.py`:
 
@@ -355,12 +355,12 @@ async def test_rollback_reraises_pentest_error(git_repo: Path, monkeypatch):
     assert "git not found" in str(exc_info.value)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_git_manager.py::test_rollback_returns_error_on_git_failure packages/core/tests/test_git_manager.py::test_rollback_reraises_pentest_error -v`
 Expected: FAIL — `test_rollback_returns_error_on_git_failure` raises an unhandled exception instead of returning a result.
 
-- [ ] **Step 3: Add try-except to rollback**
+- [x] **Step 3: Add try-except to rollback**
 
 Replace the `rollback` method in `packages/core/src/shannon_core/git_manager.py` with:
 
@@ -394,12 +394,12 @@ Replace the `rollback` method in `packages/core/src/shannon_core/git_manager.py`
             return GitResult(success=False, error=str(exc))
 ```
 
-- [ ] **Step 4: Run all git manager tests**
+- [x] **Step 4: Run all git manager tests**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_git_manager.py -v`
 Expected: All tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/git_manager.py packages/core/tests/test_git_manager.py
@@ -415,7 +415,7 @@ git commit -m "fix(core): wrap rollback errors, return GitResult instead of rais
 - Modify: `packages/core/src/shannon_core/agents/executor.py:55` (create_checkpoint call)
 - Create: `packages/core/tests/test_executor.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/test_executor.py`:
 
@@ -525,12 +525,12 @@ class TestAttemptNumberPassthrough:
                 assert call_kwargs.args[2] == 3
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_executor.py::TestAttemptNumberPassthrough -v`
 Expected: FAIL — `TypeError: execute() got an unexpected keyword argument 'attempt_number'`
 
-- [ ] **Step 3: Add `attempt_number` parameter to `execute()`**
+- [x] **Step 3: Add `attempt_number` parameter to `execute()`**
 
 In `packages/core/src/shannon_core/agents/executor.py`, modify the `execute` method signature and the `create_checkpoint` call.
 
@@ -583,12 +583,12 @@ to:
         await GitManager.create_checkpoint(deliverables, agent_name, attempt=attempt_number)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_executor.py::TestAttemptNumberPassthrough -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/executor.py packages/core/tests/test_executor.py
@@ -603,7 +603,7 @@ git commit -m "feat(core): pass attempt_number through AgentExecutor to GitManag
 - Modify: `packages/core/src/shannon_core/agents/executor.py`
 - Modify: `packages/core/tests/test_executor.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/core/tests/test_executor.py`:
 
@@ -682,12 +682,12 @@ class TestDeliverableSnapshotRestore:
                 mock_gm.rollback.assert_called_once()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_executor.py::TestDeliverableSnapshotRestore -v`
 Expected: FAIL — deliverable file is not restored after rollback (or method lacks snapshot logic).
 
-- [ ] **Step 3: Add snapshot/restore helpers and integrate into failure paths**
+- [x] **Step 3: Add snapshot/restore helpers and integrate into failure paths**
 
 Add two new imports at the top of `packages/core/src/shannon_core/agents/executor.py`:
 
@@ -803,12 +803,12 @@ To:
             )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_executor.py -v`
 Expected: All tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/executor.py packages/core/tests/test_executor.py
@@ -821,17 +821,17 @@ git commit -m "feat(core): snapshot and restore deliverables before rollback on 
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Run all tests in the core package**
+- [x] **Step 1: Run all tests in the core package**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS.
 
-- [ ] **Step 2: Run all tests across all packages**
+- [x] **Step 2: Run all tests across all packages**
 
 Run: `cd /root/shannon-py && uv run pytest --timeout=120 -v`
 Expected: All tests PASS.
 
-- [ ] **Step 3: Final commit (if any test fixes were needed)**
+- [x] **Step 3: Final commit (if any test fixes were needed)**
 
 ```bash
 git add -A

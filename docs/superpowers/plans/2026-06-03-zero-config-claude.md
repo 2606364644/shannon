@@ -1,6 +1,6 @@
 # 零配置 Claude 体验 实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 让 shannon-py 只需设置 `ANTHROPIC_API_KEY` 即可运行，无需任何 `SHANNON_*` 环境变量。
 
@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `packages/core/tests/agents/test_providers.py`
 
-- [ ] **Step 1: 在 `TestAnthropicProvider` 类中添加测试方法**
+- [x] **Step 1: 在 `TestAnthropicProvider` 类中添加测试方法**
 
 在 `test_call_success` 方法之后（约第 278 行），添加以下测试：
 
@@ -131,13 +131,13 @@ class TestAnthropicProviderBuildOptions:
         assert options.env["ANTHROPIC_VERTEX_PROJECT_ID"] == "test-project"
 ```
 
-- [ ] **Step 2: 运行测试确认新增的零配置测试失败**
+- [x] **Step 2: 运行测试确认新增的零配置测试失败**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/agents/test_providers.py::TestAnthropicProviderBuildOptions -v`
 
 预期: `test_no_env_override_with_anthropic_key_only` **FAIL** — 因为当前代码在 `config.api_key` 有值时会设置 `options.env`（即使 key 来自 `ANTHROPIC_API_KEY` fallback）。其他测试可能 PASS 或 FAIL 取决于当前行为。
 
-- [ ] **Step 3: Commit 测试**
+- [x] **Step 3: Commit 测试**
 
 ```bash
 git add packages/core/tests/agents/test_providers.py
@@ -151,7 +151,7 @@ git commit -m "test: add zero-config _build_options tests for AnthropicProvider"
 **Files:**
 - Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py:104-123`
 
-- [ ] **Step 1: 替换 `_build_options` 中 `anthropic_api` 分支的逻辑**
+- [x] **Step 1: 替换 `_build_options` 中 `anthropic_api` 分支的逻辑**
 
 将 `providers_anthropic.py` 第 104-110 行：
 
@@ -187,13 +187,13 @@ git commit -m "test: add zero-config _build_options tests for AnthropicProvider"
 
 Bedrock（第 112-115 行）和 Vertex（第 117-121 行）分支保持不变。
 
-- [ ] **Step 2: 运行所有 provider 测试确认通过**
+- [x] **Step 2: 运行所有 provider 测试确认通过**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/agents/test_providers.py -v`
 
 预期: ALL PASS，包括 Task 1 新增的零配置测试。
 
-- [ ] **Step 3: Commit 实现**
+- [x] **Step 3: Commit 实现**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers_anthropic.py
@@ -211,7 +211,7 @@ auto-detect it from the process environment."
 **Files:**
 - Modify: `.env.example`
 
-- [ ] **Step 1: 替换整个 `.env.example` 文件**
+- [x] **Step 1: 替换整个 `.env.example` 文件**
 
 将 `.env.example` 替换为以下内容（对齐原始 shannon 的结构，以 `ANTHROPIC_API_KEY` 为主入口）：
 
@@ -291,7 +291,7 @@ ANTHROPIC_API_KEY=your-api-key-here
 # SHANNON_MAX_BUDGET=1.0
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add .env.example
@@ -305,7 +305,7 @@ git commit -m "docs: simplify .env.example to zero-config ANTHROPIC_API_KEY entr
 **Files:**
 - Modify: `packages/core/src/shannon_core/agents/providers.py:135-197`
 
-- [ ] **Step 1: 更新 `build_provider_config` 函数的文档字符串**
+- [x] **Step 1: 更新 `build_provider_config` 函数的文档字符串**
 
 将 `providers.py` 第 135-145 行的函数签名和文档字符串：
 
@@ -372,13 +372,13 @@ def build_provider_config(
     """
 ```
 
-- [ ] **Step 2: 运行全量 provider 测试确认无回归**
+- [x] **Step 2: 运行全量 provider 测试确认无回归**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/agents/test_providers.py packages/core/tests/test_runner.py -v`
 
 预期: ALL PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers.py
@@ -392,20 +392,20 @@ git commit -m "docs: update build_provider_config docstring for zero-config clar
 **Files:**
 - 无新文件
 
-- [ ] **Step 1: 运行全部核心测试套件**
+- [x] **Step 1: 运行全部核心测试套件**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/ -v --tb=short`
 
 预期: ALL PASS
 
-- [ ] **Step 2: 验证只有 `ANTHROPIC_API_KEY` 时 `build_provider_config` 产生正确配置**
+- [x] **Step 2: 验证只有 `ANTHROPIC_API_KEY` 时 `build_provider_config` 产生正确配置**
 
 手动确认逻辑路径：
 1. `build_provider_config()` 在只有 `ANTHROPIC_API_KEY` 时 → `config.api_key` 有值，`config.type` = `"anthropic_api"`
 2. `AnthropicProvider._build_options()` → `SHANNON_API_KEY` 和 `SHANNON_BASE_URL` 均为 None → `explicit_env` 为空 → 不设 `options.env`
 3. SDK 从进程环境自动读取 `ANTHROPIC_API_KEY`
 
-- [ ] **Step 3: Final commit（如有格式调整）**
+- [x] **Step 3: Final commit（如有格式调整）**
 
 ```bash
 git add -A

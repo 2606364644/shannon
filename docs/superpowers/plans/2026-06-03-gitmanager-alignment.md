@@ -1,6 +1,6 @@
 # GitManager Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fully align Python GitManager with the original TypeScript implementation — async rewrite with concurrency control, retry mechanism, change tracking, and logging.
 
@@ -29,7 +29,7 @@
 - Modify: `packages/core/src/shannon_core/models/__init__.py`
 - Test: `packages/core/tests/test_git_manager.py` (covered in Task 3+)
 
-- [ ] **Step 1: Append `GitResult` to result.py**
+- [x] **Step 1: Append `GitResult` to result.py**
 
 Add at the end of `packages/core/src/shannon_core/models/result.py`:
 
@@ -47,7 +47,7 @@ class GitResult:
 
 Note: Keep the existing `from pydantic import BaseModel` import and the two Pydantic models (`WhiteboxScanResult`, `BlackboxScanResult`) untouched. Add `from dataclasses import dataclass, field` as a new import at the top.
 
-- [ ] **Step 2: Export `GitResult` from models `__init__.py`**
+- [x] **Step 2: Export `GitResult` from models `__init__.py`**
 
 In `packages/core/src/shannon_core/models/__init__.py`, add `GitResult` to the import line from `.result`:
 
@@ -57,12 +57,12 @@ from .result import BlackboxScanResult, GitResult, WhiteboxScanResult
 
 And add `"GitResult"` to the `__all__` list (alphabetically, between `"DELIVERABLE_FILENAMES"` and `"InjectionVulnerability"`).
 
-- [ ] **Step 3: Verify import works**
+- [x] **Step 3: Verify import works**
 
 Run: `cd /root/shannon-py && python -c "from shannon_core.models import GitResult; print(GitResult(success=True))"`
 Expected: `GitResult(success=True, changed_files=[], error=None)`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/result.py packages/core/src/shannon_core/models/__init__.py
@@ -76,7 +76,7 @@ git commit -m "feat(core): add GitResult dataclass for structured git operation 
 **Files:**
 - Rewrite: `packages/core/src/shannon_core/git_manager.py`
 
-- [ ] **Step 1: Write the full async GitManager implementation**
+- [x] **Step 1: Write the full async GitManager implementation**
 
 Replace the entire contents of `packages/core/src/shannon_core/git_manager.py` with:
 
@@ -319,12 +319,12 @@ class GitManager:
         return [line.strip() for line in lines if line.strip()]
 ```
 
-- [ ] **Step 2: Verify the module imports cleanly**
+- [x] **Step 2: Verify the module imports cleanly**
 
 Run: `cd /root/shannon-py && python -c "from shannon_core.git_manager import GitManager; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/git_manager.py
@@ -338,7 +338,7 @@ git commit -m "feat(core): rewrite GitManager as async with lock, retry, and cha
 **Files:**
 - Rewrite: `packages/core/tests/test_git_manager.py`
 
-- [ ] **Step 1: Write async test fixture and basic tests**
+- [x] **Step 1: Write async test fixture and basic tests**
 
 Replace the entire contents of `packages/core/tests/test_git_manager.py` with:
 
@@ -499,12 +499,12 @@ async def test_rollback_returns_changed_files(git_repo: Path):
     assert len(result.changed_files) >= 2
 ```
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_git_manager.py -v`
 Expected: All tests PASS (approximately 15 tests)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/tests/test_git_manager.py
@@ -518,7 +518,7 @@ git commit -m "test(core): async tests for basic GitManager operations"
 **Files:**
 - Modify: `packages/core/tests/test_git_manager.py` (append)
 
-- [ ] **Step 1: Append concurrency, retry, and error tests**
+- [x] **Step 1: Append concurrency, retry, and error tests**
 
 Append the following to `packages/core/tests/test_git_manager.py`:
 
@@ -635,12 +635,12 @@ async def test_no_changes_returns_empty_list(git_repo: Path):
     assert result.changed_files == []
 ```
 
-- [ ] **Step 2: Run all tests**
+- [x] **Step 2: Run all tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_git_manager.py -v`
 Expected: All tests PASS (approximately 22 tests total)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/tests/test_git_manager.py
@@ -654,7 +654,7 @@ git commit -m "test(core): add concurrency, retry, and error handling tests for 
 **Files:**
 - Modify: `packages/core/src/shannon_core/agents/executor.py`
 
-- [ ] **Step 1: Update the 4 GitManager call sites to async**
+- [x] **Step 1: Update the 4 GitManager call sites to async**
 
 In `packages/core/src/shannon_core/agents/executor.py`, there are exactly 4 lines that call GitManager methods synchronously. Change each to use `await`:
 
@@ -698,17 +698,17 @@ In `packages/core/src/shannon_core/agents/executor.py`, there are exactly 4 line
         await GitManager.commit(deliverables, agent_name)
 ```
 
-- [ ] **Step 2: Verify no other sync GitManager calls remain**
+- [x] **Step 2: Verify no other sync GitManager calls remain**
 
 Run: `grep -rn "GitManager\.\(create_checkpoint\|commit\|rollback\|get_commit_hash\)" packages/ --include="*.py" | grep -v test_ | grep -v "await"`
 Expected: No output (all calls use `await`)
 
-- [ ] **Step 3: Verify executor module imports cleanly**
+- [x] **Step 3: Verify executor module imports cleanly**
 
 Run: `cd /root/shannon-py && python -c "from shannon_core.agents.executor import AgentExecutor; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/executor.py
@@ -721,12 +721,12 @@ git commit -m "refactor(core): update AgentExecutor to use async GitManager"
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Run the full core test suite**
+- [x] **Step 1: Run the full core test suite**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/ -v`
 Expected: All tests PASS. If any unrelated tests fail, note them but do not block — only test_git_manager.py must be green.
 
-- [ ] **Step 2: Run a quick smoke test to validate end-to-end async flow**
+- [x] **Step 2: Run a quick smoke test to validate end-to-end async flow**
 
 Run: `cd /root/shannon-py && python -c "
 import asyncio
@@ -763,7 +763,7 @@ asyncio.run(smoke())
 "`
 Expected: `ALL SMOKE TESTS PASSED`
 
-- [ ] **Step 3: Commit (only if any fixups were needed)**
+- [x] **Step 3: Commit (only if any fixups were needed)**
 
 If any adjustments were made during verification:
 

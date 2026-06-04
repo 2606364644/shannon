@@ -1,6 +1,6 @@
 # Workspace Cross-Scan UX Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix the broken cross-scan handoff UX by adding workspace discovery, linking, and actionable CLI output so users can seamlessly chain white-box → black-box scans.
 
@@ -33,7 +33,7 @@
 - Modify: `packages/core/src/shannon_core/session.py`
 - Test: `packages/core/tests/test_session.py`
 
-- [ ] **Step 1: Write failing tests for `scan_type` in `create_workspace`**
+- [x] **Step 1: Write failing tests for `scan_type` in `create_workspace`**
 
 Append to `packages/core/tests/test_session.py`:
 
@@ -62,12 +62,12 @@ def test_create_workspace_blackbox_scan_type(tmp_path):
     assert data["scan_type"] == "blackbox"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest packages/core/tests/test_session.py::test_create_workspace_includes_scan_type -v`
 Expected: FAIL — `create_workspace()` got an unexpected keyword argument `scan_type`
 
-- [ ] **Step 3: Implement `scan_type` in `create_workspace`**
+- [x] **Step 3: Implement `scan_type` in `create_workspace`**
 
 In `packages/core/src/shannon_core/session.py`, update `create_workspace` to accept `scan_type` and persist it:
 
@@ -150,17 +150,17 @@ class SessionManager:
         return agent_name.value in data.get("completed_agents", [])
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/test_session.py::test_create_workspace_includes_scan_type packages/core/tests/test_session.py::test_create_workspace_defaults_scan_type packages/core/tests/test_session.py::test_create_workspace_blackbox_scan_type -v`
 Expected: All 3 PASS
 
-- [ ] **Step 5: Run existing session tests to verify no regressions**
+- [x] **Step 5: Run existing session tests to verify no regressions**
 
 Run: `uv run pytest packages/core/tests/test_session.py -v`
 Expected: All existing tests + new tests PASS (8 tests total)
 
-- [ ] **Step 6: Write failing tests for `get_scan_type` with backward compatibility**
+- [x] **Step 6: Write failing tests for `get_scan_type` with backward compatibility**
 
 Append to `packages/core/tests/test_session.py`:
 
@@ -218,12 +218,12 @@ def test_get_status_unknown_when_empty(tmp_path):
     assert mgr.get_status(ws) == "unknown"
 ```
 
-- [ ] **Step 7: Run tests to verify they fail**
+- [x] **Step 7: Run tests to verify they fail**
 
 Run: `uv run pytest packages/core/tests/test_session.py::test_get_scan_type_explicit -v`
 Expected: FAIL — `SessionManager has no attribute 'get_scan_type'`
 
-- [ ] **Step 8: Implement `get_scan_type`, `get_status`, and backward-compat helpers**
+- [x] **Step 8: Implement `get_scan_type`, `get_status`, and backward-compat helpers**
 
 Append to `SessionManager` in `packages/core/src/shannon_core/session.py`:
 
@@ -331,12 +331,12 @@ Append to `SessionManager` in `packages/core/src/shannon_core/session.py`:
         })
 ```
 
-- [ ] **Step 9: Run all session tests**
+- [x] **Step 9: Run all session tests**
 
 Run: `uv run pytest packages/core/tests/test_session.py -v`
 Expected: All 14 tests PASS
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/session.py packages/core/tests/test_session.py
@@ -351,7 +351,7 @@ git commit -m "feat(core): enhance session data model with scan_type, status, li
 - Modify: `packages/core/src/shannon_core/models/config.py`
 - Test: `packages/core/tests/test_config.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/tests/test_config.py`:
 
@@ -368,12 +368,12 @@ def test_auto_detect_whitebox_disabled():
     assert c.auto_detect_whitebox is False
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/test_config.py::test_auto_detect_whitebox_default -v`
 Expected: FAIL — `Config` has no field `auto_detect_whitebox`
 
-- [ ] **Step 3: Add `auto_detect_whitebox` field to Config**
+- [x] **Step 3: Add `auto_detect_whitebox` field to Config**
 
 In `packages/core/src/shannon_core/models/config.py`, add the field to the `Config` class:
 
@@ -390,12 +390,12 @@ class Config(BaseModel):
     auto_detect_whitebox: bool = True
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/test_config.py -v`
 Expected: All tests PASS (including the 2 new ones)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/config.py packages/core/tests/test_config.py
@@ -410,7 +410,7 @@ git commit -m "feat(core): add auto_detect_whitebox config option (default True)
 - Create: `packages/core/src/shannon_core/workspace.py`
 - Create: `packages/core/tests/test_workspace.py`
 
-- [ ] **Step 1: Write failing tests for URL normalization**
+- [x] **Step 1: Write failing tests for URL normalization**
 
 Create `packages/core/tests/test_workspace.py`:
 
@@ -476,12 +476,12 @@ class TestUrlsMatch:
         assert urls_match("https://example.com:443", "https://example.com") is True
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest packages/core/tests/test_workspace.py::TestNormalizeUrl -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.workspace'`
 
-- [ ] **Step 3: Implement `normalize_url` and `urls_match`**
+- [x] **Step 3: Implement `normalize_url` and `urls_match`**
 
 Create `packages/core/src/shannon_core/workspace.py`:
 
@@ -678,19 +678,19 @@ def get_workspace_info(workspace_path: Path) -> dict:
     }
 ```
 
-- [ ] **Step 4: Run URL normalization tests**
+- [x] **Step 4: Run URL normalization tests**
 
 Run: `uv run pytest packages/core/tests/test_workspace.py::TestNormalizeUrl packages/core/tests/test_workspace.py::TestUrlsMatch -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit URL utilities**
+- [x] **Step 5: Commit URL utilities**
 
 ```bash
 git add packages/core/src/shannon_core/workspace.py packages/core/tests/test_workspace.py
 git commit -m "feat(core): add workspace utility module with URL matching"
 ```
 
-- [ ] **Step 6: Write failing tests for `compute_deliverables_summary`**
+- [x] **Step 6: Write failing tests for `compute_deliverables_summary`**
 
 Append to `packages/core/tests/test_workspace.py`:
 
@@ -758,19 +758,19 @@ class TestComputeDeliverablesSummary:
         assert set(summary["vuln_queues"]) == {"injection", "xss", "auth"}
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/test_workspace.py::TestComputeDeliverablesSummary -v`
 Expected: All 6 PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/workspace.py packages/core/tests/test_workspace.py
 git commit -m "feat(core): add compute_deliverables_summary for scanning workspace deliverables"
 ```
 
-- [ ] **Step 9: Write failing tests for `find_latest_workspace`**
+- [x] **Step 9: Write failing tests for `find_latest_workspace`**
 
 Append to `packages/core/tests/test_workspace.py`:
 
@@ -849,19 +849,19 @@ class TestFindLatestWorkspace:
         assert result.name == "ws-target"
 ```
 
-- [ ] **Step 10: Run tests**
+- [x] **Step 10: Run tests**
 
 Run: `uv run pytest packages/core/tests/test_workspace.py::TestFindLatestWorkspace -v`
 Expected: All 5 PASS
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add packages/core/tests/test_workspace.py
 git commit -m "test(core): add find_latest_workspace tests"
 ```
 
-- [ ] **Step 12: Write failing tests for `find_workspaces_by_url`**
+- [x] **Step 12: Write failing tests for `find_workspaces_by_url`**
 
 Append to `packages/core/tests/test_workspace.py`:
 
@@ -909,12 +909,12 @@ class TestFindWorkspacesByUrl:
         assert len(results) == 0
 ```
 
-- [ ] **Step 13: Run tests**
+- [x] **Step 13: Run tests**
 
 Run: `uv run pytest packages/core/tests/test_workspace.py::TestFindWorkspacesByUrl -v`
 Expected: All 4 PASS
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add packages/core/tests/test_workspace.py
@@ -929,7 +929,7 @@ git commit -m "test(core): add find_workspaces_by_url tests"
 - Modify: `packages/whitebox/src/shannon_whitebox/cli/main.py`
 - Test: `packages/whitebox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing test for enhanced completion output**
+- [x] **Step 1: Write failing test for enhanced completion output**
 
 Append to `packages/whitebox/tests/test_cli.py`:
 
@@ -958,12 +958,12 @@ def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
     assert "--latest" in result.output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_start_shows_workspace_and_next_steps -v`
 Expected: FAIL — "Workspace:" not found in output
 
-- [ ] **Step 3: Implement enhanced completion output**
+- [x] **Step 3: Implement enhanced completion output**
 
 Update the `start` command in `packages/whitebox/src/shannon_whitebox/cli/main.py`:
 
@@ -1010,17 +1010,17 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         raise SystemExit(1)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_start_shows_workspace_and_next_steps -v`
 Expected: PASS
 
-- [ ] **Step 5: Run all whitebox CLI tests for no regressions**
+- [x] **Step 5: Run all whitebox CLI tests for no regressions**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/main.py packages/whitebox/tests/test_cli.py
@@ -1035,7 +1035,7 @@ git commit -m "feat(whitebox): enhanced completion output with workspace name an
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing test for `--latest` help text**
+- [x] **Step 1: Write failing test for `--latest` help text**
 
 Append to `packages/blackbox/tests/test_cli.py`:
 
@@ -1048,12 +1048,12 @@ def test_start_help_shows_latest_option():
     assert "--latest" in result.output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_start_help_shows_latest_option -v`
 Expected: FAIL — "--latest" not found
 
-- [ ] **Step 3: Add `--latest` parameter to blackbox start command**
+- [x] **Step 3: Add `--latest` parameter to blackbox start command**
 
 In `packages/blackbox/src/shannon_blackbox/cli/main.py`, update the `start` command signature and add resolution logic:
 
@@ -1119,12 +1119,12 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         raise SystemExit(1)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_start_help_shows_latest_option -v`
 Expected: PASS
 
-- [ ] **Step 5: Write failing tests for `--latest` resolution logic**
+- [x] **Step 5: Write failing tests for `--latest` resolution logic**
 
 Append to `packages/blackbox/tests/test_cli.py`:
 
@@ -1202,17 +1202,17 @@ def test_w_takes_precedence_over_latest(tmp_path, monkeypatch):
     assert captured_input.workspace_name == "my-ws"
 ```
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_latest_resolves_to_workspace packages/blackbox/tests/test_cli.py::test_latest_no_workspaces packages/blackbox/tests/test_cli.py::test_w_takes_precedence_over_latest -v`
 Expected: All 3 PASS
 
-- [ ] **Step 7: Run all blackbox CLI tests**
+- [x] **Step 7: Run all blackbox CLI tests**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_cli.py
@@ -1227,7 +1227,7 @@ git commit -m "feat(blackbox): add --latest flag to resolve most recent whitebox
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing tests for auto-detection**
+- [x] **Step 1: Write failing tests for auto-detection**
 
 Append to `packages/blackbox/tests/test_cli.py`:
 
@@ -1321,12 +1321,12 @@ def test_auto_detect_no_match(tmp_path, monkeypatch):
     assert "--latest" in result.output
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_auto_detect_single_match -v`
 Expected: FAIL — "Detected white-box results" not in output
 
-- [ ] **Step 3: Implement auto-detection in the `start` command**
+- [x] **Step 3: Implement auto-detection in the `start` command**
 
 Update the `start` command in `packages/blackbox/src/shannon_blackbox/cli/main.py` — replace the full `start` function:
 
@@ -1437,17 +1437,17 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         raise SystemExit(1)
 ```
 
-- [ ] **Step 4: Run auto-detection tests**
+- [x] **Step 4: Run auto-detection tests**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py::test_auto_detect_single_match packages/blackbox/tests/test_cli.py::test_auto_detect_declined packages/blackbox/tests/test_cli.py::test_auto_detect_no_match -v`
 Expected: All 3 PASS
 
-- [ ] **Step 5: Run all blackbox CLI tests**
+- [x] **Step 5: Run all blackbox CLI tests**
 
 Run: `uv run pytest packages/blackbox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_cli.py
@@ -1464,7 +1464,7 @@ git commit -m "feat(blackbox): add same-target auto-detection with interactive p
 - Test: `packages/whitebox/tests/test_cli.py`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing test for grouped workspace listing**
+- [x] **Step 1: Write failing test for grouped workspace listing**
 
 Append to `packages/whitebox/tests/test_cli.py`:
 
@@ -1498,12 +1498,12 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     assert "bb-1" in result.output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_workspaces_grouped_by_scan_type -v`
 Expected: FAIL — "White-box workspaces:" not in output
 
-- [ ] **Step 3: Implement grouped workspace listing in whitebox CLI**
+- [x] **Step 3: Implement grouped workspace listing in whitebox CLI**
 
 Update the `workspaces` command in `packages/whitebox/src/shannon_whitebox/cli/main.py`:
 
@@ -1552,12 +1552,12 @@ def workspaces():
         click.echo("No workspaces found.")
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_workspaces_grouped_by_scan_type -v`
 Expected: PASS
 
-- [ ] **Step 5: Write failing test for blackbox grouped listing**
+- [x] **Step 5: Write failing test for blackbox grouped listing**
 
 Append to `packages/blackbox/tests/test_cli.py`:
 
@@ -1589,7 +1589,7 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     assert "Black-box workspaces:" in result.output
 ```
 
-- [ ] **Step 6: Implement grouped listing in blackbox CLI**
+- [x] **Step 6: Implement grouped listing in blackbox CLI**
 
 Update the `workspaces` command in `packages/blackbox/src/shannon_blackbox/cli/main.py`:
 
@@ -1638,17 +1638,17 @@ def workspaces():
         click.echo("No workspaces found.")
 ```
 
-- [ ] **Step 7: Run both listing tests**
+- [x] **Step 7: Run both listing tests**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_workspaces_grouped_by_scan_type packages/blackbox/tests/test_cli.py::test_workspaces_grouped_by_scan_type -v`
 Expected: Both PASS
 
-- [ ] **Step 8: Run all CLI tests**
+- [x] **Step 8: Run all CLI tests**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/main.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py
@@ -1665,7 +1665,7 @@ git commit -m "feat: enhanced workspaces listing grouped by scan_type with table
 - Test: `packages/whitebox/tests/test_cli.py`
 - Test: `packages/blackbox/tests/test_cli.py`
 
-- [ ] **Step 1: Write failing test for `workspace show`**
+- [x] **Step 1: Write failing test for `workspace show`**
 
 Append to `packages/whitebox/tests/test_cli.py`:
 
@@ -1709,12 +1709,12 @@ def test_workspace_show_not_found(tmp_path, monkeypatch):
     assert "not found" in result.output.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_workspace_show -v`
 Expected: FAIL — `No such command "workspace"`
 
-- [ ] **Step 3: Implement `workspace show` in whitebox CLI**
+- [x] **Step 3: Implement `workspace show` in whitebox CLI**
 
 Add a `workspace` group and `show` subcommand in `packages/whitebox/src/shannon_whitebox/cli/main.py`, after the existing `logs` command and before `main()`:
 
@@ -1812,12 +1812,12 @@ Also add `import json` at the top of the file (needed for `workspace show` to pa
 import json
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py::test_workspace_show packages/whitebox/tests/test_cli.py::test_workspace_show_not_found -v`
 Expected: Both PASS
 
-- [ ] **Step 5: Write failing test for blackbox `workspace show`**
+- [x] **Step 5: Write failing test for blackbox `workspace show`**
 
 Append to `packages/blackbox/tests/test_cli.py`:
 
@@ -1853,7 +1853,7 @@ def test_workspace_show_not_found(tmp_path, monkeypatch):
     assert "not found" in result.output.lower()
 ```
 
-- [ ] **Step 6: Implement `workspace show` in blackbox CLI**
+- [x] **Step 6: Implement `workspace show` in blackbox CLI**
 
 Add a `workspace` group and `show` subcommand in `packages/blackbox/src/shannon_blackbox/cli/main.py`, after the existing `logs` command and before `main()`. Use the exact same implementation as the whitebox version (identical code, shared `get_workspace_info` utility does all the work):
 
@@ -1951,17 +1951,17 @@ Also add `import json` at the top of the file:
 import json
 ```
 
-- [ ] **Step 7: Run all tests**
+- [x] **Step 7: Run all tests**
 
 Run: `uv run pytest packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py -v`
 Expected: All PASS
 
-- [ ] **Step 8: Run full test suite**
+- [x] **Step 8: Run full test suite**
 
 Run: `uv run pytest -v`
 Expected: All tests PASS across all packages
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/main.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py

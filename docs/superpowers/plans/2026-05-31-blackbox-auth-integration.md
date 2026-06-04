@@ -1,6 +1,6 @@
 # Blackbox Auth Integration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Integrate full authentication into the blackbox independent pipeline by adding structured output validation, failure classification, login_flow security validation, shared session restore partials, and the VALIDATE_AUTH agent — enabling authenticated black-box scanning with no whitebox dependency.
 
@@ -48,7 +48,7 @@
 - Modify: `packages/core/src/shannon_core/models/agents.py:8-24` (enum) and `:26-33` (model) and `:35-151` (registry) and `:155` (mapping)
 - Modify: `packages/core/tests/test_agents.py`
 
-- [ ] **Step 1: Make `deliverable_filename` optional in `AgentDefinition`**
+- [x] **Step 1: Make `deliverable_filename` optional in `AgentDefinition`**
 
 The spec requires `deliverable_filename=None` for `VALIDATE_AUTH`, but the current model declares `deliverable_filename: str` (required). Update the model in `packages/core/src/shannon_core/models/agents.py` line 32:
 
@@ -66,7 +66,7 @@ class AgentDefinition(BaseModel):
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_agents.py -v`
 Expected: ALL PASS (existing definitions all provide `deliverable_filename` explicitly, so the default doesn't matter)
 
-- [ ] **Step 2: Write the failing test for VALIDATE_AUTH**
+- [x] **Step 2: Write the failing test for VALIDATE_AUTH**
 
 Add to `packages/core/tests/test_agents.py` at the end of the file:
 
@@ -93,12 +93,12 @@ def test_validate_auth_in_session_mapping():
     assert PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] == "agent1"
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_agents.py::test_validate_auth_agent_name -v`
 Expected: FAIL with `AttributeError: 'AgentName' has no attribute 'VALIDATE_AUTH'`
 
-- [ ] **Step 4: Add VALIDATE_AUTH to enum**
+- [x] **Step 4: Add VALIDATE_AUTH to enum**
 
 In `packages/core/src/shannon_core/models/agents.py`, add after line 24 (`REPORT = "report"`):
 
@@ -114,7 +114,7 @@ So lines 23-25 become:
     VALIDATE_AUTH = "validate-authentication"
 ```
 
-- [ ] **Step 5: Add VALIDATE_AUTH to AGENTS registry**
+- [x] **Step 5: Add VALIDATE_AUTH to AGENTS registry**
 
 In the same file, add after the REPORT entry (after line 150), before the closing `}`:
 
@@ -129,7 +129,7 @@ In the same file, add after the REPORT entry (after line 150), before the closin
     ),
 ```
 
-- [ ] **Step 6: Override PLAYWRIGHT_SESSION_MAPPING for VALIDATE_AUTH**
+- [x] **Step 6: Override PLAYWRIGHT_SESSION_MAPPING for VALIDATE_AUTH**
 
 Line 155 uses a dict comprehension over all `AgentName` values:
 
@@ -147,12 +147,12 @@ PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {
 PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_agents.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/agents.py packages/core/tests/test_agents.py
@@ -167,7 +167,7 @@ git commit -m "feat(core): register VALIDATE_AUTH agent with dedicated enum, reg
 - Modify: `packages/core/src/shannon_core/models/metrics.py:3-9`
 - Modify: `packages/core/tests/test_metrics.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_metrics.py` at the end:
 
@@ -198,12 +198,12 @@ def test_agent_metrics_structured_output_nested():
     assert m.structured_output["failure_point"] == "totp_secret"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_metrics.py::test_agent_metrics_structured_output_none -v`
 Expected: FAIL with `ValidationError: Extra inputs are not permitted` (or similar)
 
-- [ ] **Step 3: Add structured_output field**
+- [x] **Step 3: Add structured_output field**
 
 In `packages/core/src/shannon_core/models/metrics.py`, add the field to `AgentMetrics`:
 
@@ -218,12 +218,12 @@ class AgentMetrics(BaseModel):
     structured_output: dict | None = None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_metrics.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/metrics.py packages/core/tests/test_metrics.py
@@ -239,7 +239,7 @@ git commit -m "feat(core): add structured_output field to AgentMetrics for schem
 - Modify: `packages/core/src/shannon_core/agents/executor.py:21-98`
 - Modify: `packages/core/tests/test_runner.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_runner.py` at the end:
 
@@ -253,12 +253,12 @@ def test_run_claude_prompt_accepts_structured_output_schema():
     assert sig.parameters["structured_output_schema"].default is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_runner.py::test_run_claude_prompt_accepts_structured_output_schema -v`
 Expected: FAIL with `AssertionError` (parameter not in signature)
 
-- [ ] **Step 3: Add structured_output_schema to run_claude_prompt**
+- [x] **Step 3: Add structured_output_schema to run_claude_prompt**
 
 In `packages/core/src/shannon_core/agents/runner.py`, add the parameter:
 
@@ -279,7 +279,7 @@ async def run_claude_prompt(
     )
 ```
 
-- [ ] **Step 4: Add structured_output_schema to AgentExecutor.execute**
+- [x] **Step 4: Add structured_output_schema to AgentExecutor.execute**
 
 In `packages/core/src/shannon_core/agents/executor.py`, update the `execute` method signature (line 21-32):
 
@@ -324,12 +324,12 @@ Then update the `AgentMetrics` return (line 93-98) to include `structured_output
         )
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_runner.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/runner.py packages/core/src/shannon_core/agents/executor.py packages/core/tests/test_runner.py
@@ -344,7 +344,7 @@ git commit -m "feat(core): add structured_output_schema passthrough to runner an
 - Modify: `packages/core/src/shannon_core/config/parser.py:33-49`
 - Modify: `packages/core/tests/test_parser.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_parser.py` at the end:
 
@@ -480,12 +480,12 @@ authentication:
 
 Note: add `from pathlib import Path` to the imports in `test_parser.py` if not already present.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_parser.py::test_login_flow_step_exceeds_max_length -v`
 Expected: FAIL — the test expects a `PentestError` but `_validate_login_flow` doesn't exist yet so parsing succeeds
 
-- [ ] **Step 3: Add `_validate_login_flow()` to parser**
+- [x] **Step 3: Add `_validate_login_flow()` to parser**
 
 In `packages/core/src/shannon_core/config/parser.py`, add after `_validate_config_security` (after line 40):
 
@@ -526,12 +526,12 @@ from shannon_core.models.config import (
 )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_parser.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/config/parser.py packages/core/tests/test_parser.py
@@ -546,7 +546,7 @@ git commit -m "feat(core): add _validate_login_flow() security validation for lo
 - Create: `prompts/shared/_shared-session.txt`
 - Modify: `packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_prompt_manager.py` at the end:
 
@@ -598,12 +598,12 @@ def test_shared_session_include_removed_without_auth(prompts_dir):
     assert "After" in result
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py::test_shared_session_include_resolves -v`
 Expected: FAIL — `@include(shared/_shared-session.txt)` resolves to empty string because file doesn't exist yet
 
-- [ ] **Step 3: Create the _shared-session.txt file**
+- [x] **Step 3: Create the _shared-session.txt file**
 
 Create `prompts/shared/_shared-session.txt`:
 
@@ -629,12 +629,12 @@ config) to confirm the restored session is still valid:
 </shared_authenticated_session>
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py::test_shared_session_include_resolves packages/core/tests/test_prompt_manager.py::test_shared_session_include_removed_without_auth -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add prompts/shared/_shared-session.txt packages/core/tests/test_prompt_manager.py
@@ -649,7 +649,7 @@ git commit -m "feat(prompts): create _shared-session.txt shared session restore 
 - Modify: `packages/core/src/shannon_core/services/validate_authentication.py`
 - Modify: `packages/core/tests/test_validate_authentication.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/core/tests/test_validate_authentication.py` at the end:
 
@@ -845,12 +845,12 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
     assert result.success is True
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_validate_authentication.py::test_auth_validation_schema_constant -v`
 Expected: FAIL with `ImportError` (AUTH_VALIDATION_SCHEMA not exported yet)
 
-- [ ] **Step 3: Add AUTH_VALIDATION_SCHEMA and update validate_authentication**
+- [x] **Step 3: Add AUTH_VALIDATION_SCHEMA and update validate_authentication**
 
 Replace the full content of `packages/core/src/shannon_core/services/validate_authentication.py` with:
 
@@ -1006,12 +1006,12 @@ async def validate_authentication(
     return await verify_auth_state(state_file)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_validate_authentication.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/validate_authentication.py packages/core/tests/test_validate_authentication.py
@@ -1030,7 +1030,7 @@ git commit -m "feat(core): add AUTH_VALIDATION_SCHEMA, structured output, and fa
 - Modify: `prompts/authz-exploit.txt:10` (after `@include(shared/_exploit-scope.txt)`)
 - **Do NOT modify:** `prompts/auth-exploit.txt` (owns its own auth flow)
 
-- [ ] **Step 1: Add include to recon-blackbox.txt**
+- [x] **Step 1: Add include to recon-blackbox.txt**
 
 In `prompts/recon-blackbox.txt`, add `@include(shared/_shared-session.txt)` on a new line between line 16 (`@include(shared/_target.txt)`) and line 17 (empty line before `<context>`). The result should be:
 
@@ -1041,7 +1041,7 @@ In `prompts/recon-blackbox.txt`, add `@include(shared/_shared-session.txt)` on a
 <context>
 ```
 
-- [ ] **Step 2: Add include to injection-exploit.txt**
+- [x] **Step 2: Add include to injection-exploit.txt**
 
 In `prompts/injection-exploit.txt`, add `@include(shared/_shared-session.txt)` on a new line after line 10 (`@include(shared/_exploit-scope.txt)`). The result should be:
 
@@ -1050,7 +1050,7 @@ In `prompts/injection-exploit.txt`, add `@include(shared/_shared-session.txt)` o
 @include(shared/_shared-session.txt)
 ```
 
-- [ ] **Step 3: Add include to xss-exploit.txt**
+- [x] **Step 3: Add include to xss-exploit.txt**
 
 In `prompts/xss-exploit.txt`, add `@include(shared/_shared-session.txt)` on a new line after line 10 (`@include(shared/_exploit-scope.txt)`). The result should be:
 
@@ -1059,7 +1059,7 @@ In `prompts/xss-exploit.txt`, add `@include(shared/_shared-session.txt)` on a ne
 @include(shared/_shared-session.txt)
 ```
 
-- [ ] **Step 4: Add include to ssrf-exploit.txt**
+- [x] **Step 4: Add include to ssrf-exploit.txt**
 
 In `prompts/ssrf-exploit.txt`, add `@include(shared/_shared-session.txt)` on a new line after line 10 (`@include(shared/_exploit-scope.txt)`). The result should be:
 
@@ -1068,7 +1068,7 @@ In `prompts/ssrf-exploit.txt`, add `@include(shared/_shared-session.txt)` on a n
 @include(shared/_shared-session.txt)
 ```
 
-- [ ] **Step 5: Add include to authz-exploit.txt**
+- [x] **Step 5: Add include to authz-exploit.txt**
 
 In `prompts/authz-exploit.txt`, add `@include(shared/_shared-session.txt)` on a new line after line 10 (`@include(shared/_exploit-scope.txt)`). The result should be:
 
@@ -1077,16 +1077,16 @@ In `prompts/authz-exploit.txt`, add `@include(shared/_shared-session.txt)` on a 
 @include(shared/_shared-session.txt)
 ```
 
-- [ ] **Step 6: Verify auth-exploit.txt is NOT modified**
+- [x] **Step 6: Verify auth-exploit.txt is NOT modified**
 
 Confirm that `prompts/auth-exploit.txt` does NOT contain `@include(shared/_shared-session.txt)`. This agent owns its own login flow and must not reuse the preflight session.
 
-- [ ] **Step 7: Run prompt manager tests to verify includes work**
+- [x] **Step 7: Run prompt manager tests to verify includes work**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: ALL PASS (existing tests should still pass)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add prompts/recon-blackbox.txt prompts/injection-exploit.txt prompts/xss-exploit.txt prompts/ssrf-exploit.txt prompts/authz-exploit.txt
@@ -1105,7 +1105,7 @@ git commit -m "feat(prompts): add _shared-session.txt include to blackbox agent 
 - Modify: `prompts/vuln-authz.txt:23` (before `<login_instructions>`)
 - **Do NOT modify:** `prompts/vuln-auth.txt` (owns its own auth analysis)
 
-- [ ] **Step 1: Add include to recon.txt**
+- [x] **Step 1: Add include to recon.txt**
 
 In `prompts/recon.txt`, add `@include(shared/_shared-session.txt)` on a new line before the `<login_instructions>` block (before line 37). The result around that section should be:
 
@@ -1118,7 +1118,7 @@ In `prompts/recon.txt`, add `@include(shared/_shared-session.txt)` on a new line
 </login_instructions>
 ```
 
-- [ ] **Step 2: Add include to vuln-injection.txt**
+- [x] **Step 2: Add include to vuln-injection.txt**
 
 In `prompts/vuln-injection.txt`, add `@include(shared/_shared-session.txt)` on a new line before the `<login_instructions>` block (before line 25). The result around that section should be:
 
@@ -1131,7 +1131,7 @@ In `prompts/vuln-injection.txt`, add `@include(shared/_shared-session.txt)` on a
 </login_instructions>
 ```
 
-- [ ] **Step 3: Add include to vuln-xss.txt**
+- [x] **Step 3: Add include to vuln-xss.txt**
 
 In `prompts/vuln-xss.txt`, add `@include(shared/_shared-session.txt)` on a new line before the `<login_instructions>` block (before line 24). The result:
 
@@ -1144,24 +1144,24 @@ In `prompts/vuln-xss.txt`, add `@include(shared/_shared-session.txt)` on a new l
 </login_instructions>
 ```
 
-- [ ] **Step 4: Add include to vuln-ssrf.txt**
+- [x] **Step 4: Add include to vuln-ssrf.txt**
 
 In `prompts/vuln-ssrf.txt`, add `@include(shared/_shared-session.txt)` on a new line before the `<login_instructions>` block (before line 24). Same pattern as above.
 
-- [ ] **Step 5: Add include to vuln-authz.txt**
+- [x] **Step 5: Add include to vuln-authz.txt**
 
 In `prompts/vuln-authz.txt`, add `@include(shared/_shared-session.txt)` on a new line before the `<login_instructions>` block (before line 24). Same pattern as above.
 
-- [ ] **Step 6: Verify vuln-auth.txt is NOT modified**
+- [x] **Step 6: Verify vuln-auth.txt is NOT modified**
 
 Confirm that `prompts/vuln-auth.txt` does NOT contain `@include(shared/_shared-session.txt)`. This agent analyzes authentication itself.
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add prompts/recon.txt prompts/vuln-injection.txt prompts/vuln-xss.txt prompts/vuln-ssrf.txt prompts/vuln-authz.txt
@@ -1179,16 +1179,16 @@ The whitebox `run_auth_validation` activity already calls `validate_authenticati
 
 **Note on spec's whitebox exploit prompts:** The spec's "Whitebox Agent Prompts" table lists `exploit-injection.txt`, `exploit-xss.txt`, etc. as needing the `_shared-session.txt` include. These files **do not exist** on disk — the prompts directory only has the blackbox versions (`injection-exploit.txt`, `xss-exploit.txt`, etc.). The whitebox pipeline uses the `vuln-*` prompts (covered in Task 8). The exploit prompts listed in the spec appear to be a naming error referencing the blackbox exploit prompts, which are already handled in Task 7. No action needed for non-existent files.
 
-- [ ] **Step 1: Verify the activity works with the updated validate_authentication**
+- [x] **Step 1: Verify the activity works with the updated validate_authentication**
 
 Read `packages/whitebox/src/shannon_whitebox/pipeline/activities.py` lines 90-115. The current `run_auth_validation` calls `validate_authentication()` which now internally uses `AUTH_VALIDATION_SCHEMA` and structured output. No changes needed to the activity itself.
 
-- [ ] **Step 2: Run existing whitebox tests**
+- [x] **Step 2: Run existing whitebox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 3: Commit (if any changes were needed)**
+- [x] **Step 3: Commit (if any changes were needed)**
 
 Only commit if files were actually modified. If no changes needed, skip this step.
 
@@ -1199,12 +1199,12 @@ Only commit if files were actually modified. If no changes needed, skip this ste
 **Files:**
 - All modified files from Tasks 1-9
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv run pytest -v`
 Expected: ALL PASS
 
-- [ ] **Step 2: Verify blackbox pipeline auth flow is wired correctly**
+- [x] **Step 2: Verify blackbox pipeline auth flow is wired correctly**
 
 The blackbox pipeline (`packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`) already has:
 - Auth validation phase (line 65-69) — calls `run_blackbox_auth_validation`
@@ -1216,7 +1216,7 @@ The blackbox activity (`packages/blackbox/src/shannon_blackbox/pipeline/activiti
 
 All of this was wired in a previous sub-project. The changes from Tasks 1-6 (VALIDATE_AUTH agent, structured output, failure classification) are now consumed automatically by the existing pipeline code. No additional pipeline changes needed.
 
-- [ ] **Step 3: Verify the dependency chain is satisfied**
+- [x] **Step 3: Verify the dependency chain is satisfied**
 
 Run a quick import check:
 
@@ -1245,7 +1245,7 @@ print('All dependency chain checks passed!')
 
 Expected: "All dependency chain checks passed!"
 
-- [ ] **Step 4: Commit (if any fixes were needed)**
+- [x] **Step 4: Commit (if any fixes were needed)**
 
 Only if changes were made during verification.
 

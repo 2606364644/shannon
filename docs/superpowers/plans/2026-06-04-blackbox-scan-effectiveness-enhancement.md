@@ -1,6 +1,6 @@
 # Blackbox Scan Effectiveness Enhancement Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Align Python blackbox scanning effectiveness with the TypeScript original by closing 7 security-critical gaps: retry policies, queue validation, DNS rebinding protection, concurrency control, browser session isolation, and exploit prompt quality.
 
@@ -48,7 +48,7 @@
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py:1-26`
 - Create: `packages/core/tests/test_retry_profiles.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/core/tests/test_retry_profiles.py
@@ -94,12 +94,12 @@ class TestGetRetryPolicy:
         assert policy.maximum_attempts == 50
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_retry_profiles.py -v`
 Expected: FAIL — `ImportError: cannot import name 'get_retry_policy' from 'shannon_core.models.retry'`
 
-- [ ] **Step 3: Add `get_retry_policy()` to retry.py**
+- [x] **Step 3: Add `get_retry_policy()` to retry.py**
 
 ```python
 # Append to packages/core/src/shannon_core/models/retry.py
@@ -117,12 +117,12 @@ def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     return profiles.get(mode or "production", PRODUCTION_RETRY)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_retry_profiles.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Add `retry_profile` field to `BlackboxPipelineInput`**
+- [x] **Step 5: Add `retry_profile` field to `BlackboxPipelineInput`**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`, add `retry_profile` field to `BlackboxPipelineInput`:
 
@@ -144,7 +144,7 @@ class BlackboxPipelineInput:
     max_concurrent: int = 3                     # NEW: max concurrent exploit agents
 ```
 
-- [ ] **Step 6: Wire retry profile in `workflows.py`**
+- [x] **Step 6: Wire retry profile in `workflows.py`**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, update the imports and replace the hardcoded retry policy:
 
@@ -165,12 +165,12 @@ Replace the hardcoded `retry_policy` (lines 55-61) with:
         )
 ```
 
-- [ ] **Step 7: Run existing workflow tests to verify no regressions**
+- [x] **Step 7: Run existing workflow tests to verify no regressions**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_workflows.py -v`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/retry.py packages/core/tests/test_retry_profiles.py packages/blackbox/src/shannon_blackbox/pipeline/shared.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -192,7 +192,7 @@ git commit -m "feat: wire retry profiles into blackbox workflow
 - Modify: `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py`
 - Create: `packages/blackbox/tests/test_queue_validation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # packages/blackbox/tests/test_queue_validation.py
@@ -293,12 +293,12 @@ class TestValidateQueue:
         assert result is False
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_queue_validation.py -v`
 Expected: FAIL — `ImportError: cannot import name 'QueueValidationResult'`
 
-- [ ] **Step 3: Implement `QueueValidationResult` and multi-level validation**
+- [x] **Step 3: Implement `QueueValidationResult` and multi-level validation**
 
 Replace the entire content of `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py`:
 
@@ -381,12 +381,12 @@ class ExploitationChecker:
         return result.valid
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_queue_validation.py packages/blackbox/tests/test_exploitation_checker.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Update workflow to use `validate_queue()` for error reporting**
+- [x] **Step 5: Update workflow to use `validate_queue()` for error reporting**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, update the exploit scheduling block (around line 130-140) to log validation results for skipped agents:
 
@@ -416,12 +416,12 @@ In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, update the ex
 
 This requires importing `ExploitationChecker.validate_queue` — update the import line in the `with workflow.unsafe.imports_passed_through():` block. The existing import `from ..services.exploitation_checker import ExploitationChecker` already covers it.
 
-- [ ] **Step 6: Run all tests**
+- [x] **Step 6: Run all tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py packages/blackbox/tests/test_queue_validation.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -444,7 +444,7 @@ git commit -m "feat: add multi-level queue validation with structured results
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
 - Create: `packages/core/tests/test_dns_pinning.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # packages/core/tests/test_dns_pinning.py
@@ -524,12 +524,12 @@ class TestValidateTargetUrlReturnsPinnedIp:
             assert ip == "93.184.216.34"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_dns_pinning.py -v`
 Expected: FAIL — `ImportError: cannot import name 'resolve_and_pin_host'`
 
-- [ ] **Step 3: Implement `resolve_and_pin_host()` and update existing functions**
+- [x] **Step 3: Implement `resolve_and_pin_host()` and update existing functions**
 
 Add the new function and update existing functions in `packages/core/src/shannon_core/utils/security.py`:
 
@@ -665,12 +665,12 @@ def validate_target_url(url: str) -> str:
     return pinned_ip
 ```
 
-- [ ] **Step 4: Run all security tests (new + existing)**
+- [x] **Step 4: Run all security tests (new + existing)**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_security.py packages/core/tests/test_dns_pinning.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Update preflight activity to use pinned IP**
+- [x] **Step 5: Update preflight activity to use pinned IP**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`, update `run_blackbox_preflight` to pass the pinned IP to `check_url_reachable`:
 
@@ -714,12 +714,12 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
 
 Add `from urllib.parse import urlparse` to the imports at the top of `activities.py`.
 
-- [ ] **Step 6: Run all tests**
+- [x] **Step 6: Run all tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_security.py packages/core/tests/test_dns_pinning.py packages/blackbox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/utils/security.py packages/core/tests/test_dns_pinning.py packages/blackbox/src/shannon_blackbox/pipeline/activities.py
@@ -742,7 +742,7 @@ git commit -m "feat: add DNS rebinding protection with IP pinning
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/blackbox/tests/test_workflows.py`:
 
@@ -759,12 +759,12 @@ def test_pipeline_input_max_concurrent_custom():
     assert input.max_concurrent == 5
 ```
 
-- [ ] **Step 2: Run test to verify it passes (field already added in Task 1)**
+- [x] **Step 2: Run test to verify it passes (field already added in Task 1)**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_workflows.py::test_pipeline_input_max_concurrent_default packages/blackbox/tests/test_workflows.py::test_pipeline_input_max_concurrent_custom -v`
 Expected: PASS
 
-- [ ] **Step 3: Add concurrency semaphore to workflow**
+- [x] **Step 3: Add concurrency semaphore to workflow**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, replace the exploit execution block (the `if exploit_tasks:` section, around lines 151-162) with:
 
@@ -791,7 +791,7 @@ In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, replace the e
                             self._state.agent_metrics[agent_name.value] = result
 ```
 
-- [ ] **Step 4: Add `--max-concurrent` CLI flag**
+- [x] **Step 4: Add `--max-concurrent` CLI flag**
 
 In `packages/blackbox/src/shannon_blackbox/cli/main.py`, add the option to the `start` command:
 
@@ -818,12 +818,12 @@ And add to the `BlackboxPipelineInput` construction:
     )
 ```
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_workflows.py
@@ -846,7 +846,7 @@ git commit -m "feat: add concurrency control for exploit agents
 - Modify: `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`
 - Modify: `packages/core/tests/test_playwright_config_writer.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `packages/core/tests/test_playwright_config_writer.py`:
 
@@ -905,12 +905,12 @@ class TestCleanupSessionConfig:
         cleanup_session_config(str(tmp_path), "agent-auth")  # Should not raise
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_playwright_config_writer.py::TestGetSessionId -v`
 Expected: FAIL — `ImportError: cannot import name 'get_session_id'`
 
-- [ ] **Step 3: Implement session mapping and per-session config**
+- [x] **Step 3: Implement session mapping and per-session config**
 
 Replace the entire content of `packages/core/src/shannon_core/services/playwright_config_writer.py`:
 
@@ -1061,12 +1061,12 @@ def cleanup_session_config(source_dir: str, session_id: str) -> None:
         shutil.rmtree(state_dir)
 ```
 
-- [ ] **Step 4: Run all playwright config writer tests**
+- [x] **Step 4: Run all playwright config writer tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_playwright_config_writer.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Update workflow to write per-agent session configs**
+- [x] **Step 5: Update workflow to write per-agent session configs**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, update the import:
 
@@ -1106,7 +1106,7 @@ And in the `finally` block, clean up all session configs:
 
 This requires importing `AGENT_SESSION_MAPPING` in the imports block.
 
-- [ ] **Step 6: Update exploit_executor to pass session ID in prompt variables**
+- [x] **Step 6: Update exploit_executor to pass session ID in prompt variables**
 
 In `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`, add the session ID to prompt variables:
 
@@ -1156,12 +1156,12 @@ class ExploitExecutor:
         )
 ```
 
-- [ ] **Step 7: Run all tests**
+- [x] **Step 7: Run all tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_playwright_config_writer.py packages/blackbox/tests/ -v`
 Expected: ALL PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/playwright_config_writer.py packages/core/tests/test_playwright_config_writer.py packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -1185,7 +1185,7 @@ git commit -m "feat: per-agent browser session isolation for concurrent exploits
 **Files:**
 - Modify: `prompts/injection-exploit.txt`
 
-- [ ] **Step 1: Replace the PY prompt with the TS-aligned version**
+- [x] **Step 1: Replace the PY prompt with the TS-aligned version**
 
 Replace the entire content of `prompts/injection-exploit.txt` with a translation of the TS `exploit-injection.txt`. The key additions are:
 
@@ -1651,7 +1651,7 @@ ONLY AFTER fulfilling these exhaustive requirements, announce "INJECTION EXPLOIT
 </conclusion_trigger>
 ```
 
-- [ ] **Step 2: Validate the prompt**
+- [x] **Step 2: Validate the prompt**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
 from shannon_core.prompts.manager import PromptManager
@@ -1669,7 +1669,7 @@ print('All placeholders present')
 "`
 Expected: `injection-exploit.txt: ~440+ lines`, `All placeholders present`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/injection-exploit.txt
@@ -1712,7 +1712,7 @@ For each prompt, the engineer must:
 
 ### Sub-task 7a: xss-exploit.txt
 
-- [ ] **Step 1: Read TS source and translate**
+- [x] **Step 1: Read TS source and translate**
 
 Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-xss.txt` and update `prompts/xss-exploit.txt` to add:
 
@@ -1723,7 +1723,7 @@ Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-
 5. Add detailed `<deliverable_instructions>` with chunked writing from TS
 6. Add `<conclusion_trigger>` with completion requirements
 
-- [ ] **Step 2: Validate xss-exploit**
+- [x] **Step 2: Validate xss-exploit**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
 from shannon_core.prompts.manager import PromptManager
@@ -1740,11 +1740,11 @@ Expected: `xss-exploit.txt: ~430+ lines`
 
 ### Sub-task 7b: ssrf-exploit.txt
 
-- [ ] **Step 3: Read TS source and translate**
+- [x] **Step 3: Read TS source and translate**
 
 Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-ssrf.txt` and update `prompts/ssrf-exploit.txt` to add the same sections as 7a, plus the TS-specific `<methodology_and_domain_expertise>` content (TodoWrite plan, SSRF-specific workflows, validation criteria, bypass exhaustion protocol).
 
-- [ ] **Step 4: Validate ssrf-exploit**
+- [x] **Step 4: Validate ssrf-exploit**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
 from shannon_core.prompts.manager import PromptManager
@@ -1761,11 +1761,11 @@ Expected: `ssrf-exploit.txt: ~490+ lines`
 
 ### Sub-task 7c: authz-exploit.txt
 
-- [ ] **Step 5: Read TS source and translate**
+- [x] **Step 5: Read TS source and translate**
 
 Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-authz.txt` and update `prompts/authz-exploit.txt`. This is the largest gap (166 → ~420 lines, 61% reduction). Add all missing sections following the same pattern.
 
-- [ ] **Step 6: Validate authz-exploit**
+- [x] **Step 6: Validate authz-exploit**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
 from shannon_core.prompts.manager import PromptManager
@@ -1782,7 +1782,7 @@ Expected: `authz-exploit.txt: ~410+ lines`
 
 ### Sub-task 7d: misconfig-exploit.txt (full rewrite)
 
-- [ ] **Step 7: Full rewrite from TS source**
+- [x] **Step 7: Full rewrite from TS source**
 
 Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-misconfig.txt` (369 lines) and completely rewrite `prompts/misconfig-exploit.txt`. The current 65-line skeleton is missing nearly everything. The TS version includes:
 
@@ -1792,7 +1792,7 @@ Read `/Users/mango/project/shannon-refactor/shannon/apps/worker/prompts/exploit-
 - `<deliverable_instructions>` with structured report format and chunked writing
 - `<conclusion_trigger>` with completion requirements
 
-- [ ] **Step 8: Validate misconfig-exploit**
+- [x] **Step 8: Validate misconfig-exploit**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -c "
 from shannon_core.prompts.manager import PromptManager
@@ -1807,7 +1807,7 @@ print('All placeholders present')
 "`
 Expected: `misconfig-exploit.txt: ~360+ lines`
 
-- [ ] **Step 9: Commit all prompt changes**
+- [x] **Step 9: Commit all prompt changes**
 
 ```bash
 git add prompts/xss-exploit.txt prompts/ssrf-exploit.txt prompts/authz-exploit.txt prompts/misconfig-exploit.txt

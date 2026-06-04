@@ -1,6 +1,6 @@
 # 白盒-黑盒扫描衔接 Bug 修复实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 修复白盒扫描完成后黑盒扫描无法正确发现和复用白盒结果的 4 个致命/严重 bug。
 
@@ -36,7 +36,7 @@
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/shared.py:17`
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py:16,37`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `packages/core/tests/test_constants.py`:
 
@@ -54,12 +54,12 @@ def test_default_deliverables_subdir_starts_with_dot():
     assert "/" in DEFAULT_DELIVERABLES_SUBDIR
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_constants.py -v`
 Expected: FAIL — `cannot import name 'DEFAULT_DELIVERABLES_SUBDIR' from 'shannon_core.constants'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `packages/core/src/shannon_core/constants.py`:
 
@@ -67,12 +67,12 @@ Expected: FAIL — `cannot import name 'DEFAULT_DELIVERABLES_SUBDIR' from 'shann
 DEFAULT_DELIVERABLES_SUBDIR: str = ".shannon/deliverables"
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_constants.py -v`
 Expected: PASS
 
-- [ ] **Step 5: 修改白盒 shared.py 导入共享常量**
+- [x] **Step 5: 修改白盒 shared.py 导入共享常量**
 
 修改 `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`，将第 1-2 行改为：
 
@@ -96,7 +96,7 @@ from shannon_core.models.metrics import AgentMetrics
     deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
 ```
 
-- [ ] **Step 6: 修改黑盒 shared.py 导入共享常量**
+- [x] **Step 6: 修改黑盒 shared.py 导入共享常量**
 
 修改 `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`，将第 1 行改为：
 
@@ -118,12 +118,12 @@ from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
     deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
 ```
 
-- [ ] **Step 7: 运行全量测试确认无回归**
+- [x] **Step 7: 运行全量测试确认无回归**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_constants.py packages/whitebox/tests/test_pipeline_shared.py packages/blackbox/tests/test_pipeline_shared.py -v`
 Expected: 全部 PASS
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add packages/core/src/shannon_core/constants.py packages/core/tests/test_constants.py packages/whitebox/src/shannon_whitebox/pipeline/shared.py packages/blackbox/src/shannon_blackbox/pipeline/shared.py
@@ -138,7 +138,7 @@ git commit -m "fix(core): unify DEFAULT_DELIVERABLES_SUBDIR constant across whit
 - Create: `packages/core/src/shannon_core/utils/paths.py`
 - Create: `packages/core/tests/test_paths.py`
 
-- [ ] **Step 1: 写失败测试 — resolve_workspaces_dir**
+- [x] **Step 1: 写失败测试 — resolve_workspaces_dir**
 
 创建 `packages/core/tests/test_paths.py`:
 
@@ -164,7 +164,7 @@ class TestResolveWorkspacesDir:
         assert result == Path("workspaces")
 ```
 
-- [ ] **Step 2: 写失败测试 — resolve_deliverables_path**
+- [x] **Step 2: 写失败测试 — resolve_deliverables_path**
 
 追加到 `packages/core/tests/test_paths.py`:
 
@@ -239,7 +239,7 @@ class TestResolveDeliverablesPath:
         assert result == Path("/data/repos/myrepo/.shannon/deliverables")
 ```
 
-- [ ] **Step 3: 写失败测试 — has_valid_whitebox_results**
+- [x] **Step 3: 写失败测试 — has_valid_whitebox_results**
 
 追加到 `packages/core/tests/test_paths.py`:
 
@@ -277,12 +277,12 @@ class TestHasValidWhiteboxResults:
         assert has_valid_whitebox_results(queue_file) is False
 ```
 
-- [ ] **Step 4: 运行测试确认失败**
+- [x] **Step 4: 运行测试确认失败**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_paths.py -v`
 Expected: FAIL — `cannot import name 'resolve_workspaces_dir' from 'shannon_core.utils.paths'`
 
-- [ ] **Step 5: 写实现**
+- [x] **Step 5: 写实现**
 
 创建 `packages/core/src/shannon_core/utils/paths.py`:
 
@@ -345,12 +345,12 @@ def has_valid_whitebox_results(queue_file: Path) -> bool:
         return False
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_paths.py -v`
 Expected: 全部 PASS
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add packages/core/src/shannon_core/utils/paths.py packages/core/tests/test_paths.py
@@ -365,7 +365,7 @@ git commit -m "feat(core): add shared path resolution and whitebox result valida
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py:18-22`
 - Modify: `packages/whitebox/src/shannon_whitebox/worker.py:20`
 
-- [ ] **Step 1: 修改白盒 activities.py**
+- [x] **Step 1: 修改白盒 activities.py**
 
 在 `packages/whitebox/src/shannon_whitebox/pipeline/activities.py` 顶部增加导入：
 
@@ -387,7 +387,7 @@ def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
     return repo, deliverables, workspaces
 ```
 
-- [ ] **Step 2: 修改白盒 worker.py**
+- [x] **Step 2: 修改白盒 worker.py**
 
 在 `packages/whitebox/src/shannon_whitebox/worker.py` 顶部增加导入：
 
@@ -404,12 +404,12 @@ from shannon_core.utils.paths import resolve_workspaces_dir
         workspaces_dir = resolve_workspaces_dir(input.repo_path)
 ```
 
-- [ ] **Step 3: 运行白盒测试确认无回归**
+- [x] **Step 3: 运行白盒测试确认无回归**
 
 Run: `cd /root/shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: 全部 PASS
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/activities.py packages/whitebox/src/shannon_whitebox/worker.py
@@ -425,7 +425,7 @@ git commit -m "refactor(whitebox): use shared path resolution utilities"
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py:15-19`
 - Modify: `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py:20-42`
 
-- [ ] **Step 1: 修改黑盒 activities.py**
+- [x] **Step 1: 修改黑盒 activities.py**
 
 在 `packages/blackbox/src/shannon_blackbox/pipeline/activities.py` 顶部增加导入：
 
@@ -444,7 +444,7 @@ def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
     )
 ```
 
-- [ ] **Step 2: 修改黑盒 workflows.py — 修复 workspace_path + 导入**
+- [x] **Step 2: 修改黑盒 workflows.py — 修复 workspace_path + 导入**
 
 在 `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py` 顶部增加导入（在第 9 行后）：
 
@@ -473,7 +473,7 @@ from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverable
         )
 ```
 
-- [ ] **Step 3: 修改黑盒 workflows.py — 替换内联路径解析为共享函数**
+- [x] **Step 3: 修改黑盒 workflows.py — 替换内联路径解析为共享函数**
 
 将第 76-89 行（`# Resolve deliverables path...` 整块，直到 `deliverables = Path("workspaces")...`）替换为：
 
@@ -487,7 +487,7 @@ from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverable
             )
 ```
 
-- [ ] **Step 4: 修改黑盒 workflows.py — 统一白盒结果检测标准**
+- [x] **Step 4: 修改黑盒 workflows.py — 统一白盒结果检测标准**
 
 将第 93-97 行（`for vt in selected_classes:` 循环中的检测逻辑）：
 
@@ -509,7 +509,7 @@ from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverable
                     found_classes.append(vt)
 ```
 
-- [ ] **Step 5: 修改黑盒 exploitation_checker.py — 使用共享函数**
+- [x] **Step 5: 修改黑盒 exploitation_checker.py — 使用共享函数**
 
 在 `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py` 顶部增加导入：
 
@@ -536,17 +536,17 @@ from shannon_core.utils.paths import has_valid_whitebox_results
             return has_valid_whitebox_results(queue_path)
 ```
 
-- [ ] **Step 6: 运行黑盒测试确认无回归**
+- [x] **Step 6: 运行黑盒测试确认无回归**
 
 Run: `cd /root/shannon-py && uv run pytest packages/blackbox/tests/ -v`
 Expected: 全部 PASS
 
-- [ ] **Step 7: 运行全量测试**
+- [x] **Step 7: 运行全量测试**
 
 Run: `cd /root/shannon-py && uv run pytest -v`
 Expected: 全部 PASS
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/src/shannon_blackbox/pipeline/activities.py packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py

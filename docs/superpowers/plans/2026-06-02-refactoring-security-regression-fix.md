@@ -1,6 +1,6 @@
 # Refactoring Security Regression Fix Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix 4 security regressions introduced during the TypeScript→Python refactoring: restore whitebox prompt conditional branching, restore auth-exploit.txt content, activate ExploitationChecker in blackbox workflow, and补全 billing patterns.
 
@@ -35,7 +35,7 @@
 - Modify: `packages/core/src/shannon_core/prompts/manager.py:34`
 - Modify: `packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/core/tests/test_prompt_manager.py`:
 
@@ -104,12 +104,12 @@ def test_multiline_conditional_block(prompts_dir):
     assert "URL:" not in result
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py::test_if_live_block_kept_when_web_url_present -xvs`
 Expected: FAIL — `<if-live>` and `<if-static>` tags pass through unprocessed.
 
-- [ ] **Step 3: Implement `strip_conditional_blocks()` in PromptManager**
+- [x] **Step 3: Implement `strip_conditional_blocks()` in PromptManager**
 
 In `packages/core/src/shannon_core/prompts/manager.py`, add the function at module level (before the class):
 
@@ -136,12 +136,12 @@ Then in `load_sync()` method, insert the call **after** `_process_includes` and 
         return template
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -xvs`
 Expected: All tests PASS (including the 5 new ones and all existing ones).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/prompts/manager.py packages/core/tests/test_prompt_manager.py
@@ -160,7 +160,7 @@ target is available (blackbox) or not (whitebox/static analysis)."
 - Modify: `prompts/shared/_target.txt`
 - Modify: `prompts/shared/_vuln-scope.txt`
 
-- [ ] **Step 1: Restore `prompts/shared/_target.txt`**
+- [x] **Step 1: Restore `prompts/shared/_target.txt`**
 
 Replace the entire content of `prompts/shared/_target.txt` with:
 
@@ -173,7 +173,7 @@ Filesystem:
 - {{REPO_PATH}}/.shannon/scratchpad/ (read-write) - screenshots, scripts, scratch work, etc.
 ```
 
-- [ ] **Step 2: Restore `prompts/shared/_vuln-scope.txt`**
+- [x] **Step 2: Restore `prompts/shared/_vuln-scope.txt`**
 
 Replace the entire content of `prompts/shared/_vuln-scope.txt` with:
 
@@ -181,7 +181,7 @@ Replace the entire content of `prompts/shared/_vuln-scope.txt` with:
 <if-live>**EXTERNAL ATTACKER SCOPE:** Only report vulnerabilities exploitable via {{WEB_URL}} from the internet. Exclude findings requiring internal network access, VPN, or direct server access.</if-live><if-static>**STATIC ANALYSIS SCOPE:** Report all code-level vulnerabilities discoverable through source code analysis. Include unsafe data flows, missing input validation, insecure defaults, hardcoded secrets, and dangerous API usage. Classify each finding by the code path that would be exercised at runtime.</if-static>
 ```
 
-- [ ] **Step 3: Verify rendering for both modes**
+- [x] **Step 3: Verify rendering for both modes**
 
 Run: `cd /root/shannon-py && python -c "
 from pathlib import Path
@@ -205,12 +205,12 @@ print('Whitebox mode: OK')
 "`
 Expected: Both print "OK".
 
-- [ ] **Step 4: Run full prompt manager tests**
+- [x] **Step 4: Run full prompt manager tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -xvs`
 Expected: All PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add prompts/shared/_target.txt prompts/shared/_vuln-scope.txt
@@ -229,7 +229,7 @@ matching the original TypeScript behavior."
 **Files:**
 - Modify: `prompts/auth-exploit.txt`
 
-- [ ] **Step 1: Port the missing sections from TS `exploit-auth.txt`**
+- [x] **Step 1: Port the missing sections from TS `exploit-auth.txt`**
 
 Replace the entire content of `prompts/auth-exploit.txt` with the following. This merges the existing Python version's structure (variable names, `@include` references) with the missing sections from the TS version (`/root/shannon/apps/worker/prompts/exploit-auth.txt`):
 
@@ -587,7 +587,7 @@ ONLY AFTER fulfilling these exhaustive requirements, announce "AUTH EXPLOITATION
 </conclusion_trigger>
 ```
 
-- [ ] **Step 2: Verify the file renders correctly**
+- [x] **Step 2: Verify the file renders correctly**
 
 Run: `cd /root/shannon-py && python -c "
 from pathlib import Path
@@ -608,7 +608,7 @@ print('auth-exploit.txt renders correctly: OK')
 "`
 Expected: "auth-exploit.txt renders correctly: OK"
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/auth-exploit.txt
@@ -632,7 +632,7 @@ Port 250 lines of missing content including:
 - Modify: `packages/blackbox/tests/test_exploitation_checker.py`
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py:91-107`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/blackbox/tests/test_exploitation_checker.py`:
 
@@ -664,12 +664,12 @@ async def test_should_exploit_truncated_json(tmp_path):
     assert await ExploitationChecker.should_exploit(tmp_path, "injection") is False
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_exploitation_checker.py::test_should_exploit_invalid_vulnerabilities_field -xvs`
 Expected: FAIL — current code calls `data.get("vulnerabilities", [])` which returns `"not a list"`, then `len("not a list")` returns a truthy value, causing the test to fail (returns True instead of False).
 
-- [ ] **Step 3: Enhance ExploitationChecker**
+- [x] **Step 3: Enhance ExploitationChecker**
 
 Replace the entire content of `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py` with:
 
@@ -718,12 +718,12 @@ class ExploitationChecker:
         return len(vulnerabilities) > 0
 ```
 
-- [ ] **Step 4: Run all ExploitationChecker tests**
+- [x] **Step 4: Run all ExploitationChecker tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/blackbox/tests/test_exploitation_checker.py -xvs`
 Expected: All 8 tests PASS.
 
-- [ ] **Step 5: Wire ExploitationChecker into blackbox workflow**
+- [x] **Step 5: Wire ExploitationChecker into blackbox workflow**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, add the import inside the `with workflow.unsafe.imports_passed_through():` block (at line 14):
 
@@ -783,12 +783,12 @@ To:
                         )))
 ```
 
-- [ ] **Step 6: Verify workflow file is syntactically correct**
+- [x] **Step 6: Verify workflow file is syntactically correct**
 
 Run: `cd /root/shannon-py && python -c "import ast; ast.parse(open('packages/blackbox/src/shannon_blackbox/pipeline/workflows.py').read()); print('Syntax OK')"`
 Expected: "Syntax OK"
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py packages/blackbox/tests/test_exploitation_checker.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -808,7 +808,7 @@ git commit -m "fix(blackbox): enhance ExploitationChecker and activate in workfl
 - Modify: `packages/core/src/shannon_core/utils/billing.py`
 - Modify: `packages/core/tests/test_billing.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/core/tests/test_billing.py`:
 
@@ -853,12 +853,12 @@ def test_monthly_limit():
     assert is_spending_cap_behavior(turns=1, cost=0.0, text="monthly limit exceeded")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_billing.py::test_billing_error_pattern -xvs`
 Expected: FAIL — pattern not in current list.
 
-- [ ] **Step 3: Add missing patterns to billing.py**
+- [x] **Step 3: Add missing patterns to billing.py**
 
 Replace the entire content of `packages/core/src/shannon_core/utils/billing.py` with:
 
@@ -900,12 +900,12 @@ def is_spending_cap_behavior(turns: int, cost: float, text: str) -> bool:
     return False
 ```
 
-- [ ] **Step 4: Run all billing tests**
+- [x] **Step 4: Run all billing tests**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_billing.py -xvs`
 Expected: All 19 tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/utils/billing.py packages/core/tests/test_billing.py
@@ -923,17 +923,17 @@ Total: 20 patterns (was 6), matching the original TS coverage."
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `cd /root/shannon-py && python -m pytest packages/ -x --tb=short`
 Expected: All tests PASS.
 
-- [ ] **Step 2: Verify all changed files**
+- [x] **Step 2: Verify all changed files**
 
 Run: `cd /root/shannon-py && git diff --stat HEAD~5`
 Expected: Exactly 10 files changed (2 prompt shared files + auth-exploit.txt + manager.py + test_prompt_manager.py + exploitation_checker.py + test_exploitation_checker.py + workflows.py + billing.py + test_billing.py).
 
-- [ ] **Step 3: Verify no regressions in prompt rendering**
+- [x] **Step 3: Verify no regressions in prompt rendering**
 
 Run: `cd /root/shannon-py && python -c "
 from pathlib import Path

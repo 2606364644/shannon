@@ -1,6 +1,6 @@
 # Pipeline Defects D4, D5, D7 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix three engineering-layer defects in Shannon's whitebox pipeline: error state overwrite (D4), missing vuln agent retry (D5), and misconfig prompt inconsistency (D7).
 
@@ -32,7 +32,7 @@ prompts/
 **Files:**
 - Create: `packages/whitebox/tests/test_pipeline_shared.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import pytest
@@ -61,16 +61,16 @@ def test_pipeline_state_default_factory_creates_new_list_each_instance():
     assert len(state2.errors) == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest packages/whitebox/tests/test_pipeline_shared.py -v`
 Expected: FAIL with "PipelineState has no attribute 'errors'"
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 No implementation yet — this test validates the next task's changes.
 
-- [ ] **Step 4: Commit test file**
+- [x] **Step 4: Commit test file**
 
 ```bash
 git add packages/whitebox/tests/test_pipeline_shared.py
@@ -84,7 +84,7 @@ git commit -m "test(whitebox): add tests for PipelineState.errors list"
 **Files:**
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/shared.py:26`
 
-- [ ] **Step 1: Read current state**
+- [x] **Step 1: Read current state**
 
 ```bash
 head -30 packages/whitebox/src/shannon_whitebox/pipeline/shared.py
@@ -102,7 +102,7 @@ class PipelineState:
     code_index_stats: dict | None = None
 ```
 
-- [ ] **Step 2: Replace error with errors list**
+- [x] **Step 2: Replace error with errors list**
 
 ```python
 @dataclass
@@ -115,12 +115,12 @@ class PipelineState:
     code_index_stats: dict | None = None
 ```
 
-- [ ] **Step 3: Run test to verify it passes**
+- [x] **Step 3: Run test to verify it passes**
 
 Run: `pytest packages/whitebox/tests/test_pipeline_shared.py -v`
 Expected: PASS (all 3 tests pass)
 
-- [ ] **Step 4: Verify no other code depends on .error being a string**
+- [x] **Step 4: Verify no other code depends on .error being a string**
 
 ```bash
 grep -r "\.error" packages/whitebox/src --include="*.py" | grep -v "errors"
@@ -131,7 +131,7 @@ Expected output (only the workflows.py line we'll fix next):
 packages/whitebox/src/shannon_whitebox/pipeline/workflows.py:132:                        self._state.error = f"{agent_name.value}: {result}"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/shared.py
@@ -145,7 +145,7 @@ git commit -m "feat(whitebox): change PipelineState.error to errors list"
 **Files:**
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py:132`
 
-- [ ] **Step 1: Read the context around line 132**
+- [x] **Step 1: Read the context around line 132**
 
 ```bash
 sed -n '126,136p' packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -163,7 +163,7 @@ Current content:
                         self._state.agent_metrics[agent_name.value] = result
 ```
 
-- [ ] **Step 2: Replace error assignment with append**
+- [x] **Step 2: Replace error assignment with append**
 
 Replace line 132:
 ```python
@@ -175,7 +175,7 @@ With:
                         self._state.errors.append(f"{agent_name.value}: {result}")
 ```
 
-- [ ] **Step 3: Verify the change**
+- [x] **Step 3: Verify the change**
 
 ```bash
 sed -n '126,136p' packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -193,12 +193,12 @@ Expected output shows `.errors.append()`:
                         self._state.agent_metrics[agent_name.value] = result
 ```
 
-- [ ] **Step 4: Run existing tests**
+- [x] **Step 4: Run existing tests**
 
 Run: `pytest packages/whitebox/tests/ -v -k "not integration"`
 Expected: PASS (no failures)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -212,7 +212,7 @@ git commit -m "feat(whitebox): append to errors list instead of overwriting"
 **Files:**
 - Create: `packages/blackbox/tests/test_pipeline_shared.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import pytest
@@ -241,12 +241,12 @@ def test_blackbox_pipeline_state_default_factory_creates_new_list_each_instance(
     assert len(state2.errors) == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest packages/blackbox/tests/test_pipeline_shared.py -v`
 Expected: FAIL with "BlackboxPipelineState has no attribute 'errors'"
 
-- [ ] **Step 3: Commit test file**
+- [x] **Step 3: Commit test file**
 
 ```bash
 git add packages/blackbox/tests/test_pipeline_shared.py
@@ -260,7 +260,7 @@ git commit -m "test(blackbox): add tests for BlackboxPipelineState.errors list"
 **Files:**
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py:27`
 
-- [ ] **Step 1: Read current state**
+- [x] **Step 1: Read current state**
 
 ```bash
 head -30 packages/blackbox/src/shannon_blackbox/pipeline/shared.py
@@ -279,7 +279,7 @@ class BlackboxPipelineState:
     error: str | None = None
 ```
 
-- [ ] **Step 2: Replace error with errors list**
+- [x] **Step 2: Replace error with errors list**
 
 ```python
 @dataclass
@@ -293,12 +293,12 @@ class BlackboxPipelineState:
     errors: list[str] = field(default_factory=list)
 ```
 
-- [ ] **Step 3: Run test to verify it passes**
+- [x] **Step 3: Run test to verify it passes**
 
 Run: `pytest packages/blackbox/tests/test_pipeline_shared.py -v`
 Expected: PASS (all 3 tests pass)
 
-- [ ] **Step 4: Verify no other code depends on .error being a string**
+- [x] **Step 4: Verify no other code depends on .error being a string**
 
 ```bash
 grep -r "\.error" packages/blackbox/src --include="*.py" | grep -v "errors"
@@ -309,7 +309,7 @@ Expected output (only the workflows.py line we'll fix next):
 packages/blackbox/src/shannon_blackbox/pipeline/workflows.py:117:                            self._state.error = f"{agent_name.value}: {result}"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/shared.py
@@ -323,7 +323,7 @@ git commit -m "feat(blackbox): change BlackboxPipelineState.error to errors list
 **Files:**
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py:117`
 
-- [ ] **Step 1: Read the context around line 117**
+- [x] **Step 1: Read the context around line 117**
 
 ```bash
 sed -n '110,121p' packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -340,7 +340,7 @@ Current content:
                             self._state.agent_metrics[agent_name.value] = result
 ```
 
-- [ ] **Step 2: Replace error assignment with append**
+- [x] **Step 2: Replace error assignment with append**
 
 Replace line 117:
 ```python
@@ -352,7 +352,7 @@ With:
                             self._state.errors.append(f"{agent_name.value}: {result}")
 ```
 
-- [ ] **Step 3: Verify the change**
+- [x] **Step 3: Verify the change**
 
 ```bash
 sed -n '110,121p' packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -369,12 +369,12 @@ Expected output shows `.errors.append()`:
                             self._state.agent_metrics[agent_name.value] = result
 ```
 
-- [ ] **Step 4: Run existing tests**
+- [x] **Step 4: Run existing tests**
 
 Run: `pytest packages/blackbox/tests/ -v -k "not integration"`
 Expected: PASS (no failures)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -388,7 +388,7 @@ git commit -m "feat(blackbox): append to errors list instead of overwriting"
 **Files:**
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py:119-124`
 
-- [ ] **Step 1: Read the context around line 119**
+- [x] **Step 1: Read the context around line 119**
 
 ```bash
 sed -n '114,125p' packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -409,7 +409,7 @@ Current content (note missing retry_policy):
                     )
 ```
 
-- [ ] **Step 2: Check how blackbox defines retry_policy**
+- [x] **Step 2: Check how blackbox defines retry_policy**
 
 ```bash
 sed -n '41,46p' packages/blackbox/src/shannon_blackbox/pipeline/workflows.py
@@ -425,7 +425,7 @@ Expected output:
         )
 ```
 
-- [ ] **Step 3: Add retry_policy parameter to vuln agent activity**
+- [x] **Step 3: Add retry_policy parameter to vuln agent activity**
 
 Replace the vuln_tasks.append block:
 ```python
@@ -453,7 +453,7 @@ With:
                     )
 ```
 
-- [ ] **Step 4: Verify the change**
+- [x] **Step 4: Verify the change**
 
 ```bash
 sed -n '114,130p' packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -480,7 +480,7 @@ Expected output shows retry_policy:
                     )
 ```
 
-- [ ] **Step 5: Verify imports are already present**
+- [x] **Step 5: Verify imports are already present**
 
 ```bash
 head -10 packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -491,12 +491,12 @@ Expected output shows RetryPolicy is already imported:
 from temporalio.common import RetryPolicy
 ```
 
-- [ ] **Step 6: Run existing tests**
+- [x] **Step 6: Run existing tests**
 
 Run: `pytest packages/whitebox/tests/ -v -k "not integration"`
 Expected: PASS (no failures)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/workflows.py
@@ -510,13 +510,13 @@ git commit -m "feat(whitebox): add retry_policy to vuln agents"
 **Files:**
 - Modify: `prompts/vuln-misconfig.txt` (backup first)
 
-- [ ] **Step 1: Create backup**
+- [x] **Step 1: Create backup**
 
 ```bash
 cp prompts/vuln-misconfig.txt prompts/vuln-misconfig.txt.backup
 ```
 
-- [ ] **Step 2: Verify backup exists**
+- [x] **Step 2: Verify backup exists**
 
 ```bash
 diff prompts/vuln-misconfig.txt prompts/vuln-misconfig.txt.backup
@@ -524,7 +524,7 @@ diff prompts/vuln-misconfig.txt prompts/vuln-misconfig.txt.backup
 
 Expected: No output (files are identical)
 
-- [ ] **Step 3: Commit backup**
+- [x] **Step 3: Commit backup**
 
 ```bash
 git add prompts/vuln-misconfig.txt.backup
@@ -538,7 +538,7 @@ git commit -m "chore: backup original vuln-misconfig.txt before rewrite"
 **Files:**
 - Reference: `prompts/vuln-injection.txt` (read only)
 
-- [ ] **Step 1: Read injection prompt structure**
+- [x] **Step 1: Read injection prompt structure**
 
 ```bash
 head -100 prompts/vuln-injection.txt
@@ -546,7 +546,7 @@ head -100 prompts/vuln-injection.txt
 
 This provides the structural template we'll adapt for misconfig.
 
-- [ ] **Step 2: Note key sections to include**
+- [x] **Step 2: Note key sections to include**
 
 Sections we must add to vuln-misconfig.txt:
 1. `<scope>` with @include(shared/_vuln-scope.txt)
@@ -569,7 +569,7 @@ Sections we must add to vuln-misconfig.txt:
 **Files:**
 - Modify: `prompts/vuln-misconfig.txt`
 
-- [ ] **Step 1: Write the first section (role through cli_tools)**
+- [x] **Step 1: Write the first section (role through cli_tools)**
 
 ```bash
 cat > prompts/vuln-misconfig.txt << 'EOF'
@@ -675,7 +675,7 @@ An **exploitable misconfiguration** is a confirmed security control that is eith
 EOF
 ```
 
-- [ ] **Step 2: Verify first section was written**
+- [x] **Step 2: Verify first section was written**
 
 ```bash
 head -100 prompts/vuln-misconfig.txt
@@ -683,7 +683,7 @@ head -100 prompts/vuln-misconfig.txt
 
 Expected: Shows role through cli_tools sections.
 
-- [ ] **Step 3: No commit yet (file incomplete)**
+- [x] **Step 3: No commit yet (file incomplete)**
 
 ---
 
@@ -692,7 +692,7 @@ Expected: Shows role through cli_tools sections.
 **Files:**
 - Modify: `prompts/vuln-misconfig.txt`
 
-- [ ] **Step 1: Append data_format_specifications section**
+- [x] **Step 1: Append data_format_specifications section**
 
 ```bash
 cat >> prompts/vuln-misconfig.txt << 'EOF'
@@ -723,7 +723,7 @@ cat >> prompts/vuln-misconfig.txt << 'EOF'
 EOF
 ```
 
-- [ ] **Step 2: Append methodology_and_domain_expertise section**
+- [x] **Step 2: Append methodology_and_domain_expertise section**
 
 ```bash
 cat >> prompts/vuln-misconfig.txt << 'EOF'
@@ -896,7 +896,7 @@ cat >> prompts/vuln-misconfig.txt << 'EOF'
 EOF
 ```
 
-- [ ] **Step 2: Verify sections were appended**
+- [x] **Step 2: Verify sections were appended**
 
 ```bash
 tail -100 prompts/vuln-misconfig.txt | head -50
@@ -911,7 +911,7 @@ Expected: Shows data_format_specifications and beginning of methodology.
 **Files:**
 - Modify: `prompts/vuln-misconfig.txt`
 
-- [ ] **Step 1: Append deliverable_instructions section**
+- [x] **Step 1: Append deliverable_instructions section**
 
 ```bash
 cat >> prompts/vuln-misconfig.txt << 'EOF'
@@ -967,7 +967,7 @@ These configurations were analyzed and confirmed to be properly implemented. The
 EOF
 ```
 
-- [ ] **Step 2: Append conclusion_trigger section**
+- [x] **Step 2: Append conclusion_trigger section**
 
 ```bash
 cat >> prompts/vuln-misconfig.txt << 'EOF'
@@ -995,7 +995,7 @@ cat >> prompts/vuln-misconfig.txt << 'EOF'
 EOF
 ```
 
-- [ ] **Step 3: Verify complete file**
+- [x] **Step 3: Verify complete file**
 
 ```bash
 wc -l prompts/vuln-misconfig.txt
@@ -1003,7 +1003,7 @@ wc -l prompts/vuln-misconfig.txt
 
 Expected: ~280-350 lines (compared to original 89 lines)
 
-- [ ] **Step 4: Verify key sections are present**
+- [x] **Step 4: Verify key sections are present**
 
 ```bash
 grep -E "^(<role>|<objective>|<scope>|<system_architecture>|<cli_tools>|<data_format|<methodology|<deliverable|<conclusion>)" prompts/vuln-misconfig.txt
@@ -1011,7 +1011,7 @@ grep -E "^(<role>|<objective>|<scope>|<system_architecture>|<cli_tools>|<data_fo
 
 Expected output shows all major sections present.
 
-- [ ] **Step 5: Verify @include directives are present**
+- [x] **Step 5: Verify @include directives are present**
 
 ```bash
 grep "@include" prompts/vuln-misconfig.txt
@@ -1027,7 +1027,7 @@ Expected output shows:
 @include(shared/_rules-of-engagement.txt)
 ```
 
-- [ ] **Step 6: Commit complete new prompt**
+- [x] **Step 6: Commit complete new prompt**
 
 ```bash
 git add prompts/vuln-misconfig.txt
@@ -1041,7 +1041,7 @@ git commit -m "feat(prompts): rewrite vuln-misconfig.txt to match vuln-injection
 **Files:**
 - Test: All modified packages
 
-- [ ] **Step 1: Run whitebox tests**
+- [x] **Step 1: Run whitebox tests**
 
 ```bash
 pytest packages/whitebox/tests/ -v -k "not integration"
@@ -1049,7 +1049,7 @@ pytest packages/whitebox/tests/ -v -k "not integration"
 
 Expected: All tests pass
 
-- [ ] **Step 2: Run blackbox tests**
+- [x] **Step 2: Run blackbox tests**
 
 ```bash
 pytest packages/blackbox/tests/ -v -k "not integration"
@@ -1057,13 +1057,13 @@ pytest packages/blackbox/tests/ -v -k "not integration"
 
 Expected: All tests pass
 
-- [ ] **Step 3: Run core tests (if any might be affected)**
+- [x] **Step 3: Run core tests (if any might be affected)**
 
 ```bash
 pytest packages/core/tests/ -v -k "pipeline" 2>/dev/null || echo "No matching tests"
 ```
 
-- [ ] **Step 4: Verify prompt syntax**
+- [x] **Step 4: Verify prompt syntax**
 
 ```bash
 head -1 prompts/vuln-misconfig.txt
@@ -1071,7 +1071,7 @@ head -1 prompts/vuln-misconfig.txt
 
 Expected: `<role>` tag present
 
-- [ ] **Step 5: Compare line counts**
+- [x] **Step 5: Compare line counts**
 
 ```bash
 wc -l prompts/vuln-*.txt
@@ -1079,7 +1079,7 @@ wc -l prompts/vuln-*.txt
 
 Expected output shows vuln-misconfig.txt is now similar in length to other vuln prompts (280-350 lines).
 
-- [ ] **Step 6: No commit (test verification only)**
+- [x] **Step 6: No commit (test verification only)**
 
 ---
 
@@ -1088,7 +1088,7 @@ Expected output shows vuln-misconfig.txt is now similar in length to other vuln 
 **Files:**
 - Git status check
 
-- [ ] **Step 1: Check git status**
+- [x] **Step 1: Check git status**
 
 ```bash
 git status
@@ -1096,7 +1096,7 @@ git status
 
 Expected: No uncommitted changes except the backup file (if not committed)
 
-- [ ] **Step 2: Verify all commits are present**
+- [x] **Step 2: Verify all commits are present**
 
 ```bash
 git log --oneline -15
@@ -1115,7 +1115,7 @@ test(blackbox): add tests for BlackboxPipelineState.errors list
 chore: backup original vuln-misconfig.txt before rewrite
 ```
 
-- [ ] **Step 3: Summary of changes**
+- [x] **Step 3: Summary of changes**
 
 D4: Error state overwrite
 - Whitebox: shared.py (error → errors list), workflows.py (append instead of assign)
@@ -1130,7 +1130,7 @@ D7: Misconfig prompt rewrite
 - Prompts: vuln-misconfig.txt rewritten from 89 to ~280-350 lines
 - Structure now matches vuln-injection.txt with all required sections
 
-- [ ] **Step 4: Ready for integration**
+- [x] **Step 4: Ready for integration**
 
 All tasks complete. Plan successfully implemented.
 

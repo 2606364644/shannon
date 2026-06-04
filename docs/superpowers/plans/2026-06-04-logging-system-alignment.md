@@ -1,6 +1,6 @@
 # Logging System Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Align shannon-py's logging system with the original TypeScript implementation by adding phase-level metrics aggregation, a unified ActivityLogger abstraction, an AuditLogger bridge with Null Object pattern, and CLI progress enhancements.
 
@@ -46,7 +46,7 @@
 - Modify: `packages/core/src/shannon_core/models/agents.py` (append after line 166)
 - Test: `packages/core/tests/test_metrics.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/core/tests/test_metrics.py`:
 
@@ -106,12 +106,12 @@ def test_misconfig_agents_mapped():
     assert AGENT_PHASE_MAP["misconfig-exploit"] == "exploitation"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_metrics.py::test_phase_metrics_defaults packages/core/tests/test_agent_phase_map.py -v`
 Expected: FAIL — `ImportError: cannot import name 'PhaseMetrics'` and `ImportError: cannot import name 'AGENT_PHASE_MAP'`
 
-- [ ] **Step 3: Add PhaseMetrics model**
+- [x] **Step 3: Add PhaseMetrics model**
 
 Append to `packages/core/src/shannon_core/models/audit.py` (after the `ResumeInfo` class, line 44):
 
@@ -125,7 +125,7 @@ class PhaseMetrics(BaseModel):
     agent_count: int = 0
 ```
 
-- [ ] **Step 4: Add AGENT_PHASE_MAP constant**
+- [x] **Step 4: Add AGENT_PHASE_MAP constant**
 
 Append to `packages/core/src/shannon_core/models/agents.py` (after line 166, the `PLAYWRIGHT_SESSION_MAPPING` line):
 
@@ -152,12 +152,12 @@ AGENT_PHASE_MAP: dict[str, str] = {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_metrics.py::test_phase_metrics_defaults packages/core/tests/test_metrics.py::test_phase_metrics_with_values packages/core/tests/test_agent_phase_map.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/audit.py packages/core/src/shannon_core/models/agents.py packages/core/tests/test_metrics.py packages/core/tests/test_agent_phase_map.py
@@ -172,7 +172,7 @@ git commit -m "feat: add PhaseMetrics model and AGENT_PHASE_MAP constant"
 - Modify: `packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py`
 - Test: `packages/whitebox/tests/test_metrics_tracker.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/whitebox/tests/test_metrics_tracker.py`:
 
@@ -276,12 +276,12 @@ async def test_phases_backward_compatible_missing_field(tmp_path: Path):
 
 Also add the missing `import pytest` at the top of the test file if not already present. Check the existing imports and add `import pytest` if missing.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_metrics_tracker.py::test_end_agent_populates_phases -v`
 Expected: FAIL — phases dict will be empty because `end_agent` doesn't populate it yet
 
-- [ ] **Step 3: Implement phase aggregation in MetricsTracker**
+- [x] **Step 3: Implement phase aggregation in MetricsTracker**
 
 Replace the `end_agent` method in `packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py` (lines 52–70) with:
 
@@ -351,12 +351,12 @@ Then add the `_aggregate_phase` and `_recalculate_phase_percentages` methods aft
             )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_metrics_tracker.py -v`
 Expected: All PASS (including existing tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py packages/whitebox/tests/test_metrics_tracker.py
@@ -372,7 +372,7 @@ git commit -m "feat: add phase aggregation to MetricsTracker"
 - Create: `packages/core/src/shannon_core/logging/activity_logger.py`
 - Create: `packages/core/tests/test_activity_logger.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/core/tests/test_activity_logger.py`:
 
@@ -456,12 +456,12 @@ def test_temporal_activity_logger_error():
         mock_logger.error.assert_called_once_with("error msg", extra={})
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_activity_logger.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.logging'`
 
-- [ ] **Step 3: Create the logging package**
+- [x] **Step 3: Create the logging package**
 
 Create `packages/core/src/shannon_core/logging/__init__.py`:
 
@@ -534,12 +534,12 @@ def create_activity_logger() -> ActivityLogger:
         return ConsoleActivityLogger()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_activity_logger.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/logging/__init__.py packages/core/src/shannon_core/logging/activity_logger.py packages/core/tests/test_activity_logger.py
@@ -555,7 +555,7 @@ git commit -m "feat: add ActivityLogger abstraction with Temporal and Console im
 - Modify: `packages/whitebox/src/shannon_whitebox/audit/__init__.py`
 - Create: `packages/whitebox/tests/test_audit_logger.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/whitebox/tests/test_audit_logger.py`:
 
@@ -645,12 +645,12 @@ async def test_real_logger_log_error():
     })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_audit_logger.py -v`
 Expected: FAIL — `ImportError: cannot import name 'AuditLogger'`
 
-- [ ] **Step 3: Create AuditLogger bridge**
+- [x] **Step 3: Create AuditLogger bridge**
 
 Create `packages/whitebox/src/shannon_whitebox/audit/audit_logger.py`:
 
@@ -720,7 +720,7 @@ def create_audit_logger(audit_session: AuditSession | None) -> AuditLogger:
     return NullAuditLogger()
 ```
 
-- [ ] **Step 4: Update audit __init__.py exports**
+- [x] **Step 4: Update audit __init__.py exports**
 
 Replace the entire content of `packages/whitebox/src/shannon_whitebox/audit/__init__.py` with:
 
@@ -731,12 +731,12 @@ from .audit_logger import AuditLogger, create_audit_logger
 __all__ = ["AuditSession", "AuditLogger", "create_audit_logger"]
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_audit_logger.py packages/whitebox/tests/test_audit_session.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/audit_logger.py packages/whitebox/src/shannon_whitebox/audit/__init__.py packages/whitebox/tests/test_audit_logger.py
@@ -751,7 +751,7 @@ git commit -m "feat: add AuditLogger bridge with Null Object pattern"
 - Create: `packages/whitebox/src/shannon_whitebox/cli/progress.py`
 - Create: `packages/whitebox/tests/test_progress_indicator.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/whitebox/tests/test_progress_indicator.py`:
 
@@ -825,12 +825,12 @@ def test_progress_indicator_spinner_frames():
     assert indicator._frames[0] == "⠋"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_progress_indicator.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_whitebox.cli.progress'`
 
-- [ ] **Step 3: Create ProgressIndicator**
+- [x] **Step 3: Create ProgressIndicator**
 
 First, ensure the CLI package directory has an `__init__.py`. Check if `packages/whitebox/src/shannon_whitebox/cli/__init__.py` exists; if not, create it:
 
@@ -902,12 +902,12 @@ def create_progress_indicator(message: str, enabled: bool = True) -> ProgressInd
     return NullProgressIndicator()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_progress_indicator.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/progress.py packages/whitebox/src/shannon_whitebox/cli/__init__.py packages/whitebox/tests/test_progress_indicator.py
@@ -924,7 +924,7 @@ git commit -m "feat: add ProgressIndicator spinner with Null Object pattern"
 - Create: `packages/core/src/shannon_core/cli/logs.py`
 - Create: `packages/core/tests/test_cli_logs.py`
 
-- [ ] **Step 1: Add watchdog dependency**
+- [x] **Step 1: Add watchdog dependency**
 
 Add `"watchdog>=4.0"` to the `dependencies` list in `packages/core/pyproject.toml`. The dependencies section should become:
 
@@ -949,11 +949,11 @@ dependencies = [
 ]
 ```
 
-- [ ] **Step 2: Install the new dependency**
+- [x] **Step 2: Install the new dependency**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && uv sync`
 
-- [ ] **Step 3: Write the failing tests**
+- [x] **Step 3: Write the failing tests**
 
 Create `packages/core/src/shannon_core/cli/__init__.py`:
 
@@ -1039,12 +1039,12 @@ def test_tail_workflow_log_missing_workspace(tmp_path: Path, capsys):
     assert "Workflow log not found" in captured.err
 ```
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [x] **Step 4: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_cli_logs.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.cli'`
 
-- [ ] **Step 5: Create the log tailing module**
+- [x] **Step 5: Create the log tailing module**
 
 Create `packages/core/src/shannon_core/cli/logs.py`:
 
@@ -1122,12 +1122,12 @@ def tail_workflow_log(workspace_id: str, workspaces_dir: str = "workspaces") -> 
         observer.join()
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_cli_logs.py -v`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/core/pyproject.toml packages/core/src/shannon_core/cli/__init__.py packages/core/src/shannon_core/cli/logs.py packages/core/tests/test_cli_logs.py
@@ -1142,7 +1142,7 @@ git commit -m "feat: add log tailing module with watchdog-based file watching"
 - Modify: `packages/whitebox/src/shannon_whitebox/cli/main.py` (lines 105–118)
 - Modify: `packages/blackbox/src/shannon_blackbox/cli/main.py` (lines 133–146)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `packages/whitebox/tests/test_cli.py` (or create a new test section if the file already has CLI tests):
 
@@ -1205,12 +1205,12 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
     assert "hello from log" in result.output
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_cli.py::test_logs_command_accepts_follow_flag -v`
 Expected: FAIL — `No such option: --follow`
 
-- [ ] **Step 3: Update whitebox CLI logs command**
+- [x] **Step 3: Update whitebox CLI logs command**
 
 Replace the `logs` command in `packages/whitebox/src/shannon_whitebox/cli/main.py` (lines 105–118) with:
 
@@ -1236,7 +1236,7 @@ def logs(workspace_name, follow):
         click.echo(log_file.read_text())
 ```
 
-- [ ] **Step 4: Update blackbox CLI logs command**
+- [x] **Step 4: Update blackbox CLI logs command**
 
 Replace the `logs` command in `packages/blackbox/src/shannon_blackbox/cli/main.py` (lines 133–146) with:
 
@@ -1262,12 +1262,12 @@ def logs(workspace_name, follow):
         click.echo(log_file.read_text())
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py -v -k "logs"`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/cli/main.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/whitebox/tests/test_cli.py packages/blackbox/tests/test_cli.py
@@ -1283,7 +1283,7 @@ git commit -m "feat: upgrade logs command with --follow flag for real-time taili
 - Modify: `packages/blackbox/src/shannon_blackbox/worker.py`
 - Create: `packages/whitebox/tests/test_worker_progress.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/whitebox/tests/test_worker_progress.py`:
 
@@ -1334,12 +1334,12 @@ async def test_poll_workflow_progress_handles_query_error():
         mock_print.assert_not_called()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_worker_progress.py -v`
 Expected: FAIL — `ImportError: cannot import name 'poll_workflow_progress'`
 
-- [ ] **Step 3: Add progress polling to whitebox worker**
+- [x] **Step 3: Add progress polling to whitebox worker**
 
 Add to `packages/whitebox/src/shannon_whitebox/worker.py`, after the `run_scan` function (before `def main()` at line 48):
 
@@ -1389,7 +1389,7 @@ Also update `run_scan` to spawn the poll task. Replace the `async with worker:` 
 
 Note: This also changes from `execute_workflow` to `start_workflow` + `handle.result()` to get a handle we can query.
 
-- [ ] **Step 4: Add progress polling to blackbox worker**
+- [x] **Step 4: Add progress polling to blackbox worker**
 
 Add the same `poll_workflow_progress` function to `packages/blackbox/src/shannon_blackbox/worker.py`, after the `run_scan` function:
 
@@ -1437,12 +1437,12 @@ Update the `run_scan` function in `packages/blackbox/src/shannon_blackbox/worker
             raise
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_worker_progress.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/worker.py packages/blackbox/src/shannon_blackbox/worker.py packages/whitebox/tests/test_worker_progress.py

@@ -1,6 +1,6 @@
 # Extract Shared Components to Core — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Move all shared infrastructure components from `shannon-whitebox` into `shannon-core` so that `shannon-blackbox` can run independently without depending on the whitebox package.
 
@@ -82,28 +82,28 @@ All 9 source files + 3 `__init__.py` package markers + 7 test files (moved to co
 - Create: `packages/core/src/shannon_core/prompts/__init__.py`
 - Create: `packages/core/src/shannon_core/services/__init__.py`
 
-- [ ] **Step 1: Create agents package directory**
+- [x] **Step 1: Create agents package directory**
 
 ```bash
 mkdir -p packages/core/src/shannon_core/agents
 touch packages/core/src/shannon_core/agents/__init__.py
 ```
 
-- [ ] **Step 2: Create prompts package directory**
+- [x] **Step 2: Create prompts package directory**
 
 ```bash
 mkdir -p packages/core/src/shannon_core/prompts
 touch packages/core/src/shannon_core/prompts/__init__.py
 ```
 
-- [ ] **Step 3: Create services package directory**
+- [x] **Step 3: Create services package directory**
 
 ```bash
 mkdir -p packages/core/src/shannon_core/services
 touch packages/core/src/shannon_core/services/__init__.py
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/__init__.py packages/core/src/shannon_core/prompts/__init__.py packages/core/src/shannon_core/services/__init__.py
@@ -118,7 +118,7 @@ git commit -m "feat(core): create agents, prompts, services package directories"
 - Create: `packages/core/src/shannon_core/agents/runner.py`
 - Test: `packages/core/tests/test_runner.py` (new — trivial smoke test since function raises NotImplementedError)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/test_runner.py`:
 
@@ -164,12 +164,12 @@ async def test_run_claude_prompt_not_implemented():
         await run_claude_prompt(prompt="test", repo_path="/tmp")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_runner.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.agents'`
 
-- [ ] **Step 3: Copy runner.py into core**
+- [x] **Step 3: Copy runner.py into core**
 
 Create `packages/core/src/shannon_core/agents/runner.py` — exact copy of `packages/whitebox/src/shannon_whitebox/agents/runner.py` (no import changes needed — it has no dependencies):
 
@@ -204,12 +204,12 @@ async def run_claude_prompt(
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_runner.py -v`
 Expected: 3 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/runner.py packages/core/tests/test_runner.py
@@ -225,7 +225,7 @@ git commit -m "feat(core): add agents/runner — ClaudeRunResult and run_claude_
 - Create: `packages/core/tests/test_validators.py`
 - Reference: `packages/whitebox/tests/test_validators.py` (original — will be deleted in Task 10)
 
-- [ ] **Step 1: Copy validators.py into core**
+- [x] **Step 1: Copy validators.py into core**
 
 Create `packages/core/src/shannon_core/agents/validators.py` — exact copy of whitebox version (only imports from `shannon_core.models`, no changes needed):
 
@@ -262,7 +262,7 @@ def get_queue_filename(agent_name: AgentName) -> str | None:
     return None
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_validators.py` — copied from whitebox, import changed from `shannon_whitebox.agents.validators` to `shannon_core.agents.validators`:
 
@@ -305,12 +305,12 @@ def test_get_queue_filename_exploit_agents():
     assert get_queue_filename(AgentName.AUTH_EXPLOIT) == "auth_exploitation_queue.json"
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_validators.py -v`
 Expected: 7 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/validators.py packages/core/tests/test_validators.py
@@ -325,7 +325,7 @@ git commit -m "feat(core): add agents/validators — validate_deliverable, get_v
 - Create: `packages/core/src/shannon_core/prompts/manager.py`
 - Create: `packages/core/tests/test_prompt_manager.py`
 
-- [ ] **Step 1: Copy prompts/manager.py into core**
+- [x] **Step 1: Copy prompts/manager.py into core**
 
 Create `packages/core/src/shannon_core/prompts/manager.py` — exact copy (only imports from `shannon_core.models`, no changes needed):
 
@@ -483,7 +483,7 @@ class PromptManager:
         return "\n\n".join(lines)
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_prompt_manager.py` — import changed from `shannon_whitebox.prompts.manager` to `shannon_core.prompts.manager`:
 
@@ -529,12 +529,12 @@ def test_missing_template_raises(prompts_dir):
         manager.load_sync("nonexistent", {"web_url": "https://x.com", "repo_path": "/r"})
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: 4 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/prompts/manager.py packages/core/tests/test_prompt_manager.py
@@ -549,7 +549,7 @@ git commit -m "feat(core): add prompts/manager — PromptManager with template l
 - Create: `packages/core/src/shannon_core/session.py`
 - Create: `packages/core/tests/test_session.py`
 
-- [ ] **Step 1: Copy session.py into core**
+- [x] **Step 1: Copy session.py into core**
 
 Create `packages/core/src/shannon_core/session.py` — exact copy (only imports from `shannon_core.models`):
 
@@ -625,7 +625,7 @@ class SessionManager:
         return agent_name.value in data.get("completed_agents", [])
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_session.py` — import changed from `shannon_whitebox.session` to `shannon_core.session`:
 
@@ -666,12 +666,12 @@ def test_session_json_contains_url(tmp_path):
     assert data["web_url"] == "https://test.com"
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_session.py -v`
 Expected: 5 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/session.py packages/core/tests/test_session.py
@@ -686,7 +686,7 @@ git commit -m "feat(core): add session — SessionManager for workspace lifecycl
 - Create: `packages/core/src/shannon_core/git_manager.py`
 - Create: `packages/core/tests/test_git_manager.py`
 
-- [ ] **Step 1: Copy git_manager.py into core**
+- [x] **Step 1: Copy git_manager.py into core**
 
 Create `packages/core/src/shannon_core/git_manager.py` — exact copy (only imports from `shannon_core.models`):
 
@@ -752,7 +752,7 @@ class GitManager:
         return None
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_git_manager.py` — import changed from `shannon_whitebox.git_manager` to `shannon_core.git_manager`:
 
@@ -798,12 +798,12 @@ def test_get_commit_hash(git_repo):
     assert len(h) == 40
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_git_manager.py -v`
 Expected: 4 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/git_manager.py packages/core/tests/test_git_manager.py
@@ -818,7 +818,7 @@ git commit -m "feat(core): add git_manager — GitManager for checkpoint/commit/
 - Create: `packages/core/src/shannon_core/services/playwright_config_writer.py`
 - Create: `packages/core/tests/test_playwright_config_writer.py`
 
-- [ ] **Step 1: Copy playwright_config_writer.py into core**
+- [x] **Step 1: Copy playwright_config_writer.py into core**
 
 Create `packages/core/src/shannon_core/services/playwright_config_writer.py` — exact copy (no dependencies on shannon_core at all):
 
@@ -916,7 +916,7 @@ def cleanup_stealth_config(source_dir: str) -> None:
         shutil.rmtree(pw_dir)
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_playwright_config_writer.py` — imports changed from `shannon_whitebox.services.playwright_config_writer` to `shannon_core.services.playwright_config_writer`:
 
@@ -981,12 +981,12 @@ class TestCleanupStealthConfig:
         cleanup_stealth_config(str(tmp_path))  # Should not raise
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_playwright_config_writer.py -v`
 Expected: 5 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/playwright_config_writer.py packages/core/tests/test_playwright_config_writer.py
@@ -1001,7 +1001,7 @@ git commit -m "feat(core): add services/playwright_config_writer — stealth con
 - Create: `packages/core/src/shannon_core/services/settings_writer.py`
 - Create: `packages/core/tests/test_settings_writer.py`
 
-- [ ] **Step 1: Copy settings_writer.py into core**
+- [x] **Step 1: Copy settings_writer.py into core**
 
 Create `packages/core/src/shannon_core/services/settings_writer.py` — exact copy (only imports `Rule` from `shannon_core.models`):
 
@@ -1079,7 +1079,7 @@ def cleanup_settings() -> None:
         settings_path.unlink()
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_settings_writer.py` — imports changed from `shannon_whitebox.services.settings_writer` to `shannon_core.services.settings_writer`:
 
@@ -1215,12 +1215,12 @@ class TestCleanupSettings:
         cleanup_settings()  # Should not raise
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_settings_writer.py -v`
 Expected: 8 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/settings_writer.py packages/core/tests/test_settings_writer.py
@@ -1234,7 +1234,7 @@ git commit -m "feat(core): add services/settings_writer — deny rules for code 
 **Files:**
 - Create: `packages/core/src/shannon_core/agents/executor.py`
 
-- [ ] **Step 1: Copy executor.py into core with updated internal imports**
+- [x] **Step 1: Copy executor.py into core with updated internal imports**
 
 Create `packages/core/src/shannon_core/agents/executor.py` — relative imports changed to absolute `shannon_core.*`:
 
@@ -1339,12 +1339,12 @@ class AgentExecutor:
         )
 ```
 
-- [ ] **Step 2: Verify the import resolves**
+- [x] **Step 2: Verify the import resolves**
 
 Run: `cd shannon-py && uv run python -c "from shannon_core.agents.executor import AgentExecutor; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/executor.py
@@ -1359,7 +1359,7 @@ git commit -m "feat(core): add agents/executor — AgentExecutor with absolute i
 - Create: `packages/core/src/shannon_core/services/validate_authentication.py`
 - Create: `packages/core/tests/test_validate_authentication.py`
 
-- [ ] **Step 1: Copy validate_authentication.py into core with updated TYPE_CHECKING imports**
+- [x] **Step 1: Copy validate_authentication.py into core with updated TYPE_CHECKING imports**
 
 Create `packages/core/src/shannon_core/services/validate_authentication.py` — TYPE_CHECKING imports changed from `shannon_whitebox.*` to `shannon_core.*`:
 
@@ -1426,7 +1426,7 @@ async def validate_authentication(
     return AuthValidationResult(success=True)
 ```
 
-- [ ] **Step 2: Copy test with updated import**
+- [x] **Step 2: Copy test with updated import**
 
 Create `packages/core/tests/test_validate_authentication.py` — imports changed from `shannon_whitebox.services.validate_authentication` to `shannon_core.services.validate_authentication`:
 
@@ -1507,12 +1507,12 @@ async def test_auth_validation_with_config_calls_executor():
     assert call_kwargs.get("prompt_override") == "validate-authentication"
 ```
 
-- [ ] **Step 3: Run tests to verify they pass**
+- [x] **Step 3: Run tests to verify they pass**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/test_validate_authentication.py -v`
 Expected: 3 passed
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/validate_authentication.py packages/core/tests/test_validate_authentication.py
@@ -1526,7 +1526,7 @@ git commit -m "feat(core): add services/validate_authentication — auth preflig
 **Files:**
 - Modify: `packages/core/pyproject.toml`
 
-- [ ] **Step 1: Add aiofiles to core dependencies**
+- [x] **Step 1: Add aiofiles to core dependencies**
 
 In `packages/core/pyproject.toml`, change the dependencies section from:
 
@@ -1549,17 +1549,17 @@ dependencies = [
 ]
 ```
 
-- [ ] **Step 2: Sync workspace**
+- [x] **Step 2: Sync workspace**
 
 Run: `cd shannon-py && uv sync`
 Expected: `Resolved X packages, installed Y packages`
 
-- [ ] **Step 3: Run all core tests**
+- [x] **Step 3: Run all core tests**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All tests pass (existing 10 + new 7 test files = 17 test files)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/pyproject.toml uv.lock
@@ -1576,7 +1576,7 @@ git commit -m "feat(core): add aiofiles dependency for AgentExecutor"
 - Modify: `packages/whitebox/src/shannon_whitebox/cli/main.py` (line 5)
 - Modify: `packages/whitebox/tests/test_integration.py` (lines 9-12)
 
-- [ ] **Step 1: Update pipeline/activities.py imports**
+- [x] **Step 1: Update pipeline/activities.py imports**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`, change lines 11-13 from:
 
@@ -1610,7 +1610,7 @@ from shannon_core.prompts.manager import PromptManager
 from shannon_core.agents.executor import AgentExecutor
 ```
 
-- [ ] **Step 2: Update pipeline/workflows.py imports**
+- [x] **Step 2: Update pipeline/workflows.py imports**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, change lines 14-15 from:
 
@@ -1626,7 +1626,7 @@ from shannon_core.services.settings_writer import sync_code_path_deny_rules, cle
 from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
 ```
 
-- [ ] **Step 3: Update cli/main.py import**
+- [x] **Step 3: Update cli/main.py import**
 
 In `packages/whitebox/src/shannon_whitebox/cli/main.py`, change line 5 from:
 
@@ -1640,7 +1640,7 @@ to:
 from shannon_core.session import SessionManager
 ```
 
-- [ ] **Step 4: Update test_integration.py imports**
+- [x] **Step 4: Update test_integration.py imports**
 
 In `packages/whitebox/tests/test_integration.py`, change lines 9-12 from:
 
@@ -1672,14 +1672,14 @@ to:
 with patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
 ```
 
-- [ ] **Step 5: Run whitebox tests**
+- [x] **Step 5: Run whitebox tests**
 
 Run: `cd shannon-py && uv run pytest packages/whitebox/tests/ -v --ignore=packages/whitebox/tests/test_git_manager.py --ignore=packages/whitebox/tests/test_session.py --ignore=packages/whitebox/tests/test_prompt_manager.py --ignore=packages/whitebox/tests/test_validators.py --ignore=packages/whitebox/tests/test_playwright_config_writer.py --ignore=packages/whitebox/tests/test_settings_writer.py --ignore=packages/whitebox/tests/test_validate_authentication.py`
 Expected: test_cli.py and test_integration.py pass
 
 Note: The 7 test files for moved components still import from `shannon_whitebox` — they will be deleted in Task 14.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/activities.py packages/whitebox/src/shannon_whitebox/pipeline/workflows.py packages/whitebox/src/shannon_whitebox/cli/main.py packages/whitebox/tests/test_integration.py
@@ -1699,7 +1699,7 @@ git commit -m "refactor(whitebox): update imports to use shannon_core for moved 
 - Modify: `packages/blackbox/tests/test_integration.py` (lines 9-11)
 - Modify: `packages/blackbox/pyproject.toml` (remove shannon-whitebox)
 
-- [ ] **Step 1: Update agents/exploit_executor.py**
+- [x] **Step 1: Update agents/exploit_executor.py**
 
 In `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`, change line 7 from:
 
@@ -1713,7 +1713,7 @@ to:
 from shannon_core.agents.executor import AgentExecutor
 ```
 
-- [ ] **Step 2: Update agents/recon_executor.py**
+- [x] **Step 2: Update agents/recon_executor.py**
 
 In `packages/blackbox/src/shannon_blackbox/agents/recon_executor.py`, change line 6 from:
 
@@ -1727,7 +1727,7 @@ to:
 from shannon_core.agents.executor import AgentExecutor
 ```
 
-- [ ] **Step 3: Update pipeline/activities.py**
+- [x] **Step 3: Update pipeline/activities.py**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`, change lines 9-10 from:
 
@@ -1759,7 +1759,7 @@ from shannon_core.prompts.manager import PromptManager
 from shannon_core.agents.executor import AgentExecutor
 ```
 
-- [ ] **Step 4: Update pipeline/workflows.py**
+- [x] **Step 4: Update pipeline/workflows.py**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, change lines 14-15 from:
 
@@ -1775,7 +1775,7 @@ from shannon_core.services.settings_writer import sync_code_path_deny_rules, cle
 from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
 ```
 
-- [ ] **Step 5: Update cli/main.py**
+- [x] **Step 5: Update cli/main.py**
 
 In `packages/blackbox/src/shannon_blackbox/cli/main.py`, change line 7 from:
 
@@ -1789,7 +1789,7 @@ to:
 from shannon_core.session import SessionManager
 ```
 
-- [ ] **Step 6: Update test_integration.py**
+- [x] **Step 6: Update test_integration.py**
 
 In `packages/blackbox/tests/test_integration.py`, change lines 9-11 from:
 
@@ -1819,7 +1819,7 @@ to:
 with patch("shannon_core.agents.executor.run_claude_prompt", return_value=mock_result):
 ```
 
-- [ ] **Step 7: Remove shannon-whitebox from blackbox pyproject.toml**
+- [x] **Step 7: Remove shannon-whitebox from blackbox pyproject.toml**
 
 In `packages/blackbox/pyproject.toml`, change dependencies from:
 
@@ -1844,17 +1844,17 @@ dependencies = [
 ]
 ```
 
-- [ ] **Step 8: Sync workspace**
+- [x] **Step 8: Sync workspace**
 
 Run: `cd shannon-py && uv sync`
 Expected: Resolves without errors
 
-- [ ] **Step 9: Run blackbox tests**
+- [x] **Step 9: Run blackbox tests**
 
 Run: `cd shannon-py && uv run pytest packages/blackbox/tests/ -v`
 Expected: All tests pass
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py packages/blackbox/src/shannon_blackbox/agents/recon_executor.py packages/blackbox/src/shannon_blackbox/pipeline/activities.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/src/shannon_blackbox/cli/main.py packages/blackbox/tests/test_integration.py packages/blackbox/pyproject.toml uv.lock
@@ -1886,7 +1886,7 @@ git commit -m "refactor(blackbox): import moved components from shannon_core, re
 - Delete: `packages/whitebox/tests/test_settings_writer.py`
 - Delete: `packages/whitebox/tests/test_validate_authentication.py`
 
-- [ ] **Step 1: Delete moved source files**
+- [x] **Step 1: Delete moved source files**
 
 ```bash
 rm packages/whitebox/src/shannon_whitebox/agents/executor.py
@@ -1909,7 +1909,7 @@ rm packages/whitebox/src/shannon_whitebox/services/__init__.py
 rmdir packages/whitebox/src/shannon_whitebox/services
 ```
 
-- [ ] **Step 2: Delete moved test files**
+- [x] **Step 2: Delete moved test files**
 
 ```bash
 rm packages/whitebox/tests/test_validators.py
@@ -1921,12 +1921,12 @@ rm packages/whitebox/tests/test_settings_writer.py
 rm packages/whitebox/tests/test_validate_authentication.py
 ```
 
-- [ ] **Step 3: Run whitebox tests (only test_cli.py and test_integration.py remain)**
+- [x] **Step 3: Run whitebox tests (only test_cli.py and test_integration.py remain)**
 
 Run: `cd shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: test_cli.py and test_integration.py pass
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A packages/whitebox/
@@ -1939,22 +1939,22 @@ git commit -m "refactor(whitebox): remove moved components (now in shannon_core)
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Run all core tests**
+- [x] **Step 1: Run all core tests**
 
 Run: `cd shannon-py && uv run pytest packages/core/tests/ -v`
 Expected: All 17 test files pass (10 original + 7 moved)
 
-- [ ] **Step 2: Run all whitebox tests**
+- [x] **Step 2: Run all whitebox tests**
 
 Run: `cd shannon-py && uv run pytest packages/whitebox/tests/ -v`
 Expected: test_cli.py and test_integration.py pass (2 files remaining)
 
-- [ ] **Step 3: Run all blackbox tests**
+- [x] **Step 3: Run all blackbox tests**
 
 Run: `cd shannon-py && uv run pytest packages/blackbox/tests/ -v`
 Expected: All test files pass
 
-- [ ] **Step 4: Verify core import works**
+- [x] **Step 4: Verify core import works**
 
 Run: `cd shannon-py && uv run python -c "from shannon_core.agents.executor import AgentExecutor; print('AgentExecutor OK')"`
 Expected: `AgentExecutor OK`
@@ -1962,12 +1962,12 @@ Expected: `AgentExecutor OK`
 Run: `cd shannon-py && uv run python -c "from shannon_core.session import SessionManager; print('SessionManager OK')"`
 Expected: `SessionManager OK`
 
-- [ ] **Step 5: Verify blackbox does not depend on whitebox**
+- [x] **Step 5: Verify blackbox does not depend on whitebox**
 
 Run: `cd shannon-py && grep -c "shannon-whitebox" packages/blackbox/pyproject.toml || echo "OK: no whitebox dependency"`
 Expected: `OK: no whitebox dependency`
 
-- [ ] **Step 6: Verify whitebox-specific code stays in whitebox**
+- [x] **Step 6: Verify whitebox-specific code stays in whitebox**
 
 Run: `cd shannon-py && uv run python -c "from shannon_whitebox.audit.session import AuditSession; print('AuditSession OK')"`
 Expected: `AuditSession OK`
@@ -1975,7 +1975,7 @@ Expected: `AuditSession OK`
 Run: `cd shannon-py && uv run python -c "from shannon_whitebox.audit.log_stream import LogStream; print('LogStream OK')"`
 Expected: `LogStream OK`
 
-- [ ] **Step 7: Final commit if any cleanup needed**
+- [x] **Step 7: Final commit if any cleanup needed**
 
 ```bash
 git add -A

@@ -1,6 +1,6 @@
 # Audit Logging Phase 1 — Core Class Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Refactor the Python audit package to match the original Shannon (TypeScript) layered architecture — `AgentLogger`, `WorkflowLogger`, `MetricsTracker` coordinated by a simplified `AuditSession` facade — without yet integrating it into the pipeline.
 
@@ -43,7 +43,7 @@
 - Modify: `packages/core/tests/test_metrics.py`
 - Test: `packages/core/tests/test_metrics.py`
 
-- [ ] **Step 1: Write failing test for optional `web_url`**
+- [x] **Step 1: Write failing test for optional `web_url`**
 
 Add to `packages/core/tests/test_metrics.py`:
 
@@ -54,12 +54,12 @@ def test_session_metadata_optional_web_url():
     assert s.web_url is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_metrics.py::test_session_metadata_optional_web_url -v`
 Expected: FAIL — `web_url` is required
 
-- [ ] **Step 3: Make `web_url` optional in `SessionMetadata`**
+- [x] **Step 3: Make `web_url` optional in `SessionMetadata`**
 
 In `packages/core/src/shannon_core/models/metrics.py`, change line 17 from:
 ```python
@@ -70,12 +70,12 @@ to:
     web_url: str | None = None
 ```
 
-- [ ] **Step 4: Run the full metrics test suite to confirm no regressions**
+- [x] **Step 4: Run the full metrics test suite to confirm no regressions**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_metrics.py -v`
 Expected: All PASS (existing tests still pass because they still provide `web_url`)
 
-- [ ] **Step 5: Write failing test for new audit data types**
+- [x] **Step 5: Write failing test for new audit data types**
 
 Create `packages/core/tests/test_audit_types.py`:
 
@@ -175,12 +175,12 @@ def test_resume_info():
     assert r.completed_agents == ["recon"]
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_audit_types.py -v`
 Expected: FAIL — `shannon_core.models.audit` module not found
 
-- [ ] **Step 7: Create the audit types module**
+- [x] **Step 7: Create the audit types module**
 
 Create `packages/core/src/shannon_core/models/audit.py`:
 
@@ -230,7 +230,7 @@ class ResumeInfo(BaseModel):
     completed_agents: list[str]
 ```
 
-- [ ] **Step 8: Update core models `__init__.py` to export new types**
+- [x] **Step 8: Update core models `__init__.py` to export new types**
 
 In `packages/core/src/shannon_core/models/__init__.py`, add after the `from .metrics import` line:
 
@@ -254,12 +254,12 @@ Add to the `__all__` list:
     "WorkflowSummary",
 ```
 
-- [ ] **Step 9: Run all tests to verify they pass**
+- [x] **Step 9: Run all tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/test_audit_types.py packages/core/tests/test_metrics.py -v`
 Expected: All PASS
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/audit.py packages/core/src/shannon_core/models/__init__.py packages/core/src/shannon_core/models/metrics.py packages/core/tests/test_audit_types.py packages/core/tests/test_metrics.py
@@ -274,7 +274,7 @@ git commit -m "feat(core): add audit data types and make SessionMetadata.web_url
 - Create: `packages/whitebox/src/shannon_whitebox/audit/utils.py`
 - Test: `packages/whitebox/tests/test_audit_utils.py`
 
-- [ ] **Step 1: Write failing tests for utils**
+- [x] **Step 1: Write failing tests for utils**
 
 Create `packages/whitebox/tests/test_audit_utils.py`:
 
@@ -418,12 +418,12 @@ def test_initialize_audit_structure(tmp_path):
     assert (base / "deliverables").is_dir()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_audit_utils.py -v`
 Expected: FAIL — `shannon_whitebox.audit.utils` module not found
 
-- [ ] **Step 3: Implement utils.py**
+- [x] **Step 3: Implement utils.py**
 
 Create `packages/whitebox/src/shannon_whitebox/audit/utils.py`:
 
@@ -504,12 +504,12 @@ def initialize_audit_structure(meta: SessionMetadata) -> None:
     (base / "deliverables").mkdir(parents=True, exist_ok=True)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_audit_utils.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/utils.py packages/whitebox/tests/test_audit_utils.py
@@ -524,7 +524,7 @@ git commit -m "feat(whitebox): add audit path generation and formatting utilitie
 - Modify: `packages/whitebox/src/shannon_whitebox/audit/log_stream.py`
 - Test: `packages/whitebox/tests/test_log_stream.py`
 
-- [ ] **Step 1: Write failing tests for enhanced LogStream**
+- [x] **Step 1: Write failing tests for enhanced LogStream**
 
 Create `packages/whitebox/tests/test_log_stream.py`:
 
@@ -630,12 +630,12 @@ async def test_append_appends_to_existing(tmp_path: Path):
     assert "new content\n" in content
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_log_stream.py -v`
 Expected: Multiple FAIL — `LogStream` has no `open`/`close`/`write` methods, no `is_open`/`path` properties
 
-- [ ] **Step 3: Rewrite LogStream with open/close lifecycle**
+- [x] **Step 3: Rewrite LogStream with open/close lifecycle**
 
 Replace the full content of `packages/whitebox/src/shannon_whitebox/audit/log_stream.py` with:
 
@@ -693,12 +693,12 @@ class LogStream:
             await self.append(line)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_log_stream.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/log_stream.py packages/whitebox/tests/test_log_stream.py
@@ -713,7 +713,7 @@ git commit -m "refactor(whitebox): enhance LogStream with open/close lifecycle"
 - Create: `packages/whitebox/src/shannon_whitebox/audit/agent_logger.py`
 - Test: `packages/whitebox/tests/test_agent_logger.py`
 
-- [ ] **Step 1: Write failing tests for AgentLogger**
+- [x] **Step 1: Write failing tests for AgentLogger**
 
 Create `packages/whitebox/tests/test_agent_logger.py`:
 
@@ -857,12 +857,12 @@ async def test_save_prompt_metadata_header(tmp_path: Path):
     assert "saved:" in content
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_agent_logger.py -v`
 Expected: FAIL — `shannon_whitebox.audit.agent_logger` module not found
 
-- [ ] **Step 3: Implement AgentLogger**
+- [x] **Step 3: Implement AgentLogger**
 
 Create `packages/whitebox/src/shannon_whitebox/audit/agent_logger.py`:
 
@@ -950,12 +950,12 @@ class AgentLogger:
             await f.write(header + content)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_agent_logger.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/agent_logger.py packages/whitebox/tests/test_agent_logger.py
@@ -970,7 +970,7 @@ git commit -m "feat(whitebox): add AgentLogger with JSON Lines output and prompt
 - Create: `packages/whitebox/src/shannon_whitebox/audit/workflow_logger.py`
 - Test: `packages/whitebox/tests/test_workflow_logger.py`
 
-- [ ] **Step 1: Write failing tests for WorkflowLogger**
+- [x] **Step 1: Write failing tests for WorkflowLogger**
 
 Create `packages/whitebox/tests/test_workflow_logger.py`:
 
@@ -1220,12 +1220,12 @@ async def test_close_prevents_further_writes(tmp_path: Path):
     await logger.log_event("TEST", "message")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_workflow_logger.py -v`
 Expected: FAIL — `shannon_whitebox.audit.workflow_logger` module not found
 
-- [ ] **Step 3: Implement WorkflowLogger**
+- [x] **Step 3: Implement WorkflowLogger**
 
 Create `packages/whitebox/src/shannon_whitebox/audit/workflow_logger.py`:
 
@@ -1409,12 +1409,12 @@ class WorkflowLogger:
             self._stream = None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_workflow_logger.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/workflow_logger.py packages/whitebox/tests/test_workflow_logger.py
@@ -1429,7 +1429,7 @@ git commit -m "feat(whitebox): add WorkflowLogger with categorized human-readabl
 - Create: `packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py`
 - Test: `packages/whitebox/tests/test_metrics_tracker.py`
 
-- [ ] **Step 1: Write failing tests for MetricsTracker**
+- [x] **Step 1: Write failing tests for MetricsTracker**
 
 Create `packages/whitebox/tests/test_metrics_tracker.py`:
 
@@ -1599,12 +1599,12 @@ async def test_atomic_write_uses_temp_file(tmp_path: Path):
     assert len(tmp_files) == 0
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_metrics_tracker.py -v`
 Expected: FAIL — `shannon_whitebox.audit.metrics_tracker` module not found
 
-- [ ] **Step 3: Implement MetricsTracker**
+- [x] **Step 3: Implement MetricsTracker**
 
 Create `packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py`:
 
@@ -1716,12 +1716,12 @@ class MetricsTracker:
         os.replace(str(tmp), str(self._path))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_metrics_tracker.py -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/metrics_tracker.py packages/whitebox/tests/test_metrics_tracker.py
@@ -1737,7 +1737,7 @@ git commit -m "feat(whitebox): add MetricsTracker with atomic session.json write
 - Modify: `packages/whitebox/src/shannon_whitebox/audit/__init__.py`
 - Test: `packages/whitebox/tests/test_audit_session.py`
 
-- [ ] **Step 1: Write failing tests for the new AuditSession**
+- [x] **Step 1: Write failing tests for the new AuditSession**
 
 Create `packages/whitebox/tests/test_audit_session.py`:
 
@@ -1962,12 +1962,12 @@ async def test_full_lifecycle(tmp_path: Path):
     assert len(json_lines) == 3  # agent_start + tool_start + agent_end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_audit_session.py -v`
 Expected: FAIL — `AuditSession` doesn't accept `SessionMetadata` or have expected methods
 
-- [ ] **Step 3: Rewrite AuditSession as facade**
+- [x] **Step 3: Rewrite AuditSession as facade**
 
 Replace the full content of `packages/whitebox/src/shannon_whitebox/audit/session.py` with:
 
@@ -2108,7 +2108,7 @@ class AuditSession:
         return {}
 ```
 
-- [ ] **Step 4: Update `__init__.py` to export AuditSession**
+- [x] **Step 4: Update `__init__.py` to export AuditSession**
 
 Replace the content of `packages/whitebox/src/shannon_whitebox/audit/__init__.py` with:
 
@@ -2118,12 +2118,12 @@ from .session import AuditSession
 __all__ = ["AuditSession"]
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && python -m pytest packages/whitebox/tests/test_audit_session.py -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/audit/session.py packages/whitebox/src/shannon_whitebox/audit/__init__.py packages/whitebox/tests/test_audit_session.py
@@ -2136,12 +2136,12 @@ git commit -m "refactor(whitebox): rewrite AuditSession as facade coordinating t
 
 **Files:** None new — run all tests to verify no regressions.
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `cd /root/shannon-py && python -m pytest packages/core/tests/ packages/whitebox/tests/ -v`
 Expected: All PASS — no regressions in core or whitebox tests
 
-- [ ] **Step 2: Fix any failures if needed**
+- [x] **Step 2: Fix any failures if needed**
 
 If any test fails due to the `SessionMetadata.web_url` change or import path changes, fix them and re-run. The key change that could affect existing tests is `web_url` becoming `Optional` — all existing tests that create `SessionMetadata` already provide `web_url`, so no breakage expected.
 

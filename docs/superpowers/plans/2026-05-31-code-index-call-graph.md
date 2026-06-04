@@ -1,6 +1,6 @@
 # Code Index & Call Graph Integration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Integrate deterministic AST-based code indexing and call graph construction into Shannon's whitebox pipeline, providing a provably-complete function registry and call chain set before PRE_RECON runs.
 
@@ -72,7 +72,7 @@
 - Create: `packages/core/tests/code_index/__init__.py`
 - Create: `packages/core/tests/code_index/fixtures/` (directory)
 
-- [ ] **Step 1: Add tree-sitter dependencies to pyproject.toml**
+- [x] **Step 1: Add tree-sitter dependencies to pyproject.toml**
 
 Replace the `dependencies` list in `packages/core/pyproject.toml`:
 
@@ -91,12 +91,12 @@ dependencies = [
 ]
 ```
 
-- [ ] **Step 2: Install updated dependencies**
+- [x] **Step 2: Install updated dependencies**
 
 Run: `pip install -e packages/core`
 Expected: Successfully installs shannon-core with all tree-sitter packages
 
-- [ ] **Step 3: Create directory structure and empty init files**
+- [x] **Step 3: Create directory structure and empty init files**
 
 Run:
 ```bash
@@ -107,12 +107,12 @@ touch packages/core/src/shannon_core/code_index/parsers/__init__.py
 touch packages/core/tests/code_index/__init__.py
 ```
 
-- [ ] **Step 4: Verify tree-sitter imports work**
+- [x] **Step 4: Verify tree-sitter imports work**
 
 Run: `python -c "import tree_sitter_python as tspython; from tree_sitter import Language; print(Language(tspython.language()))"`
 Expected: Prints a Language object representation (no error)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/pyproject.toml packages/core/src/shannon_core/code_index/ packages/core/tests/code_index/
@@ -128,7 +128,7 @@ git commit -m "feat(code-index): add tree-sitter dependencies and directory stru
 - Modify: `packages/core/src/shannon_core/models/errors.py`
 - Test: `packages/core/tests/code_index/test_models.py`
 
-- [ ] **Step 1: Write the failing test for data models**
+- [x] **Step 1: Write the failing test for data models**
 
 Create `packages/core/tests/code_index/test_models.py`:
 
@@ -340,12 +340,12 @@ def test_func_block_missing_required_field():
         )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_models.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.code_index.models'`
 
-- [ ] **Step 3: Add CODE_INDEX_FAILED to ErrorCode**
+- [x] **Step 3: Add CODE_INDEX_FAILED to ErrorCode**
 
 Add to `packages/core/src/shannon_core/models/errors.py` — append one entry inside the `ErrorCode` enum, after `BILLING_ERROR`:
 
@@ -353,7 +353,7 @@ Add to `packages/core/src/shannon_core/models/errors.py` — append one entry in
     CODE_INDEX_FAILED = "CODE_INDEX_FAILED"
 ```
 
-- [ ] **Step 4: Write the data models**
+- [x] **Step 4: Write the data models**
 
 Create `packages/core/src/shannon_core/code_index/models.py`:
 
@@ -419,12 +419,12 @@ class CodeIndex(BaseModel):
     chains: list[CallChain]
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_models.py -v`
 Expected: All 10 tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/models.py packages/core/src/shannon_core/models/errors.py packages/core/tests/code_index/test_models.py
@@ -440,7 +440,7 @@ git commit -m "feat(code-index): add data models and CODE_INDEX_FAILED error cod
 - Modify: `packages/core/src/shannon_core/code_index/parsers/__init__.py`
 - Test: `packages/core/tests/code_index/test_python_parser.py` (only test registry import)
 
-- [ ] **Step 1: Write the failing test for BaseParser**
+- [x] **Step 1: Write the failing test for BaseParser**
 
 Add to a new file `packages/core/tests/code_index/test_base_parser.py`:
 
@@ -485,12 +485,12 @@ def test_concrete_parser_implements_both_methods():
     ) == []
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_base_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write BaseParser ABC**
+- [x] **Step 3: Write BaseParser ABC**
 
 Create `packages/core/src/shannon_core/code_index/parsers/base.py`:
 
@@ -513,7 +513,7 @@ class BaseParser(ABC):
         ...
 ```
 
-- [ ] **Step 4: Write the parser registry**
+- [x] **Step 4: Write the parser registry**
 
 Replace `packages/core/src/shannon_core/code_index/parsers/__init__.py`:
 
@@ -538,12 +538,12 @@ def available_languages() -> list[str]:
     return list(_PARSER_CLASSES.keys())
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_base_parser.py -v`
 Expected: All 3 tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/base.py packages/core/src/shannon_core/code_index/parsers/__init__.py packages/core/tests/code_index/test_base_parser.py
@@ -558,7 +558,7 @@ git commit -m "feat(code-index): add BaseParser ABC and parser registry"
 - Create: `packages/core/src/shannon_core/code_index/parser.py`
 - Test: `packages/core/tests/code_index/test_parser.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/code_index/test_parser.py`:
 
@@ -646,12 +646,12 @@ class TestDiscoverSourceFiles:
         assert len(files) == 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write language detection and file discovery**
+- [x] **Step 3: Write language detection and file discovery**
 
 Create `packages/core/src/shannon_core/code_index/parser.py`:
 
@@ -715,12 +715,12 @@ def discover_source_files(repo_root: Path, language: str) -> list[Path]:
     return sorted(files)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_parser.py -v`
 Expected: All 13 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parser.py packages/core/tests/code_index/test_parser.py
@@ -736,7 +736,7 @@ git commit -m "feat(code-index): add language detection and source file discover
 - Create: `packages/core/tests/code_index/fixtures/python/flask_app.py`
 - Test: `packages/core/tests/code_index/test_python_parser.py`
 
-- [ ] **Step 1: Create the Python fixture file**
+- [x] **Step 1: Create the Python fixture file**
 
 Create `packages/core/tests/code_index/fixtures/python/flask_app.py`:
 
@@ -782,7 +782,7 @@ def process_item(item):
     pass
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `packages/core/tests/code_index/test_python_parser.py`:
 
@@ -896,12 +896,12 @@ class TestPythonParserRegistry:
         assert isinstance(parser, PythonParser)
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_python_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the Python parser**
+- [x] **Step 4: Write the Python parser**
 
 Create `packages/core/src/shannon_core/code_index/parsers/python_parser.py`:
 
@@ -1045,12 +1045,12 @@ class PythonParser(BaseParser):
 register_parser("python", PythonParser)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_python_parser.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/python_parser.py packages/core/tests/code_index/fixtures/ packages/core/tests/code_index/test_python_parser.py
@@ -1066,7 +1066,7 @@ git commit -m "feat(code-index): add Python parser with function and call extrac
 - Create: `packages/core/tests/code_index/fixtures/typescript/express_app.ts`
 - Test: `packages/core/tests/code_index/test_typescript_parser.py`
 
-- [ ] **Step 1: Create the TypeScript fixture file**
+- [x] **Step 1: Create the TypeScript fixture file**
 
 Create `packages/core/tests/code_index/fixtures/typescript/express_app.ts`:
 
@@ -1103,7 +1103,7 @@ function getOrders(): any[] {
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `packages/core/tests/code_index/test_typescript_parser.py`:
 
@@ -1168,12 +1168,12 @@ class TestTypeScriptParserRegistry:
         assert "typescript" in _PARSER_CLASSES
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_typescript_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the TypeScript parser**
+- [x] **Step 4: Write the TypeScript parser**
 
 Create `packages/core/src/shannon_core/code_index/parsers/typescript_parser.py`:
 
@@ -1335,12 +1335,12 @@ class TypeScriptParser(BaseParser):
 register_parser("typescript", TypeScriptParser)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_typescript_parser.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/typescript_parser.py packages/core/tests/code_index/fixtures/typescript/ packages/core/tests/code_index/test_typescript_parser.py
@@ -1356,7 +1356,7 @@ git commit -m "feat(code-index): add TypeScript parser"
 - Create: `packages/core/tests/code_index/fixtures/go/http_handler.go`
 - Test: `packages/core/tests/code_index/test_go_parser.py`
 
-- [ ] **Step 1: Create the Go fixture file**
+- [x] **Step 1: Create the Go fixture file**
 
 Create `packages/core/tests/code_index/fixtures/go/http_handler.go`:
 
@@ -1389,7 +1389,7 @@ func saveUser(data map[string]interface{}) map[string]interface{} {
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `packages/core/tests/code_index/test_go_parser.py`:
 
@@ -1454,12 +1454,12 @@ class TestGoParserRegistry:
         assert "go" in _PARSER_CLASSES
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_go_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the Go parser**
+- [x] **Step 4: Write the Go parser**
 
 Create `packages/core/src/shannon_core/code_index/parsers/go_parser.py`:
 
@@ -1623,12 +1623,12 @@ class GoParser(BaseParser):
 register_parser("go", GoParser)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_go_parser.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/go_parser.py packages/core/tests/code_index/fixtures/go/ packages/core/tests/code_index/test_go_parser.py
@@ -1644,7 +1644,7 @@ git commit -m "feat(code-index): add Go parser"
 - Create: `packages/core/tests/code_index/fixtures/java/SpringController.java`
 - Test: `packages/core/tests/code_index/test_java_parser.py`
 
-- [ ] **Step 1: Create the Java fixture file**
+- [x] **Step 1: Create the Java fixture file**
 
 Create `packages/core/tests/code_index/fixtures/java/SpringController.java`:
 
@@ -1675,7 +1675,7 @@ public class UserController {
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `packages/core/tests/code_index/test_java_parser.py`:
 
@@ -1736,12 +1736,12 @@ class TestJavaParserRegistry:
         assert "java" in _PARSER_CLASSES
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_java_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the Java parser**
+- [x] **Step 4: Write the Java parser**
 
 Create `packages/core/src/shannon_core/code_index/parsers/java_parser.py`:
 
@@ -1859,12 +1859,12 @@ class JavaParser(BaseParser):
 register_parser("java", JavaParser)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_java_parser.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/java_parser.py packages/core/tests/code_index/fixtures/java/ packages/core/tests/code_index/test_java_parser.py
@@ -1880,7 +1880,7 @@ git commit -m "feat(code-index): add Java parser"
 - Create: `packages/core/tests/code_index/fixtures/php/laravel_routes.php`
 - Test: `packages/core/tests/code_index/test_php_parser.py`
 
-- [ ] **Step 1: Create the PHP fixture file**
+- [x] **Step 1: Create the PHP fixture file**
 
 Create `packages/core/tests/code_index/fixtures/php/laravel_routes.php`:
 
@@ -1917,7 +1917,7 @@ class OrderController {
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `packages/core/tests/code_index/test_php_parser.py`:
 
@@ -1994,12 +1994,12 @@ class TestPhpParserRegistry:
         assert "php" in _PARSER_CLASSES
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest packages/core/tests/code_index/test_php_parser.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the PHP parser**
+- [x] **Step 4: Write the PHP parser**
 
 Create `packages/core/src/shannon_core/code_index/parsers/php_parser.py`:
 
@@ -2176,12 +2176,12 @@ class PhpParser(BaseParser):
 register_parser("php", PhpParser)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_php_parser.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/parsers/php_parser.py packages/core/tests/code_index/fixtures/php/ packages/core/tests/code_index/test_php_parser.py
@@ -2196,7 +2196,7 @@ git commit -m "feat(code-index): add PHP parser"
 - Create: `packages/core/src/shannon_core/code_index/entry_points.py`
 - Test: `packages/core/tests/code_index/test_entry_points.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/code_index/test_entry_points.py`:
 
@@ -2425,12 +2425,12 @@ class TestUnknownLanguage:
         assert len(eps) == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_entry_points.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write the entry point detection module**
+- [x] **Step 3: Write the entry point detection module**
 
 Create `packages/core/src/shannon_core/code_index/entry_points.py`:
 
@@ -2689,12 +2689,12 @@ def _detect_php(blocks: list[FuncBlock]) -> list[EntryPoint]:
     return entry_points
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_entry_points.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/entry_points.py packages/core/tests/code_index/test_entry_points.py
@@ -2709,7 +2709,7 @@ git commit -m "feat(code-index): add per-language entry point detection rules"
 - Create: `packages/core/src/shannon_core/code_index/call_graph.py`
 - Test: `packages/core/tests/code_index/test_call_graph.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/code_index/test_call_graph.py`:
 
@@ -2832,12 +2832,12 @@ class TestBuildCallChains:
         assert chains[0].depth == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_call_graph.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write the call graph builder**
+- [x] **Step 3: Write the call graph builder**
 
 Create `packages/core/src/shannon_core/code_index/call_graph.py`:
 
@@ -2952,12 +2952,12 @@ def build_call_chains(
     return chains
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_call_graph.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/call_graph.py packages/core/tests/code_index/test_call_graph.py
@@ -2972,7 +2972,7 @@ git commit -m "feat(code-index): add BFS call graph construction with cycle dete
 - Create: `packages/core/src/shannon_core/code_index/summary.py`
 - Test: `packages/core/tests/code_index/test_summary.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/core/tests/code_index/test_summary.py`:
 
@@ -3107,12 +3107,12 @@ class TestGenerateSummary:
         assert len(summary) > 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_summary.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Write the summary generator**
+- [x] **Step 3: Write the summary generator**
 
 Create `packages/core/src/shannon_core/code_index/summary.py`:
 
@@ -3201,12 +3201,12 @@ def _find_block(index: CodeIndex, block_id: str):
     return None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_summary.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/summary.py packages/core/tests/code_index/test_summary.py
@@ -3221,7 +3221,7 @@ git commit -m "feat(code-index): add code index summary generator"
 - Modify: `packages/core/src/shannon_core/code_index/__init__.py`
 - Test: `packages/core/tests/code_index/test_build_code_index.py`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 Create `packages/core/tests/code_index/test_build_code_index.py`:
 
@@ -3320,12 +3320,12 @@ class TestWriteIndexFiles:
         assert "Entry Points" in content
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest packages/core/tests/code_index/test_build_code_index.py -v`
 Expected: FAIL — `ImportError`
 
-- [ ] **Step 3: Write the public API**
+- [x] **Step 3: Write the public API**
 
 Replace `packages/core/src/shannon_core/code_index/__init__.py`:
 
@@ -3448,17 +3448,17 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     return json_path, summary_path
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest packages/core/tests/code_index/test_build_code_index.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Run the full code_index test suite**
+- [x] **Step 5: Run the full code_index test suite**
 
 Run: `python -m pytest packages/core/tests/code_index/ -v`
 Expected: All tests PASS across all test files
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/__init__.py packages/core/tests/code_index/test_build_code_index.py
@@ -3476,7 +3476,7 @@ git commit -m "feat(code-index): add public build_code_index() API and write_ind
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
 - Modify: `packages/whitebox/src/shannon_whitebox/worker.py`
 
-- [ ] **Step 1: Add CODE_INDEX to DeliverableType**
+- [x] **Step 1: Add CODE_INDEX to DeliverableType**
 
 In `packages/core/src/shannon_core/models/deliverables.py`, add to the `DeliverableType` enum after `REPORT`:
 
@@ -3529,7 +3529,7 @@ DELIVERABLE_FILENAMES: dict[DeliverableType, str] = {
 }
 ```
 
-- [ ] **Step 2: Add code_index_stats to PipelineState**
+- [x] **Step 2: Add code_index_stats to PipelineState**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`, add a `code_index_stats` field to `PipelineState`:
 
@@ -3544,7 +3544,7 @@ class PipelineState:
     code_index_stats: dict | None = None
 ```
 
-- [ ] **Step 3: Add run_code_index activity**
+- [x] **Step 3: Add run_code_index activity**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`, add the new activity function after `run_auth_validation`:
 
@@ -3570,7 +3570,7 @@ Also add the import at the top of the file (the existing imports from `shannon_c
 
 No additional imports needed — the activity uses inline imports as shown.
 
-- [ ] **Step 4: Update workflow to insert CODE_INDEX before PRE_RECON**
+- [x] **Step 4: Update workflow to insert CODE_INDEX before PRE_RECON**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, insert the CODE_INDEX activity after the auth validation step and before the code path deny rules block. The new block goes between the auth validation activity call and the `if input.config_path:` block.
 
@@ -3585,7 +3585,7 @@ Insert after line 62 (after `run_auth_validation`) and before line 64 (`if input
         self._state.code_index_stats = code_index_result
 ```
 
-- [ ] **Step 5: Register the new activity in worker.py**
+- [x] **Step 5: Register the new activity in worker.py**
 
 In `packages/whitebox/src/shannon_whitebox/worker.py`, update the import line and the activities list:
 
@@ -3603,12 +3603,12 @@ And in the `Worker(...)` call, update the `activities` list:
 activities=[run_preflight, run_agent, run_vuln_agent, run_code_index],
 ```
 
-- [ ] **Step 6: Verify existing tests still pass**
+- [x] **Step 6: Verify existing tests still pass**
 
 Run: `python -m pytest packages/core/tests/ -v --tb=short`
 Expected: All existing tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/deliverables.py packages/whitebox/src/shannon_whitebox/pipeline/shared.py packages/whitebox/src/shannon_whitebox/pipeline/activities.py packages/whitebox/src/shannon_whitebox/pipeline/workflows.py packages/whitebox/src/shannon_whitebox/worker.py
@@ -3622,7 +3622,7 @@ git commit -m "feat(whitebox): integrate code index activity into pipeline befor
 **Files:**
 - Modify: `prompts/pre-recon-code.txt`
 
-- [ ] **Step 1: Update the <starting_context> section in the PRE-RECON prompt**
+- [x] **Step 1: Update the <starting_context> section in the PRE-RECON prompt**
 
 In `prompts/pre-recon-code.txt`, replace the `<starting_context>` block (lines 80–87) with:
 
@@ -3640,12 +3640,12 @@ In `prompts/pre-recon-code.txt`, replace the `<starting_context>` block (lines 8
 </starting_context>
 ```
 
-- [ ] **Step 2: Verify the prompt file is valid**
+- [x] **Step 2: Verify the prompt file is valid**
 
 Run: `head -90 prompts/pre-recon-code.txt | tail -15`
 Expected: Shows the updated `<starting_context>` block with code_index references
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/pre-recon-code.txt
@@ -3659,17 +3659,17 @@ git commit -m "feat(prompts): update PRE-RECON starting_context to reference cod
 **Files:**
 - No new files — verification only
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite**
 
 Run: `python -m pytest packages/core/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 2: Run the code_index test suite specifically**
+- [x] **Step 2: Run the code_index test suite specifically**
 
 Run: `python -m pytest packages/core/tests/code_index/ -v`
 Expected: All code_index tests PASS
 
-- [ ] **Step 3: Verify import chain works end-to-end**
+- [x] **Step 3: Verify import chain works end-to-end**
 
 Run:
 ```bash
@@ -3683,7 +3683,7 @@ print('write_index_files:', write_index_files)
 ```
 Expected: Prints available languages (python, typescript, go, java, php) and function references
 
-- [ ] **Step 4: Verify the whitebox pipeline imports**
+- [x] **Step 4: Verify the whitebox pipeline imports**
 
 Run:
 ```bash
@@ -3697,7 +3697,7 @@ print('run_code_index:', run_code_index)
 ```
 Expected: Prints `None` and the activity function reference
 
-- [ ] **Step 5: Run existing whitebox tests**
+- [x] **Step 5: Run existing whitebox tests**
 
 Run: `python -m pytest packages/whitebox/tests/ -v`
 Expected: All existing tests PASS (no regressions)
@@ -3709,7 +3709,7 @@ Expected: All existing tests PASS (no regressions)
 **Files:**
 - Create: `packages/core/tests/code_index/test_workflow_integration.py`
 
-- [ ] **Step 1: Write the workflow integration test**
+- [x] **Step 1: Write the workflow integration test**
 
 Create `packages/core/tests/code_index/test_workflow_integration.py`:
 

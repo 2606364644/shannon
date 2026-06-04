@@ -1,6 +1,6 @@
 # Report Generation Gap Fix Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix five gaps in shannon-py report generation to align with original /root/shannon capabilities, ensuring whitebox-only scans produce non-empty reports and adding extensible output support.
 
@@ -352,12 +352,12 @@ async def test_render_findings_with_confidence_filter(tmp_path):
     assert "INJECTION-001" not in findings
 ```
 
-- [ ] **Step 1.2: Run tests to verify they fail**
+- [x] **Step 1.2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_findings_renderer.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'shannon_core.services.findings_renderer'`
 
-- [ ] **Step 1.3: Write FindingsRenderer implementation**
+- [x] **Step 1.3: Write FindingsRenderer implementation**
 
 Create `packages/core/src/shannon_core/services/findings_renderer.py`:
 
@@ -622,12 +622,12 @@ class FindingsRenderer:
             await async_write_file(findings_path, "\n".join(sections))
 ```
 
-- [ ] **Step 1.4: Run tests to verify they pass**
+- [x] **Step 1.4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_findings_renderer.py -v`
 Expected: All 12 tests PASS
 
-- [ ] **Step 1.5: Commit**
+- [x] **Step 1.5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/findings_renderer.py packages/core/tests/test_findings_renderer.py
@@ -643,7 +643,7 @@ git commit -m "feat: add deterministic FindingsRenderer service for JSON-to-Mark
 - Create: `packages/core/src/shannon_core/interfaces/report_output_provider.py`
 - Create: `packages/core/tests/test_report_output_provider.py`
 
-- [ ] **Step 2.1: Write the failing test**
+- [x] **Step 2.1: Write the failing test**
 
 Create `packages/core/tests/test_report_output_provider.py`:
 
@@ -684,12 +684,12 @@ async def test_custom_provider_can_be_implemented(tmp_path: Path):
     assert result["output_path"] == str(tmp_path / "report.md")
 ```
 
-- [ ] **Step 2.2: Run tests to verify they fail**
+- [x] **Step 2.2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_report_output_provider.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'shannon_core.interfaces'`
 
-- [ ] **Step 2.3: Write the interface and NoOp implementation**
+- [x] **Step 2.3: Write the interface and NoOp implementation**
 
 Create `packages/core/src/shannon_core/interfaces/__init__.py`:
 
@@ -714,12 +714,12 @@ class NoOpReportOutputProvider(ReportOutputProvider):
         return {"output_path": None}
 ```
 
-- [ ] **Step 2.4: Run tests to verify they pass**
+- [x] **Step 2.4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_report_output_provider.py -v`
 Expected: All 4 tests PASS
 
-- [ ] **Step 2.5: Commit**
+- [x] **Step 2.5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/interfaces/__init__.py packages/core/src/shannon_core/interfaces/report_output_provider.py packages/core/tests/test_report_output_provider.py
@@ -734,7 +734,7 @@ git commit -m "feat: add ReportOutputProvider extensibility interface with NoOp 
 - Modify: `packages/blackbox/src/shannon_blackbox/services/report_assembler.py`
 - Modify: `packages/blackbox/tests/test_report_assembler.py`
 
-- [ ] **Step 3.1: Write the failing tests for three-priority fallback**
+- [x] **Step 3.1: Write the failing tests for three-priority fallback**
 
 Add these tests to the end of `packages/blackbox/tests/test_report_assembler.py`:
 
@@ -779,12 +779,12 @@ async def test_assemble_priority_findings_over_analysis(tmp_path):
     assert "Analysis" not in content
 ```
 
-- [ ] **Step 3.2: Run tests to verify they fail**
+- [x] **Step 3.2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_report_assembler.py::test_assemble_falls_back_to_analysis_deliverable packages/blackbox/tests/test_report_assembler.py::test_assemble_priority_evidence_over_analysis packages/blackbox/tests/test_report_assembler.py::test_assemble_priority_findings_over_analysis -v`
 Expected: FAIL — `assert "Injection Analysis" in content` (the `_analysis_deliverable.md` file is not checked)
 
-- [ ] **Step 3.3: Implement three-priority fallback in ReportAssembler**
+- [x] **Step 3.3: Implement three-priority fallback in ReportAssembler**
 
 Replace the contents of `packages/blackbox/src/shannon_blackbox/services/report_assembler.py` with:
 
@@ -869,12 +869,12 @@ class ReportAssembler:
             await async_write_file(report_path, "\n".join(new_lines))
 ```
 
-- [ ] **Step 3.4: Run tests to verify they pass**
+- [x] **Step 3.4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_report_assembler.py -v`
 Expected: All 8 tests PASS (5 existing + 3 new)
 
-- [ ] **Step 3.5: Write the failing tests for model injection**
+- [x] **Step 3.5: Write the failing tests for model injection**
 
 Add `import json` to the top of `packages/blackbox/tests/test_report_assembler.py` (after the existing `import pytest`), then add these tests to the end of the file:
 
@@ -967,12 +967,12 @@ async def test_inject_model_info_skips_when_no_report(tmp_path):
     assert not report_path.exists()
 ```
 
-- [ ] **Step 3.6: Run tests to verify they pass**
+- [x] **Step 3.6: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_report_assembler.py -v`
 Expected: All 14 tests PASS (8 previous + 6 new)
 
-- [ ] **Step 3.7: Commit**
+- [x] **Step 3.7: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/services/report_assembler.py packages/blackbox/tests/test_report_assembler.py
@@ -987,7 +987,7 @@ git commit -m "fix: add three-priority fallback and model injection to ReportAss
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
 - Modify: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
 
-- [ ] **Step 4.1: Write the failing test for render_findings activity**
+- [x] **Step 4.1: Write the failing test for render_findings activity**
 
 Add to `packages/whitebox/tests/test_pipeline_shared.py` (or create `packages/whitebox/tests/test_findings_activity.py` if the shared test file is not suitable):
 
@@ -1030,12 +1030,12 @@ async def test_render_findings_activity_generates_findings(tmp_path):
     assert "**Sink Call:** db.execute" in content
 ```
 
-- [ ] **Step 4.2: Run test to verify it passes (FindingsRenderer already exists)**
+- [x] **Step 4.2: Run test to verify it passes (FindingsRenderer already exists)**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/test_findings_activity.py -v`
 Expected: PASS (1 test)
 
-- [ ] **Step 4.3: Add render_findings activity to whitebox activities**
+- [x] **Step 4.3: Add render_findings activity to whitebox activities**
 
 Add to end of `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`, before the last function or at the end of the file:
 
@@ -1060,7 +1060,7 @@ async def render_findings(input: ActivityInput) -> None:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 ```
 
-- [ ] **Step 4.4: Wire render_findings into whitebox workflow**
+- [x] **Step 4.4: Wire render_findings into whitebox workflow**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, add the `render_findings` activity call after the vuln agents section and before `self._state.status = "completed"`.
 
@@ -1105,12 +1105,12 @@ Replace with:
             return self._state
 ```
 
-- [ ] **Step 4.5: Run whitebox tests to verify nothing is broken**
+- [x] **Step 4.5: Run whitebox tests to verify nothing is broken**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 4.6: Commit**
+- [x] **Step 4.6: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/activities.py packages/whitebox/src/shannon_whitebox/pipeline/workflows.py packages/whitebox/tests/test_findings_activity.py
@@ -1125,7 +1125,7 @@ git commit -m "feat: wire FindingsRenderer into whitebox workflow after vuln age
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
 
-- [ ] **Step 5.1: Write the failing test for finalize_report activity**
+- [x] **Step 5.1: Write the failing test for finalize_report activity**
 
 Create `packages/blackbox/tests/test_finalize_report.py`:
 
@@ -1197,12 +1197,12 @@ async def test_noop_output_provider(tmp_path):
     assert result["output_path"] is None
 ```
 
-- [ ] **Step 5.2: Run tests to verify they pass (using existing implementations)**
+- [x] **Step 5.2: Run tests to verify they pass (using existing implementations)**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/test_finalize_report.py -v`
 Expected: All 3 tests PASS
 
-- [ ] **Step 5.3: Update assemble_report activity in blackbox activities**
+- [x] **Step 5.3: Update assemble_report activity in blackbox activities**
 
 Replace the `assemble_report` activity function in `packages/blackbox/src/shannon_blackbox/pipeline/activities.py` (lines 156-171) with:
 
@@ -1262,7 +1262,7 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
 
 Note: `Path` import is already at the top of the file (line 1).
 
-- [ ] **Step 5.4: Wire finalize_report into blackbox workflow**
+- [x] **Step 5.4: Wire finalize_report into blackbox workflow**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`, add the `finalize_report` activity call after the report agent and before `self._state.status = "completed"`.
 
@@ -1303,12 +1303,12 @@ Replace with:
             return self._state
 ```
 
-- [ ] **Step 5.5: Run blackbox tests to verify nothing is broken**
+- [x] **Step 5.5: Run blackbox tests to verify nothing is broken**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/ -v`
 Expected: All tests PASS
 
-- [ ] **Step 5.6: Commit**
+- [x] **Step 5.6: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/activities.py packages/blackbox/src/shannon_blackbox/pipeline/workflows.py packages/blackbox/tests/test_finalize_report.py
@@ -1322,7 +1322,7 @@ git commit -m "feat: wire FindingsRenderer, model injection, and output provider
 **Files:**
 - Modify: `packages/core/src/shannon_core/services/__init__.py`
 
-- [ ] **Step 6.1: Update services __init__.py to export FindingsRenderer**
+- [x] **Step 6.1: Update services __init__.py to export FindingsRenderer**
 
 Add the FindingsRenderer export to `packages/core/src/shannon_core/services/__init__.py`. The current file exports from `temporal_infra` and `validate_authentication`. Add after the existing imports:
 
@@ -1352,12 +1352,12 @@ from shannon_core.services.validate_authentication import (
 from shannon_core.services.findings_renderer import FindingsRenderer
 ```
 
-- [ ] **Step 6.2: Run the full test suite**
+- [x] **Step 6.2: Run the full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ packages/blackbox/tests/ packages/whitebox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 6.3: Commit**
+- [x] **Step 6.3: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/__init__.py
