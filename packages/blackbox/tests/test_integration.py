@@ -35,7 +35,7 @@ def prompts_dir(tmp_path):
     prompts = tmp_path / "prompts"
     prompts.mkdir()
     (prompts / "recon-blackbox.txt").write_text("Recon {{WEB_URL}}")
-    for vt in ["injection", "xss", "auth", "ssrf", "authz"]:
+    for vt in ["injection", "xss", "auth", "ssrf", "authz", "misconfig"]:
         (prompts / f"{vt}-exploit.txt").write_text(f"Exploit {vt} {{{{VULNERABILITY_ENTRIES}}}}")
     (prompts / "report-executive.txt").write_text("Report")
     return prompts
@@ -103,6 +103,7 @@ async def test_full_blackbox_pipeline_continuation(mock_repo, prompts_dir):
              "source_endpoint": "/api/search"},
         ]}
         (deliverables / f"{vt}_exploitation_queue.json").write_text(json.dumps(queue_data))
+        (deliverables / f"{vt}_analysis_deliverable.md").write_text(f"# {vt} analysis")
 
     for vt in ["xss", "auth", "ssrf", "authz"]:
         (deliverables / f"{vt}_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": []}))

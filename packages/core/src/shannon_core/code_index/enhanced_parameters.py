@@ -79,41 +79,35 @@ def _parse_python_params(func_node, source: bytes) -> list[TypedParameter]:
         if child.type == "identifier":
             params.append(TypedParameter(name=child.text.decode()))
         elif child.type == "typed_parameter":
-            # typed_parameter children: identifier (name), ':', type
-            name = None
-            type_ann = None
-            for sub in child.children:
-                if sub.type == "identifier":
-                    name = sub.text.decode()
-                elif sub.type == "type":
-                    type_ann = sub.text.decode()
+            # typed_parameter: identifier (name, not a field), ':', type (field)
+            name_node = child.children[0] if child.children else None
+            type_node = child.child_by_field_name("type")
+            name = name_node.text.decode() if name_node else "?"
+            type_ann = type_node.text.decode() if type_node else None
             params.append(TypedParameter(
-                name=name or "?",
+                name=name,
                 type_annotation=type_ann,
             ))
         elif child.type == "default_parameter":
-            # default_parameter children: identifier, '=', value
-            name = None
-            default_text = _extract_default_value(child, source)
-            for sub in child.children:
-                if sub.type == "identifier":
-                    name = sub.text.decode()
+            # default_parameter: name (field), '=', value (field)
+            name_node = child.child_by_field_name("name")
+            value_node = child.child_by_field_name("value")
+            name = name_node.text.decode() if name_node else "?"
+            default_text = value_node.text.decode() if value_node else None
             params.append(TypedParameter(
-                name=name or "?",
+                name=name,
                 default_value=default_text,
             ))
         elif child.type == "typed_default_parameter":
-            # typed_default_parameter: identifier, ':', type, '=', value
-            name = None
-            type_ann = None
-            default_text = _extract_default_value(child, source)
-            for sub in child.children:
-                if sub.type == "identifier":
-                    name = sub.text.decode()
-                elif sub.type == "type":
-                    type_ann = sub.text.decode()
+            # typed_default_parameter: name (field), ':', type (field), '=', value (field)
+            name_node = child.child_by_field_name("name")
+            type_node = child.child_by_field_name("type")
+            value_node = child.child_by_field_name("value")
+            name = name_node.text.decode() if name_node else "?"
+            type_ann = type_node.text.decode() if type_node else None
+            default_text = value_node.text.decode() if value_node else None
             params.append(TypedParameter(
-                name=name or "?",
+                name=name,
                 type_annotation=type_ann,
                 default_value=default_text,
             ))
@@ -132,19 +126,6 @@ def _parse_python_params(func_node, source: bytes) -> list[TypedParameter]:
                         is_keyword_variadic=True,
                     ))
     return params
-
-
-def _extract_default_value(node, source: bytes) -> str | None:
-    """Extract the default value from a default_parameter node."""
-    # The default value is after the '=' token
-    found_eq = False
-    for child in node.children:
-        if child.type == "=":
-            found_eq = True
-            continue
-        if found_eq:
-            return child.text.decode()
-    return None
 
 
 def _extract_typescript(

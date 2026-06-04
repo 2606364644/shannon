@@ -1,6 +1,6 @@
 # Plan C: Tiered Per-Chain Audit Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the flat parallel vuln-agent-per-type Phase 3 with a risk-scored, tiered per-chain audit system that allocates LLM budget proportionally to chain danger, produces structured validated findings, and generates coverage metrics.
 
@@ -54,7 +54,7 @@
 
 Scores each CallChain across 4 dimensions and assigns a tier level.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_risk_scorer.py`:
 
@@ -234,12 +234,12 @@ class TestAuditBudget:
         assert est == 85
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_risk_scorer.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement risk_scorer.py**
+- [x] **Step 3: Implement risk_scorer.py**
 
 Create `packages/core/src/shannon_core/code_index/risk_scorer.py`:
 
@@ -376,12 +376,12 @@ class AuditBudget(BaseModel):
         return t3 + t2 + t1
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_risk_scorer.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/risk_scorer.py packages/core/tests/code_index/test_risk_scorer.py
@@ -402,7 +402,7 @@ AuditBudget caps LLM calls at 200 with per-tier chain limits."
 
 VulnFinding model, category/issue_type whitelists, structured output validation, and 5-tuple deduplication.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_finding_models.py`:
 
@@ -601,12 +601,12 @@ class TestDeduplicateFindings:
         assert result[0].confidence == 0.9  # Keeps first occurrence
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_finding_models.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement finding_models.py**
+- [x] **Step 3: Implement finding_models.py**
 
 Create `packages/core/src/shannon_core/code_index/finding_models.py`:
 
@@ -770,12 +770,12 @@ def deduplicate_findings(findings: list[VulnFinding]) -> list[VulnFinding]:
     return unique
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_finding_models.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/finding_models.py packages/core/tests/code_index/test_finding_models.py
@@ -796,7 +796,7 @@ deduplicate_findings() uses 5-tuple key for dedup."
 
 Audit tier distribution statistics and coverage metrics for each phase.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_coverage_report.py`:
 
@@ -897,12 +897,12 @@ class TestCoverageReport:
         assert restored.phase0.total_source_files == 50
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_coverage_report.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement coverage_report.py**
+- [x] **Step 3: Implement coverage_report.py**
 
 Create `packages/core/src/shannon_core/code_index/coverage_report.py`:
 
@@ -1017,12 +1017,12 @@ class CoverageReport(BaseModel):
         return self.model_dump_json(indent=indent)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_coverage_report.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/coverage_report.py packages/core/tests/code_index/test_coverage_report.py
@@ -1044,7 +1044,7 @@ CoverageReport combines all phases with JSON serialization."
 
 Builds the structured input for each audit agent from call chain data: complete source code per function, taint flow summary, and sink location.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_audit_input_builder.py`:
 
@@ -1161,12 +1161,12 @@ class TestFormatTaintFlowSummary:
         assert summary == "No taint flow data available for this chain."
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_audit_input_builder.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement audit_input_builder.py**
+- [x] **Step 3: Implement audit_input_builder.py**
 
 Create `packages/core/src/shannon_core/code_index/audit_input_builder.py`:
 
@@ -1298,12 +1298,12 @@ def format_taint_flow_summary(flows: list[TaintFlow]) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_audit_input_builder.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/audit_input_builder.py packages/core/tests/code_index/test_audit_input_builder.py
@@ -1324,7 +1324,7 @@ Includes source code, taint flow summary, and sink locations."
 
 The core orchestrator that scores chains, assigns tiers, and coordinates the audit within budget limits.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/core/tests/code_index/test_tiered_audit.py`:
 
@@ -1496,12 +1496,12 @@ class TestAuditPlan:
         assert "total_chains" in json_str
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_tiered_audit.py -v`
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement tiered_audit.py**
+- [x] **Step 3: Implement tiered_audit.py**
 
 Create `packages/core/src/shannon_core/code_index/tiered_audit.py`:
 
@@ -1636,12 +1636,12 @@ class TieredAuditPlanner:
         )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/code_index/test_tiered_audit.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/tiered_audit.py packages/core/tests/code_index/test_tiered_audit.py
@@ -1661,7 +1661,7 @@ Trims Tier 1 chains first when over budget."
 
 The prompt for the Tier 1 all-in-one combined scan agent. Scans a single call chain for all vulnerability types at a high level.
 
-- [ ] **Step 1: Write the prompt file**
+- [x] **Step 1: Write the prompt file**
 
 Create `prompts/audit-tier1.txt`:
 
@@ -1762,12 +1762,12 @@ Output STRICT JSON — no markdown, no code fences, no explanation outside the J
 </critical>
 ```
 
-- [ ] **Step 2: Verify file exists**
+- [x] **Step 2: Verify file exists**
 
 Run: `wc -l /root/shannon-py/prompts/audit-tier1.txt`
 Expected: File exists with ~100+ lines
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/audit-tier1.txt
@@ -1787,7 +1787,7 @@ with category whitelists and confidence thresholds."
 
 Add a new AgentName for the Tier 1 combined audit agent and update the phase map.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Add to `packages/core/tests/test_agents.py`:
 
@@ -1801,12 +1801,12 @@ def test_audit_tier1_agent_registered():
     assert agent.model_tier == "small"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_agents.py -k "audit_tier1" -v`
 Expected: FAIL — AUDIT_TIER1 not found
 
-- [ ] **Step 3: Add AUDIT_TIER1 to agents.py**
+- [x] **Step 3: Add AUDIT_TIER1 to agents.py**
 
 In `packages/core/src/shannon_core/models/agents.py`, add to the `AgentName` enum (after `MISCONFIG_EXPLOIT`):
 
@@ -1833,17 +1833,17 @@ Add to `AGENT_PHASE_MAP`:
     "audit-tier1": "vulnerability-analysis",
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_agents.py -k "audit_tier1" -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full agents test suite**
+- [x] **Step 5: Run full agents test suite**
 
 Run: `cd /root/shannon-py && uv run pytest packages/core/tests/test_agents.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/agents.py packages/core/tests/test_agents.py
@@ -1862,11 +1862,11 @@ Registered in vulnerability-analysis phase."
 
 Add Phase 0 coverage data section to the Pre-Recon prompt so the agent knows what the deterministic indexer found.
 
-- [ ] **Step 1: Identify insertion point**
+- [x] **Step 1: Identify insertion point**
 
 Read the end of `prompts/pre-recon-code.txt` to find where to append the coverage data section. The section should be added before the output format section.
 
-- [ ] **Step 2: Add Phase 0 coverage data section**
+- [x] **Step 2: Add Phase 0 coverage data section**
 
 Append the following block to `prompts/pre-recon-code.txt`, just before the `<output_format>` tag:
 
@@ -1897,7 +1897,7 @@ Use this data to cross-reference your findings. If Phase 0 detected entry points
 </phase0_data>
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/pre-recon-code.txt
@@ -1917,7 +1917,7 @@ entry points, chain statistics, file coverage, and degradation status."
 
 Add parameter propagation data section and "No Security Judgments" rule to recon prompts. Expand recon-static.txt to include guards directory and privilege lattice sections.
 
-- [ ] **Step 1: Add parameter propagation data to recon.txt**
+- [x] **Step 1: Add parameter propagation data to recon.txt**
 
 Find the section in `prompts/recon.txt` that describes the input data (it reads `pre_recon_deliverable.md`). Add the following block after the input data section:
 
@@ -1947,7 +1947,7 @@ Report the FACTS. Let the downstream vulnerability analysis agents make the secu
 </no_security_judgments>
 ```
 
-- [ ] **Step 2: Expand recon-static.txt to 9-chapter structure**
+- [x] **Step 2: Expand recon-static.txt to 9-chapter structure**
 
 The current `recon-static.txt` has 7 sections. Add the missing sections after Section 6 (Security-Relevant File Paths):
 
@@ -1999,7 +1999,7 @@ Focus on:
 - Endpoints that perform different actions based on user context but don't verify the context
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prompts/recon.txt prompts/recon-static.txt
@@ -2021,7 +2021,7 @@ Privilege Lattice, Authorization Vulnerability Candidates."
 
 Integrate the tiered audit into the whitebox scan workflow. The key change: Phase 3 now scores chains first, then dispatches per-chain instead of per-vuln-type.
 
-- [ ] **Step 1: Add risk scoring activity to activities.py**
+- [x] **Step 1: Add risk scoring activity to activities.py**
 
 Add the following activity to `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`:
 
@@ -2091,7 +2091,7 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 ```
 
-- [ ] **Step 2: Add tiered audit fields to PipelineState**
+- [x] **Step 2: Add tiered audit fields to PipelineState**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`, add to the `PipelineState` dataclass:
 
@@ -2099,7 +2099,7 @@ In `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`, add to the `Pipe
     audit_plan_stats: dict | None = None
 ```
 
-- [ ] **Step 3: Modify workflow to add risk scoring before vuln analysis**
+- [x] **Step 3: Modify workflow to add risk scoring before vuln analysis**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, after the Recon agent block (around line 115) and before the vuln_tasks block (around line 117), insert:
 
@@ -2112,12 +2112,12 @@ In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`, after the Rec
             self._state.audit_plan_stats = risk_result
 ```
 
-- [ ] **Step 4: Run whitebox tests**
+- [x] **Step 4: Run whitebox tests**
 
 Run: `cd /root/shannon-py && uv run pytest packages/whitebox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/whitebox/src/shannon_whitebox/pipeline/activities.py packages/whitebox/src/shannon_whitebox/pipeline/workflows.py packages/whitebox/src/shannon_whitebox/pipeline/shared.py
