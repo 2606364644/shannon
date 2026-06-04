@@ -145,6 +145,8 @@ For each pending item in your todo list (managed via TodoWrite tool), trace the 
 
 - **Path Forking:** If a variable at a sink can be populated from multiple code paths (e.g., from different branches of an `if/else` statement), you must trace **every path** backward independently. Each unique route is a separate "Data Flow Path" to be analyzed.
 
+@include(shared/_cross-route-enumeration.txt)
+
 - **Track Mutations:** As you trace backward, note any string concatenations or other mutations. A mutation that occurs **before** an encoder is applied (i.e., closer to the sink) can invalidate that encoding, preventing early termination.
 
 ### **3) The Database Read Checkpoint (Handling Stored XSS)**
@@ -287,6 +289,8 @@ COMPLETION REQUIREMENTS (ALL must be satisfied):
      **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.
+
+3. Cross-Route Verification: For every vulnerability finding, confirm that `affected_routes` lists all routes sharing the same handler per Section 4.1 of the recon deliverable. Findings missing `affected_routes` or `authentication_required` are INCOMPLETE. Findings with `authentication_required: false` MUST have a corresponding pre-auth route in `affected_routes`.
 
 ONLY AFTER both systematic analysis AND successful deliverable generation, announce "XSS ANALYSIS COMPLETE" and stop.
 
