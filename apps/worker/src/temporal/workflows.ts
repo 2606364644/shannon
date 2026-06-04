@@ -48,6 +48,7 @@ import {
 } from './shared.js';
 import { toWorkflowSummary } from './summary-mapper.js';
 import { classifyErrorCode, formatWorkflowError } from './workflow-errors.js';
+import { buildAttackChainsActivity } from './activities.js';
 
 /** Agents this run is expected to produce — drives the resume short-circuit. */
 function computeExpectedAgents(vulnClasses: readonly VulnClass[], exploit: boolean): string[] {
@@ -551,6 +552,16 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
     state.currentPhase = 'exploitation';
     state.currentAgent = null;
     await a.logPhaseTransition(activityInput, 'vulnerability-exploitation', 'complete');
+
+    // === Phase: Attack Chain Assembly ===
+    // Runs after all vuln/exploit agents complete, before reporting.
+    // Non-fatal — attack chains enhance the report but don't block the pipeline.
+    try {
+      await buildAttackChainsActivity(activityInput);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.warn(`Attack chain assembly failed: ${errMsg}`);
+    }
 
     // === Phase 5: Reporting ===
     if (!shouldSkip('report')) {
