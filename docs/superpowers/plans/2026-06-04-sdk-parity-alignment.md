@@ -1,6 +1,6 @@
 # SDK Parity Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Align shannon-py's claude-agent-sdk usage with the original TS project across 4 areas: env var passthrough, message stream processing, tool call auditing, and spending cap detection.
 
@@ -29,7 +29,7 @@
 - Create: `packages/core/src/shannon_core/agents/tool_audit_logger.py`
 - Test: `packages/core/tests/agents/test_tool_audit_logger.py`
 
-- [ ] **Step 1: Write the failing test for NullToolAuditLogger**
+- [x] **Step 1: Write the failing test for NullToolAuditLogger**
 
 ```python
 """Tests for tool_audit_logger module."""
@@ -74,12 +74,12 @@ class TestNullToolAuditLogger:
         await logger.log_error("something broke", turn_count=3, duration_ms=500)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_tool_audit_logger.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.agents.tool_audit_logger'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `packages/core/src/shannon_core/agents/tool_audit_logger.py`:
 
@@ -123,12 +123,12 @@ class NullToolAuditLogger(ToolAuditLogger):
         pass
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/core/tests/agents/test_tool_audit_logger.py -v`
 Expected: PASS — all 5 tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/tool_audit_logger.py packages/core/tests/agents/test_tool_audit_logger.py
@@ -143,7 +143,7 @@ git commit -m "feat: add ToolAuditLogger ABC and NullToolAuditLogger"
 - Modify: `packages/core/src/shannon_core/agents/tool_audit_logger.py`
 - Modify: `packages/core/tests/agents/test_tool_audit_logger.py`
 
-- [ ] **Step 1: Write the failing test for ActivityToolAuditLogger**
+- [x] **Step 1: Write the failing test for ActivityToolAuditLogger**
 
 Append to `packages/core/tests/agents/test_tool_audit_logger.py`:
 
@@ -229,12 +229,12 @@ from shannon_core.logging.activity_logger import ActivityLogger
 
 Remove the now-duplicate imports from the test class bodies.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_tool_audit_logger.py::TestActivityToolAuditLogger -v`
 Expected: FAIL — `ImportError: cannot import name 'ActivityToolAuditLogger'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append `ActivityToolAuditLogger` to `packages/core/src/shannon_core/agents/tool_audit_logger.py`, adding the import:
 
@@ -290,12 +290,12 @@ class ActivityToolAuditLogger(ToolAuditLogger):
         self._logger.error("agent_error", error=error, turn_count=turn_count, duration_ms=duration_ms)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/core/tests/agents/test_tool_audit_logger.py -v`
 Expected: PASS — all 10 tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/tool_audit_logger.py packages/core/tests/agents/test_tool_audit_logger.py
@@ -310,7 +310,7 @@ git commit -m "feat: add ActivityToolAuditLogger bridging to ActivityLogger"
 - Create: `packages/core/src/shannon_core/agents/message_dispatcher.py`
 - Create: `packages/core/tests/agents/test_message_dispatcher.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `packages/core/tests/agents/test_message_dispatcher.py`:
 
@@ -540,12 +540,12 @@ class TestSpendingCapPatterns:
         assert "maximum spend" in SPENDING_CAP_PATTERNS
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_message_dispatcher.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'shannon_core.agents.message_dispatcher'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `packages/core/src/shannon_core/agents/message_dispatcher.py`:
 
@@ -646,12 +646,12 @@ class MessageDispatcher:
         return "".join(self.text_parts)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest packages/core/tests/agents/test_message_dispatcher.py -v`
 Expected: PASS — all tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/message_dispatcher.py packages/core/tests/agents/test_message_dispatcher.py
@@ -666,7 +666,7 @@ git commit -m "feat: add MessageDispatcher for SDK stream event processing"
 - Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py`
 - Modify: `packages/core/tests/agents/test_providers.py`
 
-- [ ] **Step 1: Write the failing tests for `_build_sdk_env`**
+- [x] **Step 1: Write the failing tests for `_build_sdk_env`**
 
 Append to `packages/core/tests/agents/test_providers.py`:
 
@@ -825,12 +825,12 @@ class TestBuildSdkEnv:
             assert val != "", f"Empty value for {key}"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py::TestBuildSdkEnv -v`
 Expected: FAIL — `AttributeError: 'AnthropicProvider' object has no attribute '_build_sdk_env'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add `_build_sdk_env` method to `AnthropicProvider` in `packages/core/src/shannon_core/agents/providers_anthropic.py`. Replace lines 82–132 (`_build_options`) with:
 
@@ -918,7 +918,7 @@ Add `_build_sdk_env` method to `AnthropicProvider` in `packages/core/src/shannon
         return options
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py -v`
 Expected: PASS — all tests including new `TestBuildSdkEnv` and existing `TestAnthropicProviderBuildOptions`
@@ -947,7 +947,7 @@ Update `test_no_env_override_with_anthropic_key_only`:
         assert options.env.get("ANTHROPIC_API_KEY") == "sk-ant-test"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers_anthropic.py packages/core/tests/agents/test_providers.py
@@ -962,7 +962,7 @@ git commit -m "feat: replace _build_options env handling with _build_sdk_env pas
 - Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py`
 - Modify: `packages/core/tests/agents/test_providers.py`
 
-- [ ] **Step 1: Write the failing test for dispatcher integration in `_execute_query`**
+- [x] **Step 1: Write the failing test for dispatcher integration in `_execute_query`**
 
 Append to `packages/core/tests/agents/test_providers.py`:
 
@@ -1055,12 +1055,12 @@ class TestExecuteQueryWithDispatcher:
 
 Add `from claude_agent_sdk import ClaudeAgentOptions` to the top-level imports of `test_providers.py` (if not already present).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py::TestExecuteQueryWithDispatcher -v`
 Expected: FAIL — `TypeError: _execute_query() got an unexpected keyword argument 'dispatcher'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Replace `_execute_query` in `packages/core/src/shannon_core/agents/providers_anthropic.py` (lines 139–170) with:
 
@@ -1092,12 +1092,12 @@ Replace `_execute_query` in `packages/core/src/shannon_core/agents/providers_ant
         return final_result
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py -v`
 Expected: PASS — all tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers_anthropic.py packages/core/tests/agents/test_providers.py
@@ -1112,7 +1112,7 @@ git commit -m "feat: wire MessageDispatcher into _execute_query for stream proce
 - Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py`
 - Modify: `packages/core/tests/agents/test_providers.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/core/tests/agents/test_providers.py`:
 
@@ -1164,12 +1164,12 @@ class TestCallWithTurnCount:
         assert result.turns == 3
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py::TestCallWithTurnCount -v`
 Expected: FAIL — `assert 1 == 3` (current `_extract_result` hardcodes `turns = 1`)
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Update `_extract_result` in `packages/core/src/shannon_core/agents/providers_anthropic.py` to accept `turn_count` parameter:
 
@@ -1250,12 +1250,12 @@ Update `call()` to pass `turn_count` from dispatcher:
             return self._handle_error(e, duration, model)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py -v`
 Expected: PASS — all tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers_anthropic.py packages/core/tests/agents/test_providers.py
@@ -1270,7 +1270,7 @@ git commit -m "feat: use dispatcher turn_count in _extract_result and call"
 - Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py`
 - Modify: `packages/core/tests/agents/test_providers.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/core/tests/agents/test_providers.py`:
 
@@ -1455,12 +1455,12 @@ class TestSpendingCapDetection:
         assert result.error is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py::TestSpendingCapDetection -v`
 Expected: FAIL — `AttributeError: 'AnthropicProvider' object has no attribute '_detect_spending_cap_behavior'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add `_detect_spending_cap_behavior` method and update `call()` in `providers_anthropic.py`:
 
@@ -1556,12 +1556,12 @@ Now update `_execute_query` to store dispatcher's spending cap state on the resu
         return final_result
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers.py -v`
 Expected: PASS — all tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/agents/providers_anthropic.py packages/core/tests/agents/test_providers.py
@@ -1575,17 +1575,17 @@ git commit -m "feat: add 3-layer spending cap detection (message, behavioral, ex
 **Files:**
 - None (verification only)
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `uv run pytest packages/core/tests/ -v`
 Expected: All tests PASS, no failures, no errors.
 
-- [ ] **Step 2: Check for any import issues or circular dependencies**
+- [x] **Step 2: Check for any import issues or circular dependencies**
 
 Run: `uv run python -c "from shannon_core.agents.providers_anthropic import AnthropicProvider; from shannon_core.agents.message_dispatcher import MessageDispatcher; from shannon_core.agents.tool_audit_logger import ToolAuditLogger, NullToolAuditLogger, ActivityToolAuditLogger; print('All imports OK')"`
 Expected: `All imports OK`
 
-- [ ] **Step 3: Commit (only if any fixups were needed)**
+- [x] **Step 3: Commit (only if any fixups were needed)**
 
 ```bash
 git add -A
