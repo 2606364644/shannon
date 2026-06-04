@@ -101,12 +101,13 @@ RUN git config --system user.email "agent@localhost" && \
 WORKDIR /app
 
 # Copy only what the worker needs (skip CLI source, infra, tsdown artifacts)
-COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/.npmrc /app/
-COPY --from=builder /app/node_modules /app/node_modules
-COPY --from=builder /app/apps/worker /app/apps/worker
-COPY --from=builder /app/apps/cli/package.json /app/apps/cli/package.json
+COPY --from=builder --chown=pentest:pentest /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/.npmrc /app/
+COPY --from=builder --chown=pentest:pentest /app/node_modules /app/node_modules
+COPY --from=builder --chown=pentest:pentest /app/apps/worker /app/apps/worker
+COPY --from=builder --chown=pentest:pentest /app/apps/cli/package.json /app/apps/cli/package.json
 
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.84 @playwright/cli@0.1.1
+ENV PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=300000
 RUN mkdir -p /tmp/.claude/skills && \
     playwright-cli install --skills && \
     cp -r .claude/skills/playwright-cli /tmp/.claude/skills/ && \
@@ -122,12 +123,13 @@ RUN ln -s /app/apps/worker/dist/scripts/save-deliverable.js /usr/local/bin/save-
 RUN mkdir -p /app/sessions /app/repos /app/workspaces && \
     mkdir -p /tmp/.cache /tmp/.config /tmp/.npm && \
     chmod 777 /app && \
+    chown pentest:pentest /app/sessions /app/repos /app/workspaces && \
     chmod 777 /tmp/.cache && \
     chmod 777 /tmp/.config && \
     chmod 777 /tmp/.npm && \
-    chown -R pentest:pentest /app /tmp/.claude
+    chown -R pentest:pentest /tmp/.claude
 
-COPY entrypoint.sh /app/entrypoint.sh
+COPY --chown=pentest:pentest entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Set environment variables
