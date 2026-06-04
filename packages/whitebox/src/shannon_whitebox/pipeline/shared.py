@@ -26,6 +26,8 @@ class PipelineState:
     start_time: float = 0.0
     errors: list[str] = field(default_factory=list)
     code_index_stats: dict | None = None
+    error_code: str | None = None
+    failed_agents: list[str] = field(default_factory=list)
 
 @dataclass
 class ActivityInput:
