@@ -5,6 +5,7 @@ from pathlib import Path
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
 from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from ..services.exploitation_checker import ExploitationChecker
+    from shannon_core.utils.progress import AgentOutcome, format_exploit_summary
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.playwright_config_writer import (
         write_stealth_config,
@@ -28,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
         get_retry_policy,
     )
+    from shannon_core.models.errors import classify_error_for_temporal
 
 
 @workflow.defn
@@ -130,16 +133,26 @@ class BlackboxScanWorkflow:
 
             if input.exploit:
                 # Queue gating: validate queue files before scheduling exploit agents
+                validation_results = []
                 exploit_tasks = []
                 for vt in selected_classes:
                     validation = await ExploitationChecker.validate_queue(
                         deliverables_path=deliverables,
                         vuln_type=vt,
                     )
+                    validation_results.append((vt, validation))
                     if not validation.valid:
-                        if validation.reason not in ("queue_file_missing",):
-                            logger.info(
-                                "Skipping exploit for %s: %s", vt, validation.reason
+                        if validation.is_expected:
+                            logger.debug(
+                                "Skipping exploit for %s (expected): %s",
+                                vt, validation.message,
+                            )
+                        else:
+                            logger.warning(
+                                "Skipping exploit for %s (anomalous): %s | queue_path=%s",
+                                vt,
+                                validation.message,
+                                validation.context.get("queue_path", "N/A"),
                             )
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
@@ -155,6 +168,22 @@ class BlackboxScanWorkflow:
                             retry_policy=retry_policy,
                         )))
 
+                # Validation summary log
+                _VALIDATION_ICONS = {"valid": "✅", "expected": "⏭️", "anomalous": "⚠️"}
+                summary_lines = ["Validation summary:"]
+                for vt, v in validation_results:
+                    if v.valid:
+                        icon = _VALIDATION_ICONS["valid"]
+                    elif v.is_expected:
+                        icon = _VALIDATION_ICONS["expected"]
+                    else:
+                        icon = _VALIDATION_ICONS["anomalous"]
+                    summary_lines.append(f"  {icon} {vt}: {v.message}")
+                logger.info("\n".join(summary_lines))
+
+                # Track scheduled vuln types for skipped outcomes
+                scheduled_vuln_types = {vt for vt, _ in exploit_tasks}
+
                 if exploit_tasks:
                     semaphore = asyncio.Semaphore(input.max_concurrent)
 
@@ -168,13 +197,46 @@ class BlackboxScanWorkflow:
                         *[bounded_exploit(task, vt, agent_name) for vt, agent_name, task in exploit_tasks],
                         return_exceptions=True,
                     )
+
+                    # Build AgentOutcome list from results
+                    outcomes: list[AgentOutcome] = []
                     for i, result in enumerate(results):
                         vt, agent_name, _ = exploit_tasks[i]
                         if isinstance(result, Exception):
                             self._state.errors.append(f"{agent_name.value}: {result}")
+                            self._state.failed_agents.append(agent_name.value)
+                            outcomes.append(AgentOutcome(
+                                agent_name=agent_name.value,
+                                vuln_type=vt,
+                                status="failed",
+                                error=str(result),
+                            ))
                         else:
                             self._state.completed_agents.append(agent_name.value)
                             self._state.agent_metrics[agent_name.value] = result
+                            # Extract metrics from result if available
+                            duration_s = getattr(result, "duration_s", 0.0)
+                            cost_usd = getattr(result, "cost_usd", 0.0)
+                            turns = getattr(result, "turns", 0)
+                            outcomes.append(AgentOutcome(
+                                agent_name=agent_name.value,
+                                vuln_type=vt,
+                                status="completed",
+                                duration_s=duration_s,
+                                cost_usd=cost_usd,
+                                turns=turns,
+                            ))
+
+                    # Add skipped outcomes for vuln types that were not scheduled
+                    for vt, validation in validation_results:
+                        if vt not in scheduled_vuln_types:
+                            outcomes.append(AgentOutcome(
+                                agent_name=f"{vt}-exploit",
+                                vuln_type=vt,
+                                status="skipped",
+                            ))
+
+                    logger.info(format_exploit_summary(outcomes))
 
             await workflow.execute_activity(
                 activities.assemble_report, act_input,
@@ -195,7 +257,17 @@ class BlackboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=5),
             )
 
-            self._state.status = "completed"
+            # Set final status based on failure tracking
+            if self._state.failed_agents:
+                self._state.status = "failed"
+                first_error_msg = self._state.errors[0].split(": ", 1)[-1] if self._state.errors else ""
+                error_type, _ = classify_error_for_temporal(Exception(first_error_msg))
+                self._state.error_code = error_type
+            else:
+                self._state.status = "completed"
+            return self._state
+        except CancelledError:
+            self._state.status = "cancelled"
             return self._state
         finally:
             cleanup_settings()

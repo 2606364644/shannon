@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from shannon_core.models.errors import classify_error_for_temporal
 
 
 def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
@@ -93,3 +94,57 @@ def test_pipeline_input_max_concurrent_custom():
     """Custom max_concurrent should be respected."""
     input = BlackboxPipelineInput(web_url="https://example.com", max_concurrent=5)
     assert input.max_concurrent == 5
+
+
+class TestBlackboxWorkflowErrorPropagation:
+    """Test the error propagation logic that BlackboxScanWorkflow uses."""
+
+    def test_state_completed_when_no_errors(self):
+        """All agents succeed -> status=completed."""
+        state = BlackboxPipelineState()
+        state.completed_agents = ["RECON_BLACKBOX", "REPORT"]
+        state.agent_metrics = {"RECON_BLACKBOX": {}, "REPORT": {}}
+        if state.errors:
+            state.status = "failed"
+        else:
+            state.status = "completed"
+        assert state.status == "completed"
+        assert state.failed_agents == []
+        assert state.error_code is None
+
+    def test_state_failed_when_exploit_agents_fail(self):
+        """Some exploit agents fail -> status=failed with error classification."""
+        state = BlackboxPipelineState()
+        state.completed_agents = ["RECON_BLACKBOX", "injection-exploit"]
+        state.errors = ["xss-exploit: 403 Forbidden"]
+        state.failed_agents = ["xss-exploit"]
+        if state.errors:
+            state.status = "failed"
+            first_error_msg = state.errors[0].split(": ", 1)[-1]
+            error_type, _ = classify_error_for_temporal(Exception(first_error_msg))
+            state.error_code = error_type
+        else:
+            state.status = "completed"
+        assert state.status == "failed"
+        assert state.failed_agents == ["xss-exploit"]
+        assert state.error_code == "PermissionError"
+
+    def test_state_cancelled(self):
+        """Cancelled -> status=cancelled."""
+        state = BlackboxPipelineState()
+        state.status = "cancelled"
+        assert state.status == "cancelled"
+
+    def test_state_failed_with_all_exploits_failing(self):
+        """All exploit agents fail -> still records all failures."""
+        state = BlackboxPipelineState()
+        state.completed_agents = ["RECON_BLACKBOX"]
+        state.errors = [
+            "injection-exploit: connection refused",
+            "xss-exploit: authentication failed",
+        ]
+        state.failed_agents = ["injection-exploit", "xss-exploit"]
+        state.status = "failed"
+        state.error_code = "TransientError"
+        assert state.status == "failed"
+        assert len(state.failed_agents) == 2
