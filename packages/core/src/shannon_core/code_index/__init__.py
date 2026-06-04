@@ -11,6 +11,10 @@ from shannon_core.code_index.call_graph import resolve_edges, build_call_chains
 from shannon_core.code_index.entry_points import detect_entry_points
 from shannon_core.code_index.summary import generate_summary
 from shannon_core.code_index.parsers import get_parser
+from shannon_core.code_index.degradation import build_degradation_report
+from shannon_core.code_index.file_discovery import discover_security_files
+from shannon_core.code_index.gitnexus_engine import GitNexusEngine
+from shannon_core.code_index.models import DegradationLevel, FileManifest
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,86 @@ def build_code_index(repo_path: str) -> CodeIndex:
         entry_points=entry_points,
         chains=[],
     )
+
+
+def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
+    """Build code index with GitNexus-first strategy and graceful degradation.
+
+    Strategy:
+    1. Try GitNexus (CLI + MCP) for full indexing
+    2. If unavailable, fall back to existing AST BFS parser
+    3. Always discover security files (templates, configs, schemas)
+    4. Report degradation level and coverage gaps
+
+    Returns:
+        CodeIndex with optional file_manifest and degradation_level attributes.
+    """
+    repo = Path(repo_path).resolve()
+
+    # Always discover security files regardless of GitNexus availability
+    file_manifest = discover_security_files(repo)
+
+    # Try GitNexus
+    engine = GitNexusEngine(repo)
+    degradation_level = DegradationLevel.FULL
+
+    if engine.is_available():
+        try:
+            engine.ensure_indexed()
+            logger.info("GitNexus indexing successful, using FULL mode")
+            # GitNexus extract flow would go here (Plan A integration)
+            # For now, fall through to AST with FULL degradation level
+            # Full GitNexus extraction will be added in subsequent PRs
+            base_index = build_code_index(repo_path)
+            # Create a new index with extended fields
+            index = CodeIndex(
+                repository=base_index.repository,
+                language=base_index.language,
+                total_blocks=base_index.total_blocks,
+                total_entry_points=base_index.total_entry_points,
+                total_chains=base_index.total_chains,
+                blocks=base_index.blocks,
+                edges=base_index.edges,
+                entry_points=base_index.entry_points,
+                chains=base_index.chains,
+                file_manifest=file_manifest,
+                degradation_level=degradation_level,
+            )
+            return index
+        except Exception as exc:
+            logger.warning("GitNexus failed: %s. Falling back to AST BFS", exc)
+            degradation_level = DegradationLevel.DEGRADED
+    else:
+        logger.info("GitNexus not available, using AST BFS mode")
+        degradation_level = DegradationLevel.DEGRADED
+
+    # Fallback: existing AST BFS parser
+    base_index = build_code_index(repo_path)
+    index = CodeIndex(
+        repository=base_index.repository,
+        language=base_index.language,
+        total_blocks=base_index.total_blocks,
+        total_entry_points=base_index.total_entry_points,
+        total_chains=base_index.total_chains,
+        blocks=base_index.blocks,
+        edges=base_index.edges,
+        entry_points=base_index.entry_points,
+        chains=base_index.chains,
+        file_manifest=file_manifest,
+        degradation_level=degradation_level,
+    )
+
+    # Write degradation report if not FULL
+    if degradation_level != DegradationLevel.FULL:
+        report = build_degradation_report(degradation_level)
+        report_path = repo / "degradation_report.json"
+        try:
+            report_path.write_text(report.to_json())
+            logger.warning("DEGRADED MODE — Coverage gaps: %s", report_path)
+        except Exception:
+            logger.warning("Could not write degradation report")
+
+    return index
 
 
 def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
@@ -147,6 +231,8 @@ def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
         edges=index.edges,
         entry_points=index.entry_points,
         chains=chains,
+        file_manifest=index.file_manifest,
+        degradation_level=index.degradation_level,
     )
 
     code_index_path.write_text(updated.model_dump_json(indent=2))

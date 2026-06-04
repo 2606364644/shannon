@@ -71,6 +71,9 @@ class CodeIndex(BaseModel):
     edges: list[CallEdge]
     entry_points: list[EntryPoint]
     chains: list[CallChain]
+    # Extended fields for GitNexus integration (forward refs to avoid circular order)
+    file_manifest: "FileManifest | None" = None
+    degradation_level: "DegradationLevel | None" = None
 
 
 class AdjudicatedEntryPoint(BaseModel):
