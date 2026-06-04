@@ -16,3 +16,4 @@ export * from './deliverables.js';
 export * from './errors.js';
 export * from './metrics.js';
 export * from './result.js';
+export * from './shared-knowledge.js';
