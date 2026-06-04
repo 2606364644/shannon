@@ -40,6 +40,14 @@ Success criterion: Complete source-to-sink traces detailing path, sanitizers, si
 
 <starting_context>
 - Your **single source of truth** for the application's structure is the reconnaissance report located at `.shannon/deliverables/recon_deliverable.md`. You must derive your list of testable targets from this file.
+- The Recon deliverable contains an "Endpoint Security Context" section (Section 4.2) that tells you:
+  - Which HTTP methods exist for each endpoint (never assume "ALL")
+  - Authentication requirements (anon/user/admin)
+  - Whether ownership validation exists
+  - Whether the endpoint is framework auto-generated (finale-rest/epilogue)
+  - The middleware chain protecting each endpoint
+- Use this context to determine if an endpoint is reachable, what input vectors exist, and what validation middleware processes user input before it reaches data sinks.
+- For injection analysis, pay special attention to endpoints marked as framework auto-generated that accept parameters reaching database queries or command execution without parameterized queries.
 
 </starting_context>
 
