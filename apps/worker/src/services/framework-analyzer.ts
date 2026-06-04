@@ -157,7 +157,9 @@ async function discoverModels(
       // or: finale.resource(sequelize, { model: ModelName })
       const modelRegex = /\.resource\([^)]*?model\s*:\s*([A-Za-z_][A-Za-z0-9_]*)/g;
       let match: RegExpExecArray | null;
-      while ((match = modelRegex.exec(content)) !== null) {
+      while (true) {
+        match = modelRegex.exec(content);
+        if (match === null) break;
         const modelName = match[1];
         if (modelName && !models.includes(modelName)) {
           models.push(modelName);
@@ -167,7 +169,9 @@ async function discoverModels(
 
       // Also match: new Resource endpoint path patterns
       const endpointRegex = /\.resource\([^)]*?endpoints\s*:\s*\[([^\]]+)\]/g;
-      while ((match = endpointRegex.exec(content)) !== null) {
+      while (true) {
+        match = endpointRegex.exec(content);
+        if (match === null) break;
         const endpointsStr = match[1];
         if (endpointsStr) {
           const pathMatches = endpointsStr.match(/['"`][/][^'"`]+['"`]/g);

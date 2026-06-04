@@ -21,15 +21,19 @@ import { ApplicationFailure, Context, heartbeat } from '@temporalio/activity';
 import { writePlaywrightStealthConfig } from '../ai/playwright-config-writer.js';
 import { writeUserSettingsForCodePathAvoids } from '../ai/settings-writer.js';
 import { AuditSession } from '../audit/index.js';
+import { loadSharedKnowledge, updateSharedKnowledge } from '../audit/knowledge-store.js';
 import type { ResumeAttempt } from '../audit/metrics-tracker.js';
 import { authStateFile, generateSessionJsonPath, type SessionMetadata } from '../audit/utils.js';
 import type { WorkflowSummary } from '../audit/workflow-logger.js';
 import type { CheckpointContext } from '../interfaces/checkpoint-provider.js';
 import { DEFAULT_DELIVERABLES_SUBDIR, deliverablesDir } from '../paths.js';
+import { buildAttackChains } from '../services/attack-chain-builder.js';
 import { getContainer, getOrCreateContainer, removeContainer } from '../services/container.js';
 import { classifyErrorForTemporal, PentestError } from '../services/error-handling.js';
 import { ExploitationCheckerService } from '../services/exploitation-checker.js';
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
+import { analyzeFrameworks } from '../services/framework-analyzer.js';
+import { mapFrontendRoutes } from '../services/frontend-mapper.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
 import { runPreflightChecks } from '../services/preflight.js';
 import type { ExploitationDecision, VulnType } from '../services/queue-validation.js';
@@ -247,11 +251,57 @@ async function runAgentActivity(agentName: AgentName, input: ActivityInput): Pro
 }
 
 export async function runPreReconAgent(input: ActivityInput): Promise<AgentMetrics> {
-  return runAgentActivity('pre-recon', input);
+  const metrics = await runAgentActivity('pre-recon', input);
+
+  // Save framework analysis to shared knowledge (non-fatal)
+  try {
+    const logger = createActivityLogger();
+    const sessionMetadata = buildSessionMetadata(input);
+    const frameworkAnalysis = await analyzeFrameworks(input.repoPath, logger);
+    await updateSharedKnowledge(
+      sessionMetadata,
+      {
+        frameworkAnalysis: {
+          detectedFrameworks: frameworkAnalysis.detectedFramework ? [frameworkAnalysis.detectedFramework.name] : [],
+          inferredEndpoints: frameworkAnalysis.inferredEndpoints,
+          recommendations: frameworkAnalysis.recommendations,
+        },
+      },
+      logger,
+    );
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    // Non-fatal — framework analysis enhances but doesn't block the pipeline
+    console.warn(`Framework analysis failed (non-fatal): ${errMsg}`);
+  }
+
+  return metrics;
 }
 
 export async function runReconAgent(input: ActivityInput): Promise<AgentMetrics> {
-  return runAgentActivity('recon', input);
+  const metrics = await runAgentActivity('recon', input);
+
+  // Save frontend route analysis to shared knowledge (non-fatal)
+  try {
+    const logger = createActivityLogger();
+    const sessionMetadata = buildSessionMetadata(input);
+    const frontendAnalysis = await mapFrontendRoutes(input.repoPath, logger);
+    await updateSharedKnowledge(
+      sessionMetadata,
+      {
+        frontendRoutes: {
+          routes: frontendAnalysis.routes,
+          xssVectors: frontendAnalysis.xssChains,
+        },
+      },
+      logger,
+    );
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn(`Frontend route mapping failed (non-fatal): ${errMsg}`);
+  }
+
+  return metrics;
 }
 
 export async function runInjectionVulnAgent(input: ActivityInput): Promise<AgentMetrics> {
@@ -952,6 +1002,35 @@ export async function mergeFindingsIntoQueue(
   const container = getContainer(input.workflowId);
   if (!container?.findingsProvider) return { mergedCount: 0 };
   return container.findingsProvider.mergeFindingsIntoQueue(input.repoPath, vulnType, input);
+}
+
+/**
+ * Build attack chains from accumulated shared knowledge.
+ * Runs after all vuln agents complete, before exploitation phase.
+ */
+export async function buildAttackChainsActivity(input: ActivityInput): Promise<void> {
+  const logger = createActivityLogger();
+  const sessionMetadata = buildSessionMetadata(input);
+
+  logger.info('Building attack chains from shared knowledge');
+
+  try {
+    const sharedKnowledge = await loadSharedKnowledge(sessionMetadata, logger);
+    const chains = await buildAttackChains(sharedKnowledge, logger);
+
+    await updateSharedKnowledge(
+      sessionMetadata,
+      {
+        attackChains: { chains },
+      },
+      logger,
+    );
+
+    logger.info(`Built ${chains.length} attack chain(s)`);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.warn(`Attack chain building failed (non-fatal): ${errMsg}`);
+  }
 }
 
 /**

@@ -130,7 +130,7 @@ async function findRouteFiles(codebasePath: string, framework: string, _logger: 
     unknown: ['routes.ts', 'routes.tsx', 'router.ts', 'router.tsx', 'app.routes.ts'],
   };
 
-  const patterns = filenamePatterns[framework] ?? filenamePatterns['unknown'] ?? [];
+  const patterns = filenamePatterns[framework] ?? filenamePatterns.unknown ?? [];
 
   for (const dir of searchDirs) {
     if (!(await fs.pathExists(dir))) continue;
@@ -162,9 +162,11 @@ async function parseRoutes(filePath: string, framework: string, logger: Activity
       vue: /path\s*:\s*['"`]([^'"`]+)['"`][^}]*?(?:component|name)\s*:\s*['"`]?([A-Za-z_][A-Za-z0-9_]*)/g,
     };
 
-    const regex = routeRegexMap[framework] ?? routeRegexMap['angular'] ?? /path\s*:\s*['"`]([^'"`]+)['"`]/g;
+    const regex = routeRegexMap[framework] ?? routeRegexMap.angular ?? /path\s*:\s*['"`]([^'"`]+)['"`]/g;
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(content)) !== null) {
+    while (true) {
+      match = regex.exec(content);
+      if (match === null) break;
       const path = match[1];
       const component = match[2] ?? 'Unknown';
       if (path) {
