@@ -115,6 +115,42 @@ Write your findings to `.shannon/deliverables/recon_deliverable.md` with these s
 - Database access: [file paths]
 - Configuration: [file paths]
 
+## 6.4 Guards Directory
+
+Map all authorization guards and middleware:
+| Guard Name | File:Line | Protected Routes | Check Type |
+|------------|-----------|------------------|------------|
+
+For each guard, document:
+- What it checks (role, ownership, permission, custom)
+- Which routes/endpoints it protects
+- Whether it can be bypassed
+
+## 6.5 Privilege Lattice
+
+Map the role/permission hierarchy:
+```
+Admin → Manager → User → Anonymous
+         ↓
+       Editor → Viewer
+```
+
+For each role:
+- What resources it can access
+- What operations it can perform
+- How role assignment works (database, config, token claim)
+
+## 6.6 Authorization Vulnerability Candidates
+
+For each endpoint, document:
+| Endpoint | Required Role | Object ID Params | Auth Check Present | Risk |
+|----------|--------------|------------------|--------------------|------|
+
+Focus on:
+- Endpoints with object ID parameters that lack ownership validation
+- Admin-only endpoints without role checks
+- Endpoints that perform different actions based on user context but don't verify the context
+
 ## 7. Attack Surface Priority
 - High priority targets: ...
 - Recommended test order: ...
