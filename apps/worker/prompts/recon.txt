@@ -42,6 +42,8 @@ Areas to Focus On:
 
 @include(shared/_rules-of-engagement.txt)
 
+@include(shared/_endpoint-security-context.txt)
+
 <scope_boundaries>
 # Penetration Test Scope & Boundaries
 
@@ -215,6 +217,25 @@ A table of all discovered network-accessible API endpoints with authorization de
 | DELETE | /api/orders/{order_id} | user | order_id | Bearer Token + order ownership | Deletes user order. See `orders.controller.ts`. |
 | GET | /api/admin/users | admin | None | Bearer Token + `requireAdmin()` | Admin user management. See `admin.controller.ts`. |
 | ... | ... | ... | ... | ... | ... |
+
+## 4.2 Endpoint Security Context
+
+For every endpoint in Section 4, you MUST also provide an Endpoint Security Context entry using the format defined in `<endpoint_security_context>` above.
+
+Present this as a table:
+
+| Method | Path | Auth | Middleware | Framework Origin | Ownership Check | Notes |
+|--------|------|------|------------|------------------|-----------------|-------|
+| DELETE | /api/Feedbacks/:id | user | isAuthorized | finale-rest auto-generated | none | Auto-generated |
+| GET | /api/Users/:id | user | isAuthorized | finale-rest | absent | Auto-generated |
+| POST | /api/Users | anon | none | manual | n/a | Open registration |
+
+**Framework Endpoints Detected** — When finale-rest, epilogue, or similar auto-REST frameworks are detected:
+
+1. List all models configured with the framework
+2. For each model, enumerate all auto-generated endpoints
+3. Mark each endpoint with its framework origin
+4. Note any overrides or customizations applied after auto-generation
 
 ## 5. Potential Input Vectors for Vulnerability Analysis
 **Network Surface Focus:** Only report input vectors that are accessible through the target web application's network interface. Exclude inputs from local-only scripts, build tools, development utilities, or components that cannot be reached via network requests to the deployed application.
