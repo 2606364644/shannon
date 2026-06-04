@@ -16,6 +16,7 @@ from shannon_core.agents.providers import (
 )
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
 from shannon_core.agents.providers_anthropic import AnthropicProvider
+from shannon_core.agents.message_dispatcher import MessageDispatcher
 from shannon_core.agents.providers_openai import OpenAIProvider
 from shannon_core.agents.runner import ClaudeRunResult, ProviderConfig, TokenUsage
 
@@ -258,10 +259,13 @@ class TestAnthropicProvider:
             usage=mock_usage,
             result="Test response",
         )
-        mock_result.collected_text = "Test response"
 
-        # Mock query 函数
+        # Mock query 函数 — include text event so dispatcher collects it
         async def mock_query(*, prompt, options):
+            text_event = MagicMock()
+            text_event.type = "text"
+            text_event.text = "Test response"
+            yield text_event
             yield mock_result
 
         with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
@@ -586,3 +590,86 @@ class TestBuildSdkEnv:
 
         for key, val in env.items():
             assert val != "", f"Empty value for {key}"
+
+
+class TestExecuteQueryWithDispatcher:
+    """Test _execute_query uses MessageDispatcher for event processing."""
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_collects_text_from_events(self):
+        """_execute_query collects text via dispatcher from mixed events."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        text_event = MagicMock()
+        text_event.type = "text"
+        text_event.text = "partial "
+
+        assistant_event = MagicMock()
+        assistant_event.type = "assistant"
+        block = MagicMock()
+        block.text = "response"
+        assistant_event.content = [block]
+        assistant_event.error = None
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=1000,
+            duration_api_ms=500,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+        )
+
+        events = [text_event, assistant_event, mock_result]
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider._execute_query(
+                prompt="test",
+                options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
+            )
+
+        assert result.collected_text == "partial response"
+        assert result.turn_count == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_with_custom_logger(self):
+        """_execute_query accepts a custom dispatcher with injected audit logger."""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        mock_audit = AsyncMock()
+        dispatcher = MessageDispatcher(audit_logger=mock_audit)
+
+        tool_use_event = MagicMock()
+        tool_use_event.type = "tool_use"
+        tool_use_event.name = "bash"
+        tool_use_event.input = {"command": "ls"}
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=500,
+            duration_api_ms=200,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+        )
+
+        events = [tool_use_event, mock_result]
+
+        async def mock_query(*, prompt, options):
+            for e in events:
+                yield e
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider._execute_query(
+                prompt="test",
+                options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
+                dispatcher=dispatcher,
+            )
+
+        mock_audit.log_tool_start.assert_awaited_once_with("bash", {"command": "ls"})

@@ -7,6 +7,8 @@ Anthropic Provider 实现
 - vertex: Google Cloud Vertex AI
 """
 
+from __future__ import annotations
+
 import os
 import time
 
@@ -170,33 +172,26 @@ class AnthropicProvider:
         self,
         prompt: str,
         options: ClaudeAgentOptions,
+        dispatcher: MessageDispatcher | None = None,
     ) -> ResultMessage:
         """执行 query 调用并返回最终结果"""
-        turns = 0
+        from .message_dispatcher import MessageDispatcher
+
+        dispatcher = dispatcher or MessageDispatcher()
         final_result: ResultMessage | None = None
-        text_content = ""
 
         async for event in query(prompt=prompt, options=options):
+            action = await dispatcher.dispatch(event)
             if isinstance(event, ResultMessage):
                 final_result = event
-                turns += 1
-            elif hasattr(event, "type") and event.type == "text":
-                # TextBlock
-                text_content += event.text
-            elif hasattr(event, "content"):
-                # Message with content blocks
-                for block in event.content:
-                    if hasattr(block, "text"):
-                        text_content += block.text
+            if action == "complete":
+                break
 
         if final_result is None:
-            # 如果没有收到 ResultMessage，创建一个默认的
             final_result = ResultMessage()
 
-        # 将收集的文本内容存储到 result 中
-        if text_content and not hasattr(final_result, "collected_text"):
-            final_result.collected_text = text_content
-
+        final_result.collected_text = dispatcher.collected_text
+        final_result.turn_count = dispatcher.turn_count
         return final_result
 
     def _extract_result(
