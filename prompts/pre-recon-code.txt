@@ -437,6 +437,31 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
   - Infrastructure metadata fetchers
   - Service mesh configuration retrievers
 
+<phase0_data>
+## Phase 0 Coverage Data (from code_index.json + file_manifest.json)
+
+### Entry Points (from Entry Point Detection)
+{{ENTRY_POINTS_TABLE}}
+
+### Call Chain Statistics
+- Total chains: {{TOTAL_CHAINS}}
+- Average depth: {{AVG_CHAIN_DEPTH}}
+- Max depth: {{MAX_CHAIN_DEPTH}}
+- Unresolved calls: {{UNRESOLVED_COUNT}}
+
+### File Coverage
+- Source files (indexed): {{INDEXED_SOURCE_FILES}}
+- Template files: {{TEMPLATE_FILE_COUNT}}
+- Config files: {{CONFIG_FILE_COUNT}}
+- Schema files: {{SCHEMA_FILE_COUNT}}
+- Total: {{TOTAL_FILES}}
+
+### Degradation Status
+{{DEGRADATION_WARNING_OR_NONE}}
+
+Use this data to cross-reference your findings. If Phase 0 detected entry points or chains that you don't mention in your analysis, explain why they were excluded.
+</phase0_data>
+
 <conclusion_trigger>
 **COMPLETION REQUIREMENTS (ALL must be satisfied):**
 
