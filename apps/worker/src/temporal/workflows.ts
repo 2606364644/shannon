@@ -931,8 +931,7 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       await a.persistOrValidateRunScope(activityInput, [], true);
     }
 
-    const shouldSkip = (agentName: string): boolean =>
-      resumeState?.completedAgents.includes(agentName) ?? false;
+    const shouldSkip = (agentName: string): boolean => resumeState?.completedAgents.includes(agentName) ?? false;
 
     // === Preflight (full — with URL check) ===
     state.currentPhase = 'preflight';
@@ -977,6 +976,19 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     const exploitThunks = vulnTypesWithQueues.map((vulnType) => {
       return async (): Promise<VulnExploitPipelineResult> => {
         const exploitAgentName = `${vulnType}-exploit`;
+
+        // Skip agents that completed in a prior run
+        if (shouldSkip(exploitAgentName)) {
+          log.info(`Skipping ${exploitAgentName} (already complete)`);
+          state.completedAgents.push(exploitAgentName);
+          return {
+            vulnType,
+            vulnMetrics: null,
+            exploitMetrics: null,
+            exploitDecision: { shouldExploit: false, vulnerabilityCount: 0 },
+            error: null,
+          };
+        }
 
         const decision = await a.checkExploitationQueue(activityInput, vulnType);
         let exploitMetrics: AgentMetrics | null = null;

@@ -19,9 +19,7 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 30_000;
 const MAX_DELAY_MS = 300_000;
 
-const WHITEBOX_VULN_AGENTS = ALL_VULN_CLASSES.map(
-  (cls) => `${cls}-vuln` as AgentName,
-);
+const WHITEBOX_VULN_AGENTS = ALL_VULN_CLASSES.map((cls) => `${cls}-vuln` as AgentName);
 
 interface RunnerArgs {
   repoPath: string;
