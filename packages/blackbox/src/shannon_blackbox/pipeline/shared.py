@@ -30,6 +30,8 @@ class BlackboxPipelineState:
     found_whitebox_classes: list[str] = field(default_factory=list)
     start_time: float = 0.0
     errors: list[str] = field(default_factory=list)
+    error_code: str | None = None
+    failed_agents: list[str] = field(default_factory=list)
 
 
 @dataclass
