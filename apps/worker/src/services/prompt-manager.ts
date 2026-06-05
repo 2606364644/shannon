@@ -289,6 +289,94 @@ function stripConditionalBlocks(content: string, hasWebUrl: boolean): string {
   return content;
 }
 
+/**
+ * Format shared knowledge for injection into agent prompts.
+ * Produces a human-readable summary of accumulated knowledge.
+ */
+export function buildSharedKnowledgeContext(sharedKnowledgeJson: string): string {
+  if (!sharedKnowledgeJson || sharedKnowledgeJson.trim() === '') {
+    return 'No shared knowledge available from prior agents.';
+  }
+
+  try {
+    const knowledge = JSON.parse(sharedKnowledgeJson) as Record<string, unknown>;
+
+    const lines: string[] = [];
+
+    // Framework analysis
+    const framework = knowledge.frameworkAnalysis as
+      | {
+          detectedFrameworks?: string[];
+          inferredEndpoints?: { method: string; path: string; model?: string }[];
+          recommendations?: string[];
+        }
+      | undefined;
+    if (framework?.detectedFrameworks?.length) {
+      lines.push('### Framework Analysis');
+      lines.push(`Detected frameworks: ${framework.detectedFrameworks.join(', ')}`);
+      if (framework.inferredEndpoints?.length) {
+        lines.push('');
+        lines.push('Inferred endpoints:');
+        for (const ep of framework.inferredEndpoints) {
+          lines.push(`  ${ep.method.padEnd(6)} ${ep.path}${ep.model ? ` (model: ${ep.model})` : ''}`);
+        }
+      }
+      if (framework.recommendations?.length) {
+        lines.push('');
+        lines.push('Recommendations:');
+        for (const r of framework.recommendations) {
+          lines.push(`  - ${r}`);
+        }
+      }
+    }
+
+    // Endpoint inventory
+    const endpoints = knowledge.endpointInventory as
+      | {
+          endpoints?: {
+            path: string;
+            methods: string[];
+            authentication: string;
+            frameworkOrigin: string;
+            ownershipValidation: string;
+          }[];
+        }
+      | undefined;
+    if (endpoints?.endpoints?.length) {
+      lines.push('');
+      lines.push('### Endpoint Security Context');
+      lines.push('| Method | Path | Auth | Framework | Ownership |');
+      lines.push('|--------|------|------|-----------|-----------|');
+      for (const ep of endpoints.endpoints) {
+        const methods = ep.methods.join('/');
+        lines.push(
+          `| ${methods} | ${ep.path} | ${ep.authentication} | ${ep.frameworkOrigin} | ${ep.ownershipValidation} |`,
+        );
+      }
+    }
+
+    // Attack chains
+    const chains = knowledge.attackChains as
+      | {
+          chains?: { id: string; name: string; vulnType: string; severity: string; confidence: string }[];
+        }
+      | undefined;
+    if (chains?.chains?.length) {
+      lines.push('');
+      lines.push('### Pre-assembled Attack Chains');
+      for (const chain of chains.chains) {
+        lines.push(`- [${chain.severity}/${chain.confidence}] ${chain.name} (${chain.vulnType})`);
+      }
+    }
+
+    return lines.length > 0
+      ? lines.join('\n')
+      : 'Shared knowledge loaded but contains no relevant data for this agent.';
+  } catch {
+    return `Shared knowledge available but could not be parsed. Raw data: ${sharedKnowledgeJson.slice(0, 200)}...`;
+  }
+}
+
 // Pure function: Variable interpolation
 async function interpolateVariables(
   template: string,
@@ -381,6 +469,16 @@ async function interpolateVariables(
     result = result
       .replace(/{{REPORT_FILTERS_BLOCK}}/g, renderReportFiltersBlock(config?.report))
       .replace(/{{REPORT_FILTER_RULES}}/g, renderReportFilterRules(config?.report));
+
+    // Shared knowledge injection — replace {{SHARED_KNOWLEDGE}} if present
+    // The caller must pass the serialized knowledge via the template or a side channel.
+    // If the placeholder exists but no knowledge is provided, the partial handles it.
+    const sharedKnowledgeMatch = result.match(/{{SHARED_KNOWLEDGE}}/);
+    if (sharedKnowledgeMatch) {
+      // Default: no knowledge available. The caller (activity) can pre-replace this.
+      // If still present, the shared partial will show its fallback message.
+      result = result.replace(/{{SHARED_KNOWLEDGE}}/g, 'No shared knowledge available from prior agents.');
+    }
 
     // Collapse runs of 3+ newlines (left behind by tag-strip and empty-fragment substitutions).
     result = result.replace(/\n{3,}/g, '\n\n');

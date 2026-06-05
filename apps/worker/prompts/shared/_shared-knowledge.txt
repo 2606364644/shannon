@@ -1,0 +1,16 @@
+<shared_knowledge>
+
+## Shared Knowledge from Prior Agents
+
+The following context was accumulated by agents that ran before you. Use this to inform your analysis and avoid re-discovering information that prior agents already gathered.
+
+{{SHARED_KNOWLEDGE}}
+
+### How to Use This Context
+
+- **Framework Analysis:** If auto-generated endpoints are listed, they were inferred from framework patterns. Verify them but treat them as likely present.
+- **Endpoint Inventory:** The endpoint security context comes from Recon. Each entry documents what protections exist — not whether they are sufficient (that is YOUR job).
+- **Frontend Routes:** These map the frontend to backend API calls. Use them to trace data flows from user input through storage to rendering.
+- **Attack Chains:** Pre-assembled attack scenarios from correlating the above data. Validate and extend them with your own analysis.
+
+</shared_knowledge>
