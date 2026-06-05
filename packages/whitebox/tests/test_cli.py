@@ -111,6 +111,33 @@ def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
     assert "--latest" in result.output
 
 
+def test_start_shows_deliverables_path(tmp_path, monkeypatch):
+    """Completion output should show deliverables path when returned by worker."""
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_ensure(*a, **kw):
+        pass
+
+    async def fake_run_scan(input, temporal_address):
+        return {
+            "status": "completed",
+            "workspace_name": "myapp-20260603-143022",
+            "deliverables_path": "/repo/workspaces/myapp-20260603-143022/.shannon/deliverables",
+            "web_url": "https://example.com",
+        }
+
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "myapp-20260603-143022" in result.output
+    assert "deliverables" in result.output
+
+
 def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     """workspaces command should group output by scan_type."""
     import json

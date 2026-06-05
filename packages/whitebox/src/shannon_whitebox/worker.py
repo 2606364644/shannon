@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
 
@@ -65,7 +66,23 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 await poll_task
             except asyncio.CancelledError:
                 pass
-            return result
+
+            # Convert PipelineState to enriched dict for CLI consumption
+            result_dict = asdict(result) if not isinstance(result, dict) else dict(result)
+            result_dict["workspace_name"] = input.workspace_name
+            result_dict["web_url"] = input.web_url
+
+            workspaces_dir = resolve_workspaces_dir(input.repo_path)
+            if input.workspace_name:
+                result_dict["deliverables_path"] = str(
+                    workspaces_dir / input.workspace_name / input.deliverables_subdir
+                )
+            else:
+                result_dict["deliverables_path"] = str(
+                    Path(input.repo_path) / input.deliverables_subdir
+                )
+
+            return result_dict
         except Exception:
             poll_task.cancel()
             try:
