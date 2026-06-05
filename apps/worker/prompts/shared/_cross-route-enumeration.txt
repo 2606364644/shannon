@@ -11,6 +11,11 @@ Read Section 4.1 (Shared Controller Route Groups) in
 `.shannon/deliverables/recon_deliverable.md`. If this section does not exist or is empty,
 skip to Step CR-4 and use single-route defaults.
 
+The section is organized as group subsections:
+- Each group starts with `#### Group: HandlerName (file:line) — router.js:XX-YY`
+- Below each group header is a table with one row per route
+- Each row contains: Method, Path, Auth Middleware (or `**none**`), Router Line
+
 ### Step CR-2: Locate Your Handler
 
 Find the row in Section 4.1 whose handler matches the vulnerable function you just analyzed.
