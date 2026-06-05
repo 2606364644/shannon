@@ -51,7 +51,7 @@ these fields is **INCOMPLETE** and must not be submitted.
 | `authentication_required` | `boolean` | **MANDATORY** | `false` if ANY route in the group lacks auth middleware (pre-auth). `true` if all routes require authentication. For single-route handlers, set based on that route's middleware. |
 
 **Self-check before proceeding:** Does `affected_routes` list every route from the
-Section 4.1 group row? If any route is missing, the finding is incomplete.
+Section 4.1 group table? If any route is missing, the finding is incomplete.
 
 Do NOT collapse multiple routes into a single finding unless they have identical
 authentication requirements AND identical exploitation characteristics.
