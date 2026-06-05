@@ -231,21 +231,42 @@ even if one route has no authentication middleware.
 ### 4.1 Shared Controller Route Groups
 
 When multiple routes map to the same handler function, a vulnerability in that
-handler affects ALL routes in the group. You MUST produce this summary table so
-downstream vulnerability agents can enumerate every affected route and flag
+handler affects ALL routes in the group. You MUST produce per-group subsections
+so downstream vulnerability agents can enumerate every affected route and flag
 pre-auth (unauthenticated) variants.
 
-| Handler (file:line) | Router Definition | Routes (method + path) | Auth Middleware per Route |
-|---|---|---|---|
-| controller.index.preview (index.js:32) | router.js:40-42 | GET /preview (thirtyLogin), GET /preview/v2 (thirtyLogin), GET /preview/iframe-demo (none) | /preview/iframe-demo has NO auth middleware → pre-auth risk |
-| controller.users.getProfile (users.js:45) | router.js:18-19 | GET /api/users/me (requireAuth), GET /api/admin/users/profile (requireAdmin) | Different auth levels |
+#### Group: controller.index.preview (index.js:32) — router.js:40-42
 
-**Rules for this table:**
+| Method | Path | Auth Middleware | Router Line |
+|---|---|---|---|
+| GET | /preview | thirtyLogin() | router.js:40 |
+| GET | /preview/v2 | thirtyLogin() | router.js:41 |
+| GET | /preview/iframe-demo | **none** | router.js:42 |
+
+> ⚠️ `/preview/iframe-demo` has NO auth middleware — pre-auth variant.
+
+---
+
+#### Group: controller.users.getProfile (users.js:45) — router.js:18-19
+
+| Method | Path | Auth Middleware | Router Line |
+|---|---|---|---|
+| GET | /api/users/me | requireAuth | router.js:18 |
+| GET | /api/admin/users/profile | requireAdmin | router.js:19 |
+
+> ⚠️ Different auth levels across routes — admin route has elevated privileges.
+
+---
+
+**Rules for these groups:**
 - Only include groups where ≥2 routes share the same handler function.
-- For each route, note the exact auth middleware (or "none" if absent).
-- Highlight routes with NO auth middleware — these are pre-auth variants of any vulnerability found in the handler.
-- Include the handler's file:line location for downstream agents to trace.
-- Include the router definition file:line range where the routes are registered. Downstream agents can use this as a cross-reference anchor when their handler name doesn't exactly match the one in this table — they can read the router file to confirm the mapping.
+- Each group starts with a `#### Group:` header containing handler name, file:line, and router definition range.
+- Each row MUST correspond to exactly one route — do NOT pack multiple routes into a single table cell.
+- The Auth Middleware column must reflect the presence or absence of middleware in that specific router line — never infer from sibling routes. Use `**none**` for routes with no middleware.
+- The Router Line column must cite the exact line number so each route can be independently verified.
+- When any route in a group has `**none**` auth, add a `> ⚠️` warning block below the table identifying the pre-auth route(s).
+- Include the handler's file:line location in the group header for downstream agents to trace.
+- Include the router definition file:line range in the group header. Downstream agents can use this as a cross-reference anchor when their handler name doesn't exactly match — they can read the router file to confirm the mapping.
 ## 4.2 Endpoint Security Context
 
 For every endpoint in Section 4, you MUST also provide an Endpoint Security Context entry using the format defined in `<endpoint_security_context>` above.
