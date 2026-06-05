@@ -45,6 +45,10 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
 
     selected = list(vuln_classes) if vuln_classes else list(ALL_VULN_CLASSES)
 
+    # Warn on conflicting flags
+    if latest and workspace:
+        click.echo("⚠ Both --latest and -w specified; -w takes precedence.")
+
     # Resolve --latest: find most recent whitebox workspace with deliverables
     resolved_workspace = workspace
     if latest and not workspace:

@@ -256,6 +256,29 @@ def test_w_takes_precedence_over_latest(tmp_path, monkeypatch):
     assert captured_input.workspace_name == "my-ws"
 
 
+def test_latest_and_w_conflict_warns(tmp_path, monkeypatch):
+    """When both --latest and -w are specified, a warning should be printed."""
+    monkeypatch.chdir(tmp_path)
+
+    captured_input = None
+
+    async def fake_run_scan(input, temporal_address):
+        nonlocal captured_input
+        captured_input = input
+        return BlackboxPipelineState(status="completed")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "-w", "my-ws", "--latest"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert captured_input.workspace_name == "my-ws"
+    assert "-w takes precedence" in result.output
+
+
 def test_auto_detect_single_match(tmp_path, monkeypatch):
     """When one matching whitebox workspace exists, prompt user to reuse."""
     import json
