@@ -98,6 +98,22 @@ export async function ensureInfra(): Promise<void> {
  * Build the worker image locally (local mode only).
  */
 export function buildImage(noCache: boolean): void {
+  // Ensure .cache/chrome-linux64.zip exists in the build context for the
+  // Dockerfile to COPY.  If the file is missing, create an empty placeholder
+  // so COPY still succeeds — the Dockerfile skips extraction for empty files
+  // and playwright downloads normally.
+  const buildCacheDir = path.resolve('.cache');
+  const buildCacheZip = path.join(buildCacheDir, 'chrome-linux64.zip');
+
+  if (!fs.existsSync(buildCacheZip)) {
+    fs.mkdirSync(buildCacheDir, { recursive: true });
+    fs.writeFileSync(buildCacheZip, '');
+    console.log('No cached Chrome — playwright will download during build');
+    console.log('  To cache: curl -L -o .cache/chrome-linux64.zip "<url from build log>"');
+  } else if (fs.statSync(buildCacheZip).size > 0) {
+    console.log('Using cached Chrome from .cache/chrome-linux64.zip');
+  }
+
   console.log(`Building ${DEV_IMAGE}...`);
   const args = ['build'];
   if (noCache) args.push('--no-cache');
