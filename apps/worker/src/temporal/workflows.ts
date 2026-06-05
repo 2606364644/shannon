@@ -36,7 +36,6 @@ import { ALL_AGENTS } from '../types/agents.js';
 import { ALL_VULN_CLASSES, type VulnClass } from '../types/config.js';
 import type * as activities from './activities.js';
 import type { ActivityInput } from './activities.js';
-import { buildAttackChainsActivity } from './activities.js';
 import {
   type AgentMetrics,
   getProgress,
@@ -565,7 +564,7 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
     // Runs after all vuln/exploit agents complete, before reporting.
     // Non-fatal — attack chains enhance the report but don't block the pipeline.
     try {
-      await buildAttackChainsActivity(activityInput);
+      await a.buildAttackChainsActivity(activityInput);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       log.warn(`Attack chain assembly failed: ${errMsg}`);

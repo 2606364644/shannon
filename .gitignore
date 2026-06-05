@@ -6,3 +6,4 @@ dist/
 repos/
 .turbo/
 .cache/
+apps/worker/configs/test-nnads.yaml
