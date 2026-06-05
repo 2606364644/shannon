@@ -14,9 +14,29 @@ class TestResolveWorkspacesDir:
         result = resolve_workspaces_dir("/a/b/c")
         assert result == Path("/a/b/workspaces")
 
-    def test_without_repo_path(self):
+    def test_without_repo_path(self, tmp_path, monkeypatch):
+        """When no repo_path and in a git repo, resolves to project_root/workspaces."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()
+        monkeypatch.chdir(project_root)
         result = resolve_workspaces_dir()
-        assert result == Path("workspaces")
+        assert result == project_root / "workspaces"
+
+    def test_without_repo_path_uses_project_root(self, tmp_path, monkeypatch):
+        """When no repo_path, should resolve to project_root/workspaces, not CWD."""
+        # Create a fake project root with .git and a subdirectory
+        project_root = tmp_path / "myproject"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()
+        subdir = project_root / "subdir"
+        subdir.mkdir()
+
+        # CWD is inside the project, should find project_root by walking up
+        monkeypatch.chdir(subdir)
+
+        result = resolve_workspaces_dir()
+        assert result == project_root / "workspaces"
 
 
 class TestResolveDeliverablesPath:

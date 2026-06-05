@@ -2,15 +2,24 @@ import json
 from pathlib import Path
 
 
+def find_project_root() -> Path:
+    """Walk up from CWD to find project root (directory with .git or pyproject.toml)."""
+    current = Path.cwd()
+    for parent in [current, *current.parents]:
+        if (parent / ".git").exists() or (parent / "pyproject.toml").exists():
+            return parent
+    return current
+
+
 def resolve_workspaces_dir(repo_path: str | None = None) -> Path:
     """解析 workspaces 根目录。
 
     如果提供 repo_path，使用 repo_path.parent / "workspaces"；
-    否则使用相对路径 "workspaces"（依赖调用方 CWD）。
+    否则使用 find_project_root() / "workspaces"。
     """
     if repo_path:
         return Path(repo_path).parent / "workspaces"
-    return Path("workspaces")
+    return find_project_root() / "workspaces"
 
 
 def resolve_deliverables_path(
