@@ -1,23 +1,17 @@
 from dataclasses import dataclass, field
 
+from shannon_core.models.base import BasePipelineInput
 from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
 
 
 @dataclass
-class BlackboxPipelineInput:
-    web_url: str
-    workspace_name: str | None = None
-    config_path: str | None = None
-    output_path: str | None = None
-    repo_path: str | None = None
-    resume_from_workspace: str | None = None
-    vuln_classes: list[str] | None = None
+class BlackboxPipelineInput(BasePipelineInput):
+    """Blackbox-specific fields."""
+    web_url: str = ""                          # Required for blackbox
+    repo_path: str | None = None               # Optional (from whitebox)
     exploit: bool = True
-    pipeline_testing_mode: bool = False
-    api_key: str | None = None
-    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
+    max_concurrent: int = 3
     retry_profile: str | None = None          # "production" | "testing" | "subscription"
-    max_concurrent: int = 3                     # max concurrent exploit agents
 
 
 @dataclass

@@ -1,22 +1,21 @@
 from dataclasses import dataclass, field
 
+from shannon_core.models.base import BasePipelineInput
 from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
-from shannon_core.models.agents import VulnType
-from shannon_core.models.metrics import AgentMetrics
+
 
 @dataclass
-class PipelineInput:
-    repo_path: str
+class PipelineInput(BasePipelineInput):
+    """Whitebox-specific fields.
+
+    Note: vuln_classes accepts list[str] from the base class.
+    Internally, VulnType enum values are used for type safety;
+    conversion happens at the boundary (workflow entry).
+    """
+    repo_path: str = ""                        # Required for whitebox
     web_url: str = ""
-    config_path: str | None = None
-    output_path: str | None = None
-    workspace_name: str | None = None
-    resume_from_workspace: str | None = None
-    vuln_classes: list[VulnType] | None = None
-    pipeline_testing_mode: bool = False
-    api_key: str | None = None
-    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
     prompt_override: str | None = None
+
 
 @dataclass
 class PipelineState:
@@ -29,6 +28,7 @@ class PipelineState:
     audit_plan_stats: dict | None = None
     error_code: str | None = None
     failed_agents: list[str] = field(default_factory=list)
+
 
 @dataclass
 class ActivityInput:
