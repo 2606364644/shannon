@@ -1,4 +1,3 @@
-import json
 import time
 from pathlib import Path
 
@@ -7,6 +6,7 @@ from shannon_core.models.agents import AgentName, AGENTS
 from shannon_core.models.config import Config
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.models.metrics import AgentMetrics
+from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.billing import is_spending_cap_behavior
 
 from shannon_core.agents.runner import run_claude_prompt
@@ -86,7 +86,7 @@ class AgentExecutor:
         queue_filename = get_queue_filename(agent_name)
         if result.structured_output is not None and queue_filename:
             queue_path = deliverables / queue_filename
-            queue_path.write_text(json.dumps(result.structured_output, indent=2), encoding="utf-8")
+            atomic_write_json(queue_path, result.structured_output)
 
         await validate_deliverable(deliverables, agent_name)
 

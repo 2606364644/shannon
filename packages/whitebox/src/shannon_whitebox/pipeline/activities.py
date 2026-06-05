@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from temporalio.exceptions import ApplicationError as ApplicationFailure
 from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
 from shannon_core.models.metrics import AgentMetrics
+from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.security import validate_target_url
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
@@ -247,7 +249,8 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
         # Write audit plan
         plan_path = deliverables / "audit_plan.json"
-        plan_path.write_text(plan.to_json())
+        plan_data = json.loads(plan.to_json())
+        atomic_write_json(plan_path, plan_data)
 
         return {
             "total_chains": plan.total_chains,
