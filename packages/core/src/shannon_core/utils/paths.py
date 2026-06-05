@@ -54,12 +54,27 @@ def resolve_deliverables_path(
     raise ValueError("必须提供 repo_path 或 workspace_name 之一")
 
 
+REQUIRED_VULN_FIELDS = {"title", "description", "severity", "location"}
+
+
 def has_valid_whitebox_results(queue_file: Path) -> bool:
-    """检查 exploitation queue 文件是否包含有效漏洞条目。"""
+    """检查 exploitation queue 文件是否包含有效漏洞条目。
+
+    验证 vulnerabilities 列表中的每个条目都包含必需字段：
+    title, description, severity, location。
+    """
     if not queue_file.exists():
         return False
     try:
         data = json.loads(queue_file.read_text(encoding="utf-8"))
-        return isinstance(data.get("vulnerabilities"), list) and len(data["vulnerabilities"]) > 0
+        vulns = data.get("vulnerabilities")
+        if not isinstance(vulns, list) or len(vulns) == 0:
+            return False
+        for v in vulns:
+            if not isinstance(v, dict):
+                return False
+            if not REQUIRED_VULN_FIELDS.issubset(v.keys()):
+                return False
+        return True
     except (json.JSONDecodeError, KeyError, OSError):
         return False

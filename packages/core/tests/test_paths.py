@@ -113,8 +113,47 @@ class TestHasValidWhiteboxResults:
 
     def test_valid_vulnerabilities(self, tmp_path):
         queue_file = tmp_path / "injection_exploitation_queue.json"
-        queue_file.write_text(json.dumps({"vulnerabilities": [{"ID": "V-001"}]}))
+        queue_file.write_text(json.dumps({
+            "vulnerabilities": [{
+                "title": "V-001",
+                "description": "Test vulnerability",
+                "severity": "medium",
+                "location": "test.py:1",
+            }]
+        }))
         assert has_valid_whitebox_results(queue_file) is True
+
+    def test_valid_with_required_fields(self, tmp_path):
+        """Vulnerability entries with all required fields should pass validation."""
+        queue_file = tmp_path / "injection_exploitation_queue.json"
+        queue_file.write_text(json.dumps({
+            "vulnerabilities": [{
+                "title": "SQL Injection",
+                "description": "User input concatenated into SQL query",
+                "severity": "high",
+                "location": "src/api/users.py:42",
+            }]
+        }))
+        assert has_valid_whitebox_results(queue_file) is True
+
+    def test_rejects_missing_required_fields(self, tmp_path):
+        """Vulnerability entries missing required fields should be rejected."""
+        queue_file = tmp_path / "injection_exploitation_queue.json"
+        queue_file.write_text(json.dumps({
+            "vulnerabilities": [{
+                "title": "SQL Injection",
+                # Missing: description, severity, location
+            }]
+        }))
+        assert has_valid_whitebox_results(queue_file) is False
+
+    def test_rejects_non_dict_entries(self, tmp_path):
+        """Non-dict entries in vulnerabilities should be rejected."""
+        queue_file = tmp_path / "injection_exploitation_queue.json"
+        queue_file.write_text(json.dumps({
+            "vulnerabilities": ["not a dict", 42]
+        }))
+        assert has_valid_whitebox_results(queue_file) is False
 
     def test_empty_vulnerabilities(self, tmp_path):
         queue_file = tmp_path / "injection_exploitation_queue.json"
