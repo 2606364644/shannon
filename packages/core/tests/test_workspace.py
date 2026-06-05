@@ -7,7 +7,9 @@ from shannon_core.workspace import (
     compute_deliverables_summary,
     find_latest_workspace,
     find_workspaces_by_url,
+    get_workspace_age_human,
     get_workspace_info,
+    get_workspace_vuln_counts,
     normalize_url,
     urls_match,
 )
@@ -243,3 +245,43 @@ class TestFindWorkspacesByUrl:
         _create_workspace_with_queues(tmp_path, "ws1", "https://myapp.com", "whitebox", ["injection"])
         results = find_workspaces_by_url(ws_dir, "https://other.com")
         assert len(results) == 0
+
+
+class TestGetWorkspaceVulnCounts:
+    def test_returns_per_class_counts(self, tmp_path):
+        ws = tmp_path / "ws"
+        deliverables = ws / "deliverables"
+        deliverables.mkdir(parents=True)
+        (deliverables / "injection_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [
+                {"title": "A", "description": "d", "severity": "high", "location": "a.py:1"},
+                {"title": "B", "description": "d", "severity": "low", "location": "b.py:2"},
+            ]}), encoding="utf-8"
+        )
+        (deliverables / "xss_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [
+                {"title": "C", "description": "d", "severity": "medium", "location": "c.py:3"},
+            ]}), encoding="utf-8"
+        )
+
+        counts = get_workspace_vuln_counts(ws)
+        assert counts == {"injection": 2, "xss": 1}
+
+    def test_empty_deliverables(self, tmp_path):
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        counts = get_workspace_vuln_counts(ws)
+        assert counts == {}
+
+
+class TestGetWorkspaceAge:
+    def test_returns_age_string(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        mgr = SessionManager(tmp_path / "ws")
+        ws = mgr.create_workspace("https://test.com", "/repo", name="age-ws")
+        mgr.mark_completed(ws)
+
+        age = get_workspace_age_human(ws)
+        assert isinstance(age, str)
+        assert len(age) > 0

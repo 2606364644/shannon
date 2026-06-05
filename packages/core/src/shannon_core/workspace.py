@@ -1,6 +1,7 @@
 """Shared workspace discovery and query utilities for cross-scan UX."""
 
 import json
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -96,6 +97,46 @@ def compute_deliverables_summary(workspace_path: Path) -> dict:
             reports.append(f.name)
 
     return {"vuln_queues": vuln_queues, "reports": reports}
+
+
+def get_workspace_vuln_counts(workspace_path: Path) -> dict[str, int]:
+    """Count vulnerabilities per class in a workspace's deliverables."""
+    deliverables_dir = workspace_path / "deliverables"
+    counts: dict[str, int] = {}
+
+    if not deliverables_dir.exists():
+        return counts
+
+    for f in sorted(deliverables_dir.iterdir()):
+        if f.is_file() and f.name.endswith("_exploitation_queue.json"):
+            vuln_class = f.name.replace("_exploitation_queue.json", "")
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                vulns = data.get("vulnerabilities", [])
+                if isinstance(vulns, list):
+                    counts[vuln_class] = len(vulns)
+            except (json.JSONDecodeError, OSError):
+                counts[vuln_class] = 0
+
+    return counts
+
+
+def get_workspace_age_human(workspace_path: Path) -> str:
+    """Return a human-readable age string for a workspace (e.g. '2h ago', '1d ago')."""
+    mgr = SessionManager(workspace_path.parent)
+    created = mgr.get_created_at(workspace_path)
+    if not created:
+        return "unknown"
+
+    elapsed = time.time() - created
+    if elapsed < 60:
+        return "just now"
+    elif elapsed < 3600:
+        return f"{int(elapsed / 60)}m ago"
+    elif elapsed < 86400:
+        return f"{int(elapsed / 3600)}h ago"
+    else:
+        return f"{int(elapsed / 86400)}d ago"
 
 
 def find_latest_workspace(

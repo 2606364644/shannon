@@ -16,7 +16,7 @@ from shannon_core.services.temporal_infra import (
     stop_temporal,
 )
 from shannon_core.session import SessionManager
-from shannon_core.workspace import compute_deliverables_summary, find_latest_workspace, find_workspaces_by_url
+from shannon_core.workspace import compute_deliverables_summary, find_latest_workspace, find_workspaces_by_url, get_workspace_vuln_counts, get_workspace_age_human
 
 
 @click.group()
@@ -82,12 +82,16 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
 
         elif len(matches) > 1:
             click.echo(f"Found {len(matches)} white-box workspaces for '{url}':")
+            click.echo("")
             for i, (ws_path, summary) in enumerate(matches, 1):
-                queues = ", ".join(summary["vuln_queues"])
-                click.echo(f"  [{i}] {ws_path.name}  ({queues})")
+                counts = get_workspace_vuln_counts(ws_path)
+                age = get_workspace_age_human(ws_path)
+                counts_str = " ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
+                status_icon = "✅" if summary["vuln_queues"] else "⚠️"
+                click.echo(f"  #{i}  {ws_path.name:<30} ({age:>6})   {counts_str:<25} {status_icon}")
             click.echo("")
             choice = click.prompt(
-                "Select workspace to reuse [1-{}] or 'n' for standalone".format(len(matches)),
+                "Select workspace [1-{}] or 'n' for standalone".format(len(matches)),
                 default="1",
             )
             if choice.strip().lower() == "n":
