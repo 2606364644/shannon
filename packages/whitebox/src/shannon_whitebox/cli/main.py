@@ -53,6 +53,26 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         click.echo("")
         click.echo("White-box scan complete.")
         click.echo("")
+
+        # Results summary
+        if deliverables_path:
+            from shannon_core.workspace import compute_deliverables_summary
+
+            summary_path = Path(deliverables_path)
+            if summary_path.parent.exists():
+                summary = compute_deliverables_summary(summary_path.parent)
+                if summary["vuln_queues"]:
+                    click.echo("Results summary:")
+                    for vc in sorted(summary["vuln_queues"]):
+                        queue_file = summary_path.parent / f"{vc}_exploitation_queue.json"
+                        try:
+                            data = json.loads(queue_file.read_text(encoding="utf-8"))
+                            count = len(data.get("vulnerabilities", []))
+                        except (json.JSONDecodeError, OSError):
+                            count = 0
+                        click.echo(f"  ├─ {vc:<12} {count} vulnerabilities found")
+                    click.echo("")
+
         click.echo(f"  Workspace:     {ws_name}")
         if deliverables_path:
             click.echo(f"  Deliverables:  {deliverables_path}")

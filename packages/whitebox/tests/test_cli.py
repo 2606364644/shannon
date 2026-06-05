@@ -206,6 +206,54 @@ def test_workspace_show_not_found(tmp_path, monkeypatch):
     assert "not found" in result.output.lower()
 
 
+def test_start_shows_results_summary(tmp_path, monkeypatch):
+    """Completion output should include a per-class vulnerability count summary."""
+    monkeypatch.chdir(tmp_path)
+
+    # Create a workspace with deliverables so compute_deliverables_summary works
+    from shannon_core.session import SessionManager
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://myapp.com", "/repo", name="myapp-summary-ws")
+    mgr.mark_completed(ws)
+    deliverables = ws / "deliverables"
+    deliverables.mkdir()
+    import json
+    (deliverables / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [
+            {"title": "SQLi", "description": "d", "severity": "high", "location": "a.py:1"},
+            {"title": "Cmdi", "description": "d", "severity": "medium", "location": "b.py:2"},
+        ]}), encoding="utf-8"
+    )
+    (deliverables / "xss_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [
+            {"title": "Reflected XSS", "description": "d", "severity": "medium", "location": "c.py:3"},
+        ]}), encoding="utf-8"
+    )
+
+    async def fake_ensure(*a, **kw):
+        pass
+
+    async def fake_run_scan(input, temporal_address):
+        return {
+            "status": "completed",
+            "workspace_name": "myapp-summary-ws",
+            "deliverables_path": str(deliverables),
+            "web_url": "https://myapp.com",
+        }
+
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Results summary" in result.output
+    assert "injection" in result.output
+    assert "xss" in result.output
+
+
 def test_logs_command_accepts_follow_flag(tmp_path, monkeypatch):
     """The logs command should accept a --follow flag."""
     runner = CliRunner()
