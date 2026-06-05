@@ -5,12 +5,14 @@ requires-python = ">=3.12"
 dependencies = [
     "shannon-whitebox",
     "shannon-blackbox",
+    "shannon-combined",
 ]
 
 [tool.uv.sources]
 shannon-core = { workspace = true }
 shannon-whitebox = { workspace = true }
 shannon-blackbox = { workspace = true }
+shannon-combined = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
