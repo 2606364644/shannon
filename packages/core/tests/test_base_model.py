@@ -1,7 +1,4 @@
-import os
-
 from shannon_core.models.base import BasePipelineInput
-from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
 from shannon_whitebox.pipeline.shared import PipelineInput
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
 
@@ -26,15 +23,12 @@ def test_base_has_shared_fields():
     assert expected == field_names
 
 
-def test_deliverables_subdir_uses_default_without_env():
+def test_deliverables_subdir_uses_default_without_env(monkeypatch):
     """Without SHANNON_DELIVERABLES_SUBDIR env var, uses DEFAULT_DELIVERABLES_SUBDIR."""
-    old = os.environ.pop("SHANNON_DELIVERABLES_SUBDIR", None)
-    try:
-        inp = BasePipelineInput()
-        assert inp.deliverables_subdir == DEFAULT_DELIVERABLES_SUBDIR
-    finally:
-        if old is not None:
-            os.environ["SHANNON_DELIVERABLES_SUBDIR"] = old
+    from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+    monkeypatch.delenv("SHANNON_DELIVERABLES_SUBDIR", raising=False)
+    inp = BasePipelineInput()
+    assert inp.deliverables_subdir == DEFAULT_DELIVERABLES_SUBDIR
 
 
 def test_deliverables_subdir_uses_env_when_set(monkeypatch):
