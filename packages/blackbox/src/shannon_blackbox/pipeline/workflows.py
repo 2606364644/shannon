@@ -297,4 +297,4 @@ class BlackboxScanWorkflow:
                 for session_id in set(AGENT_SESSION_MAPPING.values()):
                     engine.cleanup_config(input.repo_path, session_id=session_id)
                 engine.cleanup_config(input.repo_path)
-                cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
+            cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
