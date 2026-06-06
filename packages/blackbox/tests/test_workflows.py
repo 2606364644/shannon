@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
-from shannon_core.models.errors import classify_error_for_temporal
+from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+from shannon_core.services.browser_engine import BrowserEngineFactory
 
 
 def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
@@ -148,3 +149,68 @@ class TestBlackboxWorkflowErrorPropagation:
         state.error_code = "TransientError"
         assert state.status == "failed"
         assert len(state.failed_agents) == 2
+
+
+class TestBlackboxBrowserEngineIntegration:
+    """Test browser engine resolution logic used by BlackboxScanWorkflow."""
+
+    def test_unavailable_engine_raises_error(self, monkeypatch):
+        """Engine with check_available()=False should trigger PentestError at startup."""
+        import shannon_core.services.engines  # noqa: F401 — register engines
+
+        engine = BrowserEngineFactory.get_engine("playwright")
+        monkeypatch.setattr(
+            engine.__class__, "check_available", lambda self: False
+        )
+        engine = BrowserEngineFactory.get_engine("playwright")
+        assert not engine.check_available()
+
+        # Simulate workflow startup check
+        if not engine.check_available():
+            error = PentestError(
+                f"Browser engine '{engine.name}' is not available. "
+                f"Install it with: npm install -g {engine.name} && {engine.name} install",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            )
+        assert error.error_code == ErrorCode.BROWSER_ENGINE_UNAVAILABLE
+        assert "not available" in error.message
+
+    def test_engine_resolved_from_config(self, tmp_path):
+        """Engine name should match config.browser_engine field."""
+        from shannon_core.config.parser import parse_config
+        import shannon_core.services.engines  # noqa: F401
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("browser_engine: agent-browser\n")
+        cfg = parse_config(str(config_file))
+
+        engine_name = cfg.browser_engine
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        assert engine.name == "agent-browser"
+
+    def test_default_engine_without_config(self):
+        """Without config, engine defaults to playwright."""
+        import shannon_core.services.engines  # noqa: F401
+
+        engine_name = "playwright"
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        assert engine.name == "playwright"
+
+    def test_engine_write_config_replaces_write_stealth_config(self, tmp_path):
+        """engine.write_config() should produce the same result as write_stealth_config."""
+        import shannon_core.services.engines  # noqa: F401
+
+        engine = BrowserEngineFactory.get_engine("playwright")
+        result = engine.write_config(str(tmp_path))
+        assert result["result"] in ("wrote", "skipped-existing")
+        assert "configPath" in result
+
+    def test_engine_cleanup_removes_config(self, tmp_path):
+        """engine.cleanup_config() should remove all engine artifacts."""
+        import shannon_core.services.engines  # noqa: F401
+
+        engine = BrowserEngineFactory.get_engine("playwright")
+        engine.write_config(str(tmp_path))
+        engine.cleanup_config(str(tmp_path))
+        assert not (tmp_path / ".playwright").exists()

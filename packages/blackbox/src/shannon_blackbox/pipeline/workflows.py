@@ -19,9 +19,9 @@ with workflow.unsafe.imports_passed_through():
     from ..services.exploitation_checker import ExploitationChecker
     from shannon_core.utils.progress import AgentOutcome, format_exploit_summary
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
+    from shannon_core.services.browser_engine import BrowserEngineFactory
+    import shannon_core.services.engines  # noqa: F401 – registers engines
     from shannon_core.services.playwright_config_writer import (
-        write_stealth_config,
-        cleanup_stealth_config,
         get_session_id,
         AGENT_SESSION_MAPPING,
     )
@@ -30,7 +30,7 @@ with workflow.unsafe.imports_passed_through():
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
         get_retry_policy,
     )
-    from shannon_core.models.errors import classify_error_for_temporal
+    from shannon_core.models.errors import PentestError, ErrorCode, classify_error_for_temporal
 
 
 @workflow.defn
@@ -71,16 +71,29 @@ class BlackboxScanWorkflow:
             retry_policy=PREFLIGHT_RETRY,
         )
 
-        # Write code path deny rules (S6)
+        # Resolve config and browser engine
+        cfg = None
         if input.config_path:
             from shannon_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
-            if cfg.rules and cfg.rules.avoid:
-                sync_code_path_deny_rules(cfg.rules.avoid)
 
-        # Write stealth config (S5) — only if repo path provided
+        engine_name = cfg.browser_engine if cfg else "playwright"
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        if not engine.check_available():
+            raise PentestError(
+                f"Browser engine '{engine.name}' is not available. "
+                f"Install it with: npm install -g {engine.name} && {engine.name} install",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            )
+
+        # Write code path deny rules (S6)
+        if cfg and cfg.rules and cfg.rules.avoid:
+            sync_code_path_deny_rules(cfg.rules.avoid)
+
+        # Write browser engine config (S5) — only if repo path provided
         if input.repo_path:
-            write_stealth_config(input.repo_path)
+            engine.write_config(input.repo_path)
 
         # Auth validation when config is present
         if input.config_path:
@@ -158,7 +171,7 @@ class BlackboxScanWorkflow:
                     agent_name = AgentName(f"{vt}-exploit")
                     if agent_name.value not in self._state.completed_agents:
                         session_id = get_session_id(agent_name.value)
-                        write_stealth_config(input.repo_path, session_id=session_id)
+                        engine.write_config(input.repo_path, session_id=session_id)
                         exploit_input = BlackboxActivityInput(
                             **{**act_input.__dict__, "agent_name": agent_name.value, "vuln_type": vt}
                         )
@@ -274,7 +287,6 @@ class BlackboxScanWorkflow:
             if input.repo_path:
                 # Clean up session-specific configs
                 for session_id in set(AGENT_SESSION_MAPPING.values()):
-                    from shannon_core.services.playwright_config_writer import cleanup_session_config
-                    cleanup_session_config(input.repo_path, session_id)
-                cleanup_stealth_config(input.repo_path)
+                    engine.cleanup_config(input.repo_path, session_id=session_id)
+                engine.cleanup_config(input.repo_path)
                 cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
