@@ -20,6 +20,7 @@ class ErrorCode(str, Enum):
     AUTH_LOGIN_FAILED = "AUTH_LOGIN_FAILED"
     BILLING_ERROR = "BILLING_ERROR"
     CODE_INDEX_FAILED = "CODE_INDEX_FAILED"
+    BROWSER_ENGINE_UNAVAILABLE = "BROWSER_ENGINE_UNAVAILABLE"
 
 PentestErrorType = str
 
@@ -117,6 +118,7 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
             ErrorCode.CONFIG_VALIDATION_FAILED,
             ErrorCode.CONFIG_PARSE_ERROR,
             ErrorCode.PROMPT_LOAD_FAILED,
+            ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
         ):
             return ("ConfigurationError", False)
         if code in (ErrorCode.GIT_CHECKPOINT_FAILED, ErrorCode.GIT_ROLLBACK_FAILED):
