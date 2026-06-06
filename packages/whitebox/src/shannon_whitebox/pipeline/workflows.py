@@ -7,14 +7,15 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
-from shannon_core.models.errors import PentestError
+from shannon_core.models.errors import ErrorCode, PentestError
 
 from .shared import ActivityInput, PipelineInput, PipelineState
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
-    from shannon_core.services.playwright_config_writer import write_stealth_config, cleanup_stealth_config
+    from shannon_core.services.browser_engine import BrowserEngineFactory
+    import shannon_core.services.engines  # noqa: F401 – registers engines
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
     from shannon_core.models.retry import (
         PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, PRODUCTION_RETRY, NON_RETRYABLE,
@@ -76,15 +77,36 @@ class WhiteboxScanWorkflow:
         )
         self._state.code_index_stats = code_index_result
 
-        # Write code path deny rules (S6)
+        # Resolve config and browser engine
+        cfg = None
+        engine = None
         if input.config_path:
             from shannon_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
-            if cfg.rules and cfg.rules.avoid:
-                sync_code_path_deny_rules(cfg.rules.avoid)
 
-        # Write stealth config (S5)
-        write_stealth_config(input.repo_path)
+        engine_name = cfg.browser_engine if cfg else "playwright"
+        try:
+            engine = BrowserEngineFactory.get_engine(engine_name)
+        except KeyError as e:
+            raise PentestError(
+                f"No browser engine registered as '{engine_name}'.",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            ) from e
+        if not engine.check_available():
+            raise PentestError(
+                f"Browser engine '{engine.name}' is not available. "
+                f"Install it with: npm install -g {engine.name} && {engine.name} install",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            )
+
+        # Write code path deny rules (S6)
+        if cfg and cfg.rules and cfg.rules.avoid:
+            sync_code_path_deny_rules(cfg.rules.avoid)
+
+        # Write browser engine config (S5)
+        engine.write_config(input.repo_path)
 
         try:
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
@@ -171,5 +193,6 @@ class WhiteboxScanWorkflow:
             return self._state
         finally:
             cleanup_settings()
-            cleanup_stealth_config(input.repo_path)
+            if engine:
+                engine.cleanup_config(input.repo_path)
             cleanup_auth_state_sync(workspace_path)

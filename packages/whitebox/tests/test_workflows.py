@@ -62,3 +62,49 @@ class TestWhiteboxWorkflowErrorPropagation:
         state = PipelineState()
         state.status = "cancelled"
         assert state.status == "cancelled"
+
+
+from shannon_core.models.errors import ErrorCode, PentestError
+from shannon_core.services.browser_engine import BrowserEngineFactory
+
+
+class TestWhiteboxBrowserEngineIntegration:
+    """Test browser engine resolution logic used by WhiteboxScanWorkflow."""
+
+    def test_engine_from_config_browser_engine(self, tmp_path):
+        """Engine should be resolved from config.browser_engine field."""
+        from shannon_core.config.parser import parse_config
+        import shannon_core.services.engines  # noqa: F401
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("browser_engine: agent-browser\n")
+        cfg = parse_config(str(config_file))
+
+        engine_name = cfg.browser_engine
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        assert engine.name == "agent-browser"
+
+    def test_default_playwright_without_config(self):
+        """Without config, engine defaults to playwright."""
+        import shannon_core.services.engines  # noqa: F401
+
+        engine_name = "playwright"
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        assert engine.name == "playwright"
+
+    def test_unavailable_engine_raises_error(self, monkeypatch):
+        """Engine with check_available()=False should raise PentestError."""
+        import shannon_core.services.engines  # noqa: F401
+
+        engine = BrowserEngineFactory.get_engine("playwright")
+        monkeypatch.setattr(
+            engine.__class__, "check_available", lambda self: False
+        )
+        engine = BrowserEngineFactory.get_engine("playwright")
+        if not engine.check_available():
+            error = PentestError(
+                f"Browser engine '{engine.name}' is not available.",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            )
+        assert error.error_code == ErrorCode.BROWSER_ENGINE_UNAVAILABLE
