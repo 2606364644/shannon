@@ -13,7 +13,7 @@ class Rules(BaseModel):
     avoid: list[Rule] = []
     focus: list[Rule] = []
 
-VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
+VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf"]
 Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
 
@@ -69,4 +69,4 @@ class Config(BaseModel):
     rules_of_engagement: str | None = None
     auto_detect_whitebox: bool = True
 
-ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
+ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
