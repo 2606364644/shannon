@@ -104,3 +104,36 @@ class TestCleanupSessionConfig:
 
     def test_cleanup_noop_when_no_config(self, tmp_path):
         cleanup_session_config(str(tmp_path), "agent-auth")  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Facade delegation and engine property tests
+# ---------------------------------------------------------------------------
+
+
+class TestFacadeDelegation:
+    """Verify the playwright_config_writer facade delegates to PlaywrightEngine."""
+
+    def test_facade_delegates_to_playwright_engine(self):
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        from shannon_core.services.playwright_config_writer import _engine
+        assert isinstance(_engine, PlaywrightEngine)
+
+    def test_playwright_engine_name(self):
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        engine = PlaywrightEngine()
+        assert engine.name == "playwright"
+
+    def test_playwright_engine_session_flag(self):
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        engine = PlaywrightEngine()
+        flag = engine.session_flag("sess-42")
+        assert flag == "-s=sess-42"
+
+    def test_playwright_engine_session_flag_format(self):
+        """Session flag should use -s={sid} format."""
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        engine = PlaywrightEngine()
+        flag = engine.session_flag("my-session")
+        assert flag.startswith("-s=")
+        assert "my-session" in flag

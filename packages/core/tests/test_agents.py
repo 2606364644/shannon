@@ -1,4 +1,4 @@
-from shannon_core.models.agents import AgentName, AgentDefinition, AGENTS, VulnType, PLAYWRIGHT_SESSION_MAPPING
+from shannon_core.models.agents import AgentName, AgentDefinition, AGENTS, VulnType, BROWSER_SESSION_MAPPING, PLAYWRIGHT_SESSION_MAPPING
 
 def test_agent_name_values():
     assert AgentName.PRE_RECON == "pre-recon"
@@ -82,17 +82,28 @@ def test_report_agent_prerequisites():
     assert len(defn.prerequisites) > 0
 
 
-def test_playwright_session_mapping_exists():
-    assert len(PLAYWRIGHT_SESSION_MAPPING) > 0
+def test_browser_session_mapping_exists():
+    assert len(BROWSER_SESSION_MAPPING) > 0
 
-def test_playwright_session_mapping_all_agents_mapped():
+def test_browser_session_mapping_all_agents_mapped():
     for name in AGENTS:
-        assert name.value in PLAYWRIGHT_SESSION_MAPPING, f"Missing session mapping for {name.value}"
+        assert name.value in BROWSER_SESSION_MAPPING, f"Missing session mapping for {name.value}"
 
-def test_session_mapping_values_unique():
-    values = list(PLAYWRIGHT_SESSION_MAPPING.values())
+def test_browser_session_mapping_values_unique():
+    values = list(BROWSER_SESSION_MAPPING.values())
     for v in values:
         assert v.startswith("agent"), f"Unexpected session name: {v}"
+
+
+def test_playwright_session_mapping_alias_backward_compat():
+    """PLAYWRIGHT_SESSION_MAPPING should be the same object as BROWSER_SESSION_MAPPING."""
+    assert PLAYWRIGHT_SESSION_MAPPING is BROWSER_SESSION_MAPPING
+
+def test_playwright_session_mapping_alias_works():
+    """Old PLAYWRIGHT_SESSION_MAPPING alias should still return correct values."""
+    assert len(PLAYWRIGHT_SESSION_MAPPING) > 0
+    for name in AGENTS:
+        assert name.value in PLAYWRIGHT_SESSION_MAPPING, f"Missing session mapping for {name.value}"
 
 
 def test_validate_auth_agent_name():
@@ -113,8 +124,8 @@ def test_validate_auth_definition():
 
 
 def test_validate_auth_in_session_mapping():
-    assert AgentName.VALIDATE_AUTH.value in PLAYWRIGHT_SESSION_MAPPING
-    assert PLAYWRIGHT_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] == "agent1"
+    assert AgentName.VALIDATE_AUTH.value in BROWSER_SESSION_MAPPING
+    assert BROWSER_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] == "agent1"
 
 
 def test_audit_tier1_agent_registered():

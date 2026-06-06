@@ -215,3 +215,46 @@ class TestEnginesSubpackage:
         from shannon_core.services.engines import BrowserEngineFactory as Factory
 
         assert Factory is BrowserEngineFactory
+
+
+# ---------------------------------------------------------------------------
+# Registered engine tests (after importing engines subpackage)
+# ---------------------------------------------------------------------------
+
+
+class TestRegisteredEngines:
+    """Tests that the engines subpackage registers PlaywrightEngine and AgentBrowserEngine."""
+
+    @pytest.fixture(autouse=True)
+    def _register_engines(self):
+        """Register the real engines after the autouse _clear_registry has emptied the registry."""
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        BrowserEngineFactory.register("playwright", PlaywrightEngine)
+        BrowserEngineFactory.register("agent-browser", AgentBrowserEngine)
+
+    def test_factory_returns_playwright_engine(self):
+        engine = BrowserEngineFactory.get_engine("playwright")
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        assert isinstance(engine, PlaywrightEngine)
+        assert engine.name == "playwright"
+
+    def test_factory_returns_agent_browser_engine(self):
+        engine = BrowserEngineFactory.get_engine("agent-browser")
+        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        assert isinstance(engine, AgentBrowserEngine)
+        assert engine.name == "agent-browser"
+
+    def test_factory_raises_keyerror_for_unknown(self):
+        with pytest.raises(KeyError, match="No browser engine"):
+            BrowserEngineFactory.get_engine("nonexistent-engine")
+
+    def test_playwright_satisfies_protocol(self):
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        engine = PlaywrightEngine()
+        assert isinstance(engine, BrowserEngine)
+
+    def test_agent_browser_satisfies_protocol(self):
+        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        engine = AgentBrowserEngine()
+        assert isinstance(engine, BrowserEngine)

@@ -378,3 +378,79 @@ def test_multiline_conditional_block(prompts_dir):
     assert "Line 2" in result
     assert "Line 3" in result
     assert "URL:" not in result
+
+
+# --- Engine-aware interpolation tests ---
+
+
+def test_browser_session_flag_injected(prompts_dir):
+    """BROWSER_SESSION_FLAG placeholder should be replaced with engine session flag."""
+    (prompts_dir / "browser-flag-test.txt").write_text(
+        "Session: {{BROWSER_SESSION_FLAG}} End"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("browser-flag-test", {"web_url": "https://example.com", "repo_path": "/r"})
+    assert "{{BROWSER_SESSION_FLAG}}" not in result
+    # Default engine is playwright, so flag should contain -s=
+    assert "-s=" in result
+    assert "Session:" in result
+    assert "End" in result
+
+
+def test_browser_commands_injected(prompts_dir):
+    """BROWSER_COMMANDS placeholder should be replaced with engine command reference."""
+    (prompts_dir / "browser-cmd-test.txt").write_text(
+        "Commands:\n{{BROWSER_COMMANDS}}\nDone"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("browser-cmd-test", {"web_url": "https://example.com", "repo_path": "/r"})
+    assert "{{BROWSER_COMMANDS}}" not in result
+    # Default engine is playwright, so reference should mention playwright
+    assert "playwright" in result.lower()
+    assert "Commands:" in result
+    assert "Done" in result
+
+
+def test_browser_session_id_variable(prompts_dir):
+    """Passing browser_session_id in variables should use that session ID."""
+    (prompts_dir / "sid-test.txt").write_text("Flag: {{BROWSER_SESSION_FLAG}}")
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("sid-test", {
+        "web_url": "https://example.com",
+        "repo_path": "/r",
+        "browser_session_id": "custom-sess",
+    })
+    # Default playwright engine uses -s=<id> format
+    assert "-s=custom-sess" in result
+
+
+def test_playwright_session_backward_compat(prompts_dir):
+    """Old playwright_session variable should still work for session ID resolution."""
+    (prompts_dir / "pw-compat-test.txt").write_text("Flag: {{BROWSER_SESSION_FLAG}}")
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("pw-compat-test", {
+        "web_url": "https://example.com",
+        "repo_path": "/r",
+        "playwright_session": "legacy-sess",
+    })
+    assert "-s=legacy-sess" in result
+
+
+def test_browser_engine_variable_selects_engine(prompts_dir):
+    """Passing browser_engine in variables should change the engine used."""
+    (prompts_dir / "engine-select-test.txt").write_text(
+        "Flag: {{BROWSER_SESSION_FLAG}}\nCommands: {{BROWSER_COMMANDS}}"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("engine-select-test", {
+        "web_url": "https://example.com",
+        "repo_path": "/r",
+        "browser_engine": "agent-browser",
+        "browser_session_id": "sess-abc",
+    })
+    # Agent-browser uses --session format (space-separated) instead of -s=
+    assert "--session sess-abc" in result
+    # Commands reference should be agent-browser specific (mentions snapshot, no playwright)
+    assert "snapshot" in result.lower()
+    assert "agent-browser" in result.lower()
+
