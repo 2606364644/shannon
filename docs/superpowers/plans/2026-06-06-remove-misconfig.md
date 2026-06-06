@@ -1,6 +1,6 @@
 # Remove Misconfig Vulnerability Class — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Completely remove the misconfig vulnerability detection and exploitation feature from Shannon-Py, leaving zero residual references.
 
@@ -38,18 +38,18 @@
 - Delete: `prompts/misconfig-exploit.txt`
 - Delete: `prompts/vuln-misconfig.txt.backup`
 
-- [ ] **Step 1: Delete the three prompt files**
+- [x] **Step 1: Delete the three prompt files**
 
 ```bash
 rm prompts/vuln-misconfig.txt prompts/misconfig-exploit.txt prompts/vuln-misconfig.txt.backup
 ```
 
-- [ ] **Step 2: Verify files are gone**
+- [x] **Step 2: Verify files are gone**
 
 Run: `ls prompts/*misconfig* 2>&1`
 Expected: `No such file or directory` (exit code non-zero, "No such file or directory" in stderr)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -u prompts/vuln-misconfig.txt prompts/misconfig-exploit.txt prompts/vuln-misconfig.txt.backup
@@ -63,7 +63,7 @@ git commit -m "chore: remove misconfig prompt files"
 **Files:**
 - Modify: `packages/core/src/shannon_core/models/config.py`
 
-- [ ] **Step 1: Edit VulnClass literal on line 16**
+- [x] **Step 1: Edit VulnClass literal on line 16**
 
 Change line 16 from:
 
@@ -77,7 +77,7 @@ to:
 VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf"]
 ```
 
-- [ ] **Step 2: Edit ALL_VULN_CLASSES on line 72**
+- [x] **Step 2: Edit ALL_VULN_CLASSES on line 72**
 
 Change line 72 from:
 
@@ -91,12 +91,12 @@ to:
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
 ```
 
-- [ ] **Step 3: Verify module imports cleanly**
+- [x] **Step 3: Verify module imports cleanly**
 
 Run: `cd packages/core && python -c "from shannon_core.models.config import ALL_VULN_CLASSES; print(len(ALL_VULN_CLASSES))"`
 Expected: `5`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/config.py
@@ -110,7 +110,7 @@ git commit -m "refactor(core): remove misconfig from VulnClass and ALL_VULN_CLAS
 **Files:**
 - Modify: `packages/core/src/shannon_core/models/queue_schemas.py`
 
-- [ ] **Step 1: Remove MisconfigVulnerability class (lines 59–68)**
+- [x] **Step 1: Remove MisconfigVulnerability class (lines 59–68)**
 
 Delete these lines entirely:
 
@@ -126,7 +126,7 @@ class MisconfigVulnerability(BaseVulnerability):
     existing_validation: str | None = None
 ```
 
-- [ ] **Step 2: Remove MisconfigVulnerability from Vulnerability Union (line 69)**
+- [x] **Step 2: Remove MisconfigVulnerability from Vulnerability Union (line 69)**
 
 Change:
 
@@ -140,12 +140,12 @@ to:
 Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerability, SsrfVulnerability, AuthzVulnerability, BaseVulnerability]
 ```
 
-- [ ] **Step 3: Verify module imports cleanly**
+- [x] **Step 3: Verify module imports cleanly**
 
 Run: `cd packages/core && python -c "from shannon_core.models.queue_schemas import Vulnerability; print('ok')"`
 Expected: `ok`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/queue_schemas.py
@@ -159,7 +159,7 @@ git commit -m "refactor(core): remove MisconfigVulnerability from queue schemas"
 **Files:**
 - Modify: `packages/core/src/shannon_core/models/agents.py`
 
-- [ ] **Step 1: Remove "misconfig" from VulnType (line 6)**
+- [x] **Step 1: Remove "misconfig" from VulnType (line 6)**
 
 Change:
 
@@ -173,7 +173,7 @@ to:
 VulnType = Literal["injection", "xss", "auth", "ssrf", "authz"]
 ```
 
-- [ ] **Step 2: Remove MISCONFIG_VULN and MISCONFIG_EXPLOIT from AgentName enum (lines 22–23)**
+- [x] **Step 2: Remove MISCONFIG_VULN and MISCONFIG_EXPLOIT from AgentName enum (lines 22–23)**
 
 Delete these two lines:
 
@@ -182,7 +182,7 @@ Delete these two lines:
     MISCONFIG_EXPLOIT = "misconfig-exploit"
 ```
 
-- [ ] **Step 3: Remove both misconfig agent definitions from AGENTS dict (lines 130–143)**
+- [x] **Step 3: Remove both misconfig agent definitions from AGENTS dict (lines 130–143)**
 
 Delete these entries entirely:
 
@@ -203,7 +203,7 @@ Delete these entries entirely:
     ),
 ```
 
-- [ ] **Step 4: Remove MISCONFIG_EXPLOIT from REPORT prerequisites (line 147–149)**
+- [x] **Step 4: Remove MISCONFIG_EXPLOIT from REPORT prerequisites (line 147–149)**
 
 Change:
 
@@ -227,7 +227,7 @@ to:
                         AgentName.AUTHZ_EXPLOIT],
 ```
 
-- [ ] **Step 5: Remove "misconfig" from ALL_VULN_CLASSES (line 171)**
+- [x] **Step 5: Remove "misconfig" from ALL_VULN_CLASSES (line 171)**
 
 Change:
 
@@ -241,7 +241,7 @@ to:
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
 ```
 
-- [ ] **Step 6: Remove misconfig entries from AGENT_PHASE_MAP (lines 186, 193)**
+- [x] **Step 6: Remove misconfig entries from AGENT_PHASE_MAP (lines 186, 193)**
 
 Delete:
 
@@ -255,12 +255,12 @@ and:
     "misconfig-exploit": "exploitation",
 ```
 
-- [ ] **Step 7: Verify module imports cleanly**
+- [x] **Step 7: Verify module imports cleanly**
 
 Run: `cd packages/core && python -c "from shannon_core.models.agents import AGENTS, ALL_VULN_CLASSES, AGENT_PHASE_MAP; print(len(ALL_VULN_CLASSES), len(AGENTS), len(AGENT_PHASE_MAP))"`
 Expected: `5` followed by two counts (should be fewer than before — 16 agents, 14 phase-map entries).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/models/agents.py
@@ -275,7 +275,7 @@ git commit -m "refactor(core): remove misconfig agents from definitions and phas
 - Modify: `packages/core/src/shannon_core/services/findings_renderer.py`
 - Modify: `packages/core/src/shannon_core/services/playwright_config_writer.py`
 
-- [ ] **Step 1: Remove MisconfigVulnerability from findings_renderer imports (line 10)**
+- [x] **Step 1: Remove MisconfigVulnerability from findings_renderer imports (line 10)**
 
 Change:
 
@@ -306,7 +306,7 @@ from shannon_core.models.queue_schemas import (
 )
 ```
 
-- [ ] **Step 2: Remove render_misconfig_entry function (lines 138–159)**
+- [x] **Step 2: Remove render_misconfig_entry function (lines 138–159)**
 
 Delete the entire function:
 
@@ -335,7 +335,7 @@ def render_misconfig_entry(vuln: MisconfigVulnerability) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 3: Remove "misconfig" from CLASS_CONFIG (lines 198–204)**
+- [x] **Step 3: Remove "misconfig" from CLASS_CONFIG (lines 198–204)**
 
 Delete the entire entry:
 
@@ -349,7 +349,7 @@ Delete the entire entry:
     ),
 ```
 
-- [ ] **Step 4: Remove misconfig from playwright_config_writer session mapping (line 19)**
+- [x] **Step 4: Remove misconfig from playwright_config_writer session mapping (line 19)**
 
 Change:
 
@@ -376,12 +376,12 @@ AGENT_SESSION_MAPPING: dict[str, str] = {
 }
 ```
 
-- [ ] **Step 5: Verify both modules import cleanly**
+- [x] **Step 5: Verify both modules import cleanly**
 
 Run: `cd packages/core && python -c "from shannon_core.services.findings_renderer import CLASS_CONFIG; print(len(CLASS_CONFIG))" && python -c "from shannon_core.services.playwright_config_writer import AGENT_SESSION_MAPPING; print(len(AGENT_SESSION_MAPPING))"`
 Expected: `5` (CLASS_CONFIG) and `5` (AGENT_SESSION_MAPPING)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/findings_renderer.py packages/core/src/shannon_core/services/playwright_config_writer.py
@@ -399,7 +399,7 @@ git commit -m "refactor(core): remove misconfig from findings renderer and playw
 - Modify: `packages/core/tests/test_findings_renderer.py`
 - Modify: `packages/core/tests/test_agent_phase_map.py`
 
-- [ ] **Step 1: Remove misconfig tests from test_config.py (lines 46–53)**
+- [x] **Step 1: Remove misconfig tests from test_config.py (lines 46–53)**
 
 Delete:
 
@@ -414,7 +414,7 @@ def test_all_vuln_classes_includes_misconfig():
     assert len(ALL_VULN_CLASSES) == 6
 ```
 
-- [ ] **Step 2: Remove misconfig tests from test_queue_schemas.py (lines 117–141)**
+- [x] **Step 2: Remove misconfig tests from test_queue_schemas.py (lines 117–141)**
 
 Delete:
 
@@ -446,7 +446,7 @@ def test_misconfig_in_vulnerability_union():
     assert "MISCONFIG-VULN-001" in json_str
 ```
 
-- [ ] **Step 3: Remove misconfig tests from test_agents.py (lines 84–106)**
+- [x] **Step 3: Remove misconfig tests from test_agents.py (lines 84–106)**
 
 Delete:
 
@@ -476,7 +476,7 @@ def test_report_includes_misconfig_exploit():
     assert AgentName.MISCONFIG_EXPLOIT in defn.prerequisites
 ```
 
-- [ ] **Step 4: Remove misconfig from test_findings_renderer.py**
+- [x] **Step 4: Remove misconfig from test_findings_renderer.py**
 
 Remove `MisconfigVulnerability` from imports on line 12:
 
@@ -563,7 +563,7 @@ def test_render_misconfig_entry_full():
     assert "**Existing Validation:** None" in result
 ```
 
-- [ ] **Step 5: Remove misconfig test from test_agent_phase_map.py (lines 24–26)**
+- [x] **Step 5: Remove misconfig test from test_agent_phase_map.py (lines 24–26)**
 
 Delete:
 
@@ -573,12 +573,12 @@ def test_misconfig_agents_mapped():
     assert AGENT_PHASE_MAP["misconfig-exploit"] == "exploitation"
 ```
 
-- [ ] **Step 6: Run core tests to verify nothing is broken**
+- [x] **Step 6: Run core tests to verify nothing is broken**
 
 Run: `cd packages/core && python -m pytest tests/ -v`
 Expected: All tests PASS. Count should be reduced by the removed tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/core/tests/test_config.py packages/core/tests/test_queue_schemas.py packages/core/tests/test_agents.py packages/core/tests/test_findings_renderer.py packages/core/tests/test_agent_phase_map.py
@@ -592,7 +592,7 @@ git commit -m "test(core): remove misconfig-related test functions"
 **Files:**
 - Modify: `packages/blackbox/tests/test_integration.py`
 
-- [ ] **Step 1: Remove "misconfig" from hardcoded vuln class list in prompts_dir fixture (line 38)**
+- [x] **Step 1: Remove "misconfig" from hardcoded vuln class list in prompts_dir fixture (line 38)**
 
 Change:
 
@@ -606,12 +606,12 @@ to:
     for vt in ["injection", "xss", "auth", "ssrf", "authz"]:
 ```
 
-- [ ] **Step 2: Run blackbox integration tests**
+- [x] **Step 2: Run blackbox integration tests**
 
 Run: `cd packages/blackbox && python -m pytest tests/test_integration.py -v`
 Expected: All tests PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/blackbox/tests/test_integration.py
@@ -624,22 +624,22 @@ git commit -m "test(blackbox): remove misconfig from integration tests"
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/ -v`
 Expected: All tests PASS.
 
-- [ ] **Step 2: Grep for residual misconfig references**
+- [x] **Step 2: Grep for residual misconfig references**
 
 Run: `grep -r "misconfig" --include="*.py" --include="*.txt" packages/ prompts/`
 Expected: Zero output (no matches). If any matches remain, fix them.
 
-- [ ] **Step 3: Verify ALL_VULN_CLASSES count is 5**
+- [x] **Step 3: Verify ALL_VULN_CLASSES count is 5**
 
 Run: `cd packages/core && python -c "from shannon_core.models.config import ALL_VULN_CLASSES; assert len(ALL_VULN_CLASSES) == 5; print('OK: 5 vuln classes')"`
 Expected: `OK: 5 vuln classes`
 
-- [ ] **Step 4: Final commit (if any fixes were needed)**
+- [x] **Step 4: Final commit (if any fixes were needed)**
 
 Only if Step 2 required fixes:
 
