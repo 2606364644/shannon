@@ -182,6 +182,7 @@ export const PLAYWRIGHT_SESSION_MAPPING: Record<string, PlaywrightSession> = Obj
 
   // Phase 2: Reconnaissance
   recon: 'agent2',
+  'recon-static': 'agent2',
 
   // Phase 3: Vulnerability Analysis (5 parallel agents)
   'vuln-injection': 'agent1',
