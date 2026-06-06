@@ -27,12 +27,25 @@ class AnthropicProvider:
         self.type = config.type
 
     def _get_model(self, model_tier: str) -> str:
-        """根据 tier 获取模型名称"""
-        # 如果配置中指定了模型，优先使用
+        """根据 tier 获取模型名称
+
+        优先级: tier-specific override > global model > DEFAULT_MODELS
+        """
+        # 1. Tier-specific override (最高优先级)
+        tier_models = {
+            "small": self.config.small_model,
+            "medium": self.config.medium_model,
+            "large": self.config.large_model,
+        }
+        tier_model = tier_models.get(model_tier)
+        if tier_model:
+            return tier_model
+
+        # 2. Global model fallback
         if self.config.model:
             return self.config.model
 
-        # 根据类型和 tier 选择默认模型
+        # 3. DEFAULT_MODELS (最低优先级)
         provider_key = "anthropic_api"
         if self.type == "bedrock":
             provider_key = "bedrock"

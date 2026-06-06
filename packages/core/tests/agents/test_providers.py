@@ -193,6 +193,14 @@ class TestBuildProviderConfig:
             assert config.medium_model is None
             assert config.large_model is None
 
+    def test_tier_specific_params_override_env(self):
+        """测试显式参数覆盖 tier 环境变量"""
+        with patch.dict(os.environ, {
+            "SHANNON_MEDIUM_MODEL": "env-medium",
+        }):
+            config = build_provider_config(medium_model="param-medium")
+            assert config.medium_model == "param-medium"
+
 
 class TestCreateProvider:
     """测试 create_provider 工厂函数"""
@@ -1067,3 +1075,78 @@ class TestRunClaudePromptErrorCode:
         assert result.success is False
         assert result.error_code == "AuthenticationError"
         assert result.retryable is False
+
+
+class TestAnthropicProviderTierModelResolution:
+    """测试 AnthropicProvider tier-specific 模型解析优先级"""
+
+    def test_tier_specific_override_takes_priority(self):
+        """Tier-specific override 优先于 global model 和默认值"""
+        config = ProviderConfig(
+            type="anthropic_api",
+            model="global-model",
+            medium_model="custom-medium",
+        )
+        provider = AnthropicProvider(config)
+        assert provider._get_model("medium") == "custom-medium"
+
+    def test_tier_specific_small_model(self):
+        """small_model 覆盖 small tier"""
+        config = ProviderConfig(
+            type="anthropic_api",
+            small_model="custom-small",
+        )
+        provider = AnthropicProvider(config)
+        assert provider._get_model("small") == "custom-small"
+
+    def test_tier_specific_large_model(self):
+        """large_model 覆盖 large tier"""
+        config = ProviderConfig(
+            type="anthropic_api",
+            large_model="custom-large",
+        )
+        provider = AnthropicProvider(config)
+        assert provider._get_model("large") == "custom-large"
+
+    def test_global_model_used_when_no_tier_override(self):
+        """没有 tier override 时使用 global model"""
+        config = ProviderConfig(
+            type="anthropic_api",
+            model="global-model",
+            small_model="custom-small",
+        )
+        provider = AnthropicProvider(config)
+        # medium 没有设置专属覆盖，应使用 global model
+        assert provider._get_model("medium") == "global-model"
+        # small 有专属覆盖
+        assert provider._get_model("small") == "custom-small"
+
+    def test_default_used_when_no_overrides(self):
+        """没有覆盖时使用 DEFAULT_MODELS"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        assert provider._get_model("small") == "claude-haiku-4-5-20251001"
+        assert provider._get_model("medium") == "claude-sonnet-4-6"
+        assert provider._get_model("large") == "claude-opus-4-8"
+
+    def test_tier_override_for_bedrock(self):
+        """Bedrock provider 的 tier override"""
+        config = ProviderConfig(
+            type="bedrock",
+            medium_model="custom-bedrock-medium",
+        )
+        provider = AnthropicProvider(config)
+        assert provider._get_model("medium") == "custom-bedrock-medium"
+        # small 没有 tier override，使用 Bedrock 默认值
+        assert provider._get_model("small") == "us.anthropic.claude-haiku-4-5"
+
+    def test_tier_override_for_vertex(self):
+        """Vertex provider 的 tier override"""
+        config = ProviderConfig(
+            type="vertex",
+            large_model="custom-vertex-large",
+        )
+        provider = AnthropicProvider(config)
+        assert provider._get_model("large") == "custom-vertex-large"
+        # medium 没有 tier override，使用 Vertex 默认值
+        assert provider._get_model("medium") == "claude-sonnet-4-6@latest"
