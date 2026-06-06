@@ -1,8 +1,14 @@
 """Shared base types for pipeline inputs."""
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+
+
+def _get_default_deliverables_subdir() -> str:
+    """从环境变量获取默认产出物子目录。"""
+    return os.getenv("SHANNON_DELIVERABLES_SUBDIR", DEFAULT_DELIVERABLES_SUBDIR)
 
 
 @dataclass
@@ -15,4 +21,4 @@ class BasePipelineInput:
     vuln_classes: list[str] | None = None      # Unified to str
     pipeline_testing_mode: bool = False
     api_key: str | None = None
-    deliverables_subdir: str = DEFAULT_DELIVERABLES_SUBDIR
+    deliverables_subdir: str = field(default_factory=_get_default_deliverables_subdir)
