@@ -1,5 +1,16 @@
 import json
+import os
 from pathlib import Path
+
+from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+
+
+def get_default_deliverables_subdir() -> str:
+    """从环境变量获取默认产出物子目录。
+
+    优先读取 SHANNON_DELIVERABLES_SUBDIR，未设置时返回 DEFAULT_DELIVERABLES_SUBDIR。
+    """
+    return os.getenv("SHANNON_DELIVERABLES_SUBDIR", DEFAULT_DELIVERABLES_SUBDIR)
 
 
 def find_project_root() -> Path:

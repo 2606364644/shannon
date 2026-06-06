@@ -2,7 +2,7 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results
+from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results, get_default_deliverables_subdir
 
 
 class TestResolveWorkspacesDir:
@@ -174,3 +174,21 @@ class TestHasValidWhiteboxResults:
         queue_file = tmp_path / "injection_exploitation_queue.json"
         queue_file.write_text(json.dumps({"vulnerabilities": "not a list"}))
         assert has_valid_whitebox_results(queue_file) is False
+
+
+class TestGetDefaultDeliverablesSubdir:
+    def test_returns_constant_when_no_env(self, monkeypatch):
+        """When SHANNON_DELIVERABLES_SUBDIR is not set, returns the default constant."""
+        from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+        monkeypatch.delenv("SHANNON_DELIVERABLES_SUBDIR", raising=False)
+        assert get_default_deliverables_subdir() == DEFAULT_DELIVERABLES_SUBDIR
+
+    def test_returns_env_value_when_set(self, monkeypatch):
+        """When SHANNON_DELIVERABLES_SUBDIR is set, returns its value."""
+        monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "custom/output")
+        assert get_default_deliverables_subdir() == "custom/output"
+
+    def test_returns_empty_string_when_env_empty(self, monkeypatch):
+        """When SHANNON_DELIVERABLES_SUBDIR is set to empty string, returns empty string."""
+        monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "")
+        assert get_default_deliverables_subdir() == ""
