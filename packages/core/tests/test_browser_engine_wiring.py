@@ -190,3 +190,55 @@ async def test_executor_no_browser_engine_without_config(tmp_path):
 
     # No config → no browser_engine key → PromptManager defaults to "playwright"
     assert "browser_engine" not in captured_variables
+
+
+@pytest.mark.asyncio
+async def test_executor_prompt_variables_override_config_engine(tmp_path):
+    """prompt_variables should override browser_engine from config."""
+    import shannon_core.services.engines  # noqa: F401 — register engines
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("browser_engine: playwright")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".shannon" / "deliverables").mkdir(parents=True)
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "recon.txt").write_text("{{BROWSER_COMMANDS}}")
+
+    captured_variables = {}
+
+    def mock_load_sync(self, template_name, variables, **kwargs):
+        captured_variables.update(variables)
+        return "mock prompt"
+
+    async def mock_run_claude(prompt, **kw):
+        r = MagicMock()
+        r.success = True
+        r.error = None
+        r.cost = 0.0
+        r.turns = 1
+        r.model = "test"
+        r.structured_output = None
+        r.tokens = None
+        r.text = ""
+        return r
+
+    with patch.object(PromptManager, "load_sync", mock_load_sync), \
+         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
+         patch.object(GitManager, "commit", new_callable=AsyncMock), \
+         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+
+        pm = PromptManager(prompts_dir)
+        executor = AgentExecutor(pm)
+        await executor.execute(
+            agent_name=AgentName.RECON,
+            repo_path=str(repo),
+            config_path=str(config_file),
+            prompt_variables={"browser_engine": "agent-browser"},
+        )
+
+    assert captured_variables["browser_engine"] == "agent-browser"
