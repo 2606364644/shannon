@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-VulnType = Literal["injection", "xss", "auth", "ssrf", "authz", "misconfig"]
+VulnType = Literal["injection", "xss", "auth", "ssrf", "authz"]
 
 class AgentName(str, Enum):
     PRE_RECON = "pre-recon"
@@ -19,8 +19,6 @@ class AgentName(str, Enum):
     AUTH_EXPLOIT = "auth-exploit"
     SSRF_EXPLOIT = "ssrf-exploit"
     AUTHZ_EXPLOIT = "authz-exploit"
-    MISCONFIG_VULN = "misconfig-vuln"
-    MISCONFIG_EXPLOIT = "misconfig-exploit"
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
     AUDIT_TIER1 = "audit-tier1"
@@ -127,26 +125,12 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         prompt_template="authz-exploit",
         deliverable_filename="authz_exploitation_evidence.md",
     ),
-    AgentName.MISCONFIG_VULN: AgentDefinition(
-        name=AgentName.MISCONFIG_VULN,
-        display_name="Misconfig Vuln agent",
-        prerequisites=[AgentName.RECON],
-        prompt_template="vuln-misconfig",
-        deliverable_filename="misconfig_analysis_deliverable.md",
-    ),
-    AgentName.MISCONFIG_EXPLOIT: AgentDefinition(
-        name=AgentName.MISCONFIG_EXPLOIT,
-        display_name="Misconfig Exploitation",
-        prerequisites=[AgentName.MISCONFIG_VULN],
-        prompt_template="misconfig-exploit",
-        deliverable_filename="misconfig_exploitation_evidence.md",
-    ),
     AgentName.REPORT: AgentDefinition(
         name=AgentName.REPORT,
         display_name="Report Generator",
         prerequisites=[AgentName.INJECTION_EXPLOIT, AgentName.XSS_EXPLOIT,
                         AgentName.AUTH_EXPLOIT, AgentName.SSRF_EXPLOIT,
-                        AgentName.AUTHZ_EXPLOIT, AgentName.MISCONFIG_EXPLOIT],
+                        AgentName.AUTHZ_EXPLOIT],
         prompt_template="report-executive",
         deliverable_filename="comprehensive_security_assessment_report.md",
     ),
@@ -168,7 +152,7 @@ AGENTS: dict[AgentName, AgentDefinition] = {
     ),
 }
 
-ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz", "misconfig"]
+ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
 
 PLAYWRIGHT_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
 # VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
@@ -183,14 +167,12 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "auth-vuln": "vulnerability-analysis",
     "ssrf-vuln": "vulnerability-analysis",
     "authz-vuln": "vulnerability-analysis",
-    "misconfig-vuln": "vulnerability-analysis",
     "recon-blackbox": "recon",
     "injection-exploit": "exploitation",
     "xss-exploit": "exploitation",
     "auth-exploit": "exploitation",
     "ssrf-exploit": "exploitation",
     "authz-exploit": "exploitation",
-    "misconfig-exploit": "exploitation",
     "report": "reporting",
     "validate-authentication": "pre-recon",
     "audit-tier1": "vulnerability-analysis",
