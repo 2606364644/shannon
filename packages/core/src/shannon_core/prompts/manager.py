@@ -1,9 +1,11 @@
 import re
 from pathlib import Path
 
-from shannon_core.models.agents import PLAYWRIGHT_SESSION_MAPPING
+from shannon_core.models.agents import BROWSER_SESSION_MAPPING
 from shannon_core.models.config import Authentication, DistributedConfig
 from shannon_core.models.errors import ErrorCode, PentestError
+from shannon_core.services.browser_engine import BrowserEngineFactory
+import shannon_core.services.engines  # noqa: F401 – registers PlaywrightEngine & AgentBrowserEngine
 
 
 def strip_conditional_blocks(text: str, has_web_url: bool) -> str:
@@ -79,8 +81,23 @@ class PromptManager:
         result = template
         result = result.replace("{{WEB_URL}}", variables.get("web_url", ""))
         result = result.replace("{{REPO_PATH}}", variables.get("repo_path", ""))
-        playwright_session = variables.get("playwright_session") or PLAYWRIGHT_SESSION_MAPPING.get(template_name, "agent1")
-        result = result.replace("{{PLAYWRIGHT_SESSION}}", playwright_session)
+
+        # Resolve browser session ID (backward compat: fall back to playwright_session)
+        session_id = (
+            variables.get("browser_session_id")
+            or variables.get("playwright_session")
+            or BROWSER_SESSION_MAPPING.get(template_name, "agent1")
+        )
+
+        # Resolve the browser engine via factory
+        engine = BrowserEngineFactory.get_engine(variables.get("browser_engine", "playwright"))
+
+        # Legacy placeholder – kept so that existing templates still work
+        result = result.replace("{{PLAYWRIGHT_SESSION}}", session_id)
+
+        # Engine-aware placeholders for updated templates
+        result = result.replace("{{BROWSER_SESSION_FLAG}}", engine.session_flag(session_id))
+        result = result.replace("{{BROWSER_COMMANDS}}", engine.commands_reference())
 
         if config:
             result = result.replace("{{DESCRIPTION}}", f"Description: {config.description}" if config.description else "")
