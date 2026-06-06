@@ -1212,3 +1212,116 @@ class TestAnthropicProviderTierModelResolution:
         assert provider._get_model("large") == "custom-vertex-large"
         # medium 没有 tier override，使用 Vertex 默认值
         assert provider._get_model("medium") == "claude-sonnet-4-6@latest"
+
+
+class TestTierModelEnvVarIntegration:
+    """端到端测试：环境变量 → build_provider_config → Provider._get_model()"""
+
+    def test_single_tier_override_others_use_defaults(self):
+        """设置 SHANNON_MEDIUM_MODEL 后，只有 medium tier 被覆盖"""
+        with patch.dict(os.environ, {
+            "SHANNON_MEDIUM_MODEL": "gpt-4o",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("medium") == "gpt-4o"
+        assert provider._get_model("small") == "claude-haiku-4-5-20251001"
+        assert provider._get_model("large") == "claude-opus-4-8"
+
+    def test_tier_override_plus_global_fallback(self):
+        """SHANNON_MODEL + SHANNON_LARGE_MODEL：large 用 tier override，其余用 global"""
+        with patch.dict(os.environ, {
+            "SHANNON_MODEL": "fallback-model",
+            "SHANNON_LARGE_MODEL": "custom-large",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("large") == "custom-large"
+        assert provider._get_model("medium") == "fallback-model"
+        assert provider._get_model("small") == "fallback-model"
+
+    def test_no_overrides_all_defaults(self):
+        """不设置任何覆盖变量，所有 tier 使用 DEFAULT_MODELS"""
+        with patch.dict(os.environ, {}, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("small") == "claude-haiku-4-5-20251001"
+        assert provider._get_model("medium") == "claude-sonnet-4-6"
+        assert provider._get_model("large") == "claude-opus-4-8"
+
+    def test_bedrock_tier_override_with_env(self):
+        """Bedrock provider 通过环境变量覆盖 tier"""
+        with patch.dict(os.environ, {
+            "SHANNON_AI_PROVIDER": "bedrock",
+            "SHANNON_SMALL_MODEL": "custom-bedrock-small",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("small") == "custom-bedrock-small"
+        assert provider._get_model("medium") == "us.anthropic.claude-sonnet-4-6"
+
+    def test_vertex_tier_override_with_env(self):
+        """Vertex provider 通过环境变量覆盖 tier"""
+        with patch.dict(os.environ, {
+            "SHANNON_AI_PROVIDER": "vertex",
+            "SHANNON_LARGE_MODEL": "custom-vertex-large",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("large") == "custom-vertex-large"
+        assert provider._get_model("small") == "claude-haiku-4-5@latest"
+
+    def test_openai_tier_override_with_env(self):
+        """OpenAI compatible provider 通过环境变量覆盖 tier"""
+        with patch.dict(os.environ, {
+            "SHANNON_AI_PROVIDER": "openai_compatible",
+            "SHANNON_MEDIUM_MODEL": "gpt-4o-turbo",
+        }, clear=True):
+            config = build_provider_config()
+            provider = OpenAIProvider(config)
+
+        assert provider._get_model("medium") == "gpt-4o-turbo"
+        assert provider._get_model("small") == "gpt-4o-mini"
+
+    def test_litellm_tier_override_with_env(self):
+        """LiteLLM router 通过环境变量覆盖 tier"""
+        with patch.dict(os.environ, {
+            "SHANNON_AI_PROVIDER": "litellm_router",
+            "SHANNON_LARGE_MODEL": "anthropic/claude-opus-4-8-custom",
+        }, clear=True):
+            config = build_provider_config()
+            provider = OpenAIProvider(config)
+
+        assert provider._get_model("large") == "anthropic/claude-opus-4-8-custom"
+        assert provider._get_model("medium") == "anthropic/claude-sonnet-4-6"
+
+    def test_all_three_tiers_overridden(self):
+        """三个 tier 全部覆盖"""
+        with patch.dict(os.environ, {
+            "SHANNON_SMALL_MODEL": "my-small",
+            "SHANNON_MEDIUM_MODEL": "my-medium",
+            "SHANNON_LARGE_MODEL": "my-large",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("small") == "my-small"
+        assert provider._get_model("medium") == "my-medium"
+        assert provider._get_model("large") == "my-large"
+
+    def test_tier_override_beats_shannon_model(self):
+        """SHANNON_*_MODEL 优先级高于 SHANNON_MODEL"""
+        with patch.dict(os.environ, {
+            "SHANNON_MODEL": "global-model",
+            "SHANNON_MEDIUM_MODEL": "tier-medium",
+        }, clear=True):
+            config = build_provider_config()
+            provider = AnthropicProvider(config)
+
+        assert provider._get_model("medium") == "tier-medium"
+        assert provider._get_model("small") == "global-model"
