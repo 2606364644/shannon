@@ -15,3 +15,5 @@ from shannon_core.services.validate_authentication import (
     verify_auth_state,
 )
 from shannon_core.services.findings_renderer import FindingsRenderer
+from shannon_core.services.browser_engine import BrowserEngine, BrowserEngineFactory
+import shannon_core.services.engines  # noqa: F401 – registers engines
