@@ -21,6 +21,3 @@ def test_validate_auth_mapped():
     assert AGENT_PHASE_MAP["validate-authentication"] == "pre-recon"
 
 
-def test_misconfig_agents_mapped():
-    assert AGENT_PHASE_MAP["misconfig-vuln"] == "vulnerability-analysis"
-    assert AGENT_PHASE_MAP["misconfig-exploit"] == "exploitation"

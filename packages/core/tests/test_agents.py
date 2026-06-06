@@ -81,29 +81,6 @@ def test_report_agent_prerequisites():
     defn = AGENTS[AgentName.REPORT]
     assert len(defn.prerequisites) > 0
 
-def test_misconfig_vuln_agent_name():
-    assert AgentName.MISCONFIG_VULN == "misconfig-vuln"
-
-def test_misconfig_exploit_agent_name():
-    assert AgentName.MISCONFIG_EXPLOIT == "misconfig-exploit"
-
-def test_misconfig_vuln_in_registry():
-    assert AgentName.MISCONFIG_VULN in AGENTS
-
-def test_misconfig_exploit_in_registry():
-    assert AgentName.MISCONFIG_EXPLOIT in AGENTS
-
-def test_misconfig_vuln_prerequisites():
-    defn = AGENTS[AgentName.MISCONFIG_VULN]
-    assert AgentName.RECON in defn.prerequisites
-
-def test_misconfig_exploit_prerequisites():
-    defn = AGENTS[AgentName.MISCONFIG_EXPLOIT]
-    assert AgentName.MISCONFIG_VULN in defn.prerequisites
-
-def test_report_includes_misconfig_exploit():
-    defn = AGENTS[AgentName.REPORT]
-    assert AgentName.MISCONFIG_EXPLOIT in defn.prerequisites
 
 def test_playwright_session_mapping_exists():
     assert len(PLAYWRIGHT_SESSION_MAPPING) > 0

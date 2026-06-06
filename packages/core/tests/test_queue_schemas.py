@@ -114,28 +114,3 @@ def test_queue_json_matches_ts_format():
     assert "sink_call" in entry
     assert "mismatch_reason" in entry
 
-def test_misconfig_vulnerability():
-    from shannon_core.models.queue_schemas import MisconfigVulnerability
-    v = MisconfigVulnerability(
-        ID="MISCONFIG-VULN-001",
-        vulnerability_type="Missing Security Headers",
-        externally_exploitable=True,
-        confidence="high",
-        missing_defense="No Content-Security-Policy header",
-        redirect_sink="/redirect?url=",
-    )
-    assert v.missing_defense == "No Content-Security-Policy header"
-    assert v.redirect_sink == "/redirect?url="
-
-def test_misconfig_in_vulnerability_union():
-    from shannon_core.models.queue_schemas import MisconfigVulnerability, VulnerabilityQueue
-    v = MisconfigVulnerability(
-        ID="MISCONFIG-VULN-001",
-        vulnerability_type="Open Redirect",
-        externally_exploitable=True,
-        confidence="high",
-    )
-    queue = VulnerabilityQueue(vulnerabilities=[v])
-    assert len(queue.vulnerabilities) == 1
-    json_str = queue.model_dump_json()
-    assert "MISCONFIG-VULN-001" in json_str

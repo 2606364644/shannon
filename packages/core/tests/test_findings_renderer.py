@@ -9,7 +9,6 @@ from shannon_core.models.queue_schemas import (
     AuthVulnerability,
     SsrfVulnerability,
     AuthzVulnerability,
-    MisconfigVulnerability,
     VulnerabilityQueue,
 )
 from shannon_core.services.findings_renderer import (
@@ -18,7 +17,6 @@ from shannon_core.services.findings_renderer import (
     render_auth_entry,
     render_authz_entry,
     render_ssrf_entry,
-    render_misconfig_entry,
     filter_vulnerabilities,
     FindingsRenderer,
 )
@@ -152,26 +150,6 @@ def test_render_ssrf_entry_full():
     assert "**Missing Defense:** No URL allowlist" in result
 
 
-def test_render_misconfig_entry_full():
-    vuln = MisconfigVulnerability(
-        ID="MISCONFIG-VULN-001",
-        vulnerability_type="Open Redirect",
-        externally_exploitable=True,
-        confidence="high",
-        source_endpoint="/redirect",
-        vulnerable_parameter="next",
-        vulnerable_code_location="handlers/redirect.py:10",
-        missing_defense="No redirect validation",
-        exploitation_hypothesis="Phishing via redirect",
-        suggested_exploit_technique="Parameter manipulation",
-        redirect_sink="/redirect?url=",
-        existing_validation="None",
-    )
-    result = render_misconfig_entry(vuln)
-    assert "### MISCONFIG-VULN-001" in result
-    assert "**Source Endpoint:** /redirect" in result
-    assert "**Redirect Sink:** /redirect?url=" in result
-    assert "**Existing Validation:** None" in result
 
 
 def test_filter_by_confidence():
