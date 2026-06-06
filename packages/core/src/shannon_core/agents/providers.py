@@ -140,6 +140,9 @@ def build_provider_config(
     region: str | None = None,
     project_id: str | None = None,
     auth_token: str | None = None,
+    small_model: str | None = None,
+    medium_model: str | None = None,
+    large_model: str | None = None,
 ) -> ProviderConfig:
     """
     从环境变量和参数构建 ProviderConfig
@@ -157,6 +160,9 @@ def build_provider_config(
         region: 区域（用于 Bedrock / Vertex）
         project_id: 项目 ID（用于 Vertex）
         auth_token: 认证 Token（用于 LiteLLM）
+        small_model: Small tier 模型（默认从 SHANNON_SMALL_MODEL 读取）
+        medium_model: Medium tier 模型（默认从 SHANNON_MEDIUM_MODEL 读取）
+        large_model: Large tier 模型（默认从 SHANNON_LARGE_MODEL 读取）
 
     Returns:
         ProviderConfig: 配置对象
@@ -189,6 +195,14 @@ def build_provider_config(
     if auth_token is None:
         auth_token = os.getenv("SHANNON_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN")
 
+    # Tier-specific model overrides
+    if small_model is None:
+        small_model = os.getenv("SHANNON_SMALL_MODEL")
+    if medium_model is None:
+        medium_model = os.getenv("SHANNON_MEDIUM_MODEL")
+    if large_model is None:
+        large_model = os.getenv("SHANNON_LARGE_MODEL")
+
     return ProviderConfig(
         type=provider_type,  # type: ignore
         api_key=api_key,
@@ -197,4 +211,7 @@ def build_provider_config(
         region=region,
         project_id=project_id,
         auth_token=auth_token,
+        small_model=small_model,
+        medium_model=medium_model,
+        large_model=large_model,
     )

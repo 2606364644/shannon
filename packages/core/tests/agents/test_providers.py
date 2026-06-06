@@ -163,6 +163,36 @@ class TestBuildProviderConfig:
             assert config.project_id == "test-project"
             assert config.region == "us-central1"
 
+    def test_tier_specific_env_vars(self):
+        """测试 SHANNON_*_MODEL 环境变量"""
+        with patch.dict(os.environ, {
+            "SHANNON_SMALL_MODEL": "custom-small",
+            "SHANNON_MEDIUM_MODEL": "custom-medium",
+            "SHANNON_LARGE_MODEL": "custom-large",
+        }):
+            config = build_provider_config()
+            assert config.small_model == "custom-small"
+            assert config.medium_model == "custom-medium"
+            assert config.large_model == "custom-large"
+
+    def test_tier_specific_env_vars_partial(self):
+        """测试只设置部分 tier 变量"""
+        with patch.dict(os.environ, {
+            "SHANNON_MEDIUM_MODEL": "custom-medium",
+        }):
+            config = build_provider_config()
+            assert config.small_model is None
+            assert config.medium_model == "custom-medium"
+            assert config.large_model is None
+
+    def test_tier_specific_env_vars_default_to_none(self):
+        """测试不设置 tier 变量时默认为 None"""
+        with patch.dict(os.environ, {}, clear=True):
+            config = build_provider_config()
+            assert config.small_model is None
+            assert config.medium_model is None
+            assert config.large_model is None
+
 
 class TestCreateProvider:
     """测试 create_provider 工厂函数"""
