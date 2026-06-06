@@ -1077,6 +1077,68 @@ class TestRunClaudePromptErrorCode:
         assert result.retryable is False
 
 
+class TestOpenAIProviderTierModelResolution:
+    """测试 OpenAIProvider tier-specific 模型解析优先级"""
+
+    def test_tier_specific_override_takes_priority(self):
+        """Tier-specific override 优先于 global model 和默认值"""
+        config = ProviderConfig(
+            type="openai_compatible",
+            model="global-model",
+            medium_model="custom-medium",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("medium") == "custom-medium"
+
+    def test_tier_specific_small_model(self):
+        """small_model 覆盖 small tier"""
+        config = ProviderConfig(
+            type="openai_compatible",
+            small_model="custom-small",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("small") == "custom-small"
+
+    def test_tier_specific_large_model(self):
+        """large_model 覆盖 large tier"""
+        config = ProviderConfig(
+            type="openai_compatible",
+            large_model="custom-large",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("large") == "custom-large"
+
+    def test_global_model_used_when_no_tier_override(self):
+        """没有 tier override 时使用 global model"""
+        config = ProviderConfig(
+            type="openai_compatible",
+            model="global-model",
+            small_model="custom-small",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("medium") == "global-model"
+        assert provider._get_model("small") == "custom-small"
+
+    def test_default_used_when_no_overrides(self):
+        """没有覆盖时使用 DEFAULT_MODELS"""
+        config = ProviderConfig(type="openai_compatible")
+        provider = OpenAIProvider(config)
+        assert provider._get_model("small") == "gpt-4o-mini"
+        assert provider._get_model("medium") == "gpt-4o"
+        assert provider._get_model("large") == "o1"
+
+    def test_tier_override_for_litellm_router(self):
+        """LiteLLM router 的 tier override"""
+        config = ProviderConfig(
+            type="litellm_router",
+            medium_model="custom-litellm-medium",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("medium") == "custom-litellm-medium"
+        # small 没有 tier override，使用 litellm_router 默认值
+        assert provider._get_model("small") == "anthropic/claude-haiku-4-5"
+
+
 class TestAnthropicProviderTierModelResolution:
     """测试 AnthropicProvider tier-specific 模型解析优先级"""
 
