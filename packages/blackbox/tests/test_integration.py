@@ -35,7 +35,7 @@ def prompts_dir(tmp_path):
     prompts = tmp_path / "prompts"
     prompts.mkdir()
     (prompts / "recon-blackbox.txt").write_text("Recon {{WEB_URL}}")
-    for vt in ["injection", "xss", "auth", "ssrf", "authz", "misconfig"]:
+    for vt in ["injection", "xss", "auth", "ssrf", "authz"]:
         (prompts / f"{vt}-exploit.txt").write_text(f"Exploit {vt} {{{{VULNERABILITY_ENTRIES}}}}")
     (prompts / "report-executive.txt").write_text("Report")
     return prompts
