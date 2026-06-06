@@ -31,6 +31,24 @@ class TestProviderConfig:
         assert config.api_key is None
         assert config.base_url is None
 
+    def test_tier_specific_model_fields_default_to_none(self):
+        """Tier-specific model fields default to None"""
+        config = ProviderConfig()
+        assert config.small_model is None
+        assert config.medium_model is None
+        assert config.large_model is None
+
+    def test_tier_specific_model_fields_can_be_set(self):
+        """Tier-specific model fields can be explicitly set"""
+        config = ProviderConfig(
+            small_model="claude-haiku-4-5-20251001",
+            medium_model="claude-sonnet-4-6",
+            large_model="claude-opus-4-8",
+        )
+        assert config.small_model == "claude-haiku-4-5-20251001"
+        assert config.medium_model == "claude-sonnet-4-6"
+        assert config.large_model == "claude-opus-4-8"
+
     def test_full_config(self):
         """测试完整配置"""
         config = ProviderConfig(

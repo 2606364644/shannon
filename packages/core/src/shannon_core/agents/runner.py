@@ -34,6 +34,9 @@ class ProviderConfig:
     region: str | None = None
     project_id: str | None = None
     auth_token: str | None = None
+    small_model: str | None = None
+    medium_model: str | None = None
+    large_model: str | None = None
 
 
 # 默认模型映射表
