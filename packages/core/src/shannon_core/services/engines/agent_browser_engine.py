@@ -105,10 +105,10 @@ class AgentBrowserEngine:
     def session_flag(self, session_id: str) -> str:
         """Return the CLI flag string for session isolation.
 
-        agent-browser uses space-separated ``--session <id>`` instead of
-        Playwright's ``-s=<id>``.
+        agent-browser uses space-separated ``--session <id>`` plus
+        ``--profile`` for persistent Chrome profile (auth state auto-persists).
         """
-        return f"--session {session_id}"
+        return f"--session {session_id} --profile .agent-browser/profiles/{session_id}"
 
     def commands_reference(self) -> str:
         """Return agent-browser command reference text for prompt injection."""
