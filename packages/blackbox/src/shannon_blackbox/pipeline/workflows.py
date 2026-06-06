@@ -73,12 +73,20 @@ class BlackboxScanWorkflow:
 
         # Resolve config and browser engine
         cfg = None
+        engine = None
         if input.config_path:
             from shannon_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
 
         engine_name = cfg.browser_engine if cfg else "playwright"
-        engine = BrowserEngineFactory.get_engine(engine_name)
+        try:
+            engine = BrowserEngineFactory.get_engine(engine_name)
+        except KeyError as e:
+            raise PentestError(
+                f"No browser engine registered as '{engine_name}'.",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            ) from e
         if not engine.check_available():
             raise PentestError(
                 f"Browser engine '{engine.name}' is not available. "
@@ -284,7 +292,7 @@ class BlackboxScanWorkflow:
             return self._state
         finally:
             cleanup_settings()
-            if input.repo_path:
+            if engine and input.repo_path:
                 # Clean up session-specific configs
                 for session_id in set(AGENT_SESSION_MAPPING.values()):
                     engine.cleanup_config(input.repo_path, session_id=session_id)
