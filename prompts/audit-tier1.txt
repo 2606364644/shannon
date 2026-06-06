@@ -55,7 +55,7 @@ Output STRICT JSON — no markdown, no code fences, no explanation outside the J
 {
   "findings": [
     {
-      "category": "injection|auth|authz|xss|ssrf|misconfig",
+      "category": "injection|auth|authz|xss|ssrf",
       "issue_type": "specific_issue_type_from_whitelist",
       "entry_point_id": "file:func:line",
       "vulnerable_function_id": "file:func:line",
@@ -82,7 +82,6 @@ Output STRICT JSON — no markdown, no code fences, no explanation outside the J
 **xss:** reflected_xss, stored_xss, dom_xss
 **authz:** idor, missing_role_check, role_tampering, tenant_isolation, cross_org_access, horizontal_privilege_escalation, vertical_privilege_escalation
 **ssrf:** server_side_request_forgery, dns_rebinding, internal_service_access
-**misconfig:** cors_misconfiguration, missing_security_headers, insecure_cookie_flags, information_disclosure, debug_mode_enabled, default_credentials
 </output_format>
 
 <critical>

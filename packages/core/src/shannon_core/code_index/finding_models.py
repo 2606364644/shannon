@@ -51,11 +51,6 @@ VALID_SSRF_CATEGORIES: set[str] = {
     "internal_service_access",
 }
 
-VALID_MISCONFIG_CATEGORIES: set[str] = {
-    "cors_misconfiguration", "missing_security_headers",
-    "insecure_cookie_flags", "information_disclosure",
-    "debug_mode_enabled", "default_credentials",
-}
 
 # Map agent_type → valid issue_types
 AGENT_TYPE_WHITELIST: dict[str, set[str]] = {
@@ -64,8 +59,7 @@ AGENT_TYPE_WHITELIST: dict[str, set[str]] = {
     "xss": VALID_XSS_CATEGORIES,
     "authz": VALID_AUTHZ_CATEGORIES,
     "ssrf": VALID_SSRF_CATEGORIES,
-    "misconfig": VALID_MISCONFIG_CATEGORIES,
-}
+    }
 
 
 class VulnFinding(BaseModel):
@@ -103,7 +97,7 @@ def parse_and_validate_findings(
 
     Args:
         raw: Parsed JSON dict with "findings" key containing a list.
-        agent_type: "injection" | "auth" | "xss" | "authz" | "ssrf" | "misconfig"
+        agent_type: "injection" | "auth" | "xss" | "authz" | "ssrf"
 
     Returns:
         List of validated VulnFinding objects. Invalid entries are silently dropped.

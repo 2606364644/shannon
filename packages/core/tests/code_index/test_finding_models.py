@@ -4,7 +4,7 @@ from shannon_core.code_index.finding_models import (
     parse_and_validate_findings, deduplicate_findings,
     VALID_INJECTION_CATEGORIES, VALID_AUTH_CATEGORIES,
     VALID_XSS_CATEGORIES, VALID_AUTHZ_CATEGORIES,
-    VALID_SSRF_CATEGORIES, VALID_MISCONFIG_CATEGORIES,
+    VALID_SSRF_CATEGORIES,
 )
 
 
@@ -67,9 +67,7 @@ class TestCategoryWhitelists:
     def test_ssrf_categories(self):
         assert "server_side_request_forgery" in VALID_SSRF_CATEGORIES
 
-    def test_misconfig_categories(self):
-        assert "cors_misconfiguration" in VALID_MISCONFIG_CATEGORIES
-
+    
 
 class TestParseAndValidateFindings:
     def test_valid_findings(self):
