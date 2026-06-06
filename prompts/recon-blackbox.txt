@@ -98,5 +98,5 @@ Write your findings to `.shannon/deliverables/recon_deliverable.md` with these s
 - You have NO source code access — rely solely on browser automation and HTTP probing
 - Respect {{RULES_AVOID}} — do not probe excluded paths
 - Record every discovered endpoint — completeness matters more than depth
-- Use browser session {{PLAYWRIGHT_SESSION}} for all automated interactions
+- Use browser session {{BROWSER_SESSION_FLAG}} for all automated interactions
 </critical>

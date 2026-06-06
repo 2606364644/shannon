@@ -6,7 +6,7 @@ session to:
 
 Restore it before doing anything else:
 
-  playwright-cli -s={{PLAYWRIGHT_SESSION}} state-load {{AUTH_STATE_FILE}}
+  Use your browser's session state load command with {{BROWSER_SESSION_FLAG}} to restore authentication state from {{AUTH_STATE_FILE}}
 
 Then run verification (per the success_condition in your authentication
 config) to confirm the restored session is still valid:

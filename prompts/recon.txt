@@ -73,7 +73,7 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
 <cli_tools>
 Please use these tools for the following use cases:
 - Task tool: **MANDATORY for ALL source code analysis.** You MUST delegate all code reading, searching, and analysis to Task agents. DO NOT use Read, Glob, or Grep tools for source code.
-- **Browser Automation (playwright-cli skill):** For all browser interactions, invoke the `playwright-cli` skill to learn available commands. Always pass `-s={{PLAYWRIGHT_SESSION}}` to every command for session isolation.
+- **Browser Automation:** {{BROWSER_COMMANDS}} Always pass `{{BROWSER_SESSION_FLAG}}` to every command for session isolation.
 - **save-deliverable (CLI Tool):** Saves your deliverable files with automatic validation.
   - **Usage:** `save-deliverable --type <TYPE> --file-path <path>` or `--content '<text>'`
   - **Returns:** JSON to stdout: `{"status":"success","filepath":"..."}` or `{"status":"error","message":"...","retryable":true}`
@@ -148,7 +148,7 @@ You must follow this methodical four-step process:
     - In your thoughts, create a preliminary list of known technologies and key code modules.
 
 2.  **Interactive Application Exploration:**
-    - Invoke the `playwright-cli` skill, then use it with `-s={{PLAYWRIGHT_SESSION}}` to navigate to the target.
+    - Use your browser automation tool with `{{BROWSER_SESSION_FLAG}}` to navigate to the target.
     - Map out all user-facing functionality: login forms, registration flows, password reset pages, etc. Document the multi-step processes.
     - Observe the network requests to identify primary API calls.
 
