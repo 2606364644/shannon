@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -206,6 +207,10 @@ def parse_config(config_path: str) -> Config:
             "config",
             error_code=ErrorCode.CONFIG_PARSE_ERROR,
         )
+
+    # Environment variable override for browser engine
+    if env_engine := os.environ.get("SHANNON_BROWSER_ENGINE"):
+        raw["browser_engine"] = env_engine
 
     # Sanitize raw dict before Pydantic validation (normalizes case/whitespace)
     raw = _sanitize_raw_dict(raw)
