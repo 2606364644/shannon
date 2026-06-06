@@ -210,7 +210,7 @@ def parse_config(config_path: str) -> Config:
 
     # Environment variable override for browser engine
     if env_engine := os.environ.get("SHANNON_BROWSER_ENGINE"):
-        raw["browser_engine"] = env_engine
+        raw["browser_engine"] = env_engine.strip()
 
     # Sanitize raw dict before Pydantic validation (normalizes case/whitespace)
     raw = _sanitize_raw_dict(raw)
