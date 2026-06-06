@@ -56,17 +56,7 @@ class AuthzVulnerability(BaseVulnerability):
     reason: str | None = None
     minimal_witness: str | None = None
 
-class MisconfigVulnerability(BaseVulnerability):
-    source_endpoint: str | None = None
-    vulnerable_code_location: str | None = None
-    missing_defense: str | None = None
-    exploitation_hypothesis: str | None = None
-    suggested_exploit_technique: str | None = None
-    vulnerable_parameter: str | None = None
-    redirect_sink: str | None = None
-    existing_validation: str | None = None
-
-Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerability, SsrfVulnerability, AuthzVulnerability, MisconfigVulnerability, BaseVulnerability]
+Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerability, SsrfVulnerability, AuthzVulnerability, BaseVulnerability]
 
 class VulnerabilityQueue(BaseModel):
     vulnerabilities: list[Vulnerability] = []
