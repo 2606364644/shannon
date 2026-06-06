@@ -38,6 +38,30 @@ class TestResolveWorkspacesDir:
         result = resolve_workspaces_dir()
         assert result == project_root / "workspaces"
 
+    def test_with_worker_root_env(self, tmp_path, monkeypatch):
+        """When SHANNON_WORKER_ROOT is set, returns worker_root / workspaces."""
+        worker_root = tmp_path / "shannon-worker"
+        worker_root.mkdir()
+        monkeypatch.setenv("SHANNON_WORKER_ROOT", str(worker_root))
+        result = resolve_workspaces_dir()
+        assert result == worker_root / "workspaces"
+
+    def test_worker_root_env_ignored_when_repo_path_given(self, monkeypatch):
+        """When repo_path is provided, SHANNON_WORKER_ROOT is ignored."""
+        monkeypatch.setenv("SHANNON_WORKER_ROOT", "/custom/worker/root")
+        result = resolve_workspaces_dir("/data/repos/myrepo")
+        assert result == Path("/data/repos/workspaces")
+
+    def test_worker_root_fallback_without_repo_path(self, tmp_path, monkeypatch):
+        """When no repo_path and no SHANNON_WORKER_ROOT, uses project_root."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()
+        monkeypatch.chdir(project_root)
+        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        result = resolve_workspaces_dir()
+        assert result == project_root / "workspaces"
+
 
 class TestResolveDeliverablesPath:
     def test_with_repo_path(self):

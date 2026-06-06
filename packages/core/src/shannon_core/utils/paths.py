@@ -25,11 +25,16 @@ def find_project_root() -> Path:
 def resolve_workspaces_dir(repo_path: str | None = None) -> Path:
     """解析 workspaces 根目录。
 
-    如果提供 repo_path，使用 repo_path.parent / "workspaces"；
-    否则使用 find_project_root() / "workspaces"。
+    优先级：
+    1. repo_path 存在 → repo_path.parent / "workspaces"
+    2. SHANNON_WORKER_ROOT 环境变量 → worker_root / "workspaces"
+    3. find_project_root() / "workspaces"
     """
     if repo_path:
         return Path(repo_path).parent / "workspaces"
+    worker_root = os.getenv("SHANNON_WORKER_ROOT")
+    if worker_root:
+        return Path(worker_root) / "workspaces"
     return find_project_root() / "workspaces"
 
 
