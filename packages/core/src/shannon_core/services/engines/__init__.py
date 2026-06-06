@@ -2,10 +2,6 @@
 
 Engine classes are registered with ``BrowserEngineFactory`` here so that
 the rest of the codebase can look them up by name.
-
-Currently this module contains only the registration scaffolding.  The
-actual ``PlaywrightEngine`` and ``AgentBrowserEngine`` imports will be
-uncommented once those implementations land.
 """
 
 from __future__ import annotations
