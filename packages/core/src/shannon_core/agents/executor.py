@@ -42,6 +42,8 @@ class AgentExecutor:
         distributed = distribute_config(config)
 
         variables = {"web_url": web_url, "repo_path": str(repo)}
+        if config:
+            variables["browser_engine"] = config.browser_engine
         if prompt_variables:
             variables.update(prompt_variables)
         template_name = prompt_override or defn.prompt_template

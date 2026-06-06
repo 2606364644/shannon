@@ -80,3 +80,113 @@ class TestBrowserEngineEnvVarOverride:
         monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "chromium")
         with pytest.raises(PentestError, match="validation failed"):
             parse_config(config_path)
+
+
+from shannon_core.agents.executor import AgentExecutor
+from shannon_core.prompts.manager import PromptManager
+from shannon_core.models.agents import AgentName
+from shannon_core.git_manager import GitManager
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Executor injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_executor_injects_browser_engine_from_config(tmp_path):
+    """AgentExecutor should inject browser_engine from config into prompt variables."""
+    import shannon_core.services.engines  # noqa: F401 — register engines
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("browser_engine: agent-browser")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".shannon" / "deliverables").mkdir(parents=True)
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "recon.txt").write_text("{{BROWSER_COMMANDS}}")
+
+    captured_variables = {}
+
+    def mock_load_sync(self, template_name, variables, **kwargs):
+        captured_variables.update(variables)
+        return "mock prompt"
+
+    async def mock_run_claude(prompt, **kw):
+        r = MagicMock()
+        r.success = True
+        r.error = None
+        r.cost = 0.0
+        r.turns = 1
+        r.model = "test"
+        r.structured_output = None
+        r.tokens = None
+        r.text = ""
+        return r
+
+    with patch.object(PromptManager, "load_sync", mock_load_sync), \
+         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
+         patch.object(GitManager, "commit", new_callable=AsyncMock), \
+         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+
+        pm = PromptManager(prompts_dir)
+        executor = AgentExecutor(pm)
+        await executor.execute(
+            agent_name=AgentName.RECON,
+            repo_path=str(repo),
+            config_path=str(config_file),
+        )
+
+    assert captured_variables["browser_engine"] == "agent-browser"
+
+
+@pytest.mark.asyncio
+async def test_executor_no_browser_engine_without_config(tmp_path):
+    """Without a config file, executor should not inject browser_engine."""
+    import shannon_core.services.engines  # noqa: F401 — register engines
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".shannon" / "deliverables").mkdir(parents=True)
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "recon.txt").write_text("{{BROWSER_COMMANDS}}")
+
+    captured_variables = {}
+
+    def mock_load_sync(self, template_name, variables, **kwargs):
+        captured_variables.update(variables)
+        return "mock prompt"
+
+    async def mock_run_claude(prompt, **kw):
+        r = MagicMock()
+        r.success = True
+        r.error = None
+        r.cost = 0.0
+        r.turns = 1
+        r.model = "test"
+        r.structured_output = None
+        r.tokens = None
+        r.text = ""
+        return r
+
+    with patch.object(PromptManager, "load_sync", mock_load_sync), \
+         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
+         patch.object(GitManager, "commit", new_callable=AsyncMock), \
+         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+
+        pm = PromptManager(prompts_dir)
+        executor = AgentExecutor(pm)
+        await executor.execute(
+            agent_name=AgentName.RECON,
+            repo_path=str(repo),
+        )
+
+    # No config → no browser_engine key → PromptManager defaults to "playwright"
+    assert "browser_engine" not in captured_variables
