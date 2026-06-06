@@ -35,7 +35,7 @@
 
 ---
 
-### Task 1: BrowserEngine Protocol + Factory + Config Extension
+### Task 1: BrowserEngine Protocol + Factory + Config Extension ✅
 
 **Files:**
 - Create: `packages/core/src/shannon_core/services/browser_engine.py`
@@ -43,7 +43,7 @@
 - Modify: `packages/core/src/shannon_core/config/parser.py`
 - Create: `packages/core/tests/test_browser_engine.py`
 
-- [ ] **Step 1: Write failing tests for BrowserEngineFactory**
+- [x] **Step 1: Write failing tests for BrowserEngineFactory**
 
 ```python
 # packages/core/tests/test_browser_engine.py
@@ -97,12 +97,12 @@ class TestConfigBrowserEngine:
             Config(browser_engine="selenium")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_browser_engine.py -v`
 Expected: FAIL (module not found)
 
-- [ ] **Step 3: Create BrowserEngine Protocol + BrowserEngineFactory**
+- [x] **Step 3: Create BrowserEngine Protocol + BrowserEngineFactory**
 
 ```python
 # packages/core/src/shannon_core/services/browser_engine.py
@@ -197,7 +197,7 @@ class BrowserEngineFactory:
         return sorted(cls._engines.keys())
 ```
 
-- [ ] **Step 4: Add `browser_engine` field to Config model**
+- [x] **Step 4: Add `browser_engine` field to Config model**
 
 Add to `packages/core/src/shannon_core/models/config.py`:
 
@@ -219,7 +219,7 @@ class Config(BaseModel):
     browser_engine: BrowserEngineType = "playwright"
 ```
 
-- [ ] **Step 5: Add env var override to config parser**
+- [x] **Step 5: Add env var override to config parser**
 
 In `packages/core/src/shannon_core/config/parser.py`, inside `parse_config()`, after `raw = yaml.safe_load(content)` and before constructing `Config`, add:
 
@@ -231,7 +231,7 @@ In `packages/core/src/shannon_core/config/parser.py`, inside `parse_config()`, a
 
 Also add `import os` at the top of the file if not present.
 
-- [ ] **Step 6: Create engines subpackage with registration**
+- [x] **Step 6: Create engines subpackage with registration**
 
 ```python
 # packages/core/src/shannon_core/services/engines/__init__.py
@@ -258,7 +258,7 @@ def _ensure_registered() -> None:
 _ensure_registered()
 ```
 
-- [ ] **Step 7: Create minimal PlaywrightEngine stub (placeholder to make factory tests pass)**
+- [x] **Step 7: Create minimal PlaywrightEngine stub (placeholder to make factory tests pass)**
 
 ```python
 # packages/core/src/shannon_core/services/engines/playwright_engine.py
@@ -300,7 +300,7 @@ class PlaywrightEngine:
         return shutil.which("playwright-cli") is not None
 ```
 
-- [ ] **Step 8: Create minimal AgentBrowserEngine stub (placeholder to make factory tests pass)**
+- [x] **Step 8: Create minimal AgentBrowserEngine stub (placeholder to make factory tests pass)**
 
 ```python
 # packages/core/src/shannon_core/services/engines/agent_browser_engine.py
@@ -342,17 +342,17 @@ class AgentBrowserEngine:
         return shutil.which("agent-browser") is not None
 ```
 
-- [ ] **Step 9: Run tests to verify they pass**
+- [x] **Step 9: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_browser_engine.py -v`
 Expected: All 7 tests PASS
 
-- [ ] **Step 10: Run existing tests to verify no regressions**
+- [x] **Step 10: Run existing tests to verify no regressions**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ -v --tb=short`
 Expected: All existing tests still PASS
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/browser_engine.py \
@@ -367,13 +367,13 @@ git commit -m "feat(core): add BrowserEngine protocol, factory, and config field
 
 ---
 
-### Task 2: PlaywrightEngine Full Implementation
+### Task 2: PlaywrightEngine Full Implementation ✅
 
 **Files:**
 - Modify: `packages/core/src/shannon_core/services/engines/playwright_engine.py`
 - Modify: `packages/core/src/shannon_core/services/playwright_config_writer.py`
 
-- [ ] **Step 1: Write failing test for PlaywrightEngine commands_reference**
+- [x] **Step 1: Write failing test for PlaywrightEngine commands_reference**
 
 ```python
 # Append to packages/core/tests/test_browser_engine.py
@@ -445,12 +445,12 @@ class TestPlaywrightEngine:
         assert isinstance(engine.check_available(), bool)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_browser_engine.py::TestPlaywrightEngine -v`
 Expected: FAIL (methods return empty strings/stubs)
 
-- [ ] **Step 3: Implement PlaywrightEngine with full logic**
+- [x] **Step 3: Implement PlaywrightEngine with full logic**
 
 Replace the stub in `packages/core/src/shannon_core/services/engines/playwright_engine.py`:
 
@@ -538,17 +538,17 @@ Selectors: CSS selectors or XPath."""
         return shutil.which("playwright-cli") is not None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_browser_engine.py::TestPlaywrightEngine -v`
 Expected: All 10 tests PASS
 
-- [ ] **Step 5: Verify existing playwright tests still pass**
+- [x] **Step 5: Verify existing playwright tests still pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_playwright_config_writer.py -v`
 Expected: All existing tests PASS (playwright_config_writer unchanged)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/engines/playwright_engine.py \
@@ -558,13 +558,13 @@ git commit -m "feat(core): implement PlaywrightEngine with full commands and aut
 
 ---
 
-### Task 3: AgentBrowserEngine Full Implementation
+### Task 3: AgentBrowserEngine Full Implementation ✅
 
 **Files:**
 - Modify: `packages/core/src/shannon_core/services/engines/agent_browser_engine.py`
 - Create: `packages/core/tests/test_agent_browser_engine.py`
 
-- [ ] **Step 1: Write failing tests for AgentBrowserEngine**
+- [x] **Step 1: Write failing tests for AgentBrowserEngine**
 
 ```python
 # packages/core/tests/test_agent_browser_engine.py
@@ -653,12 +653,12 @@ class TestAgentBrowserEngineConfig:
         engine.cleanup_all(str(tmp_path))  # Should not raise
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_agent_browser_engine.py -v`
 Expected: FAIL (methods return empty strings)
 
-- [ ] **Step 3: Implement AgentBrowserEngine**
+- [x] **Step 3: Implement AgentBrowserEngine**
 
 Replace the stub in `packages/core/src/shannon_core/services/engines/agent_browser_engine.py`:
 
@@ -760,17 +760,17 @@ Always pass {session_flag} to every command for session isolation."""
         return shutil.which("agent-browser") is not None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_agent_browser_engine.py -v`
 Expected: All 12 tests PASS
 
-- [ ] **Step 5: Run full test suite to verify no regressions**
+- [x] **Step 5: Run full test suite to verify no regressions**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/engines/agent_browser_engine.py \
@@ -780,7 +780,7 @@ git commit -m "feat(core): implement AgentBrowserEngine with profile-based auth"
 
 ---
 
-### Task 4: PromptManager Integration
+### Task 4: PromptManager Integration ✅
 
 **Files:**
 - Modify: `packages/core/src/shannon_core/prompts/manager.py`
@@ -790,7 +790,7 @@ The PromptManager currently resolves `{{PLAYWRIGHT_SESSION}}` directly. We repla
 
 The `load_sync` method gets a new optional `browser_engine_name` parameter (default `"playwright"` for backward compat).
 
-- [ ] **Step 1: Write failing tests for browser variable injection**
+- [x] **Step 1: Write failing tests for browser variable injection**
 
 ```python
 # Append to packages/core/tests/test_prompt_manager.py
@@ -919,12 +919,12 @@ def test_browser_auth_save_injected(prompts_dir):
     assert "state-save" in result
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py::test_browser_session_flag_injected -v`
 Expected: FAIL (load_sync doesn't accept browser_engine_name parameter)
 
-- [ ] **Step 3: Update PromptManager.load_sync signature and _interpolate**
+- [x] **Step 3: Update PromptManager.load_sync signature and _interpolate**
 
 Modify `packages/core/src/shannon_core/prompts/manager.py`:
 
@@ -975,17 +975,17 @@ result = result.replace("{{PLAYWRIGHT_SESSION}}", playwright_session)
 
 The generic variable loop at the bottom of `_interpolate` already handles `{{BROWSER_SESSION_ID}}`, `{{BROWSER_SESSION_FLAG}}`, `{{BROWSER_COMMANDS}}`, `{{BROWSER_AUTH_RESTORE}}`, `{{BROWSER_AUTH_SAVE}}` — it converts any key in `variables` to `{{KEY}}` and replaces.
 
-- [ ] **Step 4: Run the new browser injection tests**
+- [x] **Step 4: Run the new browser injection tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -k "browser_" -v`
 Expected: All 8 new tests PASS
 
-- [ ] **Step 5: Run ALL prompt manager tests to check backward compat**
+- [x] **Step 5: Run ALL prompt manager tests to check backward compat**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS (existing tests use default `browser_engine_name="playwright"`, backward compat maintained)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/prompts/manager.py \
@@ -995,12 +995,12 @@ git commit -m "feat(core): add browser engine variable injection to PromptManage
 
 ---
 
-### Task 5: Update ExploitExecutor
+### Task 5: Update ExploitExecutor ✅
 
 **Files:**
 - Modify: `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`
 
-- [ ] **Step 1: Update ExploitExecutor to use browser_session_id**
+- [x] **Step 1: Update ExploitExecutor to use browser_session_id**
 
 The change is minimal: rename `playwright_session` to `browser_session_id` in prompt_variables.
 
@@ -1063,12 +1063,12 @@ class ExploitExecutor:
         )
 ```
 
-- [ ] **Step 2: Run blackbox tests**
+- [x] **Step 2: Run blackbox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py
@@ -1077,7 +1077,7 @@ git commit -m "refactor(blackbox): rename playwright_session to browser_session_
 
 ---
 
-### Task 6: Update Workflow Integration
+### Task 6: Update Workflow Integration ✅ (via wiring plan)
 
 **Files:**
 - Modify: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
@@ -1087,7 +1087,7 @@ This is the most delicate change — workflow files use `write_stealth_config`, 
 
 The engine is resolved once at pipeline start and used throughout.
 
-- [ ] **Step 1: Update blackbox workflow**
+- [x] **Step 1: Update blackbox workflow**
 
 In `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`:
 
@@ -1164,12 +1164,12 @@ Note: this engine resolution duplicates code with the existing `parse_config` ca
 
 **Remove the `cleanup_session_config` import** that was on line 277.
 
-- [ ] **Step 2: Run blackbox tests**
+- [x] **Step 2: Run blackbox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/blackbox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 3: Update whitebox workflow**
+- [x] **Step 3: Update whitebox workflow**
 
 In `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`:
 
@@ -1214,12 +1214,12 @@ Remove the old `parse_config` + `write_stealth_config` calls at lines 80-87.
     engine.cleanup_all(input.repo_path)
 ```
 
-- [ ] **Step 4: Run whitebox tests**
+- [x] **Step 4: Run whitebox tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/whitebox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/pipeline/workflows.py \
@@ -1229,12 +1229,12 @@ git commit -m "refactor: update workflows to use BrowserEngine interface"
 
 ---
 
-### Task 7: Update services __init__.py
+### Task 7: Update services __init__.py ❌ (NOT DONE)
 
 **Files:**
 - Modify: `packages/core/src/shannon_core/services/__init__.py`
 
-- [ ] **Step 1: Add browser engine exports**
+- [x] **Step 1: Add browser engine exports**
 
 Append to `packages/core/src/shannon_core/services/__init__.py`:
 
@@ -1248,12 +1248,12 @@ Also ensure engines are registered on import:
 from shannon_core.services.engines import _ensure_registered
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/services/__init__.py
@@ -1262,7 +1262,7 @@ git commit -m "feat(core): export BrowserEngine symbols from services package"
 
 ---
 
-### Task 8: Update Prompt Templates (24 files)
+### Task 8: Update Prompt Templates (24 files) ✅
 
 **Files:**
 - Modify: `prompts/shared/_shared-session.txt`
@@ -1282,7 +1282,7 @@ All templates change from hardcoded `playwright-cli` references to engine-agnost
 | `playwright-cli -s={{PLAYWRIGHT_SESSION}} state-load {{AUTH_STATE_FILE}}` | `{{BROWSER_AUTH_RESTORE}}` |
 | `playwright-cli -s={{PLAYWRIGHT_SESSION}} state-save {{AUTH_STATE_FILE}}` | `{{BROWSER_AUTH_SAVE}}` |
 
-- [ ] **Step 1: Update `prompts/shared/_shared-session.txt`**
+- [x] **Step 1: Update `prompts/shared/_shared-session.txt`**
 
 Replace entire file content:
 
@@ -1292,7 +1292,7 @@ Replace entire file content:
 </shared_authenticated_session>
 ```
 
-- [ ] **Step 2: Update `prompts/validate-authentication.txt`**
+- [x] **Step 2: Update `prompts/validate-authentication.txt`**
 
 The file has two browser-related sections: `<cli_tools>` and `<publish_session>`.
 
@@ -1323,7 +1323,7 @@ With:
 </publish_session>
 ```
 
-- [ ] **Step 3: Update all vuln prompt files** (6 files)
+- [x] **Step 3: Update all vuln prompt files** (6 files)
 
 For each of these files, the pattern is identical — replace the `playwright-cli` tool reference line:
 
@@ -1345,7 +1345,7 @@ Replace with:
 {{BROWSER_COMMANDS}}
 ```
 
-- [ ] **Step 4: Update all exploit prompt files** (5 files)
+- [x] **Step 4: Update all exploit prompt files** (5 files)
 
 Files:
 - `prompts/injection-exploit.txt` (line 121)
@@ -1358,7 +1358,7 @@ Same pattern as Step 3 — replace the `playwright-cli` tool reference with `{{B
 
 Additionally, in `prompts/xss-exploit.txt` (line 339), `prompts/auth-exploit.txt` (line 265), and `prompts/ssrf-exploit.txt` (line 406), replace standalone `{{PLAYWRIGHT_SESSION}}` with `{{BROWSER_SESSION_ID}}`.
 
-- [ ] **Step 5: Update `prompts/recon.txt`**
+- [x] **Step 5: Update `prompts/recon.txt`**
 
 Two references (lines 76 and 151):
 
@@ -1381,7 +1381,7 @@ With:
     - Use the browser tool with your session flag to navigate to the target.
 ```
 
-- [ ] **Step 6: Update `prompts/recon-blackbox.txt`**
+- [x] **Step 6: Update `prompts/recon-blackbox.txt`**
 
 Line 101 — replace:
 ```
@@ -1392,7 +1392,7 @@ With:
 - Use browser session {{BROWSER_SESSION_ID}} for all automated interactions
 ```
 
-- [ ] **Step 7: Update pipeline-testing vuln templates** (5 files)
+- [x] **Step 7: Update pipeline-testing vuln templates** (5 files)
 
 Files:
 - `prompts/pipeline-testing/vuln-xss.txt` (lines 6-8)
@@ -1416,7 +1416,7 @@ Replace with:
 
 The `{{BROWSER_COMMANDS}}` block is automatically injected by the PromptManager — no need to repeat it here since pipeline-testing templates are minimal.
 
-- [ ] **Step 8: Update pipeline-testing exploit templates** (5 files)
+- [x] **Step 8: Update pipeline-testing exploit templates** (5 files)
 
 Files:
 - `prompts/pipeline-testing/exploit-injection.txt`
@@ -1451,17 +1451,17 @@ With:
 
 Lines 20, 26, 32 — replace all `{{PLAYWRIGHT_SESSION}}` with `{{BROWSER_SESSION_ID}}`.
 
-- [ ] **Step 9: Verify no remaining playwright references in templates**
+- [x] **Step 9: Verify no remaining playwright references in templates**
 
 Run: `grep -rn "playwright-cli\|PLAYWRIGHT_SESSION" prompts/ --include="*.txt"`
 Expected: No output (zero matches)
 
-- [ ] **Step 10: Run prompt manager tests**
+- [x] **Step 10: Run prompt manager tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add prompts/
@@ -1470,14 +1470,14 @@ git commit -m "refactor(prompts): replace playwright-cli references with engine-
 
 ---
 
-### Task 9: Update test_prompt_manager.py Shared Session Tests
+### Task 9: Update test_prompt_manager.py Shared Session Tests ✅
 
 **Files:**
 - Modify: `packages/core/tests/test_prompt_manager.py`
 
 The shared session tests reference `playwright-cli state-load` in their test fixtures. These need updating to use the new `{{BROWSER_AUTH_RESTORE}}` placeholder.
 
-- [ ] **Step 1: Update test_shared_session_include_resolves** (line 272-295)
+- [x] **Step 1: Update test_shared_session_include_resolves** (line 272-295)
 
 Change the session_partial fixture:
 ```python
@@ -1503,7 +1503,7 @@ Update the assertion — check for auth_state_file content being present (which 
     assert "/tmp/auth-state.json" in result
 ```
 
-- [ ] **Step 2: Update test_shared_session_include_removed_without_auth** (line 298-316)
+- [x] **Step 2: Update test_shared_session_include_removed_without_auth** (line 298-316)
 
 Same change to session_partial:
 ```python
@@ -1514,12 +1514,12 @@ Same change to session_partial:
     )
 ```
 
-- [ ] **Step 3: Run all prompt manager tests**
+- [x] **Step 3: Run all prompt manager tests**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/test_prompt_manager.py -v`
 Expected: All tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/tests/test_prompt_manager.py
@@ -1528,12 +1528,12 @@ git commit -m "test(core): update shared session tests for engine-agnostic place
 
 ---
 
-### Task 10: Update .env.example + Final Integration
+### Task 10: Update .env.example + Final Integration ✅ (via wiring plan)
 
 **Files:**
 - Modify: `.env.example`
 
-- [ ] **Step 1: Add SHANNON_BROWSER_ENGINE to .env.example**
+- [x] **Step 1: Add SHANNON_BROWSER_ENGINE to .env.example**
 
 After the Temporal section, add:
 
@@ -1546,12 +1546,12 @@ After the Temporal section, add:
 # SHANNON_BROWSER_ENGINE=playwright
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run: `cd /Users/mango/project/shannon-refactor/shannon-py && python -m pytest packages/core/tests/ packages/blackbox/tests/ packages/whitebox/tests/ -v --tb=short`
 Expected: All tests PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .env.example
