@@ -257,7 +257,6 @@ AGENT_SESSION_MAPPING: dict[str, str] = {
     "auth-exploit": "agent-auth",
     "ssrf-exploit": "agent-ssrf",
     "authz-exploit": "agent-authz",
-    "misconfig-exploit": "agent-misconfig",
 }
 ```
 
