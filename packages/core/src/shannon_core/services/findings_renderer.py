@@ -7,7 +7,6 @@ from shannon_core.models.queue_schemas import (
     AuthVulnerability,
     AuthzVulnerability,
     InjectionVulnerability,
-    MisconfigVulnerability,
     SsrfVulnerability,
     Vulnerability,
     VulnerabilityQueue,
@@ -135,28 +134,6 @@ def render_ssrf_entry(vuln: SsrfVulnerability) -> str:
     return "\n".join(lines)
 
 
-def render_misconfig_entry(vuln: MisconfigVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", "**Summary:**"]
-    if vuln.source_endpoint:
-        lines.append(f"- **Source Endpoint:** {vuln.source_endpoint}")
-    if vuln.vulnerable_parameter:
-        lines.append(f"- **Vulnerable Parameter:** {vuln.vulnerable_parameter}")
-    if vuln.vulnerable_code_location:
-        lines.append(f"- **Vulnerable Code Location:** {vuln.vulnerable_code_location}")
-    if vuln.missing_defense:
-        lines.append(f"- **Missing Defense:** {vuln.missing_defense}")
-    if vuln.exploitation_hypothesis:
-        lines.append(f"- **Exploitation Hypothesis:** {vuln.exploitation_hypothesis}")
-    if vuln.suggested_exploit_technique:
-        lines.append(f"- **Suggested Exploit Technique:** {vuln.suggested_exploit_technique}")
-    if vuln.redirect_sink:
-        lines.append(f"- **Redirect Sink:** {vuln.redirect_sink}")
-    if vuln.existing_validation:
-        lines.append(f"- **Existing Validation:** {vuln.existing_validation}")
-    if vuln.notes:
-        lines.append(f"\n**Notes:** {vuln.notes}")
-    lines.append("")
-    return "\n".join(lines)
 
 
 CLASS_CONFIG: dict[str, VulnClassConfig] = {
@@ -194,13 +171,6 @@ CLASS_CONFIG: dict[str, VulnClassConfig] = {
         queue_file="ssrf_exploitation_queue.json",
         findings_file="ssrf_findings.md",
         render_entry=render_ssrf_entry,
-    ),
-    "misconfig": VulnClassConfig(
-        heading="Security Misconfigurations",
-        none_found_label="No security misconfigurations found.",
-        queue_file="misconfig_exploitation_queue.json",
-        findings_file="misconfig_findings.md",
-        render_entry=render_misconfig_entry,
     ),
 }
 
