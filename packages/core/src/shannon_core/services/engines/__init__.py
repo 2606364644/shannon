@@ -14,13 +14,14 @@ from shannon_core.services.browser_engine import BrowserEngineFactory
 
 # ---------------------------------------------------------------------------
 # Register concrete engine implementations.
-# These will be uncommented as each engine is implemented:
+# AgentBrowserEngine will be uncommented once it is implemented:
 #
-# from shannon_core.services.engines.playwright_engine import PlaywrightEngine
 # from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
-#
-# BrowserEngineFactory.register("playwright", PlaywrightEngine)
 # BrowserEngineFactory.register("agent-browser", AgentBrowserEngine)
 # ---------------------------------------------------------------------------
+
+from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+
+BrowserEngineFactory.register("playwright", PlaywrightEngine)
 
 __all__ = ["BrowserEngineFactory"]
