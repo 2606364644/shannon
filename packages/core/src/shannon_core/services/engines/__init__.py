@@ -20,7 +20,7 @@ from shannon_core.services.browser_engine import BrowserEngineFactory
 # from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
 #
 # BrowserEngineFactory.register("playwright", PlaywrightEngine)
-# BrowserEngineFactory.register("agentbrowser", AgentBrowserEngine)
+# BrowserEngineFactory.register("agent-browser", AgentBrowserEngine)
 # ---------------------------------------------------------------------------
 
 __all__ = ["BrowserEngineFactory"]

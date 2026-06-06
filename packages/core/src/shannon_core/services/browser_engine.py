@@ -20,7 +20,7 @@ class BrowserEngine(Protocol):
 
     @property
     def name(self) -> str:
-        """Engine identifier string, e.g. ``'playwright'`` or ``'agentbrowser'``."""
+        """Engine identifier string, e.g. ``'playwright'`` or ``'agent-browser'``."""
         ...
 
     def session_flag(self, session_id: str) -> str:
