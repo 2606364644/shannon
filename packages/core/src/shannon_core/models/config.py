@@ -58,6 +58,8 @@ class DistributedConfig(BaseModel):
     rules_of_engagement: str
     authentication: Authentication | None = None
 
+BrowserEngineType = Literal["playwright", "agent-browser"]
+
 class Config(BaseModel):
     rules: Rules | None = None
     authentication: Authentication | None = None
@@ -68,5 +70,6 @@ class Config(BaseModel):
     report: ReportConfig | None = None
     rules_of_engagement: str | None = None
     auto_detect_whitebox: bool = True
+    browser_engine: BrowserEngineType = "playwright"
 
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
