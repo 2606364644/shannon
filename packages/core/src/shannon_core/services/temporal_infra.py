@@ -27,6 +27,19 @@ def generate_task_queue(prefix: str) -> str:
     return f"{prefix}-{suffix}"
 
 
+def _shannon_container_exists() -> bool:
+    """Check if the original shannon-temporal container exists (running or stopped)."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "name=shannon-temporal", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+        )
+        return "shannon-temporal" in result.stdout.strip()
+    except FileNotFoundError:
+        return False
+
+
 def get_compose_file(path: Path | None = None) -> Path:
     """Return the docker-compose.yml path. Defaults to project root."""
     if path is not None:

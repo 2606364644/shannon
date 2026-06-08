@@ -165,3 +165,26 @@ class TestGenerateTaskQueue:
         from shannon_core.services.temporal_infra import generate_task_queue
         names = {generate_task_queue("shannon-py-wb") for _ in range(100)}
         assert len(names) == 100
+
+
+class TestShannonContainerExists:
+    def test_returns_true_when_container_found(self):
+        from shannon_core.services.temporal_infra import _shannon_container_exists
+        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+            mock_sp.run.return_value = MagicMock(stdout="shannon-temporal")
+            assert _shannon_container_exists() is True
+            args = mock_sp.run.call_args[0][0]
+            assert "--filter" in args
+            assert "name=shannon-temporal" in args
+
+    def test_returns_false_when_container_not_found(self):
+        from shannon_core.services.temporal_infra import _shannon_container_exists
+        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+            mock_sp.run.return_value = MagicMock(stdout="")
+            assert _shannon_container_exists() is False
+
+    def test_returns_false_when_docker_not_installed(self):
+        from shannon_core.services.temporal_infra import _shannon_container_exists
+        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+            mock_sp.run.side_effect = FileNotFoundError("docker not found")
+            assert _shannon_container_exists() is False
