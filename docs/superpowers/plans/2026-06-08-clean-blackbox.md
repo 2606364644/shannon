@@ -17,7 +17,7 @@
 
 This is the entire command implementation — scan, preview, confirm, delete.
 
-- [ ] **Step 1: Write the clean command module**
+- [x] **Step 1: Write the clean command module**
 
 Create `apps/cli/src/commands/clean.ts` with the following content:
 
@@ -187,12 +187,12 @@ export async function clean(opts: CleanOptions): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `pnpm --filter @keygraph/shannon run check`
 Expected: No type errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/cli/src/commands/clean.ts
@@ -208,7 +208,7 @@ git commit -m "feat(cli): add clean command module"
 
 Add the `clean` command to the dispatcher and help text.
 
-- [ ] **Step 1: Add import**
+- [x] **Step 1: Add import**
 
 At the top of `apps/cli/src/index.ts`, add to the existing imports (after the `stop` import on line 21):
 
@@ -216,7 +216,7 @@ At the top of `apps/cli/src/index.ts`, add to the existing imports (after the `s
 import { clean } from './commands/clean.js';
 ```
 
-- [ ] **Step 2: Add `clean` case to command switch**
+- [x] **Step 2: Add `clean` case to command switch**
 
 In the `switch (command)` block (after the `stop` case around line 248), add. Note: `args` is `process.argv.slice(2)`, so `args[0]` is `clean` and sub-args start at `args[1]`:
 
@@ -251,7 +251,7 @@ In the `switch (command)` block (after the `stop` case around line 248), add. No
   }
 ```
 
-- [ ] **Step 3: Add `clean` to help text**
+- [x] **Step 3: Add `clean` to help text**
 
 In `showHelp()`, add after the `stop` line (around line 72):
 
@@ -259,17 +259,17 @@ In `showHelp()`, add after the `stop` line (around line 72):
   ${prefix} clean -w <workspace> -r <repo>             Clean blackbox scan results [--blackbox]
 ```
 
-- [ ] **Step 4: Verify TypeScript compiles**
+- [x] **Step 4: Verify TypeScript compiles**
 
 Run: `pnpm --filter @keygraph/shannon run check`
 Expected: No type errors
 
-- [ ] **Step 5: Build and verify help output**
+- [x] **Step 5: Build and verify help output**
 
 Run: `pnpm run build && node apps/cli/dist/index.mjs help`
 Expected: Help text shows `clean` command with description
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/cli/src/index.ts
@@ -282,7 +282,7 @@ git commit -m "feat(cli): register clean command in dispatcher and help"
 
 **Files:** None (manual verification)
 
-- [ ] **Step 1: Verify clean detects no blackbox files on a whitebox-only workspace**
+- [x] **Step 1: Verify clean detects no blackbox files on a whitebox-only workspace**
 
 ```bash
 pnpm run build
@@ -293,7 +293,7 @@ Expected (if blackbox deliverables still exist): Shows preview of files to delet
 
 Expected (if blackbox deliverables were already manually cleaned): Shows "No blackbox results found. Nothing to clean."
 
-- [ ] **Step 2: Verify unknown workspace errors cleanly**
+- [x] **Step 2: Verify unknown workspace errors cleanly**
 
 ```bash
 node apps/cli/dist/index.mjs clean -w nonexistent-workspace -r /root/code/ads_oa_fe/
@@ -301,7 +301,7 @@ node apps/cli/dist/index.mjs clean -w nonexistent-workspace -r /root/code/ads_oa
 
 Expected: `ERROR: Workspace not found: .../workspaces/nonexistent-workspace`
 
-- [ ] **Step 3: Verify missing repo errors cleanly**
+- [x] **Step 3: Verify missing repo errors cleanly**
 
 ```bash
 node apps/cli/dist/index.mjs clean -w ads_oa_fe_whitebox-1780646286202 -r /nonexistent/path
