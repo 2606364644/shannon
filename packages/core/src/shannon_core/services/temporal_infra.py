@@ -128,17 +128,34 @@ async def ensure_infra(
 ) -> None:
     """Ensure Temporal infrastructure is available.
 
-    1. If Temporal is already ready, return immediately.
-    2. Otherwise, start the container via docker compose.
-    3. Poll until healthy (30 attempts × 2s interval).
-    4. Raise RuntimeError on timeout.
+    Priority chain:
+    1. If Temporal is already reachable, return immediately.
+    2. If the original shannon-temporal container exists (stopped), start it.
+    3. Otherwise, start shannon-py's own docker-compose as fallback.
     """
+    # Step 1: Already reachable?
     if await is_temporal_ready(address):
+        logger.info("Temporal already reachable at %s — reusing.", address)
         return
 
-    logger.info("Temporal not ready — starting infrastructure...")
-    start_temporal(compose_file)
+    # Step 2: Original project container exists but stopped?
+    if _shannon_container_exists():
+        logger.info("Found shannon-temporal container — starting it.")
+        try:
+            subprocess.run(
+                ["docker", "start", "shannon-temporal"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (CalledProcessError, FileNotFoundError) as e:
+            raise RuntimeError(f"Failed to start shannon-temporal: {e}") from e
+    else:
+        # Step 3: Start our own
+        logger.info("No existing Temporal found — starting shannon-py container.")
+        start_temporal(compose_file)
 
+    # Poll until ready
     logger.info("Waiting for Temporal to become ready...")
     for i in range(_READY_POLL_ATTEMPTS):
         if await is_temporal_ready(address):

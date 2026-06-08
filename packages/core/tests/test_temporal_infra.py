@@ -120,22 +120,48 @@ class TestEnsureInfra:
         mock_start.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_starts_temporal_and_waits_until_ready(self):
+    async def test_starts_shannon_container_when_exists(self):
+        """When shannon-temporal container exists but stopped, start it instead of docker-compose."""
         ready_count = 0
 
         async def fake_ready(address="localhost:7233"):
             nonlocal ready_count
             ready_count += 1
-            return ready_count > 1  # ready on 2nd poll
+            return ready_count > 1
 
         with (
             patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
+            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=True),
+            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("shannon_core.services.temporal_infra.start_temporal") as mock_start,
+        ):
+            await ensure_infra()
+
+        # Should have called docker start, NOT start_temporal (docker compose)
+        mock_start.assert_not_called()
+        mock_sp.run.assert_called_once_with(
+            ["docker", "start", "shannon-temporal"],
+            check=True, capture_output=True, text=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_starts_own_container_as_fallback(self):
+        """When no shannon container exists, fall back to own docker-compose."""
+        ready_count = 0
+
+        async def fake_ready(address="localhost:7233"):
+            nonlocal ready_count
+            ready_count += 1
+            return ready_count > 1
+
+        with (
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
+            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=False),
             patch("shannon_core.services.temporal_infra.start_temporal") as mock_start,
         ):
             await ensure_infra()
 
         mock_start.assert_called_once()
-        assert ready_count >= 2  # polled at least twice
 
     @pytest.mark.asyncio
     async def test_raises_on_timeout(self):
@@ -144,6 +170,7 @@ class TestEnsureInfra:
 
         with (
             patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=never_ready),
+            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=False),
             patch("shannon_core.services.temporal_infra.start_temporal"),
             patch("shannon_core.services.temporal_infra._READY_POLL_ATTEMPTS", 3),
             patch("shannon_core.services.temporal_infra._READY_POLL_INTERVAL", 0),
