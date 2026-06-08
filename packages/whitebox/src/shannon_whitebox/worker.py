@@ -6,7 +6,17 @@ from pathlib import Path
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from .pipeline.activities import run_agent, run_code_index, run_preflight, run_vuln_agent, run_rebuild_call_chains
+from .pipeline.activities import (
+    render_findings,
+    run_agent,
+    run_auth_validation,
+    run_code_index,
+    run_credential_check,
+    run_preflight,
+    run_rebuild_call_chains,
+    run_risk_scoring,
+    run_vuln_agent,
+)
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
 from shannon_core.utils.paths import resolve_workspaces_dir
@@ -48,7 +58,17 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         client=client,
         task_queue=TASK_QUEUE,
         workflows=[WhiteboxScanWorkflow],
-        activities=[run_preflight, run_agent, run_vuln_agent, run_code_index, run_rebuild_call_chains],
+        activities=[
+            render_findings,
+            run_agent,
+            run_auth_validation,
+            run_code_index,
+            run_credential_check,
+            run_preflight,
+            run_rebuild_call_chains,
+            run_risk_scoring,
+            run_vuln_agent,
+        ],
     )
 
     async with worker:
