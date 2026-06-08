@@ -99,7 +99,7 @@ async def get_temporal_status(
     compose_file: Path | None = None,
     address: str = "localhost:7233",
 ) -> dict:
-    """Return Temporal container and health status."""
+    """Return Temporal container and health status, including source identification."""
     compose = get_compose_file(compose_file)
     container_status = "unknown"
     try:
@@ -119,7 +119,26 @@ async def get_temporal_status(
         container_status = "not found"
 
     healthy = await is_temporal_ready(address)
-    return {"container": container_status, "healthy": healthy}
+
+    # Identify which container is providing the Temporal service
+    source = "unknown"
+    if healthy:
+        for name in ["shannon-temporal", "shannon-py-temporal"]:
+            try:
+                result = subprocess.run(
+                    ["docker", "ps", "--filter", f"name={name}", "--format", "{{.Status}}"],
+                    capture_output=True,
+                    text=True,
+                )
+                if "up" in result.stdout.strip().lower():
+                    source = name
+                    break
+            except FileNotFoundError:
+                pass
+        else:
+            source = "external"
+
+    return {"container": container_status, "healthy": healthy, "source": source}
 
 
 async def ensure_infra(

@@ -90,16 +90,52 @@ class TestStopTemporal:
 
 class TestGetTemporalStatus:
     @pytest.mark.asyncio
-    async def test_returns_running_and_healthy(self):
+    async def test_returns_running_and_healthy_with_shannon_source(self):
         with (
             patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
             patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
         ):
-            mock_sp.run.return_value = MagicMock(stdout="Up 5 minutes")
+            # First call: docker compose ps (container check)
+            # Second call: docker ps --filter name=shannon-temporal (source check)
+            mock_sp.run.side_effect = [
+                MagicMock(stdout="Up 5 minutes"),    # container status
+                MagicMock(stdout="Up 5 minutes"),    # shannon-temporal found
+            ]
             mock_ready.return_value = True
             result = await get_temporal_status()
         assert result["container"] == "running"
         assert result["healthy"] is True
+        assert result["source"] == "shannon-temporal"
+
+    @pytest.mark.asyncio
+    async def test_returns_shannon_py_source(self):
+        with (
+            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+        ):
+            mock_sp.run.side_effect = [
+                MagicMock(stdout="Up 5 minutes"),    # container status
+                MagicMock(stdout=""),                 # shannon-temporal not found
+                MagicMock(stdout="Up 5 minutes"),    # shannon-py-temporal found
+            ]
+            mock_ready.return_value = True
+            result = await get_temporal_status()
+        assert result["source"] == "shannon-py-temporal"
+
+    @pytest.mark.asyncio
+    async def test_returns_external_source(self):
+        with (
+            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+        ):
+            mock_sp.run.side_effect = [
+                MagicMock(stdout="Up 5 minutes"),
+                MagicMock(stdout=""),   # shannon-temporal not found
+                MagicMock(stdout=""),   # shannon-py-temporal not found
+            ]
+            mock_ready.return_value = True
+            result = await get_temporal_status()
+        assert result["source"] == "external"
 
     @pytest.mark.asyncio
     async def test_returns_stopped_when_container_not_found(self):
@@ -108,6 +144,7 @@ class TestGetTemporalStatus:
             result = await get_temporal_status()
         assert result["container"] == "not found"
         assert result["healthy"] is False
+        assert result["source"] == "unknown"
 
 
 class TestEnsureInfra:
