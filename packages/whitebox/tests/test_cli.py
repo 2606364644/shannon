@@ -58,7 +58,7 @@ def test_infra_down():
 
 def test_infra_status():
     async def fake_status(**kwargs):
-        return {"container": "running", "healthy": True}
+        return {"container": "running", "healthy": True, "source": "shannon-temporal"}
 
     with patch("shannon_whitebox.cli.main.get_temporal_status", side_effect=fake_status):
         runner = CliRunner()
@@ -66,6 +66,7 @@ def test_infra_status():
     assert result.exit_code == 0
     assert "running" in result.output.lower()
     assert "healthy" in result.output.lower()
+    assert "shannon-temporal" in result.output
 
 
 def test_start_calls_ensure_infra():

@@ -234,9 +234,11 @@ def status():
     result = asyncio.run(get_temporal_status())
     container = result.get("container", "unknown")
     healthy = result.get("healthy", False)
+    source = result.get("source", "unknown")
     health_str = "healthy" if healthy else "not healthy"
     click.echo(f"Container: {container}")
-    click.echo(f"Health: {health_str}")
+    click.echo(f"Source:    {source}")
+    click.echo(f"Health:    {health_str}")
 
 
 @cli.group()
