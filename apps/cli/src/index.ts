@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from './commands/build.js';
+import { clean } from './commands/clean.js';
 import { localStart } from './commands/local-start.js';
 import { logs } from './commands/logs.js';
 import { setup } from './commands/setup.js';
@@ -70,6 +71,7 @@ Usage:${
   }
   ${prefix} start --url <url> --repo <path> [options]   Start a pentest scan
   ${prefix} stop [--clean]                               Stop all containers
+  ${prefix} clean -w <workspace> -r <repo>              Clean blackbox scan results [--blackbox]
   ${prefix} workspaces                                   List all workspaces
   ${prefix} logs <workspace>                             Tail workflow log
   ${prefix} status                                       Show running workers${
@@ -246,6 +248,43 @@ switch (command) {
   case 'stop':
     stop(args.includes('--clean'));
     break;
+  case 'clean': {
+    const cleanArgs = args.slice(1);
+    let cleanWorkspace: string | undefined;
+    let cleanRepo: string | undefined;
+    for (let i = 0; i < cleanArgs.length; i++) {
+      const next = cleanArgs[i + 1];
+      if ((cleanArgs[i] === '-w' || cleanArgs[i] === '--workspace') && next && !next.startsWith('-')) {
+        cleanWorkspace = next;
+        i++;
+      } else if ((cleanArgs[i] === '-r' || cleanArgs[i] === '--repo') && next && !next.startsWith('-')) {
+        cleanRepo = next;
+        i++;
+      } else if (cleanArgs[i] === '--blackbox') {
+        // Accepted but no-op (default behavior)
+      } else {
+        console.error(`Unknown option: ${cleanArgs[i]}`);
+        console.error(`Run "${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} help" for usage`);
+        process.exit(1);
+      }
+    }
+    if (!cleanWorkspace) {
+      console.error('ERROR: Workspace name is required');
+      console.error(
+        `Usage: ${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} clean -w <workspace> -r <repo>`,
+      );
+      process.exit(1);
+    }
+    if (!cleanRepo) {
+      console.error('ERROR: Repository path is required');
+      console.error(
+        `Usage: ${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} clean -w <workspace> -r <repo>`,
+      );
+      process.exit(1);
+    }
+    await clean({ workspace: cleanWorkspace, repo: cleanRepo });
+    break;
+  }
   case 'logs': {
     const workspaceId = args[1];
     if (!workspaceId) {
