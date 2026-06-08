@@ -150,3 +150,18 @@ class TestEnsureInfra:
         ):
             with pytest.raises(RuntimeError, match="Timed out waiting for Temporal"):
                 await ensure_infra()
+
+
+class TestGenerateTaskQueue:
+    def test_format_is_prefix_hex8(self):
+        from shannon_core.services.temporal_infra import generate_task_queue
+        result = generate_task_queue("shannon-py-wb")
+        assert result.startswith("shannon-py-wb-")
+        suffix = result.removeprefix("shannon-py-wb-")
+        assert len(suffix) == 8
+        int(suffix, 16)  # must be valid hex
+
+    def test_generates_unique_names(self):
+        from shannon_core.services.temporal_infra import generate_task_queue
+        names = {generate_task_queue("shannon-py-wb") for _ in range(100)}
+        assert len(names) == 100

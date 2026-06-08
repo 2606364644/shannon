@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import subprocess
 from subprocess import CalledProcessError
 from pathlib import Path
@@ -18,6 +19,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _CONTAINER_NAME = "shannon-py-temporal"
 _READY_POLL_ATTEMPTS = 30
 _READY_POLL_INTERVAL = 2  # seconds
+
+
+def generate_task_queue(prefix: str) -> str:
+    """Generate a unique task queue name: {prefix}-{8-char-hex}."""
+    suffix = secrets.token_hex(4)
+    return f"{prefix}-{suffix}"
 
 
 def get_compose_file(path: Path | None = None) -> Path:
