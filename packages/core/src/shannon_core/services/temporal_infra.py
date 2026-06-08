@@ -30,8 +30,7 @@ def get_compose_file(path: Path | None = None) -> Path:
 async def is_temporal_ready(address: str = "localhost:7233") -> bool:
     """Check whether the Temporal server is reachable and healthy."""
     try:
-        client = await Client.connect(address)
-        await client.close()
+        await Client.connect(address)
         return True
     except Exception:
         return False
