@@ -12,8 +12,9 @@ from .pipeline.activities import (
 )
 from .pipeline.workflows import BlackboxScanWorkflow
 from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from shannon_core.services.temporal_infra import generate_task_queue
 
-TASK_QUEUE = "shannon-blackbox"
+TASK_QUEUE_PREFIX = "shannon-py-bb"
 
 
 async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
@@ -34,9 +35,11 @@ async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
 async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233") -> BlackboxPipelineState:
     client = await Client.connect(temporal_address)
 
+    task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
+
     worker = Worker(
         client=client,
-        task_queue=TASK_QUEUE,
+        task_queue=task_queue,
         workflows=[BlackboxScanWorkflow],
         activities=[run_blackbox_preflight, run_recon, run_exploit_agent, assemble_report, run_report_agent],
     )
@@ -46,7 +49,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             BlackboxScanWorkflow.run,
             input,
             id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
-            task_queue=TASK_QUEUE,
+            task_queue=task_queue,
         )
         poll_task = asyncio.create_task(poll_workflow_progress(handle))
         try:
