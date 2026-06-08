@@ -10,6 +10,11 @@ deliverables/
 xben-benchmark-results/
 .claude/
 
+# Large data directories not needed in image (mounted at runtime)
+repos/
+.cache/
+credentials/
+
 # Git
 .git/
 .gitignore

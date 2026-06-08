@@ -107,22 +107,7 @@ COPY --from=builder --chown=pentest:pentest /app/apps/worker /app/apps/worker
 COPY --from=builder --chown=pentest:pentest /app/apps/cli/package.json /app/apps/cli/package.json
 
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.84 @playwright/cli@0.1.1
-ENV PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=300000
-
-# Pre-downloaded Chrome for Testing (avoids slow network downloads during build).
-# Place the zip at .cache/chrome-linux64.zip in the project root.
-# If not cached, an empty placeholder is provided and playwright downloads normally.
-# To cache: curl -L -o .cache/chrome-linux64.zip "<url from build log>"
-COPY .cache/chrome-linux64.zip /tmp/chrome-linux64.zip
-RUN if [ -s /tmp/chrome-linux64.zip ]; then \
-        echo "Using cached Chrome for Testing" && \
-        mkdir -p /root/.cache/ms-playwright/chromium-1212 && \
-        python3 -c "import zipfile; zipfile.ZipFile('/tmp/chrome-linux64.zip').extractall('/root/.cache/ms-playwright/chromium-1212')" && \
-        mv /root/.cache/ms-playwright/chromium-1212/chrome-linux64 /root/.cache/ms-playwright/chromium-1212/chrome-linux; \
-    else \
-        echo "No cached Chrome — playwright will download during install"; \
-    fi && \
-    rm -f /tmp/chrome-linux64.zip
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 RUN mkdir -p /tmp/.claude/skills && \
     playwright-cli install --skills && \
@@ -152,7 +137,6 @@ RUN chmod +x /app/entrypoint.sh
 ENV NODE_ENV=production
 ENV PATH="/usr/local/bin:$PATH"
 ENV SHANNON_DOCKER=true
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV npm_config_cache=/tmp/.npm
 ENV HOME=/tmp
