@@ -6,7 +6,7 @@ from tree_sitter import Language, Parser
 
 from shannon_core.code_index.models import CallEdge, FuncBlock
 from shannon_core.code_index.parsers import register_parser
-from shannon_core.code_index.parsers.base import BaseParser
+from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,60 @@ class PythonParser(BaseParser):
             if attr:
                 return attr.text.decode("utf-8")
         return None
+
+    def iter_calls(self, block: FuncBlock, source: bytes):
+        """Yield CallNode for every `call` node inside this function."""
+        tree = self._parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type in ("function_definition", "async_function_definition"):
+                name_node = node.child_by_field_name("name")
+                if name_node and name_node.text.decode("utf-8") == block.function_name:
+                    if node.start_point[0] + 1 == block.start_line:
+                        for call_node in self._iter_call_nodes(node):
+                            yield call_node
+                        break
+
+    def _iter_call_nodes(self, func_node):
+        """Walk function body and yield CallNode for each `call`."""
+        for node in _walk(func_node):
+            if node.type == "call":
+                args_node = node.child_by_field_name("arguments")
+                raw_args: list = []
+                if args_node is not None:
+                    for child in args_node.children:
+                        # Skip punctuation: '(' ')' ','
+                        if child.type in ("(", ")", ","):
+                            continue
+                        raw_args.append(child)
+                yield CallNode(
+                    raw_call_node=node,
+                    raw_arg_nodes=raw_args,
+                    line=node.start_point[0] + 1,
+                    column=node.start_point[1],
+                )
+
+    def destructure_call(self, call) -> tuple[str, str | None]:
+        """For Python: `cursor.execute(x)` → ('execute', 'cursor'); `eval(x)` → ('eval', None)."""
+        func_node = call.raw_call_node.child_by_field_name("function")
+        if func_node is None:
+            return ("", None)
+        if func_node.type == "identifier":
+            return (func_node.text.decode("utf-8"), None)
+        if func_node.type == "attribute":
+            method = func_node.child_by_field_name("attribute")
+            obj = func_node.child_by_field_name("object")
+            method_name = method.text.decode("utf-8") if method else ""
+            receiver = obj.text.decode("utf-8") if obj else None
+            return (method_name, receiver)
+        return ("", None)
+
+    def extract_arg_expressions(self, call, source: bytes) -> list[str]:
+        """Slice source bytes for each argument subnode."""
+        result: list[str] = []
+        for arg_node in call.raw_arg_nodes:
+            text = source[arg_node.start_byte:arg_node.end_byte].decode("utf-8", errors="replace")
+            result.append(text)
+        return result
 
 
 # Register in the parser registry
