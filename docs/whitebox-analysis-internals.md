@@ -111,6 +111,38 @@ prompt 明确禁止主 agent 直接读源码（`pre-recon-code.txt:180`、`vuln-
 | 落盘 deliverable | 负责（`save-deliverable`） | 不负责 |
 | 工具集 | Claude Code 内置全套 | Claude Code 内置全套（继承） |
 
+### 1.5 子 agent 的派发：由谁、按什么、多少个
+
+**派发是主 agent（LLM）的运行时行为，Shannon 的 TS 代码完全不参与。** `runClaudePrompt` 只启动一个 phase 会话；会话内 spawn 几个 Task、何时 spawn，全由主 agent 自主决定。Shannon 代码不追踪子 agent 数量，只看到一个 `query()` 会话跑完、deliverable 落盘。
+
+prompt 不写"spawn N 个"，而是定义**派发单元**（按什么粒度切任务）。主 agent 读前置 deliverable，按这个粒度决定 spawn 数量。两种模式：
+
+**模式 A —— 角色固定派发（pre-recon 阶段）**
+
+prompt 直接列出要 spawn 的子 agent 角色，数量与仓库大小无关：
+
+- Phase 1 固定 3 个（`pre-recon-code.txt:111-122`）：Architecture Scanner · Entry Point Mapper · Security Pattern Hunter
+- Phase 2 固定 3 个（`pre-recon-code.txt:124-142`）：XSS/Injection Sink Hunter · SSRF Tracer · Data Security Auditor
+
+不管目标代码是 100 行还是 100 万行，pre-recon 都 spawn 这 6 个角色子 agent（Phase 1 全返回才启 Phase 2，见 6.1）。
+
+**模式 B —— 数据驱动派发（vuln 阶段）**
+
+派发单元 = 每个 source / 每条路径，数量由前置 deliverable 决定。以 `injection-vuln` 为例（`vuln-injection.txt:140-141`）：
+
+> Create a To Do for each Injection Source ... section 7 ... create a task for each discovered Injection Source.
+
+主 agent 读 `pre_recon_deliverable.md` Section 7 的 source 列表 → TodoWrite 建清单（每 source 一项）→ 逐 source spawn Task 追链。source 有几个派几条，path forking 时一条链还可能再拆（`vuln-injection.txt:145`）。
+
+**"分析 sink" 的派发要分两层**（对应 2.1 的发现/验证分工）：
+
+| 层级 | 在哪 | 模式 | 数量 |
+|---|---|---|---|
+| 发现 sink | pre-recon Sink Hunter | A（角色固定） | 1 个 Sink Hunter 子 agent；它内部 glob 后逐文件 Read，是否对每文件/变体再 spawn **未强制**，由该子 agent 自主 |
+| 验证 sink 调用链 | vuln `injection-vuln` 等 | B（数据驱动） | ≈ Section 7 的 source 数，每 source 一条追链子 agent |
+
+**数量级**（无固定值，给量级感）：pre-recon 固定 6 个；每个 vuln agent ≈ 其前置 Section 的 source/sink 条数（小仓库几个，大仓库十几个）；6 个 vuln agent 并行 → 整个白盒子 agent 总数从十几个到上百个。这就是 `maxTurns: 10_000` 的实际压力来源（主 agent 持续 spawn + 子 agent 各自几十次工具调用）。
+
 ---
 
 ## 2. 如何分析 sink 点
@@ -166,24 +198,50 @@ Shannon **没有 sink 规则数据库**。sink 类别清单**硬编码在 prompt
 
 ### 3.1 在哪个阶段
 
-入口点分析同样在 **pre-recon 阶段**，由主 agent spawn 的 **"Entry Point Mapper" 子 agent** 完成（`pre-recon-code.txt:118-119`）。
+入口点分析在 **pre-recon 阶段**，由主 agent spawn 的 **"Entry Point Mapper" 子 agent** 完成（`pre-recon-code.txt:118-119`），与 sink 发现同属 Phase 1（见 6.1）。和 sink 一样分两层：**pre-recon 发现**（Section 5）→ **recon 细化**（Section 4.1/4.2）。本节讲发现层，细化层见 3.5。
 
-### 3.2 流程
+### 3.2 流程（主 agent 派 Entry Point Mapper 子 agent）
 
-子 agent 做两件事：
+Entry Point Mapper 子 agent（`pre-recon-code.txt:118-119`）做三件事：
 
-1. **从代码逆向**：用 **Grep/Glob** 找路由定义（Express `app.get`/`router.post`、Flask `@app.route`、Spring `@RequestMapping`、Gin `router.GET` 等），再 **Read** 路由文件，提取每个 endpoint 的：HTTP 方法、路径、auth 要求、中间件链、是否框架自动生成（如 finale-rest/epilogue）。
-2. **半结构化捷径（优先）**：若项目有 API schema 文件（OpenAPI/Swagger `*.json/*.yaml`、GraphQL `*.graphql/*.gql`、JSON Schema `*.schema.json`），子 agent 直接读取并报告；主 agent 在汇总阶段把这些 schema 文件**复制**到 `.shannon/deliverables/schemas/`（`pre-recon-code.txt:149-152`），下游 agent 可直接消费，不必从代码再逆向一次。
+1. **枚举所有网络可达入口**：用 **Grep/Glob** 找路由定义（Express `app.get`/`router.post`、Flask `@app.route`、Spring `@RequestMapping`、Gin `router.GET` 等），再 **Read** 路由文件，提取每个 endpoint 的 HTTP 方法、路径、中间件链。
+2. **识别 API schema 文件（半结构化捷径，优先）**：若项目有 OpenAPI/Swagger、GraphQL、JSON Schema 文件，子 agent 直接读取 —— schema 本身就是结构化入口清单，不必从代码逆向。主 agent 在汇总阶段把这些 schema 文件**复制**到 `.shannon/deliverables/schemas/`（`pre-recon-code.txt:149-152`），供下游 agent 直接消费。
+3. **标注认证 + 排除本地工具**：每个入口标注 **public 还是需认证**（`pre-recon-code.txt:119` "Distinguish between public endpoints and those requiring authentication"）；同时**排除** local-only dev tools、CLI scripts、build processes（网络可达性过滤，与 sink 共用同一套，见 2.5）。
 
-### 3.3 分析粒度
+### 3.3 分析粒度：代码逆向 vs schema 直读两条路径
 
-- **路由文件整文件 Read**：理解单个路由模块的完整定义与中间件装配。
-- **跨文件 Grep**：定位散落各处的路由声明。
-- **结构化文件直接读**：schema 文件本身就是结构化入口点清单，无需逐文件分析。
+与 sink 类似，入口点发现按来源分两条路径，粒度不同：
 
-### 3.4 下游消费
+| 来源 | 发现路径 | 粒度 |
+|---|---|---|
+| 代码里的路由声明 | **Grep 路由装饰器/方法名**（`app.get`、`@app.route`、`@RequestMapping`）→ Read 命中文件提取路由 | Grep 驱动，命中点 Read |
+| API schema 文件 | **直接 Read 整个 schema**（OpenAPI / GraphQL / JSON Schema） | 整文件读，schema 即清单 |
 
-入口点分析产出 `pre_recon_deliverable.md` 的 **Section 5（Attack Surface）**；recon 阶段进一步细化为 **Section 4.1（Shared Controller Route Groups，共享 handler 的路由分组）** 和 **Section 4.2（Endpoint Security Context，每个 endpoint 的 auth/middleware 链）**。这两个子表是后续调用链追踪和漏洞研判的关键索引（见第 4、5 节）。
+**为什么 schema 路径优先？** schema 是声明式的结构化入口清单，一个文件就列全所有 endpoint + 参数 + 认证要求，比从分散代码逆向更完整、更快。代码逆向是 schema 缺失时的兜底，也用来交叉验证 schema 是否覆盖了实际路由（防止 schema 过时）。
+
+### 3.4 入口点识别目录
+
+和 sink 一样，Shannon **没有入口点规则数据库**，识别目录**硬编码在 prompt 文本**（`pre-recon-code.txt:119`）：
+
+| 类别 | 目录内容 |
+|---|---|
+| **入口类型** | API endpoints · web routes · webhooks · file uploads · externally-callable functions |
+| **schema 文件类型** | OpenAPI/Swagger（`*.json`/`*.yaml`/`*.yml`）· GraphQL（`*.graphql`/`*.gql`）· JSON Schema（`*.schema.json`） |
+| **认证标注** | 每个入口标 public / 需认证 |
+| **排除（out-of-scope）** | local-only dev tools · CLI scripts · build processes（详见 2.5 的网络可达性过滤） |
+
+子 agent 按这份目录找匹配，汇总写入 `pre_recon_deliverable.md` 的 **Section 5（Attack Surface）**，含四项（`pre-recon-code.txt:243-246`）：External Entry Points（每个公开接口）、Internal Service Communication（服务间信任）、Input Validation Patterns（输入校验模式）、Background Processing（网络请求触发的异步任务）。
+
+### 3.5 发现 → 细化两层（对应 sink 的发现/验证）
+
+入口点处理和 sink 一样分两层，只是第二层叫"细化"而非"验证"：
+
+| 层级 | 在哪 | 做什么 | 产出 |
+|---|---|---|---|
+| **发现** | pre-recon Entry Point Mapper | 枚举所有网络可达入口 + schema + 认证标注 | `pre_recon_deliverable.md` Section 5 |
+| **细化** | recon 阶段 | 把入口按"共享 handler"分组，补全每个 endpoint 的 auth/middleware 链 | `recon_deliverable.md` Section 4.1（Shared Controller Route Groups）+ Section 4.2（Endpoint Security Context） |
+
+细化层的 Section 4.1/4.2 是后续调用链追踪（第 4 节的 `_cross-route-enumeration.txt`）和漏洞研判（第 5 节的 `affected_routes`）的关键索引 —— 没有 4.1 的共享 handler 分组，主 agent 就无法判断一个漏洞影响几条路由。
 
 ---
 
