@@ -580,3 +580,27 @@ class TestExpressPass2TopLevel:
         # Pass 1 still works
         pass1 = [ep for ep in eps if ep.evidence.startswith("Express route:")]
         assert len(pass1) == 1
+
+    def test_route_file_with_no_blocks_is_discovered(self, tmp_path):
+        """A route file with only top-level routes (no functions) is found via filesystem walk.
+
+        The parser produces no FuncBlocks for a file containing only top-level
+        route registrations, so this file must be discovered independently.
+        """
+        repo = tmp_path / "repo"
+        routes_dir = repo / "routes"
+        routes_dir.mkdir(parents=True)
+
+        (routes_dir / "api.ts").write_text(
+            "import { Router } from 'express';\n"
+            "const router = Router();\n"
+            "router.get('/health', (req, res) => { res.json({ ok: true }); });\n"
+        )
+
+        # NO FuncBlock provided — simulates the parser finding no functions
+        eps = detect_entry_points([], "typescript", repo_path=str(repo))
+        top_level = [ep for ep in eps
+                     if ep.evidence.startswith("Express top-level")]
+        assert len(top_level) == 1
+        assert top_level[0].route == "/health"
+        assert top_level[0].http_method == "GET"

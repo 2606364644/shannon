@@ -1,3 +1,4 @@
+import os
 import re
 import logging
 from pathlib import Path, PurePosixPath
@@ -244,6 +245,20 @@ def _scan_top_level_express_routes(
     for name in ("server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts"):
         if (repo / name).exists():
             candidate_files.add(name)
+
+    # Discover route files via filesystem walk. Some route files contain only
+    # top-level route registrations (no function declarations), so the parser
+    # produces no FuncBlocks for them and they would be missed by the
+    # blocks_by_file seed above.
+    _SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__"}
+    for walk_root, dirnames, filenames in os.walk(repo):
+        # Prune dependency/build dirs in-place so we don't descend into them
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for filename in filenames:
+            if filename.endswith((".ts", ".js")):
+                rel = (Path(walk_root) / filename).relative_to(repo).as_posix()
+                if _is_route_file(rel):
+                    candidate_files.add(rel)
 
     for file_path_str in sorted(candidate_files):
         if not _is_route_file(file_path_str):
