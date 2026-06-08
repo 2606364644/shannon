@@ -13,7 +13,11 @@
       "Bash(git commit -m 'docs: add report generation gap fix plan and CLI import permissions *)",
       "mcp__web-reader__webReader",
       "Bash(openspec instructions *)",
-      "mcp__web-search-prime__web_search_prime"
+      "mcp__web-search-prime__web_search_prime",
+      "Bash(docker stop *)",
+      "Bash(docker rm *)",
+      "Bash(docker info *)",
+      "Bash(jq --version)"
     ]
   }
 }
