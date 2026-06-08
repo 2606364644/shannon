@@ -179,6 +179,23 @@ async def run_code_index(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_save_adjudication(input: ActivityInput) -> dict:
+    try:
+        from shannon_core.code_index import save_adjudication
+
+        repo, deliverables, _ = _get_paths(input)
+        save_adjudication(str(deliverables))
+
+        return {"status": "ok"}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_rebuild_call_chains(input: ActivityInput) -> dict:
     try:
         from shannon_core.code_index import rebuild_call_chains

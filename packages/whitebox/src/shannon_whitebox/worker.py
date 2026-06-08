@@ -15,6 +15,7 @@ from .pipeline.activities import (
     run_preflight,
     run_rebuild_call_chains,
     run_risk_scoring,
+    run_save_adjudication,
     run_vuln_agent,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
@@ -67,6 +68,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             run_preflight,
             run_rebuild_call_chains,
             run_risk_scoring,
+            run_save_adjudication,
             run_vuln_agent,
         ],
     )
