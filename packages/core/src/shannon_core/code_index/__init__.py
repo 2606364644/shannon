@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from shannon_core.code_index.models import CodeIndex
-from shannon_core.code_index.models import AdjudicationResult, Verdict, EntryPointSource
+from shannon_core.code_index.models import AdjudicatedEntryPoint, AdjudicationResult, Verdict, EntryPointSource
 from shannon_core.code_index.parser import detect_language, discover_source_files
 from shannon_core.code_index.call_graph import resolve_edges, build_call_chains
 from shannon_core.code_index.entry_points import detect_entry_points
@@ -175,6 +175,50 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     summary_path.write_text(generate_summary(index))
 
     return json_path, summary_path
+
+
+def save_adjudication(deliverables_dir: str) -> None:
+    """Auto-confirm entry points and write adjudication result.
+
+    Reads code_index.json, confirms all detected entry points with
+    verdict=CONFIRMED and source=CODE_INDEX, and writes entry_points.json
+    for rebuild_call_chains().
+    """
+    out = Path(deliverables_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    code_index_path = out / "code_index.json"
+
+    if not code_index_path.exists():
+        logger.warning("code_index.json not found; skipping adjudication")
+        return
+
+    index = CodeIndex.model_validate_json(code_index_path.read_text())
+
+    adjudicated = []
+    for ep in index.entry_points:
+        adjudicated.append(AdjudicatedEntryPoint(
+            func_block_id=ep.func_block_id,
+            verdict=Verdict.CONFIRMED,
+            entry_type=ep.entry_type,
+            route=ep.route,
+            http_method=ep.http_method,
+            evidence=ep.evidence,
+            source=EntryPointSource.CODE_INDEX,
+        ))
+
+    result = AdjudicationResult(
+        repository=index.repository,
+        language=index.language,
+        adjudicated_entry_points=adjudicated,
+    )
+
+    entry_points_path = out / "entry_points.json"
+    entry_points_path.write_text(result.model_dump_json(indent=2))
+
+    logger.info(
+        "Auto-confirmed %d entry points via save_adjudication",
+        len(adjudicated),
+    )
 
 
 def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
