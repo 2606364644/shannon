@@ -272,3 +272,162 @@ class TestUnknownLanguage:
         block = _block(language="rust")
         eps = detect_entry_points([block], "rust")
         assert len(eps) == 0
+
+
+class TestExpressEntryPoints:
+    """Express.js route detection — Pass 1 (FuncBlock source_code scan)."""
+
+    def test_express_app_get_in_func_block(self):
+        """Routes registered inside a function body (e.g., NodeGoat's index(app, db))."""
+        block = _block(
+            id="src/routes.ts:setupRoutes:10",
+            file_path="src/routes.ts",
+            function_name="setupRoutes",
+            start_line=10,
+            source_code=(
+                "app.get('/api/users', (req, res) => {\n"
+                "  res.json(getUsers());\n"
+                "});\n"
+            ),
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 1
+        assert express_eps[0].entry_type == "http_route"
+        assert express_eps[0].route == "/api/users"
+        assert express_eps[0].http_method == "GET"
+        assert express_eps[0].confidence == 0.90
+        assert express_eps[0].needs_llm_review is False
+
+    def test_express_router_post_in_func_block(self):
+        block = _block(
+            id="src/routes.ts:registerRoutes:5",
+            file_path="src/routes.ts",
+            function_name="registerRoutes",
+            start_line=5,
+            source_code=(
+                "router.post('/api/users/:id', async (req, res) => {\n"
+                "  const result = await saveUser(req.params.id, req.body);\n"
+                "  res.json(result);\n"
+                "});\n"
+            ),
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 1
+        assert express_eps[0].http_method == "POST"
+        assert express_eps[0].route == "/api/users/:id"
+        assert express_eps[0].confidence == 0.90
+
+    def test_express_app_all_route(self):
+        block = _block(
+            id="src/app.ts:catchAll:20",
+            file_path="src/app.ts",
+            function_name="catchAll",
+            start_line=20,
+            source_code="app.all('/api/*', (req, res, next) => { next(); });",
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 1
+        assert express_eps[0].http_method == "*"
+        assert express_eps[0].confidence == 0.85
+
+    def test_express_app_use_with_path(self):
+        block = _block(
+            id="src/app.ts:setup:1",
+            file_path="src/app.ts",
+            function_name="setup",
+            start_line=1,
+            source_code="app.use('/api', router);",
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 1
+        assert express_eps[0].http_method == "MIDDLEWARE"
+        assert express_eps[0].route == "/api"
+        assert express_eps[0].confidence == 0.80
+
+    def test_express_app_use_without_path_excluded(self):
+        """app.use() without a string path argument (framework middleware) is excluded."""
+        block = _block(
+            id="src/server.ts:setup:5",
+            file_path="src/server.ts",
+            function_name="setup",
+            start_line=5,
+            source_code="app.use(express.json());",
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 0
+
+    def test_express_app_use_bare_function_excluded(self):
+        """app.use(bodyParser()) without route string is excluded."""
+        block = _block(
+            id="src/server.ts:middleware:3",
+            file_path="src/server.ts",
+            function_name="middleware",
+            start_line=3,
+            source_code="app.use(session({ secret: 'keyboard cat' }));",
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 0
+
+    def test_multiple_routes_in_one_block(self):
+        """Multiple routes in one function (NodeGoat pattern)."""
+        block = _block(
+            id="src/routes.ts:register:1",
+            file_path="src/routes.ts",
+            function_name="register",
+            start_line=1,
+            source_code=(
+                "app.get('/users', getUsersHandler);\n"
+                "app.post('/users', createUserHandler);\n"
+                "app.delete('/users/:id', deleteUserHandler);\n"
+            ),
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 3
+        methods = {ep.http_method for ep in express_eps}
+        assert methods == {"GET", "POST", "DELETE"}
+        # All share the same func_block_id
+        assert all(ep.func_block_id == block.id for ep in express_eps)
+
+    def test_express_put_patch_delete(self):
+        block = _block(
+            id="src/routes.ts:crud:10",
+            file_path="src/routes.ts",
+            function_name="crud",
+            start_line=10,
+            source_code=(
+                "router.put('/users/:id', updateHandler);\n"
+                "router.patch('/users/:id', patchHandler);\n"
+                "router.delete('/users/:id', deleteHandler);\n"
+            ),
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 3
+        methods = {ep.http_method for ep in express_eps}
+        assert methods == {"PUT", "PATCH", "DELETE"}
+
+    def test_no_express_in_python_block(self):
+        """Express patterns in Python files are not scanned."""
+        block = _block(
+            source_code="app.get('/api/users', handler)",
+            function_name="setup",
+            language="python",
+        )
+        eps = detect_entry_points([block], "python")
+        express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
+        assert len(express_eps) == 0

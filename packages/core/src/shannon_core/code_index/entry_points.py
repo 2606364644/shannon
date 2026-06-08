@@ -1,6 +1,6 @@
 import re
 import logging
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from shannon_core.code_index.models import EntryPoint, FuncBlock
 
@@ -9,14 +9,16 @@ logger = logging.getLogger(__name__)
 LLM_REVIEW_THRESHOLD = 0.8
 
 
-def detect_entry_points(blocks: list[FuncBlock], language: str) -> list[EntryPoint]:
+def detect_entry_points(
+    blocks: list[FuncBlock], language: str, repo_path: str | None = None,
+) -> list[EntryPoint]:
     """Detect entry points from function blocks using per-language rules."""
     if language == "python":
         return _detect_python(blocks)
     elif language == "go":
         return _detect_go(blocks)
     elif language == "typescript":
-        return _detect_typescript(blocks)
+        return _detect_typescript(blocks, repo_path)
     elif language == "java":
         return _detect_java(blocks)
     elif language == "php":
@@ -143,10 +145,94 @@ _TS_DECORATOR_RULES: list[tuple[str, re.Pattern, str | None, float]] = [
     ("http_route", re.compile(r"@(Get|Post|Put|Delete|Patch)\b"), None, 0.95),
 ]
 
+# Express.js route detection
+_EXPRESS_ROUTE_PATTERN = re.compile(
+    r"""(app|router)\.(get|post|put|delete|patch|all|use)\(\s*['"](/[^'"]*)['"]\s*"""
+)
 
-def _detect_typescript(blocks: list[FuncBlock]) -> list[EntryPoint]:
+_EXPRESS_METHOD_MAP: dict[str, str | None] = {
+    "get": "GET",
+    "post": "POST",
+    "put": "PUT",
+    "delete": "DELETE",
+    "patch": "PATCH",
+    "all": "*",
+    "use": "MIDDLEWARE",
+}
+
+_EXPRESS_CONFIDENCE: dict[str, float] = {
+    "get": 0.90,
+    "post": 0.90,
+    "put": 0.90,
+    "delete": 0.90,
+    "patch": 0.90,
+    "all": 0.85,
+    "use": 0.80,
+}
+
+_ROUTE_FILE_NAMES = {"server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts"}
+
+
+def _detect_express_routes(
+    blocks: list[FuncBlock], repo_path: str | None = None,
+) -> list[EntryPoint]:
+    """Detect Express.js route registrations.
+
+    Pass 1: Scan each FuncBlock's source_code for (app|router).(get|post|...) patterns.
+    Pass 2 (if repo_path given): Scan full file source for top-level routes
+            not inside any FuncBlock, in common route directories.
+    """
     entry_points: list[EntryPoint] = []
 
+    # Pass 1: FuncBlock source_code scan
+    for block in blocks:
+        for match in _EXPRESS_ROUTE_PATTERN.finditer(block.source_code):
+            method_str = match.group(2)
+            route_path = match.group(3)
+
+            http_method = _EXPRESS_METHOD_MAP.get(method_str)
+            confidence = _EXPRESS_CONFIDENCE.get(method_str, 0.80)
+
+            entry_points.append(EntryPoint(
+                func_block_id=block.id,
+                entry_type="http_route",
+                route=route_path,
+                http_method=http_method,
+                confidence=confidence,
+                evidence=f"Express route: {match.group(1)}.{method_str}('{route_path}')",
+                needs_llm_review=confidence < LLM_REVIEW_THRESHOLD,
+            ))
+
+    # Pass 2: Top-level route scan (implemented in Task 2)
+    if repo_path is not None:
+        entry_points.extend(_scan_top_level_express_routes(blocks, repo_path))
+
+    return entry_points
+
+
+def _is_route_file(file_path: str) -> bool:
+    """Check if a file is likely a top-level Express route file."""
+    parts = PurePosixPath(file_path).parts
+    basename = parts[-1] if parts else ""
+    if basename in _ROUTE_FILE_NAMES:
+        return True
+    return any(p in ("routes", "router") for p in parts)
+
+
+def _scan_top_level_express_routes(
+    blocks: list[FuncBlock], repo_path: str,
+) -> list[EntryPoint]:
+    """Scan full file source for Express routes not inside any FuncBlock."""
+    # Placeholder — implemented in Task 2
+    return []
+
+
+def _detect_typescript(
+    blocks: list[FuncBlock], repo_path: str | None = None,
+) -> list[EntryPoint]:
+    entry_points: list[EntryPoint] = []
+
+    # NestJS decorator patterns
     for block in blocks:
         for decorator in block.decorators:
             for rule_type, pattern, _, confidence in _TS_DECORATOR_RULES:
@@ -162,6 +248,9 @@ def _detect_typescript(blocks: list[FuncBlock]) -> list[EntryPoint]:
                         needs_llm_review=confidence < LLM_REVIEW_THRESHOLD,
                     ))
                     break
+
+    # Express.js route patterns
+    entry_points.extend(_detect_express_routes(blocks, repo_path))
 
     return entry_points
 
