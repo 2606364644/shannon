@@ -10,8 +10,9 @@ from .pipeline.activities import run_agent, run_code_index, run_preflight, run_v
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
 from shannon_core.utils.paths import resolve_workspaces_dir
+from shannon_core.services.temporal_infra import generate_task_queue
 
-TASK_QUEUE = "shannon-whitebox"
+TASK_QUEUE_PREFIX = "shannon-py-wb"
 
 
 async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
@@ -44,9 +45,11 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
 
     client = await Client.connect(temporal_address)
 
+    task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
+
     worker = Worker(
         client=client,
-        task_queue=TASK_QUEUE,
+        task_queue=task_queue,
         workflows=[WhiteboxScanWorkflow],
         activities=[run_preflight, run_agent, run_vuln_agent, run_code_index, run_rebuild_call_chains],
     )
@@ -56,7 +59,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             WhiteboxScanWorkflow.run,
             input,
             id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
-            task_queue=TASK_QUEUE,
+            task_queue=task_queue,
         )
         poll_task = asyncio.create_task(poll_workflow_progress(handle))
         try:
