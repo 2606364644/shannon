@@ -76,6 +76,8 @@
 - 0 个 SinkHit 且函数在 fallback 候选集内 → 走 LLM 兜底
 - 下游消费 `TaintFlow.sink_hits[]` 列表，不依赖单个 sink_type 字段
 
+注：架构图里的 `TreeSitterSinkMatcher` 是 `SinkDetector._tree_sitter_match()` 私有方法的逻辑标签，不是独立类。
+
 ## 组件
 
 ### 文件结构
@@ -131,19 +133,19 @@ registry.register("typescript", "tree_sitter_typescript", "queries/typescript.sc
 
 ### Query 文件格式
 
-每个 `.scm` 文件按 sink 类型组织。Query 直接编码 `sink_type` 和 `taint_arg_index`，避免写 Python 后处理：
+每个 `.scm` 文件按 sink 类型组织。tree-sitter 原生 query 不支持任意 metadata directive，因此采用 **capture name 编码** sink_type，并辅以 Python 侧的元数据表反查 `taint_arg_index`：
 
 ```scheme
 ;; python.scm（节选）
 
 ;; === SQL_EXECUTION ===
+;; capture 名直接编码 sink_type；taint_arg_index 在 Python 元数据表里查
 (call
   function: (attribute_expression
     attribute: (identifier) @attr (#eq? @attr "execute"))
   arguments: (argument_list
     . (_) @taint_arg))
-  ::sink_type "sql_execution"
-  ::taint_arg_index 0
+  @sink.sql_execution
 
 ;; === COMMAND_EXEC ===
 (call
@@ -151,9 +153,26 @@ registry.register("typescript", "tree_sitter_typescript", "queries/typescript.sc
     object: (identifier) @obj (#eq? @obj "subprocess")
     attribute: (identifier) @attr (#match? @attr "^(run|call|Popen|check_output)$"))
   arguments: (argument_list) @args)
-  ::sink_type "command_exec"
-  ::taint_arg_index 0
+  @sink.command_exec
 ```
+
+Python 侧反查表（避免在 query 里硬编码 index，导致 query 文件改动牵动 Python 代码）：
+
+```python
+# registry.py
+SINK_CAPTURE_METADATA: dict[str, dict] = {
+    "sink.sql_execution":   {"sink_type": SinkType.SQL_EXECUTION,   "taint_arg_index": 0},
+    "sink.command_exec":    {"sink_type": SinkType.COMMAND_EXEC,    "taint_arg_index": 0},
+    "sink.command_exec.1":  {"sink_type": SinkType.COMMAND_EXEC,    "taint_arg_index": 1},  # cmd=arg0, args=arg1
+    "sink.deserialization": {"sink_type": SinkType.DESERIALIZATION, "taint_arg_index": 0},
+    "sink.file_write":      {"sink_type": SinkType.FILE_WRITE,      "taint_arg_index": 0},
+    "sink.template_render": {"sink_type": SinkType.TEMPLATE_RENDER, "taint_arg_index": 0},
+    "sink.http_request":    {"sink_type": SinkType.HTTP_REQUEST,    "taint_arg_index": 0},
+    "sink.log_write":       {"sink_type": SinkType.LOG_WRITE,       "taint_arg_index": 0},
+}
+```
+
+同 sink_type 出现多个 slot position（如 `subprocess.run(cmd, args)` 既可能污染 arg0 也可能 arg1）时，用后缀 `.1`、`.2` 区分。
 
 ### SinkDetector 主类
 
@@ -215,7 +234,10 @@ class SinkType(str, Enum):
     UNKNOWN = "unknown"
 ```
 
-LLM 输出 `UNKNOWN` 表示 "分析过但确认不是 sink"（区别于"未分析"）。
+**`UNKNOWN` 的语义靠 `source` 字段区分**：
+- 不产生任何 SinkHit → "未分析" 或 "分析后确认非 sink"（LLM `is_sink: false` 时直接返回 None，不构造 SinkHit）
+- `SinkHit(source=LLM, sink_type=UNKNOWN)` → "LLM 看到了 sink 但无法归类到现有 7 类"（信号：需要新增 query 类型）
+- `SinkHit(source=TREE_SITTER, sink_type=UNKNOWN)` → **不应出现**（tree-sitter query 总是绑定具体类型；防御性代码会过滤）
 
 ### TaintFlow 扩展
 
@@ -239,13 +261,13 @@ class TaintFlow(BaseModel):
 ### ChainRiskScore 微调
 
 ```python
-def _compute_sink_danger(hits: list[SinkHit]) -> int:
+def _compute_sink_danger(hits: list[SinkHit]) -> float:
     if not hits:
-        return 0
+        return 0.0
     return max(SINK_DANGER_SCORES.get(h.sink_type, 0) * h.confidence for h in hits)
 ```
 
-`effective_sink_danger = danger * confidence`，让 LLM 低置信结果打折计入。
+返回 `float`（confidence 是 float，乘积保精度）。`ChainRiskScore.sink_danger` 字段类型也由 `int` 改 `float`，下游 `tier` 阈值比较不受影响。
 
 ## 两遍评分流程
 
@@ -267,6 +289,15 @@ def _compute_sink_danger(hits: list[SinkHit]) -> int:
 ```
 
 候选集上限 200 函数 / 仓库（可配置）。超过按 "出现在最多调用链 + chain 平均分最高" 排序截断。
+
+**截断外的 UNKNOWN 函数处理**：保持 UNKNOWN，不调 LLM，但在 `.shannon/deliverables/pre_recon_deliverable.md` 的 sink 报告里加一节"未分析的 UNKNOWN 函数（按上限截断）"，列出：
+- 总数
+- 前 50 个 func_id（按截断排序），供人工抽样核查
+- 配置项 `SHANNON_SINK_FALLBACK_LIMIT` 调整上限
+
+透明化漏报面，避免静默丢失潜在 sink。
+
+**第二遍 LLM 产生的 SinkHit 持久化**：LLM 兜底产生的 `SinkHit(source=LLM)` 立即写回对应 `TaintFlow.sink_hits`，并随 `code_index.json` 一起持久化。这样后续阶段（audit_input_builder / findings_renderer）直接读 TaintFlow，无需重跑 LLM。缓存按 `(model_version, source_code_hash)` 自动失效，模型升级或函数变更会触发重新分析。
 
 ## LLM 兜底设计
 
@@ -362,7 +393,7 @@ Call the `classify_sink` tool with your verdict.
 | query 文件编译失败 | fail-fast（启动报错） |
 | 语言未注册 | 返回空 SinkHit → 走 LLM 兜底 |
 | `source_code > 8KB` | tree-sitter 正常跑；LLM 输入截断到 6KB |
-| 单函数命中 > 20 | 截断到前 20，记 WARN 日志（query 质量护栏） |
+| 单函数 SinkHit 数 > 20 | 截断到前 20 个 SinkHit（按 sink_danger 降序），记 WARN 日志（query 质量护栏；"命中"指去重后的最终 SinkHit，非 raw query capture） |
 | LLM 置信度 < 0.5 | SinkHit 仍生成，`effective_danger = danger * confidence` |
 | tree-sitter 命中后某 hit 被丢弃 | 不触发 LLM 二次兜底 |
 
@@ -446,8 +477,9 @@ def test_python_sql_execution_query(registry, fixture_dir):
 ### 性能基准
 
 `tests/perf/test_sink_detector_bench.py`：
-- 1000 funcs 单核吞吐量基线 > 500 funcs/sec（M1）
-- < 100 funcs/sec → 性能告警（CI 信息性指标，不阻塞 merge）
+- **基线 TBD：实施时实测**（无现有 benchmark 数据，避免预设拍脑袋的阈值）
+- Soft target：≥ 300 funcs/sec 单核（基于 tree-sitter 官方 ~10MB/sec 解析 + query 匹配开销估算）
+- 若实测 < 100 funcs/sec → 性能告警（CI 信息性指标，不阻塞 merge），并启动性能分析
 
 ### 端到端验证
 
@@ -478,6 +510,41 @@ def test_python_sql_execution_query(registry, fixture_dir):
 
 每步可独立 merge。
 
+## 下游消费者更新
+
+`audit_input_builder` 和 `findings_renderer` 切到 `sink_hits[]` 后，输出格式变化：
+
+### audit_input_builder
+
+`prompts/audit-tier1.txt` 等审计 prompt 里注入的 sink 信息，从单个 `sink_type` 字符串改成 sink 列表：
+
+```
+## Sinks in chain terminal function
+- [sql_execution] user_service.py:48 `cursor.execute(sql, params)` (taint arg: 0)
+- [log_write]     user_service.py:52 `logger.info(f"user={user_input}")` (taint arg: 0, low confidence: 0.4)
+```
+
+低置信 SinkHit（< 0.5）在条目后标注 "low confidence"，提示 LLM 审计员复核。
+
+### findings_renderer
+
+`InjectionVulnerability` / `XssVulnerability` 等漏洞模型的 sink 字段从模糊的函数名换成精确位置：
+
+```python
+# 改动前
+vuln.sink_call = "sqlite3.execute"          # 函数名级别
+
+# 改动后
+vuln.sink_call = f"{hit.func_id}:{hit.call_line} `{hit.call_text}`"
+# 例： "user_service.py:getUser:48 `cursor.execute(sql, params)`"
+```
+
+报告里点击 sink_call 能直接跳到源码行。
+
+### 兼容字段
+
+旧字段 `TaintFlow.sink_type` 在弃用期内仍由 `audit_input_builder` 兜底填充（取最危险的 SinkHit 的 sink_type），保证未升级的下游消费者不报错。
+
 ## 回滚预案
 
 - 步骤 4 是安全网：LLM 兜底出问题，`classify_sink` 仍能给函数级 sink_type
@@ -503,11 +570,12 @@ def test_python_sql_execution_query(registry, fixture_dir):
 
 ## 依赖变更
 
-`pyproject.toml`：
+`packages/core/pyproject.toml`：
 - `+ tree-sitter>=0.21`
 - `+ tree-sitter-python`
 - `+ tree-sitter-javascript`
 - `+ tree-sitter-typescript`（ts + tsx grammar）
-- `+ anthropic`（升级到支持 tool use 的版本）
 
 每个 grammar ~5MB，总加包体 ~20MB。
+
+**不新增 `anthropic` 直接依赖**。LLM 调用复用现有 `shannon_core.agents.runner.run_claude_prompt` 抽象（已经支持 anthropic_api / bedrock / vertex / openai_compatible / litellm_router 五种 provider）。模型选 `"small"` tier（默认 `claude-haiku-4-5-20251001`，由 `DEFAULT_MODELS` 决定）。
