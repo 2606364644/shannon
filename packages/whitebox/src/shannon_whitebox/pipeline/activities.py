@@ -75,7 +75,8 @@ async def run_agent(input: ActivityInput) -> dict:
     try:
         agent_name = AgentName(input.workspace_name)
         repo, deliverables, _ = _get_paths(input)
-        prompt_manager = PromptManager(repo.parent.parent / "prompts")
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+        prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         metrics = await executor.execute(
             agent_name=agent_name,
@@ -125,7 +126,7 @@ async def run_auth_validation(input: ActivityInput) -> None:
         from shannon_core.prompts.manager import PromptManager
         from shannon_core.agents.executor import AgentExecutor
 
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
 
