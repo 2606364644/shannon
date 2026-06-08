@@ -42,9 +42,18 @@ Add Express.js route patterns to `_detect_typescript()`. These are function call
 
 Also support chained patterns: `app.route('/path').get(...).post(...)`.
 
-All Express-detected entry points get `needs_llm_review=True` (confidence < 0.95 LLM_REVIEW_THRESHOLD) to ensure PRE_RECON adjudicates them.
+Confidence and `needs_llm_review`:
+- `LLM_REVIEW_THRESHOLD = 0.8` in `entry_points.py`. Routes with confidence >= 0.8 get `needs_llm_review=False` and are auto-confirmed.
+- `app.use(...)` with a path string argument (route-level middleware) gets confidence=0.80, `needs_llm_review=False`.
+- `app.use(...)` WITHOUT a path string argument (framework middleware like `session()`, `bodyParser()`) is **excluded** — not an attack surface entry point.
 
-Implementation: Add a `_detect_express_routes()` function called from `_detect_typescript()`. Scans each block's `source_code` for `(app|router)\.(get|post|put|delete|patch|all|use)\(` patterns. Extracts route path from first string argument.
+Implementation: Add a `_detect_express_routes()` function called from `_detect_typescript()`. It operates in two passes:
+
+**Pass 1 — FuncBlock scan:** Scans each block's `source_code` for `(app|router)\.(get|post|put|delete|patch|all|use)\(` patterns. Extracts route path from first string argument. Creates one `EntryPoint` per route, all sharing the same `func_block_id`.
+
+**Pass 2 — Top-level route scan:** For files in common route directories (`routes/`, `router/`, `server.js`, `app.js`), scans the full file source for route patterns that are NOT inside any FuncBlock. These top-level route registrations are created as synthetic entry points with `func_block_id` pointing to the file itself (e.g., `server.js::0`).
+
+**`app.use()` filtering:** Only match `app.use('/path', ...)` or `router.use('/path', ...)` where the first argument is a string literal starting with `/`. Skip `app.use(fn)` calls where the first argument is not a route path (framework middleware).
 
 ### Fix B: `save_adjudication()` Pipeline Step
 
@@ -56,10 +65,9 @@ Add a deterministic Python function that runs after PRE_RECON agent completes an
 
 Logic:
 1. Read `code_index.json` → get candidate entry points
-2. High-confidence (confidence >= 0.8, `needs_llm_review=false`) → auto-confirm with `verdict=confirmed`, `source=code_index`
-3. Low-confidence (`needs_llm_review=true`) → attempt to extract verdicts from `pre_recon_deliverable.md` using regex/pattern matching
-4. For any remaining unadjudicated entry points → default to `confirmed` (conservative: include rather than exclude)
-5. Build `AdjudicationResult` and write to `entry_points.json`
+2. High-confidence (`confidence >= 0.8`, `needs_llm_review=false`) → auto-confirm with `verdict=confirmed`, `source=code_index`
+3. Low-confidence (`needs_llm_review=true`) → default to `confirmed` with `source=code_index` (conservative: include rather than exclude)
+4. Build `AdjudicationResult` and write to `entry_points.json`
 
 **New activity:** `run_save_adjudication`
 
@@ -97,11 +105,17 @@ run_agent(RECON)
 4. Assert `code_index.json` is updated with `total_chains > 0`
 5. Assert vulnerability agents produce findings > 0
 
+## Known Limitations
+
+- **Shared func_block_id:** When multiple Express routes are registered inside one function (e.g., NodeGoat's `index(app, db)`), all routes share the same `func_block_id`. `rebuild_call_chains` deduplicates by ID, producing a single chain from that function. This means all routes in the function share one call chain rather than being analyzed independently. This is acceptable because the chain includes calls to all handlers, and vulnerability agents analyze the full chain.
+- **Dynamic route patterns:** Routes computed at runtime (e.g., `app.get(config.route, ...)`) are not detected. Only static string literal routes are matched.
+- **No LLM adjudication yet:** All entry points are auto-confirmed. The `save_adjudication()` pipeline step is designed to be extended later — when PRE_RECON can reliably output structured adjudication data, step 3 can be enhanced to use it instead of defaulting to confirmed.
+
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `packages/core/src/shannon_core/code_index/entry_points.py` | Add Express.js route detection |
-| `packages/core/src/shannon_core/code_index/__init__.py` | Add `save_adjudication()` function |
+| `packages/core/src/shannon_core/code_index/entry_points.py` | Add `_detect_express_routes()` with Pass 1 (FuncBlock scan) and Pass 2 (top-level route scan) |
+| `packages/core/src/shannon_core/code_index/__init__.py` | Add `save_adjudication()` function; wire `_detect_express_routes()` into `build_code_index()` |
 | `packages/whitebox/src/shannon_whitebox/pipeline/activities.py` | Add `run_save_adjudication` activity |
 | `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py` | Wire new activity into pipeline |
