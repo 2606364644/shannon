@@ -68,7 +68,7 @@ def build_code_index(repo_path: str) -> CodeIndex:
 
     resolved_edges = resolve_edges(all_edges, all_blocks)
 
-    entry_points = detect_entry_points(all_blocks, language)
+    entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
 
     return CodeIndex(
         repository=str(repo),

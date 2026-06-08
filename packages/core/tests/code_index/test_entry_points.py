@@ -431,3 +431,152 @@ class TestExpressEntryPoints:
         eps = detect_entry_points([block], "python")
         express_eps = [ep for ep in eps if ep.evidence.startswith("Express")]
         assert len(express_eps) == 0
+
+
+class TestExpressPass2TopLevel:
+    """Express.js route detection — Pass 2 (top-level route scan in route files)."""
+
+    def test_top_level_route_in_routes_dir(self, tmp_path):
+        """Routes in a routes/ directory are detected even if not inside a function."""
+        repo = tmp_path / "repo"
+        routes_dir = repo / "routes"
+        routes_dir.mkdir(parents=True)
+
+        (routes_dir / "users.ts").write_text(
+            "import { Router } from 'express';\n"
+            "const router = Router();\n"
+            "\n"
+            "router.get('/users', (req, res) => {\n"
+            "  res.json(getUsers());\n"
+            "});\n"
+            "\n"
+            "router.post('/users', (req, res) => {\n"
+            "  res.json(createUser());\n"
+            "});\n"
+        )
+
+        # Create a FuncBlock for a helper function inside the same file
+        block = _block(
+            id="routes/users.ts:getUsers:12",
+            file_path="routes/users.ts",
+            function_name="getUsers",
+            start_line=12,
+            end_line=15,
+            source_code="function getUsers() { return []; }",
+            language="typescript",
+        )
+
+        eps = detect_entry_points([block], "typescript", repo_path=str(repo))
+        top_level = [ep for ep in eps
+                     if ep.evidence.startswith("Express top-level")]
+        assert len(top_level) == 2
+        methods = {ep.http_method for ep in top_level}
+        assert methods == {"GET", "POST"}
+        assert all(ep.route == "/users" for ep in top_level)
+        # Synthetic func_block_id for top-level routes
+        assert all(ep.func_block_id == "routes/users.ts::0" for ep in top_level)
+
+    def test_top_level_route_in_server_js(self, tmp_path):
+        """Routes in server.js are detected."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        (repo / "server.js").write_text(
+            "const express = require('express');\n"
+            "const app = express();\n"
+            "\n"
+            "app.get('/health', (req, res) => {\n"
+            "  res.json({ status: 'ok' });\n"
+            "});\n"
+        )
+
+        # No FuncBlocks at all — purely top-level routes
+        eps = detect_entry_points([], "typescript", repo_path=str(repo))
+        top_level = [ep for ep in eps
+                     if ep.evidence.startswith("Express top-level")]
+        assert len(top_level) == 1
+        assert top_level[0].http_method == "GET"
+        assert top_level[0].route == "/health"
+
+    def test_non_route_file_not_scanned(self, tmp_path):
+        """Files not in route directories are not scanned by Pass 2."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        (repo / "helpers.ts").write_text(
+            "app.get('/internal', (req, res) => {\n"
+            "  res.json({ data: 42 });\n"
+            "});\n"
+        )
+
+        block = _block(
+            id="helpers.ts:helper:1",
+            file_path="helpers.ts",
+            function_name="helper",
+            start_line=1,
+            end_line=3,
+            source_code="function helper() { return 42; }",
+            language="typescript",
+        )
+
+        eps = detect_entry_points([block], "typescript", repo_path=str(repo))
+        top_level = [ep for ep in eps
+                     if ep.evidence.startswith("Express top-level")]
+        assert len(top_level) == 0
+
+    def test_route_inside_funcblock_not_duplicated(self, tmp_path):
+        """Routes inside a FuncBlock are NOT double-counted by Pass 2."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        (repo / "app.ts").write_text(
+            "import express from 'express';\n"
+            "const app = express();\n"
+            "\n"
+            "function setup(app) {\n"
+            "  app.get('/api/users', getUsers);\n"
+            "  app.post('/api/users', createUser);\n"
+            "}\n"
+        )
+
+        block = _block(
+            id="app.ts:setup:4",
+            file_path="app.ts",
+            function_name="setup",
+            start_line=4,
+            end_line=7,
+            source_code=(
+                "function setup(app) {\n"
+                "  app.get('/api/users', getUsers);\n"
+                "  app.post('/api/users', createUser);\n"
+                "}\n"
+            ),
+            language="typescript",
+        )
+
+        eps = detect_entry_points([block], "typescript", repo_path=str(repo))
+        # Pass 1 finds 2 routes from the FuncBlock source_code
+        pass1 = [ep for ep in eps if ep.evidence.startswith("Express route:")]
+        # Pass 2 should NOT duplicate these (they're inside the FuncBlock)
+        pass2 = [ep for ep in eps
+                 if ep.evidence.startswith("Express top-level")]
+        assert len(pass1) == 2
+        assert len(pass2) == 0
+
+    def test_no_repo_path_skips_pass2(self):
+        """When repo_path is None, Pass 2 is skipped entirely."""
+        block = _block(
+            id="src/routes.ts:setup:1",
+            file_path="src/routes.ts",
+            function_name="setup",
+            start_line=1,
+            source_code="app.get('/users', handler);",
+            language="typescript",
+        )
+        eps = detect_entry_points([block], "typescript")
+        top_level = [ep for ep in eps
+                     if ep.evidence.startswith("Express top-level")]
+        assert len(top_level) == 0
+        # Pass 1 still works
+        pass1 = [ep for ep in eps if ep.evidence.startswith("Express route:")]
+        assert len(pass1) == 1

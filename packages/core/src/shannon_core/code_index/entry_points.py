@@ -222,9 +222,71 @@ def _is_route_file(file_path: str) -> bool:
 def _scan_top_level_express_routes(
     blocks: list[FuncBlock], repo_path: str,
 ) -> list[EntryPoint]:
-    """Scan full file source for Express routes not inside any FuncBlock."""
-    # Placeholder — implemented in Task 2
-    return []
+    """Scan full file source for Express routes not inside any FuncBlock.
+
+    Only scans files in common route directories (routes/, router/,
+    server.js, app.js, etc.).
+    """
+    repo = Path(repo_path)
+    entry_points: list[EntryPoint] = []
+
+    # Group blocks by file_path
+    blocks_by_file: dict[str, list[FuncBlock]] = {}
+    for block in blocks:
+        blocks_by_file.setdefault(block.file_path, []).append(block)
+
+    # Also scan files that have NO blocks at all (e.g., purely top-level routes)
+    # We discover these by checking route-file paths that appear in blocks_by_file
+    # plus common route files that may have no parsed functions
+    candidate_files: set[str] = set(blocks_by_file.keys())
+
+    # Also check common route files that might not have any FuncBlocks
+    for name in ("server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts"):
+        if (repo / name).exists():
+            candidate_files.add(name)
+
+    for file_path_str in sorted(candidate_files):
+        if not _is_route_file(file_path_str):
+            continue
+
+        file_path = repo / file_path_str
+        if not file_path.exists():
+            continue
+
+        try:
+            full_source = file_path.read_text(errors="replace")
+        except Exception:
+            continue
+
+        # Build set of line ranges covered by FuncBlocks
+        covered_lines: set[int] = set()
+        for block in blocks_by_file.get(file_path_str, []):
+            for line in range(block.start_line, block.end_line + 1):
+                covered_lines.add(line)
+
+        # Scan for route patterns not inside any FuncBlock
+        for match in _EXPRESS_ROUTE_PATTERN.finditer(full_source):
+            line_num = full_source[:match.start()].count("\n") + 1
+            if line_num in covered_lines:
+                continue
+
+            method_str = match.group(2)
+            route_path = match.group(3)
+
+            http_method = _EXPRESS_METHOD_MAP.get(method_str)
+            confidence = _EXPRESS_CONFIDENCE.get(method_str, 0.80)
+
+            entry_points.append(EntryPoint(
+                func_block_id=f"{file_path_str}::0",
+                entry_type="http_route",
+                route=route_path,
+                http_method=http_method,
+                confidence=confidence,
+                evidence=f"Express top-level route: {match.group(1)}.{method_str}('{route_path}')",
+                needs_llm_review=confidence < LLM_REVIEW_THRESHOLD,
+            ))
+
+    return entry_points
 
 
 def _detect_typescript(
