@@ -202,3 +202,42 @@ class TestWriteIndexFilesExtended:
         data = json.loads(json_path.read_text())
         assert "file_manifest" in data
         assert data["file_manifest"]["entries"][0]["file_path"] == "config.yaml"
+
+
+class TestBuildCodeIndexSinks:
+    def test_sink_call_sites_populated(self, tmp_path):
+        """Repository with a known Python sink produces SinkCallSite."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "app.py").write_text(
+            "def f(user_sql):\n"
+            "    cursor.execute(user_sql)\n"
+        )
+        index = build_code_index(str(repo))
+        assert len(index.sink_call_sites) >= 1
+        sql_sites = [s for s in index.sink_call_sites if s.category.value == "sql"]
+        assert len(sql_sites) >= 1
+
+    def test_sink_call_sites_empty_when_no_sinks(self, tmp_path):
+        """Repository with no sinks produces empty list."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "app.py").write_text("def f(x):\n    return x + 1\n")
+        index = build_code_index(str(repo))
+        assert index.sink_call_sites == []
+
+    def test_code_index_json_contains_sink_call_sites(self, tmp_path):
+        """code_index.json includes sink_call_sites after build + write."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "app.py").write_text(
+            "import os\n"
+            "def f(cmd):\n"
+            "    os.system(cmd)\n"
+        )
+        index = build_code_index(str(repo))
+        out = tmp_path / "out"
+        json_path, _ = write_index_files(index, str(out))
+        content = json_path.read_text()
+        assert '"sink_call_sites"' in content
+        assert '"py-os-system"' in content

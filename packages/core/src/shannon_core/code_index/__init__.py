@@ -11,6 +11,7 @@ from shannon_core.code_index.call_graph import resolve_edges, build_call_chains
 from shannon_core.code_index.entry_points import detect_entry_points
 from shannon_core.code_index.summary import generate_summary
 from shannon_core.code_index.parsers import get_parser
+from shannon_core.code_index.sink_detector import detect_sinks
 from shannon_core.code_index.degradation import build_degradation_report
 from shannon_core.code_index.file_discovery import discover_security_files
 from shannon_core.code_index.gitnexus_engine import GitNexusEngine
@@ -51,14 +52,18 @@ def build_code_index(repo_path: str) -> CodeIndex:
             error_code=ErrorCode.CODE_INDEX_FAILED,
         )
 
+    # Cache: file_path → source bytes (so detect_sinks can read source without re-parsing)
+    file_sources: dict[str, bytes] = {}
     all_blocks = []
     all_edges = []
     for file_path in source_files:
         try:
+            source = file_path.read_bytes()
+            rel = str(file_path.relative_to(repo))
+            file_sources[rel] = source
             blocks = parser.parse_file(file_path, repo)
             all_blocks.extend(blocks)
 
-            source = file_path.read_bytes()
             for block in blocks:
                 edges = parser.extract_calls(block, source)
                 all_edges.extend(edges)
@@ -70,6 +75,12 @@ def build_code_index(repo_path: str) -> CodeIndex:
 
     entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
 
+    # Spec B: AST-precise sink detection
+    def _provide_source(block):
+        return file_sources.get(block.file_path)
+    sink_call_sites = detect_sinks(all_blocks, parser, source_provider=_provide_source)
+    logger.info("Detected %d sink call sites", len(sink_call_sites))
+
     return CodeIndex(
         repository=str(repo),
         language=language,
@@ -80,6 +91,7 @@ def build_code_index(repo_path: str) -> CodeIndex:
         edges=resolved_edges,
         entry_points=entry_points,
         chains=[],
+        sink_call_sites=sink_call_sites,
     )
 
 
@@ -123,6 +135,7 @@ def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
                 edges=base_index.edges,
                 entry_points=base_index.entry_points,
                 chains=base_index.chains,
+                sink_call_sites=base_index.sink_call_sites,
                 file_manifest=file_manifest,
                 degradation_level=degradation_level,
             )
@@ -146,6 +159,7 @@ def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
         edges=base_index.edges,
         entry_points=base_index.entry_points,
         chains=base_index.chains,
+        sink_call_sites=base_index.sink_call_sites,
         file_manifest=file_manifest,
         degradation_level=degradation_level,
     )
@@ -275,6 +289,7 @@ def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
         edges=index.edges,
         entry_points=index.entry_points,
         chains=chains,
+        sink_call_sites=index.sink_call_sites,
         file_manifest=index.file_manifest,
         degradation_level=index.degradation_level,
     )
