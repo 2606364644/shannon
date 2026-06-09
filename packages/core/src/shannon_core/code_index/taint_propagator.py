@@ -1,6 +1,11 @@
 """Sink classification for taint analysis.
 
 Provides heuristic sink detection for common dangerous function patterns.
+
+DEPRECATED: This module is superseded by sink_detector.detect_sinks (Spec B),
+which produces precise SinkCallSite records via tree-sitter AST. classify_sink
+is retained as a regex-based fallback used by risk_scorer when no
+SinkCallSite records are available (e.g., before Spec B wiring completed).
 """
 
 import re
@@ -23,7 +28,11 @@ _SINK_PATTERNS: list[tuple[re.Pattern, SinkType]] = [
 
 
 def classify_sink(block: FuncBlock) -> SinkType:
-    """Classify a function block's sink type based on source code patterns.
+    """[DEPRECATED: use sink_detector.detect_sinks] Classify a function block's
+    sink type based on source code patterns.
+
+    Used by risk_scorer as the regex fallback when no SinkCallSite records
+    are passed to ChainRiskScore.score().
 
     Args:
         block: The FuncBlock to classify.
