@@ -18,7 +18,9 @@
       "Bash(docker rm *)",
       "Bash(docker info *)",
       "Bash(jq --version)",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "Bash(git config *)",
+      "Bash(git submodule *)"
     ]
   }
 }
