@@ -56,6 +56,34 @@ SANITIZER_HINTS: frozenset[str] = frozenset({
 _UNSUPPORTED_LANGUAGES: frozenset[str] = frozenset({"go", "java", "php"})
 
 
+def seed_taints(
+    block: FuncBlock,
+    typed_params: list[TypedParameter],
+) -> set[str]:
+    """Determine the initial set of tainted variable names at function entry.
+
+    Rules (spec §4.1.1):
+      - 如果有 TypedParameter 信息：source != INTERNAL 即为 tainted。
+      - 如果没有（Go/Java/PHP 入口、或未跑 enhanced_parameters）：把
+        FuncBlock.parameters 全部视作 tainted（保守偏 recall），让 LLM 在
+        Spec C 复核。
+      - UNKNOWN（如 request 对象）视为 tainted — container 对象本身被标，
+        过程内分析会把 request.x 一并视作 tainted（容器过近似）。
+    """
+    seed: set[str] = set()
+    if typed_params:
+        for tp in typed_params:
+            if tp.source == ParameterSource.INTERNAL:
+                continue
+            seed.add(tp.name)
+        return seed
+
+    # Fallback: 保守 — 入口函数的全部位置参数都视作 tainted
+    for name in block.parameters:
+        seed.add(name)
+    return seed
+
+
 def build_propagation_graph(
     index: CodeIndex,
     typed_params_by_block: dict[str, list[TypedParameter]] | None = None,

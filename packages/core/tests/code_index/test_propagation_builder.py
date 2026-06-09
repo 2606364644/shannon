@@ -58,3 +58,38 @@ class TestEmptyGraph:
         # 集合至少要覆盖常见 sanitizer
         assert "escape" in SANITIZER_HINTS or any("escape" in s for s in SANITIZER_HINTS)
         assert any("sanitize" in s for s in SANITIZER_HINTS)
+
+
+class TestSeedTaints:
+    def test_seed_from_typed_params_excludes_internal(self):
+        """TypedParameter.source != INTERNAL 才算 tainted。"""
+        from shannon_core.code_index.propagation_builder import seed_taints
+        block = _block("handler", "app.py", 1, params=["user_id", "logger"])
+        typed = [
+            TypedParameter(name="user_id", source=ParameterSource.QUERY_PARAM),
+            TypedParameter(name="logger", source=ParameterSource.INTERNAL),
+        ]
+        seed = seed_taints(block, typed)
+        assert "user_id" in seed
+        assert "logger" not in seed
+
+    def test_seed_falls_back_to_function_params_when_typed_empty(self):
+        """没有 TypedParameter 信息时，把 FuncBlock.parameters 全部视作 tainted
+        （保守偏 recall），并加 note。"""
+        from shannon_core.code_index.propagation_builder import seed_taints
+        block = _block("handler", "app.py", 1, params=["user_id", "limit"])
+        seed = seed_taints(block, [])
+        # 没 typed 信息 → 全部参数 tainted
+        assert "user_id" in seed
+        assert "limit" in seed
+
+    def test_seed_includes_request_attr_patterns(self):
+        """request.x / req.x 在 Python/TS 入口里是常见外部输入；seed 时把
+        request 本身也加入（intra 阶段会展开 request.x 的字段过近似）。"""
+        from shannon_core.code_index.propagation_builder import seed_taints
+        block = _block("handler", "app.py", 1, params=["request"])
+        typed = [
+            TypedParameter(name="request", source=ParameterSource.UNKNOWN),
+        ]
+        seed = seed_taints(block, typed)
+        assert "request" in seed
