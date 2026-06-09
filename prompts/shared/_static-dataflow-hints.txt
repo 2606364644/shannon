@@ -1,0 +1,10 @@
+<static_dataflow_hints>
+可选的确定性静态线索位于 `.shannon/deliverables/static_dataflow_hints.md`（若该文件不存在，跳过本段，仍按既有流程自主分析）：
+- 把它作为追链【起点】与【交叉验证】：静态已定位的 sink 调用点、source→sink 流，优先据此展开验证。
+- ⚠️ 它是线索，不是结论：
+  - 静态【未列出】的 sink/路径 ≠ 安全——仍须用 Task agent 自主覆盖（动态调用、模板、未覆盖语言）。
+  - `needs_review` 的 sink 请重点复核转义/上下文。
+  - `sanitize_hint` 仅表示路径出现疑似 sanitizer，【不代表有效】——仍须按 slot 上下文判定，并检查 concat-after-sanitize。
+  - `confidence` 低或 notes 提示过近似时，以你自己的数据流追踪为准。
+- 你的最终判定（slot 匹配、verdict）始终以代码事实为准，静态线索仅供参考与加速。
+</static_dataflow_hints>

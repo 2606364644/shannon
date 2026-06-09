@@ -44,6 +44,8 @@ Success criterion: A complete, code-backed analysis of every potential authoriza
 - You are the final analysis specialist. Your findings complete the analysis phase.
 </starting_context>
 
+@include(shared/_static-dataflow-hints.txt)
+
 <system_architecture>
 **PENTESTING WORKFLOW - YOUR POSITION:**
 

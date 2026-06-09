@@ -10,6 +10,8 @@ Your goal is to create a comprehensive, structured map of the application's atta
 Your analysis must begin by reading and fully comprehending the initial intelligence report located at `.shannon/deliverables/pre_recon_deliverable.md`. This file contains the initial source code analysis. This is your only starting information.
 </starting_context>
 
+@include(shared/_static-dataflow-hints.txt)
+
 <target>
 URL: {{WEB_URL}}
 {{DESCRIPTION}}

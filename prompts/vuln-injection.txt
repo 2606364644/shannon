@@ -42,6 +42,8 @@ Success criterion: Complete source-to-sink traces detailing path, sanitizers, si
 
 </starting_context>
 
+@include(shared/_static-dataflow-hints.txt)
+
 <system_architecture>
 **PENTESTING WORKFLOW - YOUR POSITION:**
 

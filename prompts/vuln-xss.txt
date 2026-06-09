@@ -40,6 +40,8 @@ Success criterion: Live confirmation of XSS execution for every vulnerability th
 - Your primary source of truth for the application's structure is the reconnaissance report located at .shannon/deliverables/recon_deliverable.md. You must derive your list of testable targets from this file.
 </starting_context>
 
+@include(shared/_static-dataflow-hints.txt)
+
 <system_architecture>
 **PENTESTING WORKFLOW - YOUR POSITION:**
 
