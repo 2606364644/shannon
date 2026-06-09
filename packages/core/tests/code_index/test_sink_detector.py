@@ -125,3 +125,84 @@ class TestSinkTypeCompatibility:
     def test_sink_type_still_defined(self):
         assert SinkType.SQL_EXECUTION == "sql_execution"
         assert SinkType.COMMAND_EXEC == "command_exec"
+
+
+class TestSinkRuleLibrary:
+    def test_sink_rule_dataclass(self):
+        from shannon_core.code_index.sink_detector import SinkRule
+        import re
+        rule = SinkRule(
+            rule_id="py-db-cursor-execute",
+            languages=("python",),
+            callee="execute",
+            receiver_pattern=re.compile(r"^(cursor|cnx|conn|db)$"),
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            dangerous_slots=((0, SlotContext.SQL_VALUE),),
+        )
+        assert rule.rule_id == "py-db-cursor-execute"
+        assert rule.languages == ("python",)
+        assert rule.dangerous_slots == ((0, SlotContext.SQL_VALUE),)
+        assert rule.needs_review_default is False  # default
+
+    def test_default_rule_library_loaded(self):
+        """起始规则库至少覆盖 5 语言 x 8 类 sink."""
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES, SinkRule
+        assert len(DEFAULT_RULES) >= 40
+        # Verify language coverage
+        langs = {lang for r in DEFAULT_RULES for lang in r.languages}
+        assert "python" in langs
+        assert "typescript" in langs
+        assert "go" in langs
+        assert "java" in langs
+        assert "php" in langs
+        # Verify category coverage (all 8 categories)
+        cats = {r.category for r in DEFAULT_RULES}
+        assert SinkCategory.SQL in cats
+        assert SinkCategory.COMMAND in cats
+        assert SinkCategory.DESERIALIZATION in cats
+        assert SinkCategory.SSRF in cats
+        assert SinkCategory.XSS in cats
+        assert SinkCategory.TEMPLATE in cats
+        assert SinkCategory.FILE in cats
+        assert SinkCategory.REDIRECT in cats
+
+    def test_py_db_cursor_execute_rule_exists(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-db-cursor-execute"), None)
+        assert rule is not None
+        assert rule.callee == "execute"
+        assert rule.receiver_pattern.match("cursor")
+        assert rule.receiver_pattern.match("cnx")
+        assert rule.receiver_pattern.match("conn")
+        assert rule.receiver_pattern.match("db")
+        assert not rule.receiver_pattern.match("users")  # `.query()` of a model
+        assert rule.category == SinkCategory.SQL
+
+    def test_py_subprocess_receiver(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-subprocess-popen"), None)
+        assert rule is not None
+        assert rule.receiver_pattern.match("subprocess")
+        assert not rule.receiver_pattern.match("myobj")
+        assert rule.category == SinkCategory.COMMAND
+
+    def test_ts_innerhtml_rule_needs_review(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        # innerHTML assignment handled via assignment-style rule; if present, must be needs_review
+        rule = next((r for r in DEFAULT_RULES if r.rule_id == "ts-innerhtml"), None)
+        assert rule is not None
+        assert rule.needs_review_default is True
+        assert rule.category == SinkCategory.XSS
+
+    def test_py_render_template_string_rule_exists(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-render-template-string"), None)
+        assert rule is not None
+        assert rule.callee == "render_template_string"
+        assert rule.category == SinkCategory.TEMPLATE
+
+    def test_rule_id_unique(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        ids = [r.rule_id for r in DEFAULT_RULES]
+        assert len(ids) == len(set(ids))
