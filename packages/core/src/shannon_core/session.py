@@ -1,4 +1,5 @@
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -152,3 +153,22 @@ class SessionManager:
             "status": "completed",
             "completed_at": time.time(),
         })
+
+    def delete_workspace(self, workspace_name: str) -> bool:
+        """Delete a workspace directory and handle parent-child links.
+
+        Returns True if deleted, False if workspace not found.
+        """
+        ws = self.get_workspace(workspace_name)
+        if ws is None:
+            return False
+        self._handle_workspace_links(ws)
+        shutil.rmtree(ws)
+        return True
+
+    def _handle_workspace_links(self, workspace_path: Path) -> None:
+        """Handle parent-child links before deleting a workspace.
+
+        Stub — will be implemented in the next task.
+        """
+        pass

@@ -179,3 +179,20 @@ def test_mark_completed(tmp_path):
     assert mgr.get_status(ws) == "completed"
     assert mgr.get_completed_at(ws) is not None
     assert isinstance(mgr.get_completed_at(ws), float)
+
+
+def test_delete_workspace_removes_directory(tmp_path):
+    """delete_workspace should remove the entire workspace directory."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="to-delete")
+    assert ws.exists()
+    result = mgr.delete_workspace("to-delete")
+    assert result is True
+    assert not ws.exists()
+
+
+def test_delete_workspace_returns_false_when_not_found(tmp_path):
+    """delete_workspace should return False for nonexistent workspace."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    result = mgr.delete_workspace("nonexistent")
+    assert result is False
