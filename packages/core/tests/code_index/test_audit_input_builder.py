@@ -105,6 +105,36 @@ class TestFormatTaintFlowSummary:
         assert "QUERY" in summary or "query" in summary
         assert "order_id" in summary
 
+    def test_summary_shows_slot_and_sanitizer_tail_for_new_fields(self):
+        """带 propagation_steps + sink_call_site_id 的 flow → summary tail
+        应渲染为 '{slot}@arg{idx} (sanitizer_hint)'。"""
+        from shannon_core.code_index.parameter_models import SlotContext
+        flow = TaintFlow(
+            entry_point_id="app.py:h:1",
+            source_param="user_id",
+            source_type=ParameterSource.QUERY_PARAM,
+            propagation_steps=[
+                PropagationStep(
+                    from_func_id="app.py:h:1", from_param="user_id",
+                    to_func_id="svc.py:q:10", to_param="sql",
+                    transformation="concat", code_location="app.py:3",
+                ),
+            ],
+            sink_call_site_id="svc.py:q:execute:11:4",
+            sink_slot=SlotContext.SQL_VALUE,
+            tainted_arg_index=0,
+            confidence=0.8,
+            has_sanitizer_hint=True,
+        )
+        summary = format_taint_flow_summary([flow])
+        # tail 含 slot@arg index
+        assert "sql_value@arg0" in summary
+        # sanitizer 提示
+        assert "(sanitizer_hint)" in summary
+        # propagation path 也渲染了
+        assert "user_id" in summary
+        assert "sql" in summary
+
     def test_no_flows(self):
         summary = format_taint_flow_summary([])
         assert summary == "No taint flow data available for this chain."
@@ -137,8 +167,8 @@ class TestSinkCallSiteFieldsInPrompt:
             has_sanitizer_hint=False,
         )
         text = build_chain_audit_input(chain, {block.id: block}, [flow])
-        assert "sql_value" in text or "SQL_VALUE" in text.lower()
-        assert "arg 0" in text or "arg_index=0" in text or "argument 0" in text.lower()
+        assert "sql_value" in text
+        assert "arg 0" in text
 
     def test_sanitizer_hint_marked(self):
         from shannon_core.code_index.audit_input_builder import build_chain_audit_input
@@ -163,7 +193,7 @@ class TestSinkCallSiteFieldsInPrompt:
             has_sanitizer_hint=True,
         )
         text = build_chain_audit_input(chain, {block.id: block}, [flow])
-        assert "sanitizer" in text.lower() or "sanitize_hint" in text
+        assert "[sanitizer_hint]" in text
 
     def test_legacy_flow_without_new_fields_renders_without_crash(self):
         """旧 TaintFlow（只填了 sink_func_id / sink_type）仍能渲染。"""
