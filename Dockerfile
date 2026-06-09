@@ -107,7 +107,29 @@ COPY --from=builder --chown=pentest:pentest /app/apps/worker /app/apps/worker
 COPY --from=builder --chown=pentest:pentest /app/apps/cli/package.json /app/apps/cli/package.json
 
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.84 @playwright/cli@0.1.1
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Pre-seed playwright-cli's workspace config so `install --skills` does NOT download
+# Chrome for Testing (~174 MiB) at build time. The daemon drives the system Chromium
+# installed above via `apk add chromium` (/usr/bin/chromium-browser) instead.
+#
+# install() -> ensureConfiguredBrowserInstalled() only triggers a download when the config
+# is missing, or when launchOptions.channel is unset/chromium-prefixed AND the registry
+# executable is absent. channel "chrome" matches neither, so nothing downloads. At runtime
+# launchOptions.executablePath wins over channel, so the browser launches from
+# /usr/bin/chromium-browser directly. This also sidesteps a HOME mismatch: a build-time
+# download would land in /root/.cache/ms-playwright while the runtime (HOME=/tmp,
+# XDG_CACHE_HOME=/tmp/.cache) resolves /tmp/.cache/ms-playwright.
+RUN mkdir -p .playwright && \
+    printf '%s\n' \
+      '{' \
+      '  "browser": {' \
+      '    "browserName": "chromium",' \
+      '    "launchOptions": {' \
+      '      "channel": "chrome",' \
+      '      "executablePath": "/usr/bin/chromium-browser"' \
+      '    }' \
+      '  }' \
+      '}' > .playwright/cli.config.json
 
 RUN mkdir -p /tmp/.claude/skills && \
     playwright-cli install --skills && \
