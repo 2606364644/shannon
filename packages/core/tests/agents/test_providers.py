@@ -1448,3 +1448,52 @@ class TestExtractResultFailureSemantics:
         msg = _result_msg(result_is_error=False, result_subtype="result", stop_reason="refusal")
         result = provider._extract_result(msg, duration=10, model="m", turn_count=1)
         assert result.stop_reason == "refusal"
+
+
+class TestClassifyResultFailure:
+    """L2: _classify_result_failure maps structured signals to (error_code, retryable)."""
+
+    def setup_method(self):
+        self.provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+
+    def test_error_max_turns(self):
+        assert self.provider._classify_result_failure("error_max_turns", True, None, None) == ("ExecutionLimitError", False)
+
+    def test_error_during_execution(self):
+        assert self.provider._classify_result_failure("error_during_execution", True, None, None) == ("TransientError", True)
+
+    def test_error_max_structured_output_retries(self):
+        assert self.provider._classify_result_failure("error_max_structured_output_retries", True, None, None) == ("OutputValidationError", True)
+
+    def test_429_rate_limit(self):
+        assert self.provider._classify_result_failure("result", True, 429, None) == ("RateLimitError", True)
+
+    def test_500_server_transient(self):
+        assert self.provider._classify_result_failure("result", True, 500, None) == ("TransientError", True)
+
+    def test_529_overloaded_transient(self):
+        assert self.provider._classify_result_failure("result", True, 529, None) == ("TransientError", True)
+
+    def test_402_billing(self):
+        assert self.provider._classify_result_failure("result", True, 402, None) == ("BillingError", True)
+
+    def test_401_authentication(self):
+        assert self.provider._classify_result_failure("result", True, 401, None) == ("AuthenticationError", False)
+
+    def test_403_permission(self):
+        assert self.provider._classify_result_failure("result", True, 403, None) == ("PermissionError", False)
+
+    def test_subtype_beats_api_status(self):
+        # error_max_turns subtype wins even when an api_error_status is present
+        assert self.provider._classify_result_failure("error_max_turns", True, 429, None) == ("ExecutionLimitError", False)
+
+    def test_fallback_uses_errors_text(self):
+        # is_error but no special subtype and no api_error_status -> text fallback
+        code, retryable = self.provider._classify_result_failure("result", True, None, ["network timeout"])
+        assert code == "TransientError"  # classify_error_for_temporal("network timeout") default
+        assert retryable is True
+
+    def test_fallback_default_message(self):
+        code, retryable = self.provider._classify_result_failure("result", True, None, None)
+        assert code == "TransientError"
+        assert retryable is True

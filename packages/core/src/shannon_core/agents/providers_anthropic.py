@@ -335,6 +335,44 @@ class AnthropicProvider:
             return result_message.total_cost_usd or 0.0
         return 0.0
 
+    def _classify_result_failure(
+        self,
+        subtype: str | None,
+        is_error: bool,
+        api_error_status: int | None,
+        errors: list[str] | None,
+    ) -> tuple[str, bool]:
+        """Map structured ResultMessage failure signals to (error_code, retryable).
+
+        Structured signals (subtype, then api_error_status) win over string sniffing.
+        Only when is_error is set with no recognised structured signal do we fall back
+        to ``classify_error_for_temporal`` on the collected error text.
+        """
+        # 1) Explicit SDK failure subtypes (highest priority)
+        if subtype == "error_max_turns":
+            return ("ExecutionLimitError", False)
+        if subtype == "error_during_execution":
+            return ("TransientError", True)
+        if subtype == "error_max_structured_output_retries":
+            return ("OutputValidationError", True)
+
+        # 2) HTTP status of the failing call (only meaningful when is_error)
+        if is_error and api_error_status is not None:
+            if api_error_status == 429:
+                return ("RateLimitError", True)
+            if api_error_status in (500, 502, 503, 529):
+                return ("TransientError", True)
+            if api_error_status == 402:
+                return ("BillingError", True)
+            if api_error_status == 401:
+                return ("AuthenticationError", False)
+            if api_error_status == 403:
+                return ("PermissionError", False)
+
+        # 3) Fallback: classify the collected error text
+        error_text = "; ".join(errors) if errors else "SDK result error"
+        return classify_error_for_temporal(Exception(error_text))
+
     def _handle_error(
         self,
         error: Exception,
