@@ -5,6 +5,7 @@ from shannon_core.code_index.parsers import _PARSER_CLASSES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 JAVA_FILE = FIXTURES / "java" / "SpringController.java"
+JAVA_FIXTURE = Path(__file__).parent / "fixtures" / "java" / "SpringController.java"
 
 
 class TestJavaParserFuncBlocks:
@@ -52,3 +53,38 @@ class TestJavaParserCallEdges:
 class TestJavaParserRegistry:
     def test_registered(self):
         assert "java" in _PARSER_CLASSES
+
+
+class TestJavaParserIterCalls:
+    def test_iter_calls_method_body(self):
+        """listUsers() body has userService.getUsers()."""
+        parser = JavaParser()
+        source = JAVA_FIXTURE.read_bytes()
+        blocks = parser.parse_file(JAVA_FIXTURE, JAVA_FIXTURE.parent.parent.parent)
+        by_name = {b.function_name: b for b in blocks}
+
+        calls = list(parser.iter_calls(by_name["listUsers"], source))
+        assert len(calls) >= 1
+
+    def test_destructure_method_invocation(self):
+        """userService.getUsers() → callee=getUsers, receiver=usersService"""
+        parser = JavaParser()
+        source = JAVA_FIXTURE.read_bytes()
+        blocks = parser.parse_file(JAVA_FIXTURE, JAVA_FIXTURE.parent.parent.parent)
+        by_name = {b.function_name: b for b in blocks}
+
+        calls = list(parser.iter_calls(by_name["listUsers"], source))
+        callees = [parser.destructure_call(c) for c in calls]
+        assert ("getUsers", "userService") in callees
+
+    def test_destructure_method_no_receiver(self):
+        """A method invocation without an object (e.g., this.x()) is also handled."""
+        parser = JavaParser()
+        source = JAVA_FIXTURE.read_bytes()
+        blocks = parser.parse_file(JAVA_FIXTURE, JAVA_FIXTURE.parent.parent.parent)
+        by_name = {b.function_name: b for b in blocks}
+
+        # processOrder body: orderService.handle(message)
+        calls = list(parser.iter_calls(by_name["processOrder"], source))
+        callees = [parser.destructure_call(c) for c in calls]
+        assert ("handle", "orderService") in callees
