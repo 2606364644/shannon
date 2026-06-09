@@ -40,3 +40,14 @@ class BlackboxActivityInput:
     agent_name: str | None = None
     vuln_type: str | None = None
     workspace_path: str | None = None
+
+
+@dataclass
+class PipelineProgress:
+    """工作流进度查询返回值。"""
+    workflow_id: str
+    elapsed_ms: int
+    current_phase: str | None
+    current_agent: str | None
+    completed_agents: list[str]
+    status: str
