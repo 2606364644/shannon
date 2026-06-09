@@ -223,7 +223,7 @@ class WhiteboxScanWorkflow:
                 engine.cleanup_config(input.repo_path)
             cleanup_auth_state_sync(workspace_path)
 
-    @workflow.query
+    @workflow.query(name="PipelineProgress")
     def pipeline_progress(self) -> PipelineProgress:
         """返回当前工作流进度供 CLI 轮询。"""
         elapsed_ns = workflow.time_ns() - int(self._state.start_time * 1e9)
