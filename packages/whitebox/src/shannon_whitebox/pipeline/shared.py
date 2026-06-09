@@ -20,6 +20,8 @@ class PipelineInput(BasePipelineInput):
 @dataclass
 class PipelineState:
     status: str = "running"
+    current_phase: str | None = None
+    current_agent: str | None = None
     completed_agents: list[str] = field(default_factory=list)
     agent_metrics: dict[str, dict] = field(default_factory=dict)
     start_time: float = 0.0
