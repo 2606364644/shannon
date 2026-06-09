@@ -52,7 +52,8 @@ def build_code_index(repo_path: str) -> CodeIndex:
             error_code=ErrorCode.CODE_INDEX_FAILED,
         )
 
-    # Cache: file_path → source bytes (so detect_sinks can read source without re-parsing)
+    # Cache: file_path → source bytes (in-memory, held for the whole build; reused
+    # by detect_sinks to read source without re-parsing — acceptable tradeoff).
     file_sources: dict[str, bytes] = {}
     all_blocks = []
     all_edges = []
@@ -68,7 +69,7 @@ def build_code_index(repo_path: str) -> CodeIndex:
                 edges = parser.extract_calls(block, source)
                 all_edges.extend(edges)
         except Exception as exc:
-            logger.warning("Failed to parse %s: %s", file_path, exc)
+            logger.warning("Failed to index %s: %s", file_path, exc)
             continue
 
     resolved_edges = resolve_edges(all_edges, all_blocks)

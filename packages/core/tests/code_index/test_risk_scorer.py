@@ -311,3 +311,54 @@ class TestChainRiskScoreSinkCallSites:
         )
         # TEMPLATE_RENDER = 7
         assert score.sink_danger == 7
+
+    def test_sink_call_sites_present_but_none_match_chain(self):
+        """Sites exist but none have caller_id on the chain → classify_sink fallback."""
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory,
+        )
+        # site on a node NOT in the chain path
+        other_site = SinkCallSite(
+            id="other.py:f:execute:1:0",
+            caller_id="other.py:f:1",
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="other.py",
+            line=1,
+            column=0,
+            dangerous_slots=[],
+            rule_id="py-db-cursor-execute",
+        )
+        blocks = {
+            "app.py:handler:1": _block("handler", "app.py", 1),
+            "svc.py:query:1": _block("query", "svc.py", 1,
+                                       source="def query(sql): cursor.execute(sql)"),
+        }
+        chain = CallChain(
+            entry_point_id="app.py:handler:1",
+            path=["app.py:handler:1", "svc.py:query:1"],
+            depth=1, has_unresolved=False,
+        )
+        score = ChainRiskScore.score(
+            chain, blocks, [], set(),
+            sink_call_sites=[other_site],
+        )
+        # No matching site → fallback classify_sink on terminal (cursor.execute) → 10
+        assert score.sink_danger == 10
+
+    def test_empty_sink_call_sites_equals_none(self):
+        """sink_call_sites=[] behaves the same as not passing it (fallback)."""
+        blocks = {
+            "svc.py:query:1": _block("query", "svc.py", 1,
+                                       source="def query(sql): cursor.execute(sql)"),
+        }
+        chain = CallChain(
+            entry_point_id="svc.py:query:1",
+            path=["svc.py:query:1"],
+            depth=0, has_unresolved=False,
+        )
+        score_empty = ChainRiskScore.score(chain, blocks, [], set(), sink_call_sites=[])
+        score_none = ChainRiskScore.score(chain, blocks, [], set())
+        assert score_empty.sink_danger == score_none.sink_danger == 10
