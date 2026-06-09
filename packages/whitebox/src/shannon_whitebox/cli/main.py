@@ -21,7 +21,7 @@ from shannon_whitebox.pipeline.shared import PipelineInput
 @click.group()
 def cli():
     """Shannon White-Box Scanner - Source code vulnerability analysis."""
-    load_dotenv()
+    load_dotenv(override=True)
 
 
 @cli.command()

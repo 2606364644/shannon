@@ -11,7 +11,7 @@ from shannon_core.services.temporal_infra import ensure_infra
 @click.group()
 def cli():
     """Shannon — unified security scanning (whitebox + blackbox)."""
-    load_dotenv()
+    load_dotenv(override=True)
 
 
 @cli.command()

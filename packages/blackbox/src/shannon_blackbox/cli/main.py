@@ -22,7 +22,7 @@ from shannon_core.workspace import compute_deliverables_summary, find_latest_wor
 @click.group()
 def cli():
     """Shannon Black-Box Scanner - Runtime vulnerability verification."""
-    load_dotenv()
+    load_dotenv(override=True)
 
 
 @cli.command()

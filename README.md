@@ -63,7 +63,6 @@ cp .env.example .env
 
 - Claude SDK Provider：返回精确成本
 - OpenAI 兼容 Provider：基于公开定价估算
-- 建议设置 `SHANNON_MAX_BUDGET` 限制单次调用花费
 
 ### Temporal 配置
 
