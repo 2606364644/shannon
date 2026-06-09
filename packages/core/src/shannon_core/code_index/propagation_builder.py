@@ -257,18 +257,7 @@ def build_propagation_graph(
     index: CodeIndex,
     typed_params_by_block: dict[str, list[TypedParameter]] | None = None,
 ) -> ParameterPropagationGraph:
-    """Build a ParameterPropagationGraph from a CodeIndex.
-
-    Args:
-        index: CodeIndex 含 blocks / edges / chains / sink_call_sites。
-        typed_params_by_block: 可选的 {FuncBlock.id → [TypedParameter]}。
-            若 None，传播将退化为只用 FuncBlock.parameters 推断 seed（语义略弱，
-            但本骨架阶段足够；Task 4 会加上 typed param 提取）。
-
-    Returns:
-        ParameterPropagationGraph with taint_flows / language_coverage /
-        skipped_languages 填充。
-    """
+    """Spec A 主入口。"""
     if typed_params_by_block is None:
         typed_params_by_block = {}
 
@@ -284,12 +273,244 @@ def build_propagation_graph(
             skipped_languages=[language],
         )
 
-    # Task 3-6 会填充这里的实际算法。
+    blocks_by_id = {b.id: b for b in index.blocks}
+    sinks_by_caller: dict[str, list[SinkCallSite]] = {}
+    for s in index.sink_call_sites:
+        sinks_by_caller.setdefault(s.caller_id, []).append(s)
+
     flows: list[TaintFlow] = []
-    # _trace_all_chains(index, typed_params_by_block, flows)   # Task 5
+
+    for chain in index.chains:
+        if not chain.path:
+            continue
+        entry_id = chain.path[0]
+        entry_block = blocks_by_id.get(entry_id)
+        if entry_block is None:
+            continue
+        seed = seed_taints(entry_block, typed_params_by_block.get(entry_id, []))
+        if not seed:
+            continue
+
+        for flow in _trace_chain(
+            chain=chain,
+            blocks_by_id=blocks_by_id,
+            sinks_by_caller=sinks_by_caller,
+            seed=seed,
+            entry_block=entry_block,
+        ):
+            if not flow.flow_id:
+                flow.flow_id = f"{entry_id}->{flow.sink_call_site_id}"
+            # 给 propagation_steps 编号
+            for n, step in enumerate(flow.propagation_steps, start=1):
+                if not step.step_id:
+                    step.step_id = f"{flow.flow_id}#s{n}"
+            flows.append(flow)
 
     return ParameterPropagationGraph(
         taint_flows=flows,
         language_coverage=[language] if language else [],
         skipped_languages=[],
     )
+
+
+def _trace_chain(
+    *,
+    chain: CallChain,
+    blocks_by_id: dict[str, FuncBlock],
+    sinks_by_caller: dict[str, list[SinkCallSite]],
+    seed: set[str],
+    entry_block: FuncBlock,
+) -> Iterable[TaintFlow]:
+    """沿 CallChain.path 走 cross-function 传播。
+
+    spec §4.1.3：
+      current_tainted = {entry_func: seed}
+      for i, func_id in enumerate(chain.path):
+          intra = analyze_intra(func, current_tainted[func_id], sinks_in_func)
+          for sink_hit in intra.hits:
+              yield TaintFlow(...)
+          if i+1 < len(chain.path):
+              callee_id = chain.path[i+1]
+              callee_tainted = map_params_to_callee(...)
+              current_tainted[callee_id] = callee_tainted
+    """
+    current_tainted: dict[str, set[str]] = {entry_block.id: set(seed)}
+    accumulated_steps: list[PropagationStep] = []
+    has_sanitizer = False
+    source_param = next(iter(seed), "")  # 任取一个 seed 名作为 source_param
+
+    for i, func_id in enumerate(chain.path):
+        block = blocks_by_id.get(func_id)
+        if block is None:
+            return
+        sinks_in_func = sinks_by_caller.get(func_id, [])
+        intra = analyze_intra(
+            block=block,
+            seed=current_tainted.get(func_id, set()),
+            sinks_in_func=sinks_in_func,
+        )
+
+        # 命中 sink → 产出 flow
+        for sink_id, hit in intra.hits.items():
+            steps_total = list(accumulated_steps) + list(hit.local_steps)
+            # confidence = 整条链最弱步（spec §4.1.5）：
+            # 跨累积 steps（含跨函数映射步）+ 本函数命中 steps 取 min。
+            chain_confidence = min(
+                (s.confidence for s in steps_total),
+                default=1.0,
+            )
+            yield TaintFlow(
+                flow_id="",  # build_propagation_graph 统一编号
+                entry_point_id=entry_block.id,
+                source_param=source_param,
+                source_type=_infer_source_type(entry_block, source_param),
+                propagation_steps=steps_total,
+                sink_call_site_id=sink_id,
+                sink_slot=hit.slot,
+                tainted_arg_index=hit.tainted_arg_index,
+                confidence=chain_confidence,
+                has_sanitizer_hint=has_sanitizer or hit.has_sanitizer_hint,
+                notes="",
+            )
+
+        # 把本函数的 local_steps 累入 accumulated_steps
+        accumulated_steps.extend(intra.local_steps_accumulated or [])
+        # 如果有 sanitizer 提示，传染到下游
+        if intra.has_sanitizer_global:
+            has_sanitizer = True
+
+        # spec §4.1.2/§4.1.3：过程内分析扩展了本函数的 tainted 变量集（如
+        # q = '...' + user_id 把 q 染污）。把这份扩展后的 tainted 集折叠回
+        # current_tainted[func_id]，供下一跳 call-site 实参映射使用——否则
+        # process(q) 里的 q 永远不被识别为 tainted，链路即断。
+        local_tainted = set(current_tainted.get(func_id, set()))
+        for s in intra.local_steps_accumulated or []:
+            if s.to_func_id == func_id and s.to_param:
+                local_tainted.add(s.to_param)
+        current_tainted[func_id] = local_tainted
+
+        # 准备下一跳：把当前 tainted 通过 call-site 实参映射到 callee 形参
+        if i + 1 >= len(chain.path):
+            return
+        callee_id = chain.path[i + 1]
+        callee_block = blocks_by_id.get(callee_id)
+        if callee_block is None:
+            return
+        callee_seed = _map_call_site_to_callee_params(
+            caller_block=block,
+            caller_tainted=current_tainted.get(func_id, set()),
+            callee_block=callee_block,
+        )
+        if not callee_seed:
+            return
+        current_tainted[callee_id] = callee_seed
+        # 把跨函数这一步加进 accumulated_steps（informational）
+        accumulated_steps.append(PropagationStep(
+            step_id="",
+            from_func_id=func_id,
+            from_param=next(iter(current_tainted.get(func_id, {source_param})), source_param),
+            to_func_id=callee_id,
+            to_param=next(iter(callee_seed), ""),
+            transformation=None,
+            code_location=f"{block.file_path}:{block.start_line}",
+            confidence=0.9,
+        ))
+
+
+def _map_call_site_to_callee_params(
+    *,
+    caller_block: FuncBlock,
+    caller_tainted: set[str],
+    callee_block: FuncBlock,
+) -> set[str]:
+    """从 caller 的源码里找出对 callee 的调用位置，按位置把 tainted 实参映射
+    到 callee 的形参名。
+
+    简化：扫 caller.source_code 里包含 callee_block.function_name 后跟 '(' 的行，
+    提取括号内实参，按位置匹配 callee_block.parameters。
+    """
+    callee_name = callee_block.function_name
+    callee_params = callee_block.parameters
+    if not callee_params:
+        return set()
+
+    result: set[str] = set()
+    for line in caller_block.source_code.splitlines():
+        if callee_name + "(" not in line:
+            continue
+        # 抽出第一个 callee_name( ... ) 的实参列表（粗略、保守）
+        inside = _extract_first_call_args(line, callee_name)
+        if inside is None:
+            continue
+        for idx, arg_text in enumerate(inside):
+            if idx >= len(callee_params):
+                break
+            if _expr_references_tainted(arg_text, caller_tainted):
+                result.add(callee_params[idx])
+    return result
+
+
+def _extract_first_call_args(line: str, callee: str) -> list[str] | None:
+    """从一行代码里提取 callee(...) 的实参文本列表。粗略实现：取 callee 后第一个
+    '(' 到对应 ')' 之间的文本，按 ',' 拆。"""
+    idx = line.find(callee + "(")
+    if idx < 0:
+        return None
+    inside_start = idx + len(callee) + 1
+    depth = 1
+    inside_end = -1
+    for j in range(inside_start, len(line)):
+        ch = line[j]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                inside_end = j
+                break
+    if inside_end < 0:
+        return None
+    inside = line[inside_start:inside_end]
+    if not inside.strip():
+        return []
+    return [a.strip() for a in _split_args_respecting_parens(inside)]
+
+
+def _split_args_respecting_parens(s: str) -> list[str]:
+    """按 ',' 拆分但忽略括号/引号内的逗号。"""
+    out: list[str] = []
+    cur = []
+    depth = 0
+    quote = None
+    for ch in s:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
+def _infer_source_type(block: FuncBlock, source_param: str) -> ParameterSource:
+    """没有 typed_params 时给 source_param 一个保守的 source。"""
+    # 真实 typed 信息由 typed_params_by_block 提供；这里只是回退
+    if source_param in ("request", "req"):
+        return ParameterSource.UNKNOWN
+    if "user" in source_param.lower() or "id" in source_param.lower():
+        return ParameterSource.QUERY_PARAM
+    return ParameterSource.UNKNOWN

@@ -222,3 +222,222 @@ class TestIntraProcedural:
         assert any(s.transformation and s.transformation.startswith("sanitize_hint:")
                    for s in hit.local_steps)
         assert hit.has_sanitizer_hint is True
+
+
+class TestTraceChain:
+    def _build_chain_index(
+        self, blocks: list[FuncBlock], chains: list[CallChain],
+        sinks: list[SinkCallSite],
+    ) -> CodeIndex:
+        return CodeIndex(
+            repository=".", language="python",
+            total_blocks=len(blocks), total_entry_points=0, total_chains=len(chains),
+            blocks=blocks, edges=[], entry_points=[], chains=chains,
+            sink_call_sites=sinks,
+        )
+
+    def test_two_function_chain_reaches_sink(self):
+        """handler(user_id) → process(x) → cursor.execute(x)
+        entry 的 user_id 经 process 的形参 x 到达 sink。"""
+        from shannon_core.code_index.propagation_builder import build_propagation_graph
+
+        handler = _block(
+            "handler", "app.py", 1,
+            source=(
+                "def handler(user_id):\n"
+                "    process(user_id)\n"
+            ),
+            params=["user_id"],
+        )
+        process = _block(
+            "process", "svc.py", 5,
+            source=(
+                "def process(x):\n"
+                "    cursor.execute(x)\n"
+            ),
+            params=["x"],
+        )
+        sink = SinkCallSite(
+            id="svc.py:process:execute:6:4",
+            caller_id=process.id,
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=6, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="x", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        chain = CallChain(
+            entry_point_id=handler.id,
+            path=[handler.id, process.id],
+            depth=1, has_unresolved=False,
+        )
+        index = self._build_chain_index([handler, process], [chain], [sink])
+
+        pgraph = build_propagation_graph(
+            index,
+            typed_params_by_block={
+                handler.id: [
+                    TypedParameter(name="user_id", source=ParameterSource.QUERY_PARAM),
+                ],
+            },
+        )
+        assert len(pgraph.taint_flows) == 1
+        flow = pgraph.taint_flows[0]
+        assert flow.entry_point_id == handler.id
+        assert flow.sink_call_site_id == sink.id
+        assert flow.tainted_arg_index == 0
+        assert flow.source_param == "user_id"
+
+    def test_chain_without_sink_yields_no_flow(self):
+        """链路上没有 sink → 0 个 flow。"""
+        from shannon_core.code_index.propagation_builder import build_propagation_graph
+
+        handler = _block(
+            "handler", "app.py", 1,
+            source="def handler(user_id):\n    helper(user_id)\n",
+            params=["user_id"],
+        )
+        helper = _block(
+            "helper", "svc.py", 5,
+            source="def helper(x):\n    return x + 1\n",
+            params=["x"],
+        )
+        chain = CallChain(
+            entry_point_id=handler.id,
+            path=[handler.id, helper.id],
+            depth=1, has_unresolved=False,
+        )
+        index = self._build_chain_index([handler, helper], [chain], [])
+
+        pgraph = build_propagation_graph(
+            index,
+            typed_params_by_block={
+                handler.id: [
+                    TypedParameter(name="user_id", source=ParameterSource.QUERY_PARAM),
+                ],
+            },
+        )
+        assert pgraph.taint_flows == []
+
+    def test_param_mapping_preserves_taint_across_calls(self):
+        """handler(a, b) → process(b, a) — 第二个参数 b 才是 tainted，
+        process 的形参顺序决定 x = b (tainted)。"""
+        from shannon_core.code_index.propagation_builder import build_propagation_graph
+
+        handler = _block(
+            "handler", "app.py", 1,
+            source=(
+                "def handler(a, b):\n"
+                "    process(b, a)\n"
+            ),
+            params=["a", "b"],
+        )
+        process = _block(
+            "process", "svc.py", 5,
+            source=(
+                "def process(x, y):\n"
+                "    cursor.execute(x)\n"
+            ),
+            params=["x", "y"],
+        )
+        sink = SinkCallSite(
+            id="svc.py:process:execute:6:4",
+            caller_id=process.id,
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=6, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="x", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        chain = CallChain(
+            entry_point_id=handler.id,
+            path=[handler.id, process.id],
+            depth=1, has_unresolved=False,
+        )
+        index = self._build_chain_index([handler, process], [chain], [sink])
+
+        pgraph = build_propagation_graph(
+            index,
+            typed_params_by_block={
+                handler.id: [
+                    TypedParameter(name="a", source=ParameterSource.INTERNAL),
+                    TypedParameter(name="b", source=ParameterSource.QUERY_PARAM),
+                ],
+            },
+        )
+        # b 是 tainted → process(b, a) 把 b 映射到 process 的第 0 号形参 x
+        # → cursor.execute(x) 命中
+        assert len(pgraph.taint_flows) == 1
+        flow = pgraph.taint_flows[0]
+        assert flow.source_param == "b"
+
+    def test_confidence_is_weakest_step(self):
+        """整条链的 confidence 取最弱步。"""
+        from shannon_core.code_index.propagation_builder import build_propagation_graph
+
+        handler = _block(
+            "handler", "app.py", 1,
+            source=(
+                "def handler(user_id):\n"
+                "    q = 'SELECT ' + user_id\n"
+                "    process(q)\n"
+            ),
+            params=["user_id"],
+        )
+        process = _block(
+            "process", "svc.py", 5,
+            source=(
+                "def process(x):\n"
+                "    cursor.execute(x)\n"
+            ),
+            params=["x"],
+        )
+        sink = SinkCallSite(
+            id="svc.py:process:execute:6:4",
+            caller_id=process.id,
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=6, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="x", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        chain = CallChain(
+            entry_point_id=handler.id,
+            path=[handler.id, process.id],
+            depth=1, has_unresolved=False,
+        )
+        index = self._build_chain_index([handler, process], [chain], [sink])
+
+        pgraph = build_propagation_graph(
+            index,
+            typed_params_by_block={
+                handler.id: [
+                    TypedParameter(name="user_id", source=ParameterSource.QUERY_PARAM),
+                ],
+            },
+        )
+        assert len(pgraph.taint_flows) == 1
+        flow = pgraph.taint_flows[0]
+        # 至少有一个 concat step → confidence 应 < 1.0
+        assert flow.confidence < 1.0
+        # 出现的 transformation 至少含一次 concat
+        transformations = {s.transformation for s in flow.propagation_steps if s.transformation}
+        assert "concat" in transformations
