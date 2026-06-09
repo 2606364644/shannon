@@ -150,6 +150,12 @@ class WhiteboxScanWorkflow:
             )
             self._state.audit_plan_stats = risk_result
 
+            # Spec C: render static dataflow hints for vuln agents (after audit plan)
+            await workflow.execute_activity(
+                activities.run_render_dataflow_hints, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+            )
+
             vuln_tasks = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")

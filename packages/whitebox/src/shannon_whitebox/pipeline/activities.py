@@ -303,3 +303,49 @@ async def render_findings(input: ActivityInput) -> None:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_render_dataflow_hints(input: ActivityInput) -> dict:
+    """Spec C: render static_dataflow_hints.md from Spec B/A products.
+
+    Runs after run_risk_scoring (which writes audit_plan.json) and before
+    run_vuln_agent, so vuln agents see the summary as ready. Skipped in
+    pipeline_testing_mode (CI does not feed hints to LLMs).
+    """
+    try:
+        if input.pipeline_testing_mode:
+            return {"written": False}
+
+        from shannon_core.code_index.audit_input_builder import build_static_dataflow_hints
+        from shannon_core.code_index.models import CodeIndex
+        from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+        from shannon_core.code_index.tiered_audit import AuditPlan
+        from shannon_core.utils.atomic_write import atomic_write_text
+
+        repo, deliverables, _ = _get_paths(input)
+
+        code_index_path = deliverables / "code_index.json"
+        param_graph_path = deliverables / "parameter_graph.json"
+        audit_plan_path = deliverables / "audit_plan.json"
+        if not code_index_path.exists():
+            return {"written": False}
+
+        index = CodeIndex.model_validate_json(code_index_path.read_text())
+        pgraph = (
+            ParameterPropagationGraph.model_validate_json(param_graph_path.read_text())
+            if param_graph_path.exists()
+            else ParameterPropagationGraph()
+        )
+        audit_plan = (
+            AuditPlan.model_validate_json(audit_plan_path.read_text())
+            if audit_plan_path.exists()
+            else AuditPlan()
+        )
+
+        md = build_static_dataflow_hints(index, pgraph, audit_plan)
+        atomic_write_text(deliverables / "static_dataflow_hints.md", md)
+        return {"written": True}
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
