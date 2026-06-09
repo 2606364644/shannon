@@ -161,6 +161,8 @@ async def run_code_index(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
         index = build_code_index(str(repo))
+        # Spec A: write_index_files 同时写出 parameter_graph.json；
+        # run_rebuild_call_chains 之后链路重建，risk_scorer 读到非空 taint_flows。
         json_path, summary_path = write_index_files(index, str(deliverables))
 
         return {
