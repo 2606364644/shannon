@@ -53,9 +53,11 @@ class TieredAuditPlanner:
         plan = planner.plan()
         # plan.tier3_chains, plan.tier2_chains, plan.tier1_chains
 
-    sink_call_sites（Spec A）: 可选。传入后 ChainRiskScore.taint_completeness
-        会按 sink_call_site_id 命中 chain 上的 SinkCallSite 算分；不传则回退
-        sink_func_id（向后兼容旧 json / 旧 flow）。
+    sink_call_sites 是 Spec A 的关键转发参数：plan() 内部对每条 chain 调
+    ChainRiskScore.score(...) 时会把它原样透传过去。传入后 taint_completeness
+    按 sink_call_site_id 命中 chain 上的 SinkCallSite 算分；不传则 scorer 回退
+    到 sink_func_id（用于兼容旧 json / 旧 flow）。注意：一旦忘记转发，生产路径
+    的 taint_completeness 会恒为 0，因此转发不可省略。
     """
 
     def __init__(

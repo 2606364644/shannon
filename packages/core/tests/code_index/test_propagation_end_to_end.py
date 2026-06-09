@@ -130,3 +130,25 @@ class TestActivationAfterChainRebuild:
         assert score.taint_completeness > 0, (
             "taint_completeness 应 > 0（flow 命中 chain 上的 sink_call_site）"
         )
+
+        # 步骤 7（Spec A planner 路径回归保护）：
+        # 生产 run_risk_scoring 走的是 TieredAuditPlanner.plan()，而非直接调 scorer。
+        # 步骤 6 直调 ChainRiskScore.score(...) 绕过了 planner，能证明 scorer 激活，
+        # 却抓不到 planner 转发 sink_call_sites 被误删的回归（Task 12 修的断层）。
+        # 补这条断言，把"生产激活"在 e2e 层锁死。
+        from shannon_core.code_index.tiered_audit import TieredAuditPlanner
+        from shannon_core.code_index.risk_scorer import AuditBudget
+        flows_by_chain = {flow["entry_point_id"]: [flow_model]}
+        planner = TieredAuditPlanner(
+            chains=updated.chains,
+            blocks_by_id=blocks_by_id,
+            taint_flows_by_chain=flows_by_chain,
+            auth_middleware_ids=set(),
+            budget=AuditBudget(),
+            sink_call_sites=updated.sink_call_sites,
+        )
+        plan = planner.plan()
+        assert plan.scores, "planner 应为每条 chain 产出 score"
+        assert plan.scores[0].taint_completeness > 0, (
+            "planner 路径 taint_completeness 应 > 0（sink_call_sites 已转发给 scorer）"
+        )
