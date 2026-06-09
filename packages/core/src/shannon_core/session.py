@@ -167,8 +167,30 @@ class SessionManager:
         return True
 
     def _handle_workspace_links(self, workspace_path: Path) -> None:
-        """Handle parent-child links before deleting a workspace.
+        """Update linked workspaces before deleting this one."""
+        data = self.get_session_data(workspace_path)
+        scan_type = data.get("scan_type", "")
+        links = data.get("links", {})
+        workspace_name = workspace_path.name
 
-        Stub — will be implemented in the next task.
-        """
-        pass
+        if scan_type == "whitebox":
+            # Remove parent ref from each child
+            for child_name in links.get("child_workspaces", []):
+                child_ws = self.get_workspace(child_name)
+                if child_ws is not None:
+                    child_links = self.get_links(child_ws)
+                    child_links["parent_workspace"] = None
+                    self.update_session(child_ws, {"links": child_links})
+
+        elif scan_type == "blackbox":
+            # Remove this child from parent's child list
+            parent_name = links.get("parent_workspace")
+            if parent_name:
+                parent_ws = self.get_workspace(parent_name)
+                if parent_ws is not None:
+                    parent_links = self.get_links(parent_ws)
+                    children = parent_links.get("child_workspaces", [])
+                    if workspace_name in children:
+                        children.remove(workspace_name)
+                    parent_links["child_workspaces"] = children
+                    self.update_session(parent_ws, {"links": parent_links})

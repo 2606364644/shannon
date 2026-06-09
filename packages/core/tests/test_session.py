@@ -196,3 +196,54 @@ def test_delete_workspace_returns_false_when_not_found(tmp_path):
     mgr = SessionManager(tmp_path / "workspaces")
     result = mgr.delete_workspace("nonexistent")
     assert result is False
+
+
+def test_delete_workspace_removes_child_refs_from_parent(tmp_path):
+    """Deleting a blackbox workspace should remove its name from the parent's child_workspaces."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    parent = mgr.create_workspace("https://example.com", "/repo", name="wb-parent", scan_type="whitebox")
+    child = mgr.create_workspace("https://example.com", "/repo", name="bb-child", scan_type="blackbox")
+    mgr.add_child_workspace(parent, "bb-child")
+    mgr.set_parent_workspace(child, "wb-parent")
+
+    # Verify link exists
+    assert "bb-child" in mgr.get_links(parent)["child_workspaces"]
+
+    mgr.delete_workspace("bb-child")
+
+    # Parent should no longer list the deleted child
+    assert "bb-child" not in mgr.get_links(parent)["child_workspaces"]
+    # Child directory should be gone
+    assert not child.exists()
+
+
+def test_delete_workspace_clears_parent_ref_from_children(tmp_path):
+    """Deleting a whitebox workspace should clear parent_workspace in all child workspaces."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    parent = mgr.create_workspace("https://example.com", "/repo", name="wb-parent-2", scan_type="whitebox")
+    child1 = mgr.create_workspace("https://example.com", "/repo", name="bb-child-1a", scan_type="blackbox")
+    child2 = mgr.create_workspace("https://example.com", "/repo", name="bb-child-2a", scan_type="blackbox")
+    mgr.add_child_workspace(parent, "bb-child-1a")
+    mgr.add_child_workspace(parent, "bb-child-2a")
+    mgr.set_parent_workspace(child1, "wb-parent-2")
+    mgr.set_parent_workspace(child2, "wb-parent-2")
+
+    mgr.delete_workspace("wb-parent-2")
+
+    # Children should have their parent ref cleared
+    assert mgr.get_links(child1)["parent_workspace"] is None
+    assert mgr.get_links(child2)["parent_workspace"] is None
+    # Parent directory should be gone
+    assert not parent.exists()
+
+
+def test_delete_workspace_handles_already_deleted_linked_ws(tmp_path):
+    """Deleting a workspace with links to already-removed workspaces should not error."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    parent = mgr.create_workspace("https://example.com", "/repo", name="wb-orphan", scan_type="whitebox")
+    # Manually add a child reference to a workspace that doesn't exist on disk
+    mgr.add_child_workspace(parent, "ghost-child")
+
+    # Should not raise
+    result = mgr.delete_workspace("wb-orphan")
+    assert result is True
