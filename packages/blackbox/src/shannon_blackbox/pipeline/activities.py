@@ -11,6 +11,7 @@ from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.utils.paths import resolve_deliverables_path
+from shannon_core.logging import create_activity_logger
 
 from .shared import BlackboxActivityInput
 
@@ -83,6 +84,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             executor=executor,
             repo_path=input.repo_path or "",
             api_key=input.api_key,
+            audit_logger=create_activity_logger(),
         )
         if not result.success:
             raise PentestError(
@@ -117,6 +119,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
+            audit_logger=create_activity_logger(),
         )
         return metrics.model_dump()
     except PentestError as e:
@@ -148,6 +151,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
+            audit_logger=create_activity_logger(),
         )
         return metrics.model_dump()
     except PentestError as e:
@@ -200,6 +204,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
+            audit_logger=create_activity_logger(),
         )
         return metrics.model_dump()
     except PentestError as e:

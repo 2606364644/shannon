@@ -12,6 +12,7 @@ from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.security import validate_target_url
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
+from shannon_core.logging import create_activity_logger
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.session import SessionManager
@@ -87,6 +88,7 @@ async def run_agent(input: ActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             prompt_override=input.prompt_override,
+            audit_logger=create_activity_logger(),
         )
         return metrics.model_dump()
     except PentestError as e:
@@ -104,13 +106,16 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 @activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
     try:
-        import os
-        provider = os.environ.get("SHANNON_AI_PROVIDER", "anthropic_api")
-        # Priority: input.api_key > SHANNON_API_KEY > ANTHROPIC_API_KEY
-        api_key = input.api_key or os.environ.get("SHANNON_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        base_url = os.environ.get("SHANNON_BASE_URL")
-        if api_key or provider != "anthropic_api":
-            await validate_credentials(provider, api_key=api_key, base_url=base_url)
+        from shannon_core.agents.providers import build_provider_config
+
+        config = build_provider_config(api_key=input.api_key or None)
+        if config.api_key or config.type != "anthropic_api":
+            await validate_credentials(
+                config.type,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                auth_token=config.auth_token,
+            )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -138,6 +143,7 @@ async def run_auth_validation(input: ActivityInput) -> None:
             repo_path=input.repo_path,
             api_key=input.api_key,
             workspace_path=input.workspace_path or "",
+            audit_logger=create_activity_logger(),
         )
         if not result.success:
             raise PentestError(
