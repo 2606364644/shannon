@@ -11,7 +11,7 @@ from .pipeline.activities import (
     run_report_agent,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
-from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 from shannon_core.services.temporal_infra import generate_task_queue
 
 TASK_QUEUE_PREFIX = "shannon-py-bb"
@@ -21,7 +21,7 @@ async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
     """Periodically query workflow progress and print status to console."""
     while True:
         try:
-            progress = await handle.query("PipelineProgress")
+            progress = await handle.query("PipelineProgress", result_type=PipelineProgress)
             elapsed = int(progress.elapsed_ms / 1000)
             phase = progress.current_phase or "unknown"
             agent = progress.current_agent or "none"
