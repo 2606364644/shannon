@@ -232,3 +232,76 @@ def _sink_inventory(
                 f"{review}"
             )
     return "\n".join(lines)
+
+
+def _format_steps(steps: list) -> str:
+    """Render propagation steps as 'transform@location · ...'."""
+    if not steps:
+        return "（无中间步骤）"
+    parts = []
+    for st in steps:
+        tag = f"{st.transformation}@{st.code_location}" if st.transformation else st.code_location
+        parts.append(tag)
+    return " · ".join(parts)
+
+
+def _taint_flows(flows: list[TaintFlow]) -> str:
+    """Render source→sink flows with slot/arg/confidence/sanitizer caveats.
+
+    Flow already carries sink_slot/tainted_arg_index/confidence/has_sanitizer_hint,
+    so no SinkCallSite lookup is needed here.
+    """
+    if not flows:
+        return "## 污点流（entry → sink）\n（本仓库无可达 sink 的污点流。）"
+
+    lines = ["## 污点流（entry → sink）"]
+    for flow in flows:
+        sink_loc = flow.sink_call_site_id or "（未定位 sink）"
+        slot = flow.sink_slot.value if flow.sink_slot else "generic"
+        lines.append(
+            f"- entry `{flow.entry_point_id}` "
+            f"(param `{flow.source_param}`, source={flow.source_type.value})\n"
+            f"  → {sink_loc} slot={slot} arg={flow.tainted_arg_index}\n"
+            f"  · steps: {_format_steps(flow.propagation_steps)}"
+        )
+        if flow.has_sanitizer_hint:
+            lines.append(
+                "  · ⚠️sanitize_hint 出现疑似 sanitizer（不代表有效，请复核 concat-after-sanitize）"
+            )
+        notes_bits = [f"confidence={flow.confidence:.2f}"]
+        if flow.notes:
+            notes_bits.append(f"notes: {flow.notes}")
+        lines.append("  · " + " · ".join(notes_bits))
+    return "\n".join(lines)
+
+
+def _coverage_disclaimer(pgraph: ParameterPropagationGraph) -> str:
+    skipped = ", ".join(pgraph.skipped_languages) if pgraph.skipped_languages else "无"
+    return (
+        "## 边界与局限\n"
+        f"- 动态调用、模板 XSS、未覆盖语言（{skipped}）不在静态覆盖内，仍须用 Task agent 自主覆盖。\n"
+        "- `needs_review` 的 sink 需重点复核转义/上下文。\n"
+        "- `sanitize_hint` 仅表示路径出现疑似 sanitizer，不代表有效——须按 slot 上下文判定并检查 concat-after-sanitize。\n"
+        "- `confidence` 仅反映静态映射可信度，低或过近似时以 LLM 自己的数据流追踪为准。"
+    )
+
+
+def build_static_dataflow_hints(
+    index: CodeIndex,
+    pgraph: ParameterPropagationGraph,
+    audit_plan: AuditPlan,
+) -> str:
+    """Produce the full `static_dataflow_hints.md` text (Spec §4.1).
+
+    Consumes Spec B (SinkCallSite via index.sink_call_sites) + Spec A
+    (TaintFlow / coverage via pgraph) + tiered audit priority (audit_plan),
+    and emits LLM-friendly markdown with honest static-boundary caveats.
+    """
+    func_to_tier = _func_id_to_tier(index, audit_plan)
+    parts = [
+        _header(pgraph.language_coverage, pgraph.skipped_languages),
+        _sink_inventory(index.sink_call_sites, func_to_tier),
+        _taint_flows(pgraph.taint_flows),
+        _coverage_disclaimer(pgraph),
+    ]
+    return "\n\n".join(parts) + "\n"

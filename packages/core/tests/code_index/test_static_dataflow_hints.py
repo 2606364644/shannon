@@ -1,16 +1,21 @@
 """Spec C: build_static_dataflow_hints —— 确定性数据流摘要渲染。"""
 from shannon_core.code_index.audit_input_builder import (
+    _coverage_disclaimer,
     _func_id_to_tier,
     _header,
     _sink_inventory,
+    _taint_flows,
+    build_static_dataflow_hints,
 )
-from shannon_core.code_index.models import CallChain, CodeIndex
+from shannon_core.code_index.models import CallChain, CodeIndex, ParameterSource
 from shannon_core.code_index.parameter_models import (
     DangerousSlot,
     ParameterPropagationGraph,
+    PropagationStep,
     SinkCallSite,
     SinkCategory,
     SlotContext,
+    TaintFlow,
 )
 from shannon_core.code_index.risk_scorer import ChainRiskScore
 from shannon_core.code_index.tiered_audit import AuditPlan
@@ -138,3 +143,106 @@ class TestSinkInventory:
         text = _sink_inventory(sites, func_to_tier)
         # 未归类到任何 tier 的 sink 仍应出现（避免静默丢弃）
         assert "db.py:orphan:execute:99:4" in text
+
+
+def _flow(
+    *, entry="routes.py:getUser:10", source_param="uid",
+    source_type=ParameterSource.QUERY_PARAM, sink_id="db.py:exec:execute:42:18",
+    slot=SlotContext.SQL_VALUE, arg=0, confidence=0.6, sanitizer=False,
+    notes="", steps=None,
+) -> TaintFlow:
+    return TaintFlow(
+        flow_id=f"{entry}->{sink_id}",
+        entry_point_id=entry, source_param=source_param, source_type=source_type,
+        propagation_steps=steps or [], sink_call_site_id=sink_id,
+        sink_slot=slot, tainted_arg_index=arg, confidence=confidence,
+        has_sanitizer_hint=sanitizer, notes=notes,
+    )
+
+
+class TestTaintFlows:
+    def test_renders_entry_to_sink_with_slot_and_arg(self):
+        flows = [_flow(steps=[
+            PropagationStep(step_id="s1", from_func_id="routes.py:getUser:10",
+                            from_param="uid", to_func_id="db.py:exec:42",
+                            to_param="sql", transformation="concat",
+                            code_location="routes.py:12"),
+        ])]
+        text = _taint_flows(flows)
+        assert "routes.py:getUser:10" in text
+        assert "uid" in text
+        assert "query" in text
+        assert "sql_value" in text
+        assert "arg0" in text or "arg=0" in text
+        assert "concat" in text  # transformation 步骤
+
+    def test_sanitizer_hint_flagged_as_not_effective(self):
+        flows = [_flow(sanitizer=True, steps=[
+            PropagationStep(step_id="s1", from_func_id="a.py:f:1", from_param="x",
+                            to_func_id="b.py:g:1", to_param="y",
+                            transformation="sanitize_hint:escape", code_location="a.py:3"),
+        ])]
+        text = _taint_flows(flows)
+        assert "sanitize_hint" in text
+        assert "不代表有效" in text  # 显式声明 sanitizer hint 非有效性
+
+    def test_confidence_and_notes_rendered(self):
+        flows = [_flow(confidence=0.4, notes="容器字段过近似")]
+        text = _taint_flows(flows)
+        assert "0.40" in text
+        assert "容器字段过近似" in text
+
+    def test_no_flows_message(self):
+        text = _taint_flows([])
+        assert "无" in text or "no" in text.lower()
+
+    def test_flow_renders_sink_call_site_id_directly(self):
+        # flow 的 sink_call_site_id 直接渲染进输出（无需额外反查）
+        flows = [_flow(sink_id="db.py:missing:execute:1:1")]
+        text = _taint_flows(flows)
+        assert "db.py:missing:execute:1:1" in text
+
+
+class TestCoverageDisclaimer:
+    def test_lists_skipped_languages_and_caveats(self):
+        pgraph = ParameterPropagationGraph(
+            taint_flows=[], language_coverage=["python"], skipped_languages=["go", "java"],
+        )
+        text = _coverage_disclaimer(pgraph)
+        assert "go" in text and "java" in text
+        assert "needs_review" in text
+        assert "sanitize_hint" in text
+        assert "confidence" in text
+
+
+class TestBuildStaticDataflowHints:
+    def test_assembles_all_sections(self):
+        chains = [CallChain(entry_point_id="db.py:h:1", path=["db.py:h:1"],
+                            depth=0, has_unresolved=False)]
+        plan = AuditPlan(total_chains=1, scores=[
+            ChainRiskScore(chain_id="db.py:h:1", sink_danger=10, taint_completeness=10,
+                           auth_gap=8, depth=2),  # total=30 → tier3（depth 含入 total）
+        ])
+        index = _index(chains, [_site("db.py:h:execute:10:4", "db.py:h:1")])
+        pgraph = ParameterPropagationGraph(
+            taint_flows=[_flow(entry="db.py:h:1")],
+            language_coverage=["python"], skipped_languages=["go"],
+        )
+        md = build_static_dataflow_hints(index, pgraph, plan)
+        # 四段都在
+        assert "# Static Dataflow Hints" in md
+        assert "## Sink 调用点" in md
+        assert "## 污点流" in md
+        assert "## 边界与局限" in md
+        # tier3 段标题
+        assert "Tier 3" in md
+
+    def test_empty_index_still_renders_disclaimer(self):
+        index = _index([], [])
+        pgraph = ParameterPropagationGraph(taint_flows=[], language_coverage=[],
+                                           skipped_languages=["go", "java", "php"])
+        plan = AuditPlan()
+        md = build_static_dataflow_hints(index, pgraph, plan)
+        assert "# Static Dataflow Hints" in md
+        assert "## 边界与局限" in md
+        assert "go" in md
