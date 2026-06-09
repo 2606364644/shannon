@@ -2,8 +2,27 @@ import json
 from pathlib import Path
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from shannon_blackbox.pipeline.workflows import BlackboxScanWorkflow
 from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
 from shannon_core.services.browser_engine import BrowserEngineFactory
+
+
+def test_pipeline_progress_query_registered_as_PipelineProgress():
+    """The progress query must be registered under the name 'PipelineProgress'.
+
+    worker.py polls via `handle.query("PipelineProgress")`. A bare
+    @workflow.query would register under the method name 'pipeline_progress',
+    so the query would fail silently (swallowed by `except Exception: pass`)
+    and the CLI would print no progress. This guards that regression.
+    See docs/superpowers/specs/2026-06-09-pipeline-progress-query-design.md.
+    """
+    defn = getattr(
+        BlackboxScanWorkflow.pipeline_progress,
+        "__temporal_query_definition",
+        None,
+    )
+    assert defn is not None, "pipeline_progress is not a registered @workflow.query"
+    assert defn.name == "PipelineProgress"
 
 
 def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
