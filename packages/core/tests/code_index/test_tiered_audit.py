@@ -3,7 +3,7 @@ from shannon_core.code_index.tiered_audit import (
     TieredAuditPlanner, AuditPlan,
 )
 from shannon_core.code_index.models import FuncBlock, CallChain, ParameterSource
-from shannon_core.code_index.parameter_models import TaintFlow, SinkType
+from shannon_core.code_index.parameter_models import TaintFlow, SinkType, SlotContext
 from shannon_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
 
 
@@ -57,12 +57,22 @@ class TestTieredAuditPlanner:
                 source_type=ParameterSource.QUERY_PARAM,
                 propagation_steps=[], sink_func_id="a.py:high:1",
                 sink_type=SinkType.SQL_EXECUTION,
+                # 显式补 Spec A 字段（兼容字段之外）
+                sink_call_site_id="a.py:high:query:1:0",
+                sink_slot=SlotContext.SQL_VALUE,
+                tainted_arg_index=0,
+                confidence=0.7,
             )],
             "a.py:med:5": [TaintFlow(
                 entry_point_id="a.py:med:5", source_param="x",
                 source_type=ParameterSource.BODY_FIELD,
                 propagation_steps=[], sink_func_id="a.py:med:5",
                 sink_type=SinkType.TEMPLATE_RENDER,
+                # 显式补 Spec A 字段（兼容字段之外）
+                sink_call_site_id="a.py:med:render:5:0",
+                sink_slot=SlotContext.TEMPLATE_EXPR,
+                tainted_arg_index=0,
+                confidence=0.7,
             )],
             "a.py:low:10": [],
         }
@@ -96,6 +106,11 @@ class TestTieredAuditPlanner:
                 source_type=ParameterSource.QUERY_PARAM,
                 propagation_steps=[], sink_func_id=fid,
                 sink_type=SinkType.SQL_EXECUTION,
+                # 显式补 Spec A 字段（兼容字段之外）
+                sink_call_site_id=f"{fid}:query:{i}:0",
+                sink_slot=SlotContext.SQL_VALUE,
+                tainted_arg_index=0,
+                confidence=0.7,
             )]
 
         budget = AuditBudget(tier3_max_chains=3)
@@ -121,6 +136,11 @@ class TestTieredAuditPlanner:
                 source_type=ParameterSource.QUERY_PARAM,
                 propagation_steps=[], sink_func_id=fid,
                 sink_type=SinkType.SQL_EXECUTION,
+                # 显式补 Spec A 字段（兼容字段之外）
+                sink_call_site_id=f"{fid}:query:{i}:0",
+                sink_slot=SlotContext.SQL_VALUE,
+                tainted_arg_index=0,
+                confidence=0.7,
             )]
 
         budget = AuditBudget(max_total_llm_calls=50, tier3_max_chains=2,
