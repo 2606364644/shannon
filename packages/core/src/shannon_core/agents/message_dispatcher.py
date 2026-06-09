@@ -38,10 +38,18 @@ class MessageDispatcher:
         self.audit_logger: ToolAuditLogger = audit_logger or NullToolAuditLogger()
         self._progress = progress_callback
         self._on_error = error_callback
+        # L1: ResultMessage-level metadata collected in _handle_result_message
+        self.result_is_error: bool = False
+        self.result_subtype: str | None = None
+        self.stop_reason: str | None = None
+        self.permission_denials: list | None = None
+        self.api_error_status: int | None = None
+        self.result_errors: list[str] | None = None
 
     async def dispatch(self, event: Any) -> str:
         """Dispatch a single SDK event. Returns 'continue' or 'complete'."""
         if isinstance(event, ResultMessage):
+            await self._handle_result_message(event)
             return "complete"
 
         event_type = getattr(event, "type", None)
@@ -83,6 +91,20 @@ class MessageDispatcher:
         content = getattr(event, "content", "")
         await self.audit_logger.log_tool_end(content)
         return "continue"
+
+    async def _handle_result_message(self, event: ResultMessage) -> None:
+        """Collect result-level metadata from the terminal ResultMessage.
+
+        Reading happens here (not in the Provider) so the data is available even
+        on the empty-ResultMessage fallback path, and stays consistent with how
+        ``collected_text`` / ``turn_count`` / ``spending_cap_detected`` are gathered.
+        """
+        self.result_is_error = getattr(event, "is_error", False)
+        self.result_subtype = getattr(event, "subtype", None)
+        self.stop_reason = getattr(event, "stop_reason", None)
+        self.permission_denials = getattr(event, "permission_denials", None)
+        self.api_error_status = getattr(event, "api_error_status", None)
+        self.result_errors = getattr(event, "errors", None)
 
     @staticmethod
     def _is_spending_cap_in_text(text: str) -> bool:

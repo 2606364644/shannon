@@ -221,3 +221,61 @@ class TestSpendingCapPatterns:
         assert "quota exceeded" in SPENDING_CAP_PATTERNS
         assert "budget exceeded" in SPENDING_CAP_PATTERNS
         assert "maximum spend" in SPENDING_CAP_PATTERNS
+
+
+class TestResultMessageMetadata:
+    """L1: ResultMessage events collect result-level metadata before signalling completion."""
+
+    @pytest.mark.asyncio
+    async def test_collects_success_metadata(self):
+        d = MessageDispatcher()
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=1000,
+            duration_api_ms=500,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+            stop_reason="end_turn",
+            total_cost_usd=0.001,
+        )
+        result = await d.dispatch(msg)
+        assert result == "complete"
+        assert d.result_is_error is False
+        assert d.result_subtype == "result"
+        assert d.stop_reason == "end_turn"
+        assert d.permission_denials is None
+        assert d.api_error_status is None
+        assert d.result_errors is None
+
+    @pytest.mark.asyncio
+    async def test_collects_failure_metadata(self):
+        d = MessageDispatcher()
+        msg = ResultMessage(
+            subtype="error_max_turns",
+            duration_ms=1000,
+            duration_api_ms=500,
+            is_error=True,
+            num_turns=200,
+            session_id="test",
+            stop_reason="end_turn",
+            permission_denials=[{"tool": "bash"}],
+            api_error_status=429,
+            errors=["rate limited", "max turns"],
+        )
+        result = await d.dispatch(msg)
+        assert result == "complete"
+        assert d.result_is_error is True
+        assert d.result_subtype == "error_max_turns"
+        assert d.permission_denials == [{"tool": "bash"}]
+        assert d.api_error_status == 429
+        assert d.result_errors == ["rate limited", "max turns"]
+
+    def test_default_metadata_state(self):
+        d = MessageDispatcher()
+        assert d.result_is_error is False
+        assert d.result_subtype is None
+        assert d.stop_reason is None
+        assert d.permission_denials is None
+        assert d.api_error_status is None
+        assert d.result_errors is None
