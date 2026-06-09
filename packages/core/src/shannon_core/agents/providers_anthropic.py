@@ -250,6 +250,13 @@ class AnthropicProvider:
         final_result.collected_text = dispatcher.collected_text
         final_result.turn_count = dispatcher.turn_count
         final_result._dispatcher_spending_cap = dispatcher.spending_cap_detected
+        # L1: mount result-level metadata so _extract_result / call() can read it
+        final_result.result_is_error = dispatcher.result_is_error
+        final_result.result_subtype = dispatcher.result_subtype
+        final_result.stop_reason = dispatcher.stop_reason
+        final_result.permission_denials = dispatcher.permission_denials
+        final_result.api_error_status = dispatcher.api_error_status
+        final_result.result_errors = dispatcher.result_errors
         return final_result
 
     def _extract_result(

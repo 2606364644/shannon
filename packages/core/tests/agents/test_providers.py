@@ -1325,3 +1325,41 @@ class TestTierModelEnvVarIntegration:
 
         assert provider._get_model("medium") == "tier-medium"
         assert provider._get_model("small") == "global-model"
+
+
+class TestExecuteQueryMountsResultMetadata:
+    """L1: _execute_query mounts dispatcher result-metadata onto the final ResultMessage."""
+
+    @pytest.mark.asyncio
+    async def test_mounts_failure_metadata(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        mock_result = ResultMessage(
+            subtype="error_max_turns",
+            duration_ms=1000,
+            duration_api_ms=500,
+            is_error=True,
+            num_turns=200,
+            session_id="test",
+            stop_reason="end_turn",
+            permission_denials=[{"tool": "bash"}],
+            api_error_status=429,
+            errors=["max turns"],
+        )
+
+        async def mock_query(*, prompt, options):
+            yield mock_result
+
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            final = await provider._execute_query(
+                prompt="test",
+                options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
+            )
+
+        assert final.result_is_error is True
+        assert final.result_subtype == "error_max_turns"
+        assert final.stop_reason == "end_turn"
+        assert final.permission_denials == [{"tool": "bash"}]
+        assert final.api_error_status == 429
+        assert final.result_errors == ["max turns"]
