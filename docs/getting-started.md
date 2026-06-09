@@ -41,7 +41,7 @@ uv sync
 ### 启动扫描
 
 ```bash
-shannon-whitebox start --repo /path/to/target
+uv run shannon-whitebox start --repo /path/to/target
 ```
 
 可选参数：
@@ -60,19 +60,33 @@ shannon-whitebox start --repo /path/to/target
 
 ## 4. 黑盒扫描教程
 
-黑盒扫描针对运行中的 Web 应用进行运行时漏洞验证，无需访问源代码。
+黑盒扫描针对运行中的 Web 应用进行运行时漏洞验证。
 
-### 启动扫描
+- **独立扫描**（无白盒结果）：无需源代码访问。
+- **复用白盒结果**（推荐）：跳过侦察阶段，直接对白盒发现的漏洞做运行时验证。
+
+### 启动扫描（独立模式）
 
 ```bash
-shannon-blackbox start --url https://example.com
+uv run shannon-blackbox start --url https://example.com
 ```
+
+### 启动扫描（复用白盒结果）
+
+在白盒扫描完成后，黑盒可通过 `--repo` 复用白盒产出的漏洞队列，跳过侦察阶段：
+
+```bash
+uv run shannon-blackbox start --url https://example.com --repo /path/to/target
+```
+
+`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，详见 [白盒→黑盒交接运行手册](whitebox-blackbox-handoff.md)。
 
 可选参数：
 
 | 参数 | 说明 |
 |------|------|
 | `--url` | （必填）目标 URL |
+| `-r` / `--repo` | 目标仓库路径（复用白盒结果时必填） |
 | `-o` / `--output` | 产出物输出目录 |
 | `-w` / `--workspace` | 工作区名称（支持恢复已有工作区） |
 | `-c` / `--config` | YAML 配置文件路径 |
@@ -84,13 +98,13 @@ shannon-blackbox start --url https://example.com
 ### 按漏洞类型过滤
 
 ```bash
-shannon-blackbox start --url https://example.com --vuln-classes injection --vuln-classes xss
+uv run shannon-blackbox start --url https://example.com --repo /path/to/target --vuln-classes injection --vuln-classes xss
 ```
 
 ### 仅检测不利用
 
 ```bash
-shannon-blackbox start --url https://example.com --no-exploit
+uv run shannon-blackbox start --url https://example.com --repo /path/to/target --no-exploit
 ```
 
 ### 查看报告
@@ -108,15 +122,15 @@ shannon-blackbox start --url https://example.com --no-exploit
 ### 白盒扫描
 
 ```bash
-shannon-whitebox workspaces
-shannon-whitebox logs <workspace_name>
+uv run shannon-whitebox workspaces
+uv run shannon-whitebox logs <workspace_name>
 ```
 
 ### 黑盒扫描
 
 ```bash
-shannon-blackbox workspaces
-shannon-blackbox logs <workspace_name>
+uv run shannon-blackbox workspaces
+uv run shannon-blackbox logs <workspace_name>
 ```
 
 ### 工作区目录结构

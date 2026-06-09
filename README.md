@@ -105,12 +105,18 @@ uv run shannon-whitebox logs my-scan
 ### 黑盒扫描
 
 ```bash
+# 独立模式（无白盒结果）
 uv run shannon-blackbox start --url https://target.example.com
 
-uv run shannon-blackbox start --url https://target.example.com --vuln-classes injection --vuln-classes xss --no-exploit
+# 复用白盒结果（推荐）—— 跳过侦察，直接对白盒发现的漏洞做运行时验证
+uv run shannon-blackbox start --url https://target.example.com --repo /path/to/target-repo
 
-uv run shannon-blackbox start --url https://target.example.com --config scan.yaml --output ./results --workspace my-scan
+uv run shannon-blackbox start --url https://target.example.com --repo /path/to/target-repo --vuln-classes injection --vuln-classes xss --no-exploit
+
+uv run shannon-blackbox start --url https://target.example.com --repo /path/to/target-repo --config scan.yaml --output ./results --workspace my-scan
 ```
+
+> **注意**：`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，黑盒才能读取白盒产出的漏洞队列。详见 [白盒→黑盒交接运行手册](docs/whitebox-blackbox-handoff.md)。
 
 查看工作区和日志：
 

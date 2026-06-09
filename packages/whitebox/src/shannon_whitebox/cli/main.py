@@ -78,9 +78,9 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
             click.echo(f"  Deliverables:  {deliverables_path}")
         click.echo("")
         click.echo("  Next steps:")
-        click.echo(f"    shannon-blackbox start --url {web_url} -w {ws_name}")
+        click.echo(f"    shannon-blackbox start --url {web_url} --repo {str(Path(repo).resolve())} -w {ws_name}")
         click.echo("    # or use --latest to reuse the most recent white-box results:")
-        click.echo(f"    shannon-blackbox start --url {web_url} --latest")
+        click.echo(f"    shannon-blackbox start --url {web_url} --repo {str(Path(repo).resolve())} --latest")
     else:
         click.echo(f"Scan failed: {result.get('error', 'unknown error')}")
         raise SystemExit(1)
