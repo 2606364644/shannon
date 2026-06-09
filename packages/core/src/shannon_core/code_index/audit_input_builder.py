@@ -12,8 +12,14 @@ Two formats:
 
 import logging
 
-from shannon_core.code_index.models import CallChain, FuncBlock
-from shannon_core.code_index.parameter_models import TaintFlow
+from shannon_core.code_index.models import CallChain, CodeIndex, FuncBlock
+from shannon_core.code_index.parameter_models import (
+    DangerousSlot,
+    ParameterPropagationGraph,
+    SinkCallSite,
+    TaintFlow,
+)
+from shannon_core.code_index.tiered_audit import AuditPlan
 
 logger = logging.getLogger(__name__)
 
@@ -139,4 +145,90 @@ def format_taint_flow_summary(flows: list[TaintFlow]) -> str:
         else:
             lines.append(f"- {source_label} (no propagation steps)")
 
+    return "\n".join(lines)
+
+
+# === Spec C: static dataflow hints (consumption-side) ===
+
+_TIER_TITLES = {
+    3: "Tier 3（高风险链）",
+    2: "Tier 2（中风险链）",
+    1: "Tier 1（低风险链）",
+    0: "未归类（无 chain 关联）",
+}
+
+
+def _func_id_to_tier(index: CodeIndex, audit_plan: AuditPlan) -> dict[str, int]:
+    """Map each FuncBlock.id to the highest-priority tier of any chain whose
+    path contains it. Drives tier-sorted sink inventory (Spec §4.4).
+
+    AuditPlan stores ChainRiskScore (chain_id = '→'.join(path[:4])), so we
+    re-derive the same key from index.chains to look up each chain's tier.
+    A func that sits on both a tier3 and a tier1 chain keeps tier3 (max).
+    """
+    tier_by_chain_key = {score.chain_id: score.tier for score in audit_plan.scores}
+    func_to_tier: dict[str, int] = {}
+    for chain in index.chains:
+        key = "→".join(chain.path[:4])
+        tier = tier_by_chain_key.get(key)
+        if tier is None:
+            continue
+        for func_id in chain.path:
+            prev = func_to_tier.get(func_id, 0)
+            if tier > prev:
+                func_to_tier[func_id] = tier
+    return func_to_tier
+
+
+def _header(language_coverage: list[str], skipped_languages: list[str]) -> str:
+    covered = ", ".join(language_coverage) if language_coverage else "（无）"
+    skipped = ", ".join(skipped_languages) if skipped_languages else "无"
+    return (
+        "# Static Dataflow Hints（确定性静态线索，需 LLM 验证）\n\n"
+        "## 覆盖范围\n"
+        f"- 已静态分析语言：{covered}\n"
+        f"- 未覆盖语言（无静态污点线索，请自行追链）：{skipped}\n"
+        "- ⚠️ 本文件是【线索】非【结论】。静态未列出的 sink/路径不代表安全。"
+    )
+
+
+def _format_callee(site: SinkCallSite) -> str:
+    if site.callee_receiver:
+        return f"{site.callee_receiver}.{site.callee_name}"
+    return site.callee_name
+
+
+def _format_slots(slots: list[DangerousSlot]) -> str:
+    """Render dangerous slots as '(arg_index, slot_value); ...'."""
+    parts = [f"({s.arg_index}, {s.slot.value})" for s in slots]
+    return "; ".join(parts) if parts else "—"
+
+
+def _sink_inventory(
+    sink_call_sites: list[SinkCallSite],
+    func_to_tier: dict[str, int],
+) -> str:
+    """Render sink call sites grouped by audit tier (tier3 first)."""
+    if not sink_call_sites:
+        return "## Sink 调用点\n（本仓库无静态命中的 sink 调用点。）"
+
+    buckets: dict[int, list[SinkCallSite]] = {3: [], 2: [], 1: [], 0: []}
+    for site in sink_call_sites:
+        tier = func_to_tier.get(site.caller_id, 0)
+        buckets.setdefault(tier, []).append(site)
+
+    lines = ["## Sink 调用点（按审计优先级）"]
+    for tier in (3, 2, 1, 0):
+        sites = buckets.get(tier, [])
+        if not sites:
+            continue
+        lines.append(f"### {_TIER_TITLES[tier]}")
+        for s in sites:
+            review = " · ⚠️needs_review" if s.needs_review else ""
+            lines.append(
+                f"- `{s.id}` ({s.file_path}:{s.line}:{s.column}) "
+                f"{s.category.value}/{s.sink_subtype} @ `{_format_callee(s)}` "
+                f"· 危险槽: {_format_slots(s.dangerous_slots)} · rule={s.rule_id}"
+                f"{review}"
+            )
     return "\n".join(lines)
