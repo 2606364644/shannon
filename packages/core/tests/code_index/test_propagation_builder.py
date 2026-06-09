@@ -441,3 +441,54 @@ class TestTraceChain:
         # 出现的 transformation 至少含一次 concat
         transformations = {s.transformation for s in flow.propagation_steps if s.transformation}
         assert "concat" in transformations
+
+    def test_source_type_uses_typed_info_not_name_heuristic(self):
+        """入口参数的 source_type 应来自 typed_params，而非名字启发式。
+        auth_token 不含 user/id → 名字启发式给 UNKNOWN；typed 给 HEADER。
+        修复后 flow.source_type 必须是 HEADER。"""
+        from shannon_core.code_index.propagation_builder import build_propagation_graph
+
+        handler = _block(
+            "handler", "app.py", 1,
+            source="def handler(auth_token):\n    process(auth_token)\n",
+            params=["auth_token"],
+        )
+        process = _block(
+            "process", "svc.py", 5,
+            source="def process(x):\n    cursor.execute(x)\n",
+            params=["x"],
+        )
+        sink = SinkCallSite(
+            id="svc.py:process:execute:6:4",
+            caller_id=process.id,
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=6, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="x", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        chain = CallChain(
+            entry_point_id=handler.id,
+            path=[handler.id, process.id],
+            depth=1, has_unresolved=False,
+        )
+        index = self._build_chain_index([handler, process], [chain], [sink])
+
+        pgraph = build_propagation_graph(
+            index,
+            typed_params_by_block={
+                handler.id: [
+                    TypedParameter(name="auth_token", source=ParameterSource.HEADER),
+                ],
+            },
+        )
+        assert len(pgraph.taint_flows) == 1
+        flow = pgraph.taint_flows[0]
+        assert flow.source_param == "auth_token"
+        assert flow.source_type == ParameterSource.HEADER

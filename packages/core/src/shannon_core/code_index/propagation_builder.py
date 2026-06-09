@@ -291,12 +291,21 @@ def build_propagation_graph(
         if not seed:
             continue
 
+        # spec §4.1.1：source_type 优先用 typed_params 提供的精确来源；
+        # _infer_source_type 仅在没有 typed 信息时作为名字启发式回退。
+        source_param = next(iter(seed), "")
+        typed = typed_params_by_block.get(entry_id, [])
+        typed_by_name = {tp.name: (tp.source or ParameterSource.UNKNOWN) for tp in typed}
+        source_type = typed_by_name.get(source_param) or _infer_source_type(entry_block, source_param)
+
         for flow in _trace_chain(
             chain=chain,
             blocks_by_id=blocks_by_id,
             sinks_by_caller=sinks_by_caller,
             seed=seed,
             entry_block=entry_block,
+            source_param=source_param,
+            source_type=source_type,
         ):
             if not flow.flow_id:
                 flow.flow_id = f"{entry_id}->{flow.sink_call_site_id}"
@@ -320,6 +329,8 @@ def _trace_chain(
     sinks_by_caller: dict[str, list[SinkCallSite]],
     seed: set[str],
     entry_block: FuncBlock,
+    source_param: str,
+    source_type: ParameterSource,
 ) -> Iterable[TaintFlow]:
     """沿 CallChain.path 走 cross-function 传播。
 
@@ -337,7 +348,6 @@ def _trace_chain(
     current_tainted: dict[str, set[str]] = {entry_block.id: set(seed)}
     accumulated_steps: list[PropagationStep] = []
     has_sanitizer = False
-    source_param = next(iter(seed), "")  # 任取一个 seed 名作为 source_param
 
     for i, func_id in enumerate(chain.path):
         block = blocks_by_id.get(func_id)
@@ -363,7 +373,7 @@ def _trace_chain(
                 flow_id="",  # build_propagation_graph 统一编号
                 entry_point_id=entry_block.id,
                 source_param=source_param,
-                source_type=_infer_source_type(entry_block, source_param),
+                source_type=source_type,
                 propagation_steps=steps_total,
                 sink_call_site_id=sink_id,
                 sink_slot=hit.slot,
