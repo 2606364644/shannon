@@ -98,7 +98,8 @@ class ChainRiskScore(BaseModel):
         #       chain.path 上的某个 SinkCallSite.id。
         # 回退：没有 sink_call_sites → 用旧字段 flow.sink_func_id 命中 path[-1]。
         if sink_call_sites:
-            chain_site_ids = {s.id for s in sink_call_sites if s.caller_id in set(chain.path)}
+            chain_node_ids = set(chain.path)
+            chain_site_ids = {s.id for s in sink_call_sites if s.caller_id in chain_node_ids}
             reaching = [f for f in taint_flows if f.sink_call_site_id in chain_site_ids]
         else:
             sink_node_id = chain.path[-1] if chain.path else None
