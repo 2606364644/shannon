@@ -93,3 +93,132 @@ class TestSeedTaints:
         ]
         seed = seed_taints(block, typed)
         assert "request" in seed
+
+
+class TestIntraProcedural:
+    def _make_sink(self, caller_id: str, callee: str = "execute",
+                   file: str = "app.py", line: int = 3, col: int = 4,
+                   arg_idx: int = 0,
+                   slot: SlotContext = SlotContext.SQL_VALUE,
+                   expression: str = "sql") -> SinkCallSite:
+        return SinkCallSite(
+            id=f"{file}:{caller_id.split(':')[1]}:{callee}:{line}:{col}",
+            caller_id=caller_id,
+            callee_name=callee,
+            callee_receiver="cursor" if slot == SlotContext.SQL_VALUE else None,
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path=file,
+            line=line,
+            column=col,
+            dangerous_slots=[DangerousSlot(
+                arg_index=arg_idx, slot=slot,
+                expression=expression, is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+
+    def test_straight_assignment_to_sink(self):
+        """user_id → sql → cursor.execute(sql)
+        单函数体内一条赋值链命中 sink。"""
+        from shannon_core.code_index.propagation_builder import analyze_intra
+        block = _block(
+            "handler", "app.py", 1,
+            source=(
+                "def handler(user_id):\n"
+                "    sql = 'SELECT * FROM u WHERE id=' + user_id\n"
+                "    cursor.execute(sql)\n"
+            ),
+            params=["user_id"],
+        )
+        sink = self._make_sink(block.id, line=3, arg_idx=0)
+        result = analyze_intra(
+            block, seed={"user_id"},
+            sinks_in_func=[sink],
+        )
+        assert sink.id in result.hits
+        hit = result.hits[sink.id]
+        assert hit.tainted_arg_index == 0
+        # 至少能识别 sql 被污染 + 触达 sink 的 0 号槽
+        assert any(s.to_param == "sql" or s.transformation == "concat"
+                   for s in hit.local_steps)
+
+    def test_transformation_concat_marked(self):
+        """拼接 'SELECT ...' + user_input 应标 transformation='concat'。"""
+        from shannon_core.code_index.propagation_builder import analyze_intra
+        block = _block(
+            "f", "app.py", 1,
+            source=(
+                "def f(user_input):\n"
+                "    q = 'SELECT * FROM t WHERE id=' + user_input\n"
+                "    cursor.execute(q)\n"
+            ),
+            params=["user_input"],
+        )
+        sink = self._make_sink(block.id, line=3, arg_idx=0, expression="q")
+        result = analyze_intra(
+            block, seed={"user_input"}, sinks_in_func=[sink],
+        )
+        hit = result.hits[sink.id]
+        # 出现 concat transformation
+        concat_steps = [s for s in hit.local_steps if s.transformation == "concat"]
+        assert len(concat_steps) >= 1
+
+    def test_no_hit_when_taint_never_reaches_sink_arg(self):
+        """tainted 变量从未出现在 sink 的危险槽位 → 不命中。"""
+        from shannon_core.code_index.propagation_builder import analyze_intra
+        block = _block(
+            "f", "app.py", 1,
+            source=(
+                "def f(user_input):\n"
+                "    other = compute()\n"
+                "    cursor.execute(other)\n"
+            ),
+            params=["user_input"],
+        )
+        sink = self._make_sink(block.id, line=3, arg_idx=0)
+        result = analyze_intra(
+            block, seed={"user_input"}, sinks_in_func=[sink],
+        )
+        assert sink.id not in result.hits
+
+    def test_slot_constraint_excludes_safe_arg_index(self):
+        """sink 的 dangerous_slots 是 arg_index=0，但 tainted 走的是 arg_index=1
+        （例如 cursor.execute(safe, tainted)）→ 不算命中。"""
+        from shannon_core.code_index.propagation_builder import analyze_intra
+        # 危险槽位只声明在 0 号；tainted 走 1 号 → 不命中
+        block = _block(
+            "f", "app.py", 1,
+            source=(
+                "def f(user_input):\n"
+                "    cursor.execute('SAFE', user_input)\n"
+            ),
+            params=["user_input"],
+        )
+        sink = self._make_sink(block.id, line=2, arg_idx=0)  # 仅 0 号危险
+        result = analyze_intra(
+            block, seed={"user_input"}, sinks_in_func=[sink],
+        )
+        assert sink.id not in result.hits
+
+    def test_sanitizer_hint_does_not_block_taint(self):
+        """路径上出现 escape(...) → 标 sanitize_hint:escape，但 taint 不阻断。"""
+        from shannon_core.code_index.propagation_builder import analyze_intra
+        block = _block(
+            "f", "app.py", 1,
+            source=(
+                "def f(user_input):\n"
+                "    safe = escape(user_input)\n"
+                "    cursor.execute(safe)\n"
+            ),
+            params=["user_input"],
+        )
+        sink = self._make_sink(block.id, line=3, arg_idx=0, expression="safe")
+        result = analyze_intra(
+            block, seed={"user_input"}, sinks_in_func=[sink],
+        )
+        assert sink.id in result.hits
+        hit = result.hits[sink.id]
+        assert any(s.transformation and s.transformation.startswith("sanitize_hint:")
+                   for s in hit.local_steps)
+        assert hit.has_sanitizer_hint is True
