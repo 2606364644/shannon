@@ -71,7 +71,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         from shannon_core.prompts.manager import PromptManager
         from shannon_core.agents.executor import AgentExecutor
 
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
 
@@ -106,7 +106,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
 
         deliverables = _get_deliverables_path(input)
         deliverables.mkdir(parents=True, exist_ok=True)
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         recon = ReconExecutor(executor)
@@ -135,7 +135,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
         vuln_type: str = input.vuln_type
         agent_name = AgentName(f"{vuln_type}-exploit")
         deliverables = _get_deliverables_path(input)
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         exploit = ExploitExecutor(executor)
@@ -189,7 +189,7 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 async def run_report_agent(input: BlackboxActivityInput) -> dict:
     try:
         deliverables = _get_deliverables_path(input)
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         metrics = await executor.execute(

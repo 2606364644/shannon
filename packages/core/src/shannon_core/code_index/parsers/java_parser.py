@@ -6,7 +6,7 @@ from tree_sitter import Language, Parser
 
 from shannon_core.code_index.models import CallEdge, FuncBlock
 from shannon_core.code_index.parsers import register_parser
-from shannon_core.code_index.parsers.base import BaseParser
+from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,52 @@ class JavaParser(BaseParser):
                         line=node.start_point[0] + 1,
                     ))
         return edges
+
+    def iter_calls(self, block: FuncBlock, source: bytes):
+        tree = self._parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type == "method_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node and name_node.text.decode("utf-8") == block.function_name:
+                    if node.start_point[0] + 1 == block.start_line:
+                        for call_node in self._iter_call_nodes(node):
+                            yield call_node
+                        break
+
+    def _iter_call_nodes(self, method_node):
+        for node in _walk(method_node):
+            if node.type == "method_invocation":
+                args_node = node.child_by_field_name("arguments")
+                raw_args: list = []
+                if args_node is not None:
+                    for child in args_node.children:
+                        if child.type in ("(", ")", ","):
+                            continue
+                        raw_args.append(child)
+                yield CallNode(
+                    raw_call_node=node,
+                    raw_arg_nodes=raw_args,
+                    line=node.start_point[0] + 1,
+                    column=node.start_point[1],
+                )
+
+    def destructure_call(self, call) -> tuple[str, str | None]:
+        node = call.raw_call_node
+        name_node = node.child_by_field_name("name")
+        if name_node is None:
+            return ("", None)
+        callee = name_node.text.decode("utf-8")
+        # receiver: the `object` field of method_invocation (Java TS grammar)
+        obj_node = node.child_by_field_name("object")
+        receiver = obj_node.text.decode("utf-8") if obj_node else None
+        return (callee, receiver)
+
+    def extract_arg_expressions(self, call, source: bytes) -> list[str]:
+        result: list[str] = []
+        for arg_node in call.raw_arg_nodes:
+            text = source[arg_node.start_byte:arg_node.end_byte].decode("utf-8", errors="replace")
+            result.append(text)
+        return result
 
 
 register_parser("java", JavaParser)

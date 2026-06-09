@@ -189,7 +189,7 @@ class AnthropicProvider:
         # 添加 adaptive thinking
         if self._is_adaptive_thinking_enabled():
             from claude_agent_sdk.types import ThinkingConfigAdaptive
-            options.thinking = ThinkingConfigAdaptive()
+            options.thinking = ThinkingConfigAdaptive(type="adaptive")
 
         # Environment variables via _build_sdk_env
         options.env = self._build_sdk_env()

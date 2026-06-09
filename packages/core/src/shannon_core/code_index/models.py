@@ -3,6 +3,11 @@ from collections import Counter
 from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shannon_core.code_index.parameter_models import SinkCallSite
+
 
 class Verdict(str, Enum):
     CONFIRMED = "confirmed"
@@ -74,6 +79,8 @@ class CodeIndex(BaseModel):
     # Extended fields for GitNexus integration (forward refs to avoid circular order)
     file_manifest: "FileManifest | None" = None
     degradation_level: "DegradationLevel | None" = None
+    # Spec B: AST-precise sink detection (use forward ref; resolved at runtime via model_rebuild)
+    sink_call_sites: list["SinkCallSite"] = []
 
 
 class AdjudicatedEntryPoint(BaseModel):
@@ -168,3 +175,15 @@ class CoverageGap(BaseModel):
     reason: str
     affected_phases: list[str]
     estimated_coverage_loss: str
+
+
+# Resolve forward references for sink_call_sites (Spec B)
+def _resolve_forward_refs() -> None:
+    try:
+        from shannon_core.code_index.parameter_models import SinkCallSite  # noqa: F401
+        CodeIndex.model_rebuild()
+    except ImportError:
+        pass
+
+
+_resolve_forward_refs()

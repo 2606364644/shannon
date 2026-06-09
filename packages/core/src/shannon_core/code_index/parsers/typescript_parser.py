@@ -6,7 +6,7 @@ from tree_sitter import Language, Parser
 
 from shannon_core.code_index.models import CallEdge, FuncBlock
 from shannon_core.code_index.parsers import register_parser
-from shannon_core.code_index.parsers.base import BaseParser
+from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,55 @@ class TypeScriptParser(BaseParser):
             if prop:
                 return prop.text.decode("utf-8")
         return None
+
+    def iter_calls(self, block: FuncBlock, source: bytes):
+        tree = self._parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type in ("function_declaration", "method_definition"):
+                name_node = node.child_by_field_name("name")
+                if name_node and name_node.text.decode("utf-8") == block.function_name:
+                    if node.start_point[0] + 1 == block.start_line:
+                        for call_node in self._iter_call_nodes(node):
+                            yield call_node
+                        break
+
+    def _iter_call_nodes(self, func_node):
+        for node in _walk(func_node):
+            if node.type == "call_expression":
+                args_node = node.child_by_field_name("arguments")
+                raw_args: list = []
+                if args_node is not None:
+                    for child in args_node.children:
+                        if child.type in ("(", ")", ",", ";"):
+                            continue
+                        raw_args.append(child)
+                yield CallNode(
+                    raw_call_node=node,
+                    raw_arg_nodes=raw_args,
+                    line=node.start_point[0] + 1,
+                    column=node.start_point[1],
+                )
+
+    def destructure_call(self, call) -> tuple[str, str | None]:
+        func_node = call.raw_call_node.child_by_field_name("function")
+        if func_node is None:
+            return ("", None)
+        if func_node.type == "identifier":
+            return (func_node.text.decode("utf-8"), None)
+        if func_node.type == "member_expression":
+            prop = func_node.child_by_field_name("property")
+            obj = func_node.child_by_field_name("object")
+            callee = prop.text.decode("utf-8") if prop else ""
+            receiver = obj.text.decode("utf-8") if obj else None
+            return (callee, receiver)
+        return ("", None)
+
+    def extract_arg_expressions(self, call, source: bytes) -> list[str]:
+        result: list[str] = []
+        for arg_node in call.raw_arg_nodes:
+            text = source[arg_node.start_byte:arg_node.end_byte].decode("utf-8", errors="replace")
+            result.append(text)
+        return result
 
 
 register_parser("typescript", TypeScriptParser)

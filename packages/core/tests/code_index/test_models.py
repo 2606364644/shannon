@@ -364,3 +364,54 @@ def test_degradation_level_enum():
     assert DegradationLevel.FULL == "full"
     assert DegradationLevel.DEGRADED == "degraded"
     assert DegradationLevel.MINIMAL == "minimal"
+
+
+class TestCodeIndexSinkCallSites:
+    def test_default_empty_sink_call_sites(self):
+        from shannon_core.code_index.models import CodeIndex
+        index = CodeIndex(
+            repository="repo",
+            language="python",
+            total_blocks=0,
+            total_entry_points=0,
+            total_chains=0,
+            blocks=[],
+            edges=[],
+            entry_points=[],
+            chains=[],
+        )
+        assert index.sink_call_sites == []
+
+    def test_sink_call_sites_serialized(self):
+        from shannon_core.code_index.models import CodeIndex
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory,
+        )
+        site = SinkCallSite(
+            id="a.py:f:execute:1:0",
+            caller_id="a.py:f:1",
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="a.py",
+            line=1,
+            column=0,
+            dangerous_slots=[],
+            rule_id="py-db-cursor-execute",
+        )
+        index = CodeIndex(
+            repository="repo",
+            language="python",
+            total_blocks=1,
+            total_entry_points=0,
+            total_chains=0,
+            blocks=[],
+            edges=[],
+            entry_points=[],
+            chains=[],
+            sink_call_sites=[site],
+        )
+        json_str = index.model_dump_json()
+        assert '"sink_call_sites"' in json_str
+        assert '"py-db-cursor-execute"' in json_str

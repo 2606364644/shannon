@@ -75,7 +75,8 @@ async def run_agent(input: ActivityInput) -> dict:
     try:
         agent_name = AgentName(input.workspace_name)
         repo, deliverables, _ = _get_paths(input)
-        prompt_manager = PromptManager(repo.parent.parent / "prompts")
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+        prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         metrics = await executor.execute(
             agent_name=agent_name,
@@ -125,7 +126,7 @@ async def run_auth_validation(input: ActivityInput) -> None:
         from shannon_core.prompts.manager import PromptManager
         from shannon_core.agents.executor import AgentExecutor
 
-        prompts_dir = Path(__file__).resolve().parents[4] / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
 
@@ -169,6 +170,23 @@ async def run_code_index(input: ActivityInput) -> dict:
             "json_path": str(json_path),
             "summary_path": str(summary_path),
         }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_save_adjudication(input: ActivityInput) -> dict:
+    try:
+        from shannon_core.code_index import save_adjudication
+
+        repo, deliverables, _ = _get_paths(input)
+        save_adjudication(str(deliverables))
+
+        return {"status": "ok"}
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

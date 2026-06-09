@@ -6,7 +6,7 @@ from tree_sitter import Language, Parser
 
 from shannon_core.code_index.models import CallEdge, FuncBlock
 from shannon_core.code_index.parsers import register_parser
-from shannon_core.code_index.parsers.base import BaseParser
+from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,70 @@ class PhpParser(BaseParser):
         elif func_node.type == "variable_name":
             return func_node.text.decode("utf-8").lstrip("$")
         return None
+
+    def iter_calls(self, block: FuncBlock, source: bytes):
+        tree = self._parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type in ("function_definition", "method_declaration"):
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name_text = name_node.text.decode("utf-8").lstrip("$")
+                    if name_text == block.function_name:
+                        if node.start_point[0] + 1 == block.start_line:
+                            for call_node in self._iter_call_nodes(node):
+                                yield call_node
+                            break
+
+    def _iter_call_nodes(self, func_node):
+        call_types = (
+            "function_call_expression",
+            "member_call_expression",
+            "scoped_call_expression",
+        )
+        for node in _walk(func_node):
+            if node.type in call_types:
+                args_node = node.child_by_field_name("arguments")
+                raw_args: list = []
+                if args_node is not None:
+                    for child in args_node.children:
+                        if child.type in ("(", ")", ","):
+                            continue
+                        raw_args.append(child)
+                yield CallNode(
+                    raw_call_node=node,
+                    raw_arg_nodes=raw_args,
+                    line=node.start_point[0] + 1,
+                    column=node.start_point[1],
+                )
+
+    def destructure_call(self, call) -> tuple[str, str | None]:
+        node = call.raw_call_node
+        if node.type == "function_call_expression":
+            func_node = node.child_by_field_name("function")
+            if func_node is None:
+                return ("", None)
+            name = func_node.text.decode("utf-8").lstrip("$")
+            return (name, None)
+        if node.type == "member_call_expression":
+            name_node = node.child_by_field_name("name")
+            obj = node.child_by_field_name("object")
+            callee = name_node.text.decode("utf-8").lstrip("$") if name_node else ""
+            receiver = obj.text.decode("utf-8") if obj else None
+            return (callee, receiver)
+        if node.type == "scoped_call_expression":
+            name_node = node.child_by_field_name("name")
+            scope = node.child_by_field_name("scope")
+            callee = name_node.text.decode("utf-8").lstrip("$") if name_node else ""
+            receiver = scope.text.decode("utf-8") if scope else None
+            return (callee, receiver)
+        return ("", None)
+
+    def extract_arg_expressions(self, call, source: bytes) -> list[str]:
+        result: list[str] = []
+        for arg_node in call.raw_arg_nodes:
+            text = source[arg_node.start_byte:arg_node.end_byte].decode("utf-8", errors="replace")
+            result.append(text)
+        return result
 
 
 register_parser("php", PhpParser)
