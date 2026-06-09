@@ -40,6 +40,7 @@ import type { PipelineConfig, VulnClass } from '../types/config.js';
 import { fileExists, readJson } from '../utils/file-io.js';
 import * as activities from './activities.js';
 import type { PipelineInput, PipelineProgress, PipelineState } from './shared.js';
+import '../providers/register.js';
 
 dotenv.config();
 
