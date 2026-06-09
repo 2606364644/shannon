@@ -52,8 +52,8 @@ def build_code_index(repo_path: str) -> CodeIndex:
             error_code=ErrorCode.CODE_INDEX_FAILED,
         )
 
-    # Cache: file_path → source bytes (in-memory, held for the whole build; reused
-    # by detect_sinks to read source without re-parsing — acceptable tradeoff).
+    # Cache: file_path → source bytes (in-memory, held for the duration of build_code_index;
+    # reused by detect_sinks to read source without re-parsing — acceptable tradeoff).
     file_sources: dict[str, bytes] = {}
     all_blocks = []
     all_edges = []

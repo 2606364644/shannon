@@ -108,29 +108,30 @@ class TestEndToEndTypeScript:
 
 class TestFalsePositives:
     def test_commented_sink_not_detected(self, tmp_path):
-        """Sink in a comment must not trigger a hit (tree-sitter skips comments)."""
+        """A sink inside a comment (within a function body) must not trigger a hit;
+        a real sink call in the same body must."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "app.py").write_text(
-            "# cursor.execute(user_sql)  -- this is commented out\n"
-            "def f():\n"
-            "    pass\n"
+            "def f(user_sql):\n"
+            "    # cursor.execute(user_sql)  -- this is commented out\n"
+            "    cursor.execute(user_sql)  # real call, must be detected\n"
+            "    return None\n"
         )
         index = build_code_index(str(repo))
-        rules = {s.rule_id for s in index.sink_call_sites}
-        # The commented execute is not in a function body, so won't be visited
-        # at all. But just to be safe, no SQL hit expected.
-        assert "py-db-cursor-execute" not in rules
+        rules = [s.rule_id for s in index.sink_call_sites]
+        # Exactly one SQL hit — the real call, NOT the commented one.
+        assert rules.count("py-db-cursor-execute") == 1
 
-    def test_variable_named_query_not_hit(self, tmp_path):
-        """A variable named `query` (not a call) must not match the SQL rule."""
+    def test_variable_named_like_sink_not_hit(self, tmp_path):
+        """A variable assigned a sink callee name (not a call) must not match the rule."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "app.py").write_text(
             "def f():\n"
-            "    query = 'SELECT * FROM users'  # assignment, not call\n"
-            "    return query\n"
+            "    render_template_string = 'not a call'  # assignment, not a call\n"
+            "    return render_template_string\n"
         )
         index = build_code_index(str(repo))
         rules = {s.rule_id for s in index.sink_call_sites}
-        assert "py-db-cursor-execute" not in rules
+        assert "py-render-template-string" not in rules
