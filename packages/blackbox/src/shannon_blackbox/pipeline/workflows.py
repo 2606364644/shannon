@@ -10,7 +10,7 @@ from temporalio.exceptions import CancelledError
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
 from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results
 
-from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState
+from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 
 logger = logging.getLogger(__name__)
 
@@ -298,3 +298,16 @@ class BlackboxScanWorkflow:
                     engine.cleanup_config(input.repo_path, session_id=session_id)
                 engine.cleanup_config(input.repo_path)
             cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
+
+    @workflow.query
+    def pipeline_progress(self) -> PipelineProgress:
+        """返回当前工作流进度供 CLI 轮询。"""
+        elapsed_ns = workflow.time_ns() - int(self._state.start_time * 1e9)
+        return PipelineProgress(
+            workflow_id=workflow.info().workflow_id,
+            elapsed_ms=elapsed_ns // 1_000_000,
+            current_phase=self._state.current_phase,
+            current_agent=self._state.current_agent,
+            completed_agents=self._state.completed_agents,
+            status=self._state.status,
+        )
