@@ -35,3 +35,8 @@ function createContainerWithTranslation(
 export function registerProviders(): void {
   setContainerFactory(createContainerWithTranslation);
 }
+
+// Activate on module load so a bare side-effect `import './register.js'`
+// (e.g. in the worker entry point) registers the provider without an
+// explicit call site. Safe to call again: setContainerFactory overwrites.
+registerProviders();
