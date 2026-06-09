@@ -264,6 +264,7 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
             taint_flows_by_chain=taint_flows_by_chain,
             auth_middleware_ids=auth_ids,
             budget=AuditBudget(),
+            sink_call_sites=index.sink_call_sites,
         )
         plan = planner.plan()
 

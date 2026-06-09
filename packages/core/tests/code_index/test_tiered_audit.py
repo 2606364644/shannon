@@ -183,3 +183,55 @@ class TestAuditPlan:
         )
         json_str = plan.to_json()
         assert "total_chains" in json_str
+
+
+class TestTieredAuditPlannerSinkCallSites:
+    def test_planner_forwards_sink_call_sites_so_taint_completeness_nonzero(self):
+        """Spec A 集成：TieredAuditPlanner.plan() 必须把 sink_call_sites 转发给
+        ChainRiskScore，使 sink_call_site_id 命中的 flow 在生产路径也激活 taint_completeness。"""
+        from shannon_core.code_index.parameter_models import (
+            DangerousSlot, SinkCallSite, SinkCategory, SlotContext, TaintFlow,
+        )
+
+        block = _block("query", "svc.py", 1, source="def query(sql): cursor.execute(sql)")
+        sink = SinkCallSite(
+            id="svc.py:query:execute:2:4",
+            caller_id=block.id,
+            callee_name="execute", callee_receiver="cursor",
+            category=SinkCategory.SQL, sink_subtype="sql_raw",
+            file_path="svc.py", line=2, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="sql", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        # Spec A flow：只有 sink_call_site_id，sink_func_id 空（与生产一致）
+        flow = TaintFlow(
+            entry_point_id="app.py:h:1",
+            source_param="user_id",
+            source_type=ParameterSource.QUERY_PARAM,
+            sink_call_site_id=sink.id,
+            sink_slot=SlotContext.SQL_VALUE,
+            tainted_arg_index=0,
+            confidence=0.9,
+        )
+        chain = _chain(["app.py:h:1", block.id], 1)
+        flows_by_chain = {"app.py:h:1": [flow]}
+
+        # 不传 sink_call_sites → 回退 sink_func_id（空）→ taint_completeness=0
+        planner_no_sites = TieredAuditPlanner(
+            chains=[chain], blocks_by_id={block.id: block},
+            taint_flows_by_chain=flows_by_chain,
+            auth_middleware_ids=set(), budget=AuditBudget(),
+        )
+        assert planner_no_sites.plan().scores[0].taint_completeness == 0
+
+        # 传 sink_call_sites → 转发给 scorer → sink_call_site_id 命中 → taint_completeness > 0
+        planner_with_sites = TieredAuditPlanner(
+            chains=[chain], blocks_by_id={block.id: block},
+            taint_flows_by_chain=flows_by_chain,
+            auth_middleware_ids=set(), budget=AuditBudget(),
+            sink_call_sites=[sink],
+        )
+        assert planner_with_sites.plan().scores[0].taint_completeness > 0

@@ -14,7 +14,7 @@ import logging
 from pydantic import BaseModel
 
 from shannon_core.code_index.models import CallChain, FuncBlock
-from shannon_core.code_index.parameter_models import TaintFlow
+from shannon_core.code_index.parameter_models import SinkCallSite, TaintFlow
 from shannon_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,10 @@ class TieredAuditPlanner:
         planner = TieredAuditPlanner(chains, blocks, flows, auth_ids, budget)
         plan = planner.plan()
         # plan.tier3_chains, plan.tier2_chains, plan.tier1_chains
+
+    sink_call_sites（Spec A）: 可选。传入后 ChainRiskScore.taint_completeness
+        会按 sink_call_site_id 命中 chain 上的 SinkCallSite 算分；不传则回退
+        sink_func_id（向后兼容旧 json / 旧 flow）。
     """
 
     def __init__(
@@ -61,12 +65,14 @@ class TieredAuditPlanner:
         taint_flows_by_chain: dict[str, list[TaintFlow]],
         auth_middleware_ids: set[str],
         budget: AuditBudget,
+        sink_call_sites: list[SinkCallSite] | None = None,
     ):
         self.chains = chains
         self.blocks_by_id = blocks_by_id
         self.taint_flows_by_chain = taint_flows_by_chain
         self.auth_middleware_ids = auth_middleware_ids
         self.budget = budget
+        self.sink_call_sites = sink_call_sites
 
     def plan(self) -> AuditPlan:
         """Score all chains and produce the tiered audit plan."""
@@ -80,6 +86,7 @@ class TieredAuditPlanner:
             flows = self.taint_flows_by_chain.get(entry_id, [])
             score = ChainRiskScore.score(
                 chain, self.blocks_by_id, flows, self.auth_middleware_ids,
+                sink_call_sites=self.sink_call_sites,
             )
             scores.append(score)
 
