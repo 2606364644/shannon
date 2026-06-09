@@ -1642,3 +1642,29 @@ class TestProviderAuditLoggerInjection:
         with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(prompt="t", cwd="/tmp", model_tier="medium")
         assert result.success is True
+
+
+class TestRunClaudePromptAuditLogger:
+    """L3: run_claude_prompt wraps an ActivityLogger into ActivityToolAuditLogger."""
+
+    @pytest.mark.asyncio
+    async def test_wraps_activity_logger(self):
+        from shannon_core.logging.activity_logger import ConsoleActivityLogger
+        from shannon_core.agents.tool_audit_logger import ActivityToolAuditLogger
+        activity_logger = ConsoleActivityLogger()
+        mock_provider = AsyncMock()
+        mock_provider.call = AsyncMock(return_value=ClaudeRunResult(text="ok", success=True))
+        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+                await run_claude_prompt(prompt="t", repo_path="/tmp", audit_logger=activity_logger)
+        sent = mock_provider.call.call_args.kwargs["audit_logger"]
+        assert isinstance(sent, ActivityToolAuditLogger)
+
+    @pytest.mark.asyncio
+    async def test_none_audit_logger_passes_none(self):
+        mock_provider = AsyncMock()
+        mock_provider.call = AsyncMock(return_value=ClaudeRunResult(text="ok", success=True))
+        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+                await run_claude_prompt(prompt="t", repo_path="/tmp")
+        assert mock_provider.call.call_args.kwargs.get("audit_logger") is None

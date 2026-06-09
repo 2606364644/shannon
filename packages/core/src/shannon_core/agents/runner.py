@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.models.errors import classify_error_for_temporal
+
+if TYPE_CHECKING:
+    from shannon_core.logging.activity_logger import ActivityLogger
 
 
 @dataclass
@@ -92,6 +95,7 @@ async def run_claude_prompt(
     api_key: str | None = None,
     deliverables_subdir: str | None = None,
     provider_config: dict | None = None,
+    audit_logger: "ActivityLogger | None" = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -127,13 +131,17 @@ async def run_claude_prompt(
         from .providers import create_provider
         provider = create_provider(config)
 
-        # 3. 调用 Provider 执行
+        # L3: adapt the service-layer ActivityLogger into the SDK-domain ToolAuditLogger
+        from .tool_audit_logger import ActivityToolAuditLogger
+        tool_audit_logger = ActivityToolAuditLogger(audit_logger) if audit_logger is not None else None
+
         result = await provider.call(
             prompt=prompt,
             cwd=repo_path,
             model_tier=model_tier,
             output_format=output_format,
             deliverables_subdir=deliverables_subdir,
+            audit_logger=tool_audit_logger,
         )
 
         # 5. 检查花费上限行为
