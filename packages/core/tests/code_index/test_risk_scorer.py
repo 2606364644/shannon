@@ -362,3 +362,100 @@ class TestChainRiskScoreSinkCallSites:
         score_empty = ChainRiskScore.score(chain, blocks, [], set(), sink_call_sites=[])
         score_none = ChainRiskScore.score(chain, blocks, [], set())
         assert score_empty.sink_danger == score_none.sink_danger == 10
+
+
+class TestTaintCompletenessUsesSinkCallSiteId:
+    def test_completeness_uses_sink_call_site_id_when_chain_has_matching_site(self):
+        """chain.path 包含 SinkCallSite.caller_id 且 flow.sink_call_site_id 命中
+        → taint_completeness > 0。"""
+        from shannon_core.code_index.parameter_models import (
+            DangerousSlot, SinkCallSite, SinkCategory, SlotContext, TaintFlow,
+        )
+
+        block = _block("query", "svc.py", 1, source="def query(sql): cursor.execute(sql)")
+        chain = CallChain(
+            entry_point_id="app.py:h:1",
+            path=["app.py:h:1", block.id],
+            depth=1, has_unresolved=False,
+        )
+        sink = SinkCallSite(
+            id="svc.py:query:execute:2:4",
+            caller_id=block.id,
+            callee_name="execute", callee_receiver="cursor",
+            category=SinkCategory.SQL, sink_subtype="sql_raw",
+            file_path="svc.py", line=2, column=4,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="sql", is_entry_hint=False,
+            )],
+            rule_id="py-db-cursor-execute",
+        )
+        flow = TaintFlow(
+            flow_id="app.py:h:1->svc.py:query:execute:2:4",
+            entry_point_id="app.py:h:1",
+            source_param="user_id",
+            source_type=ParameterSource.QUERY_PARAM,
+            sink_call_site_id=sink.id,
+            sink_slot=SlotContext.SQL_VALUE,
+            tainted_arg_index=0,
+            confidence=0.9,
+        )
+        score = ChainRiskScore.score(
+            chain, {block.id: block}, [flow], set(),
+            sink_call_sites=[sink],
+        )
+        assert score.taint_completeness > 0
+
+    def test_completeness_zero_when_flow_does_not_match_chain_sites(self):
+        """flow.sink_call_site_id 指向的 sink 不在 chain 上 → taint_completeness=0。"""
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory, SlotContext, TaintFlow,
+        )
+
+        block = _block("query", "svc.py", 1)
+        chain = CallChain(
+            entry_point_id="app.py:h:1",
+            path=["app.py:h:1", block.id],
+            depth=1, has_unresolved=False,
+        )
+        # sink 在另一个 caller 上
+        other_sink = SinkCallSite(
+            id="other.py:f:execute:1:0",
+            caller_id="other.py:f:1",
+            callee_name="execute", callee_receiver="cursor",
+            category=SinkCategory.SQL, sink_subtype="sql_raw",
+            file_path="other.py", line=1, column=0,
+            dangerous_slots=[], rule_id="py-db-cursor-execute",
+        )
+        flow = TaintFlow(
+            entry_point_id="app.py:h:1",
+            source_param="x", source_type=ParameterSource.QUERY_PARAM,
+            sink_call_site_id=other_sink.id,
+            sink_slot=SlotContext.SQL_VALUE,
+            tainted_arg_index=0,
+        )
+        score = ChainRiskScore.score(
+            chain, {block.id: block}, [flow], set(),
+            sink_call_sites=[other_sink],
+        )
+        # other_sink.caller_id 不在 chain.path → flow 不算命中
+        assert score.taint_completeness == 0
+
+    def test_legacy_sink_func_id_fallback_still_works(self):
+        """sink_call_sites=None 时回退到老逻辑：flow.sink_func_id 命中 sink_node_id。"""
+        chain = CallChain(
+            entry_point_id="app.py:h:1",
+            path=["app.py:h:1", "svc.py:query:1"],
+            depth=1, has_unresolved=False,
+        )
+        flow = TaintFlow(
+            entry_point_id="app.py:h:1",
+            source_param="x", source_type=ParameterSource.QUERY_PARAM,
+            sink_func_id="svc.py:query:1",
+            sink_type=SinkType.SQL_EXECUTION,
+        )
+        score = ChainRiskScore.score(
+            chain, {"svc.py:query:1": _block("query", "svc.py", 1)},
+            [flow], set(),
+        )
+        assert score.taint_completeness > 0

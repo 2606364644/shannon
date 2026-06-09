@@ -93,9 +93,16 @@ class ChainRiskScore(BaseModel):
             chain, blocks_by_id, sink_call_sites,
         )
 
-        # Taint completeness: how many flows reach the sink
-        sink_node_id = chain.path[-1] if chain.path else None
-        reaching = [f for f in taint_flows if f.sink_func_id == sink_node_id]
+        # Taint completeness: Spec A 升级
+        # 优先：如果传了 sink_call_sites，flow.sink_call_site_id 必须命中
+        #       chain.path 上的某个 SinkCallSite.id。
+        # 回退：没有 sink_call_sites → 用旧字段 flow.sink_func_id 命中 path[-1]。
+        if sink_call_sites:
+            chain_site_ids = {s.id for s in sink_call_sites if s.caller_id in set(chain.path)}
+            reaching = [f for f in taint_flows if f.sink_call_site_id in chain_site_ids]
+        else:
+            sink_node_id = chain.path[-1] if chain.path else None
+            reaching = [f for f in taint_flows if f.sink_func_id == sink_node_id]
         taint_completeness = min(10, len(reaching) * 10)
 
         # Auth gap: does the chain pass through auth middleware?
