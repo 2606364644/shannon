@@ -17,7 +17,8 @@
       "Bash(docker stop *)",
       "Bash(docker rm *)",
       "Bash(docker info *)",
-      "Bash(jq --version)"
+      "Bash(jq --version)",
+      "Skill(update-config)"
     ]
   }
 }
