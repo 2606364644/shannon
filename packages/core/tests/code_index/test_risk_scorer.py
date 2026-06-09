@@ -170,3 +170,144 @@ class TestAuditBudget:
         # 3 tier3 × 5 + 10 tier2 × 2 + 50 tier1 × 1 = 15 + 20 + 50 = 85
         est = budget.estimate_calls(tier3_count=3, tier2_count=10, tier1_count=50)
         assert est == 85
+
+
+class TestChainRiskScoreSinkCallSites:
+    def test_score_uses_sink_call_sites_when_present(self):
+        """When a chain has SinkCallSite records attached, use their category
+        instead of falling back to classify_sink regex."""
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory,
+        )
+        from shannon_core.code_index.models import CodeIndex
+
+        # middle block has a SQL sink call site
+        sql_site = SinkCallSite(
+            id="svc.py:query:execute:2:4",
+            caller_id="svc.py:query:1",
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=2,
+            column=4,
+            dangerous_slots=[],
+            rule_id="py-db-cursor-execute",
+        )
+
+        blocks = {
+            "app.py:handler:1": _block("handler", "app.py", 1),
+            "svc.py:query:1": _block("query", "svc.py", 1, source="def query(): pass"),
+        }
+        chain = CallChain(
+            entry_point_id="app.py:handler:1",
+            path=["app.py:handler:1", "svc.py:query:1"],
+            depth=1, has_unresolved=False,
+        )
+
+        score = ChainRiskScore.score(
+            chain, blocks, [], set(),
+            sink_call_sites=[sql_site],
+        )
+        assert score.sink_danger == 10  # SQL = 10
+
+    def test_score_picks_max_danger_across_chain(self):
+        """Chain has multiple sinks (one SQL, one LOG) — pick the max."""
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory,
+        )
+        sql_site = SinkCallSite(
+            id="svc.py:f:execute:2:4",
+            caller_id="svc.py:f:1",
+            callee_name="execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="sql_raw",
+            file_path="svc.py",
+            line=2,
+            column=4,
+            dangerous_slots=[],
+            rule_id="py-db-cursor-execute",
+        )
+        log_site = SinkCallSite(
+            id="app.py:handler:info:3:4",
+            caller_id="app.py:handler:1",
+            callee_name="info",
+            callee_receiver="logger",
+            category=SinkCategory.LOG,
+            sink_subtype="log_info",
+            file_path="app.py",
+            line=3,
+            column=4,
+            dangerous_slots=[],
+            rule_id="py-log-info",
+        )
+
+        blocks = {
+            "app.py:handler:1": _block("handler", "app.py", 1),
+            "svc.py:f:1": _block("f", "svc.py", 1),
+        }
+        chain = CallChain(
+            entry_point_id="app.py:handler:1",
+            path=["app.py:handler:1", "svc.py:f:1"],
+            depth=1, has_unresolved=False,
+        )
+
+        score = ChainRiskScore.score(
+            chain, blocks, [], set(),
+            sink_call_sites=[sql_site, log_site],
+        )
+        assert score.sink_danger == 10  # SQL wins over LOG
+
+    def test_score_falls_back_when_no_sink_call_sites(self):
+        """Legacy mode: no SinkCallSite → fall back to classify_sink regex."""
+        blocks = {
+            "app.py:handler:1": _block("handler", "app.py", 1),
+            "svc.py:query:1": _block("query", "svc.py", 1,
+                                       source="def query(sql): cursor.execute(sql)"),
+        }
+        chain = CallChain(
+            entry_point_id="app.py:handler:1",
+            path=["app.py:handler:1", "svc.py:query:1"],
+            depth=1, has_unresolved=False,
+        )
+
+        # No sink_call_sites passed → backward-compatible behavior
+        score = ChainRiskScore.score(chain, blocks, [], set())
+        assert score.sink_danger == 10  # classify_sink regex still matches
+
+    def test_score_xss_uses_template_render_score(self):
+        """XSS category maps to TEMPLATE_RENDER (closest legacy fit)."""
+        from shannon_core.code_index.parameter_models import (
+            SinkCallSite, SinkCategory,
+        )
+        xss_site = SinkCallSite(
+            id="app.ts:f:innerHTML:1:0",
+            caller_id="app.ts:f:1",
+            callee_name="innerHTML",
+            callee_receiver=None,
+            category=SinkCategory.XSS,
+            sink_subtype="xss_dom",
+            file_path="app.ts",
+            line=1,
+            column=0,
+            dangerous_slots=[],
+            rule_id="ts-innerhtml-call",
+            needs_review=True,
+        )
+        blocks = {
+            "app.ts:f:1": _block("f", "app.ts", 1),
+        }
+        chain = CallChain(
+            entry_point_id="app.ts:f:1",
+            path=["app.ts:f:1"],
+            depth=0, has_unresolved=False,
+        )
+
+        score = ChainRiskScore.score(
+            chain, blocks, [], set(),
+            sink_call_sites=[xss_site],
+        )
+        # TEMPLATE_RENDER = 7
+        assert score.sink_danger == 7

@@ -16,7 +16,9 @@ import logging
 from pydantic import BaseModel
 
 from shannon_core.code_index.models import CallChain, FuncBlock
-from shannon_core.code_index.parameter_models import SinkType, TaintFlow
+from shannon_core.code_index.parameter_models import (
+    SinkCallSite, SinkCategory, SinkType, TaintFlow,
+)
 from shannon_core.code_index.taint_propagator import classify_sink
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,20 @@ SINK_DANGER_SCORES: dict[SinkType, int] = {
     SinkType.HTTP_REQUEST: 6,
     SinkType.LOG_WRITE: 3,
     SinkType.UNKNOWN: 0,
+}
+
+# Sink danger scores by category (Spec B). Used when SinkCallSite records are
+# available; SINK_DANGER_SCORES (by SinkType) remains the classify_sink fallback.
+SINK_CATEGORY_DANGER_SCORES: dict[SinkCategory, int] = {
+    SinkCategory.SQL: 10,
+    SinkCategory.COMMAND: 10,
+    SinkCategory.DESERIALIZATION: 9,
+    SinkCategory.FILE: 8,
+    SinkCategory.TEMPLATE: 7,
+    SinkCategory.SSRF: 6,
+    SinkCategory.XSS: 7,        # code-level XSS, treated same as template render
+    SinkCategory.REDIRECT: 5,
+    SinkCategory.LOG: 3,
 }
 
 
@@ -61,20 +77,24 @@ class ChainRiskScore(BaseModel):
         blocks_by_id: dict[str, FuncBlock],
         taint_flows: list[TaintFlow],
         auth_middleware_ids: set[str],
+        sink_call_sites: list[SinkCallSite] | None = None,
     ) -> "ChainRiskScore":
-        """Score a call chain based on its risk characteristics."""
+        """Score a call chain based on its risk characteristics.
+
+        Args:
+            sink_call_sites: Spec B output. If provided, sink_danger is the max
+                danger across all chain nodes that contain a SinkCallSite. If
+                None or empty, falls back to legacy classify_sink regex on the
+                terminal node.
+        """
         chain_id = "→".join(chain.path[:4])  # Truncate for display
 
-        # Sink danger: check the terminal function
-        sink_node_id = chain.path[-1] if chain.path else None
-        sink_danger = 0
-        if sink_node_id:
-            sink_block = blocks_by_id.get(sink_node_id)
-            if sink_block:
-                sink_type = classify_sink(sink_block)
-                sink_danger = SINK_DANGER_SCORES.get(sink_type, 0)
+        sink_danger = cls._compute_sink_danger(
+            chain, blocks_by_id, sink_call_sites,
+        )
 
         # Taint completeness: how many flows reach the sink
+        sink_node_id = chain.path[-1] if chain.path else None
         reaching = [f for f in taint_flows if f.sink_func_id == sink_node_id]
         taint_completeness = min(10, len(reaching) * 10)
 
@@ -98,6 +118,33 @@ class ChainRiskScore(BaseModel):
                      chain_id, sink_danger, taint_completeness, auth_gap, depth,
                      score.total, score.tier)
         return score
+
+    @staticmethod
+    def _compute_sink_danger(
+        chain: CallChain,
+        blocks_by_id: dict[str, FuncBlock],
+        sink_call_sites: list[SinkCallSite] | None,
+    ) -> int:
+        """Spec B upgrade: take max danger across all chain nodes' SinkCallSites.
+        Falls back to classify_sink on terminal node if no SinkCallSites."""
+        if sink_call_sites:
+            chain_node_ids = set(chain.path)
+            dangers = [
+                SINK_CATEGORY_DANGER_SCORES.get(s.category, 0)
+                for s in sink_call_sites
+                if s.caller_id in chain_node_ids
+            ]
+            if dangers:
+                return max(dangers)
+
+        # Fallback: legacy classify_sink on terminal node
+        sink_node_id = chain.path[-1] if chain.path else None
+        if sink_node_id:
+            sink_block = blocks_by_id.get(sink_node_id)
+            if sink_block:
+                sink_type = classify_sink(sink_block)
+                return SINK_DANGER_SCORES.get(sink_type, 0)
+        return 0
 
 
 class AuditBudget(BaseModel):
