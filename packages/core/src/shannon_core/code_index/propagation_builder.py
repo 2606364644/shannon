@@ -164,6 +164,7 @@ def analyze_intra(
                 if transformation and transformation.startswith("sanitize_hint:"):
                     has_sanitizer_global = True
             # 不管 LHS 是否被污染，sanitizer 名只要出现就记 has_sanitizer_hint
+            # （覆盖 RHS 含 sanitizer 但未引用 tainted 变量的情况）
             if _has_sanitizer(rhs):
                 has_sanitizer_global = True
 
@@ -242,7 +243,14 @@ def _detect_transformation(rhs: str) -> str | None:
 
 
 def _has_sanitizer(expr: str) -> bool:
-    return any(h in expr for h in SANITIZER_HINTS)
+    """Best-effort sanitizer detection using word boundaries.
+
+    A plain substring match would falsely flag variable names like
+    ``escaped_var`` or ``quote_str``. Word boundaries (\\b) ensure we match
+    sanitizer *calls* (escape(...), htmlspecialchars(...), bleach.clean(...))
+    without penalizing innocent identifiers that merely contain the substring.
+    """
+    return any(re.search(r"\b" + re.escape(h) + r"\b", expr) for h in SANITIZER_HINTS)
 
 
 def build_propagation_graph(
