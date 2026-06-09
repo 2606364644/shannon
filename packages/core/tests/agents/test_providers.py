@@ -2,6 +2,7 @@
 测试 Provider 抽象层
 """
 
+import logging
 import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1497,3 +1498,76 @@ class TestClassifyResultFailure:
         code, retryable = self.provider._classify_result_failure("result", True, None, None)
         assert code == "TransientError"
         assert retryable is True
+
+
+def _stream(result_message, *events):
+    """Build a mock query that yields events then the terminal ResultMessage."""
+    async def mock_query(*, prompt, options):
+        for e in events:
+            yield e
+        yield result_message
+    return mock_query
+
+
+class TestCallResultFailureLayer:
+    """L2: call() classifies structured result failures and emits diagnostics."""
+
+    @pytest.mark.asyncio
+    async def test_error_max_turns_via_call(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(
+            subtype="error_max_turns",
+            duration_ms=1000, duration_api_ms=500,
+            is_error=True, num_turns=200, session_id="t",
+        )
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+            result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
+        assert result.success is False
+        assert result.error_code == "ExecutionLimitError"
+        assert result.retryable is False
+        assert "SDK result failure" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_api_error_429_via_call(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=100, duration_api_ms=50,
+            is_error=True, num_turns=1, session_id="t",
+            api_error_status=429,
+        )
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+            result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
+        assert result.success is False
+        assert result.error_code == "RateLimitError"
+        assert result.retryable is True
+
+    @pytest.mark.asyncio
+    async def test_logs_non_end_turn_stop_reason(self, caplog):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=100, duration_api_ms=50,
+            is_error=False, num_turns=1, session_id="t",
+            stop_reason="max_duration",
+        )
+        with caplog.at_level(logging.WARNING, logger="shannon_core.agents.providers_anthropic"):
+            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+                result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
+        assert result.success is True  # non-end_turn stop is diagnostic, not failure
+        assert any("stop_reason" in r.getMessage() and "max_duration" in r.getMessage()
+                   for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_logs_permission_denials(self, caplog):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=100, duration_api_ms=50,
+            is_error=False, num_turns=1, session_id="t",
+            permission_denials=[{"tool": "bash"}],
+        )
+        with caplog.at_level(logging.INFO, logger="shannon_core.agents.providers_anthropic"):
+            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+                await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
+        assert any("permission denials" in r.getMessage().lower() for r in caplog.records)

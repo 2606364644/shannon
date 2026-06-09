@@ -107,6 +107,38 @@ class AnthropicProvider:
             turn_count = getattr(result_message, "turn_count", 1)
             result = self._extract_result(result_message, duration, model, turn_count)
 
+            # L2: read result-level metadata mounted by _execute_query (L1)
+            subtype = getattr(result_message, "result_subtype", None)
+            is_error = getattr(result_message, "result_is_error", False)
+            api_error_status = getattr(result_message, "api_error_status", None)
+            result_errors = getattr(result_message, "result_errors", None)
+
+            # L2 diagnostics: surface early-stops and permission denials
+            if result.stop_reason and result.stop_reason != "end_turn":
+                logger.warning(
+                    "Agent stopped early (stop_reason=%s); may indicate budget/refusal",
+                    result.stop_reason,
+                )
+            permission_denials = getattr(result_message, "permission_denials", None)
+            if permission_denials:
+                logger.info(
+                    "Tool permission denials recorded: %d denial(s)",
+                    len(permission_denials),
+                )
+
+            # L2: result-failure layer — structured failure signals (highest reliability),
+            # evaluated before the spending-cap heuristics.
+            if not result.success:
+                error_code, retryable = self._classify_result_failure(
+                    subtype, is_error, api_error_status, result_errors
+                )
+                result.error_code = error_code
+                result.retryable = retryable
+                result.error = result.error or (
+                    f"SDK result failure: subtype={subtype}, api_error_status={api_error_status}"
+                )
+                return result
+
             # Layer 1: message-level spending cap detection
             dispatcher_cap_detected = getattr(result_message, "_dispatcher_spending_cap", False)
             if dispatcher_cap_detected:
@@ -116,7 +148,9 @@ class AnthropicProvider:
                 return result
 
             # Layer 2: behavioral spending cap detection
-            if self._detect_spending_cap_behavior(result, turn_count):
+            # Skip when a non-end_turn stop_reason explains the early termination
+            # (e.g., max_duration) — not a spending cap.
+            if not result.stop_reason and self._detect_spending_cap_behavior(result, turn_count):
                 result.success = False
                 result.retryable = True
                 result.error = result.error or "spending cap (behavioral detection)"
