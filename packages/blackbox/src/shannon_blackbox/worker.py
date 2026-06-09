@@ -5,6 +5,7 @@ from temporalio.worker import Worker
 
 from .pipeline.activities import (
     run_blackbox_preflight,
+    run_blackbox_auth_validation,
     run_recon,
     run_exploit_agent,
     assemble_report,
@@ -41,7 +42,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         client=client,
         task_queue=task_queue,
         workflows=[BlackboxScanWorkflow],
-        activities=[run_blackbox_preflight, run_recon, run_exploit_agent, assemble_report, run_report_agent],
+        activities=[run_blackbox_preflight, run_blackbox_auth_validation, run_recon, run_exploit_agent, assemble_report, run_report_agent],
     )
 
     async with worker:

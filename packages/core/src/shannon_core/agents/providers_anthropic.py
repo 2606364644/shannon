@@ -9,6 +9,7 @@ Anthropic Provider 实现
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -17,6 +18,19 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from shannon_core.models.errors import classify_error_for_temporal
 
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
+
+logger = logging.getLogger(__name__)
+
+
+def _on_claude_stderr(line: str) -> None:
+    """转发 Claude Code 子进程的真实 stderr，避免 SDK 吞掉错误。
+
+    claude_agent_sdk 仅在注册了回调时才会捕获 CLI 的 stderr；而它的
+    ProcessError 会把 stderr 字段替换成占位字符串
+    (``"Check stderr output for details"``)，从而掩盖真正的失败原因
+    (例如 exit 143 / SIGTERM 的真实触发点)。逐行打日志以恢复可见性。
+    """
+    logger.warning("[claude-cli stderr] %s", line.rstrip())
 
 
 class AnthropicProvider:
@@ -193,6 +207,10 @@ class AnthropicProvider:
 
         # Environment variables via _build_sdk_env
         options.env = self._build_sdk_env()
+
+        # 捕获 Claude CLI 子进程的真实 stderr。否则 SDK 会丢弃 stderr，
+        # 用占位字符串掩盖失败原因。
+        options.stderr = _on_claude_stderr
 
         return options
 
