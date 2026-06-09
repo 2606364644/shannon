@@ -52,10 +52,19 @@ def build_chain_audit_input(
     sections.append(f"## Taint Flow (from Parameter Propagation Graph)\n"
                     f"{format_taint_flow_summary(taint_flows)}\n")
 
-    # Sinks
+    # Sinks — Spec A 升级
     sinks = []
     for flow in taint_flows:
-        if flow.sink_type and flow.sink_func_id:
+        if flow.sink_call_site_id:
+            slot = flow.sink_slot.value if flow.sink_slot else "generic"
+            sanitizer = " [sanitizer_hint]" if flow.has_sanitizer_hint else ""
+            sinks.append(
+                f"- {slot} sink at {flow.sink_call_site_id} "
+                f"(arg {flow.tainted_arg_index}, conf={flow.confidence:.2f})"
+                f"{sanitizer}"
+            )
+        elif flow.sink_type and flow.sink_func_id:
+            # 旧字段回退
             sink_label = flow.sink_type.value.replace("_", " ")
             # Capitalize first word only (e.g. "sql execution" → "SQL execution")
             first_space = sink_label.find(" ")
@@ -63,9 +72,7 @@ def build_chain_audit_input(
                 sink_label = sink_label[:first_space].upper() + sink_label[first_space:]
             else:
                 sink_label = sink_label.upper()
-            sinks.append(
-                f"- {sink_label} sink at {flow.sink_func_id}"
-            )
+            sinks.append(f"- {sink_label} sink at {flow.sink_func_id}")
     if sinks:
         sections.append("## Sinks in this chain\n" + "\n".join(sinks) + "\n")
     else:
@@ -122,9 +129,13 @@ def format_taint_flow_summary(flows: list[TaintFlow]) -> str:
             for step in flow.propagation_steps:
                 transform = f" [{step.transformation}]" if step.transformation else ""
                 path_parts.append(f"{step.to_param}{transform}")
-            sink_label = flow.sink_type.value if flow.sink_type else "unknown"
-            path_str = " → ".join(path_parts)
-            lines.append(f"- {flow.source_type.value}: {path_str} → {sink_label}")
+            if flow.sink_call_site_id:
+                slot = flow.sink_slot.value if flow.sink_slot else "generic"
+                sanitizer = " (sanitizer_hint)" if flow.has_sanitizer_hint else ""
+                tail = f"{slot}@arg{flow.tainted_arg_index}{sanitizer}"
+            else:
+                tail = flow.sink_type.value if flow.sink_type else "unknown"
+            lines.append(f"- {flow.source_type.value}: {' → '.join(path_parts)} → {tail}")
         else:
             lines.append(f"- {source_label} (no propagation steps)")
 
