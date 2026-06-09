@@ -22,7 +22,7 @@ def flask_repo(tmp_path) -> Path:
 
 
 class TestPropagationEndToEnd:
-    def test_param_graph_json_written_and_nonempty(self, flask_repo, tmp_path):
+    def test_param_graph_json_written_with_coverage(self, flask_repo, tmp_path):
         index = build_code_index(str(flask_repo))
         out = tmp_path / "out"
         json_path, _ = write_index_files(index, str(out))
@@ -33,9 +33,12 @@ class TestPropagationEndToEnd:
         assert "language_coverage" in data
         assert "python" in data["language_coverage"]
 
-    def test_param_graph_includes_sink_call_site_id(self, flask_repo, tmp_path):
-        """非空 flow 的 sink_call_site_id 必须形如
-        '{file}:{caller_func}:{callee}:{line}:{col}'。"""
+    def test_param_graph_schema_valid_when_no_flows(self, flask_repo, tmp_path):
+        """无 flow 时 schema 仍然合法 + 可解析。
+
+        build_code_index 阶段 chains=[]，所以 taint_flows 恒为 []，本测试实际
+        验证的是 schema 合法性；真正的非空 flow 校验要到 Task 10 注入真实 chain
+        后才能体现。"""
         index = build_code_index(str(flask_repo))
         out = tmp_path / "out"
         write_index_files(index, str(out))

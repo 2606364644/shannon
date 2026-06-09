@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from shannon_core.code_index.models import CodeIndex
+from shannon_core.code_index.models import CodeIndex, TypedParameter
 from shannon_core.code_index.models import AdjudicatedEntryPoint, AdjudicationResult, Verdict, EntryPointSource
 from shannon_core.code_index.parser import detect_language, discover_source_files
 from shannon_core.code_index.call_graph import resolve_edges, build_call_chains
@@ -19,6 +19,32 @@ from shannon_core.code_index.gitnexus_engine import GitNexusEngine
 from shannon_core.code_index.models import DegradationLevel, FileManifest
 
 logger = logging.getLogger(__name__)
+
+
+def _build_typed_params_by_block(index: CodeIndex) -> dict[str, list[TypedParameter]]:
+    """对每个 entry block 提取 typed parameters。
+
+    block.file_path 是相对 repo 的路径，需拼接 index.repository 根才能读到源文件。
+    extract_typed_parameters 在 Go/Java/PHP 上返回 [] 是预期行为（spec §4.3）。
+    单个 entry 提取失败不应影响整体，吞掉异常并 warning。
+    """
+    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
+    repo_root = Path(index.repository)
+    result: dict[str, list[TypedParameter]] = {}
+    for ep in index.entry_points:
+        block = next((b for b in index.blocks if b.id == ep.func_block_id), None)
+        if block is None:
+            continue
+        try:
+            tps = extract_typed_parameters(
+                repo_root / block.file_path, block.function_name,
+                block.start_line, index.language,
+            )
+        except Exception as exc:
+            logger.warning("typed param extraction failed for %s: %s", block.id, exc)
+            tps = []
+        result[block.id] = tps
+    return result
 
 
 def build_code_index(repo_path: str) -> CodeIndex:
@@ -97,21 +123,7 @@ def build_code_index(repo_path: str) -> CodeIndex:
     )
 
     # Spec A: parameter / taint propagation.
-    # block.file_path 是相对 repo 的路径，需拼接 repo 根才能读到源文件。
-    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
-    typed_params_by_block: dict[str, list] = {}
-    for ep in entry_points:
-        block = next((b for b in all_blocks if b.id == ep.func_block_id), None)
-        if block is None:
-            continue
-        try:
-            tps = extract_typed_parameters(
-                repo / block.file_path, block.function_name,
-                block.start_line, language,
-            )
-        except Exception:
-            tps = []
-        typed_params_by_block[block.id] = tps
+    typed_params_by_block = _build_typed_params_by_block(index)
 
     # 调用链在此阶段还没建（chains=[]）→ flows 为空；真实非空 flow 由
     # rebuild_call_chains 刷新 parameter_graph.json 时产生。本步确保传播被调用过。
@@ -215,22 +227,7 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     summary_path.write_text(generate_summary(index))
 
     # Spec A: 构建并写出 parameter_graph.json。
-    # block.file_path 相对 repo，需拼接 index.repository 根。
-    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
-    typed_params_by_block: dict[str, list] = {}
-    repo_root = Path(index.repository)
-    for ep in index.entry_points:
-        block = next((b for b in index.blocks if b.id == ep.func_block_id), None)
-        if block is None:
-            continue
-        try:
-            tps = extract_typed_parameters(
-                repo_root / block.file_path, block.function_name,
-                block.start_line, index.language,
-            )
-        except Exception:
-            tps = []
-        typed_params_by_block[block.id] = tps
+    typed_params_by_block = _build_typed_params_by_block(index)
 
     pgraph = build_propagation_graph(index, typed_params_by_block=typed_params_by_block)
 
@@ -349,25 +346,12 @@ def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
 
     # Spec A: chain 重建后传播图会变，刷新 parameter_graph.json。
     # updated 此时含真实的 chains → build_propagation_graph 产出非空 flows。
-    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
-    typed_params_by_block: dict[str, list] = {}
-    repo_root = Path(index.repository)
-    for ep in index.entry_points:
-        block = next((b for b in index.blocks if b.id == ep.func_block_id), None)
-        if block is None:
-            continue
-        try:
-            tps = extract_typed_parameters(
-                repo_root / block.file_path, block.function_name,
-                block.start_line, index.language,
-            )
-        except Exception:
-            tps = []
-        typed_params_by_block[block.id] = tps
+    typed_params_by_block = _build_typed_params_by_block(index)
 
     new_pgraph = build_propagation_graph(updated, typed_params_by_block=typed_params_by_block)
     pgraph_path = out / "parameter_graph.json"
     pgraph_path.write_text(new_pgraph.model_dump_json(indent=2))
+    logger.info("Refreshed parameter_graph.json: %d taint flows", len(new_pgraph.taint_flows))
 
     logger.info(
         "Rebuilt %d call chains from %d confirmed entry points",
