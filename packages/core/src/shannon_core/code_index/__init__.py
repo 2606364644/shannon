@@ -12,6 +12,7 @@ from shannon_core.code_index.entry_points import detect_entry_points
 from shannon_core.code_index.summary import generate_summary
 from shannon_core.code_index.parsers import get_parser
 from shannon_core.code_index.sink_detector import detect_sinks
+from shannon_core.code_index.propagation_builder import build_propagation_graph
 from shannon_core.code_index.degradation import build_degradation_report
 from shannon_core.code_index.file_discovery import discover_security_files
 from shannon_core.code_index.gitnexus_engine import GitNexusEngine
@@ -82,7 +83,7 @@ def build_code_index(repo_path: str) -> CodeIndex:
     sink_call_sites = detect_sinks(all_blocks, parser, source_provider=_provide_source)
     logger.info("Detected %d sink call sites", len(sink_call_sites))
 
-    return CodeIndex(
+    index = CodeIndex(
         repository=str(repo),
         language=language,
         total_blocks=len(all_blocks),
@@ -94,6 +95,30 @@ def build_code_index(repo_path: str) -> CodeIndex:
         chains=[],
         sink_call_sites=sink_call_sites,
     )
+
+    # Spec A: parameter / taint propagation.
+    # block.file_path 是相对 repo 的路径，需拼接 repo 根才能读到源文件。
+    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
+    typed_params_by_block: dict[str, list] = {}
+    for ep in entry_points:
+        block = next((b for b in all_blocks if b.id == ep.func_block_id), None)
+        if block is None:
+            continue
+        try:
+            tps = extract_typed_parameters(
+                repo / block.file_path, block.function_name,
+                block.start_line, language,
+            )
+        except Exception:
+            tps = []
+        typed_params_by_block[block.id] = tps
+
+    # 调用链在此阶段还没建（chains=[]）→ flows 为空；真实非空 flow 由
+    # rebuild_call_chains 刷新 parameter_graph.json 时产生。本步确保传播被调用过。
+    pgraph = build_propagation_graph(index, typed_params_by_block=typed_params_by_block)
+    logger.info("Built parameter propagation graph: %d taint flows", len(pgraph.taint_flows))
+
+    return index
 
 
 def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
@@ -179,7 +204,7 @@ def build_code_index_with_gitnexus(repo_path: str) -> CodeIndex:
 
 
 def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
-    """Write code_index.json and code_index_summary.md to output_dir."""
+    """Write code_index.json, code_index_summary.md, and parameter_graph.json."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -188,6 +213,29 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
 
     summary_path = out / "code_index_summary.md"
     summary_path.write_text(generate_summary(index))
+
+    # Spec A: 构建并写出 parameter_graph.json。
+    # block.file_path 相对 repo，需拼接 index.repository 根。
+    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
+    typed_params_by_block: dict[str, list] = {}
+    repo_root = Path(index.repository)
+    for ep in index.entry_points:
+        block = next((b for b in index.blocks if b.id == ep.func_block_id), None)
+        if block is None:
+            continue
+        try:
+            tps = extract_typed_parameters(
+                repo_root / block.file_path, block.function_name,
+                block.start_line, index.language,
+            )
+        except Exception:
+            tps = []
+        typed_params_by_block[block.id] = tps
+
+    pgraph = build_propagation_graph(index, typed_params_by_block=typed_params_by_block)
+
+    pgraph_path = out / "parameter_graph.json"
+    pgraph_path.write_text(pgraph.model_dump_json(indent=2))
 
     return json_path, summary_path
 
@@ -298,6 +346,28 @@ def rebuild_call_chains(deliverables_dir: str) -> CodeIndex:
     code_index_path.write_text(updated.model_dump_json(indent=2))
     summary_path = out / "code_index_summary.md"
     summary_path.write_text(generate_summary(updated))
+
+    # Spec A: chain 重建后传播图会变，刷新 parameter_graph.json。
+    # updated 此时含真实的 chains → build_propagation_graph 产出非空 flows。
+    from shannon_core.code_index.enhanced_parameters import extract_typed_parameters
+    typed_params_by_block: dict[str, list] = {}
+    repo_root = Path(index.repository)
+    for ep in index.entry_points:
+        block = next((b for b in index.blocks if b.id == ep.func_block_id), None)
+        if block is None:
+            continue
+        try:
+            tps = extract_typed_parameters(
+                repo_root / block.file_path, block.function_name,
+                block.start_line, index.language,
+            )
+        except Exception:
+            tps = []
+        typed_params_by_block[block.id] = tps
+
+    new_pgraph = build_propagation_graph(updated, typed_params_by_block=typed_params_by_block)
+    pgraph_path = out / "parameter_graph.json"
+    pgraph_path.write_text(new_pgraph.model_dump_json(indent=2))
 
     logger.info(
         "Rebuilt %d call chains from %d confirmed entry points",
