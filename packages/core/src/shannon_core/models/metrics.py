@@ -10,6 +10,7 @@ class AgentMetrics(BaseModel):
     num_turns: int | None = None
     model: str | None = None
     structured_output: dict | None = None
+    stop_reason: str | None = None
 
 class SessionMetadata(BaseModel):
     model_config = {"extra": "allow"}

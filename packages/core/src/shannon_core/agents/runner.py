@@ -80,6 +80,7 @@ class ClaudeRunResult:
     error: str | None = None
     retryable: bool = True
     error_code: str | None = None
+    stop_reason: str | None = None
     tokens: TokenUsage = field(default_factory=TokenUsage)
 
 async def run_claude_prompt(

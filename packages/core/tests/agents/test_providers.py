@@ -1381,3 +1381,25 @@ class TestExecuteQueryMountsResultMetadata:
         assert final.permission_denials == [{"tool": "bash"}]
         assert final.api_error_status == 429
         assert final.result_errors == ["max turns"]
+
+
+class TestStopReasonFields:
+    """L2: ClaudeRunResult and AgentMetrics carry stop_reason."""
+
+    def test_claude_run_result_has_stop_reason(self):
+        from shannon_core.agents.runner import ClaudeRunResult
+        result = ClaudeRunResult(text="ok", success=True, stop_reason="end_turn")
+        assert result.stop_reason == "end_turn"
+
+    def test_claude_run_result_stop_reason_default_none(self):
+        from shannon_core.agents.runner import ClaudeRunResult
+        assert ClaudeRunResult().stop_reason is None
+
+    def test_agent_metrics_has_stop_reason(self):
+        from shannon_core.models.metrics import AgentMetrics
+        metrics = AgentMetrics(duration_ms=10, stop_reason="max_duration")
+        assert metrics.stop_reason == "max_duration"
+
+    def test_agent_metrics_stop_reason_default_none(self):
+        from shannon_core.models.metrics import AgentMetrics
+        assert AgentMetrics(duration_ms=10).stop_reason is None
