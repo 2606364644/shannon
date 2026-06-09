@@ -8,6 +8,7 @@ build/
 .venv/
 .worktrees/
 .worktrees/
+.claude/worktrees/
 node_modules/
 workspaces/
 uv.lock
