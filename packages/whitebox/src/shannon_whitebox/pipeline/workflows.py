@@ -9,7 +9,7 @@ from temporalio.exceptions import CancelledError
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError
 
-from .shared import ActivityInput, PipelineInput, PipelineState
+from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgress
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
@@ -209,3 +209,16 @@ class WhiteboxScanWorkflow:
             if engine:
                 engine.cleanup_config(input.repo_path)
             cleanup_auth_state_sync(workspace_path)
+
+    @workflow.query
+    def pipeline_progress(self) -> PipelineProgress:
+        """返回当前工作流进度供 CLI 轮询。"""
+        elapsed_ns = workflow.time_ns() - int(self._state.start_time * 1e9)
+        return PipelineProgress(
+            workflow_id=workflow.info().workflow_id,
+            elapsed_ms=elapsed_ns // 1_000_000,
+            current_phase=self._state.current_phase,
+            current_agent=self._state.current_agent,
+            completed_agents=self._state.completed_agents,
+            status=self._state.status,
+        )
