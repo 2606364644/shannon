@@ -25,34 +25,6 @@ class SinkType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class PropagationStep(BaseModel):
-    """A single step in a taint propagation path."""
-    from_func_id: str
-    from_param: str
-    to_func_id: str
-    to_param: str
-    transformation: str | None = None
-    code_location: str = ""
-
-
-class TaintFlow(BaseModel):
-    """A complete taint flow from entry point to sink."""
-    entry_point_id: str
-    source_param: str
-    source_type: ParameterSource
-    propagation_steps: list[PropagationStep] = []
-    sink_func_id: str = ""
-    sink_type: SinkType | None = None
-
-
-class ParameterPropagationGraph(BaseModel):
-    """Complete parameter propagation graph for a repository."""
-    taint_flows: list[TaintFlow] = []
-
-
-# === Spec B: AST-precise sink detection ===
-
-
 class SlotContext(str, Enum):
     """Sink 输入位的安全上下文 —— 呼应原始项目的 slot 类型系统。"""
     SQL_VALUE = "sql_value"            # SQL-val/like/num —— 需参数绑定
@@ -63,6 +35,66 @@ class SlotContext(str, Enum):
     URL = "url"                        # SSRF —— 需协议/主机白名单
     DESERIALIZE_OBJ = "deserialize"    # 需可信来源+HMAC
     GENERIC = "generic"                # 未细分
+
+
+class PropagationStep(BaseModel):
+    """A single step in a taint propagation path."""
+    step_id: str = ""                 # "{flow_id}#s{n}"
+    from_func_id: str
+    from_param: str
+    to_func_id: str
+    to_param: str
+    transformation: str | None = None  # "concat" / "encode" / "format" / "sanitize_hint:<name>" / None
+    code_location: str = ""            # "{file}:{line}"
+    confidence: float = 1.0            # 本步映射的可信度
+
+
+class TaintFlow(BaseModel):
+    """A complete taint flow from entry point to sink.
+
+    Spec A 升级（Spec B §3.4 预留契约）：
+    - 用 sink_call_site_id 指向具体的 SinkCallSite.id
+    - sink_slot / tainted_arg_index 描述到达的精确槽位
+    - confidence = 整条链最弱步
+    - has_sanitizer_hint 仅提示，不判有效性（有效性由 Spec C 的 LLM）
+    - notes 显式标注不完备（如"未追踪容器字段"）
+
+    旧字段 sink_func_id / sink_type 保留为遗留兼容（旧测试 / 旧 param_graph.json
+    反序列化时仍可读）。新生产代码不应再写入它们。
+    """
+    flow_id: str = ""                 # "{entry_point_id}->{sink_call_site_id}"
+    entry_point_id: str
+    source_param: str
+    source_type: ParameterSource
+    propagation_steps: list[PropagationStep] = []
+
+    # 新：Spec A 精确终点
+    sink_call_site_id: str = ""
+    sink_slot: SlotContext = SlotContext.GENERIC
+    tainted_arg_index: int = -1       # -1 = 未约束 / variadic
+    confidence: float = 1.0
+    has_sanitizer_hint: bool = False
+    notes: str = ""
+
+    # 遗留：保留默认值供旧测试 / 旧 json 反序列化
+    sink_func_id: str = ""
+    sink_type: SinkType | None = None
+
+
+class ParameterPropagationGraph(BaseModel):
+    """Complete parameter propagation graph for a repository.
+
+    language_coverage: 实际跑过传播的语言（如 ["python", "typescript"]）。
+    skipped_languages: typed param 提取暂未支持、跳过传播的语言（如
+        ["go", "java", "php"]）— Spec C 据此提示 LLM。
+    """
+    taint_flows: list[TaintFlow] = []
+    language_coverage: list[str] = []
+    skipped_languages: list[str] = []
+
+
+# === Spec B: AST-precise sink detection ===
+# (SlotContext moved above PropagationStep to resolve TaintFlow forward ref)
 
 
 class DangerousSlot(BaseModel):
