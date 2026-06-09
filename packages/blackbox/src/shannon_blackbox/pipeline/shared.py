@@ -18,6 +18,7 @@ class BlackboxPipelineInput(BasePipelineInput):
 class BlackboxPipelineState:
     status: str = "running"
     current_phase: str | None = None
+    current_agent: str | None = None
     completed_agents: list[str] = field(default_factory=list)
     agent_metrics: dict[str, dict] = field(default_factory=dict)
     has_whitebox_results: bool = False
