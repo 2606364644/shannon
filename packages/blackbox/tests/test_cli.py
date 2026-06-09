@@ -515,3 +515,78 @@ def test_workspace_delete_cancelled(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
     assert ws.exists()
+
+
+def test_workspace_clean(tmp_path, monkeypatch):
+    """workspace clean should remove blackbox artifacts but keep session.json."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-clean", scan_type="blackbox")
+    (ws / "deliverables").mkdir()
+    (ws / "deliverables" / "injection_exploitation_evidence.md").write_text("evidence", encoding="utf-8")
+    (ws / "deliverables" / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    (ws / "agents").mkdir()
+    (ws / "agents" / "injection-exploit_001.log").write_text("log", encoding="utf-8")
+    (ws / "workflow.log").write_text("log data", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "clean", "bb-clean", "--force"])
+
+    assert result.exit_code == 0
+    assert "cleaned" in result.output.lower()
+    # session.json survives
+    assert (ws / "session.json").exists()
+    # Blackbox deliverable removed
+    assert not (ws / "deliverables" / "injection_exploitation_evidence.md").exists()
+    # Whitebox queue file preserved
+    assert (ws / "deliverables" / "injection_exploitation_queue.json").exists()
+
+
+def test_workspace_clean_not_found(tmp_path, monkeypatch):
+    """workspace clean with nonexistent name should exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "clean", "nonexistent", "--force"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+def test_workspace_clean_confirms(tmp_path, monkeypatch):
+    """workspace clean without --force should ask for confirmation."""
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-clean-confirm", scan_type="blackbox")
+    (ws / "workflow.log").write_text("log", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "clean", "bb-clean-confirm"], input="y\n")
+
+    assert result.exit_code == 0
+    assert "cleaned" in result.output.lower()
+
+
+def test_workspace_clean_cancelled(tmp_path, monkeypatch):
+    """workspace clean confirmation cancelled should not clean."""
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-clean-cancel", scan_type="blackbox")
+    (ws / "workflow.log").write_text("log", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "clean", "bb-clean-cancel"], input="n\n")
+
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()
+    assert (ws / "workflow.log").exists()

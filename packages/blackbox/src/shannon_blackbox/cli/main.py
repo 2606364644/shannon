@@ -372,5 +372,29 @@ def delete(workspace_name, force):
         raise SystemExit(1)
 
 
+@workspace.command()
+@click.argument("workspace_name")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+def clean(workspace_name, force):
+    """Clean scan artifacts from a workspace, preserving its structure."""
+    mgr = SessionManager(Path("workspaces"))
+    ws = mgr.get_workspace(workspace_name)
+    if ws is None:
+        click.echo(f"Workspace not found: {workspace_name}")
+        raise SystemExit(1)
+
+    click.echo(f"Cleaning workspace: {workspace_name}")
+    click.echo(f"  Will remove:  blackbox deliverables, blackbox agent logs, workflow.log, .playwright*/")
+    click.echo(f"  Will preserve: session.json, exploitation queues, recon data")
+
+    if not force:
+        if not click.confirm("Proceed with cleaning?", default=False):
+            click.echo("Cleaning cancelled.")
+            return
+
+    mgr.clean_workspace(ws, scan_type="blackbox")
+    click.echo(f"✅ Workspace '{workspace_name}' cleaned.")
+
+
 def main():
     cli()
