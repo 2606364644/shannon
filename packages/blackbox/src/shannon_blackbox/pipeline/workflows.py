@@ -143,6 +143,8 @@ class BlackboxScanWorkflow:
                 )
 
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
+                self._state.current_phase = "recon-blackbox"
+                self._state.current_agent = AgentName.RECON_BLACKBOX.value
                 recon_input = BlackboxActivityInput(**{**act_input.__dict__})
                 metrics = await workflow.execute_activity(
                     activities.run_recon, recon_input,
@@ -151,8 +153,11 @@ class BlackboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.RECON_BLACKBOX.value)
                 self._state.agent_metrics[AgentName.RECON_BLACKBOX.value] = metrics
+                self._state.current_agent = None
 
             if input.exploit:
+                self._state.current_phase = "exploitation"
+                self._state.current_agent = "pipelines"
                 # Queue gating: validate queue files before scheduling exploit agents
                 validation_results = []
                 exploit_tasks = []
@@ -178,6 +183,7 @@ class BlackboxScanWorkflow:
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
                     if agent_name.value not in self._state.completed_agents:
+                        self._state.current_agent = agent_name.value
                         session_id = get_session_id(agent_name.value)
                         engine.write_config(input.repo_path, session_id=session_id)
                         exploit_input = BlackboxActivityInput(
@@ -259,12 +265,16 @@ class BlackboxScanWorkflow:
 
                     logger.info(format_exploit_summary(outcomes))
 
+            self._state.current_phase = "reporting"
+            self._state.current_agent = "assemble-report"
             await workflow.execute_activity(
                 activities.assemble_report, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
             )
+            self._state.current_agent = None
 
             if AgentName.REPORT.value not in self._state.completed_agents:
+                self._state.current_agent = AgentName.REPORT.value
                 metrics = await workflow.execute_activity(
                     activities.run_report_agent, act_input,
                     start_to_close_timeout=timedelta(hours=1),
@@ -272,6 +282,7 @@ class BlackboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.REPORT.value)
                 self._state.agent_metrics[AgentName.REPORT.value] = metrics
+                self._state.current_agent = None
 
             await workflow.execute_activity(
                 activities.finalize_report, act_input,
@@ -286,9 +297,11 @@ class BlackboxScanWorkflow:
                 self._state.error_code = error_type
             else:
                 self._state.status = "completed"
+            self._state.current_phase = None
             return self._state
         except CancelledError:
             self._state.status = "cancelled"
+            self._state.current_phase = None
             return self._state
         finally:
             cleanup_settings()
