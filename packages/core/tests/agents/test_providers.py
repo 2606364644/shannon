@@ -1403,3 +1403,48 @@ class TestStopReasonFields:
     def test_agent_metrics_stop_reason_default_none(self):
         from shannon_core.models.metrics import AgentMetrics
         assert AgentMetrics(duration_ms=10).stop_reason is None
+
+
+def _result_msg(**mounted):
+    """Build a ResultMessage and apply mounted metadata attrs (as _execute_query does)."""
+    msg = ResultMessage(
+        subtype="result",
+        duration_ms=10,
+        duration_api_ms=5,
+        is_error=False,
+        num_turns=1,
+        session_id="test",
+    )
+    for k, v in mounted.items():
+        setattr(msg, k, v)
+    return msg
+
+
+class TestExtractResultFailureSemantics:
+    """L2: _extract_result derives success from is_error/subtype and persists stop_reason."""
+
+    def test_success_when_no_error(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = _result_msg(result_is_error=False, result_subtype="result", stop_reason="end_turn")
+        result = provider._extract_result(msg, duration=10, model="m", turn_count=1)
+        assert result.success is True
+        assert result.stop_reason == "end_turn"
+
+    def test_is_error_sets_failure(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = _result_msg(result_is_error=True, result_subtype="result")
+        result = provider._extract_result(msg, duration=10, model="m", turn_count=1)
+        assert result.success is False
+
+    def test_error_subtype_sets_failure(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        # is_error not set True, but subtype starts with error_ -> still failure
+        msg = _result_msg(result_is_error=False, result_subtype="error_max_turns")
+        result = provider._extract_result(msg, duration=10, model="m", turn_count=1)
+        assert result.success is False
+
+    def test_stop_reason_persisted(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = _result_msg(result_is_error=False, result_subtype="result", stop_reason="refusal")
+        result = provider._extract_result(msg, duration=10, model="m", turn_count=1)
+        assert result.stop_reason == "refusal"

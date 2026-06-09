@@ -294,14 +294,22 @@ class AnthropicProvider:
         if hasattr(result_message, "structured_output") and result_message.structured_output:
             structured_output = result_message.structured_output
 
+        # L2: derive success from result-level failure semantics + persist stop_reason.
+        # Reads the metadata mounted by _execute_query (L1).
+        is_error = getattr(result_message, "result_is_error", False)
+        subtype = getattr(result_message, "result_subtype", None)
+        stop_reason = getattr(result_message, "stop_reason", None)
+        success = not (is_error or (subtype is not None and subtype.startswith("error_")))
+
         return ClaudeRunResult(
             text=text,
-            success=True,
+            success=success,
             duration=duration,
             turns=turn_count,
             cost=cost,
             model=model,
             structured_output=structured_output,
+            stop_reason=stop_reason,
             tokens=tokens,
         )
 
