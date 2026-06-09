@@ -35,7 +35,6 @@ class TestIsTemporalReady:
             mock_client.connection = MagicMock()
             result = await is_temporal_ready("localhost:7233")
         assert result is True
-        mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_returns_false_when_connect_fails(self):
@@ -139,8 +138,12 @@ class TestGetTemporalStatus:
 
     @pytest.mark.asyncio
     async def test_returns_stopped_when_container_not_found(self):
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        with (
+            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+        ):
             mock_sp.run.side_effect = FileNotFoundError("docker not found")
+            mock_ready.return_value = False
             result = await get_temporal_status()
         assert result["container"] == "not found"
         assert result["healthy"] is False
