@@ -166,6 +166,72 @@ class SessionManager:
         shutil.rmtree(ws)
         return True
 
+    def clean_workspace(self, workspace_path: Path, scan_type: str) -> None:
+        """Remove scan artifacts from a workspace, preserving session.json.
+
+        scan_type controls which artifacts are removed:
+          - "whitebox": removes deliverables/, agents/, prompts/, scratchpad/,
+            workflow.log, .playwright/, .playwright-cli/
+          - "blackbox": removes blackbox-specific deliverables and agent logs,
+            truncates workflow.log, removes .playwright dirs
+        """
+        import fnmatch
+
+        if scan_type == "whitebox":
+            for name in ("deliverables", "agents", "prompts", "scratchpad"):
+                target = workspace_path / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+            for name in ("workflow.log",):
+                target = workspace_path / name
+                if target.exists():
+                    target.unlink()
+            for name in (".playwright", ".playwright-cli"):
+                target = workspace_path / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+
+        elif scan_type == "blackbox":
+            # Remove blackbox-specific deliverables
+            deliverables_dir = workspace_path / "deliverables"
+            if deliverables_dir.is_dir():
+                bb_deliverable_patterns = [
+                    "*_exploitation_evidence.md",
+                    "*_findings.md",
+                    "comprehensive_security_assessment_report.md",
+                ]
+                for f in deliverables_dir.iterdir():
+                    if any(fnmatch.fnmatch(f.name, p) for p in bb_deliverable_patterns):
+                        f.unlink()
+
+            # Remove blackbox agent logs
+            agents_dir = workspace_path / "agents"
+            if agents_dir.is_dir():
+                bb_log_patterns = [
+                    "*-exploit_*.log",
+                    "*-validate-authentication_*.log",
+                ]
+                for f in agents_dir.iterdir():
+                    if any(fnmatch.fnmatch(f.name, p) for p in bb_log_patterns):
+                        f.unlink()
+
+            # Truncate workflow.log
+            workflow_log = workspace_path / "workflow.log"
+            if workflow_log.exists():
+                workflow_log.write_text("", encoding="utf-8")
+
+            # Remove playwright dirs
+            for name in (".playwright", ".playwright-cli"):
+                target = workspace_path / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+
+        # Reset session metadata
+        self.update_session(workspace_path, {
+            "completed_agents": [],
+            "deliverables_summary": None,
+        })
+
     def _handle_workspace_links(self, workspace_path: Path) -> None:
         """Update linked workspaces before deleting this one."""
         data = self.get_session_data(workspace_path)

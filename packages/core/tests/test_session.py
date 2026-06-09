@@ -247,3 +247,80 @@ def test_delete_workspace_handles_already_deleted_linked_ws(tmp_path):
     # Should not raise
     result = mgr.delete_workspace("wb-orphan")
     assert result is True
+
+
+def test_clean_workspace_whitebox(tmp_path):
+    """clean_workspace with whitebox should remove artifacts but keep session.json."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="wb-clean", scan_type="whitebox")
+    from shannon_core.models.agents import AgentName
+    mgr.mark_agent_completed(ws, AgentName.RECON)
+    # Create artifacts
+    (ws / "deliverables").mkdir()
+    (ws / "deliverables" / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    (ws / "agents").mkdir()
+    (ws / "agents" / "recon.log").write_text("log data", encoding="utf-8")
+    (ws / "prompts").mkdir()
+    (ws / "prompts" / "recon.txt").write_text("prompt", encoding="utf-8")
+    (ws / "scratchpad").mkdir()
+    (ws / "scratchpad" / "temp.txt").write_text("temp", encoding="utf-8")
+    (ws / "workflow.log").write_text("workflow log", encoding="utf-8")
+    (ws / ".playwright").mkdir()
+    (ws / ".playwright-cli").mkdir()
+
+    mgr.clean_workspace(ws, scan_type="whitebox")
+
+    # session.json must survive
+    assert (ws / "session.json").exists()
+    # completed_agents should be reset
+    data = json.loads((ws / "session.json").read_text(encoding="utf-8"))
+    assert data["completed_agents"] == []
+    assert data["deliverables_summary"] is None
+    # Artifact dirs/files should be gone
+    assert not (ws / "deliverables").exists()
+    assert not (ws / "agents").exists()
+    assert not (ws / "prompts").exists()
+    assert not (ws / "scratchpad").exists()
+    assert not (ws / "workflow.log").exists()
+    assert not (ws / ".playwright").exists()
+    assert not (ws / ".playwright-cli").exists()
+
+
+def test_clean_workspace_blackbox(tmp_path):
+    """clean_workspace with blackbox should remove blackbox-specific artifacts."""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-clean", scan_type="blackbox")
+    # Create blackbox-style artifacts
+    (ws / "deliverables").mkdir()
+    (ws / "deliverables" / "injection_exploitation_evidence.md").write_text("evidence", encoding="utf-8")
+    (ws / "deliverables" / "xss_findings.md").write_text("findings", encoding="utf-8")
+    (ws / "deliverables" / "comprehensive_security_assessment_report.md").write_text("report", encoding="utf-8")
+    (ws / "deliverables" / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    (ws / "agents").mkdir()
+    (ws / "agents" / "injection-exploit_001.log").write_text("exploit log", encoding="utf-8")
+    (ws / "agents" / "ssrf-validate-authentication_002.log").write_text("auth log", encoding="utf-8")
+    (ws / "agents" / "recon.log").write_text("recon log", encoding="utf-8")
+    (ws / "workflow.log").write_text("workflow log", encoding="utf-8")
+    (ws / ".playwright").mkdir()
+    (ws / ".playwright-cli").mkdir()
+
+    mgr.clean_workspace(ws, scan_type="blackbox")
+
+    # session.json must survive
+    assert (ws / "session.json").exists()
+    # Blackbox-specific deliverables removed
+    assert not (ws / "deliverables" / "injection_exploitation_evidence.md").exists()
+    assert not (ws / "deliverables" / "xss_findings.md").exists()
+    assert not (ws / "deliverables" / "comprehensive_security_assessment_report.md").exists()
+    # Exploitation queues are NOT removed (they are whitebox deliverables)
+    assert (ws / "deliverables" / "injection_exploitation_queue.json").exists()
+    # Blackbox agent logs removed
+    assert not (ws / "agents" / "injection-exploit_001.log").exists()
+    assert not (ws / "agents" / "ssrf-validate-authentication_002.log").exists()
+    # Non-blackbox agent logs kept
+    assert (ws / "agents" / "recon.log").exists()
+    # workflow.log truncated (empty file remains)
+    assert (ws / "workflow.log").read_text() == ""
+    # Playwright dirs removed
+    assert not (ws / ".playwright").exists()
+    assert not (ws / ".playwright-cli").exists()
