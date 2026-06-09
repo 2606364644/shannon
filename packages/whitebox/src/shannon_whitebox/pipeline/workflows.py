@@ -110,6 +110,8 @@ class WhiteboxScanWorkflow:
 
         try:
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
+                self._state.current_phase = "pre-recon"
+                self._state.current_agent = AgentName.PRE_RECON.value
                 pre_recon_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
                 metrics = await workflow.execute_activity(
                     activities.run_agent, pre_recon_input,
@@ -133,8 +135,11 @@ class WhiteboxScanWorkflow:
                 )
                 if self._state.code_index_stats:
                     self._state.code_index_stats["total_chains"] = rebuild_result.get("total_chains", 0)
+                self._state.current_agent = None
 
             if AgentName.RECON.value not in self._state.completed_agents:
+                self._state.current_phase = "recon"
+                self._state.current_agent = AgentName.RECON.value
                 recon_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.RECON.value})
                 metrics = await workflow.execute_activity(
                     activities.run_agent, recon_input,
@@ -142,6 +147,7 @@ class WhiteboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.RECON.value)
                 self._state.agent_metrics[AgentName.RECON.value] = metrics
+                self._state.current_agent = None
 
             # Risk scoring — produce tiered audit plan
             risk_result = await workflow.execute_activity(
@@ -156,10 +162,12 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
             )
 
+            self._state.current_phase = "vulnerability-analysis"
             vuln_tasks = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")
                 if agent_name.value not in self._state.completed_agents:
+                    self._state.current_agent = agent_name.value
                     vuln_input = ActivityInput(**{**act_input.__dict__, "workspace_name": agent_name.value})
                     vuln_tasks.append(
                         workflow.execute_activity(
@@ -187,10 +195,13 @@ class WhiteboxScanWorkflow:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
 
+            self._state.current_phase = "reporting"
+            self._state.current_agent = "render-findings"
             await workflow.execute_activity(
                 activities.render_findings, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
             )
+            self._state.current_agent = None
 
             # Set final status based on whether any agents failed
             if self._state.failed_agents:
@@ -200,9 +211,11 @@ class WhiteboxScanWorkflow:
                 self._state.error_code = error_type
             else:
                 self._state.status = "completed"
+            self._state.current_phase = None
             return self._state
         except CancelledError:
             self._state.status = "cancelled"
+            self._state.current_phase = None
             return self._state
         finally:
             cleanup_settings()
