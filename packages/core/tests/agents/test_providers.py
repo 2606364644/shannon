@@ -1327,6 +1327,24 @@ class TestTierModelEnvVarIntegration:
         assert provider._get_model("small") == "global-model"
 
 
+class TestBuildOptionsMaxTurns:
+    """L2 (precondition): _build_options sets max_turns (default 200, env-overridable)."""
+
+    def test_default_max_turns(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        with patch.dict(os.environ, {}, clear=True):
+            options = provider._build_options(cwd="/tmp", model="claude-sonnet-4-6")
+        assert options.max_turns == 200
+
+    def test_env_override_max_turns(self):
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        with patch.dict(os.environ, {"CLAUDE_MAX_TURNS": "50"}, clear=True):
+            options = provider._build_options(cwd="/tmp", model="claude-sonnet-4-6")
+        assert options.max_turns == 50
+
+
 class TestExecuteQueryMountsResultMetadata:
     """L1: _execute_query mounts dispatcher result-metadata onto the final ResultMessage."""
 

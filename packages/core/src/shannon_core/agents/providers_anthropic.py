@@ -196,6 +196,11 @@ class AnthropicProvider:
             permission_mode="bypassPermissions",  # 无交互环境必需
         )
 
+        # max_turns: high "runaway" ceiling. Single-agent pentest scans finish in
+        # tens of turns; 200 is a safety net. Tunable via CLAUDE_MAX_TURNS.
+        max_turns = int(os.getenv("CLAUDE_MAX_TURNS", "200"))
+        options.max_turns = max_turns
+
         # 添加结构化输出
         if output_format:
             options.output_format = output_format
