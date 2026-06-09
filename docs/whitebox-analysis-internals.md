@@ -41,7 +41,7 @@ settingSources: ['user'],       // 继承用户级 MCP/设置
 | `prerequisites` | 依赖的前置 agent（决定执行顺序） | `['recon']` |
 | `modelTier` | 模型规模 | `pre-recon` 用 `large` |
 
-关键的几个 phase agent（`session-manager.ts:14-128`，agent 定义 `:15-113`）：
+关键的几个 phase agent（`session-manager.ts:14-128`，agent 定义 `:15-127`）：
 
 | Phase agent | promptTemplate | modelTier | 角色 |
 |---|---|---|---|
