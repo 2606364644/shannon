@@ -328,5 +328,49 @@ def show(workspace_name):
         click.echo(f"    shannon-blackbox start --url {url} -w {info['name']}")
 
 
+@workspace.command()
+@click.argument("workspace_name")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+def delete(workspace_name, force):
+    """Delete a workspace and all its data."""
+    mgr = SessionManager(Path("workspaces"))
+    ws = mgr.get_workspace(workspace_name)
+    if ws is None:
+        click.echo(f"Workspace not found: {workspace_name}")
+        raise SystemExit(1)
+
+    scan_type = mgr.get_scan_type(ws)
+    status = mgr.get_status(ws)
+    url = mgr.get_web_url(ws) or "unknown"
+    links = mgr.get_links(ws)
+
+    click.echo(f"Workspace to delete: {workspace_name}")
+    click.echo(f"  Type:   {scan_type}")
+    click.echo(f"  Target: {url}")
+    click.echo(f"  Status: {status}")
+
+    if status == "running":
+        click.echo("  ⚠ This workspace appears to be running.")
+
+    children = links.get("child_workspaces", [])
+    if children:
+        click.echo(f"  ⚠ Has {len(children)} child workspace(s)")
+
+    parent = links.get("parent_workspace")
+    if parent:
+        click.echo(f"  ⚠ Child of: {parent}")
+
+    if not force:
+        if not click.confirm("Delete this workspace?", default=False):
+            click.echo("Deletion cancelled.")
+            return
+
+    if mgr.delete_workspace(workspace_name):
+        click.echo(f"✅ Workspace '{workspace_name}' deleted.")
+    else:
+        click.echo(f"❌ Failed to delete workspace '{workspace_name}'.")
+        raise SystemExit(1)
+
+
 def main():
     cli()

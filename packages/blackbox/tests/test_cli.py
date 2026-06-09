@@ -452,3 +452,66 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
     result = runner.invoke(cli, ["logs", "test-ws"])
     assert result.exit_code == 0
     assert "hello from log" in result.output
+
+
+def test_workspace_delete(tmp_path, monkeypatch):
+    """workspace delete should remove the workspace directory."""
+    import json
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-del", scan_type="blackbox")
+    mgr.mark_completed(ws)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "delete", "bb-del", "--force"])
+
+    assert result.exit_code == 0
+    assert "deleted" in result.output.lower()
+    assert not ws.exists()
+
+
+def test_workspace_delete_not_found(tmp_path, monkeypatch):
+    """workspace delete with nonexistent name should exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "delete", "nonexistent", "--force"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+def test_workspace_delete_confirms(tmp_path, monkeypatch):
+    """workspace delete without --force should ask for confirmation."""
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-confirm", scan_type="blackbox")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "delete", "bb-confirm"], input="y\n")
+
+    assert result.exit_code == 0
+    assert "deleted" in result.output.lower()
+
+
+def test_workspace_delete_cancelled(tmp_path, monkeypatch):
+    """workspace delete confirmation cancelled should not delete."""
+    from shannon_core.session import SessionManager
+
+    monkeypatch.chdir(tmp_path)
+
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-cancel", scan_type="blackbox")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["workspace", "delete", "bb-cancel"], input="n\n")
+
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()
+    assert ws.exists()
