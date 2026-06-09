@@ -14,8 +14,10 @@ Design notes:
   precision is impossible (the LLM in Spec C is told to double-check).
 """
 
+import logging
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable
 
 from shannon_core.code_index.parameter_models import (
     DangerousSlot,
@@ -23,6 +25,12 @@ from shannon_core.code_index.parameter_models import (
     SinkCategory,
     SlotContext,
 )
+
+if TYPE_CHECKING:
+    from shannon_core.code_index.models import FuncBlock
+    from shannon_core.code_index.parsers.base import BaseParser
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -188,3 +196,178 @@ DEFAULT_RULES: tuple[SinkRule, ...] = (
              SinkCategory.REDIRECT, "open_redirect", ((0, SlotContext.URL),),
              needs_review_default=True),
 )
+
+
+# ===== Detection algorithm =====
+
+
+def _build_rule_index(
+    rules: tuple[SinkRule, ...],
+) -> dict[tuple[str, str], list[SinkRule]]:
+    """Index rules by (language, callee) for O(1) lookup."""
+    idx: dict[tuple[str, str], list[SinkRule]] = {}
+    for r in rules:
+        for lang in r.languages:
+            idx.setdefault((lang, r.callee), []).append(r)
+    return idx
+
+
+# Module-level cache of the default rule index
+_RULE_INDEX: dict[tuple[str, str], list[SinkRule]] = _build_rule_index(DEFAULT_RULES)
+
+
+def is_entry_hint(expression: str, block: "FuncBlock") -> bool:
+    """Lightweight heuristic: does this argument expression come straight from
+    a known external input?
+
+    Conservative — only returns True for clear cases:
+      - The expression is exactly a function parameter name.
+      - The expression starts with `request.` / `req.` (Flask / Express).
+      - The expression starts with a PHP superglobal (`$_GET` etc.).
+
+    Anything more complex (data.x, processed_id, ...) returns False. Spec A
+    performs the real intraprocedural taint tracking; this is just a hint for
+    downstream priority.
+    """
+    expr = expression.strip()
+
+    # 1) Direct function parameter
+    if expr in block.parameters:
+        return True
+
+    # 2) request.* / req.* (Flask / Express / similar)
+    if expr.startswith("request.") or expr.startswith("req."):
+        return True
+
+    # 3) PHP superglobals
+    if expr.startswith(("$_GET", "$_POST", "$_REQUEST", "$_COOKIE", "$_FILES")):
+        return True
+
+    return False
+
+
+def detect_sinks(
+    blocks: "list[FuncBlock]",
+    parser: "BaseParser",
+    *,
+    source_provider: "Callable[[FuncBlock], bytes | None]",
+    rules: tuple[SinkRule, ...] = DEFAULT_RULES,
+) -> list[SinkCallSite]:
+    """Detect sink call sites across all function blocks.
+
+    Args:
+        blocks: FuncBlocks to scan.
+        parser: A parser whose iter_calls/destructure_call/extract_arg_expressions
+            match the blocks' language.
+        source_provider: Callable that returns source bytes for a given block
+            (or None to skip). Caller is responsible for caching/reading files.
+        rules: Rule library to use (defaults to DEFAULT_RULES).
+
+    Returns:
+        List of SinkCallSite in source order. No deduplication — one rule hit
+        per call site, multiple rules with same callee can produce multiple
+        SinkCallSites for one call (intentional).
+    """
+    rule_index = (
+        _build_rule_index(rules) if rules is not DEFAULT_RULES else _RULE_INDEX
+    )
+    sites: list[SinkCallSite] = []
+
+    for block in blocks:
+        source = source_provider(block)
+        if source is None:
+            continue
+
+        try:
+            call_nodes = list(parser.iter_calls(block, source))
+        except Exception:
+            logger.debug("sink scan: iter_calls failed for %s", block.id, exc_info=True)
+            continue
+
+        for call in call_nodes:
+            try:
+                callee, receiver = parser.destructure_call(call)
+            except Exception:
+                logger.debug("sink scan: destructure_call failed for %s", block.id, exc_info=True)
+                continue
+            if not callee:
+                continue
+
+            candidates = rule_index.get((block.language, callee), [])
+            if not candidates:
+                continue
+
+            for rule in candidates:
+                if not _rule_matches(rule, receiver):
+                    continue
+                try:
+                    args = parser.extract_arg_expressions(call, source)
+                    dangerous = _build_dangerous_slots(rule, args, block)
+                    site = SinkCallSite(
+                        id=_make_id(block, callee, call),
+                        caller_id=block.id,
+                        callee_name=callee,
+                        callee_receiver=receiver,
+                        category=rule.category,
+                        sink_subtype=rule.sink_subtype,
+                        file_path=block.file_path,
+                        line=call.line,
+                        column=call.column,
+                        dangerous_slots=dangerous,
+                        rule_id=rule.rule_id,
+                        needs_review=rule.needs_review_default,
+                    )
+                    sites.append(site)
+                except Exception:
+                    logger.debug("sink scan: skipping rule %s on call", rule.rule_id, exc_info=True)
+                    continue
+
+    return sites
+
+
+def _rule_matches(rule: SinkRule, receiver: str | None) -> bool:
+    """A rule matches if receiver_pattern is None (bare call) or receiver
+    matches the pattern (qualified call)."""
+    if rule.receiver_pattern is None:
+        # Bare-function rule: only matches if there's no receiver.
+        return receiver is None
+    if receiver is None:
+        return False
+    return bool(rule.receiver_pattern.match(receiver))
+
+
+def _build_dangerous_slots(
+    rule: SinkRule,
+    arg_expressions: list[str],
+    block: "FuncBlock",
+) -> list[DangerousSlot]:
+    slots: list[DangerousSlot] = []
+    for idx, slot_ctx in rule.dangerous_slots:
+        if idx == -1:  # variadic marker — emit a single hint
+            slots.append(DangerousSlot(
+                arg_index=-1,
+                slot=slot_ctx,
+                expression=",".join(arg_expressions),
+                is_entry_hint=any(is_entry_hint(a, block) for a in arg_expressions),
+            ))
+            continue
+        if idx < len(arg_expressions):
+            expr = arg_expressions[idx]
+            slots.append(DangerousSlot(
+                arg_index=idx,
+                slot=slot_ctx,
+                expression=expr,
+                is_entry_hint=is_entry_hint(expr, block),
+            ))
+    return slots
+
+
+def _make_id(block: "FuncBlock", callee: str, call) -> str:
+    """SinkCallSite.id format: '{file}:{caller_func}:{callee}:{line}:{col}'.
+
+    This format is the Spec A contract: TaintFlow.sink_call_site_id must
+    match it exactly.
+    """
+    return (
+        f"{block.file_path}:{block.function_name}:{callee}:{call.line}:{call.column}"
+    )
