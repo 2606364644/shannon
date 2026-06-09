@@ -1,0 +1,3 @@
+[submodule "repos/lollms-webui"]
+	path = repos/lollms-webui
+	url = https://github.com/uiuc-kang-lab/lollms-webui-5f93989.git
