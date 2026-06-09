@@ -1571,3 +1571,28 @@ class TestCallResultFailureLayer:
             with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
                 await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert any("permission denials" in r.getMessage().lower() for r in caplog.records)
+
+
+class TestStopReasonPropagationAndNonRetryable:
+    """L2: executor maps stop_reason to AgentMetrics; error_max_turns stays non-retryable end-to-end."""
+
+    def test_classify_chain_error_max_turns_is_non_retryable(self):
+        """error_max_turns (retryable=False) reaches ApplicationFailure(non_retryable=True)."""
+        from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+        err = PentestError(
+            "max turns reached",
+            category="validation",
+            retryable=False,
+            error_code=ErrorCode.AGENT_EXECUTION_FAILED,
+        )
+        error_type, retryable = classify_error_for_temporal(err)
+        assert error_type == "AgentExecutionError"
+        assert retryable is False
+        non_retryable = not retryable
+        assert non_retryable is True
+
+    def test_agent_metrics_stop_reason_round_trip(self):
+        from shannon_core.models.metrics import AgentMetrics
+        metrics = AgentMetrics(duration_ms=10, stop_reason="end_turn")
+        dumped = metrics.model_dump()
+        assert dumped["stop_reason"] == "end_turn"

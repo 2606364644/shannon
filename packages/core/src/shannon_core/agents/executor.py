@@ -100,6 +100,7 @@ class AgentExecutor:
             num_turns=result.turns,
             model=result.model,
             structured_output=result.structured_output,
+            stop_reason=result.stop_reason,
             input_tokens=result.tokens.input_tokens if result.tokens else None,
             output_tokens=result.tokens.output_tokens if result.tokens else None,
             cache_read_tokens=result.tokens.cache_read_input_tokens if result.tokens else None,
