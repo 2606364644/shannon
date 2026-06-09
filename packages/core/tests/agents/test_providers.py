@@ -1596,3 +1596,49 @@ class TestStopReasonPropagationAndNonRetryable:
         metrics = AgentMetrics(duration_ms=10, stop_reason="end_turn")
         dumped = metrics.model_dump()
         assert dumped["stop_reason"] == "end_turn"
+
+
+class TestProviderAuditLoggerInjection:
+    """L3: provider.call / _execute_query thread a ToolAuditLogger into the dispatcher."""
+
+    @pytest.mark.asyncio
+    async def test_execute_query_uses_audit_logger_param(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        mock_audit = AsyncMock()
+        tool_use = MagicMock(); tool_use.type = "tool_use"; tool_use.name = "bash"; tool_use.input = {"command": "ls"}
+        tool_result = MagicMock(); tool_result.type = "tool_result"; tool_result.content = "ok"
+        msg = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
+                            is_error=False, num_turns=1, session_id="t")
+        async def mock_query(*, prompt, options):
+            yield tool_use; yield tool_result; yield msg
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            await provider._execute_query(
+                prompt="t", options=ClaudeAgentOptions(model="m", cwd="/tmp"),
+                audit_logger=mock_audit,
+            )
+        mock_audit.log_tool_start.assert_awaited_once_with("bash", {"command": "ls"})
+        mock_audit.log_tool_end.assert_awaited_once_with("ok")
+
+    @pytest.mark.asyncio
+    async def test_call_forwards_audit_logger(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        mock_audit = AsyncMock()
+        tool_use = MagicMock(); tool_use.type = "tool_use"; tool_use.name = "edit"; tool_use.input = {"path": "a"}
+        msg = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
+                            is_error=False, num_turns=1, session_id="t")
+        async def mock_query(*, prompt, options):
+            yield tool_use; yield msg
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            await provider.call(prompt="t", cwd="/tmp", model_tier="medium", audit_logger=mock_audit)
+        mock_audit.log_tool_start.assert_awaited_once_with("edit", {"path": "a"})
+
+    @pytest.mark.asyncio
+    async def test_call_without_audit_logger_still_works(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
+                            is_error=False, num_turns=1, session_id="t", result="hi")
+        async def mock_query(*, prompt, options):
+            yield msg
+        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider.call(prompt="t", cwd="/tmp", model_tier="medium")
+        assert result.success is True

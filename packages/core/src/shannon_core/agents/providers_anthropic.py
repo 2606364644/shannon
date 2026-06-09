@@ -18,6 +18,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from shannon_core.models.errors import classify_error_for_temporal
 
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
+from .tool_audit_logger import ToolAuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class AnthropicProvider:
         model_tier: str = "medium",
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
+        audit_logger: ToolAuditLogger | None = None,
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -98,7 +100,7 @@ class AnthropicProvider:
             options = self._build_options(cwd, model, output_format)
 
             # 执行调用
-            result_message = await self._execute_query(prompt, options)
+            result_message = await self._execute_query(prompt, options, audit_logger=audit_logger)
 
             # 计算耗时
             duration = int((time.time() - start_time) * 1000)
@@ -269,11 +271,12 @@ class AnthropicProvider:
         prompt: str,
         options: ClaudeAgentOptions,
         dispatcher: MessageDispatcher | None = None,
+        audit_logger: ToolAuditLogger | None = None,
     ) -> ResultMessage:
         """执行 query 调用并返回最终结果"""
         from .message_dispatcher import MessageDispatcher
 
-        dispatcher = dispatcher or MessageDispatcher()
+        dispatcher = dispatcher or MessageDispatcher(audit_logger=audit_logger)
         final_result: ResultMessage | None = None
 
         async for event in query(prompt=prompt, options=options):
