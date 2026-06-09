@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from shannon_core.config.parser import distribute_config, parse_config
 from shannon_core.models.agents import AgentName, AGENTS
@@ -13,6 +14,9 @@ from shannon_core.agents.runner import run_claude_prompt
 from shannon_core.agents.validators import get_queue_filename, validate_deliverable
 from shannon_core.git_manager import GitManager
 from shannon_core.prompts.manager import PromptManager
+
+if TYPE_CHECKING:
+    from shannon_core.logging.activity_logger import ActivityLogger
 
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
@@ -30,6 +34,7 @@ class AgentExecutor:
         prompt_variables: dict[str, str] | None = None,
         prompt_override: str | None = None,
         structured_output_schema: dict | None = None,
+        audit_logger: "ActivityLogger | None" = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -64,6 +69,7 @@ class AgentExecutor:
             api_key=api_key,
             deliverables_subdir=str(deliverables.relative_to(repo)) if deliverables.is_relative_to(repo) else None,
             structured_output_schema=structured_output_schema,
+            audit_logger=audit_logger,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 

@@ -1668,3 +1668,33 @@ class TestRunClaudePromptAuditLogger:
             with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
                 await run_claude_prompt(prompt="t", repo_path="/tmp")
         assert mock_provider.call.call_args.kwargs.get("audit_logger") is None
+
+
+class TestExecutorForwardsAuditLogger:
+    """L3: executor.execute forwards audit_logger to run_claude_prompt."""
+
+    @pytest.mark.asyncio
+    async def test_forwards_audit_logger(self, tmp_path):
+        from shannon_core.agents.executor import AgentExecutor
+        from shannon_core.models.agents import AgentName
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        mock_prompt_manager = MagicMock()
+        mock_prompt_manager.load_sync.return_value = "prompt body"
+        executor = AgentExecutor(mock_prompt_manager)
+
+        sentinel = object()
+        with patch("shannon_core.agents.executor.run_claude_prompt",
+                   new=AsyncMock(return_value=ClaudeRunResult(text="ok", success=True, turns=3, cost=0.01))) as mock_run, \
+             patch("shannon_core.agents.executor.GitManager") as mock_git, \
+             patch("shannon_core.agents.executor.validate_deliverable", new=AsyncMock()):
+            mock_git.create_checkpoint = AsyncMock()
+            mock_git.commit = AsyncMock()
+            await executor.execute(
+                agent_name=AgentName.RECON,
+                repo_path=str(repo),
+                audit_logger=sentinel,
+            )
+        assert mock_run.call_args.kwargs["audit_logger"] is sentinel
