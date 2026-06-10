@@ -11,11 +11,19 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+MCP_READ_TIMEOUT = 30
+
 
 class GitNexusMCPClient:
     """MCP client for GitNexus — communicates via stdio JSON-RPC.
 
-    Usage:
+    Usage::
+
+        async with GitNexusMCPClient(repo_root) as client:
+            result = await client.call_tool("cypher", {"query": "..."})
+
+    Or with explicit start/stop::
+
         client = GitNexusMCPClient(repo_root)
         await client.start()
         result = await client.call_tool("cypher", {"query": "..."})
@@ -43,6 +51,8 @@ class GitNexusMCPClient:
             "capabilities": {},
             "clientInfo": {"name": "shannon-py", "version": "1.0"},
         })
+        # Send initialized notification (MCP handshake requirement)
+        await self._send_notification("notifications/initialized", {})
         logger.info("GitNexus MCP client started")
 
     async def stop(self) -> None:
@@ -53,7 +63,7 @@ class GitNexusMCPClient:
             self._process = None
             logger.info("GitNexus MCP client stopped")
 
-    async def call_tool(self, tool_name: str, arguments: dict) -> list | dict | None:
+    async def call_tool(self, tool_name: str, arguments: dict) -> list | dict | str | None:
         """Call an MCP tool and return the parsed result.
 
         Args:
@@ -85,7 +95,14 @@ class GitNexusMCPClient:
         self._process.stdin.write(line.encode())
         await self._process.stdin.drain()
 
-        response_line = await self._process.stdout.readline()
+        try:
+            response_line = await asyncio.wait_for(
+                self._process.stdout.readline(), timeout=MCP_READ_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            raise ConnectionError(
+                f"GitNexus MCP timed out after {MCP_READ_TIMEOUT}s waiting for response"
+            )
         if not response_line:
             raise ConnectionError("GitNexus MCP closed connection")
 
@@ -98,7 +115,27 @@ class GitNexusMCPClient:
 
         return response.get("result", response)
 
-    def _parse_tool_result(self, result: dict) -> list | dict | None:
+    async def _send_notification(self, method: str, params: dict) -> None:
+        """Send a JSON-RPC notification (no id, no response expected)."""
+        if self._process is None:
+            raise RuntimeError("GitNexus MCP client not started. Call await client.start() first.")
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }
+        line = json.dumps(notification) + "\n"
+        self._process.stdin.write(line.encode())
+        await self._process.stdin.drain()
+
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.stop()
+
+    def _parse_tool_result(self, result: dict) -> list | dict | str | None:
         """Parse MCP tool result content into Python objects."""
         if not result:
             return None
