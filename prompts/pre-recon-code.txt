@@ -138,8 +138,15 @@ Launch these three discovery agents simultaneously to understand the codebase st
 
 After Phase 1 completes, launch all three vulnerability-focused agents in parallel:
 
-4. **XSS/Injection Sink Hunter Agent**:
-   "Find all dangerous sinks where untrusted input could execute in browser contexts, system commands, file operations, template engines, or deserialization. Include XSS sinks (innerHTML, document.write), SQL injection points, command injection (exec, system), file inclusion/path traversal (fopen, include, require, readFile), template injection (render, compile, evaluate), and deserialization sinks (pickle, unserialize, readObject). Provide exact file locations with line numbers. If no sinks are found, report that explicitly."
+4. **XSS/Injection Sink Hunter Agent** (MANDATORY two-step process):
+   **Step 1 — Template File Inventory (glob enumeration):**
+   "Enumerate ALL template and view files in the project using glob patterns. Cover common template extensions: html, ejs, hbs, pug, jsx, tsx, vue, svelte, php, erb, jinja2, tmpl, and any additional template extensions discovered during analysis. Organize the inventory as a directory tree showing every template file path. If no template files exist, explicitly report 'no template files found' and skip Step 2 for templates."
+
+   **Step 2 — Per-File Sink Analysis with Escaping Mode Distinction:**
+   "For EACH template/view file discovered in Step 1, independently analyze it for dangerous sinks. For server-side template engines, distinguish between escaping modes: escaped directives (e.g., EJS `<%= %>`, Jinja2 `{{ }}`) vs unescaped directives (e.g., EJS `<%- %>`, Jinja2 `{{|safe}}`). Flag bare unescaped output without JSON.stringify wrappers as highest-risk. Also analyze non-template sinks: XSS sinks (innerHTML, document.write), SQL injection points, command injection (exec, system), file inclusion/path traversal (fopen, include, require, readFile), and deserialization sinks (pickle, unserialize, readObject). Provide exact file locations with line numbers. If no sinks are found, report that explicitly."
+
+   **Cross-Variant Verification (MANDATORY):**
+   "When template files exist in variant directories (brands, locales, themes, sub-applications), you MUST check for equivalent template files across ALL variant directories. For example, if `views/brandA/header/variables.html` is found, you MUST verify whether `views/brandB/header/variables.html` exists and analyze it independently. NEVER assume variant templates are identical — each file MUST be analyzed separately with its own sink report."
 
 5. **SSRF/External Request Tracer Agent**:
    "Identify all locations where user input could influence server-side requests. Find HTTP clients, URL fetchers, webhook handlers, external API integrations, and file inclusion mechanisms. Map user-controllable request parameters with exact code locations. If no SSRF sinks are found, report that explicitly."
@@ -282,6 +289,16 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
 	 **TASK AGENT COORDINATION:** Use findings from the **XSS/Injection Sink Hunter Agent** (Phase 2, if web frontend detected) to populate this section.
 
 	 **Network Surface Focus:** Only report XSS sinks that are on web app pages or publicly facing components. Exclude sinks in non-network surface pages such as local-only scripts, build tools, developer utilities, or components that require manual file opening.
+
+	 **Template Coverage Audit (MANDATORY):** Before listing individual sinks, include a "Template Coverage Audit" table listing every template/view file discovered during Step 1 of the Sink Hunter Agent, with its sink count and analysis status. Format:
+
+	 | Template File | Sink Count | Escaping Modes | Analysis Status |
+	 |---|---|---|---|
+	 | `views/brandA/header/variables.html` | 3 | 1 unescaped, 2 escaped | Analyzed |
+	 | `views/brandB/header/variables.html` | 2 | 2 unescaped | Analyzed |
+	 | `views/brandC/header/variables.html` | - | - | NOT ANALYZED |
+
+	 Any file with "NOT ANALYZED" status indicates a coverage gap that MUST be resolved before finalizing the report. The table MUST include ALL template files from the Step 1 inventory, not just those with sinks.
 
 	 Your output MUST include sufficient information to find the exact location found, such as filepaths with line numbers, or specific references for a downstream agent to find the location exactly.
 	 - **XSS Sink:** A function or property within a web application that renders user-controllable data on a page
