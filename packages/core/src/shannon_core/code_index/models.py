@@ -13,6 +13,7 @@ class Verdict(str, Enum):
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
     RECLASSIFIED = "reclassified"
+    NEEDS_REVIEW = "needs_review"
 
 
 class EntryPointSource(str, Enum):
@@ -55,6 +56,8 @@ class EntryPoint(BaseModel):
     confidence: float
     evidence: str
     needs_llm_review: bool  # True when confidence < 0.8
+    authentication: str | None = None  # "public" | "required" | "unknown"
+    source: str = "code_index"  # "code_index" | "gitnexus" | "schema" | "llm_pre_recon"
 
 
 class CallChain(BaseModel):

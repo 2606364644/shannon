@@ -1,6 +1,38 @@
 import pytest
 from shannon_core.code_index.entry_point_fusion import merge_entry_points
-from shannon_core.code_index.models import UnifiedEntryPoint
+from shannon_core.code_index.models import EntryPoint, UnifiedEntryPoint, Verdict
+
+
+def test_verdict_has_needs_review():
+    assert Verdict.NEEDS_REVIEW.value == "needs_review"
+
+
+def test_entry_point_has_authentication_and_source():
+    ep = EntryPoint(
+        func_block_id="app.py:handler:10",
+        entry_type="http_route",
+        route="/users",
+        http_method="GET",
+        confidence=0.95,
+        evidence="Flask route decorator",
+        needs_llm_review=False,
+        authentication="public",
+        source="code_index",
+    )
+    assert ep.authentication == "public"
+    assert ep.source == "code_index"
+
+
+def test_entry_point_defaults():
+    ep = EntryPoint(
+        func_block_id="app.py:handler:10",
+        entry_type="http_route",
+        confidence=0.60,
+        evidence="LLM discovery",
+        needs_llm_review=False,
+    )
+    assert ep.authentication is None
+    assert ep.source == "code_index"
 
 
 def _gitnexus_ep(name: str, file: str, score: float = 0.9) -> dict:
