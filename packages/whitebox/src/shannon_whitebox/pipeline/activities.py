@@ -224,6 +224,27 @@ async def run_code_index(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_entry_point_fusion(input: ActivityInput) -> dict:
+    """Merge deterministic entry points with LLM-discovered entry points."""
+    try:
+        from shannon_core.code_index import run_entry_point_fusion as _fusion
+
+        repo, deliverables, _ = _get_paths(input)
+        index = _fusion(str(deliverables))
+
+        return {
+            "total_entry_points": index.total_entry_points,
+            "status": "ok",
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_save_adjudication(input: ActivityInput) -> dict:
     try:
         from shannon_core.code_index import save_adjudication

@@ -121,7 +121,14 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
                 self._state.agent_metrics[AgentName.PRE_RECON.value] = metrics
 
-                # Auto-confirm entry points (adjudication writes confirmed entry points)
+                # Entry point fusion: merge deterministic + LLM discoveries
+                fusion_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
+                await workflow.execute_activity(
+                    activities.run_entry_point_fusion, fusion_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                )
+
+                # Adjudicate merged entry points by confidence
                 adjudication_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
                 await workflow.execute_activity(
                     activities.run_save_adjudication, adjudication_input,
