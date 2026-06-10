@@ -172,8 +172,8 @@ class TestImpactTracing:
             sink_file="db.py",
             sink_line=30,
         )
-        assert len(result.edges) >= 1
-        assert len(result.chains) >= 1 or len(result.edges) >= 1
+        assert len(result.edges) == 2
+        assert len(result.chains) == 2
         # Should have called impact tool
         assert any(c[0] == "impact" for c in mcp.calls)
 

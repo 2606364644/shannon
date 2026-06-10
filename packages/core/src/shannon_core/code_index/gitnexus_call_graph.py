@@ -232,25 +232,21 @@ async def build_call_graph_from_gitnexus(
 def _build_upstream_chains(
     edges: list[CallEdge],
     sink_id: str,
-    max_depth: int = 20,
 ) -> list[CallChain]:
-    """Build chains from upstream impact edges.
+    """Build CallChain list from upstream impact edges (callers → sink).
 
-    Simple approach: one chain per unique caller, path = [caller_id, ..., sink_id].
-    For entries at depth > 1 we extend the chain from the deepest caller.
+    Simple approach: one chain per unique caller, path = [caller_id, sink_id].
     """
     if not edges:
         return []
 
-    # Group edges by caller to build unique paths
-    # Each edge represents caller -> sink, we build path [caller_id, sink_id]
     chains: list[CallChain] = []
     seen_callers: set[str] = set()
     for edge in edges:
         if edge.caller_id not in seen_callers:
             seen_callers.add(edge.caller_id)
             chains.append(CallChain(
-                entry_point_id=sink_id,
+                entry_point_id=edge.caller_id,
                 path=[edge.caller_id, sink_id],
                 depth=1,
                 has_unresolved=not edge.resolved,
@@ -323,10 +319,10 @@ async def trace_from_sink(
                 callee_name=name,
                 callee_file=file,
                 resolved=file is not None,
-                line=sink_line,
+                line=line,
             ))
 
-    chains = _build_upstream_chains(edges, sink_id, max_depth=max_depth)
+    chains = _build_upstream_chains(edges, sink_id)
 
     resolved_count = sum(1 for e in edges if e.resolved)
     degradation_report = DegradationReport(
