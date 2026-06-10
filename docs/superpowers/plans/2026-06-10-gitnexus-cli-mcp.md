@@ -943,7 +943,13 @@ The pipeline entry `build_code_index_with_gitnexus` currently receives an `mcp_c
 
 - [ ] **Step 1: Write failing test for auto-indexing pipeline**
 
-Add this test to the end of `packages/core/tests/code_index/test_gitnexus_call_graph.py`:
+First, add missing imports at the top of `packages/core/tests/code_index/test_gitnexus_call_graph.py` (add after the existing `from shannon_core.code_index.gitnexus_call_graph import` line):
+
+```python
+from unittest.mock import AsyncMock, patch
+```
+
+Then add this test class at the end of the file:
 
 ```python
 class TestPipelineAutoIndexing:
@@ -951,7 +957,6 @@ class TestPipelineAutoIndexing:
     async def test_auto_index_before_mcp(self, tmp_path):
         """build_code_index_with_gitnexus calls ensure_indexed when auto_index=True."""
         from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.code_index.gitnexus_engine import IndexResult
 
         # Create a minimal Python file so detect_language succeeds
         src_dir = tmp_path / "src"
