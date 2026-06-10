@@ -177,6 +177,31 @@ class CoverageGap(BaseModel):
     estimated_coverage_loss: str
 
 
+class DegradationReport(BaseModel):
+    """调用图降级报告。"""
+    total_edges: int = 0
+    resolved_count: int = 0
+    unresolved_count: int = 0
+    ambiguous_count: int = 0
+    truncated_count: int = 0
+
+
+class CallGraphResult(BaseModel):
+    """GitNexus MCP 构建的调用图结果。复用现有 CallEdge / CallChain / FuncBlock。"""
+    edges: list[CallEdge] = []
+    chains: list[CallChain] = []
+    entry_points: list[FuncBlock] = []
+    degradation_report: "DegradationReport | None" = None
+
+
+class GitNexusNotIndexedError(Exception):
+    """GitNexus 未索引目标仓库时抛出。"""
+
+
+class GitNexusConnectionError(Exception):
+    """GitNexus MCP 连接失败时抛出。"""
+
+
 # Resolve forward references for sink_call_sites (Spec B)
 def _resolve_forward_refs() -> None:
     try:

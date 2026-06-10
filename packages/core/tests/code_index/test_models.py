@@ -415,3 +415,69 @@ class TestCodeIndexSinkCallSites:
         json_str = index.model_dump_json()
         assert '"sink_call_sites"' in json_str
         assert '"py-db-cursor-execute"' in json_str
+
+
+class TestCallGraphResult:
+    def test_call_graph_result_holds_edges_chains_entry_points(self):
+        from shannon_core.code_index.models import (
+            CallGraphResult, CallEdge, CallChain, FuncBlock,
+        )
+        edge = CallEdge(
+            caller_id="app.py:handler:1",
+            callee_name="get_users",
+            callee_file="svc.py",
+            resolved=True,
+            line=5,
+        )
+        chain = CallChain(
+            entry_point_id="app.py:handler:1",
+            path=["app.py:handler:1", "svc.py:get_users:10"],
+            depth=1,
+            has_unresolved=False,
+        )
+        block = FuncBlock(
+            id="app.py:handler:1",
+            file_path="app.py",
+            function_name="handler",
+            start_line=1,
+            end_line=20,
+            source_code="def handler(): pass",
+            parameters=[],
+            language="python",
+        )
+        result = CallGraphResult(
+            edges=[edge],
+            chains=[chain],
+            entry_points=[block],
+        )
+        assert len(result.edges) == 1
+        assert len(result.chains) == 1
+        assert len(result.entry_points) == 1
+        assert result.degradation_report is None
+
+
+class TestIntraResult:
+    def test_intra_result_holds_taint_data(self):
+        from shannon_core.code_index.parameter_models import IntraResult
+        from shannon_core.code_index.parameter_models import PropagationStep
+        step = PropagationStep(
+            from_func_id="app.py:handler:1",
+            from_param="user_input",
+            to_func_id="app.py:handler:1",
+            to_param="query",
+        )
+        result = IntraResult(
+            tainted_params={"user_input", "query"},
+            hits={"sink_abc": 0.9},
+            local_steps=[step],
+        )
+        assert "user_input" in result.tainted_params
+        assert result.hits["sink_abc"] == 0.9
+        assert len(result.local_steps) == 1
+
+    def test_intra_result_empty(self):
+        from shannon_core.code_index.parameter_models import IntraResult
+        result = IntraResult()
+        assert len(result.tainted_params) == 0
+        assert len(result.hits) == 0
+        assert len(result.local_steps) == 0

@@ -93,6 +93,30 @@ class ParameterPropagationGraph(BaseModel):
     skipped_languages: list[str] = []
 
 
+class TaintPath(BaseModel):
+    """LLM 返回的单条 taint 传播路径。"""
+    source_param: str
+    sink_id: str
+    sink_arg_index: int
+    intermediate_vars: list[str] = []
+    sanitized: bool = False
+    sanitizer_description: str | None = None
+    confidence: float = 1.0
+
+
+class TaintAnalysisResult(BaseModel):
+    """LLM 返回的函数级 taint 分析结果（structured output schema）。"""
+    tainted_params: list[str] = []
+    propagation_paths: list[TaintPath] = []
+
+
+class IntraResult(BaseModel):
+    """函数内 taint 分析的规范化输出。LLM 或确定性分析均产出此格式。"""
+    tainted_params: set[str] = set()
+    hits: dict[str, float] = {}   # sink_id → confidence
+    local_steps: list[PropagationStep] = []
+
+
 # === Spec B: AST-precise sink detection ===
 # (SlotContext moved above PropagationStep to resolve TaintFlow forward ref)
 
