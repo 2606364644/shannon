@@ -120,7 +120,7 @@ def parse_llm_entry_points(deliverable_text: str) -> list[EntryPoint]:
         route_path = m.group(1).strip()
         func_ref = m.group(2).strip()
         # Parse file:function
-        parts = func_ref.rsplit(":", 2)
+        parts = func_ref.rsplit(":", 1)
         if len(parts) >= 2:
             file_path = parts[0]
             func_name = parts[1]
@@ -153,13 +153,19 @@ def parse_llm_entry_points(deliverable_text: str) -> list[EntryPoint]:
 
     # Pattern 2: Webhook entries
     webhook_pattern = re.compile(
-        r"\**Webhook:?\s*([^\n*]+)\**\s*[—\-–]\s*`([^`]+)`",
+        r"\*{0,2}\bWebhook:?\s+([^\n*]+?)\*{0,2}\s*[—\-–]\s*`([^`]+)`",
         re.IGNORECASE,
     )
     for m in webhook_pattern.finditer(section):
+        # Skip if this was already matched as an HTTP route
+        line_start = section.rfind("\n", 0, m.start()) + 1
+        line_prefix = section[line_start:m.start()].strip()
+        if re.match(r"\**(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)", line_prefix, re.IGNORECASE):
+            continue
+
         webhook_path = m.group(1).strip()
         func_ref = m.group(2).strip()
-        parts = func_ref.rsplit(":", 2)
+        parts = func_ref.rsplit(":", 1)
         file_path = parts[0] if len(parts) >= 2 else func_ref
         func_name = parts[1] if len(parts) >= 2 else "unknown"
 
@@ -182,11 +188,9 @@ def parse_llm_entry_points(deliverable_text: str) -> list[EntryPoint]:
     return entry_points
 
 
-def _extract_auth_nearby(text: str, position: int, window: int = 300) -> str | None:
+def _extract_auth_nearby(text: str, position: int, window: int = 120) -> str | None:
     """Look for authentication keywords near a match position."""
-    start = max(0, position - window)
-    end = min(len(text), position + window)
-    nearby = text[start:end].lower()
+    nearby = text[position : min(len(text), position + window)].lower()
 
     if "authentication: public" in nearby or "auth: public" in nearby:
         return "public"

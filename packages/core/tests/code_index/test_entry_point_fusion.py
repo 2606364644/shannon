@@ -176,10 +176,14 @@ background processing service with no HTTP interface.
 
 def test_parse_llm_entry_points_extracts_routes():
     result = parse_llm_entry_points(DELIVERABLE_WITH_ENTRY_POINTS)
-    assert len(result) >= 2  # at least the two explicitly listed routes
-    # Check that file paths are extracted
-    file_paths = [ep.func_block_id for ep in result]
+    routes = [ep for ep in result if ep.entry_type == "http_route"]
+    assert len(routes) == 2  # exactly 2 HTTP routes
+    file_paths = [ep.func_block_id for ep in routes]
     assert any("users.py" in fp for fp in file_paths)
+    # Verify HTTP method extraction
+    methods = {ep.http_method for ep in routes}
+    assert "POST" in methods
+    assert "GET" in methods
 
 
 def test_parse_llm_entry_points_extracts_webhook():
@@ -204,3 +208,11 @@ def test_parse_llm_entry_points_empty():
 def test_parse_llm_entry_points_malformed():
     result = parse_llm_entry_points("totally not a deliverable")
     assert result == []
+
+
+def test_parse_llm_entry_points_extracts_auth():
+    result = parse_llm_entry_points(DELIVERABLE_WITH_ENTRY_POINTS)
+    # Check auth extraction
+    by_route = {ep.route: ep for ep in result if ep.entry_type == "http_route"}
+    assert by_route.get("/api/public/status") is not None
+    assert by_route["/api/public/status"].authentication == "public"
