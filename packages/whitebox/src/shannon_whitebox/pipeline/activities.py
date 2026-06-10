@@ -262,6 +262,51 @@ async def run_save_adjudication(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_merge_sink_reports(input: ActivityInput) -> dict:
+    """Merge deterministic sinks with LLM-discovered sinks from pre-recon."""
+    try:
+        from shannon_core.code_index.sink_merger import merge_sink_reports
+        from shannon_core.code_index.parameter_models import SinkCallSite
+        from shannon_core.code_index.models import CodeIndex
+
+        repo, deliverables, _ = _get_paths(input)
+
+        # Load deterministic sinks from code_index.json
+        code_index_path = deliverables / "code_index.json"
+        det_sinks: list[SinkCallSite] = []
+        index = None
+        if code_index_path.exists():
+            index = CodeIndex.model_validate_json(code_index_path.read_text())
+            det_sinks = index.sink_call_sites
+
+        # Read LLM pre-recon deliverable
+        llm_report = ""
+        pre_recon_path = deliverables / "pre_recon_deliverable.md"
+        if pre_recon_path.exists():
+            llm_report = pre_recon_path.read_text()
+
+        # Merge
+        merged = merge_sink_reports(det_sinks, llm_report)
+
+        # Write merged sinks back to code_index.json (reuse existing index)
+        if index is not None:
+            index.sink_call_sites = merged
+            atomic_write_json(code_index_path, json.loads(index.model_dump_json()))
+
+        return {
+            "deterministic_count": len(det_sinks),
+            "llm_only_count": len(merged) - len(det_sinks),
+            "total_count": len(merged),
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_risk_scoring(input: ActivityInput) -> dict:
     """Score call chains and produce tiered audit plan."""
     try:

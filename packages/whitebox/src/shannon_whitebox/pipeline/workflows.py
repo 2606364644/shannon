@@ -70,13 +70,6 @@ class WhiteboxScanWorkflow:
             retry_policy=AUTH_VALIDATION_RETRY,
         )
 
-        # Code Index — deterministic AST analysis before PRE_RECON
-        code_index_result = await workflow.execute_activity(
-            activities.run_code_index, act_input,
-            start_to_close_timeout=timedelta(minutes=10),
-        )
-        self._state.code_index_stats = code_index_result
-
         # Resolve config and browser engine
         cfg = None
         engine = None
@@ -109,27 +102,55 @@ class WhiteboxScanWorkflow:
         engine.write_config(input.repo_path)
 
         try:
+            # === Parallel: Code Index (deterministic) ∥ PRE_RECON (LLM) ===
+            # These two have no data dependency. The original Shannon had no
+            # deterministic layer, so PRE_RECON's Sink Hunter runs fine
+            # without static-dataflow-hints.
+
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
                 self._state.current_phase = "pre-recon"
                 self._state.current_agent = AgentName.PRE_RECON.value
-                pre_recon_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
-                metrics = await workflow.execute_activity(
-                    activities.run_agent, pre_recon_input,
-                    start_to_close_timeout=timedelta(hours=2),
-                    retry_policy=PRODUCTION_RETRY,
+
+                pre_recon_input = ActivityInput(
+                    **{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value}
                 )
+
+                # Fail-fast: if either fails, cancel the other and propagate.
+                code_index_result, pre_recon_metrics = await asyncio.gather(
+                    workflow.execute_activity(
+                        activities.run_code_index, act_input,
+                        start_to_close_timeout=timedelta(minutes=10),
+                    ),
+                    workflow.execute_activity(
+                        activities.run_agent, pre_recon_input,
+                        start_to_close_timeout=timedelta(hours=2),
+                        retry_policy=PRODUCTION_RETRY,
+                    ),
+                )
+
+                self._state.code_index_stats = code_index_result
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
-                self._state.agent_metrics[AgentName.PRE_RECON.value] = metrics
+                self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
+
+                # Merge deterministic sinks with LLM-discovered sinks
+                await workflow.execute_activity(
+                    activities.run_merge_sink_reports, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                )
 
                 # Entry point fusion: merge deterministic + LLM discoveries
-                fusion_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
+                fusion_input = ActivityInput(
+                    **{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value}
+                )
                 await workflow.execute_activity(
                     activities.run_entry_point_fusion, fusion_input,
                     start_to_close_timeout=timedelta(minutes=2),
                 )
 
                 # Adjudicate merged entry points by confidence
-                adjudication_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
+                adjudication_input = ActivityInput(
+                    **{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value}
+                )
                 await workflow.execute_activity(
                     activities.run_save_adjudication, adjudication_input,
                     start_to_close_timeout=timedelta(minutes=2),
