@@ -366,17 +366,37 @@ class TestRunEntryPointFusion:
         assert "llm_pre_recon" in sources
 
     def test_fusion_deduplicates_same_entry(self, tmp_path):
-        code_index = _make_test_code_index()
+        # Use matching func_block_id format to test actual dedup
+        code_index = {
+            "repository": "/tmp/test-repo",
+            "language": "python",
+            "total_blocks": 1, "total_entry_points": 1, "total_chains": 0,
+            "blocks": [], "edges": [],
+            "entry_points": [{
+                "func_block_id": "src/routes/health.py:health_check",
+                "entry_type": "http_route",
+                "route": "/api/public/health",
+                "http_method": "GET",
+                "confidence": 0.95,
+                "evidence": "Flask @app.route decorator",
+                "needs_llm_review": False,
+                "authentication": None,
+                "source": "code_index",
+            }],
+            "chains": [], "sink_call_sites": [],
+        }
         (tmp_path / "code_index.json").write_text(json.dumps(code_index))
         (tmp_path / "pre_recon_deliverable.md").write_text(_make_test_deliverable())
 
         result = run_entry_point_fusion(str(tmp_path))
 
+        # health_check appears in both deterministic and LLM — should be deduped
         health_entries = [
             ep for ep in result.entry_points
-            if "health_check" in ep.func_block_id or "health" in (ep.route or "")
+            if "health_check" in ep.func_block_id
         ]
-        assert len(health_entries) >= 1
+        assert len(health_entries) == 1
+        assert health_entries[0].source == "code_index"  # deterministic wins
 
 
 # ---------------------------------------------------------------------------

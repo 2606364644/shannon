@@ -334,7 +334,7 @@ def run_entry_point_fusion(deliverables_dir: str) -> CodeIndex:
 
     if not code_index_path.exists():
         logger.warning("code_index.json not found; skipping entry point fusion")
-        return CodeIndex.model_validate_json(code_index_path.read_text())
+        raise FileNotFoundError(f"code_index.json not found in {deliverables_dir}")
 
     index = CodeIndex.model_validate_json(code_index_path.read_text())
 
