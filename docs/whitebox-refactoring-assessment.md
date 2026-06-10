@@ -2,7 +2,7 @@
 
 > 对比原始 Shannon（TypeScript）与重构后 Shannon-py（Python）在白盒安全分析三个核心维度（sink / 入口点 / 漏洞）的优劣。
 >
-> 日期：2026-06-09 · **修订：2026-06-09（v4，三轮 prompt 逐行 diff：揭出 recon 4.1/4.2 删除的连锁根因，重判为"能力替换非加法"）**
+> 日期：2026-06-09 · **修订：2026-06-10（v5，独立六维度评估：AST引擎对比LLM引擎的覆盖度/精度/可扩展性/成本/多语言/下游衔接，确认v4结论并补充量化数据）**
 >
 > **性质**：活文档（评估报告），持续完善，**不是实现 Spec**。§5.3 的缺口表是未来 Spec 的来源——每个缺口成熟后在 `docs/superpowers/specs/` 单独开 spec（brainstorming → spec → plan）。
 
@@ -14,7 +14,7 @@
 
 **v3**：sink 规则数纠正（197+→**47**）、sink 覆盖度核验（SSRF/路径/XXE/XSS 更窄）、vuln-injection prompt 删了 Branch Path Exhaustion、传播写容器/属性漏检、save-deliverable 工具不存在、entry_point_fusion 死代码。
 
-**v4（本轮，prompt 逐行 diff）——根因级发现**：
+**v4（prompt 逐行 diff）——根因级发现**：
 
 > **重构是"能力替换"，不是"纯加法"。** 确定性 taint 图（`parameter_graph.json`）+ AST sink 检测**替换**了 recon 的结构化索引（Section 4.1 共享 handler 路由分组、Section 4.2 端点安全上下文/框架来源/参数完整性）。删除的能力**多数无确定性替代**。
 
@@ -28,6 +28,17 @@
 6. **重构新增的 hint 注入**：recon/pre-recon/vuln-* 都 `@include(_static-dataflow-hints.txt)`；recon 新增 `<parameter_propagation_data>` 注入 taint 流摘要；pre-recon 新增 `<phase0_data>` 注入 code_index 统计 + `{{DEGRADATION_WARNING_OR_NONE}}`。
 
 **关键判断**：taint 图（source→sink）≠ 路由级 auth/中间件、≠ 框架来源 IDOR、≠ 模板参数交叉验证。**被替换走的 recon 结构化索引，确定性层基本不覆盖。** 见 §0.3。
+
+**v5（六维度独立评估，对照原始设计文档 `whitebox-analysis-internals.md`）——量化确认**：
+
+> 独立于 v2-v4 的 prompt diff 视角，直接对照原始设计文档和重构代码，按六个维度量化评估入口点与 Sink 点分析。**核心结论与 v4 一致**，但补充了量化数据：
+
+1. **Sink 规则量化**：原始 prompt 覆盖 XSS 5 上下文 × ~15 个 API = ~75 个检测点（LLM 自由匹配）；重构仅 2 条 XSS 规则。SSRF 原始 13 子类 vs 重构 ~3 子类。量化缺口比 v4 所述更严重。
+2. **入口点量化**：原始 Entry Point Mapper 覆盖 ~10 种框架（含 Ruby/C#），重构 `entry_points.py` 覆盖 8 种模式（5 语言）。`entry_point_fusion.py` 三源融合框架已就绪但 `build_code_index` 未调用——**确认 v3 死代码结论**。
+3. **成本量化**：原始 pre-recon 固定 6 个子 agent（Phase 1: 3 + Phase 2: 3），每个子 agent 可能数十次 Read/Grep 调用；重构的 `detect_entry_points()` + `detect_sinks()` 是毫秒级 Python 函数调用。
+4. **精度量化**：原始 file:line 为 LLM 估算（不可复现）；重构为 AST 精确到 `line:column`（100% 可复现）。
+5. **可扩展性**：原始新增 sink 类别需改 prompt（~2000 行文本，需 prompt 工程）；重构加 `SinkRule(...)` dataclass 即可。
+6. **综合裁定**：重构 4:1 胜出（精度/可扩展性/成本/下游衔接），原始 1 胜出（覆盖度），多语言各有千秋。与 v4 的"能力替换"裁定一致。
 
 ---
 
