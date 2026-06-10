@@ -96,12 +96,15 @@ class GitNexusEngine:
             return True
 
         try:
-            output = self._run_cli(
-                "log", "-1", "--format=%ct",
-                "--repo", str(self.repo_root),
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%ct"],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(self.repo_root),
             )
-            commit_ts = int(output.strip())
-        except (GitNexusError, ValueError):
+            if result.returncode != 0:
+                return False
+            commit_ts = int(result.stdout.strip())
+        except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
             return False
 
         index_ts = self.gitnexus_dir.stat().st_mtime
