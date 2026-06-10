@@ -6,7 +6,7 @@
 >
 > **日期**：2026-06-11
 >
-> **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-sink-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
+> **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-point-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
 
 ---
 
@@ -297,4 +297,4 @@
 ## 7. 交叉参考
 
 - `docs/whitebox-refactoring-assessment.md` — 全维度评估（v7），本分析是其 §1 Sink 部分的代码级修正
-- `docs/entry-sink-gap-analysis.md` — v1 差距分析，本分析修正其 §2 的三处错误（C1/C2/C3）
+- `docs/entry-point-gap-analysis.md` — v1 差距分析，本分析修正其 §2 的三处错误（C1/C2/C3）

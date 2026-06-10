@@ -249,6 +249,6 @@ class EntryPoint(BaseModel):
 
 ## 7. 交叉参考
 
-- `docs/entry-sink-gap-analysis.md` — 入口点差距矩阵（EP-1 到 EP+4）
+- `docs/entry-point-gap-analysis.md` — 入口点差距矩阵（EP-1 到 EP+7）
 - `docs/whitebox-refactoring-assessment.md` — 全维度评估
 - 原始项目 `apps/worker/prompts/pre-recon-code.txt` — Entry Point Mapper 原始 prompt 参考
