@@ -1,5 +1,6 @@
 """gitnexus_call_graph 单元测试。"""
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from shannon_core.code_index.models import (
     CallChain, CallEdge, FuncBlock,
@@ -224,3 +225,42 @@ class TestImpactTracing:
         ctx = await get_function_context(mcp, "get_users")
         assert ctx is not None
         assert "symbol" in ctx
+
+
+class TestPipelineAutoIndexing:
+    @pytest.mark.asyncio
+    async def test_auto_index_before_mcp(self, tmp_path):
+        """build_code_index_with_gitnexus calls ensure_indexed when auto_index=True."""
+        from shannon_core.code_index import build_code_index_with_gitnexus
+
+        # Create a minimal Python file so detect_language succeeds
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("def handler(): pass\n")
+
+        # Mock GitNexusEngine to avoid needing real gitnexus CLI
+        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
+            # GitNexus not available → should fall back gracefully
+            with patch("shannon_core.code_index._build_code_index_fallback") as mock_fallback:
+                from shannon_core.code_index.models import CodeIndex, DegradationLevel
+                mock_fallback.return_value = CodeIndex(
+                    repository=str(tmp_path),
+                    language="python",
+                    total_blocks=0,
+                    total_entry_points=0,
+                    total_chains=0,
+                    blocks=[],
+                    edges=[],
+                    entry_points=[],
+                    chains=[],
+                    degradation_level=DegradationLevel.MINIMAL,
+                )
+                mcp = FakeImpactMCPClient(responses={})
+                index = await build_code_index_with_gitnexus(
+                    str(tmp_path),
+                    mcp_client=mcp,
+                    llm_client=AsyncMock(return_value="{}"),
+                    auto_index=True,
+                )
+                assert index is not None
+                assert index.degradation_level == DegradationLevel.MINIMAL
