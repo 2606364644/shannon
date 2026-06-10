@@ -133,3 +133,74 @@ class TestMergeEntryPoints:
         )
         assert result[0].route == "/users"
         assert result[0].http_method == "POST"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: parse_llm_entry_points tests
+# ---------------------------------------------------------------------------
+from shannon_core.code_index.entry_point_fusion import parse_llm_entry_points
+
+DELIVERABLE_WITH_ENTRY_POINTS = """
+# Pre-Recon Deliverable
+
+## 5. Attack Surface Analysis
+
+### External Entry Points
+
+1. **POST /api/users** — `src/routes/users.py:create_user` (line 42)
+   - Authentication: required (JWT middleware)
+   - Framework: Express.js
+
+2. **GET /api/public/status** — `src/routes/health.py:status_check` (line 15)
+   - Authentication: public
+   - Framework: Express.js
+
+3. **Webhook: /webhooks/stripe** — `src/webhooks/stripe.py:handle_webhook` (line 8)
+   - Authentication: required (HMAC signature)
+   - Entry type: webhook
+
+### API Schema Files
+- `openapi.yaml` — defines 45 endpoints
+- `schema.graphql` — defines 12 queries, 8 mutations
+"""
+
+DELIVERABLE_WITHOUT_ENTRY_POINTS = """
+# Pre-Recon Deliverable
+
+## 5. Attack Surface Analysis
+
+No external entry points were identified. The application appears to be a
+background processing service with no HTTP interface.
+"""
+
+
+def test_parse_llm_entry_points_extracts_routes():
+    result = parse_llm_entry_points(DELIVERABLE_WITH_ENTRY_POINTS)
+    assert len(result) >= 2  # at least the two explicitly listed routes
+    # Check that file paths are extracted
+    file_paths = [ep.func_block_id for ep in result]
+    assert any("users.py" in fp for fp in file_paths)
+
+
+def test_parse_llm_entry_points_extracts_webhook():
+    result = parse_llm_entry_points(DELIVERABLE_WITH_ENTRY_POINTS)
+    webhooks = [ep for ep in result if ep.entry_type == "webhook"]
+    assert len(webhooks) >= 1
+    assert any("stripe" in ep.evidence.lower() for ep in webhooks)
+
+
+def test_parse_llm_entry_points_confidence_is_060():
+    result = parse_llm_entry_points(DELIVERABLE_WITH_ENTRY_POINTS)
+    for ep in result:
+        assert ep.confidence == 0.60
+        assert ep.source == "llm_pre_recon"
+
+
+def test_parse_llm_entry_points_empty():
+    result = parse_llm_entry_points(DELIVERABLE_WITHOUT_ENTRY_POINTS)
+    assert result == []
+
+
+def test_parse_llm_entry_points_malformed():
+    result = parse_llm_entry_points("totally not a deliverable")
+    assert result == []
