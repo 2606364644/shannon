@@ -121,20 +121,12 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
                 self._state.agent_metrics[AgentName.PRE_RECON.value] = metrics
 
-                # Auto-confirm entry points before rebuilding call chains
+                # Auto-confirm entry points (adjudication writes confirmed entry points)
                 adjudication_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
                 await workflow.execute_activity(
                     activities.run_save_adjudication, adjudication_input,
                     start_to_close_timeout=timedelta(minutes=2),
                 )
-
-                rebuild_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.PRE_RECON.value})
-                rebuild_result = await workflow.execute_activity(
-                    activities.run_rebuild_call_chains, rebuild_input,
-                    start_to_close_timeout=timedelta(minutes=5),
-                )
-                if self._state.code_index_stats:
-                    self._state.code_index_stats["total_chains"] = rebuild_result.get("total_chains", 0)
                 self._state.current_agent = None
 
             if AgentName.RECON.value not in self._state.completed_agents:

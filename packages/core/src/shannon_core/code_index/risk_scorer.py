@@ -12,6 +12,7 @@ Tier assignment:
   - Tier 1 (total < 15):  Lightweight scan, unlimited, 1 combined agent
 """
 
+import re
 import logging
 from pydantic import BaseModel
 
@@ -19,9 +20,30 @@ from shannon_core.code_index.models import CallChain, FuncBlock
 from shannon_core.code_index.parameter_models import (
     SinkCallSite, SinkCategory, SinkType, TaintFlow,
 )
-from shannon_core.code_index.taint_propagator import classify_sink
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Legacy classify_sink (inlined from deleted taint_propagator.py)
+# ---------------------------------------------------------------------------
+_SINK_PATTERNS: list[tuple[re.Pattern, SinkType]] = [
+    (re.compile(r'(?:execute|query|cursor\.execute|raw\s*\()', re.IGNORECASE), SinkType.SQL_EXECUTION),
+    (re.compile(r'(?:os\.system|subprocess|popen|exec\s*\(|eval\s*\()', re.IGNORECASE), SinkType.COMMAND_EXEC),
+    (re.compile(r'(?:pickle\.loads?|yaml\.load|unserialize|deserialize)', re.IGNORECASE), SinkType.DESERIALIZATION),
+    (re.compile(r'(?:open\s*\(|write\s*\(|file_put_contents|os\.path\.join.*\.\.)', re.IGNORECASE), SinkType.FILE_WRITE),
+    (re.compile(r'(?:render_template|render\s*\(|\.innerHTML|Response\s*\()', re.IGNORECASE), SinkType.TEMPLATE_RENDER),
+    (re.compile(r'(?:requests\.(?:get|post)|urllib|http\.Client|fetch\s*\()', re.IGNORECASE), SinkType.HTTP_REQUEST),
+    (re.compile(r'(?:logger?\.(?:info|debug|warn|error)|log\.\w+|console\.log)', re.IGNORECASE), SinkType.LOG_WRITE),
+]
+
+
+def _classify_sink_legacy(block: FuncBlock) -> SinkType:
+    """Regex-based sink classification (migrated from taint_propagator.classify_sink)."""
+    source = block.source_code
+    for pattern, sink_type in _SINK_PATTERNS:
+        if pattern.search(source):
+            return sink_type
+    return SinkType.UNKNOWN
 
 # Sink danger scores by type
 SINK_DANGER_SCORES: dict[SinkType, int] = {
@@ -150,7 +172,7 @@ class ChainRiskScore(BaseModel):
         if sink_node_id:
             sink_block = blocks_by_id.get(sink_node_id)
             if sink_block:
-                sink_type = classify_sink(sink_block)
+                sink_type = _classify_sink_legacy(sink_block)
                 return SINK_DANGER_SCORES.get(sink_type, 0)
         return 0
 
