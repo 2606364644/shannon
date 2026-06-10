@@ -113,6 +113,12 @@ class GitNexusMCPClient:
 
         子进程命令: gitnexus mcp
         通信协议: JSON-RPC over stdio
+
+        初始化流程：
+        1. 启动子进程，捕获 stdin/stdout
+        2. 发送 initialize 请求（含 capabilities）
+        3. 收到 initialize 响应后，发送 initialized 通知
+        4. 连接就绪，可开始 tools/call 请求
         """
 
     async def call_tool(self, tool_name: str, arguments: dict) -> dict:
@@ -246,7 +252,11 @@ class FunctionContext:
 改造现有的 `build_code_index_with_gitnexus` 函数：
 
 ```python
-async def build_code_index_with_gitnexus(repo_path: Path, llm_client):
+async def build_code_index_with_gitnexus(
+    repo_path: Path,
+    llm_client,
+    sink_patterns: list[str] | None = None,  # e.g. ["execute_sql", "eval", "os.system"]
+):
     """改造后的 pipeline 入口"""
     # 1. 检查 GitNexus 是否可用
     if not await GitNexusIndexer.is_installed():
@@ -263,11 +273,26 @@ async def build_code_index_with_gitnexus(repo_path: Path, llm_client):
     # 3. 连接 MCP 并构建调用链
     async with GitNexusMCPClient(repo_path) as mcp:
         builder = CallChainBuilder(mcp)
-        chains = await builder.trace_from_sink(sink_name)
+
+        # 3a. 自动发现 sinks（或使用传入的 patterns）
+        sinks = await builder.find_sinks(sink_patterns or DEFAULT_SINK_PATTERNS)
+
+        # 3b. 对每个 sink 追踪调用链
+        all_chains: list[CallChain] = []
+        for sink in sinks:
+            chain = await builder.trace_from_sink(sink.name)
+            all_chains.append(chain)
 
     # 4. 交给 LLM 做 taint 分析（现有逻辑）
-    taint_results = await llm_taint_analyze(chains, llm_client)
+    taint_results = await llm_taint_analyze(all_chains, llm_client)
     return taint_results
+
+# 默认 sink 模式列表（可被调用方覆盖）
+DEFAULT_SINK_PATTERNS = [
+    "execute_sql", "cursor.execute", "eval", "exec",
+    "os.system", "subprocess.call", "subprocess.run",
+    "open", "write", "pickle.loads", "yaml.load",
+]
 ```
 
 ## 降级策略
