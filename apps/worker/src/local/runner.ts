@@ -4,8 +4,8 @@ import { writeUserSettingsForCodePathAvoids } from '../ai/settings-writer.js';
 import { AuditSession } from '../audit/index.js';
 import type { SessionMetadata } from '../audit/utils.js';
 import { deliverablesDir, WORKSPACES_DIR } from '../paths.js';
-import { AgentExecutionService } from '../services/agent-execution.js';
 import { ReportTranslationProvider } from '../providers/report-translation-provider.js';
+import { AgentExecutionService } from '../services/agent-execution.js';
 import { ConfigLoaderService } from '../services/config-loader.js';
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
@@ -437,6 +437,29 @@ async function run(): Promise<void> {
         await injectModelIntoReport(args.repoPath, undefined, path.join(WORKSPACES_DIR, sessionId), logger);
       } catch (error) {
         logger.warn(`Model re-injection had issues: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // Phase 7: Translation (Chinese deliverables)
+    if (!aborted) {
+      logger.info('=== Phase 7: Translation ===');
+      try {
+        const provider = new ReportTranslationProvider();
+        const translationResult = await provider.generate(
+          {
+            repoPath: args.repoPath,
+            workflowId: sessionId,
+            sessionId,
+            ...(args.apiKey && { apiKey: args.apiKey }),
+            ...(args.providerConfig && { providerConfig: args.providerConfig }),
+          },
+          logger,
+        );
+        if (translationResult.outputPath) {
+          logger.info(`Translations written to ${translationResult.outputPath}`);
+        }
+      } catch (error) {
+        logger.warn(`Translation had issues: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   } finally {
