@@ -36,7 +36,7 @@ class TestGitNexusEngineCLI:
             assert "context" in cmd
             assert "--name" in cmd
 
-    def test_cli_error_returns_failed_result(self, tmp_path):
+    def test_cli_error_raises_gitnexus_error(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
         with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error msg")
