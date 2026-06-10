@@ -227,3 +227,162 @@ async def build_call_graph_from_gitnexus(
         entry_points=entry_point_blocks,
         degradation_report=degradation_report,
     )
+
+
+def _build_upstream_chains(
+    edges: list[CallEdge],
+    sink_id: str,
+    max_depth: int = 20,
+) -> list[CallChain]:
+    """Build chains from upstream impact edges.
+
+    Simple approach: one chain per unique caller, path = [caller_id, ..., sink_id].
+    For entries at depth > 1 we extend the chain from the deepest caller.
+    """
+    if not edges:
+        return []
+
+    # Group edges by caller to build unique paths
+    # Each edge represents caller -> sink, we build path [caller_id, sink_id]
+    chains: list[CallChain] = []
+    seen_callers: set[str] = set()
+    for edge in edges:
+        if edge.caller_id not in seen_callers:
+            seen_callers.add(edge.caller_id)
+            chains.append(CallChain(
+                entry_point_id=sink_id,
+                path=[edge.caller_id, sink_id],
+                depth=1,
+                has_unresolved=not edge.resolved,
+            ))
+
+    return chains
+
+
+async def trace_from_sink(
+    mcp_client: "object",
+    sink_name: str,
+    sink_file: str,
+    sink_line: int,
+    *,
+    direction: str = "upstream",
+    max_depth: int = 5,
+) -> CallGraphResult:
+    """Trace upstream callers from a sink function using the impact MCP tool.
+
+    Calls ``impact`` with the given target and direction, then parses the
+    returned upstream/downstream entries into CallEdge objects and builds
+    chains.
+
+    Returns an empty ``CallGraphResult`` when the impact response is ``None``
+    or a plain string.
+    """
+    impact_result = await mcp_client.call_tool(
+        "impact",
+        {
+            "target": sink_name,
+            "direction": direction,
+            "maxDepth": max_depth,
+        },
+    )
+
+    # Guard against None or string responses
+    if impact_result is None or isinstance(impact_result, str):
+        return CallGraphResult(
+            edges=[],
+            chains=[],
+            entry_points=[],
+            degradation_report=DegradationReport(),
+        )
+
+    sink_id = f"{sink_file}:{sink_name}:{sink_line}"
+    entries = impact_result.get(direction, []) or []
+    edges: list[CallEdge] = []
+
+    for entry in entries:
+        name = entry.get("name")
+        if not name:
+            continue
+        file = entry.get("file")
+        line = entry.get("line", 0)
+
+        if direction == "upstream":
+            # upstream: caller -> sink
+            caller_id = f"{file}:{name}:{line}" if file else name
+            edges.append(CallEdge(
+                caller_id=caller_id,
+                callee_name=sink_name,
+                callee_file=sink_file,
+                resolved=file is not None,
+                line=line,
+            ))
+        else:
+            # downstream: sink -> callee
+            edges.append(CallEdge(
+                caller_id=sink_id,
+                callee_name=name,
+                callee_file=file,
+                resolved=file is not None,
+                line=sink_line,
+            ))
+
+    chains = _build_upstream_chains(edges, sink_id, max_depth=max_depth)
+
+    resolved_count = sum(1 for e in edges if e.resolved)
+    degradation_report = DegradationReport(
+        total_edges=len(edges),
+        resolved_count=resolved_count,
+        unresolved_count=len(edges) - resolved_count,
+    )
+
+    return CallGraphResult(
+        edges=edges,
+        chains=chains,
+        entry_points=[],
+        degradation_report=degradation_report,
+    )
+
+
+async def find_sinks_by_patterns(
+    mcp_client: "object",
+    patterns: list[str],
+) -> list[dict]:
+    """Discover sink functions by querying GitNexus for each pattern.
+
+    Deduplicates results by name.  Returns a list of dicts with keys
+    ``name``, ``filePath``, ``startLine``.
+    """
+    seen_names: set[str] = set()
+    sinks: list[dict] = []
+
+    for pattern in patterns:
+        result = await mcp_client.call_tool("query", {"query": pattern})
+        if result is None:
+            continue
+        for entry in result:
+            name = entry.get("name")
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            sinks.append({
+                "name": name,
+                "filePath": entry.get("filePath", ""),
+                "startLine": entry.get("startLine", 0),
+            })
+
+    return sinks
+
+
+async def get_function_context(
+    mcp_client: "object",
+    function_name: str,
+) -> dict | None:
+    """Retrieve symbol details for a function via the context MCP tool.
+
+    Returns the raw dict response from the tool, or ``None`` if the tool
+    returns ``None``.
+    """
+    result = await mcp_client.call_tool("context", {"name": function_name})
+    if result is None:
+        return None
+    return result

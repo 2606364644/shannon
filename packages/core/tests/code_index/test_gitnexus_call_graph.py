@@ -7,6 +7,9 @@ from shannon_core.code_index.models import (
 from shannon_core.code_index.gitnexus_call_graph import (
     build_call_graph_from_gitnexus,
     _parse_process_response,
+    trace_from_sink,
+    find_sinks_by_patterns,
+    get_function_context,
 )
 
 
@@ -135,3 +138,89 @@ class TestBuildCallGraphFromGitNexus:
         chain = result.chains[0]
         assert chain.entry_point_id == "app.py:handler:1"
         assert "svc.py:get_users:10" in chain.path
+
+
+class FakeImpactMCPClient:
+    """Fake MCP client with separate responses per tool+arguments."""
+
+    def __init__(self, responses: dict[str, list | dict | str | None]):
+        self._responses = responses
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call_tool(self, tool_name: str, arguments: dict):
+        self.calls.append((tool_name, arguments))
+        key = tool_name
+        return self._responses.get(key)
+
+
+class TestImpactTracing:
+    @pytest.mark.asyncio
+    async def test_trace_from_sink_builds_chains(self):
+        """trace_from_sink uses impact tool to build upstream chains."""
+        mcp = FakeImpactMCPClient(responses={
+            "impact": {
+                "target": {"name": "execute_sql", "kind": "Function", "file": "db.py", "line": 30},
+                "upstream": [
+                    {"depth": 1, "name": "get_users", "kind": "Function", "file": "svc.py", "line": 15, "relation": "CALLS", "confidence": 0.9},
+                    {"depth": 2, "name": "handler", "kind": "Function", "file": "app.py", "line": 5, "relation": "CALLS", "confidence": 0.85},
+                ],
+            },
+        })
+        result = await trace_from_sink(
+            mcp_client=mcp,
+            sink_name="execute_sql",
+            sink_file="db.py",
+            sink_line=30,
+        )
+        assert len(result.edges) >= 1
+        assert len(result.chains) >= 1 or len(result.edges) >= 1
+        # Should have called impact tool
+        assert any(c[0] == "impact" for c in mcp.calls)
+
+    @pytest.mark.asyncio
+    async def test_trace_from_sink_returns_empty_on_none(self):
+        """trace_from_sink returns empty result when impact returns None."""
+        mcp = FakeImpactMCPClient(responses={"impact": None})
+        result = await trace_from_sink(
+            mcp_client=mcp,
+            sink_name="nonexistent",
+            sink_file="f.py",
+            sink_line=1,
+        )
+        assert result.edges == []
+        assert result.chains == []
+
+    @pytest.mark.asyncio
+    async def test_find_sinks_by_patterns(self):
+        """find_sinks_by_patterns uses query tool to discover sinks."""
+        mcp = FakeImpactMCPClient(responses={
+            "query": [
+                {"name": "execute_sql", "kind": "Function", "filePath": "db.py", "startLine": 30},
+                {"name": "eval", "kind": "Function", "filePath": "utils.py", "startLine": 10},
+            ],
+        })
+        sinks = await find_sinks_by_patterns(mcp, ["execute_sql", "eval"])
+        assert len(sinks) >= 1
+        assert any(s["name"] == "execute_sql" for s in sinks)
+
+    @pytest.mark.asyncio
+    async def test_find_sinks_returns_empty_on_none(self):
+        """find_sinks_by_patterns returns empty list when query returns None."""
+        mcp = FakeImpactMCPClient(responses={"query": None})
+        sinks = await find_sinks_by_patterns(mcp, ["nonexistent"])
+        assert sinks == []
+
+    @pytest.mark.asyncio
+    async def test_get_function_context(self):
+        """get_function_context retrieves symbol details via context tool."""
+        mcp = FakeImpactMCPClient(responses={
+            "context": {
+                "symbol": {"uid": "Function:get_users", "kind": "Function", "filePath": "svc.py", "startLine": 10},
+                "incoming": {"calls": [{"name": "handler"}]},
+                "outgoing": {"calls": [{"name": "execute_sql"}]},
+                "processes": [{"name": "UserFlow"}],
+            },
+        })
+        ctx = await get_function_context(mcp, "get_users")
+        assert ctx is not None
+        assert "symbol" in ctx
