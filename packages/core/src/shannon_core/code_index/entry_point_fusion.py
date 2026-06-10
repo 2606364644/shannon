@@ -4,6 +4,7 @@ Merges entry points from:
 1. GitNexus EP Scoring (primary, highest confidence)
 2. Schema files (OpenAPI/GraphQL/Proto → handler)
 3. Framework conventions (Next.js pages/api/, Django urls.py)
+4. LLM pre-recon discoveries (Entry Point Mapper agent)
 
 Deduplicates by uid (file_path:name), keeping the highest-confidence source.
 """
