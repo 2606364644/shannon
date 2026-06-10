@@ -20,19 +20,22 @@ def merge_entry_points(
     gitnexus_eps: list[dict],
     schema_eps: list[UnifiedEntryPoint],
     convention_eps: list[UnifiedEntryPoint],
+    llm_eps: list[EntryPoint] | None = None,
 ) -> list[UnifiedEntryPoint]:
     """Merge entry points from multiple sources.
 
-    Priority order for dedup: gitnexus > schema > convention.
+    Priority order for dedup: gitnexus > schema > convention > llm_pre_recon.
     Each source gets a confidence score:
     - gitnexus: from EP Scoring (variable)
     - schema_file: 0.80 (high trust, but not code-verified)
     - framework_convention: 0.75 (convention-based, good trust)
+    - llm_pre_recon: 0.60 (LLM-discovered, lower default confidence)
 
     Args:
         gitnexus_eps: Entry points from GitNexus EP Scoring (MCP cypher results).
         schema_eps: Entry points from Schema file parsing.
         convention_eps: Entry points from framework convention detection.
+        llm_eps: Entry points discovered by LLM pre-recon Entry Point Mapper.
 
     Returns:
         Deduplicated list of UnifiedEntryPoint sorted by confidence descending.
@@ -67,15 +70,38 @@ def merge_entry_points(
         if ep.uid not in unified:
             unified[ep.uid] = ep
 
+    # Source 4: LLM pre-recon discoveries
+    for ep in llm_eps or []:
+        # Dedup key: extract file:function from func_block_id
+        key = ep.func_block_id
+        if key not in unified:
+            # Extract function name from func_block_id
+            parts = ep.func_block_id.split(":")
+            name = parts[1] if len(parts) >= 2 else ep.func_block_id
+            file_path = parts[0] if len(parts) >= 2 else ""
+
+            unified[key] = UnifiedEntryPoint(
+                uid=key,
+                name=name,
+                file_path=file_path,
+                confidence=ep.confidence,
+                source="llm_pre_recon",
+                entry_type=ep.entry_type,
+                route=ep.route,
+                http_method=ep.http_method,
+                evidence=ep.evidence,
+            )
+
     # Sort by confidence descending
     result = sorted(unified.values(), key=lambda ep: -ep.confidence)
 
     logger.info(
-        "Merged %d entry points: %d from GitNexus, %d from schema, %d from convention",
+        "Merged %d entry points: %d from GitNexus, %d from schema, %d from convention, %d from LLM",
         len(result),
         sum(1 for e in result if e.source == "gitnexus"),
         sum(1 for e in result if e.source == "schema_file"),
         sum(1 for e in result if e.source == "framework_convention"),
+        sum(1 for e in result if e.source == "llm_pre_recon"),
     )
 
     return result

@@ -216,3 +216,87 @@ def test_parse_llm_entry_points_extracts_auth():
     by_route = {ep.route: ep for ep in result if ep.entry_type == "http_route"}
     assert by_route.get("/api/public/status") is not None
     assert by_route["/api/public/status"].authentication == "public"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: merge_entry_points with LLM source (4-source merge)
+# ---------------------------------------------------------------------------
+
+
+def _llm_ep(name: str, file: str, entry_type: str = "http_route", auth: str | None = None) -> EntryPoint:
+    return EntryPoint(
+        func_block_id=f"{file}:{name}",
+        entry_type=entry_type,
+        route=f"/{name}",
+        http_method="GET",
+        confidence=0.60,
+        evidence=f"LLM discovered: {file}:{name}",
+        needs_llm_review=False,
+        authentication=auth,
+        source="llm_pre_recon",
+    )
+
+
+class TestMergeWithLLM:
+    def test_llm_fills_gap(self):
+        """LLM discovers an entry point that deterministic missed."""
+        result = merge_entry_points(
+            gitnexus_eps=[_gitnexus_ep("a", "app.py")],
+            schema_eps=[],
+            convention_eps=[],
+            llm_eps=[_llm_ep("webhook_handler", "hooks.py", entry_type="webhook")],
+        )
+        assert len(result) == 2
+        sources = {ep.source for ep in result}
+        assert "gitnexus" in sources
+        assert "llm_pre_recon" in sources
+
+    def test_deterministic_wins_over_llm(self):
+        """When both find the same entry point, deterministic (gitnexus) wins."""
+        result = merge_entry_points(
+            gitnexus_eps=[_gitnexus_ep("handler", "app.py", score=0.9)],
+            schema_eps=[],
+            convention_eps=[],
+            llm_eps=[_llm_ep("handler", "app.py")],
+        )
+        assert len(result) == 1
+        assert result[0].source == "gitnexus"
+        assert result[0].confidence == 0.9
+
+    def test_llm_supplements_auth_annotation(self):
+        """LLM auth annotation supplements deterministic entry that lacks it."""
+        result = merge_entry_points(
+            gitnexus_eps=[_gitnexus_ep("handler", "app.py", score=0.9)],
+            schema_eps=[],
+            convention_eps=[],
+            llm_eps=[_llm_ep("handler", "app.py", auth="required")],
+        )
+        assert len(result) == 1
+        # gitnexus version wins
+        assert result[0].source == "gitnexus"
+
+    def test_llm_only_entry_points(self):
+        """Only LLM entry points, no deterministic sources."""
+        result = merge_entry_points(
+            gitnexus_eps=[],
+            schema_eps=[],
+            convention_eps=[],
+            llm_eps=[
+                _llm_ep("stripe_webhook", "webhooks.py", entry_type="webhook"),
+                _llm_ep("upload", "upload.py", entry_type="upload"),
+            ],
+        )
+        assert len(result) == 2
+        for ep in result:
+            assert ep.confidence == 0.60
+            assert ep.source == "llm_pre_recon"
+
+    def test_four_sources_merged(self):
+        """All four sources contribute independent entry points."""
+        result = merge_entry_points(
+            gitnexus_eps=[_gitnexus_ep("a", "app.py")],
+            schema_eps=[_schema_ep("b", "api.py")],
+            convention_eps=[_convention_ep("c", "pages/api/x.ts")],
+            llm_eps=[_llm_ep("webhook", "hooks.py", entry_type="webhook")],
+        )
+        assert len(result) == 4
