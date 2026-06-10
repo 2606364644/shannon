@@ -4,9 +4,11 @@
 >
 > **数据来源**：逐行代码核验（`sink_detector.py`、`pre-recon-code.txt`、`vuln-*.txt`、`recon.txt`），以代码为准。
 >
-> **日期**：2026-06-11
+> **日期**：2026-06-11（v3 更新：2026-06-11）
 >
 > **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-point-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
+>
+> **v3 更新要点**：commit `b3c58bd` 已恢复模板分析方法论（两步流程 + 变体验证 + Coverage Audit 表），SK-1/SK-2/SK-3 评估需同步修正；同时更新 `pre-recon-code.txt` 行号偏移。
 
 ---
 
@@ -27,7 +29,7 @@
 | **确定性检测引擎** | ❌ 无 | ✅ AST call node 遍历（`sink_detector.py:detect_sinks()`），匹配 47 条 `SinkRule`，O(1) 规则索引 | **重构更可靠**：确定性、可测试、可复现 |
 | **LLM 检测引擎** | LLM Agent（Sink Hunter 子 agent）：glob 枚举模板 → 逐文件 Read → LLM 判定；业务代码 Grep 危险 API | LLM 仍跑（prompt 保留完整 SSRF 13 子类 + XSS 5 上下文），确定性 hint 经 `_static-dataflow-hints.txt` 注入 | **平手（LLM 层两版一致）** |
 | **规则存储** | 自然语言 prompt（`pre-recon-code.txt:289-415`） | 代码化 `DEFAULT_RULES`（47 条 `SinkRule`，`sink_detector.py:67-198`），Pydantic 模型 + 单测 | **重构更可维护** |
-| **模板分析方法论** | ✅ 强制两步流程（`:129-136`）+ 变体验证（`:135-136`）+ Coverage Audit（`:276-284`） | ❌ 三者全删，替换为单句泛泛指令（`:142`） | **原始胜（最大差距）** |
+| **模板分析方法论** | ✅ 强制两步流程（`:129-136`）+ 变体验证（`:135-136`）+ Coverage Audit（`:276-284`） | ⚠️ Prompt 层已在 `b3c58bd` **恢复**：两步流程（`:141-146`）+ 变体验证（`:148-149`）+ 审计表（`:293-301`）；确定性层仍不分析模板转义指令 | **差距缩小（仅确定性层缺失）** ← v3 修正 |
 | **XXE 检测** | ❌ 两边 prompt 均无 XXE 专门覆盖 | ❌ 两边 prompt 均无 + 确定性层 0 条 | **平手（均无）** |
 
 ---
@@ -153,9 +155,9 @@
 |---|---|---|---|
 | Python 模板注入函数 | ✅ LLM 识别 | ✅ 2 条确定性规则 | 持平 |
 | TS/PHP 模板注入函数 | ✅ LLM 识别 | ❌ 无确定性规则 | 低（LLM 兜底） |
-| **模板文件转义指令分析** | ✅ **强制两步流程**（`pre-recon-code.txt:129-136`）：Step 1 glob 枚举模板 → Step 2 逐文件区分 escaped（EJS `<%= %>`、Jinja2 `{{ }}`）vs unescaped（EJS `<%- %>`、Jinja2 `{{\|safe}}`） | ❌ **三层落空**：① 确定性层不分析模板文件转义指令 ② `pre-recon-code.txt` 的两步流程+变体验证+审计表全删，替换为单句 `:142` ③ `file_discovery.py:15-17` 有 10 种模板扩展名分类但**未接 `sink_detector`（断路）** | **原始胜（最大差距之一）** |
-| Cross-Variant 验证 | ✅ `:135-136` 强制跨品牌/区域/主题验证 | ❌ 完全缺失 | **原始胜** |
-| Template Coverage Audit 表 | ✅ `:276-284` 完整性审计（每模板文件的 sink 数+转义模式+分析状态） | ❌ 删除 | **原始胜** |
+| **模板文件转义指令分析** | ✅ **强制两步流程**（`pre-recon-code.txt:129-136`）：Step 1 glob 枚举模板 → Step 2 逐文件区分 escaped（EJS `<%= %>`、Jinja2 `{{ }}`）vs unescaped（EJS `<%- %>`、Jinja2 `{{\|safe}}`） | ⚠️ **Prompt 层已恢复（`b3c58bd`），确定性层仍缺失**：① 确定性层不分析模板文件转义指令 ② ~~Prompt 层全删~~ **已在 `b3c58bd` 恢复**：两步流程（`:141-146`）+ 变体验证（`:148-149`）+ 审计表（`:293-301`） ③ `file_discovery.py:15-17` 有 10 种模板扩展名分类但**未接 `sink_detector`（断路）** | **差距缩小（仅确定性层 + file_discovery 断路）** ← v3 修正 |
+| Cross-Variant 验证 | ✅ `:135-136` 强制跨品牌/区域/主题验证 | ⚠️ Prompt 已恢复（`:148-149`），确定性层无 | **差距缩小** ← v3 修正 |
+| Template Coverage Audit 表 | ✅ `:276-284` 完整性审计（每模板文件的 sink 数+转义模式+分析状态） | ⚠️ Prompt 已恢复（`:293-301`），确定性层无 | **差距缩小** ← v3 修正 |
 
 ### 2.7 文件操作 — 3 条（仅 PHP）
 
@@ -202,8 +204,8 @@
 |---|---|---|---|
 | **规则可维护性** | ⭐⭐ 自然语言 prompt | ⭐⭐⭐⭐⭐ Pydantic 模型 + 47 条 SinkRule + 单测覆盖 | **重构远胜** |
 | **规则结构化** | LLM 输出 JSON Schema 验证 | `SinkCallSite` Pydantic + `SlotContext` 枚举 + `DangerousSlot` + `is_entry_hint` 标记 | **重构更结构化** |
-| **模板分析方法论** | ⭐⭐⭐⭐⭐ 强制两步 + 变体验证 + 审计表 | ☆ 三层落空（确定性不分析 + prompt 删 + file_discovery 断路） | **原始胜** |
-| **变体审计** | ⭐⭐⭐⭐ 强制 | ☆ 无 | **原始胜** |
+| **模板分析方法论** | ⭐⭐⭐⭐⭐ 强制两步 + 变体验证 + 审计表 | ⭐⭐⭐ Prompt 层已恢复（`b3c58bd`），确定性层仍不分析 + file_discovery 断路 | **差距缩小** ← v3 修正 |
+| **变体审计** | ⭐⭐⭐⭐ 强制 | ⭐⭐⭐ Prompt 已恢复（`:148-149`），确定性层无 | **差距缩小** ← v3 修正 |
 | **SSRF LLM 覆盖** | ⭐⭐⭐⭐ 13 子类 | ⭐⭐⭐⭐ 13 子类（**完全一致**） | **平手** |
 | **XSS LLM 覆盖** | ⭐⭐⭐⭐ 5 上下文 | ⭐⭐⭐⭐ 5 上下文（**完全一致**） | **平手** |
 | **路径穿越 LLM 覆盖** | ⭐⭐⭐⭐ LFI/RFI/PathTraversal | ⭐⭐⭐⭐ **与原始一致** | **平手** ← v2 修正 |
@@ -218,9 +220,9 @@
 
 | # | 差距项 | 原始能力 | 重构现状 | 严重度 | v2 修正说明 |
 |---|---|---|---|---|---|
-| SK-1 | **模板文件转义指令分析** | 强制两步流程（`:129-136`）+ 变体验证（`:135-136`）+ 审计表（`:276-284`） | 三层落空（确定性不分析 + prompt 全删 + file_discovery 断路） | **高** | 不变 |
-| SK-2 | 跨变体验证 | `:135-136` 强制跨品牌/区域/主题 | 完全缺失 | 低 | 不变 |
-| SK-3 | Coverage Audit 表 | `:276-284` 完整性审计 | 删除 | 低 | 不变 |
+| SK-1 | **模板文件转义指令分析** | 强制两步流程（`:129-136`）+ 变体验证（`:135-136`）+ 审计表（`:276-284`） | Prompt 层已在 `b3c58bd` **恢复**（`:141-149` + `:293-301`）；确定性层仍不分析 + file_discovery 断路 | **中** | v3 修正：Prompt 层已恢复，差距缩小至确定性层 |
+| SK-2 | 跨变体验证 | `:135-136` 强制跨品牌/区域/主题 | Prompt 已恢复（`:148-149`），确定性层无 | 低 | v3 修正：Prompt 层已恢复 |
+| SK-3 | Coverage Audit 表 | `:276-284` 完整性审计 | Prompt 已恢复（`:293-301`），确定性层无 | 低 | v3 修正：Prompt 层已恢复 |
 | ~~SK-4~~ | ~~XXE 检测~~ | ~~✅ LLM prompt 覆盖~~ | ~~确定性层 + LLM prompt 均无~~ | ~~中-高~~ | ❌ **撤回**：两边均无，非"原始胜" |
 | SK-5 | **文件读取确定性规则** | LLM 列举 `fopen, readFile` | 确定性层 0 条；LLM prompt 与原始一致 | **中** | 修正：差距仅限确定性层 |
 | SK-6 | **SSRF 确定性覆盖**（12/13 非HTTP子类） | prompt 13 子类 | 确定性层仅 HTTP Client（11 条）；LLM prompt 13/13 完整 | **中** | 不变 |
@@ -247,7 +249,7 @@
 
 ### 5.2 原始明确胜出
 
-- **模板文件 Sink 检测**：强制两步流程 + 变体验证 + 审计表（重构三层落空）— **最大单项差距**
+- **模板文件 Sink 确定性检测**：确定性层不分析模板转义指令 + `file_discovery` 断路 — **差距已缩小**（Prompt 层方法论已在 `b3c58bd` 恢复：两步流程 + 变体验证 + Coverage Audit）
 
 ### 5.3 确定性层差距（LLM 层平手）
 
@@ -276,7 +278,7 @@
 | Coverage Audit 表 | `apps/worker/prompts/pre-recon-code.txt:276-284` |
 | SSRF 分类（13 子类） | `apps/worker/prompts/pre-recon-code.txt:333-415` |
 | XSS 分类（5 上下文） | `apps/worker/prompts/pre-recon-code.txt:289-322` |
-| LFI/RFI/PathTraversal | `apps/worker/prompts/vuln-injection.txt:2/108/120/147/216-217` |
+| LFI/RFI/PathTraversal | `apps/worker/prompts/vuln-injection.txt:2/115/126/154/216` |
 | recon Section 9 注入源 | `apps/worker/prompts/recon.txt:440-460` |
 
 ### 重构 Shannon-py
@@ -287,8 +289,10 @@
 | Sink 检测算法 | `packages/core/src/shannon_core/code_index/sink_detector.py:249-325` |
 | 数据模型（SlotContext/SinkCallSite） | `packages/core/src/shannon_core/code_index/parameter_models.py` |
 | 文件发现（模板/schema） | `packages/core/src/shannon_core/code_index/file_discovery.py` |
-| LLM prompt SSRF（13 子类） | `prompts/pre-recon-code.txt:333-415` |
-| LLM prompt XSS（5 上下文） | `prompts/pre-recon-code.txt:289-322` |
+| LLM prompt SSRF（13 子类） | `prompts/pre-recon-code.txt:340-432` |
+| LLM prompt XSS（5 上下文） | `prompts/pre-recon-code.txt:306-339` |
+| 模板分析方法论（两步流程+变体验证） | `prompts/pre-recon-code.txt:141-149` |
+| Template Coverage Audit | `prompts/pre-recon-code.txt:293-301` |
 | LFI/RFI/PathTraversal | `prompts/vuln-injection.txt:2/108/120/147/210-211` |
 | recon Section 9 注入源 | `prompts/recon.txt:383-394` |
 

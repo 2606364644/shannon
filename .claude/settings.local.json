@@ -20,7 +20,9 @@
       "Bash(jq --version)",
       "Skill(update-config)",
       "Bash(git config *)",
-      "Bash(git submodule *)"
+      "Bash(git submodule *)",
+      "Bash(git commit -m 'docs: split entry-sink-gap-analysis into entry-point-gap-analysis + sink-gap-analysis-v2 *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
