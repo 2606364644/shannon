@@ -9,9 +9,21 @@ import json
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class IndexResult:
+    """Result of an ensure_indexed() call."""
+
+    success: bool
+    file_count: int = 0
+    symbol_count: int = 0
+    is_stale: bool = False
+    error_message: str | None = None
 
 
 class GitNexusError(Exception):
@@ -24,8 +36,9 @@ class GitNexusEngine:
 
     Usage:
         engine = GitNexusEngine(repo_root)
-        engine.ensure_indexed()           # gitnexus analyze
-        ctx = engine.get_context("func")  # gitnexus context --name func
+        result = engine.ensure_indexed()           # gitnexus analyze
+        stale = engine.check_stale()               # check if index is stale
+        ctx = engine.get_context("func")           # gitnexus context --name func
     """
 
     def __init__(self, repo_root: Path, timeout: int = 300):
@@ -37,22 +50,65 @@ class GitNexusEngine:
         """Check if gitnexus CLI is installed."""
         return shutil.which("gitnexus") is not None
 
-    def ensure_indexed(self) -> None:
+    def ensure_indexed(self, force: bool = False) -> IndexResult:
         """Run gitnexus analyze if not already indexed.
 
         Creates .gitnexus/ directory with the knowledge graph.
-        Skips if .gitnexus/ already exists.
-        """
-        if self.gitnexus_dir.exists():
-            logger.debug("GitNexus index already exists at %s", self.gitnexus_dir)
-            return
+        Skips if .gitnexus/ already exists (unless force=True).
 
-        logger.info("Running gitnexus analyze on %s", self.repo_root)
-        self._run_cli("analyze", str(self.repo_root))
-        logger.info("GitNexus indexing complete")
+        Args:
+            force: If True, run analyze even when index already exists.
+
+        Returns:
+            IndexResult with success status and metadata.
+        """
+        if not force and self.gitnexus_dir.exists():
+            logger.debug("GitNexus index already exists at %s", self.gitnexus_dir)
+            return IndexResult(success=True, is_stale=False)
+
+        args = ["analyze", str(self.repo_root)]
+        if force:
+            args.append("--force")
+
+        try:
+            logger.info("Running gitnexus analyze on %s", self.repo_root)
+            self._run_cli(*args)
+            logger.info("GitNexus indexing complete")
+        except GitNexusError as exc:
+            return IndexResult(success=False, error_message=str(exc))
+
+        return IndexResult(success=True)
+
+    def check_stale(self) -> bool:
+        """Check if the index is stale (older than latest commit).
+
+        Compares .gitnexus/ directory mtime with the timestamp of the
+        latest git commit.
+
+        Returns:
+            True if index is stale or missing, False if fresh or
+            unable to determine (no git repo).
+        """
+        if not (self.repo_root / ".git").exists():
+            return False
+
+        if not self.gitnexus_dir.exists():
+            return True
+
+        try:
+            output = self._run_cli(
+                "log", "-1", "--format=%ct",
+                "--repo", str(self.repo_root),
+            )
+            commit_ts = int(output.strip())
+        except (GitNexusError, ValueError):
+            return False
+
+        index_ts = self.gitnexus_dir.stat().st_mtime
+        return index_ts < commit_ts
 
     def get_context(self, symbol_name: str) -> dict:
-        """Get 360° context for a symbol.
+        """Get 360-degree context for a symbol.
 
         Equivalent to SCR-AI's GitNexusChainBuilder._query_context().
 
