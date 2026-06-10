@@ -312,11 +312,78 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     return json_path, summary_path
 
 
-def save_adjudication(deliverables_dir: str) -> None:
-    """Auto-confirm entry points and write adjudication result.
+def run_entry_point_fusion(deliverables_dir: str) -> CodeIndex:
+    """Merge deterministic entry points with LLM-discovered entry points.
 
-    Reads code_index.json, confirms all detected entry points with
-    verdict=CONFIRMED and source=CODE_INDEX, and writes entry_points.json.
+    Reads code_index.json and pre_recon_deliverable.md, parses LLM entry
+    points from the deliverable, merges with deterministic entry points,
+    and updates code_index.json in place.
+
+    Args:
+        deliverables_dir: Path to the deliverables directory containing
+            code_index.json and pre_recon_deliverable.md.
+
+    Returns:
+        Updated CodeIndex with merged entry points.
+    """
+    from shannon_core.code_index.entry_point_fusion import parse_llm_entry_points
+
+    out = Path(deliverables_dir)
+    code_index_path = out / "code_index.json"
+    deliverable_path = out / "pre_recon_deliverable.md"
+
+    if not code_index_path.exists():
+        logger.warning("code_index.json not found; skipping entry point fusion")
+        return CodeIndex.model_validate_json(code_index_path.read_text())
+
+    index = CodeIndex.model_validate_json(code_index_path.read_text())
+
+    # Parse LLM entry points from deliverable (if it exists)
+    llm_eps: list[EntryPoint] = []
+    if deliverable_path.exists():
+        deliverable_text = deliverable_path.read_text()
+        llm_eps = parse_llm_entry_points(deliverable_text)
+        logger.info("Parsed %d LLM entry points from deliverable", len(llm_eps))
+    else:
+        logger.info("No pre_recon_deliverable.md found; LLM fusion skipped")
+
+    # Merge: deterministic entry points as the base, LLM as supplementary
+    deterministic_ids = {ep.func_block_id for ep in index.entry_points}
+
+    # Add LLM-only discoveries
+    merged_entries = list(index.entry_points)
+    added = 0
+    for ep in llm_eps:
+        if ep.func_block_id not in deterministic_ids:
+            merged_entries.append(ep)
+            added += 1
+        else:
+            logger.debug("LLM entry point %s already in deterministic results, skipping", ep.func_block_id)
+
+    logger.info(
+        "Entry point fusion: %d deterministic + %d LLM-only = %d total",
+        len(index.entry_points), added, len(merged_entries),
+    )
+
+    # Update index
+    updated = index.model_copy(update={
+        "entry_points": merged_entries,
+        "total_entry_points": len(merged_entries),
+    })
+
+    # Write updated code_index.json
+    code_index_path.write_text(updated.model_dump_json(indent=2))
+
+    return updated
+
+
+def save_adjudication(deliverables_dir: str) -> None:
+    """Adjudicate entry points by confidence and write adjudication result.
+
+    Reads code_index.json, assigns verdict based on confidence thresholds:
+    - confidence >= 0.85: CONFIRMED
+    - confidence < 0.50: REJECTED
+    - otherwise: NEEDS_REVIEW
     """
     out = Path(deliverables_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -330,14 +397,22 @@ def save_adjudication(deliverables_dir: str) -> None:
 
     adjudicated = []
     for ep in index.entry_points:
+        if ep.confidence >= 0.85:
+            verdict = Verdict.CONFIRMED
+        elif ep.confidence < 0.50:
+            verdict = Verdict.REJECTED
+        else:
+            verdict = Verdict.NEEDS_REVIEW
+
         adjudicated.append(AdjudicatedEntryPoint(
             func_block_id=ep.func_block_id,
-            verdict=Verdict.CONFIRMED,
+            verdict=verdict,
             entry_type=ep.entry_type,
             route=ep.route,
             http_method=ep.http_method,
             evidence=ep.evidence,
-            source=EntryPointSource.CODE_INDEX,
+            source=EntryPointSource.CODE_INDEX if ep.source in ("code_index", "gitnexus")
+                    else EntryPointSource.LLM_DISCOVERY,
         ))
 
     result = AdjudicationResult(
@@ -349,7 +424,10 @@ def save_adjudication(deliverables_dir: str) -> None:
     entry_points_path = out / "entry_points.json"
     entry_points_path.write_text(result.model_dump_json(indent=2))
 
+    confirmed = sum(1 for a in adjudicated if a.verdict == Verdict.CONFIRMED)
+    needs_review = sum(1 for a in adjudicated if a.verdict == Verdict.NEEDS_REVIEW)
+    rejected = sum(1 for a in adjudicated if a.verdict == Verdict.REJECTED)
     logger.info(
-        "Auto-confirmed %d entry points via save_adjudication",
-        len(adjudicated),
+        "Adjudicated %d entry points: %d confirmed, %d needs_review, %d rejected",
+        len(adjudicated), confirmed, needs_review, rejected,
     )

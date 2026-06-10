@@ -300,3 +300,164 @@ class TestMergeWithLLM:
             llm_eps=[_llm_ep("webhook", "hooks.py", entry_type="webhook")],
         )
         assert len(result) == 4
+
+
+# ---------------------------------------------------------------------------
+# Task 4A: run_entry_point_fusion tests
+# ---------------------------------------------------------------------------
+import json
+from shannon_core.code_index import run_entry_point_fusion
+
+
+def _make_test_deliverable() -> str:
+    return """# Pre-Recon Deliverable
+
+## 5. Attack Surface Analysis
+
+### External Entry Points
+
+1. **POST /api/webhooks/stripe** — `src/webhooks/stripe.py:handle_webhook` (line 8)
+   - Authentication: required (HMAC signature)
+   - Entry type: webhook
+
+2. **GET /api/public/health** — `src/routes/health.py:health_check` (line 15)
+   - Authentication: public
+"""
+
+
+def _make_test_code_index() -> dict:
+    return {
+        "repository": "/tmp/test-repo",
+        "language": "python",
+        "total_blocks": 10,
+        "total_entry_points": 1,
+        "total_chains": 0,
+        "blocks": [],
+        "edges": [],
+        "entry_points": [
+            {
+                "func_block_id": "src/routes/health.py:health_check:15",
+                "entry_type": "http_route",
+                "route": "/api/public/health",
+                "http_method": "GET",
+                "confidence": 0.95,
+                "evidence": "Flask @app.route decorator",
+                "needs_llm_review": False,
+                "authentication": None,
+                "source": "code_index",
+            }
+        ],
+        "chains": [],
+        "sink_call_sites": [],
+    }
+
+
+class TestRunEntryPointFusion:
+    def test_fusion_merges_deterministic_and_llm(self, tmp_path):
+        code_index = _make_test_code_index()
+        (tmp_path / "code_index.json").write_text(json.dumps(code_index))
+        (tmp_path / "pre_recon_deliverable.md").write_text(_make_test_deliverable())
+
+        result = run_entry_point_fusion(str(tmp_path))
+
+        assert result.total_entry_points >= 2
+        sources = {ep.source for ep in result.entry_points}
+        assert "code_index" in sources
+        assert "llm_pre_recon" in sources
+
+    def test_fusion_deduplicates_same_entry(self, tmp_path):
+        code_index = _make_test_code_index()
+        (tmp_path / "code_index.json").write_text(json.dumps(code_index))
+        (tmp_path / "pre_recon_deliverable.md").write_text(_make_test_deliverable())
+
+        result = run_entry_point_fusion(str(tmp_path))
+
+        health_entries = [
+            ep for ep in result.entry_points
+            if "health_check" in ep.func_block_id or "health" in (ep.route or "")
+        ]
+        assert len(health_entries) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Task 4B: save_adjudication confidence-based verdict tests
+# ---------------------------------------------------------------------------
+from shannon_core.code_index import save_adjudication
+from shannon_core.code_index.models import AdjudicationResult
+
+
+class TestSaveAdjudication:
+    def test_high_confidence_confirmed(self, tmp_path):
+        code_index = {
+            "repository": "/tmp/test",
+            "language": "python",
+            "total_blocks": 1, "total_entry_points": 1, "total_chains": 0,
+            "blocks": [], "edges": [],
+            "entry_points": [{
+                "func_block_id": "app.py:handler:10",
+                "entry_type": "http_route",
+                "confidence": 0.95,
+                "evidence": "test",
+                "needs_llm_review": False,
+                "source": "code_index",
+            }],
+            "chains": [], "sink_call_sites": [],
+        }
+        (tmp_path / "code_index.json").write_text(json.dumps(code_index))
+
+        save_adjudication(str(tmp_path))
+
+        result = AdjudicationResult.model_validate_json(
+            (tmp_path / "entry_points.json").read_text()
+        )
+        assert result.adjudicated_entry_points[0].verdict.value == "confirmed"
+
+    def test_medium_confidence_needs_review(self, tmp_path):
+        code_index = {
+            "repository": "/tmp/test",
+            "language": "python",
+            "total_blocks": 1, "total_entry_points": 1, "total_chains": 0,
+            "blocks": [], "edges": [],
+            "entry_points": [{
+                "func_block_id": "app.py:maybe_handler:20",
+                "entry_type": "unknown",
+                "confidence": 0.60,
+                "evidence": "LLM discovery",
+                "needs_llm_review": False,
+                "source": "llm_pre_recon",
+            }],
+            "chains": [], "sink_call_sites": [],
+        }
+        (tmp_path / "code_index.json").write_text(json.dumps(code_index))
+
+        save_adjudication(str(tmp_path))
+
+        result = AdjudicationResult.model_validate_json(
+            (tmp_path / "entry_points.json").read_text()
+        )
+        assert result.adjudicated_entry_points[0].verdict.value == "needs_review"
+
+    def test_low_confidence_rejected(self, tmp_path):
+        code_index = {
+            "repository": "/tmp/test",
+            "language": "python",
+            "total_blocks": 1, "total_entry_points": 1, "total_chains": 0,
+            "blocks": [], "edges": [],
+            "entry_points": [{
+                "func_block_id": "app.py:util:30",
+                "entry_type": "unknown",
+                "confidence": 0.30,
+                "evidence": "low confidence",
+                "needs_llm_review": True,
+                "source": "code_index",
+            }],
+            "chains": [], "sink_call_sites": [],
+        }
+        (tmp_path / "code_index.json").write_text(json.dumps(code_index))
+
+        save_adjudication(str(tmp_path))
+
+        result = AdjudicationResult.model_validate_json(
+            (tmp_path / "entry_points.json").read_text()
+        )
+        assert result.adjudicated_entry_points[0].verdict.value == "rejected"

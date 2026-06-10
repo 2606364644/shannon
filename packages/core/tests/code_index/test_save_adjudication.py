@@ -73,8 +73,8 @@ class TestSaveAdjudication:
         assert aep.route == "/users"
         assert aep.http_method == "GET"
 
-    def test_auto_confirms_low_confidence(self, tmp_path):
-        """Low-confidence entry points are also confirmed (conservative)."""
+    def test_rejects_low_confidence(self, tmp_path):
+        """Low-confidence entry points (< 0.50) are rejected."""
         b1 = _make_block("handler")
         ep = EntryPoint(
             func_block_id=b1.id,
@@ -102,7 +102,7 @@ class TestSaveAdjudication:
             (d / "entry_points.json").read_text()
         )
         assert len(result.adjudicated_entry_points) == 1
-        assert result.adjudicated_entry_points[0].verdict == Verdict.CONFIRMED
+        assert result.adjudicated_entry_points[0].verdict == Verdict.REJECTED
 
     def test_writes_entry_points_json(self, tmp_path):
         b1 = _make_block("handler")
