@@ -160,11 +160,18 @@ async def run_auth_validation(input: ActivityInput) -> None:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
+class _StubMCPClient:
+    """Fallback MCP client that returns None, triggering degradation."""
+    async def call_tool(self, tool_name: str, arguments: dict):
+        return None
+
+
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     try:
         import logging
         from shannon_core.code_index import build_code_index_with_gitnexus, write_index_files
+        from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
         logger = logging.getLogger(__name__)
 
@@ -175,22 +182,29 @@ async def run_code_index(input: ActivityInput) -> dict:
             # Placeholder: in production, this calls run_claude_prompt
             return "{}"
 
-        # Create MCP client for GitNexus
-        # For now, use a simple stub that returns None (will trigger fallback)
-        class _StubMCPClient:
-            async def call_tool(self, tool_name: str, arguments: dict):
-                return None
-
+        # Create real GitNexus MCP client with auto-indexing.
+        # auto_index=True handles:
+        #   1. Check if gitnexus CLI is installed
+        #   2. Run gitnexus analyze if needed
+        #   3. Fall back to minimal AST-only mode if unavailable
         try:
+            async with GitNexusMCPClient(Path(repo)) as mcp:
+                index = await build_code_index_with_gitnexus(
+                    str(repo),
+                    mcp_client=mcp,
+                    llm_client=_llm_taint_client,
+                    auto_index=True,
+                )
+        except Exception as exc:
+            logger.warning(
+                "GitNexus MCP failed (%s), falling back to minimal index", exc,
+            )
             index = await build_code_index_with_gitnexus(
                 str(repo),
-                mcp_client=_StubMCPClient(),
+                mcp_client=_StubMCPClient(),  # fallback stub
                 llm_client=_llm_taint_client,
+                auto_index=True,  # will detect unavailable and use minimal mode
             )
-        except Exception:
-            # Fallback: if GitNexus not available, return minimal index info
-            logger.warning("GitNexus unavailable for code indexing, skipping")
-            return {"total_blocks": 0, "total_entry_points": 0, "total_chains": 0}
 
         json_path, summary_path = write_index_files(index, str(deliverables))
 
