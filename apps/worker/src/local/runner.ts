@@ -5,6 +5,7 @@ import { AuditSession } from '../audit/index.js';
 import type { SessionMetadata } from '../audit/utils.js';
 import { deliverablesDir, WORKSPACES_DIR } from '../paths.js';
 import { AgentExecutionService } from '../services/agent-execution.js';
+import { ReportTranslationProvider } from '../providers/report-translation-provider.js';
 import { ConfigLoaderService } from '../services/config-loader.js';
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
@@ -410,6 +411,32 @@ async function run(): Promise<void> {
         await injectModelIntoReport(args.repoPath, undefined, path.join(WORKSPACES_DIR, sessionId), logger);
       } catch (error) {
         logger.warn(`Model injection had issues: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // Phase 6: Report agent (executive summary + final report)
+    if (!aborted) {
+      logger.info('=== Phase 6: Report ===');
+      const reportResult = await runAgentWithRetry(
+        'report',
+        args,
+        auditSession,
+        logger,
+        configLoader,
+        deliverablesPath,
+        distributedConfig,
+      );
+      results.push(reportResult);
+      if (!reportResult.success) {
+        logger.warn(`Report agent failed after ${reportResult.attempts} attempts: ${reportResult.error}`);
+        // Non-fatal — assembled report from Phase 5 is still usable
+      }
+
+      // Re-inject model info (report agent overwrites the assembled file)
+      try {
+        await injectModelIntoReport(args.repoPath, undefined, path.join(WORKSPACES_DIR, sessionId), logger);
+      } catch (error) {
+        logger.warn(`Model re-injection had issues: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   } finally {
