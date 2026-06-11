@@ -44,6 +44,8 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     )
     click.echo(f"Starting white-box scan on {repo}")
     asyncio.run(ensure_infra(address=temporal_address))
+    from shannon_core.runtime.prerequisites import ensure_prerequisite
+    ensure_prerequisite("gitnexus", profile="whitebox")
     result = asyncio.run(run_scan(input, temporal_address))
     if result.get("status") == "completed":
         ws_name = result.get("workspace_name", "unknown")
