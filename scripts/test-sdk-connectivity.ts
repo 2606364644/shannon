@@ -109,8 +109,8 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
     });
 
     for await (const message of stream) {
-      if (message.type === 'result') {
-        resultText = (message as { type: 'result'; result: string }).result || '';
+      if (message.type === 'result' && message.subtype === 'success') {
+        resultText = message.result || '';
         break;
       }
     }
