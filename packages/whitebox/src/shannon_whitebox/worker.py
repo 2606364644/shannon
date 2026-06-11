@@ -17,6 +17,10 @@ from .pipeline.activities import (
     run_risk_scoring,
     run_save_adjudication,
     run_vuln_agent,
+    run_attack_chain_assembly,
+    run_framework_analysis,
+    run_frontend_mapping,
+    run_route_chain_building,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput, PipelineProgress
@@ -73,6 +77,10 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             run_risk_scoring,
             run_save_adjudication,
             run_vuln_agent,
+            run_attack_chain_assembly,
+            run_framework_analysis,
+            run_frontend_mapping,
+            run_route_chain_building,
         ],
     )
 
