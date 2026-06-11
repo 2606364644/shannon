@@ -26,5 +26,5 @@
   "javascript": {
     "formatter": { "quoteStyle": "single", "semicolons": "always", "trailingCommas": "all" }
   },
-  "files": { "includes": ["apps/**/*.ts", "packages/**/*.ts", "*.json", "apps/**/*.json", "packages/**/*.json"] }
+  "files": { "includes": ["apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "*.json", "apps/**/*.json", "packages/**/*.json"] }
 }
