@@ -19,6 +19,11 @@ const ENV_FILE = resolve(PROJECT_ROOT, '.env');
 const MODEL_TIERS = ['small', 'medium', 'large'] as const;
 const TIMEOUT_MS = 30_000;
 
+// bypassPermissions requires a non-root user (Claude Code CLI restriction).
+// Fall back to plan mode when running as root — still verifies API connectivity.
+const IS_ROOT = process.getuid?.() === 0;
+const PERMISSION_MODE = IS_ROOT ? ('plan' as const) : ('bypassPermissions' as const);
+
 const DEFAULT_MODELS: Record<string, string> = {
   small: 'claude-haiku-4-5-20251001',
   medium: 'claude-sonnet-4-6',
@@ -60,11 +65,12 @@ function maskToken(token: string): string {
   return `${token.slice(0, 4)}...${token.slice(-4)}`;
 }
 
-function printHeader(endpoint: string, authSource: string, authToken: string): void {
+function printHeader(endpoint: string, authSource: string, authToken: string, permissionMode: string): void {
   console.log('🔗 Shannon SDK Connectivity Test');
   console.log('─────────────────────────────────');
   console.log(`Endpoint: ${endpoint}`);
   console.log(`Auth: ${authSource} (${maskToken(authToken)})`);
+  console.log(`Mode: ${permissionMode}${IS_ROOT ? ' (root detected — bypassPermissions unavailable)' : ''}`);
   console.log();
 }
 
@@ -99,8 +105,8 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
         model,
         maxTurns: 1,
         cwd: resolve(SCRIPT_DIR),
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
+        permissionMode: PERMISSION_MODE,
+        ...(!IS_ROOT && { allowDangerouslySkipPermissions: true }),
         tools: [],
         env: sdkEnv,
         persistSession: false,
@@ -194,7 +200,7 @@ async function main(): Promise<number> {
   };
 
   // 5. Print header
-  printHeader(baseUrl, authSource, effectiveToken);
+  printHeader(baseUrl, authSource, effectiveToken, PERMISSION_MODE);
 
   // 6. Test each model tier sequentially
   const results: TestResult[] = [];
