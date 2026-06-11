@@ -22,7 +22,10 @@
       "Bash(git config *)",
       "Bash(git submodule *)",
       "Bash(xargs -I {} find {} -type f -name \"*.py\")",
-      "Bash(netstat -tlnp)"
+      "Bash(netstat -tlnp)",
+      "Bash(gitnexus mcp *)",
+      "Bash(gitnexus *)",
+      "Bash(git commit -m 'fix\\(whitebox\\): register run_merge_sink_reports activity in worker *)"
     ]
   }
 }
