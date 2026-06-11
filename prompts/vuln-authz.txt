@@ -46,6 +46,8 @@ Success criterion: A complete, code-backed analysis of every potential authoriza
 
 @include(shared/_static-dataflow-hints.txt)
 
+@include(shared/_cross-route-enumeration.txt)
+
 <system_architecture>
 **PENTESTING WORKFLOW - YOUR POSITION:**
 

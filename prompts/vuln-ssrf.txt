@@ -42,6 +42,8 @@ Success criterion: A complete source-to-sink trace for every identified SSRF vul
 
 @include(shared/_static-dataflow-hints.txt)
 
+@include(shared/_cross-route-enumeration.txt)
+
 <system_architecture>
 **PENTESTING WORKFLOW - YOUR POSITION:**
 
