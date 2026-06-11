@@ -4,11 +4,13 @@
 >
 > **数据来源**：逐行代码核验（`sink_detector.py`、`pre-recon-code.txt`、`vuln-*.txt`、`recon.txt`），以代码为准。
 >
-> **日期**：2026-06-11（v3 更新：2026-06-11）
+> **日期**：2026-06-11（v3 更新：2026-06-11，v4 更新：2026-06-11）
 >
 > **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-point-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
 >
 > **v3 更新要点**：commit `b3c58bd` 已恢复模板分析方法论（两步流程 + 变体验证 + Coverage Audit 表），SK-1/SK-2/SK-3 评估需同步修正；同时更新 `pre-recon-code.txt` 行号偏移。
+>
+> **v4 更新要点**：代码级全量核验发现原文档仅覆盖 `sink_detector` 单模块，遗漏完整的 sink pipeline 架构。新增：① §4 补充 SK-12（`sink_merger` 已实现未接入 pipeline）、SK-13（fallback 路径 sink 真空）② §5 新增 §5.5 Pipeline 架构缺口 ③ §6 重构代码路径索引从 10 条扩充至 20 条（分三层：确定性检测 / 合并与下游消费 / LLM prompt）。
 
 ---
 
@@ -235,6 +237,8 @@
 | SK+2 | Slot 类型系统 | 自然语言 slot | `SlotContext` 枚举（8 值）+ `DangerousSlot` 模型 | 重构新增 ✨ | — |
 | SK+3 | 确定性 hint 注入 | 无 | `_static-dataflow-hints.txt` → LLM | 重构新增 ✨ | — |
 | SK+4 | is_entry_hint 标记 | 无 | 保守浅层判断（参数名/request.*/PHP 超全局） | 重构新增 ✨ | — |
+| SK-12 | **sink_merger 未接入 pipeline** | LLM Sink Hunter 报告自然融入流程 | `sink_merger.py` 已完整实现（153 行 + 单测），但 `__init__.py` 未 import / 调用 `merge_sink_reports()`；LLM pre-recon 发现的 sink 无法与确定性结果融合 | **中-高** | 代码级核验新增 |
+| SK-13 | **Fallback 路径丢失全部 sink 检测** | 无降级路径（依赖单一流程） | `_build_code_index_fallback()`（`__init__.py:230`）返回 `sink_call_sites=[]`；GitNexus 不可用时所有下游风险评分、分层审计失去 sink 感知 | **中** | 代码级核验新增 |
 
 ---
 
@@ -265,6 +269,21 @@
 
 - **XXE**：两边 prompt 均无 XXE 专门覆盖 + 确定性层 0 条
 
+### 5.5 重构 Pipeline 架构缺口（代码级核验新增）
+
+重构的 sink 检测 pipeline 已形成完整的 8 步链路（`__init__.py:51`）：
+
+```
+tree-sitter 解析 → GitNexus 调用图 → detect_sinks() → LLM 污点分析
+  → 跨函数传播 → 入口点融合 → CodeIndex 组装
+```
+
+但存在两个架构级缺口：
+
+1. **`sink_merger` 断路**（SK-12）：`sink_merger.py` 实现了确定性 + LLM sink 的去重合并逻辑（含 `parse_llm_sinks()` 报告解析 + `_infer_category()` 类别推断 + `merge_sink_reports()` 碰撞去重），且有完整的 `test_sink_merger.py` 测试覆盖。但 pipeline 主编排 `__init__.py` 仅 import 了 `detect_sinks`，未 import `merge_sink_reports`。**影响**：LLM pre-recon 阶段（Sink Hunter）发现的 sink 无法被确定性结果验证或补充，两条检测通道完全隔离。
+
+2. **Fallback 路径 sink 真空**（SK-13）：当 GitNexus MCP 不可用时，`_build_code_index_fallback()` 直接返回 `sink_call_sites=[]` 和 `degradation_level=MINIMAL`。**影响**：下游 `risk_scorer` 退化为 legacy regex 模式匹配（`_classify_sink_legacy()`），`tiered_audit` 的 sink-aware 评分完全失效，`audit_input_builder` 的 sink 清单为空。
+
 ---
 
 ## 6. 关键代码路径索引
@@ -283,12 +302,32 @@
 
 ### 重构 Shannon-py
 
+#### 确定性检测层
+
 | 功能 | 文件 |
 |---|---|
 | Sink 规则库（47 条） | `packages/core/src/shannon_core/code_index/sink_detector.py:67-198` |
 | Sink 检测算法 | `packages/core/src/shannon_core/code_index/sink_detector.py:249-325` |
-| 数据模型（SlotContext/SinkCallSite） | `packages/core/src/shannon_core/code_index/parameter_models.py` |
+| 数据模型（SlotContext/SinkCallSite/SinkCategory） | `packages/core/src/shannon_core/code_index/parameter_models.py` |
 | 文件发现（模板/schema） | `packages/core/src/shannon_core/code_index/file_discovery.py` |
+
+#### Sink 合并与下游消费
+
+| 功能 | 文件 | 备注 |
+|---|---|---|
+| Sink 合并（确定性 + LLM 去重） | `packages/core/src/shannon_core/code_index/sink_merger.py:99` | ⚠️ **已实现未接入 pipeline** |
+| LLM Sink 报告解析 | `packages/core/src/shannon_core/code_index/sink_merger.py:71` | ⚠️ 同上 |
+| 链路风险评分（Spec B category + legacy 双路径） | `packages/core/src/shannon_core/code_index/risk_scorer.py:96` | ✅ 已接入 |
+| 逐函数 LLM 污点分析 | `packages/core/src/shannon_core/code_index/llm_taint_analyzer.py:230` | ✅ 已接入 |
+| 跨函数污点传播 | `packages/core/src/shannon_core/code_index/chain_propagator.py:133` | ✅ 已接入 |
+| 分层审计规划 | `packages/core/src/shannon_core/code_index/tiered_audit.py:48` | ✅ 已接入 |
+| 审计输入构建（sink 清单渲染） | `packages/core/src/shannon_core/code_index/audit_input_builder.py:27` | ✅ 已接入 |
+| Pipeline 主编排（8 步流程） | `packages/core/src/shannon_core/code_index/__init__.py:51` | ✅ |
+
+#### LLM Prompt 层
+
+| 功能 | 文件 |
+|---|---|
 | LLM prompt SSRF（13 子类） | `prompts/pre-recon-code.txt:340-432` |
 | LLM prompt XSS（5 上下文） | `prompts/pre-recon-code.txt:306-339` |
 | 模板分析方法论（两步流程+变体验证） | `prompts/pre-recon-code.txt:141-149` |
