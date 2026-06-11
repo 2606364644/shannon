@@ -437,3 +437,191 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_framework_analysis(input: ActivityInput) -> dict:
+    """Detect auto-REST frameworks, infer endpoints, write deliverable."""
+    try:
+        from shannon_core.services.framework_analyzer import analyze_frameworks
+
+        repo, deliverables, _ = _get_paths(input)
+        result = await analyze_frameworks(str(repo))
+
+        # Write result as JSON deliverable
+        import dataclasses
+        result_data = dataclasses.asdict(result)
+        result_path = deliverables / "framework_analysis.json"
+        atomic_write_json(result_path, result_data)
+
+        return {
+            "detected_framework": result.detected_framework.name if result.detected_framework else None,
+            "inferred_endpoint_count": len(result.inferred_endpoints),
+            "recommendation_count": len(result.recommendations),
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_frontend_mapping(input: ActivityInput) -> dict:
+    """Map frontend routes to API calls, identify XSS chains, write deliverable."""
+    try:
+        from shannon_core.services.frontend_mapper import map_frontend_routes
+
+        repo, deliverables, _ = _get_paths(input)
+        result = await map_frontend_routes(str(repo))
+
+        # Write result as JSON deliverable
+        import dataclasses
+        result_data = dataclasses.asdict(result)
+        result_path = deliverables / "frontend_mapping.json"
+        atomic_write_json(result_path, result_data)
+
+        return {
+            "route_count": len(result.routes),
+            "xss_chain_count": len(result.xss_chains),
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_route_chain_building(input: ActivityInput) -> dict:
+    """Build route chain map from framework + frontend analysis results."""
+    try:
+        from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
+        from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
+        from shannon_core.services.route_chain_builder import build_attack_chains_from_analysis
+        import dataclasses
+        import logging
+
+        repo, deliverables, _ = _get_paths(input)
+        log = logging.getLogger(__name__)
+
+        # Load framework analysis result
+        framework_result = FrameworkAnalysisResult()
+        framework_path = deliverables / "framework_analysis.json"
+        if framework_path.exists():
+            data = json.loads(framework_path.read_text())
+            # Reconstruct endpoints from dicts (tuples become lists in JSON)
+            def _to_endpoint(d: dict) -> InferredEndpoint:
+                return InferredEndpoint(
+                    method=d["method"], path=d["path"], source=d["source"],
+                    model=d.get("model"), middleware=tuple(d.get("middleware", [])),
+                    vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+                )
+            endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
+            framework_result = FrameworkAnalysisResult(
+                inferred_endpoints=endpoints,
+                recommendations=data.get("recommendations", []),
+            )
+
+        # Load frontend mapping result
+        frontend_result = FrontendAnalysisResult()
+        frontend_path = deliverables / "frontend_mapping.json"
+        if frontend_path.exists():
+            data = json.loads(frontend_path.read_text())
+            def _to_route(d: dict) -> FrontendRoute:
+                return FrontendRoute(
+                    path=d["path"], component=d["component"], authenticated=d["authenticated"],
+                )
+            def _to_xss(d: dict) -> XssAttackChain:
+                return XssAttackChain(
+                    entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
+                    render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
+                )
+            routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
+            xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
+            frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
+
+        chains = build_attack_chains_from_analysis(
+            framework_result.inferred_endpoints, frontend_result.routes, frontend_result.xss_chains, log,
+        )
+
+        # Write chains
+        chains_data = [dataclasses.asdict(c) for c in chains]
+        chains_path = deliverables / "route_chains.json"
+        atomic_write_json(chains_path, chains_data)
+
+        return {"chain_count": len(chains)}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_attack_chain_assembly(input: ActivityInput) -> dict:
+    """Assemble multi-step attack chains from all analysis results."""
+    try:
+        from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
+        from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
+        from shannon_core.services.attack_chain_builder import build_attack_chains
+        import dataclasses
+        import logging
+
+        repo, deliverables, _ = _get_paths(input)
+        log = logging.getLogger(__name__)
+
+        # Load results (JSON stores tuples as lists, convert back)
+        def _to_endpoint(d: dict) -> InferredEndpoint:
+            return InferredEndpoint(
+                method=d["method"], path=d["path"], source=d["source"],
+                model=d.get("model"), middleware=tuple(d.get("middleware", [])),
+                vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+            )
+
+        def _to_route(d: dict) -> FrontendRoute:
+            return FrontendRoute(
+                path=d["path"], component=d["component"], authenticated=d["authenticated"],
+            )
+
+        def _to_xss(d: dict) -> XssAttackChain:
+            return XssAttackChain(
+                entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
+                render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
+            )
+
+        framework_result = FrameworkAnalysisResult()
+        framework_path = deliverables / "framework_analysis.json"
+        if framework_path.exists():
+            data = json.loads(framework_path.read_text())
+            endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
+            framework_result = FrameworkAnalysisResult(
+                inferred_endpoints=endpoints,
+                recommendations=data.get("recommendations", []),
+            )
+
+        frontend_result = FrontendAnalysisResult()
+        frontend_path = deliverables / "frontend_mapping.json"
+        if frontend_path.exists():
+            data = json.loads(frontend_path.read_text())
+            routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
+            xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
+            frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
+
+        chains = await build_attack_chains(framework_result, frontend_result, log)
+
+        # Write assembled chains
+        chains_data = [dataclasses.asdict(c) for c in chains]
+        chains_path = deliverables / "attack_chains.json"
+        atomic_write_json(chains_path, chains_data)
+
+        return {"chain_count": len(chains)}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
