@@ -274,6 +274,7 @@ export interface MessageDispatchDeps {
   progress: ProgressManager;
   auditLogger: AuditLogger;
   logger: ActivityLogger;
+  silent?: boolean;
 }
 
 // Dispatches SDK messages to appropriate handlers and formatters
@@ -294,7 +295,9 @@ export async function dispatchMessage(
 
       if (assistantResult.cleanedContent.trim()) {
         progress.stop();
-        outputLines(formatAssistantOutput(assistantResult.cleanedContent, execContext, turnCount, description));
+        if (!deps.silent) {
+          outputLines(formatAssistantOutput(assistantResult.cleanedContent, execContext, turnCount, description));
+        }
         progress.start();
       }
 

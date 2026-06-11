@@ -149,6 +149,7 @@ export async function runClaudePrompt(
   apiKey?: string,
   deliverablesSubdir?: string,
   providerConfig?: import('../types/config.js').ProviderConfig,
+  silent?: boolean,
 ): Promise<ClaudePromptResult> {
   // 1. Initialize timing and prompt
   const timer = new Timer(`agent-${description.toLowerCase().replace(/\s+/g, '-')}`);
@@ -259,7 +260,7 @@ export async function runClaudePrompt(
     const messageLoopResult = await processMessageStream(
       fullPrompt,
       options,
-      { execContext, description, progress, auditLogger, logger },
+      { execContext, description, progress, auditLogger, logger, ...optionalSilent(silent) },
       timer,
     );
 
@@ -334,12 +335,19 @@ interface MessageLoopResult {
   structuredOutput?: unknown;
 }
 
+// exactOptionalPropertyTypes helper: only includes silent when explicitly set
+function optionalSilent(silent: boolean | undefined): { silent?: boolean } {
+  if (silent === undefined) return {};
+  return { silent };
+}
+
 interface MessageLoopDeps {
   execContext: ReturnType<typeof detectExecutionContext>;
   description: string;
   progress: ReturnType<typeof createProgressManager>;
   auditLogger: ReturnType<typeof createAuditLogger>;
   logger: ActivityLogger;
+  silent?: boolean;
 }
 
 async function processMessageStream(
@@ -378,6 +386,7 @@ async function processMessageStream(
       progress,
       auditLogger,
       logger,
+      ...optionalSilent(deps.silent),
     });
 
     if (dispatchResult.type === 'throw') {
