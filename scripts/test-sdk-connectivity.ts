@@ -3,7 +3,9 @@
 // SDK connectivity test — verifies model provider reachability for all three tiers.
 // Reads config from the INLINE_CONFIG block below, falls back to .env if unset.
 //
-// Usage: npx tsx scripts/test-sdk-connectivity.ts
+// Usage:
+//   npx tsx scripts/test-sdk-connectivity.ts
+//
 // Exit codes: 0 = all passed, 1 = at least one failed, 2 = config error
 
 import { readFileSync } from 'node:fs';
