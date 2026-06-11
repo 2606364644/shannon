@@ -111,6 +111,8 @@ def ensure_prerequisite(name: str, profile: str) -> None:
    - 仍缺 → 打印安装失败 + 手动命令兜底 → 走降级确认路径。
    - 已装 → 返回。
 
+**非交互/CI 环境：** 当 stdin 不是 TTY 时（CI 管道、无终端调用），`click.confirm` 检测到非交互模式后自动取默认值（安装提示默认 True → 尝试安装；降级确认默认 False → 退出码 1）。实现时用 `sys.stdin.isatty()` 检测，或 catch `click.Abort` / `EOFError`，确保 CI 中不挂起。环境变量 `SHANNON_SKIP_PREREQUISITES=1` 可跳过全部自检（CI 已预装依赖时使用）。
+
 **脚本路径定位策略：**
 
 - 默认：从 `prerequisites.py` 所在路径上溯 `../../../../../scripts/bootstrap.sh`（core 包 → packages/ → repo root）。
