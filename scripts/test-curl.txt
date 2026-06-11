@@ -1,0 +1,35 @@
+curl --request POST \
+  --url http://localhost:8080/anthropic/v1/messages \
+  --header 'Authorization: Bearer 1234567890abcdef' \
+  --header 'Content-Type: application/json' \
+  --header 'x-bf-async-job-result-ttl: 3600' \
+  --data '
+{
+  "model": "glm-5.1",
+  "max_tokens": 123,
+  "messages": [
+    {
+      "content": "say hello world"
+    }
+  ],
+  "system": "You are a helpful assistant.",
+  "cache_control": {
+    "type": "ephemeral",
+    "ttl": "3600"
+  },
+  "metadata": {
+    "user_id": "123"
+  },
+  "stream": false,
+  "temperature": 0.5,
+  "top_p": 123,
+  "top_k": 123,
+  "stop_sequences": [
+    "stop"
+  ],
+  "thinking": {
+    "budget_tokens": 123
+  },
+  "output_format": {}
+}
+'
