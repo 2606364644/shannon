@@ -3,8 +3,7 @@
 // SDK connectivity test — verifies model provider reachability for all three tiers.
 // Reads config from the INLINE_CONFIG block below, falls back to .env if unset.
 //
-// Usage:
-//   npx tsx scripts/test-sdk-connectivity.ts
+// Usage: npx tsx scripts/test-sdk-connectivity.ts
 //
 // Exit codes: 0 = all passed, 1 = at least one failed, 2 = config error
 
@@ -19,15 +18,15 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 
 const INLINE_CONFIG = {
   /** API endpoint URL, e.g. "https://open.bigmodel.cn/api/anthropic" */
-  baseUrl: '',
+  baseUrl: 'http://localhost:8080',
   /** Auth token or API key */
   authToken: '',
   /** Set to "token" (default) or "key" depending on which field you filled */
   authType: 'token' as 'token' | 'key',
   /** Model overrides — leave empty string to use defaults */
-  smallModel: '',
-  mediumModel: '',
-  largeModel: '',
+  smallModel: 'llm-proxy/glm-5.1',
+  mediumModel: 'llm-proxy/glm-5.1',
+  largeModel: 'llm-proxy/glm-5.1',
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -150,15 +149,20 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
     const durationMs = Date.now() - start;
     clearTimeout(timer);
 
-    if (resultText) {
+    const isApiError = resultText.includes('API Error:') || resultText.includes('"type":"error"');
+
+    if (resultText && !isApiError) {
       console.log(`  ✅ OK (${(durationMs / 1000).toFixed(1)}s)`);
+      console.log(`  📝 ${resultText.trim().split('\n')[0].slice(0, 200)}`);
       console.log();
       return { tier, model, passed: true, durationMs };
     }
 
-    console.log(`  ❌ FAILED: Empty response`);
+    const errorDetail = isApiError ? resultText.trim().split('\n')[0].slice(0, 200) : 'Empty response';
+    console.log(`  ❌ FAILED: ${isApiError ? 'API error' : 'Empty response'}`);
+    console.log(`  📝 ${errorDetail}`);
     console.log();
-    return { tier, model, passed: false, durationMs, error: 'Empty response' };
+    return { tier, model, passed: false, durationMs, error: errorDetail };
   } catch (error) {
     clearTimeout(timer);
     const durationMs = Date.now() - start;
