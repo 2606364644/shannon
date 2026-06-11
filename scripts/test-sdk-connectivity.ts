@@ -89,6 +89,11 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
         permissionMode: PERMISSION_MODE,
         ...(!IS_ROOT && { allowDangerouslySkipPermissions: true }),
         tools: [],
+        // IMPORTANT: Empty settingSources enters SDK isolation mode — skip loading
+        // ~/.claude/settings.json (and project/local settings). Without this, the user's
+        // global settings.json `env` block overrides INLINE_CONFIG below, so the test
+        // silently hits a different endpoint/token than the one printed in the header.
+        settingSources: [],
         env: sdkEnv,
         persistSession: false,
         abortController: controller,
