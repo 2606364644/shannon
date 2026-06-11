@@ -157,6 +157,24 @@ class WhiteboxScanWorkflow:
                 )
                 self._state.current_agent = None
 
+                # === Route Analysis Phase (parallel) ===
+                framework_result, frontend_result = await asyncio.gather(
+                    workflow.execute_activity(
+                        activities.run_framework_analysis, act_input,
+                        start_to_close_timeout=timedelta(minutes=5),
+                    ),
+                    workflow.execute_activity(
+                        activities.run_frontend_mapping, act_input,
+                        start_to_close_timeout=timedelta(minutes=5),
+                    ),
+                )
+
+                # Route chain building (depends on framework + frontend)
+                await workflow.execute_activity(
+                    activities.run_route_chain_building, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                )
+
             if AgentName.RECON.value not in self._state.completed_agents:
                 self._state.current_phase = "recon"
                 self._state.current_agent = AgentName.RECON.value
@@ -214,6 +232,17 @@ class WhiteboxScanWorkflow:
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
+
+            # === Attack Chain Assembly ===
+            try:
+                await workflow.execute_activity(
+                    activities.run_attack_chain_assembly, act_input,
+                    start_to_close_timeout=timedelta(minutes=5),
+                )
+            except Exception as exc:
+                # Non-fatal — attack chains enhance the report but don't block the pipeline
+                import logging
+                logging.getLogger(__name__).warning("Attack chain assembly failed: %s", exc)
 
             self._state.current_phase = "reporting"
             self._state.current_agent = "render-findings"
