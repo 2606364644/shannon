@@ -125,6 +125,8 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
     )
     click.echo(f"Starting black-box scan on {url}")
     asyncio.run(ensure_infra(address=temporal_address))
+    from shannon_core.runtime.prerequisites import ensure_prerequisite
+    ensure_prerequisite("playwright-cli", profile="blackbox")
     result = asyncio.run(run_scan(input, temporal_address))
     if result.status == "completed":
         if result.has_whitebox_results:
