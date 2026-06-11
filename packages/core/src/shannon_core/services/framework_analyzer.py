@@ -125,7 +125,7 @@ FRAMEWORK_PATTERNS: tuple[FrameworkPattern, ...] = (
 # Core logic
 # ---------------------------------------------------------------------------
 
-def analyze_frameworks(
+async def analyze_frameworks(
     codebase_path: str,
 ) -> FrameworkAnalysisResult:
     """Detect auto-REST frameworks, discover models, infer endpoints, build recommendations."""
