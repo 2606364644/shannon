@@ -61,7 +61,7 @@ function maskToken(token: string): string {
 }
 
 function printHeader(endpoint: string, authSource: string, authToken: string): void {
-  console.log('SDK Connectivity Test');
+  console.log('🔗 Shannon SDK Connectivity Test');
   console.log('─────────────────────────────────');
   console.log(`Endpoint: ${endpoint}`);
   console.log(`Auth: ${authSource} (${maskToken(authToken)})`);
@@ -88,7 +88,7 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  console.log(`Testing ${tier} model (${model})...`);
+  console.log(`📡 Testing ${tier} model (${model})...`);
 
   try {
     let resultText = '';
@@ -119,12 +119,12 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
     clearTimeout(timer);
 
     if (resultText) {
-      console.log(`  OK (${(durationMs / 1000).toFixed(1)}s)`);
+      console.log(`  ✅ OK (${(durationMs / 1000).toFixed(1)}s)`);
       console.log();
       return { tier, model, passed: true, durationMs };
     }
 
-    console.log(`  FAILED: Empty response`);
+    console.log(`  ❌ FAILED: Empty response`);
     console.log();
     return { tier, model, passed: false, durationMs, error: 'Empty response' };
   } catch (error) {
@@ -141,7 +141,7 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
       errorMessage = `Network error: ${err.message}`;
     }
 
-    console.log(`  FAILED: ${errorMessage}`);
+    console.log(`  ❌ FAILED: ${errorMessage}`);
     console.log();
     return { tier, model, passed: false, durationMs, error: errorMessage };
   }
@@ -155,7 +155,7 @@ async function main(): Promise<number> {
   try {
     env = parseEnvFile(ENV_FILE);
   } catch {
-    console.error(`Cannot read ${ENV_FILE}`);
+    console.error(`❌ Cannot read ${ENV_FILE}`);
     console.error('   Create one with ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).');
     return 2;
   }
@@ -166,13 +166,13 @@ async function main(): Promise<number> {
   const apiKey = env.ANTHROPIC_API_KEY;
 
   if (!baseUrl) {
-    console.error('ANTHROPIC_BASE_URL is not set in .env');
+    console.error('❌ ANTHROPIC_BASE_URL is not set in .env');
     return 2;
   }
 
   const effectiveToken = authToken || apiKey;
   if (!effectiveToken) {
-    console.error('Neither ANTHROPIC_AUTH_TOKEN nor ANTHROPIC_API_KEY is set in .env');
+    console.error('❌ Neither ANTHROPIC_AUTH_TOKEN nor ANTHROPIC_API_KEY is set in .env');
     return 2;
   }
 
