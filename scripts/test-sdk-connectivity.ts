@@ -1,39 +1,36 @@
 #!/usr/bin/env node
 
 // SDK connectivity test — verifies model provider reachability for all three tiers.
-// Reads config from the INLINE_CONFIG block below, falls back to .env if unset.
+// All config is in the INLINE_CONFIG block below — no .env needed.
 //
 // Usage: npx tsx scripts/test-sdk-connectivity.ts
 //
 // Exit codes: 0 = all passed, 1 = at least one failed, 2 = config error
 
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  INLINE CONFIG — edit here, leave empty to read from .env      ║
+// ║  INLINE CONFIG — edit here to test your model provider          ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 const INLINE_CONFIG = {
   /** API endpoint URL, e.g. "https://open.bigmodel.cn/api/anthropic" */
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://localhost:8080/anthropic',
   /** Auth token or API key */
-  authToken: '',
+  authToken: '1234567890abcdef',
   /** Set to "token" (default) or "key" depending on which field you filled */
   authType: 'token' as 'token' | 'key',
   /** Model overrides — leave empty string to use defaults */
-  smallModel: 'llm-proxy/glm-5.1',
-  mediumModel: 'llm-proxy/glm-5.1',
-  largeModel: 'llm-proxy/glm-5.1',
+  smallModel: 'glm-5.1',
+  mediumModel: 'glm-5.1',
+  largeModel: 'glm-5.1',
 };
 
 // ═══════════════════════════════════════════════════════════════════
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(SCRIPT_DIR, '..');
-const ENV_FILE = resolve(PROJECT_ROOT, '.env');
 const MODEL_TIERS = ['small', 'medium', 'large'] as const;
 const TIMEOUT_MS = 30_000;
 
@@ -42,40 +39,6 @@ const TIMEOUT_MS = 30_000;
 const IS_ROOT = process.getuid?.() === 0;
 const PERMISSION_MODE = IS_ROOT ? ('plan' as const) : ('bypassPermissions' as const);
 
-const DEFAULT_MODELS: Record<string, string> = {
-  small: 'claude-haiku-4-5-20251001',
-  medium: 'claude-sonnet-4-6',
-  large: 'claude-opus-4-7',
-};
-
-const ENV_VAR_MAP: Record<string, string> = {
-  small: 'ANTHROPIC_SMALL_MODEL',
-  medium: 'ANTHROPIC_MEDIUM_MODEL',
-  large: 'ANTHROPIC_LARGE_MODEL',
-};
-
-// === .env Parser ===
-
-/** Minimal .env parser — handles KEY=VALUE lines, ignores comments and blanks. */
-function parseEnvFile(filePath: string): Record<string, string> {
-  const content = readFileSync(filePath, 'utf-8');
-  const env: Record<string, string> = {};
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
-    const key = trimmed.slice(0, eqIndex).trim();
-    let value = trimmed.slice(eqIndex + 1).trim();
-    // Strip surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    env[key] = value;
-  }
-  return env;
-}
-
 // === Output Helpers ===
 
 function maskToken(token: string): string {
@@ -83,18 +46,11 @@ function maskToken(token: string): string {
   return `${token.slice(0, 4)}...${token.slice(-4)}`;
 }
 
-function printHeader(
-  endpoint: string,
-  authSource: string,
-  authToken: string,
-  permissionMode: string,
-  configSource: string,
-): void {
+function printHeader(endpoint: string, authSource: string, authToken: string, permissionMode: string): void {
   console.log('🔗 Shannon SDK Connectivity Test');
   console.log('─────────────────────────────────');
   console.log(`Endpoint: ${endpoint}`);
   console.log(`Auth: ${authSource} (${maskToken(authToken)})`);
-  console.log(`Config: ${configSource}`);
   console.log(`Mode: ${permissionMode}${IS_ROOT ? ' (root detected — bypassPermissions unavailable)' : ''}`);
   console.log();
 }
@@ -186,74 +142,46 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
 // === Main ===
 
 async function main(): Promise<number> {
-  // 1. Load config: INLINE_CONFIG takes precedence, then fall back to .env
-  let env: Record<string, string> = {};
-  try {
-    env = parseEnvFile(ENV_FILE);
-  } catch {
-    // .env missing is OK if INLINE_CONFIG is filled
+  // 1. Validate config
+  if (!INLINE_CONFIG.baseUrl) {
+    console.error('❌ INLINE_CONFIG.baseUrl is empty');
+    return 2;
   }
-
-  const baseUrl = INLINE_CONFIG.baseUrl || env.ANTHROPIC_BASE_URL;
-  const authToken =
-    INLINE_CONFIG.authType === 'token' ? INLINE_CONFIG.authToken || env.ANTHROPIC_AUTH_TOKEN : env.ANTHROPIC_AUTH_TOKEN;
-  const apiKey =
-    INLINE_CONFIG.authType === 'key' ? INLINE_CONFIG.authToken || env.ANTHROPIC_API_KEY : env.ANTHROPIC_API_KEY;
-
-  // 2. Validate required config
-  if (!baseUrl) {
-    console.error('❌ No endpoint configured. Set INLINE_CONFIG.baseUrl or ANTHROPIC_BASE_URL in .env');
+  if (!INLINE_CONFIG.authToken) {
+    console.error('❌ INLINE_CONFIG.authToken is empty');
     return 2;
   }
 
-  const effectiveToken = authToken || apiKey;
-  if (!effectiveToken) {
-    console.error(
-      '❌ No auth configured. Set INLINE_CONFIG.authToken or ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY in .env',
-    );
-    return 2;
-  }
+  const authSource = INLINE_CONFIG.authType === 'key' ? 'API_KEY' : 'AUTH_TOKEN';
 
-  const configSource = INLINE_CONFIG.baseUrl ? 'inline' : '.env';
-  const authSource = INLINE_CONFIG.authToken
-    ? INLINE_CONFIG.authType === 'key'
-      ? 'INLINE (ANTHROPIC_API_KEY)'
-      : 'INLINE (ANTHROPIC_AUTH_TOKEN)'
-    : authToken
-      ? 'ANTHROPIC_AUTH_TOKEN'
-      : 'ANTHROPIC_API_KEY';
-
-  // 3. Resolve model names
-  const models: Record<string, string> = {};
-  const inlineModels = {
+  // 2. Resolve model names
+  const models: Record<string, string> = {
     small: INLINE_CONFIG.smallModel,
     medium: INLINE_CONFIG.mediumModel,
     large: INLINE_CONFIG.largeModel,
   };
-  for (const tier of MODEL_TIERS) {
-    models[tier] = inlineModels[tier] || env[ENV_VAR_MAP[tier]] || DEFAULT_MODELS[tier];
-  }
 
-  // 4. Build SDK env (only pass what the SDK needs)
+  // 3. Build SDK env
   const sdkEnv: Record<string, string> = {
-    ANTHROPIC_BASE_URL: baseUrl,
-    ...(authToken && { ANTHROPIC_AUTH_TOKEN: authToken }),
-    ...(apiKey && !authToken && { ANTHROPIC_API_KEY: apiKey }),
+    ANTHROPIC_BASE_URL: INLINE_CONFIG.baseUrl,
+    ...(INLINE_CONFIG.authType === 'key'
+      ? { ANTHROPIC_API_KEY: INLINE_CONFIG.authToken }
+      : { ANTHROPIC_AUTH_TOKEN: INLINE_CONFIG.authToken }),
     HOME: process.env.HOME || '',
     PATH: process.env.PATH || '',
   };
 
-  // 5. Print header
-  printHeader(baseUrl, authSource, effectiveToken, PERMISSION_MODE, configSource);
+  // 4. Print header
+  printHeader(INLINE_CONFIG.baseUrl, authSource, INLINE_CONFIG.authToken, PERMISSION_MODE);
 
-  // 6. Test each model tier sequentially
+  // 5. Test each model tier sequentially
   const results: TestResult[] = [];
   for (const tier of MODEL_TIERS) {
     const result = await testModel(tier, models[tier], sdkEnv);
     results.push(result);
   }
 
-  // 7. Summary
+  // 6. Summary
   const passed = results.filter((r) => r.passed).length;
   printFooter(passed, results.length);
 
