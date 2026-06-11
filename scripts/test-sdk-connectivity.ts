@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // SDK connectivity test — verifies model provider reachability for all three tiers.
-// Reads .env from project root, calls query() per model, reports pass/fail with timing.
+// Reads config from the INLINE_CONFIG block below, falls back to .env if unset.
 //
 // Usage: npx tsx scripts/test-sdk-connectivity.ts
 // Exit codes: 0 = all passed, 1 = at least one failed, 2 = config error
@@ -11,7 +11,24 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-// === Configuration ===
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  INLINE CONFIG — edit here, leave empty to read from .env      ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+const INLINE_CONFIG = {
+  /** API endpoint URL, e.g. "https://open.bigmodel.cn/api/anthropic" */
+  baseUrl: '',
+  /** Auth token or API key */
+  authToken: '',
+  /** Set to "token" (default) or "key" depending on which field you filled */
+  authType: 'token' as 'token' | 'key',
+  /** Model overrides — leave empty string to use defaults */
+  smallModel: '',
+  mediumModel: '',
+  largeModel: '',
+};
+
+// ═══════════════════════════════════════════════════════════════════
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..');
@@ -65,11 +82,18 @@ function maskToken(token: string): string {
   return `${token.slice(0, 4)}...${token.slice(-4)}`;
 }
 
-function printHeader(endpoint: string, authSource: string, authToken: string, permissionMode: string): void {
+function printHeader(
+  endpoint: string,
+  authSource: string,
+  authToken: string,
+  permissionMode: string,
+  configSource: string,
+): void {
   console.log('🔗 Shannon SDK Connectivity Test');
   console.log('─────────────────────────────────');
   console.log(`Endpoint: ${endpoint}`);
   console.log(`Auth: ${authSource} (${maskToken(authToken)})`);
+  console.log(`Config: ${configSource}`);
   console.log(`Mode: ${permissionMode}${IS_ROOT ? ' (root detected — bypassPermissions unavailable)' : ''}`);
   console.log();
 }
@@ -156,38 +180,52 @@ async function testModel(tier: string, model: string, sdkEnv: Record<string, str
 // === Main ===
 
 async function main(): Promise<number> {
-  // 1. Load .env
-  let env: Record<string, string>;
+  // 1. Load config: INLINE_CONFIG takes precedence, then fall back to .env
+  let env: Record<string, string> = {};
   try {
     env = parseEnvFile(ENV_FILE);
   } catch {
-    console.error(`❌ Cannot read ${ENV_FILE}`);
-    console.error('   Create one with ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).');
-    return 2;
+    // .env missing is OK if INLINE_CONFIG is filled
   }
 
-  // 2. Validate required config
-  const baseUrl = env.ANTHROPIC_BASE_URL;
-  const authToken = env.ANTHROPIC_AUTH_TOKEN;
-  const apiKey = env.ANTHROPIC_API_KEY;
+  const baseUrl = INLINE_CONFIG.baseUrl || env.ANTHROPIC_BASE_URL;
+  const authToken =
+    INLINE_CONFIG.authType === 'token' ? INLINE_CONFIG.authToken || env.ANTHROPIC_AUTH_TOKEN : env.ANTHROPIC_AUTH_TOKEN;
+  const apiKey =
+    INLINE_CONFIG.authType === 'key' ? INLINE_CONFIG.authToken || env.ANTHROPIC_API_KEY : env.ANTHROPIC_API_KEY;
 
+  // 2. Validate required config
   if (!baseUrl) {
-    console.error('❌ ANTHROPIC_BASE_URL is not set in .env');
+    console.error('❌ No endpoint configured. Set INLINE_CONFIG.baseUrl or ANTHROPIC_BASE_URL in .env');
     return 2;
   }
 
   const effectiveToken = authToken || apiKey;
   if (!effectiveToken) {
-    console.error('❌ Neither ANTHROPIC_AUTH_TOKEN nor ANTHROPIC_API_KEY is set in .env');
+    console.error(
+      '❌ No auth configured. Set INLINE_CONFIG.authToken or ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY in .env',
+    );
     return 2;
   }
 
-  const authSource = authToken ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+  const configSource = INLINE_CONFIG.baseUrl ? 'inline' : '.env';
+  const authSource = INLINE_CONFIG.authToken
+    ? INLINE_CONFIG.authType === 'key'
+      ? 'INLINE (ANTHROPIC_API_KEY)'
+      : 'INLINE (ANTHROPIC_AUTH_TOKEN)'
+    : authToken
+      ? 'ANTHROPIC_AUTH_TOKEN'
+      : 'ANTHROPIC_API_KEY';
 
   // 3. Resolve model names
   const models: Record<string, string> = {};
+  const inlineModels = {
+    small: INLINE_CONFIG.smallModel,
+    medium: INLINE_CONFIG.mediumModel,
+    large: INLINE_CONFIG.largeModel,
+  };
   for (const tier of MODEL_TIERS) {
-    models[tier] = env[ENV_VAR_MAP[tier]] || DEFAULT_MODELS[tier];
+    models[tier] = inlineModels[tier] || env[ENV_VAR_MAP[tier]] || DEFAULT_MODELS[tier];
   }
 
   // 4. Build SDK env (only pass what the SDK needs)
@@ -200,7 +238,7 @@ async function main(): Promise<number> {
   };
 
   // 5. Print header
-  printHeader(baseUrl, authSource, effectiveToken, PERMISSION_MODE);
+  printHeader(baseUrl, authSource, effectiveToken, PERMISSION_MODE, configSource);
 
   // 6. Test each model tier sequentially
   const results: TestResult[] = [];
