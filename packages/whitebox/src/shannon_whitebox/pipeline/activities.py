@@ -182,28 +182,48 @@ async def run_code_index(input: ActivityInput) -> dict:
             # Placeholder: in production, this calls run_claude_prompt
             return "{}"
 
-        # Create real GitNexus MCP client with auto-indexing.
-        # auto_index=True handles:
-        #   1. Check if gitnexus CLI is installed
-        #   2. Run gitnexus analyze if needed
-        #   3. Fall back to minimal AST-only mode if unavailable
-        try:
-            async with GitNexusMCPClient(Path(repo)) as mcp:
+        # --- GitNexus integration ---
+        # GitNexus MCP serves ALL indexed repos from its global registry
+        # (~/.gitnexus/registry.json).  The correct order is:
+        #   1. `gitnexus analyze <repo>`  — index & register the repo
+        #   2. `gitnexus mcp`             — start MCP server (no --repo flag)
+        # If indexing fails or MCP is unreachable we degrade to minimal AST-only.
+        from shannon_core.code_index.gitnexus_engine import GitNexusEngine
+
+        engine = GitNexusEngine(Path(repo))
+        indexed = False
+        if engine.is_available():
+            result = engine.ensure_indexed()
+            indexed = result.success
+            if not indexed:
+                logger.warning("GitNexus indexing failed: %s", result.error_message)
+
+        if indexed:
+            try:
+                async with GitNexusMCPClient(Path(repo)) as mcp:
+                    index = await build_code_index_with_gitnexus(
+                        str(repo),
+                        mcp_client=mcp,
+                        llm_client=_llm_taint_client,
+                        auto_index=False,  # already indexed above
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "GitNexus MCP failed (%s), falling back to minimal index", exc,
+                )
                 index = await build_code_index_with_gitnexus(
                     str(repo),
-                    mcp_client=mcp,
+                    mcp_client=_StubMCPClient(),
                     llm_client=_llm_taint_client,
-                    auto_index=True,
+                    auto_index=True,  # will detect unavailable → minimal mode
                 )
-        except Exception as exc:
-            logger.warning(
-                "GitNexus MCP failed (%s), falling back to minimal index", exc,
-            )
+        else:
+            # GitNexus CLI missing or indexing failed — minimal AST-only mode
             index = await build_code_index_with_gitnexus(
                 str(repo),
-                mcp_client=_StubMCPClient(),  # fallback stub
+                mcp_client=_StubMCPClient(),
                 llm_client=_llm_taint_client,
-                auto_index=True,  # will detect unavailable and use minimal mode
+                auto_index=True,
             )
 
         json_path, summary_path = write_index_files(index, str(deliverables))
