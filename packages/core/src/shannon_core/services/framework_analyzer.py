@@ -125,14 +125,14 @@ FRAMEWORK_PATTERNS: tuple[FrameworkPattern, ...] = (
 # Core logic
 # ---------------------------------------------------------------------------
 
-async def analyze_frameworks(
+def analyze_frameworks(
     codebase_path: str,
 ) -> FrameworkAnalysisResult:
     """Detect auto-REST frameworks, discover models, infer endpoints, build recommendations."""
     detected: FrameworkPattern | None = None
 
     for pattern in FRAMEWORK_PATTERNS:
-        if await _detect_framework(codebase_path, pattern):
+        if _detect_framework(codebase_path, pattern):
             detected = pattern
             logger.info("Detected framework: %s", pattern.name)
             break
@@ -141,7 +141,7 @@ async def analyze_frameworks(
         logger.info("No auto-generated REST framework detected")
         return FrameworkAnalysisResult()
 
-    models = await _discover_models(codebase_path, detected)
+    models = _discover_models(codebase_path, detected)
     logger.info("Found %d model(s) configured with %s: %s", len(models), detected.name, ", ".join(models))
 
     endpoints = _generate_inferred_endpoints(detected, models)
@@ -154,7 +154,7 @@ async def analyze_frameworks(
     )
 
 
-async def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bool:
+def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bool:
     """Scan source files for framework initialization patterns."""
     all_patterns = list(pattern.detection_patterns.get("import", ())) + list(
         pattern.detection_patterns.get("initialize", ())
@@ -163,11 +163,11 @@ async def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bo
         return False
 
     try:
-        source_files = await _find_source_files(codebase_path)
+        source_files = _find_source_files(codebase_path)
         for file_path in source_files:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             for detection_pattern in all_patterns:
-                if detection_pattern in content:
+                if re.search(detection_pattern, content):
                     logger.info('Framework pattern "%s" found in %s', detection_pattern, file_path)
                     return True
     except Exception as exc:
@@ -176,7 +176,7 @@ async def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bo
     return False
 
 
-async def _find_source_files(codebase_path: str) -> list[Path]:
+def _find_source_files(codebase_path: str) -> list[Path]:
     """Find relevant source files to scan for framework patterns."""
     base = Path(codebase_path)
     files: list[Path] = []
@@ -189,16 +189,16 @@ async def _find_source_files(codebase_path: str) -> list[Path]:
     for subdir in ("routes", "models", "api", "src/routes", "src/models"):
         dir_path = base / subdir
         if dir_path.exists():
-            for f in dir_path.iterdir():
-                if f.suffix in (".js", ".ts"):
-                    files.append(f)
+            files.extend(dir_path.rglob("*.js"))
+            files.extend(dir_path.rglob("*.ts"))
 
     return files
 
 
-async def _discover_models(codebase_path: str, pattern: FrameworkPattern) -> list[str]:
+def _discover_models(codebase_path: str, pattern: FrameworkPattern) -> list[str]:
     """Discover model names configured with the framework."""
     models: list[str] = []
+    # Guard: skip discovery if the framework has no resource config patterns defined.
     config_patterns = pattern.detection_patterns.get("config", ())
     if not config_patterns:
         return models
@@ -206,7 +206,7 @@ async def _discover_models(codebase_path: str, pattern: FrameworkPattern) -> lis
     model_regex = re.compile(r"\.resource\([^)]*?model\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 
     try:
-        source_files = await _find_source_files(codebase_path)
+        source_files = _find_source_files(codebase_path)
         for file_path in source_files:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             for match in model_regex.finditer(content):
