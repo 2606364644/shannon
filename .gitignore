@@ -8,3 +8,4 @@ repos/
 .cache/
 apps/worker/configs/test-nnads.yaml
 .worktrees/
+.env.bak
