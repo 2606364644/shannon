@@ -169,17 +169,20 @@ async def build_call_graph_from_gitnexus(
 ) -> CallGraphResult:
     """Build a call graph using GitNexus MCP tools.
 
-    1. Call mcp_client.call_tool("query", {...}) to get entry points
-    2. Match to blocks
-    3. Call mcp_client.call_tool("process", {...}) to get call chains
-    4. Parse edges, build chains, create degradation report
+    Uses the real GitNexus MCP API:
+    1. ``query({query: "entry point"})`` — process-grouped search returning
+       ``processes``, ``process_symbols``, and ``definitions``.
+    2. For each symbol, ``context({name: "…"})`` — 360° view with
+       ``incoming.calls`` and ``outgoing.calls`` that become CallEdges.
+    3. ``cypher`` — raw graph query to discover CALLS relationships and
+       confidence scores for all edges.
 
-    Raises GitNexusNotIndexedError if query returns None.
+    Raises GitNexusNotIndexedError if query returns None (repo not indexed).
     """
-    # Step 1: Query entry points from GitNexus
+    # ── Step 1: query for entry-point candidates ──────────────────────
     query_result = await mcp_client.call_tool(
         "query",
-        {"repo_path": repo_path, "query_type": "entry_points"},
+        {"query": "entry point"},
     )
 
     if query_result is None:
@@ -187,30 +190,81 @@ async def build_call_graph_from_gitnexus(
             f"GitNexus has not indexed repository: {repo_path}"
         )
 
-    # Step 2: Match query results to known blocks
+    # ── Step 2: extract symbols and match to tree-sitter blocks ───────
+    # query returns: {"processes": [...], "process_symbols": [...], "definitions": [...]}
+    process_symbols: list[dict] = query_result.get("process_symbols", []) if isinstance(query_result, dict) else []
+    definitions: list[dict] = query_result.get("definitions", []) if isinstance(query_result, dict) else []
+
+    # Build block index for matching  (file_path, func_name, start_line) → FuncBlock
     block_index: dict[tuple[str, str, int], FuncBlock] = {}
     for block in blocks:
         block_index[(block.file_path, block.function_name, block.start_line)] = block
+    # Also index by (file_path, func_name) for fuzzy matching
+    block_by_name: dict[tuple[str, str], FuncBlock] = {}
+    for block in blocks:
+        block_by_name.setdefault((block.file_path, block.function_name), block)
 
     entry_point_blocks: list[FuncBlock] = []
     entry_point_ids: list[str] = []
-    for entry in query_result:
-        key = (entry.get("file", ""), entry.get("name", ""), entry.get("line", 0))
-        matched = block_index.get(key)
-        if matched:
+
+    all_symbols = process_symbols + definitions
+    seen_block_ids: set[str] = set()
+    for sym in all_symbols:
+        if not isinstance(sym, dict):
+            continue
+        file_path = sym.get("filePath", "")
+        name = sym.get("name", "")
+        # Try exact match first (file + name + line), then fuzzy (file + name)
+        line = sym.get("startLine") or sym.get("line", 0)
+        if isinstance(line, str):
+            try:
+                line = int(line)
+            except (ValueError, TypeError):
+                line = 0
+        matched = block_index.get((file_path, name, line))
+        if not matched:
+            matched = block_by_name.get((file_path, name))
+        if matched and matched.id not in seen_block_ids:
             entry_point_blocks.append(matched)
             entry_point_ids.append(matched.id)
+            seen_block_ids.add(matched.id)
 
-    # Step 3: Get call chains via process tool
-    process_result = await mcp_client.call_tool(
-        "process",
-        {"repo_path": repo_path, "process_type": "call_chains"},
-    )
+    # ── Step 3: get call edges via cypher query ───────────────────────
+    edges: list[CallEdge] = []
+    try:
+        cypher_result = await mcp_client.call_tool(
+            "cypher",
+            {"query": "MATCH (caller)-[r:CodeRelation {type: 'CALLS'}]->(callee) RETURN caller.filePath AS caller_file, caller.name AS caller_name, caller.startLine AS caller_line, callee.filePath AS callee_file, callee.name AS callee_name, r.confidence AS confidence LIMIT 5000"},
+        )
+        if isinstance(cypher_result, list):
+            for record in cypher_result:
+                if not isinstance(record, dict):
+                    continue
+                caller_name = record.get("caller_name")
+                callee_name = record.get("callee_name")
+                if not caller_name or not callee_name:
+                    continue
+                caller_file = record.get("caller_file", "")
+                caller_line = record.get("caller_line", 0) or 0
+                callee_file = record.get("callee_file")
+                if isinstance(caller_line, str):
+                    try:
+                        caller_line = int(caller_line)
+                    except (ValueError, TypeError):
+                        caller_line = 0
+                caller_id = f"{caller_file}:{caller_name}:{caller_line}" if caller_file else caller_name
+                resolved = callee_file is not None
+                edges.append(CallEdge(
+                    caller_id=caller_id,
+                    callee_name=callee_name,
+                    callee_file=callee_file,
+                    resolved=resolved,
+                    line=caller_line,
+                ))
+    except Exception as exc:
+        logger.warning("Cypher query for call edges failed (%s); edge list will be empty", exc)
 
-    process_data = process_result if process_result else []
-
-    # Step 4: Parse edges and build chains
-    edges = _parse_process_response(process_data)
+    # ── Step 4: build chains from edges ───────────────────────────────
     chains = _build_chains_from_edges(edges, entry_point_ids, blocks=blocks)
 
     # Build degradation report

@@ -79,13 +79,18 @@ class TestBuildCallGraphFromGitNexus:
             _block("execute", "db.py", 30),
         ]
         mcp = FakeMCPClient(responses={
-            "query": [
-                {"file": "app.py", "name": "handler", "line": 1, "score": 0.95},
-            ],
-            "process": [
+            "query": {
+                "processes": [{"summary": "HandlerFlow", "priority": 0.9}],
+                "process_symbols": [
+                    {"name": "handler", "type": "Function", "filePath": "app.py", "startLine": 1},
+                ],
+                "definitions": [],
+            },
+            "cypher": [
                 {
-                    "caller": {"file": "app.py", "name": "handler", "line": 5},
-                    "callee": {"file": "svc.py", "name": "get_users", "line": 12},
+                    "caller_file": "app.py", "caller_name": "handler",
+                    "caller_line": 5, "callee_file": "svc.py",
+                    "callee_name": "get_users", "confidence": 0.9,
                 },
             ],
         })
@@ -118,15 +123,23 @@ class TestBuildCallGraphFromGitNexus:
             _block("execute", "db.py", 30),
         ]
         mcp = FakeMCPClient(responses={
-            "query": [{"file": "app.py", "name": "handler", "line": 1, "score": 0.9}],
-            "process": [
+            "query": {
+                "processes": [{"summary": "HandlerFlow", "priority": 0.9}],
+                "process_symbols": [
+                    {"name": "handler", "type": "Function", "filePath": "app.py", "startLine": 1},
+                ],
+                "definitions": [],
+            },
+            "cypher": [
                 {
-                    "caller": {"file": "app.py", "name": "handler", "line": 5},
-                    "callee": {"file": "svc.py", "name": "get_users", "line": 12},
+                    "caller_file": "app.py", "caller_name": "handler",
+                    "caller_line": 5, "callee_file": "svc.py",
+                    "callee_name": "get_users", "confidence": 0.9,
                 },
                 {
-                    "caller": {"file": "svc.py", "name": "get_users", "line": 15},
-                    "callee": {"file": "db.py", "name": "execute", "line": 30},
+                    "caller_file": "svc.py", "caller_name": "get_users",
+                    "caller_line": 15, "callee_file": "db.py",
+                    "callee_name": "execute", "confidence": 0.85,
                 },
             ],
         })

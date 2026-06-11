@@ -39,8 +39,11 @@ class GitNexusMCPClient:
 
     async def start(self) -> None:
         """Start the gitnexus mcp subprocess and send initialize."""
+        # NOTE: `gitnexus mcp` does NOT accept --repo. It discovers all
+        # indexed repos from the global registry (~/.gitnexus/registry.json).
+        # The repo must be indexed via `gitnexus analyze` BEFORE starting MCP.
         self._process = await asyncio.create_subprocess_exec(
-            "gitnexus", "mcp", "--repo", str(self.repo_root),
+            "gitnexus", "mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
