@@ -117,7 +117,7 @@ export class ReportTranslationProvider implements ReportOutputProvider {
           null,
           null,
           logger,
-          'small',
+          'medium',
           undefined,
           input.apiKey,
           input.deliverablesSubdir,
