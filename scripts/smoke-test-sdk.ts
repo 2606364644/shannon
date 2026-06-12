@@ -14,7 +14,8 @@
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod/v4';
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  INLINE CONFIG — edit here to test your model provider          ║
@@ -193,19 +194,27 @@ async function testConnectivity(): Promise<TestResult> {
   }
 }
 
-// === Virtual Tool ===
+// === Virtual Tool (MCP Server) ===
 
-const WEATHER_TOOL = {
-  name: 'get_weather',
-  description: 'Get the current weather for a location',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      location: { type: 'string' as const, description: 'City name' },
+// createSdkMcpServer registers custom tools as an in-process MCP server.
+// This is the only way to add custom tools — the SDK's `tools` option only
+// accepts built-in tool names (string[]), not tool definition objects.
+const weatherServer = createSdkMcpServer({
+  name: 'weather',
+  version: '1.0.0',
+  tools: [
+    {
+      name: 'get_weather',
+      description: 'Get the current weather for a location',
+      inputSchema: {
+        location: z.string().describe('City name'),
+      },
+      handler: async (args) => ({
+        content: [{ type: 'text' as const, text: `Weather in ${args.location}: 22°C, Sunny` }],
+      }),
     },
-    required: ['location'],
-  },
-};
+  ],
+});
 
 // === L2: Tool Use ===
 
@@ -226,7 +235,8 @@ async function testToolUse(): Promise<TestResult> {
       options: {
         ...baseOptions(controller),
         maxTurns: 1,
-        tools: [WEATHER_TOOL],
+        tools: [],
+        mcpServers: { weather: weatherServer },
       },
     });
 
@@ -326,7 +336,8 @@ async function testMultiTurn(): Promise<TestResult> {
       options: {
         ...baseOptions(controller),
         maxTurns: 3,
-        tools: [WEATHER_TOOL],
+        tools: [],
+        mcpServers: { weather: weatherServer },
       },
     });
 
