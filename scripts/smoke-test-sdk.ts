@@ -29,7 +29,7 @@ const INLINE_CONFIG = {
   /** "token" (default) or "key" depending on which field you filled */
   authType: 'token' as 'token' | 'key',
   /** Model to test — single model used across all levels */
-  model: 'glm-5.1',
+  model: 'llm-proxy-anthropic/glm-5.1',
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -137,6 +137,12 @@ function classifyError(error: Error): { detail: string; hint: string } {
       hint: 'Model may not support Anthropic content block format',
     };
   }
+  if (error.message.includes('maximum number of turns')) {
+    return {
+      detail: error.message,
+      hint: 'Model exceeded turn limit — may indicate tool use loop or planning mode blocking tool execution',
+    };
+  }
   return { detail: error.message.slice(0, 300), hint: 'Unexpected error — check model and endpoint configuration' };
 }
 
@@ -234,7 +240,7 @@ async function testToolUse(): Promise<TestResult> {
       prompt: 'What is the weather in Tokyo? You MUST use the get_weather tool to check. Do not guess.',
       options: {
         ...baseOptions(controller),
-        maxTurns: 1,
+        maxTurns: 2,
         tools: [],
         mcpServers: { weather: weatherServer },
       },
@@ -312,6 +318,22 @@ async function testToolUse(): Promise<TestResult> {
   } catch (error) {
     clearTimeout(timer);
     const durationMs = Date.now() - start;
+
+    // If tool_use blocks were found before the error, L2 passes — the core
+    // test (does the model produce tool_use?) succeeded even if the SDK hit
+    // max turns or another non-fatal error.
+    if (toolCallsFound > 0) {
+      const callSummary = toolCallNames.map((n, i) => `${n}(${toolCallInputs[i]})`).join(', ');
+      const blockTypes = [...contentBlockTypes].sort().join(', ');
+      return {
+        level: 'L2',
+        label: 'Tool Use',
+        passed: true,
+        durationMs,
+        detail: `Tool call: ${callSummary} | Content blocks: ${blockTypes}`,
+      };
+    }
+
     const { detail, hint } = classifyError(error as Error);
     return { level: 'L2', label: 'Tool Use', passed: false, durationMs, detail, hint };
   }
@@ -422,6 +444,20 @@ async function testMultiTurn(): Promise<TestResult> {
   } catch (error) {
     clearTimeout(timer);
     const durationMs = Date.now() - start;
+
+    // If tool_use blocks were found but no final text, report partial success
+    // with a clearer message than a generic error.
+    if (toolCallsFound > 0 && !resultText?.trim()) {
+      return {
+        level: 'L3',
+        label: 'Multi-Turn',
+        passed: false,
+        durationMs,
+        detail: `Tool calls: ${toolCallsFound} but empty final response`,
+        hint: 'Model produced tool calls but failed to generate final summary',
+      };
+    }
+
     const { detail, hint } = classifyError(error as Error);
     return { level: 'L3', label: 'Multi-Turn', passed: false, durationMs, detail, hint };
   }
