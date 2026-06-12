@@ -229,13 +229,13 @@ async function testToolUse(): Promise<TestResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS.l2);
 
-  try {
-    let toolCallsFound = 0;
-    const toolCallNames: string[] = [];
-    const toolCallInputs: string[] = [];
-    const contentBlockTypes = new Set<string>();
-    let resultText = '';
+  let toolCallsFound = 0;
+  const toolCallNames: string[] = [];
+  const toolCallInputs: string[] = [];
+  const contentBlockTypes = new Set<string>();
+  let resultText = '';
 
+  try {
     const stream = query({
       prompt: 'What is the weather in Tokyo? You MUST use the get_weather tool to check. Do not guess.',
       options: {
@@ -346,12 +346,12 @@ async function testMultiTurn(): Promise<TestResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS.l3);
 
-  try {
-    let toolCallsFound = 0;
-    const toolCallNames: string[] = [];
-    let resultText = '';
-    let assistantTurns = 0;
+  let toolCallsFound = 0;
+  const toolCallNames: string[] = [];
+  let resultText = '';
+  let assistantTurns = 0;
 
+  try {
     const stream = query({
       prompt:
         'What is the weather in Tokyo and Beijing? Use the get_weather tool for BOTH cities, then provide a brief comparison.',
