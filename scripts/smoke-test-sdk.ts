@@ -307,6 +307,115 @@ async function testToolUse(): Promise<TestResult> {
   }
 }
 
+// === L3: Multi-Turn ===
+
+async function testMultiTurn(): Promise<TestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS.l3);
+
+  try {
+    let toolCallsFound = 0;
+    const toolCallNames: string[] = [];
+    let resultText = '';
+    let assistantTurns = 0;
+
+    const stream = query({
+      prompt:
+        'What is the weather in Tokyo and Beijing? Use the get_weather tool for BOTH cities, then provide a brief comparison.',
+      options: {
+        ...baseOptions(controller),
+        maxTurns: 3,
+        tools: [WEATHER_TOOL],
+      },
+    });
+
+    for await (const message of stream) {
+      // Count assistant turns
+      if (message.type === 'assistant') {
+        assistantTurns++;
+        const content = (message as { message?: { content?: unknown[] } }).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            const typedBlock = block as { type?: string; name?: string };
+            if (typedBlock.type === 'tool_use') {
+              toolCallsFound++;
+              if (typedBlock.name) {
+                toolCallNames.push(typedBlock.name);
+              }
+            }
+          }
+        }
+      }
+
+      // Capture final result
+      if (message.type === 'result' && message.subtype === 'success') {
+        resultText = (message as { result?: string }).result || '';
+        break;
+      }
+    }
+
+    clearTimeout(timer);
+    const durationMs = Date.now() - start;
+
+    // Check for API errors
+    const isApiError = resultText.includes('API Error:') || resultText.includes('"type":"error"');
+
+    if (isApiError) {
+      const errorDetail = resultText.trim().split('\n')[0].slice(0, 200);
+      return {
+        level: 'L3',
+        label: 'Multi-Turn',
+        passed: false,
+        durationMs,
+        detail: errorDetail,
+        hint: 'API error during multi-turn — model may not support tool_result round-trips',
+      };
+    }
+
+    // Verify we got tool calls AND a final text response
+    if (toolCallsFound > 0 && resultText.trim().length > 0) {
+      const toolSummary =
+        toolCallNames.length > 0
+          ? `${toolCallsFound} (${[...new Set(toolCallNames)].map((n) => `${n}`).join(', ')} × ${toolCallNames.length})`
+          : `${toolCallsFound}`;
+      return {
+        level: 'L3',
+        label: 'Multi-Turn',
+        passed: true,
+        durationMs,
+        detail: `Tool calls: ${toolSummary} | Turns: ${assistantTurns} | Final response: ${resultText.trim().length} chars`,
+      };
+    }
+
+    // Partial success or failure
+    if (toolCallsFound === 0) {
+      return {
+        level: 'L3',
+        label: 'Multi-Turn',
+        passed: false,
+        durationMs,
+        detail: 'No tool calls found across multi-turn conversation',
+        hint: 'Model may not support sustained tool use across turns',
+      };
+    }
+
+    return {
+      level: 'L3',
+      label: 'Multi-Turn',
+      passed: false,
+      durationMs,
+      detail: `Tool calls: ${toolCallsFound} but empty final response`,
+      hint: 'Model produced tool calls but failed to generate final summary',
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    const durationMs = Date.now() - start;
+    const { detail, hint } = classifyError(error as Error);
+    return { level: 'L3', label: 'Multi-Turn', passed: false, durationMs, detail, hint };
+  }
+}
+
 // === Main ===
 
 async function main(): Promise<number> {
@@ -357,7 +466,10 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // L3 — placeholder for Task 3
+  // L3
+  const l3 = await testMultiTurn();
+  printResult(l3);
+  results.push(l3);
 
   printSummary(results);
   return results.every((r) => r.passed) ? 0 : 1;
