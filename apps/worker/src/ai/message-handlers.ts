@@ -330,14 +330,18 @@ export async function dispatchMessage(
 
     case 'tool_use': {
       const toolData = handleToolUseMessage(message as unknown as ToolUseMessage);
-      outputLines(formatToolUseOutput(toolData.toolName, toolData.parameters));
+      if (!deps.silent) {
+        outputLines(formatToolUseOutput(toolData.toolName, toolData.parameters));
+      }
       await auditLogger.logToolStart(toolData.toolName, toolData.parameters);
       return { type: 'continue' };
     }
 
     case 'tool_result': {
       const toolResultData = handleToolResultMessage(message as unknown as ToolResultMessage);
-      outputLines(formatToolResultOutput(toolResultData.displayContent));
+      if (!deps.silent) {
+        outputLines(formatToolResultOutput(toolResultData.displayContent));
+      }
       await auditLogger.logToolEnd(toolResultData.content);
       return { type: 'continue' };
     }
