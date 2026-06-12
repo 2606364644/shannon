@@ -193,6 +193,120 @@ async function testConnectivity(): Promise<TestResult> {
   }
 }
 
+// === Virtual Tool ===
+
+const WEATHER_TOOL = {
+  name: 'get_weather',
+  description: 'Get the current weather for a location',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      location: { type: 'string' as const, description: 'City name' },
+    },
+    required: ['location'],
+  },
+};
+
+// === L2: Tool Use ===
+
+async function testToolUse(): Promise<TestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS.l2);
+
+  try {
+    let toolCallsFound = 0;
+    const toolCallNames: string[] = [];
+    const toolCallInputs: string[] = [];
+    const contentBlockTypes = new Set<string>();
+    let resultText = '';
+
+    const stream = query({
+      prompt: 'What is the weather in Tokyo? You MUST use the get_weather tool to check. Do not guess.',
+      options: {
+        ...baseOptions(controller),
+        maxTurns: 1,
+        tools: [WEATHER_TOOL],
+      },
+    });
+
+    for await (const message of stream) {
+      // Parse assistant messages for content blocks
+      if (message.type === 'assistant') {
+        const content = (message as { message?: { content?: unknown[] } }).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            const typedBlock = block as { type?: string; name?: string; input?: unknown; text?: string };
+            if (typedBlock.type) {
+              contentBlockTypes.add(typedBlock.type);
+            }
+            if (typedBlock.type === 'tool_use') {
+              toolCallsFound++;
+              if (typedBlock.name) {
+                toolCallNames.push(typedBlock.name);
+              }
+              toolCallInputs.push(JSON.stringify(typedBlock.input || {}));
+            }
+          }
+        }
+      }
+
+      // Capture final result
+      if (message.type === 'result' && message.subtype === 'success') {
+        resultText = (message as { result?: string }).result || '';
+        break;
+      }
+    }
+
+    clearTimeout(timer);
+    const durationMs = Date.now() - start;
+
+    // Check for API errors in result text
+    const isApiError = resultText.includes('API Error:') || resultText.includes('"type":"error"');
+
+    if (isApiError) {
+      const errorDetail = resultText.trim().split('\n')[0].slice(0, 200);
+      return {
+        level: 'L2',
+        label: 'Tool Use',
+        passed: false,
+        durationMs,
+        detail: errorDetail,
+        hint: 'API returned an error during tool use — model may not support tool_use format',
+      };
+    }
+
+    // Verify tool_use content block was produced
+    if (toolCallsFound > 0) {
+      const callSummary = toolCallNames.map((n, i) => `${n}(${toolCallInputs[i]})`).join(', ');
+      const blockTypes = [...contentBlockTypes].sort().join(', ');
+      return {
+        level: 'L2',
+        label: 'Tool Use',
+        passed: true,
+        durationMs,
+        detail: `Tool call: ${callSummary} | Content blocks: ${blockTypes}`,
+      };
+    }
+
+    // No tool call found — model may not support tool use
+    const blockTypes = contentBlockTypes.size > 0 ? [...contentBlockTypes].sort().join(', ') : 'none';
+    return {
+      level: 'L2',
+      label: 'Tool Use',
+      passed: false,
+      durationMs,
+      detail: `No tool_use content block found. Content blocks: ${blockTypes}`,
+      hint: 'Model did not invoke any tools — may lack Anthropic tool_use support',
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    const durationMs = Date.now() - start;
+    const { detail, hint } = classifyError(error as Error);
+    return { level: 'L2', label: 'Tool Use', passed: false, durationMs, detail, hint };
+  }
+}
+
 // === Main ===
 
 async function main(): Promise<number> {
@@ -233,7 +347,16 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // L2 — placeholder for Task 2
+  // L2
+  const l2 = await testToolUse();
+  printResult(l2);
+  results.push(l2);
+
+  if (!l2.passed) {
+    printSummary(results);
+    return 1;
+  }
+
   // L3 — placeholder for Task 3
 
   printSummary(results);
