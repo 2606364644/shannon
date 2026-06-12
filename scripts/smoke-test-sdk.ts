@@ -35,11 +35,7 @@ const INLINE_CONFIG = {
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
-const TIMEOUT_MS: Record<string, number> = {
-  l1: 30_000,
-  l2: 30_000,
-  l3: 60_000,
-};
+const TIMEOUT_MS = { l1: 30_000, l2: 30_000, l3: 60_000 } as const;
 
 // bypassPermissions requires a non-root user (Claude Code CLI restriction).
 const IS_ROOT = process.getuid?.() === 0;
@@ -48,7 +44,7 @@ const PERMISSION_MODE = IS_ROOT ? ('plan' as const) : ('bypassPermissions' as co
 // === Types ===
 
 interface TestResult {
-  level: string;
+  level: 'L1' | 'L2' | 'L3';
   label: string;
   passed: boolean;
   durationMs: number;
@@ -115,7 +111,7 @@ function baseOptions(abortController: AbortController) {
     cwd: resolve(SCRIPT_DIR),
     permissionMode: PERMISSION_MODE,
     ...(!IS_ROOT && { allowDangerouslySkipPermissions: true }),
-    settingSources: [] as const,
+    settingSources: [],
     env: buildSdkEnv(),
     persistSession: false,
     abortController,
