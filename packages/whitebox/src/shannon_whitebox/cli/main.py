@@ -66,7 +66,7 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
                 if summary["vuln_queues"]:
                     click.echo("Results summary:")
                     for vc in sorted(summary["vuln_queues"]):
-                         queue_file = summary_path / f"{vc}_exploitation_queue.json"
+                        queue_file = summary_path / f"{vc}_exploitation_queue.json"
                         try:
                             data = json.loads(queue_file.read_text(encoding="utf-8"))
                             count = len(data.get("vulnerabilities", []))
