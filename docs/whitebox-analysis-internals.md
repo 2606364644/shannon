@@ -16,7 +16,7 @@
 
 两条路径共享同一套分析机制（sink/入口点/调用链/研判）和同一套 agent 定义（`session-manager.ts`），区别仅在于编排粒度和运行环境。下文的分析机制描述对两条路径通用，阶段编排差异见 5.3 和 6.4。
 
-核心入口在 `apps/worker/src/ai/claude-executor.ts:139` 的 `runClaudePrompt`——它准备 prompt 与配置，委托给 `processMessageStream`（`:362`）调用 `@anthropic-ai/claude-agent-sdk` 的 `query()`，在 `cwd: sourceDir`（目标仓库根目录）下启动一个 Claude Code 会话。会话配置见 `claude-executor.ts:234-244`：
+核心入口在 `apps/worker/src/ai/claude-executor.ts:139` 的 `runClaudePrompt`——它准备 prompt 与配置，委托给 `processMessageStream`（`:353`）调用 `@anthropic-ai/claude-agent-sdk` 的 `query()`（`:370`），在 `cwd: sourceDir`（目标仓库根目录）下启动一个 Claude Code 会话。会话配置见 `claude-executor.ts:232-244`：
 
 ```ts
 model,                          // 由 modelTier 解析（pre-recon 用 large）
@@ -57,7 +57,7 @@ settingSources: ['user'],       // 继承用户级 MCP/设置
 | `injection-exploit` 等 | `exploit-*` | 默认 | **pentest 专属**；白盒 `exploit=false` 硬编码（`workflows.ts:713`），不跑 exploit 阶段 |
 | `report` | `report-executive` | 默认 | 生成执行摘要 + 最终报告；Temporal 路径作为第 4 阶段自动执行，local runner 作为 Phase 6 执行；`prerequisites` 含所有 exploit agent（白盒下无 exploit 阶段，实际不阻塞） |
 
-**每个 phase agent 在运行期 = 一个独立的 Claude Code 会话**（一次 `query()` 调用）。Temporal activity 调用 `runClaudePrompt`，后者委托 `processMessageStream`（`:345-414`）流式接收消息、会话结束后由 `validateAgentOutput`（`claude-executor.ts:83-135`）校验 deliverable 是否生成。
+**每个 phase agent 在运行期 = 一个独立的 Claude Code 会话**（一次 `query()` 调用）。Temporal activity 调用 `runClaudePrompt`，后者委托 `processMessageStream`（`claude-executor.ts:353`）流式接收消息、会话结束后由 `validateAgentOutput`（`claude-executor.ts:83-135`）校验 deliverable 是否生成。
 
 phase agent 之间**通过 deliverable 文件传递信息**，不共享内存上下文。例如 `injection-vuln` 不会读到 `pre-recon` 会话里的对话历史，只能读 `pre_recon_deliverable.md` 这个磁盘文件。
 
@@ -192,8 +192,8 @@ sink 发现按文件类型分两条路径，粒度不同：
 ### 2.4 sink 判定的"规则库"
 
 Shannon **没有 sink 规则数据库**。sink 类别清单**硬编码在 prompt 文本**里，作为 LLM 的检测目录：
-- XSS sink 目录：`pre-recon-code.txt:289-321`（HTML body / 属性 / JS / CSS / URL 五类上下文，逐类列举 API）
-- SSRF sink 目录：`pre-recon-code.txt:333-415`（HTTP client、原始 socket、URL opener、headless 浏览器、媒体处理器、link preview、webhook tester、JWKS fetcher、importer、cloud metadata 等 13 个子类）
+- XSS sink 目录：`pre-recon-code.txt:271-322`（Section 9，HTML body / 属性 / JS / CSS / URL 五类上下文，逐类列举 API）
+- SSRF sink 目录：`pre-recon-code.txt:333-415`（Section 10，HTTP client、原始 socket、URL opener、headless 浏览器、媒体处理器、link preview、webhook tester、JWKS fetcher、importer、cloud metadata 等 13 个子类）
 
 子 agent 按这份目录去代码里找匹配，结果汇总写入 `pre_recon_deliverable.md` 的 **Section 9（XSS Sinks）** 和 **Section 10（SSRF Sinks）**，作为下游所有 agent 的"已知 sink 清单"。
 
@@ -419,16 +419,16 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 
 白盒 agent 跑在 `bypassPermissions` 下，但配置里的 `code_path` avoid 规则会被**硬强制**到工具层，确定性排除路径：
 
-1. Temporal 路径：`syncCodePathDenyRules`（`activities.ts:578`）每 workflow 调一次；本地 Runner 路径：`runner.ts:232-246` 在 Phase 1 前调用同一函数。两者均委托 `writeUserSettingsForCodePathAvoids`（`settings-writer.ts:24`）。
+1. Temporal 路径：`syncCodePathDenyRules`（`activities.ts:578`）每 workflow 调一次；本地 Runner 路径：`runner.ts:311` 在 Phase 1 前调用同一函数（`syncCodePathDenyRules` 函数定义在 `:232`）。两者均委托 `writeUserSettingsForCodePathAvoids`（`settings-writer.ts:24`）。
 2. 每个 avoid pattern 转成两条 deny：`Read(./pattern)` + `Edit(./pattern)`（`settings-writer.ts:17-22`，`FILE_TOOLS = ['Read','Edit']`），写入 `~/.claude/settings.json` 的 `permissions.deny`。
-3. SDK 经 `settingSources: ['user']` 读这份 settings，**`bypassPermissions` 下照样拦**（`settings-writer.ts:7-11`）。
+3. SDK 经 `settingSources: ['user']` 读这份 settings，**`bypassPermissions` 下照样拦**（`settings-writer.ts:8-10`）。
 4. 无 avoid 规则时删除该文件（`settings-writer.ts:28-31`），避免上一轮残留污染。
 
 **影响**：被 avoid 的路径（`node_modules`、`vendor`、生成代码等）从 sink/调用链覆盖范围里**确定性排除** —— 靠 SDK 工具层硬拦，不是 prompt 纪律。这是白盒覆盖的硬边界。
 
 ### 6.4 并行 vuln agent 的隔离
 
-白盒路径的漏洞分析阶段是 **5 条**独立 pipeline 并行（`WHITEBOX_VULN_CLASSES` = injection / xss / auth / authz / ssrf，`workflows.ts:645, 761-771`；local runner 使用 `ALL_VULN_CLASSES`，值相同，`types/config.ts:27`）。pentest 路径有 **6 条**（含 misconfig，`buildPipelineConfigs` `workflows.ts:351-402`）。注意 `workflows.ts:13` 注释里的"5 个"对白盒恰好正确、对 pentest 已过时（pentest 已是 6 个含 misconfig）。
+白盒路径的漏洞分析阶段是 **5 条**独立 pipeline 并行（`WHITEBOX_VULN_CLASSES` = injection / xss / auth / authz / ssrf，`workflows.ts:645, 761-771`；local runner 使用 `ALL_VULN_CLASSES`，值相同，`types/config.ts:27`）。pentest 路径有 **6 条**（含 misconfig，`buildPipelineConfigs` `workflows.ts:351-402`）。注意 `workflows.ts:13` 注释写的是"5 pipelined pairs"（指 pentest 的 vuln→exploit 配对数），但 pentest 实际 6 个含 misconfig，该数已过时；白盒不跑 exploit、本无配对概念，此注释与白盒路径无关。
 
 **白盒编排——两条路径的并行模型不同**：
 
@@ -437,7 +437,7 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 | Temporal | `Promise.allSettled`（`workflows.ts:795`） | 无显式上限，5 条全部同跑 | `workflows.ts:761-795` |
 | 本地 Runner | `Semaphore`（`runner.ts:368`） | 默认 5（= vuln agent 数），可通过 `--concurrency` 配置 | `runner.ts:365-391` |
 
-每条 pipeline `vuln → queue check`（无 exploit，`exploit=false`）。pentest 编排不同（`workflows.ts:475-535`）：每条 `vuln → queue check → conditional exploit`，使用 `runWithConcurrencyLimit`（`:405`）。
+每条 pipeline `vuln → queue check`（无 exploit，`exploit=false`）。pentest 编排不同（`workflows.ts:476-534`）：每条 `vuln → queue check → conditional exploit`，使用 `runWithConcurrencyLimit`（`:407`）。
 
 **隔离**（白盒与 pentest 共享）：
 - **Per-workflow DI container**（`container.ts`）：每 workflow 一个，服务实例化一次、跨 agent 复用。
@@ -470,15 +470,15 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 |---|---|---|
 | 1 | **白盒未纳入 misconfig** | `WHITEBOX_VULN_CLASSES`（`workflows.ts:645`）= 5 个（injection/xss/auth/authz/ssrf），不含 misconfig。misconfig 仅在 pentest 路径（`buildPipelineConfigs` `:351-402`）。openspec proposal `2026-05-26-add-misconfig-agent` 计划纳入白盒但未落地。 |
 | 2 | **Section 7 "Injection Sources" prompt 间断裂** | `vuln-injection.txt:141` 指示 injection agent 读 pre-recon 的 "Section 7. Injection Sources (Command Injection and SQL Injection)"，但 `pre-recon-code.txt:254` 的 deliverable 大纲里 Section 7 实际是 "Overall Codebase Indexing"。injection agent 的注入源清单无确定上游契约。 |
-| 3 | **源码注释滞后** | `workflows.ts:756` 注释写 "(6 agents)"，白盒实际 5 个；`:13` 注释写 "5"，对白盒正确但对 pentest 过时。 |
+| 3 | **源码注释滞后** | `workflows.ts:756` 注释写 "(6 agents)"，白盒实际 5 个（vulnAgents 定义在 `:761-771`）；`:13` 注释写 "5 pipelined pairs"（指 pentest 的 vuln→exploit 配对），对 pentest 过时（实际 6 个含 misconfig）。 |
 
 ---
 
 ## 附：关键文件索引
 
 **调度与执行**
-- `apps/worker/src/ai/claude-executor.ts:139` — `runClaudePrompt` 函数入口；`query()` 由 `processMessageStream` 在约 `:362` 调用
-- `apps/worker/src/ai/claude-executor.ts:234-244` — 会话配置（`maxTurns`、`cwd`、`bypassPermissions`、`allowDangerouslySkipPermissions`）
+- `apps/worker/src/ai/claude-executor.ts:139` — `runClaudePrompt` 函数入口；`query()` 由 `processMessageStream`（`:353`）在 `:370` 调用
+- `apps/worker/src/ai/claude-executor.ts:232-244` — 会话配置（`maxTurns`、`cwd`、`bypassPermissions`、`allowDangerouslySkipPermissions`）
 - `apps/worker/src/session-manager.ts:14` — `AGENTS` 注册表（phase agent 定义，含 `report` agent）
 - `apps/worker/src/ai/claude-executor.ts:83` — `validateAgentOutput`，deliverable 校验
 
@@ -491,7 +491,7 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 - `apps/worker/src/services/container.ts` — per-workflow DI container；`AuditSession` 逐 agent 注入（不进容器，`NOTE @ :35-39, :54-55`）
 - `apps/worker/src/temporal/workflows.ts:645` — `WHITEBOX_VULN_CLASSES`（白盒 5 个 vuln）
 - `apps/worker/src/temporal/workflows.ts:761-771` — 白盒 vulnAgents 定义（5 条，`Promise.allSettled @ :795`）
-- `apps/worker/src/temporal/workflows.ts:351-402` — pentest `buildPipelineConfigs`（6 条含 misconfig，`runWithConcurrencyLimit @ :405`）
+- `apps/worker/src/temporal/workflows.ts:351-402` — pentest `buildPipelineConfigs`（6 条含 misconfig，`runWithConcurrencyLimit @ :407`）
 - `apps/worker/src/temporal/activities.ts:578` — `syncCodePathDenyRules`，每 workflow 一次
 
 **报告与翻译（local runner Phase 5-7）**
