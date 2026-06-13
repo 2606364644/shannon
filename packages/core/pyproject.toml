@@ -19,6 +19,7 @@ dependencies = [
     "openai>=1.50",
     "temporalio>=1.0",
     "watchdog>=4.0",
+    "rich>=13.7.0",
 ]
 
 [project.scripts]
