@@ -28,16 +28,6 @@ confirm() {
     [[ "${ans,,}" =~ ^(y|yes|)$ ]]
 }
 
-ensure_pnpm_in_path() {
-    # pnpm global bin may not be on PATH after first install
-    local pnpm_bin
-    pnpm_bin="$(pnpm bin -g 2>/dev/null || true)"
-    if [[ -n "$pnpm_bin" && ":$PATH:" != *":$pnpm_bin:"* ]]; then
-        export PATH="$pnpm_bin:$PATH"
-        pnpm setup 2>/dev/null || true
-    fi
-}
-
 # ── Preflight: node / npm ───────────────────────────────────────────
 if ! has npm; then
     fail "Node.js/npm is required but not found."
@@ -46,14 +36,6 @@ if ! has npm; then
     exit 1
 fi
 ok "npm $(npm --version)"
-
-# ── Preflight: pnpm ────────────────────────────────────────────────
-if ! has pnpm; then
-    echo "Installing pnpm..."
-    npm install -g pnpm
-fi
-ok "pnpm $(pnpm --version)"
-ensure_pnpm_in_path
 
 # ── Install functions ───────────────────────────────────────────────
 
@@ -66,17 +48,23 @@ install_gitnexus() {
         warn "gitnexus skipped"
         return 0
     fi
-    echo "Installing gitnexus via pnpm..."
-    pnpm config set --global onlyBuiltDependencies \
-        "@ladybugdb/core" "gitnexus" "tree-sitter" 2>/dev/null || true
-    pnpm add -g gitnexus@latest
-    ensure_pnpm_in_path
+    echo "Installing gitnexus via npm..."
+    # GitNexus ships native deps (@ladybugdb/core, tree-sitter grammars).
+    # npm runs install/build scripts by default, so no pnpm-style
+    # onlyBuiltDependencies allow-list is needed — and this matches
+    # GitNexus' official install method (npm install -g gitnexus).
+    if ! npm install -g gitnexus@latest; then
+        fail "gitnexus installation failed."
+        echo "  If this is a C++ toolchain error, retry skipping optional grammars:"
+        echo "    GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1 npm install -g gitnexus@latest"
+        echo "  Manual: npm install -g gitnexus@latest"
+        return 1
+    fi
     if has gitnexus; then
         ok "gitnexus installed"
     else
-        fail "gitnexus installation failed."
-        echo "  Manual: pnpm config set --global onlyBuiltDependencies @ladybugdb/core gitnexus tree-sitter"
-        echo "          pnpm add -g gitnexus@latest"
+        fail "gitnexus not found after install."
+        echo "  Manual: npm install -g gitnexus@latest"
         return 1
     fi
 }

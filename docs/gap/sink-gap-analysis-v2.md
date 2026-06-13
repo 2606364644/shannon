@@ -4,13 +4,15 @@
 >
 > **数据来源**：逐行代码核验（`sink_detector.py`、`pre-recon-code.txt`、`vuln-*.txt`、`recon.txt`），以代码为准。
 >
-> **日期**：2026-06-11（v3 更新：2026-06-11，v4 更新：2026-06-11）
+> **日期**：2026-06-11（v3 更新：2026-06-11，v4 更新：2026-06-11，v5 更新：2026-06-13）
 >
 > **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-point-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
 >
 > **v3 更新要点**：commit `b3c58bd` 已恢复模板分析方法论（两步流程 + 变体验证 + Coverage Audit 表），SK-1/SK-2/SK-3 评估需同步修正；同时更新 `pre-recon-code.txt` 行号偏移。
 >
 > **v4 更新要点**：代码级全量核验发现原文档仅覆盖 `sink_detector` 单模块，遗漏完整的 sink pipeline 架构。新增：① §4 补充 SK-12（`sink_merger` 已实现未接入 pipeline）、SK-13（fallback 路径 sink 真空）② §5 新增 §5.5 Pipeline 架构缺口 ③ §6 重构代码路径索引从 10 条扩充至 20 条（分三层：确定性检测 / 合并与下游消费 / LLM prompt）。
+>
+> **v5 更新要点**（2026-06-13 代码级复核，commit `04ad085`）：`sink_merger` 已正式接入 pipeline——`run_merge_sink_reports` activity 已定义（`activities.py:285`）、注册（`worker.py:15,76`）、调用（`workflows.py:136`），确定性 + LLM 双通道打通，**SK-12 断路已修复**；SK-13 fallback 真空因 LLM sink 合并而部分缓解（但 LLM-only sink `caller_id=""`、`needs_review=True`，仍无法挂入 call chain，**taint 传播层面仍真空**）；同步 prompt 行号偏移（`vuln-injection.txt` +2、`recon.txt` Section 9 `:440-460` → `:465-476`、`pre-recon-code.txt` SSRF/XSS section 整体后移）。47 条规则、SSRF/XSS/路径穿越/文件读取/XXE 的覆盖判定经复核**全部不变**。
 
 ---
 
@@ -105,6 +107,8 @@
 | `php-file-get-contents` | PHP | `file_get_contents` | ✗ |
 
 **SSRF 确定性层 vs LLM prompt 层覆盖对比**：
+
+> ⚠️ **v5 行号偏移说明**：下表 `pre-recon-code.txt` 行号为 v3 时期（commit `b3c58bd`）快照。2026-06-13 复核确认该 section 已整体后移——SSRF 13 子类现位于 `:340-430`（HTTP Clients `:346`、Raw Sockets `:355`、URL Openers `:361`、Redirect ~`:362-371`、Headless `:372`、Media `:379`、Link Preview `:385`、Webhook Testers `:392`、SSO/OIDC `:399`、Package `:413`、Monitoring `:420`、Cloud Metadata `:427`）；XSS 5 上下文现位于 `:306-339`；模板方法论 `:141-149`、Coverage Audit `:293-301` 仍有效。**结论（13 子类全保留、两版一致）不变。**
 
 | SSRF 子类 | 确定性层 | LLM prompt（两版一致） | 差距定性 |
 |---|---|---|---|
@@ -237,8 +241,8 @@
 | SK+2 | Slot 类型系统 | 自然语言 slot | `SlotContext` 枚举（8 值）+ `DangerousSlot` 模型 | 重构新增 ✨ | — |
 | SK+3 | 确定性 hint 注入 | 无 | `_static-dataflow-hints.txt` → LLM | 重构新增 ✨ | — |
 | SK+4 | is_entry_hint 标记 | 无 | 保守浅层判断（参数名/request.*/PHP 超全局） | 重构新增 ✨ | — |
-| SK-12 | **sink_merger 未接入 pipeline** | LLM Sink Hunter 报告自然融入流程 | `sink_merger.py` 已完整实现（153 行 + 单测），但 `__init__.py` 未 import / 调用 `merge_sink_reports()`；LLM pre-recon 发现的 sink 无法与确定性结果融合 | **中-高** | 代码级核验新增 |
-| SK-13 | **Fallback 路径丢失全部 sink 检测** | 无降级路径（依赖单一流程） | `_build_code_index_fallback()`（`__init__.py:230`）返回 `sink_call_sites=[]`；GitNexus 不可用时所有下游风险评分、分层审计失去 sink 感知 | **中** | 代码级核验新增 |
+| SK-12 | ~~sink_merger 未接入 pipeline~~ → ✅ **已修复** | LLM Sink Hunter 报告自然融入流程 | `sink_merger.py`（含 `merge_sink_reports()` + `parse_llm_sinks()` + 单测）已接入：`run_merge_sink_reports` activity（`activities.py:285`）→ `worker.py:15,76` 注册 → `workflows.py:136` 调用；确定性 + LLM sink 双通道已打通 | ~~中-高~~ → ✅ **已修复** | commit `04ad085` |
+| SK-13 | **Fallback 路径 taint 传播仍真空**（sink 清单已部分缓解） | 无降级路径（依赖单一流程） | `_build_code_index_fallback()`（`__init__.py:230`）仍返回 `sink_call_sites=[]`、`degradation_level=MINIMAL`；但 SK-12 修复后 `run_merge_sink_reports` 会从 `pre_recon_deliverable.md` 补 LLM-only sink（`caller_id=""`、`needs_review=True`）——**sink 清单不再真空，但 LLM-only sink 无 caller_id 无法挂入 call chain，taint 传播 / sink-aware 风险评分仍失效** | ~~中~~ → **低-中** | v5 修正：SK-12 缓解清单真空，传播层仍失效 |
 
 ---
 
@@ -269,7 +273,7 @@
 
 - **XXE**：两边 prompt 均无 XXE 专门覆盖 + 确定性层 0 条
 
-### 5.5 重构 Pipeline 架构缺口（代码级核验新增）
+### 5.5 重构 Pipeline 架构缺口（v5 修订）
 
 重构的 sink 检测 pipeline 已形成完整的 8 步链路（`__init__.py:51`）：
 
@@ -278,11 +282,11 @@ tree-sitter 解析 → GitNexus 调用图 → detect_sinks() → LLM 污点分�
   → 跨函数传播 → 入口点融合 → CodeIndex 组装
 ```
 
-但存在两个架构级缺口：
+> **v5 复核**：原"两个架构级缺口"中 SK-12（`sink_merger` 断路）已在 commit `04ad085` 修复，当前仅余 SK-13（fallback taint 真空，且已被部分缓解）。
 
-1. **`sink_merger` 断路**（SK-12）：`sink_merger.py` 实现了确定性 + LLM sink 的去重合并逻辑（含 `parse_llm_sinks()` 报告解析 + `_infer_category()` 类别推断 + `merge_sink_reports()` 碰撞去重），且有完整的 `test_sink_merger.py` 测试覆盖。但 pipeline 主编排 `__init__.py` 仅 import 了 `detect_sinks`，未 import `merge_sink_reports`。**影响**：LLM pre-recon 阶段（Sink Hunter）发现的 sink 无法被确定性结果验证或补充，两条检测通道完全隔离。
+1. ~~**`sink_merger` 断路**（SK-12）~~ → ✅ **已修复**（commit `04ad085`）：`sink_merger.py`（含 `parse_llm_sinks()` + `_infer_category()` + `merge_sink_reports()` 碰撞去重 + 完整单测）现已通过 `run_merge_sink_reports` activity 接入 pipeline（`activities.py:285` → `worker.py:15,76` → `workflows.py:136`）。该 activity 在 `run_code_index`（确定性 `detect_sinks`）与 PRE_RECON（LLM Sink Hunter）并行完成后执行，从 `code_index.json` 读确定性 sink、从 `pre_recon_deliverable.md` 读 LLM sink，按 `(file_path, line)` 去重后回写。**影响**：两条检测通道已打通，LLM-only sink 以 `rule_id="llm-sink-hunter"`、`needs_review=True` 补入清单。
 
-2. **Fallback 路径 sink 真空**（SK-13）：当 GitNexus MCP 不可用时，`_build_code_index_fallback()` 直接返回 `sink_call_sites=[]` 和 `degradation_level=MINIMAL`。**影响**：下游 `risk_scorer` 退化为 legacy regex 模式匹配（`_classify_sink_legacy()`），`tiered_audit` 的 sink-aware 评分完全失效，`audit_input_builder` 的 sink 清单为空。
+2. **Fallback 路径 taint 传播仍真空**（SK-13，严重度下调）：GitNexus 不可用时 `_build_code_index_fallback()` 仍返回 `sink_call_sites=[]`、`degradation_level=MINIMAL`；但 SK-12 修复后 `run_merge_sink_reports` 会补 LLM-only sink。**残余影响**：LLM-only sink `caller_id=""` 无法挂入 call chain，`risk_scorer` / `tiered_audit` 的 sink-aware 评分仍部分失效（sink 清单非空但缺 taint 关联）。
 
 ---
 
@@ -332,12 +336,12 @@ tree-sitter 解析 → GitNexus 调用图 → detect_sinks() → LLM 污点分�
 | LLM prompt XSS（5 上下文） | `prompts/pre-recon-code.txt:306-339` |
 | 模板分析方法论（两步流程+变体验证） | `prompts/pre-recon-code.txt:141-149` |
 | Template Coverage Audit | `prompts/pre-recon-code.txt:293-301` |
-| LFI/RFI/PathTraversal | `prompts/vuln-injection.txt:2/108/120/147/210-211` |
-| recon Section 9 注入源 | `prompts/recon.txt:383-394` |
+| LFI/RFI/PathTraversal | `prompts/vuln-injection.txt:2/110/122/149/211-213`（v5：较 v2 `:2/108/120/147/210-211` 偏移 +2） |
+| recon Section 9 注入源 | `prompts/recon.txt:465-476`（v5：较 v2 `:383-394` 偏移约 +80） |
 
 ---
 
 ## 7. 交叉参考
 
 - `docs/whitebox-refactoring-assessment.md` — 全维度评估（v7），本分析是其 §1 Sink 部分的代码级修正
-- `docs/entry-point-gap-analysis.md` — v1 差距分析，本分析修正其 §2 的三处错误（C1/C2/C3）
+- `docs/gap/entry-point-gap-analysis.md` — v1 差距分析，本分析修正其 §2 的三处错误（C1/C2/C3）

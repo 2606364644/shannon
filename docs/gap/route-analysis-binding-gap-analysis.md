@@ -1,14 +1,19 @@
 # 路由分析服务与接口绑定差距分析
 
-> 对比原始 Shannon（TypeScript, `/root/shannon`）与重构 Shannon-py（Python）在**路由级分析服务**（framework-analyzer / frontend-mapper / route-chain-builder / attack-chain-builder）及其 **Pipeline 接口绑定**上的能力差距。
+> 对比原始 Shannon（TypeScript, `/Users/mango/project/shannon-refactor/shannon`）与重构 Shannon-py（Python）在**路由级分析服务**（framework-analyzer / frontend-mapper / route-chain-builder / attack-chain-builder）及其 **Pipeline 接口绑定**上的能力差距。
 >
 > **数据来源**：逐行代码核验（非仅文档），以代码为准。
 >
-> **日期**：2026-06-11
+> **日期**：2026-06-11（v2 复核更新：2026-06-13）
+>
+> **v2 复核要点**（2026-06-13，代码级复核）：
+> - **RA-1 时序描述修正**：`run_attack_chain_assembly` 实际在 **VULN agents 之后**运行（`workflows.py:238`），原文档 §4.2"重构版在漏洞分析之前就构建链"判定错误。漏洞上下文增强能力（`attack_chain_builder.py`）仍完全缺失——**结论不变，但时序根因需更正**。
+> - **RA-2/RA-4/RA-5/RA-6 复核**：均仍成立。RA-6 重复反序列化代码行号已偏移（实测 `_to_endpoint` 在 `run_route_chain_building` 的 `:536-541`、`run_attack_chain_assembly` 的 `:598-603`）。
+> - **路径统一**：原始 TS 项目实际位于 `/Users/mango/project/shannon-refactor/shannon`。
 >
 > **与已有文档的关系**：
-> - `docs/entry-point-gap-analysis.md` — 入口点**检测**差距（AST regex vs LLM）
-> - `docs/sink-gap-analysis-v2.md` — Sink 点**检测**差距（确定性规则 vs LLM prompt）
+> - `docs/gap/entry-point-gap-analysis.md` — 入口点**检测**差距（AST regex vs LLM）
+> - `docs/gap/sink-gap-analysis-v2.md` — Sink 点**检测**差距（确定性规则 vs LLM prompt）
 > - **本文档** — 路由**分析**服务（框架推断 / 前端映射 / 攻击链构建）+ **Pipeline 接口绑定**差距
 
 ---
@@ -304,7 +309,7 @@ if (vulnKnowledge) {
 
 **影响**：
 1. 攻击链置信度**永远无法升级为 `confirmed`**——即使下游漏洞 agent 已确认对应端点的漏洞。
-2. 原始设计中，`attack-chain-builder` 在所有漏洞分析 agent 完成后运行，能读取已确认的漏洞发现来增强攻击链。重构版在漏洞分析之前就构建链，且无增强步骤。
+2. 原始设计中，`attack-chain-builder` 在所有漏洞分析 agent 完成后运行，能读取已确认的漏洞发现来增强攻击链。~~重构版在漏洞分析之前就构建链，且无增强步骤。~~ → **v2 修正**：重构版 `run_attack_chain_assembly` **同样在 VULN agents 之后运行**（`workflows.py:238`），时序与原始对齐；但 `attack_chain_builder.py` **未接收漏洞 deliverables 作为输入**（`run_attack_chain_assembly` 仅读 `framework_analysis.json` + `frontend_mapping.json`，见 `activities.py:616-632`），故增强步骤仍缺失——差距是「**漏洞数据未传入**」而非「时序错误」。
 
 ### 4.3 数据源差距
 
@@ -414,9 +419,9 @@ EXPLOIT agents × N
 PRE_RECON agent  ─┐
 Code Index        ─┤ asyncio.gather（并行）
                   ─┤
-Sink Merge           ← 合并确定性 + LLM sink
-Entry Fusion         ← 4 源入口融合
-Adjudication         ← confidence 裁定
+Sink Merge           ← 合并确定性 + LLM sink（commit `04ad085` 已接入）
+Entry Fusion         ← 2 源入口融合（worker 注册已补，运行时生效）
+Adjudication         ← confidence 裁定（已接入 + 注册）
                   ─┤
 Framework Analysis ─┐ asyncio.gather（并行）
 Frontend Mapping   ─┘
@@ -455,11 +460,13 @@ Render Findings
 
 | 重复代码块 | 位置 1 | 位置 2 | 行数 |
 |---|---|---|---|
-| `_to_endpoint()` 反序列化 | `:516-521` | `:578-583` | 6 行 × 2 |
-| `_to_route()` 反序列化 | `:533-535` | `:585-588` | 3 行 × 2 |
-| `_to_xss()` 反序列化 | `:537-541` | `:590-594` | 5 行 × 2 |
-| 加载 `framework_analysis.json` | `:511-526` | `:597-604` | 16 行 × 2 |
-| 加载 `frontend_mapping.json` | `:529-544` | `:606-612` | 16 行 × 2 |
+| `_to_endpoint()` 反序列化 | `:536-541` | `:598-603` | 6 行 × 2 |
+| `_to_route()` 反序列化 | `:553-556` | `:605-608` | 4 行 × 2 |
+| `_to_xss()` 反序列化 | `:557-561` | `:610-614` | 5 行 × 2 |
+| 加载 `framework_analysis.json` | `:531-546` | `:616-624` | ~16 行 × 2 |
+| 加载 `frontend_mapping.json` | `:549-564` | `:626-632` | ~16 行 × 2 |
+
+> **v2 复核**：行号已对齐 `activities.py` 当前版本（原表为早期行号，整体偏移约 +20）。重复结论不变。
 
 **根因**：`run_route_chain_building` 和 `run_attack_chain_assembly` 各自独立读取并反序列化相同的 JSON 文件。
 
@@ -477,7 +484,7 @@ Pipeline 绑定的核心差距是**数据流架构差异**：
 
 | # | 差距项 | 原始能力 | 重构现状 | 严重度 | 类型 |
 |---|---|---|---|---|---|
-| RA-1 | **漏洞上下文增强** | `attack-chain-builder` 读 SharedKnowledge 中已确认漏洞，升级攻击链 confidence 为 `confirmed` | ❌ 完全缺失 | **高** | 功能差距 |
+| RA-1 | **漏洞上下文增强** | `attack-chain-builder` 读 SharedKnowledge 中已确认漏洞，升级攻击链 confidence 为 `confirmed` | ❌ 完全缺失（`attack_chain_builder.py` 无漏洞输入参数；`run_attack_chain_assembly` 在 VULN 后运行但仅读 framework/frontend JSON） | **高** | 功能差距（v2：时序已对齐，差距在「数据未传入」） |
 | RA-2 | **endpoint 路径发现** | `discoverModels()` 提取 `.resource({ endpoints: [...] })` 中的显式路径 | ❌ 仅提取 model 名 | 中 | 功能差距 |
 | RA-3 | **SharedKnowledge 集中式数据流** | 所有服务读写同一个知识库，跨 phase 数据积累 | 独立 JSON 文件，无跨 phase 共享 | **中-高** | 架构差距 |
 | RA-4 | **API 调用 / 用户输入提取** | 模型有字段但未实现（两版均为空壳） | 同原始 | 低 | 两版均未完成 |
@@ -542,7 +549,7 @@ Pipeline 绑定的核心差距是**数据流架构差异**：
 
 ## 9. 交叉参考
 
-- `docs/whitebox-refactoring-assessment.md` — 全维度评估（v8），§2.4 提及 recon 4.1/4.2 路由级索引差距
-- `docs/entry-point-gap-analysis.md` — 入口点**检测**差距（AST regex vs LLM）
-- `docs/sink-gap-analysis-v2.md` — Sink 点**检测**差距（确定性规则 vs LLM prompt）
+- `docs/whitebox-refactoring-assessment.md` — 全维度评估（v8）
+- `docs/gap/entry-point-gap-analysis.md` — 入口点**检测**差距（AST regex vs LLM）
+- `docs/gap/sink-gap-analysis-v2.md` — Sink 点**检测**差距（确定性规则 vs LLM prompt）
 - 本文档专注于**路由分析服务**（框架推断 / 前端映射 / 攻击链构建）和 **Pipeline 接口绑定**差距
