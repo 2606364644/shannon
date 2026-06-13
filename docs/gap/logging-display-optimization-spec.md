@@ -412,8 +412,10 @@ packages/core/src/shannon_core/
 |------|------|------|
 | 1 | 事件模型 + Dispatcher 骨架 | Dispatcher 能接收事件并分发；不改现有行为（先只接 FileLogRenderer） |
 | 2 | FileLogRenderer + formatters | workflow.log 输出符合 §3 格式；`COMPLETION_PATTERN` 兼容性测试通过 |
-| 3 | 错误分类模块 | `classification.py` 两函数语义测试通过，被两 renderer 复用 |
+| 3 | 错误分类模块 | `classification.py` 两函数语义测试通过，回填 `ErrorEvent.classified`/`display_retryable` |
 | 4 | RichConsoleRenderer | 实时 stdout 展示 Panel/Progress/颜色；全面超越原始项目 |
+
+**阶段间依赖说明：** 阶段3（错误分类）可在阶段2之后任意时机插入。阶段2的 `ErrorEvent` 先以 `classified=None`/`display_retryable=None` 渲染（错误块格式化 `format_error_block` 是纯字符串处理，不依赖分类）；阶段3完成后回填这两个字段，renderer 增强错误展示（如标注 `[BillingError · retryable]`）。阶段4（Rich）依赖阶段1-3全部完成。
 
 ---
 
