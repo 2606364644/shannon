@@ -1,3 +1,5 @@
+import asyncio
+
 from shannon_core.display.dispatcher import DisplayDispatcher
 from shannon_core.display.events import PhaseEvent
 
@@ -24,9 +26,6 @@ async def test_dispatch_with_no_renderers_is_noop():
     evt = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
     # Must not raise
     await dispatcher.dispatch(evt)
-
-
-import asyncio
 
 
 class _OrderRecordingRenderer:
