@@ -17,6 +17,7 @@ from shannon_core.prompts.manager import PromptManager
 
 if TYPE_CHECKING:
     from shannon_core.logging.activity_logger import ActivityLogger
+    from shannon_core.agents.tool_audit_logger import ToolAuditLogger
 
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
@@ -35,7 +36,7 @@ class AgentExecutor:
         prompt_override: str | None = None,
         structured_output_schema: dict | None = None,
         audit_logger: "ActivityLogger | None" = None,
-        tool_audit_logger=None,
+        tool_audit_logger: "ToolAuditLogger | None" = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)

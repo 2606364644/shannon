@@ -5,6 +5,7 @@ from shannon_core.models.errors import classify_error_for_temporal
 
 if TYPE_CHECKING:
     from shannon_core.logging.activity_logger import ActivityLogger
+    from shannon_core.agents.tool_audit_logger import ToolAuditLogger
 
 
 @dataclass
@@ -96,7 +97,7 @@ async def run_claude_prompt(
     deliverables_subdir: str | None = None,
     provider_config: dict | None = None,
     audit_logger: "ActivityLogger | None" = None,
-    tool_audit_logger=None,
+    tool_audit_logger: "ToolAuditLogger | None" = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt

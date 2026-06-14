@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -81,6 +82,7 @@ async def run_agent(input: ActivityInput) -> dict:
     attempt = activity.info().attempt
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session)
+    agent_start = time.monotonic()
     try:
         repo, deliverables, _ = _get_paths(input)
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
@@ -97,7 +99,6 @@ async def run_agent(input: ActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             prompt_override=input.prompt_override,
-            audit_logger=create_activity_logger(),
             tool_audit_logger=tool_audit_logger,
         )
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -110,14 +111,16 @@ async def run_agent(input: ActivityInput) -> dict:
         return metrics.model_dump()
     except PentestError as e:
         await session.end_agent(agent_name.value, AgentEndResult(
-            success=False, duration_ms=0, cost_usd=0.0,
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
         await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
+        # log_error surfaces to the live display; ApplicationFailure surfaces to
+        # Temporal for retry decisions — both are intended, not double-logging.
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
         await session.end_agent(agent_name.value, AgentEndResult(
-            success=False, duration_ms=0, cost_usd=0.0,
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
         await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
