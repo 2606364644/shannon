@@ -31,7 +31,8 @@ def cli():
 @click.option("-c", "--config", "config_path", default=None, help="YAML configuration file")
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
-def start(repo, output, workspace, config_path, pipeline_testing, temporal_address):
+@click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
+def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain):
     """Start a white-box security scan."""
     from shannon_whitebox.worker import run_scan
 
@@ -46,7 +47,9 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     asyncio.run(ensure_infra(address=temporal_address))
     from shannon_core.runtime.prerequisites import ensure_prerequisite
     ensure_prerequisite("gitnexus", profile="whitebox")
-    result = asyncio.run(run_scan(input, temporal_address))
+    import sys
+    use_rich = sys.stdout.isatty() and not plain
+    result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
     if result.get("status") == "completed":
         ws_name = result.get("workspace_name", "unknown")
         deliverables_path = result.get("deliverables_path", "")
