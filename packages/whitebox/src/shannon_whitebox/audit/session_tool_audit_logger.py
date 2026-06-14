@@ -7,13 +7,16 @@ events appear in workflow.log and on the live dashboard.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from shannon_core.agents.tool_audit_logger import ToolAuditLogger
 
+if TYPE_CHECKING:
+    from shannon_whitebox.audit.session import AuditSession
+
 
 class SessionToolAuditLogger(ToolAuditLogger):
-    def __init__(self, session: "AuditSession") -> None:  # noqa: F821 (typed below)
+    def __init__(self, session: "AuditSession") -> None:
         self._session = session
 
     async def log_tool_start(self, tool_name: str, parameters: Any) -> None:
@@ -21,7 +24,8 @@ class SessionToolAuditLogger(ToolAuditLogger):
             "tool_start", {"toolName": tool_name, "parameters": parameters})
 
     async def log_tool_end(self, result: Any) -> None:
-        # tool_end has no DisplayEvent surface; record for file completeness only.
+        # tool_end has no DisplayEvent/workflow.log surface; AuditSession.log_event
+        # records it to the per-agent JSON log only (when an agent is active).
         await self._session.log_event("tool_end", {"result": str(result)[:200]})
 
     async def log_assistant_turn(self, turn: int, content: str) -> None:
