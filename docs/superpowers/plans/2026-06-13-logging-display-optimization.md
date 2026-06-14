@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, Rich (terminal), pytest + pytest-asyncio (asyncio_mode=auto), uv workspace (packages/core depends on nothing new except Rich; whitebox depends on core).
 
-**Spec:** `docs/gap/logging-display-optimization-spec.md`
+**Spec:** `docs/superpowers/specs/2026-06-13-logging-display-optimization-design.md`
 
 **Key constraints discovered:**
 - `format_duration`/`format_log_time`/`format_timestamp` currently live in `shannon_whitebox.audit.utils`, but renderers are being placed in `shannon_core.display`. Core must NOT import whitebox (would be a reverse dependency). Solution: migrate these 3 helpers to `shannon_core.display.formatters`, and have whitebox re-import them to stay backward-compatible.

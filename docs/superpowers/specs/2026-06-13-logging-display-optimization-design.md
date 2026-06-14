@@ -1,7 +1,7 @@
 # 日志展示优化 Spec：让 Shannon-py 超越原始 Shannon
 
 > 版本: v1 | 日期: 2026-06-13 | 状态: 待评审
-> 前置文档: [logging-display-gap-analysis.md](./logging-display-gap-analysis.md)
+> 前置文档: [logging-display-gap-analysis.md](../../gap/logging-display-gap-analysis.md)
 
 ## 目的
 
@@ -27,7 +27,7 @@
 
 ## 与 Gap 分析的追溯关系
 
-本 Spec 补齐并超越以下 gap（见 [gap 分析](./logging-display-gap-analysis.md)）：
+本 Spec 补齐并超越以下 gap（见 [gap 分析](../../gap/logging-display-gap-analysis.md)）：
 
 | Gap ID | 处理方式 | 本 Spec 位置 |
 |--------|---------|-------------|
