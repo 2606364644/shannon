@@ -282,6 +282,12 @@ async def test_use_rich_attaches_dashboard_renderer(tmp_path: Path):
     logger = WorkflowLogger(meta, use_rich=True, console=console, dashboard=dashboard)
     await logger.initialize(workflow_id="wf-1")
     # dispatcher should have 3 renderers: File, RichConsole, LiveDashboard
-    assert len(logger._dispatcher._renderers) == 3
+    renderers = logger._dispatcher._renderers
+    from shannon_core.display.file_renderer import FileLogRenderer
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    assert len(renderers) == 3
+    assert isinstance(renderers[0], FileLogRenderer)
+    assert isinstance(renderers[1], RichConsoleRenderer)
+    assert renderers[2] is dashboard
     await logger.log_phase("recon", "start")
     await logger.close()

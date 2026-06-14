@@ -1,4 +1,6 @@
-from typing import Any, Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.display.dispatcher import DisplayDispatcher
 from shannon_core.display.events import (
@@ -12,6 +14,10 @@ from shannon_core.models.metrics import SessionMetadata
 from shannon_whitebox.audit.log_stream import LogStream
 from shannon_whitebox.audit.utils import generate_workflow_log_path
 
+if TYPE_CHECKING:
+    from rich.console import Console
+    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+
 
 class WorkflowLogger:
     """Emits DisplayEvents through a dispatcher.
@@ -21,7 +27,8 @@ class WorkflowLogger:
     """
 
     def __init__(self, session_metadata: SessionMetadata, use_rich: bool = False,
-                 console=None, dashboard=None) -> None:
+                 console: Console | None = None,
+                 dashboard: LiveDashboardRenderer | None = None) -> None:
         self._meta = session_metadata
         self._workflow_id: str | None = None
         self._stream: LogStream | None = None
