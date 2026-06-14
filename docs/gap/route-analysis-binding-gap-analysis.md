@@ -4,12 +4,17 @@
 >
 > **数据来源**：逐行代码核验（非仅文档），以代码为准。
 >
-> **日期**：2026-06-11（v2 复核更新：2026-06-13）
+> **日期**：2026-06-11（v2 复核更新：2026-06-13；v3 复核：2026-06-14）
 >
 > **v2 复核要点**（2026-06-13，代码级复核）：
 > - **RA-1 时序描述修正**：`run_attack_chain_assembly` 实际在 **VULN agents 之后**运行（`workflows.py:238`），原文档 §4.2"重构版在漏洞分析之前就构建链"判定错误。漏洞上下文增强能力（`attack_chain_builder.py`）仍完全缺失——**结论不变，但时序根因需更正**。
 > - **RA-2/RA-4/RA-5/RA-6 复核**：均仍成立。RA-6 重复反序列化代码行号已偏移（实测 `_to_endpoint` 在 `run_route_chain_building` 的 `:536-541`、`run_attack_chain_assembly` 的 `:598-603`）。
 > - **路径统一**：原始 TS 项目实际位于 `/Users/mango/project/shannon-refactor/shannon`。
+>
+> **v3 复核要点**（2026-06-14，代码级复核）：
+> - **零改动确认**：自 v2 复核（commit `0196803`, 2026-06-13 18:07）以来，4 个路由分析服务（`attack_chain_builder.py` / `route_chain_builder.py` / `framework_analyzer.py` / `frontend_mapper.py`）与 pipeline（`activities.py` / `workflows.py` / `worker.py`）**无任何实质改动**——服务代码最近一次提交为 `744cfb7`（2026-06-11）；0196803 仅触及 worker 注册与文档迁移，未改路由分析 activity 逻辑。RA-1～RA-8、RA+1～RA+4 全部结论持续成立。
+> - **行号全文复核**：RA-6 重复反序列化（`_to_endpoint` `:536-541`/`:598-603`、`_to_route` `:553-556`/`:605-608`、`_to_xss` `:557-561`/`:610-614`、JSON 加载 `:531-546`+`:549-564` / `:616-624`+`:626-632`）、`workflows.py:238` 时序、`activities.py:616-632` 数据源、原始 TS `endpointRegex`（`framework-analyzer.ts:171-185`）、IDOR 前端路由关联（`route-chain-builder.ts:99-101`）——逐项实测均与 v2 标注**完全一致**，无需偏移修正。
+> - **新增连带影响 RA-9**：因漏洞上下文增强缺失（RA-1），`run_attack_chain_assembly` 产出的 `attack_chains.json` 与 `run_route_chain_building` 产出的 `route_chains.json` **内容完全相同**——两者读同一批 JSON、跑同一套 `build_attack_chains_from_analysis`，仅输出文件名不同。即整个 `run_attack_chain_assembly` 在当前实现下**功能冗余**，详见 §5.3 与差距矩阵 RA-9。
 >
 > **与已有文档的关系**：
 > - `docs/gap/entry-point-gap-analysis.md` — 入口点**检测**差距（AST regex vs LLM）
@@ -444,6 +449,8 @@ Render Findings
 | 攻击链构建位置 | **VULN 之后**（可读漏洞上下文） | **VULN 之前**（route_chain）+ **VULN 之后**（attack_chain） | ❌ `route_chain_building` 在 VULN 前运行，无漏洞上下文 |
 | 攻击链增强 | ✅ 基于已确认漏洞升级 confidence | ❌ 无增强步骤 | ❌ **关键差距** |
 
+> **v3 连带观察（attack_chain_assembly 冗余）**：在 RA-1 漏洞上下文增强缺失的前提下，`run_route_chain_building`（`activities.py:518-581`，输出 `route_chains.json`）与 `run_attack_chain_assembly`（`activities.py:585-647`，输出 `attack_chains.json`）**读同一批输入 JSON、调用同一套 `build_attack_chains_from_analysis`**，产出内容完全相同。二者唯一差异是 `build_attack_chains()`（`attack_chain_builder.py:20-39`）预留的漏洞增强步骤——当前为空操作。因此当前 `attack_chains.json` 实为 `route_chains.json` 的副本，`run_attack_chain_assembly` 在功能上冗余；修复 RA-1（接入漏洞 deliverables、恢复 confidence 升级）后两者才会有区分度。`workflows.py:237-245` 已将该 activity 包在 try/except 中作非致命处理，进一步印证其"增强型"定位。
+
 ### 5.4 数据传递机制对比
 
 | 维度 | 原始 | 重构 | 评估 |
@@ -492,6 +499,7 @@ Pipeline 绑定的核心差距是**数据流架构差异**：
 | RA-6 | **重复反序列化代码** | N/A（用 SharedKnowledge API） | `run_route_chain_building` 和 `run_attack_chain_assembly` 各自重复约 40 行 | 低 | 代码质量 |
 | RA-7 | **类型约束退化** | TS 字面量联合类型（`'xss' \| 'authz' \| 'injection'`） | Python `str` 无枚举约束 | 低 | 类型安全 |
 | RA-8 | **框架模式独立文件** | `framework-patterns.ts` 独立可引用 | 内嵌 `framework_analyzer.py` | 低 | 可维护性 |
+| RA-9 | **attack_chain_assembly 冗余** | `buildAttackChains` 含漏洞增强，产出有别于 route-chain | `attack_chains.json` 与 `route_chains.json` 内容完全相同（无漏洞增强时），activity 功能冗余 | 中 | 架构差距（RA-1 连带） |
 | RA+1 | **文件发现递归扫描** | `readdir()` 仅一级 | `rglob("*.js/*.ts")` 递归 | — | 重构增强 ✨ |
 | RA+2 | **框架检测引号限定** | `content.includes('react')` 可能误匹配 | `'"react"' in content` 精确匹配 | — | 重构增强 ✨ |
 | RA+3 | **服务独立 Activity** | 嵌入 agent 内 | 独立 Temporal activity，可独立重试 | — | 重构增强 ✨ |
@@ -535,7 +543,7 @@ Pipeline 绑定的核心差距是**数据流架构差异**：
 
 按"性价比 = 影响面 × 修复难度倒数"：
 
-1. **RA-1 漏洞上下文增强**（高影响、中难度）：在 `attack_chain_builder.py` 中添加漏洞上下文参数，`run_attack_chain_assembly` activity 从 deliverables 读取漏洞发现结果，执行 confidence 升级逻辑。需定义 `VulnerabilityContext` 模型或复用现有漏洞 deliverable 格式。
+1. **RA-1 漏洞上下文增强**（高影响、中难度）：在 `attack_chain_builder.py` 中添加漏洞上下文参数，`run_attack_chain_assembly` activity 从 deliverables 读取漏洞发现结果，执行 confidence 升级逻辑。需定义 `VulnerabilityContext` 模型或复用现有漏洞 deliverable 格式。修复后 `attack_chains.json` 才与 `route_chains.json` 区分（见 RA-9），`run_attack_chain_assembly` 才摆脱冗余；在此之前可考虑临时合并两个 activity 或跳过其一以减少重复 IO。
 
 2. **RA-3 SharedKnowledge 等价机制**（高影响、高难度）：为重构版引入轻量级共享知识层，或至少确保 `attack_chain_assembly` 能读取漏洞 agent 的 deliverables。可作为 RA-1 的基础设施。
 

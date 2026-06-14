@@ -4,7 +4,7 @@
 >
 > **数据来源**：逐行代码核验（`sink_detector.py`、`pre-recon-code.txt`、`vuln-*.txt`、`recon.txt`），以代码为准。
 >
-> **日期**：2026-06-11（v3 更新：2026-06-11，v4 更新：2026-06-11，v5 更新：2026-06-13）
+> **日期**：2026-06-11（v3 更新：2026-06-11，v4 更新：2026-06-11，v5 更新：2026-06-13，v6 更新：2026-06-14）
 >
 > **v2 修正要点**：基于对两个项目的全量 prompt grep 验证，修正了 v1（`entry-point-gap-analysis.md` §2）中关于 XXE/路径穿越/文件读取的三处错误判断。
 >
@@ -13,6 +13,8 @@
 > **v4 更新要点**：代码级全量核验发现原文档仅覆盖 `sink_detector` 单模块，遗漏完整的 sink pipeline 架构。新增：① §4 补充 SK-12（`sink_merger` 已实现未接入 pipeline）、SK-13（fallback 路径 sink 真空）② §5 新增 §5.5 Pipeline 架构缺口 ③ §6 重构代码路径索引从 10 条扩充至 20 条（分三层：确定性检测 / 合并与下游消费 / LLM prompt）。
 >
 > **v5 更新要点**（2026-06-13 代码级复核，commit `04ad085`）：`sink_merger` 已正式接入 pipeline——`run_merge_sink_reports` activity 已定义（`activities.py:285`）、注册（`worker.py:15,76`）、调用（`workflows.py:136`），确定性 + LLM 双通道打通，**SK-12 断路已修复**；SK-13 fallback 真空因 LLM sink 合并而部分缓解（但 LLM-only sink `caller_id=""`、`needs_review=True`，仍无法挂入 call chain，**taint 传播层面仍真空**）；同步 prompt 行号偏移（`vuln-injection.txt` +2、`recon.txt` Section 9 `:440-460` → `:465-476`、`pre-recon-code.txt` SSRF/XSS section 整体后移）。47 条规则、SSRF/XSS/路径穿越/文件读取/XXE 的覆盖判定经复核**全部不变**。
+
+> **v6 更新要点**（2026-06-14 代码级复核，HEAD `bf7a210`）：自 v5（`04ad085`）以来 sink 检测核心代码（`sink_detector`/`sink_merger`/pipeline/fallback）**无实质语义变化**，47 条规则与 SSRF/XSS/路径穿越/文件读取/XXE 覆盖判定**全部不变**。仅行号因无关 commit 间接偏移：`worker.py` 注册行 `:76`→`:77`、`workflows.py` 调用行 `:136`→`:137`（均由 commit `0196803` CLI summary 验证这一无关改动连带挪动 import/注册行）、pre-recon-code.txt URL Openers `:361`→`:360`、`file_discovery.py` 模板扩展名 `:15-17`→`:15-16`（10 种扩展名横跨两行）。架构观察：commit `27c06ea` 将 `gitnexus_call_graph` 从 stub 真实化（query→process_symbols→cypher `CALLS` 边 + 置信度分数），提升调用图质量但不改 sink 检测语义，fallback 逻辑（SK-13）行为不变；SK-13 中 LLM-only sink `caller_id=""`（`sink_merger.py:134`）仍硬编码、`parse_llm_sinks` 无推断逻辑，**taint 传播真空判定不变**。
 
 ---
 
@@ -108,7 +110,7 @@
 
 **SSRF 确定性层 vs LLM prompt 层覆盖对比**：
 
-> ⚠️ **v5 行号偏移说明**：下表 `pre-recon-code.txt` 行号为 v3 时期（commit `b3c58bd`）快照。2026-06-13 复核确认该 section 已整体后移——SSRF 13 子类现位于 `:340-430`（HTTP Clients `:346`、Raw Sockets `:355`、URL Openers `:361`、Redirect ~`:362-371`、Headless `:372`、Media `:379`、Link Preview `:385`、Webhook Testers `:392`、SSO/OIDC `:399`、Package `:413`、Monitoring `:420`、Cloud Metadata `:427`）；XSS 5 上下文现位于 `:306-339`；模板方法论 `:141-149`、Coverage Audit `:293-301` 仍有效。**结论（13 子类全保留、两版一致）不变。**
+> ⚠️ **v5 行号偏移说明**：下表 `pre-recon-code.txt` 行号为 v3 时期（commit `b3c58bd`）快照。2026-06-13 复核确认该 section 已整体后移——SSRF 13 子类现位于 `:340-430`（HTTP Clients `:346`、Raw Sockets `:355`、URL Openers `:360`、Redirect ~`:362-371`、Headless `:372`、Media `:379`、Link Preview `:385`、Webhook Testers `:392`、SSO/OIDC `:399`、Package `:413`、Monitoring `:420`、Cloud Metadata `:427`）；XSS 5 上下文现位于 `:306-339`；模板方法论 `:141-149`、Coverage Audit `:293-301` 仍有效。**结论（13 子类全保留、两版一致）不变。**
 
 | SSRF 子类 | 确定性层 | LLM prompt（两版一致） | 差距定性 |
 |---|---|---|---|
@@ -161,7 +163,7 @@
 |---|---|---|---|
 | Python 模板注入函数 | ✅ LLM 识别 | ✅ 2 条确定性规则 | 持平 |
 | TS/PHP 模板注入函数 | ✅ LLM 识别 | ❌ 无确定性规则 | 低（LLM 兜底） |
-| **模板文件转义指令分析** | ✅ **强制两步流程**（`pre-recon-code.txt:129-136`）：Step 1 glob 枚举模板 → Step 2 逐文件区分 escaped（EJS `<%= %>`、Jinja2 `{{ }}`）vs unescaped（EJS `<%- %>`、Jinja2 `{{\|safe}}`） | ⚠️ **Prompt 层已恢复（`b3c58bd`），确定性层仍缺失**：① 确定性层不分析模板文件转义指令 ② ~~Prompt 层全删~~ **已在 `b3c58bd` 恢复**：两步流程（`:141-146`）+ 变体验证（`:148-149`）+ 审计表（`:293-301`） ③ `file_discovery.py:15-17` 有 10 种模板扩展名分类但**未接 `sink_detector`（断路）** | **差距缩小（仅确定性层 + file_discovery 断路）** ← v3 修正 |
+| **模板文件转义指令分析** | ✅ **强制两步流程**（`pre-recon-code.txt:129-136`）：Step 1 glob 枚举模板 → Step 2 逐文件区分 escaped（EJS `<%= %>`、Jinja2 `{{ }}`）vs unescaped（EJS `<%- %>`、Jinja2 `{{\|safe}}`） | ⚠️ **Prompt 层已恢复（`b3c58bd`），确定性层仍缺失**：① 确定性层不分析模板文件转义指令 ② ~~Prompt 层全删~~ **已在 `b3c58bd` 恢复**：两步流程（`:141-146`）+ 变体验证（`:148-149`）+ 审计表（`:293-301`） ③ `file_discovery.py:15-16` 有 10 种模板扩展名分类但**未接 `sink_detector`（断路）** | **差距缩小（仅确定性层 + file_discovery 断路）** ← v3 修正 |
 | Cross-Variant 验证 | ✅ `:135-136` 强制跨品牌/区域/主题验证 | ⚠️ Prompt 已恢复（`:148-149`），确定性层无 | **差距缩小** ← v3 修正 |
 | Template Coverage Audit 表 | ✅ `:276-284` 完整性审计（每模板文件的 sink 数+转义模式+分析状态） | ⚠️ Prompt 已恢复（`:293-301`），确定性层无 | **差距缩小** ← v3 修正 |
 
@@ -241,7 +243,7 @@
 | SK+2 | Slot 类型系统 | 自然语言 slot | `SlotContext` 枚举（8 值）+ `DangerousSlot` 模型 | 重构新增 ✨ | — |
 | SK+3 | 确定性 hint 注入 | 无 | `_static-dataflow-hints.txt` → LLM | 重构新增 ✨ | — |
 | SK+4 | is_entry_hint 标记 | 无 | 保守浅层判断（参数名/request.*/PHP 超全局） | 重构新增 ✨ | — |
-| SK-12 | ~~sink_merger 未接入 pipeline~~ → ✅ **已修复** | LLM Sink Hunter 报告自然融入流程 | `sink_merger.py`（含 `merge_sink_reports()` + `parse_llm_sinks()` + 单测）已接入：`run_merge_sink_reports` activity（`activities.py:285`）→ `worker.py:15,76` 注册 → `workflows.py:136` 调用；确定性 + LLM sink 双通道已打通 | ~~中-高~~ → ✅ **已修复** | commit `04ad085` |
+| SK-12 | ~~sink_merger 未接入 pipeline~~ → ✅ **已修复** | LLM Sink Hunter 报告自然融入流程 | `sink_merger.py`（含 `merge_sink_reports()` + `parse_llm_sinks()` + 单测）已接入：`run_merge_sink_reports` activity（`activities.py:285`）→ `worker.py:15,77` 注册 → `workflows.py:137` 调用；确定性 + LLM sink 双通道已打通 | ~~中-高~~ → ✅ **已修复** | commit `04ad085` |
 | SK-13 | **Fallback 路径 taint 传播仍真空**（sink 清单已部分缓解） | 无降级路径（依赖单一流程） | `_build_code_index_fallback()`（`__init__.py:230`）仍返回 `sink_call_sites=[]`、`degradation_level=MINIMAL`；但 SK-12 修复后 `run_merge_sink_reports` 会从 `pre_recon_deliverable.md` 补 LLM-only sink（`caller_id=""`、`needs_review=True`）——**sink 清单不再真空，但 LLM-only sink 无 caller_id 无法挂入 call chain，taint 传播 / sink-aware 风险评分仍失效** | ~~中~~ → **低-中** | v5 修正：SK-12 缓解清单真空，传播层仍失效 |
 
 ---
@@ -284,7 +286,7 @@ tree-sitter 解析 → GitNexus 调用图 → detect_sinks() → LLM 污点分�
 
 > **v5 复核**：原"两个架构级缺口"中 SK-12（`sink_merger` 断路）已在 commit `04ad085` 修复，当前仅余 SK-13（fallback taint 真空，且已被部分缓解）。
 
-1. ~~**`sink_merger` 断路**（SK-12）~~ → ✅ **已修复**（commit `04ad085`）：`sink_merger.py`（含 `parse_llm_sinks()` + `_infer_category()` + `merge_sink_reports()` 碰撞去重 + 完整单测）现已通过 `run_merge_sink_reports` activity 接入 pipeline（`activities.py:285` → `worker.py:15,76` → `workflows.py:136`）。该 activity 在 `run_code_index`（确定性 `detect_sinks`）与 PRE_RECON（LLM Sink Hunter）并行完成后执行，从 `code_index.json` 读确定性 sink、从 `pre_recon_deliverable.md` 读 LLM sink，按 `(file_path, line)` 去重后回写。**影响**：两条检测通道已打通，LLM-only sink 以 `rule_id="llm-sink-hunter"`、`needs_review=True` 补入清单。
+1. ~~**`sink_merger` 断路**（SK-12）~~ → ✅ **已修复**（commit `04ad085`）：`sink_merger.py`（含 `parse_llm_sinks()` + `_infer_category()` + `merge_sink_reports()` 碰撞去重 + 完整单测）现已通过 `run_merge_sink_reports` activity 接入 pipeline（`activities.py:285` → `worker.py:15,77` → `workflows.py:137`）。该 activity 在 `run_code_index`（确定性 `detect_sinks`）与 PRE_RECON（LLM Sink Hunter）并行完成后执行，从 `code_index.json` 读确定性 sink、从 `pre_recon_deliverable.md` 读 LLM sink，按 `(file_path, line)` 去重后回写。**影响**：两条检测通道已打通，LLM-only sink 以 `rule_id="llm-sink-hunter"`、`needs_review=True` 补入清单。
 
 2. **Fallback 路径 taint 传播仍真空**（SK-13，严重度下调）：GitNexus 不可用时 `_build_code_index_fallback()` 仍返回 `sink_call_sites=[]`、`degradation_level=MINIMAL`；但 SK-12 修复后 `run_merge_sink_reports` 会补 LLM-only sink。**残余影响**：LLM-only sink `caller_id=""` 无法挂入 call chain，`risk_scorer` / `tiered_audit` 的 sink-aware 评分仍部分失效（sink 清单非空但缺 taint 关联）。
 

@@ -4,7 +4,7 @@
 >
 > **数据来源**：代码级核验（非仅文档），参考 `whitebox-refactoring-assessment.md` v7 但以实际代码为准。
 >
-> **日期**：2026-06-11（v2 复核更新：2026-06-13）
+> **日期**：2026-06-11（v2 复核更新：2026-06-13；v3 复核更新：2026-06-14）
 >
 > **更新要点**（基于 2026-06-10~11 代码变更）：
 > - EP-7 裁定修复：Phase 0 简化为 code index 审查 + 自动化置信度裁定（≥0.85 CONFIRMED / <0.50 REJECTED / 否则 NEEDS_REVIEW）；`run_save_adjudication` 已接入 pipeline 并注册 worker
@@ -17,6 +17,12 @@
 > - **EP-3 修正**：Upload 在 LLM 层已覆盖（Mapper `:132` 明确 "file uploads"），不再是"两层均无"
 > - **EP-10 修正**：~~发现 `run_entry_point_fusion` 未在 `worker.py` 注册~~ → ✅ **已补注册**（worker.py import + activities 列表，2026-06-13 同步修复）；现两源入口融合运行时生效，仅余"四源 `merge_entry_points()` 未接入"
 > - **路径统一**：原始 TS 项目实际位于 `/Users/mango/project/shannon-refactor/shannon`
+>
+> **v3 复核要点**（2026-06-14，代码级复核）：
+> - **EP-1 推翻**：确定性 `framework_analyzer.py`（274 行，注释明确 "ported from `framework-patterns.ts`"）已实现 finale-rest + epilogue 检测 + CRUD 端点推断（`/api/{Model}s` 与 `/api/{Model}s/:id` 模板 + vulnerability_patterns）；`run_framework_analysis` activity（`activities.py:463`）在 workflow 与前端映射并行调用（`workflows.py:163`）且 worker 已注册。原"无对应实现"判定错误
+> - **EP-2 推翻**：确定性 `frontend_mapper.py`（228 行）已实现 Angular/React/Vue 框架检测（读 `package.json`）+ per-framework 路由文件发现 + 路由解析 + XSS 链识别；`run_frontend_mapping` activity（`activities.py:491`）+ workflow 并行调用（`workflows.py:167`）+ worker 注册齐全；另有 `route_chain_builder.py`（110 行）/`attack_chain_builder.py`（39 行）补全路由→API 链构建。原"无对应实现"判定错误
+> - **EP-7/EP-10 再核验**：`worker.py` activity 列表（`worker.py:77-87`）已含 `run_merge_sink_reports`/`run_entry_point_fusion`/`run_save_adjudication`/`run_framework_analysis`/`run_frontend_mapping`/`run_route_chain_building`，5 个 entry-point 相关 activity 注册齐全
+> - **file_discovery 断路再确认**：`discover_security_files`（`__init__.py:82,247`）结果仅写入 `CodeIndex.file_manifest`，从未喂给入口点检测；四源 `merge_entry_points()` 仍无任何调用点（grep 全仓零命中）
 >
 > **Sink 点差距分析**：见 `docs/gap/sink-gap-analysis-v2.md`
 
@@ -45,8 +51,8 @@
 | Java `@RabbitListener` | ✅ LLM 识别 | ✅ regex, conf=0.90 | 持平 |
 | PHP Symfony `#[Route]` | ✅ LLM 识别 | ✅ regex, conf=0.95 | 持平 |
 | Python Celery `@shared_task` | ✅ LLM 识别 | ✅ regex, conf=0.90 | 持平 |
-| **自动生成 REST (finale-rest/epilogue)** | ✅ `framework-analyzer.ts` 专门检测，推断 CRUD 端点 | ❌ 无对应实现 | **原始胜** |
-| **前端路由 (Angular/React/Vue)** | ✅ `frontend-mapper.ts` 专门映射前端路由 → API 调用 | ❌ 无对应实现 | **原始胜** |
+| **自动生成 REST (finale-rest/epilogue)** | ✅ `framework-analyzer.ts` 专门检测，推断 CRUD 端点 | ✅ `framework_analyzer.py`（274 行，移植自 `framework-patterns.ts`）：finale-rest + epilogue 检测 + CRUD 端点推断（`/api/{Model}s`、`/api/{Model}s/:id` 模板 + vulnerability_patterns）；`run_framework_analysis` activity 已接入 workflow（`workflows.py:163`） | ~~原始胜~~ → ✅ **持平（v3 推翻）** |
+| **前端路由 (Angular/React/Vue)** | ✅ `frontend-mapper.ts` 专门映射前端路由 → API 调用 | ✅ `frontend_mapper.py`（228 行）：Angular/React/Vue 框架检测 + 路由解析 + XSS 链识别；`run_frontend_mapping` activity 已接入 workflow（`workflows.py:167`）；`route_chain_builder.py` 构建路由→API 链 | ~~原始胜~~ → ✅ **持平（v3 推翻）** |
 | **Webhook 端点** | ✅ prompt 覆盖 | ⚠️ 确定性层无规则；LLM 层已覆盖（Entry Point Mapper `:132` catalog "webhooks" + fusion `Pattern 2` 解析 webhook 条目） | ~~原始胜~~ → LLM 层已恢复 |
 | **文件上传端点** | ✅ prompt 覆盖 | ⚠️ 确定性层无规则；LLM 层已覆盖（Entry Point Mapper `:132` catalog "file uploads"） | ~~原始胜~~ → LLM 层已恢复 |
 
@@ -69,8 +75,8 @@
 
 | # | 差距项 | 原始能力 | 重构现状 | 严重度 |
 |---|---|---|---|---|
-| EP-1 | 自动生成 REST 框架检测 (finale-rest/epilogue) | `framework-analyzer.ts` 专门检测 | 无对应实现 | 中 |
-| EP-2 | 前端路由→API 映射 | `frontend-mapper.ts` 完整映射 | 无对应实现 | 中 |
+| EP-1 | ~~自动生成 REST 框架检测 (finale-rest/epilogue)~~ | `framework-analyzer.ts` 专门检测 | ✅ **已恢复**：`framework_analyzer.py`（274 行，移植自 `framework-patterns.ts`）检测 finale-rest + epilogue + 推断 CRUD 端点；`run_framework_analysis` activity（`activities.py:463`）+ workflow 调用（`workflows.py:163`）+ worker 注册（`worker.py:85`）齐全 | ~~中~~ → ✅ 已恢复（v3 推翻） |
+| EP-2 | ~~前端路由→API 映射~~ | `frontend-mapper.ts` 完整映射 | ✅ **已恢复**：`frontend_mapper.py`（228 行）Angular/React/Vue 检测 + 路由解析 + XSS 链；`run_frontend_mapping` activity（`activities.py:491`）+ workflow 调用（`workflows.py:167`）+ worker 注册（`worker.py:86`）；`route_chain_builder.py`（110 行）补全链构建 | ~~中~~ → ✅ 已恢复（v3 推翻） |
 | EP-3 | Webhook/Upload 端点检测 | prompt 覆盖 | ⚠️ Webhook: LLM 层已恢复（Entry Point Mapper `:132` + fusion Pattern 2）；Upload: **LLM 层已恢复**（Mapper `:132` "file uploads"）；确定性层两类均无规则 | ~~低~~ → LLM 层 webhook+upload 均已恢复（v2 修正 upload 判定） |
 | EP-4 | API Schema 优先读取 | pre-recon 明确指令 | ⚠️ LLM 层已恢复（Mapper 明确要求 catalog schema 文件）；`file_discovery.py` 仍未接入入口点检测 | ~~中~~→LLM层已恢复 |
 | EP-5 | 入口认证标注 (public/auth) | 每入口标 public/需认证 | ⚠️ 模型有 `authentication` 字段 + LLM fusion 填充；AST 确定性检测不填充 | ~~中~~→部分解决 |
@@ -114,7 +120,11 @@
 | 文件发现（schema 分类） | `packages/core/src/shannon_core/code_index/file_discovery.py` |
 | 管线编排（含 fusion + adjudication） | `packages/core/src/shannon_core/code_index/__init__.py` |
 | Temporal workflow（fusion 插入点） | `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py` |
-| Activity（fusion + adjudication） | `packages/whitebox/src/shannon_whitebox/pipeline/activities.py` |
+| Activity（fusion + adjudication + framework/frontend） | `packages/whitebox/src/shannon_whitebox/pipeline/activities.py` |
+| 自动 REST 框架检测（finale-rest/epilogue） | `packages/core/src/shannon_core/services/framework_analyzer.py` |
+| 前端路由→API 映射（Angular/React/Vue） | `packages/core/src/shannon_core/services/frontend_mapper.py` |
+| 路由→API 攻击链构建 | `packages/core/src/shannon_core/services/route_chain_builder.py` + `attack_chain_builder.py` |
+| Worker activity 注册清单 | `packages/whitebox/src/shannon_whitebox/worker.py` |
 | Entry Point Mapper prompt（comprehensive scan） | `prompts/pre-recon-code.txt` (Phase 1 Agent 2) |
 
 ---
