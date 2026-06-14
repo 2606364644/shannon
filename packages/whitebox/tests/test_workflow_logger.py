@@ -49,8 +49,8 @@ async def test_log_phase(tmp_path: Path):
     await logger.log_phase("recon", "complete")
     await logger.close()
     content = _read_log(tmp_path)
-    assert "[PHASE] recon started" in content
-    assert "[PHASE] recon completed" in content
+    assert "[PHASE] Starting recon" in content
+    assert "[PHASE] Completed recon" in content
 
 
 async def test_log_agent_start(tmp_path: Path):
@@ -60,7 +60,7 @@ async def test_log_agent_start(tmp_path: Path):
     await logger.log_agent("recon", "start")
     await logger.close()
     content = _read_log(tmp_path)
-    assert "[AGENT] recon started" in content
+    assert "[AGENT] recon: Starting" in content
 
 
 async def test_log_agent_end_with_details(tmp_path: Path):
@@ -76,7 +76,7 @@ async def test_log_agent_end_with_details(tmp_path: Path):
     await logger.log_agent("recon", "end", details)
     await logger.close()
     content = _read_log(tmp_path)
-    assert "[AGENT] recon ended" in content
+    assert "[AGENT] recon: Completed" in content
     assert "2m 30s" in content
     assert "$0.0500" in content
 
@@ -89,7 +89,8 @@ async def test_log_agent_end_with_error(tmp_path: Path):
     await logger.log_agent("recon", "end", details)
     await logger.close()
     content = _read_log(tmp_path)
-    assert "error: Rate limit exceeded" in content
+    assert "Failed" in content
+    assert "Rate limit exceeded" in content
 
 
 async def test_log_tool_start(tmp_path: Path):
@@ -99,7 +100,7 @@ async def test_log_tool_start(tmp_path: Path):
     await logger.log_tool_start("recon", "Read", {"file_path": "/etc/passwd"})
     await logger.close()
     content = _read_log(tmp_path)
-    assert "[TOOL] recon → Read(" in content
+    assert "[TOOL]  recon: Read:" in content
     assert "file_path=/etc/passwd" in content
 
 
@@ -122,7 +123,7 @@ async def test_log_llm_response(tmp_path: Path):
     await logger.log_llm_response("recon", 1, "Found SQL injection vulnerability")
     await logger.close()
     content = _read_log(tmp_path)
-    assert "[LLM] recon turn 1:" in content
+    assert "[LLM]   recon: Turn 1:" in content
     assert "Found SQL injection vulnerability" in content
 
 
@@ -246,3 +247,26 @@ async def test_close_prevents_further_writes(tmp_path: Path):
     # These should silently do nothing after close
     await logger.log_phase("test", "start")
     await logger.log_event("TEST", "message")
+
+
+async def test_log_phase_uses_starting_verb(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    logger = WorkflowLogger(meta)
+    await logger.initialize(workflow_id="wf-1")
+    await logger.log_phase("reconnaissance", "start")
+    content = _read_log(tmp_path)
+    # New format: "Starting reconnaissance" (was "reconnaissance started")
+    assert "[PHASE] Starting reconnaissance" in content
+    await logger.close()
+
+
+async def test_log_agent_end_includes_prefix_and_cost(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    logger = WorkflowLogger(meta)
+    await logger.initialize(workflow_id="wf-1")
+    from shannon_core.models.audit import AgentLogDetails
+    await logger.log_agent("xss-vuln", "end", AgentLogDetails(
+        attempt_number=1, duration_ms=5200, cost_usd=0.15, success=True))
+    content = _read_log(tmp_path)
+    assert "[AGENT] [XSS] xss-vuln: Completed (5.2s, $0.1500)" in content
+    await logger.close()

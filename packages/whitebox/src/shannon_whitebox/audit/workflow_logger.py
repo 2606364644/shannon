@@ -1,173 +1,119 @@
 from typing import Any, Literal
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.models.audit import AgentLogDetails, WorkflowSummary, ResumeInfo
-from shannon_whitebox.audit.log_stream import LogStream
-from shannon_whitebox.audit.utils import (
-    format_duration,
-    format_log_time,
-    generate_workflow_log_path,
+from shannon_core.display.dispatcher import DisplayDispatcher
+from shannon_core.display.events import (
+    AgentEvent, AgentMetric, ErrorEvent, LlmTurnEvent, PhaseEvent,
+    ResumeEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
 )
-
-
-def _format_tool_params(tool_name: str, parameters: Any) -> str:
-    """Per-tool smart truncation for readable workflow log lines."""
-    if not isinstance(parameters, dict):
-        return str(parameters)
-
-    tool_key_map: dict[str, str] = {
-        "Bash": "command",
-        "Read": "file_path",
-        "Write": "file_path",
-        "Edit": "file_path",
-        "Grep": "pattern",
-        "Glob": "pattern",
-    }
-
-    key = tool_key_map.get(tool_name)
-    if key and key in parameters:
-        val = str(parameters[key])
-        if len(val) > 80:
-            val = val[:77] + "..."
-        return f"{key}={val}"
-
-    items = list(parameters.items())[:2]
-    parts = [f"{k}={str(v)[:40]}" for k, v in items]
-    result = ", ".join(parts)
-    if len(parameters) > 2:
-        result += ", ..."
-    return result
+from shannon_core.display.file_renderer import FileLogRenderer
+from shannon_core.display.formatters import format_log_time
+from shannon_core.models.audit import AgentLogDetails, ResumeInfo, WorkflowSummary
+from shannon_core.models.metrics import SessionMetadata
+from shannon_whitebox.audit.log_stream import LogStream
+from shannon_whitebox.audit.utils import generate_workflow_log_path
 
 
 class WorkflowLogger:
-    """Human-readable workflow log with category-tagged lines."""
+    """Emits DisplayEvents through a dispatcher.
 
-    def __init__(self, session_metadata: SessionMetadata):
+    The dispatcher fans events to FileLogRenderer (writes workflow.log via the
+    injected LogStream) and, optionally, a RichConsoleRenderer for live stdout.
+    """
+
+    def __init__(self, session_metadata: SessionMetadata, use_rich: bool = False) -> None:
         self._meta = session_metadata
-        self._stream: LogStream | None = None
         self._workflow_id: str | None = None
+        self._stream: LogStream | None = None
+        self._dispatcher: DisplayDispatcher | None = None
+        self._use_rich = use_rich
 
     async def initialize(self, workflow_id: str | None = None) -> None:
-        """Open the log file and write the header block."""
         self._workflow_id = workflow_id
         path = generate_workflow_log_path(self._meta)
         self._stream = LogStream(path)
         await self._stream.open()
 
-        sep = "=" * 80
-        header = f"{sep}\nShannon Pentest - Workflow Log\n{sep}\n"
-        if workflow_id:
-            header += f"Workflow ID: {workflow_id}\n"
-        header += (
-            f"Target URL:  {self._meta.web_url or 'N/A'}\n"
-            f"Started:     {format_log_time()}\n"
-            f"{sep}\n\n"
-        )
-        await self._stream.write(header)
+        renderers: list = [FileLogRenderer(self._stream)]
+        if self._use_rich:
+            from shannon_core.display.rich_renderer import RichConsoleRenderer
+            renderers.append(RichConsoleRenderer())
+        self._dispatcher = DisplayDispatcher(renderers)
+
+        await self._dispatcher.dispatch(WorkflowHeader(
+            timestamp=format_log_time(), category="HEADER",
+            workflow_id=workflow_id, target_url=self._meta.web_url,
+        ))
 
     async def log_phase(self, phase: str, event: Literal["start", "complete"]) -> None:
-        """Log a phase transition."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        verb = "started" if event == "start" else "completed"
-        await self._stream.write(f"[{format_log_time()}] [PHASE] {phase} {verb}\n")
+        await self._dispatcher.dispatch(PhaseEvent(
+            timestamp=format_log_time(), category="PHASE", phase=phase, event=event))
 
-    async def log_agent(self, agent_name: str, event: Literal["start", "end"], details: AgentLogDetails | None = None) -> None:
-        """Log an agent lifecycle event."""
-        if self._stream is None:
+    async def log_agent(self, agent_name: str, event: Literal["start", "end"],
+                        details: AgentLogDetails | None = None) -> None:
+        if self._dispatcher is None:
             return
-        verb = "started" if event == "start" else "ended"
-        msg = f"[{format_log_time()}] [AGENT] {agent_name} {verb}"
-        if details:
-            parts: list[str] = []
-            if details.attempt_number > 1:
-                parts.append(f"attempt {details.attempt_number}")
-            if details.duration_ms is not None:
-                parts.append(f"duration: {format_duration(details.duration_ms)}")
-            if details.cost_usd is not None:
-                parts.append(f"cost: ${details.cost_usd:.4f}")
-            if details.success is not None:
-                parts.append("✓" if details.success else "✗")
-            if details.error:
-                parts.append(f"error: {details.error}")
-            if parts:
-                msg += " (" + ", ".join(parts) + ")"
-        await self._stream.write(msg + "\n")
+        d = details or AgentLogDetails(attempt_number=1)
+        await self._dispatcher.dispatch(AgentEvent(
+            timestamp=format_log_time(), category="AGENT", agent_name=agent_name,
+            event=event, attempt=d.attempt_number, duration_ms=d.duration_ms,
+            cost_usd=d.cost_usd, success=d.success, error=d.error))
 
     async def log_tool_start(self, agent_name: str, tool_name: str, parameters: Any) -> None:
-        """Log a tool invocation."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        formatted = _format_tool_params(tool_name, parameters)
-        await self._stream.write(f"[{format_log_time()}] [TOOL] {agent_name} → {tool_name}({formatted})\n")
+        await self._dispatcher.dispatch(ToolCallEvent(
+            timestamp=format_log_time(), category="TOOL", agent_name=agent_name,
+            tool_name=tool_name, parameters=parameters))
 
     async def log_llm_response(self, agent_name: str, turn: int, content: str) -> None:
-        """Log an LLM response (truncated to 200 chars)."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        truncated = content[:200] + "..." if len(content) > 200 else content
-        await self._stream.write(f"[{format_log_time()}] [LLM] {agent_name} turn {turn}: {truncated}\n")
+        await self._dispatcher.dispatch(LlmTurnEvent(
+            timestamp=format_log_time(), category="LLM", agent_name=agent_name,
+            turn=turn, content=content))
 
     async def log_event(self, event_type: str, message: str) -> None:
-        """Log a generic categorized event."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
+        # Generic event written directly (rare; not worth a dedicated event type).
         await self._stream.write(f"[{format_log_time()}] [{event_type}] {message}\n")
 
     async def log_error(self, error: Exception, context: str | None = None) -> None:
-        """Log an error with optional context."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        msg = f"[{format_log_time()}] [ERROR] {type(error).__name__}: {error}"
-        if context:
-            msg += f" (context: {context})"
-        await self._stream.write(msg + "\n")
+        from shannon_core.errors.classification import classify_for_temporal, is_retryable_for_display
+        etype, _ = classify_for_temporal(error)
+        await self._dispatcher.dispatch(ErrorEvent(
+            timestamp=format_log_time(), category="ERROR",
+            error_type=type(error).__name__, message=str(error), context=context,
+            classified=etype.value, display_retryable=is_retryable_for_display(error)))
 
     async def log_workflow_complete(self, summary: WorkflowSummary) -> None:
-        """Write the final summary block (single write)."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        sep = "=" * 80
-        dash = "─" * 40
-        lines = [
-            f"\n{sep}\n",
-            "Workflow COMPLETED\n",
-            f"{dash}\n",
-            f"Workflow ID: {self._workflow_id or 'N/A'}\n",
-            f"Status:      {summary.status}\n",
-            f"Duration:    {format_duration(summary.total_duration_ms)}\n",
-            f"Total Cost:  ${summary.total_cost_usd:.4f}\n",
-            f"Agents:      {len(summary.completed_agents)} completed\n",
-            "\n",
-            "Agent Breakdown:\n",
+        agents = [
+            AgentMetric(name=n, duration_ms=m.duration_ms, cost_usd=m.cost_usd, success=True)
+            for n, m in summary.agent_metrics.items()
         ]
-        for name in summary.completed_agents:
-            metrics = summary.agent_metrics.get(name)
-            if metrics:
-                cost_str = f", ${metrics.cost_usd:.4f}" if metrics.cost_usd is not None else ""
-                lines.append(f"  - {name} ({format_duration(metrics.duration_ms)}{cost_str})\n")
-            else:
-                lines.append(f"  - {name}\n")
-        if summary.error:
-            lines.append(f"\nError: {summary.error}\n")
-        lines.append(f"{sep}\n")
-        await self._stream.write("".join(lines))
+        await self._dispatcher.dispatch(SummaryEvent(
+            timestamp=format_log_time(), category="SUMMARY", status=summary.status,
+            total_duration_ms=summary.total_duration_ms, total_cost_usd=summary.total_cost_usd,
+            agents=agents, error=summary.error))
 
     async def log_resume_header(self, resume_info: ResumeInfo) -> None:
-        """Write a resume header block."""
-        if self._stream is None:
+        if self._dispatcher is None:
             return
-        header = (
-            f"\n[{format_log_time()}] [RESUME] Resuming workflow\n"
-            f"  Previous Workflow ID: {resume_info.previous_workflow_id}\n"
-            f"  New Workflow ID:      {resume_info.new_workflow_id}\n"
-            f"  Checkpoint:           {resume_info.checkpoint_hash}\n"
-            f"  Completed Agents:     {', '.join(resume_info.completed_agents)}\n\n"
-        )
-        await self._stream.write(header)
+        await self._dispatcher.dispatch(ResumeEvent(
+            timestamp=format_log_time(), category="RESUME",
+            previous_workflow_id=resume_info.previous_workflow_id,
+            new_workflow_id=resume_info.new_workflow_id,
+            checkpoint_hash=resume_info.checkpoint_hash,
+            completed_agents=resume_info.completed_agents))
 
     async def close(self) -> None:
-        """Flush and close the underlying stream."""
         if self._stream is not None:
             await self._stream.close()
             self._stream = None
+        self._dispatcher = None  # all log_* methods check dispatcher and no-op after close
