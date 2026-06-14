@@ -59,3 +59,33 @@ def classify_for_temporal(error: Exception) -> tuple[ErrorType, bool]:
         if pattern.lower() in msg:
             return etype, retryable
     return ErrorType.TRANSIENT, True
+
+
+# Display-only patterns. NOTE: the set of "retryable" and "non-retryable"
+# keywords is curated independently; unknown errors default to NON-retryable
+# (fail-safe), which is the OPPOSITE of classify_for_temporal's fallback.
+_NON_RETRYABLE_KEYWORDS = (
+    "401", "unauthorized", "403", "forbidden", "400", "invalid request",
+    "413", "request too large", "ENOENT", "config", "max turns", "budget",
+    "invalid prompt", "out of memory", "permission denied", "invalid api key",
+)
+_RETRYABLE_KEYWORDS = (
+    "rate limit", "429", "timeout", "network", "ECONN", "billing",
+    "transient", "502", "503", "504",
+)
+
+
+def is_retryable_for_display(error: Exception) -> bool:
+    """Display-only retry flag. Fallback: False (fail-safe).
+
+    Semantics intentionally DIFFER from classify_for_temporal, which falls
+    back to retryable=True. Do not merge these two functions.
+    """
+    msg = str(error).lower()
+    for kw in _NON_RETRYABLE_KEYWORDS:
+        if kw.lower() in msg:
+            return False
+    for kw in _RETRYABLE_KEYWORDS:
+        if kw.lower() in msg:
+            return True
+    return False  # fail-safe default for unknown errors

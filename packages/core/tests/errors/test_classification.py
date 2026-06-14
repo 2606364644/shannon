@@ -33,3 +33,33 @@ def test_authz_validation_order_validation_before_invalid_request():
     # OUTPUT_VALIDATION must match before INVALID_REQUEST even if both keywords present
     etype, _ = classify_for_temporal(RuntimeError("output validation failed with 400"))
     assert etype == ErrorType.OUTPUT_VALIDATION
+
+
+from shannon_core.errors.classification import is_retryable_for_display
+
+
+def test_display_retryable_true_for_known_retryable():
+    assert is_retryable_for_display(RuntimeError("rate limit exceeded")) is True
+    assert is_retryable_for_display(RuntimeError("billing charge failed")) is True
+
+
+def test_display_retryable_false_for_known_non_retryable():
+    assert is_retryable_for_display(RuntimeError("401 unauthorized")) is False
+    assert is_retryable_for_display(RuntimeError("ENOENT config not found")) is False
+
+
+def test_display_retryable_fallback_is_false():
+    # OPPOSITE of classify_for_temporal: unknown errors are NOT retryable (fail-safe)
+    assert is_retryable_for_display(RuntimeError("totally unknown xyz")) is False
+
+
+def test_two_functions_agree_on_known_types_but_differ_on_unknown():
+    from shannon_core.errors.classification import classify_for_temporal
+    known = RuntimeError("rate limit exceeded")
+    # Agree on known retryable
+    assert classify_for_temporal(known)[1] is True
+    assert is_retryable_for_display(known) is True
+    # Differ on unknown
+    unknown = RuntimeError("totally unknown glitch")
+    assert classify_for_temporal(unknown)[1] is True   # Temporal: retry
+    assert is_retryable_for_display(unknown) is False  # Display: fail-safe
