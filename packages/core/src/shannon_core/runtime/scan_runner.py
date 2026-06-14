@@ -154,6 +154,9 @@ async def run_scan_graceful(
                 raise ScanCancelled()
             return result_task.result()
         finally:
+            # result_task 故意不在此取消：
+            #   - 正常路径：已被上面的 result_task.result() 消费
+            #   - 取消路径：由 _do_cancel 的 wait_for 消费
             for task in (poll_task, shutdown_wait_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):

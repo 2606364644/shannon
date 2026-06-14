@@ -153,3 +153,88 @@ class TestRunScanGracefulNormal:
 
         assert result == {"status": "completed", "vulns": 3}
         fake_handle.cancel.assert_not_awaited()  # 正常完成不取消
+
+
+class TestRunScanGracefulCancel:
+    @pytest.mark.asyncio
+    async def test_shutdown_triggers_cancel_and_raises_scan_cancelled(self):
+        fake_handle = AsyncMock()
+        # result 永不自然完成 → 模拟必须靠 cancel
+        fake_handle.result = MagicMock(
+            return_value=asyncio.get_running_loop().create_future()
+        )
+        fake_handle.cancel = AsyncMock()
+
+        fake_client = AsyncMock()
+        fake_client.start_workflow = AsyncMock(return_value=fake_handle)
+        fake_worker = _make_fake_worker()
+
+        triggered = ShutdownController()
+        triggered._event.set()  # 预置：中断已发生
+        triggered.install = MagicMock()   # 不注册真实信号 handler
+        triggered.uninstall = MagicMock()
+
+        with patch(
+            "shannon_core.runtime.scan_runner.Client.connect",
+            AsyncMock(return_value=fake_client),
+        ), patch(
+            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+        ), patch(
+            "shannon_core.runtime.scan_runner.generate_task_queue",
+            return_value="tq-test",
+        ), patch(
+            "shannon_core.runtime.scan_runner.ShutdownController",
+            return_value=triggered,
+        ):
+            with pytest.raises(ScanCancelled):
+                await run_scan_graceful(
+                    temporal_address="localhost:7233",
+                    task_queue_prefix="x",
+                    workflow_cls=MagicMock(),
+                    workflow_input=MagicMock(workspace_name="ws1"),
+                    activities=[],
+                    progress_type=MagicMock(),
+                    cancel_grace_seconds=0.01,  # 立即超时
+                )
+
+        fake_handle.cancel.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_exception_still_raises_scan_cancelled(self):
+        fake_handle = AsyncMock()
+        fake_handle.result = MagicMock(
+            return_value=asyncio.get_running_loop().create_future()
+        )
+        fake_handle.cancel = AsyncMock(side_effect=RuntimeError("server unreachable"))
+
+        fake_client = AsyncMock()
+        fake_client.start_workflow = AsyncMock(return_value=fake_handle)
+        fake_worker = _make_fake_worker()
+
+        triggered = ShutdownController()
+        triggered._event.set()
+        triggered.install = MagicMock()
+        triggered.uninstall = MagicMock()
+
+        with patch(
+            "shannon_core.runtime.scan_runner.Client.connect",
+            AsyncMock(return_value=fake_client),
+        ), patch(
+            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+        ), patch(
+            "shannon_core.runtime.scan_runner.generate_task_queue",
+            return_value="tq-test",
+        ), patch(
+            "shannon_core.runtime.scan_runner.ShutdownController",
+            return_value=triggered,
+        ):
+            with pytest.raises(ScanCancelled):  # 不是 RuntimeError
+                await run_scan_graceful(
+                    temporal_address="localhost:7233",
+                    task_queue_prefix="x",
+                    workflow_cls=MagicMock(),
+                    workflow_input=MagicMock(workspace_name="ws1"),
+                    activities=[],
+                    progress_type=MagicMock(),
+                    cancel_grace_seconds=0.01,
+                )
