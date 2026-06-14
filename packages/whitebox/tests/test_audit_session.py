@@ -62,7 +62,8 @@ async def test_log_event_dispatches_to_both_loggers(tmp_path: Path):
     assert len(tool_events) == 1
     # Check workflow log has human-readable event
     wf_content = (ad / "workflow.log").read_text()
-    assert "[TOOL] recon → Read(" in wf_content
+    assert "[TOOL]  recon: Read:" in wf_content
+    assert "file_path=/tmp/test" in wf_content
 
 
 async def test_log_event_dispatches_llm_response(tmp_path: Path):
@@ -73,7 +74,7 @@ async def test_log_event_dispatches_llm_response(tmp_path: Path):
     await session.log_event("llm_response", {"turn": 1, "content": "Found XSS vulnerability"})
     ad = _audit_dir(tmp_path)
     wf_content = (ad / "workflow.log").read_text()
-    assert "[LLM] recon turn 1:" in wf_content
+    assert "[LLM]   recon: Turn 1:" in wf_content
     assert "Found XSS vulnerability" in wf_content
 
 
@@ -114,8 +115,8 @@ async def test_log_phase_start_and_complete(tmp_path: Path):
     await session.log_phase_complete("recon")
     ad = _audit_dir(tmp_path)
     wf_content = (ad / "workflow.log").read_text()
-    assert "[PHASE] recon started" in wf_content
-    assert "[PHASE] recon completed" in wf_content
+    assert "[PHASE] Starting recon" in wf_content
+    assert "[PHASE] Completed recon" in wf_content
 
 
 async def test_log_workflow_complete(tmp_path: Path):
@@ -214,12 +215,12 @@ async def test_full_lifecycle(tmp_path: Path):
     wf = (ad / "workflow.log").read_text()
     assert "Shannon Pentest - Workflow Log" in wf
     assert "Workflow ID: wf-lifecycle" in wf
-    assert "[PHASE] recon started" in wf
-    assert "[AGENT] recon started" in wf
-    assert "[TOOL] recon → Read(" in wf
-    assert "[LLM] recon turn 1:" in wf
-    assert "[AGENT] recon ended" in wf
-    assert "[PHASE] recon completed" in wf
+    assert "[PHASE] Starting recon" in wf
+    assert "[AGENT] recon: Starting" in wf
+    assert "[TOOL]  recon: Read:" in wf
+    assert "[LLM]   recon: Turn 1:" in wf
+    assert "[AGENT] recon: Completed" in wf
+    assert "[PHASE] Completed recon" in wf
     assert "Workflow COMPLETED" in wf
 
     # Verify session.json
