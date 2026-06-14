@@ -1,9 +1,12 @@
 import asyncio
+import time
 from dataclasses import asdict
 from pathlib import Path
 
 from temporalio.client import Client
 from temporalio.worker import Worker
+
+from shannon_core.models.audit import WorkflowSummary, AgentMetricsSummary
 
 from .pipeline.activities import (
     render_findings,
@@ -79,6 +82,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 set_audit_session, clear_audit_session,
             )
             set_audit_session(session)
+            scan_start = time.monotonic()
             try:
                 handle = await client.start_workflow(
                     WhiteboxScanWorkflow.run,
@@ -89,6 +93,26 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 result = await handle.result()
             finally:
                 clear_audit_session()
+
+            # Emit the final summary so the Rich summary table / dashboard
+            # finalization fires. Build it from the PipelineState result.
+            status = result.status if isinstance(result.status, str) and result.status in ("completed", "failed", "cancelled") else "failed"
+            agent_metrics_summary = {
+                name: AgentMetricsSummary(
+                    duration_ms=int(m.get("duration_ms", 0) or 0),
+                    cost_usd=m.get("cost_usd"),
+                )
+                for name, m in (result.agent_metrics or {}).items()
+            }
+            summary = WorkflowSummary(
+                status=status,
+                total_duration_ms=int((time.monotonic() - scan_start) * 1000),
+                total_cost_usd=sum((am.cost_usd or 0.0) for am in agent_metrics_summary.values()),
+                completed_agents=list(result.completed_agents or []),
+                agent_metrics=agent_metrics_summary,
+                error=(result.errors[0] if result.errors else None),
+            )
+            await session.log_workflow_complete(summary)
 
             result_dict = asdict(result) if not isinstance(result, dict) else dict(result)
             result_dict["workspace_name"] = input.workspace_name
