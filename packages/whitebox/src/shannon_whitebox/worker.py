@@ -23,32 +23,23 @@ from .pipeline.activities import (
     run_framework_analysis,
     run_frontend_mapping,
     run_route_chain_building,
+    log_phase_start_activity,
+    log_phase_complete_activity,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
-from .pipeline.shared import PipelineInput, PipelineProgress
+from .pipeline.shared import PipelineInput
 from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_core.services.temporal_infra import generate_task_queue
 
 TASK_QUEUE_PREFIX = "shannon-py-wb"
 
 
-async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
-    """Periodically query workflow progress and print status to console."""
-    while True:
-        try:
-            progress = await handle.query("PipelineProgress", result_type=PipelineProgress)
-            elapsed = int(progress.elapsed_ms / 1000)
-            phase = progress.current_phase or "unknown"
-            agent = progress.current_agent or "none"
-            completed = len(progress.completed_agents)
-            print(f"[{elapsed}s] Phase: {phase} | Agent: {agent} | Completed: {completed}/13")
-        except Exception:
-            pass  # Workflow may have completed
-        await asyncio.sleep(interval_seconds)
-
-
-async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233") -> dict:
+async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233",
+                   use_rich: bool = False) -> dict:
+    from rich.console import Console
     from shannon_core.session import SessionManager
+    from shannon_core.models.metrics import SessionMetadata
+    from shannon_whitebox.audit.display_lifecycle import run_with_display
 
     # Persist session data so blackbox can discover repo_path
     if input.workspace_name:
@@ -61,7 +52,6 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         )
 
     client = await Client.connect(temporal_address)
-
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
 
     worker = Worker(
@@ -69,42 +59,39 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         task_queue=task_queue,
         workflows=[WhiteboxScanWorkflow],
         activities=[
-            render_findings,
-            run_agent,
-            run_auth_validation,
-            run_code_index,
-            run_credential_check,
-            run_merge_sink_reports,
-            run_entry_point_fusion,
-            run_preflight,
-            run_render_dataflow_hints,
-            run_risk_scoring,
-            run_save_adjudication,
-            run_vuln_agent,
-            run_attack_chain_assembly,
-            run_framework_analysis,
-            run_frontend_mapping,
-            run_route_chain_building,
+            render_findings, run_agent, run_auth_validation, run_code_index,
+            run_credential_check, run_merge_sink_reports, run_entry_point_fusion,
+            run_preflight, run_render_dataflow_hints, run_risk_scoring,
+            run_save_adjudication, run_vuln_agent, run_attack_chain_assembly,
+            run_framework_analysis, run_frontend_mapping, run_route_chain_building,
+            log_phase_start_activity, log_phase_complete_activity,
         ],
     )
 
-    async with worker:
-        handle = await client.start_workflow(
-            WhiteboxScanWorkflow.run,
-            input,
-            id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
-            task_queue=task_queue,
-        )
-        poll_task = asyncio.create_task(poll_workflow_progress(handle))
-        try:
-            result = await handle.result()
-            poll_task.cancel()
-            try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
+    meta = SessionMetadata(
+        id=input.workspace_name or "whitebox-scan",
+        web_url=input.web_url,
+        repo_path=input.repo_path,
+        output_path=str(resolve_workspaces_dir(input.repo_path)),
+    )
 
-            # Convert PipelineState to enriched dict for CLI consumption
+    async with worker:
+        async with run_with_display(meta, use_rich=use_rich) as session:
+            from shannon_whitebox.audit.session_registry import (
+                set_audit_session, clear_audit_session,
+            )
+            set_audit_session(session)
+            handle = await client.start_workflow(
+                WhiteboxScanWorkflow.run,
+                input,
+                id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
+                task_queue=task_queue,
+            )
+            try:
+                result = await handle.result()
+            finally:
+                clear_audit_session()
+
             result_dict = asdict(result) if not isinstance(result, dict) else dict(result)
             result_dict["workspace_name"] = input.workspace_name
             result_dict["web_url"] = input.web_url
@@ -112,21 +99,11 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             workspaces_dir = resolve_workspaces_dir(input.repo_path)
             if input.workspace_name:
                 result_dict["deliverables_path"] = str(
-                    workspaces_dir / input.workspace_name / input.deliverables_subdir
-                )
+                    workspaces_dir / input.workspace_name / input.deliverables_subdir)
             else:
                 result_dict["deliverables_path"] = str(
-                    Path(input.repo_path) / input.deliverables_subdir
-                )
-
+                    Path(input.repo_path) / input.deliverables_subdir)
             return result_dict
-        except Exception:
-            poll_task.cancel()
-            try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
-            raise
 
 
 def main():
