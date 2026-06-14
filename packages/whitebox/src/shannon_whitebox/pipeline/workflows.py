@@ -259,12 +259,12 @@ class WhiteboxScanWorkflow:
                 import logging
                 logging.getLogger(__name__).warning("Attack chain assembly failed: %s", exc)
 
-            self._state.current_phase = "reporting"
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
                 start_to_close_timeout=timedelta(seconds=10),
             )
+            self._state.current_phase = "reporting"
             self._state.current_agent = "render-findings"
             await workflow.execute_activity(
                 activities.render_findings, act_input,
