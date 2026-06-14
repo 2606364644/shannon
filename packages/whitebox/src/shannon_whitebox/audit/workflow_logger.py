@@ -44,11 +44,11 @@ class WorkflowLogger:
         await self._stream.open()
 
         renderers: list = [FileLogRenderer(self._stream)]
-        if self._use_rich:
+        if self._console is not None:
             from shannon_core.display.rich_renderer import RichConsoleRenderer
             renderers.append(RichConsoleRenderer(self._console))
-            if self._dashboard is not None:
-                renderers.append(self._dashboard)
+        if self._use_rich and self._dashboard is not None:
+            renderers.append(self._dashboard)
         self._dispatcher = DisplayDispatcher(renderers)
 
         await self._dispatcher.dispatch(WorkflowHeader(

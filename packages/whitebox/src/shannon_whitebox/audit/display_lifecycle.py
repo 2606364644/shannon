@@ -28,7 +28,9 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         finally:
             await session.close()
     else:
-        session = AuditSession(meta, use_rich=False)
+        from rich.console import Console
+        console = Console()  # auto-detects non-TTY in pipes -> plain text per event
+        session = AuditSession(meta, use_rich=False, console=console)
         await session.initialize(workflow_id=meta.id)
         try:
             yield session

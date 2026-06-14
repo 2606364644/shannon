@@ -291,3 +291,21 @@ async def test_use_rich_attaches_dashboard_renderer(tmp_path: Path):
     assert renderers[2] is dashboard
     await logger.log_phase("recon", "start")
     await logger.close()
+
+
+async def test_plain_mode_attaches_rich_console_and_produces_stdout(tmp_path: Path):
+    """Plain (non-rich) mode still attaches RichConsoleRenderer so piped/CI runs
+    get one line per event on stdout (no dashboard, no Live)."""
+    import io
+    from rich.console import Console
+    meta = _make_meta(tmp_path)
+    buf = io.StringIO()
+    console = Console(file=buf, width=100)  # non-TTY -> plain text, no color
+    logger = WorkflowLogger(meta, use_rich=False, console=console)
+    await logger.initialize(workflow_id="wf-plain")
+    await logger.log_phase("recon", "start")
+    await logger.log_agent("recon", "start")
+    await logger.close()
+    out = buf.getvalue()
+    # RichConsoleRenderer printed at least the agent line to the console
+    assert "recon" in out
