@@ -73,12 +73,21 @@ async def run_preflight(input: ActivityInput) -> None:
 
 @activity.defn
 async def run_agent(input: ActivityInput) -> dict:
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from shannon_core.models.audit import AgentEndResult
+
+    agent_name = AgentName(input.workspace_name)
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session)
     try:
-        agent_name = AgentName(input.workspace_name)
         repo, deliverables, _ = _get_paths(input)
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
+
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         metrics = await executor.execute(
             agent_name=agent_name,
             repo_path=str(repo),
@@ -89,12 +98,28 @@ async def run_agent(input: ActivityInput) -> dict:
             pipeline_testing=input.pipeline_testing_mode,
             prompt_override=input.prompt_override,
             audit_logger=create_activity_logger(),
+            tool_audit_logger=tool_audit_logger,
         )
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True,
+            duration_ms=metrics.duration_ms,
+            cost_usd=metrics.cost_usd or 0.0,
+            attempt_number=attempt,
+            model=metrics.model,
+        ))
         return metrics.model_dump()
     except PentestError as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=0, cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=0, cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 

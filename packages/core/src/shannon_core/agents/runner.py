@@ -96,6 +96,7 @@ async def run_claude_prompt(
     deliverables_subdir: str | None = None,
     provider_config: dict | None = None,
     audit_logger: "ActivityLogger | None" = None,
+    tool_audit_logger=None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -131,9 +132,16 @@ async def run_claude_prompt(
         from .providers import create_provider
         provider = create_provider(config)
 
-        # L3: adapt the service-layer ActivityLogger into the SDK-domain ToolAuditLogger
+        # L3: adapt the service-layer ActivityLogger into the SDK-domain ToolAuditLogger.
+        # Prefer an explicitly-passed tool_audit_logger (e.g. SessionToolAuditLogger
+        # wired by run_agent); otherwise wrap audit_logger; otherwise None.
         from .tool_audit_logger import ActivityToolAuditLogger
-        tool_audit_logger = ActivityToolAuditLogger(audit_logger) if audit_logger is not None else None
+        if tool_audit_logger is not None:
+            active_tool_logger = tool_audit_logger
+        elif audit_logger is not None:
+            active_tool_logger = ActivityToolAuditLogger(audit_logger)
+        else:
+            active_tool_logger = None
 
         result = await provider.call(
             prompt=prompt,
@@ -141,7 +149,7 @@ async def run_claude_prompt(
             model_tier=model_tier,
             output_format=output_format,
             deliverables_subdir=deliverables_subdir,
-            audit_logger=tool_audit_logger,
+            audit_logger=active_tool_logger,
         )
 
         # 5. 检查花费上限行为
