@@ -7,6 +7,7 @@
 import asyncio
 import os
 import signal
+from typing import Any
 
 
 class ScanCancelled(Exception):
@@ -63,3 +64,30 @@ class ShutdownController:
             return
         self._loop.remove_signal_handler(signal.SIGINT)
         self._loop.remove_signal_handler(signal.SIGTERM)
+
+
+async def poll_progress(
+    handle,
+    progress_type,
+    total: int = 13,
+    interval_seconds: int = 30,
+) -> None:
+    """周期性查询 workflow 进度并打印一行（取代三个 worker 里复制的版本）。
+
+    progress_type 由各 worker 注入（whitebox/blackbox 各自的 PipelineProgress），
+    保持 core 不依赖上层包类型。
+    """
+    while True:
+        try:
+            progress = await handle.query("PipelineProgress", result_type=progress_type)
+            elapsed = int(progress.elapsed_ms / 1000)
+            phase = progress.current_phase or "unknown"
+            agent = progress.current_agent or "none"
+            completed = len(progress.completed_agents)
+            print(
+                f"[{elapsed}s] Phase: {phase} | Agent: {agent} | Completed: {completed}/{total}",
+                flush=True,
+            )
+        except Exception:
+            pass  # workflow 可能已完成或暂时不可查询
+        await asyncio.sleep(interval_seconds)

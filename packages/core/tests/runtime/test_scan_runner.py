@@ -63,3 +63,49 @@ class TestShutdownController:
         ctrl._loop = MagicMock()
         ctrl._on_signal(signal.SIGINT)  # set event
         await asyncio.wait_for(ctrl.wait(), timeout=1.0)  # 立即返回
+
+
+from shannon_core.runtime.scan_runner import poll_progress
+
+
+class TestPollProgress:
+    @pytest.mark.asyncio
+    async def test_queries_and_prints_one_iteration(self, capsys):
+        fake_handle = AsyncMock()
+        progress = MagicMock(
+            elapsed_ms=30000,
+            current_phase="scan",
+            current_agent="agent1",
+            completed_agents=["a", "b"],
+        )
+        fake_handle.query = AsyncMock(return_value=progress)
+
+        sleeps = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) >= 1:
+                raise asyncio.CancelledError()
+
+        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+            with pytest.raises(asyncio.CancelledError):
+                await poll_progress(fake_handle, progress_type=MagicMock(), total=13)
+
+        # 注入的 progress_type 必须被原样作为 result_type 传给 query
+        assert fake_handle.query.await_args.args == ("PipelineProgress",)
+        assert fake_handle.query.await_args.kwargs.get("result_type") is not None
+        out = capsys.readouterr().out
+        assert "[30s] Phase: scan | Agent: agent1 | Completed: 2/13" in out
+
+    @pytest.mark.asyncio
+    async def test_swallows_query_exception_and_continues(self):
+        fake_handle = AsyncMock()
+        fake_handle.query = AsyncMock(side_effect=RuntimeError("workflow gone"))
+
+        async def fake_sleep(seconds):
+            raise asyncio.CancelledError()
+
+        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+            with pytest.raises(asyncio.CancelledError):
+                await poll_progress(fake_handle, progress_type=MagicMock(), total=13)
+        # 异常被吞掉，没有向上抛 RuntimeError
