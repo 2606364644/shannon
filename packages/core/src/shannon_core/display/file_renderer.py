@@ -6,7 +6,9 @@ line, matching the COMPLETION_PATTERN in shannon_core.cli.logs.
 """
 from __future__ import annotations
 
-from shannon_core.display.formatters import agent_prefix, format_duration, humanize_tool_call
+from shannon_core.display.formatters import (
+    agent_prefix, format_duration, format_error_block, humanize_tool_call,
+)
 
 
 _SEP = "=" * 80
@@ -81,3 +83,46 @@ class FileLogRenderer:
         who = _prefixed(e.agent_name)
         content = e.content[:200] + "..." if len(e.content) > 200 else e.content
         return f"[{e.timestamp}] [LLM]   {who}: Turn {e.turn}: {content}\n"
+
+    def _error(self, e) -> str:
+        msg = f"[{e.timestamp}] [ERROR] {e.error_type}: {e.message}"
+        if e.context:
+            msg += f" (context: {e.context})"
+        if e.classified:
+            flag = "retryable" if e.display_retryable else "non-retryable"
+            msg += f" [{e.classified} · {flag}]"
+        return msg + "\n"
+
+    def _summary(self, e) -> str:
+        status = "COMPLETED" if e.status == "completed" else "FAILED"
+        lines = [
+            "",
+            f"{_SEP}",
+            f"Workflow {status}",
+            "─" * 40,
+            f"Status:      {e.status}",
+            f"Duration:    {format_duration(e.total_duration_ms)}",
+            f"Total Cost:  ${e.total_cost_usd:.4f}",
+            f"Agents:      {len(e.agents)} completed",
+            "",
+            "Agent Breakdown:",
+        ]
+        for m in e.agents:
+            mark = "✓" if m.success else "✗"
+            cost = f", ${m.cost_usd:.4f}" if m.cost_usd is not None else ""
+            lines.append(f"  {mark} {m.name} ({format_duration(m.duration_ms)}{cost})")
+        if e.error:
+            lines.append("")
+            lines.append(format_error_block(e.error).rstrip("\n"))
+        lines.append(f"{_SEP}")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _resume(self, e) -> str:
+        return (
+            f"\n[{e.timestamp}] [RESUME] Resuming workflow\n"
+            f"  Previous Workflow ID: {e.previous_workflow_id}\n"
+            f"  New Workflow ID:      {e.new_workflow_id}\n"
+            f"  Checkpoint:           {e.checkpoint_hash}\n"
+            f"  Completed Agents:     {', '.join(e.completed_agents)}\n\n"
+        )

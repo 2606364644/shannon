@@ -98,3 +98,57 @@ async def test_llm_line_alignment():
         turn=1, content="Analyzing"))
     out = renderer._writer.text
     assert "[LLM]   [Injection] injection-vuln: Turn 1: Analyzing\n" in out  # three spaces after [LLM]
+
+
+from shannon_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
+
+
+async def test_error_line_basic():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ErrorEvent(
+        timestamp="t", category="ERROR", error_type="ValueError", message="boom"))
+    assert "[ERROR] ValueError: boom\n" in renderer._writer.text
+
+
+async def test_error_line_with_context_and_classification():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ErrorEvent(
+        timestamp="t", category="ERROR", error_type="RuntimeError", message="x",
+        context="during scan", classified="BillingError", display_retryable=True))
+    line = renderer._writer.text
+    assert "[ERROR] RuntimeError: x (context: during scan) [BillingError · retryable]" in line
+
+
+async def test_summary_completed_has_completion_marker():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=12400, total_cost_usd=0.3450,
+        agents=[AgentMetric(name="xss-vuln", duration_ms=4100, cost_usd=0.165, success=True)]))
+    out = renderer._writer.text
+    assert "Workflow COMPLETED" in out  # COMPLETION_PATTERN must match
+    assert "Status:      completed" in out
+    assert "Duration:    12.4s" in out
+    assert "Total Cost:  $0.3450" in out
+    assert "✓ xss-vuln" in out
+
+
+async def test_summary_failed_has_failure_marker():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="failed",
+        total_duration_ms=1000, total_cost_usd=0.0, agents=[], error="something|went|wrong"))
+    out = renderer._writer.text
+    assert "Workflow FAILED" in out
+    assert "Error:       something" in out
+
+
+async def test_resume_block():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ResumeEvent(
+        timestamp="t", category="RESUME", previous_workflow_id="w1",
+        new_workflow_id="w2", checkpoint_hash="abc", completed_agents=["a", "b"]))
+    out = renderer._writer.text
+    assert "[RESUME] Resuming workflow" in out
+    assert "Previous Workflow ID: w1" in out
+    assert "New Workflow ID:      w2" in out
