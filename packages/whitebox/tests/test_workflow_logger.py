@@ -270,3 +270,18 @@ async def test_log_agent_end_includes_prefix_and_cost(tmp_path: Path):
     content = _read_log(tmp_path)
     assert "[AGENT] [XSS] xss-vuln: Completed (5.2s, $0.1500)" in content
     await logger.close()
+
+
+async def test_use_rich_attaches_dashboard_renderer(tmp_path: Path):
+    import io
+    from rich.console import Console
+    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    meta = _make_meta(tmp_path)
+    console = Console(file=io.StringIO(), width=100)
+    dashboard = LiveDashboardRenderer(console)
+    logger = WorkflowLogger(meta, use_rich=True, console=console, dashboard=dashboard)
+    await logger.initialize(workflow_id="wf-1")
+    # dispatcher should have 3 renderers: File, RichConsole, LiveDashboard
+    assert len(logger._dispatcher._renderers) == 3
+    await logger.log_phase("recon", "start")
+    await logger.close()

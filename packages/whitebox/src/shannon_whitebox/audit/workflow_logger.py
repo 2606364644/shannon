@@ -20,12 +20,15 @@ class WorkflowLogger:
     injected LogStream) and, optionally, a RichConsoleRenderer for live stdout.
     """
 
-    def __init__(self, session_metadata: SessionMetadata, use_rich: bool = False) -> None:
+    def __init__(self, session_metadata: SessionMetadata, use_rich: bool = False,
+                 console=None, dashboard=None) -> None:
         self._meta = session_metadata
         self._workflow_id: str | None = None
         self._stream: LogStream | None = None
         self._dispatcher: DisplayDispatcher | None = None
         self._use_rich = use_rich
+        self._console = console
+        self._dashboard = dashboard
 
     async def initialize(self, workflow_id: str | None = None) -> None:
         self._workflow_id = workflow_id
@@ -36,7 +39,9 @@ class WorkflowLogger:
         renderers: list = [FileLogRenderer(self._stream)]
         if self._use_rich:
             from shannon_core.display.rich_renderer import RichConsoleRenderer
-            renderers.append(RichConsoleRenderer())
+            renderers.append(RichConsoleRenderer(self._console))
+            if self._dashboard is not None:
+                renderers.append(self._dashboard)
         self._dispatcher = DisplayDispatcher(renderers)
 
         await self._dispatcher.dispatch(WorkflowHeader(
