@@ -63,3 +63,15 @@ def test_two_functions_agree_on_known_types_but_differ_on_unknown():
     unknown = RuntimeError("totally unknown glitch")
     assert classify_for_temporal(unknown)[1] is True   # Temporal: retry
     assert is_retryable_for_display(unknown) is False  # Display: fail-safe
+
+
+def test_output_validation_consistent_between_functions():
+    """Known retryable types must agree between both functions (only UNKNOWN errors differ)."""
+    from shannon_core.errors.classification import classify_for_temporal
+    for msg in ["output validation failed", "billing charge failed", "rate limit exceeded"]:
+        err = RuntimeError(msg)
+        _, classify_retryable = classify_for_temporal(err)
+        display_retryable = is_retryable_for_display(err)
+        assert classify_retryable == display_retryable, (
+            f"{msg!r}: classify={classify_retryable} but display={display_retryable}"
+        )

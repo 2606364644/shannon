@@ -75,9 +75,16 @@ class WorkflowLogger:
             turn=turn, content=content))
 
     async def log_event(self, event_type: str, message: str) -> None:
+        """Log a generic categorized event.
+
+        Writes directly to the file stream (bypassing the dispatcher), so generic
+        events appear in workflow.log but NOT on Rich stdout when use_rich=True.
+        This is intentional: generic events are rare and don't warrant a dedicated
+        DisplayEvent type. If Rich output of generic events becomes needed, introduce
+        a GenericEvent type and route through the dispatcher.
+        """
         if self._dispatcher is None:
             return
-        # Generic event written directly (rare; not worth a dedicated event type).
         await self._stream.write(f"[{format_log_time()}] [{event_type}] {message}\n")
 
     async def log_error(self, error: Exception, context: str | None = None) -> None:
@@ -93,6 +100,9 @@ class WorkflowLogger:
     async def log_workflow_complete(self, summary: WorkflowSummary) -> None:
         if self._dispatcher is None:
             return
+        # AgentMetricsSummary has no success field; agents listed in a completed
+        # summary are assumed to have succeeded. If per-agent failure state is needed
+        # later, thread a success flag through AgentMetricsSummary first.
         agents = [
             AgentMetric(name=n, duration_ms=m.duration_ms, cost_usd=m.cost_usd, success=True)
             for n, m in summary.agent_metrics.items()
