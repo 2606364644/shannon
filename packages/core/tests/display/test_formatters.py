@@ -45,3 +45,40 @@ def test_agent_prefix_exploit_variants_share_prefix():
 def test_agent_prefix_unknown_falls_back():
     assert agent_prefix("pre-recon") == "[Agent]"
     assert agent_prefix("totally-unknown") == "[Agent]"
+
+
+from shannon_core.display.formatters import format_error_block, summarize_todo
+
+
+def test_summarize_todo_shows_latest_completed():
+    params = {"todos": [
+        {"status": "completed", "content": "step one"},
+        {"status": "completed", "content": "step two"},
+        {"status": "in_progress", "content": "step three"},
+    ]}
+    assert summarize_todo(params) == "✅ step two"
+
+
+def test_summarize_todo_shows_in_progress_when_none_completed():
+    params = {"todos": [
+        {"status": "in_progress", "content": "current"},
+    ]}
+    assert summarize_todo(params) == "🔄 current"
+
+
+def test_summarize_todo_returns_none_when_empty():
+    assert summarize_todo({"todos": []}) is None
+    assert summarize_todo({}) is None
+
+
+def test_format_error_block_pipe_delimited():
+    result = format_error_block("phase context|ErrorType|message|Hint: retry")
+    lines = result.split("\n")
+    assert lines[0] == "Error:       phase context"
+    assert lines[1] == "             ErrorType"
+    assert lines[2] == "             message"
+    assert lines[3] == "             Hint: retry"
+
+
+def test_format_error_block_single_segment():
+    assert format_error_block("just one error") == "Error:       just one error\n"

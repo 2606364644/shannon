@@ -56,3 +56,36 @@ _AGENT_PREFIXES: dict[str, str] = {
 def agent_prefix(agent_name: str) -> str:
     """Map an agent name to its display prefix, or '[Agent]' if unknown."""
     return _AGENT_PREFIXES.get(agent_name, "[Agent]")
+
+
+def summarize_todo(params: dict) -> str | None:
+    """Summarize a TodoWrite tool call: latest completed (✅) or first in-progress (🔄).
+
+    Returns None if nothing noteworthy, so callers can skip emitting the line.
+    """
+    todos = params.get("todos")
+    if not todos or not isinstance(todos, list):
+        return None
+    completed = [t for t in todos if t.get("status") == "completed"]
+    if completed:
+        return f"✅ {completed[-1].get('content', '')}"
+    in_progress = [t for t in todos if t.get("status") == "in_progress"]
+    if in_progress:
+        return f"🔄 {in_progress[0].get('content', '')}"
+    return None
+
+
+def format_error_block(error_str: str) -> str:
+    """Format a pipe-delimited error string into aligned multi-line text.
+
+    Input:  "phase context|ErrorType|message|Hint: ..."
+    Output: "Error:       phase context\\n             ErrorType\\n             ..."
+    """
+    label = "Error:       "
+    indent = " " * len(label)
+    segments = error_str.split("|")
+    rendered = [
+        f"{label}{seg.strip()}" if i == 0 else f"{indent}{seg.strip()}"
+        for i, seg in enumerate(segments)
+    ]
+    return "\n".join(rendered) + "\n"
