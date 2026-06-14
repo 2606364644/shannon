@@ -44,3 +44,57 @@ async def test_phase_complete_no_blank_prefix():
     out = renderer._writer.text
     assert "[PHASE] Completed recon" in out
     assert not out.startswith("\n")
+
+
+from shannon_core.display.events import AgentEvent, LlmTurnEvent, ToolCallEvent
+
+
+async def test_agent_start_with_prefix():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(AgentEvent(
+        timestamp="t", category="AGENT", agent_name="injection-vuln",
+        event="start", attempt=2))
+    assert "[AGENT] [Injection] injection-vuln: Starting (attempt 2)\n" in renderer._writer.text
+
+
+async def test_agent_start_no_prefix_for_unknown():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(AgentEvent(
+        timestamp="t", category="AGENT", agent_name="pre-recon",
+        event="start", attempt=1))
+    assert "[AGENT] pre-recon: Starting (attempt 1)\n" in renderer._writer.text
+
+
+async def test_agent_end_completed_with_metrics():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(AgentEvent(
+        timestamp="t", category="AGENT", agent_name="xss-vuln",
+        event="end", attempt=1, duration_ms=5200, cost_usd=0.15, success=True))
+    line = "[AGENT] [XSS] xss-vuln: Completed (5.2s, $0.1500)\n"
+    assert line in renderer._writer.text
+
+
+async def test_agent_end_failed():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(AgentEvent(
+        timestamp="t", category="AGENT", agent_name="xss-vuln",
+        event="end", attempt=1, duration_ms=100, success=False, error="boom"))
+    assert "[AGENT] [XSS] xss-vuln: Failed (100ms) - boom" in renderer._writer.text
+
+
+async def test_tool_line_alignment():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ToolCallEvent(
+        timestamp="t", category="TOOL", agent_name="injection-vuln",
+        tool_name="Bash", parameters={"command": "ls"}))
+    out = renderer._writer.text
+    assert "[TOOL]  [Injection] injection-vuln: Bash: command=ls\n" in out  # two spaces after [TOOL]
+
+
+async def test_llm_line_alignment():
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(LlmTurnEvent(
+        timestamp="t", category="LLM", agent_name="injection-vuln",
+        turn=1, content="Analyzing"))
+    out = renderer._writer.text
+    assert "[LLM]   [Injection] injection-vuln: Turn 1: Analyzing\n" in out  # three spaces after [LLM]
