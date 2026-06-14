@@ -42,10 +42,10 @@
 1. **无信号处理**：入口 `asyncio.run(run_scan(...))` 直接裸跑，SIGINT 走 Python 默认 handler → 抛 `KeyboardInterrupt`。
 2. **`KeyboardInterrupt` 绕过清理**：`worker.py` 的 `try/except Exception` 捕不到它（`BaseException`），`async with worker:` 的 `__aexit__` 与 `poll_task` 取消逻辑被跳过。
 3. **阻塞式等待**：`await handle.result()` 一行阻塞，中断只能靠外部硬打断，无法「主动醒来走取消流程」。
-4. **子进程清理路径已存在但被绕过**：
-   - gitnexus：`activities.py:203` 用 `async with GitNexusMCPClient(...)`，`__aexit__` 调 `stop()`（`terminate()` + `wait()`）。
-   - playwright：`blackbox pipeline/workflows.py:306-313` 的 `finally:` 调 `cleanup_settings` / `engine.cleanup_config` / `cleanup_auth_state_sync`。
-   - 两者都依赖 **Temporal 协作式取消**正常触发；直接 `KeyboardInterrupt` 打断 event loop 时这些 `finally`/`__aexit__` 不保证执行。
+4. **临时资源清理路径已存在但被绕过**（清理的是临时注入配置 + 子进程，**不删 deliverables/workflow.log**）：
+   - 子进程：gitnexus 用 `async with GitNexusMCPClient(...)`（`activities.py:203`），`__aexit__` 调 `stop()`（`terminate()` + `wait()`）；playwright 浏览器由 `engine.cleanup_config` 关闭。
+   - 临时注入配置：`cleanup_settings` / `engine.cleanup_config` / `cleanup_auth_state_sync`（删注入目标仓库的 settings、playwright session 配置、auth-state.json；**正常完成也删**，目的是还原战场）。
+   - **两个 workflow 都已有 `except CancelledError`**（whitebox `workflows.py:265-268`、blackbox 同构）→ 设 `status="cancelled"` 并跑 `finally` 清理。当前 `KeyboardInterrupt` 绕过它们，临时配置反而可能残留——优雅退出正好修复这点。
 5. **combined 误判**：`orchestrator.py:40` `if wb_result.get("status") != "completed"` 会把任何非 completed（含将来的 cancelled）一律当 failed。
 
 > 结论：根因不是「缺一个 try/except」，而是「缺协作式取消入口」。优雅退出的价值在于让 workflow 收到 cancel，从而触发各 activity/workflow **已有的**清理代码，并让 `asyncio.run` 干净结束（而非被 `KeyboardInterrupt` 打断）。
@@ -59,7 +59,9 @@
 **`run_scan` 边界划分**（关键决策）：
 - `scan_runner` **只管 Temporal 连接 + workflow + 信号**这一层。
 - workspace 创建、deliverables 后处理留在各自 worker（whitebox 特有）。
-- 子进程清理由 activity/workflow **已有的** `async with` / `finally` 负责，由 `handle.cancel()` 触发；`scan_runner` 不直接管子进程。
+- **临时资源清理**（临时注入配置 + 子进程）由 activity/workflow **已有的** `async with` / `finally` 负责，由 `handle.cancel()` 触发；`scan_runner` 不直接管这些。
+  - **清理不删 deliverables（扫描结果）和 workflow.log（日志）**：deliverables 由各 activity 增量写入并保留，workflow.log 已写内容保留，Ctrl+C 只是停止后续 activity 的产出。
+  - 实际被清理的是：①临时注入目标仓库的配置（`cleanup_settings`、`engine.cleanup_config`、`cleanup_auth_state_sync`——正常完成也会删，目的是还原战场）；②子进程（gitnexus `async with` 的 `stop()`、playwright 浏览器）。
 
 ### 4.2 组件接口
 
@@ -139,7 +141,7 @@ async with worker:
 1. SIGINT → `ShutdownController` set 事件 + 打印提示。
 2. 主协程从 `asyncio.wait` **主动醒来**（非外部打断）→ 进入取消分支。
 3. `handle.cancel()` → Temporal server 给 workflow 发 cancel。
-4. workflow 在 activity 边界收到 `CancelledError` → gitnexus 的 `async with __aexit__` 执行 `stop()`；blackbox workflow 的 `finally` 执行 playwright cleanup。
+4. workflow 在 activity 边界收到 `CancelledError` → workflow 的 `except CancelledError` 设 `status="cancelled"`；activity 内 `async with GitNexusMCPClient` 的 `__aexit__` 执行 `stop()`（gitnexus 子进程）；workflow `finally` 执行 `cleanup_settings` / `engine.cleanup_config` / `cleanup_auth_state_sync`（清理临时注入配置，**不删 deliverables/log**）。
 5. workflow 结束 → `result_task` 完成 → `run_scan_graceful` 抛 `ScanCancelled`。
 6. `finally`：取消 `poll_task`、`uninstall` handler。
 7. `async with worker` 的 `__aexit__` → `worker.shutdown()` 干净关闭 gRPC channel。
@@ -218,4 +220,4 @@ combined 的 worker 调用与 orchestrator 结构**无需改动**即可复用（
 - **双击语义 vs 单次优雅 vs 确认提示**：选双击。业界主流（uvicorn / docker / gunicorn），既给清理留时间、又留强制逃生口；确认提示会拦截所有 Ctrl+C，与用户中断习惯冲突。
 - **超时放弃等待 vs escalate terminate vs 不设超时**：选放弃等待。terminate 跳过 `finally` 会留子进程孤儿，与「优雅」相悖；不设超时可能卡死，只能靠第二次 Ctrl+C。
 - **`os._exit(130)` 作为第二次 Ctrl+C 行为**：绕过 asyncio 清理直接终止，正是「强制」语义；普通 `raise KeyboardInterrupt` 会再次触发那套混乱清理，违背初衷。
-- **子进程清理放 activity/workflow、不放 scan_runner**：清理路径已存在且健全（`async with` / `finally`），scan_runner 只需保证 `handle.cancel()` 触发它们；重复实现清理逻辑会制造第二个真相源。
+- **临时资源清理放 activity/workflow、不放 scan_runner**：清理路径已存在且健全（`async with` / `finally`），且**只清临时注入配置 + 子进程、不删 deliverables/log**；scan_runner 只需保证 `handle.cancel()` 触发它们，重复实现会制造第二个真相源。
