@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from shannon_core.display.formatters import (
-    agent_prefix, format_duration, humanize_tool_call,
+    agent_prefix, format_duration, format_error_block, humanize_tool_call,
 )
 
 
@@ -87,3 +87,42 @@ class RichConsoleRenderer:
     def _render_llm(self, e) -> None:
         content = e.content[:200] + "..." if len(e.content) > 200 else e.content
         self._console.print(f"[{e.timestamp}] [magenta]💭 Turn {e.turn}: {content}[/]", highlight=False)
+
+    def _render_error(self, e) -> None:
+        line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"
+        if e.context:
+            line += f" (context: {e.context})"
+        if e.classified:
+            flag = "retryable" if e.display_retryable else "non-retryable"
+            line += f" [{e.classified} · {flag}]"
+        self._console.print(line, highlight=False)
+
+    def _render_summary(self, e) -> None:
+        from rich.table import Table
+        status = e.status.upper()
+        self._console.print(Panel.fit(
+            f"Workflow [bold]{status}[/]\n"
+            f"Duration: {format_duration(e.total_duration_ms)}    "
+            f"Total Cost: ${e.total_cost_usd:.4f}",
+            border_style="green" if e.status == "completed" else "red",
+        ))
+        if e.agents:
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Status")
+            table.add_column("Agent")
+            table.add_column("Duration")
+            table.add_column("Cost")
+            for m in e.agents:
+                mark = "✓" if m.success else "✗"
+                cost = f"${m.cost_usd:.4f}" if m.cost_usd is not None else "—"
+                table.add_row(mark, m.name, format_duration(m.duration_ms), cost)
+            self._console.print(table)
+        if e.error:
+            self._console.print(f"[red]{format_error_block(e.error)}[/]", highlight=False)
+
+    def _render_resume(self, e) -> None:
+        self._console.print(
+            f"[dim yellow][{e.timestamp}] [RESUME] Resuming workflow[/]\n"
+            f"  Previous: {e.previous_workflow_id}    New: {e.new_workflow_id}",
+            highlight=False,
+        )

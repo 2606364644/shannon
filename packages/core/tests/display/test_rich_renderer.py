@@ -74,3 +74,39 @@ async def test_llm_renders_turn():
     out = renderer._console.export_text()
     assert "Turn 1" in out
     assert "Analyzing code" in out
+
+
+from shannon_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
+
+
+async def test_error_renders_in_red_with_classification():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(ErrorEvent(
+        timestamp="t", category="ERROR", error_type="RuntimeError", message="boom",
+        classified="BillingError", display_retryable=True))
+    out = renderer._console.export_text()
+    assert "RuntimeError" in out
+    assert "boom" in out
+    assert "BillingError" in out
+
+
+async def test_summary_completed_renders_panel():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=12400, total_cost_usd=0.3450,
+        agents=[AgentMetric(name="xss-vuln", duration_ms=4100, cost_usd=0.165)]))
+    out = renderer._console.export_text()
+    assert "COMPLETED" in out
+    assert "12.4s" in out
+    assert "xss-vuln" in out
+
+
+async def test_resume_renders_message():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(ResumeEvent(
+        timestamp="t", category="RESUME", previous_workflow_id="w1",
+        new_workflow_id="w2", checkpoint_hash="abc", completed_agents=["a"]))
+    out = renderer._console.export_text()
+    assert "Resuming" in out
+    assert "w2" in out
