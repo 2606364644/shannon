@@ -108,6 +108,11 @@ class WhiteboxScanWorkflow:
             # without static-dataflow-hints.
 
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
                 self._state.current_phase = "pre-recon"
                 self._state.current_agent = AgentName.PRE_RECON.value
 
@@ -176,6 +181,11 @@ class WhiteboxScanWorkflow:
                 )
 
             if AgentName.RECON.value not in self._state.completed_agents:
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
                 self._state.current_phase = "recon"
                 self._state.current_agent = AgentName.RECON.value
                 recon_input = ActivityInput(**{**act_input.__dict__, "workspace_name": AgentName.RECON.value})
@@ -200,6 +210,11 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
             )
 
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "vulnerability-analysis"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
             self._state.current_phase = "vulnerability-analysis"
             vuln_tasks = []
             for vt in selected_classes:
@@ -245,6 +260,11 @@ class WhiteboxScanWorkflow:
                 logging.getLogger(__name__).warning("Attack chain assembly failed: %s", exc)
 
             self._state.current_phase = "reporting"
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
             self._state.current_agent = "render-findings"
             await workflow.execute_activity(
                 activities.render_findings, act_input,

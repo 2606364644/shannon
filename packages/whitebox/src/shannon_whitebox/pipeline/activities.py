@@ -104,6 +104,20 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def log_phase_start_activity(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    phase = input.workspace_name or "unknown"
+    await get_audit_session().log_phase_start(phase)
+
+
+@activity.defn
+async def log_phase_complete_activity(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    phase = input.workspace_name or "unknown"
+    await get_audit_session().log_phase_complete(phase)
+
+
+@activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
     try:
         from shannon_core.agents.providers import build_provider_config
