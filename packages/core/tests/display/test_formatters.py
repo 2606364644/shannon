@@ -82,3 +82,52 @@ def test_format_error_block_pipe_delimited():
 
 def test_format_error_block_single_segment():
     assert format_error_block("just one error") == "Error:       just one error\n"
+
+
+from shannon_core.display.formatters import humanize_tool_call, maybe_browser_action
+
+
+def test_humanize_task_launch():
+    result = humanize_tool_call("Task", {"description": "deep analysis"})
+    assert result == "🚀 Launching deep analysis"
+
+
+def test_humanize_todowrite_uses_summarize():
+    result = humanize_tool_call("TodoWrite", {"todos": [
+        {"status": "completed", "content": "done thing"},
+    ]})
+    assert result == "✅ done thing"
+
+
+def test_humanize_todowrite_none_returns_placeholder():
+    # summarize_todo can return None; humanize falls back to a generic line
+    result = humanize_tool_call("TodoWrite", {"todos": []})
+    assert result == "TodoWrite"
+
+
+def test_humanize_bash_browser_action():
+    result = humanize_tool_call("Bash", {"command": "playwright-cli navigate https://x.com"})
+    assert "🌐" in result
+    assert "x.com" in result
+
+
+def test_humanize_bash_non_browser():
+    result = humanize_tool_call("Bash", {"command": "ls -la"})
+    assert "command=ls -la" in result
+
+
+def test_humanize_unknown_tool_default_params():
+    result = humanize_tool_call("Read", {"file_path": "/tmp/x"})
+    assert "file_path=/tmp/x" in result
+
+
+def test_maybe_browser_action_navigate():
+    assert maybe_browser_action({"command": "playwright-cli goto https://a.com"}) == "🌐 Navigating to a.com"
+
+
+def test_maybe_browser_action_click():
+    assert maybe_browser_action({"command": "playwright-cli click #submit"}) == "🖱️ Clicking #submit"
+
+
+def test_maybe_browser_action_non_browser_returns_none():
+    assert maybe_browser_action({"command": "ls -la"}) is None

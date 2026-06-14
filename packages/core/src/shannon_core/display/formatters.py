@@ -6,7 +6,9 @@ dependency on whitebox. Whitebox re-imports them for backward compatibility.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 
 def format_duration(ms: int) -> str:
@@ -89,3 +91,73 @@ def format_error_block(error_str: str) -> str:
         for i, seg in enumerate(segments)
     ]
     return "\n".join(rendered) + "\n"
+
+
+def default_tool_params(tool_name: str, params: dict) -> str:
+    """Generic per-tool smart truncation for readable log lines."""
+    tool_key_map = {
+        "Bash": "command",
+        "Read": "file_path",
+        "Write": "file_path",
+        "Edit": "file_path",
+        "Grep": "pattern",
+        "Glob": "pattern",
+    }
+    key = tool_key_map.get(tool_name)
+    if key and key in params:
+        val = str(params[key])
+        if len(val) > 80:
+            val = val[:77] + "..."
+        return f"{key}={val}"
+    items = list(params.items())[:2]
+    parts = [f"{k}={str(v)[:40]}" for k, v in items]
+    result = ", ".join(parts)
+    if len(params) > 2:
+        result += ", ..."
+    return result
+
+
+def maybe_browser_action(params: dict) -> str | None:
+    """Parse a playwright-cli Bash command into an emoji phrase. None if not browser."""
+    command = params.get("command", "") if isinstance(params, dict) else ""
+    match = re.match(r"playwright-cli\s+(?:-s=\S+\s+)?(\S+)(?:\s+(.*))?", command)
+    if not match:
+        return None
+    subcommand, args = match.group(1), (match.group(2) or "").strip()
+
+    def _domain(url: str) -> str:
+        try:
+            host = urlparse(url).hostname
+            return host or url[:30]
+        except Exception:
+            return url[:30]
+
+    if subcommand in ("open", "goto", "navigate"):
+        return f"🌐 Navigating to {_domain(args)}" if args else "🌐 Opening browser"
+    if subcommand in ("click", "dblclick"):
+        return f"🖱️ Clicking {(args or 'element')[:25]}"
+    if subcommand in ("type", "fill"):
+        return f"⌨️ Typing {(args or 'text')[:20]}"
+    if subcommand in ("snapshot", "screenshot"):
+        return "📸 Taking page snapshot" if subcommand == "snapshot" else "📸 Taking screenshot"
+    if subcommand == "reload":
+        return "🔄 Reloading page"
+    return f"🌐 Browser: {subcommand}"
+
+
+def humanize_tool_call(tool_name: str, params: dict) -> str:
+    """Turn a raw tool call into a human-readable single line."""
+    if not isinstance(params, dict):
+        params = {}
+    match tool_name:
+        case "Task":
+            return f"🚀 Launching {params.get('description', 'analysis agent')}"
+        case "TodoWrite":
+            return summarize_todo(params) or "TodoWrite"
+        case "Bash":
+            browser = maybe_browser_action(params)
+            if browser:
+                return browser
+            return default_tool_params(tool_name, params)
+        case _:
+            return default_tool_params(tool_name, params)
