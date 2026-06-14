@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from shannon_core.models.metrics import SessionMetadata
 from shannon_core.models.audit import AgentEndResult, AgentLogDetails, ResumeInfo, WorkflowSummary
@@ -9,12 +11,21 @@ from .metrics_tracker import MetricsTracker
 from .utils import initialize_audit_structure
 from .workflow_logger import WorkflowLogger
 
+if TYPE_CHECKING:
+    from rich.console import Console
+    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+
 
 class AuditSession:
     """Facade coordinating AgentLogger, WorkflowLogger, and MetricsTracker."""
 
-    def __init__(self, session_metadata: SessionMetadata):
+    def __init__(self, session_metadata: SessionMetadata, use_rich: bool = False,
+                 console: Console | None = None,
+                 dashboard: LiveDashboardRenderer | None = None):
         self._meta = session_metadata
+        self._use_rich = use_rich
+        self._console = console
+        self._dashboard = dashboard
         self._agent_logger: AgentLogger | None = None
         self._workflow_logger: WorkflowLogger | None = None
         self._metrics_tracker: MetricsTracker | None = None
@@ -24,7 +35,9 @@ class AuditSession:
     async def initialize(self, workflow_id: str | None = None) -> None:
         """Create directory structure and initialize all components."""
         initialize_audit_structure(self._meta)
-        self._workflow_logger = WorkflowLogger(self._meta)
+        self._workflow_logger = WorkflowLogger(
+            self._meta, use_rich=self._use_rich,
+            console=self._console, dashboard=self._dashboard)
         await self._workflow_logger.initialize(workflow_id)
         self._metrics_tracker = MetricsTracker(self._meta)
         await self._metrics_tracker.initialize(workflow_id)

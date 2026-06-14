@@ -235,3 +235,16 @@ async def test_full_lifecycle(tmp_path: Path):
     assert "Agent: recon" in agent_content
     json_lines = [json.loads(l) for l in agent_content.split("\n") if l.startswith("{")]
     assert len(json_lines) == 4  # agent_start + tool_start + llm_response + agent_end
+
+
+async def test_display_config_passed_to_workflow_logger(tmp_path: Path):
+    import io
+    from rich.console import Console
+    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    meta = _make_meta(tmp_path)
+    console = Console(file=io.StringIO(), width=100)
+    dashboard = LiveDashboardRenderer(console)
+    session = AuditSession(meta, use_rich=True, console=console, dashboard=dashboard)
+    await session.initialize(workflow_id="wf-1")
+    assert session._workflow_logger._use_rich is True
+    assert len(session._workflow_logger._dispatcher._renderers) == 3
