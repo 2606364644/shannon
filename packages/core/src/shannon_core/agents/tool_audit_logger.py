@@ -26,6 +26,9 @@ class ToolAuditLogger(ABC):
     @abstractmethod
     async def log_error(self, error: str, *, turn_count: int = 0, duration_ms: int = 0) -> None: ...
 
+    @abstractmethod
+    async def log_assistant_turn(self, turn: int, content: str) -> None: ...
+
 
 class NullToolAuditLogger(ToolAuditLogger):
     """No-op implementation — safe default when auditing is disabled."""
@@ -37,6 +40,9 @@ class NullToolAuditLogger(ToolAuditLogger):
         pass
 
     async def log_error(self, error: str, *, turn_count: int = 0, duration_ms: int = 0) -> None:
+        pass
+
+    async def log_assistant_turn(self, turn: int, content: str) -> None:
         pass
 
 
@@ -54,3 +60,6 @@ class ActivityToolAuditLogger(ToolAuditLogger):
 
     async def log_error(self, error: str, *, turn_count: int = 0, duration_ms: int = 0) -> None:
         self._logger.error("agent_error", error=error, turn_count=turn_count, duration_ms=duration_ms)
+
+    async def log_assistant_turn(self, turn: int, content: str) -> None:
+        self._logger.info("assistant_turn", turn=turn, content=content[:500])

@@ -279,3 +279,33 @@ class TestResultMessageMetadata:
         assert d.permission_denials is None
         assert d.api_error_status is None
         assert d.result_errors is None
+
+
+class _RecordingAuditLogger:
+    def __init__(self) -> None:
+        self.turns: list[tuple[int, str]] = []
+
+    async def log_tool_start(self, tool_name, parameters): pass
+    async def log_tool_end(self, result): pass
+    async def log_error(self, error, *, turn_count=0, duration_ms=0): pass
+    async def log_assistant_turn(self, turn: int, content: str) -> None:
+        self.turns.append((turn, content))
+
+
+class _AssistantEvent:
+    type = "assistant"
+    def __init__(self, text: str) -> None:
+        block = MagicMock()
+        block.text = text
+        self.content = [block]
+
+
+class TestAssistantTurnLogging:
+    """LLM assistant turns are surfaced to the audit logger."""
+
+    @pytest.mark.asyncio
+    async def test_assistant_event_logs_turn(self):
+        rec = _RecordingAuditLogger()
+        d = MessageDispatcher(audit_logger=rec)
+        await d.dispatch(_AssistantEvent("Analyzing sinks"))
+        assert rec.turns == [(1, "Analyzing sinks")]

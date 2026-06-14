@@ -68,12 +68,16 @@ class MessageDispatcher:
 
     async def _handle_assistant(self, event: Any) -> str:
         self.turn_count += 1
+        turn_text = ""
         for block in getattr(event, "content", []):
             if hasattr(block, "text"):
                 text = block.text
                 self.text_parts.append(text)
+                turn_text += text
                 if self._is_spending_cap_in_text(text):
                     self.spending_cap_detected = True
+        if turn_text:
+            await self.audit_logger.log_assistant_turn(self.turn_count, turn_text)
         error = getattr(event, "error", None)
         if error and self._on_error:
             self._on_error(str(error))
