@@ -24,3 +24,28 @@ async def test_dispatch_with_no_renderers_is_noop():
     evt = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
     # Must not raise
     await dispatcher.dispatch(evt)
+
+
+import asyncio
+
+
+class _OrderRecordingRenderer:
+    """Records start/end of each render call to detect interleaving."""
+    def __init__(self, log: list, tag: str) -> None:
+        self._log = log
+        self._tag = tag
+
+    async def render(self, event) -> None:
+        self._log.append(f"start-{self._tag}")
+        await asyncio.sleep(0)  # yield to force potential interleaving
+        self._log.append(f"end-{self._tag}")
+
+
+async def test_dispatch_serializes_concurrent_events():
+    log: list[str] = []
+    r = _OrderRecordingRenderer(log, "A")
+    d = DisplayDispatcher([r])
+    ev = PhaseEvent(timestamp="t", category="PHASE", phase="p", event="start")
+    await asyncio.gather(d.dispatch(ev), d.dispatch(ev))
+    # No start should appear before the previous end -> no interleaving
+    assert log == ["start-A", "end-A", "start-A", "end-A"]
