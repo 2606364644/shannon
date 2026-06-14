@@ -1,6 +1,5 @@
 import asyncio
 from dataclasses import asdict
-from datetime import timedelta
 from pathlib import Path
 
 from temporalio.client import Client
@@ -36,7 +35,6 @@ TASK_QUEUE_PREFIX = "shannon-py-wb"
 
 async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> dict:
-    from rich.console import Console
     from shannon_core.session import SessionManager
     from shannon_core.models.metrics import SessionMetadata
     from shannon_whitebox.audit.display_lifecycle import run_with_display
@@ -81,13 +79,13 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 set_audit_session, clear_audit_session,
             )
             set_audit_session(session)
-            handle = await client.start_workflow(
-                WhiteboxScanWorkflow.run,
-                input,
-                id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
-                task_queue=task_queue,
-            )
             try:
+                handle = await client.start_workflow(
+                    WhiteboxScanWorkflow.run,
+                    input,
+                    id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
+                    task_queue=task_queue,
+                )
                 result = await handle.result()
             finally:
                 clear_audit_session()

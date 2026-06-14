@@ -19,10 +19,17 @@ class MetricsTracker:
         self._data: dict = {}
 
     async def initialize(self, workflow_id: str | None = None) -> None:
-        """Create the initial session.json structure."""
+        """Create the initial session.json structure.
+
+        If a session.json already exists (e.g. written by SessionManager.create_workspace
+        with blackbox-discovery fields like ``repo_path``), merge the metrics-tracker
+        payload into it instead of overwriting. The metrics tracker owns the ``session``
+        and ``metrics`` sub-trees; all other top-level keys (``repo_path``, ``web_url``,
+        ``created_at``, ``scan_type``, ``links``, ...) are preserved as-is.
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         ts = format_timestamp()
-        self._data = {
+        new_payload = {
             "session": {
                 "id": self._meta.id,
                 "webUrl": self._meta.web_url,
@@ -38,6 +45,20 @@ class MetricsTracker:
                 "agents": {},
             },
         }
+        existing: dict = {}
+        if self._path.exists():
+            try:
+                existing = json.loads(self._path.read_text(encoding="utf-8"))
+                if not isinstance(existing, dict):
+                    existing = {}
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+        # Preserve pre-existing top-level fields (e.g. repo_path) written by other
+        # writers; MetricsTracker owns only the `session` and `metrics` sub-trees.
+        merged = dict(existing)
+        merged["session"] = new_payload["session"]
+        merged["metrics"] = new_payload["metrics"]
+        self._data = merged
         await self._atomic_write()
 
     def start_agent(self, agent_name: str, attempt_number: int) -> None:
