@@ -118,10 +118,23 @@ class AuditSession:
                 await self._metrics_tracker.reload()
                 await self._metrics_tracker.add_resume_attempt(workflow_id, terminated, checkpoint)
 
+    async def log_error(self, error: Exception, context: str | None = None) -> None:
+        """Log an error to the workflow log (renders an [ERROR] line)."""
+        if self._workflow_logger:
+            await self._workflow_logger.log_error(error, context=context)
+
     async def log_resume_header(self, resume_info: ResumeInfo) -> None:
         """Write a resume header to the workflow log."""
         if self._workflow_logger:
             await self._workflow_logger.log_resume_header(resume_info)
+
+    async def close(self) -> None:
+        """Close the workflow logger's stream so buffered writes are flushed.
+
+        Safe to call without initialize(); safe to call more than once.
+        """
+        if self._workflow_logger:
+            await self._workflow_logger.close()
 
     async def get_metrics(self) -> dict:
         """Return the current metrics dict."""
