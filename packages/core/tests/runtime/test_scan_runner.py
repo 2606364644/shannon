@@ -9,6 +9,8 @@ import pytest
 from shannon_core.runtime.scan_runner import (
     ScanCancelled,
     ShutdownController,
+    poll_progress,
+    run_scan_graceful,
 )
 
 
@@ -65,9 +67,6 @@ class TestShutdownController:
         await asyncio.wait_for(ctrl.wait(), timeout=1.0)  # 立即返回
 
 
-from shannon_core.runtime.scan_runner import poll_progress
-
-
 class TestPollProgress:
     @pytest.mark.asyncio
     async def test_queries_and_prints_one_iteration(self, capsys):
@@ -109,3 +108,48 @@ class TestPollProgress:
             with pytest.raises(asyncio.CancelledError):
                 await poll_progress(fake_handle, progress_type=MagicMock(), total=13)
         # 异常被吞掉，没有向上抛 RuntimeError
+
+
+def _make_fake_worker():
+    """构造可作 async context manager 的 fake Worker。"""
+    fake = AsyncMock()
+    fake.__aenter__ = AsyncMock(return_value=fake)
+    fake.__aexit__ = AsyncMock(return_value=False)
+    return fake
+
+
+class TestRunScanGracefulNormal:
+    @pytest.mark.asyncio
+    async def test_normal_completion_returns_result_without_cancel(self):
+        fake_handle = AsyncMock()
+        fake_handle.result = AsyncMock(return_value={"status": "completed", "vulns": 3})
+        fake_handle.cancel = AsyncMock()
+        fake_handle.query = AsyncMock()
+
+        fake_client = AsyncMock()
+        fake_client.start_workflow = AsyncMock(return_value=fake_handle)
+
+        fake_worker = _make_fake_worker()
+
+        with patch(
+            "shannon_core.runtime.scan_runner.Client.connect",
+            AsyncMock(return_value=fake_client),
+        ), patch(
+            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+        ), patch(
+            "shannon_core.runtime.scan_runner.generate_task_queue",
+            return_value="tq-test",
+        ), patch.object(ShutdownController, "install"), patch.object(
+            ShutdownController, "uninstall"
+        ):  # 不注册真实信号 handler，保持测试纯净
+            result = await run_scan_graceful(
+                temporal_address="localhost:7233",
+                task_queue_prefix="x",
+                workflow_cls=MagicMock(),
+                workflow_input=MagicMock(workspace_name="ws1"),
+                activities=[],
+                progress_type=MagicMock(),
+            )
+
+        assert result == {"status": "completed", "vulns": 3}
+        fake_handle.cancel.assert_not_awaited()  # 正常完成不取消
