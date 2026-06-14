@@ -23,3 +23,25 @@ def test_format_log_time_format():
     # format_log_time uses local now; just assert shape YYYY-MM-DD HH:MM:SS
     import re
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", format_log_time())
+
+
+from shannon_core.display.formatters import agent_prefix
+
+
+def test_agent_prefix_known_vuln_agents():
+    assert agent_prefix("injection-vuln") == "[Injection]"
+    assert agent_prefix("xss-vuln") == "[XSS]"
+    assert agent_prefix("ssrf-vuln") == "[SSRF]"
+    assert agent_prefix("auth-vuln") == "[Auth]"
+    assert agent_prefix("authz-vuln") == "[Authz]"
+
+
+def test_agent_prefix_exploit_variants_share_prefix():
+    assert agent_prefix("injection-exploit") == "[Injection]"
+    assert agent_prefix("authz-exploit") == "[Authz]"
+    assert agent_prefix("auth-exploit") == "[Auth]"
+
+
+def test_agent_prefix_unknown_falls_back():
+    assert agent_prefix("pre-recon") == "[Agent]"
+    assert agent_prefix("totally-unknown") == "[Agent]"

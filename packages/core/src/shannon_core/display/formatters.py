@@ -33,3 +33,26 @@ def format_timestamp(ts: float | None = None) -> str:
 def format_log_time() -> str:
     """Human-readable local format 'YYYY-MM-DD HH:MM:SS'."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Maps agent name (AgentName.value string) to a short display prefix.
+# Keys are matched exactly, so auth/authz cannot collide. The original TS
+# project used substring matching where authz HAD to be checked before auth;
+# exact-key matching removes that hazard.
+_AGENT_PREFIXES: dict[str, str] = {
+    "injection-vuln": "[Injection]",
+    "injection-exploit": "[Injection]",
+    "xss-vuln": "[XSS]",
+    "xss-exploit": "[XSS]",
+    "authz-vuln": "[Authz]",
+    "authz-exploit": "[Authz]",
+    "auth-vuln": "[Auth]",
+    "auth-exploit": "[Auth]",
+    "ssrf-vuln": "[SSRF]",
+    "ssrf-exploit": "[SSRF]",
+}
+
+
+def agent_prefix(agent_name: str) -> str:
+    """Map an agent name to its display prefix, or '[Agent]' if unknown."""
+    return _AGENT_PREFIXES.get(agent_name, "[Agent]")
