@@ -32,7 +32,9 @@ async def test_run_scan_uses_dynamic_task_queue():
         return mock_worker
 
     with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker):
+         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("shannon_blackbox.worker.ShutdownController.install"), \
+         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
         from shannon_blackbox.worker import run_scan
         await run_scan(input, "localhost:7233")
 
@@ -87,7 +89,9 @@ async def test_run_scan_emits_failed_summary_on_workflow_error():
 
     with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
          patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_blackbox.worker.run_with_display", fake_display):
+         patch("shannon_blackbox.worker.run_with_display", fake_display), \
+         patch("shannon_blackbox.worker.ShutdownController.install"), \
+         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
         from shannon_blackbox.worker import run_scan
         with pytest.raises(RuntimeError, match="browser-engine-unavailable"):
             await run_scan(input, "localhost:7233")
@@ -96,3 +100,51 @@ async def test_run_scan_emits_failed_summary_on_workflow_error():
     summary = fake_session.log_workflow_complete.await_args.args[0]
     assert summary.status == "failed"
     assert summary.error == "browser-engine-unavailable"
+
+
+@pytest.mark.asyncio
+async def test_run_scan_returns_cancelled_on_scan_cancelled():
+    """On user interrupt (ScanCancelled), run_scan returns
+    BlackboxPipelineState(status='cancelled') and still clears the audit session."""
+    from shannon_core.runtime.scan_runner import ScanCancelled
+    import contextlib
+
+    input = BlackboxPipelineInput(
+        web_url="http://example.com",
+        workspace_name="test-bb-cancel",
+    )
+
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=AsyncMock())
+
+    def capture_worker(**kwargs):
+        mock_worker = AsyncMock()
+        mock_worker.__aenter__ = AsyncMock(return_value=None)
+        mock_worker.__aexit__ = AsyncMock(return_value=None)
+        return mock_worker
+
+    class FakeSession:
+        log_workflow_complete = AsyncMock()
+        log_error = AsyncMock()
+
+    @contextlib.asynccontextmanager
+    async def fake_display(meta, use_rich=False):
+        yield FakeSession()
+
+    with (
+        patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)),
+        patch("shannon_blackbox.worker.Worker", side_effect=capture_worker),
+        patch("shannon_blackbox.worker.run_with_display", fake_display),
+        patch("shannon_blackbox.worker.ShutdownController.install"),
+        patch("shannon_blackbox.worker.ShutdownController.uninstall"),
+        patch(
+            "shannon_blackbox.worker.await_workflow_with_shutdown",
+            AsyncMock(side_effect=ScanCancelled()),
+        ),
+        patch("shannon_blackbox.worker.clear_audit_session") as mock_clear,
+    ):
+        from shannon_blackbox.worker import run_scan
+        result = await run_scan(input, "localhost:7233")
+
+    assert result == BlackboxPipelineState(status="cancelled")
+    mock_clear.assert_called()  # 清理在 cancel 路径仍执行

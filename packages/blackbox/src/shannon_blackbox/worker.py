@@ -22,6 +22,11 @@ from shannon_core.models.metrics import SessionMetadata
 from shannon_core.models.audit import AgentMetricsSummary, WorkflowSummary
 from shannon_core.audit.display_lifecycle import run_with_display
 from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
+from shannon_core.runtime.scan_runner import (
+    ScanCancelled,
+    ShutdownController,
+    await_workflow_with_shutdown,
+)
 
 TASK_QUEUE_PREFIX = "shannon-py-bb"
 
@@ -46,6 +51,7 @@ def _to_workflow_summary(result: BlackboxPipelineState, total_duration_ms: int) 
 
 async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> BlackboxPipelineState:
+    """跑黑盒扫描；Ctrl+C 时优雅取消并返回 BlackboxPipelineState(status="cancelled")。"""
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
 
@@ -67,35 +73,44 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         output_path=str(resolve_workspaces_dir(input.repo_path)),
     )
 
-    async with worker:
-        async with run_with_display(meta, use_rich=use_rich) as session:
-            set_audit_session(session)
-            scan_start = time.monotonic()
-            handle = await client.start_workflow(
-                BlackboxScanWorkflow.run,
-                input,
-                id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
-                task_queue=task_queue,
-            )
-            try:
-                result = await handle.result()
-            except Exception as e:
-                # Workflow-level failure: finalize the dashboard with a failed
-                # summary so the Live context closes cleanly, then re-raise so
-                # the CLI surfaces the error. (In-activity failures are already
-                # surfaced via log_error during the run; this covers workflow-
-                # level raises like browser-engine-unavailable / config-parse.)
-                await session.log_workflow_complete(_to_workflow_summary(
-                    BlackboxPipelineState(status="failed", errors=[str(e)]),
-                    int((time.monotonic() - scan_start) * 1000),
-                ))
-                raise
-            finally:
-                clear_audit_session()
+    ctrl = ShutdownController()
+    ctrl.install(asyncio.get_running_loop())
+    try:
+        async with worker:
+            async with run_with_display(meta, use_rich=use_rich) as session:
+                set_audit_session(session)
+                scan_start = time.monotonic()
+                handle = await client.start_workflow(
+                    BlackboxScanWorkflow.run,
+                    input,
+                    id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
+                    task_queue=task_queue,
+                )
+                try:
+                    result = await await_workflow_with_shutdown(
+                        handle, ctrl, cancel_grace_seconds=15.0,
+                    )
+                except ScanCancelled:
+                    return BlackboxPipelineState(status="cancelled")
+                except Exception as e:
+                    # Workflow-level failure: finalize the dashboard with a failed
+                    # summary so the Live context closes cleanly, then re-raise so
+                    # the CLI surfaces the error. (In-activity failures are already
+                    # surfaced via log_error during the run; this covers workflow-
+                    # level raises like browser-engine-unavailable / config-parse.)
+                    await session.log_workflow_complete(_to_workflow_summary(
+                        BlackboxPipelineState(status="failed", errors=[str(e)]),
+                        int((time.monotonic() - scan_start) * 1000),
+                    ))
+                    raise
+                finally:
+                    clear_audit_session()
 
-            total_duration_ms = int((time.monotonic() - scan_start) * 1000)
-            await session.log_workflow_complete(_to_workflow_summary(result, total_duration_ms))
-            return result
+                total_duration_ms = int((time.monotonic() - scan_start) * 1000)
+                await session.log_workflow_complete(_to_workflow_summary(result, total_duration_ms))
+                return result
+    finally:
+        ctrl.uninstall()
 
 
 def main():
