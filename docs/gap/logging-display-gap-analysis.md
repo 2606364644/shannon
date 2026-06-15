@@ -282,6 +282,8 @@ packages/whitebox/src/shannon_whitebox/audit/
 > - `pipeline/activities.py:19` 的 `from ... import AuditSession` 是**未使用的 import**
 >
 > **影响**：生产 Temporal 运行中 workflow.log 内容暂未由本子系统写入；`FileLogRenderer`/`RichConsoleRenderer` 的新格式输出目前仅在测试与手工 `WorkflowLogger(meta, ...)` 调用中可见。**接入 activity 是启用 Rich（§3.2 的 `use_rich`）的前置依赖**——未完成前开 `use_rich=True` 只会把 Rich 输出写进无人读取的 worker stdout。
+>
+> **更新（2026-06-15）**：上述"接入链未挂"的判断在两次实时展示实现完成后**对白盒与黑盒两侧均已闭环**。白盒侧经 [`docs/superpowers/plans/2026-06-15-whitebox-live-display.md`](../superpowers/plans/2026-06-15-whitebox-live-display.md) 接线：activity 现通过 `get_audit_session()` 取到 `AuditSession`，worker 经 `run_with_display(..., use_rich=...)` 启动会话、CLI `--plain`/TTY 自动检测切换 Rich 仪表盘。黑盒侧经 [`docs/superpowers/specs/2026-06-15-blackbox-live-display-design.md`](../superpowers/specs/2026-06-15-blackbox-live-display-design.md) 镜像同一方案：`run_recon`/`run_exploit_agent`/`run_report_agent`/`run_blackbox_auth_validation`/`log_phase_start_activity`/`log_phase_complete_activity` 全部接入 `get_audit_session()`，blackbox worker 同样走 `run_with_display`（旧 file-watcher poller 已删除）。上方 §3.1–3.3 的静态分析保留作为历史差距记录；如需刷新"零实例化"等具体证据，请按 2026-06-15 之后的代码重核。
 
 ---
 

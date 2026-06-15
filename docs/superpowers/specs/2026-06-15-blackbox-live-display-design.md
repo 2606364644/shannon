@@ -1,6 +1,6 @@
 # Blackbox 实时日志展示设计：复用 core audit 层 + 并行 exploit 仪表盘
 
-> 日期: 2026-06-15 | 状态: 设计待评审
+> 日期: 2026-06-15 | 状态: 已实现（Tasks 1-7 完成；手动冒烟待人工签字）
 >
 > 关联文档:
 > - 姊妹 spec（白盒，已实现）: [`2026-06-15-whitebox-live-display-design.md`](./2026-06-15-whitebox-live-display-design.md)
