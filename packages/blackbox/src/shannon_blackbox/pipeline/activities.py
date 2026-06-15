@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -103,6 +104,15 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
 
 @activity.defn
 async def run_recon(input: BlackboxActivityInput) -> dict:
+    from shannon_core.audit.session_registry import get_audit_session
+    from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from shannon_core.models.audit import AgentEndResult
+
+    agent_name = AgentName.RECON_BLACKBOX
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session)
+    agent_start = time.monotonic()
     try:
         from shannon_blackbox.agents.recon_executor import ReconExecutor
 
@@ -112,6 +122,8 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         recon = ReconExecutor(executor)
+
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         metrics = await recon.execute(
             workspace_path=deliverables.parent,
             deliverables_path=deliverables,
@@ -119,29 +131,54 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
-            audit_logger=create_activity_logger(),
+            tool_audit_logger=tool_audit_logger,
         )
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True,
+            duration_ms=metrics.duration_ms,
+            cost_usd=metrics.cost_usd or 0.0,
+            attempt_number=attempt,
+            model=metrics.model,
+        ))
         return metrics.model_dump()
     except PentestError as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 @activity.defn
 async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
+    from shannon_core.audit.session_registry import get_audit_session
+    from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from shannon_core.models.audit import AgentEndResult
+
+    vuln_type: str = input.vuln_type
+    agent_name = AgentName(f"{vuln_type}-exploit")
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session)
+    agent_start = time.monotonic()
     try:
         from shannon_blackbox.agents.exploit_executor import ExploitExecutor
 
-        vuln_type: str = input.vuln_type
-        agent_name = AgentName(f"{vuln_type}-exploit")
         deliverables = _get_deliverables_path(input)
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
         exploit = ExploitExecutor(executor)
+
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         metrics = await exploit.execute(
             agent_name=agent_name,
             vuln_type=vuln_type,
@@ -151,13 +188,28 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
-            audit_logger=create_activity_logger(),
+            tool_audit_logger=tool_audit_logger,
         )
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True,
+            duration_ms=metrics.duration_ms,
+            cost_usd=metrics.cost_usd or 0.0,
+            attempt_number=attempt,
+            model=metrics.model,
+        ))
         return metrics.model_dump()
     except PentestError as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -191,26 +243,52 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 
 @activity.defn
 async def run_report_agent(input: BlackboxActivityInput) -> dict:
+    from shannon_core.audit.session_registry import get_audit_session
+    from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from shannon_core.models.audit import AgentEndResult
+
+    agent_name = AgentName.REPORT
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session)
+    agent_start = time.monotonic()
     try:
         deliverables = _get_deliverables_path(input)
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
+
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         metrics = await executor.execute(
-            agent_name=AgentName.REPORT,
+            agent_name=agent_name,
             repo_path=str(deliverables),
             web_url=input.web_url,
             deliverables_path=str(deliverables),
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
-            audit_logger=create_activity_logger(),
+            tool_audit_logger=tool_audit_logger,
         )
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True,
+            duration_ms=metrics.duration_ms,
+            cost_usd=metrics.cost_usd or 0.0,
+            attempt_number=attempt,
+            model=metrics.model,
+        ))
         return metrics.model_dump()
     except PentestError as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
