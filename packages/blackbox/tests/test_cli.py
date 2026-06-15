@@ -36,7 +36,7 @@ def test_start_wires_repo_param():
 
     captured_input: BlackboxPipelineInput | None = None
 
-    async def fake_run_scan(input: BlackboxPipelineInput, temporal_address: str) -> BlackboxPipelineState:
+    async def fake_run_scan(input: BlackboxPipelineInput, temporal_address: str, use_rich: bool = False) -> BlackboxPipelineState:
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -56,7 +56,7 @@ def test_start_wires_repo_param():
 
 def test_start_shows_whitebox_completion_message():
     """When whitebox results are found, completion message should mention them."""
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return BlackboxPipelineState(
             status="completed",
             has_whitebox_results=True,
@@ -77,7 +77,7 @@ def test_start_shows_whitebox_completion_message():
 
 def test_start_shows_standalone_completion_message():
     """When no whitebox results, completion message should say standalone."""
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return BlackboxPipelineState(status="completed")
 
     with (
@@ -93,7 +93,7 @@ def test_start_shows_standalone_completion_message():
 
 def test_start_shows_error_on_failure():
     """When scan fails, CLI should show error and exit 1."""
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return BlackboxPipelineState(status="failed", errors=["something broke"])
 
     with (
@@ -171,7 +171,7 @@ def test_start_calls_ensure_infra():
     async def fake_ensure(*a, **kw):
         pass
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return BlackboxPipelineState(status="completed")
 
     with (
@@ -203,7 +203,7 @@ def test_latest_resolves_to_workspace(tmp_path, monkeypatch):
 
     captured_input = None
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -241,7 +241,7 @@ def test_w_takes_precedence_over_latest(tmp_path, monkeypatch):
 
     captured_input = None
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -263,7 +263,7 @@ def test_latest_and_w_conflict_warns(tmp_path, monkeypatch):
 
     captured_input = None
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -298,7 +298,7 @@ def test_auto_detect_single_match(tmp_path, monkeypatch):
 
     captured_input = None
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -334,7 +334,7 @@ def test_auto_detect_declined(tmp_path, monkeypatch):
 
     captured_input = None
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         nonlocal captured_input
         captured_input = input
         return BlackboxPipelineState(status="completed")
@@ -354,7 +354,7 @@ def test_auto_detect_no_match(tmp_path, monkeypatch):
     """When no matching workspace exists, run standalone with tip."""
     monkeypatch.chdir(tmp_path)
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return BlackboxPipelineState(status="completed")
 
     with (

@@ -38,7 +38,8 @@ def cli():
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
 @click.option("--max-concurrent", default=3, type=int, help="Max concurrent exploit agents (default: 3)")
 @click.option("--retry-profile", "retry_profile", default=None, type=click.Choice(["production", "testing", "subscription"]), help="Retry policy profile")
-def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile):
+@click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -127,7 +128,9 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
     asyncio.run(ensure_infra(address=temporal_address))
     from shannon_core.runtime.prerequisites import ensure_prerequisite
     ensure_prerequisite("playwright-cli", profile="blackbox")
-    result = asyncio.run(run_scan(input, temporal_address))
+    import sys
+    use_rich = sys.stdout.isatty() and not plain
+    result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
     if result.status == "completed":
         if result.has_whitebox_results:
             classes = result.found_whitebox_classes
