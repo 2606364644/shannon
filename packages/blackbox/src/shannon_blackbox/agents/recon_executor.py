@@ -7,6 +7,7 @@ from shannon_core.models.metrics import AgentMetrics
 from shannon_core.agents.executor import AgentExecutor
 
 if TYPE_CHECKING:
+    from shannon_core.agents.tool_audit_logger import ToolAuditLogger
     from shannon_core.logging.activity_logger import ActivityLogger
 
 
@@ -23,6 +24,7 @@ class ReconExecutor:
         api_key: str | None = None,
         pipeline_testing: bool = False,
         audit_logger: "ActivityLogger | None" = None,
+        tool_audit_logger: "ToolAuditLogger | None" = None,
     ) -> AgentMetrics:
         return await self._executor.execute(
             agent_name=AgentName.RECON_BLACKBOX,
@@ -33,4 +35,5 @@ class ReconExecutor:
             api_key=api_key,
             pipeline_testing=pipeline_testing,
             audit_logger=audit_logger,
+            tool_audit_logger=tool_audit_logger,
         )

@@ -12,6 +12,7 @@ from shannon_core.utils.file_io import async_path_exists, async_read_file
 
 if TYPE_CHECKING:
     from shannon_core.agents.executor import AgentExecutor
+    from shannon_core.agents.tool_audit_logger import ToolAuditLogger
     from shannon_core.logging.activity_logger import ActivityLogger
     from shannon_core.prompts.manager import PromptManager
 
@@ -97,6 +98,7 @@ async def validate_authentication(
     repo_path: str = "",
     api_key: str | None = None,
     audit_logger: "ActivityLogger | None" = None,
+    tool_audit_logger: "ToolAuditLogger | None" = None,
 ) -> AuthValidationResult:
     """Validate user-supplied credentials by running the validate-authentication agent.
 
@@ -132,6 +134,7 @@ async def validate_authentication(
         prompt_variables={"AUTH_STATE_FILE": str(state_file)},
         structured_output_schema=AUTH_VALIDATION_SCHEMA,
         audit_logger=audit_logger,
+        tool_audit_logger=tool_audit_logger,
     )
 
     # 4. Classify structured output

@@ -77,6 +77,7 @@ async def test_recon_executor_delegates(mock_repo):
         api_key=None,
         pipeline_testing=False,
         audit_logger=None,
+        tool_audit_logger=None,
     )
 
 
