@@ -79,6 +79,17 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             )
             try:
                 result = await handle.result()
+            except Exception as e:
+                # Workflow-level failure: finalize the dashboard with a failed
+                # summary so the Live context closes cleanly, then re-raise so
+                # the CLI surfaces the error. (In-activity failures are already
+                # surfaced via log_error during the run; this covers workflow-
+                # level raises like browser-engine-unavailable / config-parse.)
+                await session.log_workflow_complete(_to_workflow_summary(
+                    BlackboxPipelineState(status="failed", errors=[str(e)]),
+                    int((time.monotonic() - scan_start) * 1000),
+                ))
+                raise
             finally:
                 clear_audit_session()
 
