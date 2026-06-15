@@ -99,6 +99,44 @@ async def poll_progress(
         await asyncio.sleep(interval_seconds)
 
 
+async def await_workflow_with_shutdown(
+    handle: Any,
+    ctrl: "ShutdownController",
+    *,
+    progress_type: Any = None,
+    total: int = 13,
+    cancel_grace_seconds: float = 15.0,
+) -> Any:
+    """在已注册的 ShutdownController 下等待 workflow 完成；被中断时协作式取消并抛 ScanCancelled。
+
+    调用方负责 ctrl 的 install/uninstall 生命周期。progress_type=None 时不启动
+    轮询（调用方用 Rich 仪表盘等其它进度展示代替 poll 打印）。
+    """
+    poll_task = (
+        asyncio.create_task(poll_progress(handle, progress_type=progress_type, total=total))
+        if progress_type is not None
+        else None
+    )
+    result_task = asyncio.ensure_future(handle.result())
+    shutdown_wait_task = asyncio.create_task(ctrl.wait())
+    try:
+        await asyncio.wait(
+            {result_task, shutdown_wait_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if ctrl.is_set():
+            await _do_cancel(handle, result_task, cancel_grace_seconds)
+            raise ScanCancelled()
+        return result_task.result()
+    finally:
+        for task in (poll_task, shutdown_wait_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+
 async def run_scan_graceful(
     *,
     temporal_address: str,
@@ -139,28 +177,15 @@ async def run_scan_graceful(
             id=workflow_id,
             task_queue=task_queue,
         )
-        poll_task = asyncio.create_task(
-            poll_progress(handle, progress_type=progress_type, total=progress_total)
-        )
-        result_task = asyncio.ensure_future(handle.result())
-        shutdown_wait_task = asyncio.create_task(ctrl.wait())
         try:
-            await asyncio.wait(
-                {result_task, shutdown_wait_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            return await await_workflow_with_shutdown(
+                handle,
+                ctrl,
+                progress_type=progress_type,
+                total=progress_total,
+                cancel_grace_seconds=cancel_grace_seconds,
             )
-            if ctrl.is_set():
-                await _do_cancel(handle, result_task, cancel_grace_seconds)
-                raise ScanCancelled()
-            return result_task.result()
         finally:
-            # result_task 故意不在此取消：
-            #   - 正常路径：已被上面的 result_task.result() 消费
-            #   - 取消路径：由 _do_cancel 的 wait_for 消费
-            for task in (poll_task, shutdown_wait_task):
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await task
             ctrl.uninstall()
 
 

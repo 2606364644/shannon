@@ -9,6 +9,7 @@ import pytest
 from shannon_core.runtime.scan_runner import (
     ScanCancelled,
     ShutdownController,
+    await_workflow_with_shutdown,
     poll_progress,
     run_scan_graceful,
 )
@@ -116,6 +117,37 @@ def _make_fake_worker():
     fake.__aenter__ = AsyncMock(return_value=fake)
     fake.__aexit__ = AsyncMock(return_value=False)
     return fake
+
+
+class TestAwaitWorkflowWithShutdown:
+    @pytest.mark.asyncio
+    async def test_no_poll_when_progress_type_is_none(self):
+        fake_handle = AsyncMock()
+        fake_handle.result = AsyncMock(return_value={"status": "completed"})
+        fake_handle.query = AsyncMock()
+        ctrl = ShutdownController()  # not set
+
+        result = await await_workflow_with_shutdown(fake_handle, ctrl, progress_type=None)
+
+        assert result == {"status": "completed"}
+        fake_handle.query.assert_not_awaited()  # 无 poll → 不查询进度
+
+    @pytest.mark.asyncio
+    async def test_poll_started_when_progress_type_given(self):
+        fake_handle = AsyncMock()
+        fake_handle.result = AsyncMock(return_value={"status": "completed"})
+
+        async def fake_sleep(seconds):
+            raise asyncio.CancelledError()  # poll 第一轮 sleep 即取消
+
+        ctrl = ShutdownController()
+        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+            result = await await_workflow_with_shutdown(
+                fake_handle, ctrl, progress_type=MagicMock(), total=7
+            )
+
+        assert result == {"status": "completed"}
+        fake_handle.query.assert_awaited_once()  # poll 跑了一轮查询
 
 
 class TestRunScanGracefulNormal:
