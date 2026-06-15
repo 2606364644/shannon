@@ -4,7 +4,7 @@
 >
 > **数据来源**：代码级核验（非仅文档），参考 `whitebox-refactoring-assessment.md` v7 但以实际代码为准。
 >
-> **日期**：2026-06-11（v2 复核更新：2026-06-13；v3 复核更新：2026-06-14）
+> **日期**：2026-06-11（v2 复核更新：2026-06-13；v3 复核更新：2026-06-14；v4 复核更新：2026-06-15）
 >
 > **更新要点**（基于 2026-06-10~11 代码变更）：
 > - EP-7 裁定修复：Phase 0 简化为 code index 审查 + 自动化置信度裁定（≥0.85 CONFIRMED / <0.50 REJECTED / 否则 NEEDS_REVIEW）；`run_save_adjudication` 已接入 pipeline 并注册 worker
@@ -22,7 +22,12 @@
 > - **EP-1 推翻**：确定性 `framework_analyzer.py`（274 行，注释明确 "ported from `framework-patterns.ts`"）已实现 finale-rest + epilogue 检测 + CRUD 端点推断（`/api/{Model}s` 与 `/api/{Model}s/:id` 模板 + vulnerability_patterns）；`run_framework_analysis` activity（`activities.py:463`）在 workflow 与前端映射并行调用（`workflows.py:163`）且 worker 已注册。原"无对应实现"判定错误
 > - **EP-2 推翻**：确定性 `frontend_mapper.py`（228 行）已实现 Angular/React/Vue 框架检测（读 `package.json`）+ per-framework 路由文件发现 + 路由解析 + XSS 链识别；`run_frontend_mapping` activity（`activities.py:491`）+ workflow 并行调用（`workflows.py:167`）+ worker 注册齐全；另有 `route_chain_builder.py`（110 行）/`attack_chain_builder.py`（39 行）补全路由→API 链构建。原"无对应实现"判定错误
 > - **EP-7/EP-10 再核验**：`worker.py` activity 列表（`worker.py:77-87`）已含 `run_merge_sink_reports`/`run_entry_point_fusion`/`run_save_adjudication`/`run_framework_analysis`/`run_frontend_mapping`/`run_route_chain_building`，5 个 entry-point 相关 activity 注册齐全
-> - **file_discovery 断路再确认**：`discover_security_files`（`__init__.py:82,247`）结果仅写入 `CodeIndex.file_manifest`，从未喂给入口点检测；四源 `merge_entry_points()` 仍无任何调用点（grep 全仓零命中）
+> - **file_discovery 断路再确认**：`discover_security_files`（`__init__.py:82,247`）结果仅写入 `CodeIndex.file_manifest`，从未喂给入口点检测；四源 `merge_entry_points()` 仍无**生产**调用点（仅定义于 `entry_point_fusion.py:20`，仅被单元测试直接调用；详见 v4 复核要点）
+>
+> **v4 复核要点**（2026-06-15，代码级复核）：
+> - **无实质代码变更**：自 v3（2026-06-14）以来，entry-point 相关文件（`code_index/`、`services/framework_analyzer.py`/`frontend_mapper.py`、`pipeline/activities.py`/`workflows.py`、`worker.py`、`prompts/recon.txt`、`prompts/pre-recon-code.txt`、`shared/_endpoint-security-context.txt`）**零提交**；2026-06-15 的近期提交集中于 audit/logging（`workflow_logger`、`SessionToolAuditLogger`、shutdown），与入口点识别无关。v3 全部技术结论持续有效，无需推翻或下调任何差距项。
+> - **`merge_entry_points()` 表述精确化**：该四源函数在生产代码中**仅定义、无调用**（`entry_point_fusion.py:20` 定义；`__init__.py` 的 `run_entry_point_fusion` 走 2 源合并、未调四源函数），仅被 `tests/code_index/test_entry_point_fusion.py` 直接调用。原 v3「grep 全仓零命中」表述过强，已修正为「生产代码无调用点」。
+> - **新增第 5 节「已知覆盖盲区与维度补遗」**：扩展分析维度，识别出非 HTTP 入口（gRPC/WebSocket/Kafka/SQS/cron/GraphQL resolver/Lambda）属**原始 TS 与重构共同盲区**（确定性层与 LLM prompt 均未显式覆盖，非重构差距）、动态路由为确定性方法的结构性局限；并补录测试覆盖（6 个测试文件齐全）作为「可测试」论点的正面佐证，及三项「定性待深化」项。
 >
 > **Sink 点差距分析**：见 `docs/gap/sink-gap-analysis-v2.md`
 
@@ -84,7 +89,7 @@
 | EP-7 | ~~入口裁定把关~~ | LLM 两层裁定 | ✅ **已修复**：Phase 0 简化 + 自动化置信度裁定（CONFIRMED/REJECTED/NEEDS_REVIEW） | ~~中~~→✅ 已修复 |
 | EP-8 | ~~共享 handler 分组 (recon 4.1)~~ | 路由映射 agent 专门识别 | ✅ **已恢复**：`recon.txt:256`「Shared Controller Route Groups」+ Route Mapper Agent group detection（`:162`） | ~~高~~ → ✅ 已恢复（v2 推翻） |
 | EP-9 | ~~端点安全上下文 (recon 4.2)~~ | 完整 auth/middleware/framework 上下文 | ✅ **已恢复**：`recon.txt:295` + `shared/_endpoint-security-context.txt`（91 行，@include 于 `:46`） | ~~高~~ → ✅ 已恢复（v2 推翻） |
-| EP-10 | 多源融合 | — | ✅ **worker 注册已补**（2026-06-13）：`run_entry_point_fusion` activity（`activities.py:247`）+ workflow 调用（`workflows.py:146`）+ worker 注册齐全，两源融合运行时生效；仅余四源 `merge_entry_points()` 已编码但从未被调用（`schema_eps`/`convention_eps` 未生成） | ~~中~~ → **低（仅四源未接入）** |
+| EP-10 | 多源融合 | — | ✅ **worker 注册已补**（2026-06-13）：`run_entry_point_fusion` activity（`activities.py:247`）+ workflow 调用（`workflows.py:146`）+ worker 注册齐全，两源融合运行时生效；仅余四源 `merge_entry_points()` 已编码但从未在生产管线中被调用（`schema_eps`/`convention_eps` 未生成；详见 v4 复核要点） | ~~中~~ → **低（仅四源未接入）** |
 | EP+1 | 角色架构/权限格 | 无 | Section 7 完整角色层级 | 重构新增 ✨ |
 | EP+2 | 授权候选三维预排序 | 无 | Section 8 水平/垂直/上下文 | 重构新增 ✨ |
 | EP+3 | Guard 分类语义 | 无 | Section 6.4 五类 guard | 重构新增 ✨ |
@@ -95,7 +100,60 @@
 
 ---
 
-## 5. 关键代码路径索引
+## 5. 已知覆盖盲区与维度补遗
+
+> v4 复核扩展出的维度。多数为**原始 TS 与重构的共同盲区**（不构成「重构差距」，故不纳入第 4 节矩阵），另含此前未单独核验的定性项。
+
+### 5.1 非 HTTP 入口的共同盲区
+
+`EntryPoint.entry_type` 注释（`models.py:53`）声明 `"http_route" | "rpc" | "cli" | "message_consumer" | ...`，但确定性层**实际仅产出两类**：
+
+| 层 | 已覆盖 | 缺口 |
+|---|---|---|
+| 确定性层（`entry_points.py`） | `http_route`（4 条 Python 规则）+ `message_consumer`（Celery `@shared_task` / Java `@RabbitListener`） | `rpc`/`cli` 注释有、检测器无 |
+| LLM 层（`pre-recon-code.txt:132`） | API endpoints / web routes / webhooks / file uploads / schema 文件 | 未显式列 gRPC/WS/Kafka/cron/resolver |
+
+**两边均未覆盖**（核对：原始 TS `apps/worker/prompts/` + `framework-patterns.ts` 亦零命中，属共同盲区而非重构差距）：
+
+- **gRPC service** 方法（proto `service` + impl）
+- **WebSocket / SSE handler**（`@app.websocket` / `socket.on`）
+- **Kafka / SQS consumer**（`@KafkaListener` / `confluent_kafka.Consumer`）
+- **Lambda / FaaS handler**（`def handler(event, context)`）
+- **定时任务**（Spring `@Scheduled` / APScheduler / cron 驱动）
+- **GraphQL resolver**（`@Query`/`@Mutation`/`@Resolver`——schema 文件覆盖定义，但 resolver 函数本身未作入口）
+
+**定性**：共同盲区；`entry_type` 注释的 `rpc`/`cli` 暴露了未实现的检测意图。明确划界以避免「入口点 = Web 路由」的窄化误读。
+
+### 5.2 动态 / 运行时入口点（确定性方法的结构性局限）
+
+AST/regex 对**静态注册**路由可靠，但天然看不到：配置/数据驱动的路由表（从 DB、YAML 加载）、反射/动态注册（`add_url_rule` 循环、装饰器工厂批量生成）、运行时由中间件/plugin 注入的端点。原始 TS 的 LLM agent 方式有概率通过 Read 推断部分动态路由，重构确定性层**结构上无法发现**——这是「重构更可靠」叙事的反面，此前未定性。
+
+### 5.3 测试覆盖（补遗：正面佐证）
+
+文档以「可测试、可复现」为重构优势，此前未核验测试存在性。实际**齐全**：
+
+| 测试文件 | 覆盖 |
+|---|---|
+| `tests/code_index/test_entry_points.py` | 各框架 regex 检测 |
+| `tests/code_index/test_entry_point_fusion.py` | 四源 `merge_entry_points` + 2 源 pipeline 合并 |
+| `tests/test_framework_analyzer.py` | finale-rest/epilogue CRUD 推断 |
+| `tests/test_frontend_mapper.py` | Angular/React/Vue 路由解析 |
+| `tests/test_route_chain_builder.py` | 路由→API 链构建 |
+| `tests/code_index/test_file_discovery.py` | schema 文件分类 |
+
+「可测试」由声明转为证据；亦解释了 `merge_entry_points()` 为何仅被单元测试调用（见 v4 复核要点）。
+
+### 5.4 定性待深化项
+
+| 项 | 当前定性 | 待深化 |
+|---|---|---|
+| 2 源融合去重 | EP-10「四源未接入」 | 已生效的 `func_block_id` 去重对 LLM 发现的**无函数锚点**入口（如 webhook）如何合并？路径归一化（trailing slash / 参数命名）是否处理？ |
+| EP-5 认证粒度 | 「部分解决 / 中」 | 原始给 auth 中间件链 + 参数完整性 + 框架来源；重构仅 `public/required/unknown` 三态字符串，粒度差距或 >「中」，且直接影响 pre-auth 路由优先级 |
+| 入口→Sink 下游契约 | 仅交叉引用 | `entry_points.json` / 裁定产物如何被调用链/sink 阶段消费的契约未交代 |
+
+---
+
+## 6. 关键代码路径索引
 
 ### 原始 Shannon (TS)
 
@@ -129,7 +187,7 @@
 
 ---
 
-## 6. 交叉参考
+## 7. 交叉参考
 
 - `docs/whitebox-refactoring-assessment.md` — 全维度评估（Sink/入口/漏洞 + 调用链/传播/prompt diff）
 - `docs/gap/sink-gap-analysis-v2.md` — Sink 点差距分析（XXE/路径穿越/文件读取修正版）
