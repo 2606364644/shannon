@@ -35,7 +35,9 @@ async def test_run_scan_persists_session_data(tmp_path):
     mock_worker.__aexit__ = AsyncMock(return_value=None)
 
     with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", return_value=mock_worker):
+         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("shannon_whitebox.worker.ShutdownController.install"), \
+         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
         from shannon_whitebox.worker import run_scan
         result = await run_scan(input, "localhost:7233")
 
@@ -83,7 +85,9 @@ async def test_run_scan_uses_dynamic_task_queue(tmp_path):
         return mock_worker
 
     with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", side_effect=capture_worker):
+         patch("shannon_whitebox.worker.Worker", side_effect=capture_worker), \
+         patch("shannon_whitebox.worker.ShutdownController.install"), \
+         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
         from shannon_whitebox.worker import run_scan
         await run_scan(input, "localhost:7233")
 
@@ -93,3 +97,33 @@ async def test_run_scan_uses_dynamic_task_queue(tmp_path):
     suffix = captured_task_queue.removeprefix("shannon-py-wb-")
     assert len(suffix) == 8
     int(suffix, 16)  # must be valid hex
+
+
+@pytest.mark.asyncio
+async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path):
+    """run_scan should return {"status": "cancelled"} when the workflow is interrupted."""
+    from shannon_core.runtime.scan_runner import ScanCancelled
+    from shannon_whitebox.worker import run_scan
+
+    repo = tmp_path / "target-repo"
+    repo.mkdir()
+    input = PipelineInput(repo_path=str(repo), workspace_name="ws-cancel")
+
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=AsyncMock())
+    mock_worker = AsyncMock()
+    mock_worker.__aenter__ = AsyncMock(return_value=None)
+    mock_worker.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("shannon_whitebox.worker.ShutdownController.install"), \
+         patch("shannon_whitebox.worker.ShutdownController.uninstall"), \
+         patch("shannon_whitebox.worker.await_workflow_with_shutdown",
+               AsyncMock(side_effect=ScanCancelled())), \
+         patch("shannon_whitebox.audit.session_registry.clear_audit_session") as mock_clear:
+        result = await run_scan(input, "localhost:7233")
+
+    assert result == {"status": "cancelled"}
+    mock_clear.assert_called()  # 清理在 cancel 路径仍执行
+

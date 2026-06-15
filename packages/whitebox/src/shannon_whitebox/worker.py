@@ -32,6 +32,11 @@ from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
 from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_core.services.temporal_infra import generate_task_queue
+from shannon_core.runtime.scan_runner import (
+    ScanCancelled,
+    ShutdownController,
+    await_workflow_with_shutdown,
+)
 
 TASK_QUEUE_PREFIX = "shannon-py-wb"
 
@@ -76,56 +81,67 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         output_path=str(resolve_workspaces_dir(input.repo_path)),
     )
 
-    async with worker:
-        async with run_with_display(meta, use_rich=use_rich) as session:
-            from shannon_whitebox.audit.session_registry import (
-                set_audit_session, clear_audit_session,
-            )
-            set_audit_session(session)
-            scan_start = time.monotonic()
-            try:
-                handle = await client.start_workflow(
-                    WhiteboxScanWorkflow.run,
-                    input,
-                    id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
-                    task_queue=task_queue,
+    ctrl = ShutdownController()
+    ctrl.install(asyncio.get_running_loop())
+    try:
+        async with worker:
+            async with run_with_display(meta, use_rich=use_rich) as session:
+                from shannon_whitebox.audit.session_registry import (
+                    set_audit_session, clear_audit_session,
                 )
-                result = await handle.result()
-            finally:
-                clear_audit_session()
+                set_audit_session(session)
+                scan_start = time.monotonic()
+                try:
+                    handle = await client.start_workflow(
+                        WhiteboxScanWorkflow.run,
+                        input,
+                        id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
+                        task_queue=task_queue,
+                    )
+                    try:
+                        # progress_type=None: Rich 仪表盘已负责进度展示，不重复 poll 打印。
+                        result = await await_workflow_with_shutdown(
+                            handle, ctrl, cancel_grace_seconds=15.0,
+                        )
+                    except ScanCancelled:
+                        return {"status": "cancelled"}
+                finally:
+                    clear_audit_session()
 
-            # Emit the final summary so the Rich summary table / dashboard
-            # finalization fires. Build it from the PipelineState result.
-            status = result.status if isinstance(result.status, str) and result.status in ("completed", "failed", "cancelled") else "failed"
-            agent_metrics_summary = {
-                name: AgentMetricsSummary(
-                    duration_ms=int(m.get("duration_ms", 0) or 0),
-                    cost_usd=m.get("cost_usd"),
+                # Emit the final summary so the Rich summary table / dashboard
+                # finalization fires. Build it from the PipelineState result.
+                status = result.status if isinstance(result.status, str) and result.status in ("completed", "failed", "cancelled") else "failed"
+                agent_metrics_summary = {
+                    name: AgentMetricsSummary(
+                        duration_ms=int(m.get("duration_ms", 0) or 0),
+                        cost_usd=m.get("cost_usd"),
+                    )
+                    for name, m in (result.agent_metrics or {}).items()
+                }
+                summary = WorkflowSummary(
+                    status=status,
+                    total_duration_ms=int((time.monotonic() - scan_start) * 1000),
+                    total_cost_usd=sum((am.cost_usd or 0.0) for am in agent_metrics_summary.values()),
+                    completed_agents=list(result.completed_agents or []),
+                    agent_metrics=agent_metrics_summary,
+                    error=(result.errors[0] if result.errors else None),
                 )
-                for name, m in (result.agent_metrics or {}).items()
-            }
-            summary = WorkflowSummary(
-                status=status,
-                total_duration_ms=int((time.monotonic() - scan_start) * 1000),
-                total_cost_usd=sum((am.cost_usd or 0.0) for am in agent_metrics_summary.values()),
-                completed_agents=list(result.completed_agents or []),
-                agent_metrics=agent_metrics_summary,
-                error=(result.errors[0] if result.errors else None),
-            )
-            await session.log_workflow_complete(summary)
+                await session.log_workflow_complete(summary)
 
-            result_dict = asdict(result) if not isinstance(result, dict) else dict(result)
-            result_dict["workspace_name"] = input.workspace_name
-            result_dict["web_url"] = input.web_url
+                result_dict = asdict(result) if not isinstance(result, dict) else dict(result)
+                result_dict["workspace_name"] = input.workspace_name
+                result_dict["web_url"] = input.web_url
 
-            workspaces_dir = resolve_workspaces_dir(input.repo_path)
-            if input.workspace_name:
-                result_dict["deliverables_path"] = str(
-                    workspaces_dir / input.workspace_name / input.deliverables_subdir)
-            else:
-                result_dict["deliverables_path"] = str(
-                    Path(input.repo_path) / input.deliverables_subdir)
-            return result_dict
+                workspaces_dir = resolve_workspaces_dir(input.repo_path)
+                if input.workspace_name:
+                    result_dict["deliverables_path"] = str(
+                        workspaces_dir / input.workspace_name / input.deliverables_subdir)
+                else:
+                    result_dict["deliverables_path"] = str(
+                        Path(input.repo_path) / input.deliverables_subdir)
+                return result_dict
+    finally:
+        ctrl.uninstall()
 
 
 def main():
