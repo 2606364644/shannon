@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -10,64 +11,80 @@ from .pipeline.activities import (
     run_exploit_agent,
     assemble_report,
     run_report_agent,
+    log_phase_start_activity,
+    log_phase_complete_activity,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
-from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
+from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_core.services.temporal_infra import generate_task_queue
+from shannon_core.models.metrics import SessionMetadata
+from shannon_core.models.audit import AgentMetricsSummary, WorkflowSummary
+from shannon_core.audit.display_lifecycle import run_with_display
+from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
 
 TASK_QUEUE_PREFIX = "shannon-py-bb"
 
 
-async def poll_workflow_progress(handle, interval_seconds: int = 30) -> None:
-    """Periodically query workflow progress and print status to console."""
-    while True:
-        try:
-            progress = await handle.query("PipelineProgress", result_type=PipelineProgress)
-            elapsed = int(progress.elapsed_ms / 1000)
-            phase = progress.current_phase or "unknown"
-            agent = progress.current_agent or "none"
-            completed = len(progress.completed_agents)
-            print(f"[{elapsed}s] Phase: {phase} | Agent: {agent} | Completed: {completed}/13")
-        except Exception:
-            pass  # Workflow may have completed
-        await asyncio.sleep(interval_seconds)
+def _to_workflow_summary(result: BlackboxPipelineState, total_duration_ms: int) -> WorkflowSummary:
+    status = result.status if result.status in ("completed", "failed", "cancelled") else "failed"
+    return WorkflowSummary(
+        status=status,  # type: ignore[arg-type]
+        total_duration_ms=total_duration_ms,
+        total_cost_usd=sum((m.get("cost_usd") or 0.0) for m in result.agent_metrics.values()),
+        completed_agents=list(result.completed_agents),
+        agent_metrics={
+            name: AgentMetricsSummary(
+                duration_ms=int(m.get("duration_ms") or 0),
+                cost_usd=m.get("cost_usd"),
+            )
+            for name, m in result.agent_metrics.items()
+        },
+        error=result.errors[-1] if result.errors else None,
+    )
 
 
-async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233") -> BlackboxPipelineState:
+async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233",
+                   use_rich: bool = False) -> BlackboxPipelineState:
     client = await Client.connect(temporal_address)
-
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
 
     worker = Worker(
         client=client,
         task_queue=task_queue,
         workflows=[BlackboxScanWorkflow],
-        activities=[run_blackbox_preflight, run_blackbox_auth_validation, run_recon, run_exploit_agent, assemble_report, run_report_agent],
+        activities=[
+            run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
+            run_exploit_agent, assemble_report, run_report_agent,
+            log_phase_start_activity, log_phase_complete_activity,
+        ],
+    )
+
+    meta = SessionMetadata(
+        id=input.workspace_name or "blackbox-scan",
+        web_url=input.web_url,
+        repo_path=input.repo_path,
+        output_path=str(resolve_workspaces_dir(input.repo_path)),
     )
 
     async with worker:
-        handle = await client.start_workflow(
-            BlackboxScanWorkflow.run,
-            input,
-            id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
-            task_queue=task_queue,
-        )
-        poll_task = asyncio.create_task(poll_workflow_progress(handle))
-        try:
-            result = await handle.result()
-            poll_task.cancel()
+        async with run_with_display(meta, use_rich=use_rich) as session:
+            set_audit_session(session)
+            scan_start = time.monotonic()
+            handle = await client.start_workflow(
+                BlackboxScanWorkflow.run,
+                input,
+                id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
+                task_queue=task_queue,
+            )
             try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
+                result = await handle.result()
+            finally:
+                clear_audit_session()
+
+            total_duration_ms = int((time.monotonic() - scan_start) * 1000)
+            await session.log_workflow_complete(_to_workflow_summary(result, total_duration_ms))
             return result
-        except Exception:
-            poll_task.cancel()
-            try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
-            raise
 
 
 def main():
