@@ -37,6 +37,9 @@ async def run_combined_scan(
 
     wb_result = await run_whitebox_scan(wb_input, temporal_address)
 
+    if wb_result.get("status") == "cancelled":
+        return {"status": "cancelled", "phase": "whitebox"}
+
     if wb_result.get("status") != "completed":
         return {
             "status": "failed",

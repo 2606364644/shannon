@@ -55,3 +55,22 @@ async def test_run_combined_scan_stops_on_whitebox_failure():
     mock_wb.assert_called_once()
     mock_bb.assert_not_called()
     assert result["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_whitebox_cancelled_short_circuits_before_blackbox():
+    """If whitebox is cancelled, the combined scan returns cancelled and
+    does not run blackbox."""
+    with (
+        patch("shannon_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value={"status": "cancelled"}) as mock_wb,
+        patch("shannon_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock) as mock_bb,
+    ):
+        result = await run_combined_scan(
+            repo_path="/data/repos/myrepo",
+            url="https://example.com",
+            temporal_address="localhost:7233",
+        )
+
+    mock_wb.assert_called_once()
+    mock_bb.assert_not_called()  # 关键：blackbox 阶段未执行
+    assert result == {"status": "cancelled", "phase": "whitebox"}

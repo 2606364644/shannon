@@ -40,7 +40,10 @@ def scan(repo, url, config_path, pipeline_testing, temporal_address):
         pipeline_testing=pipeline_testing,
     ))
 
-    if result.get("status") == "completed":
+    if result.get("status") == "cancelled":
+        click.echo("Scan cancelled.")
+        raise SystemExit(130)
+    elif result.get("status") == "completed":
         wb_ws = result.get("whitebox_workspace", "unknown")
         classes = result.get("found_whitebox_classes", [])
         if classes:

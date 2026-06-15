@@ -39,3 +39,19 @@ def test_scan_calls_orchestrator():
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "completed" in result.output.lower()
+
+
+def test_scan_exits_130_on_cancelled():
+    """When the combined scan is cancelled, the CLI should print a message and exit 130."""
+    async def fake_combined(*args, **kwargs):
+        return {"status": "cancelled", "phase": "whitebox"}
+
+    with (
+        patch("shannon_combined.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_combined.orchestrator.run_combined_scan", side_effect=fake_combined),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["scan", "--repo", "/tmp/repo", "--url", "https://example.com"])
+
+    assert result.exit_code == 130
+    assert "Scan cancelled." in result.output
