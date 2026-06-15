@@ -131,7 +131,10 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
     import sys
     use_rich = sys.stdout.isatty() and not plain
     result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
-    if result.status == "completed":
+    if result.status == "cancelled":
+        click.echo("Scan cancelled.")
+        raise SystemExit(130)
+    elif result.status == "completed":
         if result.has_whitebox_results:
             classes = result.found_whitebox_classes
             click.echo(f"Scan completed (leveraged whitebox results for: {', '.join(classes)})")

@@ -590,3 +590,21 @@ def test_workspace_clean_cancelled(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
     assert (ws / "workflow.log").exists()
+
+
+def test_start_exits_130_on_cancelled():
+    """When the scan is cancelled, the CLI should print a message and exit 130."""
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        return BlackboxPipelineState(status="cancelled")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_blackbox.cli.main.find_workspaces_by_url", return_value=[]),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
+
+    assert result.exit_code == 130
+    assert "Scan cancelled." in result.output
