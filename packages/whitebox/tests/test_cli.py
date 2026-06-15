@@ -74,7 +74,7 @@ def test_start_calls_ensure_infra():
     async def fake_ensure(*a, **kw):
         pass
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return {"status": "completed"}
 
     with (
@@ -95,7 +95,7 @@ def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
     async def fake_ensure(*a, **kw):
         pass
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return {"status": "completed", "workspace_name": "myapp-20260603-143022"}
 
     with (
@@ -119,7 +119,7 @@ def test_start_shows_deliverables_path(tmp_path, monkeypatch):
     async def fake_ensure(*a, **kw):
         pass
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return {
             "status": "completed",
             "workspace_name": "myapp-20260603-143022",
@@ -234,7 +234,7 @@ def test_start_shows_results_summary(tmp_path, monkeypatch):
     async def fake_ensure(*a, **kw):
         pass
 
-    async def fake_run_scan(input, temporal_address):
+    async def fake_run_scan(input, temporal_address, use_rich=False):
         return {
             "status": "completed",
             "workspace_name": "myapp-summary-ws",
@@ -416,3 +416,20 @@ def test_workspace_clean_cancelled(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
     assert (ws / "workflow.log").exists()
+
+
+def test_start_exits_130_on_cancelled():
+    """When the scan is cancelled, the CLI should print a message and exit 130."""
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch(
+            "shannon_whitebox.worker.run_scan",
+            new=AsyncMock(return_value={"status": "cancelled"}),
+        ),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
+
+    assert result.exit_code == 130
+    assert "Scan cancelled." in result.output

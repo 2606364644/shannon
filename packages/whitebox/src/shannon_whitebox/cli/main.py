@@ -50,7 +50,10 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     import sys
     use_rich = sys.stdout.isatty() and not plain
     result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
-    if result.get("status") == "completed":
+    if result.get("status") == "cancelled":
+        click.echo("Scan cancelled.")
+        raise SystemExit(130)
+    elif result.get("status") == "completed":
         ws_name = result.get("workspace_name", "unknown")
         deliverables_path = result.get("deliverables_path", "")
         web_url = result.get("web_url", "<target-url>")
