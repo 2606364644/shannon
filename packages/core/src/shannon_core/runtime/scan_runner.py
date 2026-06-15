@@ -129,6 +129,8 @@ async def await_workflow_with_shutdown(
             raise ScanCancelled()
         return result_task.result()
     finally:
+        # result_task 不在此取消：正常路径已由 result_task.result() 消费，
+        # 取消路径由 _do_cancel 的 wait_for 消费（wait_for 超时也会取消 result_task）。
         for task in (poll_task, shutdown_wait_task):
             if task is None:
                 continue

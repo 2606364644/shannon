@@ -149,6 +149,25 @@ class TestAwaitWorkflowWithShutdown:
         assert result == {"status": "completed"}
         fake_handle.query.assert_awaited_once()  # poll 跑了一轮查询
 
+    @pytest.mark.asyncio
+    async def test_raises_scan_cancelled_when_shutdown_triggered(self):
+        fake_handle = AsyncMock()
+        # result 永不自然完成 → 必须靠取消路径
+        fake_handle.result = MagicMock(
+            return_value=asyncio.get_running_loop().create_future()
+        )
+        fake_handle.cancel = AsyncMock()
+
+        triggered = ShutdownController()
+        triggered._event.set()  # 预置：中断已发生
+
+        with pytest.raises(ScanCancelled):
+            await await_workflow_with_shutdown(
+                fake_handle, triggered, cancel_grace_seconds=0.01
+            )
+
+        fake_handle.cancel.assert_awaited_once()
+
 
 class TestRunScanGracefulNormal:
     @pytest.mark.asyncio
