@@ -66,6 +66,11 @@ class BlackboxScanWorkflow:
         )
 
         await workflow.execute_activity(
+            activities.log_phase_start_activity,
+            BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "preflight"}),
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        await workflow.execute_activity(
             activities.run_blackbox_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
             retry_policy=PREFLIGHT_RETRY,
@@ -106,6 +111,11 @@ class BlackboxScanWorkflow:
         # Auth validation when config is present
         if input.config_path:
             await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "auth-validation"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            await workflow.execute_activity(
                 activities.run_blackbox_auth_validation, act_input,
                 start_to_close_timeout=timedelta(minutes=10),
                 retry_policy=AUTH_VALIDATION_RETRY,
@@ -143,6 +153,11 @@ class BlackboxScanWorkflow:
                 )
 
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "recon-blackbox"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
                 self._state.current_phase = "recon-blackbox"
                 self._state.current_agent = AgentName.RECON_BLACKBOX.value
                 recon_input = BlackboxActivityInput(**{**act_input.__dict__})
@@ -156,6 +171,11 @@ class BlackboxScanWorkflow:
                 self._state.current_agent = None
 
             if input.exploit:
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "exploitation"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
                 self._state.current_phase = "exploitation"
                 self._state.current_agent = "pipelines"
                 # Queue gating: validate queue files before scheduling exploit agents
@@ -265,6 +285,11 @@ class BlackboxScanWorkflow:
 
                     logger.info(format_exploit_summary(outcomes))
 
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
             self._state.current_phase = "reporting"
             self._state.current_agent = "assemble-report"
             await workflow.execute_activity(

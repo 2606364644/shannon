@@ -12,7 +12,6 @@ from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.utils.paths import resolve_deliverables_path
-from shannon_core.logging import create_activity_logger
 
 from .shared import BlackboxActivityInput
 
@@ -68,15 +67,24 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
 
 @activity.defn
 async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
+    from shannon_core.audit.session_registry import get_audit_session
+    from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from shannon_core.models.audit import AgentEndResult
+    from shannon_core.models.agents import AgentName
+
+    agent_name = AgentName.VALIDATE_AUTH
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session)
+    agent_start = time.monotonic()
     try:
         from shannon_core.services.validate_authentication import validate_authentication
-        from shannon_core.prompts.manager import PromptManager
-        from shannon_core.agents.executor import AgentExecutor
 
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
 
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         result = await validate_authentication(
             web_url=input.web_url,
             config_path=input.config_path,
@@ -85,8 +93,11 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             executor=executor,
             repo_path=input.repo_path or "",
             api_key=input.api_key,
-            audit_logger=create_activity_logger(),
+            tool_audit_logger=tool_audit_logger,
         )
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True, duration_ms=int((time.monotonic() - agent_start) * 1000),
+            cost_usd=0.0, attempt_number=attempt))
         if not result.success:
             raise PentestError(
                 f"Authentication validation failed: {result.failure_detail or 'unknown'}",
@@ -95,9 +106,17 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
                 error_code=ErrorCode.AUTH_LOGIN_FAILED,
             )
     except PentestError as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        await session.log_error(e, context=agent_name.value)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -314,3 +333,17 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def log_phase_start_activity(input: BlackboxActivityInput) -> None:
+    from shannon_core.audit.session_registry import get_audit_session
+    phase = input.workspace_name or "unknown"
+    await get_audit_session().log_phase_start(phase)
+
+
+@activity.defn
+async def log_phase_complete_activity(input: BlackboxActivityInput) -> None:
+    from shannon_core.audit.session_registry import get_audit_session
+    phase = input.workspace_name or "unknown"
+    await get_audit_session().log_phase_complete(phase)
