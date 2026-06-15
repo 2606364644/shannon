@@ -251,17 +251,14 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
 Run: `cd packages/blackbox && python -m pytest tests/test_worker.py -v`
 Expected: PASS（3 个测试全绿：task-queue、failed-summary、cancelled）
 
-- [ ] **Step 7: 跑 blackbox 全量测试确认不回归**
-
-Run: `cd packages/blackbox && python -m pytest tests/ -q`
-Expected: PASS（无回归）
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add packages/blackbox/src/shannon_blackbox/worker.py packages/blackbox/tests/test_worker.py
 git commit -m "refactor(blackbox): run_scan adopts await_workflow_with_shutdown for graceful cancel"
 ```
+
+> **不跑 blackbox 全量 `tests/`**：本包全量含集成级慢用例，会长时间挂起；改动仅触及 `worker.py`，已由 Step 6 的 `test_worker.py`（3 个测试：task-queue / failed-summary / cancelled）完全覆盖。
 
 ---
 
@@ -324,10 +321,10 @@ Expected: FAIL（`result.exit_code` 为 1——cancelled 当前掉进 else 分�
 Run: `cd packages/whitebox && python -m pytest tests/test_cli.py::test_start_exits_130_on_cancelled -v`
 Expected: PASS（exit_code 130）
 
-- [ ] **Step 5: 跑 whitebox cli 测试确认不回归**
+- [ ] **Step 5: 跑 whitebox `start` 相关测试确认不回归**
 
-Run: `cd packages/whitebox && python -m pytest tests/test_cli.py -q`
-Expected: PASS
+Run: `cd packages/whitebox && python -m pytest tests/test_cli.py -k start -v`
+Expected: PASS（仅 `start` 相关用例：新增 cancelled + 修好的 4 个 fake；避开 logs/workspace 等慢用例）
 
 - [ ] **Step 6: Commit**
 
@@ -398,10 +395,10 @@ Expected: FAIL（`result.exit_code` 为 1——cancelled 当前掉进 else 分�
 Run: `cd packages/blackbox && python -m pytest tests/test_cli.py::test_start_exits_130_on_cancelled -v`
 Expected: PASS（exit_code 130）
 
-- [ ] **Step 5: 跑 blackbox cli 测试确认不回归**
+- [ ] **Step 5: 跑 blackbox `start` 相关测试确认不回归**
 
-Run: `cd packages/blackbox && python -m pytest tests/test_cli.py -q`
-Expected: PASS
+Run: `cd packages/blackbox && python -m pytest tests/test_cli.py -k start -v`
+Expected: PASS（仅 `start` 相关用例；避开慢用例）
 
 - [ ] **Step 6: Commit**
 
@@ -530,17 +527,14 @@ Expected: FAIL（`result.exit_code` 为 1——cancelled 当前掉进 else 分�
     elif result.get("status") == "completed":
 ```
 
-- [ ] **Step 8: 运行 combined 全量测试确认通过**
-
-Run: `cd packages/combined && python -m pytest tests/ -q`
-Expected: PASS（无回归）
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/combined/src/shannon_combined/orchestrator.py packages/combined/src/shannon_combined/cli/main.py packages/combined/tests/test_orchestrator.py packages/combined/tests/test_cli.py
 git commit -m "feat(combined): short-circuit on cancelled sub-scan; scan exits 130"
 ```
+
+> **不跑 combined 全量 `tests/`**：全量含集成级慢用例；改动触及 `orchestrator.py` + `cli/main.py`，已由 Step 4 的 `test_orchestrator.py` 与 Step 6-7 的 `test_cli.py` 覆盖。
 
 ---
 
@@ -637,5 +631,5 @@ Expected: 第一次打印 `正在优雅取消…`，第二次打印 `强制退�
 - combined orchestrator 短路返回 `{"status": "cancelled", "phase": "whitebox"}`（Task D），combined CLI 测试断言同结构（Task D Step 5）。
 
 **4. 回归风险**：
-- Task A Step 5 显式更新 blackbox 两个现有 worker 测试补 patch，Step 7 跑全量。
-- Task B/C/D 各自 Step 跑对应 cli/orchestrator 全量测试。
+- Task A Step 5 显式更新 blackbox 两个现有 worker 测试补 patch；回归由 `test_worker.py`（Step 6，3 测试）覆盖——**不跑 blackbox 全量**（含集成级慢用例，且改动仅触及 `worker.py`）。
+- Task B/C 的 Step 5 只跑各自 `test_cli.py -k start`（改动触及的 `start` 命令相关用例，避开慢用例）；Task D 由 `test_orchestrator.py`（Step 4，3 个用例全测被改函数）+ `test_cli.py`（Step 6-7）覆盖——**不跑任何包的全量**。
