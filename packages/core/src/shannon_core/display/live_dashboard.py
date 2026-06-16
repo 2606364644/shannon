@@ -1,12 +1,18 @@
-"""LiveDashboardRenderer — bottom dashboard renderer for the live scan.
+"""LiveDashboardRenderer — bottom status-line renderer for the live scan.
 
 Dual role:
   * dispatcher Renderer: async render(event) folds the event into a new
     immutable DashboardState snapshot via atomic reference swap.
-  * Rich renderable: __rich_console__ builds the dashboard from the latest
-    snapshot + live elapsed. Rich's Live refresh thread re-invokes
-    __rich_console__ each tick, so the dashboard animates between events
+  * Rich renderable: __rich_console__ builds a single compact status line from
+    the latest snapshot + live elapsed. Rich's Live refresh thread re-invokes
+    __rich_console__ each tick, so the status line animates between events
     (spinner frames, ticking elapsed) without any per-event update call.
+
+The status line carries: phase · completed-count · elapsed · cost, with the
+currently-running agent(s) + spinner appended. A full-width dim rule sits
+above it to separate it from the scrolling log region. This replaces the former
+expand-to-width multi-row agent table (which stretched short tokens into big
+gaps) and the hardcoded 60-char separator (which never matched terminal width).
 
 Concurrency: _snapshot is mutated only on the event-loop thread (under the
 dispatcher's lock) via atomic assignment; the Live refresh thread reads it.
@@ -17,17 +23,14 @@ from __future__ import annotations
 
 import time
 
-from rich.console import Console, ConsoleOptions, RenderResult
+from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from shannon_core.display.dashboard_state import AgentRow, DashboardState
+from shannon_core.display.dashboard_state import DashboardState
 from shannon_core.display.events import DisplayEvent
-from shannon_core.display.formatters import agent_prefix, format_duration
-
-_DONE = "✓"
-_FAILED = "✗"
+from shannon_core.display.formatters import format_duration
 
 
 class LiveDashboardRenderer:
@@ -44,46 +47,27 @@ class LiveDashboardRenderer:
         self._snapshot = self._snapshot.apply(event)
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        yield self._render()
+        yield self._render(options)
 
-    def _render(self) -> Table:
+    def _render(self, options: ConsoleOptions) -> Group:
         snap = self._snapshot
-        elapsed = int(time.monotonic() - self._start_monotonic)
+        elapsed = format_duration(int(time.monotonic() - self._start_monotonic) * 1000)
+        running = [r for r in snap.agents.values() if r.status == "running"]
 
-        top = Table.grid(expand=True, padding=(0, 1))
-        phase = snap.current_phase or "—"
-        top.add_row(
-            Text(f"Phase: {phase}", style="bold cyan"),
-            Text(f"{snap.completed_count} done", style="green"),
-            Text(f"{elapsed}s"),
-            Text(f"${snap.total_cost:.4f}"),
+        cells: list = [
+            Text(snap.current_phase or "—", style="bold cyan"),
+            Text(f" · {snap.completed_count} done", style="green"),
+            Text(f" · {elapsed}"),
+            Text(f" · ${snap.total_cost:.4f}", style="yellow"),
+        ]
+        if running:
+            cells += [Text("    "), Spinner("dots"),
+                      Text(" " + " · ".join(r.name for r in running), style="blue")]
+
+        row = Table.grid()  # expand=False: cells take natural width, no big gaps
+        row.add_row(*cells)
+
+        return Group(
+            Text("─" * options.max_width, style="dim"),  # spans real terminal width
+            row,
         )
-
-        frame = Table.grid(expand=True)
-        frame.add_row(top)
-        frame.add_row(Text("─" * 60, style="dim"))
-        for row in snap.agents.values():
-            frame.add_row(self._agent_line(row))
-        return frame
-
-    def _agent_line(self, row: AgentRow) -> Table:
-        line = Table.grid(expand=True, padding=(0, 1))
-        line.add_column(width=2)
-        line.add_column(ratio=2)
-        line.add_column(ratio=1)
-        line.add_column(ratio=3)
-
-        if row.status == "running":
-            icon = Spinner("dots")
-            mid = Text(f"t{row.turn}" if row.turn else "·")
-        elif row.status == "done":
-            icon = Text(_DONE, style="green")
-            mid = Text(format_duration(row.duration_ms or 0))
-        else:
-            icon = Text(_FAILED, style="red")
-            mid = Text(format_duration(row.duration_ms or 0))
-
-        label = Text.assemble((f"{agent_prefix(row.name)} ", "bold"), row.name)
-        detail = Text(row.last_action_detail or row.last_action or "")
-        line.add_row(icon, label, mid, detail)
-        return line

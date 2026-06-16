@@ -2,13 +2,14 @@ import io
 
 from rich.console import Console
 
-from shannon_core.display.events import PhaseEvent, AgentEvent, ToolCallEvent
+from shannon_core.display.events import PhaseEvent, AgentEvent
 from shannon_core.display.live_dashboard import LiveDashboardRenderer
 
 
-def _console() -> tuple[Console, io.StringIO]:
+def _console(width: int = 100) -> tuple[Console, io.StringIO]:
     buf = io.StringIO()
-    return Console(file=buf, width=100, force_terminal=True, color_system=None, force_interactive=True), buf
+    return Console(file=buf, width=width, force_terminal=True,
+                   color_system=None, force_interactive=True), buf
 
 
 async def test_render_folds_event_into_snapshot():
@@ -18,22 +19,30 @@ async def test_render_folds_event_into_snapshot():
     assert r.snapshot.current_phase == "recon"
 
 
-async def test_rich_console_renders_phase_and_agent_rows():
+async def test_status_line_shows_phase_counts_cost_and_running_agent():
     console, buf = _console()
     r = LiveDashboardRenderer(console)
     await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="vulnerability-analysis", event="start"))
     await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="injection-vuln",
                               event="start", attempt=1))
-    await r.render(ToolCallEvent(timestamp="t", category="TOOL", agent_name="injection-vuln",
-                                 tool_name="Bash", parameters={"command": "rg -n eval"}))
     console.print(r)
     out = buf.getvalue()
-    assert "vulnerability-analysis" in out
-    assert "injection-vuln" in out
-    assert "Bash" in out or "command=rg -n eval" in out
+    assert "vulnerability-analysis" in out   # phase in status line
+    assert "0 done" in out                   # completed count (agent running, not done)
+    assert "$0.0000" in out                  # accumulated cost
+    assert "injection-vuln" in out           # running agent appended with spinner
 
 
-async def test_done_agent_shows_checkmark_style():
+async def test_separator_spans_full_console_width():
+    console, buf = _console(width=80)
+    r = LiveDashboardRenderer(console)
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
+    console.print(r)
+    out = buf.getvalue()
+    assert out.count("─") == 80              # rule width tracks options.max_width, not hardcoded
+
+
+async def test_done_agent_increments_count_and_leaves_status_line():
     console, buf = _console()
     r = LiveDashboardRenderer(console)
     await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="auth-vuln", event="start", attempt=1))
@@ -41,5 +50,7 @@ async def test_done_agent_shows_checkmark_style():
                               attempt=1, duration_ms=4500, cost_usd=0.23, success=True))
     console.print(r)
     out = buf.getvalue()
-    assert "auth-vuln" in out
-    assert "4.5s" in out
+    assert "1 done" in out                   # completed_count incremented
+    assert "$0.2300" in out                  # cost accumulated into status line
+    assert "auth-vuln" not in out            # done agent no longer "running" -> not in status line
+    assert "4.5s" not in out                 # per-agent duration NOT shown in dashboard
