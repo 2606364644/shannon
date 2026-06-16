@@ -78,20 +78,22 @@ class WorkflowLogger:
         ))
 
     async def log_phase(self, phase: str, event: Literal["start", "complete"],
-                        steps: tuple[str, ...] = ()) -> None:
+                        steps: tuple[str, ...] = (),
+                        step_intents: tuple[str | None, ...] = ()) -> None:
         if self._dispatcher is None:
             return
         await self._dispatcher.dispatch(PhaseEvent(
             timestamp=format_log_time(), category="PHASE", phase=phase,
-            event=event, steps=tuple(steps)))
+            event=event, steps=tuple(steps), step_intents=tuple(step_intents)))
 
     async def log_step(self, name: str, phase: str, event: Literal["start", "complete"],
-                       duration_ms: int | None = None, error: str | None = None) -> None:
+                       duration_ms: int | None = None, error: str | None = None,
+                       intent: str | None = None) -> None:
         if self._dispatcher is None:
             return
         await self._dispatcher.dispatch(StepEvent(
             timestamp=format_log_time(), category="STEP", name=name, phase=phase,
-            event=event, duration_ms=duration_ms, error=error))
+            event=event, duration_ms=duration_ms, error=error, intent=intent))
 
     async def log_agent(self, agent_name: str, event: Literal["start", "end"],
                         details: AgentLogDetails | None = None) -> None:

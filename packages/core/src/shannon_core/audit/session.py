@@ -103,10 +103,12 @@ class AuditSession:
 
         self._current_agent_name = None
 
-    async def log_phase_start(self, phase: str, steps: tuple[str, ...] = ()) -> None:
+    async def log_phase_start(self, phase: str, steps: tuple[str, ...] = (),
+                              step_intents: tuple[str | None, ...] = ()) -> None:
         """Log a phase start event, optionally declaring the phase's unit names."""
         if self._workflow_logger:
-            await self._workflow_logger.log_phase(phase, "start", steps=tuple(steps))
+            await self._workflow_logger.log_phase(
+                phase, "start", steps=tuple(steps), step_intents=tuple(step_intents))
 
     async def log_phase_complete(self, phase: str) -> None:
         """Log a phase complete event."""
@@ -114,14 +116,16 @@ class AuditSession:
             await self._workflow_logger.log_phase(phase, "complete")
 
     async def log_step(self, name: str, phase: str, event: str,
-                       duration_ms: int | None = None, error: str | None = None) -> None:
+                       duration_ms: int | None = None, error: str | None = None,
+                       intent: str | None = None) -> None:
         """Log a deterministic sub-step start/complete event."""
         if self._workflow_logger:
             await self._workflow_logger.log_step(name, phase, event,
-                                                 duration_ms=duration_ms, error=error)
+                                                 duration_ms=duration_ms, error=error,
+                                                 intent=intent)
 
     @asynccontextmanager
-    async def track_step(self, phase: str, name: str):
+    async def track_step(self, phase: str, name: str, intent: str | None = None):
         """Emit StepEvent start on enter, complete (with duration/error) on exit.
 
         Uses try/finally so the complete event is always emitted, even when the
@@ -129,7 +133,7 @@ class AuditSession:
         stuck on 'running'.
         """
         start = time.monotonic()
-        await self.log_step(name, phase, "start")
+        await self.log_step(name, phase, "start", intent=intent)
         err: str | None = None
         try:
             yield
@@ -138,7 +142,8 @@ class AuditSession:
             raise
         finally:
             await self.log_step(name, phase, "complete",
-                                duration_ms=int((time.monotonic() - start) * 1000), error=err)
+                                duration_ms=int((time.monotonic() - start) * 1000), error=err,
+                                intent=intent)
 
     async def log_workflow_complete(self, summary: WorkflowSummary) -> None:
         """Write the workflow summary and update session status."""

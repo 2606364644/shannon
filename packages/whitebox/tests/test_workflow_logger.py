@@ -355,3 +355,43 @@ async def test_initialize_offline_header_has_repo_mode_monitor(tmp_path: Path, m
     assert "namespaces/default/workflows/wf-1" in content
     assert "shannon-whitebox logs wf-1 --follow" in content
     await logger.close()
+
+
+async def test_log_step_threads_intent_into_step_event():
+    from shannon_core.display.events import StepEvent
+    # 直接用 WorkflowLogger + 假 dispatcher 捕获
+    from shannon_core.audit.workflow_logger import WorkflowLogger
+    from shannon_core.models.metrics import SessionMetadata
+
+    captured = []
+
+    class _Disp:
+        async def dispatch(self, ev):
+            if isinstance(ev, StepEvent):
+                captured.append(ev)
+
+    meta = SessionMetadata(id="wf", web_url=None, repo_path="/r", output_path="/o")
+    wl = WorkflowLogger(meta, use_rich=False)
+    wl._dispatcher = _Disp()  # 绕过 initialize 直接注入
+    await wl.log_step("code-index", "pre-recon", "start", intent="构建调用图与代码索引")
+    assert captured and captured[-1].intent == "构建调用图与代码索引"
+
+
+async def test_log_phase_threads_step_intents():
+    from shannon_core.display.events import PhaseEvent
+    from shannon_core.audit.workflow_logger import WorkflowLogger
+    from shannon_core.models.metrics import SessionMetadata
+
+    captured = []
+
+    class _Disp:
+        async def dispatch(self, ev):
+            if isinstance(ev, PhaseEvent):
+                captured.append(ev)
+
+    meta = SessionMetadata(id="wf", web_url=None, repo_path="/r", output_path="/o")
+    wl = WorkflowLogger(meta, use_rich=False)
+    wl._dispatcher = _Disp()
+    await wl.log_phase("pre-recon", "start",
+                       steps=("code-index",), step_intents=("构建调用图与代码索引",))
+    assert captured and captured[-1].step_intents == ("构建调用图与代码索引",)
