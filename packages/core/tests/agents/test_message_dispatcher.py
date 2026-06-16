@@ -3,7 +3,10 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from claude_agent_sdk import ResultMessage
+from claude_agent_sdk import (
+    AssistantMessage, ResultMessage, TextBlock, ToolUseBlock,
+    UserMessage, ToolResultBlock,
+)
 
 from shannon_core.agents.message_dispatcher import (
     SPENDING_CAP_PATTERNS,
@@ -13,45 +16,36 @@ from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
 
 
 def _make_text_event(text: str) -> object:
-    """Create a minimal text-type event."""
-    event = MagicMock()
-    event.type = "text"
-    event.text = text
-    return event
+    """A text-bearing assistant turn (real SDK has no standalone 'text' event;
+    text lives in AssistantMessage.content TextBlocks)."""
+    return AssistantMessage(content=[TextBlock(text=text)], model="test-model")
 
 
 def _make_assistant_event(
     texts: list[str] | None = None,
     error: str | None = None,
+    tool_uses: list[tuple[str, dict]] | None = None,
 ) -> object:
-    """Create a minimal assistant-type event."""
-    event = MagicMock()
-    event.type = "assistant"
+    """A real AssistantMessage with TextBlocks and/or ToolUseBlocks."""
     blocks = []
     for t in (texts or []):
-        block = MagicMock()
-        block.text = t
-        blocks.append(block)
-    event.content = blocks
-    event.error = error
-    return event
+        blocks.append(TextBlock(text=t))
+    for name, inp in (tool_uses or []):
+        blocks.append(ToolUseBlock(id=f"call_{name}", name=name, input=inp))
+    return AssistantMessage(content=blocks, model="test-model", error=error)
 
 
 def _make_tool_use_event(name: str = "bash", input_params: dict | None = None) -> object:
-    """Create a minimal tool_use-type event."""
-    event = MagicMock()
-    event.type = "tool_use"
-    event.name = name
-    event.input = input_params or {"command": "ls"}
-    return event
+    """A tool-use, modeled as an AssistantMessage whose only block is a ToolUseBlock."""
+    return AssistantMessage(
+        content=[ToolUseBlock(id=f"call_{name}", name=name, input=input_params or {"command": "ls"})],
+        model="test-model",
+    )
 
 
 def _make_tool_result_event(content: str = "file.txt") -> object:
-    """Create a minimal tool_result-type event."""
-    event = MagicMock()
-    event.type = "tool_result"
-    event.content = content
-    return event
+    """A tool result, modeled as a UserMessage whose content is a ToolResultBlock."""
+    return UserMessage(content=[ToolResultBlock(tool_use_id="call_1", content=content)])
 
 
 class TestMessageDispatcherDefaults:
@@ -292,14 +286,6 @@ class _RecordingAuditLogger:
         self.turns.append((turn, content))
 
 
-class _AssistantEvent:
-    type = "assistant"
-    def __init__(self, text: str) -> None:
-        block = MagicMock()
-        block.text = text
-        self.content = [block]
-
-
 class TestAssistantTurnLogging:
     """LLM assistant turns are surfaced to the audit logger."""
 
@@ -307,5 +293,5 @@ class TestAssistantTurnLogging:
     async def test_assistant_event_logs_turn(self):
         rec = _RecordingAuditLogger()
         d = MessageDispatcher(audit_logger=rec)
-        await d.dispatch(_AssistantEvent("Analyzing sinks"))
+        await d.dispatch(_make_assistant_event(texts=["Analyzing sinks"]))
         assert rec.turns == [(1, "Analyzing sinks")]

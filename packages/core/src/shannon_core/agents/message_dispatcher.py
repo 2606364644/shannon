@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from claude_agent_sdk import ResultMessage
+from claude_agent_sdk import (
+    AssistantMessage, ResultMessage, TextBlock, ToolUseBlock,
+    UserMessage, ToolResultBlock,
+)
 
 from .tool_audit_logger import NullToolAuditLogger, ToolAuditLogger
 
@@ -47,53 +50,48 @@ class MessageDispatcher:
         self.result_errors: list[str] | None = None
 
     async def dispatch(self, event: Any) -> str:
-        """Dispatch a single SDK event. Returns 'continue' or 'complete'."""
+        """Dispatch a single SDK event. Returns 'continue' or 'complete'.
+
+        claude_agent_sdk messages are discriminated by class (isinstance), NOT by
+        a `.type` string field — AssistantMessage/UserMessage/SystemMessage have no
+        `type` attribute. Tool use/result are content blocks inside messages, not
+        top-level events.
+        """
         if isinstance(event, ResultMessage):
             await self._handle_result_message(event)
             return "complete"
 
-        event_type = getattr(event, "type", None)
-
-        if event_type == "assistant":
+        if isinstance(event, AssistantMessage):
             return await self._handle_assistant(event)
-        elif event_type == "tool_use":
-            return await self._handle_tool_use(event)
-        elif event_type == "tool_result":
-            return await self._handle_tool_result(event)
-        elif event_type == "text":
-            self.text_parts.append(event.text)
-            return "continue"
-        else:
+
+        if isinstance(event, UserMessage):
+            for block in getattr(event, "content", None) or []:
+                if isinstance(block, ToolResultBlock):
+                    await self.audit_logger.log_tool_end(getattr(block, "content", ""))
             return "continue"
 
-    async def _handle_assistant(self, event: Any) -> str:
+        # SystemMessage / HookEventMessage / StreamEvent / unknown: ignored
+        return "continue"
+
+    async def _handle_assistant(self, event: AssistantMessage) -> str:
         self.turn_count += 1
         turn_text = ""
-        for block in getattr(event, "content", []):
-            if hasattr(block, "text"):
+        for block in getattr(event, "content", None) or []:
+            if isinstance(block, TextBlock):
                 text = block.text
                 self.text_parts.append(text)
                 turn_text += text
                 if self._is_spending_cap_in_text(text):
                     self.spending_cap_detected = True
+            elif isinstance(block, ToolUseBlock):
+                await self.audit_logger.log_tool_start(block.name, block.input)
+                if self._progress:
+                    self._progress(f"tool: {block.name}")
         if turn_text:
             await self.audit_logger.log_assistant_turn(self.turn_count, turn_text)
         error = getattr(event, "error", None)
         if error and self._on_error:
             self._on_error(str(error))
-        return "continue"
-
-    async def _handle_tool_use(self, event: Any) -> str:
-        tool_name = getattr(event, "name", "unknown")
-        params = getattr(event, "input", {})
-        await self.audit_logger.log_tool_start(tool_name, params)
-        if self._progress:
-            self._progress(f"tool: {tool_name}")
-        return "continue"
-
-    async def _handle_tool_result(self, event: Any) -> str:
-        content = getattr(event, "content", "")
-        await self.audit_logger.log_tool_end(content)
         return "continue"
 
     async def _handle_result_message(self, event: ResultMessage) -> None:
