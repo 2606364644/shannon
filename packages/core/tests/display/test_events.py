@@ -9,6 +9,7 @@ from shannon_core.display.events import (
     LlmTurnEvent,
     PhaseEvent,
     ResumeEvent,
+    StepEvent,
     SummaryEvent,
     ToolCallEvent,
     WorkflowHeader,
@@ -60,6 +61,38 @@ def test_resume_event():
     assert e.completed_agents == ["a"]
 
 
+def test_step_event_fields():
+    e = StepEvent(timestamp="t", category="STEP", name="code-index",
+                  phase="pre-recon", event="start")
+    assert e.name == "code-index"
+    assert e.phase == "pre-recon"
+    assert e.duration_ms is None
+    assert e.error is None
+
+
+def test_phase_event_has_optional_steps_default_empty():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
+    assert e.steps == ()
+
+
+def test_phase_event_carries_steps():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon", event="start",
+                   steps=("code-index", "pre-recon"))
+    assert e.steps == ("code-index", "pre-recon")
+
+
+def test_workflow_header_banner_fields():
+    e = WorkflowHeader(timestamp="t", category="HEADER", workflow_id="wf-1",
+                       target_url=None, repo_path="/repo", mode="offline",
+                       web_ui_url="http://localhost:8233/x", logs_cmd="logs wf --follow",
+                       workspace="wf-1")
+    assert e.repo_path == "/repo"
+    assert e.mode == "offline"
+    assert e.web_ui_url.startswith("http://localhost:8233")
+    assert e.logs_cmd == "logs wf --follow"
+    assert e.workspace == "wf-1"
+
+
 def test_all_events_are_frozen():
     for ctor in [
         lambda: WorkflowHeader(timestamp="t", category="HEADER", workflow_id=None, target_url=None),
@@ -72,6 +105,7 @@ def test_all_events_are_frozen():
                              total_duration_ms=1, total_cost_usd=0.0, agents=[]),
         lambda: ResumeEvent(timestamp="t", category="RESUME", previous_workflow_id="a",
                             new_workflow_id="b", checkpoint_hash="h", completed_agents=[]),
+        lambda: StepEvent(timestamp="t", category="STEP", name="x", phase="p", event="start"),
     ]:
         with pytest.raises(dataclasses.FrozenInstanceError):
             ctor().timestamp = "mutated"

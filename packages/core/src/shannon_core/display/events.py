@@ -21,12 +21,27 @@ class DisplayEvent:
 class WorkflowHeader(DisplayEvent):
     workflow_id: str | None
     target_url: str | None
+    repo_path: str | None = None
+    mode: str | None = None
+    web_ui_url: str | None = None
+    logs_cmd: str | None = None
+    workspace: str | None = None
 
 
 @dataclass(frozen=True)
 class PhaseEvent(DisplayEvent):
     phase: str
     event: Literal["start", "complete"]
+    steps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StepEvent(DisplayEvent):
+    name: str
+    phase: str
+    event: Literal["start", "complete"]
+    duration_ms: int | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True)
