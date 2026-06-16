@@ -1,9 +1,10 @@
 """
 Message stream processor for Claude Agent SDK events.
 
-Processes 7+ event types (assistant, tool_use, tool_result, result, text, etc.)
-with real-time dispatch, turn counting, text collection, and spending cap detection.
-Aligned with TS message-handlers.ts capabilities.
+Discriminates SDK messages by class (isinstance): AssistantMessage / UserMessage /
+ResultMessage. Tool use and tool result are content blocks inside those messages,
+not standalone events. Dispatch does real-time turn counting, text collection,
+and spending cap detection. Aligned with TS message-handlers.ts capabilities.
 """
 
 from __future__ import annotations
