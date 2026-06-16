@@ -13,6 +13,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
+from .tool_audit_logger import ToolAuditLogger
 
 
 # OpenAI 模型定价（美元/1K tokens）
@@ -90,6 +91,7 @@ class OpenAIProvider:
         model_tier: str = "medium",
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
+        audit_logger: ToolAuditLogger | None = None,
     ) -> ClaudeRunResult:
         """
         调用 OpenAI API 执行 prompt
@@ -100,6 +102,7 @@ class OpenAIProvider:
             model_tier: 模型层级
             output_format: 结构化输出格式 (JSON Schema)
             deliverables_subdir: 产物子目录（OpenAI 不使用）
+            audit_logger: provider 无关的逐轮审计日志记录器（可选）
 
         Returns:
             ClaudeRunResult: 执行结果
@@ -127,7 +130,13 @@ class OpenAIProvider:
             duration = int((time.time() - start_time) * 1000)
 
             # 提取结果
-            return self._extract_result(response, duration, model, output_format is not None)
+            result = self._extract_result(response, duration, model, output_format is not None)
+
+            # provider 无关的逐轮上报:OpenAI 单次 completion 作为单 turn
+            if audit_logger is not None and result.text:
+                await audit_logger.log_assistant_turn(1, result.text)
+
+            return result
 
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)

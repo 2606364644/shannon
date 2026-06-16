@@ -13,6 +13,7 @@ import os
 from abc import ABC, abstractmethod
 
 from .runner import ClaudeRunResult, ProviderConfig
+from .tool_audit_logger import ToolAuditLogger
 
 
 # ============================================================================
@@ -68,6 +69,7 @@ class BaseProvider(ABC):
         model_tier: str = "medium",
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
+        audit_logger: ToolAuditLogger | None = None,
     ) -> ClaudeRunResult:
         """
         调用 AI 模型执行 prompt
@@ -78,6 +80,7 @@ class BaseProvider(ABC):
             model_tier: 模型层级 (small/medium/large)
             output_format: 结构化输出格式 (JSON Schema)
             deliverables_subdir: 产物子目录
+            audit_logger: provider 无关的逐轮审计日志记录器（可选）
 
         Returns:
             ClaudeRunResult: 执行结果

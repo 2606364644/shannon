@@ -472,6 +472,27 @@ class TestOpenAIProvider:
         assert provider._is_retryable_error(Exception("authentication failed")) is False
         assert provider._is_retryable_error(Exception("permission denied")) is False
 
+    @pytest.mark.asyncio
+    async def test_openai_call_logs_single_turn(self):
+        """OpenAIProvider.call surfaces the assistant response as a single turn."""
+        from unittest.mock import AsyncMock, MagicMock
+        config = ProviderConfig(type="openai_compatible", api_key="k")
+        provider = OpenAIProvider(config)
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = "hello world"
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_response.usage = MagicMock(prompt_tokens=5, completion_tokens=2)
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        provider._client = mock_client
+
+        rec = AsyncMock()
+        await provider.call(prompt="hi", cwd="/tmp", model_tier="medium", audit_logger=rec)
+        rec.log_assistant_turn.assert_awaited_once_with(1, "hello world")
+
 
 class TestClaudeRunResult:
     """测试 ClaudeRunResult"""
