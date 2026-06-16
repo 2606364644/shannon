@@ -45,13 +45,14 @@ class FileLogRenderer:
 
     def _step(self, e) -> str:
         verb = "Starting" if e.event == "start" else "Completed"
+        intent = f" — {e.intent}" if getattr(e, "intent", None) else ""
         parts = []
         if e.event == "complete" and e.duration_ms is not None:
             parts.append(format_duration(e.duration_ms))
         if e.error:
             parts.append(f"error: {e.error}")
         suffix = f" ({', '.join(parts)})" if parts else ""
-        return f"[{e.timestamp}] [STEP] {e.name}: {verb}{suffix}\n"
+        return f"[{e.timestamp}] [STEP] {e.name}: {verb}{intent}{suffix}\n"
 
     def _header(self, e) -> str:
         lines = [_SEP, "Shannon Pentest - Workflow Log", _SEP]

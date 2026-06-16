@@ -175,6 +175,21 @@ async def test_step_event_renders_step_line():
     assert "Completed" in out
 
 
+async def test_step_file_line_includes_intent_when_present():
+    class _W:
+        def __init__(self): self.lines = []
+        async def write(self, s): self.lines.append(s)
+    w = _W()
+    from shannon_core.display.file_renderer import FileLogRenderer
+    r = FileLogRenderer(w)
+    from shannon_core.display.events import StepEvent
+    await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                             phase="pre-recon", event="start",
+                             intent="构建调用图与代码索引"))
+    out = "".join(w.lines)
+    assert "[STEP] code-index: Starting — 构建调用图与代码索引\n" in out
+
+
 async def test_header_renders_repo_and_monitor_when_offline():
     class _W:
         def __init__(self): self.lines = []
