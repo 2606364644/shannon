@@ -34,11 +34,31 @@ interface RunnerArgs {
   sessionId?: string;
 }
 
+/**
+ * Resolve the default Phase 3 concurrency from the SHANNON_CONCURRENCY env var.
+ * Returns the built-in default (all vuln classes) when unset or invalid; an
+ * invalid value logs a warning and falls back rather than crashing a long scan.
+ */
+function resolveConcurrencyFromEnv(): number {
+  const raw = process.env.SHANNON_CONCURRENCY;
+  if (!raw) {
+    return ALL_VULN_CLASSES.length;
+  }
+  const parsed = parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    console.warn(
+      `[WARN] SHANNON_CONCURRENCY="${raw}" invalid (need integer >= 1); using default ${ALL_VULN_CLASSES.length}`,
+    );
+    return ALL_VULN_CLASSES.length;
+  }
+  return parsed;
+}
+
 function parseArgs(argv: string[]): RunnerArgs {
   let repoPath = '';
   let configPath: string | undefined;
   let workspace: string | undefined;
-  let concurrency = ALL_VULN_CLASSES.length;
+  let concurrency: number | undefined;
   let pipelineTestingMode = false;
   let apiKey: string | undefined;
   let promptDir: string | undefined;
@@ -107,7 +127,7 @@ function parseArgs(argv: string[]): RunnerArgs {
 
   return {
     repoPath: path.resolve(repoPath),
-    concurrency,
+    concurrency: concurrency ?? resolveConcurrencyFromEnv(),
     pipelineTestingMode,
     ...(configPath && { configPath: path.resolve(configPath) }),
     ...(workspace && { workspace }),
