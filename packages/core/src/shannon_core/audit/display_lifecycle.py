@@ -2,12 +2,18 @@
 the session inside an active Live context (rich mode) or plain (non-rich)."""
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from shannon_core.models.metrics import SessionMetadata
 
 from .session import AuditSession
+
+
+def default_refresh_hz() -> float:
+    """Live dashboard refresh rate. Default 3Hz (calm); override via env."""
+    return float(os.environ.get("SHANNON_LIVE_REFRESH_HZ", "3"))
 
 
 @asynccontextmanager
@@ -27,7 +33,8 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         # -> rich_cast re-imports rich *inside the sandbox thread*, hitting the sandbox
         # importer and throwing a circular ImportError that fails every workflow task.
         # Keep stderr real so worker logging never re-enters rich / the sandbox.
-        live = Live(dashboard, console=console, transient=True, refresh_per_second=10,
+        live = Live(dashboard, console=console, transient=True,
+                    refresh_per_second=default_refresh_hz(),
                     redirect_stderr=False)
         try:
             with live:
