@@ -21,7 +21,7 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         dashboard = LiveDashboardRenderer(console)
         session = AuditSession(meta, use_rich=True, console=console, dashboard=dashboard)
         await session.initialize(workflow_id=meta.id)
-        live = Live(dashboard, console=console, transient=False, refresh_per_second=10)
+        live = Live(dashboard, console=console, transient=True, refresh_per_second=10)
         try:
             with live:
                 yield session
