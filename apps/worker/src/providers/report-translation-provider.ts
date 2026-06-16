@@ -63,7 +63,10 @@ async function runWithConcurrencyLimit<T>(
 }
 
 export class ReportTranslationProvider implements ReportOutputProvider {
-  async generate(input: ActivityInput, logger: ActivityLogger): Promise<{ outputPath?: string }> {
+  async generate(
+    input: ActivityInput,
+    logger: ActivityLogger,
+  ): Promise<{ outputPath?: string; successCount?: number; failCount?: number }> {
     // 1. Resolve source deliverables directory
     const srcDir = deliverablesDir(input.repoPath, input.deliverablesSubdir);
     const srcExists = await fileExists(srcDir);
@@ -179,12 +182,12 @@ export class ReportTranslationProvider implements ReportOutputProvider {
     // 7. Return result
     if (successCount === 0) {
       logger.warn('All translations failed');
-      return {};
+      return { successCount, failCount };
     }
 
     logger.info(
       `Translation complete: ${successCount} succeeded, ${failCount} failed, ${totalChars.toLocaleString()} chars total, ${(totalDuration / 1000).toFixed(1)}s`,
     );
-    return { outputPath: cnDir };
+    return { outputPath: cnDir, successCount, failCount };
   }
 }

@@ -11,7 +11,10 @@ import type { ActivityInput } from '../temporal/activities.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 
 export interface ReportOutputProvider {
-  generate(input: ActivityInput, logger: ActivityLogger): Promise<{ outputPath?: string }>;
+  generate(
+    input: ActivityInput,
+    logger: ActivityLogger,
+  ): Promise<{ outputPath?: string; successCount?: number; failCount?: number }>;
 }
 
 /** Default no-op implementation — no additional output produced. */
