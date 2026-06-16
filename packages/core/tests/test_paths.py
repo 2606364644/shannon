@@ -6,13 +6,25 @@ from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverable
 
 
 class TestResolveWorkspacesDir:
-    def test_with_repo_path(self):
+    def test_with_repo_path_ignored(self, tmp_path, monkeypatch):
+        """repo_path 不再决定 workspace 根(改为 project_root/workspaces)。"""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()
+        monkeypatch.chdir(project_root)
+        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir("/data/repos/myrepo")
-        assert result == Path("/data/repos/workspaces")
+        assert result == project_root / "workspaces"
 
-    def test_with_repo_path_nested(self):
+    def test_with_repo_path_nested_ignored(self, tmp_path, monkeypatch):
+        """repo_path 不再决定 workspace 根(改为 project_root/workspaces)。"""
+        project_root = tmp_path / "myproject"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()
+        monkeypatch.chdir(project_root)
+        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir("/a/b/c")
-        assert result == Path("/a/b/workspaces")
+        assert result == project_root / "workspaces"
 
     def test_without_repo_path(self, tmp_path, monkeypatch):
         """When no repo_path and in a git repo, resolves to project_root/workspaces."""
@@ -46,11 +58,11 @@ class TestResolveWorkspacesDir:
         result = resolve_workspaces_dir()
         assert result == worker_root / "workspaces"
 
-    def test_worker_root_env_ignored_when_repo_path_given(self, monkeypatch):
-        """When repo_path is provided, SHANNON_WORKER_ROOT is ignored."""
+    def test_worker_root_env_used_even_when_repo_path_given(self, monkeypatch):
+        """SHANNON_WORKER_ROOT 优先级高于 repo_path(repo_path 已不再参与定位 workspace 根)。"""
         monkeypatch.setenv("SHANNON_WORKER_ROOT", "/custom/worker/root")
         result = resolve_workspaces_dir("/data/repos/myrepo")
-        assert result == Path("/data/repos/workspaces")
+        assert result == Path("/custom/worker/root/workspaces")
 
     def test_worker_root_fallback_without_repo_path(self, tmp_path, monkeypatch):
         """When no repo_path and no SHANNON_WORKER_ROOT, uses project_root."""

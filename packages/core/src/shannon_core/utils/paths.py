@@ -25,13 +25,13 @@ def find_project_root() -> Path:
 def resolve_workspaces_dir(repo_path: str | None = None) -> Path:
     """解析 workspaces 根目录。
 
-    优先级：
-    1. repo_path 存在 → repo_path.parent / "workspaces"
-    2. SHANNON_WORKER_ROOT 环境变量 → worker_root / "workspaces"
-    3. find_project_root() / "workspaces"
+    优先级:
+    1. SHANNON_WORKER_ROOT 环境变量 → worker_root / "workspaces"
+    2. find_project_root() / "workspaces"  (shannon-py 项目根)
+
+    注意: repo_path 不再用于定位 workspace 根(曾导致 workspace 落到 repo 父目录)。
+    参数保留仅为调用方签名兼容;deliverables 仍落在 repo_path/.shannon/deliverables。
     """
-    if repo_path:
-        return Path(repo_path).parent / "workspaces"
     worker_root = os.getenv("SHANNON_WORKER_ROOT")
     if worker_root:
         return Path(worker_root) / "workspaces"
