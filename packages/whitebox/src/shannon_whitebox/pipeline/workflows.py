@@ -69,8 +69,10 @@ class WhiteboxScanWorkflow:
         )
         await workflow.execute_activity(
             activities.log_phase_start_activity,
-            ActivityInput(**{**act_input.__dict__, "workspace_name": "setup"}),
-            steps=list(PHASE_STEPS["setup"]),
+            args=[
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "setup"}),
+                list(PHASE_STEPS["setup"]),
+            ],
             start_to_close_timeout=timedelta(seconds=10),
         )
         self._state.current_phase = "setup"
@@ -139,8 +141,10 @@ class WhiteboxScanWorkflow:
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
-                    ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
-                    steps=list(PHASE_STEPS["pre-recon"]),
+                    args=[
+                        ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
+                        list(PHASE_STEPS["pre-recon"]),
+                    ],
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "pre-recon"
@@ -218,8 +222,10 @@ class WhiteboxScanWorkflow:
             if AgentName.RECON.value not in self._state.completed_agents:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
-                    ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
-                    steps=list(PHASE_STEPS["recon"]),
+                    args=[
+                        ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
+                        list(PHASE_STEPS["recon"]),
+                    ],
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "recon"
@@ -241,8 +247,10 @@ class WhiteboxScanWorkflow:
             # Risk scoring — produce tiered audit plan
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                ActivityInput(**{**act_input.__dict__, "workspace_name": "risk-scoring"}),
-                steps=list(PHASE_STEPS["risk-scoring"]),
+                args=[
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "risk-scoring"}),
+                    list(PHASE_STEPS["risk-scoring"]),
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "risk-scoring"
@@ -265,8 +273,10 @@ class WhiteboxScanWorkflow:
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                ActivityInput(**{**act_input.__dict__, "workspace_name": "vulnerability-analysis"}),
-                steps=list(vuln_phase_steps([str(vt) for vt in selected_classes])),
+                args=[
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "vulnerability-analysis"}),
+                    list(vuln_phase_steps([str(vt) for vt in selected_classes])),
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "vulnerability-analysis"
@@ -310,8 +320,10 @@ class WhiteboxScanWorkflow:
             # === Attack Chain Assembly ===
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                ActivityInput(**{**act_input.__dict__, "workspace_name": "attack-chain"}),
-                steps=list(PHASE_STEPS["attack-chain"]),
+                args=[
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "attack-chain"}),
+                    list(PHASE_STEPS["attack-chain"]),
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "attack-chain"
@@ -332,8 +344,10 @@ class WhiteboxScanWorkflow:
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
-                steps=list(PHASE_STEPS["reporting"]),
+                args=[
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                    list(PHASE_STEPS["reporting"]),
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "reporting"
