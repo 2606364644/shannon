@@ -230,6 +230,16 @@ export class AuditSession {
   }
 
   /**
+   * Write a free-form event line to the unified workflow log (workflow.log).
+   * Use for non-phase/non-agent events such as translation summaries, so the
+   * outcome is visible from `./shannon logs` rather than only in worker stdout.
+   */
+  async logWorkflowEvent(eventType: string, message: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.workflowLogger.logEvent(eventType, message);
+  }
+
+  /**
    * Log workflow completion to unified workflow log
    */
   async logWorkflowComplete(summary: WorkflowSummary): Promise<void> {

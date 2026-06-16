@@ -1096,6 +1096,26 @@ export async function generateReportOutputActivity(input: ActivityInput): Promis
   if (result.outputPath) {
     logger.info(`Report output written to ${result.outputPath}`);
   }
+
+  // Surface the translation outcome in workflow.log. The provider's own summary
+  // logs go to the Temporal activity logger (worker stdout), which is invisible
+  // from `./shannon logs` — that is how an all-failed translation went unnoticed.
+  const succeeded = result.successCount ?? 0;
+  const failed = result.failCount ?? 0;
+  if (succeeded === 0 && failed === 0) return; // nothing attempted (no deliverables)
+
+  const sessionMetadata = buildSessionMetadata(input);
+  const auditSession = new AuditSession(sessionMetadata);
+  await auditSession.initialize(input.workflowId);
+
+  if (failed > 0 || !result.outputPath) {
+    await auditSession.logWorkflowEvent(
+      'TRANSLATION',
+      `WARNING — ${failed} of ${succeeded + failed} deliverable(s) failed to translate (output: ${result.outputPath ?? 'none'}). See worker stdout for per-file errors.`,
+    );
+  } else {
+    await auditSession.logWorkflowEvent('TRANSLATION', `${succeeded} deliverable(s) translated → ${result.outputPath}`);
+  }
 }
 
 /**
