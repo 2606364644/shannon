@@ -110,3 +110,24 @@ async def test_resume_renders_message():
     out = renderer._console.export_text()
     assert "Resuming" in out
     assert "w2" in out
+
+
+async def test_phase_suppressed_when_show_phase_false():
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=120, record=True)
+    renderer = RichConsoleRenderer(console, show_phase=False)
+    await renderer.render(PhaseEvent(
+        timestamp="t", category="PHASE", phase="reconnaissance", event="start"))
+    out = console.export_text()
+    assert "PHASE" not in out
+    assert "reconnaissance" not in out
+
+
+async def test_phase_rendered_by_default():
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=120, record=True)
+    renderer = RichConsoleRenderer(console)  # show_phase defaults to True
+    await renderer.render(PhaseEvent(
+        timestamp="t", category="PHASE", phase="reconnaissance", event="start"))
+    out = console.export_text()
+    assert "reconnaissance" in out

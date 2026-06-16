@@ -23,8 +23,9 @@ class RichConsoleRenderer:
         "RESUME": "dim yellow",
     }
 
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(self, console: Console | None = None, show_phase: bool = True) -> None:
         self._console = console or Console()
+        self._show_phase = show_phase
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
@@ -33,7 +34,9 @@ class RichConsoleRenderer:
         )
         match event:
             case WorkflowHeader(): self._render_header(event)
-            case PhaseEvent(): self._render_phase(event)
+            case PhaseEvent():
+                if self._show_phase:
+                    self._render_phase(event)
             case AgentEvent(): self._render_agent(event)
             case ToolCallEvent(): self._render_tool(event)
             case LlmTurnEvent(): self._render_llm(event)
