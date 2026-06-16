@@ -30,13 +30,16 @@ class RichConsoleRenderer:
     async def render(self, event) -> None:
         from shannon_core.display.events import (
             AgentEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
-            ResumeEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
+            ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
         )
         match event:
             case WorkflowHeader(): self._render_header(event)
             case PhaseEvent():
                 if self._show_phase:
                     self._render_phase(event)
+            case StepEvent():
+                if self._show_phase:
+                    self._render_step(event)
             case AgentEvent(): self._render_agent(event)
             case ToolCallEvent(): self._render_tool(event)
             case LlmTurnEvent(): self._render_llm(event)
@@ -45,12 +48,36 @@ class RichConsoleRenderer:
             case ResumeEvent(): self._render_resume(event)
 
     def _render_header(self, e) -> None:
-        body = (
-            f"Workflow:  {e.workflow_id or 'N/A'}\n"
-            f"Target:    {e.target_url or 'N/A'}\n"
-            f"Started:   {e.timestamp}"
-        )
+        lines = []
+        if getattr(e, "repo_path", None):
+            lines.append(f"Repository: {e.repo_path}")
+        if e.target_url:
+            lines.append(f"Target:     {e.target_url}")
+        mode = getattr(e, "mode", None)
+        if mode and not e.target_url:
+            lines.append(f"Mode:       {mode}")
+        lines.append(f"Started:    {e.timestamp}")
+        web_ui = getattr(e, "web_ui_url", None)
+        logs_cmd = getattr(e, "logs_cmd", None)
+        if web_ui or logs_cmd:
+            lines.append("")
+            lines.append("Monitor:")
+            if web_ui:
+                lines.append(f"  Web UI: {web_ui}")
+            if logs_cmd:
+                lines.append(f"  Logs:   {logs_cmd}")
+        body = "\n".join(lines)
         self._console.print(Panel(body, title="Shannon Pentest", border_style="cyan"))
+
+    def _render_step(self, e) -> None:
+        verb = "Starting" if e.event == "start" else "Completed"
+        suffix = ""
+        if e.event == "complete" and e.duration_ms is not None:
+            suffix = f" ({format_duration(e.duration_ms)})"
+        if e.error:
+            suffix = f" — {e.error}"
+        self._console.print(
+            f"[{e.timestamp}] [cyan]STEP[/]  {verb} {e.name}{suffix}", highlight=False)
 
     def _render_phase(self, e) -> None:
         verb = "Starting" if e.event == "start" else "Completed"

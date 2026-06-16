@@ -12,15 +12,41 @@ def _renderer_with_capture() -> tuple[RichConsoleRenderer, io.StringIO]:
     return RichConsoleRenderer(console), buf
 
 
-async def test_header_renders_workflow_id_and_target():
-    renderer, buf = _renderer_with_capture()
+async def test_header_offline_shows_repo_mode_monitor_no_NA():
+    renderer, _ = _renderer_with_capture()
     await renderer.render(WorkflowHeader(
-        timestamp="2026-01-01 12:00:00", category="HEADER",
-        workflow_id="wf-1", target_url="https://x.com"))
+        timestamp="2026-06-16 13:49:44", category="HEADER", workflow_id="wf-1",
+        target_url=None, repo_path="/root/code/prize_web",
+        mode="offline (source code analysis)",
+        web_ui_url="http://localhost:8233/namespaces/default/workflows/wf-1",
+        logs_cmd="shannon-whitebox logs wf-1 --follow", workspace="wf-1"))
     out = renderer._console.export_text()
-    assert "Shannon Pentest" in out
-    assert "wf-1" in out
+    assert "Repository:" in out
+    assert "/root/code/prize_web" in out
+    assert "offline" in out
+    assert "Monitor:" in out
+    assert "8233" in out
+    assert "N/A" not in out
+
+
+async def test_header_with_target_url_shows_url():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(WorkflowHeader(
+        timestamp="t", category="HEADER", workflow_id="wf-1",
+        target_url="https://x.com", repo_path="/repo", mode="https://x.com",
+        web_ui_url=None, logs_cmd=None))
+    out = renderer._console.export_text()
     assert "https://x.com" in out
+
+
+async def test_step_event_renders_step_line():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="start"))
+    out = renderer._console.export_text()
+    assert "code-index" in out
+    assert "STEP" in out
 
 
 async def test_phase_start_renders_phase_name():
