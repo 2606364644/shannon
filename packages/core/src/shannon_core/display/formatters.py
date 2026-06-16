@@ -145,6 +145,19 @@ def maybe_browser_action(params: dict) -> str | None:
     return f"🌐 Browser: {subcommand}"
 
 
+def first_nonempty_line(text: str) -> str:
+    """Return the first non-blank stripped line, or '' if none.
+
+    Used to render an assistant turn's text as one calm live line (the full
+    turn text is retained in the per-agent JSON log regardless).
+    """
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
 def humanize_tool_call(tool_name: str, params: dict) -> str:
     """Turn a raw tool call into a human-readable single line."""
     if not isinstance(params, dict):

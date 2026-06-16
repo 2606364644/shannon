@@ -10,6 +10,7 @@ from rich.panel import Panel
 
 from shannon_core.display.formatters import (
     agent_prefix, format_duration, format_error_block, humanize_tool_call,
+    first_nonempty_line,
 )
 
 
@@ -23,9 +24,12 @@ class RichConsoleRenderer:
         "RESUME": "dim yellow",
     }
 
-    def __init__(self, console: Console | None = None, show_phase: bool = True) -> None:
+    def __init__(self, console: Console | None = None, show_phase: bool = True,
+                 show_steps: bool = True, show_tools: bool = True) -> None:
         self._console = console or Console()
         self._show_phase = show_phase
+        self._show_steps = show_steps
+        self._show_tools = show_tools
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
@@ -38,10 +42,12 @@ class RichConsoleRenderer:
                 if self._show_phase:
                     self._render_phase(event)
             case StepEvent():
-                if self._show_phase:
+                if self._show_steps:
                     self._render_step(event)
             case AgentEvent(): self._render_agent(event)
-            case ToolCallEvent(): self._render_tool(event)
+            case ToolCallEvent():
+                if self._show_tools:
+                    self._render_tool(event)
             case LlmTurnEvent(): self._render_llm(event)
             case ErrorEvent(): self._render_error(event)
             case SummaryEvent(): self._render_summary(event)
@@ -70,14 +76,18 @@ class RichConsoleRenderer:
         self._console.print(Panel(body, title="Shannon Pentest", border_style="cyan"))
 
     def _render_step(self, e) -> None:
-        verb = "Starting" if e.event == "start" else "Completed"
+        if e.event == "start":
+            label = e.intent or e.name
+            self._console.print(
+                f"[{e.timestamp}] [cyan]STEP[/]  ▸ {label}", highlight=False)
+            return
         suffix = ""
-        if e.event == "complete" and e.duration_ms is not None:
+        if e.duration_ms is not None:
             suffix = f" ({format_duration(e.duration_ms)})"
         if e.error:
             suffix = f" — {e.error}"
         self._console.print(
-            f"[{e.timestamp}] [cyan]STEP[/]  {verb} {e.name}{suffix}", highlight=False)
+            f"[{e.timestamp}] [cyan]STEP[/]  ✓ {e.name}{suffix}", highlight=False)
 
     def _render_phase(self, e) -> None:
         verb = "Starting" if e.event == "start" else "Completed"
@@ -115,8 +125,9 @@ class RichConsoleRenderer:
         self._console.print(f"[{e.timestamp}] [yellow]🔧 {e.tool_name}({params})[/]", highlight=False)
 
     def _render_llm(self, e) -> None:
-        content = e.content[:200] + "..." if len(e.content) > 200 else e.content
-        self._console.print(f"[{e.timestamp}] [magenta]💭 Turn {e.turn}: {content}[/]", highlight=False)
+        line = first_nonempty_line(e.content) or "(无文本)"
+        self._console.print(
+            f"[{e.timestamp}] [magenta]💭 Turn {e.turn}: {line}[/]", highlight=False)
 
     def _render_error(self, e) -> None:
         line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"

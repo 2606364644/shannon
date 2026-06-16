@@ -60,7 +60,12 @@ class WorkflowLogger:
         renderers: list = [FileLogRenderer(self._stream)]
         if self._console is not None:
             from shannon_core.display.rich_renderer import RichConsoleRenderer
-            renderers.append(RichConsoleRenderer(self._console, show_phase=not self._use_rich))
+            renderers.append(RichConsoleRenderer(
+                self._console,
+                show_phase=not self._use_rich,   # rich: 压住 PHASE 行
+                show_steps=True,                 # rich: 放开 STEP 行
+                show_tools=not self._use_rich,   # rich: 隐藏 🔧（仍写 workflow.log）
+            ))
         if self._use_rich and self._dashboard is not None:
             renderers.append(self._dashboard)
         self._dispatcher = DisplayDispatcher(renderers)

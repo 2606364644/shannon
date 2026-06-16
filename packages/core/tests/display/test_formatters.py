@@ -131,3 +131,19 @@ def test_maybe_browser_action_click():
 
 def test_maybe_browser_action_non_browser_returns_none():
     assert maybe_browser_action({"command": "ls -la"}) is None
+
+
+from shannon_core.display.formatters import first_nonempty_line
+
+
+def test_first_nonempty_line_single_line():
+    assert first_nonempty_line("🔄 Read router.ts") == "🔄 Read router.ts"
+
+
+def test_first_nonempty_line_picks_first_non_blank():
+    assert first_nonempty_line("\n\n  🔄 Read router.ts  \nnext") == "🔄 Read router.ts"
+
+
+def test_first_nonempty_line_empty_returns_empty():
+    assert first_nonempty_line("") == ""
+    assert first_nonempty_line("   \n  ") == ""

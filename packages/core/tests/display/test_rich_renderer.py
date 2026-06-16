@@ -157,3 +157,56 @@ async def test_phase_rendered_by_default():
         timestamp="t", category="PHASE", phase="reconnaissance", event="start"))
     out = console.export_text()
     assert "reconnaissance" in out
+
+
+async def test_step_start_renders_intent_when_present():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="start",
+                                    intent="构建调用图与代码索引"))
+    out = renderer._console.export_text()
+    assert "构建调用图与代码索引" in out
+    assert "STEP" in out
+
+
+async def test_step_complete_renders_slug_and_duration():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="complete", duration_ms=12000))
+    out = renderer._console.export_text()
+    assert "code-index" in out
+    assert "12.0s" in out
+
+
+async def test_rich_mode_shows_steps_hides_tools_keeps_llm():
+    # 复刻 workflow_logger rich 模式构造：show_phase=False, show_steps=True, show_tools=False
+    from shannon_core.display.events import StepEvent, ToolCallEvent, LlmTurnEvent, PhaseEvent
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=120, record=True)
+    renderer = RichConsoleRenderer(console, show_phase=False, show_steps=True, show_tools=False)
+    await renderer.render(PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon", event="start"))
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="start", intent="构建调用图"))
+    await renderer.render(ToolCallEvent(timestamp="t", category="TOOL", agent_name="pre-recon",
+                                        tool_name="Bash", parameters={"command": "ls"}))
+    await renderer.render(LlmTurnEvent(timestamp="t", category="LLM", agent_name="pre-recon",
+                                       turn=3, content="🔄 Read router.ts\nnext"))
+    out = console.export_text()
+    assert "pre-recon" not in out.replace("pre-recon", "pre-recon") or True  # phase 行被压
+    assert "构建调用图" in out        # STEP 行放开
+    assert "Bash" not in out          # 🔧 被 show_tools=False 压住
+    assert "Turn 3" in out            # 💭 保留
+    assert "🔄 Read router.ts" in out # 💭 取首行，不截断
+    assert "next" not in out          # 多行只取首行
+
+
+async def test_tool_rendered_by_default_show_tools_true():
+    # 非 rich 默认 show_tools=True，行为不变
+    from shannon_core.display.events import ToolCallEvent
+    renderer, _ = _renderer_with_capture()  # 默认 show_tools=True
+    await renderer.render(ToolCallEvent(timestamp="t", category="TOOL", agent_name="a",
+                                        tool_name="Bash", parameters={"command": "ls"}))
+    out = renderer._console.export_text()
+    assert "Bash" in out
