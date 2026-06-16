@@ -142,8 +142,13 @@ async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None
 
 @activity.defn
 async def log_phase_complete_activity(input: ActivityInput) -> None:
-    """Emit a phase-complete event. Defined for symmetry with log_phase_start_activity;
-    not yet scheduled from the workflow (available for future phase-completion surfacing)."""
+    """Emit a phase-complete event.
+
+    Scheduled by ``WhiteboxScanWorkflow.run()`` at the end of each phase
+    (setup / pre-recon / recon / risk-scoring / vulnerability-analysis /
+    attack-chain / reporting) to surface phase completion, mirroring the
+    phase-start event emitted by ``log_phase_start_activity``.
+    """
     from shannon_whitebox.audit.session_registry import get_audit_session
     phase = input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
