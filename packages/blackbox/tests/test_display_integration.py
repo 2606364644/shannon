@@ -53,8 +53,11 @@ async def test_audit_session_reaches_console_and_dashboard(tmp_path: Path):
     assert "▶ [Injection] injection-exploit started" in out           # agent start (full)
     assert "🔧 Bash(command=curl 'http://x/?q=<script>')" in out      # tool_start line
     assert "💭 Turn 2: reflected XSS confirmed" in out                # llm_response line
-    # Dashboard region (rendered via console.print(dashboard) -> __rich_console__).
-    # "Phase:" + "1 done" are dashboard-only tokens the scrolling log never emits, so
-    # their presence proves the LiveDashboardRenderer snapshot reached the buffer too.
-    assert "Phase: exploitation" in out                               # dashboard phase line
+    # Phase is suppressed from the scrolling log in rich mode; it lives in the
+    # dashboard status line only. color_system=None would strip "[bold cyan]PHASE[/]"
+    # to bare "PHASE"; its absence proves show_phase=False is wired through the
+    # WorkflowLogger. The phase name still reaches the buffer via the dashboard.
+    assert "PHASE" not in out                                         # no scrolling phase line
+    assert "Starting exploitation" not in out
+    assert "exploitation" in out                                      # phase in status line
     assert "1 done" in out                                            # completed_count
