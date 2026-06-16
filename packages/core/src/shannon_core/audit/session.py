@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from shannon_core.models.metrics import SessionMetadata
@@ -101,15 +103,42 @@ class AuditSession:
 
         self._current_agent_name = None
 
-    async def log_phase_start(self, phase: str) -> None:
-        """Log a phase start event."""
+    async def log_phase_start(self, phase: str, steps: tuple[str, ...] = ()) -> None:
+        """Log a phase start event, optionally declaring the phase's unit names."""
         if self._workflow_logger:
-            await self._workflow_logger.log_phase(phase, "start")
+            await self._workflow_logger.log_phase(phase, "start", steps=tuple(steps))
 
     async def log_phase_complete(self, phase: str) -> None:
         """Log a phase complete event."""
         if self._workflow_logger:
             await self._workflow_logger.log_phase(phase, "complete")
+
+    async def log_step(self, name: str, phase: str, event: str,
+                       duration_ms: int | None = None, error: str | None = None) -> None:
+        """Log a deterministic sub-step start/complete event."""
+        if self._workflow_logger:
+            await self._workflow_logger.log_step(name, phase, event,
+                                                 duration_ms=duration_ms, error=error)
+
+    @asynccontextmanager
+    async def track_step(self, phase: str, name: str):
+        """Emit StepEvent start on enter, complete (with duration/error) on exit.
+
+        Uses try/finally so the complete event is always emitted, even when the
+        wrapped activity raises — keeps the dashboard's unit_status from getting
+        stuck on 'running'.
+        """
+        start = time.monotonic()
+        await self.log_step(name, phase, "start")
+        err: str | None = None
+        try:
+            yield
+        except Exception as e:  # re-raise after recording; caller decides handling
+            err = str(e)
+            raise
+        finally:
+            await self.log_step(name, phase, "complete",
+                                duration_ms=int((time.monotonic() - start) * 1000), error=err)
 
     async def log_workflow_complete(self, summary: WorkflowSummary) -> None:
         """Write the workflow summary and update session status."""

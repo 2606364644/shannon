@@ -248,3 +248,48 @@ async def test_display_config_passed_to_workflow_logger(tmp_path: Path):
     await session.initialize(workflow_id="wf-1")
     assert session._workflow_logger._use_rich is True
     assert len(session._workflow_logger._dispatcher._renderers) == 3
+
+
+async def test_log_step_writes_step_line(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    session = AuditSession(meta)
+    await session.initialize()
+    await session.log_step("code-index", "pre-recon", "start")
+    await session.log_step("code-index", "pre-recon", "complete", duration_ms=9000)
+    ad = _audit_dir(tmp_path)
+    wf = (ad / "workflow.log").read_text()
+    assert "[STEP]" in wf
+    assert "code-index" in wf
+
+
+async def test_log_phase_start_passes_steps(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    session = AuditSession(meta)
+    await session.initialize()
+    await session.log_phase_start("pre-recon", steps=("code-index", "pre-recon"))
+    ad = _audit_dir(tmp_path)
+    assert "[PHASE] Starting pre-recon" in (ad / "workflow.log").read_text()
+
+
+async def test_track_step_emits_start_then_complete(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    session = AuditSession(meta)
+    await session.initialize()
+    async with session.track_step("pre-recon", "merge-sinks"):
+        pass
+    wf = (_audit_dir(tmp_path) / "workflow.log").read_text()
+    assert "[STEP] merge-sinks: Starting" in wf
+    assert "[STEP] merge-sinks: Completed" in wf
+
+
+async def test_track_step_emits_complete_with_error_on_exception(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    session = AuditSession(meta)
+    await session.initialize()
+    import pytest
+    with pytest.raises(RuntimeError):
+        async with session.track_step("pre-recon", "adjudication"):
+            raise RuntimeError("boom")
+    wf = (_audit_dir(tmp_path) / "workflow.log").read_text()
+    assert "[STEP] adjudication: Starting" in wf
+    assert "boom" in wf   # error surfaced in the complete step line
