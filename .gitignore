@@ -9,3 +9,9 @@ repos/
 apps/worker/configs/test-nnads.yaml
 .worktrees/
 .env.bak
+apps/worker/configs/futunn copy.yaml
+apps/worker/configs/test-hr-futuoa.yaml
+apps/worker/configs/futunn.yaml
+apps/worker/configs/moomoo.yaml
+scripts/smoke-test-sdk.ts
+scripts/test-sdk-connectivity.ts

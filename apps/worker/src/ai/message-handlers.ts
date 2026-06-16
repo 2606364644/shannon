@@ -348,7 +348,9 @@ export async function dispatchMessage(
 
     case 'result': {
       const resultData = handleResultMessage(message as ResultMessage);
-      outputLines(formatResultOutput(resultData, !execContext.useCleanOutput));
+      if (!deps.silent) {
+        outputLines(formatResultOutput(resultData, !execContext.useCleanOutput));
+      }
 
       if (resultData.subtype === 'error_max_structured_output_retries') {
         return {
