@@ -309,3 +309,49 @@ async def test_plain_mode_attaches_rich_console_and_produces_stdout(tmp_path: Pa
     out = buf.getvalue()
     # RichConsoleRenderer printed at least the agent line to the console
     assert "recon" in out
+
+
+WEB_UI_PORT_DEFAULT = "8233"
+
+
+async def test_log_step_writes_step_line(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    logger = WorkflowLogger(meta)
+    await logger.initialize()
+    await logger.log_step("code-index", "pre-recon", "start")
+    await logger.log_step("code-index", "pre-recon", "complete", duration_ms=12000)
+    await logger.close()
+    content = _read_log(tmp_path)
+    assert "[STEP]" in content
+    assert "code-index" in content
+    assert "Starting" in content
+    assert "Completed" in content
+
+
+async def test_log_phase_carries_steps(tmp_path: Path):
+    meta = _make_meta(tmp_path)
+    logger = WorkflowLogger(meta)
+    await logger.initialize()
+    await logger.log_phase("pre-recon", "start", steps=("code-index", "pre-recon"))
+    await logger.close()
+    content = _read_log(tmp_path)
+    assert "[PHASE] Starting pre-recon" in content
+
+
+async def test_initialize_offline_header_has_repo_mode_monitor(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TEMPORAL_WEB_UI_PORT", "8233")
+    meta = SessionMetadata(id="wf-1", web_url=None, repo_path="/root/code/prize_web",
+                           output_path=str(tmp_path))
+    logger = WorkflowLogger(meta)
+    await logger.initialize(workflow_id="wf-1")
+    # Read the log from the path the logger actually wrote (meta.id="wf-1", not the
+    # default "test-session" that _read_log/_audit_dir derive from _make_meta).
+    from shannon_core.audit.utils import generate_workflow_log_path
+    content = generate_workflow_log_path(meta).read_text()
+    assert "Repository:" in content
+    assert "/root/code/prize_web" in content
+    assert "offline" in content
+    assert "Monitor:" in content
+    assert "namespaces/default/workflows/wf-1" in content
+    assert "shannon-whitebox logs wf-1 --follow" in content
+    await logger.close()

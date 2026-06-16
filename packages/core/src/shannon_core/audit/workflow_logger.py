@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.display.dispatcher import DisplayDispatcher
 from shannon_core.display.events import (
     AgentEvent, AgentMetric, ErrorEvent, LlmTurnEvent, PhaseEvent,
-    ResumeEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
+    ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
 )
 from shannon_core.display.file_renderer import FileLogRenderer
 from shannon_core.display.formatters import format_log_time
@@ -17,6 +18,19 @@ from .utils import generate_workflow_log_path
 if TYPE_CHECKING:
     from rich.console import Console
     from shannon_core.display.live_dashboard import LiveDashboardRenderer
+
+
+def _web_ui_url(workflow_id: str | None) -> str | None:
+    if not workflow_id:
+        return None
+    port = os.environ.get("TEMPORAL_WEB_UI_PORT", "8233")
+    return f"http://localhost:{port}/namespaces/default/workflows/{workflow_id}"
+
+
+def _logs_cmd(workspace: str | None) -> str | None:
+    if not workspace:
+        return None
+    return f"shannon-whitebox logs {workspace} --follow"
 
 
 class WorkflowLogger:
@@ -51,16 +65,33 @@ class WorkflowLogger:
             renderers.append(self._dashboard)
         self._dispatcher = DisplayDispatcher(renderers)
 
+        ws = workflow_id or self._meta.id
+        mode = self._meta.web_url or "offline (source code analysis)"
         await self._dispatcher.dispatch(WorkflowHeader(
             timestamp=format_log_time(), category="HEADER",
-            workflow_id=workflow_id, target_url=self._meta.web_url,
+            workflow_id=workflow_id, target_url=self._meta.web_url or None,
+            repo_path=self._meta.repo_path,
+            mode=mode,
+            web_ui_url=_web_ui_url(workflow_id),
+            logs_cmd=_logs_cmd(ws),
+            workspace=ws,
         ))
 
-    async def log_phase(self, phase: str, event: Literal["start", "complete"]) -> None:
+    async def log_phase(self, phase: str, event: Literal["start", "complete"],
+                        steps: tuple[str, ...] = ()) -> None:
         if self._dispatcher is None:
             return
         await self._dispatcher.dispatch(PhaseEvent(
-            timestamp=format_log_time(), category="PHASE", phase=phase, event=event))
+            timestamp=format_log_time(), category="PHASE", phase=phase,
+            event=event, steps=tuple(steps)))
+
+    async def log_step(self, name: str, phase: str, event: Literal["start", "complete"],
+                       duration_ms: int | None = None, error: str | None = None) -> None:
+        if self._dispatcher is None:
+            return
+        await self._dispatcher.dispatch(StepEvent(
+            timestamp=format_log_time(), category="STEP", name=name, phase=phase,
+            event=event, duration_ms=duration_ms, error=error))
 
     async def log_agent(self, agent_name: str, event: Literal["start", "end"],
                         details: AgentLogDetails | None = None) -> None:
