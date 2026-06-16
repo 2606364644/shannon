@@ -11,7 +11,7 @@ from typing import Literal
 
 from shannon_core.display.events import (
     AgentEvent, DisplayEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
-    ResumeEvent, SummaryEvent, ToolCallEvent,
+    ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent,
 )
 from shannon_core.display.formatters import humanize_tool_call
 
@@ -35,6 +35,8 @@ class AgentRow:
 class DashboardState:
     current_phase: str | None = None
     agents: dict[str, AgentRow] = field(default_factory=dict)
+    phase_units: tuple[str, ...] = ()
+    unit_status: dict[str, str] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -44,10 +46,37 @@ class DashboardState:
     def total_cost(self) -> float:
         return sum(r.cost_usd or 0.0 for r in self.agents.values())
 
+    @property
+    def total_units(self) -> int:
+        return len(self.phase_units)
+
+    @property
+    def completed_units(self) -> int:
+        return sum(1 for st in self.unit_status.values() if st in ("done", "failed"))
+
+    @property
+    def running_units(self) -> list[str]:
+        return [n for n in self.phase_units if self.unit_status.get(n) == "running"]
+
+    def _set_unit(self, name: str, status: str) -> "DashboardState":
+        if name not in self.phase_units:
+            return self   # unit not declared in this phase -> ignore (keeps agents clean)
+        units = dict(self.unit_status)
+        units[name] = status
+        return replace(self, unit_status=units)
+
     def apply(self, event: DisplayEvent) -> "DashboardState":
         """Return a new state with the event folded in (immutable)."""
         if isinstance(event, PhaseEvent):
-            return replace(self, current_phase=event.phase)
+            if event.event == "start":
+                return replace(self, current_phase=event.phase,
+                               phase_units=event.steps, unit_status={})
+            return replace(self, current_phase=event.phase)  # complete: keep units
+
+        if isinstance(event, StepEvent):
+            status = "running" if event.event == "start" else (
+                "failed" if event.error else "done")
+            return self._set_unit(event.name, status)
 
         if isinstance(event, ResumeEvent):
             agents = dict(self.agents)
@@ -61,6 +90,7 @@ class DashboardState:
             if event.event == "start":
                 agents[event.agent_name] = replace(
                     cur, status="running", attempt=event.attempt, error=None)
+                next_state = self._set_unit(event.agent_name, "running")
             else:  # end
                 status: AgentStatus = "done" if event.success else "failed"
                 agents[event.agent_name] = replace(
@@ -68,7 +98,8 @@ class DashboardState:
                     duration_ms=event.duration_ms if event.duration_ms is not None else cur.duration_ms,
                     cost_usd=event.cost_usd if event.cost_usd is not None else cur.cost_usd,
                     error=event.error)
-            return replace(self, agents=agents)
+                next_state = self._set_unit(event.agent_name, status)
+            return replace(next_state, agents=agents)
 
         if isinstance(event, ToolCallEvent):
             agents = dict(self.agents)

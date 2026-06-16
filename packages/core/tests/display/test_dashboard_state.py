@@ -104,3 +104,70 @@ def test_unknown_event_is_noop():
     s = DashboardState().apply(WorkflowHeader(timestamp="t", category="HEADER",
                                               workflow_id="w", target_url="u"))
     assert s == DashboardState()
+
+
+from shannon_core.display.events import StepEvent
+
+
+def _phase_with_steps(name: str, steps) -> PhaseEvent:
+    return PhaseEvent(timestamp="t", category="PHASE", phase=name, event="start",
+                      steps=tuple(steps))
+
+
+def _step(name: str, phase: str, event: str = "start", **kw) -> StepEvent:
+    return StepEvent(timestamp="t", category="STEP", name=name, phase=phase,
+                     event=event, duration_ms=kw.get("duration_ms"), error=kw.get("error"))
+
+
+def test_phase_start_records_units_and_resets_status():
+    s = DashboardState().apply(
+        _phase_with_steps("pre-recon", ["code-index", "pre-recon", "merge-sinks"]))
+    assert s.phase_units == ("code-index", "pre-recon", "merge-sinks")
+    assert s.unit_status == {}
+    assert s.total_units == 3
+    assert s.completed_units == 0
+
+
+def test_step_start_then_complete_advances_unit_progress():
+    s = (DashboardState()
+         .apply(_phase_with_steps("pre-recon", ["code-index", "pre-recon"]))
+         .apply(_step("code-index", "pre-recon", "start"))
+         .apply(_step("code-index", "pre-recon", "complete", duration_ms=12000)))
+    assert s.unit_status["code-index"] == "done"
+    assert s.completed_units == 1
+    assert s.running_units == []
+    assert "code-index" not in s.running_units
+
+
+def test_running_units_lists_in_flight():
+    s = (DashboardState()
+         .apply(_phase_with_steps("pre-recon", ["code-index", "pre-recon"]))
+         .apply(_step("code-index", "pre-recon", "start"))
+         .apply(_agent("pre-recon", "start")))   # agent in same phase -> unit running
+    assert set(s.running_units) == {"code-index", "pre-recon"}
+    assert s.completed_units == 0
+
+
+def test_agent_in_phase_advances_unit_status():
+    s = (DashboardState()
+         .apply(_phase_with_steps("pre-recon", ["code-index", "pre-recon"]))
+         .apply(_agent("pre-recon", "start"))
+         .apply(_agent("pre-recon", "end", success=True)))
+    assert s.unit_status["pre-recon"] == "done"
+    assert s.completed_units == 1
+
+
+def test_step_failed_marks_unit_failed():
+    s = (DashboardState()
+         .apply(_phase_with_steps("pre-recon", ["code-index"]))
+         .apply(_step("code-index", "pre-recon", "complete", error="boom")))
+    assert s.unit_status["code-index"] == "failed"
+    assert s.completed_units == 1   # terminal either way
+
+
+def test_phase_without_steps_keeps_legacy_completed_count():
+    # Backward-compat: a PhaseEvent without steps does not set phase_units,
+    # so status line falls back to completed_count-based "N done".
+    s = DashboardState().apply(_phase("recon"))
+    assert s.phase_units == ()
+    assert s.total_units == 0
