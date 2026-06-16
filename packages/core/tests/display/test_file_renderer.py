@@ -152,3 +152,45 @@ async def test_resume_block():
     assert "[RESUME] Resuming workflow" in out
     assert "Previous Workflow ID: w1" in out
     assert "New Workflow ID:      w2" in out
+
+
+from shannon_core.display.events import StepEvent
+
+
+async def test_step_event_renders_step_line():
+    class _W:
+        def __init__(self): self.lines = []
+        async def write(self, s): self.lines.append(s)
+    w = _W()
+    from shannon_core.display.file_renderer import FileLogRenderer
+    r = FileLogRenderer(w)
+    await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                             phase="pre-recon", event="start"))
+    await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                             phase="pre-recon", event="complete", duration_ms=12000))
+    out = "".join(w.lines)
+    assert "[STEP]" in out
+    assert "code-index" in out
+    assert "Starting" in out
+    assert "Completed" in out
+
+
+async def test_header_renders_repo_and_monitor_when_offline():
+    class _W:
+        def __init__(self): self.lines = []
+        async def write(self, s): self.lines.append(s)
+    w = _W()
+    from shannon_core.display.file_renderer import FileLogRenderer
+    r = FileLogRenderer(w)
+    await r.render(WorkflowHeader(
+        timestamp="2026-06-16 13:49:44", category="HEADER", workflow_id="wf-1",
+        target_url=None, repo_path="/root/code/prize_web", mode="offline (source code analysis)",
+        web_ui_url="http://localhost:8233/namespaces/default/workflows/wf-1",
+        logs_cmd="shannon-whitebox logs wf-1 --follow", workspace="wf-1"))
+    out = "".join(w.lines)
+    assert "Repository:" in out
+    assert "/root/code/prize_web" in out
+    assert "offline" in out
+    assert "Monitor:" in out
+    assert "8233" in out
+    assert "Target URL:  N/A" not in out     # offline -> no N/A target line

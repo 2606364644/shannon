@@ -30,11 +30,12 @@ class FileLogRenderer:
     async def render(self, event) -> None:
         from shannon_core.display.events import (
             AgentEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
-            ResumeEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
+            ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
         )
         match event:
             case WorkflowHeader(): await self._writer.write(self._header(event))
             case PhaseEvent(): await self._writer.write(self._phase(event))
+            case StepEvent(): await self._writer.write(self._step(event))
             case AgentEvent(): await self._writer.write(self._agent(event))
             case ToolCallEvent(): await self._writer.write(self._tool(event))
             case LlmTurnEvent(): await self._writer.write(self._llm(event))
@@ -42,13 +43,37 @@ class FileLogRenderer:
             case SummaryEvent(): await self._writer.write(self._summary(event))
             case ResumeEvent(): await self._writer.write(self._resume(event))
 
+    def _step(self, e) -> str:
+        verb = "Starting" if e.event == "start" else "Completed"
+        parts = []
+        if e.event == "complete" and e.duration_ms is not None:
+            parts.append(format_duration(e.duration_ms))
+        if e.error:
+            parts.append(f"error: {e.error}")
+        suffix = f" ({', '.join(parts)})" if parts else ""
+        return f"[{e.timestamp}] [STEP] {e.name}: {verb}{suffix}\n"
+
     def _header(self, e) -> str:
-        target = e.target_url if e.target_url else "N/A"
         lines = [_SEP, "Shannon Pentest - Workflow Log", _SEP]
-        if e.workflow_id:  # omit the line entirely when None (matches old behavior)
+        if e.workflow_id:
             lines.append(f"Workflow ID: {e.workflow_id}")
-        lines.append(f"Target URL:  {target}")
+        if getattr(e, "repo_path", None):
+            lines.append(f"Repository:  {e.repo_path}")
+        # Target line only when there is a real URL (offline scans show mode instead)
+        if e.target_url:
+            lines.append(f"Target URL:  {e.target_url}")
+        mode = getattr(e, "mode", None)
+        if mode and not e.target_url:
+            lines.append(f"Mode:        {mode}")
         lines.append(f"Started:     {e.timestamp}")
+        web_ui = getattr(e, "web_ui_url", None)
+        logs_cmd = getattr(e, "logs_cmd", None)
+        if web_ui or logs_cmd:
+            lines.append("Monitor:")
+            if web_ui:
+                lines.append(f"  Web UI: {web_ui}")
+            if logs_cmd:
+                lines.append(f"  Logs:   {logs_cmd}")
         lines.append(_SEP)
         return "\n".join(lines) + "\n\n"
 
