@@ -54,15 +54,21 @@ class LiveDashboardRenderer:
         elapsed = format_duration(int(time.monotonic() - self._start_monotonic) * 1000)
         running = [r for r in snap.agents.values() if r.status == "running"]
 
-        cells: list = [
-            Text(snap.current_phase or "—", style="bold cyan"),
-            Text(f" · {snap.completed_count} done", style="green"),
-            Text(f" · {elapsed}"),
-            Text(f" · ${snap.total_cost:.4f}", style="yellow"),
-        ]
-        if running:
+        cells: list = [Text(snap.current_phase or "—", style="bold cyan")]
+
+        if snap.total_units > 0:
+            cells.append(Text(f" · step {snap.completed_units}/{snap.total_units}", style="green"))
+            running_unit_names = snap.running_units
+        else:
+            cells.append(Text(f" · {snap.completed_count} done", style="green"))
+            running_unit_names = [r.name for r in running]
+
+        cells.append(Text(f" · {elapsed}"))
+        cells.append(Text(f" · ${snap.total_cost:.4f}", style="yellow"))
+
+        if running_unit_names:
             cells += [Text("    "), Spinner("dots"),
-                      Text(" " + " · ".join(r.name for r in running), style="blue")]
+                      Text(" " + " · ".join(running_unit_names), style="blue")]
 
         row = Table.grid()  # expand=False: cells take natural width, no big gaps
         row.add_row(*cells)

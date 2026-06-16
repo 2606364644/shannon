@@ -2,7 +2,7 @@ import io
 
 from rich.console import Console
 
-from shannon_core.display.events import PhaseEvent, AgentEvent
+from shannon_core.display.events import StepEvent, PhaseEvent, AgentEvent
 from shannon_core.display.live_dashboard import LiveDashboardRenderer
 
 
@@ -54,3 +54,34 @@ async def test_done_agent_increments_count_and_leaves_status_line():
     assert "$0.2300" in out                  # cost accumulated into status line
     assert "auth-vuln" not in out            # done agent no longer "running" -> not in status line
     assert "4.5s" not in out                 # per-agent duration NOT shown in dashboard
+
+
+async def test_status_line_shows_step_progress_and_running_units():
+    console, buf = _console()
+    r = LiveDashboardRenderer(console)
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon",
+                              event="start",
+                              steps=("code-index", "pre-recon", "merge-sinks")))
+    await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                             phase="pre-recon", event="start"))
+    await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="pre-recon",
+                              event="start", attempt=1))
+    console.print(r)
+    out = buf.getvalue()
+    assert "pre-recon" in out            # phase
+    assert "step 0/3" in out             # 0 completed of 3 units
+    assert "code-index" in out           # running unit
+    assert "pre-recon" in out            # running unit (agent)
+
+
+async def test_status_line_falls_back_when_phase_has_no_steps():
+    console, buf = _console()
+    r = LiveDashboardRenderer(console)
+    # PhaseEvent without steps (legacy) -> no "step N/M", keep "N done"
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
+    await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="recon",
+                              event="start", attempt=1))
+    console.print(r)
+    out = buf.getvalue()
+    assert "0 done" in out
+    assert "step " not in out
