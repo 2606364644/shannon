@@ -41,6 +41,15 @@ from shannon_core.runtime.scan_runner import (
 TASK_QUEUE_PREFIX = "shannon-py-wb"
 
 
+def resolve_workflow_id(workspace_name: str | None, epoch: float) -> str:
+    """Single source of truth for the Temporal workflow id.
+
+    Used for both the WorkflowHeader banner (meta.id → web_ui_url / logs_cmd)
+    and client.start_workflow(id=...) so the Web UI link points at the real run.
+    """
+    return workspace_name or f"whitebox-{int(epoch)}"
+
+
 async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> dict:
     from shannon_core.session import SessionManager
@@ -74,8 +83,11 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         ],
     )
 
+    loop = asyncio.get_running_loop()
+    workflow_id = resolve_workflow_id(input.workspace_name, loop.time())
+
     meta = SessionMetadata(
-        id=input.workspace_name or "whitebox-scan",
+        id=workflow_id,
         web_url=input.web_url,
         repo_path=input.repo_path,
         output_path=str(resolve_workspaces_dir(input.repo_path)),
@@ -95,7 +107,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                     handle = await client.start_workflow(
                         WhiteboxScanWorkflow.run,
                         input,
-                        id=input.workspace_name or f"whitebox-{int(asyncio.get_event_loop().time())}",
+                        id=workflow_id,
                         task_queue=task_queue,
                     )
                     try:

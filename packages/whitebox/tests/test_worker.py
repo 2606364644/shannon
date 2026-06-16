@@ -127,3 +127,15 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path):
     assert result == {"status": "cancelled"}
     mock_clear.assert_called()  # 清理在 cancel 路径仍执行
 
+
+from shannon_whitebox.worker import resolve_workflow_id
+
+
+def test_resolve_workflow_id_uses_workspace_name_when_given():
+    assert resolve_workflow_id("my-ws", epoch=1000.0) == "my-ws"
+
+
+def test_resolve_workflow_id_synthesizes_when_none():
+    wid = resolve_workflow_id(None, epoch=1234567890.7)
+    assert wid == "whitebox-1234567890"
+
