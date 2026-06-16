@@ -15,6 +15,7 @@ from shannon_core.services.temporal_infra import (
     stop_temporal,
 )
 from shannon_core.session import SessionManager
+from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_whitebox.pipeline.shared import PipelineInput
 
 
@@ -137,7 +138,7 @@ def status():
 @click.option("--follow", is_flag=True, help="Tail the log in real-time (auto-exits on completion)")
 def logs(workspace_name, follow):
     """View workspace execution logs."""
-    workspaces_dir = Path("workspaces")
+    workspaces_dir = resolve_workspaces_dir()
     ws = workspaces_dir / workspace_name
     if not ws.exists():
         click.echo(f"Workspace not found: {workspace_name}")
@@ -158,7 +159,7 @@ def workspaces():
     """List all workspaces grouped by scan type."""
     from shannon_core.workspace import compute_deliverables_summary
 
-    mgr = SessionManager(Path("workspaces"))
+    mgr = SessionManager(resolve_workspaces_dir())
     all_ws = mgr.list_workspaces()
 
     whitebox = []
@@ -208,7 +209,7 @@ def show(workspace_name):
     """Show detailed workspace information."""
     from shannon_core.workspace import compute_deliverables_summary, get_workspace_info
 
-    mgr = SessionManager(Path("workspaces"))
+    mgr = SessionManager(resolve_workspaces_dir())
     ws = mgr.get_workspace(workspace_name)
     if ws is None:
         click.echo(f"Workspace not found: {workspace_name}")
@@ -289,7 +290,7 @@ def show(workspace_name):
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 def delete(workspace_name, force):
     """Delete a workspace and all its data."""
-    mgr = SessionManager(Path("workspaces"))
+    mgr = SessionManager(resolve_workspaces_dir())
     ws = mgr.get_workspace(workspace_name)
     if ws is None:
         click.echo(f"Workspace not found: {workspace_name}")
@@ -333,7 +334,7 @@ def delete(workspace_name, force):
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 def clean(workspace_name, force):
     """Clean scan artifacts from a workspace, preserving its structure."""
-    mgr = SessionManager(Path("workspaces"))
+    mgr = SessionManager(resolve_workspaces_dir())
     ws = mgr.get_workspace(workspace_name)
     if ws is None:
         click.echo(f"Workspace not found: {workspace_name}")
