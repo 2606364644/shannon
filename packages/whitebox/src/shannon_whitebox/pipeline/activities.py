@@ -33,38 +33,40 @@ def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
 
 @activity.defn
 async def run_preflight(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        # Config parsing validation
-        if input.config_path:
-            from shannon_core.config.parser import parse_config
-            try:
-                parse_config(input.config_path)
-            except PentestError:
-                raise
-            except Exception as exc:
+        async with get_audit_session().track_step("setup", "preflight"):
+            # Config parsing validation
+            if input.config_path:
+                from shannon_core.config.parser import parse_config
+                try:
+                    parse_config(input.config_path)
+                except PentestError:
+                    raise
+                except Exception as exc:
+                    raise PentestError(
+                        f"Config parsing failed: {exc}",
+                        category="config",
+                        error_code=ErrorCode.CONFIG_PARSE_ERROR,
+                    ) from exc
+
+            # URL safety check
+            if input.web_url:
+                validate_target_url(input.web_url)
+
+            repo, _, _ = _get_paths(input)
+            if not repo.exists():
                 raise PentestError(
-                    f"Config parsing failed: {exc}",
-                    category="config",
-                    error_code=ErrorCode.CONFIG_PARSE_ERROR,
-                ) from exc
-
-        # URL safety check
-        if input.web_url:
-            validate_target_url(input.web_url)
-
-        repo, _, _ = _get_paths(input)
-        if not repo.exists():
-            raise PentestError(
-                f"Repository not found: {input.repo_path}",
-                "config",
-                error_code=ErrorCode.REPO_NOT_FOUND,
-            )
-        if not (repo / ".git").exists():
-            raise PentestError(
-                f"Not a git repository: {input.repo_path}",
-                "config",
-                error_code=ErrorCode.REPO_NOT_FOUND,
-            )
+                    f"Repository not found: {input.repo_path}",
+                    "config",
+                    error_code=ErrorCode.REPO_NOT_FOUND,
+                )
+            if not (repo / ".git").exists():
+                raise PentestError(
+                    f"Not a git repository: {input.repo_path}",
+                    "config",
+                    error_code=ErrorCode.REPO_NOT_FOUND,
+                )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -132,10 +134,10 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 
 
 @activity.defn
-async def log_phase_start_activity(input: ActivityInput) -> None:
+async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None = None) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     phase = input.workspace_name or "unknown"
-    await get_audit_session().log_phase_start(phase)
+    await get_audit_session().log_phase_start(phase, steps=tuple(steps or ()))
 
 
 @activity.defn
@@ -149,17 +151,19 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
 
 @activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        from shannon_core.agents.providers import build_provider_config
+        async with get_audit_session().track_step("setup", "credential-check"):
+            from shannon_core.agents.providers import build_provider_config
 
-        config = build_provider_config(api_key=input.api_key or None)
-        if config.api_key or config.type != "anthropic_api":
-            await validate_credentials(
-                config.type,
-                api_key=config.api_key,
-                base_url=config.base_url,
-                auth_token=config.auth_token,
-            )
+            config = build_provider_config(api_key=input.api_key or None)
+            if config.api_key or config.type != "anthropic_api":
+                await validate_credentials(
+                    config.type,
+                    api_key=config.api_key,
+                    base_url=config.base_url,
+                    auth_token=config.auth_token,
+                )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -170,32 +174,34 @@ async def run_credential_check(input: ActivityInput) -> None:
 
 @activity.defn
 async def run_auth_validation(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        from shannon_core.services.validate_authentication import validate_authentication
-        from shannon_core.prompts.manager import PromptManager
-        from shannon_core.agents.executor import AgentExecutor
+        async with get_audit_session().track_step("setup", "auth-validation"):
+            from shannon_core.services.validate_authentication import validate_authentication
+            from shannon_core.prompts.manager import PromptManager
+            from shannon_core.agents.executor import AgentExecutor
 
-        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
-        prompt_manager = PromptManager(prompts_dir)
-        executor = AgentExecutor(prompt_manager)
+            prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+            prompt_manager = PromptManager(prompts_dir)
+            executor = AgentExecutor(prompt_manager)
 
-        result = await validate_authentication(
-            web_url=input.web_url,
-            config_path=input.config_path,
-            prompt_manager=prompt_manager,
-            executor=executor,
-            repo_path=input.repo_path,
-            api_key=input.api_key,
-            workspace_path=input.workspace_path or "",
-            audit_logger=create_activity_logger(),
-        )
-        if not result.success:
-            raise PentestError(
-                f"Authentication validation failed: {result.failure_detail or 'unknown'}",
-                category="preflight",
-                retryable=False,
-                error_code=ErrorCode.AUTH_LOGIN_FAILED,
+            result = await validate_authentication(
+                web_url=input.web_url,
+                config_path=input.config_path,
+                prompt_manager=prompt_manager,
+                executor=executor,
+                repo_path=input.repo_path,
+                api_key=input.api_key,
+                workspace_path=input.workspace_path or "",
+                audit_logger=create_activity_logger(),
             )
+            if not result.success:
+                raise PentestError(
+                    f"Authentication validation failed: {result.failure_detail or 'unknown'}",
+                    category="preflight",
+                    retryable=False,
+                    error_code=ErrorCode.AUTH_LOGIN_FAILED,
+                )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -212,6 +218,7 @@ class _StubMCPClient:
 
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         import logging
         from shannon_core.code_index import build_code_index_with_gitnexus, write_index_files
@@ -221,56 +228,57 @@ async def run_code_index(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        # Create LLM client for taint analysis
-        async def _llm_taint_client(prompt: str, **kwargs) -> str:
-            # Placeholder: in production, this calls run_claude_prompt
-            return "{}"
+        async with get_audit_session().track_step("pre-recon", "code-index"):
+            # Create LLM client for taint analysis
+            async def _llm_taint_client(prompt: str, **kwargs) -> str:
+                # Placeholder: in production, this calls run_claude_prompt
+                return "{}"
 
-        # --- GitNexus integration ---
-        # GitNexus MCP serves ALL indexed repos from its global registry
-        # (~/.gitnexus/registry.json).  The correct order is:
-        #   1. `gitnexus analyze <repo>`  — index & register the repo
-        #   2. `gitnexus mcp`             — start MCP server (no --repo flag)
-        # If indexing fails or MCP is unreachable we degrade to minimal AST-only.
-        from shannon_core.code_index.gitnexus_engine import GitNexusEngine
+            # --- GitNexus integration ---
+            # GitNexus MCP serves ALL indexed repos from its global registry
+            # (~/.gitnexus/registry.json).  The correct order is:
+            #   1. `gitnexus analyze <repo>`  — index & register the repo
+            #   2. `gitnexus mcp`             — start MCP server (no --repo flag)
+            # If indexing fails or MCP is unreachable we degrade to minimal AST-only.
+            from shannon_core.code_index.gitnexus_engine import GitNexusEngine
 
-        engine = GitNexusEngine(Path(repo))
-        indexed = False
-        if engine.is_available():
-            result = engine.ensure_indexed()
-            indexed = result.success
-            if not indexed:
-                logger.warning("GitNexus indexing failed: %s", result.error_message)
+            engine = GitNexusEngine(Path(repo))
+            indexed = False
+            if engine.is_available():
+                result = engine.ensure_indexed()
+                indexed = result.success
+                if not indexed:
+                    logger.warning("GitNexus indexing failed: %s", result.error_message)
 
-        if indexed:
-            try:
-                async with GitNexusMCPClient(Path(repo)) as mcp:
+            if indexed:
+                try:
+                    async with GitNexusMCPClient(Path(repo)) as mcp:
+                        index = await build_code_index_with_gitnexus(
+                            str(repo),
+                            mcp_client=mcp,
+                            llm_client=_llm_taint_client,
+                            auto_index=False,  # already indexed above
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "GitNexus MCP failed (%s), falling back to minimal index", exc,
+                    )
                     index = await build_code_index_with_gitnexus(
                         str(repo),
-                        mcp_client=mcp,
+                        mcp_client=_StubMCPClient(),
                         llm_client=_llm_taint_client,
-                        auto_index=False,  # already indexed above
+                        auto_index=True,  # will detect unavailable → minimal mode
                     )
-            except Exception as exc:
-                logger.warning(
-                    "GitNexus MCP failed (%s), falling back to minimal index", exc,
-                )
+            else:
+                # GitNexus CLI missing or indexing failed — minimal AST-only mode
                 index = await build_code_index_with_gitnexus(
                     str(repo),
                     mcp_client=_StubMCPClient(),
                     llm_client=_llm_taint_client,
-                    auto_index=True,  # will detect unavailable → minimal mode
+                    auto_index=True,
                 )
-        else:
-            # GitNexus CLI missing or indexing failed — minimal AST-only mode
-            index = await build_code_index_with_gitnexus(
-                str(repo),
-                mcp_client=_StubMCPClient(),
-                llm_client=_llm_taint_client,
-                auto_index=True,
-            )
 
-        json_path, summary_path = write_index_files(index, str(deliverables))
+            json_path, summary_path = write_index_files(index, str(deliverables))
 
         return {
             "total_blocks": index.total_blocks,
@@ -290,11 +298,13 @@ async def run_code_index(input: ActivityInput) -> dict:
 @activity.defn
 async def run_entry_point_fusion(input: ActivityInput) -> dict:
     """Merge deterministic entry points with LLM-discovered entry points."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.code_index import run_entry_point_fusion as _fusion
 
         repo, deliverables, _ = _get_paths(input)
-        index = _fusion(str(deliverables))
+        async with get_audit_session().track_step("pre-recon", "entry-point-fusion"):
+            index = _fusion(str(deliverables))
 
         return {
             "total_entry_points": index.total_entry_points,
@@ -310,11 +320,13 @@ async def run_entry_point_fusion(input: ActivityInput) -> dict:
 
 @activity.defn
 async def run_save_adjudication(input: ActivityInput) -> dict:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.code_index import save_adjudication
 
         repo, deliverables, _ = _get_paths(input)
-        save_adjudication(str(deliverables))
+        async with get_audit_session().track_step("pre-recon", "adjudication"):
+            save_adjudication(str(deliverables))
 
         return {"status": "ok"}
     except PentestError as e:
@@ -328,6 +340,7 @@ async def run_save_adjudication(input: ActivityInput) -> dict:
 @activity.defn
 async def run_merge_sink_reports(input: ActivityInput) -> dict:
     """Merge deterministic sinks with LLM-discovered sinks from pre-recon."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.code_index.sink_merger import merge_sink_reports
         from shannon_core.code_index.parameter_models import SinkCallSite
@@ -335,27 +348,28 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        # Load deterministic sinks from code_index.json
-        code_index_path = deliverables / "code_index.json"
-        det_sinks: list[SinkCallSite] = []
-        index = None
-        if code_index_path.exists():
-            index = CodeIndex.model_validate_json(code_index_path.read_text())
-            det_sinks = index.sink_call_sites
+        async with get_audit_session().track_step("pre-recon", "merge-sinks"):
+            # Load deterministic sinks from code_index.json
+            code_index_path = deliverables / "code_index.json"
+            det_sinks: list[SinkCallSite] = []
+            index = None
+            if code_index_path.exists():
+                index = CodeIndex.model_validate_json(code_index_path.read_text())
+                det_sinks = index.sink_call_sites
 
-        # Read LLM pre-recon deliverable
-        llm_report = ""
-        pre_recon_path = deliverables / "pre_recon_deliverable.md"
-        if pre_recon_path.exists():
-            llm_report = pre_recon_path.read_text()
+            # Read LLM pre-recon deliverable
+            llm_report = ""
+            pre_recon_path = deliverables / "pre_recon_deliverable.md"
+            if pre_recon_path.exists():
+                llm_report = pre_recon_path.read_text()
 
-        # Merge
-        merged = merge_sink_reports(det_sinks, llm_report)
+            # Merge
+            merged = merge_sink_reports(det_sinks, llm_report)
 
-        # Write merged sinks back to code_index.json (reuse existing index)
-        if index is not None:
-            index.sink_call_sites = merged
-            atomic_write_json(code_index_path, json.loads(index.model_dump_json()))
+            # Write merged sinks back to code_index.json (reuse existing index)
+            if index is not None:
+                index.sink_call_sites = merged
+                atomic_write_json(code_index_path, json.loads(index.model_dump_json()))
 
         return {
             "deterministic_count": len(det_sinks),
@@ -373,6 +387,7 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 @activity.defn
 async def run_risk_scoring(input: ActivityInput) -> dict:
     """Score call chains and produce tiered audit plan."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.code_index.models import CodeIndex
         from shannon_core.code_index.parameter_models import ParameterPropagationGraph
@@ -381,49 +396,50 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        # Load code index
-        code_index_path = deliverables / "code_index.json"
-        if not code_index_path.exists():
-            return {"total_chains": 0, "tier3_count": 0, "tier2_count": 0, "tier1_count": 0}
+        async with get_audit_session().track_step("risk-scoring", "risk-scoring"):
+            # Load code index
+            code_index_path = deliverables / "code_index.json"
+            if not code_index_path.exists():
+                return {"total_chains": 0, "tier3_count": 0, "tier2_count": 0, "tier1_count": 0}
 
-        index = CodeIndex.model_validate_json(code_index_path.read_text())
+            index = CodeIndex.model_validate_json(code_index_path.read_text())
 
-        # Load parameter graph
-        param_graph_path = deliverables / "parameter_graph.json"
-        taint_flows_by_chain: dict[str, list] = {}
-        if param_graph_path.exists():
-            pgraph = ParameterPropagationGraph.model_validate_json(
-                param_graph_path.read_text()
+            # Load parameter graph
+            param_graph_path = deliverables / "parameter_graph.json"
+            taint_flows_by_chain: dict[str, list] = {}
+            if param_graph_path.exists():
+                pgraph = ParameterPropagationGraph.model_validate_json(
+                    param_graph_path.read_text()
+                )
+                for flow in pgraph.taint_flows:
+                    taint_flows_by_chain.setdefault(flow.entry_point_id, []).append(flow)
+
+            # Build block lookup
+            blocks_by_id = {b.id: b for b in index.blocks}
+
+            # Auth middleware detection: simple heuristic — functions with
+            # auth/login/token/verify in name or decorators
+            auth_ids: set[str] = set()
+            for block in index.blocks:
+                combined = f"{block.function_name} {' '.join(block.decorators)}".lower()
+                if any(kw in combined for kw in ("auth", "login", "token", "verify", "session")):
+                    auth_ids.add(block.id)
+
+            # Plan
+            planner = TieredAuditPlanner(
+                chains=index.chains,
+                blocks_by_id=blocks_by_id,
+                taint_flows_by_chain=taint_flows_by_chain,
+                auth_middleware_ids=auth_ids,
+                budget=AuditBudget(),
+                sink_call_sites=index.sink_call_sites,
             )
-            for flow in pgraph.taint_flows:
-                taint_flows_by_chain.setdefault(flow.entry_point_id, []).append(flow)
+            plan = planner.plan()
 
-        # Build block lookup
-        blocks_by_id = {b.id: b for b in index.blocks}
-
-        # Auth middleware detection: simple heuristic — functions with
-        # auth/login/token/verify in name or decorators
-        auth_ids: set[str] = set()
-        for block in index.blocks:
-            combined = f"{block.function_name} {' '.join(block.decorators)}".lower()
-            if any(kw in combined for kw in ("auth", "login", "token", "verify", "session")):
-                auth_ids.add(block.id)
-
-        # Plan
-        planner = TieredAuditPlanner(
-            chains=index.chains,
-            blocks_by_id=blocks_by_id,
-            taint_flows_by_chain=taint_flows_by_chain,
-            auth_middleware_ids=auth_ids,
-            budget=AuditBudget(),
-            sink_call_sites=index.sink_call_sites,
-        )
-        plan = planner.plan()
-
-        # Write audit plan
-        plan_path = deliverables / "audit_plan.json"
-        plan_data = json.loads(plan.to_json())
-        atomic_write_json(plan_path, plan_data)
+            # Write audit plan
+            plan_path = deliverables / "audit_plan.json"
+            plan_data = json.loads(plan.to_json())
+            atomic_write_json(plan_path, plan_data)
 
         return {
             "total_chains": plan.total_chains,
@@ -439,16 +455,18 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
 @activity.defn
 async def render_findings(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.services.findings_renderer import FindingsRenderer
         from shannon_core.config.parser import parse_config
 
         _, deliverables, _ = _get_paths(input)
-        report_config = None
-        if input.config_path:
-            cfg = parse_config(input.config_path)
-            report_config = cfg.report
-        await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
+        async with get_audit_session().track_step("reporting", "render-findings"):
+            report_config = None
+            if input.config_path:
+                cfg = parse_config(input.config_path)
+                report_config = cfg.report
+            await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -465,6 +483,7 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
     run_vuln_agent, so vuln agents see the summary as ready. Skipped in
     pipeline_testing_mode (CI does not feed hints to LLMs).
     """
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         if input.pipeline_testing_mode:
             return {"written": False}
@@ -477,26 +496,27 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        code_index_path = deliverables / "code_index.json"
-        param_graph_path = deliverables / "parameter_graph.json"
-        audit_plan_path = deliverables / "audit_plan.json"
-        if not code_index_path.exists():
-            return {"written": False}
+        async with get_audit_session().track_step("risk-scoring", "dataflow-hints"):
+            code_index_path = deliverables / "code_index.json"
+            param_graph_path = deliverables / "parameter_graph.json"
+            audit_plan_path = deliverables / "audit_plan.json"
+            if not code_index_path.exists():
+                return {"written": False}
 
-        index = CodeIndex.model_validate_json(code_index_path.read_text())
-        pgraph = (
-            ParameterPropagationGraph.model_validate_json(param_graph_path.read_text())
-            if param_graph_path.exists()
-            else ParameterPropagationGraph()
-        )
-        audit_plan = (
-            AuditPlan.model_validate_json(audit_plan_path.read_text())
-            if audit_plan_path.exists()
-            else AuditPlan()
-        )
+            index = CodeIndex.model_validate_json(code_index_path.read_text())
+            pgraph = (
+                ParameterPropagationGraph.model_validate_json(param_graph_path.read_text())
+                if param_graph_path.exists()
+                else ParameterPropagationGraph()
+            )
+            audit_plan = (
+                AuditPlan.model_validate_json(audit_plan_path.read_text())
+                if audit_plan_path.exists()
+                else AuditPlan()
+            )
 
-        md = build_static_dataflow_hints(index, pgraph, audit_plan)
-        atomic_write_text(deliverables / "static_dataflow_hints.md", md)
+            md = build_static_dataflow_hints(index, pgraph, audit_plan)
+            atomic_write_text(deliverables / "static_dataflow_hints.md", md)
         return {"written": True}
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
@@ -506,17 +526,19 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
 @activity.defn
 async def run_framework_analysis(input: ActivityInput) -> dict:
     """Detect auto-REST frameworks, infer endpoints, write deliverable."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.services.framework_analyzer import analyze_frameworks
 
         repo, deliverables, _ = _get_paths(input)
-        result = await analyze_frameworks(str(repo))
+        async with get_audit_session().track_step("pre-recon", "framework-analysis"):
+            result = await analyze_frameworks(str(repo))
 
-        # Write result as JSON deliverable
-        import dataclasses
-        result_data = dataclasses.asdict(result)
-        result_path = deliverables / "framework_analysis.json"
-        atomic_write_json(result_path, result_data)
+            # Write result as JSON deliverable
+            import dataclasses
+            result_data = dataclasses.asdict(result)
+            result_path = deliverables / "framework_analysis.json"
+            atomic_write_json(result_path, result_data)
 
         return {
             "detected_framework": result.detected_framework.name if result.detected_framework else None,
@@ -534,17 +556,19 @@ async def run_framework_analysis(input: ActivityInput) -> dict:
 @activity.defn
 async def run_frontend_mapping(input: ActivityInput) -> dict:
     """Map frontend routes to API calls, identify XSS chains, write deliverable."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.services.frontend_mapper import map_frontend_routes
 
         repo, deliverables, _ = _get_paths(input)
-        result = await map_frontend_routes(str(repo))
+        async with get_audit_session().track_step("pre-recon", "frontend-mapping"):
+            result = await map_frontend_routes(str(repo))
 
-        # Write result as JSON deliverable
-        import dataclasses
-        result_data = dataclasses.asdict(result)
-        result_path = deliverables / "frontend_mapping.json"
-        atomic_write_json(result_path, result_data)
+            # Write result as JSON deliverable
+            import dataclasses
+            result_data = dataclasses.asdict(result)
+            result_path = deliverables / "frontend_mapping.json"
+            atomic_write_json(result_path, result_data)
 
         return {
             "route_count": len(result.routes),
@@ -561,6 +585,7 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
 @activity.defn
 async def run_route_chain_building(input: ActivityInput) -> dict:
     """Build route chain map from framework + frontend analysis results."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
         from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
@@ -571,50 +596,51 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
         repo, deliverables, _ = _get_paths(input)
         log = logging.getLogger(__name__)
 
-        # Load framework analysis result
-        framework_result = FrameworkAnalysisResult()
-        framework_path = deliverables / "framework_analysis.json"
-        if framework_path.exists():
-            data = json.loads(framework_path.read_text())
-            # Reconstruct endpoints from dicts (tuples become lists in JSON)
-            def _to_endpoint(d: dict) -> InferredEndpoint:
-                return InferredEndpoint(
-                    method=d["method"], path=d["path"], source=d["source"],
-                    model=d.get("model"), middleware=tuple(d.get("middleware", [])),
-                    vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+        async with get_audit_session().track_step("pre-recon", "route-chain-building"):
+            # Load framework analysis result
+            framework_result = FrameworkAnalysisResult()
+            framework_path = deliverables / "framework_analysis.json"
+            if framework_path.exists():
+                data = json.loads(framework_path.read_text())
+                # Reconstruct endpoints from dicts (tuples become lists in JSON)
+                def _to_endpoint(d: dict) -> InferredEndpoint:
+                    return InferredEndpoint(
+                        method=d["method"], path=d["path"], source=d["source"],
+                        model=d.get("model"), middleware=tuple(d.get("middleware", [])),
+                        vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+                    )
+                endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
+                framework_result = FrameworkAnalysisResult(
+                    inferred_endpoints=endpoints,
+                    recommendations=data.get("recommendations", []),
                 )
-            endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
-            framework_result = FrameworkAnalysisResult(
-                inferred_endpoints=endpoints,
-                recommendations=data.get("recommendations", []),
+
+            # Load frontend mapping result
+            frontend_result = FrontendAnalysisResult()
+            frontend_path = deliverables / "frontend_mapping.json"
+            if frontend_path.exists():
+                data = json.loads(frontend_path.read_text())
+                def _to_route(d: dict) -> FrontendRoute:
+                    return FrontendRoute(
+                        path=d["path"], component=d["component"], authenticated=d["authenticated"],
+                    )
+                def _to_xss(d: dict) -> XssAttackChain:
+                    return XssAttackChain(
+                        entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
+                        render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
+                    )
+                routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
+                xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
+                frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
+
+            chains = build_attack_chains_from_analysis(
+                framework_result.inferred_endpoints, frontend_result.routes, frontend_result.xss_chains, log,
             )
 
-        # Load frontend mapping result
-        frontend_result = FrontendAnalysisResult()
-        frontend_path = deliverables / "frontend_mapping.json"
-        if frontend_path.exists():
-            data = json.loads(frontend_path.read_text())
-            def _to_route(d: dict) -> FrontendRoute:
-                return FrontendRoute(
-                    path=d["path"], component=d["component"], authenticated=d["authenticated"],
-                )
-            def _to_xss(d: dict) -> XssAttackChain:
-                return XssAttackChain(
-                    entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
-                    render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
-                )
-            routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
-            xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
-            frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
-
-        chains = build_attack_chains_from_analysis(
-            framework_result.inferred_endpoints, frontend_result.routes, frontend_result.xss_chains, log,
-        )
-
-        # Write chains
-        chains_data = [dataclasses.asdict(c) for c in chains]
-        chains_path = deliverables / "route_chains.json"
-        atomic_write_json(chains_path, chains_data)
+            # Write chains
+            chains_data = [dataclasses.asdict(c) for c in chains]
+            chains_path = deliverables / "route_chains.json"
+            atomic_write_json(chains_path, chains_data)
 
         return {"chain_count": len(chains)}
     except PentestError as e:
@@ -628,6 +654,7 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
 @activity.defn
 async def run_attack_chain_assembly(input: ActivityInput) -> dict:
     """Assemble multi-step attack chains from all analysis results."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
         from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
@@ -638,49 +665,50 @@ async def run_attack_chain_assembly(input: ActivityInput) -> dict:
         repo, deliverables, _ = _get_paths(input)
         log = logging.getLogger(__name__)
 
-        # Load results (JSON stores tuples as lists, convert back)
-        def _to_endpoint(d: dict) -> InferredEndpoint:
-            return InferredEndpoint(
-                method=d["method"], path=d["path"], source=d["source"],
-                model=d.get("model"), middleware=tuple(d.get("middleware", [])),
-                vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
-            )
+        async with get_audit_session().track_step("attack-chain", "attack-chain-assembly"):
+            # Load results (JSON stores tuples as lists, convert back)
+            def _to_endpoint(d: dict) -> InferredEndpoint:
+                return InferredEndpoint(
+                    method=d["method"], path=d["path"], source=d["source"],
+                    model=d.get("model"), middleware=tuple(d.get("middleware", [])),
+                    vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+                )
 
-        def _to_route(d: dict) -> FrontendRoute:
-            return FrontendRoute(
-                path=d["path"], component=d["component"], authenticated=d["authenticated"],
-            )
+            def _to_route(d: dict) -> FrontendRoute:
+                return FrontendRoute(
+                    path=d["path"], component=d["component"], authenticated=d["authenticated"],
+                )
 
-        def _to_xss(d: dict) -> XssAttackChain:
-            return XssAttackChain(
-                entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
-                render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
-            )
+            def _to_xss(d: dict) -> XssAttackChain:
+                return XssAttackChain(
+                    entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
+                    render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
+                )
 
-        framework_result = FrameworkAnalysisResult()
-        framework_path = deliverables / "framework_analysis.json"
-        if framework_path.exists():
-            data = json.loads(framework_path.read_text())
-            endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
-            framework_result = FrameworkAnalysisResult(
-                inferred_endpoints=endpoints,
-                recommendations=data.get("recommendations", []),
-            )
+            framework_result = FrameworkAnalysisResult()
+            framework_path = deliverables / "framework_analysis.json"
+            if framework_path.exists():
+                data = json.loads(framework_path.read_text())
+                endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
+                framework_result = FrameworkAnalysisResult(
+                    inferred_endpoints=endpoints,
+                    recommendations=data.get("recommendations", []),
+                )
 
-        frontend_result = FrontendAnalysisResult()
-        frontend_path = deliverables / "frontend_mapping.json"
-        if frontend_path.exists():
-            data = json.loads(frontend_path.read_text())
-            routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
-            xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
-            frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
+            frontend_result = FrontendAnalysisResult()
+            frontend_path = deliverables / "frontend_mapping.json"
+            if frontend_path.exists():
+                data = json.loads(frontend_path.read_text())
+                routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
+                xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
+                frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
 
-        chains = await build_attack_chains(framework_result, frontend_result, log)
+            chains = await build_attack_chains(framework_result, frontend_result, log)
 
-        # Write assembled chains
-        chains_data = [dataclasses.asdict(c) for c in chains]
-        chains_path = deliverables / "attack_chains.json"
-        atomic_write_json(chains_path, chains_data)
+            # Write assembled chains
+            chains_data = [dataclasses.asdict(c) for c in chains]
+            chains_path = deliverables / "attack_chains.json"
+            atomic_write_json(chains_path, chains_data)
 
         return {"chain_count": len(chains)}
     except PentestError as e:
