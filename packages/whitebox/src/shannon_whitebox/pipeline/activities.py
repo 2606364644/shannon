@@ -134,10 +134,12 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 
 
 @activity.defn
-async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None = None) -> None:
+async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None = None,
+                                   intents: list[str] | None = None) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     phase = input.workspace_name or "unknown"
-    await get_audit_session().log_phase_start(phase, steps=tuple(steps or ()))
+    await get_audit_session().log_phase_start(
+        phase, steps=tuple(steps or ()), step_intents=tuple(intents or ()))
 
 
 @activity.defn

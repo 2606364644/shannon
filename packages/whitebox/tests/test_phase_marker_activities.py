@@ -15,7 +15,8 @@ class _RecordingSession:
         self.phases_completed: list[str] = []
         self.steps: list[tuple[str, str, str]] = []   # (name, phase, event)
 
-    async def log_phase_start(self, phase: str, steps: tuple[str, ...] = ()) -> None:
+    async def log_phase_start(self, phase: str, steps: tuple[str, ...] = (),
+                              step_intents: tuple[str | None, ...] = ()) -> None:
         self.phases_started.append((phase, tuple(steps)))
 
     async def log_phase_complete(self, phase: str) -> None:

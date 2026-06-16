@@ -1,19 +1,8 @@
 """Tests for WhiteboxScanWorkflow error propagation logic."""
 
 from shannon_whitebox.pipeline.shared import PipelineState
-from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow, PHASE_STEPS
+from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from shannon_core.models.errors import classify_error_for_temporal
-
-
-def test_phase_steps_constants_match_design():
-    assert PHASE_STEPS["setup"] == ("preflight", "credential-check", "auth-validation")
-    assert PHASE_STEPS["pre-recon"] == (
-        "code-index", "pre-recon", "merge-sinks", "entry-point-fusion",
-        "adjudication", "framework-analysis", "frontend-mapping", "route-chain-building")
-    assert PHASE_STEPS["recon"] == ("recon",)
-    assert PHASE_STEPS["risk-scoring"] == ("risk-scoring", "dataflow-hints")
-    assert PHASE_STEPS["attack-chain"] == ("attack-chain-assembly",)
-    assert PHASE_STEPS["reporting"] == ("render-findings",)
 
 
 def test_vuln_phase_steps_dynamic():

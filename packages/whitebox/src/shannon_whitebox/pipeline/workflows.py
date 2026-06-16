@@ -10,18 +10,7 @@ from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError
 
 from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgress
-
-PHASE_STEPS: dict[str, tuple[str, ...]] = {
-    "setup": ("preflight", "credential-check", "auth-validation"),
-    "pre-recon": (
-        "code-index", "pre-recon", "merge-sinks", "entry-point-fusion",
-        "adjudication", "framework-analysis", "frontend-mapping", "route-chain-building",
-    ),
-    "recon": ("recon",),
-    "risk-scoring": ("risk-scoring", "dataflow-hints"),
-    "attack-chain": ("attack-chain-assembly",),
-    "reporting": ("render-findings",),
-}
+from .step_intents import step_names, step_intents
 
 
 def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
@@ -71,7 +60,8 @@ class WhiteboxScanWorkflow:
             activities.log_phase_start_activity,
             args=[
                 ActivityInput(**{**act_input.__dict__, "workspace_name": "setup"}),
-                list(PHASE_STEPS["setup"]),
+                list(step_names("setup")),
+                list(step_intents("setup")),
             ],
             start_to_close_timeout=timedelta(seconds=10),
         )
@@ -143,7 +133,8 @@ class WhiteboxScanWorkflow:
                     activities.log_phase_start_activity,
                     args=[
                         ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
-                        list(PHASE_STEPS["pre-recon"]),
+                        list(step_names("pre-recon")),
+                        list(step_intents("pre-recon")),
                     ],
                     start_to_close_timeout=timedelta(seconds=10),
                 )
@@ -224,7 +215,8 @@ class WhiteboxScanWorkflow:
                     activities.log_phase_start_activity,
                     args=[
                         ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
-                        list(PHASE_STEPS["recon"]),
+                        list(step_names("recon")),
+                        list(step_intents("recon")),
                     ],
                     start_to_close_timeout=timedelta(seconds=10),
                 )
@@ -249,7 +241,8 @@ class WhiteboxScanWorkflow:
                 activities.log_phase_start_activity,
                 args=[
                     ActivityInput(**{**act_input.__dict__, "workspace_name": "risk-scoring"}),
-                    list(PHASE_STEPS["risk-scoring"]),
+                    list(step_names("risk-scoring")),
+                    list(step_intents("risk-scoring")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
@@ -322,7 +315,8 @@ class WhiteboxScanWorkflow:
                 activities.log_phase_start_activity,
                 args=[
                     ActivityInput(**{**act_input.__dict__, "workspace_name": "attack-chain"}),
-                    list(PHASE_STEPS["attack-chain"]),
+                    list(step_names("attack-chain")),
+                    list(step_intents("attack-chain")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
@@ -346,7 +340,8 @@ class WhiteboxScanWorkflow:
                 activities.log_phase_start_activity,
                 args=[
                     ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
-                    list(PHASE_STEPS["reporting"]),
+                    list(step_names("reporting")),
+                    list(step_intents("reporting")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
