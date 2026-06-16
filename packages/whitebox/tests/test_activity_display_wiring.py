@@ -67,3 +67,33 @@ async def test_run_agent_failure_path_logs_end_and_error(tmp_path: Path, monkeyp
     finally:
         clear_audit_session()
         await session.close()
+
+
+async def test_step_intent_flows_end_to_end_from_registry(tmp_path: Path):
+    """Seam test: a step intent sourced from the REAL step_intents.intent_for
+    registry flows through AuditSession.track_step -> WorkflowLogger.log_step ->
+    real FileLogRenderer into workflow.log, rendered verbatim on a [STEP] line.
+
+    No hand-written literal: the asserted string is intent_for("adjudication")'s
+    actual registry value. Would fail if the registry changed it or if any layer
+    in the chain (track_step / log_step / StepEvent.intent / FileLogRenderer._step)
+    dropped the intent.
+    """
+    from shannon_whitebox.pipeline.step_intents import intent_for
+
+    intent = intent_for("adjudication")
+    assert intent is not None  # guard: registry must know this step
+
+    meta = _make_meta(tmp_path)
+    session = AuditSession(meta)
+    await session.initialize()
+    try:
+        async with session.track_step("pre-recon", "adjudication", intent=intent):
+            pass
+    finally:
+        await session.close()
+
+    wf = (generate_audit_path(meta) / "workflow.log").read_text()
+    # FileLogRenderer._step renders intent as " — {intent}" on the [STEP] line.
+    assert f"[STEP] adjudication:" in wf
+    assert f" — {intent}" in wf
