@@ -20,6 +20,7 @@ from shannon_core.session import SessionManager
 from shannon_whitebox.audit.session import AuditSession
 
 from .shared import ActivityInput
+from .step_intents import intent_for
 
 def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
     deliverables = resolve_deliverables_path(
@@ -35,7 +36,7 @@ def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
 async def run_preflight(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        async with get_audit_session().track_step("setup", "preflight"):
+        async with get_audit_session().track_step("setup", "preflight", intent=intent_for("preflight")):
             # Config parsing validation
             if input.config_path:
                 from shannon_core.config.parser import parse_config
@@ -160,7 +161,7 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
 async def run_credential_check(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        async with get_audit_session().track_step("setup", "credential-check"):
+        async with get_audit_session().track_step("setup", "credential-check", intent=intent_for("credential-check")):
             from shannon_core.agents.providers import build_provider_config
 
             config = build_provider_config(api_key=input.api_key or None)
@@ -183,7 +184,7 @@ async def run_credential_check(input: ActivityInput) -> None:
 async def run_auth_validation(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        async with get_audit_session().track_step("setup", "auth-validation"):
+        async with get_audit_session().track_step("setup", "auth-validation", intent=intent_for("auth-validation")):
             from shannon_core.services.validate_authentication import validate_authentication
             from shannon_core.prompts.manager import PromptManager
             from shannon_core.agents.executor import AgentExecutor
@@ -235,7 +236,7 @@ async def run_code_index(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        async with get_audit_session().track_step("pre-recon", "code-index"):
+        async with get_audit_session().track_step("pre-recon", "code-index", intent=intent_for("code-index")):
             # Create LLM client for taint analysis
             async def _llm_taint_client(prompt: str, **kwargs) -> str:
                 # Placeholder: in production, this calls run_claude_prompt
@@ -310,7 +311,7 @@ async def run_entry_point_fusion(input: ActivityInput) -> dict:
         from shannon_core.code_index import run_entry_point_fusion as _fusion
 
         repo, deliverables, _ = _get_paths(input)
-        async with get_audit_session().track_step("pre-recon", "entry-point-fusion"):
+        async with get_audit_session().track_step("pre-recon", "entry-point-fusion", intent=intent_for("entry-point-fusion")):
             index = _fusion(str(deliverables))
 
         return {
@@ -332,7 +333,7 @@ async def run_save_adjudication(input: ActivityInput) -> dict:
         from shannon_core.code_index import save_adjudication
 
         repo, deliverables, _ = _get_paths(input)
-        async with get_audit_session().track_step("pre-recon", "adjudication"):
+        async with get_audit_session().track_step("pre-recon", "adjudication", intent=intent_for("adjudication")):
             save_adjudication(str(deliverables))
 
         return {"status": "ok"}
@@ -355,7 +356,7 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        async with get_audit_session().track_step("pre-recon", "merge-sinks"):
+        async with get_audit_session().track_step("pre-recon", "merge-sinks", intent=intent_for("merge-sinks")):
             # Load deterministic sinks from code_index.json
             code_index_path = deliverables / "code_index.json"
             det_sinks: list[SinkCallSite] = []
@@ -403,7 +404,7 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        async with get_audit_session().track_step("risk-scoring", "risk-scoring"):
+        async with get_audit_session().track_step("risk-scoring", "risk-scoring", intent=intent_for("risk-scoring")):
             # Load code index
             code_index_path = deliverables / "code_index.json"
             if not code_index_path.exists():
@@ -468,7 +469,7 @@ async def render_findings(input: ActivityInput) -> None:
         from shannon_core.config.parser import parse_config
 
         _, deliverables, _ = _get_paths(input)
-        async with get_audit_session().track_step("reporting", "render-findings"):
+        async with get_audit_session().track_step("reporting", "render-findings", intent=intent_for("render-findings")):
             report_config = None
             if input.config_path:
                 cfg = parse_config(input.config_path)
@@ -503,7 +504,7 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
 
-        async with get_audit_session().track_step("risk-scoring", "dataflow-hints"):
+        async with get_audit_session().track_step("risk-scoring", "dataflow-hints", intent=intent_for("dataflow-hints")):
             code_index_path = deliverables / "code_index.json"
             param_graph_path = deliverables / "parameter_graph.json"
             audit_plan_path = deliverables / "audit_plan.json"
@@ -538,7 +539,7 @@ async def run_framework_analysis(input: ActivityInput) -> dict:
         from shannon_core.services.framework_analyzer import analyze_frameworks
 
         repo, deliverables, _ = _get_paths(input)
-        async with get_audit_session().track_step("pre-recon", "framework-analysis"):
+        async with get_audit_session().track_step("pre-recon", "framework-analysis", intent=intent_for("framework-analysis")):
             result = await analyze_frameworks(str(repo))
 
             # Write result as JSON deliverable
@@ -568,7 +569,7 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
         from shannon_core.services.frontend_mapper import map_frontend_routes
 
         repo, deliverables, _ = _get_paths(input)
-        async with get_audit_session().track_step("pre-recon", "frontend-mapping"):
+        async with get_audit_session().track_step("pre-recon", "frontend-mapping", intent=intent_for("frontend-mapping")):
             result = await map_frontend_routes(str(repo))
 
             # Write result as JSON deliverable
@@ -603,7 +604,7 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
         repo, deliverables, _ = _get_paths(input)
         log = logging.getLogger(__name__)
 
-        async with get_audit_session().track_step("pre-recon", "route-chain-building"):
+        async with get_audit_session().track_step("pre-recon", "route-chain-building", intent=intent_for("route-chain-building")):
             # Load framework analysis result
             framework_result = FrameworkAnalysisResult()
             framework_path = deliverables / "framework_analysis.json"
@@ -672,7 +673,7 @@ async def run_attack_chain_assembly(input: ActivityInput) -> dict:
         repo, deliverables, _ = _get_paths(input)
         log = logging.getLogger(__name__)
 
-        async with get_audit_session().track_step("attack-chain", "attack-chain-assembly"):
+        async with get_audit_session().track_step("attack-chain", "attack-chain-assembly", intent=intent_for("attack-chain-assembly")):
             # Load results (JSON stores tuples as lists, convert back)
             def _to_endpoint(d: dict) -> InferredEndpoint:
                 return InferredEndpoint(

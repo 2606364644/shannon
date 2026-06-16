@@ -27,7 +27,7 @@ class _RecordingSession:
 
     # requires `from contextlib import asynccontextmanager` at the test file top
     @asynccontextmanager
-    async def track_step(self, phase: str, name: str):
+    async def track_step(self, phase: str, name: str, intent: str | None = None):
         await self.log_step(name, phase, "start")
         try:
             yield
