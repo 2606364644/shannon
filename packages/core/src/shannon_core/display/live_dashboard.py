@@ -66,14 +66,28 @@ class LiveDashboardRenderer:
         cells.append(Text(f" · {elapsed}"))
         cells.append(Text(f" · ${snap.total_cost:.4f}", style="yellow"))
 
+        row1 = Table.grid()  # expand=False: cells take natural width, no big gaps
+        row1.add_row(*cells)
+
+        rows = [Text("─" * options.max_width, style="dim"), row1]  # separator + status
+        detail = self._pinned_detail(snap, running, running_unit_names)
+        if detail is not None:
+            pin = Table.grid()
+            pin.add_row(Spinner("dots"), Text(" " + detail, style="blue"))
+            rows.append(pin)
+
+        return Group(*rows)
+
+    def _pinned_detail(self, snap, running, running_unit_names) -> str | None:
+        """Bottom pinned line: latest agent turn (prefixed by its step intent) if
+        available, else the running unit names. Keeps 'what's happening now'
+        visible as the scrolling log region advances."""
+        narrating = [r for r in running if r.last_turn_text]
+        if narrating:
+            a = narrating[-1]
+            intent = snap.unit_intent.get(a.name)
+            prefix = f"{intent} · " if intent else ""
+            return f"{prefix}Turn {a.turn}: {a.last_turn_text}"
         if running_unit_names:
-            cells += [Text("    "), Spinner("dots"),
-                      Text(" " + " · ".join(running_unit_names), style="blue")]
-
-        row = Table.grid()  # expand=False: cells take natural width, no big gaps
-        row.add_row(*cells)
-
-        return Group(
-            Text("─" * options.max_width, style="dim"),  # spans real terminal width
-            row,
-        )
+            return " · ".join(running_unit_names)
+        return None
