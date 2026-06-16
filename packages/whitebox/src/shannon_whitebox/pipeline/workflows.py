@@ -11,6 +11,23 @@ from shannon_core.models.errors import ErrorCode, PentestError
 
 from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgress
 
+PHASE_STEPS: dict[str, tuple[str, ...]] = {
+    "setup": ("preflight", "credential-check", "auth-validation"),
+    "pre-recon": (
+        "code-index", "pre-recon", "merge-sinks", "entry-point-fusion",
+        "adjudication", "framework-analysis", "frontend-mapping", "route-chain-building",
+    ),
+    "recon": ("recon",),
+    "risk-scoring": ("risk-scoring", "dataflow-hints"),
+    "attack-chain": ("attack-chain-assembly",),
+    "reporting": ("render-findings",),
+}
+
+
+def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
+    return tuple(f"{vt}-vuln" for vt in vuln_classes)
+
+
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
@@ -51,6 +68,13 @@ class WhiteboxScanWorkflow:
             workspace_path=workspace_path,
         )
         await workflow.execute_activity(
+            activities.log_phase_start_activity,
+            ActivityInput(**{**act_input.__dict__, "workspace_name": "setup"}),
+            steps=list(PHASE_STEPS["setup"]),
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        self._state.current_phase = "setup"
+        await workflow.execute_activity(
             activities.run_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
             retry_policy=PREFLIGHT_RETRY,
@@ -68,6 +92,11 @@ class WhiteboxScanWorkflow:
             activities.run_auth_validation, act_input,
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=AUTH_VALIDATION_RETRY,
+        )
+        await workflow.execute_activity(
+            activities.log_phase_complete_activity,
+            ActivityInput(**{**act_input.__dict__, "workspace_name": "setup"}),
+            start_to_close_timeout=timedelta(seconds=10),
         )
 
         # Resolve config and browser engine
@@ -111,6 +140,7 @@ class WhiteboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
                     ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
+                    steps=list(PHASE_STEPS["pre-recon"]),
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "pre-recon"
@@ -179,11 +209,17 @@ class WhiteboxScanWorkflow:
                     activities.run_route_chain_building, act_input,
                     start_to_close_timeout=timedelta(minutes=2),
                 )
+                await workflow.execute_activity(
+                    activities.log_phase_complete_activity,
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "pre-recon"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
 
             if AgentName.RECON.value not in self._state.completed_agents:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
                     ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
+                    steps=list(PHASE_STEPS["recon"]),
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "recon"
@@ -196,8 +232,20 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.RECON.value)
                 self._state.agent_metrics[AgentName.RECON.value] = metrics
                 self._state.current_agent = None
+                await workflow.execute_activity(
+                    activities.log_phase_complete_activity,
+                    ActivityInput(**{**act_input.__dict__, "workspace_name": "recon"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
 
             # Risk scoring — produce tiered audit plan
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "risk-scoring"}),
+                steps=list(PHASE_STEPS["risk-scoring"]),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            self._state.current_phase = "risk-scoring"
             risk_result = await workflow.execute_activity(
                 activities.run_risk_scoring, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
@@ -209,10 +257,16 @@ class WhiteboxScanWorkflow:
                 activities.run_render_dataflow_hints, act_input,
                 start_to_close_timeout=timedelta(minutes=2),
             )
+            await workflow.execute_activity(
+                activities.log_phase_complete_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "risk-scoring"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 ActivityInput(**{**act_input.__dict__, "workspace_name": "vulnerability-analysis"}),
+                steps=list(vuln_phase_steps([str(vt) for vt in selected_classes])),
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "vulnerability-analysis"
@@ -247,8 +301,20 @@ class WhiteboxScanWorkflow:
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
+            await workflow.execute_activity(
+                activities.log_phase_complete_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "vulnerability-analysis"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
             # === Attack Chain Assembly ===
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "attack-chain"}),
+                steps=list(PHASE_STEPS["attack-chain"]),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            self._state.current_phase = "attack-chain"
             try:
                 await workflow.execute_activity(
                     activities.run_attack_chain_assembly, act_input,
@@ -258,10 +324,16 @@ class WhiteboxScanWorkflow:
                 # Non-fatal — attack chains enhance the report but don't block the pipeline
                 import logging
                 logging.getLogger(__name__).warning("Attack chain assembly failed: %s", exc)
+            await workflow.execute_activity(
+                activities.log_phase_complete_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "attack-chain"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                steps=list(PHASE_STEPS["reporting"]),
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "reporting"
@@ -271,6 +343,11 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=5),
             )
             self._state.current_agent = None
+            await workflow.execute_activity(
+                activities.log_phase_complete_activity,
+                ActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
             # Set final status based on whether any agents failed
             if self._state.failed_agents:
