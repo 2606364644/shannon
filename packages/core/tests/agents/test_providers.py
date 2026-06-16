@@ -669,20 +669,15 @@ class TestExecuteQueryWithDispatcher:
 
     @pytest.mark.asyncio
     async def test_dispatcher_collects_text_from_events(self):
-        """_execute_query collects text via dispatcher from mixed events."""
+        """_execute_query collects text via dispatcher from a real AssistantMessage."""
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
 
-        text_event = MagicMock()
-        text_event.type = "text"
-        text_event.text = "partial "
-
-        assistant_event = MagicMock()
-        assistant_event.type = "assistant"
-        block = MagicMock()
-        block.text = "response"
-        assistant_event.content = [block]
-        assistant_event.error = None
+        from claude_agent_sdk import AssistantMessage, TextBlock
+        assistant_event = AssistantMessage(
+            content=[TextBlock(text="partial "), TextBlock(text="response")],
+            model="test-model",
+        )
 
         mock_result = ResultMessage(
             subtype="result",
@@ -693,11 +688,9 @@ class TestExecuteQueryWithDispatcher:
             session_id="test",
         )
 
-        events = [text_event, assistant_event, mock_result]
-
         async def mock_query(*, prompt, options):
-            for e in events:
-                yield e
+            yield assistant_event
+            yield mock_result
 
         with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider._execute_query(
@@ -717,10 +710,11 @@ class TestExecuteQueryWithDispatcher:
         mock_audit = AsyncMock()
         dispatcher = MessageDispatcher(audit_logger=mock_audit)
 
-        tool_use_event = MagicMock()
-        tool_use_event.type = "tool_use"
-        tool_use_event.name = "bash"
-        tool_use_event.input = {"command": "ls"}
+        from claude_agent_sdk import AssistantMessage, ToolUseBlock
+        tool_use_event = AssistantMessage(
+            content=[ToolUseBlock(id="call_bash", name="bash", input={"command": "ls"})],
+            model="test-model",
+        )
 
         mock_result = ResultMessage(
             subtype="result",
@@ -757,15 +751,12 @@ class TestCallWithTurnCount:
         provider = AnthropicProvider(config)
 
         # Create 3 assistant events to simulate 3 turns
+        from claude_agent_sdk import AssistantMessage, TextBlock
         events = []
         for i in range(3):
-            event = MagicMock()
-            event.type = "assistant"
-            block = MagicMock()
-            block.text = f"turn {i + 1}"
-            event.content = [block]
-            event.error = None
-            events.append(event)
+            events.append(AssistantMessage(
+                content=[TextBlock(text=f"turn {i + 1}")], model="test-model",
+            ))
 
         mock_result = ResultMessage(
             subtype="result",
@@ -851,12 +842,11 @@ class TestSpendingCapDetection:
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
 
-        assistant_event = MagicMock()
-        assistant_event.type = "assistant"
-        block = MagicMock()
-        block.text = "your spending limit has been reached"
-        assistant_event.content = [block]
-        assistant_event.error = None
+        from claude_agent_sdk import AssistantMessage, TextBlock
+        assistant_event = AssistantMessage(
+            content=[TextBlock(text="your spending limit has been reached")],
+            model="test-model",
+        )
 
         mock_result = ResultMessage(
             subtype="result",
@@ -946,12 +936,11 @@ class TestSpendingCapDetection:
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
 
-        assistant_event = MagicMock()
-        assistant_event.type = "assistant"
-        block = MagicMock()
-        block.text = "completed successfully"
-        assistant_event.content = [block]
-        assistant_event.error = None
+        from claude_agent_sdk import AssistantMessage, TextBlock
+        assistant_event = AssistantMessage(
+            content=[TextBlock(text="completed successfully")],
+            model="test-model",
+        )
 
         mock_result = ResultMessage(
             subtype="result",
@@ -1605,8 +1594,12 @@ class TestProviderAuditLoggerInjection:
     async def test_execute_query_uses_audit_logger_param(self):
         provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
         mock_audit = AsyncMock()
-        tool_use = MagicMock(); tool_use.type = "tool_use"; tool_use.name = "bash"; tool_use.input = {"command": "ls"}
-        tool_result = MagicMock(); tool_result.type = "tool_result"; tool_result.content = "ok"
+        from claude_agent_sdk import AssistantMessage, ToolUseBlock, UserMessage, ToolResultBlock
+        tool_use = AssistantMessage(
+            content=[ToolUseBlock(id="call_bash", name="bash", input={"command": "ls"})],
+            model="test-model",
+        )
+        tool_result = UserMessage(content=[ToolResultBlock(tool_use_id="call_bash", content="ok")])
         msg = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
                             is_error=False, num_turns=1, session_id="t")
         async def mock_query(*, prompt, options):
@@ -1623,7 +1616,11 @@ class TestProviderAuditLoggerInjection:
     async def test_call_forwards_audit_logger(self):
         provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
         mock_audit = AsyncMock()
-        tool_use = MagicMock(); tool_use.type = "tool_use"; tool_use.name = "edit"; tool_use.input = {"path": "a"}
+        from claude_agent_sdk import AssistantMessage, ToolUseBlock
+        tool_use = AssistantMessage(
+            content=[ToolUseBlock(id="call_edit", name="edit", input={"path": "a"})],
+            model="test-model",
+        )
         msg = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
                             is_error=False, num_turns=1, session_id="t")
         async def mock_query(*, prompt, options):
