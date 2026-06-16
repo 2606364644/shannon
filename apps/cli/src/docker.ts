@@ -275,6 +275,7 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   // Writable overlays: shadow .shannon/ and .playwright/ inside the :ro repo with workspace-backed dirs
   const workspacePath = path.join(opts.workspacesDir, opts.workspace);
   args.push('-v', `${path.join(workspacePath, 'deliverables')}:${opts.repo.containerPath}/.shannon/deliverables`);
+  args.push('-v', `${path.join(workspacePath, 'deliverables-cn')}:${opts.repo.containerPath}/.shannon/deliverables-cn`);
   args.push('-v', `${path.join(workspacePath, 'scratchpad')}:${opts.repo.containerPath}/.shannon/scratchpad`);
   args.push('-v', `${path.join(workspacePath, '.playwright-cli')}:${opts.repo.containerPath}/.shannon/.playwright-cli`);
   args.push('-v', `${path.join(workspacePath, '.playwright')}:${opts.repo.containerPath}/.playwright`);
