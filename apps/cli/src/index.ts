@@ -94,7 +94,7 @@ Options for 'start':
       --blackbox-only       Exploitation only (reads prior whitebox deliverables)
       --pipeline-testing    Use minimal prompts for fast testing
       --debug               Preserve worker container after exit for log inspection
-      --concurrency <n>     Max parallel vuln agents in whitebox mode
+      --concurrency <n>     Max parallel vuln agents in whitebox mode (or SHANNON_CONCURRENCY env var)
 
 Examples:
   ${prefix} start -u https://example.com -r ${mode === 'local' ? 'my-repo' : './my-repo'}
