@@ -109,3 +109,26 @@ def test_all_events_are_frozen():
     ]:
         with pytest.raises(dataclasses.FrozenInstanceError):
             ctor().timestamp = "mutated"
+
+
+def test_step_event_carries_optional_intent():
+    e = StepEvent(timestamp="t", category="STEP", name="code-index",
+                  phase="pre-recon", event="start", intent="构建调用图与代码索引")
+    assert e.intent == "构建调用图与代码索引"
+
+
+def test_step_event_intent_defaults_none():
+    e = StepEvent(timestamp="t", category="STEP", name="x", phase="p", event="start")
+    assert e.intent is None
+
+
+def test_phase_event_carries_step_intents():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon", event="start",
+                   steps=("code-index", "pre-recon"),
+                   step_intents=("构建调用图与代码索引", "扫描架构与入口点"))
+    assert e.step_intents == ("构建调用图与代码索引", "扫描架构与入口点")
+
+
+def test_phase_event_step_intents_default_empty():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
+    assert e.step_intents == ()

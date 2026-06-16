@@ -33,6 +33,7 @@ class PhaseEvent(DisplayEvent):
     phase: str
     event: Literal["start", "complete"]
     steps: tuple[str, ...] = ()
+    step_intents: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class StepEvent(DisplayEvent):
     event: Literal["start", "complete"]
     duration_ms: int | None = None
     error: str | None = None
+    intent: str | None = None
 
 
 @dataclass(frozen=True)
