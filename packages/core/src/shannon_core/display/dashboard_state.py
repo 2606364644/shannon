@@ -13,7 +13,7 @@ from shannon_core.display.events import (
     AgentEvent, DisplayEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
     ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent,
 )
-from shannon_core.display.formatters import humanize_tool_call
+from shannon_core.display.formatters import humanize_tool_call, first_nonempty_line
 
 AgentStatus = Literal["running", "done", "failed"]
 
@@ -26,6 +26,7 @@ class AgentRow:
     turn: int = 0
     last_action: str | None = None
     last_action_detail: str | None = None
+    last_turn_text: str | None = None
     duration_ms: int | None = None
     cost_usd: float | None = None
     error: str | None = None
@@ -37,6 +38,7 @@ class DashboardState:
     agents: dict[str, AgentRow] = field(default_factory=dict)
     phase_units: tuple[str, ...] = ()
     unit_status: dict[str, str] = field(default_factory=dict)
+    unit_intent: dict[str, str] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -69,14 +71,20 @@ class DashboardState:
         """Return a new state with the event folded in (immutable)."""
         if isinstance(event, PhaseEvent):
             if event.event == "start":
+                intents = {n: i for n, i in zip(event.steps, event.step_intents) if i}
                 return replace(self, current_phase=event.phase,
-                               phase_units=event.steps, unit_status={})
+                               phase_units=event.steps, unit_status={}, unit_intent=intents)
             return replace(self, current_phase=event.phase)  # complete: keep units
 
         if isinstance(event, StepEvent):
             status = "running" if event.event == "start" else (
                 "failed" if event.error else "done")
-            return self._set_unit(event.name, status)
+            state = self._set_unit(event.name, status)
+            if event.intent:
+                intents = dict(state.unit_intent)
+                intents[event.name] = event.intent
+                state = replace(state, unit_intent=intents)
+            return state
 
         if isinstance(event, ResumeEvent):
             agents = dict(self.agents)
@@ -114,7 +122,10 @@ class DashboardState:
             agents = dict(self.agents)
             cur = agents.get(event.agent_name)
             if cur is not None:
-                agents[event.agent_name] = replace(cur, turn=event.turn)
+                line = first_nonempty_line(event.content)
+                agents[event.agent_name] = replace(
+                    cur, turn=event.turn,
+                    last_turn_text=line or cur.last_turn_text)
             return replace(self, agents=agents)
 
         # ErrorEvent, SummaryEvent, WorkflowHeader -> no dashboard-state change

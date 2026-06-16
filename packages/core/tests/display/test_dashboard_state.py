@@ -114,6 +114,11 @@ def _phase_with_steps(name: str, steps) -> PhaseEvent:
                       steps=tuple(steps))
 
 
+def _phase_with_steps_intents(name: str, steps, intents) -> PhaseEvent:
+    return PhaseEvent(timestamp="t", category="PHASE", phase=name, event="start",
+                      steps=tuple(steps), step_intents=tuple(intents))
+
+
 def _step(name: str, phase: str, event: str = "start", **kw) -> StepEvent:
     return StepEvent(timestamp="t", category="STEP", name=name, phase=phase,
                      event=event, duration_ms=kw.get("duration_ms"), error=kw.get("error"))
@@ -171,3 +176,36 @@ def test_phase_without_steps_keeps_legacy_completed_count():
     s = DashboardState().apply(_phase("recon"))
     assert s.phase_units == ()
     assert s.total_units == 0
+
+
+def test_phase_start_seeds_unit_intents():
+    s = DashboardState().apply(
+        _phase_with_steps_intents("pre-recon", ["code-index", "pre-recon"],
+                                  ["构建调用图与代码索引", "扫描架构与入口点"]))
+    assert s.unit_intent == {"code-index": "构建调用图与代码索引",
+                             "pre-recon": "扫描架构与入口点"}
+
+
+def test_phase_start_resets_unit_intents_across_phases():
+    s = (DashboardState()
+         .apply(_phase_with_steps_intents("pre-recon", ["code-index"], ["构建调用图"]))
+         .apply(_phase_with_steps_intents("recon", ["recon"], ["侦察"])))
+    assert s.unit_intent == {"recon": "侦察"}
+
+
+def test_step_event_records_intent():
+    s = (DashboardState()
+         .apply(_phase_with_steps("pre-recon", ["code-index"]))
+         .apply(StepEvent(timestamp="t", category="STEP", name="code-index",
+                          phase="pre-recon", event="start", intent="构建调用图")))
+    assert s.unit_intent["code-index"] == "构建调用图"
+
+
+def test_llm_turn_records_last_turn_text():
+    s = (DashboardState()
+         .apply(_agent("pre-recon", "start"))
+         .apply(LlmTurnEvent(timestamp="t", category="LLM", agent_name="pre-recon",
+                             turn=5, content="🔄 Read router.ts\nmore")))
+    row = s.agents["pre-recon"]
+    assert row.turn == 5
+    assert row.last_turn_text == "🔄 Read router.ts"
