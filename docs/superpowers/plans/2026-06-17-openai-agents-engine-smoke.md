@@ -10,11 +10,26 @@
 SHANNON_AI_PROVIDER=openai_compatible
 SHANNON_OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4   # 智谱 OpenAI 兼容端点（核对文档为准）
 SHANNON_OPENAI_API_KEY=<glm-key>                               # 缺失时回退 SHANNON_API_KEY / OPENAI_API_KEY
-SHANNON_LARGE_MODEL=GLM-5.2[1m]
-SHANNON_MEDIUM_MODEL=GLM-5.2[1m]
-SHANNON_SMALL_MODEL=GLM-4.5-Air
+# ⚠️ 模型名与 anthropic 兼容接口不同（小写、无 [1m] 后缀）
+# 智谱 /api/paas/v4 支持：glm-4.5 / glm-4.5-air / glm-4.6 / glm-4.7 / glm-5 / glm-5-turbo / glm-5.1 / glm-5.2
+SHANNON_LARGE_MODEL=glm-5.2
+SHANNON_MEDIUM_MODEL=glm-5.2
+SHANNON_SMALL_MODEL=glm-4.5-air
 # SHANNON_OPENAI_MAX_TURNS=200（默认，对齐 AnthropicProvider 的 CLAUDE_MAX_TURNS）
 ```
+
+## 冒烟实测记录（2026-06-17）
+
+用 .env 的智谱 Pro token + 环境变量 override（不改 .env）跑最小冒烟：
+
+- ✅ **引擎连通成功**：`build_provider_config(openai_compatible)` → `OpenAIProvider` → `Runner.run_streamed` → 请求打到 `https://open.bigmodel.cn/api/paas/v4`，鉴权有效、SDK 接入链路通。
+- ✅ **错误处理正确**：GLM 返回的结构化错误（1211 模型不存在 / 1113 余额不足）被 `_handle_error` 捕获 → `ClaudeRunResult(success=False, error=...)`，无崩溃、无未捕获异常。
+- ⚠️ **模型名差异**（真实发现）：anthropic 接口用 `GLM-5.2[1m]`，OpenAI 兼容端点用 `glm-5.2`（小写、无 `[1m]`）。切引擎时模型名也要改——已修正本文件前置。
+- ❌ **阻塞在账户余额**：Pro token 在 OpenAI 兼容端点余额不足（429, code 1113 "余额不足或无可用资源包,请充值"）。**需充值或换有 API 余额的 key** 才能跑通真实 tool-use loop（验证 turns>1 / audit 落库 / usage>0）。
+
+**待办**：充值/换 key 后，重跑下方 §1 最小冒烟验证真实 loop。
+
+---
 
 ## 1. 最小冒烟（单 agent，验 loop + tool calling）
 - [ ] 跑一个会触发 `bash` 工具的简单 agent（如 pre-recon 子步），确认：
