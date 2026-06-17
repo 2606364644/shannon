@@ -55,3 +55,4 @@ SHANNON_SMALL_MODEL=GLM-4.5-Air
 - OpenAI 引擎 `cost` 恒为 0.0（GLM 定价未知，不假估算）。
 - `web_search` 用无 key 的 DuckDuckGo Lite，结果质量有限；如需更强搜索，后续接智谱 web_search tool 或其它源。
 - OpenAI 引擎未实现 `Task`(subagent) / `TodoWrite` / `MultiEdit` / `NotebookEdit`（shannon 不依赖，已与用户确认不做）。
+- **结构化输出只走 fallback 路径**（spec §5.6 偏差）：`output_format` 不转 Pydantic `output_type`（那是 Responses 模式特性，Chat Completions 模式不适用），仅靠 prompt 约束 + `json.loads` 解析最终文本。若 GLM 对 strict JSON schema 支持不稳，结构化输出可能需额外 prompt 工程。
