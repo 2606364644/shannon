@@ -548,6 +548,16 @@ class TestOpenAIProvider:
         res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium")
         assert res.stop_reason == "max_turns"
 
+    def test_is_retryable_classifies_rate_limit(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        assert provider._is_retryable_error(Exception("Rate limit exceeded")) is True
+        assert provider._is_retryable_error(Exception("request timed out")) is True
+        assert provider._is_retryable_error(Exception("Service unavailable (503)")) is True
+        assert provider._is_retryable_error(Exception("invalid_api_key (401)")) is False
+        assert provider._is_retryable_error(Exception("permission denied (403)")) is False
+        assert provider._is_retryable_error(Exception("some transient error")) is True
+
 
 class TestClaudeRunResult:
     """测试 ClaudeRunResult"""

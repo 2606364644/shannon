@@ -139,6 +139,29 @@ class OpenAIProvider(BaseProvider):
             retryable=self._is_retryable_error(error),
         )
 
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """判断错误是否可重试。
+
+        BaseProvider 的实现只匹配自定义异常类；openai/httpx/agents 抛的是普通异常，
+        需基于消息和类型名分类，对齐旧 OpenAIProvider / AnthropicProvider 行为。
+        """
+        error_msg = str(error).lower()
+        error_type = type(error).__name__.lower()
+        # 速率限制 / 超时 / 服务不可用 → 可重试
+        if "rate" in error_msg or "limit" in error_msg or error_type == "ratelimiterror":
+            return True
+        if "timeout" in error_msg or error_type in ("timeouterror", "timeoutexception", "connecttimeout"):
+            return True
+        if "unavailable" in error_msg or "503" in error_msg or "502" in error_msg or "504" in error_msg or error_type == "serviceunavailable":
+            return True
+        # 认证 / 权限 → 不可重试
+        if "auth" in error_msg or "401" in error_msg or error_type == "authenticationerror":
+            return False
+        if "permission" in error_msg or "403" in error_msg or error_type == "permissiondeniederror":
+            return False
+        # 默认可重试（与旧行为一致）
+        return True
+
 
 class _MaxTurnsStub:
     """MaxTurnsExceeded 时无 RunResult，伪造一个只含 final_output 的对象供 map_run_result 使用。"""
