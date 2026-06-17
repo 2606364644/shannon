@@ -79,5 +79,5 @@ async def _web_search_impl(
     return _truncate("\n".join(rows), 30000) or "[web_search] no results"
 
 
-web_fetch = function_tool(_web_fetch_impl)
-web_search = function_tool(_web_search_impl)
+web_fetch = function_tool(_web_fetch_impl, name_override="web_fetch")
+web_search = function_tool(_web_search_impl, name_override="web_search")

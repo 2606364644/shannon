@@ -109,7 +109,7 @@ async def _glob_impl(
     return _truncate("\n".join(str(m.relative_to(base)) if m.is_relative_to(base) else str(m) for m in matches))
 
 
-read_file = function_tool(_read_file_impl)
-write_file = function_tool(_write_file_impl)
-edit_file = function_tool(_edit_file_impl)
-glob = function_tool(_glob_impl)
+read_file = function_tool(_read_file_impl, name_override="read_file")
+write_file = function_tool(_write_file_impl, name_override="write_file")
+edit_file = function_tool(_edit_file_impl, name_override="edit_file")
+glob = function_tool(_glob_impl, name_override="glob")

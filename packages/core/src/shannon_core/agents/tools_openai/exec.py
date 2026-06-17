@@ -55,7 +55,7 @@ async def _bash_impl(
         return _truncate(f"[bash error] {type(e).__name__}: {e}")
 
 
-bash = function_tool(_bash_impl)
+bash = function_tool(_bash_impl, name_override="bash")
 
 
 async def _grep_impl(
@@ -120,4 +120,4 @@ async def _grep_impl(
     return _truncate("\n".join(matches_content))
 
 
-grep = function_tool(_grep_impl)
+grep = function_tool(_grep_impl, name_override="grep")
