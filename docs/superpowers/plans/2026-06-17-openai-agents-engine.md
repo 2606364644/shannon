@@ -848,6 +848,7 @@ async def test_collects_text_and_reports_turn():
     await collector.on_event(_text_event("world"))
     await collector.on_event(_agent_event())  # 再次新 agent → 第二 turn
     await collector.on_event(_text_event("second"))
+    await collector.close()  # 流结束，上报最后一个 turn
     assert collector.text == "hello worldsecond"
     assert collector.turns == 2
     audit.log_assistant_turn.assert_any_call(1, "hello world")
@@ -1178,7 +1179,7 @@ class TestOpenAIProvider:
         fake_result.stream_events = _empty
 
         monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
-                            AsyncMock(return_value=fake_result))
+                            MagicMock(return_value=fake_result))
 
         audit = AsyncMock()
         res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium", audit_logger=audit)
@@ -1189,17 +1190,21 @@ class TestOpenAIProvider:
 
     @pytest.mark.asyncio
     async def test_call_handles_max_turns(self, monkeypatch, tmp_path):
-        from unittest.mock import AsyncMock
+        from unittest.mock import MagicMock
         from agents import MaxTurnsExceeded
         from shannon_core.agents.providers_openai import OpenAIProvider
 
         config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
         provider = OpenAIProvider(config)
 
-        async def _boom(*a, **kw):
+        async def _raising_stream():
             raise MaxTurnsExceeded("hit")
+            yield  # 使其成为 async generator
 
-        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed", _boom)
+        fake_result = MagicMock()
+        fake_result.stream_events = _raising_stream
+        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
+                            MagicMock(return_value=fake_result))
         res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium")
         assert res.stop_reason == "max_turns"
 ```
