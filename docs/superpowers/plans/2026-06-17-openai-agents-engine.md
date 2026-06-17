@@ -22,6 +22,7 @@
 - **测试**：pytest 只跑改动相关子集（**全量会 hang**，见 memory）；`TestModel` 不可用，agent loop 集成测用 mock `Runner.run_streamed`。
 - **配置**：`SHANNON_AI_PROVIDER=openai_compatible` 切引擎；新增 `SHANNON_OPENAI_BASE_URL` / `SHANNON_OPENAI_API_KEY` / `SHANNON_OPENAI_MAX_TURNS`（默认 200）。
 - **依赖注入**：工具 cwd 经 `Runner.run_streamed(agent, input=prompt, context=ToolContext(cwd=cwd))` 注入；工具首参声明为 `ctx: RunContextWrapper[ToolContext]`，访问 `ctx.context.cwd`。
+- **工具实现模式（重要，所有工具统一）**：openai-agents 0.17.5 的 `@function_tool` 装饰后产出的是 `FunctionTool` 对象，**不可直接调用**（注册时传 `tools=[name]`，运行时 SDK 调 `on_invoke_tool`）。因此每个工具写成**裸 async 函数** `_NAME_impl(ctx, ...)`，再 `NAME = function_tool(_NAME_impl)`；**测试调裸 `_NAME_impl`**（验证真实逻辑），`build_tools()` 注册包装后的 `NAME`。
 - **接口契约**：`OpenAIProvider.call` 签名与返回类型严格匹配 `BaseProvider.call(...)` → `ClaudeRunResult`（`runner.py`）。
 
 ---
@@ -70,7 +71,7 @@ import pytest
 from agents import RunContextWrapper
 
 from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.exec import bash
+from shannon_core.agents.tools_openai.exec import _bash_impl
 
 
 def _ctx(tmp_path):
@@ -79,32 +80,32 @@ def _ctx(tmp_path):
 
 @pytest.mark.asyncio
 async def test_bash_returns_stdout(tmp_path):
-    result = await bash(_ctx(tmp_path), "echo hello-world")
+    result = await _bash_impl(_ctx(tmp_path), "echo hello-world")
     assert "hello-world" in result
 
 
 @pytest.mark.asyncio
 async def test_bash_respects_cwd(tmp_path):
     (tmp_path / "marker.txt").write_text("x")
-    result = await bash(_ctx(tmp_path), "test -f marker.txt && echo FOUND")
+    result = await _bash_impl(_ctx(tmp_path), "test -f marker.txt && echo FOUND")
     assert "FOUND" in result
 
 
 @pytest.mark.asyncio
 async def test_bash_includes_stderr(tmp_path):
-    result = await bash(_ctx(tmp_path), "echo oops 1>&2")
+    result = await _bash_impl(_ctx(tmp_path), "echo oops 1>&2")
     assert "oops" in result
 
 
 @pytest.mark.asyncio
 async def test_bash_timeout_returns_error(tmp_path):
-    result = await bash(_ctx(tmp_path), "sleep 5", timeout=1)
+    result = await _bash_impl(_ctx(tmp_path), "sleep 5", timeout=1)
     assert "timed out" in result.lower() or "timeout" in result.lower()
 
 
 @pytest.mark.asyncio
 async def test_bash_truncates_long_output(tmp_path):
-    result = await bash(_ctx(tmp_path), "yes x | head -c 60000")
+    result = await _bash_impl(_ctx(tmp_path), "yes x | head -c 60000")
     assert len(result) <= 32000
     assert result.endswith("...[truncated]")
 ```
@@ -177,8 +178,7 @@ def _truncate(text: str) -> str:
     return text
 
 
-@function_tool
-async def bash(
+async def _bash_impl(
     ctx: RunContextWrapper[ToolContext],
     command: str,
     timeout: int = 120,
@@ -210,6 +210,9 @@ async def bash(
         return _truncate(text)
     except Exception as e:  # 工具内异常默认会被 SDK 当结果回喂模型，这里也兜底
         return _truncate(f"[bash error] {type(e).__name__}: {e}")
+
+
+bash = function_tool(_bash_impl, name_override="bash")
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
@@ -249,7 +252,7 @@ import pytest
 from agents import RunContextWrapper
 
 from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.fs import edit_file, glob, read_file, write_file
+from shannon_core.agents.tools_openai.fs import _edit_file_impl, _glob_impl, _read_file_impl, _write_file_impl
 
 
 def _ctx(tmp_path):
@@ -259,43 +262,43 @@ def _ctx(tmp_path):
 @pytest.mark.asyncio
 async def test_read_file_with_line_numbers(tmp_path):
     (tmp_path / "a.txt").write_text("alpha\nbeta\n")
-    out = await read_file(_ctx(tmp_path), "a.txt")
+    out = await _read_file_impl(_ctx(tmp_path), "a.txt")
     assert "1\talpha" in out and "2\tbeta" in out
 
 
 @pytest.mark.asyncio
 async def test_read_file_offset_limit(tmp_path):
     (tmp_path / "a.txt").write_text("l1\nl2\nl3\nl4\n")
-    out = await read_file(_ctx(tmp_path), "a.txt", offset=1, limit=2)
+    out = await _read_file_impl(_ctx(tmp_path), "a.txt", offset=1, limit=2)
     assert "l2" in out and "l3" in out and "l4" not in out
 
 
 @pytest.mark.asyncio
 async def test_write_file_creates_and_overwrites(tmp_path):
-    await write_file(_ctx(tmp_path), "sub/dir/b.txt", "hello")
+    await _write_file_impl(_ctx(tmp_path), "sub/dir/b.txt", "hello")
     assert (tmp_path / "sub" / "dir" / "b.txt").read_text() == "hello"
-    await write_file(_ctx(tmp_path), "sub/dir/b.txt", "world")
+    await _write_file_impl(_ctx(tmp_path), "sub/dir/b.txt", "world")
     assert (tmp_path / "sub" / "dir" / "b.txt").read_text() == "world"
 
 
 @pytest.mark.asyncio
 async def test_edit_file_replaces_unique(tmp_path):
     (tmp_path / "c.txt").write_text("foo bar foo")
-    await edit_file(_ctx(tmp_path), "c.txt", "bar", "baz")
+    await _edit_file_impl(_ctx(tmp_path), "c.txt", "bar", "baz")
     assert (tmp_path / "c.txt").read_text() == "foo baz foo"
 
 
 @pytest.mark.asyncio
 async def test_edit_file_error_when_not_unique(tmp_path):
     (tmp_path / "c.txt").write_text("dup dup")
-    out = await edit_file(_ctx(tmp_path), "c.txt", "dup", "x")
+    out = await _edit_file_impl(_ctx(tmp_path), "c.txt", "dup", "x")
     assert "not unique" in out.lower()
 
 
 @pytest.mark.asyncio
 async def test_edit_file_replace_all(tmp_path):
     (tmp_path / "c.txt").write_text("dup dup")
-    await edit_file(_ctx(tmp_path), "c.txt", "dup", "x", replace_all=True)
+    await _edit_file_impl(_ctx(tmp_path), "c.txt", "dup", "x", replace_all=True)
     assert (tmp_path / "c.txt").read_text() == "x x"
 
 
@@ -304,7 +307,7 @@ async def test_glob_matches_pattern(tmp_path):
     (tmp_path / "x.py").write_text("")
     (tmp_path / "y.txt").write_text("")
     (tmp_path / "z.py").write_text("")
-    out = await glob(_ctx(tmp_path), "**/*.py")
+    out = await _glob_impl(_ctx(tmp_path), "**/*.py")
     assert "x.py" in out and "z.py" in out and "y.txt" not in out
 ```
 
@@ -339,8 +342,7 @@ def _truncate(text: str) -> str:
     return text[:_MAX_FILE_OUTPUT] + ("...[truncated]" if len(text) > _MAX_FILE_OUTPUT else "")
 
 
-@function_tool
-async def read_file(
+async def _read_file_impl(
     ctx: RunContextWrapper[ToolContext],
     path: str,
     offset: int = 0,
@@ -365,8 +367,7 @@ async def read_file(
     return _truncate("\n".join(numbered))
 
 
-@function_tool
-async def write_file(
+async def _write_file_impl(
     ctx: RunContextWrapper[ToolContext],
     path: str,
     content: str,
@@ -383,8 +384,7 @@ async def write_file(
     return f"wrote {len(content)} bytes to {path}"
 
 
-@function_tool
-async def edit_file(
+async def _edit_file_impl(
     ctx: RunContextWrapper[ToolContext],
     path: str,
     old_string: str,
@@ -414,8 +414,7 @@ async def edit_file(
     return f"edited {path} ({count} replacement(s))"
 
 
-@function_tool
-async def glob(
+async def _glob_impl(
     ctx: RunContextWrapper[ToolContext],
     pattern: str,
     path: str = ".",
@@ -429,6 +428,12 @@ async def glob(
     base = _resolve(ctx, path)
     matches = sorted(base.glob(pattern), key=lambda f: f.stat().st_mtime if f.exists() else 0, reverse=True)
     return _truncate("\n".join(str(m.relative_to(base)) if m.is_relative_to(base) else str(m) for m in matches))
+
+
+read_file = function_tool(_read_file_impl, name_override="read_file")
+write_file = function_tool(_write_file_impl, name_override="write_file")
+edit_file = function_tool(_edit_file_impl, name_override="edit_file")
+glob = function_tool(_glob_impl, name_override="glob")
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
@@ -459,14 +464,14 @@ git commit -m "feat(openai-engine): 加文件工具 read_file/write_file/edit_fi
 - [ ] **Step 1: 写失败测试（追加到 test_exec.py 末尾）**
 
 ```python
-from shannon_core.agents.tools_openai.exec import grep
+from shannon_core.agents.tools_openai.exec import _grep_impl
 
 
 @pytest.mark.asyncio
 async def test_grep_content_mode(tmp_path):
     (tmp_path / "a.py").write_text("def hello():\n    pass\n")
     (tmp_path / "b.py").write_text("world\n")
-    out = await grep(_ctx(tmp_path), "hello")
+    out = await _grep_impl(_ctx(tmp_path), "hello")
     assert "hello" in out and "a.py" in out
     assert "b.py" not in out
 
@@ -475,14 +480,14 @@ async def test_grep_content_mode(tmp_path):
 async def test_grep_files_with_matches_mode(tmp_path):
     (tmp_path / "a.py").write_text("target\n")
     (tmp_path / "b.py").write_text("target\ntarget\n")
-    out = await grep(_ctx(tmp_path), "target", output_mode="files_with_matches")
+    out = await _grep_impl(_ctx(tmp_path), "target", output_mode="files_with_matches")
     assert "a.py" in out and "b.py" in out
 
 
 @pytest.mark.asyncio
 async def test_grep_count_mode(tmp_path):
     (tmp_path / "a.py").write_text("x\nx\ny\n")
-    out = await grep(_ctx(tmp_path), "x", output_mode="count")
+    out = await _grep_impl(_ctx(tmp_path), "x", output_mode="count")
     assert "2" in out
 ```
 
@@ -496,8 +501,7 @@ Expected: FAIL（`ImportError: cannot import name 'grep'`）。
 在 `exec.py` 末尾追加：
 
 ```python
-@function_tool
-async def grep(
+async def _grep_impl(
     ctx: RunContextWrapper[ToolContext],
     pattern: str,
     path: str = ".",
@@ -557,6 +561,9 @@ async def grep(
     if output_mode == "count":
         return _truncate("\n".join(counts))
     return _truncate("\n".join(matches_content))
+
+
+grep = function_tool(_grep_impl, name_override="grep")
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
@@ -595,7 +602,7 @@ import pytest
 from agents import RunContextWrapper
 
 from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.web import web_fetch, web_search
+from shannon_core.agents.tools_openai.web import _web_fetch_impl, _web_search_impl
 
 
 def _ctx(tmp_path):
@@ -611,7 +618,7 @@ async def test_web_fetch_strips_html(tmp_path):
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
     with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
-        out = await web_fetch(_ctx(tmp_path), "https://example.com")
+        out = await _web_fetch_impl(_ctx(tmp_path), "https://example.com")
     assert "Hello there" in out
     assert "<p>" not in out
 
@@ -625,7 +632,7 @@ async def test_web_fetch_truncates(tmp_path):
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
     with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
-        out = await web_fetch(_ctx(tmp_path), "https://example.com", max_length=1000)
+        out = await _web_fetch_impl(_ctx(tmp_path), "https://example.com", max_length=1000)
     assert len(out) <= 1100
 
 
@@ -642,7 +649,7 @@ async def test_web_search_returns_results(tmp_path):
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
     with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
-        out = await web_search(_ctx(tmp_path), "foo")
+        out = await _web_search_impl(_ctx(tmp_path), "foo")
     assert "foo.example" in out or "Foo" in out
 ```
 
@@ -678,8 +685,7 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "...[truncated]"
 
 
-@function_tool
-async def web_fetch(
+async def _web_fetch_impl(
     ctx: RunContextWrapper[ToolContext],
     url: str,
     max_length: int = 30000,
@@ -699,8 +705,7 @@ async def web_fetch(
         return f"[web_fetch error] {type(e).__name__}: {e}"
 
 
-@function_tool
-async def web_search(
+async def _web_search_impl(
     ctx: RunContextWrapper[ToolContext],
     query: str,
     max_results: int = 10,
@@ -729,6 +734,10 @@ async def web_search(
         link = urllib.parse.unquote(href)
         rows.append(f"- {snippet.strip()[:200]}\n  {link}")
     return _truncate("\n".join(rows), 30000) or "[web_search] no results"
+
+
+web_fetch = function_tool(_web_fetch_impl, name_override="web_fetch")
+web_search = function_tool(_web_search_impl, name_override="web_search")
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
@@ -1048,15 +1057,8 @@ from agents import RunResult
 
 from .runner import ClaudeRunResult, TokenUsage
 
-# 与 providers_openai 现有定价表共用；未知模型回退到 gpt-4o 档
-_DEFAULT_PRICING = {"input": 0.0025, "output": 0.01}
-
-
-def _estimate_cost(model: str, tokens: TokenUsage) -> float:
-    # GLM 等模型定价未知，这里给 0；真实成本以 provider 账单为准。
-    # 保留估算入口，后续可按模型补定价表。
-    pricing = _DEFAULT_PRICING
-    return (tokens.input_tokens / 1000) * pricing["input"] + (tokens.output_tokens / 1000) * pricing["output"]
+# GLM 等第三方模型定价未知，cost 留 0.0（不假估算），以 provider 账单为准。
+# 不复用 providers_openai.OPENAI_PRICING——Task 8 会重写该模块并删除该表。
 
 
 def _usage_from(run_result: RunResult) -> TokenUsage:
@@ -1094,7 +1096,7 @@ def map_run_result(
         success=True,
         duration=duration_ms,
         turns=turns,
-        cost=_estimate_cost(model, tokens),
+        cost=0.0,  # GLM 定价未知，留空（见文件头注释）
         model=model,
         structured_output=structured_output,
         tokens=tokens,
