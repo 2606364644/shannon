@@ -3,15 +3,18 @@
 import asyncio
 
 import click
-from dotenv import load_dotenv
+from shannon_core.config.env_loader import load_env
 
+from shannon_core.config.env_loader import load_env
+from shannon_core.config.profile_validator import validate_active_profile
 from shannon_core.services.temporal_infra import ensure_infra
 
 
 @click.group()
 def cli():
     """Shannon — unified security scanning (whitebox + blackbox)."""
-    load_dotenv(override=True)
+    load_env()
+    validate_active_profile()
 
 
 @cli.command()

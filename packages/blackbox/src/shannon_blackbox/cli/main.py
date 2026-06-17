@@ -5,7 +5,8 @@ from pathlib import Path
 
 import click
 
-from dotenv import load_dotenv
+from shannon_core.config.env_loader import load_env
+from shannon_core.config.profile_validator import validate_active_profile
 
 from shannon_core.models.agents import ALL_VULN_CLASSES
 from shannon_core.services.temporal_infra import (
@@ -22,7 +23,8 @@ from shannon_core.workspace import compute_deliverables_summary, find_latest_wor
 @click.group()
 def cli():
     """Shannon Black-Box Scanner - Runtime vulnerability verification."""
-    load_dotenv(override=True)
+    load_env()
+    validate_active_profile()
 
 
 @cli.command()
