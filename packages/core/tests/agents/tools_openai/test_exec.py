@@ -42,3 +42,30 @@ async def test_bash_truncates_long_output(tmp_path):
     result = await _bash_impl(_ctx(tmp_path), "yes x | head -c 60000")
     assert len(result) <= 32000
     assert result.endswith("...[truncated]")
+
+
+from shannon_core.agents.tools_openai.exec import _grep_impl
+
+
+@pytest.mark.asyncio
+async def test_grep_content_mode(tmp_path):
+    (tmp_path / "a.py").write_text("def hello():\n    pass\n")
+    (tmp_path / "b.py").write_text("world\n")
+    out = await _grep_impl(_ctx(tmp_path), "hello")
+    assert "hello" in out and "a.py" in out
+    assert "b.py" not in out
+
+
+@pytest.mark.asyncio
+async def test_grep_files_with_matches_mode(tmp_path):
+    (tmp_path / "a.py").write_text("target\n")
+    (tmp_path / "b.py").write_text("target\ntarget\n")
+    out = await _grep_impl(_ctx(tmp_path), "target", output_mode="files_with_matches")
+    assert "a.py" in out and "b.py" in out
+
+
+@pytest.mark.asyncio
+async def test_grep_count_mode(tmp_path):
+    (tmp_path / "a.py").write_text("x\nx\ny\n")
+    out = await _grep_impl(_ctx(tmp_path), "x", output_mode="count")
+    assert "2" in out

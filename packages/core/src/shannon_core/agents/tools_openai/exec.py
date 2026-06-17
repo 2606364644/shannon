@@ -56,3 +56,68 @@ async def _bash_impl(
 
 
 bash = function_tool(_bash_impl)
+
+
+async def _grep_impl(
+    ctx: RunContextWrapper[ToolContext],
+    pattern: str,
+    path: str = ".",
+    glob: str = "*",
+    output_mode: str = "content",
+) -> str:
+    """Search file contents for a regex pattern.
+
+    Args:
+        pattern: Regular expression to search for.
+        path: Directory or file to search (default working directory).
+        glob: File-name glob filter (default "*").
+        output_mode: "content" (default, matching lines), "files_with_matches" (file list), or "count".
+    """
+    cwd = ctx.context.cwd
+    base = Path(path)
+    if not base.is_absolute():
+        base = Path(cwd) / base
+    regex = re.compile(pattern)
+    files: list[Path] = []
+    if base.is_file():
+        files = [base]
+    else:
+        files = [f for f in base.rglob(glob) if f.is_file()]
+
+    rg = shutil.which("rg")
+    if rg:
+        mode_flag = {"files_with_matches": "-l", "count": "-c"}.get(output_mode)
+        cmd = [rg, "-n", "--color=never"]
+        if mode_flag:
+            cmd.append(mode_flag)
+        cmd += ["-g", glob, pattern, str(base)]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return _truncate(res.stdout)
+        except Exception:
+            pass  # 退化到 python 正则扫描
+
+    matches_content: list[str] = []
+    matched_files: list[str] = []
+    counts: list[str] = []
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        hit_lines = [ln for ln in text.splitlines() if regex.search(ln)]
+        if not hit_lines:
+            continue
+        matched_files.append(str(f))
+        counts.append(f"{f}: {len(hit_lines)}")
+        for i, ln in enumerate(text.splitlines(), 1):
+            if regex.search(ln):
+                matches_content.append(f"{f}:{i}:{ln}")
+    if output_mode == "files_with_matches":
+        return _truncate("\n".join(matched_files))
+    if output_mode == "count":
+        return _truncate("\n".join(counts))
+    return _truncate("\n".join(matches_content))
+
+
+grep = function_tool(_grep_impl)
