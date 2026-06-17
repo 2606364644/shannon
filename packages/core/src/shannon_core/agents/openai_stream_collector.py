@@ -1,9 +1,12 @@
 """openai-agents 流式 event 收集器：实时驱动逐轮 audit + 累积 text/turns。
 
-对齐 anthropic 侧 MessageDispatcher 的逐轮上报语义：
-- 每个 agent_updated_stream_event 开启一个新 turn；
-- turn 内的文本累积，turn 结束（下一个 agent_updated 或流结束）时上报 log_assistant_turn；
-- tool 调用 → log_tool_start，tool 输出 → log_tool_end。
+对齐 anthropic 侧 MessageDispatcher 的逐轮上报语义（每个 assistant 模型响应 = 1 turn）。
+
+turn 计数基于模型响应产出的 run item（tool_call_item / message_output_item），
+而非 agent_updated_stream_event——后者在 Chat Completions 模式下整个 run 只发 1 次，
+无法区分多轮（实测：真实工具 loop 被错算成 1 turn）。
+raw_response_event 的 text delta 累积为当前 turn 的文本，在该 turn 的 run item
+出现时作为该 turn 上报 log_assistant_turn。
 """
 from __future__ import annotations
 
@@ -33,11 +36,6 @@ class StreamCollector:
     async def on_event(self, event: Any) -> None:
         etype = getattr(event, "type", None)
 
-        if etype == "agent_updated_stream_event":
-            await self._close_turn()
-            self._turn_count += 1
-            return
-
         if etype == "raw_response_event":
             data = getattr(event, "data", None)
             if isinstance(data, ResponseTextDeltaEvent):
@@ -50,21 +48,35 @@ class StreamCollector:
             name = getattr(event, "name", None)
             item = getattr(event, "item", None)
             item_type = getattr(item, "type", None)
+            # 模型响应产出的 item（调工具 / 给消息）= 一个新 turn
             if name == "tool_called" or item_type == "tool_call_item":
+                await self._advance_turn()
                 self.tool_call_count += 1
                 if self._audit is not None:
                     await self._audit.log_tool_start(_item_tool_name(item), _item_tool_args(item))
+            elif name == "message_output_created" or item_type == "message_output_item":
+                await self._advance_turn()
             elif name == "tool_output" or item_type == "tool_call_output_item":
+                # 工具执行结果，不是模型响应，不计 turn
                 if self._audit is not None:
                     await self._audit.log_tool_end(getattr(item, "output", ""))
             return
 
-    async def close(self) -> None:
-        await self._close_turn()
+        # agent_updated_stream_event / 其它：忽略（不再用于计 turn）
 
-    async def _close_turn(self) -> None:
-        if self._turn_count > 0 and self._turn_text and self._audit is not None:
-            await self._audit.log_assistant_turn(self._turn_count, self._turn_text)
+    async def close(self) -> None:
+        # 流结束，上报最后一 turn 尚未随 run item flush 的尾文本（如有）
+        await self._flush_turn()
+
+    async def _advance_turn(self) -> None:
+        """新模型响应 turn：turn_count +1，再把累积的文本作为该 turn 上报。"""
+        self._turn_count += 1
+        await self._flush_turn()
+
+    async def _flush_turn(self) -> None:
+        if self._turn_text and self._audit is not None:
+            turn_no = self._turn_count or 1
+            await self._audit.log_assistant_turn(turn_no, self._turn_text)
         self._turn_text = ""
 
 

@@ -243,6 +243,41 @@ class TestBuildProviderConfigOpenAI:
         cfg = build_provider_config()
         assert cfg.base_url != "https://should-be-ignored/v4"
 
+    def test_openai_tier_models_precedence(self, monkeypatch):
+        """openai 系优先读 SHANNON_OPENAI_*_MODEL（模型名与 anthropic 兼容接口不同）"""
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
+        monkeypatch.setenv("SHANNON_LARGE_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SHANNON_SMALL_MODEL", "GLM-4.5-Air")
+        monkeypatch.setenv("SHANNON_OPENAI_LARGE_MODEL", "glm-5.2")
+        monkeypatch.setenv("SHANNON_OPENAI_MEDIUM_MODEL", "glm-5.2")
+        monkeypatch.setenv("SHANNON_OPENAI_SMALL_MODEL", "glm-4.5-air")
+        cfg = build_provider_config()
+        assert cfg.large_model == "glm-5.2"
+        assert cfg.medium_model == "glm-5.2"
+        assert cfg.small_model == "glm-4.5-air"
+
+    def test_openai_tier_models_fallback(self, monkeypatch):
+        """openai 系缺 SHANNON_OPENAI_*_MODEL 时回退 SHANNON_*_MODEL"""
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
+        monkeypatch.delenv("SHANNON_OPENAI_LARGE_MODEL", raising=False)
+        monkeypatch.delenv("SHANNON_OPENAI_MEDIUM_MODEL", raising=False)
+        monkeypatch.delenv("SHANNON_OPENAI_SMALL_MODEL", raising=False)
+        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "shared-model")
+        cfg = build_provider_config()
+        assert cfg.medium_model == "shared-model"
+
+    def test_anthropic_tier_models_ignore_openai(self, monkeypatch):
+        """anthropic 系不读 SHANNON_OPENAI_*_MODEL"""
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "anthropic_api")
+        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SHANNON_OPENAI_MEDIUM_MODEL", "glm-5.2")
+        cfg = build_provider_config()
+        assert cfg.medium_model == "GLM-5.2[1m]"
+
 
 class TestCreateProvider:
     """测试 create_provider 工厂函数"""

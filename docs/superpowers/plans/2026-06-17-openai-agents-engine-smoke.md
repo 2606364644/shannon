@@ -25,7 +25,12 @@ SHANNON_SMALL_MODEL=glm-4.5-air
 - ✅ **引擎连通成功**：`build_provider_config(openai_compatible)` → `OpenAIProvider` → `Runner.run_streamed` → 请求打到 `https://open.bigmodel.cn/api/paas/v4`，鉴权有效、SDK 接入链路通。
 - ✅ **错误处理正确**：GLM 返回的结构化错误（1211 模型不存在 / 1113 余额不足）被 `_handle_error` 捕获 → `ClaudeRunResult(success=False, error=...)`，无崩溃、无未捕获异常。
 - ⚠️ **模型名差异**（真实发现）：anthropic 接口用 `GLM-5.2[1m]`，OpenAI 兼容端点用 `glm-5.2`（小写、无 `[1m]`）。切引擎时模型名也要改——已修正本文件前置。
-- ❌ **阻塞在账户余额**：Pro token 在 OpenAI 兼容端点余额不足（429, code 1113 "余额不足或无可用资源包,请充值"）。**需充值或换有 API 余额的 key** 才能跑通真实 tool-use loop（验证 turns>1 / audit 落库 / usage>0）。
+- ❌ ~~阻塞在 OpenAI API 余额~~ → **✅ 已解决（改用 coding 通道）**：智谱有两条 OpenAI 兼容端点——`/api/paas/v4`（按量计费 API，Pro 订阅不覆盖，报 1113 余额不足）vs **`/api/coding/paas/v4`（coding 通道，Pro/Max 订阅覆盖）**。改用 coding 通道后余额问题消失。
+- ✅ **OpenAI 引擎 loop 实测跑通**（`SHANNON_OPENAI_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4`）：
+  - 单轮连通：`success=True`，`tokens=1279/18`。
+  - 工具 loop：模型→调 `bash`(echo)→拿结果→给答案；**audit 逐轮上报正常**（`log_tool_start`/`log_tool_end`/`log_assistant_turn`）；**usage 回传**（`tokens=2623/50`，证明 `ModelSettings(include_usage=True)` 生效）。
+  - ✅ **turns 计数已修复**：`StreamCollector` 改用模型响应产出的 run item（`tool_call_item` / `message_output_item`）计 turn（原来用 `agent_updated_stream_event`，Chat Completions 模式下整个 run 只发 1 次，导致真实多轮被算成 1 turn）。修复后真实工具 loop **turns=3**（调工具 + 中间响应 + 给答案），**与 anthropic 引擎 turns=3 对齐**；单元测试 4 passed。
+  - anthropic 引擎对照：同 key 同模型（GLM），`turns=3` 跑通。双引擎均可用。
 
 **待办**：充值/换 key 后，重跑下方 §1 最小冒烟验证真实 loop。
 

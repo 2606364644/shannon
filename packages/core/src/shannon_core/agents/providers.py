@@ -215,12 +215,21 @@ def build_provider_config(
         auth_token = os.getenv("SHANNON_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN")
 
     # Tier-specific model overrides
+    # openai 系优先读 SHANNON_OPENAI_*_MODEL（模型名通常与 anthropic 兼容接口不同，
+    # 如智谱 anthropic 用 GLM-5.2[1m]、openai 兼容用 glm-5.2），回退 SHANNON_*_MODEL。
+    # 这样 .env 可双端点 + 双模型并存，切换引擎只改 SHANNON_AI_PROVIDER。
     if small_model is None:
-        small_model = os.getenv("SHANNON_SMALL_MODEL")
+        small_model = (
+            os.getenv("SHANNON_OPENAI_SMALL_MODEL") if is_openai_family else None
+        ) or os.getenv("SHANNON_SMALL_MODEL")
     if medium_model is None:
-        medium_model = os.getenv("SHANNON_MEDIUM_MODEL")
+        medium_model = (
+            os.getenv("SHANNON_OPENAI_MEDIUM_MODEL") if is_openai_family else None
+        ) or os.getenv("SHANNON_MEDIUM_MODEL")
     if large_model is None:
-        large_model = os.getenv("SHANNON_LARGE_MODEL")
+        large_model = (
+            os.getenv("SHANNON_OPENAI_LARGE_MODEL") if is_openai_family else None
+        ) or os.getenv("SHANNON_LARGE_MODEL")
 
     return ProviderConfig(
         type=provider_type,  # type: ignore
