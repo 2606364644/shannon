@@ -107,12 +107,12 @@ class TestBuildProviderConfig:
         config = build_provider_config()
         assert config.type == "anthropic_api"
 
-    def test_shannon_env_vars(self):
-        """测试 SHANNON_* 环境变量"""
+    def test_openai_env_vars(self):
+        """测试 openai_compatible 的 SHANNON_OPENAI_* 环境变量(删 fallback 后 openai 读 SHANNON_OPENAI_*)"""
         with patch.dict(os.environ, {
             "SHANNON_AI_PROVIDER": "openai_compatible",
-            "SHANNON_API_KEY": "test-key",
-            "SHANNON_BASE_URL": "https://api.example.com",
+            "SHANNON_OPENAI_API_KEY": "test-key",
+            "SHANNON_OPENAI_BASE_URL": "https://api.example.com",
             "SHANNON_MODEL": "gpt-4o",
         }):
             config = build_provider_config()
@@ -121,8 +121,8 @@ class TestBuildProviderConfig:
             assert config.base_url == "https://api.example.com"
             assert config.model == "gpt-4o"
 
-    def test_anthropic_env_vars_fallback(self):
-        """测试 ANTHROPIC_* 环境变量回退"""
+    def test_anthropic_reads_anthropic_prefixed_vars(self):
+        """anthropic_api 直接读 ANTHROPIC_*(无跨前缀 fallback)。"""
         with patch.dict(os.environ, {
             "ANTHROPIC_API_KEY": "anthropic-key",
             "ANTHROPIC_BASE_URL": "https://anthropic.example.com",
@@ -131,14 +131,13 @@ class TestBuildProviderConfig:
             assert config.api_key == "anthropic-key"
             assert config.base_url == "https://anthropic.example.com"
 
-    def test_shannon_priority_over_anthropic(self):
-        """测试 SHANNON_* 优先级高于 ANTHROPIC_*"""
+    def test_anthropic_ignores_shannon_credential_vars(self):
+        """anthropic_api 不再读 SHANNON_API_KEY(删 fallback);只认 ANTHROPIC_*。"""
         with patch.dict(os.environ, {
-            "SHANNON_API_KEY": "shannon-key",
-            "ANTHROPIC_API_KEY": "anthropic-key",
-        }):
+            "SHANNON_API_KEY": "should-be-ignored",
+        }, clear=True):
             config = build_provider_config()
-            assert config.api_key == "shannon-key"
+            assert config.api_key is None
 
     def test_explicit_params_override_env(self):
         """测试显式参数覆盖环境变量"""
@@ -225,7 +224,8 @@ class TestBuildProviderConfigOpenAI:
         assert cfg.base_url == "https://open.bigmodel.cn/api/paas/v4"
         assert cfg.api_key == "glm-key"
 
-    def test_openai_falls_back_to_shannon_vars(self, monkeypatch):
+    def test_openai_no_fallback_to_shannon_vars(self, monkeypatch):
+        """openai_compatible 缺 SHANNON_OPENAI_* 时不再回退 SHANNON_*(删 fallback)。"""
         from shannon_core.agents.providers import build_provider_config
         monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
         monkeypatch.delenv("SHANNON_OPENAI_BASE_URL", raising=False)
@@ -233,8 +233,8 @@ class TestBuildProviderConfigOpenAI:
         monkeypatch.setenv("SHANNON_BASE_URL", "https://shared/v4")
         monkeypatch.setenv("SHANNON_API_KEY", "shared-key")
         cfg = build_provider_config()
-        assert cfg.base_url == "https://shared/v4"
-        assert cfg.api_key == "shared-key"
+        assert cfg.base_url is None
+        assert cfg.api_key is None
 
     def test_anthropic_unchanged_by_openai_vars(self, monkeypatch):
         from shannon_core.agents.providers import build_provider_config
@@ -258,8 +258,8 @@ class TestBuildProviderConfigOpenAI:
         assert cfg.medium_model == "glm-5.2"
         assert cfg.small_model == "glm-4.5-air"
 
-    def test_openai_tier_models_fallback(self, monkeypatch):
-        """openai 系缺 SHANNON_OPENAI_*_MODEL 时回退 SHANNON_*_MODEL"""
+    def test_openai_tier_models_no_fallback(self, monkeypatch):
+        """openai_compatible 缺 SHANNON_OPENAI_*_MODEL 时不再回退 SHANNON_*_MODEL。"""
         from shannon_core.agents.providers import build_provider_config
         monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
         monkeypatch.delenv("SHANNON_OPENAI_LARGE_MODEL", raising=False)
@@ -267,7 +267,7 @@ class TestBuildProviderConfigOpenAI:
         monkeypatch.delenv("SHANNON_OPENAI_SMALL_MODEL", raising=False)
         monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "shared-model")
         cfg = build_provider_config()
-        assert cfg.medium_model == "shared-model"
+        assert cfg.medium_model is None  # 不回退 SHANNON_MEDIUM_MODEL
 
     def test_anthropic_tier_models_ignore_openai(self, monkeypatch):
         """anthropic 系不读 SHANNON_OPENAI_*_MODEL"""
@@ -1388,10 +1388,10 @@ class TestTierModelEnvVarIntegration:
         assert provider._get_model("small") == "claude-haiku-4-5@latest"
 
     def test_openai_tier_override_with_env(self):
-        """OpenAI compatible provider 通过环境变量覆盖 tier"""
+        """OpenAI compatible provider 通过 SHANNON_OPENAI_*_MODEL 覆盖 tier"""
         with patch.dict(os.environ, {
             "SHANNON_AI_PROVIDER": "openai_compatible",
-            "SHANNON_MEDIUM_MODEL": "gpt-4o-turbo",
+            "SHANNON_OPENAI_MEDIUM_MODEL": "gpt-4o-turbo",
         }, clear=True):
             config = build_provider_config()
             provider = OpenAIProvider(config)

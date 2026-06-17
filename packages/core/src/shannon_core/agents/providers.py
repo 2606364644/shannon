@@ -12,6 +12,8 @@ Provider 抽象层 - 支持多种 AI Provider
 import os
 from abc import ABC, abstractmethod
 
+from shannon_core.config.provider_settings import PROVIDER_SETTINGS
+
 from .runner import ClaudeRunResult, ProviderConfig
 from .tool_audit_logger import ToolAuditLogger
 
@@ -147,40 +149,96 @@ def build_provider_config(
     medium_model: str | None = None,
     large_model: str | None = None,
 ) -> ProviderConfig:
+    """从环境变量和参数构建 ProviderConfig。
+
+    anthropic_api / openai_compatible: 按 PROVIDER_SETTINGS 直接读取对应前缀变量,
+    不做跨前缀 fallback(profile 文件须自洽, profile_validator 启动时兜底校验)。
+    bedrock / vertex / litellm_router: 保留现有读取行为(用户未使用, 非本次范围)。
+
+    显式参数优先于环境变量。
     """
-    从环境变量和参数构建 ProviderConfig
-
-    零配置用法: 只需设置 ANTHROPIC_API_KEY 环境变量即可。
-    SHANNON_* 变量用于覆盖默认行为。
-
-    环境变量优先级: 参数 > SHANNON_* > ANTHROPIC_*
-
-    openai 系（openai_compatible / litellm_router）会额外先尝试
-    SHANNON_OPENAI_BASE_URL / SHANNON_OPENAI_API_KEY，再回退通用 SHANNON_* 变量。
-    anthropic 系行为不变，不读取 SHANNON_OPENAI_*。
-
-    Args:
-        provider_type: Provider 类型（默认 anthropic_api）
-        api_key: API Key（默认 openai 系读 SHANNON_OPENAI_API_KEY，回退 SHANNON_API_KEY > ANTHROPIC_API_KEY > OPENAI_API_KEY）
-        base_url: Base URL（默认 openai 系读 SHANNON_OPENAI_BASE_URL，回退 SHANNON_BASE_URL > ANTHROPIC_BASE_URL）
-        model: 模型名称（默认从 SHANNON_MODEL > ANTHROPIC_MODEL 读取）
-        region: 区域（用于 Bedrock / Vertex）
-        project_id: 项目 ID（用于 Vertex）
-        auth_token: 认证 Token（用于 LiteLLM）
-        small_model: Small tier 模型（默认从 SHANNON_SMALL_MODEL 读取）
-        medium_model: Medium tier 模型（默认从 SHANNON_MEDIUM_MODEL 读取）
-        large_model: Large tier 模型（默认从 SHANNON_LARGE_MODEL 读取）
-
-    Returns:
-        ProviderConfig: 配置对象
-    """
-    # Provider 类型
     if provider_type is None:
         provider_type = os.getenv("SHANNON_AI_PROVIDER", "anthropic_api")
 
+    if provider_type in ("anthropic_api", "openai_compatible"):
+        return _build_from_settings(
+            provider_type,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            auth_token=auth_token,
+            small_model=small_model,
+            medium_model=medium_model,
+            large_model=large_model,
+        )
+
+    # bedrock / vertex / litellm_router: 现有 fallback 读取(非本次范围, 保持不变)
+    return _build_legacy(
+        provider_type,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        region=region,
+        project_id=project_id,
+        auth_token=auth_token,
+        small_model=small_model,
+        medium_model=medium_model,
+        large_model=large_model,
+    )
+
+
+def _read(param: str | None, env_name: str | None) -> str | None:
+    """显式参数优先; 否则读环境变量; env_name 为 None 时该字段不读。"""
+    if param is not None:
+        return param
+    if env_name is None:
+        return None
+    return os.getenv(env_name)
+
+
+def _build_from_settings(
+    provider_type: str,
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    model: str | None,
+    auth_token: str | None,
+    small_model: str | None,
+    medium_model: str | None,
+    large_model: str | None,
+) -> ProviderConfig:
+    """anthropic_api / openai_compatible: 按 PROVIDER_SETTINGS 读取, 无跨前缀 fallback。"""
+    f = PROVIDER_SETTINGS[provider_type]
+    return ProviderConfig(
+        type=provider_type,  # type: ignore
+        api_key=_read(api_key, f.api_key),
+        base_url=_read(base_url, f.base_url),
+        model=_read(model, f.model),
+        region=None,
+        project_id=None,
+        auth_token=_read(auth_token, f.auth_token),
+        small_model=_read(small_model, f.small_model),
+        medium_model=_read(medium_model, f.medium_model),
+        large_model=_read(large_model, f.large_model),
+    )
+
+
+def _build_legacy(
+    provider_type: str,
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    model: str | None,
+    region: str | None,
+    project_id: str | None,
+    auth_token: str | None,
+    small_model: str | None,
+    medium_model: str | None,
+    large_model: str | None,
+) -> ProviderConfig:
+    """bedrock / vertex / litellm_router: 保留删除 fallback 前的读取行为。"""
     is_openai_family = provider_type in ("openai_compatible", "litellm_router")
 
-    # API Key - openai 系优先 SHANNON_OPENAI_API_KEY，否则 SHANNON_API_KEY > ANTHROPIC_API_KEY > OPENAI_API_KEY
     if api_key is None:
         if is_openai_family:
             api_key = os.getenv("SHANNON_OPENAI_API_KEY")
@@ -190,34 +248,19 @@ def build_provider_config(
                 or os.getenv("ANTHROPIC_API_KEY")
                 or os.getenv("OPENAI_API_KEY")
             )
-
-    # Base URL - openai 系优先 SHANNON_OPENAI_BASE_URL，否则通用 SHANNON_BASE_URL > ANTHROPIC_BASE_URL
     if base_url is None:
         if is_openai_family:
             base_url = os.getenv("SHANNON_OPENAI_BASE_URL")
         if base_url is None:
             base_url = os.getenv("SHANNON_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
-
-    # Model - 优先 SHANNON_MODEL，其次 ANTHROPIC_MODEL
     if model is None:
         model = os.getenv("SHANNON_MODEL") or os.getenv("ANTHROPIC_MODEL")
-
-    # Region - 用于 Bedrock 和 Vertex
     if region is None:
         region = os.getenv("SHANNON_REGION") or os.getenv("AWS_REGION") or os.getenv("CLOUD_ML_REGION")
-
-    # Project ID - 用于 Vertex
     if project_id is None:
         project_id = os.getenv("SHANNON_PROJECT_ID") or os.getenv("ANTHROPIC_VERTEX_PROJECT_ID")
-
-    # Auth Token - 用于 LiteLLM
     if auth_token is None:
         auth_token = os.getenv("SHANNON_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN")
-
-    # Tier-specific model overrides
-    # openai 系优先读 SHANNON_OPENAI_*_MODEL（模型名通常与 anthropic 兼容接口不同，
-    # 如智谱 anthropic 用 GLM-5.2[1m]、openai 兼容用 glm-5.2），回退 SHANNON_*_MODEL。
-    # 这样 .env 可双端点 + 双模型并存，切换引擎只改 SHANNON_AI_PROVIDER。
     if small_model is None:
         small_model = (
             os.getenv("SHANNON_OPENAI_SMALL_MODEL") if is_openai_family else None
