@@ -8,15 +8,8 @@ from agents import RunResult
 
 from .runner import ClaudeRunResult, TokenUsage
 
-# 与 providers_openai 现有定价表共用；未知模型回退到 gpt-4o 档
-_DEFAULT_PRICING = {"input": 0.0025, "output": 0.01}
-
-
-def _estimate_cost(model: str, tokens: TokenUsage) -> float:
-    # GLM 等模型定价未知，这里给 0；真实成本以 provider 账单为准。
-    # 保留估算入口，后续可按模型补定价表。
-    pricing = _DEFAULT_PRICING
-    return (tokens.input_tokens / 1000) * pricing["input"] + (tokens.output_tokens / 1000) * pricing["output"]
+# GLM 等第三方模型定价未知，cost 留 0.0（不假估算），以 provider 账单为准。
+# 不复用 providers_openai.OPENAI_PRICING——Task 8 会重写该模块并删除该表。
 
 
 def _usage_from(run_result: RunResult) -> TokenUsage:
@@ -54,7 +47,7 @@ def map_run_result(
         success=True,
         duration=duration_ms,
         turns=turns,
-        cost=_estimate_cost(model, tokens),
+        cost=0.0,  # GLM 定价未知，留空
         model=model,
         structured_output=structured_output,
         tokens=tokens,

@@ -30,6 +30,7 @@ def test_map_plain_text():
     assert res.model == "GLM-5.2[1m]"
     assert res.tokens.input_tokens == 10
     assert res.tokens.output_tokens == 5
+    assert res.cost == 0.0
 
 
 def test_map_stop_reason_max_turns():
