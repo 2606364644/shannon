@@ -295,7 +295,8 @@ def show(workspace_name):
     summary = info["deliverables_summary"]
     if summary["vuln_queues"] or summary["reports"]:
         click.echo("\n  Deliverables:")
-        deliverables_dir = ws / "deliverables"
+        from shannon_core.utils.paths import deliverables_dir_for_workspace
+        deliverables_dir = deliverables_dir_for_workspace(ws)
         for vc in summary["vuln_queues"]:
             filename = f"{vc}_exploitation_queue.json"
             filepath = deliverables_dir / filename

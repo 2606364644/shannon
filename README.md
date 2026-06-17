@@ -93,6 +93,9 @@ uv run shannon-whitebox start --repo /path/to/target-repo
 uv run shannon-whitebox start --repo /path/to/repo --output ./results --workspace my-scan --config scan.yaml
 
 uv run shannon-whitebox start --repo /path/to/repo --pipeline-testing --temporal-address localhost:7233
+
+# 可选：--url 记录部署地址，黑盒可据此按 URL 自动复用白盒结果（详见 docs/whitebox-blackbox-handoff.md）
+uv run shannon-whitebox start --repo /path/to/repo --workspace my-scan --url https://target.example.com
 ```
 
 查看工作区和日志：

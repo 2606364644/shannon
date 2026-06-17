@@ -10,7 +10,6 @@ from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, Vuln
 from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
 from shannon_core.models.metrics import AgentMetrics
 from shannon_core.utils.atomic_write import atomic_write_json
-from shannon_core.utils.security import validate_target_url
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.logging import create_activity_logger
@@ -50,10 +49,6 @@ async def run_preflight(input: ActivityInput) -> None:
                         category="config",
                         error_code=ErrorCode.CONFIG_PARSE_ERROR,
                     ) from exc
-
-            # URL safety check
-            if input.web_url:
-                validate_target_url(input.web_url)
 
             repo, _, _ = _get_paths(input)
             if not repo.exists():

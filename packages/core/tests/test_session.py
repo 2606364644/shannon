@@ -250,14 +250,18 @@ def test_delete_workspace_handles_already_deleted_linked_ws(tmp_path):
 
 
 def test_clean_workspace_whitebox(tmp_path):
-    """clean_workspace with whitebox should remove artifacts but keep session.json."""
+    """clean_workspace with whitebox removes repo-centric deliverables + workspace artifacts, keeps session.json."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
     mgr = SessionManager(tmp_path / "workspaces")
-    ws = mgr.create_workspace("https://example.com", "/repo", name="wb-clean", scan_type="whitebox")
+    ws = mgr.create_workspace("https://example.com", str(repo), name="wb-clean", scan_type="whitebox")
     from shannon_core.models.agents import AgentName
     mgr.mark_agent_completed(ws, AgentName.RECON)
-    # Create artifacts
-    (ws / "deliverables").mkdir()
-    (ws / "deliverables" / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    # Deliverables live repo-centric (<repo>/.shannon/deliverables)
+    deliverables = repo / ".shannon" / "deliverables"
+    deliverables.mkdir(parents=True)
+    (deliverables / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    # Other artifacts live under the workspace
     (ws / "agents").mkdir()
     (ws / "agents" / "recon.log").write_text("log data", encoding="utf-8")
     (ws / "prompts").mkdir()
@@ -276,8 +280,9 @@ def test_clean_workspace_whitebox(tmp_path):
     data = json.loads((ws / "session.json").read_text(encoding="utf-8"))
     assert data["completed_agents"] == []
     assert data["deliverables_summary"] is None
-    # Artifact dirs/files should be gone
-    assert not (ws / "deliverables").exists()
+    # Repo-centric deliverables removed
+    assert not deliverables.exists()
+    # Workspace artifact dirs/files gone
     assert not (ws / "agents").exists()
     assert not (ws / "prompts").exists()
     assert not (ws / "scratchpad").exists()
@@ -287,15 +292,18 @@ def test_clean_workspace_whitebox(tmp_path):
 
 
 def test_clean_workspace_blackbox(tmp_path):
-    """clean_workspace with blackbox should remove blackbox-specific artifacts."""
+    """clean_workspace with blackbox removes blackbox-specific deliverables (repo-centric)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    deliverables = repo / ".shannon" / "deliverables"
+    deliverables.mkdir(parents=True)
     mgr = SessionManager(tmp_path / "workspaces")
-    ws = mgr.create_workspace("https://example.com", "/repo", name="bb-clean", scan_type="blackbox")
-    # Create blackbox-style artifacts
-    (ws / "deliverables").mkdir()
-    (ws / "deliverables" / "injection_exploitation_evidence.md").write_text("evidence", encoding="utf-8")
-    (ws / "deliverables" / "xss_findings.md").write_text("findings", encoding="utf-8")
-    (ws / "deliverables" / "comprehensive_security_assessment_report.md").write_text("report", encoding="utf-8")
-    (ws / "deliverables" / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
+    ws = mgr.create_workspace("https://example.com", str(repo), name="bb-clean", scan_type="blackbox")
+    # Blackbox-style deliverables (repo-centric)
+    (deliverables / "injection_exploitation_evidence.md").write_text("evidence", encoding="utf-8")
+    (deliverables / "xss_findings.md").write_text("findings", encoding="utf-8")
+    (deliverables / "comprehensive_security_assessment_report.md").write_text("report", encoding="utf-8")
+    (deliverables / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
     (ws / "agents").mkdir()
     (ws / "agents" / "injection-exploit_001.log").write_text("exploit log", encoding="utf-8")
     (ws / "agents" / "ssrf-validate-authentication_002.log").write_text("auth log", encoding="utf-8")
@@ -309,11 +317,11 @@ def test_clean_workspace_blackbox(tmp_path):
     # session.json must survive
     assert (ws / "session.json").exists()
     # Blackbox-specific deliverables removed
-    assert not (ws / "deliverables" / "injection_exploitation_evidence.md").exists()
-    assert not (ws / "deliverables" / "xss_findings.md").exists()
-    assert not (ws / "deliverables" / "comprehensive_security_assessment_report.md").exists()
+    assert not (deliverables / "injection_exploitation_evidence.md").exists()
+    assert not (deliverables / "xss_findings.md").exists()
+    assert not (deliverables / "comprehensive_security_assessment_report.md").exists()
     # Exploitation queues are NOT removed (they are whitebox deliverables)
-    assert (ws / "deliverables" / "injection_exploitation_queue.json").exists()
+    assert (deliverables / "injection_exploitation_queue.json").exists()
     # Blackbox agent logs removed
     assert not (ws / "agents" / "injection-exploit_001.log").exists()
     assert not (ws / "agents" / "ssrf-validate-authentication_002.log").exists()

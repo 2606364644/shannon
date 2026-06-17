@@ -2,7 +2,7 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results, get_default_deliverables_subdir
+from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results, get_default_deliverables_subdir, deliverables_dir_for_workspace
 
 
 class TestResolveWorkspacesDir:
@@ -228,3 +228,30 @@ class TestGetDefaultDeliverablesSubdir:
         """When SHANNON_DELIVERABLES_SUBDIR is set to empty string, returns empty string."""
         monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "")
         assert get_default_deliverables_subdir() == ""
+
+
+class TestDeliverablesDirForWorkspace:
+    """deliverables_dir_for_workspace resolves repo-centric via session, with fallback."""
+
+    def test_uses_session_repo_path(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="wb-1")
+
+        assert deliverables_dir_for_workspace(ws) == repo / ".shannon" / "deliverables"
+
+    def test_fallback_when_session_repo_empty(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        mgr = SessionManager(tmp_path / "workspaces")
+        # Empty-string repo_path is falsy → must fall back, not resolve to "/.shannon/...".
+        ws = mgr.create_workspace("https://x.com", "", name="wb-empty")
+        assert deliverables_dir_for_workspace(ws) == tmp_path / "workspaces" / "wb-empty" / ".shannon" / "deliverables"
+
+    def test_fallback_when_no_session(self, tmp_path):
+        ws = tmp_path / "workspaces" / "orphan"
+        ws.mkdir(parents=True)
+        assert deliverables_dir_for_workspace(ws) == ws / ".shannon" / "deliverables"

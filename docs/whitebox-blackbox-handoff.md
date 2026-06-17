@@ -65,7 +65,8 @@ shannon-whitebox infra status        # 确认 healthy
 ```bash
 uv run shannon-whitebox start \
   --repo <REPO> \
-  --workspace wb-myapp          # 建议带 --workspace，便于 workspace 管理与断点续扫
+  --workspace wb-myapp \          # 建议带 --workspace，便于 workspace 管理与断点续扫
+  --url https://myapp.example.com # 可选：记录部署 URL，黑盒可据此按 URL 自动检测并复用本扫描
 ```
 
 完成后产出（位于仓库内部，不在 workspaces 目录）：
@@ -126,27 +127,40 @@ uv run shannon-blackbox logs bb-myapp --follow
 
 ---
 
-## 5. ⚠️ 已知缺口与陷阱（务必阅读）
+## 5. ✅ 历史陷阱与修复状态
 
-以下都是当前 `feat/fork-py` 分支真实存在的问题，照 README 或 CLI 提示直接跑会踩坑：
+下列问题曾在 `feat/fork-py` 早期存在，现已修复。**统一根因**：消费侧（summary/discovery/
+展示/clean）的 deliverables 定位此前是 workspace-centric（`workspaces/<name>/deliverables`），
+与写入侧的 repo-centric（`<REPO>/.shannon/deliverables`）脱节；现已通过
+`deliverables_dir_for_workspace`（从 workspace 的 session.json 恢复 repo_path）统一对齐。
 
-### 缺口 1 — README / CLI 提示的「下一步」命令漏了 `--repo`
-白盒完成后 CLI 会打印（`packages/whitebox/.../cli/main.py:81`）：
-```
-shannon-blackbox start --url <URL> -w <NAME>
-```
-README 的黑盒示例也只给 `shannon-blackbox start --url <URL>`。**这些命令都没带 `--repo`**，照抄后 `input.repo_path=None`，黑盒 workflow 会落到 `workspaces/<name>/.shannon/deliverables`（白盒没写在那里）→ 检测不到白盒结果 → **回退成 standalone 黑盒，不复用**。
-→ **修正：黑盒命令必须显式加 `--repo <REPO>`。**
+### 陷阱 1 — CLI/README「下一步」命令漏 `--repo`  → ✅ 已修复
+白盒完成时 CLI 打印的「Next steps」与 README 黑盒示例均已显式带 `--repo <REPO>`，
+黑盒据此复用白盒结果。`-w <白盒名>` 也安全（黑盒不创建/覆盖 session，仅用作定位）。
 
-### 缺口 2 — `--latest` 当前失效
-`shannon-blackbox start --url <URL> --latest` 走 `find_latest_workspace`，它用 `compute_deliverables_summary(workspace)` 判断是否有 deliverables，而该函数找的是 **`workspaces/<name>/deliverables/`**（`packages/core/.../workspace.py:74`）。但白盒实际写在 **`<REPO>/.shannon/deliverables/`**，目录不一致 → 判定「无 deliverables」→ 报 `Latest workspace has no deliverables`。
-→ **当前请用 `--repo` + `-w`，不要依赖 `--latest`。**
+### 陷阱 2 — `--latest` 失效  → ✅ 已修复
+`compute_deliverables_summary` 现经 session 解析到真实 `<REPO>/.shannon/deliverables`。
+`shannon-blackbox start --url <URL> --repo <REPO> --latest` 可正常跳过侦察。
 
-### 缺口 3 — 裸 URL 自动检测失效
-`shannon-blackbox start --url <URL>`（不带 `-w`/`--latest`）的自动检测走 `find_workspaces_by_url`，它同时受两个问题影响：①白盒 CLI 不传 `web_url`（`cli/main.py:38`），落库为空串 → URL 匹配失败；②同样受缺口 2 的目录不一致影响。→ 自动检测必然返回空 → standalone。
+### 陷阱 3 — 裸 URL 自动检测失效  → ✅ 已修复
+白盒新增可选 `--url`（`shannon-whitebox start --repo <REPO> --url <URL>`），写入 session.web_url；
+黑盒 `find_workspaces_by_url` 据此按 URL 自动匹配。
+> 要在白盒时带 `--url`，自动检测才有信息可用；否则用 `--repo`/`-w`。
+> `--url` 仅用于记录关联，**不**触发目标 URL 可达性校验（白盒源码扫描不联网）。
 
-### 缺口 4 — 白盒 CLI 打印的 deliverables 路径与实际不符
-白盒完成时打印的 `Deliverables:` 路径来自 `worker.py:102`（`workspaces/<name>/.shannon/deliverables`），与**实际写入位置** `<REPO>/.shannon/deliverables` 不一致。这只是显示误导，不影响黑盒（黑盒靠 `--repo` 解析）。→ 找白盒产出物请认准 `<REPO>/.shannon/deliverables/`。
+### 陷阱 4 — 白盒打印的 deliverables 路径与实际不符  → ✅ 已修复
+白盒完成时返回的 `deliverables_path` 统一为 `<REPO>/.shannon/deliverables`，与实际写入一致；
+完成摘要、`workspaces`、`workspace show` 均显示正确路径与计数。
+
+### 连带修复 — `workspace clean`
+此前 `clean_workspace` 在 `workspaces/<name>/deliverables` 清理（找不到 repo-centric 产物），
+现已解析到真实 deliverables 目录。注意：deliverables 在 repo 内；`agents`/`prompts`/`scratchpad`
+仍在 workspace 内（保持原行为）。
+
+### 设计说明 — repo-centric 共享语义
+deliverables 固定写在 `<REPO>/.shannon/deliverables`（`SHANNON_DELIVERABLES_SUBDIR` 默认
+`.shannon/deliverables`）。同一 repo 的多次白盒扫描会**共享/覆盖**同一份 deliverables
+（符合「一 repo 一最新结果」）。如需每次独立保留，可设置不同的 `SHANNON_DELIVERABLES_SUBDIR`。
 
 ---
 
@@ -154,9 +168,9 @@ README 的黑盒示例也只给 `shannon-blackbox start --url <URL>`。**这些�
 
 | 现象 | 原因 | 处理 |
 |------|------|------|
-| 黑盒日志出现 `No whitebox results found ... running RECON_BLACKBOX from scratch` | 黑盒 `--repo` 未传，或与白盒 `--repo` 不是同一仓库 | 确认两条命令的 `--repo` 是同一个绝对路径 |
-| `--latest` 报 `Latest workspace has no deliverables` | 缺口 2，目录不一致 | 改用 `--repo <REPO> -w <NAME>` |
-| 黑盒 standalone（未复用）且无报错 | 用了 README 示例（缺 `--repo`），命中缺口 1 | 加 `--repo <REPO>` |
+| 黑盒日志出现 `No whitebox results found ... running RECON_BLACKBOX from scratch` | 黑盒 `--repo` 未传，或与白盒 `--repo` 不是同一仓库；或白盒 deliverables 为空 | 确认两条命令的 `--repo` 是同一个绝对路径；确认白盒已完成且有 queue 文件 |
+| 裸 URL 自动检测未命中（standalone） | 白盒扫描时未带 `--url`，session.web_url 为空 | 白盒带 `--url <URL>` 重扫，或直接用 `--repo`/`-w` |
+| `workspace clean` 清不掉 deliverables | （历史问题，已修复）若仍出现，确认 session.repo_path 正确指向目标仓库 | 检查 `workspace show` 的 Repo 字段 |
 | Temporal 连接失败 | Temporal 未启动 / 地址不对 | `shannon-whitebox infra status`；必要时 `temporal server start-dev` 或 `docker compose up -d` |
 | 白盒扫描失败：provider/auth | `.env` 未配置 API Key | 检查 `.env` 中 `SHANNON_AI_PROVIDER` / `SHANNON_API_KEY` |
 

@@ -53,6 +53,7 @@ uv run shannon-whitebox start --repo /path/to/target
 | `-c` / `--config` | YAML 配置文件路径 |
 | `--pipeline-testing` | 使用最小化提示词进行测试 |
 | `--temporal-address` | Temporal 服务器地址（默认 `localhost:7233`） |
+| `--url` | 部署目标 URL（可选，记录后黑盒可按 URL 自动复用白盒结果） |
 
 ### 查看产出物
 

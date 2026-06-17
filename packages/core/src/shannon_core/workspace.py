@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from shannon_core.session import SessionManager
+from shannon_core.utils.paths import deliverables_dir_for_workspace
 
 
 def normalize_url(url: str) -> str:
@@ -69,9 +70,8 @@ def _is_valid_queue_file(filepath: Path) -> bool:
         return False
 
 
-def compute_deliverables_summary(workspace_path: Path) -> dict:
-    """Scan the deliverables directory and return a summary of vuln queues and reports."""
-    deliverables_dir = workspace_path / "deliverables"
+def summarize_deliverables_dir(deliverables_dir: Path) -> dict:
+    """Scan a deliverables directory and return a summary of vuln queues and reports."""
     vuln_queues: list[str] = []
     reports: list[str] = []
 
@@ -99,9 +99,18 @@ def compute_deliverables_summary(workspace_path: Path) -> dict:
     return {"vuln_queues": vuln_queues, "reports": reports}
 
 
+def compute_deliverables_summary(workspace_path: Path) -> dict:
+    """Summarize a workspace's deliverables.
+
+    Resolves the deliverables directory repo-centric (via the workspace's session.json),
+    matching where whitebox actually writes — not the legacy ``workspace/deliverables``.
+    """
+    return summarize_deliverables_dir(deliverables_dir_for_workspace(workspace_path))
+
+
 def get_workspace_vuln_counts(workspace_path: Path) -> dict[str, int]:
     """Count vulnerabilities per class in a workspace's deliverables."""
-    deliverables_dir = workspace_path / "deliverables"
+    deliverables_dir = deliverables_dir_for_workspace(workspace_path)
     counts: dict[str, int] = {}
 
     if not deliverables_dir.exists():

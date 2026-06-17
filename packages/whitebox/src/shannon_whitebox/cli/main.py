@@ -33,12 +33,14 @@ def cli():
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
 @click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
-def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain):
+@click.option("--url", default=None, help="Deployed target URL (optional; recorded so blackbox can auto-detect this scan by URL)")
+def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url):
     """Start a white-box security scan."""
     from shannon_whitebox.worker import run_scan
 
     input = PipelineInput(
         repo_path=str(Path(repo).resolve()),
+        web_url=url or "",
         output_path=str(Path(output).resolve()) if output else None,
         workspace_name=workspace,
         config_path=config_path,
@@ -57,7 +59,7 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     elif result.get("status") == "completed":
         ws_name = result.get("workspace_name", "unknown")
         deliverables_path = result.get("deliverables_path", "")
-        web_url = result.get("web_url", "<target-url>")
+        web_url = result.get("web_url") or "<target-url>"
 
         click.echo("")
         click.echo("White-box scan complete.")
@@ -65,11 +67,11 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
 
         # Results summary
         if deliverables_path:
-            from shannon_core.workspace import compute_deliverables_summary
+            from shannon_core.workspace import summarize_deliverables_dir
 
             summary_path = Path(deliverables_path)
-            if summary_path.parent.exists():
-                summary = compute_deliverables_summary(summary_path.parent)
+            if summary_path.exists():
+                summary = summarize_deliverables_dir(summary_path)
                 if summary["vuln_queues"]:
                     click.echo("Results summary:")
                     for vc in sorted(summary["vuln_queues"]):
@@ -244,7 +246,8 @@ def show(workspace_name):
     summary = info["deliverables_summary"]
     if summary["vuln_queues"] or summary["reports"]:
         click.echo("\n  Deliverables:")
-        deliverables_dir = ws / "deliverables"
+        from shannon_core.utils.paths import deliverables_dir_for_workspace
+        deliverables_dir = deliverables_dir_for_workspace(ws)
         for vc in summary["vuln_queues"]:
             filename = f"{vc}_exploitation_queue.json"
             filepath = deliverables_dir / filename

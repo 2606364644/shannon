@@ -70,6 +70,22 @@ def resolve_deliverables_path(
     raise ValueError("必须提供 repo_path 或 workspace_name 之一")
 
 
+def deliverables_dir_for_workspace(workspace_path: Path) -> Path:
+    """从 workspace 的 session.json 恢复 repo_path，解析真实 deliverables 目录。
+
+    与写入侧（resolve_deliverables_path(repo_path=...)）保持一致：白盒/黑盒
+    session 记录了 repo_path → 返回 ``<repo>/<deliverables_subdir>``；session 无
+    repo_path 或无 session.json → fallback 到 ``workspaces/<name>/<subdir>``。
+    供消费侧（compute_deliverables_summary 等）统一解析，避免再硬拼 workspace 目录。
+    """
+    return resolve_deliverables_path(
+        repo_path=None,
+        deliverables_subdir=get_default_deliverables_subdir(),
+        workspace_name=workspace_path.name,
+        workspaces_root=workspace_path.parent,
+    )
+
+
 REQUIRED_VULN_FIELDS = {"title", "description", "severity", "location"}
 
 

@@ -2,6 +2,9 @@
 
 These tests verify the data contracts and file I/O between whitebox
 and blackbox without running the full Temporal workflows.
+
+Deliverables are written repo-centric (<repo>/.shannon/deliverables) to match
+production whitebox output and the documented handoff contract.
 """
 
 import json
@@ -11,9 +14,27 @@ import pytest
 
 from shannon_core.session import SessionManager
 from shannon_core.utils.paths import has_valid_whitebox_results
-from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.workspace import compute_deliverables_summary, find_workspaces_by_url
 from shannon_core.services.workspace_discovery import WorkspaceDiscovery
+
+
+def _repo_deliverables(repo: Path) -> Path:
+    """The repo-centric deliverables dir matching production whitebox output."""
+    d = repo / ".shannon" / "deliverables"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _write_queue(deliverables: Path, vc: str, vulns=None) -> None:
+    (deliverables / f"{vc}_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": vulns if vulns is not None else [{
+            "title": f"{vc} vuln",
+            "description": f"A {vc} vulnerability was found",
+            "severity": "high",
+            "location": f"src/{vc}.py:10",
+        }]}),
+        encoding="utf-8",
+    )
 
 
 class TestWhiteboxProducesCompleteDeliverables:
@@ -21,30 +42,23 @@ class TestWhiteboxProducesCompleteDeliverables:
 
     def test_deliverables_have_valid_schema(self, tmp_path):
         """Each exploitation queue file should pass schema validation."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = _repo_deliverables(repo)
+
         mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="wb-complete")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-complete")
         mgr.mark_completed(ws)
 
-        deliverables = ws / "deliverables"
-        deliverables.mkdir()
-
         for vc in ["injection", "xss", "auth", "ssrf"]:
-            queue_file = deliverables / f"{vc}_exploitation_queue.json"
-            atomic_write_json(queue_file, {
-                "vulnerabilities": [{
-                    "title": f"{vc} vuln",
-                    "description": f"A {vc} vulnerability was found",
-                    "severity": "high",
-                    "location": f"src/{vc}.py:10",
-                }]
-            })
+            _write_queue(deliverables, vc)
 
         # Verify all queue files pass validation
         for vc in ["injection", "xss", "auth", "ssrf"]:
             queue_file = deliverables / f"{vc}_exploitation_queue.json"
             assert has_valid_whitebox_results(queue_file), f"{vc} queue failed validation"
 
-        # Verify deliverables summary
+        # Verify deliverables summary resolves repo-centric via session
         summary = compute_deliverables_summary(ws)
         assert set(summary["vuln_queues"]) == {"injection", "xss", "auth", "ssrf"}
 
@@ -53,17 +67,14 @@ class TestBlackboxLoadsWhiteboxResults:
     """Blackbox discovers and loads whitebox deliverables."""
 
     def test_discovery_finds_whitebox_workspace(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = _repo_deliverables(repo)
+        _write_queue(deliverables, "injection")
+
         mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="wb-discover")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-discover")
         mgr.mark_completed(ws)
-        deliverables = ws / "deliverables"
-        deliverables.mkdir()
-        (deliverables / "injection_exploitation_queue.json").write_text(
-            json.dumps({"vulnerabilities": [{
-                "title": "SQLi", "description": "d", "severity": "high", "location": "a.py:1"
-            }]}),
-            encoding="utf-8",
-        )
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 1
@@ -72,17 +83,16 @@ class TestBlackboxLoadsWhiteboxResults:
         assert "injection" in summary["vuln_queues"]
 
     def test_workspace_discovery_service_finds_workspace(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = _repo_deliverables(repo)
+        _write_queue(deliverables, "auth", vulns=[{
+            "title": "Broken Auth", "description": "d", "severity": "critical", "location": "auth.py:5"
+        }])
+
         mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="wb-svc")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-svc")
         mgr.mark_completed(ws)
-        deliverables = ws / "deliverables"
-        deliverables.mkdir()
-        (deliverables / "auth_exploitation_queue.json").write_text(
-            json.dumps({"vulnerabilities": [{
-                "title": "Broken Auth", "description": "d", "severity": "critical", "location": "auth.py:5"
-            }]}),
-            encoding="utf-8",
-        )
 
         discovery = WorkspaceDiscovery(tmp_path / "workspaces")
         result = discovery.find_for_blackbox("https://myapp.com", latest=True)
@@ -94,24 +104,25 @@ class TestBlackboxFallbackOnEmptyResults:
     """Empty whitebox results -> blackbox runs standalone recon."""
 
     def test_no_whitebox_results_returns_empty(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
         mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="wb-empty")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-empty")
         mgr.mark_completed(ws)
-        # No deliverables directory
+        # Repo has no .shannon/deliverables
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 0
 
     def test_empty_vulns_not_discovered(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = _repo_deliverables(repo)
+        _write_queue(deliverables, "injection", vulns=[])
+
         mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="wb-no-vulns")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-no-vulns")
         mgr.mark_completed(ws)
-        deliverables = ws / "deliverables"
-        deliverables.mkdir()
-        (deliverables / "injection_exploitation_queue.json").write_text(
-            json.dumps({"vulnerabilities": []}),
-            encoding="utf-8",
-        )
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 0
@@ -141,30 +152,20 @@ class TestMultiWorkspaceDiscovery:
     def test_multiple_workspaces_returned(self, tmp_path):
         import time
 
+        repo1 = tmp_path / "repo1"
+        repo1.mkdir()
+        _write_queue(_repo_deliverables(repo1), "injection")
         mgr = SessionManager(tmp_path / "workspaces")
-        ws1 = mgr.create_workspace("https://myapp.com", "/repo", name="ws-old")
+        ws1 = mgr.create_workspace("https://myapp.com", str(repo1), name="ws-old")
         mgr.mark_completed(ws1)
-        d1 = ws1 / "deliverables"
-        d1.mkdir()
-        (d1 / "injection_exploitation_queue.json").write_text(
-            json.dumps({"vulnerabilities": [
-                {"title": "V1", "description": "d", "severity": "high", "location": "a.py:1"}
-            ]}),
-            encoding="utf-8",
-        )
 
         time.sleep(0.01)
 
-        ws2 = mgr.create_workspace("https://myapp.com", "/repo", name="ws-new")
+        repo2 = tmp_path / "repo2"
+        repo2.mkdir()
+        _write_queue(_repo_deliverables(repo2), "xss")
+        ws2 = mgr.create_workspace("https://myapp.com", str(repo2), name="ws-new")
         mgr.mark_completed(ws2)
-        d2 = ws2 / "deliverables"
-        d2.mkdir()
-        (d2 / "xss_exploitation_queue.json").write_text(
-            json.dumps({"vulnerabilities": [
-                {"title": "V2", "description": "d", "severity": "medium", "location": "b.py:2"}
-            ]}),
-            encoding="utf-8",
-        )
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 2

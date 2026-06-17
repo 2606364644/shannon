@@ -12,11 +12,13 @@ from shannon_core.session import SessionManager
 
 
 def _setup_workspace(tmp_path, name, web_url, vuln_classes, scan_type="whitebox"):
-    """Helper to create a workspace with deliverables."""
+    """Helper to create a workspace whose session points at a tmp repo, with repo-centric deliverables."""
+    repo = tmp_path / "repos" / name
+    repo.mkdir(parents=True)
     mgr = SessionManager(tmp_path / "workspaces")
-    ws = mgr.create_workspace(web_url, "/repo", name=name, scan_type=scan_type)
+    ws = mgr.create_workspace(web_url, str(repo), name=name, scan_type=scan_type)
     mgr.mark_completed(ws)
-    deliverables = ws / "deliverables"
+    deliverables = repo / ".shannon" / "deliverables"
     deliverables.mkdir(parents=True)
     for vc in vuln_classes:
         (deliverables / f"{vc}_exploitation_queue.json").write_text(

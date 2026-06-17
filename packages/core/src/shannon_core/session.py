@@ -178,7 +178,13 @@ class SessionManager:
         import fnmatch
 
         if scan_type == "whitebox":
-            for name in ("deliverables", "agents", "prompts", "scratchpad"):
+            # Deliverables live repo-centric (<repo>/.shannon/deliverables); the
+            # agents/prompts/scratchpad dirs stay under the workspace.
+            from shannon_core.utils.paths import deliverables_dir_for_workspace
+            deliverables_dir = deliverables_dir_for_workspace(workspace_path)
+            if deliverables_dir.is_dir():
+                shutil.rmtree(deliverables_dir)
+            for name in ("agents", "prompts", "scratchpad"):
                 target = workspace_path / name
                 if target.is_dir():
                     shutil.rmtree(target)
@@ -192,8 +198,9 @@ class SessionManager:
                     shutil.rmtree(target)
 
         elif scan_type == "blackbox":
-            # Remove blackbox-specific deliverables
-            deliverables_dir = workspace_path / "deliverables"
+            # Remove blackbox-specific deliverables (resolved repo-centric via session)
+            from shannon_core.utils.paths import deliverables_dir_for_workspace
+            deliverables_dir = deliverables_dir_for_workspace(workspace_path)
             if deliverables_dir.is_dir():
                 bb_deliverable_patterns = [
                     "*_exploitation_evidence.md",

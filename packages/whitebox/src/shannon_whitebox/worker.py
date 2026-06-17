@@ -144,13 +144,10 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 result_dict["workspace_name"] = input.workspace_name
                 result_dict["web_url"] = input.web_url
 
-                workspaces_dir = resolve_workspaces_dir(input.repo_path)
-                if input.workspace_name:
-                    result_dict["deliverables_path"] = str(
-                        workspaces_dir / input.workspace_name / input.deliverables_subdir)
-                else:
-                    result_dict["deliverables_path"] = str(
-                        Path(input.repo_path) / input.deliverables_subdir)
+                # Deliverables always live repo-centric (<repo>/<subdir>), matching
+                # where whitebox activities write — independent of workspace_name.
+                result_dict["deliverables_path"] = str(
+                    Path(input.repo_path) / input.deliverables_subdir)
                 return result_dict
     finally:
         ctrl.uninstall()

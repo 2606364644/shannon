@@ -11,6 +11,7 @@ from shannon_core.workspace import (
     get_workspace_info,
     get_workspace_vuln_counts,
     normalize_url,
+    summarize_deliverables_dir,
     urls_match,
 )
 
@@ -87,86 +88,133 @@ class TestGetWorkspaceInfo:
     def test_includes_deliverables(self, tmp_path):
         from shannon_core.session import SessionManager
 
-        mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", "/repo", name="test-ws2")
-        deliverables = ws / "deliverables"
-        deliverables.mkdir()
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = repo / ".shannon" / "deliverables"
+        deliverables.mkdir(parents=True)
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
         )
+
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="test-ws2")
 
         info = get_workspace_info(ws)
         assert "injection" in info["deliverables_summary"]["vuln_queues"]
 
 
-class TestComputeDeliverablesSummary:
-    def test_empty_workspace(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        ws.mkdir(parents=True)
-        summary = compute_deliverables_summary(ws)
-        assert summary == {"vuln_queues": [], "reports": []}
+class TestSummarizeDeliverablesDir:
+    """Tests for the deliverables-dir scanner — the core of compute_deliverables_summary.
+
+    These pass a deliverables directory directly, independent of session/repo resolution.
+    """
+
+    def test_empty_dir(self, tmp_path):
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
+        assert summarize_deliverables_dir(deliverables) == {"vuln_queues": [], "reports": []}
+
+    def test_missing_dir(self, tmp_path):
+        assert summarize_deliverables_dir(tmp_path / "nope") == {"vuln_queues": [], "reports": []}
 
     def test_valid_queue_file(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        deliverables = ws / "deliverables"
-        deliverables.mkdir(parents=True)
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
         )
-        summary = compute_deliverables_summary(ws)
-        assert "injection" in summary["vuln_queues"]
+        assert "injection" in summarize_deliverables_dir(deliverables)["vuln_queues"]
 
     def test_empty_queue_file_ignored(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        deliverables = ws / "deliverables"
-        deliverables.mkdir(parents=True)
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
         (deliverables / "xss_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": []}), encoding="utf-8"
         )
-        summary = compute_deliverables_summary(ws)
-        assert "xss" not in summary["vuln_queues"]
+        assert "xss" not in summarize_deliverables_dir(deliverables)["vuln_queues"]
 
     def test_invalid_json_ignored(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        deliverables = ws / "deliverables"
-        deliverables.mkdir(parents=True)
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
         (deliverables / "auth_exploitation_queue.json").write_text("not json", encoding="utf-8")
-        summary = compute_deliverables_summary(ws)
-        assert "auth" not in summary["vuln_queues"]
+        assert "auth" not in summarize_deliverables_dir(deliverables)["vuln_queues"]
 
     def test_reports_collected(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        deliverables = ws / "deliverables"
-        deliverables.mkdir(parents=True)
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
         (deliverables / "executive_summary.md").write_text("# Summary", encoding="utf-8")
         (deliverables / "injection_findings.md").write_text("# Findings", encoding="utf-8")
-        summary = compute_deliverables_summary(ws)
-        assert "executive_summary.md" in summary["reports"]
-        assert "injection_findings.md" in summary["reports"]
+        reports = summarize_deliverables_dir(deliverables)["reports"]
+        assert "executive_summary.md" in reports
+        assert "injection_findings.md" in reports
 
     def test_multiple_vuln_queues(self, tmp_path):
-        ws = tmp_path / "workspaces" / "test-ws"
-        deliverables = ws / "deliverables"
-        deliverables.mkdir(parents=True)
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir()
         for vc in ["injection", "xss", "auth"]:
             (deliverables / f"{vc}_exploitation_queue.json").write_text(
                 json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
             )
+        assert set(summarize_deliverables_dir(deliverables)["vuln_queues"]) == {"injection", "xss", "auth"}
+
+
+class TestComputeDeliverablesSummaryRepoCentric:
+    """compute_deliverables_summary(ws) must resolve repo-centric deliverables via session."""
+
+    def test_finds_repo_centric_deliverables(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = repo / ".shannon" / "deliverables"
+        deliverables.mkdir(parents=True)
+        (deliverables / "injection_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+        )
+
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-1")
+        # Deliverables live under the repo, NOT under the workspace dir.
+        assert not (ws / "deliverables").exists()
+
         summary = compute_deliverables_summary(ws)
-        assert set(summary["vuln_queues"]) == {"injection", "xss", "auth"}
+        assert "injection" in summary["vuln_queues"]
+
+    def test_fallback_when_no_session(self, tmp_path):
+        # Bare workspace dir without session.json → fallback to workspaces/<name>/<subdir>.
+        ws = tmp_path / "workspaces" / "orphan"
+        deliverables = ws / ".shannon" / "deliverables"
+        deliverables.mkdir(parents=True)
+        (deliverables / "xss_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
+        )
+        summary = compute_deliverables_summary(ws)
+        assert "xss" in summary["vuln_queues"]
+
+    def test_empty_when_repo_has_no_deliverables(self, tmp_path):
+        from shannon_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-empty")
+        assert compute_deliverables_summary(ws) == {"vuln_queues": [], "reports": []}
 
 
 def _create_workspace_with_queues(
     tmp_path: Path, name: str, web_url: str, scan_type: str, vuln_classes: list[str]
 ) -> Path:
-    """Helper: create a workspace with valid exploitation queue files."""
+    """Helper: workspace whose session points at a tmp repo, with queue files written
+    repo-centric (<repo>/.shannon/deliverables) — matching production whitebox output."""
     from shannon_core.session import SessionManager
 
+    repo = tmp_path / "repos" / name
+    repo.mkdir(parents=True)
     mgr = SessionManager(tmp_path / "workspaces")
-    ws = mgr.create_workspace(web_url, "/repo", name=name, scan_type=scan_type)
+    ws = mgr.create_workspace(web_url, str(repo), name=name, scan_type=scan_type)
     mgr.mark_completed(ws)
 
-    deliverables = ws / "deliverables"
+    deliverables = repo / ".shannon" / "deliverables"
     deliverables.mkdir(parents=True)
     for vc in vuln_classes:
         (deliverables / f"{vc}_exploitation_queue.json").write_text(
@@ -249,8 +297,11 @@ class TestFindWorkspacesByUrl:
 
 class TestGetWorkspaceVulnCounts:
     def test_returns_per_class_counts(self, tmp_path):
-        ws = tmp_path / "ws"
-        deliverables = ws / "deliverables"
+        from shannon_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        deliverables = repo / ".shannon" / "deliverables"
         deliverables.mkdir(parents=True)
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [
@@ -264,14 +315,18 @@ class TestGetWorkspaceVulnCounts:
             ]}), encoding="utf-8"
         )
 
-        counts = get_workspace_vuln_counts(ws)
-        assert counts == {"injection": 2, "xss": 1}
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="ws")
+        assert get_workspace_vuln_counts(ws) == {"injection": 2, "xss": 1}
 
     def test_empty_deliverables(self, tmp_path):
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        counts = get_workspace_vuln_counts(ws)
-        assert counts == {}
+        from shannon_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="ws")
+        assert get_workspace_vuln_counts(ws) == {}
 
 
 class TestGetWorkspaceAge:
