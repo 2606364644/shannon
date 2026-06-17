@@ -14,3 +14,4 @@ workspaces/
 uv.lock
 .turbo/
 .env
+.env.profiles/
