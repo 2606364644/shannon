@@ -155,10 +155,14 @@ def build_provider_config(
 
     环境变量优先级: 参数 > SHANNON_* > ANTHROPIC_*
 
+    openai 系（openai_compatible / litellm_router）会额外先尝试
+    SHANNON_OPENAI_BASE_URL / SHANNON_OPENAI_API_KEY，再回退通用 SHANNON_* 变量。
+    anthropic 系行为不变，不读取 SHANNON_OPENAI_*。
+
     Args:
         provider_type: Provider 类型（默认 anthropic_api）
-        api_key: API Key（默认从 SHANNON_API_KEY > ANTHROPIC_API_KEY 读取）
-        base_url: Base URL（默认从 SHANNON_BASE_URL > ANTHROPIC_BASE_URL 读取）
+        api_key: API Key（默认 openai 系读 SHANNON_OPENAI_API_KEY，回退 SHANNON_API_KEY > ANTHROPIC_API_KEY > OPENAI_API_KEY）
+        base_url: Base URL（默认 openai 系读 SHANNON_OPENAI_BASE_URL，回退 SHANNON_BASE_URL > ANTHROPIC_BASE_URL）
         model: 模型名称（默认从 SHANNON_MODEL > ANTHROPIC_MODEL 读取）
         region: 区域（用于 Bedrock / Vertex）
         project_id: 项目 ID（用于 Vertex）
@@ -174,13 +178,25 @@ def build_provider_config(
     if provider_type is None:
         provider_type = os.getenv("SHANNON_AI_PROVIDER", "anthropic_api")
 
-    # API Key - 优先 SHANNON_API_KEY，其次 ANTHROPIC_API_KEY
-    if api_key is None:
-        api_key = os.getenv("SHANNON_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+    is_openai_family = provider_type in ("openai_compatible", "litellm_router")
 
-    # Base URL - 优先 SHANNON_BASE_URL，其次 ANTHROPIC_BASE_URL
+    # API Key - openai 系优先 SHANNON_OPENAI_API_KEY，否则 SHANNON_API_KEY > ANTHROPIC_API_KEY > OPENAI_API_KEY
+    if api_key is None:
+        if is_openai_family:
+            api_key = os.getenv("SHANNON_OPENAI_API_KEY")
+        if api_key is None:
+            api_key = (
+                os.getenv("SHANNON_API_KEY")
+                or os.getenv("ANTHROPIC_API_KEY")
+                or os.getenv("OPENAI_API_KEY")
+            )
+
+    # Base URL - openai 系优先 SHANNON_OPENAI_BASE_URL，否则通用 SHANNON_BASE_URL > ANTHROPIC_BASE_URL
     if base_url is None:
-        base_url = os.getenv("SHANNON_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
+        if is_openai_family:
+            base_url = os.getenv("SHANNON_OPENAI_BASE_URL")
+        if base_url is None:
+            base_url = os.getenv("SHANNON_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
 
     # Model - 优先 SHANNON_MODEL，其次 ANTHROPIC_MODEL
     if model is None:

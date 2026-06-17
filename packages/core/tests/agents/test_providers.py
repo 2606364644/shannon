@@ -209,6 +209,41 @@ class TestBuildProviderConfig:
             assert config.medium_model == "param-medium"
 
 
+class TestBuildProviderConfigOpenAI:
+    """测试 build_provider_config 在 openai 系下的 SHANNON_OPENAI_* 优先级"""
+
+    def test_openai_env_precedence(self, monkeypatch):
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
+        monkeypatch.setenv("SHANNON_OPENAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+        monkeypatch.setenv("SHANNON_OPENAI_API_KEY", "glm-key")
+        monkeypatch.delenv("SHANNON_BASE_URL", raising=False)
+        monkeypatch.delenv("SHANNON_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        cfg = build_provider_config()
+        assert cfg.type == "openai_compatible"
+        assert cfg.base_url == "https://open.bigmodel.cn/api/paas/v4"
+        assert cfg.api_key == "glm-key"
+
+    def test_openai_falls_back_to_shannon_vars(self, monkeypatch):
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
+        monkeypatch.delenv("SHANNON_OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("SHANNON_OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("SHANNON_BASE_URL", "https://shared/v4")
+        monkeypatch.setenv("SHANNON_API_KEY", "shared-key")
+        cfg = build_provider_config()
+        assert cfg.base_url == "https://shared/v4"
+        assert cfg.api_key == "shared-key"
+
+    def test_anthropic_unchanged_by_openai_vars(self, monkeypatch):
+        from shannon_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SHANNON_AI_PROVIDER", "anthropic_api")
+        monkeypatch.setenv("SHANNON_OPENAI_BASE_URL", "https://should-be-ignored/v4")
+        cfg = build_provider_config()
+        assert cfg.base_url != "https://should-be-ignored/v4"
+
+
 class TestCreateProvider:
     """测试 create_provider 工厂函数"""
 
