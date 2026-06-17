@@ -1,88 +1,86 @@
-"""
-OpenAI Provider 实现
+"""OpenAI Provider（基于 openai-agents，Chat Completions 模式接第三方 OpenAI 兼容接口）。
 
-使用 OpenAI SDK 进行 AI 调用，支持:
-- openai_compatible: OpenAI 兼容接口
-- litellm_router: LiteLLM 路由器
+设计见 docs/superpowers/specs/2026-06-17-openai-agents-engine-design.md。
+与 AnthropicProvider 双引擎并存，经 SHANNON_AI_PROVIDER=openai_compatible 切换。
 """
+from __future__ import annotations
 
 import os
 import time
-from typing import Any
 
+from agents import (
+    Agent,
+    MaxTurnsExceeded,
+    ModelSettings,
+    OpenAIChatCompletionsModel,
+    Runner,
+    RunContextWrapper,
+    set_tracing_disabled,
+)
 from openai import AsyncOpenAI
 
-from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
+from .openai_result_mapper import map_run_result
+from .openai_stream_collector import StreamCollector
+from .providers import BaseProvider, ProviderConfig
+from .runner import DEFAULT_MODELS, ClaudeRunResult, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
+from .tools_openai import ToolContext, build_tools
+
+_tracing_disabled = False
 
 
-# OpenAI 模型定价（美元/1K tokens）
-# 参考定价，用于成本估算
-OPENAI_PRICING: dict[str, dict[str, float]] = {
-    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-    "gpt-4o": {"input": 0.0025, "output": 0.01},
-    "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-    "o1": {"input": 0.015, "output": 0.06},
-    "o1-mini": {"input": 0.0015, "output": 0.006},
-}
-
-
-class OpenAIProvider:
-    """使用 OpenAI SDK 的 Provider"""
+class OpenAIProvider(BaseProvider):
+    """使用 openai-agents 的 Provider（多轮 tool use agent loop）。"""
 
     def __init__(self, config: ProviderConfig):
-        self.config = config
-        self.type = config.type
+        super().__init__(config)
+        global _tracing_disabled
+        if not _tracing_disabled:
+            set_tracing_disabled(True)  # 第三方 base_url，关掉 trace 上传避免 401
+            _tracing_disabled = True
         self._client: AsyncOpenAI | None = None
 
+    # —— 模型解析（沿用现有语义）——
     def _get_model(self, model_tier: str) -> str:
-        """根据 tier 获取模型名称
-
-        优先级: tier-specific override > global model > DEFAULT_MODELS
-        """
-        # 1. Tier-specific override (最高优先级)
         tier_models = {
             "small": self.config.small_model,
             "medium": self.config.medium_model,
             "large": self.config.large_model,
         }
-        tier_model = tier_models.get(model_tier)
-        if tier_model:
-            return tier_model
-
-        # 2. Global model fallback
+        if tier_models.get(model_tier):
+            return tier_models[model_tier]
         if self.config.model:
             return self.config.model
-
-        # 3. DEFAULT_MODELS (最低优先级)
-        if self.type == "litellm_router":
-            models = DEFAULT_MODELS.get("litellm_router", DEFAULT_MODELS["anthropic_api"])
-        else:
-            models = DEFAULT_MODELS.get("openai_compatible", DEFAULT_MODELS["openai_compatible"])
-
+        key = "litellm_router" if self.type == "litellm_router" else "openai_compatible"
+        models = DEFAULT_MODELS.get(key, DEFAULT_MODELS["openai_compatible"])
         return models.get(model_tier, models.get("medium", "gpt-4o"))
 
     def _get_client(self) -> AsyncOpenAI:
-        """获取或创建 OpenAI 客户端"""
         if self._client is None:
-            client_kwargs: dict[str, Any] = {}
-
-            # API Key
+            kwargs: dict = {}
             api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
             if api_key:
-                client_kwargs["api_key"] = api_key
-
-            # Base URL
+                kwargs["api_key"] = api_key
             if self.config.base_url:
-                client_kwargs["base_url"] = self.config.base_url
-
-            # Auth Token (用于 LiteLLM)
+                kwargs["base_url"] = self.config.base_url
             if self.type == "litellm_router" and self.config.auth_token:
-                client_kwargs["api_key"] = self.config.auth_token
-
-            self._client = AsyncOpenAI(**client_kwargs)
-
+                kwargs["api_key"] = self.config.auth_token
+            self._client = AsyncOpenAI(**kwargs)
         return self._client
+
+    def _max_turns(self) -> int:
+        return int(os.getenv("SHANNON_OPENAI_MAX_TURNS", "200"))
+
+    def build_agent(self, model: str, output_format: dict | None) -> Agent:
+        client = self._get_client()
+        chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
+        return Agent(
+            name="shannon-openai-agent",
+            instructions=None,  # prompt 已含 system prompt，整段当 user input
+            tools=build_tools(),
+            model=chat_model,
+            model_settings=ModelSettings(include_usage=True),
+        )
 
     async def call(
         self,
@@ -93,135 +91,43 @@ class OpenAIProvider:
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
     ) -> ClaudeRunResult:
-        """
-        调用 OpenAI API 执行 prompt
-
-        Args:
-            prompt: 用户提示
-            cwd: 工作目录（OpenAI 不使用，但保持接口一致）
-            model_tier: 模型层级
-            output_format: 结构化输出格式 (JSON Schema)
-            deliverables_subdir: 产物子目录（OpenAI 不使用）
-            audit_logger: provider 无关的逐轮审计日志记录器（可选）
-
-        Returns:
-            ClaudeRunResult: 执行结果
-        """
         start_time = time.time()
         model = self._get_model(model_tier)
-
         try:
-            client = self._get_client()
+            agent = self.build_agent(model, output_format)
+            collector = StreamCollector(audit_logger)
+            stop_reason: str | None = None
+            try:
+                result = Runner.run_streamed(
+                    agent,
+                    input=prompt,
+                    context=ToolContext(cwd=cwd),
+                    max_turns=self._max_turns(),
+                )
+                async for event in result.stream_events():
+                    await collector.on_event(event)
+                await collector.close()
+                run_result = result
+            except MaxTurnsExceeded:
+                await collector.close()
+                # 无可用 RunResult，构造一个最小结果对象
+                run_result = _MaxTurnsStub(collector.text)
+                stop_reason = "max_turns"
 
-            # 构建请求参数
-            request_params: dict[str, Any] = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-
-            # 如果提供了 output_format，使用 JSON Mode
-            if output_format:
-                request_params["response_format"] = {"type": "json_object"}
-
-            # 执行调用
-            response = await client.chat.completions.create(**request_params)
-
-            # 计算耗时
             duration = int((time.time() - start_time) * 1000)
-
-            # 提取结果
-            result = self._extract_result(response, duration, model, output_format is not None)
-
-            # provider 无关的逐轮上报:OpenAI 单次 completion 作为单 turn
-            if audit_logger is not None and result.text:
-                await audit_logger.log_assistant_turn(1, result.text)
-
-            return result
-
+            return map_run_result(
+                run_result,
+                duration_ms=duration,
+                model=model,
+                turns=max(collector.turns, 1),
+                stop_reason=stop_reason,
+                output_format=output_format,
+            )
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
             return self._handle_error(e, duration, model)
 
-    def _extract_result(
-        self,
-        response: Any,
-        duration: int,
-        model: str,
-        has_json_mode: bool,
-    ) -> ClaudeRunResult:
-        """从 OpenAI 响应提取结果"""
-        # 提取文本内容
-        text = ""
-        if response.choices:
-            text = response.choices[0].message.content or ""
-
-        # 提取 token 统计
-        tokens = self._extract_tokens(response)
-
-        # 估算成本
-        cost = self._estimate_cost(model, tokens)
-
-        # 提取结构化输出
-        structured_output = None
-        if has_json_mode and text:
-            try:
-                import json
-                structured_output = json.loads(text)
-            except json.JSONDecodeError:
-                pass
-
-        # OpenAI 不支持多轮 Agent 调用，固定为 1
-        turns = 1
-
-        return ClaudeRunResult(
-            text=text,
-            success=True,
-            duration=duration,
-            turns=turns,
-            cost=cost,
-            model=model,
-            structured_output=structured_output,
-            tokens=tokens,
-        )
-
-    def _extract_tokens(self, response: Any) -> TokenUsage:
-        """从 OpenAI 响应提取 token 统计"""
-        usage = getattr(response, "usage", None)
-        if not usage:
-            return TokenUsage()
-
-        return TokenUsage(
-            input_tokens=usage.prompt_tokens or 0,
-            output_tokens=usage.completion_tokens or 0,
-            cache_creation_input_tokens=0,  # OpenAI 不直接暴露
-            cache_read_input_tokens=0,  # OpenAI 不直接暴露
-        )
-
-    def _estimate_cost(self, model: str, tokens: TokenUsage) -> float:
-        """
-        根据模型和 token 数量估算成本
-
-        注意：这是估算值，实际成本可能因 Provider 而异
-        """
-        pricing = OPENAI_PRICING.get(model, OPENAI_PRICING.get("gpt-4o", OPENAI_PRICING["gpt-4o"]))
-
-        input_cost = (tokens.input_tokens / 1000) * pricing["input"]
-        output_cost = (tokens.output_tokens / 1000) * pricing["output"]
-
-        return input_cost + output_cost
-
-    def _handle_error(
-        self,
-        error: Exception,
-        duration: int,
-        model: str,
-    ) -> ClaudeRunResult:
-        """处理错误"""
-        error_msg = str(error)
-
-        # 分类错误
-        retryable = self._is_retryable_error(error)
-
+    def _handle_error(self, error: Exception, duration: int, model: str) -> ClaudeRunResult:
         return ClaudeRunResult(
             text="",
             success=False,
@@ -229,34 +135,19 @@ class OpenAIProvider:
             turns=0,
             cost=0.0,
             model=model,
-            error=error_msg,
-            retryable=retryable,
+            error=str(error),
+            retryable=self._is_retryable_error(error),
         )
 
-    def _is_retryable_error(self, error: Exception) -> bool:
-        """判断错误是否可重试"""
-        error_msg = str(error).lower()
-        error_type = type(error).__name__.lower()
 
-        # 速率限制
-        if "rate" in error_msg or "limit" in error_msg or error_type == "ratelimiterror":
-            return True
+class _MaxTurnsStub:
+    """MaxTurnsExceeded 时无 RunResult，伪造一个只含 final_output 的对象供 map_run_result 使用。"""
 
-        # 超时
-        if "timeout" in error_msg or error_type == "timeouterror":
-            return True
-
-        # 服务不可用
-        if "unavailable" in error_msg or "503" in error_msg or error_type == "serviceunavailable":
-            return True
-
-        # 认证错误 - 不可重试
-        if "auth" in error_msg or "401" in error_msg or error_type == "authentication":
-            return False
-
-        # 权限错误 - 不可重试
-        if "permission" in error_msg or "403" in error_msg:
-            return False
-
-        # 默认可重试
-        return True
+    def __init__(self, text: str):
+        class _CW:
+            class _U:
+                input_tokens = 0
+                output_tokens = 0
+            usage = _U()
+        self.final_output = text
+        self.context_wrapper = _CW()

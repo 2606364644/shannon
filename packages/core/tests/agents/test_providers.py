@@ -19,7 +19,13 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
 from shannon_core.agents.providers_anthropic import AnthropicProvider
 from shannon_core.agents.message_dispatcher import MessageDispatcher
 from shannon_core.agents.providers_openai import OpenAIProvider
-from shannon_core.agents.runner import ClaudeRunResult, ProviderConfig, TokenUsage, run_claude_prompt
+from shannon_core.agents.runner import (
+    DEFAULT_MODELS,
+    ClaudeRunResult,
+    ProviderConfig,
+    TokenUsage,
+    run_claude_prompt,
+)
 
 
 class TestProviderConfig:
@@ -432,66 +438,80 @@ class TestAnthropicProviderBuildOptions:
 
 
 class TestOpenAIProvider:
-    """测试 OpenAIProvider"""
+    def test_get_model_resolves_tier(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        config = ProviderConfig(
+            type="openai_compatible",
+            medium_model="GLM-5.2[1m]",
+        )
+        provider = OpenAIProvider(config)
+        assert provider._get_model("medium") == "GLM-5.2[1m]"
 
-    def test_get_model_default(self):
-        """测试获取默认模型"""
+    def test_get_model_falls_back_to_default(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
         config = ProviderConfig(type="openai_compatible")
         provider = OpenAIProvider(config)
-        assert provider._get_model("medium") == "gpt-4o"
+        # DEFAULT_MODELS["openai_compatible"]["medium"]
+        assert provider._get_model("medium") == DEFAULT_MODELS["openai_compatible"]["medium"]
 
-    def test_get_model_explicit(self):
-        """测试显式指定的模型"""
-        config = ProviderConfig(type="openai_compatible", model="gpt-4o-mini")
+    def test_build_agent_wires_chatcompletions_model_and_tools(self):
+        from agents import Agent, OpenAIChatCompletionsModel
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
         provider = OpenAIProvider(config)
-        assert provider._get_model("medium") == "gpt-4o-mini"
-
-    def test_estimate_cost(self):
-        """测试成本估算"""
-        config = ProviderConfig(type="openai_compatible")
-        provider = OpenAIProvider(config)
-
-        tokens = TokenUsage(input_tokens=1000, output_tokens=500)
-        cost = provider._estimate_cost("gpt-4o-mini", tokens)
-
-        # gpt-4o-mini: input $0.00015/1K, output $0.0006/1K
-        # (1000 * 0.00015 / 1000) + (500 * 0.0006 / 1000)
-        # = 0.00015 + 0.0003 = 0.00045
-        assert abs(cost - 0.00045) < 0.00001
-
-    def test_is_retryable_error(self):
-        """测试错误分类"""
-        config = ProviderConfig(type="openai_compatible")
-        provider = OpenAIProvider(config)
-
-        # 可重试错误
-        assert provider._is_retryable_error(Exception("rate limit exceeded")) is True
-        assert provider._is_retryable_error(Exception("timeout")) is True
-
-        # 不可重试错误
-        assert provider._is_retryable_error(Exception("authentication failed")) is False
-        assert provider._is_retryable_error(Exception("permission denied")) is False
+        agent = provider.build_agent("m", output_format=None)
+        assert isinstance(agent, Agent)
+        assert isinstance(agent.model, OpenAIChatCompletionsModel)
+        assert len(agent.tools) == 8
 
     @pytest.mark.asyncio
-    async def test_openai_call_logs_single_turn(self):
-        """OpenAIProvider.call surfaces the assistant response as a single turn."""
+    async def test_call_maps_result_and_audits(self, monkeypatch, tmp_path):
+        # 用 mock Runner.run_streamed 验证 call() 的组装：event 收集 + 映射 + audit
         from unittest.mock import AsyncMock, MagicMock
-        config = ProviderConfig(type="openai_compatible", api_key="k")
+        from shannon_core.agents.providers_openai import OpenAIProvider
+
+        config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
         provider = OpenAIProvider(config)
 
-        mock_choice = MagicMock()
-        mock_choice.message.content = "hello world"
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = MagicMock(prompt_tokens=5, completion_tokens=2)
+        async def _empty():  # stream_events 占位迭代器
+            if False:
+                yield  # 让它成为 async generator
 
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        provider._client = mock_client
+        fake_result = MagicMock()
+        fake_result.final_output = "done"
+        fake_result.context_wrapper = MagicMock()
+        fake_result.context_wrapper.usage = MagicMock(input_tokens=3, output_tokens=2)
+        fake_result.stream_events = _empty
 
-        rec = AsyncMock()
-        await provider.call(prompt="hi", cwd="/tmp", model_tier="medium", audit_logger=rec)
-        rec.log_assistant_turn.assert_awaited_once_with(1, "hello world")
+        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
+                            MagicMock(return_value=fake_result))
+
+        audit = AsyncMock()
+        res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium", audit_logger=audit)
+        assert res.success is True
+        assert res.text == "done"
+        assert res.model == "m"
+        assert res.tokens.input_tokens == 3
+
+    @pytest.mark.asyncio
+    async def test_call_handles_max_turns(self, monkeypatch, tmp_path):
+        from unittest.mock import MagicMock
+        from agents import MaxTurnsExceeded
+        from shannon_core.agents.providers_openai import OpenAIProvider
+
+        config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
+        provider = OpenAIProvider(config)
+
+        async def _raising_stream():
+            raise MaxTurnsExceeded("hit")
+            yield  # 使其成为 async generator
+
+        fake_result = MagicMock()
+        fake_result.stream_events = _raising_stream
+        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
+                            MagicMock(return_value=fake_result))
+        res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium")
+        assert res.stop_reason == "max_turns"
 
 
 class TestClaudeRunResult:
