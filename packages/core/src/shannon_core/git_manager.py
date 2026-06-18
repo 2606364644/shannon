@@ -163,6 +163,28 @@ class GitManager:
         return None
 
     @staticmethod
+    async def get_completed_agents(repo_path: Path) -> set[str]:
+        """Return agent names that have a `deliverable: {name}` commit in git log.
+
+        Non-git repos return an empty set. Used by resume to derive the
+        authoritative 'completed' signal (G).
+        """
+        if not await GitManager.is_git_repository(repo_path):
+            return set()
+        result = await GitManager._run_git(
+            repo_path, "log", "--pretty=format:%s", "--grep=^deliverable:",
+        )
+        if result.returncode != 0:
+            return set()
+        completed: set[str] = set()
+        prefix = "deliverable:"
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith(prefix):
+                completed.add(line[len(prefix):].strip())
+        return completed
+
+    @staticmethod
     async def execute_with_retry(
         repo_path: Path,
         *args: str,
