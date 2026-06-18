@@ -1,0 +1,40 @@
+# packages/whitebox/tests/test_whitebox_resume.py
+import pytest
+
+from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeState, reconcile
+
+
+@pytest.mark.parametrize("g,j,f,expected_completed,expected_aborted,expects_warning", [
+    # G J F -> completed? aborted? warning?
+    (True,  True,  True,  True,  False, False),   # 正常完成
+    (True,  False, True,  True,  False, True),    # session 落盘晚，warn
+    (True,  True,  False, False, True,  False),   # 文件被误删 -> 中止
+    (True,  False, False, False, True,  False),   # G 有但文件/session 都无 -> 中止
+    (False, True,  True,  False, False, True),    # session 误记 -> 重跑 + warn
+    (False, True,  False, False, False, True),    # session 误记 -> 重跑 + warn
+    (False, False, True,  False, False, True),    # 半成品/旧残留 -> 重跑 + warn
+    (False, False, False, False, False, False),   # 未跑过 -> 正常重跑
+])
+def test_reconcile_decision_table(g, j, f, expected_completed, expected_aborted, expects_warning):
+    state = reconcile(
+        git_completed={"pre-recon"} if g else set(),
+        session_completed={"pre-recon"} if j else set(),
+        file_exists={"pre-recon": f},
+        agent="pre-recon",
+    )
+    if expected_aborted:
+        assert state.aborted is True
+        assert state.abort_reason
+        return
+    assert state.aborted is False
+    assert ("pre-recon" in state.completed_agents) is expected_completed
+    assert bool(state.warnings) is expects_warning
+
+
+def test_reconcile_abort_message_mentions_missing_file():
+    state = reconcile(
+        git_completed={"pre-recon"}, session_completed={"pre-recon"},
+        file_exists={"pre-recon": False}, agent="pre-recon",
+    )
+    assert state.aborted
+    assert "pre-recon" in state.abort_reason
