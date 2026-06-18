@@ -15,9 +15,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+import json
+
 from shannon_core.git_manager import GitManager
 from shannon_core.models.agents import AGENTS, AgentName
-from shannon_core.session import SessionManager
 
 
 @dataclass
@@ -88,7 +89,7 @@ class WhiteboxResumeStateBuilder:
     """从磁盘重建 completed_agents，激活 WhiteboxScanWorkflow 的空壳守卫。"""
 
     def __init__(self) -> None:
-        self._sessions = SessionManager(Path("."))
+        pass
 
     async def build(
         self,
@@ -131,7 +132,10 @@ class WhiteboxResumeStateBuilder:
         return state
 
     def _session_success(self, workspace: Path) -> set[str]:
-        data = self._sessions.get_session_data(workspace)
+        session_file = workspace / "session.json"
+        if not session_file.exists():
+            return set()
+        data = json.loads(session_file.read_text(encoding="utf-8"))
         agents = (data.get("metrics") or {}).get("agents") or {}
         return {name for name, m in agents.items() if m.get("success") is True}
 
