@@ -30,7 +30,7 @@ from rich.text import Text
 
 from shannon_core.display.dashboard_state import DashboardState
 from shannon_core.display.events import DisplayEvent
-from shannon_core.display.formatters import format_duration
+from shannon_core.display.formatters import agent_prefix, format_duration
 
 
 class LiveDashboardRenderer:
@@ -55,39 +55,34 @@ class LiveDashboardRenderer:
         running = [r for r in snap.agents.values() if r.status == "running"]
 
         cells: list = [Text(snap.current_phase or "—", style="bold cyan")]
-
         if snap.total_units > 0:
             cells.append(Text(f" · step {snap.completed_units}/{snap.total_units}", style="green"))
-            running_unit_names = snap.running_units
         else:
             cells.append(Text(f" · {snap.completed_count} done", style="green"))
-            running_unit_names = [r.name for r in running]
-
         cells.append(Text(f" · {elapsed}"))
         cells.append(Text(f" · ${snap.total_cost:.4f}", style="yellow"))
 
-        row1 = Table.grid()  # expand=False: cells take natural width, no big gaps
+        row1 = Table.grid()
         row1.add_row(*cells)
 
-        rows = [Text("─" * options.max_width, style="dim"), row1]  # separator + status
-        detail = self._pinned_detail(snap, running, running_unit_names)
-        if detail is not None:
-            pin = Table.grid()
-            pin.add_row(Spinner("dots"), Text(" " + detail, style="blue"))
-            rows.append(pin)
-
+        rows = [Text("─" * options.max_width, style="dim"), row1]
+        if running:
+            # 每个 running agent 一行；label 优先 step intent，否则 agent 短前缀；
+            # action 优先当前工具，其次 turn 文本，再次 "running..."。
+            # Table.grid() 用自然宽度，避免 expand-to-width 拉大间隙。
+            for a in running:
+                intent = snap.unit_intent.get(a.name)
+                label = intent or agent_prefix(a.name)
+                action = a.last_action_detail or a.last_turn_text or "running..."
+                grid = Table.grid()
+                grid.add_row(Spinner("dots"),
+                             Text(f" {label} t{a.turn}  {action}", style="blue"))
+                rows.append(grid)
+        elif snap.running_units:
+            # 无 running agent 但有 running step（如 code-index 这类非 agent 单元）：
+            # 保留旧行为，显示运行中单元名。
+            grid = Table.grid()
+            grid.add_row(Spinner("dots"),
+                         Text(" " + " · ".join(snap.running_units), style="blue"))
+            rows.append(grid)
         return Group(*rows)
-
-    def _pinned_detail(self, snap, running, running_unit_names) -> str | None:
-        """Bottom pinned line: latest agent turn (prefixed by its step intent) if
-        available, else the running unit names. Keeps 'what's happening now'
-        visible as the scrolling log region advances."""
-        narrating = [r for r in running if r.last_turn_text]
-        if narrating:
-            a = narrating[-1]
-            intent = snap.unit_intent.get(a.name)
-            prefix = f"{intent} · " if intent else ""
-            return f"{prefix}Turn {a.turn}: {a.last_turn_text}"
-        if running_unit_names:
-            return " · ".join(running_unit_names)
-        return None
