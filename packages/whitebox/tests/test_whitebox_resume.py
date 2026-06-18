@@ -131,3 +131,24 @@ async def test_cleanup_rewind_archives_target_and_after(tmp_path):
     assert (archive_dir / "recon_deliverable.md").exists()
     assert (archive_dir / "injection_analysis_deliverable.md").exists()
     assert not (deliverables / "recon_deliverable.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_builder_rewind_keeps_only_before_target(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir()
+    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
+    for f in ("pre_recon_deliverable.md", "recon_deliverable.md", "injection_analysis_deliverable.md"):
+        (deliverables / f).write_text("done")
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    _write_session(workspace, {"pre-recon": True, "recon": True, "injection-vuln": True})
+
+    builder = WhiteboxResumeStateBuilder()
+    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+               AsyncMock(return_value={"pre-recon", "recon", "injection-vuln"})):
+        state = await builder.build(
+            mode="rewind", workspace=workspace, deliverables=deliverables,
+            repo_path=repo, rewind_target="recon",
+        )
+
+    assert state.completed_agents == ["pre-recon"]  # 只保留 recon 之前
+    assert state.interrupted_agent == "recon"
