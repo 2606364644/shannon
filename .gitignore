@@ -9,6 +9,7 @@ build/
 .worktrees/
 .worktrees/
 .claude/worktrees/
+.agents/
 node_modules/
 workspaces/
 uv.lock
