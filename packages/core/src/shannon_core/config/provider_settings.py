@@ -8,6 +8,7 @@ profile 文件必须自洽地提供该 provider 的全部必填变量。
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -17,6 +18,8 @@ class ProviderFields:
 
     required: 必填字段名(ProviderFields 的属性名, 不是环境变量名)。
               特殊值 "credential" 表示 api_key 与 auth_token 二选一。
+              注意: model 不在任何 provider 的 required 里 —— 全局 model 是可选的,
+              仅 tier 模型(small/medium/large_model)是必填的。这是设计如此, 非遗漏。
     """
     base_url: str | None
     api_key: str | None = None
@@ -82,3 +85,18 @@ PROVIDER_SETTINGS: dict[str, ProviderFields] = {
 def get_provider_fields(provider_type: str) -> ProviderFields | None:
     """返回 provider 的字段映射; 未知 provider 返回 None。"""
     return PROVIDER_SETTINGS.get(provider_type)
+
+
+def present(env_name: str | None) -> str | None:
+    """读环境变量, 空串视为未设置(返回 None)。
+
+    统一"set 但空 = unset"的语义: profile_validator 与 build_provider_config
+    都通过本函数读取, 避免一方把空串当缺失、另一方把空串当有效值的分歧。
+    env_name 为 None 时该字段不被读取, 直接返回 None。
+    """
+    if env_name is None:
+        return None
+    value = os.getenv(env_name)
+    if not value:  # None 或 ""
+        return None
+    return value

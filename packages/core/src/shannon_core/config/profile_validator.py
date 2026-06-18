@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from shannon_core.config.provider_settings import get_provider_fields
+from shannon_core.config.provider_settings import get_provider_fields, present
 from shannon_core.models.errors import ErrorCode, PentestError
 
 _PROVIDER_ENV = "SHANNON_AI_PROVIDER"
@@ -43,23 +43,24 @@ def validate_active_profile() -> None:
     missing: list[str] = []
     for req in fields.required:
         if req == "credential":
-            # api_key / auth_token 二选一
+            # api_key / auth_token 二选一; 字段名固定, 直接取属性(便于静态分析)。
             credential_found = False
             for f in _CREDENTIAL_FIELDS:
-                env_name = _env_of(fields, f)
-                if env_name and os.getenv(env_name):
+                env_name = getattr(fields, f)
+                if env_name and present(env_name):
                     credential_found = True
                     break
             if not credential_found:
                 missing.append("credential (api_key 或 auth_token)")
             continue
+        # 普通 required 字段: 用 _env_of 解析属性名 → 环境变量名, present 统一空串语义。
         env_name = _env_of(fields, req)
-        if env_name is None or not os.getenv(env_name):
+        if env_name is None or not present(env_name):
             missing.append(env_name or req)
 
     if missing:
         raise PentestError(
-            f"profile( provider={provider}) 缺少必填变量: {', '.join(missing)}。"
+            f"profile(provider={provider}) 缺少必填变量: {', '.join(missing)}。"
             f"请在 .env.profiles/${{SHANNON_PROFILE}}.env 补齐",
             category="config",
             error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
@@ -68,5 +69,5 @@ def validate_active_profile() -> None:
 
 
 def _env_of(fields, field_name: str) -> str | None:
-    """取 ProviderFields 某字段对应的环境变量名。"""
+    """取 ProviderFields 某字段对应的环境变量名(动态 required 循环用)。"""
     return getattr(fields, field_name, None)

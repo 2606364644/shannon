@@ -12,7 +12,7 @@ Provider 抽象层 - 支持多种 AI Provider
 import os
 from abc import ABC, abstractmethod
 
-from shannon_core.config.provider_settings import PROVIDER_SETTINGS
+from shannon_core.config.provider_settings import PROVIDER_SETTINGS, present
 
 from .runner import ClaudeRunResult, ProviderConfig
 from .tool_audit_logger import ToolAuditLogger
@@ -188,12 +188,11 @@ def build_provider_config(
 
 
 def _read(param: str | None, env_name: str | None) -> str | None:
-    """显式参数优先; 否则读环境变量; env_name 为 None 时该字段不读。"""
+    """显式参数优先; 否则读环境变量(空串视为未设置); env_name 为 None 时该字段不读。"""
     if param is not None:
         return param
-    if env_name is None:
-        return None
-    return os.getenv(env_name)
+    # 复用 provider_settings.present: set 但空 = unset, 与 profile_validator 语义一致。
+    return present(env_name)
 
 
 def _build_from_settings(
@@ -236,11 +235,15 @@ def _build_legacy(
     medium_model: str | None,
     large_model: str | None,
 ) -> ProviderConfig:
-    """bedrock / vertex / litellm_router: 保留删除 fallback 前的读取行为。"""
-    is_openai_family = provider_type in ("openai_compatible", "litellm_router")
+    """bedrock / vertex / litellm_router: 保留删除 fallback 前的读取行为。
+
+    openai_compatible 由上游 _build_from_settings 处理, 永不进入本函数;
+    因此这里唯一需要走 openai-family(SHANNON_OPENAI_* 优先读)分支的只有 litellm_router。
+    """
+    is_litellm = provider_type == "litellm_router"
 
     if api_key is None:
-        if is_openai_family:
+        if is_litellm:
             api_key = os.getenv("SHANNON_OPENAI_API_KEY")
         if api_key is None:
             api_key = (
@@ -249,7 +252,7 @@ def _build_legacy(
                 or os.getenv("OPENAI_API_KEY")
             )
     if base_url is None:
-        if is_openai_family:
+        if is_litellm:
             base_url = os.getenv("SHANNON_OPENAI_BASE_URL")
         if base_url is None:
             base_url = os.getenv("SHANNON_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
@@ -263,15 +266,15 @@ def _build_legacy(
         auth_token = os.getenv("SHANNON_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN")
     if small_model is None:
         small_model = (
-            os.getenv("SHANNON_OPENAI_SMALL_MODEL") if is_openai_family else None
+            os.getenv("SHANNON_OPENAI_SMALL_MODEL") if is_litellm else None
         ) or os.getenv("SHANNON_SMALL_MODEL")
     if medium_model is None:
         medium_model = (
-            os.getenv("SHANNON_OPENAI_MEDIUM_MODEL") if is_openai_family else None
+            os.getenv("SHANNON_OPENAI_MEDIUM_MODEL") if is_litellm else None
         ) or os.getenv("SHANNON_MEDIUM_MODEL")
     if large_model is None:
         large_model = (
-            os.getenv("SHANNON_OPENAI_LARGE_MODEL") if is_openai_family else None
+            os.getenv("SHANNON_OPENAI_LARGE_MODEL") if is_litellm else None
         ) or os.getenv("SHANNON_LARGE_MODEL")
 
     return ProviderConfig(

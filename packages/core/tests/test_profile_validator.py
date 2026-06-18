@@ -22,9 +22,28 @@ OPENAI_OK = {
     "SHANNON_OPENAI_LARGE_MODEL": "glm-5.2",
 }
 
+# 校验可能触及的全部环境变量命名空间; 每个 test 开头清空, 统一隔离。
+_PROFILE_ENV_NAMESPACE = (
+    "SHANNON_AI_PROVIDER",
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "SHANNON_API_KEY", "SHANNON_BASE_URL", "SHANNON_AUTH_TOKEN",
+    "SHANNON_PROJECT_ID", "SHANNON_REGION", "SHANNON_MODEL",
+    "SHANNON_SMALL_MODEL", "SHANNON_MEDIUM_MODEL", "SHANNON_LARGE_MODEL",
+    "SHANNON_OPENAI_BASE_URL", "SHANNON_OPENAI_API_KEY",
+    "SHANNON_OPENAI_SMALL_MODEL", "SHANNON_OPENAI_MEDIUM_MODEL",
+    "SHANNON_OPENAI_LARGE_MODEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_profile_env(monkeypatch):
+    """每个 test 开头清空 profile 相关环境变量, 杜绝跨用例污染。"""
+    for var in _PROFILE_ENV_NAMESPACE:
+        monkeypatch.delenv(var, raising=False)
+
 
 def test_anthropic_full_passes(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     for k, v in ANTHROPIC_OK.items():
         monkeypatch.setenv(k, v)
     # 不抛即通过
@@ -33,7 +52,6 @@ def test_anthropic_full_passes(monkeypatch):
 
 def test_anthropic_api_key_accepted_instead_of_token(monkeypatch):
     """credential 二选一: 有 ANTHROPIC_API_KEY 也行。"""
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     env = {**ANTHROPIC_OK}
     del env["ANTHROPIC_AUTH_TOKEN"]
     env["ANTHROPIC_API_KEY"] = "sk"
@@ -43,14 +61,6 @@ def test_anthropic_api_key_accepted_instead_of_token(monkeypatch):
 
 
 def test_anthropic_missing_credential_raises(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
-    monkeypatch.delenv("SHANNON_SMALL_MODEL", raising=False)
-    monkeypatch.delenv("SHANNON_MEDIUM_MODEL", raising=False)
-    monkeypatch.delenv("SHANNON_LARGE_MODEL", raising=False)
-
     # Set environment without credentials
     env = {**ANTHROPIC_OK}
     del env["ANTHROPIC_AUTH_TOKEN"]  # 既无 token 也无 api_key
@@ -64,15 +74,6 @@ def test_anthropic_missing_credential_raises(monkeypatch):
 
 
 def test_anthropic_missing_base_url_raises(monkeypatch):
-    # Clean up environment first
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
-    monkeypatch.delenv("SHANNON_SMALL_MODEL", raising=False)
-    monkeypatch.delenv("SHANNON_MEDIUM_MODEL", raising=False)
-    monkeypatch.delenv("SHANNON_LARGE_MODEL", raising=False)
-
     # Set environment without base_url
     env = {**ANTHROPIC_OK}
     del env["ANTHROPIC_BASE_URL"]
@@ -85,7 +86,6 @@ def test_anthropic_missing_base_url_raises(monkeypatch):
 
 
 def test_anthropic_missing_medium_model_raises(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     env = {**ANTHROPIC_OK}
     del env["SHANNON_MEDIUM_MODEL"]
     for k, v in env.items():
@@ -95,15 +95,28 @@ def test_anthropic_missing_medium_model_raises(monkeypatch):
     assert "SHANNON_MEDIUM_MODEL" in exc.value.message
 
 
+def test_anthropic_empty_optional_model_yields_none_in_config(monkeypatch):
+    """Important #2: set 但空的 SHANNON_MODEL(optional)在校验时不阻塞,
+    build_provider_config 产出的 config.model 为 None(而非空串)。"""
+    from shannon_core.agents.providers import build_provider_config
+
+    env = {**ANTHROPIC_OK}
+    env["SHANNON_MODEL"] = ""  # 空串
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    validate_active_profile()  # model 非 required, 不抛
+
+    cfg = build_provider_config()
+    assert cfg.model is None  # 空串被视为未设置, 不是 ""
+
+
 def test_openai_full_passes(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     for k, v in OPENAI_OK.items():
         monkeypatch.setenv(k, v)
     validate_active_profile()
 
 
 def test_openai_missing_api_key_raises(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     env = {**OPENAI_OK}
     del env["SHANNON_OPENAI_API_KEY"]
     for k, v in env.items():
@@ -114,7 +127,6 @@ def test_openai_missing_api_key_raises(monkeypatch):
 
 
 def test_openai_missing_base_url_raises(monkeypatch):
-    monkeypatch.delenv("SHANNON_AI_PROVIDER", raising=False)
     env = {**OPENAI_OK}
     del env["SHANNON_OPENAI_BASE_URL"]
     for k, v in env.items():
@@ -122,6 +134,17 @@ def test_openai_missing_base_url_raises(monkeypatch):
     with pytest.raises(PentestError) as exc:
         validate_active_profile()
     assert "SHANNON_OPENAI_BASE_URL" in exc.value.message
+
+
+def test_openai_empty_required_api_key_treated_as_missing(monkeypatch):
+    """Important #2: set 但空的必填变量(空串)按缺失处理, 校验抛错。"""
+    env = {**OPENAI_OK}
+    env["SHANNON_OPENAI_API_KEY"] = ""  # 空串
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    with pytest.raises(PentestError) as exc:
+        validate_active_profile()
+    assert "SHANNON_OPENAI_API_KEY" in exc.value.message
 
 
 def test_bedrock_skips_strict_validation(monkeypatch):
