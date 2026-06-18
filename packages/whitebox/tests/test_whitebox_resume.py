@@ -152,3 +152,58 @@ async def test_builder_rewind_keeps_only_before_target(tmp_path):
 
     assert state.completed_agents == ["pre-recon"]  # 只保留 recon 之前
     assert state.interrupted_agent == "recon"
+
+
+@pytest.mark.asyncio
+async def test_builder_rewind_vuln_maps_to_injection_vuln(tmp_path):
+    """I-1: --rewind vuln 规范化到 injection-vuln（vuln 段起点）。
+
+    - completed_agents 只保留 injection-vuln 之前的（pre-recon / recon）
+    - interrupted_agent == "injection-vuln"
+    - cleanup(mode="rewind", rewind_target="vuln") 不 crash，归档 injection-vuln 及之后
+    """
+    repo = tmp_path / "repo"; repo.mkdir()
+    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
+    for f in ("pre_recon_deliverable.md", "recon_deliverable.md",
+              "injection_analysis_deliverable.md", "xss_analysis_deliverable.md"):
+        (deliverables / f).write_text("done")
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    _write_session(workspace, {
+        "pre-recon": True, "recon": True,
+        "injection-vuln": True, "xss-vuln": True,
+    })
+
+    builder = WhiteboxResumeStateBuilder()
+    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+               AsyncMock(return_value={"pre-recon", "recon", "injection-vuln", "xss-vuln"})):
+        state = await builder.build(
+            mode="rewind", workspace=workspace, deliverables=deliverables,
+            repo_path=repo, rewind_target="vuln",  # 别名
+        )
+
+    # vuln 别名 -> injection-vuln：只保留它之前的 pre-recon / recon
+    assert state.completed_agents == ["pre-recon", "recon"]
+    assert state.interrupted_agent == "injection-vuln"
+
+    # cleanup 用原始别名 "vuln" 也不应 crash（内部规范化）
+    archived = await builder.cleanup(
+        mode="rewind", deliverables=deliverables,
+        completed_agents=state.completed_agents,
+        rewind_target="vuln", run_ts="20260619-1600",
+    )
+    archive_dir = deliverables / ".whitebox-archive" / "20260619-1600"
+    assert archived == archive_dir
+    # injection-vuln 及之后被归档；pre-recon/recon 保留
+    assert (archive_dir / "injection_analysis_deliverable.md").exists()
+    assert (archive_dir / "xss_analysis_deliverable.md").exists()
+    assert (deliverables / "pre_recon_deliverable.md").exists()
+    assert (deliverables / "recon_deliverable.md").exists()
+    assert not (deliverables / "injection_analysis_deliverable.md").exists()
+
+
+def test_session_success_swallows_corrupt_json(tmp_path):
+    """M-2: session.json 损坏（JSONDecodeError）不应抛到 worker，返回空集。"""
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    (workspace / "session.json").write_text("{ not valid json", encoding="utf-8")
+    builder = WhiteboxResumeStateBuilder()
+    assert builder._session_success(workspace) == set()

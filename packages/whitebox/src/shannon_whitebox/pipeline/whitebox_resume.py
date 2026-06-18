@@ -16,10 +16,13 @@ from pathlib import Path
 from typing import Literal
 
 import json
+import logging
 import shutil
 
 from shannon_core.git_manager import GitManager
 from shannon_core.models.agents import AGENTS, AgentName
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -85,6 +88,21 @@ _AGENT_ORDER: list[str] = [
     AgentName.AUTHZ_VULN.value,
 ]
 
+# rewind target 别名规范化。CLI 接受 --rewind vuln（语义：重跑全部 5 个并行
+# vuln agent，即从 vuln 段起点 injection-vuln 开始），但 vuln 不在 _AGENT_ORDER。
+# 这里在 builder 内部把别名翻成真实起点，避免 _before_rewind / cleanup 取
+# _AGENT_ORDER.index 时 ValueError 导致 worker 崩溃。
+_REWIND_ALIASES: dict[str, str] = {
+    "vuln": AgentName.INJECTION_VULN.value,
+}
+
+
+def _normalize_rewind_target(target: str | None) -> str | None:
+    """把 rewind 别名（如 vuln）翻译成 _AGENT_ORDER 里的真实起点 agent。None→None。"""
+    if target is None:
+        return None
+    return _REWIND_ALIASES.get(target, target)
+
 
 class WhiteboxResumeStateBuilder:
     """从磁盘重建 completed_agents，激活 WhiteboxScanWorkflow 的空壳守卫。"""
@@ -103,6 +121,9 @@ class WhiteboxResumeStateBuilder:
     ) -> WhiteboxResumeState:
         if mode == "fresh":
             return WhiteboxResumeState(mode="fresh")
+
+        # 规范化 rewind 别名（vuln -> injection-vuln），保证后续 index 查找不 ValueError
+        rewind_target = _normalize_rewind_target(rewind_target)
 
         git_completed = await GitManager.get_completed_agents(repo_path)
         session_completed = self._session_success(workspace)
@@ -136,7 +157,13 @@ class WhiteboxResumeStateBuilder:
         session_file = workspace / "session.json"
         if not session_file.exists():
             return set()
-        data = json.loads(session_file.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # atomic_write 下 session.json 不会写一半；损坏仅外部干扰。
+            # 与 FileNotFoundError 同等处理：返回空集，让 git_completed 主导对账。
+            _logger.warning("session.json 损坏（JSONDecodeError），忽略 session success 信号: %s", session_file)
+            return set()
         agents = (data.get("metrics") or {}).get("agents") or {}
         return {name for name, m in agents.items() if m.get("success") is True}
 
@@ -186,6 +213,9 @@ class WhiteboxResumeStateBuilder:
         """
         if mode == "fresh":
             return None
+
+        # 规范化 rewind 别名（vuln -> injection-vuln），保证 index 查找不 ValueError
+        rewind_target = _normalize_rewind_target(rewind_target)
 
         if mode == "rewind":
             assert rewind_target and run_ts

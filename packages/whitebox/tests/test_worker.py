@@ -190,7 +190,7 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
 
     # mock builder.build 返回有 completed_agents 的 state
     fake_state = WhiteboxResumeState(
-        mode="auto", completed_agents=["pre_recon"], interrupted_agent="recon",
+        mode="auto", completed_agents=["pre-recon"], interrupted_agent="recon",
     )
     builder_build = AsyncMock(return_value=fake_state)
     builder_cleanup = AsyncMock(return_value=None)
@@ -254,7 +254,7 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
                     result = await run_scan(input, "localhost:7233")
 
     # 断言
-    assert input.resume_completed_agents == ["pre_recon"]
+    assert input.resume_completed_agents == ["pre-recon"]
     # resumeAttempts 已有 1 条 → n = 2 → workflow_id 含 -resume-2
     assert captured["workflow_id"] == f"{ws_name}-resume-2", captured
     # meta.id 固定 = workspace_name（不是 resume-ws-resume-2）
