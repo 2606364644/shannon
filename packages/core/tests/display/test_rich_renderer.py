@@ -210,3 +210,16 @@ async def test_tool_rendered_by_default_show_tools_true():
                                         tool_name="Bash", parameters={"command": "ls"}))
     out = renderer._console.export_text()
     assert "Bash" in out
+
+
+async def test_llm_renders_agent_prefix_for_attribution():
+    """并行 agent 的 turn 行必须带短前缀，否则滚动区一堆 💭 Turn N 无法区分。"""
+    from shannon_core.display.events import LlmTurnEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(LlmTurnEvent(
+        timestamp="t", category="LLM", agent_name="injection-vuln",
+        turn=3, content="Checking SQL injection in login form"))
+    out = renderer._console.export_text()
+    assert "[Injection]" in out               # agent 短前缀
+    assert "Turn 3" in out
+    assert "Checking SQL injection in login form" in out

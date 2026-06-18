@@ -127,7 +127,8 @@ class RichConsoleRenderer:
     def _render_llm(self, e) -> None:
         line = first_nonempty_line(e.content) or "(无文本)"
         self._console.print(
-            f"[{e.timestamp}] [magenta]💭 Turn {e.turn}: {line}[/]", highlight=False)
+            f"[{e.timestamp}] [magenta]💭 {agent_prefix(e.agent_name)} "
+            f"Turn {e.turn}: {line}[/]", highlight=False)
 
     def _render_error(self, e) -> None:
         line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"
