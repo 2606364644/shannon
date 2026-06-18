@@ -1,6 +1,8 @@
 import asyncio
+import json
 import time
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 
 from temporalio.client import Client
@@ -41,12 +43,19 @@ from shannon_core.runtime.scan_runner import (
 TASK_QUEUE_PREFIX = "shannon-py-wb"
 
 
-def resolve_workflow_id(workspace_name: str | None, epoch: float) -> str:
+def resolve_workflow_id(
+    workspace_name: str | None, epoch: float, resume_attempt: int = 0
+) -> str:
     """Single source of truth for the Temporal workflow id.
 
     Used for both the WorkflowHeader banner (meta.id → web_ui_url / logs_cmd)
     and client.start_workflow(id=...) so the Web UI link points at the real run.
+
+    resume_attempt > 0 且有 workspace_name 时追加 ``-resume-{n}``，规避与旧
+    workflow 的 Temporal ``AlreadyStarted`` 冲突。默认 0 保证向后兼容。
     """
+    if resume_attempt > 0 and workspace_name:
+        return f"{workspace_name}-resume-{resume_attempt}"
     return workspace_name or f"whitebox-{int(epoch)}"
 
 
@@ -84,10 +93,93 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
     )
 
     loop = asyncio.get_running_loop()
-    workflow_id = resolve_workflow_id(input.workspace_name, loop.time())
+
+    # resume 探测：从磁盘重建 completed_agents，激活 workflow 的空壳守卫。
+    # fresh 模式（input._fresh=True）或无 workspace_name 跳过整个探测块。
+    resume_attempt = 0
+    is_fresh = bool(getattr(input, "_fresh", False))
+    if input.workspace_name and not is_fresh:
+        from shannon_whitebox.pipeline.whitebox_resume import (
+            WhiteboxResumeStateBuilder,
+        )
+        from shannon_core.utils.paths import resolve_deliverables_path
+
+        workspaces_dir = resolve_workspaces_dir(input.repo_path)
+        ws_dir = workspaces_dir / input.workspace_name
+        deliverables = resolve_deliverables_path(
+            input.repo_path, input.deliverables_subdir, input.workspace_name,
+        )
+        rewind_target = getattr(input, "_rewind_target", None)
+        mode = "rewind" if rewind_target else "auto"
+
+        builder = WhiteboxResumeStateBuilder()
+        rstate = await builder.build(
+            mode=mode,
+            workspace=ws_dir,
+            deliverables=deliverables,
+            repo_path=Path(input.repo_path),
+            rewind_target=rewind_target,
+        )
+        if rstate.aborted:
+            raise RuntimeError(rstate.abort_reason)
+
+        if rstate.completed_agents:
+            input.resume_completed_agents = rstate.completed_agents
+
+            # 决策 2：resume_attempt 从 session.json 的 resumeAttempts 读 len+1
+            session_file = ws_dir / "session.json"
+            n = 1
+            if session_file.exists():
+                try:
+                    existing = json.loads(
+                        session_file.read_text(encoding="utf-8"))
+                    attempts = existing.get("resumeAttempts") or []
+                    if isinstance(attempts, list):
+                        n = len(attempts) + 1
+                except (json.JSONDecodeError, OSError):
+                    n = 1
+            resume_attempt = n
+
+            # 决策 5：rewind cleanup 需要 run_ts 做归档目录名
+            cleanup_kwargs = dict(
+                mode=mode,
+                deliverables=deliverables,
+                completed_agents=rstate.completed_agents,
+                rewind_target=rewind_target,
+            )
+            if mode == "rewind":
+                cleanup_kwargs["run_ts"] = datetime.now().strftime(
+                    "%Y%m%d-%H%M%S")
+            await builder.cleanup(**cleanup_kwargs)
+
+            # 决策 4：resume 成功后追加 resumeAttempt
+            workflow_id_preview = resolve_workflow_id(
+                input.workspace_name, loop.time(), resume_attempt=n)
+            terminated = rstate.interrupted_agent and [rstate.interrupted_agent] or []
+            self_mgr = SessionManager(workspaces_dir)
+            ws_path = self_mgr.get_workspace(input.workspace_name)
+            if ws_path is not None:
+                data = self_mgr.get_session_data(ws_path)
+                attempts = data.get("resumeAttempts") or []
+                attempts.append({
+                    "workflowId": workflow_id_preview,
+                    "terminatedAgents": terminated,
+                    "checkpoint": None,
+                })
+                data["resumeAttempts"] = attempts
+                self_mgr.update_session(ws_path, data)
+
+    workflow_id = resolve_workflow_id(
+        input.workspace_name, loop.time(), resume_attempt)
+
+    # 决策 1：meta.id 固定 = workspace_name（若有），保证 MetricsTracker 写
+    # session.json 的目录 = workspace_name/，与 builder 下次 resume 读取路径一致。
+    # resume 时 workflow_id 会变 workspace_name-resume-N，但 session.json 必须仍
+    # 累积在 workspace_name/ 下。fresh/首次扫描（有 workspace_name）行为不变。
+    session_id = input.workspace_name or workflow_id
 
     meta = SessionMetadata(
-        id=workflow_id,
+        id=session_id,
         web_url=input.web_url,
         repo_path=input.repo_path,
         output_path=str(resolve_workspaces_dir(input.repo_path)),

@@ -19,6 +19,11 @@ class SessionManager:
         ws = self.workspaces_dir / name
         ws.mkdir(parents=True, exist_ok=True)
 
+        # 幂等：若 session.json 已存在（resume 场景），不覆盖 —— 保留
+        # completed_agents / resumeAttempts 等进度数据。metrics tracker 会增量更新。
+        if (ws / "session.json").exists():
+            return ws
+
         session_data = {
             "web_url": web_url,
             "repo_path": repo_path,
