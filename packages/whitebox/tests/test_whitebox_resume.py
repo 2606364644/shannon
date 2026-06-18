@@ -96,3 +96,38 @@ async def test_builder_aborts_when_file_missing(tmp_path):
 
     assert state.aborted is True
     assert "recon" in (state.abort_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_auto_deletes_partial_deliverable(tmp_path):
+    deliverables = tmp_path / "deliverables"; deliverables.mkdir()
+    (deliverables / "recon_deliverable.md").write_text("half-baked")  # ¬G 半成品
+
+    builder = WhiteboxResumeStateBuilder()
+    await builder.cleanup(
+        mode="auto", deliverables=deliverables,
+        completed_agents=[],
+    )
+
+    assert not (deliverables / "recon_deliverable.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_rewind_archives_target_and_after(tmp_path):
+    deliverables = tmp_path / "deliverables"; deliverables.mkdir()
+    (deliverables / "pre_recon_deliverable.md").write_text("keep")
+    (deliverables / "recon_deliverable.md").write_text("archive")  # rewind 目标
+    (deliverables / "injection_analysis_deliverable.md").write_text("archive")  # 之后
+
+    builder = WhiteboxResumeStateBuilder()
+    archived = await builder.cleanup(
+        mode="rewind", deliverables=deliverables,
+        completed_agents=["pre-recon"],
+        rewind_target="recon", run_ts="20260619-1530",
+    )
+
+    assert (deliverables / "pre_recon_deliverable.md").exists()  # 之前保留
+    archive_dir = deliverables / ".whitebox-archive" / "20260619-1530"
+    assert (archive_dir / "recon_deliverable.md").exists()
+    assert (archive_dir / "injection_analysis_deliverable.md").exists()
+    assert not (deliverables / "recon_deliverable.md").exists()

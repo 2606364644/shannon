@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import json
+import shutil
 
 from shannon_core.git_manager import GitManager
 from shannon_core.models.agents import AGENTS, AgentName
@@ -165,4 +166,48 @@ class WhiteboxResumeStateBuilder:
         for agent in _AGENT_ORDER:
             if agent not in completed:
                 return agent
+        return None
+
+    @staticmethod
+    async def cleanup(
+        *,
+        mode: Literal["auto", "rewind", "fresh"],
+        deliverables: Path,
+        completed_agents: list[str],
+        rewind_target: str | None = None,
+        run_ts: str | None = None,
+    ) -> Path | None:
+        """清理半成品/旧产出物，让重跑从干净状态开始。不用 git reset。
+
+        auto:  删除不在 completed_agents 的产出物文件（半成品/旧残留）。
+        rewind: 把 target 及之后 agent 的产出物归档到 .whitebox-archive/<run_ts>/。
+        fresh: 不处理（全新扫会自建 deliverables）。
+        返回归档目录（rewind）或 None。
+        """
+        if mode == "fresh":
+            return None
+
+        if mode == "rewind":
+            assert rewind_target and run_ts
+            start = _AGENT_ORDER.index(rewind_target)
+            to_archive = _AGENT_ORDER[start:]
+            archive = deliverables / ".whitebox-archive" / run_ts
+            archive.mkdir(parents=True, exist_ok=True)
+            for agent_name in to_archive:
+                defn = AGENTS.get(AgentName(agent_name))
+                if defn and defn.deliverable_filename:
+                    src = deliverables / defn.deliverable_filename
+                    if src.exists():
+                        shutil.move(str(src), str(archive / defn.deliverable_filename))
+            return archive
+
+        # auto: 删不在 completed_agents 的半成品
+        for agent_name, defn in AGENTS.items():
+            if not defn.deliverable_filename:
+                continue
+            if agent_name.value in completed_agents:
+                continue  # 已完成，保留
+            src = deliverables / defn.deliverable_filename
+            if src.exists():
+                src.unlink()
         return None
