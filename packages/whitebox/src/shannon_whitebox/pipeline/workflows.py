@@ -35,6 +35,9 @@ class WhiteboxScanWorkflow:
 
     @workflow.run
     async def run(self, input: PipelineInput) -> PipelineState:
+        # resume: 预填已完成 agent，激活下方 `if X not in completed_agents` 守卫
+        if input.resume_completed_agents:
+            self._state.completed_agents = list(input.resume_completed_agents)
         self._state.start_time = workflow.time_ns() / 1e9
 
         selected_classes: list[VulnType] = input.vuln_classes or list(ALL_VULN_CLASSES)

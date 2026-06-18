@@ -15,6 +15,7 @@ class PipelineInput(BasePipelineInput):
     repo_path: str = ""                        # Required for whitebox
     web_url: str = ""
     prompt_override: str | None = None
+    resume_completed_agents: list[str] = field(default_factory=list)  # resume 预填
 
 
 @dataclass

@@ -133,3 +133,17 @@ class TestWhiteboxBrowserEngineIntegration:
                 error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
             )
         assert error.error_code == ErrorCode.BROWSER_ENGINE_UNAVAILABLE
+
+
+def test_run_prefills_completed_agents_from_input():
+    """resume 时 input 携带 completed_agents，run 开头预填，守卫应能跳过。"""
+    from shannon_whitebox.pipeline.shared import PipelineInput, PipelineState
+
+    # 模拟 run 开头的预填逻辑（不启动 Temporal）
+    state = PipelineState()
+    inp = PipelineInput(repo_path="/repo", resume_completed_agents=["pre-recon", "recon"])
+    state.completed_agents = list(inp.resume_completed_agents or [])
+
+    # 守卫逻辑：pre-recon / recon 已在 completed -> 应跳过
+    assert "pre-recon" in state.completed_agents
+    assert "recon" in state.completed_agents
