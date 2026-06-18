@@ -62,7 +62,7 @@ class WorkflowLogger:
             from shannon_core.display.rich_renderer import RichConsoleRenderer
             renderers.append(RichConsoleRenderer(
                 self._console,
-                show_phase=not self._use_rich,   # rich: 压住 PHASE 行
+                show_phase=True,                  # rich/plain 都显示 PHASE 分隔行（恢复结构感）
                 show_steps=True,                 # rich: 放开 STEP 行
                 show_tools=not self._use_rich,   # rich: 隐藏 🔧（仍写 workflow.log）
             ))

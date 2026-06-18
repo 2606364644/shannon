@@ -395,3 +395,22 @@ async def test_log_phase_threads_step_intents():
     await wl.log_phase("pre-recon", "start",
                        steps=("code-index",), step_intents=("构建调用图与代码索引",))
     assert captured and captured[-1].step_intents == ("构建调用图与代码索引",)
+
+
+async def test_rich_mode_renders_phase_line_to_stdout(tmp_path):
+    """rich 模式下 PHASE 分隔行应输出到 stdout（show_phase=True），
+    否则滚动区缺少阶段结构感。"""
+    import io
+    from rich.console import Console
+    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    meta = _make_meta(tmp_path)
+    buf = io.StringIO()
+    console = Console(file=buf, width=100, force_terminal=True, color_system=None)
+    dashboard = LiveDashboardRenderer(console)
+    logger = WorkflowLogger(meta, use_rich=True, console=console, dashboard=dashboard)
+    await logger.initialize(workflow_id="wf-1")
+    await logger.log_phase("vulnerability-analysis", "start")
+    await logger.close()
+    out = buf.getvalue()
+    assert "PHASE" in out                      # RichConsoleRenderer 打了 PHASE 行
+    assert "vulnerability-analysis" in out     # 且带 phase 名
