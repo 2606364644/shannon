@@ -36,8 +36,14 @@ def cli():
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
 @click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
 @click.option("--url", default=None, help="Deployed target URL (optional; recorded so blackbox can auto-detect this scan by URL)")
-def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url):
+@click.option("--fresh", is_flag=True, help="全新扫描，忽略已有进度")
+@click.option("--rewind", "rewind", default=None,
+              type=click.Choice(["pre-recon", "recon", "vuln"]),
+              help="回退到指定阶段重跑（pre-recon/recon/vuln）")
+def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url, fresh, rewind):
     """Start a white-box security scan."""
+    if fresh and rewind:
+        raise click.UsageError("--fresh 与 --rewind 互斥，不能同时使用。")
     from shannon_whitebox.worker import run_scan
 
     input = PipelineInput(
@@ -48,6 +54,10 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         config_path=config_path,
         pipeline_testing_mode=pipeline_testing,
     )
+    if fresh:
+        setattr(input, "_fresh", True)
+    if rewind:
+        setattr(input, "_rewind_target", rewind)
     click.echo(f"Starting white-box scan on {repo}")
     asyncio.run(ensure_infra(address=temporal_address))
     from shannon_core.runtime.prerequisites import ensure_prerequisite

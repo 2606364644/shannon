@@ -418,6 +418,29 @@ def test_workspace_clean_cancelled(tmp_path, monkeypatch):
     assert (ws / "workflow.log").exists()
 
 
+def test_start_rejects_fresh_and_rewind_together(monkeypatch):
+    from click.testing import CliRunner
+    from shannon_whitebox.cli.main import cli
+    runner = CliRunner()
+    result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--fresh", "--rewind", "recon"])
+    assert result.exit_code != 0
+    assert "互斥" in result.output or "mutually" in result.output.lower()
+
+
+def test_start_rewind_accepted(monkeypatch):
+    from click.testing import CliRunner
+    from unittest.mock import patch, AsyncMock
+    from shannon_whitebox.cli.main import cli
+
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        return {"status": "completed"}
+    with patch("shannon_whitebox.cli.main.ensure_infra", AsyncMock()), \
+         patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--rewind", "recon"])
+    assert result.exit_code == 0
+
+
 def test_start_exits_130_on_cancelled():
     """When the scan is cancelled, the CLI should print a message and exit 130."""
     with (
