@@ -96,7 +96,10 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
 
     # resume 探测：从磁盘重建 completed_agents，激活 workflow 的空壳守卫。
     # fresh 模式（input._fresh=True）或无 workspace_name 跳过整个探测块。
+    # None = 尚未计算（fresh/首次/无 completed_agents）；>=1 = resume 第 N 次。
+    # 用哨兵而非 0，避免下方 "if not resume_attempt" 把 0 当 falsy 与"未设置"混淆。
     resume_attempt = 0
+    workflow_id: str | None = None
     is_fresh = bool(getattr(input, "_fresh", False))
     if input.workspace_name and not is_fresh:
         from shannon_whitebox.pipeline.whitebox_resume import (
@@ -126,7 +129,18 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         if rstate.completed_agents:
             input.resume_completed_agents = rstate.completed_agents
 
-            # 决策 2：resume_attempt 从 session.json 的 resumeAttempts 读 len+1
+            # === top-level `resumeAttempts` schema 说明 ===
+            # worker 把 resume 计数记录在 session.json 的 **top-level** `resumeAttempts`
+            #（与 repo_path / web_url / created_at 同层）。这是 worker resume 逻辑的
+            # canonical 位置：resume_attempt = len(top-level resumeAttempts) + 1，
+            # resume 成功后向它 append 一条。它与 MetricsTracker 拥有的嵌套
+            # `session.resumeAttempts`（audit/UI 显示用，被 initialize 重置、目前由
+            # add_resume_attempt 写入）刻意分离 —— 不同所有者、不同生命周期。
+            # 跨 MetricsTracker.initialize 的存活依赖 initialize 用 `dict(existing)`
+            # 浅拷贝保留所有 top-level key（MetricsTracker 只 owns `session`/`metrics`
+            # 两个子树）。见 test_resume_attempts_survive_metrics_tracker_initialize。
+
+            # 决策 2：resume_attempt 从 session.json 的 top-level resumeAttempts 读 len+1
             session_file = ws_dir / "session.json"
             n = 1
             if session_file.exists():
@@ -152,25 +166,32 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                     "%Y%m%d-%H%M%S")
             await builder.cleanup(**cleanup_kwargs)
 
-            # 决策 4：resume 成功后追加 resumeAttempt
-            workflow_id_preview = resolve_workflow_id(
-                input.workspace_name, loop.time(), resume_attempt=n)
-            terminated = rstate.interrupted_agent and [rstate.interrupted_agent] or []
+            # 决策 4：resume 成功后追加一条到 top-level resumeAttempts。
+            # workflow_id 只算一次（含 resume_attempt），preview 与下方实际
+            # start_workflow(id=...) 复用同一个值。
+            workflow_id = resolve_workflow_id(
+                input.workspace_name, loop.time(), resume_attempt)
+            terminated = (
+                [rstate.interrupted_agent] if rstate.interrupted_agent else []
+            )
             self_mgr = SessionManager(workspaces_dir)
             ws_path = self_mgr.get_workspace(input.workspace_name)
             if ws_path is not None:
                 data = self_mgr.get_session_data(ws_path)
                 attempts = data.get("resumeAttempts") or []
                 attempts.append({
-                    "workflowId": workflow_id_preview,
+                    "workflowId": workflow_id,
                     "terminatedAgents": terminated,
                     "checkpoint": None,
                 })
                 data["resumeAttempts"] = attempts
                 self_mgr.update_session(ws_path, data)
 
-    workflow_id = resolve_workflow_id(
-        input.workspace_name, loop.time(), resume_attempt)
+    # 非恢复路径（fresh/首次/无 completed_agents）：resume_attempt 仍为 0，
+    # workflow_id 尚未在恢复分支内计算，这里补算。恢复路径已在上方算过，直接复用。
+    if workflow_id is None:
+        workflow_id = resolve_workflow_id(
+            input.workspace_name, loop.time(), resume_attempt)
 
     # 决策 1：meta.id 固定 = workspace_name（若有），保证 MetricsTracker 写
     # session.json 的目录 = workspace_name/，与 builder 下次 resume 读取路径一致。

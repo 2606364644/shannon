@@ -327,3 +327,65 @@ async def test_run_scan_fresh_mode_skips_resume(tmp_path, monkeypatch):
     assert captured["workflow_id"] == "fresh-ws"
     explode_build.assert_not_called()
 
+
+@pytest.mark.asyncio
+async def test_resume_attempts_survive_metrics_tracker_initialize(tmp_path):
+    """Important 回归保护：worker 写入的 **top-level** `resumeAttempts` 必须跨
+    MetricsTracker.initialize() 存活。
+
+    worker resume 路径把 resume 计数记录在 session.json 的 top-level
+    `resumeAttempts`（与 repo_path 同层）。MetricsTracker.initialize() 只 owns
+    `session`/`metrics` 两个子树，通过 ``dict(existing)`` 浅拷贝保留其它 top-level
+    key —— 这是 top-level resumeAttempts 跨 init 存活的依赖点。本测试钉死该不变量：
+    若未来有人改成整体覆盖写，此测试会立刻红。
+    """
+    from shannon_core.models.metrics import SessionMetadata
+    from shannon_core.audit.metrics_tracker import MetricsTracker
+
+    # 构造一个已有 top-level resumeAttempts（非空）的 workspace session.json
+    workspaces_dir = tmp_path / "workspaces"
+    ws_name = "survive-ws"
+    ws_dir = workspaces_dir / ws_name
+    ws_dir.mkdir(parents=True)
+    session_file = ws_dir / "session.json"
+
+    pre_attempts = [
+        {"workflowId": f"{ws_name}-resume-1", "terminatedAgents": [], "checkpoint": None},
+        {"workflowId": f"{ws_name}-resume-2", "terminatedAgents": ["recon"], "checkpoint": None},
+    ]
+    seed = {
+        "web_url": "",
+        "repo_path": str(tmp_path),
+        "scan_type": "whitebox",
+        # top-level resumeAttempts（worker 写入位置）
+        "resumeAttempts": list(pre_attempts),
+    }
+    session_file.write_text(json.dumps(seed), encoding="utf-8")
+
+    # MetricsTracker 用 meta.output_path + meta.id 解析 session.json 路径
+    meta = SessionMetadata(
+        id=ws_name,
+        web_url="",
+        repo_path=str(tmp_path),
+        output_path=str(workspaces_dir),
+    )
+
+    tracker = MetricsTracker(meta)
+    await tracker.initialize(workflow_id=f"{ws_name}-resume-3")
+
+    # 断言：initialize 后 top-level resumeAttempts 仍在，且长度不变（未被重置/删除）
+    after = json.loads(session_file.read_text(encoding="utf-8"))
+    assert "resumeAttempts" in after, "top-level resumeAttempts 被 initialize 删掉了"
+    assert isinstance(after["resumeAttempts"], list)
+    assert len(after["resumeAttempts"]) == len(pre_attempts), (
+        f"top-level resumeAttempts 长度变化："
+        f"init 前={len(pre_attempts)} init 后={len(after['resumeAttempts'])}"
+    )
+    # 内容也未被动过
+    assert after["resumeAttempts"] == pre_attempts
+
+    # 同时确认 MetricsTracker 自己的 session.resumeAttempts（嵌套、audit 用）被初始化为空 ——
+    # 这正是两个所有者刻意分离的证据：top-level 保留，嵌套重置。
+    assert after["session"]["resumeAttempts"] == []
+
+
