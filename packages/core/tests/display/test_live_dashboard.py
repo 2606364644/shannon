@@ -68,9 +68,8 @@ async def test_status_line_shows_step_progress_and_running_units():
                               event="start", attempt=1))
     console.print(r)
     out = buf.getvalue()
-    assert "pre-recon" in out            # phase
-    assert "step 0/3" in out             # 0 completed of 3 units
     assert "pre-recon" in out            # phase 名（状态行）
+    assert "step 0/3" in out             # 0 completed of 3 units
     assert "running..." in out           # pre-recon agent 行：无 turn/tool 时 action 回退
     # 注：code-index 是非 agent 单元，当存在 running agent 时不在状态栏单独显示，
     # 其进度由状态行 "step 0/3" 体现。
