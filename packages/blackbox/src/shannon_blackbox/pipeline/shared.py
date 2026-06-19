@@ -12,6 +12,7 @@ class BlackboxPipelineInput(BasePipelineInput):
     exploit: bool = True
     max_concurrent: int = 3
     retry_profile: str | None = None          # "production" | "testing" | "subscription"
+    rerun: bool = False  # 强制重跑黑盒（归档旧 evidence + 新 workflow id）
 
 
 @dataclass

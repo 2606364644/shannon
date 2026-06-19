@@ -67,3 +67,11 @@ class TestBlackboxPipelineStateErrorPropagation:
         state = BlackboxPipelineState()
         state.status = "cancelled"
         assert state.status == "cancelled"
+
+
+from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+
+
+def test_blackbox_input_has_rerun_field_default_false():
+    inp = BlackboxPipelineInput(web_url="https://x.com")
+    assert inp.rerun is False
