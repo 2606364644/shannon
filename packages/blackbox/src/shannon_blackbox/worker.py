@@ -73,6 +73,24 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         output_path=str(resolve_workspaces_dir(input.repo_path)),
     )
 
+    # rerun：归档旧 evidence + workflow id 加时间戳规避 AlreadyStarted
+    workflow_id_base = input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}"
+    if input.rerun:
+        from datetime import datetime
+        from shannon_core.utils.paths import resolve_deliverables_path
+        from shannon_blackbox.pipeline.blackbox_rerun import archive_blackbox_deliverables
+        deliverables = resolve_deliverables_path(
+            repo_path=input.repo_path,
+            deliverables_subdir=input.deliverables_subdir,
+            workspace_name=input.workspace_name,
+            workspaces_root=resolve_workspaces_dir(input.repo_path),
+        )
+        run_ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        archive_blackbox_deliverables(deliverables, run_ts)
+        workflow_id = f"{workflow_id_base}-rerun-{run_ts}"
+    else:
+        workflow_id = workflow_id_base
+
     ctrl = ShutdownController()
     ctrl.install(asyncio.get_running_loop())
     try:
@@ -83,7 +101,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
                 handle = await client.start_workflow(
                     BlackboxScanWorkflow.run,
                     input,
-                    id=input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}",
+                    id=workflow_id,
                     task_queue=task_queue,
                 )
                 try:

@@ -1,3 +1,5 @@
+import contextlib
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -148,3 +150,64 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled():
 
     assert result == BlackboxPipelineState(status="cancelled")
     mock_clear.assert_called()  # 清理在 cancel 路径仍执行
+
+
+@pytest.mark.asyncio
+async def test_run_scan_rerun_archives_old_evidence_and_uses_new_id(tmp_path, monkeypatch):
+    """--rerun 时：归档旧 evidence + workflow id 带 -rerun- 后缀。"""
+    repo = tmp_path / "repo"
+    deliverables = repo / ".shannon" / "deliverables"
+    deliverables.mkdir(parents=True)
+    (deliverables / "injection_exploitation_evidence.md").write_text("# old")
+
+    monkeypatch.setenv("SHANNON_WORKSPACES_DIR", str(tmp_path / "workspaces"))
+
+    captured_wf_id = {}
+    mock_handle = AsyncMock()
+    mock_handle.result = AsyncMock(
+        return_value=BlackboxPipelineState(status="completed")
+    )
+    mock_client = AsyncMock()
+
+    async def capture_start(wf, inp, id, task_queue):
+        captured_wf_id["id"] = id
+        return mock_handle
+
+    mock_client.start_workflow = capture_start
+
+    def capture_worker(**kwargs):
+        mock_worker = AsyncMock()
+        mock_worker.__aenter__ = AsyncMock(return_value=None)
+        mock_worker.__aexit__ = AsyncMock(return_value=None)
+        return mock_worker
+
+    class FakeSession:
+        log_workflow_complete = AsyncMock()
+        log_workflow_header = AsyncMock()
+
+    @contextlib.asynccontextmanager
+    async def fake_display(meta, use_rich=False):
+        yield FakeSession()
+
+    inp = BlackboxPipelineInput(
+        web_url="https://x.com",
+        repo_path=str(repo),
+        workspace_name="ws1",
+        rerun=True,
+    )
+
+    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("shannon_blackbox.worker.run_with_display", fake_display), \
+         patch("shannon_blackbox.worker.ShutdownController.install"), \
+         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
+        from shannon_blackbox.worker import run_scan
+        await run_scan(inp, "localhost:7233")
+
+    # 归档了旧 evidence
+    archive_dirs = list(deliverables.glob(".blackbox-archive/*"))
+    assert len(archive_dirs) == 1
+    assert (archive_dirs[0] / "injection_exploitation_evidence.md").exists()
+    assert not (deliverables / "injection_exploitation_evidence.md").exists()
+    # workflow id 带 -rerun- 后缀
+    assert "-rerun-" in captured_wf_id["id"]
