@@ -5,6 +5,16 @@ from pathlib import Path
 
 from shannon_core.models.agents import AgentName
 
+# Blackbox deliverable filename patterns (glob). Shared by clean_workspace
+# (remove on rerun) and blackbox_rerun.archive_blackbox_deliverables (move
+# to dated archive). Keep in sync — do not hardcode elsewhere.
+BB_DELIVERABLE_PATTERNS: list[str] = [
+    "*_exploitation_evidence.md",
+    "*_findings.md",
+    "comprehensive_security_assessment_report.md",
+]
+
+
 class SessionManager:
     def __init__(self, workspaces_dir: Path):
         self.workspaces_dir = workspaces_dir
@@ -207,13 +217,8 @@ class SessionManager:
             from shannon_core.utils.paths import deliverables_dir_for_workspace
             deliverables_dir = deliverables_dir_for_workspace(workspace_path)
             if deliverables_dir.is_dir():
-                bb_deliverable_patterns = [
-                    "*_exploitation_evidence.md",
-                    "*_findings.md",
-                    "comprehensive_security_assessment_report.md",
-                ]
                 for f in deliverables_dir.iterdir():
-                    if any(fnmatch.fnmatch(f.name, p) for p in bb_deliverable_patterns):
+                    if any(fnmatch.fnmatch(f.name, p) for p in BB_DELIVERABLE_PATTERNS):
                         f.unlink()
 
             # Remove blackbox agent logs
