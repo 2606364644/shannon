@@ -13,7 +13,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from shannon_core.session import BB_DELIVERABLE_PATTERNS  # 见 Step 3b
+# 复用 clean_workspace 的归档清单 BB_DELIVERABLE_PATTERNS
+from shannon_core.session import BB_DELIVERABLE_PATTERNS
 
 
 def detect_blackbox_completed(deliverables: Path) -> bool:
@@ -31,5 +32,14 @@ def archive_blackbox_deliverables(deliverables: Path, run_ts: str) -> Path:
     archive.mkdir(parents=True, exist_ok=True)
     for pattern in BB_DELIVERABLE_PATTERNS:
         for src in deliverables.glob(pattern):
-            shutil.move(str(src), str(archive / src.name))
+            dest = archive / src.name
+            if dest.exists():
+                # 同 run_ts 下重名（秒级时间戳双 rerun / 测试复用 run_ts）：
+                # 加序号后缀避免覆盖丢历史
+                stem, suffix = src.stem, src.suffix
+                i = 1
+                while dest.exists():
+                    dest = archive / f"{stem}_{i}{suffix}"
+                    i += 1
+            shutil.move(str(src), str(dest))
     return archive

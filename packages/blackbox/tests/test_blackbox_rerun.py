@@ -78,3 +78,25 @@ def test_archive_all_five_evidence_and_findings(tmp_path):
     assert (archive / "comprehensive_security_assessment_report.md").exists()
     # deliverables 顶层清空了黑盒产出物
     assert list(deliverables.glob("*_exploitation_evidence.md")) == []
+
+
+def test_archive_avoids_overwrite_on_duplicate_run_ts(tmp_path):
+    """同 run_ts 二次归档：重名文件加序号后缀，不覆盖第一次的归档。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    run_ts = "20260619-1600"
+
+    # 第一次：归档一个 evidence
+    (deliverables / "injection_exploitation_evidence.md").write_text("first")
+    archive_blackbox_deliverables(deliverables, run_ts)
+    # 第二次：构造同名新 evidence 文件，用相同 run_ts 再归档
+    (deliverables / "injection_exploitation_evidence.md").write_text("second")
+    archive = archive_blackbox_deliverables(deliverables, run_ts)
+
+    # 归档目录两个文件并存：原名 + _1 后缀，第二次不覆盖第一次
+    assert (archive / "injection_exploitation_evidence.md").exists()
+    assert (archive / "injection_exploitation_evidence_1.md").exists()
+    archived = sorted(p.name for p in archive.iterdir())
+    assert len(archived) == 2
+    # 原文件内容保留（未被覆盖）
+    assert (archive / "injection_exploitation_evidence.md").read_text() == "first"

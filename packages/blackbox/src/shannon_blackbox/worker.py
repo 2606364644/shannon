@@ -74,7 +74,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
     )
 
     # rerun：归档旧 evidence + workflow id 加时间戳规避 AlreadyStarted
-    workflow_id_base = input.workspace_name or f"blackbox-{int(asyncio.get_event_loop().time())}"
+    workflow_id_base = input.workspace_name or f"blackbox-{int(asyncio.get_running_loop().time())}"
     if input.rerun:
         from datetime import datetime
         from shannon_core.utils.paths import resolve_deliverables_path
