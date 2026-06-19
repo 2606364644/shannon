@@ -41,7 +41,8 @@ def cli():
 @click.option("--max-concurrent", default=3, type=int, help="Max concurrent exploit agents (default: 3)")
 @click.option("--retry-profile", "retry_profile", default=None, type=click.Choice(["production", "testing", "subscription"]), help="Retry policy profile")
 @click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
-def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain):
+@click.option("--rerun", is_flag=True, help="强制重跑黑盒（归档旧 evidence，基于已有白盒结果重新跑）")
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain, rerun):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -126,6 +127,25 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         max_concurrent=max_concurrent,
         retry_profile=retry_profile,
     )
+
+    # 幂等检测：默认（非 --rerun）若已跑过黑盒 → 告知、不启动 worker（省 Temporal 连接）
+    # 仅在能定位 deliverables 时检测（有 repo 或 workspace）；standalone 模式跳过。
+    if not rerun and (repo or resolved_workspace):
+        from shannon_core.utils.paths import resolve_deliverables_path
+        from shannon_blackbox.pipeline.blackbox_rerun import detect_blackbox_completed
+        deliverables = resolve_deliverables_path(
+            repo_path=str(Path(repo).resolve()) if repo else None,
+            deliverables_subdir=input.deliverables_subdir,
+            workspace_name=resolved_workspace,
+        )
+        if detect_blackbox_completed(deliverables):
+            click.echo(
+                f"该 workspace 已跑过黑盒，结果在 {deliverables}。"
+                f"如需重跑请加 --rerun（旧 evidence 会归档到 .blackbox-archive/）。"
+            )
+            return
+    input.rerun = rerun
+
     click.echo(f"Starting black-box scan on {url}")
     asyncio.run(ensure_infra(address=temporal_address))
     from shannon_core.runtime.prerequisites import ensure_prerequisite

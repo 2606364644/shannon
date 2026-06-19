@@ -608,3 +608,58 @@ def test_start_exits_130_on_cancelled():
 
     assert result.exit_code == 130
     assert "Scan cancelled." in result.output
+
+
+def test_start_informs_when_blackbox_already_ran(tmp_path, monkeypatch):
+    """默认（非 --rerun）检测到已跑过黑盒 → 告知、不调 run_scan。"""
+    from click.testing import CliRunner
+    from unittest.mock import patch, AsyncMock
+    from shannon_blackbox.cli.main import cli
+
+    # 构造一个已有黑盒 evidence 的 deliverables（指向 repo）
+    repo = tmp_path / "repo"
+    deliverables = repo / ".shannon" / "deliverables"
+    deliverables.mkdir(parents=True)
+    (deliverables / "injection_exploitation_evidence.md").write_text("# done")
+
+    run_scan_called = []
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        run_scan_called.append(True)
+        return {"status": "completed"}
+
+    with patch("shannon_blackbox.cli.main.ensure_infra", AsyncMock()), \
+         patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://x.com", "-r", str(repo), "-w", "ws1"])
+
+    assert result.exit_code == 0
+    assert "已跑过" in result.output or "already" in result.output.lower()
+    assert run_scan_called == []  # 没调 run_scan
+
+
+def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
+    """--rerun 跳过幂等检测，正常调 run_scan。"""
+    from click.testing import CliRunner
+    from unittest.mock import patch, AsyncMock
+    from shannon_blackbox.cli.main import cli
+
+    repo = tmp_path / "repo"
+    deliverables = repo / ".shannon" / "deliverables"
+    deliverables.mkdir(parents=True)
+    (deliverables / "injection_exploitation_evidence.md").write_text("# old")
+
+    run_scan_called = []
+    captured = {}
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        run_scan_called.append(True)
+        captured["rerun"] = input.rerun
+        return BlackboxPipelineState(status="completed")
+
+    with patch("shannon_blackbox.cli.main.ensure_infra", AsyncMock()), \
+         patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "https://x.com", "-r", str(repo), "-w", "ws1", "--rerun"])
+
+    assert result.exit_code == 0
+    assert run_scan_called == [True]
+    assert captured["rerun"] is True
