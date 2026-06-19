@@ -53,3 +53,28 @@ def test_archive_handles_empty_deliverables(tmp_path):
 
     assert archive.exists()  # 目录创建，即使无文件可移
     assert list(archive.iterdir()) == []
+
+
+def test_detect_true_with_multiple_evidence(tmp_path):
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    for vt in ("injection", "xss", "auth"):
+        (deliverables / f"{vt}_exploitation_evidence.md").write_text("e")
+    assert detect_blackbox_completed(deliverables) is True
+
+
+def test_archive_all_five_evidence_and_findings(tmp_path):
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    for vt in ("injection", "xss", "auth", "ssrf", "authz"):
+        (deliverables / f"{vt}_exploitation_evidence.md").write_text("e")
+        (deliverables / f"{vt}_findings.md").write_text("f")
+    (deliverables / "comprehensive_security_assessment_report.md").write_text("r")
+
+    archive = archive_blackbox_deliverables(deliverables, "20260619-1600")
+
+    assert len(list(archive.glob("*_exploitation_evidence.md"))) == 5
+    assert len(list(archive.glob("*_findings.md"))) == 5
+    assert (archive / "comprehensive_security_assessment_report.md").exists()
+    # deliverables 顶层清空了黑盒产出物
+    assert list(deliverables.glob("*_exploitation_evidence.md")) == []
