@@ -52,6 +52,20 @@ def _to_workflow_summary(result: BlackboxPipelineState, total_duration_ms: int) 
 async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> BlackboxPipelineState:
     """跑黑盒扫描；Ctrl+C 时优雅取消并返回 BlackboxPipelineState(status="cancelled")。"""
+    # 纯黑盒场景（无白盒 session 可接）：worker 自建一个 blackbox session，
+    # deliverables 落 workspaces/<自建session>/deliverables（spec 决策 6）。
+    if not input.workspace_name:
+        from shannon_core.session import SessionManager
+        workspaces_dir = resolve_workspaces_dir(input.repo_path)
+        mgr = SessionManager(workspaces_dir)
+        ws_path = mgr.create_workspace(
+            web_url=input.web_url or "",
+            repo_path=input.repo_path or "",
+            name=None,
+            scan_type="blackbox",
+        )
+        input.workspace_name = ws_path.name
+
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
 

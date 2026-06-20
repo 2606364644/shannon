@@ -212,3 +212,60 @@ async def test_run_scan_rerun_archives_old_evidence_and_uses_new_id(tmp_path, mo
     assert not (deliverables / "injection_exploitation_evidence.md").exists()
     # workflow id 带 -rerun- 后缀
     assert "-rerun-" in captured_wf_id["id"]
+
+
+@pytest.mark.asyncio
+async def test_run_scan_self_creates_session_when_workspace_name_empty(tmp_path, monkeypatch):
+    """纯黑盒（workspace_name 为空）→ worker 自建 blackbox session 并回填 name。
+
+    spec 决策 6：无白盒 session 可接时黑盒自建一个 session，deliverables 落
+    workspaces/<自建session>/deliverables，不报错。
+    """
+    import json
+    import contextlib
+
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+
+    inp = BlackboxPipelineInput(
+        web_url="https://standalone.example.com",
+        repo_path=None,
+        workspace_name=None,  # 纯黑盒
+    )
+
+    mock_handle = AsyncMock()
+    mock_handle.result = AsyncMock(
+        return_value=BlackboxPipelineState(status="completed")
+    )
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=mock_handle)
+
+    def capture_worker(**kwargs):
+        mock_worker = AsyncMock()
+        mock_worker.__aenter__ = AsyncMock(return_value=None)
+        mock_worker.__aexit__ = AsyncMock(return_value=None)
+        return mock_worker
+
+    class FakeSession:
+        log_workflow_complete = AsyncMock()
+
+    @contextlib.asynccontextmanager
+    async def fake_display(meta, use_rich=False):
+        yield FakeSession()
+
+    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("shannon_blackbox.worker.run_with_display", fake_display), \
+         patch("shannon_blackbox.worker.ShutdownController.install"), \
+         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
+        from shannon_blackbox.worker import run_scan
+        await run_scan(inp, "localhost:7233")
+
+    # workspace_name 已被回填
+    assert inp.workspace_name, "纯黑盒应自建 session 并回填 workspace_name"
+
+    # session 文件存在且 scan_type=blackbox
+    ws_dir = tmp_path / "worker" / "workspaces" / inp.workspace_name
+    assert ws_dir.exists(), f"自建 session 目录应存在: {ws_dir}"
+    session_data = json.loads((ws_dir / "session.json").read_text(encoding="utf-8"))
+    assert session_data["scan_type"] == "blackbox"
+    assert session_data["web_url"] == "https://standalone.example.com"
