@@ -61,10 +61,10 @@ def _write_session(workspace: Path, agents_success: dict[str, bool]) -> None:
 @pytest.mark.asyncio
 async def test_builder_auto_resume_skips_completed(tmp_path):
     repo = tmp_path / "repo"; repo.mkdir()
-    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    deliverables = workspace / "deliverables"; deliverables.mkdir(parents=True)
     (deliverables / "pre_recon_deliverable.md").write_text("done")
     (deliverables / "recon_deliverable.md").write_text("done")
-    workspace = tmp_path / "ws"; workspace.mkdir()
     _write_session(workspace, {"pre-recon": True, "recon": True})
 
     builder = WhiteboxResumeStateBuilder()
@@ -82,9 +82,9 @@ async def test_builder_auto_resume_skips_completed(tmp_path):
 @pytest.mark.asyncio
 async def test_builder_aborts_when_file_missing(tmp_path):
     repo = tmp_path / "repo"; repo.mkdir()
-    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
-    # 不写 recon_deliverable.md（文件缺失）
     workspace = tmp_path / "ws"; workspace.mkdir()
+    deliverables = workspace / "deliverables"; deliverables.mkdir(parents=True)
+    # 不写 recon_deliverable.md（文件缺失）
     _write_session(workspace, {"recon": True})
 
     builder = WhiteboxResumeStateBuilder()
@@ -136,10 +136,10 @@ async def test_cleanup_rewind_archives_target_and_after(tmp_path):
 @pytest.mark.asyncio
 async def test_builder_rewind_keeps_only_before_target(tmp_path):
     repo = tmp_path / "repo"; repo.mkdir()
-    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    deliverables = workspace / "deliverables"; deliverables.mkdir(parents=True)
     for f in ("pre_recon_deliverable.md", "recon_deliverable.md", "injection_analysis_deliverable.md"):
         (deliverables / f).write_text("done")
-    workspace = tmp_path / "ws"; workspace.mkdir()
     _write_session(workspace, {"pre-recon": True, "recon": True, "injection-vuln": True})
 
     builder = WhiteboxResumeStateBuilder()
@@ -163,11 +163,11 @@ async def test_builder_rewind_vuln_maps_to_injection_vuln(tmp_path):
     - cleanup(mode="rewind", rewind_target="vuln") 不 crash，归档 injection-vuln 及之后
     """
     repo = tmp_path / "repo"; repo.mkdir()
-    deliverables = repo / ".shannon" / "deliverables"; deliverables.mkdir(parents=True)
+    workspace = tmp_path / "ws"; workspace.mkdir()
+    deliverables = workspace / "deliverables"; deliverables.mkdir(parents=True)
     for f in ("pre_recon_deliverable.md", "recon_deliverable.md",
               "injection_analysis_deliverable.md", "xss_analysis_deliverable.md"):
         (deliverables / f).write_text("done")
-    workspace = tmp_path / "ws"; workspace.mkdir()
     _write_session(workspace, {
         "pre-recon": True, "recon": True,
         "injection-vuln": True, "xss-vuln": True,

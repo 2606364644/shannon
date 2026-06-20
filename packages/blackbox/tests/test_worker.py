@@ -155,12 +155,13 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled():
 @pytest.mark.asyncio
 async def test_run_scan_rerun_archives_old_evidence_and_uses_new_id(tmp_path, monkeypatch):
     """--rerun 时：归档旧 evidence + workflow id 带 -rerun- 后缀。"""
-    repo = tmp_path / "repo"
-    deliverables = repo / ".shannon" / "deliverables"
+    # deliverables 落在 session 维度（workspaces/<session>/deliverables）；
+    # resolve_workspaces_dir 读 SHANNON_WORKER_ROOT（非 SHANNON_WORKSPACES_DIR）。
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# old")
-
-    monkeypatch.setenv("SHANNON_WORKSPACES_DIR", str(tmp_path / "workspaces"))
+    repo = tmp_path / "repo"
 
     captured_wf_id = {}
     mock_handle = AsyncMock()

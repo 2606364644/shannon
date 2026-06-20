@@ -10,7 +10,7 @@ async def test_assemble_report_activity_generates_findings(tmp_path):
     """assemble_report should run FindingsRenderer before assembling."""
     from shannon_core.services.findings_renderer import FindingsRenderer
 
-    deliverables = tmp_path / ".shannon" / "deliverables"
+    deliverables = tmp_path / "workspaces" / "bb-session" / "deliverables"
     deliverables.mkdir(parents=True)
 
     queue = VulnerabilityQueue(vulnerabilities=[
@@ -38,7 +38,7 @@ async def test_model_injection_in_finalize(tmp_path):
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    deliverables = workspace / ".shannon" / "deliverables"
+    deliverables = workspace / "deliverables"
     deliverables.mkdir(parents=True)
 
     report_path = deliverables / "comprehensive_security_assessment_report.md"

@@ -11,7 +11,7 @@ async def test_render_findings_activity_generates_findings(tmp_path):
     from shannon_core.services.findings_renderer import FindingsRenderer
 
     repo = tmp_path / "my-repo"
-    deliverables = repo / ".shannon" / "deliverables"
+    deliverables = tmp_path / "workspaces" / "wb-session" / "deliverables"
     deliverables.mkdir(parents=True)
 
     queue = VulnerabilityQueue(vulnerabilities=[

@@ -250,15 +250,15 @@ def test_delete_workspace_handles_already_deleted_linked_ws(tmp_path):
 
 
 def test_clean_workspace_whitebox(tmp_path):
-    """clean_workspace with whitebox removes repo-centric deliverables + workspace artifacts, keeps session.json."""
+    """clean_workspace with whitebox removes session-centric deliverables + workspace artifacts, keeps session.json."""
     repo = tmp_path / "repo"
     repo.mkdir()
     mgr = SessionManager(tmp_path / "workspaces")
     ws = mgr.create_workspace("https://example.com", str(repo), name="wb-clean", scan_type="whitebox")
     from shannon_core.models.agents import AgentName
     mgr.mark_agent_completed(ws, AgentName.RECON)
-    # Deliverables live repo-centric (<repo>/.shannon/deliverables)
-    deliverables = repo / ".shannon" / "deliverables"
+    # Deliverables live session-centric (ws/deliverables)
+    deliverables = ws / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_queue.json").write_text("[]", encoding="utf-8")
     # Other artifacts live under the workspace
@@ -280,7 +280,7 @@ def test_clean_workspace_whitebox(tmp_path):
     data = json.loads((ws / "session.json").read_text(encoding="utf-8"))
     assert data["completed_agents"] == []
     assert data["deliverables_summary"] is None
-    # Repo-centric deliverables removed
+    # Session-centric deliverables removed
     assert not deliverables.exists()
     # Workspace artifact dirs/files gone
     assert not (ws / "agents").exists()
@@ -292,14 +292,14 @@ def test_clean_workspace_whitebox(tmp_path):
 
 
 def test_clean_workspace_blackbox(tmp_path):
-    """clean_workspace with blackbox removes blackbox-specific deliverables (repo-centric)."""
+    """clean_workspace with blackbox removes blackbox-specific deliverables (session-centric)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    deliverables = repo / ".shannon" / "deliverables"
-    deliverables.mkdir(parents=True)
     mgr = SessionManager(tmp_path / "workspaces")
     ws = mgr.create_workspace("https://example.com", str(repo), name="bb-clean", scan_type="blackbox")
-    # Blackbox-style deliverables (repo-centric)
+    # Blackbox-style deliverables (session-centric: ws/deliverables)
+    deliverables = ws / "deliverables"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("evidence", encoding="utf-8")
     (deliverables / "xss_findings.md").write_text("findings", encoding="utf-8")
     (deliverables / "comprehensive_security_assessment_report.md").write_text("report", encoding="utf-8")

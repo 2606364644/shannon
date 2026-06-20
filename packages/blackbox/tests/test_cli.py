@@ -616,16 +616,17 @@ def test_start_informs_when_blackbox_already_ran(tmp_path, monkeypatch):
     from unittest.mock import patch, AsyncMock
     from shannon_blackbox.cli.main import cli
 
-    # 构造一个已有黑盒 evidence 的 deliverables（指向 repo）
-    repo = tmp_path / "repo"
-    deliverables = repo / ".shannon" / "deliverables"
+    # deliverables 落在 session 维度（workspaces/<session>/deliverables）
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# done")
+    repo = tmp_path / "repo"
 
     run_scan_called = []
     async def fake_run_scan(input, temporal_address, use_rich=False):
         run_scan_called.append(True)
-        return {"status": "completed"}
+        return BlackboxPipelineState(status="completed")
 
     with patch("shannon_blackbox.cli.main.ensure_infra", AsyncMock()), \
          patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
@@ -643,10 +644,11 @@ def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
     from unittest.mock import patch, AsyncMock
     from shannon_blackbox.cli.main import cli
 
-    repo = tmp_path / "repo"
-    deliverables = repo / ".shannon" / "deliverables"
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# old")
+    repo = tmp_path / "repo"
 
     run_scan_called = []
     captured = {}

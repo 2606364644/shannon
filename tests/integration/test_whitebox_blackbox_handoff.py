@@ -3,7 +3,7 @@
 These tests verify the data contracts and file I/O between whitebox
 and blackbox without running the full Temporal workflows.
 
-Deliverables are written repo-centric (<repo>/.shannon/deliverables) to match
+Deliverables are written session-centric (workspaces/<session>/deliverables) to match
 production whitebox output and the documented handoff contract.
 """
 
@@ -18,9 +18,9 @@ from shannon_core.workspace import compute_deliverables_summary, find_workspaces
 from shannon_core.services.workspace_discovery import WorkspaceDiscovery
 
 
-def _repo_deliverables(repo: Path) -> Path:
-    """The repo-centric deliverables dir matching production whitebox output."""
-    d = repo / ".shannon" / "deliverables"
+def _session_deliverables(workspace: Path) -> Path:
+    """The session-centric deliverables dir (ws/deliverables) matching production whitebox output."""
+    d = workspace / "deliverables"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -44,11 +44,11 @@ class TestWhiteboxProducesCompleteDeliverables:
         """Each exploitation queue file should pass schema validation."""
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = _repo_deliverables(repo)
 
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-complete")
         mgr.mark_completed(ws)
+        deliverables = _session_deliverables(ws)
 
         for vc in ["injection", "xss", "auth", "ssrf"]:
             _write_queue(deliverables, vc)
@@ -58,7 +58,7 @@ class TestWhiteboxProducesCompleteDeliverables:
             queue_file = deliverables / f"{vc}_exploitation_queue.json"
             assert has_valid_whitebox_results(queue_file), f"{vc} queue failed validation"
 
-        # Verify deliverables summary resolves repo-centric via session
+        # Verify deliverables summary resolves session-centric via ws/deliverables
         summary = compute_deliverables_summary(ws)
         assert set(summary["vuln_queues"]) == {"injection", "xss", "auth", "ssrf"}
 
@@ -69,12 +69,12 @@ class TestBlackboxLoadsWhiteboxResults:
     def test_discovery_finds_whitebox_workspace(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = _repo_deliverables(repo)
-        _write_queue(deliverables, "injection")
 
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-discover")
         mgr.mark_completed(ws)
+        deliverables = _session_deliverables(ws)
+        _write_queue(deliverables, "injection")
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 1
@@ -85,14 +85,14 @@ class TestBlackboxLoadsWhiteboxResults:
     def test_workspace_discovery_service_finds_workspace(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = _repo_deliverables(repo)
-        _write_queue(deliverables, "auth", vulns=[{
-            "title": "Broken Auth", "description": "d", "severity": "critical", "location": "auth.py:5"
-        }])
 
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-svc")
         mgr.mark_completed(ws)
+        deliverables = _session_deliverables(ws)
+        _write_queue(deliverables, "auth", vulns=[{
+            "title": "Broken Auth", "description": "d", "severity": "critical", "location": "auth.py:5"
+        }])
 
         discovery = WorkspaceDiscovery(tmp_path / "workspaces")
         result = discovery.find_for_blackbox("https://myapp.com", latest=True)
@@ -109,7 +109,7 @@ class TestBlackboxFallbackOnEmptyResults:
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-empty")
         mgr.mark_completed(ws)
-        # Repo has no .shannon/deliverables
+        # Workspace has no deliverables/
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 0
@@ -117,12 +117,12 @@ class TestBlackboxFallbackOnEmptyResults:
     def test_empty_vulns_not_discovered(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = _repo_deliverables(repo)
-        _write_queue(deliverables, "injection", vulns=[])
 
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-no-vulns")
         mgr.mark_completed(ws)
+        deliverables = _session_deliverables(ws)
+        _write_queue(deliverables, "injection", vulns=[])
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 0
@@ -154,18 +154,18 @@ class TestMultiWorkspaceDiscovery:
 
         repo1 = tmp_path / "repo1"
         repo1.mkdir()
-        _write_queue(_repo_deliverables(repo1), "injection")
         mgr = SessionManager(tmp_path / "workspaces")
         ws1 = mgr.create_workspace("https://myapp.com", str(repo1), name="ws-old")
         mgr.mark_completed(ws1)
+        _write_queue(_session_deliverables(ws1), "injection")
 
         time.sleep(0.01)
 
         repo2 = tmp_path / "repo2"
         repo2.mkdir()
-        _write_queue(_repo_deliverables(repo2), "xss")
         ws2 = mgr.create_workspace("https://myapp.com", str(repo2), name="ws-new")
         mgr.mark_completed(ws2)
+        _write_queue(_session_deliverables(ws2), "xss")
 
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
         assert len(results) == 2

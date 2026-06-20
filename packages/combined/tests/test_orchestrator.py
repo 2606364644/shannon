@@ -11,7 +11,7 @@ async def test_run_combined_scan_calls_whitebox_then_blackbox():
     whitebox_result = {
         "status": "completed",
         "workspace_name": "test-ws-001",
-        "deliverables_path": "/repo/workspaces/test-ws-001/.shannon/deliverables",
+        "deliverables_path": "/repo/workspaces/test-ws-001/deliverables",
         "web_url": "https://example.com",
     }
 

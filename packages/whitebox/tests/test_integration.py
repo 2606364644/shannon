@@ -60,7 +60,7 @@ async def test_full_pipeline_mocked(mock_repo, prompts_dir):
         return mock_results.get("pre-recon", ClaudeRunResult(success=True, text="ok"))
 
     with patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
-        deliverables = mock_repo / ".shannon" / "deliverables"
+        deliverables = mock_repo.parent / "workspaces" / "wb-session" / "deliverables"
         deliverables.mkdir(parents=True, exist_ok=True)
 
         for agent_name in [AgentName.PRE_RECON, AgentName.RECON,

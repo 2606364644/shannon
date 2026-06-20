@@ -90,14 +90,14 @@ class TestGetWorkspaceInfo:
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = repo / ".shannon" / "deliverables"
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="test-ws2")
+
+        deliverables = ws / "deliverables"
         deliverables.mkdir(parents=True)
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
         )
-
-        mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", str(repo), name="test-ws2")
 
         info = get_workspace_info(ws)
         assert "injection" in info["deliverables_summary"]["vuln_queues"]
@@ -158,32 +158,31 @@ class TestSummarizeDeliverablesDir:
         assert set(summarize_deliverables_dir(deliverables)["vuln_queues"]) == {"injection", "xss", "auth"}
 
 
-class TestComputeDeliverablesSummaryRepoCentric:
-    """compute_deliverables_summary(ws) must resolve repo-centric deliverables via session."""
+class TestComputeDeliverablesSummarySessionCentric:
+    """compute_deliverables_summary(ws) reads deliverables under the session dir (ws/deliverables)."""
 
-    def test_finds_repo_centric_deliverables(self, tmp_path):
+    def test_finds_session_deliverables(self, tmp_path):
         from shannon_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = repo / ".shannon" / "deliverables"
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-1")
+        # Deliverables live under the session dir, NOT under the repo.
+        deliverables = ws / "deliverables"
         deliverables.mkdir(parents=True)
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
         )
-
-        mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://myapp.com", str(repo), name="wb-1")
-        # Deliverables live under the repo, NOT under the workspace dir.
-        assert not (ws / "deliverables").exists()
+        assert not (repo / ".shannon" / "deliverables").exists()
 
         summary = compute_deliverables_summary(ws)
         assert "injection" in summary["vuln_queues"]
 
     def test_fallback_when_no_session(self, tmp_path):
-        # Bare workspace dir without session.json → fallback to workspaces/<name>/<subdir>.
+        # Bare workspace dir without session.json → deliverables read from workspaces/<name>/<subdir>.
         ws = tmp_path / "workspaces" / "orphan"
-        deliverables = ws / ".shannon" / "deliverables"
+        deliverables = ws / "deliverables"
         deliverables.mkdir(parents=True)
         (deliverables / "xss_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [{"id": "1"}]}), encoding="utf-8"
@@ -204,8 +203,8 @@ class TestComputeDeliverablesSummaryRepoCentric:
 def _create_workspace_with_queues(
     tmp_path: Path, name: str, web_url: str, scan_type: str, vuln_classes: list[str]
 ) -> Path:
-    """Helper: workspace whose session points at a tmp repo, with queue files written
-    repo-centric (<repo>/.shannon/deliverables) — matching production whitebox output."""
+    """Helper: workspace whose queue files live session-centric (ws/deliverables) —
+    matching production whitebox output (deliverables under workspaces/<session>)."""
     from shannon_core.session import SessionManager
 
     repo = tmp_path / "repos" / name
@@ -214,7 +213,7 @@ def _create_workspace_with_queues(
     ws = mgr.create_workspace(web_url, str(repo), name=name, scan_type=scan_type)
     mgr.mark_completed(ws)
 
-    deliverables = repo / ".shannon" / "deliverables"
+    deliverables = ws / "deliverables"
     deliverables.mkdir(parents=True)
     for vc in vuln_classes:
         (deliverables / f"{vc}_exploitation_queue.json").write_text(
@@ -301,7 +300,9 @@ class TestGetWorkspaceVulnCounts:
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        deliverables = repo / ".shannon" / "deliverables"
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="ws")
+        deliverables = ws / "deliverables"
         deliverables.mkdir(parents=True)
         (deliverables / "injection_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": [
@@ -314,9 +315,6 @@ class TestGetWorkspaceVulnCounts:
                 {"title": "C", "description": "d", "severity": "medium", "location": "c.py:3"},
             ]}), encoding="utf-8"
         )
-
-        mgr = SessionManager(tmp_path / "workspaces")
-        ws = mgr.create_workspace("https://x.com", str(repo), name="ws")
         assert get_workspace_vuln_counts(ws) == {"injection": 2, "xss": 1}
 
     def test_empty_deliverables(self, tmp_path):

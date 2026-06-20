@@ -123,7 +123,7 @@ def test_start_shows_deliverables_path(tmp_path, monkeypatch):
         return {
             "status": "completed",
             "workspace_name": "myapp-20260603-143022",
-            "deliverables_path": "/repo/workspaces/myapp-20260603-143022/.shannon/deliverables",
+            "deliverables_path": "/repo/workspaces/myapp-20260603-143022/deliverables",
             "web_url": "https://example.com",
         }
 

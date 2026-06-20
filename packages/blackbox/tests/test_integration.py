@@ -25,7 +25,7 @@ def mock_repo(tmp_path):
     (repo / "README.md").write_text("# Test App")
     subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
-    deliverables = repo / ".shannon" / "deliverables"
+    deliverables = tmp_path / "workspaces" / "bb-session" / "deliverables"
     deliverables.mkdir(parents=True)
     return repo, deliverables
 

@@ -30,7 +30,7 @@ def resolve_workspaces_dir(repo_path: str | None = None) -> Path:
     2. find_project_root() / "workspaces"  (shannon-py 项目根)
 
     注意: repo_path 不再用于定位 workspace 根(曾导致 workspace 落到 repo 父目录)。
-    参数保留仅为调用方签名兼容;deliverables 仍落在 repo_path/.shannon/deliverables。
+    参数保留仅为调用方签名兼容;deliverables 落在 workspaces/<session>/deliverables。
     """
     worker_root = os.getenv("SHANNON_WORKER_ROOT")
     if worker_root:

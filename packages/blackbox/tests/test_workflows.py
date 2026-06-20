@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
