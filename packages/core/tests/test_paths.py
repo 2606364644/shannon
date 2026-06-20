@@ -76,71 +76,40 @@ class TestResolveWorkspacesDir:
 
 
 class TestResolveDeliverablesPath:
-    def test_with_repo_path(self):
+    def test_workspace_name_takes_priority(self, tmp_path):
+        """workspace_name 优先 → workspaces/<name>/deliverables，忽略 repo_path。"""
         result = resolve_deliverables_path(
             repo_path="/data/repos/myrepo",
-            deliverables_subdir=".shannon/deliverables",
-        )
-        assert result == Path("/data/repos/myrepo/.shannon/deliverables")
-
-    def test_with_workspace_name_reads_session(self, tmp_path):
-        ws_dir = tmp_path / "workspaces" / "scan-1"
-        ws_dir.mkdir(parents=True)
-        session_data = {"repo_path": "/data/repos/myrepo", "web_url": "https://example.com"}
-        (ws_dir / "session.json").write_text(json.dumps(session_data))
-
-        result = resolve_deliverables_path(
-            repo_path=None,
-            deliverables_subdir=".shannon/deliverables",
+            deliverables_subdir="deliverables",
             workspace_name="scan-1",
             workspaces_root=tmp_path / "workspaces",
         )
-        assert result == Path("/data/repos/myrepo/.shannon/deliverables")
+        assert result == tmp_path / "workspaces" / "scan-1" / "deliverables"
 
-    def test_with_workspace_name_fallback_when_no_session(self, tmp_path):
-        ws_dir = tmp_path / "workspaces"
+    def test_workspace_name_without_workspaces_root(self, tmp_path, monkeypatch):
+        """workspace_name 但未传 workspaces_root → 用 resolve_workspaces_dir()。"""
+        monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
         result = resolve_deliverables_path(
             repo_path=None,
-            deliverables_subdir=".shannon/deliverables",
+            deliverables_subdir="deliverables",
             workspace_name="scan-1",
-            workspaces_root=ws_dir,
         )
-        assert result == ws_dir / "scan-1" / ".shannon/deliverables"
+        assert result == tmp_path / "worker" / "workspaces" / "scan-1" / "deliverables"
 
-    def test_with_workspace_name_fallback_when_no_repo_in_session(self, tmp_path):
-        ws_dir = tmp_path / "workspaces" / "scan-1"
-        ws_dir.mkdir(parents=True)
-        session_data = {"web_url": "https://example.com"}
-        (ws_dir / "session.json").write_text(json.dumps(session_data))
-
+    def test_repo_path_fallback_when_no_workspace(self):
+        """无 workspace_name 时过渡回退 repo_path/<subdir>。"""
         result = resolve_deliverables_path(
-            repo_path=None,
-            deliverables_subdir=".shannon/deliverables",
-            workspace_name="scan-1",
-            workspaces_root=tmp_path / "workspaces",
+            repo_path="/data/repos/myrepo",
+            deliverables_subdir="deliverables",
         )
-        assert result == tmp_path / "workspaces" / "scan-1" / ".shannon/deliverables"
+        assert result == Path("/data/repos/myrepo/deliverables")
 
     def test_raises_when_no_repo_or_workspace(self):
         with pytest.raises(ValueError, match="必须提供"):
             resolve_deliverables_path(
                 repo_path=None,
-                deliverables_subdir=".shannon/deliverables",
+                deliverables_subdir="deliverables",
             )
-
-    def test_repo_path_takes_priority_over_workspace(self, tmp_path):
-        ws_dir = tmp_path / "workspaces" / "scan-1"
-        ws_dir.mkdir(parents=True)
-        session_data = {"repo_path": "/other/repo"}
-        (ws_dir / "session.json").write_text(json.dumps(session_data))
-
-        result = resolve_deliverables_path(
-            repo_path="/data/repos/myrepo",
-            deliverables_subdir=".shannon/deliverables",
-            workspace_name="scan-1",
-            workspaces_root=tmp_path / "workspaces",
-        )
-        assert result == Path("/data/repos/myrepo/.shannon/deliverables")
 
 
 class TestHasValidWhiteboxResults:
@@ -231,9 +200,9 @@ class TestGetDefaultDeliverablesSubdir:
 
 
 class TestDeliverablesDirForWorkspace:
-    """deliverables_dir_for_workspace resolves repo-centric via session, with fallback."""
+    """deliverables_dir_for_workspace 直接返回 workspace 下的 deliverables 目录。"""
 
-    def test_uses_session_repo_path(self, tmp_path):
+    def test_returns_workspace_deliverables(self, tmp_path):
         from shannon_core.session import SessionManager
 
         repo = tmp_path / "repo"
@@ -241,17 +210,9 @@ class TestDeliverablesDirForWorkspace:
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://x.com", str(repo), name="wb-1")
 
-        assert deliverables_dir_for_workspace(ws) == repo / ".shannon" / "deliverables"
+        assert deliverables_dir_for_workspace(ws) == ws / "deliverables"
 
-    def test_fallback_when_session_repo_empty(self, tmp_path):
-        from shannon_core.session import SessionManager
-
-        mgr = SessionManager(tmp_path / "workspaces")
-        # Empty-string repo_path is falsy → must fall back, not resolve to "/.shannon/...".
-        ws = mgr.create_workspace("https://x.com", "", name="wb-empty")
-        assert deliverables_dir_for_workspace(ws) == tmp_path / "workspaces" / "wb-empty" / ".shannon" / "deliverables"
-
-    def test_fallback_when_no_session(self, tmp_path):
+    def test_works_without_session_json(self, tmp_path):
         ws = tmp_path / "workspaces" / "orphan"
         ws.mkdir(parents=True)
-        assert deliverables_dir_for_workspace(ws) == ws / ".shannon" / "deliverables"
+        assert deliverables_dir_for_workspace(ws) == ws / "deliverables"

@@ -25,67 +25,36 @@ def test_pipeline_progress_query_registered_as_PipelineProgress():
     assert defn.name == "PipelineProgress"
 
 
-def _resolve_deliverables(input: BlackboxPipelineInput) -> Path:
-    """Replicate the path resolution logic from BlackboxScanWorkflow for unit testing."""
-    deliverables_path = None
-    if input.repo_path:
-        deliverables_path = Path(input.repo_path) / input.deliverables_subdir
-    elif input.workspace_name:
-        session_file = Path("workspaces") / input.workspace_name / "session.json"
-        if session_file.exists():
-            session_data = json.loads(session_file.read_text())
-            saved_repo = session_data.get("repo_path")
-            if saved_repo:
-                deliverables_path = Path(saved_repo) / input.deliverables_subdir
-    if not deliverables_path:
-        deliverables_path = Path("workspaces") / (input.workspace_name or "default") / input.deliverables_subdir
-    return deliverables_path
+from shannon_core.utils.paths import resolve_deliverables_path
 
 
-def test_path_resolution_with_repo_path(tmp_path):
-    """When repo_path is provided, deliverables should be under repo."""
+def test_path_resolution_workspace_name_priority(tmp_path):
+    """workspace_name 优先 → workspaces/<name>/deliverables。"""
     repo = tmp_path / "my-repo"
     repo.mkdir()
-
     input = BlackboxPipelineInput(
         web_url="https://example.com",
         repo_path=str(repo),
         workspace_name="my-scan",
     )
-    result = _resolve_deliverables(input)
-    assert result == repo / ".shannon" / "deliverables"
+    result = resolve_deliverables_path(
+        repo_path=input.repo_path,
+        deliverables_subdir=input.deliverables_subdir,
+        workspace_name=input.workspace_name,
+        workspaces_root=tmp_path / "workspaces",
+    )
+    assert result == tmp_path / "workspaces" / "my-scan" / "deliverables"
 
 
-def test_path_resolution_fallback_to_session_data(tmp_path, monkeypatch):
-    """When repo_path is missing but session.json has it, use session data."""
-    monkeypatch.chdir(tmp_path)
-    repo = tmp_path / "target-repo"
+def test_path_resolution_pure_fallback(tmp_path):
+    """无 workspace_name 时回退 repo_path/deliverables。"""
+    repo = tmp_path / "my-repo"
     repo.mkdir()
-
-    # Create session.json with repo_path
-    ws_dir = tmp_path / "workspaces" / "my-scan"
-    ws_dir.mkdir(parents=True)
-    session_data = {"repo_path": str(repo), "web_url": ""}
-    (ws_dir / "session.json").write_text(json.dumps(session_data))
-
-    input = BlackboxPipelineInput(
-        web_url="https://example.com",
-        workspace_name="my-scan",
+    result = resolve_deliverables_path(
+        repo_path=str(repo),
+        deliverables_subdir="deliverables",
     )
-    result = _resolve_deliverables(input)
-    assert result == repo / ".shannon" / "deliverables"
-
-
-def test_path_resolution_pure_fallback(tmp_path, monkeypatch):
-    """When no repo_path and no session data, fall back to workspaces dir."""
-    monkeypatch.chdir(tmp_path)
-
-    input = BlackboxPipelineInput(
-        web_url="https://example.com",
-        workspace_name="my-scan",
-    )
-    result = _resolve_deliverables(input)
-    assert result == Path("workspaces") / "my-scan" / ".shannon" / "deliverables"
+    assert result == repo / "deliverables"
 
 
 def test_state_tracks_found_classes_with_results(tmp_path):

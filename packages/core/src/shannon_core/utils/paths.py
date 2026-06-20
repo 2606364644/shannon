@@ -44,46 +44,33 @@ def resolve_deliverables_path(
     workspace_name: str | None = None,
     workspaces_root: Path | None = None,
 ) -> Path:
-    """统一的 deliverables 路径解析。
+    """统一的 deliverables 路径解析（session 维度）。
 
     优先级：
-    1. repo_path 存在 → repo_path / deliverables_subdir
-    2. workspace_name 存在 → 从 session.json 恢复 repo_path → repo_path / deliverables_subdir
-    3. fallback → workspaces_root / workspace_name / deliverables_subdir
+    1. workspace_name → workspaces_root / workspace_name / deliverables_subdir
+    2. repo_path（过渡兼容）→ repo_path / deliverables_subdir
+    3. 都无 → raise ValueError
+
+    deliverables 自 2026-06 起落在 session 下（workspaces/<session>/deliverables），
+    不再写被扫仓库。repo_path 分支仅供迁移期调用方尚未提供 workspace_name 时兜底。
     """
+    if workspace_name:
+        ws_root = workspaces_root or resolve_workspaces_dir()
+        return ws_root / workspace_name / deliverables_subdir
+
     if repo_path:
         return Path(repo_path) / deliverables_subdir
 
-    if workspace_name:
-        ws_root = workspaces_root or resolve_workspaces_dir()
-        session_file = ws_root / workspace_name / "session.json"
-        if session_file.exists():
-            try:
-                session_data = json.loads(session_file.read_text(encoding="utf-8"))
-                saved_repo = session_data.get("repo_path")
-                if saved_repo:
-                    return Path(saved_repo) / deliverables_subdir
-            except (json.JSONDecodeError, OSError):
-                pass
-        return ws_root / workspace_name / deliverables_subdir
-
-    raise ValueError("必须提供 repo_path 或 workspace_name 之一")
+    raise ValueError("必须提供 workspace_name 或 repo_path 之一")
 
 
 def deliverables_dir_for_workspace(workspace_path: Path) -> Path:
-    """从 workspace 的 session.json 恢复 repo_path，解析真实 deliverables 目录。
+    """workspace 下的 deliverables 目录。
 
-    与写入侧（resolve_deliverables_path(repo_path=...)）保持一致：白盒/黑盒
-    session 记录了 repo_path → 返回 ``<repo>/<deliverables_subdir>``；session 无
-    repo_path 或无 session.json → fallback 到 ``workspaces/<name>/<subdir>``。
-    供消费侧（compute_deliverables_summary 等）统一解析，避免再硬拼 workspace 目录。
+    deliverables 落在 session 下：workspaces/<session>/<subdir>。
+    workspace_path 已是 workspaces/<session>，直接拼子目录。
     """
-    return resolve_deliverables_path(
-        repo_path=None,
-        deliverables_subdir=get_default_deliverables_subdir(),
-        workspace_name=workspace_path.name,
-        workspaces_root=workspace_path.parent,
-    )
+    return workspace_path / get_default_deliverables_subdir()
 
 
 REQUIRED_VULN_FIELDS = {"title", "description", "severity", "location"}

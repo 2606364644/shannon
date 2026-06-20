@@ -6,6 +6,6 @@ def test_default_deliverables_subdir_is_string():
     assert len(DEFAULT_DELIVERABLES_SUBDIR) > 0
 
 
-def test_default_deliverables_subdir_starts_with_dot():
-    assert DEFAULT_DELIVERABLES_SUBDIR.startswith(".")
-    assert "/" in DEFAULT_DELIVERABLES_SUBDIR
+def test_default_deliverables_subdir_is_session_relative():
+    """deliverables 落在 session 下，子目录名固定 'deliverables'（无 .shannon 前缀）。"""
+    assert DEFAULT_DELIVERABLES_SUBDIR == "deliverables"

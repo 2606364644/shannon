@@ -1,1 +1,1 @@
-DEFAULT_DELIVERABLES_SUBDIR: str = ".shannon/deliverables"
+DEFAULT_DELIVERABLES_SUBDIR: str = "deliverables"
