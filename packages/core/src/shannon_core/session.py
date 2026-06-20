@@ -22,7 +22,13 @@ class SessionManager:
 
     def create_workspace(self, web_url: str, repo_path: str, name: str | None = None, *, scan_type: str = "whitebox") -> Path:
         if not name:
-            hostname = web_url.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "-")
+            if web_url:
+                hostname = (
+                    web_url.replace("https://", "").replace("http://", "")
+                    .split("/")[0].replace(".", "-")
+                ) or "repo"
+            else:
+                hostname = Path(repo_path).name.replace(".", "-") or "repo"
             session_id = f"shannon-{int(time.time() * 1000)}"
             name = f"{hostname}_{session_id}"
 

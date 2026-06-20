@@ -8,9 +8,13 @@ from shannon_whitebox.pipeline.shared import PipelineInput
 
 
 @pytest.mark.asyncio
-async def test_run_scan_persists_session_data(tmp_path):
+async def test_run_scan_persists_session_data(tmp_path, monkeypatch):
     """run_scan should create a session.json with repo_path via SessionManager."""
     from shannon_whitebox.pipeline.shared import PipelineState
+
+    # Redirect workspaces root to tmp_path so resolve_workspaces_dir lands here
+    # instead of the shannon-py project root (read by find_project_root()).
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -50,6 +54,63 @@ async def test_run_scan_persists_session_data(tmp_path):
     # Verify enriched return dict
     assert result["workspace_name"] == "test-ws"
     assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_scan_auto_generates_workspace_name_when_none(tmp_path, monkeypatch):
+    """无 -w 时 run_scan 应自动生成 name 并回填 input.workspace_name，
+    使后续 deliverables/session_id 解析一致（必落 session）。
+
+    Task 3 降级覆盖：mock 掉 Temporal/Worker，断言回填后的 workspace_name
+    非空、session.json 已生成、且 deliverables_path 指向 session 维度。
+    """
+    from shannon_whitebox.pipeline.shared import PipelineState
+
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+
+    repo = tmp_path / "myapp"
+    repo.mkdir()
+
+    # 不传 workspace_name —— 走自动生成兜底
+    input = PipelineInput(repo_path=str(repo))
+    assert input.workspace_name is None
+
+    mock_result = PipelineState(status="completed")
+
+    mock_handle = AsyncMock()
+    mock_handle.result = AsyncMock(return_value=mock_result)
+    mock_handle.query = AsyncMock(side_effect=Exception("no query in test"))
+
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=mock_handle)
+
+    mock_worker = AsyncMock()
+    mock_worker.__aenter__ = AsyncMock(return_value=None)
+    mock_worker.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("shannon_whitebox.worker.ShutdownController.install"), \
+         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
+        from shannon_whitebox.worker import run_scan
+        result = await run_scan(input, "localhost:7233")
+
+    # workspace_name 已回填，且基于 repo basename 命名
+    assert input.workspace_name is not None
+    assert input.workspace_name.startswith("myapp_"), input.workspace_name
+
+    # session.json 已落 session 目录
+    session_file = tmp_path / "workspaces" / input.workspace_name / "session.json"
+    assert session_file.exists()
+
+    # 返回的 deliverables_path 走 session 维度（不再落到 repo）
+    assert result["workspace_name"] == input.workspace_name
+    deliverables_path = Path(result["deliverables_path"])
+    assert "workspaces" in deliverables_path.parts
+    assert input.workspace_name in deliverables_path.parts
+    # deliverables 不应落在 repo 下
+    assert str(repo) not in str(deliverables_path)
+
 
 
 @pytest.mark.asyncio

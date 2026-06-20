@@ -33,6 +33,26 @@ def test_session_json_contains_url(tmp_path):
     data = json.loads((ws / "session.json").read_text())
     assert data["web_url"] == "https://test.com"
 
+def test_create_workspace_names_after_repo_basename_when_no_url(tmp_path):
+    """web_url 为空时用 repo basename 命名，不以空 hostname 开头。"""
+    mgr = SessionManager(tmp_path / "workspaces")
+    repo = tmp_path / "myapp"
+    repo.mkdir()
+    ws = mgr.create_workspace(web_url="", repo_path=str(repo), name=None)
+    assert ws.name.startswith("myapp_")
+    assert "shannon-" in ws.name
+
+
+def test_create_workspace_names_after_hostname_when_url_given(tmp_path):
+    """web_url 非空时仍用 hostname（不回退到 repo basename）。"""
+    mgr = SessionManager(tmp_path / "workspaces")
+    repo = tmp_path / "myapp"
+    repo.mkdir()
+    ws = mgr.create_workspace(web_url="https://git.example.com/x/y", repo_path=str(repo), name=None)
+    assert ws.name.startswith("git-example-com_")
+    assert "shannon-" in ws.name
+
+
 def test_create_workspace_includes_scan_type(tmp_path):
     """create_workspace should accept and persist scan_type."""
     mgr = SessionManager(tmp_path / "workspaces")

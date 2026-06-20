@@ -65,15 +65,15 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
     from shannon_core.models.metrics import SessionMetadata
     from shannon_whitebox.audit.display_lifecycle import run_with_display
 
-    # Persist session data so blackbox can discover repo_path
-    if input.workspace_name:
-        workspaces_dir = resolve_workspaces_dir(input.repo_path)
-        mgr = SessionManager(workspaces_dir)
-        mgr.create_workspace(
-            web_url=input.web_url or "",
-            repo_path=input.repo_path,
-            name=input.workspace_name,
-        )
+    # 持久化 session（无 -w 时自动生成 name 并回填，使 deliverables/session_id 解析一致）
+    workspaces_dir = resolve_workspaces_dir(input.repo_path)
+    mgr = SessionManager(workspaces_dir)
+    ws_path = mgr.create_workspace(
+        web_url=input.web_url or "",
+        repo_path=input.repo_path,
+        name=input.workspace_name,
+    )
+    input.workspace_name = ws_path.name
 
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
@@ -257,10 +257,15 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 result_dict["workspace_name"] = input.workspace_name
                 result_dict["web_url"] = input.web_url
 
-                # Deliverables always live repo-centric (<repo>/<subdir>), matching
-                # where whitebox activities write — independent of workspace_name.
+                # deliverables 落 session 下（workspaces/<session>/deliverables）
+                from shannon_core.utils.paths import resolve_deliverables_path
                 result_dict["deliverables_path"] = str(
-                    Path(input.repo_path) / input.deliverables_subdir)
+                    resolve_deliverables_path(
+                        repo_path=input.repo_path,
+                        deliverables_subdir=input.deliverables_subdir,
+                        workspace_name=input.workspace_name,
+                    )
+                )
                 return result_dict
     finally:
         ctrl.uninstall()
