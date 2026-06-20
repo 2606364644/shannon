@@ -102,8 +102,8 @@ def summarize_deliverables_dir(deliverables_dir: Path) -> dict:
 def compute_deliverables_summary(workspace_path: Path) -> dict:
     """Summarize a workspace's deliverables.
 
-    Resolves the deliverables directory repo-centric (via the workspace's session.json),
-    matching where whitebox actually writes — not the legacy ``workspace/deliverables``.
+    Deliverables 落 session 维度 ``<workspace>/deliverables``（自 2026-06 从
+    ``repo/.shannon/deliverables`` 迁移）；``deliverables_dir_for_workspace`` 直接返回该目录。
     """
     return summarize_deliverables_dir(deliverables_dir_for_workspace(workspace_path))
 
