@@ -6,15 +6,21 @@ rerun 场景：白盒+黑盒跑完后，基于已有白盒结果整体重跑黑�
 
 幂等信号用 evidence 文件存在性（黑盒 session.json 是 MetricsTracker 写的 nested
 session.status，无 top-level status；evidence 文件最直接可靠）。
-归档文件清单复用 session.py 的 bb_deliverable_patterns。
+归档文件清单 BB_DELIVERABLE_PATTERNS 本地定义（删 clean 后只剩 rerun 用，
+放 core session.py 名不副实）。
 """
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
 
-# 复用 clean_workspace 的归档清单 BB_DELIVERABLE_PATTERNS
-from shannon_core.session import BB_DELIVERABLE_PATTERNS
+# Blackbox deliverable filename patterns (glob). 归档清单
+# （archive_blackbox_deliverables 用）。删 clean 后只剩 rerun 用。
+BB_DELIVERABLE_PATTERNS: list[str] = [
+    "*_exploitation_evidence.md",
+    "*_findings.md",
+    "comprehensive_security_assessment_report.md",
+]
 
 
 def detect_blackbox_completed(deliverables: Path) -> bool:

@@ -5,15 +5,6 @@ from pathlib import Path
 
 from shannon_core.models.agents import AgentName
 
-# Blackbox deliverable filename patterns (glob). Shared by clean_workspace
-# (remove on rerun) and blackbox_rerun.archive_blackbox_deliverables (move
-# to dated archive). Keep in sync — do not hardcode elsewhere.
-BB_DELIVERABLE_PATTERNS: list[str] = [
-    "*_exploitation_evidence.md",
-    "*_findings.md",
-    "comprehensive_security_assessment_report.md",
-]
-
 
 class SessionManager:
     def __init__(self, workspaces_dir: Path):
@@ -186,74 +177,6 @@ class SessionManager:
         self._handle_workspace_links(ws)
         shutil.rmtree(ws)
         return True
-
-    def clean_workspace(self, workspace_path: Path, scan_type: str) -> None:
-        """Remove scan artifacts from a workspace, preserving session.json.
-
-        scan_type controls which artifacts are removed:
-          - "whitebox": removes deliverables/, agents/, prompts/, scratchpad/,
-            workflow.log, .playwright/, .playwright-cli/
-          - "blackbox": removes blackbox-specific deliverables and agent logs,
-            truncates workflow.log, removes .playwright dirs
-        """
-        import fnmatch
-
-        if scan_type == "whitebox":
-            # Deliverables live session-centric (workspaces/<session>/deliverables); the
-            # agents/prompts/scratchpad dirs stay under the workspace.
-            from shannon_core.utils.paths import deliverables_dir_for_workspace
-            deliverables_dir = deliverables_dir_for_workspace(workspace_path)
-            if deliverables_dir.is_dir():
-                shutil.rmtree(deliverables_dir)
-            for name in ("agents", "prompts", "scratchpad"):
-                target = workspace_path / name
-                if target.is_dir():
-                    shutil.rmtree(target)
-            for name in ("workflow.log",):
-                target = workspace_path / name
-                if target.exists():
-                    target.unlink()
-            for name in (".playwright", ".playwright-cli"):
-                target = workspace_path / name
-                if target.is_dir():
-                    shutil.rmtree(target)
-
-        elif scan_type == "blackbox":
-            # Remove blackbox-specific deliverables (session-centric: workspaces/<session>/deliverables)
-            from shannon_core.utils.paths import deliverables_dir_for_workspace
-            deliverables_dir = deliverables_dir_for_workspace(workspace_path)
-            if deliverables_dir.is_dir():
-                for f in deliverables_dir.iterdir():
-                    if any(fnmatch.fnmatch(f.name, p) for p in BB_DELIVERABLE_PATTERNS):
-                        f.unlink()
-
-            # Remove blackbox agent logs
-            agents_dir = workspace_path / "agents"
-            if agents_dir.is_dir():
-                bb_log_patterns = [
-                    "*-exploit_*.log",
-                    "*-validate-authentication_*.log",
-                ]
-                for f in agents_dir.iterdir():
-                    if any(fnmatch.fnmatch(f.name, p) for p in bb_log_patterns):
-                        f.unlink()
-
-            # Truncate workflow.log
-            workflow_log = workspace_path / "workflow.log"
-            if workflow_log.exists():
-                workflow_log.write_text("", encoding="utf-8")
-
-            # Remove playwright dirs
-            for name in (".playwright", ".playwright-cli"):
-                target = workspace_path / name
-                if target.is_dir():
-                    shutil.rmtree(target)
-
-        # Reset session metadata
-        self.update_session(workspace_path, {
-            "completed_agents": [],
-            "deliverables_summary": None,
-        })
 
     def _handle_workspace_links(self, workspace_path: Path) -> None:
         """Update linked workspaces before deleting this one."""

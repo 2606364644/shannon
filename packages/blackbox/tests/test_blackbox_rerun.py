@@ -100,3 +100,24 @@ def test_archive_avoids_overwrite_on_duplicate_run_ts(tmp_path):
     assert len(archived) == 2
     # 原文件内容保留（未被覆盖）
     assert (archive / "injection_exploitation_evidence.md").read_text() == "first"
+
+
+def test_clean_command_removed():
+    """Regression guard: clean 子命令已删除（被 --fresh/--rerun 取代）。
+
+    调用应非零退出（click 报 no such command "clean"）。护栏防 clean 复活。
+    """
+    from click.testing import CliRunner
+    from shannon_blackbox.cli.main import cli as bb_cli
+    from shannon_whitebox.cli.main import cli as wb_cli
+
+    runner = CliRunner()
+
+    bb_res = runner.invoke(bb_cli, ["workspace", "clean", "x"])
+    assert bb_res.exit_code != 0
+    assert "No such command" in bb_res.output or "clean" in bb_res.output.lower()
+
+    wb_res = runner.invoke(wb_cli, ["workspace", "clean", "x"])
+    assert wb_res.exit_code != 0
+    assert "No such command" in wb_res.output or "clean" in wb_res.output.lower()
+
