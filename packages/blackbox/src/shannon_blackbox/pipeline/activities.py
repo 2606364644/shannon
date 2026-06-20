@@ -85,6 +85,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         executor = AgentExecutor(prompt_manager)
 
         await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
+        deliverables = _get_deliverables_path(input)
         result = await validate_authentication(
             web_url=input.web_url,
             config_path=input.config_path,
@@ -92,6 +93,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             prompt_manager=prompt_manager,
             executor=executor,
             repo_path=input.repo_path or "",
+            deliverables_path=str(deliverables),
             api_key=input.api_key,
             tool_audit_logger=tool_audit_logger,
         )

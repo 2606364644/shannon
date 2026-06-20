@@ -188,12 +188,14 @@ async def run_auth_validation(input: ActivityInput) -> None:
             prompt_manager = PromptManager(prompts_dir)
             executor = AgentExecutor(prompt_manager)
 
+            repo, deliverables, _ = _get_paths(input)
             result = await validate_authentication(
                 web_url=input.web_url,
                 config_path=input.config_path,
                 prompt_manager=prompt_manager,
                 executor=executor,
                 repo_path=input.repo_path,
+                deliverables_path=str(deliverables),
                 api_key=input.api_key,
                 workspace_path=input.workspace_path or "",
                 audit_logger=create_activity_logger(),

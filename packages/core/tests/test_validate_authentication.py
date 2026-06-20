@@ -446,3 +446,60 @@ async def test_auth_validation_structured_success_but_missing_state_file(tmp_pat
     # Double-verification catches the lie: structured output says success but file is missing
     assert result.success is False
     assert result.failure_point == "out_of_band"
+
+
+# --- deliverables_path forwarding (不再 fallback 到 repo) ---
+
+@pytest.mark.asyncio
+async def test_auth_validation_forwards_deliverables_path(tmp_path):
+    """validate_authentication forwards deliverables_path to executor.execute.
+
+    防止 validate-authentication agent 在被扫仓库 mkdir .shannon/deliverables 污染源。
+    """
+    state_file = tmp_path / "auth-state.json"
+
+    async def fake_execute(**kwargs):
+        state_file.write_text(json.dumps({"cookies": [{"name": "s", "value": "v"}]}))
+        return AgentMetrics(duration_ms=5000)
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    deliverables_dir = tmp_path / "session-deliverables"
+    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+            deliverables_path=str(deliverables_dir),
+        )
+
+    assert result.success is True
+    call_kwargs = mock_executor.execute.call_args.kwargs
+    assert call_kwargs.get("deliverables_path") == str(deliverables_dir)
+
+
+@pytest.mark.asyncio
+async def test_executor_raises_when_deliverables_path_missing(tmp_path):
+    """AgentExecutor.execute raises ValueError when deliverables_path 未传.
+
+    防止 executor 内部 fallback 到 repo/.shannon/deliverables 复活污染源。
+    """
+    from shannon_core.agents.executor import AgentExecutor
+    from shannon_core.models.agents import AgentName
+
+    mock_prompt_manager = MagicMock()
+    executor = AgentExecutor(mock_prompt_manager)
+
+    with pytest.raises(ValueError, match="deliverables_path is required"):
+        await executor.execute(
+            agent_name=AgentName.VALIDATE_AUTH,
+            repo_path=str(tmp_path / "repo"),
+        )
+

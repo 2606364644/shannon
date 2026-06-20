@@ -40,7 +40,11 @@ class AgentExecutor:
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
-        deliverables = Path(deliverables_path) if deliverables_path else repo / ".shannon" / "deliverables"
+        if not deliverables_path:
+            raise ValueError(
+                "deliverables_path is required (deliverables 落 session, 不再 fallback 到 repo)"
+            )
+        deliverables = Path(deliverables_path)
         deliverables.mkdir(parents=True, exist_ok=True)
 
         config: Config | None = None

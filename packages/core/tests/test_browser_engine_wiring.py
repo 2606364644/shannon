@@ -138,6 +138,7 @@ async def test_executor_injects_browser_engine_from_config(tmp_path):
         await executor.execute(
             agent_name=AgentName.RECON,
             repo_path=str(repo),
+            deliverables_path=str(repo / "deliverables"),
             config_path=str(config_file),
         )
 
@@ -186,6 +187,7 @@ async def test_executor_no_browser_engine_without_config(tmp_path):
         await executor.execute(
             agent_name=AgentName.RECON,
             repo_path=str(repo),
+            deliverables_path=str(repo / "deliverables"),
         )
 
     # No config → no browser_engine key → PromptManager defaults to "playwright"
@@ -237,6 +239,7 @@ async def test_executor_prompt_variables_override_config_engine(tmp_path):
         await executor.execute(
             agent_name=AgentName.RECON,
             repo_path=str(repo),
+            deliverables_path=str(repo / "deliverables"),
             config_path=str(config_file),
             prompt_variables={"browser_engine": "agent-browser"},
         )

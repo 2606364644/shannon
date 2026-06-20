@@ -1813,6 +1813,7 @@ class TestExecutorForwardsAuditLogger:
             await executor.execute(
                 agent_name=AgentName.RECON,
                 repo_path=str(repo),
+                deliverables_path=str(repo / "deliverables"),
                 audit_logger=sentinel,
             )
         assert mock_run.call_args.kwargs["audit_logger"] is sentinel
