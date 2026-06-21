@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from shannon_core.display.formatters import (
     agent_prefix, format_duration, format_error_block, humanize_tool_call,
-    first_nonempty_line,
+    first_nonempty_line, pad_rule,
 )
 
 
@@ -91,8 +91,9 @@ class RichConsoleRenderer:
 
     def _render_phase(self, e) -> None:
         verb = "Starting" if e.event == "start" else "Completed"
+        body = pad_rule(f"{verb} {e.phase}")
         self._console.print(
-            f"[{e.timestamp}] [bold cyan]PHASE[/]  {verb} {e.phase} {'─' * 20}",
+            f"[{e.timestamp}] [bold cyan]PHASE[/]  {body}",
             highlight=False,
         )
 

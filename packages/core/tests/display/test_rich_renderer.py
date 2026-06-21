@@ -223,3 +223,22 @@ async def test_llm_renders_agent_prefix_for_attribution():
     assert "[Injection]" in out               # agent 短前缀
     assert "Turn 3" in out
     assert "Checking SQL injection in login form" in out
+
+
+async def test_phase_rule_right_edges_align_across_phases():
+    from rich.cells import cell_len
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(PhaseEvent(
+        timestamp="t", category="PHASE", phase="setup", event="start"))
+    await renderer.render(PhaseEvent(
+        timestamp="t", category="PHASE", phase="pre-recon", event="start"))
+    await renderer.render(PhaseEvent(
+        timestamp="t", category="PHASE", phase="pre-recon", event="complete"))
+    out = renderer._console.export_text()
+    lines = [ln for ln in out.splitlines() if "PHASE" in ln]
+    assert len(lines) == 3
+    # 三行右端对齐：显示宽度相等
+    widths = {cell_len(ln) for ln in lines}
+    assert len(widths) == 1, f"phase 行未对齐: {lines}"
+    # 横线存在且非固定 20
+    assert all("─" in ln for ln in lines)
