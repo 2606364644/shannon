@@ -44,6 +44,8 @@ class ActivityInput:
     api_key: str | None = None
     prompt_override: str | None = None
     workspace_path: str | None = None
+    agent_name: str | None = None    # run_agent/run_vuln_agent 的 agent enum value（如 "pre-recon"/"recon"/"injection-vuln"）
+    phase: str | None = None          # log_phase_* 的 phase label（如 "setup"/"pre-recon"/"recon"/"reporting"）
 
 
 @dataclass

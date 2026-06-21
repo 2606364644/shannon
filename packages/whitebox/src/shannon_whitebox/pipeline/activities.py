@@ -76,7 +76,7 @@ async def run_agent(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
     from shannon_core.models.audit import AgentEndResult
 
-    agent_name = AgentName(input.workspace_name)
+    agent_name = AgentName(input.agent_name or input.workspace_name)
     attempt = activity.info().attempt
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session)
@@ -133,7 +133,7 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None = None,
                                    intents: list[str] | None = None) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
-    phase = input.workspace_name or "unknown"
+    phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_start(
         phase, steps=tuple(steps or ()), step_intents=tuple(intents or ()))
 
@@ -148,7 +148,7 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
     phase-start event emitted by ``log_phase_start_activity``.
     """
     from shannon_whitebox.audit.session_registry import get_audit_session
-    phase = input.workspace_name or "unknown"
+    phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
 
 
