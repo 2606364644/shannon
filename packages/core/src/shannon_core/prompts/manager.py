@@ -81,6 +81,8 @@ class PromptManager:
         result = template
         result = result.replace("{{WEB_URL}}", variables.get("web_url", ""))
         result = result.replace("{{REPO_PATH}}", variables.get("repo_path", ""))
+        result = result.replace("{{DELIVERABLES_PATH}}", variables.get("deliverables_path", ""))
+        result = result.replace("{{SCRATCHPAD_PATH}}", variables.get("scratchpad_path", ""))
 
         # Resolve browser session ID (backward compat: fall back to playwright_session)
         session_id = (

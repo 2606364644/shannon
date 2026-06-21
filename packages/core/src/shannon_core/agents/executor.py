@@ -52,7 +52,12 @@ class AgentExecutor:
             config = parse_config(config_path)
         distributed = distribute_config(config)
 
-        variables = {"web_url": web_url, "repo_path": str(repo)}
+        variables = {
+            "web_url": web_url,
+            "repo_path": str(repo),
+            "deliverables_path": str(deliverables),
+            "scratchpad_path": str(deliverables.parent / "scratchpad"),
+        }
         if config:
             variables["browser_engine"] = config.browser_engine
         if prompt_variables:
