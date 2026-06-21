@@ -13,6 +13,12 @@ from shannon_core.display.formatters import (
     first_nonempty_line, pad_rule,
 )
 
+from shannon_core.display.symbols import (
+    AGENT_DONE, AGENT_FAIL, AGENT_START,
+    STEP_DONE, STEP_FAIL, STEP_PENDING,
+    SUMMARY_OK, SUMMARY_FAIL,
+)
+
 
 class RichConsoleRenderer:
     STYLE_MAP = {
@@ -76,18 +82,19 @@ class RichConsoleRenderer:
         self._console.print(Panel(body, title="Shannon Pentest", border_style="cyan"))
 
     def _render_step(self, e) -> None:
+        label = e.intent or e.name
         if e.event == "start":
-            label = e.intent or e.name
             self._console.print(
-                f"[{e.timestamp}] [cyan]STEP[/]  ▸ {label}", highlight=False)
+                f"[{e.timestamp}] [cyan]STEP[/]  {STEP_PENDING} {label}", highlight=False)
             return
-        suffix = ""
-        if e.duration_ms is not None:
-            suffix = f" ({format_duration(e.duration_ms)})"
         if e.error:
-            suffix = f" — {e.error}"
+            self._console.print(
+                f"[{e.timestamp}] [cyan]STEP[/]  {STEP_FAIL} {label}  — {e.error}",
+                highlight=False)
+            return
+        suffix = f"  {format_duration(e.duration_ms)}" if e.duration_ms is not None else ""
         self._console.print(
-            f"[{e.timestamp}] [cyan]STEP[/]  ✓ {e.name}{suffix}", highlight=False)
+            f"[{e.timestamp}] [cyan]STEP[/]  {STEP_DONE} {label}{suffix}", highlight=False)
 
     def _render_phase(self, e) -> None:
         verb = "Starting" if e.event == "start" else "Completed"

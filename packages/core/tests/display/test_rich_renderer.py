@@ -176,8 +176,47 @@ async def test_step_complete_renders_slug_and_duration():
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="complete", duration_ms=12000))
     out = renderer._console.export_text()
-    assert "code-index" in out
+    assert "code-index" in out  # 无 intent 时 fallback 到 slug
     assert "12.0s" in out
+    assert "✓" in out
+
+
+async def test_step_start_uses_pending_circle_symbol():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="start",
+                                    intent="构建调用图与代码索引"))
+    out = renderer._console.export_text()
+    assert "○" in out
+    assert "构建调用图与代码索引" in out
+    assert "▸" not in out  # 旧符号退出
+
+
+async def test_step_complete_uses_done_check_and_intent():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="complete", duration_ms=12000,
+                                    intent="构建调用图与代码索引"))
+    out = renderer._console.export_text()
+    assert "✓" in out
+    assert "构建调用图与代码索引" in out
+    assert "12.0s" in out
+    assert "code-index" not in out  # 英文 slug 退出终端（intent 优先）
+
+
+async def test_step_fail_uses_cross_and_error():
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
+                                    phase="pre-recon", event="complete",
+                                    error="索引构建超时", intent="构建调用图与代码索引"))
+    out = renderer._console.export_text()
+    assert "✗" in out
+    assert "✓" not in out  # 失败不再误用 ✓
+    assert "构建调用图与代码索引" in out
+    assert "索引构建超时" in out
 
 
 async def test_rich_mode_shows_steps_hides_tools_keeps_llm():
