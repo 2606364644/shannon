@@ -114,6 +114,73 @@ async def test_run_scan_auto_generates_workspace_name_when_none(tmp_path, monkey
 
 
 @pytest.mark.asyncio
+async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypatch):
+    """无 -w（自动生成 session）是全新扫描，不该触发 resume 对账。
+
+    回归保护：repo 历史有 git deliverable commit（repo/.shannon 时代扫过）时，无 -w
+    自动生成新 session 后若触发 resume 对账，会把历史 commit（G=True）与新空 session
+    deliverables（F=False）对账，G∧¬F 误判"文件被误删"而中止（NodeGoat 冒烟抓到）。
+    修复：resume 探测只在用户显式 -w（explicit_workspace）时触发。
+    """
+    from shannon_whitebox.pipeline.shared import PipelineState
+
+    repo = tmp_path / "NodeGoat"
+    repo.mkdir()
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+
+    input = PipelineInput(repo_path=str(repo))  # 无 workspace_name
+    assert input.workspace_name is None
+
+    mock_result = PipelineState(status="completed")
+    mock_handle = AsyncMock()
+    mock_handle.result = AsyncMock(return_value=mock_result)
+    mock_handle.query = AsyncMock(side_effect=Exception("no query"))
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=mock_handle)
+    mock_worker = AsyncMock()
+    mock_worker.__aenter__ = AsyncMock(return_value=None)
+    mock_worker.__aexit__ = AsyncMock(return_value=None)
+
+    # builder.build 若被调用即爆炸——无 -w 自动生成 session 不应进 resume 探测块
+    explode_build = AsyncMock(
+        side_effect=AssertionError("无 -w 自动生成 session 不应触发 resume 对账")
+    )
+    with (
+        patch(
+            "shannon_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder"
+        ) as MockBuilder,
+    ):
+        MockBuilder.return_value.build = explode_build
+        with (
+            patch("shannon_whitebox.worker.Client.connect",
+                  AsyncMock(return_value=mock_client)),
+            patch("shannon_whitebox.worker.Worker", return_value=mock_worker),
+            patch("shannon_whitebox.worker.ShutdownController.install"),
+            patch("shannon_whitebox.worker.ShutdownController.uninstall"),
+        ):
+            sess = MagicMock()
+            sess.log_workflow_complete = AsyncMock()
+
+            def fake_display(meta, *args, **kwargs):
+                class _Ctx:
+                    async def __aenter__(self_inner):
+                        return sess
+
+                    async def __aexit__(self_inner, *a):
+                        return False
+                return _Ctx()
+
+            with patch(
+                "shannon_whitebox.audit.display_lifecycle.run_with_display",
+                side_effect=fake_display,
+            ):
+                from shannon_whitebox.worker import run_scan
+                await run_scan(input, "localhost:7233")
+
+    explode_build.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_run_scan_uses_dynamic_task_queue(tmp_path):
     """run_scan should generate a unique task queue per scan, not use a fixed name."""
     from shannon_whitebox.pipeline.shared import PipelineState

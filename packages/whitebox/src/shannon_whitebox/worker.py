@@ -65,6 +65,12 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
     from shannon_core.models.metrics import SessionMetadata
     from shannon_whitebox.audit.display_lifecycle import run_with_display
 
+    # 用户是否显式传 -w：仅显式 -w 才视为 resume 已有 session 的意图。
+    # 无 -w 时自动生成的 session 是全新扫描，不该触发 resume 对账——否则一个历史
+    # repo 的 git deliverable commit 会与新建空 session 的 deliverables 对账（G∧¬F
+    # 误判"文件被误删"而中止）。
+    explicit_workspace = bool(input.workspace_name)
+
     # 持久化 session（无 -w 时自动生成 name 并回填，使 deliverables/session_id 解析一致）
     workspaces_dir = resolve_workspaces_dir(input.repo_path)
     mgr = SessionManager(workspaces_dir)
@@ -101,7 +107,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
     resume_attempt = 0
     workflow_id: str | None = None
     is_fresh = bool(getattr(input, "_fresh", False))
-    if input.workspace_name and not is_fresh:
+    if explicit_workspace and not is_fresh:
         from shannon_whitebox.pipeline.whitebox_resume import (
             WhiteboxResumeStateBuilder,
         )
