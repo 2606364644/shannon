@@ -43,21 +43,22 @@ async def test_audit_session_reaches_console_and_dashboard(tmp_path: Path):
 
     out = buf.getvalue()
     # Scrolling-log lines (RichConsoleRenderer printed each event). color_system=None
-    # strips Rich markup like "[blue]AGENT[/]" to the bare word "AGENT". The tool and
-    # llm events carry an emoji prefix (🔧 / 💭) rather than a bracketed category —
-    # the FileLogRenderer writes [TOOL]/[LLM] to workflow.log, but that stream is not
-    # the capturing console, so we assert the emoji-tagged lines the RichConsoleRenderer
-    # actually emits. Each assertion pins a distinct event the renderer can only have
-    # produced if the dispatcher wired the event through.
+    # strips Rich markup like "[blue]AGENT[/]" to the bare word "AGENT". After the
+    # rich-display-visibility change, rich mode shows the PHASE line and the AGENT
+    # start/end lines, prefixes the llm_response line with the agent tag, but
+    # suppresses the tool_start (🔧) line (show_tools=False). The FileLogRenderer
+    # still writes [TOOL]/[LLM] to workflow.log, but that stream is not the
+    # capturing console. Each assertion pins a distinct event the renderer can only
+    # have produced if the dispatcher wired the event through.
     assert "AGENT" in out and "injection-exploit" in out              # agent start line
     assert "▶ [Injection] injection-exploit started" in out           # agent start (full)
-    assert "🔧 Bash(command=curl 'http://x/?q=<script>')" in out      # tool_start line
-    assert "💭 Turn 2: reflected XSS confirmed" in out                # llm_response line
-    # Phase is suppressed from the scrolling log in rich mode; it lives in the
-    # dashboard status line only. color_system=None would strip "[bold cyan]PHASE[/]"
-    # to bare "PHASE"; its absence proves show_phase=False is wired through the
-    # WorkflowLogger. The phase name still reaches the buffer via the dashboard.
-    assert "PHASE" not in out                                         # no scrolling phase line
-    assert "Starting exploitation" not in out
+    assert "💭 [Injection] Turn 2: reflected XSS confirmed" in out    # llm_response line (agent-prefixed)
+    assert "🔧" not in out                                            # tool_start suppressed in rich mode
+    # Phase is shown in the scrolling log in rich mode (show_phase=True): the
+    # PHASE line renders, and color_system=None strips "[bold cyan]PHASE[/]" to
+    # the bare word "PHASE". Its presence proves the WorkflowLogger wired
+    # show_phase=True through to the RichConsoleRenderer.
+    assert "PHASE" in out                                             # scrolling phase line shown
+    assert "Starting exploitation" in out
     assert "exploitation" in out                                      # phase in status line
     assert "1 done" in out                                            # completed_count
