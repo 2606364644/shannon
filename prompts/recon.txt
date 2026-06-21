@@ -78,10 +78,6 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
 Please use these tools for the following use cases:
 - Task tool: **MANDATORY for ALL source code analysis.** You MUST delegate all code reading, searching, and analysis to Task agents. DO NOT use Read, Glob, or Grep tools for source code.
 - **Browser Automation:** {{BROWSER_COMMANDS}} Always pass `{{BROWSER_SESSION_FLAG}}` to every command for session isolation.
-- **save-deliverable (CLI Tool):** Saves your deliverable files with automatic validation.
-  - **Usage:** `save-deliverable --type <TYPE> --file-path <path>` or `--content '<text>'`
-  - **Returns:** JSON to stdout: `{"status":"success","filepath":"..."}` or `{"status":"error","message":"...","retryable":true}`
-  - **For large reports:** Write to disk first, then use `--file-path`. Do NOT pass large reports via `--content`.
 
 - **Bash tool:** Use for creating directories, copying files, and other shell commands as needed.
 
@@ -176,7 +172,7 @@ You must follow this methodical four-step process:
 </systematic_approach>
 
 <deliverable_instructions>
-When you have a complete understanding of the attack surface, you MUST synthesize all of your findings into a single, detailed Markdown report and save it using the save-deliverable CLI with --type RECON.
+When you have a complete understanding of the attack surface, you MUST synthesize all of your findings into a single, detailed Markdown report and write it to `{{DELIVERABLES_PATH}}/recon_deliverable.md` using the Write tool.
 
 Your report MUST use the following structure precisely:
 
@@ -490,9 +486,9 @@ CRITICAL: Only include sources tracing to dangerous sinks (shell, DB, file ops, 
    - Use the **Write** tool to create `{{DELIVERABLES_PATH}}/recon_deliverable.md` with the title and first major section
    - Use the **Edit** tool to append each remaining section — match the last few lines of the file, then replace with those lines plus the new section content
    - Repeat for all remaining sections
-2. Run `save-deliverable` with `--type RECON --file-path "{{DELIVERABLES_PATH}}/recon_deliverable.md"`
+2. Confirm `{{DELIVERABLES_PATH}}/recon_deliverable.md` is complete with all sections
 
-**WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations. Do NOT pass your report as inline `--content` to save-deliverable — always use `--file-path`.
+**WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 Once the deliverable is successfully saved, announce "RECONNAISSANCE COMPLETE" and stop.
 
