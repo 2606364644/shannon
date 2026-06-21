@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from shannon_core.models.queue_schemas import Vulnerability, VulnerabilityQueue
+import logging
+from pathlib import Path
 
-from shannon_blackbox.services.exploitation_checker import CoverageResult
+from shannon_core.models.queue_schemas import Vulnerability, VulnerabilityQueue
+from shannon_core.utils.file_io import (
+    async_path_exists,
+    async_read_file,
+    async_write_file,
+)
+
+from shannon_blackbox.services.exploitation_checker import (
+    CoverageResult,
+    ExploitationChecker,
+)
 
 # vuln_class → 展示字段的 (标签, 属性名) 列表。属性名对齐 queue_schemas 各子类字段。
 _CLASS_FIELDS: dict[str, list[tuple[str, str]]] = {
@@ -68,3 +79,38 @@ def render_unverified_section(result: CoverageResult, queue: VulnerabilityQueue)
                     lines.append(f"- **{label}:** {val}")
         lines.append("")
     return "\n".join(lines)
+
+
+logger = logging.getLogger(__name__)
+
+
+async def close_coverage_gaps(
+    deliverables_path: Path,
+    vuln_classes: list[str],
+) -> list[CoverageResult]:
+    """对每类 exploit 计算 coverage，未覆盖则幂等追加 evidence 未覆盖节。
+
+    返回存在未覆盖条目的 CoverageResult 列表（供调用方/测试断言）。
+    evidence 或 queue 缺失 → 跳过该类（不报错）。
+    """
+    uncovered_results: list[CoverageResult] = []
+    for vc in vuln_classes:
+        queue_path = deliverables_path / f"{vc}_exploitation_queue.json"
+        evidence_path = deliverables_path / f"{vc}_exploitation_evidence.md"
+        result = await ExploitationChecker.check_coverage(queue_path, evidence_path, vc)
+        if result is None or not result.uncovered_ids:
+            continue
+        evidence_text = await async_read_file(evidence_path)
+        if _UNVERIFIED_HEADING in evidence_text:
+            # 幂等：已含未覆盖节，跳过追加（assemble 重跑安全）
+            uncovered_results.append(result)
+            continue
+        queue = VulnerabilityQueue.model_validate_json(await async_read_file(queue_path))
+        section = render_unverified_section(result, queue)
+        await async_write_file(evidence_path, evidence_text.rstrip("\n") + "\n" + section)
+        logger.warning(
+            "exploit coverage gap: %s — %d/%d uncovered: %s",
+            vc, len(result.uncovered_ids), result.total, sorted(result.uncovered_ids),
+        )
+        uncovered_results.append(result)
+    return uncovered_results
