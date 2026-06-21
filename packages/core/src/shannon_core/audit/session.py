@@ -28,11 +28,9 @@ class AuditSession:
         self._use_rich = use_rich
         self._console = console
         self._dashboard = dashboard
-        self._agent_logger: AgentLogger | None = None
         self._workflow_logger: WorkflowLogger | None = None
         self._metrics_tracker: MetricsTracker | None = None
         self._lock = asyncio.Lock()
-        self._current_agent_name: str | None = None
 
     async def initialize(self, workflow_id: str | None = None) -> None:
         """Create directory structure and initialize all components."""
@@ -45,10 +43,12 @@ class AuditSession:
         await self._metrics_tracker.initialize(workflow_id)
 
     async def start_agent(self, agent_name: str, prompt: str, attempt: int = 1) -> None:
-        """Initialize an agent logger, save prompt, and log start events."""
-        self._current_agent_name = agent_name
-        self._agent_logger = AgentLogger(self._meta, agent_name, attempt)
-        await self._agent_logger.initialize()
+        """Save prompt, log start events, and register with metrics.
+
+        Per-agent JSON log creation moved to SessionToolAuditLogger.initialize
+        (called by the activity after this), so concurrent agents no longer race
+        on a shared _agent_logger field.
+        """
         await AgentLogger.save_prompt(self._meta, agent_name, prompt)
 
         if self._workflow_logger:
@@ -58,34 +58,22 @@ class AuditSession:
         if self._metrics_tracker:
             self._metrics_tracker.start_agent(agent_name, attempt)
 
-    async def log_event(self, event_type: str, event_data: Any) -> None:
-        """Dispatch events to both agent log (JSON) and workflow log (human-readable)."""
-        if self._agent_logger:
-            await self._agent_logger.log_event(event_type, event_data)
+    async def log_llm_turn(self, agent_name: str, turn: int, content: str) -> None:
+        """Route an LLM turn to the workflow log with explicit agent attribution."""
         if self._workflow_logger:
-            if event_type == "tool_start" and isinstance(event_data, dict):
-                await self._workflow_logger.log_tool_start(
-                    self._current_agent_name or "unknown",
-                    event_data.get("toolName", "unknown"),
-                    event_data.get("parameters", {}),
-                )
-            elif event_type == "llm_response" and isinstance(event_data, dict):
-                await self._workflow_logger.log_llm_response(
-                    self._current_agent_name or "unknown",
-                    event_data.get("turn", 0),
-                    event_data.get("content", ""),
-                )
+            await self._workflow_logger.log_llm_response(agent_name, turn, content)
+
+    async def log_tool_call(self, agent_name: str, tool_name: str, parameters: Any) -> None:
+        """Route a tool call to the workflow log with explicit agent attribution."""
+        if self._workflow_logger:
+            await self._workflow_logger.log_tool_start(agent_name, tool_name, parameters)
 
     async def end_agent(self, agent_name: str, result: AgentEndResult) -> None:
-        """Close agent log, update metrics, and log end events."""
-        if self._agent_logger:
-            await self._agent_logger.log_event("agent_end", {
-                "success": result.success,
-                "duration_ms": result.duration_ms,
-            })
-            await self._agent_logger.close()
-            self._agent_logger = None
+        """Log end events and update metrics.
 
+        Per-agent JSON log close moved to SessionToolAuditLogger.close
+        (called by the activity before this).
+        """
         if self._workflow_logger:
             details = AgentLogDetails(
                 attempt_number=result.attempt_number,
@@ -100,8 +88,6 @@ class AuditSession:
             async with self._lock:
                 await self._metrics_tracker.reload()
                 await self._metrics_tracker.end_agent(agent_name, result)
-
-        self._current_agent_name = None
 
     async def log_phase_start(self, phase: str, steps: tuple[str, ...] = (),
                               step_intents: tuple[str | None, ...] = ()) -> None:
