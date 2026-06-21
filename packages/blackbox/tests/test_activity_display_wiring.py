@@ -20,9 +20,11 @@ async def test_session_tool_audit_logger_feeds_workflow_log(tmp_path: Path):
     set_audit_session(session)
     try:
         await session.start_agent("injection-exploit", "p", attempt=1)
-        lg = SessionToolAuditLogger(session)
+        lg = SessionToolAuditLogger(session, "injection-exploit", attempt=1)
+        await lg.initialize()
         await lg.log_tool_start("Bash", {"command": "curl 'http://x/?q=<script>'"})
         await lg.log_assistant_turn(1, "confirmed reflected XSS")
+        await lg.close(success=True, duration_ms=100)
         await session.end_agent("injection-exploit", AgentEndResult(
             success=True, duration_ms=100, cost_usd=0.01, attempt_number=1))
     finally:

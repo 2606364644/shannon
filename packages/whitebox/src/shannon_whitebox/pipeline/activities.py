@@ -79,7 +79,7 @@ async def run_agent(input: ActivityInput) -> dict:
     agent_name = AgentName(input.agent_name or input.workspace_name)
     attempt = activity.info().attempt
     session = get_audit_session()
-    tool_audit_logger = SessionToolAuditLogger(session)
+    tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
     try:
         repo, deliverables, _ = _get_paths(input)
@@ -88,6 +88,7 @@ async def run_agent(input: ActivityInput) -> dict:
         executor = AgentExecutor(prompt_manager)
 
         await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
+        await tool_audit_logger.initialize()
         metrics = await executor.execute(
             agent_name=agent_name,
             repo_path=str(repo),
@@ -99,6 +100,7 @@ async def run_agent(input: ActivityInput) -> dict:
             prompt_override=input.prompt_override,
             tool_audit_logger=tool_audit_logger,
         )
+        await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
             success=True,
             duration_ms=metrics.duration_ms,
@@ -108,6 +110,8 @@ async def run_agent(input: ActivityInput) -> dict:
         ))
         return metrics.model_dump()
     except PentestError as e:
+        await tool_audit_logger.close(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
@@ -117,6 +121,8 @@ async def run_agent(input: ActivityInput) -> dict:
         # Temporal for retry decisions — both are intended, not double-logging.
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
+        await tool_audit_logger.close(
+            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))

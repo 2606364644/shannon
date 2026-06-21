@@ -25,9 +25,11 @@ async def test_session_tool_audit_logger_feeds_workflow_log(tmp_path: Path):
     set_audit_session(session)
     try:
         await session.start_agent("injection-vuln", "p", attempt=1)
-        lg = SessionToolAuditLogger(session)
+        lg = SessionToolAuditLogger(session, "injection-vuln", attempt=1)
+        await lg.initialize()
         await lg.log_tool_start("Bash", {"command": "rg -n eval"})
         await lg.log_assistant_turn(1, "found sinks")
+        await lg.close(success=True, duration_ms=100)
         await session.end_agent("injection-vuln", AgentEndResult(
             success=True, duration_ms=100, cost_usd=0.01, attempt_number=1))
     finally:
