@@ -69,7 +69,7 @@ Focus Areas:
 </methodology>
 
 <output_format>
-Write your findings to `.shannon/deliverables/recon_deliverable.md` with these sections:
+Write your findings to `{{DELIVERABLES_PATH}}/recon_deliverable.md` with these sections:
 
 ## 1. Technology Stack
 - Server-side: [framework, language, version]

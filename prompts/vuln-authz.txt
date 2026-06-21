@@ -37,7 +37,7 @@ Success criterion: A complete, code-backed analysis of every potential authoriza
 </critical>
 
 <starting_context>
-- Your **primary source of truth** for authorization test targets is the reconnaissance report at `.shannon/deliverables/recon_deliverable.md`. Look specifically for:
+- Your **primary source of truth** for authorization test targets is the reconnaissance report at `{{DELIVERABLES_PATH}}/recon_deliverable.md`. Look specifically for:
   - **"Horizontal" section:** Endpoints where users access resources by ID that might belong to other users
   - **"Vertical" section:** Admin/privileged endpoints that regular users shouldn't access
   - **"Context" section:** Multi-step workflows where order/state matters
@@ -53,8 +53,8 @@ Success criterion: A complete, code-backed analysis of every potential authoriza
 
 **Phase Sequence:** RECON (Complete) → **AUTHZ ANALYSIS (You)** → EXPLOITATION (next phase)
 
-**Your Input:** `.shannon/deliverables/recon_deliverable.md`, `.shannon/deliverables/pre_recon_deliverable.md` (reconnaissance findings)
-**Your Output:** `.shannon/deliverables/authz_analysis_deliverable.md` (analysis report for exploitation phase)
+**Your Input:** `{{DELIVERABLES_PATH}}/recon_deliverable.md`, `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md` (reconnaissance findings)
+**Your Output:** `{{DELIVERABLES_PATH}}/authz_analysis_deliverable.md` (analysis report for exploitation phase)
 
 **WHAT HAPPENED BEFORE YOU:**
 - Reconnaissance agent mapped application architecture, endpoints, and data flows
@@ -134,7 +134,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 ### 1) Horizontal Authorization Analysis
 
 - **Create To Dos:**
-    For each item listed under **`.shannon/deliverables/recon_deliverable.md` → section 8 "Horizontal"*, use the TodoWrite tool to create a task entry.
+    For each item listed under **`{{DELIVERABLES_PATH}}/recon_deliverable.md` → section 8 "Horizontal"*, use the TodoWrite tool to create a task entry.
     
 - **Process:**
     - Start at the identified endpoint.
@@ -166,7 +166,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 ### 2) Vertical Authorization Analysis
 
 - **Create To Dos:**
-    For each item listed under **`.shannon/deliverables/recon_deliverable.md` →  section 8 "Vertical"**, use the TodoWrite tool to create a task entry.
+    For each item listed under **`{{DELIVERABLES_PATH}}/recon_deliverable.md` →  section 8 "Vertical"**, use the TodoWrite tool to create a task entry.
     
 - **Process:**
     - Start at the identified endpoint.
@@ -192,7 +192,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 ### 3) Context / Workflow Authorization Analysis
 
 - **Create To Dos:**
-    For each item listed under **`.shannon/deliverables/recon_deliverable.md` → section 8 "Context"**, use the TodoWrite tool to create a task entry.
+    For each item listed under **`{{DELIVERABLES_PATH}}/recon_deliverable.md` → section 8 "Context"**, use the TodoWrite tool to create a task entry.
     
 - **Process:**
     - Start at the endpoint that represents a step in a workflow.
@@ -356,10 +356,10 @@ examples:
 1. **Todo Completion:** ALL tasks in your TodoWrite list must be marked as "completed"
 2. **Deliverable Generation:** Your deliverable must be successfully saved using the save-deliverable CLI tool:
    - **CHUNKED WRITING (MANDATORY):**
-     1. Use the **Write** tool to create `.shannon/deliverables/authz_analysis_deliverable.md` with the title and first major section
+     1. Use the **Write** tool to create `{{DELIVERABLES_PATH}}/authz_analysis_deliverable.md` with the title and first major section
      2. Use the **Edit** tool to append each remaining section — match the last few lines of the file, then replace with those lines plus the new section content
      3. Repeat step 2 for all remaining sections
-     4. Run `save-deliverable` with `--type AUTHZ_ANALYSIS --file-path ".shannon/deliverables/authz_analysis_deliverable.md"`
+     4. Run `save-deliverable` with `--type AUTHZ_ANALYSIS --file-path "{{DELIVERABLES_PATH}}/authz_analysis_deliverable.md"`
      **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **Note:** Save your deliverable markdown via save-deliverable first. The exploitation queue is captured automatically at the end of your session.

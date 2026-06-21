@@ -82,7 +82,7 @@ Compile findings into a structured deliverable.
 </methodology>
 
 <output_format>
-Write your findings to `.shannon/deliverables/recon_deliverable.md` with these sections:
+Write your findings to `{{DELIVERABLES_PATH}}/recon_deliverable.md` with these sections:
 
 ## 1. Architecture Overview
 - Framework and language
