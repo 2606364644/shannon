@@ -74,7 +74,7 @@ async def test_agent_start_shows_prefix():
 async def test_agent_end_completed_shows_metrics():
     renderer, _ = _renderer_with_capture()
     await renderer.render(AgentEvent(
-        timestamp="t", category="AGENT", agent_name="xss-vuln",
+        timestamp="2026-06-22 00:25:17", category="AGENT", agent_name="xss-vuln",
         event="end", attempt=1, duration_ms=5200, cost_usd=0.15, success=True))
     out = renderer._console.export_text()
     assert "Completed" in out
@@ -82,19 +82,19 @@ async def test_agent_end_completed_shows_metrics():
     assert "0.15" in out
     assert "✓" in out       # 成功符号
     assert "AGENT" in out   # 带 AGENT 标签前缀（与 start 行一致）
-    assert "[t]" in out     # 补时间戳前缀
+    assert "[2026-06-22 00:25:17]" in out  # 时间戳前缀（真实格式含空格，Rich 不当 tag）
 
 
 async def test_agent_end_failed_shows_cross_timestamp_and_error():
     renderer, _ = _renderer_with_capture()
     await renderer.render(AgentEvent(
-        timestamp="t", category="AGENT", agent_name="xss-vuln",
+        timestamp="2026-06-22 00:25:17", category="AGENT", agent_name="xss-vuln",
         event="end", attempt=1, duration_ms=5200, success=False, error="boom"))
     out = renderer._console.export_text()
     assert "✗" in out
     assert "failed" in out
     assert "boom" in out
-    assert "[t]" in out     # 补时间戳前缀
+    assert "[2026-06-22 00:25:17]" in out  # 时间戳前缀（真实格式含空格，Rich 不当 tag）
     assert "AGENT" in out
 
 
