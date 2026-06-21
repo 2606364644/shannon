@@ -6,6 +6,7 @@ from shannon_core.services.framework_analyzer import (
     FRAMEWORK_PATTERNS,
     InferredEndpoint,
     FrameworkAnalysisResult,
+    _detect_framework,
     _generate_inferred_endpoints,
     _build_recommendations,
 )
@@ -161,3 +162,51 @@ class TestBuildRecommendations:
         recs = _build_recommendations(framework, endpoints)
         for vp in framework.vulnerability_patterns:
             assert vp in recs
+
+
+class TestDetectFramework:
+    """Regression: detection patterns that contain regex metacharacters but are
+    meant literally (e.g. ``finale.initialize(`` with an unbalanced ``(``) must
+    match their literal occurrence instead of raising ``re.error``."""
+
+    def _finale_pattern(self, initialize=..., import_=()):
+        return FrameworkPattern(
+            name="finale-rest",
+            detection_patterns={
+                "import": import_,
+                "initialize": initialize if initialize is not ... else ("finale.initialize(",),
+                "config": ("finale.resource(",),
+            },
+            endpoint_templates=(),
+            vulnerability_patterns=(),
+        )
+
+    def test_literal_paren_pattern_matches(self, tmp_path):
+        fw = self._finale_pattern()
+        (tmp_path / "server.js").write_text(
+            'var finale = require("finale-rest");\nfinale.initialize(app);'
+        )
+        assert _detect_framework(str(tmp_path), fw) is True
+
+    def test_no_match_returns_false_without_subpattern_warning(self, tmp_path, caplog):
+        # import is a real regex; initialize is a literal with an unbalanced '('
+        fw = self._finale_pattern(
+            initialize=("finale.initialize(",), import_=("import.*finale.*from",)
+        )
+        (tmp_path / "server.js").write_text("var express = require('express');\n")
+
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            assert _detect_framework(str(tmp_path), fw) is False
+        assert not any(
+            "unterminated subpattern" in r.getMessage() for r in caplog.records
+        )
+
+    def test_regex_pattern_still_works(self, tmp_path):
+        # The ``.*`` regex must keep working once the literal fast-path misses.
+        fw = self._finale_pattern(import_=("import.*finale.*from",), initialize=())
+        (tmp_path / "server.js").write_text(
+            "import finale from 'finale-rest';\n"
+        )
+        assert _detect_framework(str(tmp_path), fw) is True

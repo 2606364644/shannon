@@ -154,6 +154,25 @@ async def analyze_frameworks(
     )
 
 
+def _pattern_in_content(detection_pattern: str, content: str) -> bool:
+    """Match a detection pattern against file content.
+
+    Detection patterns mix literal substrings (e.g. ``finale.initialize(``,
+    ``require("finale-rest")``) with simple regexes (e.g.
+    ``import.*finale.*from``). Literal patterns that carry regex metacharacters —
+    notably the unbalanced ``(`` in ``finale.initialize(`` — raise ``re.error``
+    if handed straight to ``re.search`` (the historical "unterminated
+    subpattern" warning). Match the literal substring first, and only fall back
+    to regex for patterns that actually use regex syntax.
+    """
+    if detection_pattern in content:
+        return True
+    try:
+        return re.search(detection_pattern, content) is not None
+    except re.error:
+        return False
+
+
 def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bool:
     """Scan source files for framework initialization patterns."""
     all_patterns = list(pattern.detection_patterns.get("import", ())) + list(
@@ -167,7 +186,7 @@ def _detect_framework(codebase_path: str, pattern: FrameworkPattern) -> bool:
         for file_path in source_files:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             for detection_pattern in all_patterns:
-                if re.search(detection_pattern, content):
+                if _pattern_in_content(detection_pattern, content):
                     logger.info('Framework pattern "%s" found in %s', detection_pattern, file_path)
                     return True
     except Exception as exc:
