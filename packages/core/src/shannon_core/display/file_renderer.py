@@ -10,6 +10,8 @@ from shannon_core.display.formatters import (
     agent_prefix, format_duration, format_error_block, humanize_tool_call,
 )
 
+from shannon_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
+
 
 _SEP = "=" * 80
 
@@ -134,7 +136,7 @@ class FileLogRenderer:
             "Agent Breakdown:",
         ]
         for m in e.agents:
-            mark = "✓" if m.success else "✗"
+            mark = SUMMARY_OK if m.success else SUMMARY_FAIL
             cost = f", ${m.cost_usd:.4f}" if m.cost_usd is not None else ""
             lines.append(f"  {mark} {m.name} ({format_duration(m.duration_ms)}{cost})")
         if e.error:

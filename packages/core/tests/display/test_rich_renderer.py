@@ -142,6 +142,7 @@ async def test_summary_completed_renders_panel():
     assert "COMPLETED" in out
     assert "12.4s" in out
     assert "xss-vuln" in out
+    assert "✓" in out  # summary 行用 SUMMARY_OK
 
 
 async def test_resume_renders_message():

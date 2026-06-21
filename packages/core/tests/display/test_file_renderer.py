@@ -209,3 +209,23 @@ async def test_header_renders_repo_and_monitor_when_offline():
     assert "Monitor:" in out
     assert "8233" in out
     assert "Target URL:  N/A" not in out     # offline -> no N/A target line
+
+
+async def test_file_summary_uses_ok_symbol_for_success():
+    from shannon_core.display.events import AgentMetric, SummaryEvent
+    from shannon_core.display.file_renderer import FileLogRenderer
+
+    class _Buf:
+        def __init__(self):
+            self.s = ""
+
+        async def write(self, s):
+            self.s += s
+
+    buf = _Buf()
+    r = FileLogRenderer(buf)
+    await r.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=12400, total_cost_usd=0.3450,
+        agents=[AgentMetric(name="xss-vuln", duration_ms=4100, cost_usd=0.165)]))
+    assert "✓ xss-vuln" in buf.s

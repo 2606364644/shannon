@@ -167,7 +167,7 @@ class RichConsoleRenderer:
             table.add_column("Duration")
             table.add_column("Cost")
             for m in e.agents:
-                mark = "✓" if m.success else "✗"
+                mark = SUMMARY_OK if m.success else SUMMARY_FAIL
                 cost = f"${m.cost_usd:.4f}" if m.cost_usd is not None else "—"
                 table.add_row(mark, m.name, format_duration(m.duration_ms), cost)
             self._console.print(table)
