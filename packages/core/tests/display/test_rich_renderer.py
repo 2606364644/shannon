@@ -80,6 +80,22 @@ async def test_agent_end_completed_shows_metrics():
     assert "Completed" in out
     assert "5.2s" in out
     assert "0.15" in out
+    assert "✓" in out       # 成功符号
+    assert "AGENT" in out   # 带 AGENT 标签前缀（与 start 行一致）
+    assert "[t]" in out     # 补时间戳前缀
+
+
+async def test_agent_end_failed_shows_cross_timestamp_and_error():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(AgentEvent(
+        timestamp="t", category="AGENT", agent_name="xss-vuln",
+        event="end", attempt=1, duration_ms=5200, success=False, error="boom"))
+    out = renderer._console.export_text()
+    assert "✗" in out
+    assert "failed" in out
+    assert "boom" in out
+    assert "[t]" in out     # 补时间戳前缀
+    assert "AGENT" in out
 
 
 async def test_tool_renders_humanized():

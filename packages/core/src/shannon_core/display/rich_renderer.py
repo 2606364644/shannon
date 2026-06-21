@@ -6,6 +6,7 @@ a category->style map for consistent color semantics.
 from __future__ import annotations
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from shannon_core.display.formatters import (
@@ -111,14 +112,18 @@ class RichConsoleRenderer:
         return f"{pfx} {agent_name}"
 
     def _render_agent(self, e) -> None:
+        ts = escape(f"[{e.timestamp}]")
         title = self._agent_panel_title(e.agent_name)
         if e.event == "start":
-            self._console.print(f"[{e.timestamp}] [blue]AGENT[/]  ▶ {title} started (attempt {e.attempt})")
+            self._console.print(
+                f"{ts} [blue]AGENT[/]  {AGENT_START} {title} started (attempt {e.attempt})")
             return
         # end
         if e.success is False:
             dur = format_duration(e.duration_ms) if e.duration_ms is not None else "?"
-            self._console.print(f"[red]{title} failed ({dur}) — {e.error or ''}[/]")
+            err = f" — {e.error}" if e.error else ""
+            self._console.print(
+                f"{ts} [blue]AGENT[/]  [red]{AGENT_FAIL} {title} failed ({dur}){err}[/]")
             return
         parts = []
         if e.duration_ms is not None:
@@ -126,7 +131,8 @@ class RichConsoleRenderer:
         if e.cost_usd is not None:
             parts.append(f"${e.cost_usd:.4f}")
         metrics = f" ({', '.join(parts)})" if parts else ""
-        self._console.print(f"[green]{title} Completed{metrics}[/]")
+        self._console.print(
+            f"{ts} [blue]AGENT[/]  [green]{AGENT_DONE} {title} Completed{metrics}[/]")
 
     def _render_tool(self, e) -> None:
         params = humanize_tool_call(e.tool_name, e.parameters if isinstance(e.parameters, dict) else {})
