@@ -10,6 +10,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from rich.cells import cell_len
+
 
 def format_duration(ms: int) -> str:
     """Convert milliseconds to human-readable: '23ms', '1.5s', '2m 30s'."""
@@ -174,3 +176,16 @@ def humanize_tool_call(tool_name: str, params: dict) -> str:
             return default_tool_params(tool_name, params)
         case _:
             return default_tool_params(tool_name, params)
+
+
+PHASE_RULE_WIDTH = 36  # PHASE 行 text + 分隔线的目标显示列宽
+
+
+def pad_rule(text: str, col: int = PHASE_RULE_WIDTH) -> str:
+    """在 text 右侧填充 ─，使同一 col 下所有调用的显示宽度恒定（右端对齐）。
+
+    用 cell_len 按显示宽度计算（中文 intent 算 2 列）。文字超长时兜底至少 2 个 ─。
+    """
+    width = cell_len(text)
+    n = max(2, col - width)
+    return f"{text} {'─' * n}"

@@ -147,3 +147,35 @@ def test_first_nonempty_line_picks_first_non_blank():
 def test_first_nonempty_line_empty_returns_empty():
     assert first_nonempty_line("") == ""
     assert first_nonempty_line("   \n  ") == ""
+
+
+from shannon_core.display.formatters import pad_rule, PHASE_RULE_WIDTH
+
+
+def test_pad_rule_constant_exists():
+    assert PHASE_RULE_WIDTH == 36
+
+
+def test_pad_rule_ascii():
+    # cell_len("Starting setup") == 14 -> 36 - 14 = 22 个 ─
+    result = pad_rule("Starting setup")
+    assert result.startswith("Starting setup ")
+    assert result.count("─") == 22
+
+
+def test_pad_rule_cjk_counts_double_width():
+    # cell_len("预检") == 4（中文双宽）-> 36 - 4 = 32 个 ─
+    assert pad_rule("预检").count("─") == 32
+
+
+def test_pad_rule_overflow_floors_at_two():
+    # 文字超长时兜底至少 2 个 ─
+    assert pad_rule("a" * 40).count("─") == 2
+
+
+def test_pad_rule_same_col_aligns_right_edge():
+    # 同一 col 调用，显示宽度恒定 -> 右端对齐
+    from rich.cells import cell_len
+    a = pad_rule("Starting setup")
+    b = pad_rule("Completed pre-recon")
+    assert cell_len(a) == cell_len(b)
