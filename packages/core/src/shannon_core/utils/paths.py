@@ -31,11 +31,23 @@ def resolve_workspaces_dir(repo_path: str | None = None) -> Path:
 
     注意: repo_path 不再用于定位 workspace 根(曾导致 workspace 落到 repo 父目录)。
     参数保留仅为调用方签名兼容;deliverables 落在 workspaces/<session>/deliverables。
+
+    污染防御: find_project_root 是 cwd-based,若用户 cd 进被扫 repo 再跑,根会落到
+    <repo>/workspaces 而污染被扫 repo。此时 fallback 到 repo_path.parent/workspaces
+    (repo 同级)—— 宁可落 repo 父目录也不污染 repo 本身(项目核心目标)。
     """
     worker_root = os.getenv("SHANNON_WORKER_ROOT")
     if worker_root:
         return Path(worker_root) / "workspaces"
-    return find_project_root() / "workspaces"
+    root = find_project_root() / "workspaces"
+    if repo_path:
+        try:
+            root.resolve().relative_to(Path(repo_path).resolve())
+            # cwd-based 根落在被扫 repo 内 → 污染 repo,fallback 到 repo 同级
+            return Path(repo_path).resolve().parent / "workspaces"
+        except ValueError:
+            pass
+    return root
 
 
 def resolve_deliverables_path(

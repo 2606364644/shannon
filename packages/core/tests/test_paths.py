@@ -74,6 +74,30 @@ class TestResolveWorkspacesDir:
         result = resolve_workspaces_dir()
         assert result == project_root / "workspaces"
 
+    def test_fallback_when_cwd_root_inside_scanned_repo(self, tmp_path, monkeypatch):
+        """cwd-based 根落在被扫 repo 内(用户 cd 进 repo 再跑)→ fallback 到 repo 同级,
+        避免污染被扫 repo(项目核心目标)。"""
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        (repo / ".git").mkdir()  # find_project_root 从 repo 内 cwd 找到 repo 本身
+        monkeypatch.chdir(repo)
+        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        result = resolve_workspaces_dir(str(repo))
+        assert result == repo.resolve().parent / "workspaces"
+
+    def test_no_fallback_when_cwd_root_outside_repo(self, tmp_path, monkeypatch):
+        """cwd-based 根不在被扫 repo 内(用户在 shannon-py 跑,repo 在别处)→ 正常返回
+        project_root/workspaces,不触发 fallback(e6d74db 的默认行为不变)。"""
+        project = tmp_path / "shannon-py"
+        project.mkdir()
+        (project / ".git").mkdir()
+        monkeypatch.chdir(project)
+        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        repo = tmp_path / "vuln-range" / "NodeGoat"
+        repo.mkdir(parents=True)
+        result = resolve_workspaces_dir(str(repo))
+        assert result == project / "workspaces"
+
 
 class TestResolveDeliverablesPath:
     def test_workspace_name_takes_priority(self, tmp_path):
