@@ -146,3 +146,25 @@ async def test_close_coverage_gaps_idempotent(tmp_path):
 
     assert first == second  # 幂等：不重复追加
     assert second.count("## Unverified Findings") == 1
+
+
+@pytest.mark.asyncio
+async def test_uncovered_section_reaches_final_report(tmp_path):
+    """组合：close_coverage_gaps 写 evidence 节 → ReportAssembler 把 evidence 全文带进报告。"""
+    from shannon_blackbox.services.report_assembler import ReportAssembler
+
+    _write_queue(tmp_path, "auth", ["AUTH-VULN-01", "AUTH-VULN-02"])
+    (tmp_path / "auth_exploitation_evidence.md").write_text(
+        "# Auth Evidence\n## Successfully Exploited\n### AUTH-VULN-01: a\n"
+    )
+
+    await close_coverage_gaps(tmp_path, ["auth"])
+    report_path = tmp_path / "comprehensive_security_assessment_report.md"
+    await ReportAssembler.assemble(tmp_path, ["auth"], report_path)
+
+    report = report_path.read_text()
+    # 未覆盖节进入最终报告（ReportAssembler 读 evidence 全文）
+    assert "Unverified Findings" in report
+    assert "AUTH-VULN-02" in report
+    # 已覆盖条目也在
+    assert "AUTH-VULN-01" in report

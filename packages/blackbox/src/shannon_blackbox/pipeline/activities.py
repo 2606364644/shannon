@@ -253,6 +253,11 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
             report_config = cfg.report
         await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
 
+        # AU-6: exploit queue→evidence 闭环——未覆盖条目写入 evidence 未覆盖节，
+        # ReportAssembler 读 evidence 全文时自动带入最终报告。
+        from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
+        await close_coverage_gaps(deliverables, vuln_classes)
+
         await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
