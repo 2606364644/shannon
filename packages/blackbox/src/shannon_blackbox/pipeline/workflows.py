@@ -67,7 +67,7 @@ class BlackboxScanWorkflow:
 
         await workflow.execute_activity(
             activities.log_phase_start_activity,
-            BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "preflight"}),
+            BlackboxActivityInput(**{**act_input.__dict__, "phase": "preflight"}),
             start_to_close_timeout=timedelta(seconds=10),
         )
         await workflow.execute_activity(
@@ -112,7 +112,7 @@ class BlackboxScanWorkflow:
         if input.config_path:
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "auth-validation"}),
+                BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
                 start_to_close_timeout=timedelta(seconds=10),
             )
             await workflow.execute_activity(
@@ -155,7 +155,7 @@ class BlackboxScanWorkflow:
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
-                    BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "recon-blackbox"}),
+                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "recon-blackbox"}),
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "recon-blackbox"
@@ -173,7 +173,7 @@ class BlackboxScanWorkflow:
             if input.exploit:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
-                    BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "exploitation"}),
+                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "exploitation"}),
                     start_to_close_timeout=timedelta(seconds=10),
                 )
                 self._state.current_phase = "exploitation"
@@ -287,7 +287,7 @@ class BlackboxScanWorkflow:
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                BlackboxActivityInput(**{**act_input.__dict__, "workspace_name": "reporting"}),
+                BlackboxActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "reporting"

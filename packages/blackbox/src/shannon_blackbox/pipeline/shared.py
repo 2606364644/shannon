@@ -42,6 +42,7 @@ class BlackboxActivityInput:
     agent_name: str | None = None
     vuln_type: str | None = None
     workspace_path: str | None = None
+    phase: str | None = None          # log_phase_* 的 phase label（如 "preflight"/"recon-blackbox"/"exploitation"/"reporting"）
 
 
 @dataclass

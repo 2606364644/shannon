@@ -340,12 +340,12 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
 @activity.defn
 async def log_phase_start_activity(input: BlackboxActivityInput) -> None:
     from shannon_core.audit.session_registry import get_audit_session
-    phase = input.workspace_name or "unknown"
+    phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_start(phase)
 
 
 @activity.defn
 async def log_phase_complete_activity(input: BlackboxActivityInput) -> None:
     from shannon_core.audit.session_registry import get_audit_session
-    phase = input.workspace_name or "unknown"
+    phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
