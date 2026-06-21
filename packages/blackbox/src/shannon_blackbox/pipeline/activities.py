@@ -258,6 +258,8 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
         from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
         await close_coverage_gaps(deliverables, vuln_classes)
 
+        # Order invariant: close_coverage_gaps mutates evidence above; ReportAssembler
+        # reads evidence here — do not reorder (uncovered section would be missed).
         await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)

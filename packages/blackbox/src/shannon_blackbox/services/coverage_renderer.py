@@ -7,7 +7,6 @@ from pathlib import Path
 
 from shannon_core.models.queue_schemas import Vulnerability, VulnerabilityQueue
 from shannon_core.utils.file_io import (
-    async_path_exists,
     async_read_file,
     async_write_file,
 )
