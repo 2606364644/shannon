@@ -263,6 +263,12 @@ class WhiteboxScanWorkflow:
                 args=[
                     ActivityInput(**{**act_input.__dict__, "phase": "vulnerability-analysis"}),
                     list(vuln_phase_steps([str(vt) for vt in selected_classes])),
+                    # 必须补齐第 3 参数(intents)，使 args 数量(3)== log_phase_start_activity
+                    # 参数数(3)。否则 temporalio worker 检测到数量不匹配会把整个 arg_types
+                    # 置 None，input 被反序列化成 dict 而非 ActivityInput → input.phase 崩。
+                    # vuln steps 是动态 agent(vuln_classes 决定)，无静态 step_intents，故按
+                    # 每个 vuln class 现造平行 intent 文案。
+                    [f"分析 {vt} 漏洞" for vt in selected_classes],
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
             )
