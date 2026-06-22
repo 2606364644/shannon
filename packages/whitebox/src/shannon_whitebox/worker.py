@@ -12,6 +12,7 @@ from shannon_core.models.audit import WorkflowSummary, AgentMetricsSummary
 
 from .pipeline.activities import (
     render_findings,
+    assemble_report,
     run_agent,
     run_auth_validation,
     run_code_index,
@@ -89,7 +90,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         task_queue=task_queue,
         workflows=[WhiteboxScanWorkflow],
         activities=[
-            render_findings, run_agent, run_auth_validation, run_code_index,
+            render_findings, assemble_report, run_agent, run_auth_validation, run_code_index,
             run_credential_check, run_merge_sink_reports, run_entry_point_fusion,
             run_preflight, run_render_dataflow_hints, run_risk_scoring,
             run_save_adjudication, run_vuln_agent, run_attack_chain_assembly,
