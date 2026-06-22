@@ -26,13 +26,14 @@ Shannon 当前是**单仓库**扫描器:
 - 支持声明式多 repo 配置(gateway + N 个后端 + 后端间关系);
 - 复用已有单仓扫描产物,或由编排器现扫;
 - 由专用 Agent 推断跨服务调用关系、信任边界、候选跨服务数据流;
-- 产出可人工复核的关联产物(候选 + 证据 + 置信度),合并两仓漏洞。
+- 产出可人工复核的关联产物(候选 + 证据 + 置信度),合并两仓漏洞;
+- **黑盒 gateway 层关联验证**:黑盒 `--url <gateway>` 复用关联 workspace,exploitation 消费 topology 在 gateway HTTP 层验证跨服务可达性与转发(§6.2)。
 
 **非目标(显式排除,留待后续阶段)**
 
 - **不**做全链路确定性数据流追踪(gateway 输入一路追到 gRPC sink 的确定性传播);
 - **不**给 Shannon 补 proto parser / RPC handler 确定性入口发现;
-- **不**纳入黑盒(gateway HTTP 实时验证)的关联;
+- **不**做 gRPC 进程内验证(后端进程内 sink 执行,需 gRPC 客户端 + 后端可观测,留后续 §13);
 - **不**改 Shannon 单仓白盒内核(pipeline / `--repo` 语义不动);
 - **不**测 Agent 推断的"准确率"(需标注数据集,超出第一阶段)。
 
@@ -44,7 +45,7 @@ Shannon 当前是**单仓库**扫描器:
 | 2 | **形态 = 声明式编排器** | multi-repo 配置 → 依次跑单仓白盒 → 关联;不改单仓内核 |
 | 3 | **机制 = Agent 推断,不写确定性解析器** | 关联逻辑交给 Agent(grep/read 代码),不写 proto parser、grpc-js 调用点 AST 提取器等。红利:Agent 能直接读 Go 代码理解 RPC handler,部分绕过 gRPC 盲区 |
 | 4 | **落地 = 新增专用 `cross-repo-correlation` Agent** | 独立 prompt + 通用 code 工具,职责单一、可独立测试 |
-| 5 | **阶段 = 第一阶段聚焦白盒** | 黑盒关联留后续 |
+| 5 | **范围 = 白盒关联 + 黑盒 gateway 层验证(本次)** | 黑盒纳入本次:基于关联 topology 在 gateway HTTP 层做跨服务关联验证;gRPC 进程内验证 + 全链路确定性留后续(§13) |
 | 6 | **产物性质 = 候选 + 证据 + 置信度** | 概率性推断,非确定性结论,供人工复核 |
 | 7 | **复用已有 workspace** | 配置可声明已有 workspace,编排器跳过扫描直接关联;`path` 仍必填(Agent 要读源码) |
 | 8 | **多后端 = 图拓扑** | `relations` 是图(非树),支持 gateway 多后端 + 后端互调;Agent 走 per-edge 推断 + 全局合并 |
@@ -70,6 +71,17 @@ cross-repo-correlation Agent(新增)
    ├── cross-service-topology.json
    ├── trust-boundaries.json
    └── correlation-report.md
+```
+
+**黑盒延续(§6.2,本次范围)**:
+
+```
+<关联workspace>/deliverables/ (topology + boundaries)
+        │  shannon-blackbox --url <gateway> --workspace <关联workspace>
+        ▼
+exploit_executor 读 topology → gateway HTTP 层验证跨服务可达性与转发
+        ▼
+{vc}_exploitation_evidence.md (跨服务路径标注)
 ```
 
 编排器对每个 repo 的分支逻辑:
@@ -153,6 +165,24 @@ correlation:
 2. **全局合并**:所有边的候选汇总成拓扑图,标注信任边界,串出**多跳跨服务链**(如 `gateway → order-svc → payment-svc`)。
 
 这是多后端能 scale 的核心,也使"单边失败不拖垮全局"成为可能(见 §8)。
+
+### 6.2 黑盒 gateway 层关联验证(消费 topology)
+
+本次范围含黑盒:基于关联 topology,在 gateway HTTP 层做跨服务关联验证,形成"白盒关联 → 黑盒验证"闭环。
+
+**触发**(扩展黑盒复用源):
+
+```
+shannon-blackbox start --url <gateway-url> --workspace <关联workspace>
+```
+
+Shannon 黑盒已有"检测白盒 deliverables、有则跳过 recon 直接 exploitation"机制(`workflows.py:136-150`)+ "按 URL 复用 workspace"(`find_workspaces_by_url`)。本次扩展其复用源:从单仓 deliverables → **关联 workspace** deliverables。
+
+**exploitation 消费 topology**:`exploit_executor`(黑盒 exploitation 执行器)读关联 workspace deliverables 里的 `cross-service-topology.json` + `trust-boundaries.json` 作为上下文,据此在 **gateway HTTP 层**构造触达后端 method/sink 的 payload,验证可达性与转发行为(如 gateway 的 `POST /orders` 是否真能把恶意输入转发到 `order-svc.CreateOrder`)。
+
+**能力边界**:✅ gateway HTTP 层(可达性 / 转发行为 / gateway 侧注入·ssrf·authz);❌ gRPC 进程内(后端进程内 sink 真实执行需 gRPC 客户端 + 后端可观测,留后续 §13)。
+
+**产物**:复用黑盒现有 `{vc}_exploitation_evidence.md`,增加跨服务路径标注(验证了哪条 gateway→backend 路径)。
 
 ## 7. 产物形态(字段名为草案,实现可调)
 
@@ -252,10 +282,11 @@ correlation:
 - [ ] per-edge 单边失败不影响其余;
 - [ ] 缺 entrypoint / relations 引用错误 → 配置阶段报错;
 - [ ] glm-anthropic profile 下端到端冒烟通过(覆盖 §9);
+- [ ] 黑盒 `--url <gateway>` 复用关联 workspace deliverables,exploitation 消费 topology 在 gateway HTTP 层验证(§6.2);
 - [ ] 新测试独立模块,全套广跑用 `--ignore` 避开预存挂起 suite。
 
 ## 13. 后续阶段(本设计不实现)
 
-- **二阶段(全链路)**:给 Shannon 补 Go proto 解析 + RPC handler 确定性入口发现 + 跨服务确定性数据流,让 gateway 输入能确定性地追到 gRPC sink。届时本设计的关联 Agent 可作为"确定性传播 + 概率补全"的混合层底座。
-- **黑盒关联(gateway→gRPC 验证)**:gateway HTTP 实时验证纳入关联。**触发方式**:不是 `shannon-blackbox --repo <gRPC 单仓>`(那样复用的是 gRPC 仓单仓漏洞队列,exposure 拓扑错且缺 gateway→method 映射,与 `--url <gateway>` 错位);正确做法是黑盒 `--url <gateway>` + 复用**关联 workspace** 的 deliverables(含 gateway 入口 + topology + 候选跨服务数据流)。Shannon 黑盒已有"按 URL 复用 workspace deliverables"机制(`--latest` / `find_workspaces_by_url`,`packages/blackbox/.../cli/main.py:32-36`),二阶段本质是扩展其复用源(从单仓 deliverables → 关联 workspace),非从零造触发。**关键衔接**:第一阶段产出的 `cross-service-topology` 正是该验证的可达性输入。**能力边界**:二阶段黑盒能在 gateway HTTP 层构造可触达后端 method/sink 的 payload、验证 gateway 层可达性与转发行为;但真正在 gRPC 后端进程内验证 sink 执行需 gRPC 客户端 + 后端可观测能力(更深的后续,本设计不含)。后端单仓 pre-recon 产物(模型错配 + 拓扑误导,见 §1)不适用于此验证。
+- **全链路确定性数据流**:给 Shannon 补 Go proto 解析 + RPC handler 确定性入口发现 + 跨服务确定性传播,让 gateway 输入能确定性地追到 gRPC sink。届时关联 Agent 可作为"确定性传播 + 概率补全"混合层底座。
+- **gRPC 进程内验证(§6.2 能力边界外)**:加 gRPC 客户端 + proto payload 构造 + 后端可观测,真正在 gRPC 后端进程内验证 sink 执行。本次 §6.2 只到 gateway HTTP 层。
 - **更细 role**:如区分"聚合层 gateway"vs"最外层 edge",当前 entrypoint/backend 两值够用。
