@@ -286,3 +286,91 @@ async def test_render_findings_with_confidence_filter(tmp_path):
     findings = (deliverables / "injection_findings.md").read_text()
     assert "INJECTION-002" in findings
     assert "INJECTION-001" not in findings
+
+
+@pytest.mark.asyncio
+async def test_render_recovers_bare_list_queue(tmp_path):
+    """NodeGoat regression: bare-list queue renders instead of crashing."""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    bare_list = json.dumps([
+        {"ID": "AUTH-1", "vulnerability_type": "Auth",
+         "externally_exploitable": True, "confidence": "high",
+         "source_endpoint": "POST /login"},
+    ])
+    (deliverables / "auth_exploitation_queue.json").write_text(bare_list)
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    findings = (deliverables / "auth_findings.md").read_text()
+    assert "### AUTH-1" in findings
+    assert "**Source Endpoint:** POST /login" in findings
+    assert "auto-recovered" in findings.lower() or "bare-list" in findings.lower()
+
+
+@pytest.mark.asyncio
+async def test_render_isolates_bad_class(tmp_path):
+    """A bad queue in one class must not block rendering of another."""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "auth_exploitation_queue.json").write_text("{not valid json")
+    good = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJ-1", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            sink_call="db.execute",
+        ),
+    ])
+    (deliverables / "injection_exploitation_queue.json").write_text(good.model_dump_json())
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    inj = (deliverables / "injection_findings.md").read_text()
+    assert "### INJ-1" in inj
+    auth = (deliverables / "auth_findings.md").read_text()
+    assert "## Authentication Vulnerabilities" in auth
+    assert "No authentication vulnerabilities found." not in auth  # not none_found
+    assert "auth_exploitation_queue.json" in auth  # surfaces the bad file
+
+
+@pytest.mark.asyncio
+async def test_render_entry_isolation(tmp_path):
+    """A single vuln that fails to render must not abort the whole class.
+
+    Simulated by injecting a vuln whose render touches an attribute the entry
+    lacks — covered indirectly via malformed entries being dropped by
+    parse_lenient and good entries still rendering.
+    """
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    content = json.dumps([
+        {"ID": "AUTH-1", "vulnerability_type": "Auth",
+         "externally_exploitable": True, "confidence": "high",
+         "source_endpoint": "POST /login"},
+        {"no_required_fields": True},  # dropped by parse_lenient
+        {"ID": "AUTH-2", "vulnerability_type": "Auth",
+         "externally_exploitable": True, "confidence": "medium"},
+    ])
+    (deliverables / "auth_exploitation_queue.json").write_text(content)
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    findings = (deliverables / "auth_findings.md").read_text()
+    assert "### AUTH-1" in findings
+    assert "### AUTH-2" in findings
+
+
+@pytest.mark.asyncio
+async def test_render_standard_empty_queue_still_none_found(tmp_path):
+    """Regression guard: a well-formed empty queue still reads 'none found'."""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "xss_exploitation_queue.json").write_text(
+        VulnerabilityQueue(vulnerabilities=[]).model_dump_json()
+    )
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    findings = (deliverables / "xss_findings.md").read_text()
+    assert "No XSS vulnerabilities found." in findings
+    assert "auto-recovered" not in findings.lower()

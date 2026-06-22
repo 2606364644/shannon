@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -13,6 +14,8 @@ from shannon_core.models.queue_schemas import (
     XssVulnerability,
 )
 from shannon_core.utils.file_io import async_path_exists, async_read_file, async_write_file
+
+logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
@@ -210,16 +213,54 @@ class FindingsRenderer:
             if not await async_path_exists(queue_path):
                 continue
 
-            content = await async_read_file(queue_path)
-            queue = VulnerabilityQueue.model_validate_json(content)
+            try:
+                content = await async_read_file(queue_path)
+                parsed = VulnerabilityQueue.parse_lenient(content)
+            except Exception as exc:  # noqa: BLE001 — isolate this class
+                logger.warning("queue %s unreadable: %s", class_cfg.queue_file, exc)
+                await async_write_file(findings_path, "\n".join([
+                    f"## {class_cfg.heading}", "",
+                    f"> ⚠️ {class_cfg.heading} queue unreadable; findings unavailable for this class. See logs.",
+                    "", DISCLAIMER, "",
+                ]))
+                continue
+
+            if parsed.warnings:
+                logger.warning(
+                    "queue %s parsed leniently: %s", class_cfg.queue_file, parsed.warnings
+                )
+            queue = parsed.queue
             filtered = filter_vulnerabilities(queue, config)
 
             sections: list[str] = [f"## {class_cfg.heading}", ""]
+            if parsed.warnings:
+                sections.append(
+                    "> ⚠️ Queue auto-recovered ("
+                    + "; ".join(parsed.warnings)
+                    + f"). Raw queue preserved at `{class_cfg.queue_file}`; verify data integrity."
+                )
+                sections.append("")
+
             if not filtered:
-                sections.append(class_cfg.none_found_label)
+                if parsed.original_form == "object" and not parsed.warnings:
+                    sections.append(class_cfg.none_found_label)
+                else:
+                    reason = "; ".join(parsed.warnings) or "no parseable entries"
+                    sections.append(
+                        f"> ⚠️ No renderable entries in `{class_cfg.queue_file}` ({reason})."
+                    )
             else:
                 for vuln in filtered:
-                    sections.append(class_cfg.render_entry(vuln))
+                    try:
+                        sections.append(class_cfg.render_entry(vuln))
+                    except Exception as exc:  # noqa: BLE001 — isolate single entry
+                        logger.warning(
+                            "render entry %s failed: %s",
+                            getattr(vuln, "ID", "?"), exc,
+                        )
+                        sections.append(
+                            f"### {getattr(vuln, 'ID', 'UNKNOWN')} — render error\n"
+                        )
 
             sections.append("")
             sections.append(DISCLAIMER)
