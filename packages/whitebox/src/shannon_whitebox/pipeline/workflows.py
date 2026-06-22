@@ -3,7 +3,6 @@ from datetime import timedelta
 from pathlib import Path
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
@@ -23,9 +22,7 @@ with workflow.unsafe.imports_passed_through():
     from shannon_core.services.browser_engine import BrowserEngineFactory
     import shannon_core.services.engines  # noqa: F401 – registers engines
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
-    from shannon_core.models.retry import (
-        PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, PRODUCTION_RETRY, NON_RETRYABLE,
-    )
+    from shannon_core.models.retry import retry_for
     from shannon_core.models.errors import classify_error_for_temporal
 
 @workflow.defn
@@ -67,31 +64,33 @@ class WhiteboxScanWorkflow:
                 list(step_intents("setup")),
             ],
             start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=retry_for("log"),
         )
         self._state.current_phase = "setup"
         await workflow.execute_activity(
             activities.run_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
-            retry_policy=PREFLIGHT_RETRY,
+            retry_policy=retry_for("preflight"),
         )
 
         # Credential check
         await workflow.execute_activity(
             activities.run_credential_check, act_input,
             start_to_close_timeout=timedelta(minutes=1),
-            retry_policy=PREFLIGHT_RETRY,
+            retry_policy=retry_for("preflight"),
         )
 
         # Auth validation
         await workflow.execute_activity(
             activities.run_auth_validation, act_input,
             start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=AUTH_VALIDATION_RETRY,
+            retry_policy=retry_for("auth-validation"),
         )
         await workflow.execute_activity(
             activities.log_phase_complete_activity,
             ActivityInput(**{**act_input.__dict__, "phase": "setup"}),
             start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=retry_for("log"),
         )
 
         # Resolve config and browser engine
@@ -140,6 +139,7 @@ class WhiteboxScanWorkflow:
                         list(step_intents("pre-recon")),
                     ],
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
                 self._state.current_phase = "pre-recon"
                 self._state.current_agent = AgentName.PRE_RECON.value
@@ -149,12 +149,13 @@ class WhiteboxScanWorkflow:
                     workflow.execute_activity(
                         activities.run_code_index, act_input,
                         start_to_close_timeout=timedelta(minutes=10),
+                        retry_policy=retry_for("standard"),
                     ),
                     workflow.execute_activity(
                         activities.run_agent,
                         ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.PRE_RECON.value}),
                         start_to_close_timeout=timedelta(hours=2),
-                        retry_policy=PRODUCTION_RETRY,
+                        retry_policy=retry_for("standard"),
                     ),
                 )
 
@@ -166,18 +167,21 @@ class WhiteboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.run_merge_sink_reports, act_input,
                     start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
                 )
 
                 # Entry point fusion: merge deterministic + LLM discoveries
                 await workflow.execute_activity(
                     activities.run_entry_point_fusion, act_input,
                     start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
                 )
 
                 # Adjudicate merged entry points by confidence
                 await workflow.execute_activity(
                     activities.run_save_adjudication, act_input,
                     start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
                 )
                 self._state.current_agent = None
 
@@ -186,10 +190,12 @@ class WhiteboxScanWorkflow:
                     workflow.execute_activity(
                         activities.run_framework_analysis, act_input,
                         start_to_close_timeout=timedelta(minutes=5),
+                        retry_policy=retry_for("standard"),
                     ),
                     workflow.execute_activity(
                         activities.run_frontend_mapping, act_input,
                         start_to_close_timeout=timedelta(minutes=5),
+                        retry_policy=retry_for("standard"),
                     ),
                 )
 
@@ -197,11 +203,13 @@ class WhiteboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.run_route_chain_building, act_input,
                     start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
                 )
                 await workflow.execute_activity(
                     activities.log_phase_complete_activity,
                     ActivityInput(**{**act_input.__dict__, "phase": "pre-recon"}),
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
 
             if AgentName.RECON.value not in self._state.completed_agents:
@@ -213,6 +221,7 @@ class WhiteboxScanWorkflow:
                         list(step_intents("recon")),
                     ],
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
                 self._state.current_phase = "recon"
                 self._state.current_agent = AgentName.RECON.value
@@ -220,6 +229,7 @@ class WhiteboxScanWorkflow:
                     activities.run_agent,
                     ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.RECON.value}),
                     start_to_close_timeout=timedelta(hours=2),
+                    retry_policy=retry_for("standard"),
                 )
                 self._state.completed_agents.append(AgentName.RECON.value)
                 self._state.agent_metrics[AgentName.RECON.value] = metrics
@@ -228,6 +238,7 @@ class WhiteboxScanWorkflow:
                     activities.log_phase_complete_activity,
                     ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
 
             # Risk scoring — produce tiered audit plan
@@ -239,11 +250,13 @@ class WhiteboxScanWorkflow:
                     list(step_intents("risk-scoring")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             self._state.current_phase = "risk-scoring"
             risk_result = await workflow.execute_activity(
                 activities.run_risk_scoring, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=retry_for("standard"),
             )
             self._state.audit_plan_stats = risk_result
 
@@ -251,11 +264,13 @@ class WhiteboxScanWorkflow:
             await workflow.execute_activity(
                 activities.run_render_dataflow_hints, act_input,
                 start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
             )
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "risk-scoring"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
 
             await workflow.execute_activity(
@@ -271,6 +286,7 @@ class WhiteboxScanWorkflow:
                     [f"分析 {vt} 漏洞" for vt in selected_classes],
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             self._state.current_phase = "vulnerability-analysis"
             vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
@@ -282,13 +298,7 @@ class WhiteboxScanWorkflow:
                         activities.run_vuln_agent,
                         ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
                         start_to_close_timeout=timedelta(hours=2),
-                        retry_policy=RetryPolicy(
-                            maximum_attempts=3,
-                            initial_interval=timedelta(seconds=30),
-                            maximum_interval=timedelta(minutes=5),
-                            backoff_coefficient=2.0,
-                            non_retryable_error_types=NON_RETRYABLE,
-                        ),
+                        retry_policy=retry_for("vuln"),
                     )
                     vuln_tasks.append((vt, agent_name, coro))
 
@@ -314,6 +324,7 @@ class WhiteboxScanWorkflow:
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "vulnerability-analysis"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
 
             # === Attack Chain Assembly ===
@@ -325,12 +336,14 @@ class WhiteboxScanWorkflow:
                     list(step_intents("attack-chain")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             self._state.current_phase = "attack-chain"
             try:
                 await workflow.execute_activity(
                     activities.run_attack_chain_assembly, act_input,
                     start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
                 # Non-fatal — attack chains enhance the report but don't block the pipeline
@@ -340,6 +353,7 @@ class WhiteboxScanWorkflow:
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "attack-chain"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
 
             await workflow.execute_activity(
@@ -350,18 +364,21 @@ class WhiteboxScanWorkflow:
                     list(step_intents("reporting")),
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             self._state.current_phase = "reporting"
             self._state.current_agent = "render-findings"
             await workflow.execute_activity(
                 activities.render_findings, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=retry_for("standard"),
             )
             # 轴1:拼接各分项 → 综合报告(确定性)
             self._state.current_agent = "assemble-report"
             await workflow.execute_activity(
                 activities.assemble_report, act_input,
                 start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
             )
             # 轴1:REPORT agent 加执行摘要 + 清理(report-executive.txt)
             self._state.current_agent = "run-report-agent"
@@ -369,12 +386,14 @@ class WhiteboxScanWorkflow:
                 activities.run_agent,
                 ActivityInput(**{**act_input.__dict__, "agent_name": "report"}),
                 start_to_close_timeout=timedelta(minutes=15),
+                retry_policy=retry_for("standard"),
             )
             self._state.current_agent = None
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
 
             # Set final status based on whether any agents failed
