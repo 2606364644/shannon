@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Literal
 
 from temporalio.common import RetryPolicy
 
@@ -50,6 +51,16 @@ SUBSCRIPTION_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
+# vuln agent 专用:per-vt fan-out 下封顶 ~12min,有意分歧于 TS PRODUCTION_RETRY。
+# 详见 docs/superpowers/specs/2026-06-22-retry-policy-alignment-design.md §2.3。
+VULN_RETRY = RetryPolicy(
+    maximum_attempts=5,
+    initial_interval=timedelta(minutes=1),
+    maximum_interval=timedelta(minutes=5),
+    backoff_coefficient=2.0,
+    non_retryable_error_types=NON_RETRYABLE,
+)
+
 
 def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     """Select a retry policy by mode name.
@@ -62,3 +73,28 @@ def get_retry_policy(mode: str | None = None) -> RetryPolicy:
         "subscription": SUBSCRIPTION_RETRY,
     }
     return profiles.get(mode or "production", PRODUCTION_RETRY)
+
+
+Category = Literal["standard", "vuln", "log", "preflight", "auth-validation"]
+
+
+def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
+    """按 activity 类别选 retry policy(单一映射源)。
+
+    - standard: LLM agent + 确定性处理。委托 get_retry_policy(mode) 保留 mode 感知
+      (testing/subscription);不传 mode 默认 production。
+    - vuln:     per-vt vuln agent,有界 VULN_RETRY。
+    - log:      phase log marker(10s 写),短 policy。
+    - preflight / auth-validation: 现有短 tier。
+    """
+    if category == "standard":
+        return get_retry_policy(mode)
+    if category == "vuln":
+        return VULN_RETRY
+    if category == "log":
+        return PREFLIGHT_RETRY
+    if category == "preflight":
+        return PREFLIGHT_RETRY
+    if category == "auth-validation":
+        return AUTH_VALIDATION_RETRY
+    raise ValueError(f"unknown activity category: {category!r}")
