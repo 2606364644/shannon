@@ -17,6 +17,10 @@ Your task is to:
 4. Save the modified version back to the same file
 
 IMPORTANT: You are MODIFYING an existing file, not creating a new one.
+
+LANGUAGE: 用简体中文撰写你新增的所有叙述性内容(执行摘要、按类型汇总)。
+保留英文原文:漏洞编号(如 AUTH-VULN-01)、代码、文件路径、HTTP 方法/状态码、
+URL、请求头名、JSON 字段名、技术缩写(SSRF/XSS/CSRF/RBAC 等)。
 </objective>
 
 <target>
@@ -51,15 +55,15 @@ MODIFY the existing file `{{DELIVERABLES_PATH}}/comprehensive_security_assessmen
 
 1. ADDING these sections at the top:
 
-# Security Assessment Report
+# 安全评估报告
 
-## Executive Summary
-- Target: {{WEB_URL}}
-- Assessment Date: {current date}
-- Scope: {{VULN_CLASSES_TESTED}}
-- Exploitation: {{EXPLOITATION}}
+## 执行摘要
+- 目标: {{WEB_URL}}
+- 评估日期: {current date}
+- 范围: {{VULN_CLASSES_TESTED}}
+- 利用情况: {{EXPLOITATION}}
 
-## Summary by Vulnerability Type
+## 按漏洞类型汇总
 
 {For each vulnerability type below, examine the comprehensive_security_assessment_report.md sections and provide a summary. If no section exists for that type or no vulnerabilities are listed, explicitly state that none were found.}
 
