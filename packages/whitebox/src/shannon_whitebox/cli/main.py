@@ -7,6 +7,7 @@ from pathlib import Path
 
 from shannon_core.config.env_loader import load_env
 from shannon_core.config.profile_validator import validate_active_profile
+from shannon_core.config.concurrency import get_max_concurrent
 
 from shannon_core.services.temporal_infra import (
     ensure_infra,
@@ -53,6 +54,7 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         workspace_name=workspace,
         config_path=config_path,
         pipeline_testing_mode=pipeline_testing,
+        max_concurrent=get_max_concurrent(),
     )
     if fresh:
         setattr(input, "_fresh", True)
