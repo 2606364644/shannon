@@ -17,6 +17,7 @@ from shannon_core.models.audit import AgentEndResult
 from shannon_core.models.metrics import SessionMetadata
 from shannon_core.display.live_dashboard import LiveDashboardRenderer
 from shannon_core.audit.session import AuditSession
+from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:
@@ -32,8 +33,11 @@ async def test_audit_session_reaches_console_and_dashboard(tmp_path: Path):
 
     await session.log_phase_start("exploitation")
     await session.start_agent("injection-exploit", "p", attempt=1)
-    await session.log_event("tool_start", {"toolName": "Bash", "parameters": {"command": "curl 'http://x/?q=<script>'"}})
-    await session.log_event("llm_response", {"turn": 2, "content": "reflected XSS confirmed"})
+    lg = SessionToolAuditLogger(session, "injection-exploit", attempt=1)
+    await lg.initialize()
+    await lg.log_tool_start("Bash", {"command": "curl 'http://x/?q=<script>'"})
+    await lg.log_assistant_turn(2, "reflected XSS confirmed")
+    await lg.close(success=True, duration_ms=5200)
     await session.end_agent("injection-exploit", AgentEndResult(
         success=True, duration_ms=5200, cost_usd=0.15, attempt_number=1))
 
