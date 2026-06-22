@@ -26,10 +26,7 @@ with workflow.unsafe.imports_passed_through():
         AGENT_SESSION_MAPPING,
     )
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
-    from shannon_core.models.retry import (
-        PREFLIGHT_RETRY, AUTH_VALIDATION_RETRY, NON_RETRYABLE,
-        get_retry_policy,
-    )
+    from shannon_core.models.retry import retry_for
     from shannon_core.models.errors import PentestError, ErrorCode, classify_error_for_temporal
 
 
@@ -61,19 +58,21 @@ class BlackboxScanWorkflow:
             workspace_path=workspace_path,
         )
 
-        retry_policy = get_retry_policy(
-            "testing" if input.pipeline_testing_mode else (input.retry_profile or "production")
+        retry_policy = retry_for(
+            "standard",
+            "testing" if input.pipeline_testing_mode else (input.retry_profile or "production"),
         )
 
         await workflow.execute_activity(
             activities.log_phase_start_activity,
             BlackboxActivityInput(**{**act_input.__dict__, "phase": "preflight"}),
             start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=retry_for("log"),
         )
         await workflow.execute_activity(
             activities.run_blackbox_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
-            retry_policy=PREFLIGHT_RETRY,
+            retry_policy=retry_for("preflight"),
         )
 
         # Resolve config and browser engine
@@ -114,11 +113,12 @@ class BlackboxScanWorkflow:
                 activities.log_phase_start_activity,
                 BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             await workflow.execute_activity(
                 activities.run_blackbox_auth_validation, act_input,
                 start_to_close_timeout=timedelta(minutes=10),
-                retry_policy=AUTH_VALIDATION_RETRY,
+                retry_policy=retry_for("auth-validation"),
             )
 
         try:
@@ -157,6 +157,7 @@ class BlackboxScanWorkflow:
                     activities.log_phase_start_activity,
                     BlackboxActivityInput(**{**act_input.__dict__, "phase": "recon-blackbox"}),
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
                 self._state.current_phase = "recon-blackbox"
                 self._state.current_agent = AgentName.RECON_BLACKBOX.value
@@ -175,6 +176,7 @@ class BlackboxScanWorkflow:
                     activities.log_phase_start_activity,
                     BlackboxActivityInput(**{**act_input.__dict__, "phase": "exploitation"}),
                     start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
                 self._state.current_phase = "exploitation"
                 self._state.current_agent = "pipelines"
@@ -289,12 +291,14 @@ class BlackboxScanWorkflow:
                 activities.log_phase_start_activity,
                 BlackboxActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
                 start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
             )
             self._state.current_phase = "reporting"
             self._state.current_agent = "assemble-report"
             await workflow.execute_activity(
                 activities.assemble_report, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=retry_policy,
             )
             self._state.current_agent = None
 
@@ -312,6 +316,7 @@ class BlackboxScanWorkflow:
             await workflow.execute_activity(
                 activities.finalize_report, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=retry_policy,
             )
 
             # Set final status based on failure tracking
