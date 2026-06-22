@@ -19,8 +19,8 @@ Your task is to:
 IMPORTANT: You are MODIFYING an existing file, not creating a new one.
 
 LANGUAGE: 用简体中文撰写你新增的所有叙述性内容(执行摘要、按类型汇总)。
-保留英文原文:漏洞编号(如 AUTH-VULN-01)、代码、文件路径、HTTP 方法/状态码、
-URL、请求头名、JSON 字段名、技术缩写(SSRF/XSS/CSRF/RBAC 等)。
+保留英文原文:漏洞编号(如 AUTH-VULN-01)、代码、命令、文件路径与行号、HTTP 方法/状态码、
+URL、请求头名、JSON 字段名、cookie 名、技术缩写(SSRF、SSTI、XSS、CSRF、RBAC、HSTS、IDOR、OAuth、JWT、PKCE)。
 </objective>
 
 <target>
