@@ -125,7 +125,7 @@ class WhiteboxResumeStateBuilder:
         # 规范化 rewind 别名（vuln -> injection-vuln），保证后续 index 查找不 ValueError
         rewind_target = _normalize_rewind_target(rewind_target)
 
-        git_completed = await GitManager.get_completed_agents(repo_path)
+        git_completed = await GitManager.get_completed_agents(deliverables)
         session_completed = self._session_success(workspace)
         file_exists = self._file_exists_map(deliverables)
 

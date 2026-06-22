@@ -207,3 +207,40 @@ def test_session_success_swallows_corrupt_json(tmp_path):
     (workspace / "session.json").write_text("{ not valid json", encoding="utf-8")
     builder = WhiteboxResumeStateBuilder()
     assert builder._session_success(workspace) == set()
+
+
+@pytest.mark.asyncio
+async def test_resume_build_scans_deliverables_not_repo(tmp_path, monkeypatch):
+    """resume 的 get_completed_agents 应扫 deliverables 独立仓库(非被扫 repo)。
+
+    修复前传 repo_path(deliverable commit 实际落 shannon-py,扫不到)。
+    """
+    from shannon_core.git_manager import GitManager
+    from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "session.json").write_text("{}")  # _session_success 最小输入
+    deliverables = workspace / "deliverables"
+    deliverables.mkdir()
+    repo = tmp_path / "repo"  # 无关路径,不应被扫
+    repo.mkdir()
+
+    scanned_paths = []
+
+    async def spy(path):
+        scanned_paths.append(path)
+        return set()
+
+    monkeypatch.setattr(
+        "shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents", spy,
+    )
+
+    builder = WhiteboxResumeStateBuilder()
+    await builder.build(
+        mode="auto", workspace=workspace, deliverables=deliverables, repo_path=repo,
+    )
+
+    assert scanned_paths == [deliverables], (
+        f"expected get_completed_agents called with deliverables, got {scanned_paths}"
+    )
