@@ -273,31 +273,37 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
             )
             self._state.current_phase = "vulnerability-analysis"
-            vuln_tasks = []
+            vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")
                 if agent_name.value not in self._state.completed_agents:
                     self._state.current_agent = agent_name.value
-                    vuln_tasks.append(
-                        workflow.execute_activity(
-                            activities.run_vuln_agent,
-                            ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
-                            start_to_close_timeout=timedelta(hours=2),
-                            retry_policy=RetryPolicy(
-                                maximum_attempts=3,
-                                initial_interval=timedelta(seconds=30),
-                                maximum_interval=timedelta(minutes=5),
-                                backoff_coefficient=2.0,
-                                non_retryable_error_types=NON_RETRYABLE,
-                            ),
-                        )
+                    coro = workflow.execute_activity(
+                        activities.run_vuln_agent,
+                        ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
+                        start_to_close_timeout=timedelta(hours=2),
+                        retry_policy=RetryPolicy(
+                            maximum_attempts=3,
+                            initial_interval=timedelta(seconds=30),
+                            maximum_interval=timedelta(minutes=5),
+                            backoff_coefficient=2.0,
+                            non_retryable_error_types=NON_RETRYABLE,
+                        ),
                     )
+                    vuln_tasks.append((vt, agent_name, coro))
 
             if vuln_tasks:
-                results = await asyncio.gather(*vuln_tasks, return_exceptions=True)
-                for i, result in enumerate(results):
-                    vt = selected_classes[i]
-                    agent_name = AgentName(f"{vt}-vuln")
+                semaphore = asyncio.Semaphore(input.max_concurrent)
+
+                async def bounded(coro):
+                    async with semaphore:
+                        return await coro
+
+                results = await asyncio.gather(
+                    *[bounded(coro) for _, _, coro in vuln_tasks],
+                    return_exceptions=True,
+                )
+                for (vt, agent_name, _), result in zip(vuln_tasks, results):
                     if isinstance(result, Exception):
                         self._state.errors.append(f"{agent_name.value}: {result}")
                         self._state.failed_agents.append(agent_name.value)
