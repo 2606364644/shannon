@@ -21,7 +21,7 @@ Shannon 当前是**单仓库**扫描器:
 
 ## 2. 目标与非目标
 
-**目标(第一阶段)**
+**目标(本次范围)**
 
 - 支持声明式多 repo 配置(gateway + N 个后端 + 后端间关系);
 - 复用已有单仓扫描产物,或由编排器现扫;
@@ -34,8 +34,8 @@ Shannon 当前是**单仓库**扫描器:
 - **不**做全链路确定性数据流追踪(gateway 输入一路追到 gRPC sink 的确定性传播);
 - **不**给 Shannon 补 proto parser / RPC handler 确定性入口发现;
 - **不**做 gRPC 进程内验证(后端进程内 sink 执行,需 gRPC 客户端 + 后端可观测,留后续 §13);
-- **不**改 Shannon 单仓白盒内核(pipeline / `--repo` 语义不动);
-- **不**测 Agent 推断的"准确率"(需标注数据集,超出第一阶段)。
+- **不改单仓扫描内核,零单仓回归**:白盒 `--repo` / 黑盒单仓 `--repo`·`--latest` 路径行为完全不变(已核 `workflows.py:128-171` 单仓复用路径)。§6.2 黑盒扩展仅在 deliverables 解析处加**条件分支**(指定关联 workspace 才走新路径,否则原逻辑);`exploit_executor` 注入 topology 仅在**有 topology 时**触发;关联 Agent 对 `code_index` **只读复用**,不改其实现;
+- **不**测 Agent 推断的"准确率"(需标注数据集,超出本次范围)。
 
 ## 3. 已定决策(brainstorming 产出)
 
@@ -77,7 +77,7 @@ cross-repo-correlation Agent(新增)
 
 ```
 <关联workspace>/deliverables/ (topology + boundaries)
-        │  shannon-blackbox --url <gateway> --workspace <关联workspace>
+        │  shannon-blackbox --url <gateway> <复用关联workspace 的 flag>
         ▼
 exploit_executor 读 topology → gateway HTTP 层验证跨服务可达性与转发
         ▼
@@ -172,13 +172,15 @@ correlation:
 
 **触发**(扩展黑盒复用源):
 
+Shannon 黑盒现有的 deliverables 复用机制是 `--repo`(复用同 repo 白盒队列)+ `--latest` / `find_workspaces_by_url`(按 URL 找最近白盒 workspace 复用其 deliverables);注意 `--workspace` 是黑盒**自身** workspace 的 resume,**不是**复用源。本次扩展复用源:从"单仓 deliverables"→"**关联 workspace** deliverables"。具体 flag 形态(新增 `--correlated-workspace`,或扩展 `--latest`/`find_workspaces_by_url` 识别关联 workspace)留实现阶段定,本设计不锁死。
+
 ```
-shannon-blackbox start --url <gateway-url> --workspace <关联workspace>
+shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 ```
 
-Shannon 黑盒已有"检测白盒 deliverables、有则跳过 recon 直接 exploitation"机制(`workflows.py:136-150`)+ "按 URL 复用 workspace"(`find_workspaces_by_url`)。本次扩展其复用源:从单仓 deliverables → **关联 workspace** deliverables。
+黑盒已有"检测 deliverables、有则跳过 recon 直接 exploitation"机制(`workflows.py:136-150`),扩展后该机制识别关联 workspace 的 topology/boundaries 并复用。
 
-**exploitation 消费 topology**:`exploit_executor`(黑盒 exploitation 执行器)读关联 workspace deliverables 里的 `cross-service-topology.json` + `trust-boundaries.json` 作为上下文,据此在 **gateway HTTP 层**构造触达后端 method/sink 的 payload,验证可达性与转发行为(如 gateway 的 `POST /orders` 是否真能把恶意输入转发到 `order-svc.CreateOrder`)。
+**exploitation 消费 topology**:`exploit_executor`(黑盒 exploitation 执行器)读关联 workspace deliverables 里的 `cross-service-topology.json` + `trust-boundaries.json` 作为上下文,据此在 **gateway HTTP 层**构造触达后端 method/sink 的 payload,验证可达性与转发行为(如 gateway 的 `POST /orders` 是否真能把恶意输入转发到 `order-svc.CreateOrder`)。**注**:`exploit_executor` 当前如何组织 exploitation prompt 上下文(是否已有 deliverables 内容注入机制)待实现阶段确认;若现有注入点不含 topology,需新增一个 topology 注入环节——本节实现风险之一(见 §11)。
 
 **能力边界**:✅ gateway HTTP 层(可达性 / 转发行为 / gateway 侧注入·ssrf·authz);❌ gRPC 进程内(后端进程内 sink 真实执行需 gRPC 客户端 + 后端可观测,留后续 §13)。
 
@@ -186,7 +188,7 @@ Shannon 黑盒已有"检测白盒 deliverables、有则跳过 recon 直接 explo
 
 ## 7. 产物形态(字段名为草案,实现可调)
 
-落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**(职责 ⑥ 对后端 method 的 exposure 重标注仅落在此关联 workspace,后端单仓 deliverables 原样保留——是叠加视图,非原地覆盖)。
+落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**(职责 ⑥ 对后端 method 的 exposure 重标注仅落在此关联 workspace,后端单仓 deliverables 原样保留——是叠加视图,非原地覆盖)。deliverables 另含合并后的 `{vc}_exploitation_queue.json`(职责 ⑤ 合并 N 仓漏洞),供 §6.2 黑盒 `has_whitebox_results` 检测复用(`workflows.py:136`)——这是黑盒闭环的必要产物,非可选。
 
 ### 7.1 `cross-service-topology.json`(服务调用图)
 
@@ -270,7 +272,8 @@ Shannon 黑盒已有"检测白盒 deliverables、有则跳过 recon 直接 explo
 | Agent 推断质量(概率性) | 中 | 产物形态固化为"候选 + 证据 + 置信度",不强阻断;低置信项透明单列 |
 | 多后端规模(上下文爆炸) | 中 | §6.1 per-edge 推断 + 全局合并 |
 | 复用模式版本漂移 | 低 | §8 警告 + 报告标注 |
-| 第一阶段 gRPC 后端"扫得浅" | 已知接受 | 单仓静态分析照常跑;深度入口发现留二阶段 |
+| 本次 gRPC 后端"扫得浅" | 已知接受 | 单仓静态分析照常跑;深度入口发现留后续(§13) |
+| 黑盒 exploit_executor 注入 topology(注入点待确认) | 中 | §6.2 caveat;实现阶段先确认现有 prompt 上下文机制再定注入方式 |
 
 ## 12. 验收清单
 
@@ -283,6 +286,7 @@ Shannon 黑盒已有"检测白盒 deliverables、有则跳过 recon 直接 explo
 - [ ] 缺 entrypoint / relations 引用错误 → 配置阶段报错;
 - [ ] glm-anthropic profile 下端到端冒烟通过(覆盖 §9);
 - [ ] 黑盒 `--url <gateway>` 复用关联 workspace deliverables,exploitation 消费 topology 在 gateway HTTP 层验证(§6.2);
+- [ ] **单仓零回归**:现有白盒 `--repo` / 黑盒单仓扫描在本次改动后行为不变(跑现有单仓测试套件 + 冒烟无回归);
 - [ ] 新测试独立模块,全套广跑用 `--ignore` 避开预存挂起 suite。
 
 ## 13. 后续阶段(本设计不实现)
