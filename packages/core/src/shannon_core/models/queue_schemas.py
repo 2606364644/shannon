@@ -1,6 +1,8 @@
+import json
+from dataclasses import dataclass, field
 from typing import Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 class BaseVulnerability(BaseModel):
     ID: str
@@ -58,5 +60,89 @@ class AuthzVulnerability(BaseVulnerability):
 
 Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerability, SsrfVulnerability, AuthzVulnerability, BaseVulnerability]
 
+# pydantic 2: bare typing.Union has no .model_validate — use a TypeAdapter.
+_VulnerabilityAdapter = TypeAdapter(Vulnerability)
+
+
+@dataclass
+class LenientParseResult:
+    """Result of lenient queue parsing.
+
+    ``queue`` is always a valid (possibly empty) VulnerabilityQueue.
+    ``warnings`` is non-empty whenever lenient recovery was applied —
+    callers MUST surface these (never silent).
+    """
+    queue: "VulnerabilityQueue"
+    warnings: list[str] = field(default_factory=list)
+    original_form: str = "object"  # object | bare_list | object_no_key | invalid_json
+
+
 class VulnerabilityQueue(BaseModel):
     vulnerabilities: list[Vulnerability] = []
+
+    @classmethod
+    def parse_lenient(cls, content: str) -> LenientParseResult:
+        """Tolerantly parse a queue file, absorbing legacy/hand-written forms.
+
+        Never raises. Supported forms:
+        - {"vulnerabilities": [...]}            -> object (normal)
+        - [...]                                  -> bare_list (wrapped)
+        - {...} without "vulnerabilities"        -> object_no_key (empty)
+        - invalid JSON                           -> invalid_json (empty)
+        Per-entry schema failures are dropped (recorded in warnings).
+        """
+        warnings: list[str] = []
+
+        # --- JSON decode ---
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, ValueError) as exc:
+            return LenientParseResult(
+                queue=cls(vulnerabilities=[]),
+                warnings=[f"invalid json: {exc}"],
+                original_form="invalid_json",
+            )
+
+        # --- Normalize top-level form into an entries list ---
+        if isinstance(data, list):
+            warnings.append(f"wrapped bare-list form ({len(data)} entries)")
+            original_form = "bare_list"
+            entries = data
+        elif isinstance(data, dict):
+            entries = data.get("vulnerabilities")
+            if not isinstance(entries, list):
+                actual = type(entries).__name__ if entries is not None else "None"
+                warnings.append(f"'vulnerabilities' is {actual}, expected list")
+                return LenientParseResult(
+                    queue=cls(vulnerabilities=[]),
+                    warnings=warnings,
+                    original_form="object_no_key",
+                )
+            original_form = "object"
+        else:
+            warnings.append(f"top-level JSON is {type(data).__name__}, expected object or array")
+            return LenientParseResult(
+                queue=cls(vulnerabilities=[]),
+                warnings=warnings,
+                original_form="invalid_json",
+            )
+
+        # --- Validate entries individually, drop malformed ---
+        vulns: list[Vulnerability] = []
+        dropped = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                dropped += 1
+                continue
+            try:
+                vulns.append(_VulnerabilityAdapter.validate_python(entry))
+            except Exception:
+                dropped += 1
+        if dropped:
+            warnings.append(f"dropped {dropped} malformed entr{'y' if dropped == 1 else 'ies'}")
+
+        return LenientParseResult(
+            queue=cls(vulnerabilities=vulns),
+            warnings=warnings,
+            original_form=original_form,
+        )

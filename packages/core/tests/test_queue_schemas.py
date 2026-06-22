@@ -2,7 +2,7 @@ import json
 from shannon_core.models.queue_schemas import (
     BaseVulnerability, InjectionVulnerability, XssVulnerability,
     AuthVulnerability, SsrfVulnerability, AuthzVulnerability,
-    VulnerabilityQueue,
+    LenientParseResult, VulnerabilityQueue,
 )
 
 def test_base_vulnerability_required_fields():
@@ -113,4 +113,71 @@ def test_queue_json_matches_ts_format():
     assert "path" in entry
     assert "sink_call" in entry
     assert "mismatch_reason" in entry
+
+
+def test_parse_lenient_standard_object():
+    content = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJ-1", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+        ),
+    ]).model_dump_json()
+    result = VulnerabilityQueue.parse_lenient(content)
+    assert result.original_form == "object"
+    assert result.warnings == []
+    assert len(result.queue.vulnerabilities) == 1
+    assert result.queue.vulnerabilities[0].ID == "INJ-1"
+
+
+def test_parse_lenient_wraps_bare_list():
+    content = json.dumps([
+        {"ID": "AUTH-1", "vulnerability_type": "Auth", "externally_exploitable": True, "confidence": "high"},
+        {"ID": "AUTH-2", "vulnerability_type": "Auth", "externally_exploitable": True, "confidence": "medium"},
+    ])
+    result = VulnerabilityQueue.parse_lenient(content)
+    assert result.original_form == "bare_list"
+    assert any("bare-list" in w for w in result.warnings)
+    assert len(result.queue.vulnerabilities) == 2
+    assert result.queue.vulnerabilities[0].ID == "AUTH-1"
+
+
+def test_parse_lenient_invalid_json():
+    result = VulnerabilityQueue.parse_lenient("{not valid json")
+    assert result.original_form == "invalid_json"
+    assert len(result.queue.vulnerabilities) == 0
+    assert any("invalid json" in w for w in result.warnings)
+
+
+def test_parse_lenient_object_without_vulnerabilities_key():
+    result = VulnerabilityQueue.parse_lenient(json.dumps({"meta": "no queue here"}))
+    assert result.original_form == "object_no_key"
+    assert len(result.queue.vulnerabilities) == 0
+    assert any("vulnerabilities" in w for w in result.warnings)
+
+
+def test_parse_lenient_drops_malformed_entries_keeps_good():
+    content = json.dumps([
+        {"ID": "GOOD-1", "vulnerability_type": "Auth", "externally_exploitable": True, "confidence": "high"},
+        {"missing": "required fields"},
+        {"ID": "GOOD-2", "vulnerability_type": "Auth", "externally_exploitable": True, "confidence": "low"},
+    ])
+    result = VulnerabilityQueue.parse_lenient(content)
+    ids = [v.ID for v in result.queue.vulnerabilities]
+    assert ids == ["GOOD-1", "GOOD-2"]
+    assert any("dropped" in w for w in result.warnings)
+
+
+def test_parse_lenient_vulnerabilities_not_a_list():
+    content = json.dumps({"vulnerabilities": "not a list"})
+    result = VulnerabilityQueue.parse_lenient(content)
+    assert len(result.queue.vulnerabilities) == 0
+    assert result.warnings  # some warning surfaced
+
+
+def test_parse_lenient_returns_lenient_parse_result():
+    result = VulnerabilityQueue.parse_lenient("[]")
+    assert isinstance(result, LenientParseResult)
+    assert hasattr(result, "queue")
+    assert hasattr(result, "warnings")
+    assert hasattr(result, "original_form")
 
