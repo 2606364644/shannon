@@ -124,8 +124,11 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
 | `run_agent(RECON)` | standard | **🔥 原裸奔→补配(最大的火)** |
 | `run_risk_scoring` / `run_render_dataflow_hints` | standard | **原裸奔→补配** |
 | `run_vuln_agent` | vuln | **原内联 3/30s → VULN_RETRY(行为变化,有意)** |
-| `run_attack_chain_assembly` / `render_findings` | standard | **原裸奔→补配** |
+| `run_attack_chain_assembly` | standard | **原裸奔→补配**(attack-chain 阶段) |
+| `render_findings` / `assemble_report` / `run_agent(report)` | standard | **原裸奔→补配**(reporting 阶段 **3** 个 activity 全裸奔;初版 explore 漏报 assemble_report + run_agent(report),靠 AST 锚点测试兜底发现) |
 | 所有 `log_phase_start/complete`(~14 处) | log | **原裸奔→补配** |
+
+> 白盒合计 **19** 个非日志 activity,其中 **14** 个裸奔(含 reporting 的 assemble_report + run_agent(report));**AST 锚点测试**(§7)是正确性保证,本清单仅供参考。
 
 ### 5.2 黑盒 — `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
 
