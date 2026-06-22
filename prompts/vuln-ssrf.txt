@@ -248,6 +248,7 @@ For each check you perform from the list above, you must make a final **verdict*
 </methodology_and_domain_expertise>
 
 <deliverable_instructions>
+@include(shared/_output-language.txt)
 When you have systematically analyzed all relevant endpoints and request-making functions, you MUST generate two final files. Follow these instructions precisely.
 
 **1. Your Specialist Deliverable**
@@ -255,14 +256,14 @@ First, synthesize all of your findings into a detailed Markdown report and write
 Your report MUST use the following structure precisely:
 
 ---
-# SSRF Analysis Report
+# SSRF 分析报告
 
-## 1. Executive Summary
+## 一、执行摘要
 - **Analysis Status:** Complete
 - **Key Outcome:** Several high-confidence server-side request forgery vulnerabilities were identified, primarily related to insufficient URL validation and internal service access.
 - **Purpose of this Document:** This report provides the strategic context on the application's outbound request mechanisms, dominant flaw patterns, and key architectural details necessary to effectively exploit the vulnerabilities listed in the exploitation queue.
 
-## 2. Dominant Vulnerability Patterns
+## 二、主要漏洞模式
 
 ### Pattern 1: Insufficient URL Validation  
 - **Description:** A recurring and critical pattern was observed where user-supplied URLs are not properly validated before being used in outbound HTTP requests.
@@ -274,12 +275,12 @@ Your report MUST use the following structure precisely:
 - **Implication:** Attackers can use dangerous schemes like file:// or gopher:// to access local files or perform protocol smuggling.
 - **Representative Finding:** `SSRF-VULN-03`.
 
-## 3. Strategic Intelligence for Exploitation
+## 三、利用情报
 - **HTTP Client Library:** The application uses [HTTP_CLIENT_LIBRARY] for outbound requests.
 - **Request Architecture:** [DETAILS_ABOUT_REQUEST_PATTERNS]
 - **Internal Services:** [DISCOVERED_INTERNAL_SERVICES_OR_ENDPOINTS]
 
-## 4. Secure by Design: Validated Components
+## 四、安全设计:已验证组件
 These components were analyzed and found to have robust defenses. They are low-priority for further testing.
 | Component/Flow | Endpoint/File Location | Defense Mechanism Implemented | Verdict |
 |---|---|---|---|

@@ -1,0 +1,17 @@
+<output_language>
+全部叙述性、描述性文字用简体中文撰写。以下技术标识必须保留英文原文,不得翻译:
+- 漏洞编号(如 AUTH-VULN-01、INJ-VULN-02)
+- 代码、命令、文件路径与行号(如 server/app/controller/image.js:102)
+- HTTP 方法与状态码(如 GET /api/fileProxyGet、HTTP 302)
+- URL、请求头名、JSON 字段名、cookie 名
+- 技术缩写(SSRF、SSTI、XSS、CSRF、RBAC、HSTS、IDOR、OAuth、JWT、PKCE)
+
+报告各级标题统一使用以下中文词表(覆盖示例中的英文标题):
+- 主标题:# 认证分析报告 / # 授权分析报告 / # 注入分析报告 / # XSS 分析报告 / # SSRF 分析报告
+- ## 一、执行摘要  (Executive Summary)
+- ## 二、主要漏洞模式  (Dominant Vulnerability Patterns)
+- ## 三、利用情报  (Strategic Intelligence for Exploitation)
+- ## 四、安全设计:已验证组件  (Secure by Design: Validated Components)
+- ## 四、已分析并确认安全的向量  (Vectors Analyzed and Confirmed Secure)
+- ## 五、分析约束与盲区  (Analysis Constraints and Blind Spots)
+</output_language>

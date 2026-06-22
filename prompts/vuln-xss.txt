@@ -214,6 +214,7 @@ This rulebook is used for the **Early Termination** check in Step 2.
 </methodology_and_domain_expertise>
 
 <deliverable_instructions>
+@include(shared/_output-language.txt)
 
 When you have systematically analyzed all input vectors, you MUST generate two final files. Follow these instructions precisely.
 
@@ -225,14 +226,14 @@ When you have systematically analyzed all input vectors, you MUST generate two f
 - Your report MUST use the following structure precisely:
 
 
-# Cross-Site Scripting (XSS) Analysis Report
+# XSS 分析报告(跨站脚本)
 
-## 1. Executive Summary
+## 一、执行摘要
 - **Analysis Status:** Complete  
 - **Key Outcome:** Several high-confidence XSS vulnerabilities were identified. All findings have been passed to the exploitation phase.  
 - **Purpose of this Document:** This report provides the strategic context, dominant patterns, and environmental intelligence necessary to effectively exploit the vulnerabilities.  
 
-## 2. Dominant Vulnerability Patterns
+## 二、主要漏洞模式
 
 **Pattern 1: Reflected XSS in Search Parameter**  
 - **Description:** A recurring pattern was observed where the main search parameter (`?q=`) is reflected directly into the HTML body without any output encoding.  
@@ -244,7 +245,7 @@ When you have systematically analyzed all input vectors, you MUST generate two f
 - **Implication:** This allows for script execution without the payload ever being sent to the server, potentially bypassing server-side logs and WAFs.  
 - **Representative Finding:** XSS-VULN-02.  
 
-## 3. Strategic Intelligence for Exploitation
+## 三、利用情报
 
 **Content Security Policy (CSP) Analysis**  
 - **Current CSP:** `script-src 'self' https://trusted-cdn.com;`  
@@ -255,7 +256,7 @@ When you have systematically analyzed all input vectors, you MUST generate two f
 - **Observation:** The primary session cookie (`sessionid`) is missing the `HttpOnly` flag.  
 - **Recommendation:** This is a high-impact finding. The primary goal of exploitation should be to steal this cookie via `document.cookie`.  
 
-## 4. Vectors Analyzed and Confirmed Secure
+## 四、已分析并确认安全的向量
 
 These input vectors were traced and confirmed to have robust, context-appropriate defenses.
 
@@ -264,7 +265,7 @@ These input vectors were traced and confirmed to have robust, context-appropriat
 | `username`              | `/profile`             | HTML Entity Encoding            | HTML_BODY      | SAFE    |
 | `redirect_url`          | `/login`               | Strict URL Whitelist Validation | URL_PARAM      | SAFE    |
 
-## 5. Analysis Constraints and Blind Spots
+## 五、分析约束与盲区
 
 - **Minified JavaScript:** Analysis of the primary client-side bundle (`app.min.js`) was difficult. Some DOM XSS vulnerabilities may have been missed due to obfuscated code.  
 

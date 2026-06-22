@@ -277,6 +277,7 @@ For each analysis you perform from the lists above, you must make a final **verd
 </methodology_and_domain_expertise>
 
 <deliverable_instructions>
+@include(shared/_output-language.txt)
 When you have systematically analyzed all relevant endpoints and logic paths, you MUST generate three final files. Follow these instructions precisely to structure your output.
 
 **1. Your Specialist Deliverable**
@@ -286,15 +287,15 @@ First, synthesize all of your findings into a single, detailed Markdown report a
 Your report MUST use the following structure precisely:
 
 ---
-# Authorization Analysis Report
+# 授权分析报告
 
-## 1. Executive Summary
+## 一、执行摘要
 
 - **Analysis Status:** Complete  
 - **Key Outcome:** ONLY high-confidence authorization vulnerabilities (horizontal, vertical, and context/workflow) were recorded. All findings have been passed to the exploitation phase via the machine-readable exploitation queue.  
 - **Purpose of this Document:** This report provides the strategic context, dominant patterns, and architectural intelligence necessary to effectively exploit the vulnerabilities listed in the queue. It is intended to be read alongside the JSON deliverable.  
 
-## 2. Dominant Vulnerability Patterns
+## 二、主要漏洞模式
 
 ### Pattern 1: Missing Ownership Validation (Horizontal | Vertical | Context)
 - **Description:** Multiple endpoints accept resource IDs without verifying the requesting user owns or has access to that resource
@@ -303,7 +304,7 @@ Your report MUST use the following structure precisely:
 
 etc...
 
-## 3. Strategic Intelligence for Exploitation
+## 三、利用情报
 examples:
 - **Session Management Architecture:**  
   - Sessions use JWT tokens stored in cookies with `httpOnly` flag  
@@ -323,7 +324,7 @@ examples:
   - Multi-step processes use status fields in database  
   - **Critical Finding:** Status transitions don't verify prior state completion  
 
-## 4. Vectors Analyzed and Confirmed Secure
+## 四、已分析并确认安全的向量
 
 These authorization checks were traced and confirmed to have robust, properly-placed guards. They are **low-priority** for further testing.
 
@@ -333,7 +334,7 @@ These authorization checks were traced and confirmed to have robust, properly-pl
 | `GET /api/public/*` | routes/public.js:12 | Public endpoints, no auth required by design | SAFE |
 | `GET /api/users/me` | controllers/user.js:89 | Uses session user ID, no parameter manipulation possible | SAFE |
 
-## 5. Analysis Constraints and Blind Spots
+## 五、分析约束与盲区
 examples: 
 - **Untraced Microservice Calls:**  
   Some endpoints make calls to internal microservices. Authorization checks within these services could not be analyzed without their source code.

@@ -200,6 +200,7 @@ For each check you perform from the list above (Transport, Rate Limiting, Sessio
 </methodology_and_domain_expertise>
 
 <deliverable_instructions>
+@include(shared/_output-language.txt)
 When you have systematically analyzed all relevant endpoints and logic paths, you MUST generate two final files. Follow these instructions precisely.
 
 **1. Your Specialist Deliverable**
@@ -207,14 +208,14 @@ First, synthesize all of your findings into a detailed Markdown report and write
 Your report MUST use the following structure precisely:
 
 ---
-# Authentication Analysis Report
+# 认证分析报告
 
-## 1. Executive Summary
+## 一、执行摘要
 - **Analysis Status:** Complete
 - **Key Outcome:** Critical authentication flaws were identified, primarily related to weak session management and insufficient transport security.
 - **Purpose of this Document:** This report provides the strategic context on the application's authentication mechanisms, dominant flaw patterns, and key architectural details necessary to effectively exploit the vulnerabilities listed in the exploitation queue.
 
-## 2. Dominant Vulnerability Patterns
+## 二、主要漏洞模式
 
 ### Pattern 1: Weak Session Management
 - **Description:** A recurring and critical pattern was observed where session cookies lack proper security flags and session identifiers are not rotated after successful authentication.
@@ -226,12 +227,12 @@ Your report MUST use the following structure precisely:
 - **Implication:** Attackers can perform brute force attacks, credential stuffing, and password spraying without being throttled.
 - **Representative Finding:** `AUTH-VULN-03`.
 
-## 3. Strategic Intelligence for Exploitation
+## 三、利用情报
 - **Authentication Method:** The system uses JWT-based authentication with tokens stored in cookies.
 - **Session Token Details:** The session is managed via a JWT stored in a cookie named `session_token`. The XSS specialist noted this cookie lacks the `HttpOnly` flag, making it accessible to script.
 - **Password Policy:** Basic password requirements are enforced client-side but server-side validation appears minimal.
 
-## 4. Secure by Design: Validated Components
+## 四、安全设计:已验证组件
 These components were analyzed and found to have robust defenses. They are low-priority for further testing.
 | Component/Flow | Endpoint/File Location | Defense Mechanism Implemented | Verdict |
 |---|---|---|---|
