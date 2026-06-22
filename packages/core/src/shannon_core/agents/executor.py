@@ -46,6 +46,7 @@ class AgentExecutor:
             )
         deliverables = Path(deliverables_path)
         deliverables.mkdir(parents=True, exist_ok=True)
+        await GitManager.ensure_repository(deliverables)
 
         config: Config | None = None
         if config_path:
