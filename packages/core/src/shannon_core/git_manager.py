@@ -64,6 +64,28 @@ class GitManager:
             return False
 
     @staticmethod
+    async def ensure_repository(repo_path: Path) -> GitResult:
+        """幂等确保 repo_path 是独立 git 仓库(对齐 TS activities.ts:535-552)。
+
+        用 stat(repo_path/.git) 判断 .git 是否"直接存在于 repo_path 内"——
+        刻意不用 is_git_repository(后者用 rev-parse,会匹配父仓库的 .git,
+        正是迁移后 deliverables 污染主仓库的 bug 根源)。不存在则 git init +
+        设 local 身份(避免无全局 git config 的环境 commit 失败)+ 首次空 commit。
+        """
+        dot_git = repo_path / ".git"
+        if dot_git.exists():
+            return GitResult(success=True)
+
+        await GitManager._run_git(repo_path, "init")
+        # local 身份:TS 依赖全局 config,这里设 local 以在 CI/容器等无全局环境稳健
+        await GitManager._run_git(repo_path, "config", "user.email", "shannon-deliverables@local")
+        await GitManager._run_git(repo_path, "config", "user.name", "shannon-deliverables")
+        await GitManager._run_git_with_retry(
+            repo_path, "commit", "--allow-empty", "-m", "Initial deliverables checkpoint",
+        )
+        return GitResult(success=True)
+
+    @staticmethod
     async def create_checkpoint(
         repo_path: Path,
         agent_name: str | AgentName,

@@ -262,3 +262,67 @@ async def test_no_changes_returns_empty_list(git_repo: Path):
     result = await GitManager.commit(git_repo, "no-change-agent")
     assert result.success
     assert result.changed_files == []
+
+
+# ---- ensure_repository ----
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_inits_new_repo(tmp_path: Path):
+    """deliverables 无 .git 时,ensure_repository 建 .git + 首次 commit。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+
+    result = await GitManager.ensure_repository(deliverables)
+
+    assert result.success is True
+    assert (deliverables / ".git").exists()  # .git 直接在 deliverables 内
+    # 首次 commit 存在
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=deliverables, capture_output=True, text=True,
+    )
+    assert "Initial deliverables checkpoint" in log.stdout
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_idempotent(tmp_path: Path):
+    """deliverables 已有 .git 时,ensure_repository 幂等跳过(不重复 init/commit)。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    await GitManager.ensure_repository(deliverables)
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=deliverables, capture_output=True, text=True,
+    ).stdout.strip()
+
+    result = await GitManager.ensure_repository(deliverables)  # 二次调用
+
+    assert result.success is True
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=deliverables, capture_output=True, text=True,
+    ).stdout.strip()
+    assert head_before == head_after  # HEAD 不变(未新增 commit)
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_dotgit_is_inside_not_parent(tmp_path: Path):
+    """关键:.git 必须直接在 deliverables 内,而非沿用父仓库的 .git(这是原 bug 根源)。"""
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    subprocess.run(["git", "init"], cwd=parent, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "p@p.com"], cwd=parent, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "P"], cwd=parent, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "parent-initial"], cwd=parent, capture_output=True, check=True)
+    deliverables = parent / "deliverables"  # 嵌套在父仓库内(模拟 workspaces/<session>/deliverables)
+    deliverables.mkdir()
+
+    await GitManager.ensure_repository(deliverables)
+
+    assert (deliverables / ".git").exists()  # deliverables 自己的 .git
+    # deliverables 的 HEAD 与父仓库不同(独立仓库)
+    deliv_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=deliverables, capture_output=True, text=True,
+    ).stdout.strip()
+    parent_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=parent, capture_output=True, text=True,
+    ).stdout.strip()
+    assert deliv_head != parent_head
