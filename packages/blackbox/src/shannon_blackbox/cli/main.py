@@ -39,7 +39,12 @@ def cli():
 @click.option("--no-exploit", is_flag=True, help="Skip exploitation phase")
 @click.option("--pipeline-testing", is_flag=True, help="Use minimal prompts for testing")
 @click.option("--temporal-address", default="localhost:7233", help="Temporal server address")
-@click.option("--max-concurrent", default=get_max_concurrent, type=int, help="Max concurrent exploit agents (env: SHANNON_MAX_CONCURRENT, default: 3)")
+@click.option(
+    "--max-concurrent",
+    default=get_max_concurrent,
+    type=int,
+    help="Max concurrent exploit agents (env: SHANNON_MAX_CONCURRENT, default: 3)",
+)
 @click.option("--retry-profile", "retry_profile", default=None, type=click.Choice(["production", "testing", "subscription"]), help="Retry policy profile")
 @click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
 @click.option("--rerun", is_flag=True, help="强制重跑黑盒（归档旧 evidence，基于已有白盒结果重新跑）")
