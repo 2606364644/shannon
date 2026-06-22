@@ -96,6 +96,7 @@ async def test_agent_end_failed_shows_cross_timestamp_and_error():
     assert "boom" in out
     assert "[2026-06-22 00:25:17]" in out  # 时间戳前缀（真实格式含空格，Rich 不当 tag）
     assert "AGENT" in out
+    assert "[XSS]" in out  # 失败路径仍渲染 [XSS] title（包在 [red]...[/] 内，Rich 多字母未知 tag 当字面输出）
 
 
 async def test_tool_renders_humanized():

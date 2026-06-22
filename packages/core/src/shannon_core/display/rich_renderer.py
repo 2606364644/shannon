@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from shannon_core.display.formatters import (
-    agent_body, agent_prefix, agent_title, format_duration,
+    agent_body, agent_prefix, format_duration,
     format_error_block, humanize_tool_call, first_nonempty_line,
     pad_rule, phase_body, step_body, tag,
 )
