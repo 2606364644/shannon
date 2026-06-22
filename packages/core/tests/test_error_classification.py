@@ -339,3 +339,36 @@ class TestEdgeCases:
     def test_is_retryable_with_pentest_error_non_retryable(self):
         err = PentestError("authentication failed", "auth")
         assert is_retryable_error(err) is False
+
+
+# ============================================================================
+# classify_error_for_temporal — Pydantic ValidationError handling
+# ============================================================================
+
+def test_pydantic_validation_error_is_non_retryable():
+    """Deterministic data-format errors must not trigger Temporal retries."""
+    from pydantic import BaseModel, ValidationError
+
+    class M(BaseModel):
+        x: int
+
+    try:
+        M.model_validate({"x": "not an int"})
+    except ValidationError as exc:
+        error_type, retryable = classify_error_for_temporal(exc)
+        assert retryable is False
+        assert error_type == "OutputValidationError"
+        return
+    raise AssertionError("ValidationError was not raised")
+
+
+def test_input_should_be_text_is_non_retryable():
+    """Raw pydantic error string surfaces non-retryable even without the exception type."""
+
+    class FakeError(Exception):
+        pass
+
+    err = FakeError("1 validation error for VulnerabilityQueue\n  Input should be an object")
+    error_type, retryable = classify_error_for_temporal(err)
+    assert retryable is False
+    assert error_type == "OutputValidationError"

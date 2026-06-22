@@ -155,6 +155,10 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
     if "output validation" in text or "deliverable" in text:
         return ("OutputValidationError", True)
 
+    # Pydantic / data-format validation — deterministic, retrying won't change input
+    if "validation error" in text or "input should be" in text:
+        return ("OutputValidationError", False)
+
     # Invalid request
     if "400" in text or "malformed" in text or "invalid request" in text:
         return ("InvalidRequestError", False)
