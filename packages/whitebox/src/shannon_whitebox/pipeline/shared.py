@@ -16,6 +16,7 @@ class PipelineInput(BasePipelineInput):
     web_url: str = ""
     prompt_override: str | None = None
     resume_completed_agents: list[str] = field(default_factory=list)  # resume 预填
+    max_concurrent: int = 3                    # SHANNON_MAX_CONCURRENT 注入;vuln agents 并发上限
 
 
 @dataclass
