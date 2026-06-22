@@ -266,3 +266,8 @@ def distribute_config(config: Config | None) -> DistributedConfig:
         rules_of_engagement=config.rules_of_engagement or "",
         authentication=config.authentication,
     )
+
+def parse_multi_repo_config(path: str | Path) -> "MultiRepoConfig":
+    from shannon_core.models.multi_repo_config import MultiRepoConfig
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return MultiRepoConfig.model_validate(raw)
