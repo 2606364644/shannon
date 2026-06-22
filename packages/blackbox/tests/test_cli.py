@@ -596,3 +596,45 @@ def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert run_scan_called == [True]
     assert captured["rerun"] is True
+
+
+def _capture_input(monkeypatch, extra_args, env_value=None):
+    """Invoke `blackbox start` with run_scan mocked; return captured BlackboxPipelineInput."""
+    if env_value is None:
+        monkeypatch.delenv("SHANNON_MAX_CONCURRENT", raising=False)
+    else:
+        monkeypatch.setenv("SHANNON_MAX_CONCURRENT", env_value)
+
+    captured: list[BlackboxPipelineInput] = []
+
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        captured.append(input)
+        return BlackboxPipelineState(status="completed")
+
+    with (
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://example.com"] + extra_args)
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    return captured[0]
+
+
+def test_max_concurrent_default_from_env(monkeypatch):
+    """SHANNON_MAX_CONCURRENT=2 → BlackboxPipelineInput.max_concurrent == 2 (no CLI flag)."""
+    input = _capture_input(monkeypatch, extra_args=[], env_value="2")
+    assert input.max_concurrent == 2
+
+
+def test_max_concurrent_cli_overrides_env(monkeypatch):
+    """--max-concurrent 5 overrides SHANNON_MAX_CONCURRENT=2."""
+    input = _capture_input(monkeypatch, extra_args=["--max-concurrent", "5"], env_value="2")
+    assert input.max_concurrent == 5
+
+
+def test_max_concurrent_default_3_when_unset(monkeypatch):
+    """No env, no flag → default 3."""
+    input = _capture_input(monkeypatch, extra_args=[], env_value=None)
+    assert input.max_concurrent == 3
