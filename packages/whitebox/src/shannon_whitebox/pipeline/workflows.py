@@ -357,6 +357,19 @@ class WhiteboxScanWorkflow:
                 activities.render_findings, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
             )
+            # 轴1:拼接各分项 → 综合报告(确定性)
+            self._state.current_agent = "assemble-report"
+            await workflow.execute_activity(
+                activities.assemble_report, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+            )
+            # 轴1:REPORT agent 加执行摘要 + 清理(report-executive.txt)
+            self._state.current_agent = "run-report-agent"
+            await workflow.execute_activity(
+                activities.run_agent,
+                ActivityInput(**{**act_input.__dict__, "agent_name": "report"}),
+                start_to_close_timeout=timedelta(minutes=15),
+            )
             self._state.current_agent = None
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
