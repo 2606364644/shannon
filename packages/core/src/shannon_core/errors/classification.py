@@ -71,7 +71,7 @@ _NON_RETRYABLE_KEYWORDS = (
 )
 _RETRYABLE_KEYWORDS = (
     "rate limit", "429", "timeout", "network", "ECONN", "billing",
-    "transient", "502", "503", "504", "validation",
+    "transient", "502", "503", "504", "validation", "529",
 )
 
 

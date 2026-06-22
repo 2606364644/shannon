@@ -75,3 +75,23 @@ def test_output_validation_consistent_between_functions():
         assert classify_retryable == display_retryable, (
             f"{msg!r}: classify={classify_retryable} but display={display_retryable}"
         )
+
+
+def test_display_retryable_true_for_529_overload():
+    """529（GLM 模型服务端过载）应显示 retryable —— 修复 is_retryable_for_display 漏 529 的 bug。
+
+    真实错误 message 形如 'SDK result failure: subtype=success, api_error_status=529'。
+    """
+    assert is_retryable_for_display(
+        RuntimeError("SDK result failure: subtype=success, api_error_status=529")
+    ) is True
+
+
+def test_classify_for_temporal_529_still_transient():
+    """529 不在 _TEMPORAL_PATTERNS，fallback 到 TRANSIENT(retryable=True)。
+
+    回归保护：确保补 is_retryable_for_display 关键词不误伤 classify_for_temporal 的 error_type。
+    """
+    etype, retryable = classify_for_temporal(RuntimeError("api_error_status=529"))
+    assert etype == ErrorType.TRANSIENT
+    assert retryable is True
