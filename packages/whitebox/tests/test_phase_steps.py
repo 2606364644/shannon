@@ -27,7 +27,9 @@ def test_step_names_matches_phase_steps_order():
     assert step_names("recon") == ("recon",)
     assert step_names("risk-scoring") == ("risk-scoring", "dataflow-hints")
     assert step_names("attack-chain") == ("attack-chain-assembly",)
-    assert step_names("reporting") == ("render-findings",)
+    assert step_names("reporting") == (
+        "render-findings", "assemble-report", "run-report-agent",
+    )
 
 
 def test_step_names_unknown_phase_raises_keyerror():

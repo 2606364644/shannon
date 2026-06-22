@@ -487,6 +487,33 @@ async def render_findings(input: ActivityInput) -> None:
 
 
 @activity.defn
+async def assemble_report(input: ActivityInput) -> None:
+    """轴1:把各 *_analysis_deliverable.md 拼接成 comprehensive report。
+
+    ReportAssembler 已实现 evidence → findings → analysis_deliverable 三级回退,
+    天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
+    加执行摘要并清理。
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        from shannon_core.services.report_assembler import ReportAssembler
+
+        _, deliverables, _ = _get_paths(input)
+        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        vuln_classes = list(ALL_VULN_CLASSES)
+        async with get_audit_session().track_step(
+            "reporting", "assemble-report", intent=intent_for("assemble-report")
+        ):
+            await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_render_dataflow_hints(input: ActivityInput) -> dict:
     """Spec C: render static_dataflow_hints.md from Spec B/A products.
 

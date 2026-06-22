@@ -43,7 +43,9 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
         StepSpec("attack-chain-assembly", "组装攻击链"),
     ),
     "reporting": (
-        StepSpec("render-findings", "渲染最终报告"),
+        StepSpec("render-findings",   "渲染漏洞条目(若存在队列)"),
+        StepSpec("assemble-report",   "拼接各分项报告"),
+        StepSpec("run-report-agent",  "撰写执行摘要并清理报告"),
     ),
 }
 
