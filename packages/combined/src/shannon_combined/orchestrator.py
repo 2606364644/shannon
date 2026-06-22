@@ -1,6 +1,7 @@
 """Orchestration logic: runs whitebox scan then blackbox scan in sequence."""
 
 from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from shannon_core.config.concurrency import get_max_concurrent
 from shannon_whitebox.pipeline.shared import PipelineInput
 
 
@@ -33,6 +34,7 @@ async def run_combined_scan(
         web_url=url,
         config_path=config_path,
         pipeline_testing_mode=pipeline_testing,
+        max_concurrent=get_max_concurrent(),
     )
 
     wb_result = await run_whitebox_scan(wb_input, temporal_address)
@@ -62,6 +64,7 @@ async def run_combined_scan(
         workspace_name=workspace_name,
         config_path=config_path,
         pipeline_testing_mode=pipeline_testing,
+        max_concurrent=get_max_concurrent(),
     )
 
     bb_result = await run_blackbox_scan(bb_input, temporal_address)
