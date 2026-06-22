@@ -152,9 +152,9 @@ vuln prompt 的内容分两类:
 
 - **理由**:对 GLM 这类中文原生模型,中文分析指令更一致;但分析质量主要由模型能力决定,英文方法论 GLM 同样执行良好。
 - **代价**:~1500 行翻译;回归风险(措辞改动可能微妙影响分析行为);边际收益低。
-- **决策**:**本次不做(spec review 已确认 Layer 0 only)**。Layer 0 上线后人工冒烟评估中文报告质量;若叙述中混入明显英文腔,再作为后续增量单独启动 Layer 1。
+- **决策**:Layer 0 上线后,人工冒烟评估中文报告质量;若叙述中混入明显英文腔,再启动 Layer 1。**默认不在本次实现范围内**。
 
-> 说明:用户在 brainstorming 中认可"全中文 prompt"方向。本设计将其落为 Layer 0(彻底达成"全中文报告"实质目标)+ Layer 1(字面意义的"全中文 prompt",留作后续增量)。
+> 说明:用户在 brainstorming 中认可"全中文 prompt"方向。本设计将其落为 Layer 0(彻底达成"全中文报告"实质目标)+ Layer 1(可选,字面意义的"全中文 prompt")。**已确认范围(spec review)**:本次实现只做 Layer 0;Layer 1(分析指令中文化)不做,留作冒烟评估后的兜底。
 
 #### 4.2.3 中文标题词表(Layer 0 落地依据)
 
@@ -204,7 +204,7 @@ vuln 分项报告(`*_analysis_deliverable.md`)输出标题统一约定:
 
 ---
 
-## 5. 即时补救已完成的扫描(可选,待定)
+## 5. 即时补救已完成的扫描(已决定:不做)
 
 触发本次设计的扫描(`workspaces/honor_shannon-1782117257489/`)已跑完,但分项 `*_analysis_deliverable.md` 为**英文**。仅重跑 reporting(轴 1)会得到「中文执行摘要 + 英文分项」的混合体,不满足"全中文"。全中文补救两条路:
 
@@ -213,9 +213,9 @@ vuln 分项报告(`*_analysis_deliverable.md`)输出标题统一约定:
 | **(a) 翻译分项** | 对现有英文分项一次性翻译为中文,再跑轴 1 的 reporting | 低(几毛) | 翻译质量 |
 | **(b) 重跑 vuln agent** | 用新中文 prompt 重跑 5 个 vuln agent,再跑 reporting | 高(再数十刀) | 原生中文,最高 |
 
-**本次决策**:**纳入范围,走路径 (a)(翻译分项)**。轴 1 改造后,reporting 是独立 phase,可通过 white-box 现有的 resume 机制(`packages/whitebox/src/shannon_whitebox/pipeline/whitebox_resume.py`)从 reporting 步重跑。补救流程:一个小脚本对 `workspaces/honor_shannon-1782117257489/deliverables/` 下的英文分项 `*_analysis_deliverable.md` 做一次性翻译为中文(保留技术标识),再重跑 reporting(assemble + report-agent),即得到该次扫描的全中文综合报告。(resume 是否已支持从任意 phase 重跑、补救脚本的最终形态,在实现计划中确认。)
+**默认决策**:本次实现聚焦"以后扫描自动全中文"。即时补救作为**附带能力**——轴 1 改造后,reporting 是独立 phase,可通过 white-box 现有的 resume 机制(`packages/whitebox/src/shannon_whitebox/pipeline/whitebox_resume.py`)从 reporting 步重跑;若用户选择补救,推荐路径 (a)(低成本):用一个小脚本对指定 workspace 的英文分项做翻译,再重跑 reporting。(resume 是否已支持从任意 phase 重跑,在实现计划中确认。)
 
-> spec review 时请确认:是否需要即时补救,以及走 (a) 还是 (b)。
+> **已确认(spec review):不做即时补救。** 本次实现只保证"以后扫描自动全中文";`honor_shannon-1782117257489` 的英文分项不补救。
 
 ---
 
@@ -241,11 +241,11 @@ vuln 分项报告(`*_analysis_deliverable.md`)输出标题统一约定:
 
 ---
 
-## 8. 已定决策(spec review 结果)
+## 8. 已确认决策(spec review 结果)
 
-1. **轴 2 范围 = Layer 0 only**。Layer 1(分析指令中文化)本次不做,留作冒烟评估后的增量。
-2. **即时补救 = 纳入范围,走路径 (a) 翻译分项**。提供补救脚本,对 `honor_shannon-1782117257489` 的英文分项翻译后再重跑 reporting。
-3. **report agent 执行摘要开关 = 不加**(YAGNI)。固定为"拼接 + 执行摘要"。
+1. **轴 2 范围** → **只做 Layer 0**(输出层中文化)。Layer 1 不做。
+2. **即时补救** → **不做**(`honor_shannon-1782117257489` 英文分项不补救)。
+3. **report agent 执行摘要开关** → **不加**,固定为"拼接 + 执行摘要"。
 
 ---
 
@@ -261,4 +261,3 @@ vuln 分项报告(`*_analysis_deliverable.md`)输出标题统一约定:
 - `prompts/report-executive.txt`(中文化 + 与 vuln 标题配套)
 - `prompts/pipeline-testing/vuln-*.txt`、`report-executive.txt`(同步中文化)
 - 相关测试迁移/新增
-- 即时补救脚本(翻译 `honor_shannon-1782117257489` 英文分项 → 重跑 reporting)
