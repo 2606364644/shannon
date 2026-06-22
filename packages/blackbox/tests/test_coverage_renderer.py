@@ -168,3 +168,26 @@ async def test_uncovered_section_reaches_final_report(tmp_path):
     assert "AUTH-VULN-02" in report
     # 已覆盖条目也在
     assert "AUTH-VULN-01" in report
+
+
+def _write_bare_list_queue(tmp_path, vuln_class, ids):
+    (tmp_path / f"{vuln_class}_exploitation_queue.json").write_text(json.dumps([
+        {"ID": i, "vulnerability_type": "t", "externally_exploitable": True, "confidence": "high"}
+        for i in ids
+    ]))
+
+
+@pytest.mark.asyncio
+async def test_close_coverage_gaps_tolerates_bare_list_queue(tmp_path):
+    """Bare-list queue must not crash close_coverage_gaps (recovered via parse_lenient)."""
+    _write_bare_list_queue(tmp_path, "auth", ["AUTH-VULN-01", "AUTH-VULN-02"])
+    (tmp_path / "auth_exploitation_evidence.md").write_text(
+        "# Ev\n## Successfully Exploited\n### AUTH-VULN-01: a\n"
+    )
+
+    results = await close_coverage_gaps(tmp_path, ["auth"])
+
+    assert len(results) == 1
+    assert results[0].uncovered_ids == frozenset({"AUTH-VULN-02"})
+    ev = (tmp_path / "auth_exploitation_evidence.md").read_text()
+    assert "### AUTH-VULN-02" in ev

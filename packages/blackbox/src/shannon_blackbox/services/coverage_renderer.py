@@ -104,7 +104,7 @@ async def close_coverage_gaps(
             # 幂等：已含未覆盖节，跳过追加（assemble 重跑安全）
             uncovered_results.append(result)
             continue
-        queue = VulnerabilityQueue.model_validate_json(await async_read_file(queue_path))
+        queue = VulnerabilityQueue.parse_lenient(await async_read_file(queue_path)).queue
         section = render_unverified_section(result, queue)
         await async_write_file(evidence_path, evidence_text.rstrip("\n") + "\n" + section)
         logger.warning(
