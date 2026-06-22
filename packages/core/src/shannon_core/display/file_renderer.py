@@ -7,7 +7,8 @@ line, matching the COMPLETION_PATTERN in shannon_core.cli.logs.
 from __future__ import annotations
 
 from shannon_core.display.formatters import (
-    agent_prefix, format_duration, format_error_block, humanize_tool_call,
+    agent_body, agent_title, format_duration, format_error_block,
+    humanize_tool_call, phase_body, step_body, tag,
 )
 
 from shannon_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
@@ -17,11 +18,12 @@ _SEP = "=" * 80
 
 
 def _prefixed(agent_name: str) -> str:
-    """Return '[Prefix] agentname' or just 'agentname' for unknown agents."""
-    pfx = agent_prefix(agent_name)
-    if pfx == "[Agent]":
-        return agent_name
-    return f"{pfx} {agent_name}"
+    """Return '[Prefix] agentname' or just 'agentname' for unknown agents.
+
+    Delegates to the shared agent_title so file/rich agree on agent display.
+    仍供 _tool/_llm 行使用（本次不改这两类行）。
+    """
+    return agent_title(agent_name)
 
 
 class FileLogRenderer:
@@ -46,15 +48,7 @@ class FileLogRenderer:
             case ResumeEvent(): await self._writer.write(self._resume(event))
 
     def _step(self, e) -> str:
-        verb = "Starting" if e.event == "start" else "Completed"
-        intent = f" — {e.intent}" if getattr(e, "intent", None) else ""
-        parts = []
-        if e.event == "complete" and e.duration_ms is not None:
-            parts.append(format_duration(e.duration_ms))
-        if e.error:
-            parts.append(f"error: {e.error}")
-        suffix = f" ({', '.join(parts)})" if parts else ""
-        return f"[{e.timestamp}] [STEP] {e.name}: {verb}{intent}{suffix}\n"
+        return f"[{e.timestamp}] [{tag('STEP')}] {step_body(e)}\n"
 
     def _header(self, e) -> str:
         lines = [_SEP, "Shannon Pentest - Workflow Log", _SEP]
@@ -81,26 +75,11 @@ class FileLogRenderer:
         return "\n".join(lines) + "\n\n"
 
     def _phase(self, e) -> str:
-        verb = "Starting" if e.event == "start" else "Completed"
         prefix = "\n" if e.event == "start" else ""
-        return f"{prefix}[{e.timestamp}] [PHASE] {verb} {e.phase}\n"
+        return f"{prefix}[{e.timestamp}] [{tag('PHASE')}] {phase_body(e)}\n"
 
     def _agent(self, e) -> str:
-        who = _prefixed(e.agent_name)
-        if e.event == "start":
-            return f"[{e.timestamp}] [AGENT] {who}: Starting (attempt {e.attempt})\n"
-        # end
-        if e.success is False:
-            dur = format_duration(e.duration_ms) if e.duration_ms is not None else "?"
-            err = f" - {e.error}" if e.error else ""
-            return f"[{e.timestamp}] [AGENT] {who}: Failed ({dur}){err}\n"
-        parts = []
-        if e.duration_ms is not None:
-            parts.append(format_duration(e.duration_ms))
-        if e.cost_usd is not None:
-            parts.append(f"${e.cost_usd:.4f}")
-        metrics = f" ({', '.join(parts)})" if parts else ""
-        return f"[{e.timestamp}] [AGENT] {who}: Completed{metrics}\n"
+        return f"[{e.timestamp}] [{tag('AGENT')}] {agent_body(e)}\n"
 
     def _tool(self, e) -> str:
         who = _prefixed(e.agent_name)

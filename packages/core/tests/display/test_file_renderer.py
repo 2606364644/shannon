@@ -54,7 +54,7 @@ async def test_agent_start_with_prefix():
     await renderer.render(AgentEvent(
         timestamp="t", category="AGENT", agent_name="injection-vuln",
         event="start", attempt=2))
-    assert "[AGENT] [Injection] injection-vuln: Starting (attempt 2)\n" in renderer._writer.text
+    assert "[AGENT] ▶ [Injection] injection-vuln started (attempt 2)\n" in renderer._writer.text
 
 
 async def test_agent_start_no_prefix_for_unknown():
@@ -62,7 +62,7 @@ async def test_agent_start_no_prefix_for_unknown():
     await renderer.render(AgentEvent(
         timestamp="t", category="AGENT", agent_name="pre-recon",
         event="start", attempt=1))
-    assert "[AGENT] pre-recon: Starting (attempt 1)\n" in renderer._writer.text
+    assert "[AGENT] ▶ pre-recon started (attempt 1)\n" in renderer._writer.text
 
 
 async def test_agent_end_completed_with_metrics():
@@ -70,8 +70,7 @@ async def test_agent_end_completed_with_metrics():
     await renderer.render(AgentEvent(
         timestamp="t", category="AGENT", agent_name="xss-vuln",
         event="end", attempt=1, duration_ms=5200, cost_usd=0.15, success=True))
-    line = "[AGENT] [XSS] xss-vuln: Completed (5.2s, $0.1500)\n"
-    assert line in renderer._writer.text
+    assert "[AGENT] ✓ [XSS] xss-vuln Completed (5.2s, $0.1500)\n" in renderer._writer.text
 
 
 async def test_agent_end_failed():
@@ -79,7 +78,7 @@ async def test_agent_end_failed():
     await renderer.render(AgentEvent(
         timestamp="t", category="AGENT", agent_name="xss-vuln",
         event="end", attempt=1, duration_ms=100, success=False, error="boom"))
-    assert "[AGENT] [XSS] xss-vuln: Failed (100ms) - boom" in renderer._writer.text
+    assert "[AGENT] ✗ [XSS] xss-vuln failed (100ms) — boom" in renderer._writer.text
 
 
 async def test_tool_line_alignment():
@@ -169,10 +168,8 @@ async def test_step_event_renders_step_line():
     await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                              phase="pre-recon", event="complete", duration_ms=12000))
     out = "".join(w.lines)
-    assert "[STEP]" in out
-    assert "code-index" in out
-    assert "Starting" in out
-    assert "Completed" in out
+    assert "[STEP ] ○ code-index\n" in out        # start: 符号 + name fallback，标签补齐 [STEP ]
+    assert "[STEP ] ✓ code-index  12.0s\n" in out  # complete: 符号 + duration
 
 
 async def test_step_file_line_includes_intent_when_present():
@@ -187,7 +184,7 @@ async def test_step_file_line_includes_intent_when_present():
                              phase="pre-recon", event="start",
                              intent="构建调用图与代码索引"))
     out = "".join(w.lines)
-    assert "[STEP] code-index: Starting — 构建调用图与代码索引\n" in out
+    assert "[STEP ] ○ 构建调用图与代码索引\n" in out   # 符号 + intent，不再有 name:verb
 
 
 async def test_header_renders_repo_and_monitor_when_offline():
@@ -229,3 +226,25 @@ async def test_file_summary_uses_ok_symbol_for_success():
         total_duration_ms=12400, total_cost_usd=0.3450,
         agents=[AgentMetric(name="xss-vuln", duration_ms=4100, cost_usd=0.165)]))
     assert "✓ xss-vuln" in buf.s
+
+
+async def test_phase_step_agent_labels_align_in_file():
+    """file [PHASE]/[STEP ]/[AGENT] 标签列等宽 -> 正文起点同列。"""
+    from shannon_core.display.events import StepEvent
+    renderer = FileLogRenderer(FakeWriter())
+    ts = "2026-06-23 00:42:39"
+    await renderer.render(PhaseEvent(timestamp=ts, category="PHASE", phase="setup", event="start"))
+    await renderer.render(StepEvent(timestamp=ts, category="STEP", name="preflight",
+                                    phase="setup", event="start", intent="预检"))
+    await renderer.render(AgentEvent(timestamp=ts, category="AGENT", agent_name="pre-recon",
+                                     event="start", attempt=1))
+    out = renderer._writer.text
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    phase_line = next(ln for ln in lines if "[PHASE]" in ln)
+    step_line = next(ln for ln in lines if "[STEP ]" in ln)
+    agent_line = next(ln for ln in lines if "[AGENT]" in ln)
+    # 三行正文起点同列（标签列 [PHASE]/[STEP ]/[AGENT] 均为 7 字符等宽）
+    p = phase_line.index("Starting")
+    s = step_line.index("○")
+    a = agent_line.index("▶")
+    assert p == s == a, f"file 标签列未对齐: phase={p} step={s} agent={a}"
