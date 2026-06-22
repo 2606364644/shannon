@@ -4,7 +4,6 @@ from datetime import timedelta
 from pathlib import Path
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
