@@ -31,6 +31,9 @@ def test_reporting_phase_runs_report_agent():
 def test_reporting_phase_order_assemble_before_report():
     src = _workflow_src()
     i_assemble = src.find("activities.assemble_report")
-    # REPORT agent 调用在 assemble_report 之后(粗略顺序断言)
+    # REPORT agent 调用(agent_name="report" 字面量)必须在 assemble_report 之后;
+    # 锚定可执行代码字面量,避免匹配到注释里的 "report" 字样。
     assert i_assemble != -1
-    assert src.find("report", i_assemble) != -1
+    assert src.find('"agent_name": "report"', i_assemble) != -1, (
+        "run_agent(agent_name=report) 必须在 assemble_report 之后"
+    )
