@@ -32,11 +32,15 @@ class TopologyEdge:
     error: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps(_s(self), ensure_ascii=False)
+        d = _s(self)
+        # spec §7.1: JSON 字段名是 `from`(不带下划线), 不泄露 Python 关键字转义
+        d["from"] = d.pop("from_")
+        return json.dumps(d, ensure_ascii=False)
 
     @staticmethod
     def from_json(s: str) -> "TopologyEdge":
         d = json.loads(s)
+        d["from_"] = d.pop("from")
         d["calls"] = [Call(method=c["method"],
                            call_site=CallSite(**c["call_site"]),
                            confidence=c["confidence"], evidence=c["evidence"]) for c in d["calls"]]

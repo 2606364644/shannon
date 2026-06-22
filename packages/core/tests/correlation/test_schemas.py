@@ -20,6 +20,10 @@ def test_topology_serialization_roundtrip():
     data = json.loads(topo.to_json())
     assert data["services"][0]["role"] == "entrypoint"
     assert data["edges"][0]["calls"][0]["method"] == "order.v1.OrderService/CreateOrder"
+    # spec §7.1: JSON 字段名是 `from`(不带下划线)
+    assert "from" in data["edges"][0]
+    assert "from_" not in data["edges"][0]
+    assert data["edges"][0]["from"] == "gateway"
     roundtrip = CrossServiceTopology.from_json(topo.to_json())
     assert roundtrip.edges[0].from_ == "gateway"
 
