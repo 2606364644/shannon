@@ -82,6 +82,7 @@ def test_render_unverified_section_sorted_and_header_count():
 
 
 import json
+import logging
 
 import pytest
 
@@ -191,3 +192,17 @@ async def test_close_coverage_gaps_tolerates_bare_list_queue(tmp_path):
     assert results[0].uncovered_ids == frozenset({"AUTH-VULN-02"})
     ev = (tmp_path / "auth_exploitation_evidence.md").read_text()
     assert "### AUTH-VULN-02" in ev
+
+
+@pytest.mark.asyncio
+async def test_close_coverage_gaps_logs_lenient_recovery_warning(tmp_path, caplog):
+    """Bare-list queue triggers a WARNING proving parse_lenient warnings are surfaced (never-silent contract)."""
+    _write_bare_list_queue(tmp_path, "auth", ["AUTH-VULN-01", "AUTH-VULN-02"])
+    (tmp_path / "auth_exploitation_evidence.md").write_text(
+        "# Ev\n## Successfully Exploited\n### AUTH-VULN-01: a\n"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="shannon_blackbox.services.coverage_renderer"):
+        await close_coverage_gaps(tmp_path, ["auth"])
+
+    assert any("leniently" in r.message for r in caplog.records)
