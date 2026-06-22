@@ -1,9 +1,10 @@
 # 跨仓微服务扫描与关联分析设计
 
-- **日期**:2026-06-22
+- **日期**:2026-06-22(评审修订 2026-06-23)
 - **分支**:feat/fork-py
 - **状态**:Design(待 review → writing-plans)
 - **作者**:brainstorming 会话产出
+- **修订**:2026-06-23 经代码事实核实修订(A1–A3 事实硬伤 + B1–B3 设计优化;A4 行号漂移留 plan 阶段复核)。各修订处以 `〔修订 2026-06-23·Xx〕` 标注
 
 ## 1. 背景与动机
 
@@ -17,7 +18,7 @@ Shannon 当前是**单仓库**扫描器:
 
 目标场景:**Node.js gateway 转发到 Go gRPC 后端**的微服务架构(可含多个后端、后端间互调)。用户诉求是**两仓各自单独扫描,再做跨仓结果关联分析**。当前架构无法支持——需要新建一条跨 workspace 的关联线。
 
-一个被确认的前提:Shannon 白盒的 pre-recon 阶段(`entry_point_fusion.py`,4 源融合:GitNexus / schema[含 **Proto→handler**] / framework convention / LLM Entry Point Mapper)**能发现**后端 gRPC 仓的 RPC handler 入口,但有两个根本问题:(a) **模型错配**——融合产物统一用 HTTP-centric 模型(`route` / `http_method` / `entry_type=http_route`)建模,gRPC method 语义被错配成 HTTP 路由;(b) **拓扑误导**——单仓视角把后端 method 当作"该仓自己的对外入口/攻击面",但真实可达性是经 gateway 转发,单仓 pre-recon 的 exposure 判断因此错误。本设计刻意不补确定性 proto parser / RPC 路由链去修这个(见 §3 决策 3),而是让关联 Agent 用拓扑正确的可达性视图覆盖它(见 §6 职责 ⑥)。
+〔修订 2026-06-23·A1〕原表述"pre-recon 能发现后端 gRPC RPC handler 入口"**被夸大**。经代码核实(`packages/core/src/shannon_core/code_index/`):`merge_entry_points()` 虽定义了 4 源融合(GitNexus / schema[Proto→handler] / framework convention / LLM),但**该函数在生产流水线从未被调用**——实际 `run_entry_point_fusion()` 只跑 2 源(deterministic + LLM),**schema 源(Proto→handler)从未接入**;`detect_entry_points()` 对 Go 只识别 `http.ResponseWriter`/`gin.Context`/`func main()`,**无任何 grpc/rpc 规则**;`parse_llm_entry_points()` 正则只认 `GET/POST/...`,LLM 若 free-text 提到 gRPC method 会被**硬编码成 `entry_type="http_route"`**(`entry_point_fusion.py:170`)。即**确定性层对 gRPC 全盲**(不止"错配")。这**强化而非推翻**决策 3——正因为确定性层是盲的,关联只能交给 Agent。两个仍成立的真问题:(a) LLM 偶发提及的 gRPC method 被**错配**成 http_route;(b) **拓扑误导**——单仓视角把后端 method 当对外攻击面,但真实可达性经 gateway 转发,单仓 exposure 判断错误。本设计不补确定性 proto parser(见 §3 决策 3),让关联 Agent 用拓扑正确可达性视图覆盖它(§6 职责⑥)。**附加局限(对应 §6 职责⑥ 的能力边界)**:关联层只能重标注 exposure、拓扑层串跨服务链,**无法补救单仓扫描因 gRPC 盲区已漏掉的 backend sink**——后端 sink 覆盖深度受限于单仓扫描本身的盲区。
 
 ## 2. 目标与非目标
 
@@ -153,7 +154,7 @@ correlation:
 |---|---|
 | 输入 | N 个 repo 的 `(path, deliverables)` 配对、`relations` 图、各 repo 的 `role` |
 | 工具 | `grep`(跨任意仓)、`read_file`、可选复用 `code_index` 摘要工具。**只读**,不依赖任何引擎专有能力(见 §9) |
-| 职责(prompt) | ① 在 `from` 仓找 RPC client 调用点(grpc-js / connect-es / proto-loader 等),提取 service/method + 代码位置;② 在 `to` 仓定位 method 的 handler 实现,读 handler 内 sink;③ 推断信任边界(从 `role: entrypoint` 沿 relations 可达性);④ 产出候选跨服务数据流(HTTP 入口参数→method 参数→handler sink),带证据 + 置信度;⑤ 合并 N 仓漏洞 deliverables,按服务分组 + 跨服务上下文标注;⑥ **不信任后端仓单仓 pre-recon 的 exposure 判断**(单仓视角拓扑误导,见 §1)——用本 Agent 推断的 topology(经 gateway 可达性)对后端 method 的真实 exposure 重新标注 |
+| 职责(prompt) | ① 在 `from` 仓找 RPC client 调用点(grpc-js / connect-es / proto-loader 等),提取 service/method + 代码位置;② 在 `to` 仓定位 method 的 handler 实现,读 handler 内 sink;③ 推断信任边界(从 `role: entrypoint` 沿 relations 可达性);④ 产出候选跨服务数据流(HTTP 入口参数→method 参数→handler sink),带证据 + 置信度;⑤ 合并 N 仓漏洞 deliverables,按服务分组 + 跨服务上下文标注;⑥ **不信任后端仓单仓 pre-recon 的 exposure 判断**(单仓视角拓扑误导,见 §1)——用本 Agent 推断的 topology(经 gateway 可达性)对后端 method 的真实 exposure 重新标注;⑦〔修订 2026-06-23·B3〕**补全未声明的边**:在 from 仓 grep 出 RPC client 调用时,若目标 service 不在用户声明的 `relations` 里,作为 `declared-missing` 边单列报告(防漏报——exposure 推断依赖声明 relations 完整性,漏声明边→backend method 被误判 internal→假阴性,见 §7.2) |
 | 输出 | `cross-service-topology.json` + `trust-boundaries.json` + 候选 `cross_service_flows` + `correlation-report.md`,全部带证据与置信度 |
 | 性质 | 概率性推断,非确定性;产物供人工复核 |
 
@@ -172,7 +173,7 @@ correlation:
 
 **触发**(扩展黑盒复用源):
 
-Shannon 黑盒现有的 deliverables 复用机制是 `--repo`(复用同 repo 白盒队列)+ `--latest` / `find_workspaces_by_url`(按 URL 找最近白盒 workspace 复用其 deliverables);注意 `--workspace` 是黑盒**自身** workspace 的 resume,**不是**复用源。本次扩展复用源:从"单仓 deliverables"→"**关联 workspace** deliverables"。具体 flag 形态(新增 `--correlated-workspace`,或扩展 `--latest`/`find_workspaces_by_url` 识别关联 workspace)留实现阶段定,本设计不锁死。
+Shannon 黑盒现有的 deliverables 复用机制是 `--repo`(复用同 repo 白盒队列)+ `--latest` / `find_workspaces_by_url`(按 URL 找最近白盒 workspace 复用其 deliverables);注意 `--workspace` 是黑盒**自身** workspace 的 resume,**不是**复用源(`cli/main.py:35` 已核实)。本次扩展复用源:从"单仓 deliverables"→"**关联 workspace** deliverables"。〔修订 2026-06-23·B2〕**推荐新增 `--correlated-workspace <path>`**(显式指定关联 workspace,绕开 url/scan_type 匹配),**不**扩展 `find_workspaces_by_url`——后者有两个隐藏约束使其不适合:它按 `urls_match(ws_url,url)` **且** `scan_type=="whitebox"` 双重过滤(`workspace.py:178-198`),而关联 workspace 跨多 repo **无单一 web_url**、也**不是 whitebox 类型**;强行扩展要同时解决 scan_type 归属 + web_url 填什么,改动面大、语义乱。`--correlated-workspace` 直接定位路径,最简。
 
 ```
 shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
@@ -180,7 +181,7 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 
 黑盒已有"检测 deliverables、有则跳过 recon 直接 exploitation"机制(`workflows.py:136-150`),扩展后该机制识别关联 workspace 的 topology/boundaries 并复用。
 
-**exploitation 消费 topology**:`exploit_executor`(黑盒 exploitation 执行器)读关联 workspace deliverables 里的 `cross-service-topology.json` + `trust-boundaries.json` 作为上下文,据此在 **gateway HTTP 层**构造触达后端 method/sink 的 payload,验证可达性与转发行为(如 gateway 的 `POST /orders` 是否真能把恶意输入转发到 `order-svc.CreateOrder`)。**注**:`exploit_executor` 当前如何组织 exploitation prompt 上下文(是否已有 deliverables 内容注入机制)待实现阶段确认;若现有注入点不含 topology,需新增一个 topology 注入环节——本节实现风险之一(见 §11)。
+**exploitation 消费 topology**:`exploit_executor`(黑盒 exploitation 执行器)读关联 workspace deliverables 里的 `cross-service-topology.json` + `trust-boundaries.json` 作为上下文,据此在 **gateway HTTP 层**构造触达后端 method/sink 的 payload,验证可达性与转发行为(如 gateway 的 `POST /orders` 是否真能把恶意输入转发到 `order-svc.CreateOrder`)。〔修订 2026-06-23·A3〕经核实 `agents/exploit_executor.py:33-40`:`exploit_executor` **本就有 deliverables 注入机制**——它读 `{vuln_type}_exploitation_queue.json` 原文注入 `prompt_variables["vulnerability_entries"]`,另注入 `browser_session_id`。故 topology 注入**无需新建环节**,在同一 `prompt_variables` 字典**新增两项**(`cross_service_topology` / `trust_boundaries`,读关联 workspace 对应文件)即可。原 §11"注入点待确认"风险据此**降为低**。
 
 **能力边界**:✅ gateway HTTP 层(可达性 / 转发行为 / gateway 侧注入·ssrf·authz);❌ gRPC 进程内(后端进程内 sink 真实执行需 gRPC 客户端 + 后端可观测,留后续 §13)。
 
@@ -188,7 +189,7 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 
 ## 7. 产物形态(字段名为草案,实现可调)
 
-落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**(职责 ⑥ 对后端 method 的 exposure 重标注仅落在此关联 workspace,后端单仓 deliverables 原样保留——是叠加视图,非原地覆盖)。deliverables 另含合并后的 `{vc}_exploitation_queue.json`(职责 ⑤ 合并 N 仓漏洞),供 §6.2 黑盒 `has_whitebox_results` 检测复用(`workflows.py:136`)——这是黑盒闭环的必要产物,非可选。
+落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**(职责 ⑥ 对后端 method 的 exposure 重标注仅落在此关联 workspace,后端单仓 deliverables 原样保留——是叠加视图,非原地覆盖)。deliverables 另含合并后的 `{vc}_exploitation_queue.json`(职责 ⑤ 合并 N 仓漏洞),供 §6.2 黑盒 `has_whitebox_results` 检测复用(`workflows.py:136`)——这是黑盒闭环的必要产物,非可选。〔修订 2026-06-23·B1〕**硬约束**:合并 queue 每条 entry **必须保留** `title`/`description`/`severity`/`location` 四字段——`has_valid_whitebox_results`(`paths.py:88-111`)用 subset 检查 `REQUIRED_VULN_FIELDS.issubset(entry.keys())`,缺任一字段即判无效→黑盒退回 from-scratch recon。跨服务标注用**额外**字段(如 `service`/`cross_service_source`),不破坏检测(subset 检查允许多字段)。
 
 ### 7.1 `cross-service-topology.json`(服务调用图)
 
@@ -225,7 +226,7 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 }
 ```
 
-`exposure` 由"从 `role: entrypoint` 沿 relations 可达性"推断:entrypoint 自身 HTTP 路由对外;backend 的 method 默认 internal,除非存在 entrypoint→…→它的可达路径。
+`exposure` 由"从 `role: entrypoint` 沿 relations 可达性"推断:entrypoint 自身 HTTP 路由对外;backend 的 method 默认 internal,除非存在 entrypoint→…→它的可达路径。〔修订 2026-06-23·B3〕**漏报风险**:此推断依赖用户声明的 `relations` 完整;漏声明一条 entrypoint→backend 边,该 backend method 被误判 internal(实际 external)。对策见职责⑦(Agent 主动发现并报告未声明边)。
 
 ### 7.3 `correlation-report.md`(人读报告,章节)
 
@@ -240,7 +241,7 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 | 场景 | 处理 |
 |---|---|
 | deliverables 缺失/不全 | 编排器报错,指明哪个 repo 缺,提示现扫或修 workspace 路径;不进入关联 |
-| **版本漂移**(复用模式特有) | 复用时优先比对 workspace 元数据记录的扫描 commit 与 repo 当前 HEAD;若元数据无 commit,退化为用 workspace 创建时间 vs repo 最近改动时间粗判;任一方式发现不一致即**警告不阻断**,并在报告标注"复用产物,源码版本可能漂移,请人工确认"。注:workspace 元数据是否持久化 commit 待实现阶段确认,本对策设计为无论存否都能降级工作 |
+| **版本漂移**(复用模式特有) | 〔修订 2026-06-23·A2〕经核实 `session.py:34-46` `create_workspace()`:session.json **不持久化 git commit**(只存 web_url/repo_path/created_at/scan_type/status 等;`GitManager.get_commit_hash()` 存在但无调用方写入)。故 commit 比对主路径**不可行**,统一走降级:用 workspace `created_at` vs repo 最近改动时间粗判;发现不一致即**警告不阻断**并在报告标注"复用产物,源码版本漂移,请人工确认"。可选增强(plan 阶段,非前提):在 session.json 增补 `scanned_commit` 字段以支持精确比对——成本很低,可根治降级 |
 | per-edge 推断失败/低置信 | 该边标 `confidence: low` 或 `unverified`,报告单列"声明了但未证实的关系",**不丢弃** |
 | 单条边 Agent 超时/中断 | 该边标 `error`,其余边继续(per-edge 独立设计的回报) |
 | 缺 entrypoint | 配置加载阶段报错(§5 校验) |
@@ -273,7 +274,7 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 | 多后端规模(上下文爆炸) | 中 | §6.1 per-edge 推断 + 全局合并 |
 | 复用模式版本漂移 | 低 | §8 警告 + 报告标注 |
 | 本次 gRPC 后端"扫得浅" | 已知接受 | 单仓静态分析照常跑;深度入口发现留后续(§13) |
-| 黑盒 exploit_executor 注入 topology(注入点待确认) | 中 | §6.2 caveat;实现阶段先确认现有 prompt 上下文机制再定注入方式 |
+| 黑盒 exploit_executor 注入 topology | 低〔A3 修订〕 | §6.2:复用现有 `prompt_variables` 注入点(`exploit_executor.py:33-40`),新增 topology/boundaries 两项,无需新建环节 |
 
 ## 12. 验收清单
 
@@ -291,6 +292,6 @@ shannon-blackbox start --url <gateway-url> <复用关联workspace 的 flag>
 
 ## 13. 后续阶段(本设计不实现)
 
-- **全链路确定性数据流**:给 Shannon 补 Go proto 解析 + RPC handler 确定性入口发现 + 跨服务确定性传播,让 gateway 输入能确定性地追到 gRPC sink。届时关联 Agent 可作为"确定性传播 + 概率补全"混合层底座。
+- **全链路确定性数据流**:给 Shannon 补 Go proto 解析 + RPC handler 确定性入口发现 + 跨服务确定性传播,让 gateway 输入能确定性地追到 gRPC sink。〔A1 修订〕注意:schema 源(Proto→handler)**从未接入**流水线,故此项是**全新建设**而非修补现有错配。届时关联 Agent 可作为"确定性传播 + 概率补全"混合层底座。
 - **gRPC 进程内验证(§6.2 能力边界外)**:加 gRPC 客户端 + proto payload 构造 + 后端可观测,真正在 gRPC 后端进程内验证 sink 执行。本次 §6.2 只到 gateway HTTP 层。
 - **更细 role**:如区分"聚合层 gateway"vs"最外层 edge",当前 entrypoint/backend 两值够用。
