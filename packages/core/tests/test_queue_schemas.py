@@ -181,3 +181,12 @@ def test_parse_lenient_returns_lenient_parse_result():
     assert hasattr(result, "warnings")
     assert hasattr(result, "original_form")
 
+
+def test_parse_lenient_never_raises_on_non_str_input():
+    for bad in (None, 123, 42.0):
+        result = VulnerabilityQueue.parse_lenient(bad)
+        assert isinstance(result, LenientParseResult)
+        assert result.original_form == "invalid_json"
+        assert len(result.queue.vulnerabilities) == 0
+        assert result.warnings  # some warning surfaced
+

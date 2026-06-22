@@ -96,7 +96,7 @@ class VulnerabilityQueue(BaseModel):
         # --- JSON decode ---
         try:
             data = json.loads(content)
-        except (json.JSONDecodeError, ValueError) as exc:
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
             return LenientParseResult(
                 queue=cls(vulnerabilities=[]),
                 warnings=[f"invalid json: {exc}"],
@@ -105,7 +105,7 @@ class VulnerabilityQueue(BaseModel):
 
         # --- Normalize top-level form into an entries list ---
         if isinstance(data, list):
-            warnings.append(f"wrapped bare-list form ({len(data)} entries)")
+            warnings.append(f"wrapped bare-list form ({len(data)} {'entry' if len(data) == 1 else 'entries'})")
             original_form = "bare_list"
             entries = data
         elif isinstance(data, dict):
