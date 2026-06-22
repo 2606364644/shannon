@@ -9,13 +9,12 @@ from rich.console import Console
 from rich.panel import Panel
 
 from shannon_core.display.formatters import (
-    agent_prefix, format_duration, format_error_block, humanize_tool_call,
-    first_nonempty_line, pad_rule,
+    agent_body, agent_prefix, agent_title, format_duration,
+    format_error_block, humanize_tool_call, first_nonempty_line,
+    pad_rule, phase_body, step_body, tag,
 )
 
 from shannon_core.display.symbols import (
-    AGENT_DONE, AGENT_FAIL, AGENT_START,
-    STEP_DONE, STEP_FAIL, STEP_PENDING,
     SUMMARY_OK, SUMMARY_FAIL,
 )
 
@@ -82,55 +81,28 @@ class RichConsoleRenderer:
         self._console.print(Panel(body, title="Shannon Pentest", border_style="cyan"))
 
     def _render_step(self, e) -> None:
-        label = e.intent or e.name
-        if e.event == "start":
-            self._console.print(
-                f"[{e.timestamp}] [cyan]STEP[/]  {STEP_PENDING} {label}", highlight=False)
-            return
-        if e.error:
-            self._console.print(
-                f"[{e.timestamp}] [cyan]STEP[/]  {STEP_FAIL} {label}  — {e.error}",
-                highlight=False)
-            return
-        suffix = f"  {format_duration(e.duration_ms)}" if e.duration_ms is not None else ""
         self._console.print(
-            f"[{e.timestamp}] [cyan]STEP[/]  {STEP_DONE} {label}{suffix}", highlight=False)
+            f"[{e.timestamp}] [cyan]{tag('STEP')}[/]  {step_body(e)}", highlight=False)
 
     def _render_phase(self, e) -> None:
-        verb = "Starting" if e.event == "start" else "Completed"
-        body = pad_rule(f"{verb} {e.phase}")
+        body = pad_rule(phase_body(e))
         self._console.print(
-            f"[{e.timestamp}] [bold cyan]PHASE[/]  {body}",
+            f"[{e.timestamp}] [bold cyan]{tag('PHASE')}[/]  {body}",
             highlight=False,
         )
 
-    def _agent_panel_title(self, agent_name: str) -> str:
-        pfx = agent_prefix(agent_name)
-        if pfx == "[Agent]":
-            return agent_name
-        return f"{pfx} {agent_name}"
-
     def _render_agent(self, e) -> None:
-        title = self._agent_panel_title(e.agent_name)
+        body = agent_body(e)
         if e.event == "start":
             self._console.print(
-                f"[{e.timestamp}] [blue]AGENT[/]  {AGENT_START} {title} started (attempt {e.attempt})")
+                f"[{e.timestamp}] [blue]{tag('AGENT')}[/]  {body}", highlight=False)
             return
-        # end
         if e.success is False:
-            dur = format_duration(e.duration_ms) if e.duration_ms is not None else "?"
-            err = f" — {e.error}" if e.error else ""
             self._console.print(
-                f"[{e.timestamp}] [blue]AGENT[/]  [red]{AGENT_FAIL} {title} failed ({dur}){err}[/]")
+                f"[{e.timestamp}] [blue]{tag('AGENT')}[/]  [red]{body}[/]", highlight=False)
             return
-        parts = []
-        if e.duration_ms is not None:
-            parts.append(format_duration(e.duration_ms))
-        if e.cost_usd is not None:
-            parts.append(f"${e.cost_usd:.4f}")
-        metrics = f" ({', '.join(parts)})" if parts else ""
         self._console.print(
-            f"[{e.timestamp}] [blue]AGENT[/]  [green]{AGENT_DONE} {title} Completed{metrics}[/]")
+            f"[{e.timestamp}] [blue]{tag('AGENT')}[/]  [green]{body}[/]", highlight=False)
 
     def _render_tool(self, e) -> None:
         params = humanize_tool_call(e.tool_name, e.parameters if isinstance(e.parameters, dict) else {})

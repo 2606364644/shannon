@@ -298,3 +298,25 @@ async def test_phase_rule_right_edges_align_across_phases():
     assert len(widths) == 1, f"phase 行未对齐: {lines}"
     # 横线存在且非固定 20
     assert all("─" in ln for ln in lines)
+
+
+async def test_phase_step_agent_bodies_align_same_column():
+    """标签列经 tag() 补齐等宽 -> PHASE/STEP/AGENT 正文起点同列。"""
+    from shannon_core.display.events import StepEvent
+    renderer, _ = _renderer_with_capture()
+    ts = "2026-06-23 00:42:39"
+    await renderer.render(PhaseEvent(timestamp=ts, category="PHASE", phase="setup", event="start"))
+    await renderer.render(StepEvent(timestamp=ts, category="STEP", name="preflight",
+                                    phase="setup", event="start", intent="预检"))
+    await renderer.render(AgentEvent(timestamp=ts, category="AGENT", agent_name="pre-recon",
+                                     event="start", attempt=1))
+    out = renderer._console.export_text()
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    phase_line = next(ln for ln in lines if "Starting setup" in ln)
+    step_line = next(ln for ln in lines if "预检" in ln)
+    agent_line = next(ln for ln in lines if "pre-recon started" in ln)
+    # body 起点（标签列之后）三行必须同列
+    p = phase_line.index("Starting")
+    s = step_line.index("○")
+    a = agent_line.index("▶")
+    assert p == s == a, f"PHASE/STEP/AGENT 正文未对齐: phase={p} step={s} agent={a}"
