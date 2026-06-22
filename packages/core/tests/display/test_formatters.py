@@ -179,3 +179,100 @@ def test_pad_rule_same_col_aligns_right_edge():
     a = pad_rule("Starting setup")
     b = pad_rule("Completed pre-recon")
     assert cell_len(a) == cell_len(b)
+
+
+from shannon_core.display.formatters import tag, LABEL_WIDTH
+
+
+def test_tag_pads_short_label_to_width():
+    assert tag("STEP") == "STEP "          # 4 -> 5
+
+
+def test_tag_no_pad_when_already_full_width():
+    assert tag("PHASE") == "PHASE"
+    assert tag("AGENT") == "AGENT"
+
+
+def test_tag_all_core_labels_equal_width():
+    assert {len(tag(l)) for l in ("PHASE", "STEP", "AGENT")} == {LABEL_WIDTH}
+    assert LABEL_WIDTH == 5
+
+
+from shannon_core.display.formatters import step_body
+from shannon_core.display.events import StepEvent
+
+
+def test_step_body_start_uses_pending_and_intent():
+    e = StepEvent(timestamp="t", category="STEP", name="code-index", phase="pre-recon",
+                  event="start", intent="构建调用图与代码索引")
+    assert step_body(e) == "○ 构建调用图与代码索引"
+
+
+def test_step_body_start_falls_back_to_name_when_no_intent():
+    e = StepEvent(timestamp="t", category="STEP", name="code-index", phase="pre-recon",
+                  event="start")
+    assert step_body(e) == "○ code-index"
+
+
+def test_step_body_complete_with_duration():
+    e = StepEvent(timestamp="t", category="STEP", name="code-index", phase="pre-recon",
+                  event="complete", duration_ms=4100, intent="构建调用图与代码索引")
+    assert step_body(e) == "✓ 构建调用图与代码索引  4.1s"
+
+
+def test_step_body_complete_without_duration():
+    e = StepEvent(timestamp="t", category="STEP", name="x", phase="p", event="complete")
+    assert step_body(e) == "✓ x"
+
+
+def test_step_body_error_uses_cross_and_error():
+    e = StepEvent(timestamp="t", category="STEP", name="x", phase="p",
+                  event="complete", error="索引构建超时", intent="构建调用图")
+    assert step_body(e) == "✗ 构建调用图  — 索引构建超时"
+
+
+from shannon_core.display.formatters import phase_body, agent_title, agent_body
+from shannon_core.display.events import PhaseEvent, AgentEvent
+
+
+def test_phase_body_start():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="setup", event="start")
+    assert phase_body(e) == "Starting setup"
+
+
+def test_phase_body_complete():
+    e = PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon", event="complete")
+    assert phase_body(e) == "Completed pre-recon"
+
+
+def test_agent_title_known_prefix():
+    assert agent_title("injection-vuln") == "[Injection] injection-vuln"
+    assert agent_title("xss-vuln") == "[XSS] xss-vuln"
+
+
+def test_agent_title_unknown_is_bare_name():
+    assert agent_title("pre-recon") == "pre-recon"
+
+
+def test_agent_body_start_with_prefix():
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="injection-vuln",
+                   event="start", attempt=1)
+    assert agent_body(e) == "▶ [Injection] injection-vuln started (attempt 1)"
+
+
+def test_agent_body_start_unknown_agent():
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="pre-recon",
+                   event="start", attempt=1)
+    assert agent_body(e) == "▶ pre-recon started (attempt 1)"
+
+
+def test_agent_body_end_completed_with_metrics():
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="xss-vuln",
+                   event="end", attempt=1, duration_ms=5200, cost_usd=0.15, success=True)
+    assert agent_body(e) == "✓ [XSS] xss-vuln Completed (5.2s, $0.1500)"
+
+
+def test_agent_body_end_failed():
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="xss-vuln",
+                   event="end", attempt=1, duration_ms=100, success=False, error="boom")
+    assert agent_body(e) == "✗ [XSS] xss-vuln failed (100ms) — boom"

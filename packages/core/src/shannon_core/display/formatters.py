@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 
 from rich.cells import cell_len
 
+from shannon_core.display.symbols import (
+    AGENT_DONE, AGENT_FAIL, AGENT_START,
+    STEP_DONE, STEP_FAIL, STEP_PENDING,
+)
+
 
 def format_duration(ms: int) -> str:
     """Convert milliseconds to human-readable: '23ms', '1.5s', '2m 30s'."""
@@ -189,3 +194,63 @@ def pad_rule(text: str, col: int = PHASE_RULE_WIDTH) -> str:
     width = cell_len(text)
     n = max(2, col - width)
     return f"{text} {'─' * n}"
+
+
+LABEL_WIDTH = 5  # PHASE/AGENT=5，STEP 补齐到 5，让标签列等宽
+
+
+def tag(label: str, width: int = LABEL_WIDTH) -> str:
+    """补齐到固定宽度的标签内容：tag("STEP") -> "STEP "。
+
+    rich 与 file 共用：终端 [cyan]{tag}[/] 无字面方括号，file [{tag}] 方括号内补齐。
+    """
+    return label.ljust(width)
+
+
+def step_body(e) -> str:
+    """STEP 正文：○/✓/✗ + 意图（fallback name）+ duration/error suffix。
+
+    纯文本、无颜色、无标签列、无换行 —— rich 与 file 共用的单一来源。
+    """
+    label = e.intent or e.name
+    if e.event == "start":
+        return f"{STEP_PENDING} {label}"
+    if e.error:
+        return f"{STEP_FAIL} {label}  — {e.error}"
+    suffix = f"  {format_duration(e.duration_ms)}" if e.duration_ms is not None else ""
+    return f"{STEP_DONE} {label}{suffix}"
+
+
+def phase_body(e) -> str:
+    """PHASE 正文：verb + phase，如 'Starting setup'。纯文本，rich/file 共用。"""
+    verb = "Starting" if e.event == "start" else "Completed"
+    return f"{verb} {e.phase}"
+
+
+def agent_title(agent_name: str) -> str:
+    """'[Prefix] name' 或未知 agent 直接 'name'。
+
+    取代 rich 的 _agent_panel_title 与 file 的 _prefixed（两者逻辑相同），统一为单一来源。
+    """
+    pfx = agent_prefix(agent_name)
+    if pfx == "[Agent]":
+        return agent_name
+    return f"{pfx} {agent_name}"
+
+
+def agent_body(e) -> str:
+    """AGENT 正文：▶/✗/✓ + title + (attempt)/failed/metrics。纯文本，rich/file 共用。"""
+    title = agent_title(e.agent_name)
+    if e.event == "start":
+        return f"{AGENT_START} {title} started (attempt {e.attempt})"
+    if e.success is False:
+        dur = format_duration(e.duration_ms) if e.duration_ms is not None else "?"
+        err = f" — {e.error}" if e.error else ""
+        return f"{AGENT_FAIL} {title} failed ({dur}){err}"
+    parts = []
+    if e.duration_ms is not None:
+        parts.append(format_duration(e.duration_ms))
+    if e.cost_usd is not None:
+        parts.append(f"${e.cost_usd:.4f}")
+    metrics = f" ({', '.join(parts)})" if parts else ""
+    return f"{AGENT_DONE} {title} Completed{metrics}"
