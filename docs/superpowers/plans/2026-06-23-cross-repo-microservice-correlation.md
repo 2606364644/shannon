@@ -1030,7 +1030,7 @@ def write_correlation_deliverables(
 
 - [ ] **Step 4: Implement per-edge runner + merge in orchestrator**
 
-在 `packages/multi/src/shannon_multi/orchestrator.py` 追加（替换 Task A5 的 `NotImplementedError` 桩 `run_cross_repo`）:
+在 `packages/multi/src/shannon_multi/orchestrator.py` 模块级追加 `_run_edge` + `_merge_edge_results`（供 Step 6 `run_cross_repo` 调用；`run_cross_repo` 桩的替换在 Step 6）:
 ```python
 import asyncio
 import json
