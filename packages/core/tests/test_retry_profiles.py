@@ -10,6 +10,7 @@ from shannon_core.models.retry import (
     PREFLIGHT_RETRY,
     AUTH_VALIDATION_RETRY,
     VULN_RETRY,
+    NON_RETRYABLE,
     get_retry_policy,
     retry_for,
 )
@@ -50,7 +51,7 @@ class TestVulnRetry:
         assert VULN_RETRY.initial_interval == timedelta(minutes=1)
         assert VULN_RETRY.maximum_interval == timedelta(minutes=5)
         assert VULN_RETRY.backoff_coefficient == 2.0
-        assert VULN_RETRY.non_retryable_error_types  # 共享 NON_RETRYABLE
+        assert VULN_RETRY.non_retryable_error_types == NON_RETRYABLE  # 共享 NON_RETRYABLE
 
 
 class TestRetryFor:
