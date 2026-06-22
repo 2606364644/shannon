@@ -15,3 +15,7 @@ apps/worker/configs/futunn.yaml
 apps/worker/configs/moomoo.yaml
 scripts/smoke-test-sdk.ts
 scripts/test-sdk-connectivity.ts
+apps/worker/configs/ent-ft-futuie.yaml
+apps/worker/configs/test-perks-futuoa.yaml
+apps/worker/configs/futunn-session.yaml
+apps/worker/configs/futuhk.yaml
