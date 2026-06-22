@@ -17,7 +17,7 @@ Shannon 当前是**单仓库**扫描器:
 
 目标场景:**Node.js gateway 转发到 Go gRPC 后端**的微服务架构(可含多个后端、后端间互调)。用户诉求是**两仓各自单独扫描,再做跨仓结果关联分析**。当前架构无法支持——需要新建一条跨 workspace 的关联线。
 
-一个被确认的前提:Shannon 的**确定性**入口发现管线不解析 `.proto`(`.proto` 仅在 `file_discovery.py:19` 被归为 `schema` 类文件收集),无 gRPC 路由链。这意味着纯工程化方式要先补 proto parser + RPC handler 入口发现,成本极高。本设计刻意绕开这条路径(见 §3 决策 3)。
+一个被确认的前提:Shannon 白盒的 pre-recon 阶段(`entry_point_fusion.py`,4 源融合:GitNexus / schema[含 **Proto→handler**] / framework convention / LLM Entry Point Mapper)**能发现**后端 gRPC 仓的 RPC handler 入口,但有两个根本问题:(a) **模型错配**——融合产物统一用 HTTP-centric 模型(`route` / `http_method` / `entry_type=http_route`)建模,gRPC method 语义被错配成 HTTP 路由;(b) **拓扑误导**——单仓视角把后端 method 当作"该仓自己的对外入口/攻击面",但真实可达性是经 gateway 转发,单仓 pre-recon 的 exposure 判断因此错误。本设计刻意不补确定性 proto parser / RPC 路由链去修这个(见 §3 决策 3),而是让关联 Agent 用拓扑正确的可达性视图覆盖它(见 §6 职责 ⑥)。
 
 ## 2. 目标与非目标
 
@@ -141,7 +141,7 @@ correlation:
 |---|---|
 | 输入 | N 个 repo 的 `(path, deliverables)` 配对、`relations` 图、各 repo 的 `role` |
 | 工具 | `grep`(跨任意仓)、`read_file`、可选复用 `code_index` 摘要工具。**只读**,不依赖任何引擎专有能力(见 §9) |
-| 职责(prompt) | ① 在 `from` 仓找 RPC client 调用点(grpc-js / connect-es / proto-loader 等),提取 service/method + 代码位置;② 在 `to` 仓定位 method 的 handler 实现,读 handler 内 sink;③ 推断信任边界(从 `role: entrypoint` 沿 relations 可达性);④ 产出候选跨服务数据流(HTTP 入口参数→method 参数→handler sink),带证据 + 置信度;⑤ 合并 N 仓漏洞 deliverables,按服务分组 + 跨服务上下文标注 |
+| 职责(prompt) | ① 在 `from` 仓找 RPC client 调用点(grpc-js / connect-es / proto-loader 等),提取 service/method + 代码位置;② 在 `to` 仓定位 method 的 handler 实现,读 handler 内 sink;③ 推断信任边界(从 `role: entrypoint` 沿 relations 可达性);④ 产出候选跨服务数据流(HTTP 入口参数→method 参数→handler sink),带证据 + 置信度;⑤ 合并 N 仓漏洞 deliverables,按服务分组 + 跨服务上下文标注;⑥ **不信任后端仓单仓 pre-recon 的 exposure 判断**(单仓视角拓扑误导,见 §1)——用本 Agent 推断的 topology(经 gateway 可达性)对后端 method 的真实 exposure 重新标注 |
 | 输出 | `cross-service-topology.json` + `trust-boundaries.json` + 候选 `cross_service_flows` + `correlation-report.md`,全部带证据与置信度 |
 | 性质 | 概率性推断,非确定性;产物供人工复核 |
 
@@ -156,7 +156,7 @@ correlation:
 
 ## 7. 产物形态(字段名为草案,实现可调)
 
-落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**。
+落在 `<out_workspace>/deliverables/`,**独立关联 workspace,不回写各仓原始 workspace**(职责 ⑥ 对后端 method 的 exposure 重标注仅落在此关联 workspace,后端单仓 deliverables 原样保留——是叠加视图,非原地覆盖)。
 
 ### 7.1 `cross-service-topology.json`(服务调用图)
 
@@ -257,5 +257,5 @@ correlation:
 ## 13. 后续阶段(本设计不实现)
 
 - **二阶段(全链路)**:给 Shannon 补 Go proto 解析 + RPC handler 确定性入口发现 + 跨服务确定性数据流,让 gateway 输入能确定性地追到 gRPC sink。届时本设计的关联 Agent 可作为"确定性传播 + 概率补全"的混合层底座。
-- **黑盒关联**:gateway HTTP 实时验证纳入关联(需后端可观测/agent 能力,Shannon 黑盒当前不碰 gRPC 流量)。
+- **黑盒关联(gateway→gRPC 验证)**:gateway HTTP 实时验证纳入关联。**触发方式**:不是 `shannon-blackbox --repo <gRPC 单仓>`(那样复用的是 gRPC 仓单仓漏洞队列,exposure 拓扑错且缺 gateway→method 映射,与 `--url <gateway>` 错位);正确做法是黑盒 `--url <gateway>` + 复用**关联 workspace** 的 deliverables(含 gateway 入口 + topology + 候选跨服务数据流)。Shannon 黑盒已有"按 URL 复用 workspace deliverables"机制(`--latest` / `find_workspaces_by_url`,`packages/blackbox/.../cli/main.py:32-36`),二阶段本质是扩展其复用源(从单仓 deliverables → 关联 workspace),非从零造触发。**关键衔接**:第一阶段产出的 `cross-service-topology` 正是该验证的可达性输入。**能力边界**:二阶段黑盒能在 gateway HTTP 层构造可触达后端 method/sink 的 payload、验证 gateway 层可达性与转发行为;但真正在 gRPC 后端进程内验证 sink 执行需 gRPC 客户端 + 后端可观测能力(更深的后续,本设计不含)。后端单仓 pre-recon 产物(模型错配 + 拓扑误导,见 §1)不适用于此验证。
 - **更细 role**:如区分"聚合层 gateway"vs"最外层 edge",当前 entrypoint/backend 两值够用。
