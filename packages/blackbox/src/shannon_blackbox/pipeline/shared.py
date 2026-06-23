@@ -13,6 +13,7 @@ class BlackboxPipelineInput(BasePipelineInput):
     max_concurrent: int = 3
     retry_profile: str | None = None          # "production" | "testing" | "subscription"
     rerun: bool = False  # 强制重跑黑盒（归档旧 evidence + 新 workflow id）
+    correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：复用 topology 做网关层校验，Phase B 接入）
 
 
 @dataclass
@@ -43,6 +44,7 @@ class BlackboxActivityInput:
     vuln_type: str | None = None
     workspace_path: str | None = None
     phase: str | None = None          # log_phase_* 的 phase label（如 "preflight"/"recon-blackbox"/"exploitation"/"reporting"）
+    correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：由 workflow 从 PipelineInput 透传，Phase B 接入）
 
 
 @dataclass

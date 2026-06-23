@@ -55,6 +55,7 @@ class BlackboxScanWorkflow:
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
             workspace_path=workspace_path,
+            correlated_workspace=input.correlated_workspace,
         )
 
         retry_policy = retry_for(

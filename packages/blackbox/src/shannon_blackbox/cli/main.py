@@ -48,7 +48,9 @@ def cli():
 @click.option("--retry-profile", "retry_profile", default=None, type=click.Choice(["production", "testing", "subscription"]), help="Retry policy profile")
 @click.option("--plain", is_flag=True, help="Disable Rich live dashboard; print one line per event (CI/pipes).")
 @click.option("--rerun", is_flag=True, help="强制重跑黑盒（归档旧 evidence，基于已有白盒结果重新跑）")
-def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain, rerun):
+@click.option("--correlated-workspace", default=None,
+              help="Cross-repo correlation workspace (reuse topology for gateway-layer validation)")
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain, rerun, correlated_workspace):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -97,6 +99,7 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         pipeline_testing_mode=pipeline_testing,
         max_concurrent=max_concurrent,
         retry_profile=retry_profile,
+        correlated_workspace=correlated_workspace,
     )
 
     # 幂等检测：默认（非 --rerun）若已跑过黑盒 → 告知、不启动 worker（省 Temporal 连接）
