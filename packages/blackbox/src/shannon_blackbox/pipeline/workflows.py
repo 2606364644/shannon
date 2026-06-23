@@ -154,7 +154,7 @@ class BlackboxScanWorkflow:
             # + find_project_root()），不能用硬编码 Path("workspaces")——否则 CWD 漂移会找不到产物。
             corr_ctx = None
             if input.correlated_workspace:
-                corr_ws_path = resolve_workspaces_dir(input.repo_path) / input.correlated_workspace
+                corr_ws_path = resolve_workspaces_dir() / input.correlated_workspace
                 corr_ctx = _load_correlation_context(corr_ws_path)
             self._state.correlation_context = corr_ctx  # 供 exploitation 读取（B3）
 
