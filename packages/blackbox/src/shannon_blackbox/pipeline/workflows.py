@@ -13,6 +13,25 @@ from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipeli
 
 logger = logging.getLogger(__name__)
 
+
+def _load_correlation_context(corr_workspace_path: Path) -> dict | None:
+    """读关联 workspace 的 topology/boundaries 作为 exploitation 上下文。
+
+    纯函数（不依赖 Temporal，可单测）。文件缺失返回 None（workflow 退回原逻辑）。
+    注意：corr_workspace_path 必须已解析到 workspaces/<session>（调用方用
+    resolve_workspaces_dir() 拼接，与 A6 创建关联 workspace 的逻辑一致）。
+    """
+    import json
+    dlv = corr_workspace_path / "deliverables"
+    topo_f, bound_f = dlv / "cross-service-topology.json", dlv / "trust-boundaries.json"
+    if not (topo_f.exists() and bound_f.exists()):
+        return None
+    return {
+        "topology": json.loads(topo_f.read_text(encoding="utf-8")),
+        "boundaries": json.loads(bound_f.read_text(encoding="utf-8")),
+    }
+
+
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from ..services.exploitation_checker import ExploitationChecker
@@ -129,6 +148,15 @@ class BlackboxScanWorkflow:
                 workspace_name=input.workspace_name,
                 workspaces_root=resolve_workspaces_dir(input.repo_path),
             )
+
+            # B2: 当指定关联 workspace 时，加载其 topology/boundaries 作为 exploitation 上下文。
+            # resolve_workspaces_dir() 与 A6 创建关联 workspace 的逻辑一致（honors SHANNON_WORKER_ROOT
+            # + find_project_root()），不能用硬编码 Path("workspaces")——否则 CWD 漂移会找不到产物。
+            corr_ctx = None
+            if input.correlated_workspace:
+                corr_ws_path = resolve_workspaces_dir(input.repo_path) / input.correlated_workspace
+                corr_ctx = _load_correlation_context(corr_ws_path)
+            self._state.correlation_context = corr_ctx  # 供 exploitation 读取（B3）
 
             has_whitebox_results = False
             found_classes: list[str] = []

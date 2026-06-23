@@ -29,6 +29,7 @@ class BlackboxPipelineState:
     errors: list[str] = field(default_factory=list)
     error_code: str | None = None
     failed_agents: list[str] = field(default_factory=list)
+    correlation_context: dict | None = None  # B2：关联 workspace topology/boundaries 上下文（供 exploitation 消费）
 
 
 @dataclass
