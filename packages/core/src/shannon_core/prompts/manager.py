@@ -1,3 +1,4 @@
+import logging
 import re
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from shannon_core.models.config import Authentication, DistributedConfig
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.services.browser_engine import BrowserEngineFactory
 import shannon_core.services.engines  # noqa: F401 – registers PlaywrightEngine & AgentBrowserEngine
+
+logger = logging.getLogger(__name__)
 
 
 def strip_conditional_blocks(text: str, has_web_url: bool) -> str:
@@ -154,6 +157,17 @@ class PromptManager:
                 result = result.replace(token, value)
 
         result = re.sub(r"\n{3,}", "\n\n", result)
+
+        # 检测残留的未解析占位符(只匹配真变量格式 {{UPPER_CASE}},
+        # 排除自然语言填空提示如 {{number of ...}})
+        remaining = re.findall(r"\{\{[A-Z][A-Z0-9_]*\}\}", result)
+        if remaining:
+            logger.warning(
+                "Unresolved prompt placeholders in %s: %s",
+                template_name,
+                sorted(set(remaining)),
+            )
+
         return result
 
     def _build_report_filters_block(self, config) -> str:

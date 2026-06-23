@@ -454,3 +454,32 @@ def test_browser_engine_variable_selects_engine(prompts_dir):
     assert "snapshot" in result.lower()
     assert "agent-browser" in result.lower()
 
+
+def test_unresolved_placeholder_logs_warning(prompts_dir, caplog):
+    """漏传的 {{UPPER_CASE}} 变量应触发 warning。"""
+    import logging
+    (prompts_dir / "unresolved-test.txt").write_text("Hello {{WEB_URL}} and {{MISSING_VAR}} world")
+    manager = PromptManager(prompts_dir)
+    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+        result = manager.load_sync("unresolved-test", {"web_url": "https://x.com", "repo_path": "/r"})
+    assert "https://x.com" in result  # 已知变量正常替换
+    # 残留的 MISSING_VAR 应被报告
+    assert any("MISSING_VAR" in r.message for r in caplog.records), \
+        "残留的 {{MISSING_VAR}} 应触发 warning"
+
+
+def test_natural_language_placeholder_not_flagged(prompts_dir, caplog):
+    """合法的自然语言填空提示(含空格/小写)不应被误报。"""
+    import logging
+    (prompts_dir / "fillin-test.txt").write_text(
+        "Count: {{number of confirmed vulnerabilities}}\nURL: {{WEB_URL}}"
+    )
+    manager = PromptManager(prompts_dir)
+    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+        result = manager.load_sync("fillin-test", {"web_url": "https://x.com", "repo_path": "/r"})
+    # 自然语言填空提示保留在结果里(给 agent 看的占位词)
+    assert "{{number of confirmed vulnerabilities}}" in result
+    # 不应有任何 warning(自然语言占位符不是真变量)
+    unresolved_warnings = [r for r in caplog.records if "Unresolved" in r.message or "placeholder" in r.message.lower()]
+    assert unresolved_warnings == [], f"自然语言填空提示不应触发 warning: {unresolved_warnings}"
+
