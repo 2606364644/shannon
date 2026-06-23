@@ -77,15 +77,20 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
 
     config = parse_multi_repo_config(config_path)
     plans = plan_repo_scans(config)
-    workspaces_root = Path("workspaces")
+    # workspace 根必须与 run_whitebox 写入根一致(run_whitebox 用 resolve_workspaces_dir(repo_path)),
+    # 否则 SHANNON_WORKER_ROOT 或 cwd≠project-root 时读取会落空(A6 review Important #1)。
+    from shannon_core.utils.paths import resolve_workspaces_dir
 
     # 1. N repo 白盒:复用 or 现扫
     per_repo_deliverables: dict[str, Path] = {}
     per_repo_queue: dict[str, list[dict]] = {}
     drift_warnings: list[str] = []
     for p in plans:
+        # 每个 repo 的 workspace 都从其写入根(resolve_workspaces_dir(repo_path))读取,
+        # 与 run_whitebox 的 resolve_workspaces_dir(input.repo_path) 对齐。
+        repo_ws_root = resolve_workspaces_dir(p.repo_path)
         if p.reuse:
-            ws_path = workspaces_root / p.workspace
+            ws_path = repo_ws_root / p.workspace
             # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知时)
             if p.repo_path and (ws_path / "session.json").exists():
                 sess = json.loads((ws_path / "session.json").read_text(encoding="utf-8"))
@@ -97,7 +102,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                                      config_path=p.scan_config,
                                      pipeline_testing_mode=pipeline_testing)
             result = await run_whitebox(wb_input, temporal_address)
-            ws_path = workspaces_root / result["workspace_name"]
+            ws_path = repo_ws_root / result["workspace_name"]
         dlv = deliverables_dir_for_workspace(ws_path)
         per_repo_deliverables[p.service] = dlv
         # 收集该仓所有 exploitation_queue(spec §7 合并, B1)
@@ -110,8 +115,9 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
             per_repo_queue.setdefault(vc, []).extend(
                 [{"__service": p.service, **e} for e in entries])
 
-    # 2. 关联 workspace
-    mgr = SessionManager(workspaces_root)
+    # 2. 关联 workspace —— 无归属 repo,用标准 workspaces 根(resolve_workspaces_dir() 无参),
+    # 与 run_whitebox 默认写入根一致,Phase B --correlated-workspace 可在该标准位置找到。
+    mgr = SessionManager(resolve_workspaces_dir())
     out_ws = mgr.create_workspace(web_url="", repo_path="",
                                   name=config.correlation.out_workspace,
                                   scan_type="correlation")
