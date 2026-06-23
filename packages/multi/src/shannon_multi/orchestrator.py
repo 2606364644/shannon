@@ -36,12 +36,25 @@ def plan_repo_scans(config: MultiRepoConfig) -> list[RepoScanPlan]:
 # ---------------------------------------------------------------------------
 import asyncio  # noqa: E402
 import json  # noqa: E402
+import logging  # noqa: E402
 import os  # noqa: E402
 from shannon_core.correlation.schemas import (  # noqa: E402
     CrossServiceTopology, ServiceNode, TopologyEdge, Call, CallSite, TrustBoundary,
 )
 from shannon_core.correlation.queue_merge import merge_exploitation_queues  # noqa: E402
 from shannon_core.correlation.drift import detect_drift  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+def _prompts_dir() -> Path:
+    """Absolute prompts dir, independent of process CWD.
+
+    orchestrator.py is at <repo>/packages/multi/src/shannon_multi/orchestrator.py,
+    so parents[4] is the repo root that holds prompts/.
+    (final-review IMPORTANT 1: 避免非 repo-root CWD 调用时 Prompt file not found 崩溃)
+    """
+    return Path(__file__).resolve().parents[4] / "prompts"
 
 
 async def _run_edge(from_svc: str, to_svc: str, *, runner) -> dict:
@@ -91,8 +104,10 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
         repo_ws_root = resolve_workspaces_dir(p.repo_path)
         if p.reuse:
             ws_path = repo_ws_root / p.workspace
-            # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知时)
-            if p.repo_path and (ws_path / "session.json").exists():
+            # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知且盘上存在时)。
+            # final-review MINOR 5: 复用 workspace 的 path 可能已失配/移动,
+            # getmtime 会 FileNotFoundError 并中止整个编排 —— 加 Path.exists() 守卫优雅降级(跳过漂移检测)。
+            if p.repo_path and (ws_path / "session.json").exists() and Path(p.repo_path).exists():
                 sess = json.loads((ws_path / "session.json").read_text(encoding="utf-8"))
                 rpt = detect_drift(sess.get("created_at", 0.0), os.path.getmtime(p.repo_path))
                 if rpt.drifted:
@@ -110,7 +125,9 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
             vc = q.stem.replace("_exploitation_queue", "")
             try:
                 entries = json.loads(q.read_text(encoding="utf-8")).get("vulnerabilities", [])
-            except Exception:
+            except (json.JSONDecodeError, OSError) as e:
+                # final-review MINOR 6: 仅捕解析/IO 错并留痕,不再静默吞所有异常。
+                logger.warning("跳过损坏的 exploitation queue %s: %s", q, e)
                 entries = []
             per_repo_queue.setdefault(vc, []).extend(
                 [{"__service": p.service, **e} for e in entries])
@@ -126,7 +143,13 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
     # 3. per-edge 关联 Agent(asyncio.Semaphore 限并发, B5)
     role_map = {s: spec.role for s, spec in config.repos.items()}
     repo_paths = {s: spec.path for s, spec in config.repos.items()}
-    sem = asyncio.Semaphore(3)  # 并发上限:plan 用 3;接 max_concurrent 配置见风险登记(spec B5)
+    # final-review MINOR 8: 并发上限改接 SHANNON_MAX_CONCURRENT(whitebox/blackbox 同源 env 驱动,
+    # 默认 3),闭合 spec B5 风险登记 TODO。
+    from shannon_core.config.concurrency import get_max_concurrent
+    sem = asyncio.Semaphore(get_max_concurrent())
+    # final-review IMPORTANT 1+2: PromptManager 用绝对路径(_prompts_dir() 不受 CWD 影响),
+    # 且单实例提升到 run_cross_repo 作用域 —— N 条 edge 不再重复构造 executor / 重编译 prompt。
+    executor = AgentExecutor(PromptManager(_prompts_dir()))
     edge_output_schema = {
         "type": "object",
         "properties": {
@@ -139,7 +162,6 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
 
     async def edge_runner(f: str, t: str) -> dict:
         async with sem:
-            executor = AgentExecutor(PromptManager(Path("prompts")))
             prompt_vars = {
                 "relations_json": json.dumps({"from": f, "to": t,
                     "protocol": next((r.protocol for r in config.relations

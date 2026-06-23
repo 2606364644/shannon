@@ -41,9 +41,13 @@ class TopologyEdge:
     def from_json(s: str) -> "TopologyEdge":
         d = json.loads(s)
         d["from_"] = d.pop("from")
+        # final-review MINOR 7: 过滤掉 LLM 可能多吐的未知键,避免 TopologyEdge(**d) 触发 TypeError。
+        # calls 单独重建并显式赋值,不参与 **d 过滤集。
+        calls_raw = d.get("calls", [])
+        d = {k: d[k] for k in ("from_", "to", "protocol", "status", "error") if k in d}
         d["calls"] = [Call(method=c["method"],
                            call_site=CallSite(**c["call_site"]),
-                           confidence=c["confidence"], evidence=c["evidence"]) for c in d["calls"]]
+                           confidence=c["confidence"], evidence=c["evidence"]) for c in calls_raw]
         return TopologyEdge(**d)
 
 

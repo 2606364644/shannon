@@ -68,6 +68,15 @@ def test_merge_edges_collects_all():
     assert len(merged["edges"]) == 2
 
 
+def test_prompts_dir_is_absolute_and_points_to_real_prompts():
+    """final-review IMPORTANT 1 回归锚点:prompts 路径必须绝对且指向真实 prompts 目录,
+    防止非 repo-root CWD 调用时 Prompt file not found 崩溃回归。"""
+    from shannon_multi.orchestrator import _prompts_dir
+    d = _prompts_dir()
+    assert d.is_absolute()
+    assert (d / "cross-repo-correlation.txt").exists()
+
+
 def test_write_correlation_deliverables_writes_all_files(tmp_path):
     """Task A6: report.py 落盘 helper 写齐四类产物。"""
     from shannon_core.correlation.report import write_correlation_deliverables

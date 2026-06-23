@@ -40,3 +40,17 @@ def test_edge_status_declared_missing():
     e = TopologyEdge(from_="gateway", to="ghost-svc", protocol="grpc",
                      calls=[], status="declared-missing", error=None)
     assert json.loads(e.to_json())["status"] == "declared-missing"
+
+
+def test_edge_from_json_tolerates_extra_llm_fields():
+    """final-review MINOR 7 回归锚点:LLM 多吐的未知键不应触发 TypeError。
+    from_json 应过滤到已知键(calls 单独重建)。"""
+    raw = json.dumps({
+        "from": "gateway", "to": "order-svc", "protocol": "grpc",
+        "status": "ok", "error": None, "calls": [],
+        "extra_llm_field": "noise", "confidence_overall": "high",
+    })
+    e = TopologyEdge.from_json(raw)
+    assert e.from_ == "gateway"
+    assert e.to == "order-svc"
+    assert e.calls == []
