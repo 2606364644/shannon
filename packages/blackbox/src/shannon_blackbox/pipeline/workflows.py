@@ -32,6 +32,30 @@ def _load_correlation_context(corr_workspace_path: Path) -> dict | None:
     }
 
 
+def has_correlation_results(corr_ws_deliverables: Path, vuln_classes: list[str]) -> bool:
+    """§6.2 闭环检测端:关联 workspace 的 merged queue 是否构成黑盒 recon-skip 复用源。
+
+    纯函数(不依赖 Temporal,可单测)。当 `--correlated-workspace` 指定的关联
+    workspace deliverables 里存在 `vuln_classes` 中至少一个漏洞类的有效
+    `{vt}_exploitation_queue.json` 时返回 True。有效性复用
+    `has_valid_whitebox_results`(每条 entry 必须含 title/description/severity/location
+    四字段,spec §7 B1 硬约束;跨服务额外字段如 service/cross_service_source 因 subset
+    检查不破坏判定)。
+
+    与单仓 deliverables 检查的关系:ADD 源(任一有效即 skip recon),非 replace。
+    调用方(workflow `run`)仅在 `input.correlated_workspace` 设置时调用本函数——
+    `correlated_workspace` 为 None(所有单仓 / 现有 `--repo`·`--latest` 调用)时
+    根本不进入此路径,行为与改动前字节一致(单仓零回归)。
+    """
+    if not vuln_classes:
+        return False
+    for vt in vuln_classes:
+        queue_file = corr_ws_deliverables / f"{vt}_exploitation_queue.json"
+        if has_valid_whitebox_results(queue_file):
+            return True
+    return False
+
+
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from ..services.exploitation_checker import ExploitationChecker
@@ -153,6 +177,7 @@ class BlackboxScanWorkflow:
             # resolve_workspaces_dir() 与 A6 创建关联 workspace 的逻辑一致（honors SHANNON_WORKER_ROOT
             # + find_project_root()），不能用硬编码 Path("workspaces")——否则 CWD 漂移会找不到产物。
             corr_ctx = None
+            corr_ws_path = None
             if input.correlated_workspace:
                 corr_ws_path = resolve_workspaces_dir() / input.correlated_workspace
                 corr_ctx = _load_correlation_context(corr_ws_path)
@@ -167,6 +192,31 @@ class BlackboxScanWorkflow:
                     found_classes.append(vt)
             self._state.has_whitebox_results = has_whitebox_results
             self._state.found_whitebox_classes = found_classes
+
+            # §6.2 闭环(final-review fix):当指定关联 workspace 时，把 A6 写入关联 workspace
+            # deliverables 的 merged `{vt}_exploitation_queue.json` 也作为 recon-skip 复用源。
+            # 语义=ADD(任一来源有效即跳过 recon)，非 replace——保留 --correlated-workspace
+            # 与 --repo/--latest 合法的组合用法。仅在 input.correlated_workspace 设置时进入
+            # 此分支：correlated_workspace 为 None 时 has_correlation_results 根本不被调用，
+            # 上述单仓 deliverables 检查逻辑字节不变(单仓零回归)。
+            if input.correlated_workspace and corr_ws_path is not None and not has_whitebox_results:
+                corr_dlv = corr_ws_path / "deliverables"
+                if has_correlation_results(corr_dlv, selected_classes):
+                    has_whitebox_results = True
+                    # 记录由关联 workspace 贡献的类(用于日志可观测)
+                    corr_classes = [
+                        vt for vt in selected_classes
+                        if has_valid_whitebox_results(corr_dlv / f"{vt}_exploitation_queue.json")
+                    ]
+                    found_classes.extend(vt for vt in corr_classes if vt not in found_classes)
+                    self._state.has_whitebox_results = True
+                    self._state.found_whitebox_classes = found_classes
+                    logger.info(
+                        "Correlation workspace results detected at %s for classes: %s — "
+                        "skipping RECON_BLACKBOX (§6.2 closed loop)",
+                        corr_dlv, corr_classes,
+                    )
+
             if has_whitebox_results:
                 logger.info(
                     "Whitebox results detected at %s for classes: %s — skipping RECON_BLACKBOX",
