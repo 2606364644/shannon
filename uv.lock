@@ -7,6 +7,7 @@ members = [
     "shannon-blackbox",
     "shannon-combined",
     "shannon-core",
+    "shannon-multi",
     "shannon-py",
     "shannon-whitebox",
 ]
@@ -1176,12 +1177,28 @@ requires-dist = [
 ]
 
 [[package]]
+name = "shannon-multi"
+version = "0.1.0"
+source = { editable = "packages/multi" }
+dependencies = [
+    { name = "shannon-core" },
+    { name = "shannon-whitebox" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "shannon-core", editable = "packages/core" },
+    { name = "shannon-whitebox", editable = "packages/whitebox" },
+]
+
+[[package]]
 name = "shannon-py"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "shannon-blackbox" },
     { name = "shannon-combined" },
+    { name = "shannon-multi" },
     { name = "shannon-whitebox" },
 ]
 
@@ -1198,6 +1215,7 @@ dev = [
 requires-dist = [
     { name = "shannon-blackbox", editable = "packages/blackbox" },
     { name = "shannon-combined", editable = "packages/combined" },
+    { name = "shannon-multi", editable = "packages/multi" },
     { name = "shannon-whitebox", editable = "packages/whitebox" },
 ]
 
