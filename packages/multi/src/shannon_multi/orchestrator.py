@@ -31,5 +31,180 @@ def plan_repo_scans(config: MultiRepoConfig) -> list[RepoScanPlan]:
     return plans
 
 
+# ---------------------------------------------------------------------------
+# Task A6: per-edge asyncio + 单边隔离 + merge
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from shannon_core.correlation.schemas import (  # noqa: E402
+    CrossServiceTopology, ServiceNode, TopologyEdge, Call, CallSite, TrustBoundary,
+)
+from shannon_core.correlation.queue_merge import merge_exploitation_queues  # noqa: E402
+from shannon_core.correlation.drift import detect_drift  # noqa: E402
+
+
+async def _run_edge(from_svc: str, to_svc: str, *, runner) -> dict:
+    """单条 edge 推断。runner 是 async(f,t)->dict(真实=AgentExecutor 调用)。
+    失败 → 标 status=error,不抛(spec §8 单边隔离)。"""
+    try:
+        return await runner(from_svc, to_svc)
+    except Exception as e:  # noqa: BLE001
+        return {"from": from_svc, "to": to_svc, "protocol": "grpc",
+                "calls": [], "status": "error", "error": str(e), "boundaries": []}
+
+
+def _merge_edge_results(edge_results: list[dict]) -> dict:
+    edges, boundaries = [], []
+    for r in edge_results:
+        edges.append({"from": r["from"], "to": r["to"], "protocol": r.get("protocol", "grpc"),
+                      "calls": r.get("calls", []), "status": r.get("status", "ok"),
+                      "error": r.get("error")})
+        boundaries.extend(r.get("boundaries", []))
+    return {"edges": edges, "boundaries": boundaries}
+
+
 async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_testing: bool = False) -> dict:
-    raise NotImplementedError  # Task A6
+    from shannon_core.config.parser import parse_multi_repo_config
+    from shannon_core.session import SessionManager
+    from shannon_core.utils.paths import deliverables_dir_for_workspace
+    from shannon_core.agents.executor import AgentExecutor
+    from shannon_core.prompts.manager import PromptManager
+    from shannon_core.models.agents import AgentName
+    from shannon_core.correlation.report import write_correlation_deliverables
+    from shannon_whitebox.worker import run_scan as run_whitebox
+    from shannon_whitebox.pipeline.shared import PipelineInput
+
+    config = parse_multi_repo_config(config_path)
+    plans = plan_repo_scans(config)
+    workspaces_root = Path("workspaces")
+
+    # 1. N repo 白盒:复用 or 现扫
+    per_repo_deliverables: dict[str, Path] = {}
+    per_repo_queue: dict[str, list[dict]] = {}
+    drift_warnings: list[str] = []
+    for p in plans:
+        if p.reuse:
+            ws_path = workspaces_root / p.workspace
+            # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知时)
+            if p.repo_path and (ws_path / "session.json").exists():
+                sess = json.loads((ws_path / "session.json").read_text(encoding="utf-8"))
+                rpt = detect_drift(sess.get("created_at", 0.0), os.path.getmtime(p.repo_path))
+                if rpt.drifted:
+                    drift_warnings.append(f"{p.service}: {rpt.note}")
+        else:
+            wb_input = PipelineInput(repo_path=p.repo_path, workspace_name=p.workspace,
+                                     config_path=p.scan_config,
+                                     pipeline_testing_mode=pipeline_testing)
+            result = await run_whitebox(wb_input, temporal_address)
+            ws_path = workspaces_root / result["workspace_name"]
+        dlv = deliverables_dir_for_workspace(ws_path)
+        per_repo_deliverables[p.service] = dlv
+        # 收集该仓所有 exploitation_queue(spec §7 合并, B1)
+        for q in dlv.glob("*_exploitation_queue.json"):
+            vc = q.stem.replace("_exploitation_queue", "")
+            try:
+                entries = json.loads(q.read_text(encoding="utf-8")).get("vulnerabilities", [])
+            except Exception:
+                entries = []
+            per_repo_queue.setdefault(vc, []).extend(
+                [{"__service": p.service, **e} for e in entries])
+
+    # 2. 关联 workspace
+    mgr = SessionManager(workspaces_root)
+    out_ws = mgr.create_workspace(web_url="", repo_path="",
+                                  name=config.correlation.out_workspace,
+                                  scan_type="correlation")
+    out_dlv = deliverables_dir_for_workspace(out_ws)
+
+    # 3. per-edge 关联 Agent(asyncio.Semaphore 限并发, B5)
+    role_map = {s: spec.role for s, spec in config.repos.items()}
+    repo_paths = {s: spec.path for s, spec in config.repos.items()}
+    sem = asyncio.Semaphore(3)  # 并发上限:plan 用 3;接 max_concurrent 配置见风险登记(spec B5)
+    edge_output_schema = {
+        "type": "object",
+        "properties": {
+            "from": {"type": "string"}, "to": {"type": "string"},
+            "protocol": {"type": "string"}, "status": {"type": "string"},
+            "calls": {"type": "array"}, "boundaries": {"type": "array"},
+        },
+        "required": ["from", "to", "status"],
+    }
+
+    async def edge_runner(f: str, t: str) -> dict:
+        async with sem:
+            executor = AgentExecutor(PromptManager(Path("prompts")))
+            prompt_vars = {
+                "relations_json": json.dumps({"from": f, "to": t,
+                    "protocol": next((r.protocol for r in config.relations
+                                      if r.from_ == f and r.to == t), "grpc")}),
+                "role_map": json.dumps(role_map),
+                "repo_paths": json.dumps({f: repo_paths.get(f), t: repo_paths.get(t)}),
+                "deliverables_path": str(out_dlv),
+            }
+            metrics = await executor.execute(
+                agent_name=AgentName.CROSS_REPO_CORRELATION,
+                repo_path=str(out_ws),  # 注:非 git repo,但 git ops 全在 deliverables(见 Task A6 风险 #1)
+                deliverables_path=str(out_dlv),
+                pipeline_testing=pipeline_testing,
+                prompt_variables=prompt_vars,
+                structured_output_schema=edge_output_schema,  # 强制单 edge JSON 输出
+            )
+            # A6 风险 #3:AgentMetrics 真实属性是 structured_output(非 brief 的 output)。
+            # 取不到合法 payload 则降级 unverified(spec §8 per-edge 隔离)。
+            payload = getattr(metrics, "structured_output", None)
+            if isinstance(payload, dict) and "from" in payload:
+                return payload
+            return {"from": f, "to": t, "protocol": "grpc", "calls": [],
+                    "status": "unverified", "boundaries": []}
+
+    edge_pairs = [(r.from_, r.to) for r in config.relations]
+    edge_results = await asyncio.gather(
+        *[_run_edge(f, t, runner=edge_runner) for f, t in edge_pairs])
+    merged = _merge_edge_results(edge_results)
+
+    # 4. 组装 topology + boundaries
+    topology = CrossServiceTopology(
+        services=[ServiceNode(name=s, role=spec.role, repo=spec.path or spec.workspace or "")
+                  for s, spec in config.repos.items()],
+        edges=[TopologyEdge(from_=e["from"], to=e["to"], protocol=e["protocol"],
+                            calls=[Call(method=c["method"],
+                                        call_site=CallSite(**c["call_site"]),
+                                        confidence=c["confidence"], evidence=c["evidence"])
+                                   for c in e.get("calls", [])],
+                            status=e["status"], error=e.get("error"))
+               for e in merged["edges"]])
+    boundaries = [TrustBoundary(**b) for b in merged["boundaries"]]
+
+    # 5. 合并 queue(B1 四字段)+ 落盘
+    merged_queues = {vc: merge_exploitation_queues(
+        _group_by_service(entries)) for vc, entries in per_repo_queue.items()}
+    report_md = _render_report(topology, boundaries, merged_queues, drift_warnings)
+    write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues, report_md)
+
+    return {"out_workspace": config.correlation.out_workspace,
+            "deliverables_path": str(out_dlv),
+            "edge_statuses": [e["status"] for e in merged["edges"]]}
+
+
+def _group_by_service(entries: list[dict]) -> dict[str, list[dict]]:
+    g: dict[str, list[dict]] = {}
+    for e in entries:
+        svc = e.pop("__service", "unknown")
+        g.setdefault(svc, []).append(e)
+    return g
+
+
+def _render_report(topology, boundaries, merged_queues, drift_warnings) -> str:
+    lines = ["# Cross-Repo Correlation Report", "",
+             "## 服务拓扑", ""]
+    for e in topology.edges:
+        lines.append(f"- {e.from_} → {e.to} ({e.protocol}) [{e.status}]")
+    lines += ["", "## 未验证/低置信/失败项(透明单列)", ""]
+    for e in topology.edges:
+        if e.status in ("low", "unverified", "error", "declared-missing"):
+            lines.append(f"- {e.from_}→{e.to}: {e.status} {e.error or ''}")
+    if drift_warnings:
+        lines += ["", "## 版本漂移警告(A2)", ""]
+        lines += [f"- {w}" for w in drift_warnings]
+    return "\n".join(lines)
