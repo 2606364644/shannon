@@ -166,7 +166,7 @@ ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
 BROWSER_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
 # VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
 BROWSER_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
-BROWSER_SESSION_MAPPING[AgentName.AUDIT_TIER1.value] = f"agent{len(AgentName)}"
+BROWSER_SESSION_MAPPING[AgentName.AUDIT_TIER1.value] = "agent16"
 
 # Backward-compatible alias
 PLAYWRIGHT_SESSION_MAPPING = BROWSER_SESSION_MAPPING

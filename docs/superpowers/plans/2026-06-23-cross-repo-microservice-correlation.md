@@ -684,7 +684,7 @@ discover that were NOT declared in the graph (declared-missing edges).
 
 <deliverables-from-scans>
 {{DELIVERABLES_PATH}}
-</deliverables>
+</deliverables-from-scans>
 
 <output-format>
 This invocation analyzes the SINGLE edge described in <service-graph> (its
