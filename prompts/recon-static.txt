@@ -93,6 +93,22 @@ Write your findings to `{{DELIVERABLES_PATH}}/recon_deliverable.md` with these s
 | Method | Path | Handler | Auth | Parameters | Notes |
 |--------|------|---------|------|------------|-------|
 
+## 2.1 Endpoint Security Context
+
+For every endpoint in Section 2, document its security context. This is **descriptive analysis** — document what protections exist, NOT whether they are sufficient.
+
+| Method | Path | Auth | Middleware | Framework Origin | Ownership Check | Notes |
+|--------|------|------|------------|------------------|-----------------|-------|
+| (per endpoint) | | anon/user/admin | (middleware chain) | manual / finale-rest auto-generated / epilogue auto-generated | none detected / yes (file:line) | |
+
+**Framework Endpoints (finale-rest / epilogue):**
+When auto-REST frameworks are detected (search for `finale.initialize()`, `epilogue.initialize()`, `finale.resource()`, `epilogue.resource()`):
+1. List all models configured with the framework
+2. For each model, enumerate all auto-generated endpoints: `GET/POST /api/{Model}s`, `GET/PUT/DELETE /api/{Model}s/:id`
+3. Mark each endpoint's Framework Origin (finale-rest auto-generated / epilogue auto-generated)
+4. Note any overrides or customizations applied after auto-generation
+5. For auto-generated endpoints, ownership validation is typically absent by default — record "none detected" unless an explicit ownership check is found
+
 ## 3. Authentication Architecture
 - Mechanism: [session/JWT/OAuth/...]
 - Login flow: [steps]
