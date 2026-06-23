@@ -22,6 +22,7 @@ class AgentName(str, Enum):
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
     AUDIT_TIER1 = "audit-tier1"
+    CROSS_REPO_CORRELATION = "cross-repo-correlation"
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -150,6 +151,14 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,  # Findings collected, no separate deliverable
         model_tier="small",
     ),
+    AgentName.CROSS_REPO_CORRELATION: AgentDefinition(
+        name=AgentName.CROSS_REPO_CORRELATION,
+        display_name="Cross-Repo Correlation",
+        prerequisites=[],  # 关联由编排器在外部触发,不在单仓流水线内
+        prompt_template="cross-repo-correlation",
+        deliverable_filename=None,  # 产物由编排器从 LLM 输出解析落盘
+        model_tier="large",
+    ),
 }
 
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
@@ -179,4 +188,5 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "report": "reporting",
     "validate-authentication": "pre-recon",
     "audit-tier1": "vulnerability-analysis",
+    "cross-repo-correlation": "correlation",
 }
