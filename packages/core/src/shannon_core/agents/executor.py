@@ -19,6 +19,27 @@ if TYPE_CHECKING:
     from shannon_core.logging.activity_logger import ActivityLogger
     from shannon_core.agents.tool_audit_logger import ToolAuditLogger
 
+
+def resolve_template_name(
+    agent_name: AgentName,
+    prompt_override: str | None,
+    default_template: str,
+    web_url: str,
+) -> str:
+    """决定 agent 实际使用的 prompt template 名。
+
+    - 显式 prompt_override 优先(不被覆盖)。
+    - recon agent 在无 live web target(离线/纯静态)时回退到 recon-static,
+      对齐原始 shannon runner.ts:189 的 promptOverride 思路。
+    - 其余情况用 AGENTS 字典里的默认 prompt_template。
+    """
+    if prompt_override:
+        return prompt_override
+    if agent_name == AgentName.RECON and not web_url:
+        return "recon-static"
+    return default_template
+
+
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
         self.prompt_manager = prompt_manager
@@ -63,7 +84,9 @@ class AgentExecutor:
             variables["browser_engine"] = config.browser_engine
         if prompt_variables:
             variables.update(prompt_variables)
-        template_name = prompt_override or defn.prompt_template
+        template_name = resolve_template_name(
+            agent_name, prompt_override, defn.prompt_template, web_url,
+        )
         prompt = self.prompt_manager.load_sync(
             template_name,
             variables=variables,
