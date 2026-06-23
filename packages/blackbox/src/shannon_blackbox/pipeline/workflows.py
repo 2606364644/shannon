@@ -237,7 +237,10 @@ class BlackboxScanWorkflow:
                         session_id = get_session_id(agent_name.value)
                         engine.write_config(input.repo_path, session_id=session_id)
                         exploit_input = BlackboxActivityInput(
-                            **{**act_input.__dict__, "agent_name": agent_name.value, "vuln_type": vt}
+                            **{**act_input.__dict__,
+                               "agent_name": agent_name.value,
+                               "vuln_type": vt,
+                               "correlation_context": self._state.correlation_context}
                         )
                         exploit_tasks.append((vt, agent_name, workflow.execute_activity(
                             activities.run_exploit_agent, exploit_input,

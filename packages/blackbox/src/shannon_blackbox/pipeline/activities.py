@@ -224,6 +224,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
+            correlation_context=input.correlation_context,
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(

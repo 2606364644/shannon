@@ -46,6 +46,7 @@ class BlackboxActivityInput:
     workspace_path: str | None = None
     phase: str | None = None          # log_phase_* 的 phase label（如 "preflight"/"recon-blackbox"/"exploitation"/"reporting"）
     correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：由 workflow 从 PipelineInput 透传，Phase B 接入）
+    correlation_context: dict | None = None  # B3：关联 workspace topology/boundaries（由 workflow 从 state 注入，exploit activity 消费）
 
 
 @dataclass
