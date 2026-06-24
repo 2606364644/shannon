@@ -226,6 +226,56 @@ def _scan_cors(file_path: Path, content: str, lines: list[str]) -> list[ConfigFi
     return findings
 
 
+# --- JWT claim scanning (nOAuth) ---
+
+_JWT_DECODE_PATTERNS = (
+    r"jwt\.verify\s*\(",
+    r"jwt\.decode\s*\(",
+    r"jsonwebtoken\.verify\s*\(",
+    r"jsonwebtoken\.decode\s*\(",
+    r"jwt_decode\s*\(",
+    r"decode_token\s*\(",
+    r"jwt\.decode\s*\[",
+)
+_JWT_DECODE_RE = re.compile("|".join(_JWT_DECODE_PATTERNS), re.IGNORECASE)
+
+# Mutable identity attributes (nOAuth): using these for identity is the flaw.
+_MUTABLE_CLAIM_RE = re.compile(
+    r"payload\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])"
+)
+_SUB_USE_RE = re.compile(r"payload\s*(?:\.\s*sub|\[\s*['\"]sub['\"]\s*\])", re.IGNORECASE)
+_MUTABLE_CLAIMS = {"email", "name", "preferred_username", "username", "user", "displayName"}
+
+
+def _scan_jwt_claims(file_path: Path, content: str, lines: list[str]) -> list[ConfigFinding]:
+    findings: list[ConfigFinding] = []
+    for m in _JWT_DECODE_RE.finditer(content):
+        line_no = content[:m.start()].count("\n") + 1
+        lo = max(0, line_no - 1)
+        hi = min(len(lines), line_no + 6)  # +/-5 line window
+        window = "\n".join(lines[lo:hi])
+        # Safe: uses sub in the window
+        if _SUB_USE_RE.search(window):
+            continue
+        # Dangerous: reads a mutable claim
+        for cm in _MUTABLE_CLAIM_RE.finditer(window):
+            claim = cm.group(1) or cm.group(2)
+            if claim in _MUTABLE_CLAIMS:
+                findings.append(ConfigFinding(
+                    category="jwt_claim",
+                    file_path=str(file_path),
+                    line=line_no,
+                    detail=(
+                        f"nOAuth candidate: JWT payload uses mutable claim '{claim}' for identity; "
+                        f"use the immutable 'sub' claim instead (attacker can control {claim} "
+                        f"via their own IdP tenant to impersonate users)"
+                    ),
+                    evidence=window.strip()[:200],
+                ))
+                break  # one finding per decode point
+    return findings
+
+
 # --- Orchestrator ---
 
 async def scan_auth_config(codebase_path: str) -> AuthConfigScanResult:
@@ -260,12 +310,13 @@ async def scan_auth_config(codebase_path: str) -> AuthConfigScanResult:
             result.cookie_findings.extend(_scan_cookies(fp, content, lines))
             result.hsts_findings.extend(_scan_hsts(fp, content, lines, has_any_hsts_global))
             result.cors_findings.extend(_scan_cors(fp, content, lines))
+            result.jwt_claim_findings.extend(_scan_jwt_claims(fp, content, lines))
         except Exception as exc:
             logger.debug("auth-config scan: error in %s: %s", fp, exc)
 
     logger.info(
-        "auth-config scan: %d cookie, %d hsts, %d cors findings across %d files",
+        "auth-config scan: %d cookie, %d hsts, %d cors, %d jwt_claim findings across %d files",
         len(result.cookie_findings), len(result.hsts_findings),
-        len(result.cors_findings), len(files),
+        len(result.cors_findings), len(result.jwt_claim_findings), len(files),
     )
     return result

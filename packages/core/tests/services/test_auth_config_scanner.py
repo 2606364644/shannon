@@ -100,3 +100,51 @@ async def test_scan_result_is_serializable_via_dataclasses_asdict(tmp_path):
     assert "cookie_findings" in data
     assert "hsts_findings" in data
     assert "cors_findings" in data
+
+
+@pytest.mark.asyncio
+async def test_jwt_uses_sub_not_flagged(tmp_path):
+    _write(tmp_path, "auth.js", """
+        const payload = jwt.verify(token, secret);
+        const userId = payload.sub;  // correct: immutable subject
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert result.jwt_claim_findings == []
+
+
+@pytest.mark.asyncio
+async def test_jwt_uses_email_for_identity_flagged_noauth(tmp_path):
+    """nOAuth: using mutable 'email' claim as identity instead of 'sub'."""
+    _write(tmp_path, "auth.js", """
+        const payload = jwt.decode(token);
+        const userId = payload.email;  // attacker can change this
+        const user = User.findByEmail(userId);
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert len(result.jwt_claim_findings) == 1
+    f = result.jwt_claim_findings[0]
+    assert "email" in f.detail
+    assert "sub" in f.detail  # should mention the safe alternative
+
+
+@pytest.mark.asyncio
+async def test_jwt_uses_preferred_username_flagged(tmp_path):
+    _write(tmp_path, "auth.py", """
+        payload = jwt.decode(token, key, algorithms=['HS256'])
+        username = payload['preferred_username']
+        session['user'] = username
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert len(result.jwt_claim_findings) == 1
+    assert "preferred_username" in result.jwt_claim_findings[0].detail
+
+
+@pytest.mark.asyncio
+async def test_jwt_decode_without_claim_access_not_flagged(tmp_path):
+    """Just decoding without reading a mutable claim — not enough signal."""
+    _write(tmp_path, "auth.js", """
+        const payload = jwt.verify(token, secret);
+        // no claim access in window
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert result.jwt_claim_findings == []
