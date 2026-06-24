@@ -31,6 +31,21 @@ def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
     workspaces = repo.parent / "workspaces"
     return repo, deliverables, workspaces
 
+
+def _to_endpoint(d: dict):
+    """Reconstruct framework analyzer endpoint dataclasses from JSON."""
+    from shannon_core.services.framework_analyzer import InferredEndpoint
+
+    return InferredEndpoint(
+        method=d["method"],
+        path=d["path"],
+        source=d["source"],
+        model=d.get("model"),
+        middleware=tuple(d.get("middleware", [])),
+        vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+    )
+
+
 @activity.defn
 async def run_preflight(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -87,6 +102,22 @@ async def run_agent(input: ActivityInput) -> dict:
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
 
+        prompt_variables = None
+        if agent_name == AgentName.RECON:
+            framework_analysis_path = deliverables / "framework_analysis.json"
+            if framework_analysis_path.exists():
+                from shannon_core.services.framework_endpoint_renderer import render_framework_endpoints
+
+                data = json.loads(framework_analysis_path.read_text())
+                endpoints = [
+                    _to_endpoint(endpoint)
+                    for endpoint in data.get("inferred_endpoints", [])
+                    if isinstance(endpoint, dict)
+                ]
+                prompt_variables = {
+                    "framework_endpoints_summary": render_framework_endpoints(endpoints),
+                }
+
         await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         await tool_audit_logger.initialize()
         metrics = await executor.execute(
@@ -98,6 +129,7 @@ async def run_agent(input: ActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             prompt_override=input.prompt_override,
+            prompt_variables=prompt_variables,
             tool_audit_logger=tool_audit_logger,
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
@@ -614,7 +646,7 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
     """Build route chain map from framework + frontend analysis results."""
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
-        from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
+        from shannon_core.services.framework_analyzer import FrameworkAnalysisResult
         from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
         from shannon_core.services.route_chain_builder import build_attack_chains_from_analysis
         import dataclasses
@@ -629,13 +661,6 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
             framework_path = deliverables / "framework_analysis.json"
             if framework_path.exists():
                 data = json.loads(framework_path.read_text())
-                # Reconstruct endpoints from dicts (tuples become lists in JSON)
-                def _to_endpoint(d: dict) -> InferredEndpoint:
-                    return InferredEndpoint(
-                        method=d["method"], path=d["path"], source=d["source"],
-                        model=d.get("model"), middleware=tuple(d.get("middleware", [])),
-                        vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
-                    )
                 endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
                 framework_result = FrameworkAnalysisResult(
                     inferred_endpoints=endpoints,
