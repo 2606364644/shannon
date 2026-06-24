@@ -10,6 +10,10 @@ class BaseVulnerability(BaseModel):
     externally_exploitable: bool
     confidence: str
     notes: str | None = None
+    # Spec §4.1 dual-track merge fields. All are optional for backward compatibility.
+    source_track: str | None = None
+    evidence_chain: str | None = None
+    merge_source: str | None = None
 
 class InjectionVulnerability(BaseVulnerability):
     source: str | None = None
