@@ -220,13 +220,6 @@ async def run_auth_validation(input: ActivityInput) -> None:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
-
-class _StubMCPClient:
-    """Fallback MCP client that returns None, triggering degradation."""
-    async def call_tool(self, tool_name: str, arguments: dict):
-        return None
-
-
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -250,7 +243,7 @@ async def run_code_index(input: ActivityInput) -> dict:
             # (~/.gitnexus/registry.json).  The correct order is:
             #   1. `gitnexus analyze <repo>`  — index & register the repo
             #   2. `gitnexus mcp`             — start MCP server (no --repo flag)
-            # If indexing fails or MCP is unreachable we degrade to minimal AST-only.
+            # If GitNexus is unavailable, indexing fails, or MCP fails, we raise PentestError — no degradation.
             from shannon_core.code_index.gitnexus_engine import GitNexusEngine
 
             engine = GitNexusEngine(Path(repo))
