@@ -73,6 +73,7 @@ async def build_code_index_with_gitnexus(
             GitNexus CLI is unavailable or indexing fails (no fallback).
 
     Raises:
+        PentestError: if GitNexus CLI is unavailable, indexing fails, or (later) MCP query fails.
         GitNexusNotIndexedError: if GitNexus hasn't indexed the repo
         GitNexusConnectionError: if MCP connection fails
     """
@@ -221,76 +222,6 @@ async def build_code_index_with_gitnexus(
         file_manifest=file_manifest,
         degradation_level=DegradationLevel.FULL,
     )
-
-
-async def _build_code_index_fallback(
-    repo_path: str,
-    *,
-    mcp_client,
-    llm_client,
-) -> CodeIndex:
-    """Build a minimal AST-only code index when GitNexus is unavailable.
-
-    Performs only tree-sitter parsing and entry point detection.
-    No call graph, no sink detection, no taint analysis.
-
-    Returns:
-        CodeIndex with degradation_level=MINIMAL.
-    """
-    from shannon_core.models.errors import ErrorCode, PentestError
-
-    repo = Path(repo_path).resolve()
-    file_manifest = discover_security_files(repo)
-
-    try:
-        language = detect_language(repo)
-    except ValueError as exc:
-        raise PentestError(
-            str(exc), category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
-        ) from exc
-
-    logger.info("Fallback mode — detected language: %s", language)
-
-    source_files = discover_source_files(repo, language)
-    if not source_files:
-        raise PentestError(
-            f"No source files found for language '{language}' in {repo}",
-            category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
-        )
-
-    parser = get_parser(language)
-    if parser is None:
-        raise PentestError(
-            f"No parser available for language '{language}'",
-            category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
-        )
-
-    all_blocks = []
-    for file_path in source_files:
-        try:
-            blocks = parser.parse_file(file_path, repo)
-            all_blocks.extend(blocks)
-        except Exception as exc:
-            logger.warning("Failed to index %s: %s", file_path, exc)
-            continue
-
-    entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
-
-    return CodeIndex(
-        repository=str(repo),
-        language=language,
-        total_blocks=len(all_blocks),
-        total_entry_points=len(entry_points),
-        total_chains=0,
-        blocks=all_blocks,
-        edges=[],
-        entry_points=entry_points,
-        chains=[],
-        sink_call_sites=[],
-        file_manifest=file_manifest,
-        degradation_level=DegradationLevel.MINIMAL,
-    )
-
 
 def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     """Write code_index.json, code_index_summary.md, and parameter_graph.json."""
