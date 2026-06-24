@@ -148,3 +148,50 @@ async def test_jwt_decode_without_claim_access_not_flagged(tmp_path):
     """)
     result = await scan_auth_config(str(tmp_path))
     assert result.jwt_claim_findings == []
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_without_rate_limit_flagged(tmp_path):
+    _write(tmp_path, "routes/auth.js", """
+        router.post('/login', async (req, res) => {
+          const user = await auth.login(req.body);
+        });
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert len(result.rate_limit_findings) == 1
+    assert "/login" in result.rate_limit_findings[0].detail
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_with_rate_limit_not_flagged(tmp_path):
+    _write(tmp_path, "routes/auth.js", """
+        const limiter = rateLimit({ windowMs: 60000, max: 5 });
+        router.post('/login', limiter, async (req, res) => {
+          const user = await auth.login(req.body);
+        });
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert result.rate_limit_findings == []
+
+
+@pytest.mark.asyncio
+async def test_reset_and_token_endpoints_flagged(tmp_path):
+    _write(tmp_path, "app.py", """
+        @app.route('/reset', methods=['POST'])
+        def reset(): pass
+        @app.route('/token', methods=['POST'])
+        def token(): pass
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    endpoints = {f.detail for f in result.rate_limit_findings}
+    assert any("/reset" in e for e in endpoints)
+    assert any("/token" in e for e in endpoints)
+
+
+@pytest.mark.asyncio
+async def test_non_auth_endpoint_not_flagged_for_rate_limit(tmp_path):
+    _write(tmp_path, "routes/items.js", """
+        router.get('/items', (req, res) => { res.json([]); });
+    """)
+    result = await scan_auth_config(str(tmp_path))
+    assert result.rate_limit_findings == []

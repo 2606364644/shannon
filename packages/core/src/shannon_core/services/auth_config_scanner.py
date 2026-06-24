@@ -276,6 +276,51 @@ def _scan_jwt_claims(file_path: Path, content: str, lines: list[str]) -> list[Co
     return findings
 
 
+# --- Rate-limit scanning ---
+
+_AUTH_ROUTE_PATTERNS = (
+    r"(?:post|get|put|all|route)\s*\(\s*['\"](?:/?(?:login|signin|signup|register|reset|recover|forgot|token|oauth|auth))",
+    r"@(?:app|router|bp)\.route\s*\(\s*['\"](?:/?(?:login|signup|reset|token|oauth|forgot))",
+    r"@(app|router)\.(post|get)\s*\(\s*['\"]/(?:login|signup|reset|token)",
+)
+_AUTH_ROUTE_RE = re.compile("|".join(_AUTH_ROUTE_PATTERNS), re.IGNORECASE)
+_RATE_LIMIT_HINTS = (
+    "rateLimit", "rate-limiter", "express-rate-limit", "rate_limit",
+    "slowauth", "throttle", "limiter", "@limiter", "flask_limiter",
+    "slowapi", "RateLimiter",
+)
+_RATE_LIMIT_RE = re.compile("|".join(re.escape(h) for h in _RATE_LIMIT_HINTS), re.IGNORECASE)
+_SENSITIVE_PATH_RE = re.compile(
+    r"/?(login|signin|signup|register|reset|recover|forgot|token|oauth)", re.IGNORECASE
+)
+
+
+def _scan_rate_limits(file_path: Path, content: str, lines: list[str]) -> list[ConfigFinding]:
+    findings: list[ConfigFinding] = []
+    for m in _AUTH_ROUTE_RE.finditer(content):
+        line_no = content[:m.start()].count("\n") + 1
+        lo = max(0, line_no - 3)
+        hi = min(len(lines), line_no + 6)  # window covers middleware in front of handler
+        window = "\n".join(lines[lo:hi])
+        if _RATE_LIMIT_RE.search(window):
+            continue  # rate-limit middleware present
+        # Extract the sensitive path from the match itself (the window may
+        # span adjacent routes, so searching it can grab the wrong path).
+        path_m = _SENSITIVE_PATH_RE.search(m.group(0))
+        path = path_m.group(0) if path_m else "auth-endpoint"
+        findings.append(ConfigFinding(
+            category="rate_limit",
+            file_path=str(file_path),
+            line=line_no,
+            detail=(
+                f"Auth-sensitive endpoint '{path}' has no rate-limit middleware detected "
+                f"in its handler window — vulnerable to brute force / credential stuffing"
+            ),
+            evidence=window.strip()[:200],
+        ))
+    return findings
+
+
 # --- Orchestrator ---
 
 async def scan_auth_config(codebase_path: str) -> AuthConfigScanResult:
@@ -311,12 +356,15 @@ async def scan_auth_config(codebase_path: str) -> AuthConfigScanResult:
             result.hsts_findings.extend(_scan_hsts(fp, content, lines, has_any_hsts_global))
             result.cors_findings.extend(_scan_cors(fp, content, lines))
             result.jwt_claim_findings.extend(_scan_jwt_claims(fp, content, lines))
+            result.rate_limit_findings.extend(_scan_rate_limits(fp, content, lines))
         except Exception as exc:
             logger.debug("auth-config scan: error in %s: %s", fp, exc)
 
     logger.info(
-        "auth-config scan: %d cookie, %d hsts, %d cors, %d jwt_claim findings across %d files",
+        "auth-config scan: %d cookie, %d hsts, %d cors, %d jwt_claim, %d rate_limit "
+        "findings across %d files",
         len(result.cookie_findings), len(result.hsts_findings),
-        len(result.cors_findings), len(result.jwt_claim_findings), len(files),
+        len(result.cors_findings), len(result.jwt_claim_findings),
+        len(result.rate_limit_findings), len(files),
     )
     return result
