@@ -223,6 +223,7 @@ async def build_code_index_with_gitnexus(
         degradation_level=DegradationLevel.FULL,
     )
 
+
 def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     """Write code_index.json, code_index_summary.md, and parameter_graph.json."""
     out = Path(output_dir)
