@@ -263,6 +263,61 @@ class TestPipelineAutoIndexing:
                 )
 
     @pytest.mark.asyncio
+    async def test_hard_fail_path_does_not_build_parameter_graph(self, tmp_path):
+        """Hard-fail path never reaches pgraph construction."""
+        from shannon_core.code_index import build_code_index_with_gitnexus
+        from shannon_core.models.errors import PentestError
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("def handler(): pass\n")
+
+        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
+            with patch("shannon_core.code_index.ParameterPropagationGraph") as mock_pgraph:
+                mcp = FakeImpactMCPClient(responses={})
+                with pytest.raises(PentestError, match="GitNexus"):
+                    await build_code_index_with_gitnexus(
+                        str(tmp_path),
+                        mcp_client=mcp,
+                        llm_client=AsyncMock(return_value="{}"),
+                        auto_index=True,
+                    )
+
+        mock_pgraph.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_success_path_returns_parameter_graph(self, tmp_path):
+        """GitNexus success path attaches the constructed pgraph to CodeIndex."""
+        from shannon_core.code_index import build_code_index_with_gitnexus
+        from shannon_core.code_index.models import CallGraphResult
+
+        source_file = tmp_path / "app.py"
+        source_file.write_text("def handler(): pass\n")
+        handler = _block("handler", "app.py", 1)
+        parser = MagicMock()
+        parser.parse_file.return_value = [handler]
+
+        with patch("shannon_core.code_index.detect_language", return_value="python"):
+            with patch("shannon_core.code_index.discover_source_files", return_value=[source_file]):
+                with patch("shannon_core.code_index.get_parser", return_value=parser):
+                    with patch(
+                        "shannon_core.code_index.build_call_graph_from_gitnexus",
+                        new=AsyncMock(return_value=CallGraphResult(entry_points=[handler])),
+                    ):
+                        with patch("shannon_core.code_index.detect_sinks", return_value=[]):
+                            with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
+                                with patch("shannon_core.code_index.propagate_across_chains", return_value=[]):
+                                    index = await build_code_index_with_gitnexus(
+                                        str(tmp_path),
+                                        mcp_client=FakeImpactMCPClient(responses={}),
+                                        llm_client=AsyncMock(return_value="{}"),
+                                    )
+
+        assert index.parameter_graph is not None
+        assert index.parameter_graph.language_coverage == ["python"]
+        assert index.parameter_graph.taint_flows == []
+
+    @pytest.mark.asyncio
     async def test_indexing_failure_raises(self, tmp_path):
         """ensure_indexed() 失败时,build_code_index_with_gitnexus 必须硬失败。"""
         from shannon_core.code_index import build_code_index_with_gitnexus

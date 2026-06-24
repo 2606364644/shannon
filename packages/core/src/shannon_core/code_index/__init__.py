@@ -206,8 +206,6 @@ async def build_code_index_with_gitnexus(
             ))
 
     # ⑧ Assemble CodeIndex
-    # NOTE: CodeIndex does not have a parameter_graph field.
-    # The pgraph is stored separately and can be written by write_index_files.
     return CodeIndex(
         repository=str(repo),
         language=language,
@@ -221,6 +219,7 @@ async def build_code_index_with_gitnexus(
         sink_call_sites=sink_call_sites,
         file_manifest=file_manifest,
         degradation_level=DegradationLevel.FULL,
+        parameter_graph=pgraph,
     )
 
 
