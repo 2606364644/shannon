@@ -206,3 +206,97 @@ def find_framework_idor_candidates(fa_path: Path) -> list[FrameworkIDORCandidate
         ))
     logger.info("authz GitNexus track: %d framework auto-generated IDOR candidates", len(out))
     return out
+
+
+def _endpoint_label(func_block_id: str, entry_points: list[EntryPoint]) -> str:
+    """Render an endpoint as 'METHOD /path' (fallback to handler id)."""
+    for ep in entry_points:
+        if ep.func_block_id == func_block_id and ep.route:
+            return f"{ep.http_method or '—'} {ep.route}"
+    return func_block_id
+
+
+def _snippet(source: str, max_len: int = 200) -> str:
+    s = source.strip().replace("\n", " ")
+    return s[:max_len] + ("…" if len(s) > max_len else "")
+
+
+def render_authz_gitnexus_candidates(
+    dominance_cands: list[IDORCandidateChain],
+    framework_cands: list[FrameworkIDORCandidate],
+    *,
+    index: CodeIndex,
+    entry_points: list[EntryPoint],
+    max_snippet: int = 200,
+) -> str:
+    """Render GitNexus-track IDOR candidates as markdown for the judge prompt.
+
+    Two sections: (1) dominance candidates (handler→sink path, no ownership
+    guard), (2) framework auto-generated endpoints (default no ownership).
+    Plus a verdict directive telling the judge LLM to emit one
+    AuthzVulnerability per candidate with externally_exploitable + reason.
+    """
+    if not dominance_cands and not framework_cands:
+        return "（无确定性 IDOR 候选。GitNexus 索引或 framework 分析可能未就绪。）"
+
+    blocks_by_id = {b.id: b for b in index.blocks}
+    lines: list[str] = ["## Authz GitNexus Track — IDOR 候选链（确定性，待 LLM 判定）", ""]
+
+    # ----- dominance candidates -----
+    if dominance_cands:
+        lines.append("### 1) 调用图 dominance 候选（handler→sink 无 ownership 守卫）")
+        lines.append("")
+        lines.append("| Endpoint | Handler | Sink | 调用路径 | Handler 片段 | Sink 片段 |")
+        lines.append("|---|---|---|---|---|---|")
+        for c in dominance_cands:
+            label = _endpoint_label(c.endpoint_id, entry_points)
+            handler_src = _snippet(blocks_by_id[c.handler_id].source_code, max_snippet) \
+                if c.handler_id in blocks_by_id else "—"
+            sink_src = _snippet(blocks_by_id[c.sink_id].source_code, max_snippet) \
+                if c.sink_id in blocks_by_id else "—"
+            path_str = " → ".join(c.path)
+            lines.append(
+                f"| `{label}` | `{c.handler_id}` | `{c.sink_id}` | `{path_str}` "
+                f"| `{handler_src}` | `{sink_src}` |"
+            )
+        lines.append("")
+        lines.append(
+            "> ⚠️ 这些路径的 handler 段未检出 ORM ownership 谓词（`where { userId }` 等）。"
+            "守卫缺失仅为启发式（dominance 非数学证明），须你语义确认：该 sink 是否真无"
+            " ownership/role 守卫，或守卫在调用路径的其它节点上。"
+        )
+        lines.append("")
+
+    # ----- framework candidates -----
+    if framework_cands:
+        lines.append("### 2) Framework 自动生成端点（默认无 ownership validation）")
+        lines.append("")
+        lines.append("| Endpoint | Framework | Model | Vulnerability Indicators |")
+        lines.append("|---|---|---|---|")
+        for f in framework_cands:
+            indicators = "; ".join(f.vulnerability_indicators) if f.vulnerability_indicators else "—"
+            model = f.model or "—"
+            lines.append(
+                f"| `{f.method} {f.path}` | {f.framework} | {model} | {indicators} |"
+            )
+        lines.append("")
+        lines.append(
+            "> ⚠️ finale-rest/epilogue 等 ORM-to-REST 框架默认 isAuthenticated 但无 ownership。"
+            "除非框架的 create.end/update.end/destroy.end hook 显式加了 ownership 校验，"
+            "否则默认 IDOR。须你确认是否有 hook 覆盖默认行为。"
+        )
+        lines.append("")
+
+    # ----- verdict directive -----
+    lines.extend([
+        "### 判定指令（每条候选产一条 AuthzVulnerability）",
+        "",
+        "对上方**每一条**候选，判 IDOR verdict：",
+        "- **vulnerable**：该端点到达 side-effect sink 且**无** ownership/role 守卫 dominate 该 sink",
+        "- **safe / not-exploitable**：存在覆盖所有路径的 ownership 守卫（如 hook、middleware、ORM 谓词），或 sink 非敏感资源",
+        "- 输出 JSON 数组，每元素含：`endpoint`（METHOD /path）、`vulnerability_type`（Horizontal）、",
+        "  `externally_exploitable`（bool）、`vulnerable_code_location`、`guard_evidence`（缺失守卫描述）、",
+        "  `side_effect`、`reason`、`minimal_witness`、`confidence`（high/med/low）、`notes`",
+        "- **保守**：不确定时判 vulnerable（宁过报不漏报）。",
+    ])
+    return "\n".join(lines)
