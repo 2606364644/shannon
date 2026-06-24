@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
-from shannon_core.code_index.models import EntryPoint, FuncBlock
+from shannon_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
 
 logger = logging.getLogger(__name__)
 
@@ -296,3 +297,30 @@ def render_recon_gitnexus_track(
         ]
     )
     return "\n".join(lines)
+
+
+def build_recon_gitnexus_track(deliverables_dir: str) -> str:
+    """Read code_index.json and render the deterministic recon track.
+
+    This is intentionally lenient: index absence, invalid JSON, and schema drift
+    all return the same empty-track markdown so recon can still run.
+    """
+    index_path = Path(deliverables_dir) / "code_index.json"
+    if not index_path.exists():
+        logger.info("recon GitNexus track: code_index.json missing")
+        return render_recon_gitnexus_track([], [])
+
+    try:
+        index = CodeIndex.model_validate_json(index_path.read_text())
+    except Exception as exc:
+        logger.warning("recon GitNexus track: code_index.json parse failed: %s", exc)
+        return render_recon_gitnexus_track([], [])
+
+    if not index.entry_points:
+        logger.info("recon GitNexus track: code_index.json has no entry_points")
+        return render_recon_gitnexus_track([], [])
+
+    blocks_by_id = {block.id: block for block in index.blocks}
+    groups = detect_shared_route_groups(list(index.entry_points))
+    contexts = scan_endpoint_security(list(index.entry_points), blocks_by_id)
+    return render_recon_gitnexus_track(groups, contexts)
