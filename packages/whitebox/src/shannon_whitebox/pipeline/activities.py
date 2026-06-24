@@ -14,6 +14,7 @@ from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.logging import create_activity_logger
 from shannon_core.agents.executor import AgentExecutor
+from shannon_core.agents.runner import run_claude_prompt
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.session import SessionManager
 from shannon_whitebox.audit.session import AuditSession
@@ -200,6 +201,113 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
+
+
+@activity.defn
+async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
+    """GitNexus track LLM chain-judgement pass for authz (spec §5.7).
+
+    1. Build IDOR candidates from code_index.json + framework_analysis.json
+       (dominance heuristic + framework auto-generated).
+    2. If candidates exist, render them into the authz_gitnexus_judge prompt
+       and call run_claude_prompt (single call, structured JSON output).
+    3. Parse the LLM verdicts leniently, tag each with source_track="gitnexus"
+       + evidence_chain (the candidate path), write authz_gitnexus_queue.json.
+
+    No candidates → write empty queue, skip the LLM call (save cost).
+    Lenient on LLM output: invalid JSON → empty queue, no crash.
+
+    This writes ONLY authz_gitnexus_queue.json (never authz_exploitation_queue.json
+    — that's the LLM track's; Plan 3 merges them). It does NOT go through
+    executor.execute (no git checkpoint, no validator, no auto queue write).
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    from shannon_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
+    from shannon_core.models.queue_schemas import VulnerabilityQueue
+
+    try:
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "authz-gitnexus-judge",
+            intent=intent_for("authz-gitnexus-judge"),
+        ):
+            repo, deliverables, _ = _get_paths(input)
+            md, dom_cands, fw_cands = build_authz_gitnexus_track(str(deliverables))
+            candidate_count = len(dom_cands) + len(fw_cands)
+
+            # Evidence map: endpoint label → candidate path (for evidence_chain).
+            evidence_by_endpoint: dict[str, str] = {}
+            for c in dom_cands:
+                label = f"{c.endpoint_id}→{c.sink_id}"
+                evidence_by_endpoint[c.endpoint_id] = " → ".join(c.path)
+
+            vulnerabilities: list[dict] = []
+            if candidate_count > 0:
+                prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+                prompt_manager = PromptManager(prompts_dir)
+                prompt = prompt_manager.load_sync(
+                    "authz_gitnexus_judge",
+                    variables={
+                        "deliverables_path": str(deliverables),
+                        "authz_gitnexus_candidates": md,
+                    },
+                )
+                result = await run_claude_prompt(
+                    prompt=prompt,
+                    repo_path=str(repo),
+                    model_tier="medium",
+                    api_key=input.api_key,
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                )
+                raw = result.structured_output
+                if raw is None and result.text:
+                    raw = result.text  # fallback to text; parse_lenient handles
+                parsed = VulnerabilityQueue.parse_lenient(
+                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
+                )
+                for v in parsed.queue.vulnerabilities:
+                    data = v.model_dump()
+                    data["source_track"] = "gitnexus"
+                    if not data.get("evidence_chain"):
+                        ep_key = getattr(v, "endpoint", None) or ""
+                        data["evidence_chain"] = evidence_by_endpoint.get(
+                            _match_endpoint_to_handler(ep_key, dom_cands), ""
+                        ) or "dominance/framework candidate"
+                    vulnerabilities.append(data)
+
+            atomic_write_json(
+                deliverables / "authz_gitnexus_queue.json",
+                {"vulnerabilities": vulnerabilities},
+            )
+            return {
+                "candidate_count": candidate_count,
+                "verdict_count": len(vulnerabilities),
+                "dominance_candidates": len(dom_cands),
+                "framework_candidates": len(fw_cands),
+            }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+def _match_endpoint_to_handler(endpoint_label: str, dom_cands) -> str:
+    """Best-effort: match an LLM-emitted endpoint label back to a dominance
+    candidate's handler id, so we can attach the right evidence_chain.
+
+    endpoint_label is like 'PUT /api/u/:id'; we don't have route→handler here,
+    so we fall back to the first candidate's handler if the label is non-empty.
+    This is best-effort metadata; the merge (Plan 3) dedups by endpoint anyway.
+    """
+    if not endpoint_label or not dom_cands:
+        return ""
+    return dom_cands[0].endpoint_id
 
 
 @activity.defn
