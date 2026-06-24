@@ -388,8 +388,14 @@ async def run_code_index(input: ActivityInput) -> dict:
         async with get_audit_session().track_step("pre-recon", "code-index", intent=intent_for("code-index")):
             # Create LLM client for taint analysis
             async def _llm_taint_client(prompt: str, **kwargs) -> str:
-                # Placeholder: in production, this calls run_claude_prompt
-                return "{}"
+                # P1: real per-function LLM taint is not wired yet (cost).
+                # Raising (not returning "{}") routes analyze_taint_llm to its
+                # conservative fallback so the taint channel is non-empty
+                # instead of silently dead.
+                raise RuntimeError(
+                    "LLM taint client not wired in production; "
+                    "analyze_taint_llm will use conservative fallback"
+                )
 
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry

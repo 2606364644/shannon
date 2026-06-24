@@ -275,14 +275,16 @@ async def analyze_taint_llm(
         llm_result = parse_llm_response(raw_response)
         return _intra_result_from_llm(block, llm_result, sinks_in_func)
 
-    # Conservative fallback: mark all params as tainted, no hits
+    # Conservative fallback: mark all params tainted AND every sink in the
+    # function as hit (over-approximate — report rather than miss), so
+    # propagate_across_chains can emit flows without real LLM analysis.
     logger.warning(
         "LLM taint analysis failed for %s (last error: %s). "
-        "Using conservative fallback: all params tainted.",
+        "Using conservative fallback: all params tainted, all sinks hit.",
         block.id, last_exc,
     )
     return IntraResult(
         tainted_params=set(block.parameters),
-        hits={},
+        hits={s.id: 1.0 for s in sinks_in_func},
         local_steps=[],
     )

@@ -167,3 +167,25 @@ class TestPropagateAcrossChains:
             chains=[], blocks=[], intra_results={},
         )
         assert flows == []
+
+
+@pytest.mark.asyncio
+async def test_raising_llm_client_yields_nonempty_flows_via_fallback():
+    """P1: raising LLM client → analyze_taint_llm conservative fallback
+    (all params tainted + every sink marked hit) → propagate_across_chains
+    emits non-empty flows (taint channel non-empty, not silently dead)."""
+    from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
+
+    block = _block("handler", "app.py", 1, params=["q"])
+    sink = _sink(block.id, sink_id="sink_1")
+
+    async def raising_client(prompt, **kwargs):
+        raise RuntimeError("LLM taint client not wired in production")
+
+    intra = await analyze_taint_llm(block, sinks_in_func=[sink], llm_client=raising_client)
+    assert "q" in intra.tainted_params
+    assert "sink_1" in intra.hits
+
+    chain = CallChain(entry_point_id=block.id, path=[block.id], depth=1, has_unresolved=False)
+    flows = propagate_across_chains(chains=[chain], blocks=[block], intra_results={block.id: intra})
+    assert len(flows) >= 1

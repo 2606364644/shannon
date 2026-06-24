@@ -194,3 +194,16 @@ class TestAnalyzeTaintLLM:
             llm_client=llm_client,
         )
         assert len(result.tainted_params) == 0
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_fallback_marks_all_sinks_as_hits(self):
+        """P1: conservative fallback marks every sink in the function as a hit
+        (over-approximate — report rather than miss) so flows can be emitted."""
+        block = _block(params=["user_input"])
+        sink = _sink(block.id, sink_id="sink_1")
+        llm_client = FakeLLMClient(response=None)  # raises
+        result = await analyze_taint_llm(
+            block=block, sinks_in_func=[sink], llm_client=llm_client,
+        )
+        assert "user_input" in result.tainted_params
+        assert "sink_1" in result.hits  # conservative: sink marked reachable
