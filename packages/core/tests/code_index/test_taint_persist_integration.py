@@ -1,6 +1,4 @@
 # packages/core/tests/code_index/test_taint_persist_integration.py
-import json
-
 from shannon_core.code_index import write_index_files
 from shannon_core.code_index.models import CodeIndex
 from shannon_core.code_index.parameter_models import (
