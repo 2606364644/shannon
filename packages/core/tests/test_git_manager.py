@@ -264,6 +264,48 @@ async def test_no_changes_returns_empty_list(git_repo: Path):
     assert result.changed_files == []
 
 
+# ---- commit_index (protect code_index.json from concurrent agent rollback) ----
+
+
+@pytest.mark.asyncio
+async def test_commit_index_protects_files_from_rollback(tmp_path: Path):
+    """run_code_index 的产物必须能挺过并发 agent 失败时的 rollback(clean -fd)。
+
+    固化生产 bug: code_index.json 作为未跟踪文件,被并发 pre-recon agent 的
+    rollback(clean -fd)清掉;而 run_code_index 已成功、不在重试循环里,文件永不
+    重生 → run_entry_point_fusion 硬报 FileNotFoundError。
+    """
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "code_index.json").write_text('{"blocks": []}')
+    (deliverables / "code_index_summary.md").write_text("# code index")
+
+    await GitManager.ensure_repository(deliverables)
+    await GitManager.commit_index(deliverables)  # 提交为跟踪文件
+
+    # 模拟并发 pre-recon agent 失败 → rollback(reset --hard + clean -fd)
+    await GitManager.rollback(deliverables, "simulated pre-recon failure")
+
+    assert (deliverables / "code_index.json").exists()
+    assert (deliverables / "code_index_summary.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_commit_index_uses_index_prefix_not_deliverable(tmp_path: Path):
+    """commit_index 用 'index:' 前缀,避免 get_completed_agents 把 code-index
+    误当已完成 agent(污染 resume 的跳过守卫)。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "code_index.json").write_text('{}')
+
+    await GitManager.ensure_repository(deliverables)
+    await GitManager.commit_index(deliverables)
+
+    completed = await GitManager.get_completed_agents(deliverables)
+    assert "code-index" not in completed
+    assert "code_index" not in completed
+
+
 # ---- ensure_repository ----
 
 
