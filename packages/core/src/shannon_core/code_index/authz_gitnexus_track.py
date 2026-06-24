@@ -20,9 +20,11 @@ endpoint).
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from shannon_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
 
@@ -151,3 +153,56 @@ def find_unguarded_sink_paths(
         len(http_eps), len(candidates),
     )
     return candidates
+
+
+@dataclass(frozen=True)
+class FrameworkIDORCandidate:
+    """A framework auto-generated endpoint (default no ownership) → IDOR candidate."""
+    method: str
+    path: str
+    framework: str
+    model: str | None
+    vulnerability_indicators: tuple[str, ...]
+
+
+def find_framework_idor_candidates(fa_path: Path) -> list[FrameworkIDORCandidate]:
+    """Read framework_analysis.json (Plan 2); auto-generated endpoints are IDOR candidates.
+
+    finale-rest/epilogue auto-generate CRUD with isAuthenticated only and no
+    ownership validation by default (framework_analyzer.py:84-99). These are
+    direct IDOR candidates. Manual endpoints (source="manual") are excluded —
+    they're analyzed via the dominance heuristic (Task 1).
+
+    Lenient: missing/invalid framework_analysis.json → empty list (Plan 2 not
+    landed is a soft dependency).
+    """
+    if not fa_path.exists():
+        logger.info("authz GitNexus track: framework_analysis.json missing → no framework candidates")
+        return []
+    try:
+        data = json.loads(fa_path.read_text())
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        logger.warning("authz GitNexus track: framework_analysis.json parse failed (%s) → empty", exc)
+        return []
+
+    framework_name = ""
+    fw = data.get("detected_framework")
+    if isinstance(fw, dict):
+        framework_name = str(fw.get("name", ""))
+
+    out: list[FrameworkIDORCandidate] = []
+    for ep in data.get("inferred_endpoints", []):
+        if not isinstance(ep, dict):
+            continue
+        if ep.get("source") != "framework-auto-generated":
+            continue
+        indicators = ep.get("vulnerability_indicators", []) or []
+        out.append(FrameworkIDORCandidate(
+            method=str(ep.get("method", "")),
+            path=str(ep.get("path", "")),
+            framework=framework_name,
+            model=ep.get("model"),
+            vulnerability_indicators=tuple(str(i) for i in indicators),
+        ))
+    logger.info("authz GitNexus track: %d framework auto-generated IDOR candidates", len(out))
+    return out
