@@ -235,8 +235,10 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
     summary_path = out / "code_index_summary.md"
     summary_path.write_text(generate_summary(index))
 
-    # parameter_graph built in build_code_index_with_gitnexus if available
-    # Try to get it from a side-channel or skip
+    if index.parameter_graph is not None:
+        pgraph_path = out / "parameter_graph.json"
+        pgraph_path.write_text(index.parameter_graph.model_dump_json(indent=2))
+
     return json_path, summary_path
 
 
