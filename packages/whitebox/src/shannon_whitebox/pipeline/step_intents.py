@@ -41,6 +41,7 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
     ),
     "vulnerability-analysis": (
         StepSpec("merge-dual-track", "双轨合并 LLM/GitNexus 漏洞队列"),
+        StepSpec("auth-config-scan", "确定性认证配置扫描(cookie/HSTS/CORS/JWT/限流)"),
     ),
     "attack-chain": (
         StepSpec("attack-chain-assembly", "组装攻击链"),

@@ -912,6 +912,106 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_auth_config_scan(input: ActivityInput) -> dict:
+    """Deterministic auth-config scan (spec §5.8 vuln-auth GitNexus track).
+
+    Scans the repo for auth/session config issues (cookie flags, HSTS, CORS,
+    JWT nOAuth claims, rate-limit middleware) and writes two deliverables:
+      1. auth_config_scan.json — structured scan result (LLM reads this as a
+         starting point, like vuln-authz reads Endpoint Security Context).
+      2. auth_gitnexus_queue.json — each suspicious config item as an
+         AuthVulnerability (source_track='gitnexus'), consumed by Plan 3's
+         run_merge_dual_track_queues for verdict OR with the LLM track.
+
+    Pure additive: zero findings still writes both files (empty), so the
+    merger degrades cleanly to llm-only. Scan failures never abort the vuln
+    phase (logged, empty result).
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        import dataclasses
+        from shannon_core.services.auth_config_scanner import scan_auth_config
+        from shannon_core.models.queue_schemas import AuthVulnerability
+
+        repo, deliverables, _ = _get_paths(input)
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "auth-config-scan",
+            intent=intent_for("auth-config-scan"),
+        ):
+            result = await scan_auth_config(str(repo))
+
+            # 1. Structured scan result (LLM reads this)
+            scan_data = dataclasses.asdict(result)
+            atomic_write_json(deliverables / "auth_config_scan.json", scan_data)
+
+            # 2. GitNexus-track queue (Plan 3 merger consumes this)
+            vulns = [_finding_to_auth_vulnerability(f) for f in result.all_findings()]
+            atomic_write_json(
+                deliverables / "auth_gitnexus_queue.json",
+                {"vulnerabilities": [v.model_dump() for v in vulns]},
+            )
+
+            total = len(result.all_findings())
+        return {
+            "total_findings": total,
+            "cookie": len(result.cookie_findings),
+            "hsts": len(result.hsts_findings),
+            "cors": len(result.cors_findings),
+            "jwt_claim": len(result.jwt_claim_findings),
+            "rate_limit": len(result.rate_limit_findings),
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+# Category -> AUTH-VULN vulnerability_type mapping.
+# externally_exploitable=True for all (conservative over-report; merger ORs).
+_CATEGORY_TO_VULN_TYPE = {
+    "cookie": "Session_Management_Flaw",
+    "hsts": "Transport_Exposure",
+    "cors": "Transport_Exposure",
+    "jwt_claim": "Login_Flow_Logic",      # nOAuth is a login-flow identity flaw
+    "rate_limit": "Abuse_Defenses_Missing",
+}
+_CATEGORY_TO_SUGGESTED_TECHNIQUE = {
+    "cookie": "session_hijacking",
+    "hsts": "credential_theft_via_mitm",
+    "cors": "credential_theft_via_cors",
+    "jwt_claim": "noauth_attribute_hijack",
+    "rate_limit": "brute_force_login",
+}
+
+
+def _finding_to_auth_vulnerability(f) -> "AuthVulnerability":
+    """Convert a deterministic ConfigFinding into an AuthVulnerability for the
+    GitNexus-track queue (source_track='gitnexus')."""
+    from shannon_core.models.queue_schemas import AuthVulnerability
+    vuln_type = _CATEGORY_TO_VULN_TYPE.get(f.category, "Session_Management_Flaw")
+    technique = _CATEGORY_TO_SUGGESTED_TECHNIQUE.get(f.category, "session_hijacking")
+    location = f"{f.file_path}:{f.line}"
+    return AuthVulnerability(
+        ID=f"AUTH-GN-{f.category.upper()}-{abs(hash((f.file_path, f.line, f.category))) % 100000:05d}",
+        vulnerability_type=vuln_type,
+        externally_exploitable=True,   # conservative: scanner hit -> exploitable candidate
+        confidence="medium",           # deterministic signal, LLM confirms/denies
+        source_track="gitnexus",
+        evidence_chain=f"[deterministic scan] {f.category}@{location}: {f.detail}",
+        source_endpoint=None,          # config-level, not endpoint-scoped
+        vulnerable_code_location=location,
+        missing_defense=f.detail,
+        exploitation_hypothesis=(
+            f"Attacker can exploit the missing/weak auth configuration: {f.detail}"
+        ),
+        suggested_exploit_technique=technique,
+        notes=f"GitNexus-track candidate (awaiting LLM confirmation). Evidence: {f.evidence}",
+    )
+
+
+@activity.defn
 async def run_route_chain_building(input: ActivityInput) -> dict:
     """Build route chain map from framework + frontend analysis results."""
     from shannon_whitebox.audit.session_registry import get_audit_session

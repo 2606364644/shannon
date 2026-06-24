@@ -288,7 +288,17 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
-            self._state.current_phase = "vulnerability-analysis"
+           self._state.current_phase = "vulnerability-analysis"
+            # Deterministic auth-config scan (spec §5.8 GitNexus track for vuln-auth).
+            # Runs BEFORE the vuln agents so auth_config_scan.json is ready for
+            # the vuln-auth LLM to read. Pure additive: zero findings -> empty
+            # files, merger degrades to llm-only. Only runs when auth is in scope.
+            if "auth" in [str(vt) for vt in selected_classes]:
+                await workflow.execute_activity(
+                    activities.run_auth_config_scan, act_input,
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=retry_for("standard"),
+                )
             vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")

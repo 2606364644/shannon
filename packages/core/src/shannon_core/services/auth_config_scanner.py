@@ -160,8 +160,8 @@ def _scan_hsts(file_path: Path, content: str, lines: list[str], has_any_hsts_glo
     # If no HSTS config anywhere in this file at all → flag the entry/listen line
     has_hsts_in_file = any(_pattern_in_content(p, content) for p in _HSTS_PATTERNS)
     if not has_hsts_in_file:
-        # Only flag absence on entry files (avoid one finding per random file)
-        if file_path.name in _ENTRY_FILES or _pattern_in_content(r"app\.(listen|use)", content):
+       # Only flag absence on entry files (avoid one finding per random file)
+        if _pattern_in_content(r"app\.(listen|use)|createServer|app\s*=\s*express", content):
             listen_m = re.search(r"app\.(listen|use)\s*\(", content)
             line_no = content[:listen_m.start()].count("\n") + 1 if listen_m else 1
             findings.append(ConfigFinding(
