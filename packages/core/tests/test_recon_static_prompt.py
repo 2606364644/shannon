@@ -24,3 +24,17 @@ def test_recon_static_still_marks_no_browser():
     """静态分析约束保留(回归锚点)。"""
     src = _read("recon-static")
     assert "browser" in src.lower() and ("no" in src.lower() or "not" in src.lower())
+
+
+def test_recon_static_has_section_8_authorization_candidates():
+    """离线 recon deliverable 必须含 Section 8 Authorization Vulnerability Candidates
+    及 8.1/8.2/8.3 三类子节,闭合 vuln-authz 对 'section 8' 的引用(离线闭环)。"""
+    src = _read("recon-static")
+    assert "8. Authorization Vulnerability Candidates" in src, \
+        "recon-static 须含 ## 8. Authorization Vulnerability Candidates 节"
+    assert "8.1 Horizontal Privilege Escalation Candidates" in src, \
+        "须含 8.1 Horizontal Privilege Escalation Candidates 子节"
+    assert "8.2 Vertical Privilege Escalation Candidates" in src, \
+        "须含 8.2 Vertical Privilege Escalation Candidates 子节"
+    assert "8.3 Context-Based Authorization Candidates" in src, \
+        "须含 8.3 Context-Based Authorization Candidates 子节"

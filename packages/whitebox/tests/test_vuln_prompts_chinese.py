@@ -58,3 +58,6 @@ def test_vuln_authz_has_framework_endpoint_guidance():
     # 必须提示自动生成端点默认缺 ownership validation → assume vulnerable
     assert "ownership validation" in src.lower() or "ownership check" in src.lower(), \
         "须提示框架端点默认缺 ownership validation"
+    # 不得残留硬编码 "(Section 4.2)" —— LIVE/OFFLINE 编号不一致(离线为 2.1),改按节名引用
+    assert "(Section 4.2)" not in src and "Section 4.2" not in src, \
+        "vuln-authz 不得硬编码 'Section 4.2'(离线对应节号为 2.1),改按 'Endpoint Security Context' 节名引用"

@@ -51,11 +51,11 @@ Before analyzing any authorization vulnerabilities:
 
 1. **Read Recon deliverable:**
    - Open `{{DELIVERABLES_PATH}}/recon_deliverable.md`
-   - Locate the "Endpoint Security Context" section (Section 4.2)
+   - Locate the "Endpoint Security Context" section (search for the "Endpoint Security Context" heading)
    - Extract all endpoints with their security context
 
 2. **For each endpoint in your TODO list:**
-   - Look up its security context in Section 4.2
+   - Look up its security context in the Endpoint Security Context section
    - Note: Authentication requirement
    - Note: Middleware chain
    - Note: Framework origin (manual vs auto-generated)
