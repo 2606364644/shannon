@@ -216,3 +216,83 @@ def scan_endpoint_security(
         sum(1 for context in contexts if context.ownership == "unknown"),
     )
     return contexts
+
+
+def _md_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _auth_cell(auth: str) -> str:
+    if auth == "none":
+        return "**none**"
+    return auth
+
+
+def render_recon_gitnexus_track(
+    groups: list[SharedRouteGroup],
+    contexts: list[EndpointSecurityContext],
+) -> str:
+    """Render deterministic recon intelligence as prompt markdown."""
+    if not groups and not contexts:
+        return "（无确定性检测到的共享路由组或端点安全上下文。GitNexus 索引可能未就绪或为空。）"
+
+    lines: list[str] = [
+        "## Recon GitNexus Track（确定性下限：§4.1 路由组 + §4.2 端点安全上下文）",
+        "",
+    ]
+
+    if groups:
+        lines.extend(
+            [
+                "### §4.1 Shared Route Groups（调用图反推：同 handler 多路由）",
+                "",
+                "| Handler | Method | Path | Auth |",
+                "|---|---|---|---|",
+            ]
+        )
+        for group in groups:
+            for route in group.routes:
+                lines.append(
+                    f"| `{_md_cell(group.handler_id)}` | {route.method or '-'} | "
+                    f"`{_md_cell(route.path)}` | {_auth_cell(route.auth)} |"
+                )
+            if group.auth_conflict:
+                lines.append("")
+                lines.append(
+                    f"> `{_md_cell(group.handler_id)}`: at least one route is not clearly authenticated; "
+                    "pre-auth variant candidate, take the dangerous side."
+                )
+        lines.append("")
+
+    if contexts:
+        lines.extend(
+            [
+                "### §4.2 Endpoint Security Context（确定性：auth/middleware/ownership）",
+                "",
+                "| Endpoint | Handler | Auth | Middleware | Ownership | Evidence |",
+                "|---|---|---|---|---|---|",
+            ]
+        )
+        for context in contexts:
+            endpoint = f"{context.method or '-'} {context.path}"
+            middleware = ", ".join(context.middleware) if context.middleware else "-"
+            ownership = "**none**" if context.ownership == "none" else context.ownership
+            evidence = context.ownership_evidence or "-"
+            lines.append(
+                f"| `{_md_cell(endpoint)}` | `{_md_cell(context.handler_id)}` | "
+                f"{_auth_cell(context.auth)} | {_md_cell(middleware)} | {ownership} | "
+                f"`{_md_cell(evidence)}` |"
+            )
+        lines.append("")
+
+    lines.extend(
+        [
+            "**填充与合并规则（字段危险侧，spec §4.3）：**",
+            "- 以上为确定性检测下限。recon §4.1/§4.2 表须据此填充，并独立探索其他路由组/端点；下限非上限。",
+            "- Auth 冲突取无：任一轨标 none 或未清晰认证，合并取 none。",
+            "- Framework Origin 冲突取 auto-generated：确定性轨标 auto-generated 即取 auto-generated。",
+            "- Ownership 冲突取 none：任一轨标 none，合并取 none。guarded 仅为候选，须语义确认。",
+            "- Missing handler 标 unknown：handler 未在 code_index 解析到源码，必须独立核实。",
+        ]
+    )
+    return "\n".join(lines)
