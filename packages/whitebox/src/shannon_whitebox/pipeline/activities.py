@@ -771,6 +771,109 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
+async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
+    """GitNexus-track chain-verdict LLM pass client.
+
+    Production: reuses the same LLM client pool as run_agent. This stub is the
+    injection point -- when not configured, callers must pass their own client
+    (tests do). Default raises so judge_chain_verdict takes its conservative
+    needs_review path (does NOT silently clear).
+    """
+    raise RuntimeError(
+        "GitNexus-track chain-verdict LLM client not configured; "
+        "judge_chain_verdict will mark candidates needs_review"
+    )
+
+
+@activity.defn
+async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
+    """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
+
+    Reads parameter_graph.json (Plan 1) + code_index.json (sink_call_sites for
+    XSS routing), runs the light chain-verdict pass for the three trace-class
+    vuln types, and writes <vuln>_gitnexus_queue.json for each. Plan 3's
+    run_merge_dual_track_queues then does verdict OR against the LLM track.
+
+    Graceful degradation: no parameter_graph.json (Plan 1 not landed) ->
+    per_class empty, no gitnexus queues written, merger falls back to llm-only.
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        from shannon_core.code_index.models import CodeIndex
+        from shannon_core.code_index.parameter_models import (
+            ParameterPropagationGraph,
+            SinkCallSite,
+        )
+        from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+            build_injection_findings,
+        )
+        from shannon_core.code_index.vuln_chain_builders.xss_builder import (
+            build_xss_findings,
+        )
+        from shannon_core.code_index.vuln_chain_builders.ssrf_builder import (
+            build_ssrf_findings,
+        )
+        from shannon_core.utils.atomic_write import atomic_write_json
+
+        repo, deliverables, _ = _get_paths(input)
+        per_class: dict[str, int] = {}
+
+        pgraph_path = deliverables / "parameter_graph.json"
+        if not pgraph_path.exists():
+            return {"per_class": {}, "skipped": "no parameter_graph.json"}
+        try:
+            pgraph = ParameterPropagationGraph.model_validate_json(pgraph_path.read_text())
+        except Exception:
+            return {"per_class": {}, "skipped": "invalid parameter_graph.json"}
+
+        # XSS routes by SinkCallSite.category == XSS (SlotContext has no render
+        # context), so read code_index.json for the sink call sites.
+        sink_call_sites: dict[str, SinkCallSite] = {}
+        code_index_path = deliverables / "code_index.json"
+        if code_index_path.exists():
+            try:
+                index = CodeIndex.model_validate_json(code_index_path.read_text())
+                sink_call_sites = {s.id: s for s in index.sink_call_sites}
+            except Exception as exc:
+                logger.warning("gitnexus chain-verdict: code_index.json parse failed (%s)", exc)
+
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "gitnexus-chain-verdict",
+            intent=None,
+        ):
+            llm = _gitnexus_verdict_llm_client
+
+            for vc, builder in (
+                ("injection", build_injection_findings),
+                ("xss", build_xss_findings),
+                ("ssrf", build_ssrf_findings),
+            ):
+                try:
+                    if vc == "xss":
+                        findings = await builder(pgraph, llm_client=llm,
+                                                 sink_call_sites=sink_call_sites)
+                    else:
+                        findings = await builder(pgraph, llm_client=llm)
+                except Exception as exc:
+                    # one vuln class failing must not block the others
+                    logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
+                    continue
+                if findings:
+                    atomic_write_json(
+                        deliverables / f"{vc}_gitnexus_queue.json",
+                        {"vulnerabilities": [f.model_dump() for f in findings]},
+                    )
+                    per_class[vc] = len(findings)
+
+        return {"per_class": per_class}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
 @activity.defn
 async def run_framework_analysis(input: ActivityInput) -> dict:
     """Detect auto-REST frameworks, infer endpoints, write deliverable."""

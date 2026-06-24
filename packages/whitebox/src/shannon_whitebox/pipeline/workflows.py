@@ -334,6 +334,22 @@ class WhiteboxScanWorkflow:
                 import logging
                 logging.getLogger(__name__).warning(
                     "Authz GitNexus judge failed (non-fatal, LLM-only track continues): %s", exc)
+            # === GitNexus-track chain verdict: inj/xss/ssrf (spec §5.4-5.6) ===
+            # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
+            # Runs before run_merge_dual_track_queues (which reads those queues).
+            # Non-fatal: failure degrades to LLM-only (merger tolerates absent
+            # gitnexus queues). No parameter_graph.json (Plan 1 not landed) ->
+            # empty, degrades to LLM-only (current behavior).
+            try:
+                await workflow.execute_activity(
+                    activities.run_gitnexus_chain_verdict, act_input,
+                    start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "GitNexus chain verdict failed (non-fatal, LLM-only track continues): %s", exc)
             await workflow.execute_activity(
                 activities.run_merge_dual_track_queues,
                 act_input,
