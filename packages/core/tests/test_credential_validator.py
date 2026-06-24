@@ -128,7 +128,7 @@ class TestValidateOpenAICompatible:
     async def test_valid_credentials(self):
         mock_client = AsyncMock()
         mock_response = MagicMock(status_code=200)
-        mock_client.get.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -142,7 +142,7 @@ class TestValidateOpenAICompatible:
     async def test_invalid_key_401(self):
         mock_client = AsyncMock()
         mock_response = MagicMock(status_code=401)
-        mock_client.get.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -159,7 +159,7 @@ class TestValidateOpenAICompatible:
     async def test_forbidden_key_403(self):
         mock_client = AsyncMock()
         mock_response = MagicMock(status_code=403)
-        mock_client.get.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -197,7 +197,7 @@ class TestValidateOpenAICompatible:
         mock_client = AsyncMock()
         mock_response = MagicMock(status_code=200)
         # Verify that trailing slash is handled correctly
-        mock_client.get.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -206,16 +206,16 @@ class TestValidateOpenAICompatible:
                 api_key="valid-key",
                 base_url="https://api.example.com/"
             )
-            # Should call get with correct URL (trailing slash removed)
-            mock_client.get.assert_called_once()
-            call_args = mock_client.get.call_args
-            assert "/v1/models" in call_args[0][0]
+            # Should POST to chat/completions with trailing slash removed
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            assert call_args[0][0] == "https://api.example.com/chat/completions"
 
     @pytest.mark.asyncio
     async def test_connection_error_retryable(self):
         import httpx
         mock_client = AsyncMock()
-        mock_client.get.side_effect = httpx.ConnectError("Connection failed")
+        mock_client.post.side_effect = httpx.ConnectError("Connection failed")
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -227,3 +227,46 @@ class TestValidateOpenAICompatible:
                 )
             assert exc_info.value.error_code == ErrorCode.AUTH_FAILED
             assert exc_info.value.retryable
+
+    @pytest.mark.asyncio
+    async def test_uses_chat_completions_not_models_list(self):
+        """智谱 GLM 等专用通道(base_url 已含 /paas/v4 版本路径)没有 models 列表端点,
+        只有 chat/completions。校验必须 POST {base}/chat/completions(所有 OpenAI 兼容
+        服务必然支持),而不是 GET {base}/v1/models —— 后者在 base 含版本号时会拼出
+        不存在的 /paas/v4/v1/models,越过鉴权层后被路由层拒绝成 HTTP 404。"""
+        mock_client = AsyncMock()
+        mock_response = MagicMock(status_code=200)
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await validate_credentials(
+                "openai_compatible",
+                api_key="valid-key",
+                base_url="https://open.bigmodel.cn/api/coding/paas/v4",
+                model="glm-5.2",
+            )
+        # POST 到 chat/completions,绝不访问 /v1/models,也不发起 GET
+        mock_client.post.assert_called_once()
+        url = mock_client.post.call_args[0][0]
+        assert url == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+        assert "/v1/models" not in url
+        mock_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_auth_error_status_passes(self):
+        """非鉴权类状态(如 400 未知 model)说明请求已越过鉴权层、endpoint 可达且 key
+        有效 —— 必须放行。旧的 models 探测把任何非 200 都当 "unexpected status" 报错,
+        正是智谱 coding 通道返回 404 时误杀 scan 的根因,此处固化新语义防回归。"""
+        mock_client = AsyncMock()
+        mock_response = MagicMock(status_code=400)
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await validate_credentials(  # must NOT raise
+                "openai_compatible",
+                api_key="valid-key",
+                base_url="https://api.example.com",
+                model="some-model",
+            )

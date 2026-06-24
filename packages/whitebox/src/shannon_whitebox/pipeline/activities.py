@@ -216,6 +216,7 @@ async def run_credential_check(input: ActivityInput) -> None:
                     api_key=config.api_key,
                     base_url=config.base_url,
                     auth_token=config.auth_token,
+                    model=config.large_model or config.medium_model or config.model,
                 )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)

@@ -76,16 +76,30 @@ async def _validate_vertex() -> None:
         ) from exc
 
 
-async def _validate_openai_compatible(api_key: str, base_url: str) -> None:
-    """Call /v1/models endpoint to verify OpenAI-compatible API credentials."""
-    # Remove trailing slash from base_url for consistent URL construction
+async def _validate_openai_compatible(
+    api_key: str, base_url: str, model: str | None = None
+) -> None:
+    """POST a minimal chat request to verify OpenAI-compatible API credentials.
+
+    Uses ``{base_url}/chat/completions`` — supported by every OpenAI-compatible
+    service — rather than ``{base_url}/v1/models``. Many dedicated channels
+    (e.g. Zhipu's ``coding/paas/v4``) do not expose a models-list endpoint at
+    all, and ``/v1/models`` also collides with base_urls that already include a
+    version path: it resolves to ``…/paas/v4/v1/models``, which the gateway
+    rejects as HTTP 404 once an otherwise-valid key passes its auth check.
+    """
     base_url = base_url.rstrip("/")
 
     try:
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-            resp = await client.get(
-                f"{base_url}/v1/models",
+            resp = await client.post(
+                f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model or "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
             )
         if resp.status_code in (401, 403):
             raise PentestError(
@@ -94,13 +108,8 @@ async def _validate_openai_compatible(api_key: str, base_url: str) -> None:
                 retryable=False,
                 error_code=ErrorCode.AUTH_FAILED,
             )
-        elif resp.status_code != 200:
-            raise PentestError(
-                f"OpenAI-compatible API returned unexpected status (HTTP {resp.status_code})",
-                category="preflight",
-                retryable=True,
-                error_code=ErrorCode.AUTH_FAILED,
-            )
+        # Any other status (200 success, 400 unknown model, …) means the request
+        # reached the endpoint and cleared authentication — credentials are valid.
     except httpx.ConnectError as exc:
         raise PentestError(
             f"Cannot reach OpenAI-compatible API at {base_url}: {exc}",
@@ -116,6 +125,7 @@ async def validate_credentials(
     api_key: str | None = None,
     base_url: str | None = None,
     auth_token: str | None = None,
+    model: str | None = None,
 ) -> None:
     """Dispatch credential validation to the appropriate provider.
 
@@ -149,7 +159,7 @@ async def validate_credentials(
                 retryable=False,
                 error_code=ErrorCode.AUTH_FAILED,
             )
-        await _validate_openai_compatible(api_key, base_url)
+        await _validate_openai_compatible(api_key, base_url, model)
     elif provider == "litellm_router":
         if not base_url or not auth_token:
             raise PentestError(
