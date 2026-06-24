@@ -33,9 +33,18 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         # -> rich_cast re-imports rich *inside the sandbox thread*, hitting the sandbox
         # importer and throwing a circular ImportError that fails every workflow task.
         # Keep stderr real so worker logging never re-enters rich / the sandbox.
-        live = Live(dashboard, console=console, transient=True,
+        # Alternate screen + full redraw: Rich repaints the whole screen each
+        # refresh instead of relative erase (cursor-up + line erase). Relative
+        # erase desyncs here because RichConsoleRenderer prints PHASE/STEP/AGENT
+        # log lines to this same Console; full redraw has no line-count to drift,
+        # so duplicate "ghost" footer frames cannot accumulate and resize re-flows
+        # (Rich re-measures Console.size every refresh). redirect_stdout=True keeps
+        # those console.print log lines inside the managed alt screen so they stay
+        # visible. redirect_stderr stays False: that is the documented guard against
+        # the Temporal workflow-sandbox circular-import failure.
+        live = Live(dashboard, console=console, screen=True, transient=False,
                     refresh_per_second=default_refresh_hz(),
-                    redirect_stderr=False)
+                    redirect_stdout=True, redirect_stderr=False)
         try:
             with live:
                 yield session
