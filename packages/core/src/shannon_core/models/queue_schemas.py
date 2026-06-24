@@ -52,6 +52,11 @@ class SsrfVulnerability(BaseVulnerability):
     missing_defense: str | None = None
     exploitation_hypothesis: str | None = None
     suggested_exploit_technique: str | None = None
+    # Spec §5.6: align with injection/xss so the Plan 3 merger can do verdict OR
+    # via the verdict field (not just externally_exploitable).
+    path: str | None = None
+    verdict: str | None = None
+    witness_payload: str | None = None
 
 class AuthzVulnerability(BaseVulnerability):
     endpoint: str | None = None
