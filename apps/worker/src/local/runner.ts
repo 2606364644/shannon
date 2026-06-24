@@ -14,6 +14,7 @@ import { assembleFinalReport, injectModelIntoReport } from '../services/reportin
 import type { AgentName } from '../types/agents.js';
 import { ALL_VULN_CLASSES, type DistributedConfig, type ProviderConfig } from '../types/config.js';
 import { ConsoleActivityLogger } from './console-logger.js';
+import { loadResumeState, restoreGitCheckpoint, WHITEBOX_EXPECTED_AGENTS } from './resume.js';
 import { Semaphore } from './semaphore.js';
 
 const MAX_RETRIES = 3;
@@ -330,6 +331,39 @@ async function run(): Promise<void> {
   logger.info('Syncing code_path deny rules...');
   await syncCodePathDenyRules(args, configLoader, logger);
 
+  // 5.5 Resume detection — skip already-completed agents/phases on `-w <existing-workspace>` re-runs
+  const resumeState = await loadResumeState(workspaceName, args.repoPath, logger);
+  let shouldSkip = (_name: string): boolean => false;
+  let nonAgentDone: ReadonlySet<string> = new Set();
+
+  if (resumeState) {
+    logger.info(`Resuming: ${resumeState.completedAgents.length} agent(s) already complete`);
+    const incomplete = WHITEBOX_EXPECTED_AGENTS.filter((n) => !resumeState.completedAgents.includes(n));
+    await restoreGitCheckpoint(args.repoPath, resumeState.checkpointHash, incomplete, undefined, logger);
+    await auditSession.addResumeAttempt(sessionId, [], resumeState.checkpointHash);
+    await auditSession.logResumeHeader({
+      previousWorkflowId: resumeState.originalWorkflowId,
+      newWorkflowId: sessionId,
+      checkpointHash: resumeState.checkpointHash,
+      completedAgents: resumeState.completedAgents,
+    });
+    shouldSkip = (name: string): boolean => resumeState.completedAgents.includes(name);
+    nonAgentDone = new Set(resumeState.completedNonAgentPhases);
+
+    const allAgentsDone = WHITEBOX_EXPECTED_AGENTS.every((n) => resumeState.completedAgents.includes(n));
+    const allPhasesDone =
+      nonAgentDone.has('findings-rendering') && nonAgentDone.has('report-assembly') && nonAgentDone.has('translation');
+    if (allAgentsDone && allPhasesDone) {
+      logger.info('All expected agents and phases already complete. Nothing to resume.');
+      await auditSession.updateSessionStatus('completed');
+      console.log('');
+      console.log('=== Pipeline Complete (resumed, nothing to do) ===');
+      console.log(`  Workspace:    ${path.join(WORKSPACES_DIR, sessionId)}`);
+      console.log('');
+      process.exit(0);
+    }
+  }
+
   // 6. Execute pipeline phases
   const pipelineStart = Date.now();
   const results: AgentResult[] = [];
@@ -345,7 +379,7 @@ async function run(): Promise<void> {
 
   try {
     // Phase 1: Pre-recon
-    if (!aborted) {
+    if (!aborted && !shouldSkip('pre-recon')) {
       logger.info('=== Phase 1: Pre-recon ===');
       const result = await runAgentWithRetry(
         'pre-recon',
@@ -364,7 +398,7 @@ async function run(): Promise<void> {
     }
 
     // Phase 2: Recon (static)
-    if (!aborted) {
+    if (!aborted && !shouldSkip('recon')) {
       logger.info('=== Phase 2: Static Recon ===');
       const result = await runAgentWithRetry(
         'recon',
@@ -387,8 +421,18 @@ async function run(): Promise<void> {
       logger.info(`=== Phase 3: Vulnerability Analysis (concurrency=${args.concurrency}) ===`);
       const semaphore = new Semaphore(args.concurrency);
 
-      const vulnPromises = WHITEBOX_VULN_AGENTS.map((agentName) =>
-        semaphore.with(async () => {
+      const vulnPromises = WHITEBOX_VULN_AGENTS.map((agentName) => {
+        if (shouldSkip(agentName)) {
+          return Promise.resolve({
+            agentName,
+            success: true,
+            attempts: 0,
+            durationMs: 0,
+            costUsd: 0,
+          });
+        }
+
+        return semaphore.with(async () => {
           if (aborted) {
             return { agentName, success: false, attempts: 0, durationMs: 0, costUsd: 0, error: 'Aborted' };
           }
@@ -404,8 +448,8 @@ async function run(): Promise<void> {
             deliverablesPath,
             distributedConfig,
           );
-        }),
-      );
+        });
+      });
 
       const vulnResults = await Promise.all(vulnPromises);
       results.push(...vulnResults);
@@ -413,18 +457,24 @@ async function run(): Promise<void> {
 
     // Phase 4: Findings rendering (no exploit agents in whitebox mode)
     if (!aborted) {
-      logger.info('=== Phase 4: Findings Rendering ===');
-      try {
-        await renderFindingsFromQueues(args.repoPath, undefined, logger);
-      } catch (error) {
-        logger.warn(`Findings rendering had issues: ${error instanceof Error ? error.message : String(error)}`);
+      if (!nonAgentDone.has('findings-rendering')) {
+        logger.info('=== Phase 4: Findings Rendering ===');
+        try {
+          await renderFindingsFromQueues(args.repoPath, undefined, logger);
+          await auditSession.markNonAgentPhaseComplete('findings-rendering');
+        } catch (error) {
+          logger.warn(`Findings rendering had issues: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
-      logger.info('=== Phase 5: Report Assembly ===');
-      try {
-        await assembleFinalReport(args.repoPath, undefined, logger);
-      } catch (error) {
-        logger.warn(`Report assembly had issues: ${error instanceof Error ? error.message : String(error)}`);
+      if (!nonAgentDone.has('report-assembly')) {
+        logger.info('=== Phase 5: Report Assembly ===');
+        try {
+          await assembleFinalReport(args.repoPath, undefined, logger);
+          await auditSession.markNonAgentPhaseComplete('report-assembly');
+        } catch (error) {
+          logger.warn(`Report assembly had issues: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
       try {
@@ -435,7 +485,7 @@ async function run(): Promise<void> {
     }
 
     // Phase 6: Report agent (executive summary + final report)
-    if (!aborted) {
+    if (!aborted && !shouldSkip('report')) {
       logger.info('=== Phase 6: Report ===');
       const reportResult = await runAgentWithRetry(
         'report',
@@ -461,7 +511,7 @@ async function run(): Promise<void> {
     }
 
     // Phase 7: Translation (Chinese deliverables)
-    if (!aborted) {
+    if (!aborted && !nonAgentDone.has('translation')) {
       logger.info('=== Phase 7: Translation ===');
       try {
         const provider = new ReportTranslationProvider();
@@ -478,6 +528,7 @@ async function run(): Promise<void> {
         if (translationResult.outputPath) {
           logger.info(`Translations written to ${translationResult.outputPath}`);
         }
+        await auditSession.markNonAgentPhaseComplete('translation');
       } catch (error) {
         logger.warn(`Translation had issues: ${error instanceof Error ? error.message : String(error)}`);
       }
