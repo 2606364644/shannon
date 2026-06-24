@@ -300,3 +300,54 @@ def render_authz_gitnexus_candidates(
         "- **保守**：不确定时判 vulnerable（宁过报不漏报）。",
     ])
     return "\n".join(lines)
+
+
+def build_authz_gitnexus_track(
+    deliverables_dir: str,
+) -> tuple[str, list[IDORCandidateChain], list[FrameworkIDORCandidate]]:
+    """Read code_index.json + framework_analysis.json, build IDOR candidates.
+
+    Returns (markdown, dominance_candidates, framework_candidates):
+    - markdown: rendered candidates for the judge-LLM prompt (Task 5).
+    - dominance_candidates / framework_candidates: raw lists for test asserts.
+
+    Lenient: missing/invalid code_index.json → empty dominance candidates
+    (framework candidates may still come from framework_analysis.json).
+    Missing framework_analysis.json → empty framework candidates. Never raises
+    (spec §6 graceful degradation: when GitNexus index is absent, only the LLM
+    track runs).
+    """
+    out = Path(deliverables_dir)
+    ci_path = out / "code_index.json"
+
+    index: CodeIndex | None = None
+    if ci_path.exists():
+        try:
+            index = CodeIndex.model_validate_json(ci_path.read_text())
+        except Exception as exc:  # invalid JSON / schema drift
+            logger.warning("authz GitNexus track: code_index.json parse failed (%s)", exc)
+            index = None
+    else:
+        logger.info("authz GitNexus track: code_index.json missing")
+
+    dominance_cands: list[IDORCandidateChain] = []
+    if index is not None:
+        dominance_cands = find_unguarded_sink_paths(index)
+
+    framework_cands = find_framework_idor_candidates(out / "framework_analysis.json")
+
+    if index is None:
+        index = CodeIndex(
+            repository="", language="", total_blocks=0, total_entry_points=0,
+            total_chains=0, blocks=[], edges=[], entry_points=[], chains=[],
+        )
+    entry_points = list(index.entry_points)
+
+    md = render_authz_gitnexus_candidates(
+        dominance_cands, framework_cands, index=index, entry_points=entry_points,
+    )
+    logger.info(
+        "authz GitNexus track built: %d dominance + %d framework candidates",
+        len(dominance_cands), len(framework_cands),
+    )
+    return md, dominance_cands, framework_cands
