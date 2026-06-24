@@ -39,6 +39,9 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
         StepSpec("risk-scoring",   "打分与风险排序"),
         StepSpec("dataflow-hints", "生成数据流提示"),
     ),
+    "vulnerability-analysis": (
+        StepSpec("merge-dual-track", "双轨合并 LLM/GitNexus 漏洞队列"),
+    ),
     "attack-chain": (
         StepSpec("attack-chain-assembly", "组装攻击链"),
     ),

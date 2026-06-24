@@ -426,6 +426,74 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
+    """Merge LLM-track and GitNexus-track vulnerability queues."""
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        from shannon_core.code_index.dual_track_merger import merge_dual_track_queues
+        from shannon_core.models.queue_schemas import VulnerabilityQueue
+
+        _, deliverables, _ = _get_paths(input)
+
+        merged_classes: list[str] = []
+        per_class_counts: dict[str, dict] = {}
+
+        async with get_audit_session().track_step(
+            "vulnerability-analysis",
+            "merge-dual-track",
+            intent=intent_for("merge-dual-track"),
+        ):
+            for vuln_class in ("injection", "xss", "ssrf", "authz", "auth"):
+                exploitation_path = deliverables / f"{vuln_class}_exploitation_queue.json"
+                if not exploitation_path.exists():
+                    continue
+
+                llm_path = deliverables / f"{vuln_class}_llm_queue.json"
+                llm_path.write_text(exploitation_path.read_text(encoding="utf-8"), encoding="utf-8")
+                llm_parsed = VulnerabilityQueue.parse_lenient(llm_path.read_text(encoding="utf-8"))
+                llm_findings = llm_parsed.queue.vulnerabilities
+
+                gitnexus_findings = []
+                gitnexus_path = deliverables / f"{vuln_class}_gitnexus_queue.json"
+                if gitnexus_path.exists():
+                    gitnexus_parsed = VulnerabilityQueue.parse_lenient(
+                        gitnexus_path.read_text(encoding="utf-8")
+                    )
+                    gitnexus_findings = gitnexus_parsed.queue.vulnerabilities
+
+                merged = merge_dual_track_queues(
+                    llm_findings,
+                    gitnexus_findings,
+                    mode="verdict",
+                )
+                atomic_write_json(
+                    exploitation_path,
+                    {"vulnerabilities": [finding.model_dump() for finding in merged]},
+                )
+
+                merged_classes.append(vuln_class)
+                per_class_counts[vuln_class] = {
+                    "llm": len(llm_findings),
+                    "gitnexus": len(gitnexus_findings),
+                    "merged": len(merged),
+                    "both": sum(1 for finding in merged if finding.merge_source == "both"),
+                    "llm_only": sum(1 for finding in merged if finding.merge_source == "llm-only"),
+                    "gitnexus_only": sum(
+                        1 for finding in merged if finding.merge_source == "gitnexus-only"
+                    ),
+                    "warnings": llm_parsed.warnings,
+                }
+
+        return {"merged_classes": merged_classes, "per_class_counts": per_class_counts}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_risk_scoring(input: ActivityInput) -> dict:
     """Score call chains and produce tiered audit plan."""
     from shannon_whitebox.audit.session_registry import get_audit_session

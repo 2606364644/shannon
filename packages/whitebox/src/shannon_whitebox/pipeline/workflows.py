@@ -321,6 +321,12 @@ class WhiteboxScanWorkflow:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
             await workflow.execute_activity(
+                activities.run_merge_dual_track_queues,
+                act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
+            )
+            await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "vulnerability-analysis"}),
                 start_to_close_timeout=timedelta(seconds=10),
