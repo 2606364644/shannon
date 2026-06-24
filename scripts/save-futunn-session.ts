@@ -25,8 +25,7 @@ import { dirname } from 'node:path';
 // ║  (容器内 repo 路径 /root/code/task_center,挂载点同名)            ║
 // ╚══════════════════════════════════════════════════════════════════╝
 const DEFAULT_OUT = '/root/code/task_center/.shannon-preseed/auth-state.json';
-const LOGIN_URL =
-  'https://passport.futunn.com/?target=https%3A%2F%2Fmobile.futunn.com%2F&type=login&lang=zh-hk';
+const LOGIN_URL = 'https://passport.futunn.com/?target=https%3A%2F%2Fmobile.futunn.com%2F&type=login&lang=zh-hk';
 const LOGIN_TIMEOUT_MS = 600_000; // 10 分钟,留给手动登录 + 滑块
 const POLL_INTERVAL_MS = 2_000;
 
@@ -48,7 +47,10 @@ function fail(msg: string): void {
 
 // 判断当前页面是否已落到已认证的 mobile.futunn.com(而非 passport 登录页)。
 // 单纯靠 URL 不够稳(SPA 可能 hash 路由),所以同时要求有 futunn 域的 cookie。
-async function isLoggedIn(page: { url: () => string }, cookies: Array<{ domain: string; name: string }>): Promise<boolean> {
+async function isLoggedIn(
+  page: { url: () => string },
+  cookies: Array<{ domain: string; name: string }>,
+): Promise<boolean> {
   const url = page.url();
   if (!url.includes('mobile.futunn.com') || url.includes('passport')) {
     return false;
