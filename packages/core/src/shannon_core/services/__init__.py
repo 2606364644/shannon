@@ -26,6 +26,11 @@ from shannon_core.services.framework_analyzer import (
     FrameworkAnalysisResult,
     analyze_frameworks,
 )
+from shannon_core.services.auth_config_scanner import (
+    ConfigFinding,
+    AuthConfigScanResult,
+    scan_auth_config,
+)
 from shannon_core.services.frontend_mapper import (
     FrontendRoute,
     ApiCall,
