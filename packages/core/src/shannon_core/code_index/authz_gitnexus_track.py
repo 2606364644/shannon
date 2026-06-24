@@ -66,28 +66,8 @@ def _is_side_effect_sink(block: FuncBlock | None) -> bool:
 
 
 def _handler_has_ownership_guard(handler: FuncBlock) -> bool:
-    """Reuse Plan 6's ownership predicate detection.
-
-    Plan 6 (recon §4.2) ships `scan_endpoint_security` with
-    `_OWNERSHIP_PREDICATE_RE`/`_detect_ownership`. We reuse the predicate
-    regex directly (imported lazily so Plan 6 is a soft dependency — if it
-    has not landed, we degrade to a local copy).
-    """
-    try:
-        from shannon_core.code_index.recon_gitnexus_track import (
-            _OWNERSHIP_PREDICATE_RE,
-        )
-    except ImportError:
-        # Plan 6 not landed yet — local fallback (kept in sync with Plan 6).
-        _OWNERSHIP_PREDICATE_RE = re.compile(
-            r"(?i)("
-            r"where\s*[:({]?\s*['\"]?\s*(user_?id|owner_?id|owner|creator_?id|author_?id)\b"
-            r"|where\s*\(\s*['\"]?(user_?id|owner_?id|owner|creator_?id|author_?id)['\"]?\s*[,=]"
-            r"|\bfind(First|One|All)?\s*\(\s*\{[^}]*?(user_?id|owner|creator)"
-            r"|\b(owner|currentUser|req\.user|ctx\.state\.user)\s*\.\s*id\b"
-            r"|\b(user_?id|owner_?id)\s*=\s*(req|ctx|currentUser)"
-            r")"
-        )
+    """Reuse Plan 6's ownership predicate detection (in-tree hard dependency)."""
+    from shannon_core.code_index.recon_gitnexus_track import _OWNERSHIP_PREDICATE_RE
     return _OWNERSHIP_PREDICATE_RE.search(handler.source_code) is not None
 
 

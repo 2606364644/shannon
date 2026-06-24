@@ -234,12 +234,6 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
             md, dom_cands, fw_cands = build_authz_gitnexus_track(str(deliverables))
             candidate_count = len(dom_cands) + len(fw_cands)
 
-            # Evidence map: endpoint label → candidate path (for evidence_chain).
-            evidence_by_endpoint: dict[str, str] = {}
-            for c in dom_cands:
-                label = f"{c.endpoint_id}→{c.sink_id}"
-                evidence_by_endpoint[c.endpoint_id] = " → ".join(c.path)
-
             vulnerabilities: list[dict] = []
             if candidate_count > 0:
                 prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
@@ -247,7 +241,6 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 prompt = prompt_manager.load_sync(
                     "authz_gitnexus_judge",
                     variables={
-                        "deliverables_path": str(deliverables),
                         "authz_gitnexus_candidates": md,
                     },
                 )
@@ -273,10 +266,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     data = v.model_dump()
                     data["source_track"] = "gitnexus"
                     if not data.get("evidence_chain"):
-                        ep_key = getattr(v, "endpoint", None) or ""
-                        data["evidence_chain"] = evidence_by_endpoint.get(
-                            _match_endpoint_to_handler(ep_key, dom_cands), ""
-                        ) or "dominance/framework candidate"
+                        data["evidence_chain"] = "gitnexus track candidate (dominance/framework)"
                     vulnerabilities.append(data)
 
             atomic_write_json(
@@ -297,21 +287,9 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
-def _match_endpoint_to_handler(endpoint_label: str, dom_cands) -> str:
-    """Best-effort: match an LLM-emitted endpoint label back to a dominance
-    candidate's handler id, so we can attach the right evidence_chain.
-
-    endpoint_label is like 'PUT /api/u/:id'; we don't have route→handler here,
-    so we fall back to the first candidate's handler if the label is non-empty.
-    This is best-effort metadata; the merge (Plan 3) dedups by endpoint anyway.
-    """
-    if not endpoint_label or not dom_cands:
-        return ""
-    return dom_cands[0].endpoint_id
-
-
 @activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
+
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         async with get_audit_session().track_step("setup", "credential-check", intent=intent_for("credential-check")):
@@ -777,6 +755,109 @@ async def run_render_dataflow_hints(input: ActivityInput) -> dict:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
+async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
+    """GitNexus-track chain-verdict LLM pass client.
+
+    Production: reuses the same LLM client pool as run_agent. This stub is the
+    injection point -- when not configured, callers must pass their own client
+    (tests do). Default raises so judge_chain_verdict takes its conservative
+    needs_review path (does NOT silently clear).
+    """
+    raise RuntimeError(
+        "GitNexus-track chain-verdict LLM client not configured; "
+        "judge_chain_verdict will mark candidates needs_review"
+    )
+
+
+@activity.defn
+async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
+    """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
+
+    Reads parameter_graph.json (Plan 1) + code_index.json (sink_call_sites for
+    XSS routing), runs the light chain-verdict pass for the three trace-class
+    vuln types, and writes <vuln>_gitnexus_queue.json for each. Plan 3's
+    run_merge_dual_track_queues then does verdict OR against the LLM track.
+
+    Graceful degradation: no parameter_graph.json (Plan 1 not landed) ->
+    per_class empty, no gitnexus queues written, merger falls back to llm-only.
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        from shannon_core.code_index.models import CodeIndex
+        from shannon_core.code_index.parameter_models import (
+            ParameterPropagationGraph,
+            SinkCallSite,
+        )
+        from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+            build_injection_findings,
+        )
+        from shannon_core.code_index.vuln_chain_builders.xss_builder import (
+            build_xss_findings,
+        )
+        from shannon_core.code_index.vuln_chain_builders.ssrf_builder import (
+            build_ssrf_findings,
+        )
+        from shannon_core.utils.atomic_write import atomic_write_json
+
+        repo, deliverables, _ = _get_paths(input)
+        per_class: dict[str, int] = {}
+
+        pgraph_path = deliverables / "parameter_graph.json"
+        if not pgraph_path.exists():
+            return {"per_class": {}, "skipped": "no parameter_graph.json"}
+        try:
+            pgraph = ParameterPropagationGraph.model_validate_json(pgraph_path.read_text())
+        except Exception:
+            return {"per_class": {}, "skipped": "invalid parameter_graph.json"}
+
+        # XSS routes by SinkCallSite.category == XSS (SlotContext has no render
+        # context), so read code_index.json for the sink call sites.
+        sink_call_sites: dict[str, SinkCallSite] = {}
+        code_index_path = deliverables / "code_index.json"
+        if code_index_path.exists():
+            try:
+                index = CodeIndex.model_validate_json(code_index_path.read_text())
+                sink_call_sites = {s.id: s for s in index.sink_call_sites}
+            except Exception as exc:
+                logger.warning("gitnexus chain-verdict: code_index.json parse failed (%s)", exc)
+
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "gitnexus-chain-verdict",
+            intent=None,
+        ):
+            llm = _gitnexus_verdict_llm_client
+
+            for vc, builder in (
+                ("injection", build_injection_findings),
+                ("xss", build_xss_findings),
+                ("ssrf", build_ssrf_findings),
+            ):
+                try:
+                    if vc == "xss":
+                        findings = await builder(pgraph, llm_client=llm,
+                                                 sink_call_sites=sink_call_sites)
+                    else:
+                        findings = await builder(pgraph, llm_client=llm)
+                except Exception as exc:
+                    # one vuln class failing must not block the others
+                    logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
+                    continue
+                if findings:
+                    atomic_write_json(
+                        deliverables / f"{vc}_gitnexus_queue.json",
+                        {"vulnerabilities": [f.model_dump() for f in findings]},
+                    )
+                    per_class[vc] = len(findings)
+
+        return {"per_class": per_class}
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
 @activity.defn
 async def run_framework_analysis(input: ActivityInput) -> dict:
     """Detect auto-REST frameworks, infer endpoints, write deliverable."""
@@ -834,6 +915,106 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def run_auth_config_scan(input: ActivityInput) -> dict:
+    """Deterministic auth-config scan (spec §5.8 vuln-auth GitNexus track).
+
+    Scans the repo for auth/session config issues (cookie flags, HSTS, CORS,
+    JWT nOAuth claims, rate-limit middleware) and writes two deliverables:
+      1. auth_config_scan.json — structured scan result (LLM reads this as a
+         starting point, like vuln-authz reads Endpoint Security Context).
+      2. auth_gitnexus_queue.json — each suspicious config item as an
+         AuthVulnerability (source_track='gitnexus'), consumed by Plan 3's
+         run_merge_dual_track_queues for verdict OR with the LLM track.
+
+    Pure additive: zero findings still writes both files (empty), so the
+    merger degrades cleanly to llm-only. Scan failures never abort the vuln
+    phase (logged, empty result).
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    try:
+        import dataclasses
+        from shannon_core.services.auth_config_scanner import scan_auth_config
+        from shannon_core.models.queue_schemas import AuthVulnerability
+
+        repo, deliverables, _ = _get_paths(input)
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "auth-config-scan",
+            intent=intent_for("auth-config-scan"),
+        ):
+            result = await scan_auth_config(str(repo))
+
+            # 1. Structured scan result (LLM reads this)
+            scan_data = dataclasses.asdict(result)
+            atomic_write_json(deliverables / "auth_config_scan.json", scan_data)
+
+            # 2. GitNexus-track queue (Plan 3 merger consumes this)
+            vulns = [_finding_to_auth_vulnerability(f) for f in result.all_findings()]
+            atomic_write_json(
+                deliverables / "auth_gitnexus_queue.json",
+                {"vulnerabilities": [v.model_dump() for v in vulns]},
+            )
+
+            total = len(result.all_findings())
+        return {
+            "total_findings": total,
+            "cookie": len(result.cookie_findings),
+            "hsts": len(result.hsts_findings),
+            "cors": len(result.cors_findings),
+            "jwt_claim": len(result.jwt_claim_findings),
+            "rate_limit": len(result.rate_limit_findings),
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+# Category -> AUTH-VULN vulnerability_type mapping.
+# externally_exploitable=True for all (conservative over-report; merger ORs).
+_CATEGORY_TO_VULN_TYPE = {
+    "cookie": "Session_Management_Flaw",
+    "hsts": "Transport_Exposure",
+    "cors": "Transport_Exposure",
+    "jwt_claim": "Login_Flow_Logic",      # nOAuth is a login-flow identity flaw
+    "rate_limit": "Abuse_Defenses_Missing",
+}
+_CATEGORY_TO_SUGGESTED_TECHNIQUE = {
+    "cookie": "session_hijacking",
+    "hsts": "credential_theft_via_mitm",
+    "cors": "credential_theft_via_cors",
+    "jwt_claim": "noauth_attribute_hijack",
+    "rate_limit": "brute_force_login",
+}
+
+
+def _finding_to_auth_vulnerability(f) -> "AuthVulnerability":
+    """Convert a deterministic ConfigFinding into an AuthVulnerability for the
+    GitNexus-track queue (source_track='gitnexus')."""
+    from shannon_core.models.queue_schemas import AuthVulnerability
+    vuln_type = _CATEGORY_TO_VULN_TYPE.get(f.category, "Session_Management_Flaw")
+    technique = _CATEGORY_TO_SUGGESTED_TECHNIQUE.get(f.category, "session_hijacking")
+    location = f"{f.file_path}:{f.line}"
+    return AuthVulnerability(
+        ID=f"AUTH-GN-{f.category.upper()}-{abs(hash((f.file_path, f.line, f.category))) % 100000:05d}",
+        vulnerability_type=vuln_type,
+        externally_exploitable=True,   # conservative: scanner hit -> exploitable candidate
+        confidence="medium",           # deterministic signal, LLM confirms/denies
+        source_track="gitnexus",
+        evidence_chain=f"[deterministic scan] {f.category}@{location}: {f.detail}",
+        source_endpoint=None,          # config-level, not endpoint-scoped
+        vulnerable_code_location=location,
+        missing_defense=f.detail,
+        exploitation_hypothesis=(
+            f"Attacker can exploit the missing/weak auth configuration: {f.detail}"
+        ),
+        suggested_exploit_technique=technique,
+        notes=f"GitNexus-track candidate (awaiting LLM confirmation). Evidence: {f.evidence}",
+    )
 
 
 @activity.defn

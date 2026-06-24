@@ -1,6 +1,6 @@
 # packages/whitebox/tests/test_run_authz_gitnexus_judge.py
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

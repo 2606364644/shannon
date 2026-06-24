@@ -289,6 +289,16 @@ class WhiteboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
             self._state.current_phase = "vulnerability-analysis"
+            # Deterministic auth-config scan (spec §5.8 GitNexus track for vuln-auth).
+            # Runs BEFORE the vuln agents so auth_config_scan.json is ready for
+            # the vuln-auth LLM to read. Pure additive: zero findings -> empty
+            # files, merger degrades to llm-only. Only runs when auth is in scope.
+            if "auth" in [str(vt) for vt in selected_classes]:
+                await workflow.execute_activity(
+                    activities.run_auth_config_scan, act_input,
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=retry_for("standard"),
+                )
             vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
             for vt in selected_classes:
                 agent_name = AgentName(f"{vt}-vuln")
@@ -334,6 +344,22 @@ class WhiteboxScanWorkflow:
                 import logging
                 logging.getLogger(__name__).warning(
                     "Authz GitNexus judge failed (non-fatal, LLM-only track continues): %s", exc)
+            # === GitNexus-track chain verdict: inj/xss/ssrf (spec §5.4-5.6) ===
+            # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
+            # Runs before run_merge_dual_track_queues (which reads those queues).
+            # Non-fatal: failure degrades to LLM-only (merger tolerates absent
+            # gitnexus queues). No parameter_graph.json (Plan 1 not landed) ->
+            # empty, degrades to LLM-only (current behavior).
+            try:
+                await workflow.execute_activity(
+                    activities.run_gitnexus_chain_verdict, act_input,
+                    start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "GitNexus chain verdict failed (non-fatal, LLM-only track continues): %s", exc)
             await workflow.execute_activity(
                 activities.run_merge_dual_track_queues,
                 act_input,

@@ -40,6 +40,33 @@ Success criterion: A complete, code-backed analysis of every potential authentic
 - Your primary source of truth for the application's structure is the reconnaissance report located at `{{DELIVERABLES_PATH}}/recon_deliverable.md`. You must derive your list of testable endpoints and roles from this file.
 </starting_context>
 
+<auth_config_context>
+### Read Auth Config Scan (REQUIRED — Do This First, if present)
+
+Before beginning your 9-class methodology analysis:
+
+1. **Check for the deterministic scan result:**
+   - Read `{{DELIVERABLES_PATH}}/auth_config_scan.json` (if it exists).
+   - If the file does NOT exist or is empty (all finding lists empty), skip this section and proceed with your normal autonomous analysis — the deterministic track is simply absent, not authoritative.
+
+2. **For each suspicious config item the scanner found** (cookie_findings, hsts_findings, cors_findings, jwt_claim_findings, rate_limit_findings):
+   - Treat it as a **high-priority starting point**, NOT a conclusion.
+   - Use the Task Agent to verify the finding against the actual code at `file_path:line`:
+     - **cookie**: confirm the cookie truly lacks the flagged flag(s) at every set-point; check if a global cookie policy (e.g., `app.use(cookieParser(...))`, `SESSION_COOKIE_SECURE` env) compensates.
+     - **hsts**: confirm HSTS is truly absent/weak at the edge (reverse proxy / load balancer may add it upstream — note as a conditional in your finding if so).
+     - **cors**: confirm the wildcard origin / credentials combo is actually reachable from a browser; check if a stricter origin allowlist overrides it.
+     - **jwt_claim (nOAuth)**: confirm the mutable claim (`email`/`name`/`preferred_username`) is actually used for **identity determination** (user lookup / session binding), not just display. If `sub` is used elsewhere for the authoritative identity, the mutable-claim read may be benign — document the actual binding.
+     - **rate_limit**: confirm the auth-sensitive endpoint (`/login`, `/signup`, `/reset`, `/token`) truly has no rate-limit middleware on **all** code paths (gateway/WAF may enforce it upstream — note as conditional).
+
+3. **For each verified item, produce a verdict:**
+   - **vulnerable** → add to your exploitation queue (the scanner's `missing_defense` text and `file:line` go into the corresponding finding fields).
+   - **safe** (compensating control confirmed, or scanner false positive) → document in "安全设计:已验证组件" section, do NOT add to queue.
+
+**⚠️ The scanner is a lead, not a verdict.** It uses regex over source/config and cannot see runtime headers, upstream proxies, or env-driven policy. A scanner hit that you confirm safe (e.g., HSTS set at the CDN) must NOT enter the queue. Conversely, scanner silence on a check does NOT mean safe — continue your full 9-class methodology autonomously for anything the scanner didn't cover (custom token entropy, session fixation, password policy, SSO state/nonce, etc.).
+
+**The deterministic track also produces `auth_gitnexus_queue.json`** (a parallel queue of these same items as AuthVulnerability candidates). Your LLM-track queue and that GitNexus-track queue are merged downstream by verdict OR (any vulnerable → vulnerable). So your job is to give the accurate LLM-track verdict for each item you can reach; the merger handles the combination.
+</auth_config_context>
+
 @include(shared/_static-dataflow-hints.txt)
 
 @include(shared/_cross-route-enumeration.txt)
