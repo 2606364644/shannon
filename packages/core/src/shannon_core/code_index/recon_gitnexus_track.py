@@ -8,9 +8,10 @@ deliverable with field-level dangerous-side rules.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
-from shannon_core.code_index.models import EntryPoint
+from shannon_core.code_index.models import EntryPoint, FuncBlock
 
 logger = logging.getLogger(__name__)
 
@@ -82,3 +83,136 @@ def detect_shared_route_groups(entry_points: list[EntryPoint]) -> list[SharedRou
         len(groups),
     )
     return groups
+
+
+_AUTH_GUARD_RE = re.compile(
+    r"(?i)\b("
+    r"@?RequireAuth|@?requireAuth|@?IsAuthenticated|@?isAuthenticated|"
+    r"@?UseGuards|@?Guard|@?PreAuthorize|@?Secured|@?RolesAllowed|"
+    r"@?login_required|@?loginRequired|@?auth_required|@?AuthRequired|"
+    r"AuthGuard|canActivate|@Authorize|@AuthorizeRequest"
+    r")\b"
+)
+_EXPLICIT_PUBLIC_RE = re.compile(r"(?i)\b(public|@?Anonymous|allowAnonymous|noAuth)\b")
+_MIDDLEWARE_NAME_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(|;|\s*$|\s*[,)])")
+_MIDDLEWARE_HINT_RE = re.compile(
+    r"(?i)(\.use\s*\(|\.guard\s*\(|middleware\s*[:=]|Guard\b|requireAdmin|requireRole)"
+)
+_OWNERSHIP_PREDICATE_RE = re.compile(
+    r"(?is)("
+    r"where\s*[:(][^}\n;]{0,240}\b(user_?id|owner_?id|owner|creator_?id|author_?id)\b"
+    r"[^}\n;]{0,240}(req\.user|ctx\.state\.user|currentUser|user\.id|userId)"
+    r"|\.where\s*\(\s*['\"]?(user_?id|owner_?id|owner|creator_?id|author_?id)['\"]?\s*[,=]"
+    r"|\bfindBy(Owner|OwnerId|UserId|CreatorId|AuthorId)\b"
+    r"|\b(owner|currentUser|req\.user|ctx\.state\.user)\s*\.\s*id\b"
+    r"|\b(user_?id|owner_?id)\s*=\s*(req|ctx|currentUser)"
+    r")"
+)
+
+
+@dataclass(frozen=True)
+class EndpointSecurityContext:
+    """§4.2 endpoint security context from deterministic source scanning."""
+
+    method: str | None
+    path: str
+    handler_id: str
+    auth: str
+    middleware: tuple[str, ...]
+    ownership: str
+    ownership_evidence: str | None
+
+
+def _detect_auth(source: str, decorators: list[str], ep_auth: str | None) -> str:
+    """Determine auth presence from source, decorators, and entry-point hints."""
+    blob = source + "\n" + " ".join(decorators)
+    if _AUTH_GUARD_RE.search(blob):
+        return "present"
+    if _EXPLICIT_PUBLIC_RE.search(blob):
+        return "none"
+    if ep_auth is not None:
+        return _auth_token(ep_auth)
+    return "none"
+
+
+def _extract_middleware(source: str, decorators: list[str]) -> tuple[str, ...]:
+    """Extract likely middleware or guard names from source text."""
+    blob = source + "\n" + " ".join(decorators)
+    found: list[str] = []
+
+    for decorator in decorators:
+        match = re.match(r"@?([A-Za-z_][A-Za-z0-9_]*)", decorator)
+        if match and match.group(1) not in found:
+            found.append(match.group(1))
+
+    if _MIDDLEWARE_HINT_RE.search(blob):
+        for match in _MIDDLEWARE_NAME_RE.finditer(blob):
+            name = match.group(1)
+            if re.search(r"(?i)(auth|role|admin|guard|middleware)", name) and name not in found:
+                found.append(name)
+
+    return tuple(found)
+
+
+def _detect_ownership(source: str) -> tuple[str, str | None]:
+    """Return ownership candidate and a short evidence snippet."""
+    match = _OWNERSHIP_PREDICATE_RE.search(source)
+    if match is None:
+        return "none", None
+
+    start = max(0, match.start() - 20)
+    end = min(len(source), match.end() + 20)
+    return "guarded", source[start:end].replace("\n", " ").strip()
+
+
+def scan_endpoint_security(
+    entry_points: list[EntryPoint],
+    blocks_by_id: dict[str, FuncBlock],
+) -> list[EndpointSecurityContext]:
+    """Build §4.2 deterministic auth, middleware, and ownership context."""
+    contexts: list[EndpointSecurityContext] = []
+
+    for ep in entry_points:
+        if ep.route is None:
+            continue
+
+        block = blocks_by_id.get(ep.func_block_id)
+        if block is None:
+            contexts.append(
+                EndpointSecurityContext(
+                    method=ep.http_method,
+                    path=ep.route,
+                    handler_id=ep.func_block_id,
+                    auth="unknown",
+                    middleware=(),
+                    ownership="unknown",
+                    ownership_evidence=None,
+                )
+            )
+            continue
+
+        ownership, evidence = _detect_ownership(block.source_code)
+        contexts.append(
+            EndpointSecurityContext(
+                method=ep.http_method,
+                path=ep.route,
+                handler_id=ep.func_block_id,
+                auth=_detect_auth(block.source_code, list(block.decorators), ep.authentication),
+                middleware=_extract_middleware(block.source_code, list(block.decorators)),
+                ownership=ownership,
+                ownership_evidence=evidence,
+            )
+        )
+
+    logger.info(
+        "recon §4.2 track: %d endpoints (auth present=%d none=%d unknown=%d; "
+        "ownership guarded=%d none=%d unknown=%d)",
+        len(contexts),
+        sum(1 for context in contexts if context.auth == "present"),
+        sum(1 for context in contexts if context.auth == "none"),
+        sum(1 for context in contexts if context.auth == "unknown"),
+        sum(1 for context in contexts if context.ownership == "guarded"),
+        sum(1 for context in contexts if context.ownership == "none"),
+        sum(1 for context in contexts if context.ownership == "unknown"),
+    )
+    return contexts
