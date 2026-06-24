@@ -254,40 +254,36 @@ async def run_code_index(input: ActivityInput) -> dict:
             from shannon_core.code_index.gitnexus_engine import GitNexusEngine
 
             engine = GitNexusEngine(Path(repo))
-            indexed = False
-            if engine.is_available():
-                result = engine.ensure_indexed()
-                indexed = result.success
-                if not indexed:
-                    logger.warning("GitNexus indexing failed: %s", result.error_message)
+            if not engine.is_available():
+                raise PentestError(
+                    "GitNexus CLI not available, cannot build code index. "
+                    "Install with: npm install -g gitnexus",
+                    category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
+                )
+            result = engine.ensure_indexed()
+            if not result.success:
+                raise PentestError(
+                    f"GitNexus indexing failed: {result.error_message}. "
+                    "Code index requires a working GitNexus index.",
+                    category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
+                )
 
-            if indexed:
-                try:
-                    async with GitNexusMCPClient(Path(repo)) as mcp:
-                        index = await build_code_index_with_gitnexus(
-                            str(repo),
-                            mcp_client=mcp,
-                            llm_client=_llm_taint_client,
-                            auto_index=False,  # already indexed above
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "GitNexus MCP failed (%s), falling back to minimal index", exc,
-                    )
+            try:
+                async with GitNexusMCPClient(Path(repo)) as mcp:
                     index = await build_code_index_with_gitnexus(
                         str(repo),
-                        mcp_client=_StubMCPClient(),
+                        mcp_client=mcp,
                         llm_client=_llm_taint_client,
-                        auto_index=True,  # will detect unavailable → minimal mode
+                        auto_index=False,
                     )
-            else:
-                # GitNexus CLI missing or indexing failed — minimal AST-only mode
-                index = await build_code_index_with_gitnexus(
-                    str(repo),
-                    mcp_client=_StubMCPClient(),
-                    llm_client=_llm_taint_client,
-                    auto_index=True,
-                )
+            except PentestError:
+                raise
+            except Exception as exc:
+                raise PentestError(
+                    f"GitNexus MCP query failed: {exc}. "
+                    "Code index requires a working GitNexus MCP connection.",
+                    category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
+                ) from exc
 
             json_path, summary_path = write_index_files(index, str(deliverables))
 
