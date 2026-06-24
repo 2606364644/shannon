@@ -830,7 +830,7 @@ export async function persistOrValidateRunScope(
   await atomicWrite(sessionPath, session);
 }
 
-async function findLatestCommit(gitDir: string, commitHashes: string[]): Promise<string> {
+export async function findLatestCommit(gitDir: string, commitHashes: string[]): Promise<string> {
   if (commitHashes.length === 1) {
     const hash = commitHashes[0];
     if (!hash) {
@@ -863,9 +863,9 @@ export async function restoreGitCheckpoint(
   checkpointHash: string,
   incompleteAgents: AgentName[],
   deliverablesSubdir?: string,
+  logger = createActivityLogger(),
 ): Promise<void> {
   const deliverablesPath = deliverablesDir(repoPath, deliverablesSubdir);
-  const logger = createActivityLogger();
   logger.info(`Restoring deliverables to ${checkpointHash}...`);
 
   // Validate hash exists in this clone before attempting reset
