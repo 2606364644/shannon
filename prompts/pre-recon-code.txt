@@ -117,6 +117,15 @@ Review the deterministic code index data provided below:
 
 Entry point adjudication is handled automatically downstream — you do NOT need to write entry_points.json.
 
+<pre_recon_gitnexus_track>
+{{PRE_RECON_GITNEXUS_TRACK}}
+
+**填充规则**：上表为 GitNexus + AST 确定性检测的 entry points / sinks / 模板转义。
+- 这些是**确定性下限**：你的 Sink Hunter / Entry Point Mapper 必须**覆盖**这些（逐条确认 network-reachable / render context）。
+- **下限非上限**：确定性未列出的 sink/entry/模板不代表不存在——仍须独立探索（glob 模板、grep 危险 API、变体目录），尤其未覆盖语言/动态调用。
+- 模板转义段的 unescaped 项是**高危**，优先分析。
+</pre_recon_gitnexus_track>
+
 ## Phase 1: Discovery Agents (Launch in Parallel)
 
 Launch these three discovery agents simultaneously to understand the codebase structure:
