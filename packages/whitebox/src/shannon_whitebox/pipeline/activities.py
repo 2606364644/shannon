@@ -234,12 +234,6 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
             md, dom_cands, fw_cands = build_authz_gitnexus_track(str(deliverables))
             candidate_count = len(dom_cands) + len(fw_cands)
 
-            # Evidence map: endpoint label → candidate path (for evidence_chain).
-            evidence_by_endpoint: dict[str, str] = {}
-            for c in dom_cands:
-                label = f"{c.endpoint_id}→{c.sink_id}"
-                evidence_by_endpoint[c.endpoint_id] = " → ".join(c.path)
-
             vulnerabilities: list[dict] = []
             if candidate_count > 0:
                 prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
@@ -247,7 +241,6 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 prompt = prompt_manager.load_sync(
                     "authz_gitnexus_judge",
                     variables={
-                        "deliverables_path": str(deliverables),
                         "authz_gitnexus_candidates": md,
                     },
                 )
@@ -273,10 +266,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     data = v.model_dump()
                     data["source_track"] = "gitnexus"
                     if not data.get("evidence_chain"):
-                        ep_key = getattr(v, "endpoint", None) or ""
-                        data["evidence_chain"] = evidence_by_endpoint.get(
-                            _match_endpoint_to_handler(ep_key, dom_cands), ""
-                        ) or "dominance/framework candidate"
+                        data["evidence_chain"] = "gitnexus track candidate (dominance/framework)"
                     vulnerabilities.append(data)
 
             atomic_write_json(
@@ -297,21 +287,9 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
-def _match_endpoint_to_handler(endpoint_label: str, dom_cands) -> str:
-    """Best-effort: match an LLM-emitted endpoint label back to a dominance
-    candidate's handler id, so we can attach the right evidence_chain.
-
-    endpoint_label is like 'PUT /api/u/:id'; we don't have route→handler here,
-    so we fall back to the first candidate's handler if the label is non-empty.
-    This is best-effort metadata; the merge (Plan 3) dedups by endpoint anyway.
-    """
-    if not endpoint_label or not dom_cands:
-        return ""
-    return dom_cands[0].endpoint_id
-
-
 @activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
+
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         async with get_audit_session().track_step("setup", "credential-check", intent=intent_for("credential-check")):
