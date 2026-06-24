@@ -111,7 +111,7 @@ async def test_non_recon_agent_not_injected(tmp_path):
 
 @pytest.mark.asyncio
 async def test_recon_agent_without_framework_json_skips(tmp_path):
-    """RECON agent + missing framework_analysis.json -> no crash, no injection."""
+    """RECON agent + missing framework_analysis.json -> no crash, no framework injection."""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
 
@@ -129,4 +129,5 @@ async def test_recon_agent_without_framework_json_skips(tmp_path):
     with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
         await _run_with_runtime_patches(FakeInput(), captured)
 
-    assert captured.get("prompt_variables") is None
+    prompt_variables = captured.get("prompt_variables") or {}
+    assert "framework_endpoints_summary" not in prompt_variables

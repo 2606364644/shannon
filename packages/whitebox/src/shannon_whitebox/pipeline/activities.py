@@ -104,6 +104,7 @@ async def run_agent(input: ActivityInput) -> dict:
 
         prompt_variables = None
         if agent_name == AgentName.RECON:
+            prompt_variables = {}
             framework_analysis_path = deliverables / "framework_analysis.json"
             if framework_analysis_path.exists():
                 from shannon_core.services.framework_endpoint_renderer import render_framework_endpoints
@@ -114,9 +115,11 @@ async def run_agent(input: ActivityInput) -> dict:
                     for endpoint in data.get("inferred_endpoints", [])
                     if isinstance(endpoint, dict)
                 ]
-                prompt_variables = {
-                    "framework_endpoints_summary": render_framework_endpoints(endpoints),
-                }
+                prompt_variables["framework_endpoints_summary"] = render_framework_endpoints(endpoints)
+
+            from shannon_core.code_index.recon_gitnexus_track import build_recon_gitnexus_track
+
+            prompt_variables["recon_gitnexus_track"] = build_recon_gitnexus_track(str(deliverables))
 
         if agent_name == AgentName.PRE_RECON:
             from shannon_core.code_index.pre_recon_gitnexus_track import build_pre_recon_gitnexus_track
