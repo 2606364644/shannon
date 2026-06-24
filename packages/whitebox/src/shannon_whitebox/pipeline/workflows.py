@@ -320,6 +320,20 @@ class WhiteboxScanWorkflow:
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
+            # === Authz GitNexus track: judge IDOR candidates (spec §5.7) ===
+            # Runs after vuln agents (LLM track queues ready) and before the
+            # dual-track merge (Plan 3) so authz_gitnexus_queue.json exists
+            # when merge reads it. Graceful: empty candidates → empty queue.
+            try:
+                await workflow.execute_activity(
+                    activities.run_authz_gitnexus_judge, act_input,
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Authz GitNexus judge failed (non-fatal, LLM-only track continues): %s", exc)
             await workflow.execute_activity(
                 activities.run_merge_dual_track_queues,
                 act_input,
