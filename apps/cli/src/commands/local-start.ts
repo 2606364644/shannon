@@ -89,11 +89,15 @@ async function localStartBare(args: LocalStartArgs, concurrency: number | undefi
   fs.mkdirSync(workspacesDir, { recursive: true });
 
   const workspace = args.workspace ?? `${path.basename(repo.hostPath)}_whitebox-${Date.now()}`;
+  const sessionJsonPath = path.join(workspacesDir, workspace, 'session.json');
 
   console.log('');
   console.log('  Shannon — Local Whitebox Scan');
   console.log(`  Repository:  ${repo.hostPath}`);
   console.log(`  Workspace:   ${workspace}`);
+  if (fs.existsSync(sessionJsonPath)) {
+    console.log('  (Workspace exists — resuming completed phases)');
+  }
   if (concurrency !== undefined) {
     console.log(`  Concurrency: ${concurrency}`);
   }
@@ -150,6 +154,7 @@ async function localStartNpx(args: LocalStartArgs, concurrency: number | undefin
   const workspace = args.workspace ?? `${path.basename(repo.hostPath)}_whitebox-${Date.now()}`;
 
   const workspacePath = path.join(workspacesDir, workspace);
+  const sessionJsonPath = path.join(workspacePath, 'session.json');
   fs.mkdirSync(workspacePath, { recursive: true });
   fs.chmodSync(workspacePath, 0o777);
   for (const dir of ['deliverables', 'scratchpad', '.playwright-cli', '.playwright']) {
@@ -168,6 +173,9 @@ async function localStartNpx(args: LocalStartArgs, concurrency: number | undefin
   console.log('  Shannon — Whitebox Scan (Docker, no Temporal)');
   console.log(`  Repository:  ${repo.hostPath}`);
   console.log(`  Workspace:   ${workspace}`);
+  if (fs.existsSync(sessionJsonPath)) {
+    console.log('  (Workspace exists — resuming completed phases)');
+  }
   if (concurrency !== undefined) {
     console.log(`  Concurrency: ${concurrency}`);
   }
