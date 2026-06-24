@@ -1,6 +1,6 @@
 """gitnexus_call_graph 单元测试。"""
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from shannon_core.code_index.models import (
     CallChain, CallEdge, FuncBlock,
@@ -253,6 +253,32 @@ class TestPipelineAutoIndexing:
         (src_dir / "app.py").write_text("def handler(): pass\n")
 
         with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
+            mcp = FakeImpactMCPClient(responses={})
+            with pytest.raises(PentestError, match="GitNexus"):
+                await build_code_index_with_gitnexus(
+                    str(tmp_path),
+                    mcp_client=mcp,
+                    llm_client=AsyncMock(return_value="{}"),
+                    auto_index=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_indexing_failure_raises(self, tmp_path):
+        """ensure_indexed() 失败时,build_code_index_with_gitnexus 必须硬失败。"""
+        from shannon_core.code_index import build_code_index_with_gitnexus
+        from shannon_core.models.errors import PentestError
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("def handler(): pass\n")
+
+        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls:
+            mock_engine = MagicMock()
+            mock_engine.is_available.return_value = True
+            mock_engine.ensure_indexed.return_value = MagicMock(
+                success=False, error_message="boom"
+            )
+            mock_engine_cls.return_value = mock_engine
             mcp = FakeImpactMCPClient(responses={})
             with pytest.raises(PentestError, match="GitNexus"):
                 await build_code_index_with_gitnexus(

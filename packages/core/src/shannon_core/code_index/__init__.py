@@ -69,8 +69,8 @@ async def build_code_index_with_gitnexus(
         mcp_client: GitNexus MCP client for call graph queries.
         llm_client: LLM client for taint analysis.
         auto_index: If True, attempt to ensure GitNexus has indexed the repo
-            via the CLI engine before proceeding. Falls back to minimal
-            AST-only mode if GitNexus CLI is unavailable or indexing fails.
+            via the CLI engine before proceeding. Raises PentestError if
+            GitNexus CLI is unavailable or indexing fails (no fallback).
 
     Raises:
         GitNexusNotIndexedError: if GitNexus hasn't indexed the repo
@@ -93,12 +93,10 @@ async def build_code_index_with_gitnexus(
             )
         index_result = engine.ensure_indexed()
         if not index_result.success:
-            logger.warning(
-                "GitNexus indexing failed: %s. Falling back to minimal mode.",
-                index_result.error_message,
-            )
-            return await _build_code_index_fallback(
-                str(repo), mcp_client=mcp_client, llm_client=llm_client,
+            raise PentestError(
+                f"GitNexus indexing failed: {index_result.error_message}. "
+                "Code index requires a working GitNexus index.",
+                category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
             )
 
     # ① Tree-sitter parse → FuncBlock[]
