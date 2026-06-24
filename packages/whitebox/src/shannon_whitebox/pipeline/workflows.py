@@ -288,7 +288,7 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
-           self._state.current_phase = "vulnerability-analysis"
+            self._state.current_phase = "vulnerability-analysis"
             # Deterministic auth-config scan (spec §5.8 GitNexus track for vuln-auth).
             # Runs BEFORE the vuln agents so auth_config_scan.json is ready for
             # the vuln-auth LLM to read. Pure additive: zero findings -> empty
