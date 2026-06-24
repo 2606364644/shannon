@@ -1,26 +1,21 @@
-"""Regression guard: the live dashboard must render on the alternate screen
-(full redraw), not in transient relative-erase mode.
+"""Regression guard: the live dashboard must keep the scrolling log region
+visible during a scan, so it must NOT use the alternate screen.
 
-Ghost frames (duplicate `pre-recon - step 0/8` + full-width rules that also
-fail to re-flow on resize) were caused by transient relative-erase desync:
-Rich remembers the previous frame's line count, moves the cursor up, and erases
-that many lines; once the count drifts (this region shares the console with
-other writes and frame-height changes), stale frames are left on screen.
-`screen=True` (alternate screen) makes Rich repaint from an absolute cursor
-origin each refresh, so there is no line-count to drift and ghosting is
-impossible by construction.
+A screen=True (alt-screen) Live was tried to eliminate ghost frames, but it
+wipes the scrolling log region: during the scan only the footer is visible and
+the PHASE/STEP/AGENT lines disappear (standard alt-screen semantics). That is a
+worse regression than the ghosting it fixed. This test locks the dashboard to
+the transient mode that keeps log lines scrolling above the animating footer.
 
-This test locks the invariant by intercepting the real `Live(...)` construction
-inside `run_with_display(use_rich=True)` and asserting the screen/redraw flags.
-It fails if anyone reverts `screen=True` back to `transient=True` (the mode that
-produced the bug). Checking the flag values is the reliable regression signal
-here: the ghosting is an interaction-dependent runtime effect that a byte-level
-PTY capture cannot deterministically reproduce (Rich's alt screen is wiped on
-stop, so the footer never survives into a post-stop capture, and the transient
-baseline erases itself on stop by design).
+Note: this test does NOT claim the transient mode is free of ghost frames; it
+only enforces that the footer does not run in an alternate screen, preserving
+visible log output. The ghost-frame problem is a separate, interaction-dependent
+issue tracked separately.
 """
 import asyncio
 from unittest.mock import patch
+
+import pytest
 
 from rich.live import Live
 
@@ -45,13 +40,13 @@ def _spy(captured):
     return wrapper
 
 
-import pytest
-
 @pytest.mark.asyncio
-async def test_rich_live_uses_alternate_screen_full_redraw():
-    """run_with_display must build its Live with screen=True (alt-screen full
-    redraw) and transient=False, with stderr left un-redirected for the
-    Temporal workflow-sandbox circular-import guard."""
+async def test_rich_live_does_not_use_alternate_screen():
+    """The live footer must run in transient (scrolling) mode, never in the
+    alternate screen. screen=True would hide the scrolling log region during the
+    scan; transient=True keeps PHASE/STEP/AGENT lines visible above the footer.
+    redirect_stderr must stay False (Temporal workflow-sandbox circular-import
+    guard)."""
     captured: list[dict] = []
 
     with patch.object(Live, "__init__", _spy(captured)):
@@ -60,18 +55,15 @@ async def test_rich_live_uses_alternate_screen_full_redraw():
 
     assert captured, "no Live was constructed; the rich display path was not exercised"
     live_kwargs = captured[-1]
-    # screen=True is the core fix: alternate-screen full redraw has no
-    # relative-erase line count to desync, so ghost frames cannot accumulate.
-    assert live_kwargs.get("screen") is True, (
-        "Live must use screen=True (alt-screen full redraw); got "
-        f"screen={live_kwargs.get('screen')!r}, which reintroduces ghost frames"
+    # screen must be unset/False: the alternate screen hides the scrolling logs.
+    assert not live_kwargs.get("screen"), (
+        "Live must NOT use screen=True (alt screen wipes the scrolling log region); "
+        f"got screen={live_kwargs.get('screen')!r}"
     )
-    assert live_kwargs.get("transient") is False, (
-        f"Live must use transient=False with screen=True; got transient={live_kwargs.get('transient')!r}"
+    assert live_kwargs.get("transient") is True, (
+        "Live must use transient=True so log lines scroll above the footer; "
+        f"got transient={live_kwargs.get('transient')!r}"
     )
-    # redirect_stderr must stay False: redirecting stderr installs a FileProxy
-    # that re-imports rich inside the Temporal workflow-sandbox thread,
-    # triggering a circular ImportError that fails every workflow task.
     assert live_kwargs.get("redirect_stderr") is False, (
         "redirect_stderr must stay False (Temporal workflow-sandbox circular-import guard); "
         f"got redirect_stderr={live_kwargs.get('redirect_stderr')!r}"

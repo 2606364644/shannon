@@ -33,23 +33,14 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         # -> rich_cast re-imports rich *inside the sandbox thread*, hitting the sandbox
         # importer and throwing a circular ImportError that fails every workflow task.
         # Keep stderr real so worker logging never re-enters rich / the sandbox.
-        # Alternate screen + full redraw: Rich repaints the whole screen each
-        # refresh from an absolute cursor origin instead of relative erase
-        # (cursor-up + per-line erase keyed on the previous frame's height).
-        # Relative erase can desync when this region shares the console with
-        # other writes and frame-height changes, leaving stale "ghost" footer
-        # frames that also fail to re-flow on resize. Full redraw has no
-        # line-count to drift, so it eliminates ghosting and re-flows on resize
-        # (Rich re-measures Console.size every refresh).
-        # redirect_stdout stays True (its default): it captures bare print()/
-        # sys.stdout writes from non-Rich code into the live region. The
-        # PHASE/STEP/AGENT console.print lines are already live-integrated via
-        # Rich's render hook regardless of this flag. redirect_stderr stays
-        # False: that is the documented guard against the Temporal workflow-
-        # sandbox circular-import failure.
-        live = Live(dashboard, console=console, screen=True, transient=False,
+        # screen=True (alt screen) was tried to kill ghost frames but it wipes
+        # the scrolling log region during the scan (only the footer is visible),
+        # which is worse than the original ghosting. Reverted to transient: log
+        # lines (PHASE/STEP/AGENT) scroll above the footer and stay visible while
+        # the footer animates in place.
+        live = Live(dashboard, console=console, transient=True,
                     refresh_per_second=default_refresh_hz(),
-                    redirect_stdout=True, redirect_stderr=False)
+                    redirect_stderr=False)
         try:
             with live:
                 yield session
