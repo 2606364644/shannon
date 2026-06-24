@@ -12,6 +12,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MCP_READ_TIMEOUT = 30
+# Grace period after SIGTERM before escalating to SIGKILL when stopping the
+# MCP subprocess. See GitNexusMCPClient.stop().
+MCP_STOP_TIMEOUT = 5
 
 
 class GitNexusMCPClient:
@@ -59,10 +62,23 @@ class GitNexusMCPClient:
         logger.info("GitNexus MCP client started")
 
     async def stop(self) -> None:
-        """Terminate the MCP subprocess."""
+        """Terminate the MCP subprocess, escalating to SIGKILL if it ignores SIGTERM.
+
+        A bare ``await self._process.wait()`` blocks forever when the subprocess
+        doesn't exit on SIGTERM (e.g. wedged mid-query); in production that only
+        gets relieved by the activity's start_to_close_timeout, surfacing as a
+        CancelledError long after the real failure. Bound the wait and force-kill.
+        """
         if self._process:
             self._process.terminate()
-            await self._process.wait()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=MCP_STOP_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "GitNexus MCP subprocess ignored SIGTERM, escalating to SIGKILL"
+                )
+                self._process.kill()
+                await self._process.wait()
             self._process = None
             logger.info("GitNexus MCP client stopped")
 

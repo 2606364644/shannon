@@ -67,11 +67,40 @@ class TestGitNexusMCPClient:
         await client.stop()
         mock_proc.terminate.assert_called_once()
         mock_proc.wait.assert_called_once()
+        mock_proc.kill.assert_not_called()  # 干净退出不应升级到 SIGKILL
 
     @pytest.mark.asyncio
     async def test_stop_noop_when_no_process(self, tmp_path):
         client = GitNexusMCPClient(tmp_path)
         await client.stop()  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_stop_kills_unresponsive_subprocess(self, tmp_path):
+        """子进程不响应 SIGTERM(僵死)时,stop() 必须 SIGKILL 它并在有限时间内返回,
+        不能永久阻塞 —— 否则 wait() 永不返回,会把整个 activity 拖到
+        start_to_close_timeout 才失败(生产里表现为 10 分钟后 CancelledError)。"""
+        client = GitNexusMCPClient(tmp_path)
+        killed = asyncio.Event()
+
+        zombie = MagicMock()
+        zombie.terminate = MagicMock()
+        zombie.kill = MagicMock(side_effect=lambda: killed.set())
+
+        async def _wait():
+            # SIGTERM 后仍僵死;直到被 SIGKILL(killed 置位)才退出
+            if not killed.is_set():
+                await asyncio.Event().wait()
+            return 0
+        zombie.wait = _wait
+        client._process = zombie
+
+        with patch("shannon_core.code_index.gitnexus_mcp.MCP_STOP_TIMEOUT", 0.05):
+            # stop 必须在 2s 内自拔返回,不能永久阻塞
+            await asyncio.wait_for(client.stop(), timeout=2)
+
+        zombie.terminate.assert_called_once()   # 先尝试 SIGTERM
+        zombie.kill.assert_called_once()        # SIGTERM 无效 → 升级 SIGKILL
+        assert client._process is None
 
     @pytest.mark.asyncio
     async def test_send_request_increments_id(self, tmp_path):
