@@ -86,12 +86,10 @@ async def build_code_index_with_gitnexus(
         from shannon_core.code_index.gitnexus_engine import GitNexusEngine
         engine = GitNexusEngine(repo)
         if not engine.is_available():
-            logger.warning(
-                "GitNexus CLI not installed. Falling back to minimal AST-only mode. "
-                "Install with: npm install -g gitnexus"
-            )
-            return await _build_code_index_fallback(
-                str(repo), mcp_client=mcp_client, llm_client=llm_client,
+            raise PentestError(
+                "GitNexus CLI not installed but is required for code indexing. "
+                "Install with: npm install -g gitnexus",
+                category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
             )
         index_result = engine.ensure_indexed()
         if not index_result.success:
