@@ -280,4 +280,20 @@ export class AuditSession {
     await this.ensureInitialized();
     await this.workflowLogger.logResumeHeader(resumeInfo);
   }
+
+  /**
+   * Mark a non-agent phase (findings-rendering, report-assembly, translation) as completed.
+   * Persisted to session.json so resume runs can skip it.
+   */
+  async markNonAgentPhaseComplete(name: string): Promise<void> {
+    await this.ensureInitialized();
+
+    const unlock = await sessionMutex.lock(this.sessionId);
+    try {
+      await this.metricsTracker.reload();
+      await this.metricsTracker.markNonAgentPhase(name);
+    } finally {
+      unlock();
+    }
+  }
 }

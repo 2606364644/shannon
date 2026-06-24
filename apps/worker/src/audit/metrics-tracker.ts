@@ -68,6 +68,7 @@ interface SessionData {
     total_cost_usd: number;
     phases: Record<string, PhaseMetrics>;
     agents: Record<string, AgentAuditMetrics>;
+    completedNonAgentPhases: string[];
   };
 }
 
@@ -128,6 +129,7 @@ export class MetricsTracker {
         total_cost_usd: 0,
         phases: {}, // Phase-level aggregations
         agents: {}, // Agent-level metrics
+        completedNonAgentPhases: [], // Non-agent phases (findings-rendering, report-assembly, translation)
       },
     };
 
@@ -287,6 +289,33 @@ export class MetricsTracker {
     }
 
     this.data.session.resumeAttempts.push(resumeAttempt);
+
+    await this.save();
+  }
+
+  /**
+   * Mark a non-agent phase (findings-rendering, report-assembly, translation) as completed.
+   * Idempotent — duplicate marks are ignored.
+   */
+  async markNonAgentPhase(name: string): Promise<void> {
+    if (!this.data) {
+      throw new PentestError(
+        'MetricsTracker not initialized',
+        'validation',
+        false,
+        {},
+        ErrorCode.AGENT_EXECUTION_FAILED,
+      );
+    }
+
+    // Backfill field missing from older session.json (reload() does not initialize it)
+    if (!this.data.metrics.completedNonAgentPhases) {
+      this.data.metrics.completedNonAgentPhases = [];
+    }
+
+    if (!this.data.metrics.completedNonAgentPhases.includes(name)) {
+      this.data.metrics.completedNonAgentPhases.push(name);
+    }
 
     await this.save();
   }
