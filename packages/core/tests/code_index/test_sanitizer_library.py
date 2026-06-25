@@ -63,3 +63,24 @@ def test_annotate_sanitizers_finds_defense_on_step_transformation():
 def test_annotate_sanitizers_empty_when_no_defense():
     steps = [_step("concat"), _step("format")]
     assert annotate_sanitizers(steps, language="python") == []
+
+
+def test_subprocess_shell_false_list_args_annotated_as_array():
+    lib = SanitizerLibrary()
+    hit = lib.match(
+        language="python", callee="run", receiver_text="subprocess",
+        arg_expr='["ls", "-la"], shell=False',
+    )
+    assert hit is not None
+    assert hit.defense_type == "subprocess_array"
+    assert hit.applies_to == "cmd_argument"
+
+
+def test_subprocess_shell_true_no_array_defense():
+    lib = SanitizerLibrary()
+    hit = lib.match(
+        language="python", callee="run", receiver_text="subprocess",
+        arg_expr='"ls " + x, shell=True',
+    )
+    # shell=True 不标 array defense（保持判 vulnerable）
+    assert hit is None or hit.defense_type != "subprocess_array"

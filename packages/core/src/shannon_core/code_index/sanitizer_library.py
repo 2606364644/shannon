@@ -67,9 +67,13 @@ DEFAULT_SANITIZER_RULES: tuple[SanitizerRule, ...] = (
     # --- Command execution ---
     SanitizerRule("py-shlex-quote", ("python",), "quote", re.compile(r"^(shlex)$"),
                   None, "shlex_quote", "cmd_argument"),
-    # subprocess with list args + shell=False is detected via AST in sink_detector;
-    # here we only annotate when the transformation text carries shell=False hint.
-    # (No callee rule; handled in annotate_sanitizers via transformation text.)
+    # spec 改动 1.2 C：subprocess 数组参数 + shell=False → subprocess_array defense
+    # (best-effort arg-level text matching, same mechanism as SQL placeholder detection;
+    #  the transformation-text path in _TRANSFORMATION_FRAGMENTS still covers inline hints.)
+    SanitizerRule("py-subprocess-shell-false-array", ("python",), "run", _SUBPROCESS,
+                  re.compile(r"shell\s*=\s*False"), "subprocess_array", "cmd_argument"),
+    SanitizerRule("py-subprocess-popen-shell-false-array", ("python",), "Popen", _SUBPROCESS,
+                  re.compile(r"shell\s*=\s*False"), "subprocess_array", "cmd_argument"),
 
     # --- Path ---
     SanitizerRule("py-path-resolve", ("python",), "resolve", _PATHLIB,
