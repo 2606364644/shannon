@@ -240,6 +240,16 @@ class TestIsLiteralExpression:
         assert _is_literal_expression("request.body") is False
         assert _is_literal_expression("data.x") is False
 
+    def test_concatenation_not_literal(self):
+        # I-1 修复:首尾恰好同引号但含拼接操作符 → 不是字面量
+        # (防止 GitNexus 轨把拼接 sink 误过滤致漏报)
+        assert _is_literal_expression('"SELECT " + col + " FROM"') is False
+        assert _is_literal_expression("'a','b'") is False
+        assert _is_literal_expression("'x' + user") is False
+        # 纯字面量仍判 True(回归保护)
+        assert _is_literal_expression("'SELECT * FROM users'") is True
+        assert _is_literal_expression('"hello"') is True
+
 
 def _sink_hint(
     func_id: str, expression: str, is_hint: bool, sink_id: str = "sink_1",

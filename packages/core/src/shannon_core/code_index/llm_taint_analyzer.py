@@ -236,8 +236,10 @@ def _is_literal_expression(expr: str) -> bool:
     e = expr.strip()
     if not e:
         return True
-    # 引号字符串
-    if len(e) >= 2 and e[0] in "\"'" and e[-1] == e[0]:
+    # 引号字符串 — 排除拼接表达式(首尾恰好同引号字符,如 "X" + col + "Y"
+    # 或变参槽 'a','b');含拼接操作符的不是单个字面量。
+    if (len(e) >= 2 and e[0] in "\"'" and e[-1] == e[0]
+            and "+" not in e and "," not in e):
         return True
     # 数字(整数 / 浮点,含正负号)
     cleaned = e.lstrip("+-")
