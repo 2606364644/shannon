@@ -249,6 +249,43 @@ def _is_literal_expression(expr: str) -> bool:
     return e in {"true", "false", "null", "None", "True", "False"}
 
 
+# 置信度分层(spec §3.2):直达参数→sink 用 AST 浅判断(is_entry_hint)确认;
+# 间接/未跟踪流给低置信,留给 LLM 或 LLM vuln 轨复核。
+_DIRECT_HIT_CONFIDENCE = 0.9
+_INDIRECT_HIT_CONFIDENCE = 0.5
+
+
+def _deterministic_intra_fallback(
+    block: FuncBlock,
+    sinks_in_func: list[SinkCallSite],
+) -> IntraResult:
+    """LLM 不可用时的确定性 intra 判断(spec 改动: 立场 B)。
+
+    用 SinkCallSite.dangerous_slots[].is_entry_hint(AST 浅判断)给 sink 命中分层,
+    并过滤纯字面量 sink:
+      - 任一 slot is_entry_hint=True  → hits[sink.id] = 0.9(直达)
+      - 否则若全部 slot 为字面量      → 不进 hits(过滤常量 sink,降噪)
+      - 否则(变量引用,非直达)       → hits[sink.id] = 0.5(间接,需复核)
+
+    tainted_params 保守保留全部参数 —— 保 propagate_across_chains 的 chain seed
+    与跨函数传播,不损失召回(双轨铁律:GitNexus 轨确定性补召回)。
+    """
+    hits: dict[str, float] = {}
+    for sink in sinks_in_func:
+        slots = sink.dangerous_slots
+        if any(slot.is_entry_hint for slot in slots):
+            hits[sink.id] = _DIRECT_HIT_CONFIDENCE
+            continue
+        if slots and all(_is_literal_expression(slot.expression) for slot in slots):
+            continue  # 纯字面量 sink: 明确非注入源,过滤
+        hits[sink.id] = _INDIRECT_HIT_CONFIDENCE  # 间接 / 未跟踪
+    return IntraResult(
+        tainted_params=set(block.parameters),
+        hits=hits,
+        local_steps=[],
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5. Main entry point
 # ---------------------------------------------------------------------------

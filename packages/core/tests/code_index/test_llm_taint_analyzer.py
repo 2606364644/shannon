@@ -13,6 +13,7 @@ from shannon_core.code_index.parameter_models import (
     TaintPath,
 )
 from shannon_core.code_index.llm_taint_analyzer import (
+    _deterministic_intra_fallback,
     _is_literal_expression,
     analyze_taint_llm,
     build_taint_prompt,
@@ -237,3 +238,64 @@ class TestIsLiteralExpression:
         assert _is_literal_expression("processed") is False
         assert _is_literal_expression("request.body") is False
         assert _is_literal_expression("data.x") is False
+
+
+def _sink_hint(
+    func_id: str, expression: str, is_hint: bool, sink_id: str = "sink_1",
+) -> SinkCallSite:
+    """构造带指定 dangerous_slot(is_entry_hint/expression)的 sink。"""
+    return SinkCallSite(
+        id=sink_id,
+        caller_id=func_id,
+        callee_name="cursor.execute",
+        callee_receiver="cursor",
+        category=SinkCategory.SQL,
+        sink_subtype="execute",
+        file_path="app.py",
+        line=4,
+        column=0,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.SQL_VALUE,
+            expression=expression, is_entry_hint=is_hint,
+        )],
+        rule_id="sql-execute",
+        needs_review=False,
+    )
+
+
+class TestDeterministicIntraFallback:
+    def test_direct_param_sink_high_confidence(self):
+        block = _block(params=["user_input"])
+        sink = _sink_hint(block.id, "user_input", is_hint=True)
+        result = _deterministic_intra_fallback(block, [sink])
+        assert result.hits["sink_1"] == 0.9
+
+    def test_request_object_sink_high_confidence(self):
+        block = _block(params=[])
+        sink = _sink_hint(block.id, "request.body", is_hint=True)
+        result = _deterministic_intra_fallback(block, [sink])
+        assert result.hits["sink_1"] == 0.9
+
+    def test_local_var_sink_low_confidence(self):
+        block = _block(params=["user_input"])
+        sink = _sink_hint(block.id, "processed", is_hint=False)
+        result = _deterministic_intra_fallback(block, [sink])
+        assert result.hits["sink_1"] == 0.5
+
+    def test_literal_sink_filtered_out(self):
+        block = _block(params=[])
+        sink = _sink_hint(block.id, "'SELECT * FROM users'", is_hint=False)
+        result = _deterministic_intra_fallback(block, [sink])
+        assert "sink_1" not in result.hits
+
+    def test_preserves_all_tainted_params(self):
+        block = _block(params=["user_input", "config", "limit"])
+        sink = _sink_hint(block.id, "user_input", is_hint=True)
+        result = _deterministic_intra_fallback(block, [sink])
+        assert result.tainted_params == {"user_input", "config", "limit"}
+
+    def test_empty_sinks_returns_empty_hits(self):
+        block = _block(params=["user_input"])
+        result = _deterministic_intra_fallback(block, [])
+        assert result.hits == {}
+        assert result.tainted_params == {"user_input"}
