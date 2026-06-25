@@ -137,9 +137,11 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
   **Negative Injection Vulnerability Analysis (pre-exploitation)**
 
   - **Goal:** Prove whether untrusted input can influence the **structure** of a backend command (SQL or Shell) or reach sensitive **slots** without the correct defense. No live exploitation in this phase.
-  - **1) Create a To Do for each Injection Source found in the Pre-Recon Deliverable
-		  - inside of .shannon/deliverables/pre_recon_deliverable.md under the section "7. Injection Sources (Command Injection and SQL Injection)" use the TodoWrite tool to create a task for each discovered Injection Source. 
-		  - Note: All sources are marked as Tainted until they Hit a Santiization that matches the sink context. normalizers (lowercasing, trimming, JSON parse, schema decode) — still **tainted**.
+  - **1) Build your injection source list from recon + your own sink grep**
+		  - Derive candidate input vectors from the Attack Surface section (Section 5) of `.shannon/deliverables/recon_deliverable.md` (URL params, POST body, headers, JSON fields, file-upload names).
+		  - You MUST also actively grep the whole repository for the sink checklist in step 3. Do NOT rely solely on any upstream target list — the recon and pre-recon deliverables are a starting point, not an exhaustive sink inventory, and sinks they never enumerated will be missed if you only analyze what they list.
+		  - Create a TodoWrite task for every input source AND every sink the grep surfaces.
+		  - Note: All sources are marked as Tainted until they hit a Sanitization that matches the sink context. Normalizers (lowercasing, trimming, JSON parse, schema decode) — still **tainted**.
     - **2) Trace Data Flow Paths from Source to Sink**
 		    - For each source, your goal is to identify every unique "Data Flow Path" to a database sink. A path is a distinct route the data takes through the code.
 		    - **Path Forking:** If a single source variable is used in a way that leads to multiple, different database queries (sinks), you must treat each route as a **separate and independent path for analysis**. For example, if `userInput` is passed to both `updateProfile()` and `auditLog()`, you will analyze the "userInput → updateProfile → DB_UPDATE" path and the "userInput → auditLog → DB_INSERT" path as two distinct units.
@@ -151,7 +153,15 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 		      - **B. The ordered list of sanitizers on that path:** Record every sanitization function encountered *on this specific path*, including its name, file:line, and type (e.g., parameter binding, type casting).
 		      - **C. All concatenations on that path:** Note every string concatenation or format operation involving the tainted data. Crucially, flag any concatenation that occurs *after* a sanitization step on this path.
   - **3) Detect sinks and label slot types**
-		- **SQLi:** DB calls, raw SQL, string-built queries | **Command:** `exec`, `system`, `subprocess`, shell invocations | **File:** `include`, `require`, `fopen`, `readFile` | **SSTI:** template `render`/`compile` with user content | **Deserialize:** `pickle.loads`, `unserialize`, `readObject`, `yaml.load`
+		- **SQLi — check ALL of these per language (most-missed class):**
+			- Go: `db.Raw(`, `gorm.Expr(`, `Where(fmt.Sprintf(`, `db.Exec(` + any concatenation, sharded `tableName` / identifier interpolation
+			- Node.js: `sequelize.query` / `.literal`, `knex.raw`, typeorm `.query`, mongoose string-form `where()`
+			- Python: `cursor.execute(f"...")` / `%` formatting / `.raw(`, SQLAlchemy `text()`
+			- Java: MyBatis `${}` (vs safe `#{}`), JPA `createNativeQuery`, JDBC `Statement` + concatenation
+			- PHP: `query()` + concatenation, Laravel `whereRaw` / `DB::raw`
+			- **Dynamic identifiers** (slot=ident — parameter binds do NOT protect these): table name, column name, `ORDER BY`, `GROUP BY` interpolation. Trace each identifier to its origin; if it is not whitelist-backed, it is vulnerable.
+		- **Command — check ALL of these, not only the obvious ones:** `exec` / `system` / `subprocess` / shell invocations, AND `sh -c`, `shell=True`, library-wrapped shell calls, SSH/remote-shell helpers, job-scheduler or template-driven command construction with user strings.
+		- **File:** `include`, `require`, `fopen`, `readFile` | **SSTI:** template `render`/`compile` with user content | **Deserialize:** `pickle.loads`, `unserialize`, `readObject`, `yaml.load`
 		- **Slot labels:** SQL-val/like/num/enum/ident | CMD-argument/part-of-string | FILE-path/include | TEMPLATE-expression | DESERIALIZE-object | PATH-component
 - **4) Match sanitization to sink context**
 		- **SQL:** Binds for val/like/num; whitelist for enum/ident. Mismatch: concat, regex, wrong slot defense
@@ -163,11 +173,12 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
     - **Vulnerable** if any tainted input reaches a slot with no defense or the wrong one.
     - Include a short rationale (e.g., "context mismatch: regex escape on ORDER BY keyword slot").
     - If concat occurred **after** sanitization, treat that sanitization as **non-effective** for this path.
+    - **Cross-service / second-order sinks:** A user-controlled SQL or command fragment that THIS service forwards to a downstream service for execution (e.g. an RPC field literally named `sql_condition` or `olap_sql`, a forwarded query string, a remote-shell command argument) is a **vulnerable** sink, NOT safe. Verdict `vulnerable`, set `externally_exploitable=false`, and record the downstream service in `notes`. The injection executes outside this binary, but it is still a real injection — do not mark it safe merely because there is no local driver/shell call.
   - **6) Append to findings list (consistent fields)**
-	  -  **If the verdict is `vulnerable`:** Include the finding in your exploitation queue. Set `externally_exploitable` to `true` ONLY if exploitable via public internet without internal access. Ensure all fields in the `exploitation_queue_format`, including a minimal `witness_payload`, are populated.
+	  -  **If the verdict is `vulnerable`:** Include the finding in your exploitation queue. Set `externally_exploitable` to `true` if exploitable via public internet without internal access; set it to `false` for cross-service / second-order / internal-only findings. BOTH enter the queue — `externally_exploitable` is a reachability tag, not an admission gate. Ensure all fields in the `exploitation_queue_format`, including a minimal `witness_payload`, are populated.
     - **If the verdict is `safe`:** DO NOT add the finding to the exploitation queue. These secure vectors must be documented later in the "Vectors Analyzed and Confirmed Secure" section of your final Markdown report (`.shannon/deliverables/injection_analysis_deliverable.md`).
     - **If a single source is found to be vulnerable via multiple, distinct paths to different sinks, you must create a separate vulnerability entry in the exploitation queue for each unique vulnerable path.**
-    - **QUEUE INCLUSION CRITERIA:** ONLY include vulnerabilities where `externally_exploitable = true`. Exclude any vulnerability requiring internal network access, VPN, or direct server access.
+    - **QUEUE INCLUSION CRITERIA:** Include EVERY finding with verdict `vulnerable`, regardless of `externally_exploitable`. Findings with `externally_exploitable=false` (cross-service, second-order, internal-only) are surfaced in the final report via the findings renderer and are triaged separately by the exploit agent — they must NOT be dropped.
 
     - **fields:**
 		    - `source` (param & file:line)
