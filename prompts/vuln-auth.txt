@@ -67,8 +67,6 @@ Before beginning your 9-class methodology analysis:
 **The deterministic track also produces `auth_gitnexus_queue.json`** (a parallel queue of these same items as AuthVulnerability candidates). Your LLM-track queue and that GitNexus-track queue are merged downstream by verdict OR (any vulnerable → vulnerable). So your job is to give the accurate LLM-track verdict for each item you can reach; the merger handles the combination.
 </auth_config_context>
 
-@include(shared/_static-dataflow-hints.txt)
-
 @include(shared/_cross-route-enumeration.txt)
 
 <system_architecture>

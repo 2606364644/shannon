@@ -88,8 +88,6 @@ When Recon reports an endpoint with `Framework Origin: finale-rest auto-generate
   ```
 </framework_endpoint_guidance>
 
-@include(shared/_static-dataflow-hints.txt)
-
 @include(shared/_cross-route-enumeration.txt)
 
 <system_architecture>
