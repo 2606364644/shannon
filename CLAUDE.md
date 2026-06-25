@@ -12,7 +12,7 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 - **LLM 轨**：`vuln-*.txt` agent，**纯 LLM 分析**——读 recon + 自己 grep + 自己追链，**保持与原始项目 `/root/shannon` 一致**（TS 无确定性层，100% 自给自足）。→ `<vuln>_exploitation_queue.json`（LLM 产物）。
 
 **铁律（易踩，反复强调）：**
-- **不要把确定性层产物（尤其 `static_dataflow_hints.md`）喂进 LLM 轨 prompt。** LLM 轨靠自身方法论 + 双轨 OR 由 GitNexus 轨独立补召回；把确定性结果喂 LLM 轨会让它依赖确定性层（而确定性层 / GitNexus 经常超时 / 不可用），破坏独立性。`prompts/shared/_static-dataflow-hints.txt` 的 `@include` 是历史遗留耦合，新工作不要再引入，且应逐步移除。
+- **不要把确定性层产物喂进 LLM 轨 prompt。** LLM 轨靠自身方法论 + 双轨 OR 由 GitNexus 轨独立补召回；把确定性结果喂 LLM 轨会让它依赖确定性层（而确定性层 / GitNexus 经常超时 / 不可用），破坏独立性。**确定性→LLM 轨的 hints 桥梁（原 `static_dataflow_hints.md` 产物 + `prompts/shared/_static-dataflow-hints.txt` partial + `@include`）已彻底拆除——勿重建**（2026-06-26 injection-recall follow-up）。任何新 prompt 不得 `@include` 确定性产物；`packages/core/tests/prompts/test_static_dataflow_hints_decoupling.py` 锁定此不变量。
 - **改 LLM 轨 prompt** 时，源只从 recon + grep 派生（TS 式），不引确定性 hints。
 - **扩 sink 覆盖** 分两条路：LLM 轨改 prompt 清单（`vuln-*.txt`），GitNexus 轨改代码规则（`packages/core/src/shannon_core/code_index/sink_detector.py`）。
 - **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**。
@@ -31,11 +31,11 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 
 **关键约定：**
 - **两个引擎在代码流程上是一样的**——shannon-py 经统一抽象调用（`packages/core/src/shannon_core/agents/` 的 `BaseProvider` + `run_claude_prompt`），业务侧（whitebox / blackbox / core）不感知用哪个引擎。
-- **差异只在核心智能体能力**：claude-agent-sdk（CLI）原生全套工具，含**子代理委派**（CLI v2.1.x 该 tool 名 `Agent`，原 `Task`）；openai-agents 经 `tools_openai/build_tools()` 暴露工具集。
+- **差异只在核心智能体能力**：claude-agent-sdk（CLI）原生全套工具，含**子代理委派**（CLI v2.1.x 该 tool 名 `Agent`，原 `Task`）；openai-agents 经 `tools_openai/build_tools()` 暴露工具集（含 `task` 子代理委派，Task 5 已对齐 CLI）。
 - **引擎的智能体能力是 agent 方维护的，当前项目只是使用**——`packages/core/src/shannon_core/agents/` 是项目的 agent 集成层（对接两套 SDK、暴露统一工具/能力），上游 SDK（claude-agent-sdk / openai-agents）提供底层能力；业务侧只 `run_claude_prompt(...)`，不直接碰 SDK。
-- **能力对齐**（让两引擎都能跑 vuln prompt 的 "delegate to Task Agent"）是 agent 集成层的职责——见 `docs/superpowers/plans/2026-06-25-injection-recall-port.md` Task 5。
+- **能力对齐已落实**（Task 5，`feat/fork-py`）：openai 引擎经 `tools_openai/task.py` 的 `task` function_tool + provider 注入 `_make_subagent_runner`，对齐 CLI 的 `Agent` 子代理委派——两引擎跑同一份 vuln prompt（**prompt 不改**），双引擎流程对齐。
 - **两个引擎都要支持、流程一致（可互换）**——不要"切到 glm-anthropic 了事"丢 openai 引擎，也不要让 openai 退化成单 agent 使两引擎行为分叉。
-- **实测（2026-06-25，`scripts/validate_glm_task_probe.py`，2/2 可复现）：GLM 在 claude-agent-sdk 能正确驱动 `Agent` 子代理委派**；glm-anthropic 不瘫、与原始 TS 一致，"LLM 轨跑不出结果" 仅限 openai-agents（工具集历史上无委派 tool）。改 agent/tool 行为后，用 `scripts/validate_*_task_probe.py` 类探针在对应引擎实测。
+- **实测**：GLM 在 claude-agent-sdk 能正确驱动 `Agent` 子代理委派（`scripts/validate_glm_task_probe.py`，2/2 可复现）；glm-anthropic 不瘫、与原始 TS 一致。openai 引擎已补 `task` 工具（Task 5），**glm-openai 侧待 `scripts/validate_openai_task_probe.py` 真机验证（人工冒烟待跑）**。改 agent/tool 行为后，用 `scripts/validate_*_task_probe.py` 类探针在对应引擎实测。
 
 ---
 
