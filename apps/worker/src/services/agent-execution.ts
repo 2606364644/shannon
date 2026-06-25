@@ -56,6 +56,7 @@ export interface AgentExecutionInput {
   promptDir?: string | undefined;
   providerConfig?: import('../types/config.js').ProviderConfig | undefined;
   promptOverride?: string | undefined;
+  mcpServers?: Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>;
 }
 
 interface FailAgentOpts {
@@ -110,6 +111,7 @@ export class AgentExecutionService {
       apiKey,
       promptDir,
       providerConfig,
+      mcpServers,
     } = input;
 
     // 1. Load config (pre-parsed configData → raw YAML → file path)
@@ -182,6 +184,8 @@ export class AgentExecutionService {
       apiKey,
       path.relative(repoPath, deliverablesPath),
       providerConfig,
+      undefined, // silent — only the translation provider suppresses output
+      mcpServers,
     );
 
     // 6. Spending cap check - defense-in-depth
