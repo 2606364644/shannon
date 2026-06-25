@@ -224,6 +224,32 @@ def _intra_result_from_llm(
 
 
 # ---------------------------------------------------------------------------
+# 4b. Deterministic intra fallback helpers (spec 改动: 立场 B)
+# ---------------------------------------------------------------------------
+
+def _is_literal_expression(expr: str) -> bool:
+    """保守判断 expression 是否为字面量常量(明确非注入源)。
+
+    仅认明确字面量形态(引号字符串 / 数字 / 布尔 / null / 空);任何变量、
+    属性访问、表达式返回 False(留给 is_entry_hint / LLM 判断)。
+    """
+    e = expr.strip()
+    if not e:
+        return True
+    # 引号字符串
+    if len(e) >= 2 and e[0] in "\"'" and e[-1] == e[0]:
+        return True
+    # 数字(整数 / 浮点,含正负号)
+    cleaned = e.lstrip("+-")
+    if cleaned.isdigit():
+        return True
+    if cleaned.count(".") == 1 and cleaned.replace(".", "", 1).isdigit():
+        return True
+    # 布尔 / 空常量
+    return e in {"true", "false", "null", "None", "True", "False"}
+
+
+# ---------------------------------------------------------------------------
 # 5. Main entry point
 # ---------------------------------------------------------------------------
 

@@ -13,6 +13,7 @@ from shannon_core.code_index.parameter_models import (
     TaintPath,
 )
 from shannon_core.code_index.llm_taint_analyzer import (
+    _is_literal_expression,
     analyze_taint_llm,
     build_taint_prompt,
     parse_llm_response,
@@ -207,3 +208,32 @@ class TestAnalyzeTaintLLM:
         )
         assert "user_input" in result.tainted_params
         assert "sink_1" in result.hits  # conservative: sink marked reachable
+
+
+class TestIsLiteralExpression:
+    def test_quoted_string(self):
+        assert _is_literal_expression("'SELECT * FROM users'") is True
+        assert _is_literal_expression('"hello"') is True
+
+    def test_integer(self):
+        assert _is_literal_expression("42") is True
+        assert _is_literal_expression("-7") is True
+        assert _is_literal_expression("+3") is True
+
+    def test_float(self):
+        assert _is_literal_expression("3.14") is True
+        assert _is_literal_expression("-0.5") is True
+
+    def test_boolean_and_null(self):
+        for lit in ("true", "false", "null", "None", "True", "False"):
+            assert _is_literal_expression(lit) is True
+
+    def test_empty(self):
+        assert _is_literal_expression("") is True
+        assert _is_literal_expression("   ") is True
+
+    def test_variable_is_not_literal(self):
+        assert _is_literal_expression("user_input") is False
+        assert _is_literal_expression("processed") is False
+        assert _is_literal_expression("request.body") is False
+        assert _is_literal_expression("data.x") is False
