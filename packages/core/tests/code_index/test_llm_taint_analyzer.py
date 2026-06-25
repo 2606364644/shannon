@@ -198,17 +198,18 @@ class TestAnalyzeTaintLLM:
         assert len(result.tainted_params) == 0
 
     @pytest.mark.asyncio
-    async def test_llm_failure_fallback_marks_all_sinks_as_hits(self):
-        """P1: conservative fallback marks every sink in the function as a hit
-        (over-approximate — report rather than miss) so flows can be emitted."""
+    async def test_llm_failure_fallback_tiers_sink_hits(self):
+        """spec 改动: LLM 失败时走确定性 fallback。_sink() 默认
+        expression="query" / is_entry_hint=False → 非字面量变量 → hits @ 0.5
+        (不再是旧的 1.0 全标);tainted_params 保守全保。"""
         block = _block(params=["user_input"])
         sink = _sink(block.id, sink_id="sink_1")
         llm_client = FakeLLMClient(response=None)  # raises
         result = await analyze_taint_llm(
             block=block, sinks_in_func=[sink], llm_client=llm_client,
         )
-        assert "user_input" in result.tainted_params
-        assert "sink_1" in result.hits  # conservative: sink marked reachable
+        assert result.tainted_params == {"user_input"}      # 全参数保守
+        assert result.hits["sink_1"] == 0.5                 # 非字面量变量 → 0.5
 
 
 class TestIsLiteralExpression:
