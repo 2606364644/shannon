@@ -4,18 +4,18 @@
 
 ---
 
-## 1. 双轨消费模型（最重要架构不变量）★
+## 1. 双轨概念（最重要架构不变量）★
 
 shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自独立、只在合并器（verdict OR）交汇**：
 
-- **GitNexus 轨**：确定性层产物（`parameter_graph.json` / `SinkCallSite`）→ `vuln_chain_builders/*_builder.py` 提候选链 → `chain_verdict.py` 跑**轻量 LLM 判定**（`run_claude_prompt` 单次结构化输出，**非 agent**）→ `<vuln>_gitnexus_queue.json`。**这条轨的 LLM 分析 GitNexus 结果。**
-- **LLM 轨**：`vuln-*.txt` agent，**纯 LLM 独立分析**——读 recon + 自己 grep + 自己追链，参照原始 TS 项目 `/root/shannon`（TS 无确定性层，100% 自给自足）。→ `<vuln>_exploitation_queue.json`（LLM 产物）。
+- **GitNexus 轨**：确定性层产物（`parameter_graph.json` / `SinkCallSite`）→ `vuln_chain_builders/*_builder.py` 提候选链 → `chain_verdict.py` 跑**轻量 LLM 判定**（`run_claude_prompt` 单次结构化输出，**非 agent**）→ `<vuln>_gitnexus_queue.json`。**这条轨的产物由 LLM 分析。**
+- **LLM 轨**：`vuln-*.txt` agent，**纯 LLM 分析**——读 recon + 自己 grep + 自己追链，**保持与原始项目 `/root/shannon` 一致**（TS 无确定性层，100% 自给自足）。→ `<vuln>_exploitation_queue.json`（LLM 产物）。
 
 **铁律（易踩，反复强调）：**
 - **不要把确定性层产物（尤其 `static_dataflow_hints.md`）喂进 LLM 轨 prompt。** LLM 轨靠自身方法论 + 双轨 OR 由 GitNexus 轨独立补召回；把确定性结果喂 LLM 轨会让它依赖确定性层（而确定性层 / GitNexus 经常超时 / 不可用），破坏独立性。`prompts/shared/_static-dataflow-hints.txt` 的 `@include` 是历史遗留耦合，新工作不要再引入，且应逐步移除。
 - **改 LLM 轨 prompt** 时，源只从 recon + grep 派生（TS 式），不引确定性 hints。
 - **扩 sink 覆盖** 分两条路：LLM 轨改 prompt 清单（`vuln-*.txt`），GitNexus 轨改代码规则（`packages/core/src/shannon_core/code_index/sink_detector.py`）。
-- **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**（见 `dual_track_merger.py` 解耦约束）。
+- **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**。
 
 **auth / authz 特殊：** 它们不是 source→sink taint（属 missing-control），确定性 sink 规则不覆盖。但 authz 有自己的"GitNexus 风格"轨（`run_authz_gitnexus_judge`：IDOR 候选 + LLM 判定），auth 有 config 扫描器（`auth_config_scan.json`）兜底。所以"扫不出"时先分清是哪条轨、哪个 vuln 类。
 
@@ -23,13 +23,19 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 
 ---
 
-## 2. 双引擎约束（glm-openai 与 glm-anthropic）
+## 2. 双引擎（claude-agent-sdk / openai-agents）
 
-- **两个引擎都要支持，且流程设计要一致（可互换）。** 不要"切到 glm-anthropic 了事"丢 openai 引擎，也不要让 openai 退化成单 agent 使两引擎行为分叉。
-- **原始 TS** 单引擎跑 Claude Code CLI，子代理委派 tool 原生在；**CLI v2.1.x 该 tool 改名 `Task` → `Agent`**。vuln prompt 的 "delegate to Task Agent" 在 glm-anthropic 下映射到 `Agent` tool。
-- **实测（2026-06-25，`scripts/validate_glm_task_probe.py`，2/2 可复现）：GLM 在 glm-anthropic 能正确驱动 `Agent` 子代理委派**（构造 description+subagent_type+prompt，子代理读码，产出正确判定）。**glm-anthropic 不瘫，与原始 TS 一致**；"LLM 轨跑不出结果" 仅限 glm-openai（`tools_openai/build_tools()` 历史上无 Task/Agent tool）。
-- **解法 = approach ①：给 openai 引擎补 Task/Agent tool**（`packages/core/src/shannon_core/agents/tools_openai/task.py` + 接入 `build_tools()`），**prompt 不改**（两引擎共用 TS 原样 Task-delegation prompt）。实现见 `docs/superpowers/plans/2026-06-25-injection-recall-port.md` Task 5。
-- 两个引擎都靠 **GLM 驱动 tool-use**；改 agent/tool 行为后，用 `scripts/validate_*_task_probe.py` 类探针在对应引擎实测。
+项目拥有**双引擎**，经 `SHANNON_AI_PROVIDER` 切换：
+- **claude-agent-sdk**（profile `glm-anthropic`）：底层 Claude Code CLI。
+- **openai-agents**（profile `glm-openai`）：openai 兼容 Chat Completions。
+
+**关键约定：**
+- **两个引擎在代码流程上是一样的**——shannon-py 经统一抽象调用（`packages/core/src/shannon_core/agents/` 的 `BaseProvider` + `run_claude_prompt`），业务侧（whitebox / blackbox / core）不感知用哪个引擎。
+- **差异只在核心智能体能力**：claude-agent-sdk（CLI）原生全套工具，含**子代理委派**（CLI v2.1.x 该 tool 名 `Agent`，原 `Task`）；openai-agents 经 `tools_openai/build_tools()` 暴露工具集。
+- **引擎的智能体能力是 agent 方维护的，当前项目只是使用**——`packages/core/src/shannon_core/agents/` 是项目的 agent 集成层（对接两套 SDK、暴露统一工具/能力），上游 SDK（claude-agent-sdk / openai-agents）提供底层能力；业务侧只 `run_claude_prompt(...)`，不直接碰 SDK。
+- **能力对齐**（让两引擎都能跑 vuln prompt 的 "delegate to Task Agent"）是 agent 集成层的职责——见 `docs/superpowers/plans/2026-06-25-injection-recall-port.md` Task 5。
+- **两个引擎都要支持、流程一致（可互换）**——不要"切到 glm-anthropic 了事"丢 openai 引擎，也不要让 openai 退化成单 agent 使两引擎行为分叉。
+- **实测（2026-06-25，`scripts/validate_glm_task_probe.py`，2/2 可复现）：GLM 在 claude-agent-sdk 能正确驱动 `Agent` 子代理委派**；glm-anthropic 不瘫、与原始 TS 一致，"LLM 轨跑不出结果" 仅限 openai-agents（工具集历史上无委派 tool）。改 agent/tool 行为后，用 `scripts/validate_*_task_probe.py` 类探针在对应引擎实测。
 
 ---
 
