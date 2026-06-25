@@ -87,6 +87,34 @@ DEFAULT_RULES: tuple[SinkRule, ...] = (
     SinkRule("php-db-select-static", ("php",), "select", re.compile(r"^(DB)$"),
              SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
 
+    # --- ORM Raw / string-built SQL (spec 改动 1.2 A) ---
+    # Catches the highest-miss class: ORM `.raw(...)` / `.text(...)` /
+    # `.createNativeQuery(...)` calls where the SQL argument is built via
+    # string concatenation. These bypass the classic cursor.execute rules
+    # above. bare-callee variants (no stable receiver) are flagged
+    # needs_review_default=True so Spec C confirms intent.
+    SinkRule("py-django-raw", ("python",), "raw", re.compile(r"^(objects)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+    SinkRule("py-sqlalchemy-text", ("python",), "text", None,
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),),
+             needs_review_default=True),  # bare callee; receiver unknown
+    SinkRule("ts-knex-raw", ("typescript",), "raw", re.compile(r"^(knex)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+    SinkRule("ts-sequelize-query", ("typescript",), "query", re.compile(r"^(sequelize)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+    SinkRule("go-gorm-raw", ("go",), "Raw", re.compile(r"^(db|gorm|DB)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+    SinkRule("go-gorm-exec", ("go",), "Exec", re.compile(r"^(db|gorm|DB)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+    SinkRule("java-jpa-createnativequery", ("java",), "createNativeQuery", None,
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),),
+             needs_review_default=True),
+    SinkRule("php-laravel-whereraw", ("php",), "whereRaw", None,
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),),
+             needs_review_default=True),
+    SinkRule("php-db-raw", ("php",), "raw", re.compile(r"^(DB)$"),
+             SinkCategory.SQL, "sql_raw", ((0, SlotContext.SQL_VALUE),)),
+
     # --- Command execution ---
     SinkRule("py-os-system", ("python",), "system", _OS_LIKE,
              SinkCategory.COMMAND, "command_shell", ((0, SlotContext.CMD_ARGUMENT),)),

@@ -578,3 +578,79 @@ class TestDetectSinksCrossLanguage:
         sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
         rules = [s.rule_id for s in sites]
         assert "php-unserialize" in rules
+
+
+# ===== Task 1 (spec 改动 1.2 A + D): ORM Raw sink rules + whitelist guard =====
+
+class TestOrmRawRules:
+    """Spec 改动 1.2 A — 9 ORM Raw / string-built SQL sink rules."""
+
+    def test_orm_raw_rules_present(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        ids = {r.rule_id for r in DEFAULT_RULES}
+        for rid in ("py-django-raw", "py-sqlalchemy-text", "ts-knex-raw",
+                    "ts-sequelize-query", "go-gorm-raw", "go-gorm-exec",
+                    "java-jpa-createnativequery", "php-laravel-whereraw", "php-db-raw"):
+            assert rid in ids, f"missing ORM Raw rule {rid}"
+
+    def test_go_gorm_raw_detects_string_built_query(self):
+        # Inline Go source with a string-built db.Raw(...) call + real detect_sinks.
+        # Uses the same GoParser/parse_file/tempfile harness pattern as the
+        # existing test_go_exec_command_hit above.
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.go_parser import GoParser
+        import tempfile, pathlib
+        src = (
+            "package main\n"
+            "func h(name string) {\n"
+            '    db.Raw("SELECT * FROM u WHERE n = \'" + name + "\'")\n'
+            "}\n"
+        )
+        parser = GoParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.go"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        raw = [s for s in sites if s.rule_id == "go-gorm-raw"]
+        assert raw, "go-gorm-raw should fire on db.Raw(...) with concatenation"
+        assert raw[0].category == SinkCategory.SQL
+
+    def test_orm_raw_rule_fields(self):
+        """Spot-check field values for a couple of the new rules."""
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        def _rule(rule_id: str):
+            return next(r for r in DEFAULT_RULES if r.rule_id == rule_id)
+
+        # py-django-raw: receiver 'objects', sql_raw, SQL_VALUE slot 0
+        r = _rule("py-django-raw")
+        assert r.callee == "raw"
+        assert r.receiver_pattern.match("objects")
+        assert not r.receiver_pattern.match("User")
+        assert r.category == SinkCategory.SQL
+        assert r.sink_subtype == "sql_raw"
+        assert r.dangerous_slots == ((0, SlotContext.SQL_VALUE),)
+        assert r.needs_review_default is False
+
+        # py-sqlalchemy-text: bare callee, needs_review_default=True
+        r = _rule("py-sqlalchemy-text")
+        assert r.callee == "text"
+        assert r.receiver_pattern is None
+        assert r.needs_review_default is True
+
+        # java-jpa-createnativequery: bare callee, needs_review_default=True
+        r = _rule("java-jpa-createnativequery")
+        assert r.callee == "createNativeQuery"
+        assert r.receiver_pattern is None
+        assert r.needs_review_default is True
+
+
+class TestSqlCommandWhitelistGuard:
+    """Spec 改动 1.2 D — guard: SQL/COMMAND issue_types must stay in whitelist."""
+
+    def test_sql_command_categories_in_whitelist(self):
+        from shannon_core.code_index.finding_models import VALID_INJECTION_CATEGORIES
+        # New ORM Raw / command rules produce SQL/COMMAND findings; their
+        # issue_types must be accepted by VALID_INJECTION_CATEGORIES.
+        assert "sql_injection" in VALID_INJECTION_CATEGORIES
+        assert "command_injection" in VALID_INJECTION_CATEGORIES
