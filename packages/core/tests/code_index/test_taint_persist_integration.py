@@ -31,7 +31,7 @@ def test_persisted_parameter_graph_round_trips_through_disk(tmp_path):
     pgraph_path = tmp_path / "parameter_graph.json"
     assert pgraph_path.exists()
 
-    # 下游 run_risk_scoring / run_render_dataflow_hints 的读取方式
+    # 下游 run_risk_scoring 的读取方式
     restored = ParameterPropagationGraph.model_validate_json(pgraph_path.read_text())
     assert len(restored.taint_flows) == 1
     assert restored.taint_flows[0].source_param == "q"

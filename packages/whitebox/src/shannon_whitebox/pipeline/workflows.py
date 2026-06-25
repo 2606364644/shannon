@@ -128,7 +128,7 @@ class WhiteboxScanWorkflow:
             # === Parallel: Code Index (deterministic) ∥ PRE_RECON (LLM) ===
             # These two have no data dependency. The original Shannon had no
             # deterministic layer, so PRE_RECON's Sink Hunter runs fine
-            # without static-dataflow-hints.
+            # on its own.
 
             if AgentName.PRE_RECON.value not in self._state.completed_agents:
                 await workflow.execute_activity(
@@ -260,12 +260,6 @@ class WhiteboxScanWorkflow:
             )
             self._state.audit_plan_stats = risk_result
 
-            # Spec C: render static dataflow hints for vuln agents (after audit plan)
-            await workflow.execute_activity(
-                activities.run_render_dataflow_hints, act_input,
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry_for("standard"),
-            )
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "risk-scoring"}),
