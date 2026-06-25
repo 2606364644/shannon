@@ -6,13 +6,16 @@ cwd 经 RunContextWrapper[ToolContext] 注入，所有工具共享同一工作�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 
 @dataclass
 class ToolContext:
-    """Runner context：注入工具的工作目录。"""
+    """Runner context：注入工具的工作目录 + 子代理 runner（改动 4a）。"""
 
     cwd: str
+    # spec 改动 4a：子代理委派 runner。provider 注入（关 chat_model+cwd）；测试可 mock。
+    subagent_run: Callable[[str], Awaitable[str]] | None = None
 
 
 def build_tools():
@@ -22,9 +25,10 @@ def build_tools():
     """
     from .exec import bash, grep
     from .fs import edit_file, glob, read_file, write_file
+    from .task import task
     from .web import web_fetch, web_search
 
-    return [bash, read_file, write_file, edit_file, grep, glob, web_fetch, web_search]
+    return [bash, read_file, write_file, edit_file, grep, glob, web_fetch, web_search, task]
 
 
 __all__ = ["ToolContext", "build_tools"]

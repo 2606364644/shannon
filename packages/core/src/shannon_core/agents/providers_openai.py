@@ -82,6 +82,40 @@ class OpenAIProvider(BaseProvider):
             model_settings=ModelSettings(include_usage=True),
         )
 
+    def _make_subagent_runner(self, model: str, cwd: str):
+        """构建子代理 runner：代码阅读 Agent（read/glob/grep）跑 prompt，返回 final_output。
+
+        spec 改动 4a：对齐 Claude Code CLI 的 Task tool —— 父 agent 调用 `task`
+        function_tool 时，spawn 一个只读代码的子代理（read_file/glob/grep，无 bash/write/task），
+        跑完返回其 final_output，保持父上下文精简。
+
+        子代理 ToolContext 不注入 subagent_run（防嵌套递归）。
+        """
+        from .tools_openai.exec import grep
+        from .tools_openai.fs import glob, read_file
+
+        client = self._get_client()
+        chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
+        subagent = Agent(
+            name="shannon-task-subagent",
+            instructions=None,  # prompt 当 user input
+            tools=[read_file, glob, grep],
+            model=chat_model,
+            model_settings=ModelSettings(include_usage=False),
+        )
+        max_turns = int(os.getenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "20"))
+
+        async def run(prompt: str) -> str:
+            res = await Runner.run(
+                subagent,
+                input=prompt,
+                context=ToolContext(cwd=cwd),  # 子代理同 cwd，无 subagent_run（防递归）
+                max_turns=max_turns,
+            )
+            return str(res.final_output)
+
+        return run
+
     async def call(
         self,
         prompt: str,
@@ -101,7 +135,7 @@ class OpenAIProvider(BaseProvider):
                 result = Runner.run_streamed(
                     agent,
                     input=prompt,
-                    context=ToolContext(cwd=cwd),
+                    context=ToolContext(cwd=cwd, subagent_run=self._make_subagent_runner(model, cwd)),
                     max_turns=self._max_turns(),
                 )
                 async for event in result.stream_events():
