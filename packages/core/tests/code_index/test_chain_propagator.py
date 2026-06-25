@@ -14,6 +14,8 @@ from shannon_core.code_index.chain_propagator import (
     propagate_across_chains,
     _references_tainted,
 )
+from shannon_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
+from shannon_core.code_index.parameter_models import TaintFlow
 
 
 def _block(
@@ -189,3 +191,72 @@ async def test_raising_llm_client_yields_nonempty_flows_via_fallback():
     chain = CallChain(entry_point_id=block.id, path=[block.id], depth=1, has_unresolved=False)
     flows = propagate_across_chains(chains=[chain], blocks=[block], intra_results={block.id: intra})
     assert len(flows) >= 1
+
+
+class TestDeterministicFallbackPropagationSmoke:
+    """spec §3.4: _deterministic_intra_fallback 产出的 IntraResult 必须能被
+    propagate_across_chains 消费、emit TaintFlow,契约不破坏。"""
+
+    def test_direct_hit_propagates_with_high_confidence(self):
+        # head(entry point) 有参数;sink 在同一函数,dangerous_slot 直达参数。
+        handler = _block("handler", "app.py", 1, params=["user_input"])
+        # 用直达 slot 覆盖默认 _sink(expression="query", is_entry_hint=False)
+        direct_sink = SinkCallSite(
+            id="sink_direct",
+            caller_id=handler.id,
+            callee_name="cursor.execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="execute",
+            file_path="app.py",
+            line=5,
+            column=0,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="user_input", is_entry_hint=True,
+            )],
+            rule_id="sql-execute",
+            needs_review=False,
+        )
+        intra = {
+            handler.id: _deterministic_intra_fallback(handler, [direct_sink]),
+        }
+        chains = [CallChain(
+            entry_point_id=handler.id, path=[handler.id],
+            depth=0, has_unresolved=False,
+        )]
+        flows = propagate_across_chains(chains=chains, blocks=[handler], intra_results=intra)
+        assert len(flows) == 1
+        assert isinstance(flows[0], TaintFlow)
+        assert flows[0].sink_call_site_id == "sink_direct"
+        assert flows[0].confidence == 0.9  # 直达分层传入 TaintFlow.confidence
+
+    def test_literal_sink_produces_no_flow(self):
+        # 字面量 sink 被过滤 → hits 空 → 不 emit flow(但 chain 仍 seed,不崩)。
+        handler = _block("handler", "app.py", 1, params=["user_input"])
+        literal_sink = SinkCallSite(
+            id="sink_literal",
+            caller_id=handler.id,
+            callee_name="cursor.execute",
+            callee_receiver="cursor",
+            category=SinkCategory.SQL,
+            sink_subtype="execute",
+            file_path="app.py",
+            line=5,
+            column=0,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.SQL_VALUE,
+                expression="'SELECT 1'", is_entry_hint=False,
+            )],
+            rule_id="sql-execute",
+            needs_review=False,
+        )
+        intra = {
+            handler.id: _deterministic_intra_fallback(handler, [literal_sink]),
+        }
+        chains = [CallChain(
+            entry_point_id=handler.id, path=[handler.id],
+            depth=0, has_unresolved=False,
+        )]
+        flows = propagate_across_chains(chains=chains, blocks=[handler], intra_results=intra)
+        assert flows == []  # 字面量 sink 过滤 → 无 flow
