@@ -13,7 +13,7 @@
 - **分支：** `feat/fork-py`（当前分支，不开新分支）。
 - **TDD：** 每个改动先写失败测试，再实现，再绿。frequent commits。
 - **commit 前缀：** `feat(code_index):` / `feat(models):` / `feat(whitebox):` / `feat(agents):` / `docs(prompt):`。
-- **双引擎约束：** glm-openai 与 glm-anthropic 都要支持、流程一致——改动 4a 给 openai 引擎补 Task/Agent tool，**prompt 不改**（两引擎共用 TS 原样 Task-delegation prompt）。
+- **双引擎约束（CLAUDE.md §2）：** 双引擎 = claude-agent-sdk（profile `glm-anthropic`）/ openai-agents（profile `glm-openai`），代码流程一致、只核心智能体能力不同；agent 集成层（`packages/core/src/shannon_core/agents/`）维护引擎能力、业务侧只 `run_claude_prompt` 使用。两引擎都要支持、流程一致——改动 4a 给 openai-agents 引擎补 Task/Agent tool（agent 集成层对齐委派能力），**prompt 不改**（两引擎共用 TS 原样 Task-delegation prompt）。
 - **LLM 轨自给自足：** LLM 轨 prompt 不引确定性 hints（改动 4b 移除 include）。
 - **prompts 不走 lint**；prompt 改动用文件内容断言测试。
 - **预存测试陷阱：** 全套 pytest 有预存挂起/失败（memory `feat-fork-py-test-gotchas`）——只跑改动相关的测试文件，不广跑。

@@ -5,7 +5,7 @@
       GLM 能否按 vuln prompt 的 "delegate to Task Agent, MANDATORY" 正确发起 Task tool call？
 
 PASS：GLM 发起 ≥1 次 Task tool call（子代理读码），audit 录到 toolName=Task。
-FAIL：GLM 从不发 Task（自己用 Read / 卡住）→ approach ① 受阻，需退回 approach ②。
+FAIL：GLM 从不发 Task（自己用 Read / 卡住）→ approach ① 模型侧受阻（注：approach ② 已作废，需另议降级）。实测结果为 PASS（2/2），本 FAIL 分支未触发。
 """
 import asyncio
 import os

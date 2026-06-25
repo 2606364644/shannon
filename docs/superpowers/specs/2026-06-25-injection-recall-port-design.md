@@ -31,7 +31,7 @@
 | **3b step 5 强化** | LLM | `vuln-injection.txt:162-165` | `prompts/vuln-injection.txt:153-156` | 直接改 |
 | **3c exploit 分诊** | exploit | `exploit-injection.txt`（新增） | `prompts/injection-exploit.txt`（尚无） | 新增 |
 | **3′ 合并器解耦** | 合并点 | —（TS 无合并器） | `dual_track_merger.py:52` | 删覆写行 |
-| **4 LLM 轨解封+解耦** | LLM | —（TS CLI 原生有 Task） | `tools_openai`（加 Task tool）+ `vuln-injection.txt:45`（移除 hints include） | 给 openai 引擎补 Task（approach ①）+ 移除 include；Task 块 prompt 不改 |
+| **4 LLM 轨解封+解耦** | LLM | —（TS CLI 原生有 Task） | `tools_openai`（加 Task tool）+ `vuln-injection.txt:45`（移除 hints include） | 给 openai-agents 引擎补 Task（approach ①，agent 集成层对齐能力）+ 移除 include；Task 块 prompt 不改 |
 
 ### 1.1 已就绪、不用动的下游（改动 3 受益）
 - `findings_renderer.py:181 _passes_filter` 只按 confidence/severity 过滤，**不过滤 `externally_exploitable`** → 跨服务 finding 入队即渲染。
@@ -78,7 +78,7 @@
 
 ### 改动 4：LLM 轨解封 + 解耦（LLM 轨；shannon-py 特有·前置）★
 
-> **双引擎约束（用户 2026-06-25 拍板）：** glm-openai 与 glm-anthropic 是双 Agent 引擎，**两个都要支持，且流程设计要一致（可互换）**。故"切到 glm-anthropic 了事"（=丢 openai 引擎）不可行；"engine-adaptive prompt 让 openai 退化单 agent"（approach ②）也违背流程一致性，**作废**。原始 TS 无此问题——它单引擎跑 Claude Code CLI，Task tool 原生在（`apps/worker/src/ai/output-formatters.ts:205` "Task tool calls"、`workflows.ts:95` "sub-agent execution"），`vuln-injection.txt` 的 "delegate to Task Agent" 直接生效。shannon-py 的 openai 引擎实现时把 Task 砍了（`tools_openai/__init__.py:27` `build_tools()` 是 CLI 工具"核心子集"，8 个无 Task），又照搬 TS 的 Task 强制 prompt 才死锁。**选定方案 = approach ①：给 openai 引擎补 Task tool，两引擎流程一致、prompt 不改。**
+> **双引擎约束（用户 2026-06-25 拍板）：** glm-openai 与 glm-anthropic 是双 Agent 引擎，**两个都要支持，且流程设计要一致（可互换）**。故"切到 glm-anthropic 了事"（=丢 openai 引擎）不可行；"engine-adaptive prompt 让 openai 退化单 agent"（approach ②）也违背流程一致性，**作废**。原始 TS 无此问题——它单引擎跑 Claude Code CLI，Task tool 原生在（`apps/worker/src/ai/output-formatters.ts:205` "Task tool calls"、`workflows.ts:95` "sub-agent execution"），`vuln-injection.txt` 的 "delegate to Task Agent" 直接生效。shannon-py **双引擎（claude-agent-sdk / openai-agents）代码流程一致、只核心智能体能力不同**（CLAUDE.md §2）：openai-agents 经 `tools_openai/build_tools()` 暴露工具子集（8 个），**未含子代理委派**——与 claude-agent-sdk（CLI 原生有委派）能力不同；又照搬 TS 的 Task 强制 prompt，故 openai 侧 vuln agent 跑不出。**委派能力对齐是 agent 集成层（`packages/core/src/shannon_core/agents/`）的职责。选定方案 = approach ①：agent 集成层为 openai-agents 提供委派 tool（`tools_openai/task.py`），两引擎能力对齐、流程一致、prompt 不改。**
 
 **4a. 解封（approach ①：给 openai 引擎补 Task tool，prompt 不改）：**
 - **vuln prompt 不动**——`vuln-injection.txt:85-96` 的 "delegate to Task Agent, MANDATORY" 原样保留（TS-faithful），两引擎都走这套 Task 委派。
