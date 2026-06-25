@@ -654,3 +654,65 @@ class TestSqlCommandWhitelistGuard:
         # issue_types must be accepted by VALID_INJECTION_CATEGORIES.
         assert "sql_injection" in VALID_INJECTION_CATEGORIES
         assert "command_injection" in VALID_INJECTION_CATEGORIES
+
+
+# ===== Task 2 (spec 改动 1.2 B): dynamic-identifier arg-shape detection =====
+
+class TestSqlArgShapeIdentifier:
+    """Spec 改动 1.2 B — SQL sink's string-built arg → SQL_IDENTIFIER + needs_review.
+
+    Uses the same inline PythonParser + tempfile + _src_provider harness as the
+    existing TestDetectSinksPython cases (the brief's _py_blocks/_py_parser
+    helpers are not defined in this module).
+    """
+
+    def test_py_sql_fstring_arg_marked_identifier(self):
+        # f-string arg into SQL sink → SQL_IDENTIFIER slot + needs_review True.
+        # The receiver must match _DB_CURSOR (cursor|cnx|conn|db|database),
+        # so we name the cursor variable "cursor" (matches existing
+        # test_python_cursor_execute_hit convention).
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.python_parser import PythonParser
+        import tempfile, pathlib
+        src = (
+            "def f(tn):\n"
+            '    cursor.execute(f"SELECT * FROM {tn}")\n'
+        )
+        parser = PythonParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.py"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        ex = [s for s in sites if s.rule_id == "py-db-cursor-execute"]
+        assert ex, "cursor.execute should still fire on f-string arg"
+        ident_slots = [d for d in ex[0].dangerous_slots
+                       if d.slot == SlotContext.SQL_IDENTIFIER]
+        assert ident_slots, "f-string arg into SQL sink should be marked SQL_IDENTIFIER"
+        assert ex[0].needs_review is True
+
+    def test_py_sql_bound_arg_stays_value(self):
+        # bound ?-placeholder arg stays SQL_VALUE, no SQL_IDENTIFIER slot,
+        # and needs_review stays at its rule default (False for cursor.execute).
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.python_parser import PythonParser
+        import tempfile, pathlib
+        src = (
+            "def f(name):\n"
+            '    cursor.execute("SELECT * FROM u WHERE n = ?", (name,))\n'
+        )
+        parser = PythonParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.py"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        ex = [s for s in sites if s.rule_id == "py-db-cursor-execute"]
+        assert ex, "cursor.execute should fire on bound-arg query"
+        val_slots = [d for d in ex[0].dangerous_slots
+                     if d.slot == SlotContext.SQL_VALUE]
+        ident_slots = [d for d in ex[0].dangerous_slots
+                       if d.slot == SlotContext.SQL_IDENTIFIER]
+        assert val_slots and not ident_slots, \
+            "bound ?-placeholder arg must stay SQL_VALUE"
+        assert ex[0].needs_review is False

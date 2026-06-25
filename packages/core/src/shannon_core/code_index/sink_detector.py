@@ -331,6 +331,17 @@ def detect_sinks(
                 try:
                     args = parser.extract_arg_expressions(call, source)
                     dangerous = _build_dangerous_slots(rule, args, block)
+                    # spec 改动 1.2 B: SQL sink whose arg is string-built
+                    # (f-string / format / printf / concat) actually injects a
+                    # dynamic identifier or DDL fragment — binds do NOT protect
+                    # it. _build_dangerous_slots already rewrote such SQL_VALUE
+                    # slots to SQL_IDENTIFIER; mirror that here so the site is
+                    # flagged for Spec C review. Gated on SinkCategory.SQL so
+                    # COMMAND/SSRF/etc. are untouched even if their arg text
+                    # happens to look string-built.
+                    force_review = rule.category == SinkCategory.SQL and any(
+                        _looks_string_built(d.expression) for d in dangerous
+                    )
                     site = SinkCallSite(
                         id=_make_id(block, callee, call),
                         caller_id=block.id,
@@ -343,7 +354,7 @@ def detect_sinks(
                         column=call.column,
                         dangerous_slots=dangerous,
                         rule_id=rule.rule_id,
-                        needs_review=rule.needs_review_default,
+                        needs_review=rule.needs_review_default or force_review,
                     )
                     sites.append(site)
                 except Exception:
@@ -362,6 +373,24 @@ def _rule_matches(rule: SinkRule, receiver: str | None) -> bool:
     if receiver is None:
         return False
     return bool(rule.receiver_pattern.match(receiver))
+
+
+# spec 改动 1.2 B: arg 表达式是否形如 string-built（f-string / format / printf / 拼接）。
+# 当一个 SQL sink 的实参是动态字符串构建时，它实际注入的是一个标识符或 DDL 片段
+# (table/column 名、ORDER BY 等)，参数绑定 / placeholder 并不能保护它 ——
+# 因此这类槽位应改标 SQL_IDENTIFIER 而非 SQL_VALUE。
+_STRING_BUILT_RE = re.compile(
+    r"(^[fFrR]['\"])"          # f-string 前缀 (Python: f"...", r'...', etc.)
+    r"|fmt\.Sprintf"            # Go fmt.Sprintf
+    r"|\.format\("              # Python str.format
+    r"|%\s*[sdbf]"              # printf 风格 %s/%d/%b/%f
+    r"|['\"]\s*\+"              # 字符串字面量 + 拼接
+)
+
+
+def _looks_string_built(expr: str) -> bool:
+    """best-effort: arg 表达式是否是动态字符串构建（暗示标识符/DDL 注入）。"""
+    return bool(_STRING_BUILT_RE.search(expr or ""))
 
 
 def _build_dangerous_slots(
@@ -387,6 +416,19 @@ def _build_dangerous_slots(
                 expression=expr,
                 is_entry_hint=is_entry_hint(expr, block),
             ))
+
+    # spec 改动 1.2 B: SQL 类 sink 的 string-built 实参 → SQL_IDENTIFIER。
+    # 绑定 / placeholder 只保护 value 槽；string-built arg 实际是动态标识符
+    # 或 DDL 片段，必须经白名单校验。DangerousSlot 是 pydantic BaseModel，
+    # 故用 model_copy(update=...) 重建（等价于 dataclasses.replace）。
+    # 仅对 SinkCategory.SQL 生效 —— COMMAND/SSRF/TEMPLATE 等即使 arg 看似
+    # string-built 也不应改标 SQL_IDENTIFIER。
+    if rule.category == SinkCategory.SQL:
+        slots = [
+            d.model_copy(update={"slot": SlotContext.SQL_IDENTIFIER})
+            if _looks_string_built(d.expression) else d
+            for d in slots
+        ]
     return slots
 
 
