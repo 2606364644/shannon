@@ -49,7 +49,12 @@ def _clone_with_merge_fields(
     data = finding.model_dump()
     data["merge_source"] = merge_source
     data["confidence"] = confidence
-    data["externally_exploitable"] = vulnerable
+    # Spec 改动 3′: do NOT overwrite externally_exploitable — it is a reachability
+    # tag (true = public-internet; false = internal / cross-service), NOT part of
+    # the verdict. Preserve the base finding's tag. The both/llm-only branches use
+    # an LLM-track finding as base (reachability authority); the gitnexus-only
+    # branch uses the GitNexus finding. The `vulnerable` param still drives the
+    # `verdict` rewrite below.
     if evidence_chain and not data.get("evidence_chain"):
         data["evidence_chain"] = evidence_chain
     if data.get("verdict") is not None:

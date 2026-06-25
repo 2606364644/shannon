@@ -79,6 +79,12 @@ def test_distinct_findings_kept_separately():
 
 
 def test_no_verdict_field_uses_externally_exploitable_for_or():
+    # When a vuln class has no `verdict` field (e.g. AuthzVulnerability),
+    # `_is_vulnerable` falls back to `externally_exploitable` to compute the
+    # verdict-OR. The OR still happens (the two same-key findings collapse into
+    # one `merge_source="both"` entry). What NO LONGER happens: the merged
+    # finding's `externally_exploitable` being recomputed from the verdict
+    # (spec 改动 3′ — it is a reachability tag, preserved from the base).
     def _authz(ID, exploitable):
         return AuthzVulnerability(
             ID=ID,
@@ -92,7 +98,10 @@ def test_no_verdict_field_uses_externally_exploitable_for_or():
     gn = [_authz("G1", True)]
     out = merge_dual_track_queues(llm, gn, mode="verdict")
     assert len(out) == 1
-    assert out[0].externally_exploitable is True
+    # OR still merged the two tracks into one both-source finding.
+    assert out[0].merge_source == "both"
+    # Reachability is preserved from the base (LLM) finding, not overwritten.
+    assert out[0].externally_exploitable is False
 
 
 def test_union_no_finding_lost():
@@ -106,3 +115,42 @@ def test_union_no_finding_lost():
     ]
     out = merge_dual_track_queues(llm, gn, mode="verdict")
     assert len(out) == 3
+
+
+# --- Spec 改动 3′: externally_exploitable is a reachability tag, not verdict ---
+# (true = public-internet reachable; false = internal / cross-service).
+# The merger must NOT overwrite it with the verdict-OR result.
+
+def _reachability_inj(externally_exploitable, verdict="vulnerable", confidence="high"):
+    """InjectionVulnerability where externally_exploitable is decoupled from verdict
+    (a cross-service finding: verdict=vulnerable but externally_exploitable=False)."""
+    return InjectionVulnerability(
+        ID="INJ-1",
+        vulnerability_type="injection",
+        externally_exploitable=externally_exploitable,
+        confidence=confidence,
+        verdict=verdict,
+    )
+
+
+def test_cross_service_reachability_preserved_through_merge():
+    # Cross-service finding: externally_exploitable=False, verdict=vulnerable.
+    # LLM-only branch — base is the LLM finding; its reachability tag must survive.
+    llm = [_reachability_inj(externally_exploitable=False, verdict="vulnerable")]
+    merged = merge_dual_track_queues(llm, [], mode="verdict")
+    assert len(merged) == 1
+    assert merged[0].externally_exploitable is False, (
+        "reachability tag must not be overwritten by the verdict-OR result"
+    )
+    assert merged[0].verdict == "vulnerable"
+
+
+def test_both_track_vulnerable_keeps_reachability_from_llm_base():
+    # both-vulnerable branch — base is the LLM finding (dual_track_merger.py:100),
+    # so its reachability (False) is authoritative, even when GitNexus says True.
+    llm = [_reachability_inj(externally_exploitable=False, verdict="vulnerable")]
+    gn = [_reachability_inj(externally_exploitable=True, verdict="vulnerable")]
+    merged = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(merged) == 1
+    assert merged[0].externally_exploitable is False
+    assert merged[0].verdict == "vulnerable"  # verdict is still the OR result
