@@ -40,3 +40,24 @@ def test_prompt_contract_does_not_reference_nonexistent_section7():
     assert "grep" in text.lower()
     # 不引确定性 hints（LLM 轨自给自足）
     assert "static_dataflow_hints" not in text
+
+
+def test_prompt_queue_includes_cross_service_findings():
+    text = PROMPT.read_text()
+    # 改动 3a：externally_exploitable 是可达性标签，不挡入队
+    assert "EVERY" in text and "vulnerable" in text
+    # 不再含旧闸门措辞
+    assert "ONLY include vulnerabilities where `externally_exploitable = true`" not in text
+
+
+def test_prompt_step5_marks_cross_service_as_vulnerable():
+    text = PROMPT.read_text()
+    # 改动 3b：跨服务转发 = vulnerable
+    assert "downstream" in text.lower() or "cross-service" in text.lower()
+    assert "externally_exploitable=false" in text or "externally_exploitable = false" in text
+
+
+def test_prompt_does_not_include_static_dataflow_hints():
+    text = PROMPT.read_text()
+    # 改动 4b：移除 hints include（LLM 轨自给自足）
+    assert "@include(shared/_static-dataflow-hints.txt)" not in text

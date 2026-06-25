@@ -42,8 +42,6 @@ Success criterion: Complete source-to-sink traces detailing path, sanitizers, si
 
 </starting_context>
 
-@include(shared/_static-dataflow-hints.txt)
-
 @include(shared/_cross-route-enumeration.txt)
 
 <system_architecture>
@@ -163,11 +161,12 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
     - **Vulnerable** if any tainted input reaches a slot with no defense or the wrong one.
     - Include a short rationale (e.g., "context mismatch: regex escape on ORDER BY keyword slot").
     - If concat occurred **after** sanitization, treat that sanitization as **non-effective** for this path.
+    - **Cross-service sink:** a user-controlled SQL/command fragment that THIS service forwards to a DOWNSTREAM service for execution (e.g. an RPC/protobuf field whose value is a SQL fragment, or a sharded table name derived from user input) is a `vulnerable` cross-service sink with `externally_exploitable=false` — NOT `safe`. "Locally this binary doesn't execute it" is not a safe verdict when a downstream service will.
   - **6) Append to findings list (consistent fields)**
 	  -  **If the verdict is `vulnerable`:** Include the finding in your exploitation queue. Set `externally_exploitable` to `true` ONLY if exploitable via public internet without internal access. Ensure all fields in the `exploitation_queue_format`, including a minimal `witness_payload`, are populated.
     - **If the verdict is `safe`:** DO NOT add the finding to the exploitation queue. These secure vectors must be documented later in the "Vectors Analyzed and Confirmed Secure" section of your final Markdown report (`{{DELIVERABLES_PATH}}/injection_analysis_deliverable.md`).
     - **If a single source is found to be vulnerable via multiple, distinct paths to different sinks, you must create a separate vulnerability entry in the exploitation queue for each unique vulnerable path.**
-    - **QUEUE INCLUSION CRITERIA:** ONLY include vulnerabilities where `externally_exploitable = true`. Exclude any vulnerability requiring internal network access, VPN, or direct server access.
+    - **QUEUE INCLUSION CRITERIA:** EVERY `vulnerable` finding enters the exploitation queue regardless of reachability. `externally_exploitable` is a per-entry REACHABILITY TAG, not an admission gate: `true` = reachable via public internet without internal access; `false` = internal / cross-service only. Do NOT exclude internal or cross-service findings — set their `externally_exploitable=false` and include them.
 
     - **fields:**
 		    - `source` (param & file:line — one source per entry, do NOT merge)
