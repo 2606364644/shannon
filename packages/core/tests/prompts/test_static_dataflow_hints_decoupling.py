@@ -74,17 +74,58 @@ def test_no_llm_track_prompt_has_forbidden_placeholders():
 
 def test_fusion_guarded_by_enable_llm_track():
     """反方向 fusion（run_merge_sink_reports / run_entry_point_fusion）必须受
-    enable_llm_track 显式守卫，而非靠 PRE_RECON 不产出文件间接降级。
+    enable_llm_track 显式守卫——用 AST 确认每个 fusion Call 节点有
+    input.enable_llm_track 的 If 祖先（不是靠 PRE_RECON 不产出文件间接降级）。
 
-    这两个 fusion activity 把 LLM pre-recon 产出的 sink/entry-point 与确定性层
-    合并——它们语义上依赖 LLM 轨产物，应在 LLM 轨关闭时显式跳过整个 activity，
-    而不是靠文件不存在间接降级。静态 grep 守卫（workflow 编排逻辑单元测成本高，
-    真机行为靠 Task 7 冒烟验证）。"""
-    text = WORKFLOWS_PY.read_text()
-    # 找到两个 fusion activity 调用，确认它们都在 if input.enable_llm_track: 块内。
-    for fusion_activity in ("run_merge_sink_reports", "run_entry_point_fusion"):
-        assert fusion_activity in text, f"{fusion_activity} 调用点消失？"
-    # 守卫模式：两个 fusion 调用前应有 if input.enable_llm_track:
-    assert "if input.enable_llm_track:" in text, (
-        "workflows.py 缺 enable_llm_track 守卫（CLAUDE.md §1：fusion 需显式守卫）"
+    CLAUDE.md §1 / Task 5: 这两个 fusion activity 把 LLM pre-recon 产出的
+    sink/entry-point 与确定性层合并，语义上依赖 LLM 轨产物，应在 LLM 轨关闭时
+    显式跳过整个 activity，而非靠文件不存在间接降级。
+
+    注：workflows.py 另有 `if input.enable_llm_track:` 守卫（vuln-agent 块，预存），
+    朴素 grep 该字符串会 assert-nothing（守卫在、fusion 不在守卫内也绿）。AST 遍历
+    锁定每个 fusion Call 节点的 If 祖先 test 必须是 input.enable_llm_track。"""
+    import ast
+
+    tree = ast.parse(WORKFLOWS_PY.read_text())
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    FUSION_ATTRS = ("run_merge_sink_reports", "run_entry_point_fusion")
+
+    # fusion activity 作为 execute_activity(activities.<name>, ...) 的首参传入
+    # （不是 node.func）；扫每个 Call 的 args / keywords 里出现的 Attribute 引用。
+    def fusion_refs(call):
+        cands = list(call.args) + [kw.value for kw in call.keywords]
+        return [c for c in cands
+                if isinstance(c, ast.Attribute) and c.attr in FUSION_ATTRS]
+
+    # 注意：parent map 必须按 Attribute 引用节点本身记，断言时向上找 If 祖先。
+    fusion_refs_by_call = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            refs = fusion_refs(node)
+            if refs:
+                fusion_refs_by_call[id(node)] = refs
+    assert fusion_refs_by_call, (
+        "未找到 fusion activity 调用——workflows.py 结构变了？"
     )
+
+    for call_id, refs in fusion_refs_by_call.items():
+        for ref in refs:
+            cur, guarded = parents.get(ref), False
+            while cur is not None:
+                if isinstance(cur, ast.If):
+                    t = cur.test
+                    if (isinstance(t, ast.Attribute)
+                            and t.attr == "enable_llm_track"
+                            and isinstance(t.value, ast.Name)
+                            and t.value.id == "input"):
+                        guarded = True
+                        break
+                cur = parents.get(cur)
+            assert guarded, (
+                f"CLAUDE.md §1 / Task 5: {ref.attr} 引用未在 "
+                f"if input.enable_llm_track: 守卫内"
+            )
