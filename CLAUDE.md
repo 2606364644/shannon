@@ -17,6 +17,12 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 - **扩 sink 覆盖** 分两条路：LLM 轨改 prompt 清单（`vuln-*.txt`），GitNexus 轨改代码规则（`packages/core/src/shannon_core/code_index/sink_detector.py`）。
 - **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**。
 
+**双轨可配置（演进方向，2026-06-26 提出，设计中 ★）：**
+- **战略**：把双轨从"固定并行"演进为**可配置开关**——**GitNexus 轨做可靠兜底，LLM 轨做可选的纯 LLM 增强（创意轨）**。**token 紧张时关闭 LLM 轨**（靠 GitNexus 轨兜底），**token 宽裕时打开 LLM 轨**（双轨 OR）。默认 LLM 轨**开**（env `SHANNON_LLM_TRACK_ENABLED`，默认 `"1"`）。
+- **为支撑"GitNexus 轨独立兜底"**，GitNexus 轨从纯确定性演进为"**确定性兜底 + 可选 LLM 补召回**"：`sink_detector`（`packages/core/src/shannon_core/code_index/sink_detector.py`）规则未命中的可疑函数（半 sink 模式）用轻量 LLM 找 sink，产 `rule_id="llm-discovered"` 的软 `SinkCallSite`（与规则 sink 同流、可区分）+ `rule_gap_report.json` 反哺规则库优化。LLM 不可用（stub / 超时）时退回纯规则 + `is_entry_hint`（`deterministic-fallback` 立场 B 成果，作为"LLM 不可用档"，不浪费）。
+- **不变的铁律**：LLM 轨仍纯 LLM 自给自足、不吃确定性产物（上条铁律不动）；本次演进只动 GitNexus 轨自己接 LLM + 加 LLM 轨开关，**不破坏双轨独立性**。
+- **设计 spec**：`docs/superpowers/specs/2026-06-26-gitnexus-llm-sink-discovery-design.md`（撰写中，brainstorming 进行时）。
+
 **auth / authz 特殊：** 它们不是 source→sink taint（属 missing-control），确定性 sink 规则不覆盖。但 authz 有自己的"GitNexus 风格"轨（`run_authz_gitnexus_judge`：IDOR 候选 + LLM 判定），auth 有 config 扫描器（`auth_config_scan.json`）兜底。所以"扫不出"时先分清是哪条轨、哪个 vuln 类。
 
 详见 `docs/architecture.md`、`docs/superpowers/specs/2026-06-25-injection-recall-port-design.md`。

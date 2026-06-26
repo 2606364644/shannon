@@ -56,7 +56,7 @@ GitNexus 轨 sink 召回 = `detect_sinks`（`sink_detector.py:277-364`，AST + `
 
 #### 收集粒度 = call 级，调用粒度 = function 级
 
-- **收集（call 级）**：复用 `detect_sinks` 已遍历的每个 call。新增半 sink 收集器 `collect_suspicious_calls(blocks, parser, source_provider)`，在规则丢弃点（`:325`/`:329`）把「callee 或 receiver 命中 sink-ish 模式」的 call 收为可疑候选，而非丢弃。
+- **收集（call 级）**：新增半 sink 收集器 `collect_suspicious_calls(blocks, parser, source_provider)`——**独立遍历**（复用 `parser.iter_calls`，与 `detect_sinks` 同样的 call 枚举；接受双遍历开销换 `detect_sinks` 零改动、可独立单测），在规则丢弃条件处（callee 不在规则库 `:325`、或 receiver 不匹配 `:329`）把「callee 或 receiver 命中 sink-ish 模式」的 call 收为可疑候选。
 - **调用（function 级）**：可疑 call 按 `FuncBlock` 去重分组，**一个函数一次 LLM 调用**（列出该函数所有可疑 call）。
 
 > 设计理由：call 级收集精准（只看规则没命中的可疑 call），function 级调用省 token（每函数一次）。同一函数既有规则 sink 又有可疑 call 时，可疑 call 仍被收集——补的是「规则没命中的 call」，与函数有无其他规则 sink 无关。
@@ -121,7 +121,7 @@ LLM 判 `is_sink=True` 的 call → 构造 `SinkCallSite`：
 |---|---|
 | `id` | `_make_id(block, callee, call)`（复用现有生成） |
 | `caller_id` / `callee_name` / `callee_receiver` / `file_path` / `line` / `column` | 来自 `SuspiciousCall` |
-| `category` / `sink_subtype` | LLM 给（`sink_subtype` 由 category 派生，如 `sql_raw`） |
+| `category` / `sink_subtype` | LLM 给；`category` ∈ `SinkCategory`（标准枚举，过下游 category 白名单），`sink_subtype` 由 LLM 给具体值（如 `sql_raw`/`cmd_shell`），给不出则回落 `category.value` |
 | `dangerous_slots` | LLM 给的 `arg_index` + `slot`；`expression` 从 `arg_exprs` 取；`is_entry_hint` 用现有 `is_entry_hint()`（`sink_detector.py:247`）算 |
 | `rule_id` | **`"llm-discovered"`** ← 区分规则 sink 的主键 |
 | `needs_review` | `True` |
@@ -140,6 +140,8 @@ LLM 判 `is_sink=True` 的 call → 构造 `SinkCallSite`：
    "suggested_rule_id": "py-custom-db-raw-query"}
 ]
 ```
+
+- **落点：** 由 `build_code_index_with_gitnexus` 在写 `code_index.json` 同处产出（deliverables 目录），与检测流程解耦——消费方可独立读取做规则优化，不参与 taint/verdict 主流。
 
 闭环：**LLM 补召回 → 规则缺口信号 → 人工/脚本据此加 `SinkRule` 进 `DEFAULT_RULES` → 该模式今后由确定性规则召回（不再烧 LLM token）**。随规则库迭代，LLM 补召回的命中数应单调下降（可观测）。
 
@@ -183,6 +185,7 @@ build_code_index_with_gitnexus (code_index/__init__.py:51)
 - **开关：** env `SHANNON_LLM_TRACK_ENABLED`，默认 `"1"`（**默认开**）。读取经现有 env 读取习惯（参照 `SHANNON_MAX_CONCURRENT`，`shared.py:19`）。
 - **关闭时：** 不创建 vuln_tasks、不跑 `run_vuln_agent`；`run_merge_dual_track_queues` 只消费 `*_gitnexus_queue.json`（merger 的 llm-only/both 分支自然不触发）。
 - **可观测：** workflow 日志明确输出 `llm_track=enabled|disabled`，避免「LLM 轨没跑」被误判为 bug。
+- **边界（重要，回应省 token 理念）：** `SHANNON_LLM_TRACK_ENABLED` **只控 LLM 轨**（重型 vuln agent）。GitNexus 轨的 LLM（`discover_sinks_llm` / `analyze_taint_llm` / `chain_verdict`）接通 `llm_client` 后**默认开**，其「关闭」= `llm_client` 未接通/stub → 自然降级到纯规则 + `is_entry_hint`（§3.5）。即：**关 LLM 轨省的是「重型 agent」大头 token，GitNexus 轨的「轻量 LLM」仍跑**（这正是它作为兜底轨的价值——比 LLM 轨便宜得多，见 §2 量级）。若未来需要更细的「连 GitNexus 轻量 LLM 也关」档位，可另加 `SHANNON_GITNEXUS_LLM_ENABLED`（本 spec 不做，留 future）。
 
 ### 3.4 接通生产 llm_client（两个 stub → 真 client）
 
@@ -246,7 +249,8 @@ GitNexus 轨当前有**两个 LLM stub**，本设计都要接通：
 
 - **token 成本**：sink-ish 模式过宽 → 可疑 call 过多 → LLM 调用爆。缓解：初稿模式偏保守（只高频 sink 词）；可观测每仓 LLM 调用数 + token，超阈值告警；`rule_gap_report` 驱动规则迭代应让 LLM 命中单调下降。
 - **LLM 误报软 sink**：可能抬高 GitNexus 轨假阳性。缓解：`needs_review=True` + `chain_verdict` 二次判定；merger verdict OR 不放大假阳性（LLM 轨独立判定）。
-- **接通 llm_client 的成本回归**：intra + verdict + discovery 三处接 LLM，单仓 LLM 调用从 0 涨到「函数数」级。缓解：三处都有「失败即降级」兜底；实测后必要时加并发限流（复用 `SHANNON_MAX_CONCURRENT` 模式）。
+- **软 sink 下游白名单**：软 sink `category` 是标准 `SinkCategory`（SQL/COMMAND 等，过 category 白名单），但 `sink_subtype` 是新值（如 `sql_raw` 经 LLM 给）。须确认 `injection_builder` → finding 不被 `VALID_INJECTION_CATEGORIES`（`finding_models.py:28`）按 subtype 误拒（plan 加断言，同 injection-recall 改动 1.2 D）。
+- **接通 llm_client 的成本回归**：intra + verdict + discovery 三处接 LLM，单仓 LLM 调用从 0 涨到「函数数」级；且含软 sink 的函数会先后调 discovery（找 sink）+ intra（追 taint）**两次** LLM（§4 选择不合并）。缓解：三处都有「失败即降级」兜底；实测 token 后若过高，可评估合并 discovery+intra 为一次调用（§4 已留口）；必要时加并发限流（复用 `SHANNON_MAX_CONCURRENT` 模式）。
 - **`_SUSPICIOUS_CALLEE_PATTERNS` 漏模式**：模式清单不全 → 某些盲区 sink 仍漏。缓解：这是「尽力补召回」非「全量保证」，LLM 轨（若开）仍双轨 OR 兜底；`rule_gap_report` 也能反向暴露「LLM 轨发现但 GitNexus 没召回」的缺口（future：对比两轨 sink 集合）。
 
 ---
