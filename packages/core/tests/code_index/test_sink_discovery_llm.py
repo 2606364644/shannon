@@ -166,40 +166,82 @@ async def test_soft_sink_flows_into_intra_hits():
     assert soft[0].id in intra.hits  # 软 sink 被 intra 命中 → 会进 TaintFlow
 
 
-def test_soft_sink_does_not_break_injection_whitelist():
-    """软 sink 的 rule_id/sink_subtype 不接触 injection 白名单维度(spec §6).
+async def test_soft_sink_does_not_break_injection_whitelist():
+    """行为锁定(spec §6 Task 6 fix): 一个 rule_id="llm-discovered" 的软 sink,
+    当其 TaintFlow.sink_slot ∈ _INJECTION_SLOTS 时, 必须完整穿过
+    injection_builder → 产出 InjectionVulnerability, 且 finding 的身份
+    (sink_call) 能追溯回该软 sink —— 即软 sink 没有被下游任何过滤丢弃.
 
-    现实校验(Step 1 grep): injection 白名单 = `VALID_INJECTION_CATEGORIES`
-    (finding_models.py:28), 其成员是 issue_type('sql_injection' 等), 由
-    `parse_and_validate_findings` 按 `issue_type` 校验 —— 既非 brief 假设的
-    vuln-class `category`, 亦非 `sink_subtype`. 更关键: 软 sink 走
-    injection_builder → InjectionVulnerability(queue_schemas), 该路径根本不调用
-    parse_and_validate_findings, 故白名单永远不会拒绝软 sink.
+    本测试做的是行为校验, 不是 source-text / 结构断言:
+      1. 经 discover_sinks_llm 真实产出一个软 SinkCallSite(rule_id=llm-discovered);
+      2. 把它的 id 作为 TaintFlow.sink_call_site_id, slot=SQL_VALUE, 构造
+         一个最小 ParameterPropagationGraph;
+      3. 跑 extract_candidate_chains → 软 sink 链被路由进 injection 桶;
+      4. 跑 build_injection_findings(mock verdict=vulnerable) → 软 sink
+         产出 InjectionVulnerability 且 sink_call 指回软 sink id.
 
-    本测试锁定此不变量: 软 sink 的 rule_id/subtype 不在任何 agent 白名单内,
-    且软 sink 产出物(InjectionVulnerability)不经白名单校验路径."""
-    from shannon_core.code_index.finding_models import (
-        VALID_INJECTION_CATEGORIES,
-        AGENT_TYPE_WHITELIST,
+    任何下游路径若因 rule_id="llm-discovered" / 新 sink_subtype 而丢弃该链,
+    本测试会 FAIL —— 这正是 spec 要锁的不变量.
+
+    (旧版的 source-text/白名单维度断言已删除: comparing sink_subtype against
+    issue_type strings 是 non-falsifiable, 锁不到运行时行为.)"""
+    from shannon_core.code_index.parameter_models import (
+        ParameterPropagationGraph,
+        ParameterSource,
+        TaintFlow,
     )
-    # 软 sink 的 SinkCategory(SQL)是 sink 级分类, 与白名单 issue_type 不混字段:
-    sc = _suspicious(arg="uid")
-    import asyncio
-    async def client(prompt, **kw):
-        return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
-                            "category": "sql", "slot": "sql_value", "arg_index": 0,
-                            "rationale": "x"}])
-    soft, _ = asyncio.run(discover_sinks_llm([sc], client))
-    assert soft[0].rule_id == "llm-discovered"
-    assert soft[0].category.value == "sql"  # SinkCategory(sink 级)
-    # 白名单维度(issue_type)不接触软 sink 的 rule_id / sink_subtype:
-    assert soft[0].sink_subtype not in VALID_INJECTION_CATEGORIES
-    assert not any(soft[0].sink_subtype in v for v in AGENT_TYPE_WHITELIST.values())
-    # injection_builder 产出 InjectionVulnerability(非 VulnFinding), 不调白名单校验:
+    from shannon_core.code_index.chain_verdict import (
+        _INJECTION_SLOTS,
+        extract_candidate_chains,
+    )
     from shannon_core.code_index.vuln_chain_builders.injection_builder import (
         build_injection_findings,
     )
-    import inspect
-    src = inspect.getsource(build_injection_findings)
-    assert "parse_and_validate_findings" not in src  # builder 不走白名单路径
-    assert "VALID_INJECTION_CATEGORIES" not in src   # 不引用白名单
+
+    # 1) 真实产出软 sink(rule_id="llm-discovered", SQL_VALUE 槽).
+    sc = _suspicious(arg="uid")
+    async def discover_client(prompt, **kw):
+        return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                            "category": "sql", "slot": "sql_value", "arg_index": 0,
+                            "rationale": "x"}])
+    soft, _ = await discover_sinks_llm([sc], discover_client)
+    assert len(soft) == 1
+    soft_sink = soft[0]
+    assert soft_sink.rule_id == "llm-discovered"          # 软 sink 标记
+    assert soft_sink.dangerous_slots[0].slot == SlotContext.SQL_VALUE
+    assert "sql_value" in _INJECTION_SLOTS                # 该槽位确实归 injection
+
+    # 2) 构造最小 pgraph: 一条 TaintFlow 终点指向该软 sink.
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[TaintFlow(
+            flow_id=f"ep#1->{soft_sink.id}",
+            entry_point_id="ep#1",
+            source_param="uid",
+            source_type=ParameterSource.QUERY_PARAM,
+            sink_call_site_id=soft_sink.id,
+            sink_slot=SlotContext.SQL_VALUE,
+        )],
+        language_coverage=["python"],
+    )
+
+    # 3) 路由层: 软 sink 链必须被 extract_candidate_chains 抽出来(不被 slot
+    #    /subtype/rule_id 过滤掉). 若任何下游因 rule_id 把它过滤, 这里 FAIL.
+    chains = extract_candidate_chains(pgraph, vuln_class="injection")
+    assert len(chains) == 1, f"soft-sink chain dropped at routing: {chains}"
+    assert chains[0].sink_call_site_id == soft_sink.id
+    assert chains[0].sink_slot == "sql_value"
+
+    # 4) 端到端: build_injection_findings 走完 verdict, 必须产出 1 条 finding,
+    #    且 finding.sink_call 指回软 sink id —— 证明软 sink 没被 builder 丢弃.
+    async def verdict_client(prompt, ** kw):
+        return json.dumps({"verdict": "vulnerable", "confidence": "high",
+                           "evidence_chain": "uid -> soft_sink",
+                           "witness_payload": "w", "mismatch_reason": "r"})
+    findings = await build_injection_findings(pgraph, llm_client=verdict_client)
+    assert len(findings) == 1, f"soft-sink finding dropped by builder: {findings}"
+    f = findings[0]
+    assert f.vulnerability_type == "injection"
+    assert f.source_track == "gitnexus"
+    # 关键断言: finding 身份(sink_call)能追溯回软 sink —— 没被任何过滤丢弃.
+    assert f.sink_call == soft_sink.id
+    assert f.verdict == "vulnerable"
