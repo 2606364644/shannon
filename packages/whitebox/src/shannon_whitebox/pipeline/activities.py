@@ -15,6 +15,7 @@ from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.logging import create_activity_logger
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.agents.runner import run_claude_prompt
+from shannon_core.config.concurrency import is_gitnexus_llm_enabled
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.session import SessionManager
 from shannon_whitebox.audit.session import AuditSession
@@ -364,16 +365,26 @@ async def run_code_index(input: ActivityInput) -> dict:
         repo, deliverables, _ = _get_paths(input)
 
         async with get_audit_session().track_step("pre-recon", "code-index", intent=intent_for("code-index")):
-            # Create LLM client for taint analysis
-            async def _llm_taint_client(prompt: str, **kwargs) -> str:
-                # P1: real per-function LLM taint is not wired yet (cost).
-                # Raising (not returning "{}") routes analyze_taint_llm to its
-                # conservative fallback so the taint channel is non-empty
-                # instead of silently dead.
-                raise RuntimeError(
-                    "LLM taint client not wired in production; "
-                    "analyze_taint_llm will use conservative fallback"
-                )
+            # Create LLM client for taint analysis (+ LLM sink discovery)
+            def _make_gitnexus_llm_client(repo_path: str):
+                """封装 run_claude_prompt 成 analyze_taint_llm/discover 期望的
+                async (prompt)->str 契约。env 关时返回 raise-client 触发降级。"""
+                if not is_gitnexus_llm_enabled():
+                    async def _disabled(prompt: str, **kwargs) -> str:
+                        raise RuntimeError(
+                            "GitNexus LLM disabled (SHANNON_GITNEXUS_LLM_ENABLED=0); "
+                            "using deterministic fallback"
+                        )
+                    return _disabled
+
+                async def _client(prompt: str, **kwargs) -> str:
+                    result = await run_claude_prompt(
+                        prompt=prompt, repo_path=repo_path, model_tier="medium",
+                    )
+                    return result.text  # ClaudeRunResult.text (runner.py:77) = 纯文本输出
+                return _client
+
+            _llm_taint_client = _make_gitnexus_llm_client(str(repo))
 
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry
@@ -723,6 +734,20 @@ async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
     )
 
 
+def _make_verdict_llm_client(repo_path: str):
+    """接通后: 真 client; env 关时返回 raise-client(降级)。"""
+    if not is_gitnexus_llm_enabled():
+        return _gitnexus_verdict_llm_client  # 模块级 raise 兜底
+    from shannon_core.agents.runner import run_claude_prompt
+
+    async def _client(prompt: str, **kwargs) -> str:
+        result = await run_claude_prompt(
+            prompt=prompt, repo_path=repo_path, model_tier="medium",
+        )
+        return result.text
+    return _client
+
+
 @activity.defn
 async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
@@ -779,7 +804,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             "vulnerability-analysis", "gitnexus-chain-verdict",
             intent=None,
         ):
-            llm = _gitnexus_verdict_llm_client
+            llm = _make_verdict_llm_client(str(repo))
 
             for vc, builder in (
                 ("injection", build_injection_findings),

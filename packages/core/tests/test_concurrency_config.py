@@ -2,7 +2,11 @@
 
 import logging
 
-from shannon_core.config.concurrency import get_max_concurrent
+from shannon_core.config.concurrency import (
+    get_max_concurrent,
+    is_gitnexus_llm_enabled,
+    is_llm_track_enabled,
+)
 
 
 def test_default_when_unset(monkeypatch):
@@ -34,3 +38,23 @@ def test_negative_falls_back(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert get_max_concurrent() == 3
     assert "must be >=1" in caplog.text
+
+
+def test_gitnexus_llm_default_on(monkeypatch):
+    monkeypatch.delenv("SHANNON_GITNEXUS_LLM_ENABLED", raising=False)
+    assert is_gitnexus_llm_enabled() is True
+
+
+def test_gitnexus_llm_off(monkeypatch):
+    monkeypatch.setenv("SHANNON_GITNEXUS_LLM_ENABLED", "0")
+    assert is_gitnexus_llm_enabled() is False
+
+
+def test_llm_track_default_on(monkeypatch):
+    monkeypatch.delenv("SHANNON_LLM_TRACK_ENABLED", raising=False)
+    assert is_llm_track_enabled() is True
+
+
+def test_llm_track_off(monkeypatch):
+    monkeypatch.setenv("SHANNON_LLM_TRACK_ENABLED", "0")
+    assert is_llm_track_enabled() is False
