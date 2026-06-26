@@ -139,3 +139,28 @@ async def test_gap_aggregation():
     assert len(gaps2) == 1
     assert gaps2[0].count == 2
     assert gaps2[0].pattern == "raw_query@custom_db"
+
+
+async def test_soft_sink_flows_into_intra_hits():
+    """软 sink 并入 sinks_by_func → analyze_taint_llm 能对其产 hits(集成 smoke)."""
+    from collections import defaultdict
+    from shannon_core.code_index.parameter_models import IntraResult
+    from shannon_core.code_index import chain_propagator  # 仅验类型可达, 实际用 mock
+
+    # 构造一个软 sink + 一个有它作 sink 的 block, 验证它进 sinks_by_func 后
+    # analyze_taint_llm 的确定性 fallback 能命中它(is_entry_hint 或 indirect)。
+    sc = _suspicious(arg="uid")  # uid 是参数 → is_entry_hint=True
+    async def client(prompt, **kw):
+        return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                            "category": "sql", "slot": "sql_value", "arg_index": 0,
+                            "rationale": "x"}])
+    soft, gaps = await discover_sinks_llm([sc], client)
+    assert soft and soft[0].dangerous_slots[0].is_entry_hint is True  # uid 是参数
+
+    # 模拟 build 函数的 sinks_by_func 分组 + 确定性 intra
+    sinks_by_func = defaultdict(list)
+    for s in soft:
+        sinks_by_func[s.caller_id].append(s)
+    from shannon_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
+    intra = _deterministic_intra_fallback(sc.block, sinks_by_func[sc.block.id])
+    assert soft[0].id in intra.hits  # 软 sink 被 intra 命中 → 会进 TaintFlow

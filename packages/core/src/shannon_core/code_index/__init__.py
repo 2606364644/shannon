@@ -18,6 +18,11 @@ from shannon_core.code_index.gitnexus_call_graph import build_call_graph_from_gi
 from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
 from shannon_core.code_index.chain_propagator import propagate_across_chains
 from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from shannon_core.code_index.sink_discovery_llm import (
+    RuleGap,
+    collect_suspicious_calls,
+    discover_sinks_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +59,7 @@ async def build_code_index_with_gitnexus(
     mcp_client,
     llm_client,
     auto_index: bool = False,
-) -> CodeIndex:
+) -> tuple[CodeIndex, list[RuleGap]]:
     """Build code index with GitNexus call graph + LLM taint analysis.
 
     Pipeline:
@@ -144,13 +149,21 @@ async def build_code_index_with_gitnexus(
         blocks=all_blocks,
     )
 
-    # ③ sink detection
+    # ③ sink detection (规则)
     def _provide_source(block):
         return file_sources.get(block.file_path)
     sink_call_sites = detect_sinks(all_blocks, parser, source_provider=_provide_source)
-    logger.info("Detected %d sink call sites", len(sink_call_sites))
+    logger.info("Detected %d rule-based sink call sites", len(sink_call_sites))
 
-    # ④ Group sinks by function
+    # ③b LLM sink 补召回 (spec §3.1): 规则未命中的可疑 call → 软 SinkCallSite
+    suspicious = collect_suspicious_calls(all_blocks, parser, source_provider=_provide_source)
+    soft_sinks, rule_gaps = await discover_sinks_llm(suspicious, llm_client)
+    if soft_sinks:
+        sink_call_sites = sink_call_sites + soft_sinks
+        logger.info("LLM sink discovery added %d soft sinks (%d rule gaps)",
+                    len(soft_sinks), len(rule_gaps))
+
+    # ④ Group sinks by function (含软 sink)
     from collections import defaultdict
     sinks_by_func: dict[str, list] = defaultdict(list)
     for s in sink_call_sites:
@@ -206,25 +219,34 @@ async def build_code_index_with_gitnexus(
             ))
 
     # ⑧ Assemble CodeIndex
-    return CodeIndex(
-        repository=str(repo),
-        language=language,
-        total_blocks=len(all_blocks),
-        total_entry_points=len(gitnexus_entry_points),
-        total_chains=len(call_graph.chains),
-        blocks=all_blocks,
-        edges=call_graph.edges,
-        entry_points=gitnexus_entry_points,
-        chains=call_graph.chains,
-        sink_call_sites=sink_call_sites,
-        file_manifest=file_manifest,
-        degradation_level=DegradationLevel.FULL,
-        parameter_graph=pgraph,
+    return (
+        CodeIndex(
+            repository=str(repo),
+            language=language,
+            total_blocks=len(all_blocks),
+            total_entry_points=len(gitnexus_entry_points),
+            total_chains=len(call_graph.chains),
+            blocks=all_blocks,
+            edges=call_graph.edges,
+            entry_points=gitnexus_entry_points,
+            chains=call_graph.chains,
+            sink_call_sites=sink_call_sites,
+            file_manifest=file_manifest,
+            degradation_level=DegradationLevel.FULL,
+            parameter_graph=pgraph,
+        ),
+        rule_gaps,
     )
 
 
-def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
-    """Write code_index.json, code_index_summary.md, and parameter_graph.json."""
+def write_index_files(
+    index: CodeIndex,
+    output_dir: str,
+    *,
+    rule_gaps: list | None = None,
+) -> tuple[Path, Path]:
+    """Write code_index.json, code_index_summary.md, parameter_graph.json,
+    and (if any) rule_gap_report.json."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -239,6 +261,17 @@ def write_index_files(index: CodeIndex, output_dir: str) -> tuple[Path, Path]:
         pgraph_path.write_text(index.parameter_graph.model_dump_json(indent=2))
     elif pgraph_path.exists():
         pgraph_path.unlink()
+
+    # 旁路: 规则缺口报告(spec §3.1 层 2, 驱动规则库迭代, 不参与 taint/verdict)
+    gap_path = out / "rule_gap_report.json"
+    if rule_gaps:
+        import json as _json
+        gap_path.write_text(_json.dumps(
+            [g if isinstance(g, dict) else g.__dict__ for g in rule_gaps],
+            indent=2, ensure_ascii=False,
+        ))
+    elif gap_path.exists():
+        gap_path.unlink()
 
     return json_path, summary_path
 

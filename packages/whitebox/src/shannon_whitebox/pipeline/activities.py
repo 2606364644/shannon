@@ -400,7 +400,7 @@ async def run_code_index(input: ActivityInput) -> dict:
 
             try:
                 async with GitNexusMCPClient(Path(repo)) as mcp:
-                    index = await build_code_index_with_gitnexus(
+                    index, rule_gaps = await build_code_index_with_gitnexus(
                         str(repo),
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
@@ -415,7 +415,9 @@ async def run_code_index(input: ActivityInput) -> dict:
                     category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
                 ) from exc
 
-            json_path, summary_path = write_index_files(index, str(deliverables))
+            json_path, summary_path = write_index_files(
+                index, str(deliverables), rule_gaps=rule_gaps,
+            )
 
         return {
             "total_blocks": index.total_blocks,

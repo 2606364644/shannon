@@ -307,7 +307,7 @@ class TestPipelineAutoIndexing:
                         with patch("shannon_core.code_index.detect_sinks", return_value=[]):
                             with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
                                 with patch("shannon_core.code_index.propagate_across_chains", return_value=[]):
-                                    index = await build_code_index_with_gitnexus(
+                                    index, rule_gaps = await build_code_index_with_gitnexus(
                                         str(tmp_path),
                                         mcp_client=FakeImpactMCPClient(responses={}),
                                         llm_client=AsyncMock(return_value="{}"),
