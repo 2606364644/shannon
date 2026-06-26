@@ -22,6 +22,7 @@ INCLUDE_LINE = "@include(shared/_static-dataflow-hints.txt)"
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOWS_PY = REPO_ROOT / "packages/whitebox/src/shannon_whitebox/pipeline/workflows.py"
+ACTIVITIES_PY = REPO_ROOT / "packages/whitebox/src/shannon_whitebox/pipeline/activities.py"
 
 
 def test_no_prompt_includes_static_dataflow_hints():
@@ -129,3 +130,31 @@ def test_fusion_guarded_by_enable_llm_track():
                 f"CLAUDE.md §1 / Task 5: {ref.attr} 引用未在 "
                 f"if input.enable_llm_track: 守卫内"
             )
+
+
+def test_no_prompt_variables_inject_deterministic_track():
+    """activities.py 不得给 LLM 轨 agent 的 prompt_variables 注入确定性 track 产物。
+    白名单：authz_gitnexus_candidates（GitNexus 轨内部 IDOR 判定，合法）。"""
+    text = ACTIVITIES_PY.read_text()
+    forbidden_keys = (
+        "pre_recon_gitnexus_track",
+        "recon_gitnexus_track",
+        "framework_endpoints_summary",
+        "taint_flow_summary",
+        "chain_audit_input",
+    )
+    offenders = [k for k in forbidden_keys if f'prompt_variables["{k}"]' in text or f'"{k}":' in text]
+    assert not offenders, (
+        f"CLAUDE.md §1 violation — activities.py still injects deterministic "
+        f"track into LLM-track prompt_variables: {offenders}"
+    )
+    # 白名单：authz_gitnexus_candidates 必须保留（轨内合法）
+    assert "authz_gitnexus_candidates" in text, (
+        "authz_gitnexus_candidates 白名单被误删（authz GitNexus 轨内判定需要它）"
+    )
+
+
+def test_forbidden_and_whitelisted_placeholders_are_disjoint():
+    """白名单（GitNexus 轨内合法）与 forbidden（确定性→LLM 耦合）不得重叠。"""
+    assert not (FORBIDDEN_PLACEHOLDERS & WHITELISTED_PLACEHOLDERS), \
+        "白名单与黑名单重叠：无法判定合法性"
