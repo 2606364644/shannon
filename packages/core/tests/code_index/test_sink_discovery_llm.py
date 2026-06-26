@@ -164,3 +164,42 @@ async def test_soft_sink_flows_into_intra_hits():
     from shannon_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
     intra = _deterministic_intra_fallback(sc.block, sinks_by_func[sc.block.id])
     assert soft[0].id in intra.hits  # 软 sink 被 intra 命中 → 会进 TaintFlow
+
+
+def test_soft_sink_does_not_break_injection_whitelist():
+    """软 sink 的 rule_id/sink_subtype 不接触 injection 白名单维度(spec §6).
+
+    现实校验(Step 1 grep): injection 白名单 = `VALID_INJECTION_CATEGORIES`
+    (finding_models.py:28), 其成员是 issue_type('sql_injection' 等), 由
+    `parse_and_validate_findings` 按 `issue_type` 校验 —— 既非 brief 假设的
+    vuln-class `category`, 亦非 `sink_subtype`. 更关键: 软 sink 走
+    injection_builder → InjectionVulnerability(queue_schemas), 该路径根本不调用
+    parse_and_validate_findings, 故白名单永远不会拒绝软 sink.
+
+    本测试锁定此不变量: 软 sink 的 rule_id/subtype 不在任何 agent 白名单内,
+    且软 sink 产出物(InjectionVulnerability)不经白名单校验路径."""
+    from shannon_core.code_index.finding_models import (
+        VALID_INJECTION_CATEGORIES,
+        AGENT_TYPE_WHITELIST,
+    )
+    # 软 sink 的 SinkCategory(SQL)是 sink 级分类, 与白名单 issue_type 不混字段:
+    sc = _suspicious(arg="uid")
+    import asyncio
+    async def client(prompt, **kw):
+        return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                            "category": "sql", "slot": "sql_value", "arg_index": 0,
+                            "rationale": "x"}])
+    soft, _ = asyncio.run(discover_sinks_llm([sc], client))
+    assert soft[0].rule_id == "llm-discovered"
+    assert soft[0].category.value == "sql"  # SinkCategory(sink 级)
+    # 白名单维度(issue_type)不接触软 sink 的 rule_id / sink_subtype:
+    assert soft[0].sink_subtype not in VALID_INJECTION_CATEGORIES
+    assert not any(soft[0].sink_subtype in v for v in AGENT_TYPE_WHITELIST.values())
+    # injection_builder 产出 InjectionVulnerability(非 VulnFinding), 不调白名单校验:
+    from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+        build_injection_findings,
+    )
+    import inspect
+    src = inspect.getsource(build_injection_findings)
+    assert "parse_and_validate_findings" not in src  # builder 不走白名单路径
+    assert "VALID_INJECTION_CATEGORIES" not in src   # 不引用白名单
