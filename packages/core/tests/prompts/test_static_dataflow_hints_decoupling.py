@@ -41,7 +41,10 @@ FORBIDDEN_PLACEHOLDERS = {
     "FRAMEWORK_ENDPOINTS_SUMMARY",   # #3 recon
     "TAINT_FLOW_SUMMARY",            # #4 recon（死占位符）
     "CHAIN_AUDIT_INPUT",             # #7 audit-tier1（死占位符）
-    "VULN_CLASSES_TESTED",           # #7 audit-tier1（死占位符）
+    # NOTE: VULN_CLASSES_TESTED is NOT forbidden — it is a user-config placeholder
+    # (manager.py:114 reads config.vuln_classes, same category as {{WEB_URL}} /
+    # {{REPO_PATH}} / {{DELIVERABLES_PATH}}), not a deterministic-layer product.
+    # Task 4 误判它为确定性耦合并删除；本 fix (controller 识别) 已恢复。
     # #5 pre-recon Phase 0 元数据占位符群
     "TOTAL_CHAINS", "AVG_CHAIN_DEPTH", "MAX_CHAIN_DEPTH", "UNRESOLVED_COUNT",
     "TOTAL_FILES", "INDEXED_SOURCE_FILES", "TEMPLATE_FILE_COUNT",

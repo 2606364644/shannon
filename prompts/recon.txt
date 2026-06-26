@@ -21,7 +21,7 @@ Filesystem:
 </target>
 
 <scope>
-Map the full network-accessible attack surface. Cover all vulnerability classes (injection, xss, auth, authz, ssrf) unless your handler explicitly narrows scope.
+Map the full network-accessible attack surface. Downstream vulnerability analysis will cover these classes: {{VULN_CLASSES_TESTED}}. Map only what supports these classes.
 </scope>
 
 <rules>

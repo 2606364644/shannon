@@ -37,6 +37,7 @@ Filesystem:
 Authentication Context:
 {{AUTH_CONTEXT}}
 
+Vulnerability classes tested in this run: {{VULN_CLASSES_TESTED}}
 Exploitation: {{EXPLOITATION}}
 </context>
 
@@ -59,6 +60,7 @@ MODIFY the existing file `{{DELIVERABLES_PATH}}/comprehensive_security_assessmen
 ## 执行摘要
 - 目标: {{WEB_URL}}
 - 评估日期: {current date}
+- 范围: {{VULN_CLASSES_TESTED}}
 - 利用情况: {{EXPLOITATION}}
 
 ## 按漏洞类型汇总

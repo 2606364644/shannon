@@ -19,6 +19,8 @@ Phase 3 — Attack Surface Documentation: Produce a structured attack surface do
 <context>
 Authentication Context:
 {{AUTH_CONTEXT}}
+
+Vulnerability classes to test: {{VULN_CLASSES_TESTED}}
 </context>
 
 <methodology>
