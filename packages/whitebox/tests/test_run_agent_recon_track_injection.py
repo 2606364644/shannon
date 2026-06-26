@@ -104,7 +104,11 @@ class _FakeInput:
 
 
 @pytest.mark.asyncio
-async def test_recon_agent_gets_gitnexus_track(tmp_path):
+async def test_recon_agent_does_not_get_gitnexus_track(tmp_path):
+    """CLAUDE.md §1: RECON is an LLM-track agent and must NOT be fed the
+    deterministic GitNexus track (process-layer coupling removed). The
+    `recon_gitnexus_track` renderer has been deleted; the RECON branch in
+    activities.py must not inject any deterministic-track variable."""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
     (deliverables / "code_index.json").write_text(_index_with_group())
@@ -113,9 +117,10 @@ async def test_recon_agent_gets_gitnexus_track(tmp_path):
     with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
         await _run_with_runtime_patches(_FakeInput("recon", tmp_path), captured)
 
-    track = (captured.get("prompt_variables") or {}).get("recon_gitnexus_track", "")
-    assert "c.js:index:32" in track
-    assert "/preview/iframe-demo" in track
+    prompt_variables = captured.get("prompt_variables") or {}
+    # Decoupling invariant: no deterministic GitNexus track must reach the
+    # RECON (LLM-track) prompt variables.
+    assert "recon_gitnexus_track" not in prompt_variables
 
 
 @pytest.mark.asyncio
@@ -130,17 +135,3 @@ async def test_non_recon_agent_not_injected(tmp_path):
 
     prompt_variables = captured.get("prompt_variables")
     assert prompt_variables is None or "recon_gitnexus_track" not in (prompt_variables or {})
-
-
-@pytest.mark.asyncio
-async def test_recon_agent_without_code_index_still_injects_notice(tmp_path):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
-
-    captured = {}
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
-        await _run_with_runtime_patches(_FakeInput("recon", tmp_path), captured)
-
-    prompt_variables = captured.get("prompt_variables") or {}
-    assert "recon_gitnexus_track" in prompt_variables
-    assert "无" in prompt_variables["recon_gitnexus_track"]

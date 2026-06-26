@@ -9,8 +9,8 @@ sink (DB write / ORM mutation / file / state). This is conservative: we
 over-report candidates (宁过报不漏报, spec §2 principle 4) and let the LLM
 chain-judgement pass (Task 4) confirm or reject each.
 
-Ownership/auth detection reuses Plan 6's scan_endpoint_security machinery
-(_OWNERSHIP_PREDICATE_RE etc.) — imported, not reimplemented.
+Ownership/auth detection reuses the shared `OWNERSHIP_PREDICATE_RE` pattern
+(`shannon_core.code_index.patterns`) — imported, not reimplemented.
 
 This is the GitNexus TRACK of the dual-track merge. The LLM track (authz
 agent, vuln-authz.txt) is untouched (spec principle 2: no anchoring). The
@@ -67,8 +67,8 @@ def _is_side_effect_sink(block: FuncBlock | None) -> bool:
 
 def _handler_has_ownership_guard(handler: FuncBlock) -> bool:
     """Reuse Plan 6's ownership predicate detection (in-tree hard dependency)."""
-    from shannon_core.code_index.recon_gitnexus_track import _OWNERSHIP_PREDICATE_RE
-    return _OWNERSHIP_PREDICATE_RE.search(handler.source_code) is not None
+    from shannon_core.code_index.patterns import OWNERSHIP_PREDICATE_RE
+    return OWNERSHIP_PREDICATE_RE.search(handler.source_code) is not None
 
 
 def find_unguarded_sink_paths(

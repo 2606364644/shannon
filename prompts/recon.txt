@@ -249,12 +249,6 @@ even if one route has no authentication middleware.
 
 ### 4.1 Shared Controller Route Groups
 
-<recon_gitnexus_track>
-{{RECON_GITNEXUS_TRACK}}
-
-**填充规则**：上方「§4.1 Shared Route Groups」表为 GitNexus 调用图反推的确定性路由组（同 handler 多路由）。你的 §4.1 表须据此填充这些组 + **独立探索其他共享 handler 的路由组**（下限非上限）。**Auth 冲突取「无」**：若确定性轨标某路由 **none** auth 或未清晰认证，合并取 none（pre-auth variant）。
-</recon_gitnexus_track>
-
 When multiple routes map to the same handler function, a vulnerability in that
 handler affects ALL routes in the group. You MUST produce per-group subsections
 so downstream vulnerability agents can enumerate every affected route and flag
@@ -301,7 +295,7 @@ pre-auth (unauthenticated) variants.
 **下限非上限**：确定性未列出的端点不代表无框架端点——仍须独立检查路由定义中的框架使用。
 </framework_endpoints_deterministic>
 
-**§4.2 确定性 Auth/Middleware/Ownership**：见上方 `<recon_gitnexus_track>` 区的「§4.2 Endpoint Security Context」表（GitNexus 源码扫描）。Auth/Middleware/Ownership 据此填充 + 独立核实其他端点。**字段冲突取危险侧**：Auth 任一 none→none；Ownership 任一 none→none；Framework Origin 任一 auto-generated→auto-generated（见 `{{FRAMEWORK_ENDPOINTS_SUMMARY}}`）。Ownership = `guarded` 为候选，须语义确认。
+**§4.2 Auth/Middleware/Ownership**：独立核实每个端点的 auth/middleware/ownership（读路由定义 + handler 源码）。**字段冲突取危险侧**：Auth 任一 none→none；Ownership 任一 none→none；Framework Origin 任一 auto-generated→auto-generated（见 `{{FRAMEWORK_ENDPOINTS_SUMMARY}}`）。
 
 For every endpoint in Section 4, you MUST also provide an Endpoint Security Context entry using the format defined in `<endpoint_security_context>` above.
 

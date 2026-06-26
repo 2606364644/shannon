@@ -119,10 +119,6 @@ async def run_agent(input: ActivityInput) -> dict:
                 ]
                 prompt_variables["framework_endpoints_summary"] = render_framework_endpoints(endpoints)
 
-            from shannon_core.code_index.recon_gitnexus_track import build_recon_gitnexus_track
-
-            prompt_variables["recon_gitnexus_track"] = build_recon_gitnexus_track(str(deliverables))
-
         if agent_name == AgentName.PRE_RECON:
             prompt_variables = prompt_variables or {}
 
