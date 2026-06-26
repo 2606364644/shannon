@@ -124,13 +124,7 @@ async def run_agent(input: ActivityInput) -> dict:
             prompt_variables["recon_gitnexus_track"] = build_recon_gitnexus_track(str(deliverables))
 
         if agent_name == AgentName.PRE_RECON:
-            from shannon_core.code_index.pre_recon_gitnexus_track import build_pre_recon_gitnexus_track
-
             prompt_variables = prompt_variables or {}
-            prompt_variables["pre_recon_gitnexus_track"] = build_pre_recon_gitnexus_track(
-                repo,
-                deliverables,
-            )
 
         await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         await tool_audit_logger.initialize()

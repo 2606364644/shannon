@@ -41,7 +41,11 @@ async def _run_with_runtime_patches(input_obj, captured: dict):
 
 
 @pytest.mark.asyncio
-async def test_pre_recon_agent_gets_gitnexus_track(tmp_path):
+async def test_pre_recon_agent_does_not_get_gitnexus_track(tmp_path):
+    """CLAUDE.md §1: PRE_RECON is an LLM-track agent and must NOT be fed the
+    deterministic GitNexus track (process-layer coupling removed). The
+    `pre_recon_gitnexus_track` renderer has been deleted; the PRE_RECON branch
+    in activities.py must not inject any deterministic-track variable."""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
     (deliverables / "code_index.json").write_text(
@@ -87,9 +91,9 @@ async def test_pre_recon_agent_gets_gitnexus_track(tmp_path):
         await _run_with_runtime_patches(FakeInput(), captured)
 
     prompt_variables = captured.get("prompt_variables") or {}
-    track = prompt_variables.get("pre_recon_gitnexus_track", "")
-    assert "/api/x" in track
-    assert "下限" in track or "独立" in track
+    # Decoupling invariant: no deterministic GitNexus track must reach the
+    # PRE_RECON (LLM-track) prompt variables.
+    assert "pre_recon_gitnexus_track" not in prompt_variables
 
 
 @pytest.mark.asyncio

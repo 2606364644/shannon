@@ -31,10 +31,6 @@ Read `.gitignore` and run `git ls-files --others --ignored --exclude-standard --
 
 {{DESCRIPTION}}
 
-<scope>
-Downstream vulnerability analysis will cover these classes: {{VULN_CLASSES_TESTED}}.
-</scope>
-
 @include(shared/_code-path-rules.txt)
 
 @include(shared/_rules-of-engagement.txt)
@@ -107,26 +103,9 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 
 **PHASED ANALYSIS APPROACH:**
 
-## Phase 0: Code Index Review (MUST complete before Phase 1)
-
-Review the deterministic code index data provided below:
-
-1. Read `code_index.json` and review the call chain statistics and file coverage data
-2. Note any coverage gaps or degradation warnings
-3. Use this understanding to inform your Phase 1 and Phase 2 analysis
-
-Entry point adjudication is handled automatically downstream — you do NOT need to write entry_points.json.
-
-<pre_recon_gitnexus_track>
-{{PRE_RECON_GITNEXUS_TRACK}}
-
-**填充规则**：上表为 GitNexus + AST 确定性检测的 entry points / sinks / 模板转义。
-- 这些是**确定性下限**：你的 Sink Hunter / Entry Point Mapper 必须**覆盖**这些（逐条确认 network-reachable / render context）。
-- **下限非上限**：确定性未列出的 sink/entry/模板不代表不存在——仍须独立探索（glob 模板、grep 危险 API、变体目录），尤其未覆盖语言/动态调用。
-- 模板转义段的 unescaped 项是**高危**，优先分析。
-</pre_recon_gitnexus_track>
-
 ## Phase 1: Discovery Agents (Launch in Parallel)
+
+> Entry point adjudication is handled automatically downstream — you do NOT need to write entry_points.json.
 
 Launch these three discovery agents simultaneously to understand the codebase structure:
 
@@ -435,28 +414,6 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
   - Container orchestration API clients
   - Infrastructure metadata fetchers
   - Service mesh configuration retrievers
-
-<phase0_data>
-## Phase 0 Coverage Data (from code_index.json + file_manifest.json)
-
-### Call Chain Statistics
-- Total chains: {{TOTAL_CHAINS}}
-- Average depth: {{AVG_CHAIN_DEPTH}}
-- Max depth: {{MAX_CHAIN_DEPTH}}
-- Unresolved calls: {{UNRESOLVED_COUNT}}
-
-### File Coverage
-- Source files (indexed): {{INDEXED_SOURCE_FILES}}
-- Template files: {{TEMPLATE_FILE_COUNT}}
-- Config files: {{CONFIG_FILE_COUNT}}
-- Schema files: {{SCHEMA_FILE_COUNT}}
-- Total: {{TOTAL_FILES}}
-
-### Degradation Status
-{{DEGRADATION_WARNING_OR_NONE}}
-
-Use this data to cross-reference your findings. If Phase 0 detected entry points or chains that you don't mention in your analysis, explain why they were excluded.
-</phase0_data>
 
 <conclusion_trigger>
 **COMPLETION REQUIREMENTS (ALL must be satisfied):**
