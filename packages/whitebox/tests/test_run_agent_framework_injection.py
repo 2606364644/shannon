@@ -41,8 +41,13 @@ async def _run_with_runtime_patches(input_obj, captured: dict):
 
 
 @pytest.mark.asyncio
-async def test_recon_agent_gets_framework_endpoints_summary(tmp_path):
-    """RECON agent: framework_analysis.json present -> prompt_variables injected."""
+async def test_recon_agent_does_not_get_framework_endpoints_summary(tmp_path):
+    """CLAUDE.md §1: RECON is an LLM-track agent and must NOT be fed the
+    deterministic framework_analysis.json output (decoupling invariant).
+    The `framework_endpoints_summary` renderer was deleted in Task 3 (commit
+    7cf066a); even when framework_analysis.json is present and well-formed,
+    the RECON branch must NOT inject any `framework_endpoints_summary`
+    variable into prompt_variables."""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
     (deliverables / "framework_analysis.json").write_text(
@@ -78,10 +83,10 @@ async def test_recon_agent_gets_framework_endpoints_summary(tmp_path):
     with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
         await _run_with_runtime_patches(FakeInput(), captured)
 
-    assert captured.get("prompt_variables") is not None
-    summary = captured["prompt_variables"].get("framework_endpoints_summary", "")
-    assert "DELETE /api/Feedbacks/:id" in summary
-    assert "framework-auto-generated" in summary
+    prompt_variables = captured.get("prompt_variables") or {}
+    # Decoupling invariant: no deterministic framework analysis must reach the
+    # RECON (LLM-track) prompt variables, even when the JSON is present.
+    assert "framework_endpoints_summary" not in prompt_variables
 
 
 @pytest.mark.asyncio
