@@ -1,6 +1,6 @@
 # GitNexus intra-taint 确定性 fallback 改造 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 把 `analyze_taint_llm` 的 LLM-失败 fallback 从「全参数 tainted + 全 sink 命中 1.0」改成用 `SinkCallSite.dangerous_slots[].is_entry_hint` 做确定性分层(直达 0.9 / 间接 0.5 / 字面量过滤),在不引 LLM 依赖、不损失召回的前提下提升 GitNexus 轨 `parameter_graph.json` 的精度。
 
@@ -42,7 +42,7 @@
 **Interfaces:**
 - Produces: `_is_literal_expression(expr: str) -> bool`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `test_llm_taint_analyzer.py` 顶部 import 块(`:15-20`)追加 `_is_literal_expression`:
 
@@ -88,12 +88,12 @@ class TestIsLiteralExpression:
         assert _is_literal_expression("data.x") is False
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py::TestIsLiteralExpression -v`
 Expected: FAIL — `ImportError: cannot import name '_is_literal_expression'`
 
-- [ ] **Step 3: 实现 helper**
+- [x] **Step 3: 实现 helper**
 
 在 `llm_taint_analyzer.py` 的 `analyze_taint_llm` 函数定义之前(约 `:228` `# 5. Main entry point` 注释块之前)插入:
 
@@ -124,12 +124,12 @@ def _is_literal_expression(expr: str) -> bool:
     return e in {"true", "false", "null", "None", "True", "False"}
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py::TestIsLiteralExpression -v`
 Expected: PASS(6 passed)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/llm_taint_analyzer.py packages/core/tests/code_index/test_llm_taint_analyzer.py
@@ -150,7 +150,7 @@ git commit -m "feat(code_index): add _is_literal_expression helper for determini
 - Consumes: `_is_literal_expression`(Task 1);`FuncBlock.parameters`;`SinkCallSite.dangerous_slots`(每个 `DangerousSlot` 有 `.is_entry_hint: bool`、`.expression: str`);`IntraResult`
 - Produces: `_deterministic_intra_fallback(block: FuncBlock, sinks_in_func: list[SinkCallSite]) -> IntraResult`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `test_llm_taint_analyzer.py` 顶部 import 追加 `_deterministic_intra_fallback`(与 Task 1 的 import 块合并):
 
@@ -229,12 +229,12 @@ class TestDeterministicIntraFallback:
         assert result.tainted_params == {"user_input"}
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py::TestDeterministicIntraFallback -v`
 Expected: FAIL — `ImportError: cannot import name '_deterministic_intra_fallback'`
 
-- [ ] **Step 3: 实现核心函数**
+- [x] **Step 3: 实现核心函数**
 
 在 `llm_taint_analyzer.py` 的 `_is_literal_expression` 之后(`analyze_taint_llm` 之前)插入:
 
@@ -276,12 +276,12 @@ def _deterministic_intra_fallback(
     )
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py::TestDeterministicIntraFallback -v`
 Expected: PASS(6 passed)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/llm_taint_analyzer.py packages/core/tests/code_index/test_llm_taint_analyzer.py
@@ -301,7 +301,7 @@ git commit -m "feat(code_index): add _deterministic_intra_fallback (is_entry_hin
 **Interfaces:**
 - Consumes: `_deterministic_intra_fallback`(Task 2)
 
-- [ ] **Step 1: 先改测试反映新预期(TDD:先红)**
+- [x] **Step 1: 先改测试反映新预期(TDD:先红)**
 
 把 `test_llm_taint_analyzer.py:198-209` 的测试整体替换为(改名 + 新断言;注意 `_sink()` 默认 `expression="query"`、`is_entry_hint=False`,即「非字面量变量」→ 新逻辑给 0.5):
 
@@ -321,12 +321,12 @@ git commit -m "feat(code_index): add _deterministic_intra_fallback (is_entry_hin
         assert result.hits["sink_1"] == 0.5                 # 非字面量变量 → 0.5
 ```
 
-- [ ] **Step 2: 跑该测试验证失败**
+- [x] **Step 2: 跑该测试验证失败**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py::TestAnalyzeTaintLLM::test_llm_failure_fallback_tiers_sink_hits -v`
 Expected: FAIL — `assert 1.0 == 0.5`(旧 fallback 仍返回 1.0)
 
-- [ ] **Step 3: 改 `analyze_taint_llm` fallback 分支**
+- [x] **Step 3: 改 `analyze_taint_llm` fallback 分支**
 
 把 `llm_taint_analyzer.py:278-290` 的:
 
@@ -362,7 +362,7 @@ Expected: FAIL — `assert 1.0 == 0.5`(旧 fallback 仍返回 1.0)
     return _deterministic_intra_fallback(block, sinks_in_func)
 ```
 
-- [ ] **Step 4: 跑整个测试文件回归**
+- [x] **Step 4: 跑整个测试文件回归**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py -v`
 Expected: PASS —— 全部通过,含:
@@ -372,7 +372,7 @@ Expected: PASS —— 全部通过,含:
 - `TestIsLiteralExpression`、`TestDeterministicIntraFallback`(Task 1/2)
 - 其它现有测试不破
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/core/src/shannon_core/code_index/llm_taint_analyzer.py packages/core/tests/code_index/test_llm_taint_analyzer.py
@@ -391,7 +391,7 @@ git commit -m "refactor(code_index): wire deterministic fallback into analyze_ta
 **Interfaces:**
 - Consumes: `_deterministic_intra_fallback`(Task 2);`propagate_across_chains(chains, blocks, intra_results) -> list[TaintFlow]`(现有)
 
-- [ ] **Step 1: 写集成测试**
+- [x] **Step 1: 写集成测试**
 
 在 `test_chain_propagator.py` 顶部 import 块追加:
 
@@ -472,19 +472,19 @@ class TestDeterministicFallbackPropagationSmoke:
         assert flows == []  # 字面量 sink 过滤 → 无 flow
 ```
 
-- [ ] **Step 2: 跑测试验证通过(契约 smoke)**
+- [x] **Step 2: 跑测试验证通过(契约 smoke)**
 
 Run: `pytest packages/core/tests/code_index/test_chain_propagator.py::TestDeterministicFallbackPropagationSmoke -v`
 Expected: PASS(2 passed)。这验证新 fallback 不破坏 propagate 契约:直达 sink emit flow @ 0.9,字面量 sink 无 flow。
 
 > 若 FAIL:检查 `_deterministic_intra_fallback` 是否正确填 `tainted_params`(非空,保 seed)与 `hits`(直达进、字面量不进);`CallChain` 字段名是否与 `models.py` 一致(`entry_point_id`/`path`/`depth`/`has_unresolved`)。
 
-- [ ] **Step 3: 跑两个相关测试文件做最终回归**
+- [x] **Step 3: 跑两个相关测试文件做最终回归**
 
 Run: `pytest packages/core/tests/code_index/test_llm_taint_analyzer.py packages/core/tests/code_index/test_chain_propagator.py -v`
 Expected: 全部 PASS。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/core/tests/code_index/test_chain_propagator.py
