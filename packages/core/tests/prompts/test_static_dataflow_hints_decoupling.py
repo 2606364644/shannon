@@ -20,6 +20,9 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 INCLUDE_LINE = "@include(shared/_static-dataflow-hints.txt)"
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+WORKFLOWS_PY = REPO_ROOT / "packages/whitebox/src/shannon_whitebox/pipeline/workflows.py"
+
 
 def test_no_prompt_includes_static_dataflow_hints():
     offenders = sorted(
@@ -66,4 +69,22 @@ def test_no_llm_track_prompt_has_forbidden_placeholders():
     assert not offenders, (
         f"CLAUDE.md §1 violation — LLM-track prompts still embed deterministic "
         f"track placeholders (process-layer coupling): {sorted(offenders)}"
+    )
+
+
+def test_fusion_guarded_by_enable_llm_track():
+    """反方向 fusion（run_merge_sink_reports / run_entry_point_fusion）必须受
+    enable_llm_track 显式守卫，而非靠 PRE_RECON 不产出文件间接降级。
+
+    这两个 fusion activity 把 LLM pre-recon 产出的 sink/entry-point 与确定性层
+    合并——它们语义上依赖 LLM 轨产物，应在 LLM 轨关闭时显式跳过整个 activity，
+    而不是靠文件不存在间接降级。静态 grep 守卫（workflow 编排逻辑单元测成本高，
+    真机行为靠 Task 7 冒烟验证）。"""
+    text = WORKFLOWS_PY.read_text()
+    # 找到两个 fusion activity 调用，确认它们都在 if input.enable_llm_track: 块内。
+    for fusion_activity in ("run_merge_sink_reports", "run_entry_point_fusion"):
+        assert fusion_activity in text, f"{fusion_activity} 调用点消失？"
+    # 守卫模式：两个 fusion 调用前应有 if input.enable_llm_track:
+    assert "if input.enable_llm_track:" in text, (
+        "workflows.py 缺 enable_llm_track 守卫（CLAUDE.md §1：fusion 需显式守卫）"
     )

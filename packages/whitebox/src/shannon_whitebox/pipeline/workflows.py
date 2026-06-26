@@ -163,19 +163,20 @@ class WhiteboxScanWorkflow:
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
                 self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
 
-                # Merge deterministic sinks with LLM-discovered sinks
-                await workflow.execute_activity(
-                    activities.run_merge_sink_reports, act_input,
-                    start_to_close_timeout=timedelta(minutes=2),
-                    retry_policy=retry_for("standard"),
-                )
+                if input.enable_llm_track:
+                    # Merge deterministic sinks with LLM-discovered sinks (needs LLM deliverable)
+                    await workflow.execute_activity(
+                        activities.run_merge_sink_reports, act_input,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=retry_for("standard"),
+                    )
 
-                # Entry point fusion: merge deterministic + LLM discoveries
-                await workflow.execute_activity(
-                    activities.run_entry_point_fusion, act_input,
-                    start_to_close_timeout=timedelta(minutes=2),
-                    retry_policy=retry_for("standard"),
-                )
+                    # Entry point fusion: merge deterministic + LLM discoveries (needs LLM deliverable)
+                    await workflow.execute_activity(
+                        activities.run_entry_point_fusion, act_input,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=retry_for("standard"),
+                    )
 
                 # Adjudicate merged entry points by confidence
                 await workflow.execute_activity(
