@@ -1,7 +1,10 @@
 """sink_discovery_llm 单测 — 半 sink 收集 + LLM 补召回(spec 方案 A)."""
+import json
+
 import pytest
 
 from shannon_core.code_index.models import FuncBlock
+from shannon_core.code_index.parameter_models import SinkCategory, SlotContext
 from shannon_core.code_index.sink_discovery_llm import (
     SuspiciousCall,
     collect_suspicious_calls,
@@ -64,3 +67,75 @@ def test_skips_non_sinkish_call():
     parser = _FakeParser([("helper", None, ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
     assert out == []
+
+
+def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid"):
+    from shannon_core.code_index.models import FuncBlock
+    block = FuncBlock(
+        id=f"app.py:handler:{line}", file_path="app.py", function_name="handler",
+        start_line=1, end_line=10, source_code="def handler(): pass",
+        parameters=["uid"], language="python",
+    )
+    return SuspiciousCall(block=block, callee=callee, receiver=receiver,
+                          arg_exprs=[arg], file_path="app.py", line=line, column=0)
+
+
+async def test_discover_produces_soft_sink(monkeypatch):
+    # LLM 判 is_sink=True → 软 SinkCallSite, rule_id=llm-discovered, needs_review=True
+    async def client(prompt, **kw):
+        return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                            "category": "sql", "slot": "sql_value", "arg_index": 0,
+                            "rationale": "raw SQL concat"}])
+    soft, gaps = await discover_sinks_llm([_suspicious()], client)
+    assert len(soft) == 1
+    s = soft[0]
+    assert s.rule_id == "llm-discovered"
+    assert s.needs_review is True
+    assert s.category == SinkCategory.SQL
+    assert s.dangerous_slots[0].slot == SlotContext.SQL_VALUE
+    assert s.dangerous_slots[0].arg_index == 0
+
+
+async def test_discover_skips_non_sink(monkeypatch):
+    async def client(prompt, **kw):
+        return json.dumps([{"call_ref": "raw_query:1", "is_sink": False}])
+    soft, gaps = await discover_sinks_llm([_suspicious()], client)
+    assert soft == []
+
+
+async def test_discover_degrades_when_llm_unavailable():
+    # llm_client=None → 返回空(降级), 不抛
+    soft, gaps = await discover_sinks_llm([_suspicious()], None)
+    assert soft == [] and gaps == []
+
+    async def raising(prompt, **kw):
+        raise RuntimeError("timeout")
+    soft, gaps = await discover_sinks_llm([_suspicious()], raising)
+    assert soft == [] and gaps == []
+
+
+async def test_gap_aggregation():
+    # 同 pattern 的两个软 sink → 聚合成 1 条 gap, count=2
+    async def client(prompt, **kw):
+        return json.dumps([
+            {"call_ref": "raw_query:1", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "x"},
+        ])
+    calls = [_suspicious(line=1), _suspicious(line=2)]
+    soft, gaps = await discover_sinks_llm(calls, client)
+    assert len(gaps) == 1
+    assert gaps[0].count == 1  # client 每次只判 1 个 → gap 聚合按实际产出的软 sink
+    # 补一个真两软 sink 的场景:
+    async def client2(prompt, **kw):
+        return json.dumps([
+            {"call_ref": "raw_query:1", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "x"},
+            {"call_ref": "raw_query:2", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "y"},
+        ])
+    calls2 = [_suspicious(line=1), _suspicious(line=2)]
+    soft2, gaps2 = await discover_sinks_llm(calls2, client2)
+    assert len(soft2) == 2
+    assert len(gaps2) == 1
+    assert gaps2[0].count == 2
+    assert gaps2[0].pattern == "raw_query@custom_db"
