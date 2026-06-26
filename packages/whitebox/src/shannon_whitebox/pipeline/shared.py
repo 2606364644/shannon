@@ -17,6 +17,7 @@ class PipelineInput(BasePipelineInput):
     prompt_override: str | None = None
     resume_completed_agents: list[str] = field(default_factory=list)  # resume 预填
     max_concurrent: int = 3                    # SHANNON_MAX_CONCURRENT 注入;vuln agents 并发上限
+    enable_llm_track: bool = True              # SHANNON_LLM_TRACK_ENABLED 注入;False=只跑 GitNexus 轨
 
 
 @dataclass

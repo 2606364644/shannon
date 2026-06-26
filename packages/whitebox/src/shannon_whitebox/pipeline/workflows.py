@@ -293,18 +293,24 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=3),
                     retry_policy=retry_for("standard"),
                 )
-            vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
-            for vt in selected_classes:
-                agent_name = AgentName(f"{vt}-vuln")
-                if agent_name.value not in self._state.completed_agents:
-                    self._state.current_agent = agent_name.value
-                    coro = workflow.execute_activity(
-                        activities.run_vuln_agent,
-                        ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
-                        start_to_close_timeout=timedelta(hours=2),
-                        retry_policy=retry_for("vuln"),
-                    )
-                    vuln_tasks.append((vt, agent_name, coro))
+            if input.enable_llm_track:
+                vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
+                for vt in selected_classes:
+                    agent_name = AgentName(f"{vt}-vuln")
+                    if agent_name.value not in self._state.completed_agents:
+                        self._state.current_agent = agent_name.value
+                        coro = workflow.execute_activity(
+                            activities.run_vuln_agent,
+                            ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
+                            start_to_close_timeout=timedelta(hours=2),
+                            retry_policy=retry_for("vuln"),
+                        )
+                        vuln_tasks.append((vt, agent_name, coro))
+            else:
+                # LLM 轨关闭: 只跑 GitNexus 轨, merge 只消费 *_gitnexus_queue.json
+                workflow.logger.info("llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0); "
+                                     "running GitNexus track only")
+                vuln_tasks = []
 
             if vuln_tasks:
                 semaphore = asyncio.Semaphore(input.max_concurrent)
