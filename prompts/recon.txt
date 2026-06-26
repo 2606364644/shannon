@@ -288,14 +288,7 @@ pre-auth (unauthenticated) variants.
 - Include the router definition file:line range in the group header. Downstream agents can use this as a cross-reference anchor when their handler name doesn't exactly match — they can read the router file to confirm the mapping.
 ## 4.2 Endpoint Security Context
 
-<framework_endpoints_deterministic>
-{{FRAMEWORK_ENDPOINTS_SUMMARY}}
-
-**填充规则**：上表为 framework-analyzer 确定性检测的框架自动生成端点。§4.2 表中这些端点的 **Framework Origin** 列据此填充（finale-rest/epilogue auto-generated）；其 Auth/Middleware/Ownership Check 仍须你独立核实。
-**下限非上限**：确定性未列出的端点不代表无框架端点——仍须独立检查路由定义中的框架使用。
-</framework_endpoints_deterministic>
-
-**§4.2 Auth/Middleware/Ownership**：独立核实每个端点的 auth/middleware/ownership（读路由定义 + handler 源码）。**字段冲突取危险侧**：Auth 任一 none→none；Ownership 任一 none→none；Framework Origin 任一 auto-generated→auto-generated（见 `{{FRAMEWORK_ENDPOINTS_SUMMARY}}`）。
+**§4.2 Auth/Middleware/Ownership**：独立核实每个端点的 auth/middleware/ownership（读路由定义 + handler 源码）。**字段冲突取危险侧**：Auth 任一 none→none；Ownership 任一 none→none。**Framework Origin**：自行判断端点是否为框架自动生成（如 finale-rest / epilogue auto-generated）还是手写路由——读路由定义与框架使用确认，不依赖外部注入。
 
 For every endpoint in Section 4, you MUST also provide an Endpoint Security Context entry using the format defined in `<endpoint_security_context>` above.
 
