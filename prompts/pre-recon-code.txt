@@ -81,7 +81,7 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 - Entry points are marked with confidence levels and a `needs_llm_review` flag
 - CallChains have NOT been built yet — they will be constructed downstream automatically
 - The call graph (CallEdge[]) is available in the code index for your analysis
-- Your role is to review the code index data (Phase 0) and supplement with discoveries the code_index could not make (Phase 1)
+- Your role is to supplement the code index with discoveries the code_index could not make (the agent phases below)
 - Entry point adjudication is handled automatically downstream — you do NOT need to write entry_points.json
 </starting_context>
 
@@ -155,19 +155,16 @@ After Phase 1 completes, launch all three vulnerability-focused agents in parall
 - **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
 **EXECUTION PATTERN:**
-1. **Use TodoWrite to create task list** tracking: Phase 0 review, Phase 1 agents, Phase 2 agents, and report synthesis
-2. **Phase 0:** Review code_index.json coverage data and degradation warnings
-3. **Mark Phase 0 todos as completed**
-4. **Phase 1:** Launch all three Phase 1 agents in parallel using multiple Task tool calls in a single message
-5. **Wait for ALL Phase 1 agents to complete** - do not proceed until you have findings from Architecture Scanner, Entry Point Mapper, AND Security Pattern Hunter
-6. **Mark Phase 1 todos as completed** and review all findings
-7. **Phase 2:** Launch all three Phase 2 agents in parallel using multiple Task tool calls in a single message
-8. **Wait for ALL Phase 2 agents to complete** - ensure you have findings from all vulnerability analysis agents
-9. **Mark Phase 2 todos as completed**
-10. **Phase 3:** Mark synthesis todo as in-progress and synthesize all findings into comprehensive security report
+1. **Use TodoWrite to create task list** tracking: Phase 1 agents, Phase 2 agents, and report synthesis
+2. **Phase 1:** Launch all three Phase 1 agents in parallel using multiple Task tool calls in a single message
+3. **Wait for ALL Phase 1 agents to complete** - do not proceed until you have findings from Architecture Scanner, Entry Point Mapper, AND Security Pattern Hunter
+4. **Mark Phase 1 todos as completed** and review all findings
+5. **Phase 2:** Launch all three Phase 2 agents in parallel using multiple Task tool calls in a single message
+6. **Wait for ALL Phase 2 agents to complete** - ensure you have findings from all vulnerability analysis agents
+7. **Mark Phase 2 todos as completed**
+8. **Phase 3:** Mark synthesis todo as in-progress and synthesize all findings into comprehensive security report
 
 **CRITICAL TIMING RULES:**
-- Phase 0 MUST complete before Phase 1 begins
 - You MUST complete ALL agents in a phase before proceeding to the next phase. Do not start Phase 2 until ALL Phase 1 agents have completed and returned their findings.
 
 **AGENT-TO-SECTION MAPPING:**

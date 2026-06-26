@@ -66,7 +66,7 @@ def _is_side_effect_sink(block: FuncBlock | None) -> bool:
 
 
 def _handler_has_ownership_guard(handler: FuncBlock) -> bool:
-    """Reuse Plan 6's ownership predicate detection (in-tree hard dependency)."""
+    """True if handler source carries an ownership predicate (OWNERSHIP_PREDICATE_RE from patterns.py)."""
     from shannon_core.code_index.patterns import OWNERSHIP_PREDICATE_RE
     return OWNERSHIP_PREDICATE_RE.search(handler.source_code) is not None
 
