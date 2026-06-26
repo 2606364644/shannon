@@ -21,7 +21,6 @@ class AgentName(str, Enum):
     AUTHZ_EXPLOIT = "authz-exploit"
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
-    AUDIT_TIER1 = "audit-tier1"
     CROSS_REPO_CORRELATION = "cross-repo-correlation"
 
 class AgentDefinition(BaseModel):
@@ -143,14 +142,6 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,
         model_tier="medium",
     ),
-    AgentName.AUDIT_TIER1: AgentDefinition(
-        name=AgentName.AUDIT_TIER1,
-        display_name="Tier 1 Combined Audit",
-        prerequisites=[AgentName.RECON],
-        prompt_template="audit-tier1",
-        deliverable_filename=None,  # Findings collected, no separate deliverable
-        model_tier="small",
-    ),
     AgentName.CROSS_REPO_CORRELATION: AgentDefinition(
         name=AgentName.CROSS_REPO_CORRELATION,
         display_name="Cross-Repo Correlation",
@@ -166,7 +157,6 @@ ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
 BROWSER_SESSION_MAPPING: dict[str, str] = {name.value: f"agent{i}" for i, name in enumerate(AgentName, 1)}
 # VALIDATE_AUTH shares agent1 slot (same browser session as preflight)
 BROWSER_SESSION_MAPPING[AgentName.VALIDATE_AUTH.value] = "agent1"
-BROWSER_SESSION_MAPPING[AgentName.AUDIT_TIER1.value] = "agent16"
 
 # Backward-compatible alias
 PLAYWRIGHT_SESSION_MAPPING = BROWSER_SESSION_MAPPING
@@ -187,6 +177,5 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "authz-exploit": "exploitation",
     "report": "reporting",
     "validate-authentication": "pre-recon",
-    "audit-tier1": "vulnerability-analysis",
     "cross-repo-correlation": "correlation",
 }

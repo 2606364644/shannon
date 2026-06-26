@@ -21,7 +21,7 @@ Filesystem:
 </target>
 
 <scope>
-Downstream vulnerability analysis will cover these classes: {{VULN_CLASSES_TESTED}}. Map only what supports these classes.
+Map the full network-accessible attack surface. Cover all vulnerability classes (injection, xss, auth, authz, ssrf) unless your handler explicitly narrows scope.
 </scope>
 
 <rules>
@@ -113,19 +113,6 @@ You are the **Attack Surface Architect** - building the foundational intelligenc
 - Identify input vectors and render contexts for Injection and XSS specialists
 - Catalog API endpoints and request patterns for SSRF specialist
 </system_architecture>
-
-<parameter_propagation_data>
-## Parameter Propagation Graph (from parameter_graph.json)
-
-For each endpoint, the parameter propagation graph provides:
-- Taint source: Where user input enters (query param, body field, path param, header, cookie)
-- Propagation path: How input flows through function calls
-- Sink: Where the input reaches a security-sensitive operation (SQL, exec, render, etc.)
-
-{{TAINT_FLOW_SUMMARY}}
-
-When documenting injection sources in Section 9, use the taint flow data to trace the complete path from entry parameter to sink. Include the transformation chain (if any) between source and sink.
-</parameter_propagation_data>
 
 <no_security_judgments>
 CRITICAL RULE — No Security Judgments:
