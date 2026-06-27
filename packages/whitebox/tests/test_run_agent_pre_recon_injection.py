@@ -1,4 +1,3 @@
-import json
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -48,33 +47,7 @@ async def test_pre_recon_agent_does_not_get_gitnexus_track(tmp_path):
     in activities.py must not inject any deterministic-track variable."""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
-    (deliverables / "code_index.json").write_text(
-        json.dumps(
-            {
-                "repository": "r",
-                "language": "python",
-                "total_blocks": 0,
-                "total_entry_points": 1,
-                "total_chains": 0,
-                "blocks": [],
-                "edges": [],
-                "chains": [],
-                "entry_points": [
-                    {
-                        "func_block_id": "app.py:h:1",
-                        "entry_type": "http_route",
-                        "route": "/api/x",
-                        "http_method": "GET",
-                        "confidence": 0.9,
-                        "evidence": "router.get",
-                        "needs_llm_review": False,
-                        "authentication": "public",
-                    }
-                ],
-                "sink_call_sites": [],
-            }
-        )
-    )
+    (deliverables / "code_index.json").write_text("{}")
 
     captured = {}
 

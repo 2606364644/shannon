@@ -37,6 +37,7 @@ def test_no_prompt_includes_static_dataflow_hints():
     )
 
 
+# 新增禁用项时同步：{{占位符}} 加进 FORBIDDEN_PLACEHOLDERS；prompt_variables 键名加进 forbidden_keys；两者都属则两处都加。
 # CLAUDE.md §1 铁律：LLM 轨 prompt 正文不得出现确定性 track 占位符（过程层注入）。
 # 这些占位符由 renderer 把确定性 JSON 加工成 markdown 喂给 LLM 轨，破坏独立性。
 FORBIDDEN_PLACEHOLDERS = {
@@ -136,6 +137,7 @@ def test_no_prompt_variables_inject_deterministic_track():
     """activities.py 不得给 LLM 轨 agent 的 prompt_variables 注入确定性 track 产物。
     白名单：authz_gitnexus_candidates（GitNexus 轨内部 IDOR 判定，合法）。"""
     text = ACTIVITIES_PY.read_text()
+    # 新增禁用项时同步：{{占位符}} 加进 FORBIDDEN_PLACEHOLDERS；prompt_variables 键名加进 forbidden_keys；两者都属则两处都加。
     forbidden_keys = (
         "pre_recon_gitnexus_track",
         "recon_gitnexus_track",
@@ -158,3 +160,12 @@ def test_forbidden_and_whitelisted_placeholders_are_disjoint():
     """白名单（GitNexus 轨内合法）与 forbidden（确定性→LLM 耦合）不得重叠。"""
     assert not (FORBIDDEN_PLACEHOLDERS & WHITELISTED_PLACEHOLDERS), \
         "白名单与黑名单重叠：无法判定合法性"
+
+
+def test_pre_recon_prompt_does_not_reference_deterministic_code_index():
+    """CLAUDE.md §1: pre-recon LLM 轨 prompt 不得引导 agent 读确定性 code_index.json
+    （含 <starting_context> 类语义耦合，非仅 {{}} 占位符）。LLM 轨须纯自给。"""
+    pre_recon = (PROMPTS_DIR / "pre-recon-code.txt").read_text()
+    assert "code_index.json" not in pre_recon, (
+        "pre-recon prompt 仍引用确定性 code_index.json（语义耦合，违背 LLM 轨自给）"
+    )

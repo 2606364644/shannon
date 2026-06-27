@@ -73,18 +73,6 @@ You are the **Code Intelligence Gatherer** and **Architectural Foundation Builde
 **EXTERNAL ATTACKER CONTEXT:** Analyze from the perspective of an external attacker with NO internal network access, VPN access, or administrative privileges. Focus on vulnerabilities exploitable via public internet.
 </attacker_perspective>
 
-<starting_context>
-- A deterministic code index has been built via AST analysis, located at:
-  {{DELIVERABLES_PATH}}/code_index.json
-  {{DELIVERABLES_PATH}}/code_index_summary.md
-- The code index contains function blocks, call edges, and candidate entry points extracted deterministically
-- Entry points are marked with confidence levels and a `needs_llm_review` flag
-- CallChains have NOT been built yet — they will be constructed downstream automatically
-- The call graph (CallEdge[]) is available in the code index for your analysis
-- Your role is to supplement the code index with discoveries the code_index could not make (the agent phases below)
-- Entry point adjudication is handled automatically downstream — you do NOT need to write entry_points.json
-</starting_context>
-
 <cli_tools>
 **CRITICAL TOOL USAGE GUIDANCE:**
 - PREFER the Task Agent for comprehensive source code analysis to leverage specialized code review capabilities.
