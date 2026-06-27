@@ -61,3 +61,11 @@ def test_prompt_does_not_include_static_dataflow_hints():
     text = PROMPT.read_text()
     # 改动 4b：移除 hints include（LLM 轨自给自足）
     assert "@include(shared/_static-dataflow-hints.txt)" not in text
+
+
+def test_prompt_has_branch_path_exhaustion():
+    """B1 补回：分支独立 trace 方法论（防漏报分支间校验不一致的注入）。"""
+    text = PROMPT.read_text()
+    assert "Branch Path Exhaustion" in text
+    assert "conditional branches" in text
+    assert "trace every branch independently" in text
