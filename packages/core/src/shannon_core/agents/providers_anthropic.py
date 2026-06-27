@@ -17,6 +17,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from shannon_core.models.errors import classify_error_for_temporal
 
+from .narration import narration_directive
 from .providers import BaseProvider
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
@@ -256,6 +257,14 @@ class AnthropicProvider(BaseProvider):
         # 捕获 Claude CLI 子进程的真实 stderr。否则 SDK 会丢弃 stderr，
         # 用占位字符串掩盖失败原因。
         options.stderr = _on_claude_stderr
+
+        # Part B: append narration-language directive as system prompt. SDK maps
+        # preset/append → `--append-system-prompt` (verified in claude_agent_sdk
+        # subprocess_cli.py:235-238) — true system-prompt position append, does
+        # NOT replace the base system prompt. None when disabled → unchanged.
+        directive = narration_directive()
+        if directive:
+            options.system_prompt = {"type": "preset", "append": directive}
 
         return options
 

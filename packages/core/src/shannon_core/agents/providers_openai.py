@@ -19,6 +19,7 @@ from agents import (
 )
 from openai import AsyncOpenAI
 
+from .narration import narration_directive
 from .openai_output_schema import RawJsonSchemaOutputSchema
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
@@ -72,6 +73,17 @@ class OpenAIProvider(BaseProvider):
     def _max_turns(self) -> int:
         return int(os.getenv("SHANNON_OPENAI_MAX_TURNS", "200"))
 
+    def _instructions(self) -> str | None:
+        """Part B: narration-language directive as the parent Agent's system message.
+
+        None when disabled → unchanged behavior (prompt passed as user input, as
+        before). Only the parent agent gets the directive; the task subagent
+        (`_make_subagent_runner`) intentionally does NOT — it returns terse
+        code-reading data consumed by the parent, and injecting the directive
+        there would risk Chinese leaking into that data.
+        """
+        return narration_directive()
+
     def build_agent(self, model: str, output_format: dict | None) -> Agent:
         client = self._get_client()
         chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
@@ -79,7 +91,7 @@ class OpenAIProvider(BaseProvider):
         output_type = RawJsonSchemaOutputSchema(output_format) if output_format else None
         return Agent(
             name="shannon-openai-agent",
-            instructions=None,  # prompt 已含 system prompt，整段当 user input
+            instructions=self._instructions(),  # None when disabled
             tools=build_tools(),
             model=chat_model,
             model_settings=ModelSettings(include_usage=True),
