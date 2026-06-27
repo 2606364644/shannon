@@ -23,7 +23,9 @@ class NullAuditSession:
     async def log_phase_start(self, phase: str) -> None: pass
     async def log_phase_complete(self, phase: str) -> None: pass
     async def log_workflow_complete(self, summary: Any) -> None: pass
-    async def log_error(self, error: Any, context: str | None = None) -> None: pass
+    async def log_error(self, error: Any, context: str | None = None, *,
+                        attempt: int | None = None,
+                        max_attempts: int | None = None) -> None: pass
     async def log_resume_header(self, resume_info: Any) -> None: pass
     async def update_session_status(self, status: str) -> None: pass
     async def close(self) -> None: pass
