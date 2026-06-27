@@ -585,8 +585,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 }
                 gn_only = sum(1 for f in merged if f.merge_source == "gitnexus-only")
                 if gn_only:
-                    import logging
-                    logging.getLogger(__name__).info(
+                    logger.info(
                         "merge: vuln=%s merged %d gitnexus-only findings (LLM track did not cover)",
                         vuln_class, gn_only)
 
