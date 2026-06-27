@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-_DIRECTIVE_ZH = """<language>
+DIRECTIVE_ZH = """<language>
 - 用中文进行所有口述、推理过程与每轮总结（narration）。
 - 人读散文用中文：notes / exploitation_hypothesis / missing_defense /
   evidence_chain 的叙述、报告正文、执行摘要正文。
@@ -28,4 +28,4 @@ def narration_directive() -> str | None:
     anything else ("en", etc.) → None (unchanged English behavior).
     """
     lang = os.getenv("SHANNON_AGENT_NARRATION_LANG", "zh").strip().lower()
-    return _DIRECTIVE_ZH if lang == "zh" else None
+    return DIRECTIVE_ZH if lang == "zh" else None
