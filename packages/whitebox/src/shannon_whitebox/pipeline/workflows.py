@@ -355,8 +355,8 @@ class WhiteboxScanWorkflow:
             # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
             # Runs before run_merge_dual_track_queues (which reads those queues).
             # Non-fatal: failure degrades to LLM-only (merger tolerates absent
-            # gitnexus queues). No parameter_graph.json (Plan 1 not landed) ->
-            # empty, degrades to LLM-only (current behavior).
+            # gitnexus queues). No parameter_graph.json (empty taint graph) ->
+            # empty, degrades to LLM-only.
             try:
                 _gn_verdict = await workflow.execute_activity(
                     activities.run_gitnexus_chain_verdict, act_input,
