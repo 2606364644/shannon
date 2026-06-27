@@ -597,6 +597,52 @@ class TestOpenAIProvider:
         assert provider._is_retryable_error(Exception("permission denied (403)")) is False
         assert provider._is_retryable_error(Exception("some transient error")) is True
 
+    def test_classify_error_rate_limit(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        code, retryable = provider._classify_error(Exception("Rate limit exceeded"))
+        assert code == "RateLimitError"
+        assert retryable is True
+
+    def test_classify_error_timeout(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        code, retryable = provider._classify_error(TimeoutError("request timed out"))
+        assert code == "TimeoutError"
+        assert retryable is True
+
+    def test_classify_error_auth(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        code, retryable = provider._classify_error(Exception("invalid_api_key (401)"))
+        assert code == "AuthenticationError"
+        assert retryable is False
+
+    def test_classify_error_permission(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        code, retryable = provider._classify_error(Exception("permission denied (403)"))
+        assert code == "PermissionError"
+        assert retryable is False
+
+    def test_classify_error_default_agent_execution(self):
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        code, retryable = provider._classify_error(Exception("some transient error"))
+        assert code == "AgentExecutionError"
+        assert retryable is True
+
+    @pytest.mark.asyncio
+    async def test_handle_error_sets_error_code(self, monkeypatch, tmp_path):
+        """B3: _handle_error 必须填 error_code（此前恒 None）。"""
+        from unittest.mock import MagicMock
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
+        res = provider._handle_error(Exception("Rate limit exceeded"), duration=100, model="m")
+        assert res.success is False
+        assert res.error_code == "RateLimitError"
+        assert res.retryable is True
+
 
 class TestClaudeRunResult:
     """测试 ClaudeRunResult"""

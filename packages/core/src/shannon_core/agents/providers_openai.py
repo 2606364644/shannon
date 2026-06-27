@@ -162,6 +162,7 @@ class OpenAIProvider(BaseProvider):
             return self._handle_error(e, duration, model)
 
     def _handle_error(self, error: Exception, duration: int, model: str) -> ClaudeRunResult:
+        error_code, retryable = self._classify_error(error)
         return ClaudeRunResult(
             text="",
             success=False,
@@ -170,31 +171,40 @@ class OpenAIProvider(BaseProvider):
             cost=0.0,
             model=model,
             error=str(error),
-            retryable=self._is_retryable_error(error),
+            error_code=error_code,
+            retryable=retryable,
         )
 
-    def _is_retryable_error(self, error: Exception) -> bool:
-        """判断错误是否可重试。
+    def _classify_error(self, error: Exception) -> tuple[str | None, bool]:
+        """分类异常 → (error_code, retryable)。error_code 字符串与
+        models/errors.py:classify_error_for_temporal 对齐（B3）。
 
-        BaseProvider 的实现只匹配自定义异常类；openai/httpx/agents 抛的是普通异常，
-        需基于消息和类型名分类，对齐旧 OpenAIProvider / AnthropicProvider 行为。
+        BaseProvider._is_retryable_error 只匹配自定义异常类；openai/httpx/agents
+        抛的是普通异常，需基于消息和类型名分类。
         """
         error_msg = str(error).lower()
         error_type = type(error).__name__.lower()
-        # 速率限制 / 超时 / 服务不可用 → 可重试
+        # 速率限制 → 可重试
         if "rate" in error_msg or "limit" in error_msg or error_type == "ratelimiterror":
-            return True
+            return ("RateLimitError", True)
+        # 超时 → 可重试
         if "timeout" in error_msg or error_type in ("timeouterror", "timeoutexception", "connecttimeout"):
-            return True
+            return ("TimeoutError", True)
+        # 服务不可用 → 可重试
         if "unavailable" in error_msg or "503" in error_msg or "502" in error_msg or "504" in error_msg or error_type == "serviceunavailable":
-            return True
-        # 认证 / 权限 → 不可重试
+            return ("ServiceUnavailableError", True)
+        # 认证 → 不可重试
         if "auth" in error_msg or "401" in error_msg or error_type == "authenticationerror":
-            return False
+            return ("AuthenticationError", False)
+        # 权限 → 不可重试
         if "permission" in error_msg or "403" in error_msg or error_type == "permissiondeniederror":
-            return False
+            return ("PermissionError", False)
         # 默认可重试（与旧行为一致）
-        return True
+        return ("AgentExecutionError", True)
+
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """判断错误是否可重试（BaseProvider 契约，委托 _classify_error，DRY）。"""
+        return self._classify_error(error)[1]
 
 
 class _MaxTurnsStub:
