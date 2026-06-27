@@ -219,3 +219,31 @@ async def test_merge_logs_gitnexus_only_findings(tmp_path, monkeypatch, caplog):
         "gitnexus-only" in r.getMessage() and "injection" in r.getMessage()
         for r in caplog.records
     ), "GitNexus-only 并入时应打 info 日志（含 vuln 类名）"
+
+
+@pytest.mark.asyncio
+async def test_merge_preserves_gitnexus_only_reachability_false(tmp_path, monkeypatch):
+    """铁律: GitNexus-only 发现 externally_exploitable=False（内部可达）合并后保持 False，
+    不被 verdict=vulnerable 覆写（dual_track_merger.py:52-57）。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_gitnexus_queue.json").write_text(
+        json.dumps(
+            {"vulnerabilities": [{
+                "ID": "G1", "vulnerability_type": "injection",
+                "externally_exploitable": False,  # 内部/跨服务可达
+                "confidence": "high",
+                "verdict": "vulnerable", "source": "q", "sink_call": "db.exec",
+            }]}
+        )
+    )
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    set_audit_session(_RecordingSession())
+    try:
+        await activities.run_merge_dual_track_queues(_input(tmp_path))
+    finally:
+        clear_audit_session()
+    out = json.loads((deliverables / "injection_exploitation_queue.json").read_text())
+    v = out["vulnerabilities"][0]
+    assert v["merge_source"] == "gitnexus-only"
+    assert v["externally_exploitable"] is False  # 保持，不被 verdict 覆写
