@@ -17,6 +17,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from shannon_core.models.errors import classify_error_for_temporal
 
+from .providers import BaseProvider
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
 
@@ -34,12 +35,15 @@ def _on_claude_stderr(line: str) -> None:
     logger.warning("[claude-cli stderr] %s", line.rstrip())
 
 
-class AnthropicProvider:
-    """使用 Claude Agent SDK 的 Provider"""
+class AnthropicProvider(BaseProvider):
+    """使用 Claude Agent SDK 的 Provider。
+
+    A1（2026-06-27 双引擎解耦修复）：继承 BaseProvider，使 ABC 的 @abstractmethod
+    约束与 isinstance 契约对两引擎同时生效（此前为鸭子类型，isinstance 为 False）。
+    """
 
     def __init__(self, config: ProviderConfig):
-        self.config = config
-        self.type = config.type
+        super().__init__(config)
 
     def _get_model(self, model_tier: str) -> str:
         """根据 tier 获取模型名称

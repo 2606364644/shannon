@@ -1817,3 +1817,30 @@ class TestExecutorForwardsAuditLogger:
                 audit_logger=sentinel,
             )
         assert mock_run.call_args.kwargs["audit_logger"] is sentinel
+
+
+class TestBaseProviderContract:
+    """D3: 两 provider 都必须是 BaseProvider 的实例（A1 契约硬化锁定）。"""
+
+    def test_anthropic_provider_is_baseprovider_instance(self):
+        from shannon_core.agents.providers import BaseProvider
+        from shannon_core.agents.providers_anthropic import AnthropicProvider
+        from shannon_core.agents.runner import ProviderConfig
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api", api_key="k"))
+        assert isinstance(provider, BaseProvider), "AnthropicProvider 必须继承 BaseProvider"
+
+    def test_openai_provider_is_baseprovider_instance(self):
+        from shannon_core.agents.providers import BaseProvider
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        from shannon_core.agents.runner import ProviderConfig
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        assert isinstance(provider, BaseProvider)
+
+    def test_anthropic_provider_inherits_init_from_base(self):
+        """A1: super().__init__ 应设置 config/type，不再手动赋值。"""
+        from shannon_core.agents.providers_anthropic import AnthropicProvider
+        from shannon_core.agents.runner import ProviderConfig
+        cfg = ProviderConfig(type="anthropic_api", api_key="k", base_url="http://x")
+        provider = AnthropicProvider(cfg)
+        assert provider.config is cfg
+        assert provider.type == "anthropic_api"

@@ -85,7 +85,7 @@ class BaseProvider(ABC):
             audit_logger: provider 无关的逐轮审计日志记录器（可选）
 
         Returns:
-            ClaudeRunResult: 执行结果
+            ClaudeRunResult: 执行结果（字段语义不变量见 runner.ClaudeRunResult docstring）
         """
         pass
 
