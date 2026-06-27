@@ -105,7 +105,7 @@ def agent_retry_category(agent_name: str) -> Category:
     """Map an agent name to its retry-policy category (single source of truth).
 
     Mirrors workflows.py retry_for() calls: vuln agents (per-vt fan-out) → 'vuln'
-    (VULN_RETRY, max 5); pre-recon/recon/report and others → 'standard'
+    (VULN_RETRY, max 8); pre-recon/recon/report and others → 'standard'
     (PRODUCTION_RETRY, max 50). Used by the live display to resolve max_attempts.
     """
     if agent_name.endswith("-vuln"):
