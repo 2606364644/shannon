@@ -203,13 +203,26 @@ git commit -m "refactor(session): workspace 目录名改人类可读日期时间
 在 `packages/core/tests/test_session.py` 末尾追加：
 
 ```python
-def test_workspace_name_collision_appends_suffix(tmp_path):
-    """同秒同名二次创建追加 -2，不覆盖既有 session.json，两目录独立。"""
+def test_workspace_name_collision_appends_suffix(tmp_path, monkeypatch):
+    """同秒同名二次创建追加 -2，不覆盖既有 session.json，两目录独立。
+
+    用 monkeypatch 冻结 session 模块的 datetime，保证两次调用生成相同 base
+    （deterministic，不依赖真实时钟同秒——避免 flaky）。
+    """
+    import shannon_core.session as session_mod
+    fixed = datetime(2026, 6, 19, 14, 30, 0)
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed
+
+    monkeypatch.setattr(session_mod, "datetime", _FixedDateTime)
     mgr = SessionManager(tmp_path / "workspaces")
     ws1 = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
-    # 同一秒、同一 hostname 再建一个 → 默认名相同，应追加 -2
     ws2 = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
-    assert ws2.name == f"{ws1.name}-2", (ws1.name, ws2.name)
+    assert ws1.name == "NodeGoat_20260619-143000", ws1.name
+    assert ws2.name == "NodeGoat_20260619-143000-2", ws2.name
     assert ws1 != ws2
     assert (ws1 / "session.json").exists()
     assert (ws2 / "session.json").exists()
@@ -229,7 +242,7 @@ def test_explicit_name_keeps_idempotent_return(tmp_path):
 - [ ] **Step 2: 跑碰撞测试确认它失败**
 
 Run: `pytest packages/core/tests/test_session.py::test_workspace_name_collision_appends_suffix -v`
-Expected: FAIL —— Task 1 的 `_default_workspace_name` 无兜底，第二次创建得到与 `ws1` 同名目录，`create_workspace` 的幂等 `return ws` 让 `ws2 == ws1`，于是 `ws2.name == f"{ws1.name}-2"` 断言失败。
+Expected: FAIL —— Task 1 的 `_default_workspace_name` 无兜底，时间被冻结后两次调用生成相同 base `NodeGoat_20260619-143000`，`create_workspace` 的幂等 `return ws` 让 `ws2 == ws1`、`ws2.name == "NodeGoat_20260619-143000"`，于是 `assert ws2.name == "NodeGoat_20260619-143000-2"` 断言失败。
 
 （`test_explicit_name_keeps_idempotent_return` 预期 PASS——显式 `name` 本就走幂等 return，它是锁定该语义不被兜底逻辑误伤的锚点。）
 
@@ -267,7 +280,7 @@ Expected: FAIL —— Task 1 的 `_default_workspace_name` 无兜底，第二次
 - [ ] **Step 4: 跑 test_session.py 全部，确认通过**
 
 Run: `pytest packages/core/tests/test_session.py -v`
-Expected: PASS（Task 1 全部 + `test_workspace_name_collision_appends_suffix` + `test_explicit_name_keeps_idempotent_return`）。注意碰撞测试依赖两次调用落在同一秒生成相同 `base`——pytest 默认足够快，若偶发跨秒导致 `ws2.name` 不含 `-2`，重跑即可（真实使用中人不会 1 秒内手建两个）。
+Expected: PASS（Task 1 全部 + `test_workspace_name_collision_appends_suffix` + `test_explicit_name_keeps_idempotent_return`）。碰撞测试已用 monkeypatch 冻结 `datetime`，deterministic、不依赖真实时钟。
 
 - [ ] **Step 5: 提交**
 
