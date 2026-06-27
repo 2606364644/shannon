@@ -191,3 +191,31 @@ async def test_merge_keeps_gitnexus_only_when_llm_queue_absent(tmp_path, monkeyp
     assert v["merge_source"] == "gitnexus-only"
     assert v["confidence"] == "needs_review"
     assert v["externally_exploitable"] is True  # 取 GitNexus 轨值，不被覆写
+
+
+@pytest.mark.asyncio
+async def test_merge_logs_gitnexus_only_findings(tmp_path, monkeypatch, caplog):
+    """可观测: GitNexus-only 发现并入时打 info 日志（A4 生效的直接信号）。"""
+    import logging
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_gitnexus_queue.json").write_text(
+        json.dumps(
+            {"vulnerabilities": [{
+                "ID": "G1", "vulnerability_type": "injection",
+                "externally_exploitable": True, "confidence": "high",
+                "verdict": "vulnerable", "source": "q", "sink_call": "db.exec",
+            }]}
+        )
+    )
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    set_audit_session(_RecordingSession())
+    with caplog.at_level(logging.INFO):
+        try:
+            await activities.run_merge_dual_track_queues(_input(tmp_path))
+        finally:
+            clear_audit_session()
+    assert any(
+        "gitnexus-only" in r.getMessage() and "injection" in r.getMessage()
+        for r in caplog.records
+    ), "GitNexus-only 并入时应打 info 日志（含 vuln 类名）"

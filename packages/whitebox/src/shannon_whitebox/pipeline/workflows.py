@@ -290,11 +290,12 @@ class WhiteboxScanWorkflow:
             # files, merger degrades to llm-only. Only runs when auth is in scope.
             if "auth" in [str(vt) for vt in selected_classes]:
                 try:
-                    await workflow.execute_activity(
+                    _auth_scan = await workflow.execute_activity(
                         activities.run_auth_config_scan, act_input,
                         start_to_close_timeout=timedelta(minutes=3),
                         retry_policy=retry_for("standard"),
                     )
+                    workflow.logger.info("Auth config scan ok: %s findings", _auth_scan.get("total_findings", 0))
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).warning(
@@ -357,11 +358,12 @@ class WhiteboxScanWorkflow:
             # gitnexus queues). No parameter_graph.json (Plan 1 not landed) ->
             # empty, degrades to LLM-only (current behavior).
             try:
-                await workflow.execute_activity(
+                _gn_verdict = await workflow.execute_activity(
                     activities.run_gitnexus_chain_verdict, act_input,
                     start_to_close_timeout=timedelta(minutes=5),
                     retry_policy=retry_for("standard"),
                 )
+                workflow.logger.info("GitNexus chain verdict ok: %s", _gn_verdict.get("per_class", {}))
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning(
