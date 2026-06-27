@@ -91,3 +91,11 @@ def test_resume_info():
     )
     assert r.previous_workflow_id == "wf-old"
     assert r.completed_agents == ["recon"]
+
+
+def test_agent_end_result_has_num_turns_field():
+    """B2 观测:AgentEndResult 记录 turn 消耗(默认 None,向后兼容)。"""
+    r = AgentEndResult(success=True, duration_ms=100, cost_usd=0.0, attempt_number=1)
+    assert r.num_turns is None  # 默认 None,既有调用零破坏
+    r2 = AgentEndResult(success=True, duration_ms=100, cost_usd=0.0, attempt_number=1, num_turns=42)
+    assert r2.num_turns == 42

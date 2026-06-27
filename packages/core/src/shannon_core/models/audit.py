@@ -12,6 +12,7 @@ class AgentEndResult(BaseModel):
     error: str | None = None
     is_final_attempt: bool = True
     checkpoint: str | None = None
+    num_turns: int | None = None  # B2 观测:agent turn 消耗(来自 AgentMetrics.num_turns)
 
 
 class AgentLogDetails(BaseModel):

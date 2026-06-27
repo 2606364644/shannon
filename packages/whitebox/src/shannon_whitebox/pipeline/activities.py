@@ -156,6 +156,7 @@ async def run_agent(input: ActivityInput) -> dict:
             cost_usd=metrics.cost_usd or 0.0,
             attempt_number=attempt,
             model=metrics.model,
+            num_turns=metrics.num_turns,
         ))
         return metrics.model_dump()
     except PentestError as e:
