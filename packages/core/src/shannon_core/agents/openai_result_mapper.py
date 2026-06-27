@@ -33,15 +33,23 @@ def map_run_result(
     output_format: dict | None = None,
 ) -> ClaudeRunResult:
     final = getattr(run_result, "final_output", "")
-    text = final if isinstance(final, str) else str(final)
+    # B2: 结构化输出路径下 final_output 可能是 dict（RawJsonSchemaOutputSchema.validate_json 返回）
+    if isinstance(final, str):
+        text = final
+    else:
+        text = json.dumps(final, ensure_ascii=False) if not isinstance(final, (int, float, bool)) else str(final)
     tokens = _usage_from(run_result)
 
     structured_output: Any | None = None
-    if output_format and text:
-        try:
-            structured_output = json.loads(text)
-        except (json.JSONDecodeError, TypeError):
-            structured_output = final if not isinstance(final, str) else None
+    if output_format:
+        # 结构化输出：优先用已解析的 dict；退化到 json.loads 文本
+        if isinstance(final, (dict, list)):
+            structured_output = final
+        elif isinstance(final, str) and text:
+            try:
+                structured_output = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                structured_output = None
 
     # B1: max_turns 对齐 Claude subtype=error_max_turns → 失败 + 不可重试（spec §1.2）
     is_max_turns = stop_reason == "max_turns"

@@ -19,6 +19,7 @@ from agents import (
 )
 from openai import AsyncOpenAI
 
+from .openai_output_schema import RawJsonSchemaOutputSchema
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
 from .providers import BaseProvider, ProviderConfig
@@ -74,12 +75,15 @@ class OpenAIProvider(BaseProvider):
     def build_agent(self, model: str, output_format: dict | None) -> Agent:
         client = self._get_client()
         chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
+        # B2: output_format 非空时强制结构化输出（对齐 Claude options.output_format）
+        output_type = RawJsonSchemaOutputSchema(output_format) if output_format else None
         return Agent(
             name="shannon-openai-agent",
             instructions=None,  # prompt 已含 system prompt，整段当 user input
             tools=build_tools(),
             model=chat_model,
             model_settings=ModelSettings(include_usage=True),
+            output_type=output_type,
         )
 
     def _make_subagent_runner(self, model: str, cwd: str):

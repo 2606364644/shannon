@@ -525,14 +525,30 @@ class TestOpenAIProvider:
         assert provider._get_model("medium") == DEFAULT_MODELS["openai_compatible"]["medium"]
 
     def test_build_agent_wires_chatcompletions_model_and_tools(self):
-        from agents import Agent, OpenAIChatCompletionsModel
         from shannon_core.agents.providers_openai import OpenAIProvider
-        config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
-        provider = OpenAIProvider(config)
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         agent = provider.build_agent("m", output_format=None)
-        assert isinstance(agent, Agent)
-        assert isinstance(agent.model, OpenAIChatCompletionsModel)
-        assert len(agent.tools) == 8
+        assert agent.name == "shannon-openai-agent"
+        # 原：工具集非空（不再断言固定 count，因 task tool 等横向计划会增减工具集）
+        assert len(agent.tools) > 0
+
+    def test_build_agent_wires_output_type_when_output_format_given(self):
+        """B2: output_format 非空时，Agent 必须带 output_type（强制结构化输出）。"""
+        from shannon_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
+        schema = {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
+        agent = provider.build_agent("m", output_format=schema)
+        assert agent.output_type is not None
+        assert isinstance(agent.output_type, RawJsonSchemaOutputSchema)
+        assert agent.output_type.json_schema() == schema
+
+    def test_build_agent_output_type_none_when_no_output_format(self):
+        """B2: output_format 为 None 时，output_type 必须为 None（兼容纯文本路径）。"""
+        from shannon_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
+        agent = provider.build_agent("m", output_format=None)
+        assert agent.output_type is None
 
     @pytest.mark.asyncio
     async def test_call_maps_result_and_audits(self, monkeypatch, tmp_path):

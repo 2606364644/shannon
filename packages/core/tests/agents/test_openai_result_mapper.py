@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 from shannon_core.agents.openai_result_mapper import map_run_result
@@ -47,3 +48,27 @@ def test_map_structured_output():
     rr = _run_result('{"k": "v"}', _usage(1, 1))
     res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
     assert res.structured_output == {"k": "v"}
+
+
+def test_map_structured_output_dict_final():
+    """B2: output_type 生效时 final_output 是已解析 dict（validate_json 返回），
+    mapper 应直接采用，不二次 json.loads；text 走 json.dumps 序列化。"""
+    rr = _run_result({"verdict": "allow"}, _usage(2, 3))
+    res = map_run_result(
+        rr,
+        duration_ms=10,
+        model="m",
+        turns=1,
+        output_format={"type": "object", "properties": {"verdict": {"type": "string"}}},
+    )
+    assert res.structured_output == {"verdict": "allow"}
+    # dict final → text 经 json.dumps（保留中文，ensure_ascii=False）
+    assert json.loads(res.text) == {"verdict": "allow"}
+
+
+def test_map_structured_output_list_final():
+    """B2: list final_output 同样走 dict/list 分支（isinstance 命中）。"""
+    rr = _run_result([{"k": "v"}], _usage(1, 1))
+    res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "array"})
+    assert res.structured_output == [{"k": "v"}]
+
