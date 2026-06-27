@@ -8,8 +8,9 @@ from agents import RunResult
 
 from .runner import ClaudeRunResult, TokenUsage
 
-# GLM 等第三方模型定价未知，cost 留 0.0（不假估算），以 provider 账单为准。
-# 不复用 providers_openai.OPENAI_PRICING——Task 8 会重写该模块并删除该表。
+# GLM/openai endpoint 不支持计费归集，cost 留 0.0（不假估算），以 provider 账单为准。
+# 此 0 值对 spending-cap 兜底无害：utils/billing.is_spending_cap_behavior 的
+# cost>0→False 早退逻辑意味着 cost=0 时继续走 text 关键词匹配（C1，已核验）。
 
 
 def _usage_from(run_result: RunResult) -> TokenUsage:
@@ -42,14 +43,19 @@ def map_run_result(
         except (json.JSONDecodeError, TypeError):
             structured_output = final if not isinstance(final, str) else None
 
+    # B1: max_turns 对齐 Claude subtype=error_max_turns → 失败 + 不可重试（spec §1.2）
+    is_max_turns = stop_reason == "max_turns"
+
     return ClaudeRunResult(
         text=text,
-        success=True,
+        success=not is_max_turns,
         duration=duration_ms,
         turns=turns,
-        cost=0.0,  # GLM 定价未知，留空
+        cost=0.0,  # 见文件头注释（C1）
         model=model,
         structured_output=structured_output,
         tokens=tokens,
         stop_reason=stop_reason,
+        error_code="ExecutionLimitError" if is_max_turns else None,
+        retryable=False if is_max_turns else True,
     )

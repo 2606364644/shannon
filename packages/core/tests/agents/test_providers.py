@@ -582,6 +582,10 @@ class TestOpenAIProvider:
                             MagicMock(return_value=fake_result))
         res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium")
         assert res.stop_reason == "max_turns"
+        # B1: max_turns 必须反映为失败（对齐 Claude subtype=error_max_turns）
+        assert res.success is False
+        assert res.error_code == "ExecutionLimitError"
+        assert res.retryable is False
 
     def test_is_retryable_classifies_rate_limit(self):
         from shannon_core.agents.providers_openai import OpenAIProvider

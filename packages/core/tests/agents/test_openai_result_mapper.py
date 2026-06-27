@@ -34,9 +34,13 @@ def test_map_plain_text():
 
 
 def test_map_stop_reason_max_turns():
+    """B1: max_turns → success=False + error_code=ExecutionLimitError + retryable=False。"""
     rr = _run_result("partial", _usage(1, 1))
     res = map_run_result(rr, duration_ms=10, model="m", turns=200, stop_reason="max_turns")
     assert res.stop_reason == "max_turns"
+    assert res.success is False
+    assert res.error_code == "ExecutionLimitError"
+    assert res.retryable is False
 
 
 def test_map_structured_output():
