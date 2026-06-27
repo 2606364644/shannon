@@ -149,3 +149,45 @@ async def test_merge_handles_invalid_llm_queue_leniently(tmp_path, monkeypatch):
     assert "injection" in result["merged_classes"]
     out = json.loads((deliverables / "injection_exploitation_queue.json").read_text())
     assert out["vulnerabilities"] == []
+
+
+@pytest.mark.asyncio
+async def test_merge_keeps_gitnexus_only_when_llm_queue_absent(tmp_path, monkeypatch):
+    """A4: LLM queue 缺席时，GitNexus-only 发现仍并入报告（真兜底）。
+    df33ec5 时此场景 continue 跳过，GitNexus 产物被丢。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    # 注意：不写 injection_exploitation_queue.json（LLM 轨缺席）
+    (deliverables / "injection_gitnexus_queue.json").write_text(
+        json.dumps(
+            {
+                "vulnerabilities": [
+                    {
+                        "ID": "G1",
+                        "vulnerability_type": "injection",
+                        "externally_exploitable": True,
+                        "confidence": "high",
+                        "verdict": "vulnerable",
+                        "source": "q",
+                        "sink_call": "db.exec",
+                        "evidence_chain": "q -> db.exec(L42)",
+                    }
+                ]
+            }
+        )
+    )
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_merge_dual_track_queues(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert "injection" in result["merged_classes"]
+    out = json.loads((deliverables / "injection_exploitation_queue.json").read_text())
+    assert len(out["vulnerabilities"]) == 1
+    v = out["vulnerabilities"][0]
+    assert v["merge_source"] == "gitnexus-only"
+    assert v["confidence"] == "needs_review"
+    assert v["externally_exploitable"] is True  # 取 GitNexus 轨值，不被覆写

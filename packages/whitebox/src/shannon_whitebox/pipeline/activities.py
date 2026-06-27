@@ -537,21 +537,29 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
         ):
             for vuln_class in ("injection", "xss", "ssrf", "authz", "auth"):
                 exploitation_path = deliverables / f"{vuln_class}_exploitation_queue.json"
-                if not exploitation_path.exists():
-                    continue
-
-                llm_path = deliverables / f"{vuln_class}_llm_queue.json"
-                llm_path.write_text(exploitation_path.read_text(encoding="utf-8"), encoding="utf-8")
-                llm_parsed = VulnerabilityQueue.parse_lenient(llm_path.read_text(encoding="utf-8"))
-                llm_findings = llm_parsed.queue.vulnerabilities
-
-                gitnexus_findings = []
                 gitnexus_path = deliverables / f"{vuln_class}_gitnexus_queue.json"
+
+                # GitNexus-track findings (may exist independently of LLM track)
+                gitnexus_findings = []
                 if gitnexus_path.exists():
                     gitnexus_parsed = VulnerabilityQueue.parse_lenient(
                         gitnexus_path.read_text(encoding="utf-8")
                     )
                     gitnexus_findings = gitnexus_parsed.queue.vulnerabilities
+
+                # LLM-track findings. A4: LLM queue absent -> empty list, still merge
+                # (GitNexus-only must reach the report, not be dropped). Skip only
+                # when BOTH tracks are empty.
+                llm_findings = []
+                llm_warnings = []
+                if exploitation_path.exists():
+                    llm_path = deliverables / f"{vuln_class}_llm_queue.json"
+                    llm_path.write_text(exploitation_path.read_text(encoding="utf-8"), encoding="utf-8")
+                    llm_parsed = VulnerabilityQueue.parse_lenient(llm_path.read_text(encoding="utf-8"))
+                    llm_findings = llm_parsed.queue.vulnerabilities
+                    llm_warnings = llm_parsed.warnings
+                elif not gitnexus_findings:
+                    continue  # both tracks empty
 
                 merged = merge_dual_track_queues(
                     llm_findings,
@@ -573,7 +581,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                     "gitnexus_only": sum(
                         1 for finding in merged if finding.merge_source == "gitnexus-only"
                     ),
-                    "warnings": llm_parsed.warnings,
+                    "warnings": llm_warnings,
                 }
 
         return {"merged_classes": merged_classes, "per_class_counts": per_class_counts}
