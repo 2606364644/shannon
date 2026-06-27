@@ -10,6 +10,7 @@ from temporalio.exceptions import ApplicationError as ApplicationFailure
 from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
 from shannon_core.models.metrics import AgentMetrics
+from shannon_core.models.retry import agent_retry_category, retry_for
 from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
@@ -99,6 +100,10 @@ async def run_agent(input: ActivityInput) -> dict:
 
     agent_name = AgentName(input.agent_name or input.workspace_name)
     attempt = activity.info().attempt
+    # Resolve once; reused by both except branches so the display can render
+    # 将重试 N/M (attempt/max) without recomputing.
+    max_attempts = retry_for(
+        agent_retry_category(agent_name.value)).maximum_attempts
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -144,7 +149,8 @@ async def run_agent(input: ActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(
+            e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         # log_error surfaces to the live display; ApplicationFailure surfaces to
         # Temporal for retry decisions — both are intended, not double-logging.
@@ -155,7 +161,8 @@ async def run_agent(input: ActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(
+            e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
