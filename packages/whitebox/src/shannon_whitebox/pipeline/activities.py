@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -92,6 +93,19 @@ async def run_preflight(input: ActivityInput) -> None:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
+
+def _vuln_max_turns(agent_name: str) -> int | None:
+    """vuln agent 用专用 max_turns(SHANNON_VULN_MAX_TURNS,默认 500);其他返回 None。
+
+    返回 None 时,executor → run_claude_prompt → provider 沿用各引擎全局 env 默认
+    (CLAUDE_MAX_TURNS / SHANNON_OPENAI_MAX_TURNS = 200),行为零变更。
+    B2: 仅 vuln 单独配,不污染 pre-recon/recon/report。
+    """
+    if agent_retry_category(agent_name) == "vuln":
+        return int(os.getenv("SHANNON_VULN_MAX_TURNS", "500"))
+    return None
+
+
 @activity.defn
 async def run_agent(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -133,6 +147,7 @@ async def run_agent(input: ActivityInput) -> dict:
             prompt_override=input.prompt_override,
             prompt_variables=prompt_variables,
             tool_audit_logger=tool_audit_logger,
+            max_turns=_vuln_max_turns(agent_name.value),
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(

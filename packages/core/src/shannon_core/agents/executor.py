@@ -58,6 +58,7 @@ class AgentExecutor:
         structured_output_schema: dict | None = None,
         audit_logger: "ActivityLogger | None" = None,
         tool_audit_logger: "ToolAuditLogger | None" = None,
+        max_turns: int | None = None,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -106,6 +107,7 @@ class AgentExecutor:
             structured_output_schema=structured_output_schema,
             audit_logger=audit_logger,
             tool_audit_logger=tool_audit_logger,
+            max_turns=max_turns,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
