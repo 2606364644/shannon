@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.display.dispatcher import DisplayDispatcher
@@ -10,10 +12,13 @@ from shannon_core.display.events import (
 )
 from shannon_core.display.file_renderer import FileLogRenderer
 from shannon_core.display.formatters import format_log_time
+from shannon_core.logging.temporalio_redirect import install_temporalio_log_redirect
 from shannon_core.models.audit import AgentLogDetails, ResumeInfo, WorkflowSummary
 from shannon_core.models.metrics import SessionMetadata
 from .log_stream import LogStream
 from .utils import generate_workflow_log_path
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -59,6 +64,10 @@ class WorkflowLogger:
         path = generate_workflow_log_path(self._meta)
         self._stream = LogStream(path)
         await self._stream.open()
+        # Divert temporalio's verbose activity-failure tracebacks to a sibling
+        # file (same dir as workflow.log) BEFORE renderers consume any events,
+        # so the first ERROR can already point at detail_path. Degrades silently.
+        self._install_failure_redirect()
 
         renderers: list = [FileLogRenderer(self._stream)]
         if self._console is not None:
@@ -84,6 +93,26 @@ class WorkflowLogger:
             logs_cmd=_logs_cmd(ws),
             workspace=ws,
         ))
+
+    def _install_failure_redirect(self) -> None:
+        """Install the temporalio.activity -> file redirect; set the detail_path hint.
+
+        The redirect target is the same-source sibling of workflow.log
+        (``<audit_dir>/activity_failures.log``), so the live display's ERROR
+        line can hint at where the full traceback lives. On any install failure
+        we degrade silently (tracebacks may appear on terminal) — never break
+        the scan. ``log_error`` then emits with ``detail_path=None``.
+        """
+        try:
+            failure_path: Path = generate_workflow_log_path(self._meta).with_name(
+                "activity_failures.log")
+            install_temporalio_log_redirect(failure_path)
+            self._activity_failure_log_path = str(failure_path)
+        except Exception:
+            logger.warning(
+                "temporalio log redirect install failed; "
+                "activity tracebacks may appear on terminal", exc_info=True)
+            self._activity_failure_log_path = None
 
     async def log_phase(self, phase: str, event: Literal["start", "complete"],
                         steps: tuple[str, ...] = (),
