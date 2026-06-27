@@ -140,7 +140,7 @@ from datetime import datetime
 
 ```python
     assert ws.name.startswith("myapp_")
-    assert re.match(r"\d{8}-\d{6}$", ws.name), ws.name
+    assert re.search(r"\d{8}-\d{6}$", ws.name), ws.name
 ```
 
 `test_create_workspace_names_after_hostname_when_url_given` 中，把：
@@ -154,7 +154,7 @@ from datetime import datetime
 
 ```python
     assert ws.name.startswith("git-example-com_")
-    assert re.match(r"\d{8}-\d{6}$", ws.name), ws.name
+    assert re.search(r"\d{8}-\d{6}$", ws.name), ws.name
 ```
 
 - [ ] **Step 5: 在 `get_scan_type` fallback 处加注释**
