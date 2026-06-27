@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from shannon_core.agents.narration import _DIRECTIVE_ZH
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def test_claude_options_get_append_system_prompt_when_zh():
@@ -28,7 +28,11 @@ def test_claude_options_get_append_system_prompt_when_zh():
         with patch.object(prov, "_is_adaptive_thinking_enabled", return_value=False), \
              patch.object(prov, "_build_sdk_env", return_value={}):
             opts = prov._build_options(cwd="/tmp", model="m", output_format=None)
-    assert opts.system_prompt == {"type": "preset", "append": _DIRECTIVE_ZH}
+    assert opts.system_prompt == {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": _DIRECTIVE_ZH,
+    }
 
 
 def test_claude_options_unchanged_when_disabled():
@@ -71,9 +75,14 @@ def test_prompts_do_not_contain_narration_directive():
     """CLAUDE.md dual-track invariant: the language directive lives only in the
     system-prompt layer, never in prompts/*.txt (no deterministic bridge; prompts
     stay English). `_DIRECTIVE_ZH`'s distinctive snippet must not appear there."""
+    # Loud guards: a future path break must FAIL, not false-green.
+    assert PROMPTS_DIR.exists(), f"prompts dir not found: {PROMPTS_DIR}"
+    txts = list(PROMPTS_DIR.rglob("*.txt"))
+    assert txts, "no prompt files scanned — anchor is vacuous"
+
     directive_snippet = "narration-language"  # distinctive phrase per spec
     offenders = []
-    for p in PROMPTS_DIR.rglob("*.txt"):
+    for p in txts:
         if directive_snippet in p.read_text(encoding="utf-8"):
             offenders.append(str(p.relative_to(PROMPTS_DIR)))
     assert not offenders, f"directive leaked into prompts: {offenders}"

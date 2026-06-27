@@ -264,7 +264,11 @@ class AnthropicProvider(BaseProvider):
         # NOT replace the base system prompt. None when disabled → unchanged.
         directive = narration_directive()
         if directive:
-            options.system_prompt = {"type": "preset", "append": directive}
+            options.system_prompt = {
+                "type": "preset",
+                "preset": "claude_code",
+                "append": directive,
+            }
 
         return options
 
