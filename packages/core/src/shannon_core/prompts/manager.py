@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from shannon_core.models.agents import BROWSER_SESSION_MAPPING
-from shannon_core.models.config import Authentication, DistributedConfig
+from shannon_core.models.config import Authentication, DistributedConfig, Rule
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.services.browser_engine import BrowserEngineFactory
 import shannon_core.services.engines  # noqa: F401 – registers PlaywrightEngine & AgentBrowserEngine
@@ -111,6 +111,9 @@ class PromptManager:
             focus_str = "\n".join(f"- {r.description}" for r in config.focus) if config.focus else "None"
             result = result.replace("{{RULES_AVOID}}", avoid_str)
             result = result.replace("{{RULES_FOCUS}}", focus_str)
+            # code_path 类规则 → [FILE]/[GLOB] 标签行（CODE_RULES_* partial）
+            result = result.replace("{{CODE_RULES_AVOID}}", self._render_code_path_rules(config.avoid))
+            result = result.replace("{{CODE_RULES_FOCUS}}", self._render_code_path_rules(config.focus))
             result = result.replace("{{VULN_CLASSES_TESTED}}", ", ".join(config.vuln_classes) if config.vuln_classes else "injection, xss, auth, authz, ssrf")
             result = result.replace("{{EXPLOITATION}}", "enabled" if config.exploit else "disabled")
             roe = config.rules_of_engagement.strip() if config.rules_of_engagement else ""
@@ -130,6 +133,8 @@ class PromptManager:
             result = result.replace("{{AUTH_CONTEXT}}", "No authentication configured")
             result = result.replace("{{RULES_AVOID}}", "None")
             result = result.replace("{{RULES_FOCUS}}", "None")
+            result = result.replace("{{CODE_RULES_AVOID}}", "None")
+            result = result.replace("{{CODE_RULES_FOCUS}}", "None")
             result = result.replace("{{VULN_CLASSES_TESTED}}", "injection, xss, auth, authz, ssrf")
             result = result.replace("{{EXPLOITATION}}", "enabled")
             result = result.replace("{{RULES_OF_ENGAGEMENT}}", "")
@@ -169,6 +174,30 @@ class PromptManager:
             )
 
         return result
+
+    def _render_code_path_rules(self, rules: list[Rule]) -> str:
+        """把 code_path 类规则渲染成 [FILE]/[GLOB] 标签行,填 {{CODE_RULES_AVOID}} /
+        {{CODE_RULES_FOCUS}}（见 prompts/shared/_code-path-rules.txt）。
+
+        复用 settings_writer.sync_code_path_deny_rules 的筛选口径
+        (type == code_path 且 value 非空);空列表 → 'None'(与 RULES_AVOID 惯例一致)。
+        """
+        code_rules = [
+            r for r in rules
+            if r.type == "code_path" and r.value and r.value.strip()
+        ]
+        if not code_rules:
+            return "None"
+        lines = []
+        for r in code_rules:
+            value = r.value.strip()
+            tag = "[GLOB]" if any(c in value for c in "*?[]") else "[FILE]"
+            desc = r.description.strip() if r.description else ""
+            if desc and desc != value:
+                lines.append(f"- {tag} {value}  # {desc}")
+            else:
+                lines.append(f"- {tag} {value}")
+        return "\n".join(lines)
 
     def _build_report_filters_block(self, config) -> str:
         """Render the REPORT_FILTERS_BLOCK conditional section."""

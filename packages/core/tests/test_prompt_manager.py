@@ -483,3 +483,118 @@ def test_natural_language_placeholder_not_flagged(prompts_dir, caplog):
     unresolved_warnings = [r for r in caplog.records if "Unresolved" in r.message or "placeholder" in r.message.lower()]
     assert unresolved_warnings == [], f"自然语言填空提示不应触发 warning: {unresolved_warnings}"
 
+
+# --- Code-path rules rendering (CODE_RULES_AVOID / CODE_RULES_FOCUS) ---
+# 见 prompts/shared/_code-path-rules.txt：每条 code_path 规则应渲染成
+# [FILE]/[GLOB] 标签行,避免占位符原样残留进 LLM prompt(并触发 unresolved warning)。
+
+
+def test_render_code_path_rules_tags_glob_and_file():
+    """code_path 规则按通配符标 [GLOB]/[FILE]。"""
+    from shannon_core.models.config import Rule
+    manager = PromptManager(Path("/tmp"))
+    rules = [
+        Rule(description="secrets dir", type="code_path", value="secrets/**"),
+        Rule(description="auth route", type="code_path", value="src/routes/auth.js"),
+    ]
+    result = manager._render_code_path_rules(rules)
+    assert "- [GLOB] secrets/**" in result
+    assert "- [FILE] src/routes/auth.js" in result
+
+
+def test_render_code_path_rules_filters_non_code_path_types():
+    """非 code_path 类型(如 url_path)规则不进 CODE_RULES 渲染。"""
+    from shannon_core.models.config import Rule
+    manager = PromptManager(Path("/tmp"))
+    rules = [
+        Rule(description="admin url", type="url_path", value="/admin"),
+        Rule(description="secrets", type="code_path", value="secrets/**"),
+    ]
+    result = manager._render_code_path_rules(rules)
+    assert "/admin" not in result
+    assert "secrets/**" in result
+
+
+def test_render_code_path_rules_appends_description_when_distinct():
+    """description 与 value 不同时附 # 注释；相同时省略。"""
+    from shannon_core.models.config import Rule
+    manager = PromptManager(Path("/tmp"))
+    rules = [
+        Rule(description="secrets directory", type="code_path", value="secrets/**"),
+        Rule(description="secrets/**", type="code_path", value="secrets/**"),
+    ]
+    result = manager._render_code_path_rules(rules)
+    assert "- [GLOB] secrets/**  # secrets directory" in result
+    assert "- [GLOB] secrets/**\n" in result + "\n"  # 第二条 description==value 不带注释
+
+
+def test_render_code_path_rules_empty_returns_none():
+    """无 code_path 规则时返回 'None'(与 RULES_AVOID else 分支惯例一致)。"""
+    manager = PromptManager(Path("/tmp"))
+    assert manager._render_code_path_rules([]) == "None"
+
+
+def test_code_path_rules_placeholders_resolved_no_warning(prompts_dir, caplog):
+    """含 {{CODE_RULES_*}} 的模板经 config 渲染后占位符被替换且不触发 unresolved warning。"""
+    import logging
+    from shannon_core.models.config import Rule
+    (prompts_dir / "code-rules-test.txt").write_text(
+        "Avoid:\n{{CODE_RULES_AVOID}}\nFocus:\n{{CODE_RULES_FOCUS}}\n"
+    )
+    config = _make_dist_config(
+        avoid=[Rule(description="secrets", type="code_path", value="secrets/**")],
+        focus=[Rule(description="core module", type="code_path", value="src/core/**")],
+    )
+    manager = PromptManager(prompts_dir)
+    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+        result = manager.load_sync(
+            "code-rules-test",
+            {"web_url": "", "repo_path": "/r"},
+            config=config,
+        )
+    assert "{{CODE_RULES_AVOID}}" not in result
+    assert "{{CODE_RULES_FOCUS}}" not in result
+    assert "[GLOB] secrets/**" in result
+    assert "[GLOB] src/core/**" in result
+    assert "# core module" in result
+    unresolved = [r for r in caplog.records if "Unresolved" in r.message]
+    assert unresolved == [], f"CODE_RULES_* 占位符不应触发 warning: {unresolved}"
+
+
+def test_code_path_rules_placeholders_none_when_no_rules(prompts_dir, caplog):
+    """config 无 code_path 规则时占位符渲染成 'None' 且不触发 warning。"""
+    import logging
+    (prompts_dir / "code-rules-none.txt").write_text(
+        "Avoid:\n{{CODE_RULES_AVOID}}\n"
+    )
+    config = _make_dist_config()  # avoid=[], focus=[]
+    manager = PromptManager(prompts_dir)
+    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+        result = manager.load_sync(
+            "code-rules-none",
+            {"web_url": "", "repo_path": "/r"},
+            config=config,
+        )
+    assert "{{CODE_RULES_AVOID}}" not in result
+    assert "None" in result
+    unresolved = [r for r in caplog.records if "Unresolved" in r.message]
+    assert unresolved == []
+
+
+def test_code_path_rules_placeholders_resolved_without_config(prompts_dir, caplog):
+    """无 config(load_sync 默认 config=None)时占位符渲染成 'None' 且不触发 warning。"""
+    import logging
+    (prompts_dir / "code-rules-noconfig.txt").write_text(
+        "Avoid:\n{{CODE_RULES_AVOID}}\nFocus:\n{{CODE_RULES_FOCUS}}\n"
+    )
+    manager = PromptManager(prompts_dir)
+    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+        result = manager.load_sync(
+            "code-rules-noconfig",
+            {"web_url": "", "repo_path": "/r"},
+        )
+    assert "{{CODE_RULES_AVOID}}" not in result
+    assert "{{CODE_RULES_FOCUS}}" not in result
+    unresolved = [r for r in caplog.records if "Unresolved" in r.message]
+    assert unresolved == []
+
