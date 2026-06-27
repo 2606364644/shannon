@@ -47,7 +47,7 @@ class TestGetRetryPolicy:
 
 class TestVulnRetry:
     def test_vuln_retry_params(self):
-        assert VULN_RETRY.maximum_attempts == 5
+        assert VULN_RETRY.maximum_attempts == 8
         assert VULN_RETRY.initial_interval == timedelta(minutes=1)
         assert VULN_RETRY.maximum_interval == timedelta(minutes=5)
         assert VULN_RETRY.backoff_coefficient == 2.0

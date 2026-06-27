@@ -51,10 +51,11 @@ SUBSCRIPTION_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
-# vuln agent 专用:per-vt fan-out 下封顶 ~12min,有意分歧于 TS PRODUCTION_RETRY。
-# 详见 docs/superpowers/specs/2026-06-22-retry-policy-alignment-design.md §2.3。
+# vuln agent 专用:per-vt fan-out 下封顶 ~20min,有意分歧于 TS PRODUCTION_RETRY。
+# 详见 docs/superpowers/specs/2026-06-22-retry-policy-alignment-design.md §2.3
+# 及 2026-06-28-llm-track-vuln-parity-restoration-design.md §4.3。
 VULN_RETRY = RetryPolicy(
-    maximum_attempts=5,
+    maximum_attempts=8,
     initial_interval=timedelta(minutes=1),
     maximum_interval=timedelta(minutes=5),
     backoff_coefficient=2.0,
