@@ -289,11 +289,16 @@ class WhiteboxScanWorkflow:
             # the vuln-auth LLM to read. Pure additive: zero findings -> empty
             # files, merger degrades to llm-only. Only runs when auth is in scope.
             if "auth" in [str(vt) for vt in selected_classes]:
-                await workflow.execute_activity(
-                    activities.run_auth_config_scan, act_input,
-                    start_to_close_timeout=timedelta(minutes=3),
-                    retry_policy=retry_for("standard"),
-                )
+                try:
+                    await workflow.execute_activity(
+                        activities.run_auth_config_scan, act_input,
+                        start_to_close_timeout=timedelta(minutes=3),
+                        retry_policy=retry_for("standard"),
+                    )
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Auth config scan failed (non-fatal, auth track degrades to LLM-only): %s", exc)
             if input.enable_llm_track:
                 vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
                 for vt in selected_classes:
