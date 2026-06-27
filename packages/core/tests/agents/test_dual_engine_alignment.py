@@ -64,9 +64,11 @@ def test_retryable_alignment_rate_limit_openai():
     assert o_retry is True
 
 
-def test_structured_output_alignment_both_engines_produce_nonNone():
-    """场景 STRUCTURED_OUTPUT：传入 output_format 时，两引擎 structured_output 都非 None。
+def test_structured_output_openai_produces_nonNone():
+    """场景 STRUCTURED_OUTPUT：传入 output_format 时，OpenAI 引擎 structured_output 非 None。
 
+    仅 OpenAI 侧——Anthropic structured_output 走 providers_anthropic 原生
+    result_message.structured_output，由 TestAnthropicProvider 覆盖。
     OpenAI: map_run_result + output_format → json.loads 解析。
     锁定 spec §3 不变量 3（structured_output 可靠性）。
     """
@@ -78,7 +80,6 @@ def test_structured_output_alignment_both_engines_produce_nonNone():
     rr.context_wrapper.usage.output_tokens = 1
     res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
     assert res.structured_output == {"verdict": "pass"}
-    assert res.structured_output is not None
 
 
 def test_structured_output_dict_final_path():

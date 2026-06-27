@@ -180,8 +180,8 @@ class OpenAIProvider(BaseProvider):
         )
 
     def _classify_error(self, error: Exception) -> tuple[str | None, bool]:
-        """分类异常 → (error_code, retryable)。error_code 字符串与
-        models/errors.py:classify_error_for_temporal 对齐（B3）。
+        """分类异常 → (error_code, retryable)。retryable 与 models/errors.py:classify_error_for_temporal
+        真值对齐；error_code 字符串走 Pre-Flight 分类表（语义化，允许两引擎差异，见 spec §1.4）。
 
         BaseProvider._is_retryable_error 只匹配自定义异常类；openai/httpx/agents
         抛的是普通异常，需基于消息和类型名分类。

@@ -525,9 +525,12 @@ class TestOpenAIProvider:
         assert provider._get_model("medium") == DEFAULT_MODELS["openai_compatible"]["medium"]
 
     def test_build_agent_wires_chatcompletions_model_and_tools(self):
+        from agents import Agent, OpenAIChatCompletionsModel
         from shannon_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         agent = provider.build_agent("m", output_format=None)
+        assert isinstance(agent, Agent)
+        assert isinstance(agent.model, OpenAIChatCompletionsModel)
         assert agent.name == "shannon-openai-agent"
         # 原：工具集非空（不再断言固定 count，因 task tool 等横向计划会增减工具集）
         assert len(agent.tools) > 0
@@ -648,10 +651,8 @@ class TestOpenAIProvider:
         assert code == "AgentExecutionError"
         assert retryable is True
 
-    @pytest.mark.asyncio
-    async def test_handle_error_sets_error_code(self, monkeypatch, tmp_path):
+    def test_handle_error_sets_error_code(self):
         """B3: _handle_error 必须填 error_code（此前恒 None）。"""
-        from unittest.mock import MagicMock
         from shannon_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         res = provider._handle_error(Exception("Rate limit exceeded"), duration=100, model="m")
