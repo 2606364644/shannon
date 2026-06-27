@@ -27,13 +27,13 @@ def _restore_temporalio_activity_logger():
     try:
         yield
     finally:
-        # Restore prior state, then drop anything we added.
+        # Restore prior state, then drop anything we added (closing the
+        # FileHandlers we added so their fds don't linger until GC).
         for h in list(logger.handlers):
             if h not in saved_handlers:
                 logger.removeHandler(h)
+                h.close()
         # Re-add originals in case they were removed.
-        for h in logger.handlers:
-            pass  # originals still present
         for h in saved_handlers:
             if h not in logger.handlers:
                 logger.addHandler(h)
@@ -45,16 +45,30 @@ def test_failure_record_goes_to_file_not_stderr(tmp_path, capsys):
     log_path = tmp_path / "activity_failures.log"
     install_temporalio_log_redirect(log_path)
 
-    logger = logging.getLogger(_LOGGER_NAME)
+    # Simulate a configured root logger with a stderr handler. With such a
+    # handler present, a propagated record WOULD reach stderr; this test only
+    # stays clean if ``propagate=False`` blocks the walk toward root. (Without
+    # a root handler, Python's lastResort never fires because our WARNING-level
+    # FileHandler already handled the record — so a bare assert on stderr would
+    # pass regardless of the propagate setting and could not detect a
+    # regression removing ``propagate=False``.)
+    import sys
+    root_stderr_handler = logging.StreamHandler(sys.stderr)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(root_stderr_handler)
     try:
-        raise RuntimeError("boom")
-    except RuntimeError:
-        logger.warning("Completing activity as failed", exc_info=True)
+        logger = logging.getLogger(_LOGGER_NAME)
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError:
+            logger.warning("Completing activity as failed", exc_info=True)
 
-    captured = capsys.readouterr()
-    assert "Traceback" not in captured.err              # not on terminal
-    assert "Traceback" in log_path.read_text()          # into file
-    assert "Completing activity as failed" in log_path.read_text()
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err              # not on terminal
+        assert "Traceback" in log_path.read_text()          # into file
+        assert "Completing activity as failed" in log_path.read_text()
+    finally:
+        root_logger.removeHandler(root_stderr_handler)
 
 
 def test_debug_records_filtered_out_of_file(tmp_path):
