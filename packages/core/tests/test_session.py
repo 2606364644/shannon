@@ -276,7 +276,6 @@ def test_workspace_name_human_readable_format(tmp_path):
     mgr = SessionManager(tmp_path / "workspaces")
     before = datetime.now()
     ws = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
-    after = datetime.now()
     # 格式：hostname_YYYYMMDD-HHMMSS
     assert re.match(r"^NodeGoat_\d{8}-\d{6}$", ws.name), ws.name
     # 日期部分 = 今天（本地时区），证明是真实当前时间而非占位
@@ -300,3 +299,39 @@ def test_legacy_timestamp_dirs_still_listable(tmp_path):
     assert legacy in workspaces
     data = mgr.get_session_data(legacy)
     assert data["scan_type"] == "whitebox"
+
+
+def test_workspace_name_collision_appends_suffix(tmp_path, monkeypatch):
+    """同秒同名二次创建追加 -2，不覆盖既有 session.json，两目录独立。
+
+    用 monkeypatch 冻结 session 模块的 datetime，保证两次调用生成相同 base
+    （deterministic，不依赖真实时钟同秒——避免 flaky）。
+    """
+    import shannon_core.session as session_mod
+    fixed = datetime(2026, 6, 19, 14, 30, 0)
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed
+
+    monkeypatch.setattr(session_mod, "datetime", _FixedDateTime)
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws1 = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
+    ws2 = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
+    assert ws1.name == "NodeGoat_20260619-143000", ws1.name
+    assert ws2.name == "NodeGoat_20260619-143000-2", ws2.name
+    assert ws1 != ws2
+    assert (ws1 / "session.json").exists()
+    assert (ws2 / "session.json").exists()
+
+
+def test_explicit_name_keeps_idempotent_return(tmp_path):
+    """显式传 name（resume 场景）+ session.json 已存在 → 幂等 return 同一目录，不追加序号、不覆盖。"""
+    mgr = SessionManager(tmp_path / "workspaces")
+    ws1 = mgr.create_workspace(web_url="", repo_path="/repo", name="myapp_run1")
+    assert ws1.name == "myapp_run1"
+    # 同名 resume → 应返回同一目录，不得变成 myapp_run1-2
+    ws2 = mgr.create_workspace(web_url="", repo_path="/repo", name="myapp_run1")
+    assert ws2 == ws1
+    assert ws2.name == "myapp_run1"

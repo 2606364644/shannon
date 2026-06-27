@@ -49,9 +49,16 @@ class SessionManager:
     def _default_workspace_name(self, hostname: str) -> str:
         """生成默认 workspace 名：<hostname>_YYYYMMDD-HHMMSS（本地时区紧凑秒级，无冒号）。
 
-        Task 2 会在此方法内追加同秒同名碰撞兜底（-2/-3 序号）。
+        同秒同名碰撞（目标目录已存在且含 session.json）时追加 -2/-3… 序号，
+        避免错误复用别人的目录。显式 name（resume）不走本方法，幂等 return 不受影响。
         """
-        return f"{hostname}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        base = f"{hostname}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        name = base
+        i = 2
+        while (self.workspaces_dir / name / "session.json").exists():
+            name = f"{base}-{i}"
+            i += 1
+        return name
 
     def list_workspaces(self) -> list[Path]:
         if not self.workspaces_dir.exists():
