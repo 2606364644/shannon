@@ -661,6 +661,20 @@ class TestOpenAIProvider:
         assert res.retryable is True
 
 
+class TestOpenAISubagentMaxTurns:
+    """B2: openai 子代理 max_turns 默认 40（对称主 agent _max_turns()）。"""
+
+    def test_default_is_40(self, monkeypatch):
+        monkeypatch.delenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", raising=False)
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible"))
+        assert provider._subagent_max_turns() == 40
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "60")
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible"))
+        assert provider._subagent_max_turns() == 60
+
+
 class TestClaudeRunResult:
     """测试 ClaudeRunResult"""
 

@@ -73,6 +73,12 @@ class OpenAIProvider(BaseProvider):
     def _max_turns(self) -> int:
         return int(os.getenv("SHANNON_OPENAI_MAX_TURNS", "200"))
 
+    def _subagent_max_turns(self) -> int:
+        # 子代理（Task 委派）max_turns。结构层已硬限单层（子代理无 subagent_run
+        # + 只读工具集 [read_file, glob, grep]），调大无递归风险，仅增单次 token。
+        # B2: 20→40,锚定更复杂的追链子任务。
+        return int(os.getenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "40"))
+
     def _instructions(self) -> str | None:
         """Part B: narration-language directive as the parent Agent's system message.
 
@@ -119,7 +125,7 @@ class OpenAIProvider(BaseProvider):
             model=chat_model,
             model_settings=ModelSettings(include_usage=False),
         )
-        max_turns = int(os.getenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "20"))
+        max_turns = self._subagent_max_turns()
 
         async def run(prompt: str) -> str:
             res = await Runner.run(
