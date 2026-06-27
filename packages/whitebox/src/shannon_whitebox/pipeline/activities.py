@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -22,6 +23,9 @@ from shannon_whitebox.audit.session import AuditSession
 
 from .shared import ActivityInput
 from .step_intents import intent_for
+
+logger = logging.getLogger(__name__)
+
 
 def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
     deliverables = resolve_deliverables_path(
