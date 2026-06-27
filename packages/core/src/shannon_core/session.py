@@ -1,6 +1,7 @@
 import json
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 
 from shannon_core.models.agents import AgentName
@@ -20,8 +21,7 @@ class SessionManager:
                 ) or "repo"
             else:
                 hostname = Path(repo_path).name.replace(".", "-") or "repo"
-            session_id = f"shannon-{int(time.time() * 1000)}"
-            name = f"{hostname}_{session_id}"
+            name = self._default_workspace_name(hostname)
 
         ws = self.workspaces_dir / name
         ws.mkdir(parents=True, exist_ok=True)
@@ -45,6 +45,13 @@ class SessionManager:
         }
         (ws / "session.json").write_text(json.dumps(session_data, indent=2), encoding="utf-8")
         return ws
+
+    def _default_workspace_name(self, hostname: str) -> str:
+        """生成默认 workspace 名：<hostname>_YYYYMMDD-HHMMSS（本地时区紧凑秒级，无冒号）。
+
+        Task 2 会在此方法内追加同秒同名碰撞兜底（-2/-3 序号）。
+        """
+        return f"{hostname}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     def list_workspaces(self) -> list[Path]:
         if not self.workspaces_dir.exists():
@@ -95,6 +102,8 @@ class SessionManager:
         if "scan_type" in session:
             return session["scan_type"]
         name = workspace_path.name.lower()
+        # 新格式目录名（<hostname>_YYYYMMDD-HHMMSS）不含 "blackbox" 词；
+        # 此 fallback 仅在 session.json 缺 scan_type 时触发，新建均有 scan_type，不受影响。
         if "blackbox" in name:
             return "blackbox"
         return "whitebox"

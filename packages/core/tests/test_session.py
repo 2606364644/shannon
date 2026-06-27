@@ -1,5 +1,7 @@
 import json
+import re
 import pytest
+from datetime import datetime
 from pathlib import Path
 from shannon_core.session import SessionManager
 
@@ -40,7 +42,7 @@ def test_create_workspace_names_after_repo_basename_when_no_url(tmp_path):
     repo.mkdir()
     ws = mgr.create_workspace(web_url="", repo_path=str(repo), name=None)
     assert ws.name.startswith("myapp_")
-    assert "shannon-" in ws.name
+    assert re.search(r"\d{8}-\d{6}$", ws.name), ws.name
 
 
 def test_create_workspace_names_after_hostname_when_url_given(tmp_path):
@@ -50,7 +52,7 @@ def test_create_workspace_names_after_hostname_when_url_given(tmp_path):
     repo.mkdir()
     ws = mgr.create_workspace(web_url="https://git.example.com/x/y", repo_path=str(repo), name=None)
     assert ws.name.startswith("git-example-com_")
-    assert "shannon-" in ws.name
+    assert re.search(r"\d{8}-\d{6}$", ws.name), ws.name
 
 
 def test_create_workspace_includes_scan_type(tmp_path):
@@ -267,3 +269,34 @@ def test_delete_workspace_handles_already_deleted_linked_ws(tmp_path):
     # Should not raise
     result = mgr.delete_workspace("wb-orphan")
     assert result is True
+
+
+def test_workspace_name_human_readable_format(tmp_path):
+    """新 workspace 名为 <hostname>_YYYYMMDD-HHMMSS（本地时区紧凑秒级，无冒号）。"""
+    mgr = SessionManager(tmp_path / "workspaces")
+    before = datetime.now()
+    ws = mgr.create_workspace(web_url="", repo_path="/repo/NodeGoat", name=None)
+    after = datetime.now()
+    # 格式：hostname_YYYYMMDD-HHMMSS
+    assert re.match(r"^NodeGoat_\d{8}-\d{6}$", ws.name), ws.name
+    # 日期部分 = 今天（本地时区），证明是真实当前时间而非占位
+    parsed = datetime.strptime(ws.name.split("_", 1)[1], "%Y%m%d-%H%M%S")
+    assert parsed.strftime("%Y%m%d") == before.strftime("%Y%m%d")
+
+
+def test_legacy_timestamp_dirs_still_listable(tmp_path):
+    """老格式目录（shannon-<毫秒>）仍能被 list_workspaces / get_session_data 处理。"""
+    mgr = SessionManager(tmp_path / "workspaces")
+    legacy = tmp_path / "workspaces" / "NodeGoat_shannon-1782041072350"
+    legacy.mkdir()
+    (legacy / "session.json").write_text(json.dumps({
+        "web_url": "",
+        "repo_path": "/repo",
+        "created_at": 1782041072.350,
+        "scan_type": "whitebox",
+        "status": "completed",
+    }))
+    workspaces = mgr.list_workspaces()
+    assert legacy in workspaces
+    data = mgr.get_session_data(legacy)
+    assert data["scan_type"] == "whitebox"
