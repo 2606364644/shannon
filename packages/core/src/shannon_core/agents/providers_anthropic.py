@@ -83,6 +83,7 @@ class AnthropicProvider(BaseProvider):
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
+        max_turns: int | None = None,
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -102,7 +103,7 @@ class AnthropicProvider(BaseProvider):
 
         try:
             # 构建 SDK 配置
-            options = self._build_options(cwd, model, output_format)
+            options = self._build_options(cwd, model, output_format, max_turns_override=max_turns)
 
             # 执行调用
             result_message = await self._execute_query(prompt, options, audit_logger=audit_logger)
@@ -229,6 +230,7 @@ class AnthropicProvider(BaseProvider):
         cwd: str,
         model: str,
         output_format: dict | None = None,
+        max_turns_override: int | None = None,
     ) -> ClaudeAgentOptions:
         """构建 ClaudeAgentOptions"""
         options = ClaudeAgentOptions(
@@ -239,7 +241,8 @@ class AnthropicProvider(BaseProvider):
 
         # max_turns: high "runaway" ceiling. Single-agent pentest scans finish in
         # tens of turns; 200 is a safety net. Tunable via CLAUDE_MAX_TURNS.
-        max_turns = int(os.getenv("CLAUDE_MAX_TURNS", "200"))
+        # B2: 外部 override 优先（vuln 专用），否则沿用 CLAUDE_MAX_TURNS。
+        max_turns = max_turns_override or int(os.getenv("CLAUDE_MAX_TURNS", "200"))
         options.max_turns = max_turns
 
         # 添加结构化输出

@@ -146,6 +146,7 @@ class OpenAIProvider(BaseProvider):
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
+        max_turns: int | None = None,
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
@@ -158,7 +159,7 @@ class OpenAIProvider(BaseProvider):
                     agent,
                     input=prompt,
                     context=ToolContext(cwd=cwd, subagent_run=self._make_subagent_runner(model, cwd)),
-                    max_turns=self._max_turns(),
+                    max_turns=max_turns or self._max_turns(),
                 )
                 async for event in result.stream_events():
                     await collector.on_event(event)

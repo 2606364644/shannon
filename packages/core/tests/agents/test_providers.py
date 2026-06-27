@@ -506,6 +506,28 @@ class TestAnthropicProviderBuildOptions:
         assert options.env["CLOUD_ML_REGION"] == "us-central1"
         assert options.env["ANTHROPIC_VERTEX_PROJECT_ID"] == "test-project"
 
+    def test_build_options_uses_max_turns_override(self, monkeypatch):
+        """B2: _build_options(max_turns_override=N) → options.max_turns == N。"""
+        monkeypatch.setenv("CLAUDE_MAX_TURNS", "200")  # 默认值
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        with patch.object(provider, "_is_adaptive_thinking_enabled", return_value=False):
+            options = provider._build_options(
+                cwd="/tmp", model="claude-sonnet-4-6", output_format=None, max_turns_override=500,
+            )
+        assert options.max_turns == 500
+
+    def test_build_options_falls_back_to_env_when_override_none(self, monkeypatch):
+        """override=None → 沿用 CLAUDE_MAX_TURNS env。"""
+        monkeypatch.setenv("CLAUDE_MAX_TURNS", "200")
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        with patch.object(provider, "_is_adaptive_thinking_enabled", return_value=False):
+            options = provider._build_options(
+                cwd="/tmp", model="claude-sonnet-4-6", output_format=None, max_turns_override=None,
+            )
+        assert options.max_turns == 200
+
 
 class TestOpenAIProvider:
     def test_get_model_resolves_tier(self):

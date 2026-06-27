@@ -170,6 +170,31 @@ class TestRunClaudePrompt:
         assert "structured_output_schema" in sig.parameters
         assert sig.parameters["structured_output_schema"].default is None
 
+    @pytest.mark.asyncio
+    async def test_run_claude_prompt_forwards_max_turns_to_provider(self):
+        """B2: run_claude_prompt(max_turns=N) 透传到 provider.call(max_turns=N)。"""
+        mock_provider = MagicMock()
+        mock_result = ClaudeRunResult(text="ok", success=True, duration=10, turns=1)
+        mock_provider.call = AsyncMock(return_value=mock_result)
+
+        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+            await run_claude_prompt(prompt="p", repo_path="/tmp/repo", max_turns=500)
+
+        mock_provider.call.assert_awaited_once()
+        assert mock_provider.call.call_args.kwargs["max_turns"] == 500
+
+    @pytest.mark.asyncio
+    async def test_run_claude_prompt_max_turns_none_when_omitted(self):
+        """不传 max_turns 时透传 None（provider 沿用 env 默认）。"""
+        mock_provider = MagicMock()
+        mock_result = ClaudeRunResult(text="ok", success=True, duration=10, turns=1)
+        mock_provider.call = AsyncMock(return_value=mock_result)
+
+        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+            await run_claude_prompt(prompt="p", repo_path="/tmp/repo")
+
+        assert mock_provider.call.call_args.kwargs["max_turns"] is None
+
 
 class TestTokenUsage:
     """测试 TokenUsage 数据类"""

@@ -112,6 +112,7 @@ async def run_claude_prompt(
     provider_config: dict | None = None,
     audit_logger: "ActivityLogger | None" = None,
     tool_audit_logger: "ToolAuditLogger | None" = None,
+    max_turns: int | None = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -165,6 +166,7 @@ async def run_claude_prompt(
             output_format=output_format,
             deliverables_subdir=deliverables_subdir,
             audit_logger=active_tool_logger,
+            max_turns=max_turns,
         )
 
         # 5. 检查花费上限行为
