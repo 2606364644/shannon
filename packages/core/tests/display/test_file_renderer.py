@@ -115,7 +115,7 @@ async def test_error_line_with_context_and_classification():
         timestamp="t", category="ERROR", error_type="RuntimeError", message="x",
         context="during scan", classified="BillingError", display_retryable=True))
     line = renderer._writer.text
-    assert "[ERROR] RuntimeError: x (context: during scan) [BillingError · retryable]" in line
+    assert "[ERROR] RuntimeError: x (context: during scan) [BillingError · 将重试]" in line
 
 
 async def test_summary_completed_has_completion_marker():

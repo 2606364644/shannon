@@ -78,6 +78,9 @@ class ErrorEvent(DisplayEvent):
     context: str | None = None
     classified: str | None = None
     display_retryable: bool | None = None
+    attempt: int | None = None
+    max_attempts: int | None = None
+    detail_path: str | None = None
 
 
 @dataclass(frozen=True)

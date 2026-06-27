@@ -96,8 +96,16 @@ class FileLogRenderer:
         if e.context:
             msg += f" (context: {e.context})"
         if e.classified:
-            flag = "retryable" if e.display_retryable else "non-retryable"
-            msg += f" [{e.classified} · {flag}]"
+            if e.display_retryable:
+                suffix = (
+                    f"将重试 {e.attempt}/{e.max_attempts}"
+                    if (e.attempt and e.max_attempts) else "将重试"
+                )
+                msg += f" [{e.classified} · {suffix}]"
+            else:
+                msg += f" [{e.classified} · 不可重试]"
+        if e.detail_path:
+            msg += f"  (详细堆栈见 {e.detail_path})"
         return msg + "\n"
 
     def _summary(self, e) -> str:

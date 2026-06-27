@@ -119,8 +119,16 @@ class RichConsoleRenderer:
         if e.context:
             line += f" (context: {e.context})"
         if e.classified:
-            flag = "retryable" if e.display_retryable else "non-retryable"
-            line += f" [{e.classified} · {flag}]"
+            if e.display_retryable:
+                suffix = (
+                    f"将重试 {e.attempt}/{e.max_attempts}"
+                    if (e.attempt and e.max_attempts) else "将重试"
+                )
+                line += f" [{e.classified} · {suffix}]"
+            else:
+                line += f" [{e.classified} · 不可重试]"
+        if e.detail_path:
+            line += f"  (详细堆栈见 {e.detail_path})"
         self._console.print(line, highlight=False)
 
     def _render_summary(self, e) -> None:
