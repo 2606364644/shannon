@@ -7,6 +7,7 @@ from temporalio.exceptions import ApplicationError as ApplicationFailure
 
 from shannon_core.models.agents import AgentName
 from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+from shannon_core.models.retry import agent_retry_category, retry_for
 from shannon_core.utils.security import validate_target_url, check_url_reachable
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
@@ -74,6 +75,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
 
     agent_name = AgentName.VALIDATE_AUTH
     attempt = activity.info().attempt
+    max_attempts = retry_for(agent_retry_category(agent_name.value)).maximum_attempts
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -116,7 +118,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
@@ -125,7 +127,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -138,6 +140,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
 
     agent_name = AgentName.RECON_BLACKBOX
     attempt = activity.info().attempt
+    max_attempts = retry_for(agent_retry_category(agent_name.value)).maximum_attempts
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -177,7 +180,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
@@ -186,7 +189,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -200,6 +203,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
     vuln_type: str = input.vuln_type
     agent_name = AgentName(f"{vuln_type}-exploit")
     attempt = activity.info().attempt
+    max_attempts = retry_for(agent_retry_category(agent_name.value)).maximum_attempts
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -241,7 +245,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
@@ -250,7 +254,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
@@ -297,6 +301,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
 
     agent_name = AgentName.REPORT
     attempt = activity.info().attempt
+    max_attempts = retry_for(agent_retry_category(agent_name.value)).maximum_attempts
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -333,7 +338,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
@@ -342,7 +347,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
         await session.end_agent(agent_name.value, AgentEndResult(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
             attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value)
+        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
