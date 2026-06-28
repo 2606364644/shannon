@@ -295,7 +295,14 @@ class WhiteboxScanWorkflow:
                         start_to_close_timeout=timedelta(minutes=3),
                         retry_policy=retry_for("standard"),
                     )
-                    workflow.logger.info("Auth config scan ok: %s findings", _auth_scan.get("total_findings", 0))
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        ActivityInput(**{**act_input.__dict__,
+                           "info_message": f"Auth config scan ok: {_auth_scan.get('total_findings', 0)} findings",
+                           "info_level": "info"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).warning(
@@ -315,8 +322,14 @@ class WhiteboxScanWorkflow:
                         vuln_tasks.append((vt, agent_name, coro))
             else:
                 # LLM 轨关闭: 只跑 GitNexus 轨, merge 只消费 *_gitnexus_queue.json
-                workflow.logger.info("llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0); "
-                                     "running GitNexus track only")
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0); running GitNexus track only",
+                       "info_level": "info"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
                 vuln_tasks = []
 
             if vuln_tasks:
@@ -363,7 +376,14 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=5),
                     retry_policy=retry_for("standard"),
                 )
-                workflow.logger.info("GitNexus chain verdict ok: %s", _gn_verdict.get("per_class", {}))
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"GitNexus chain verdict ok: {_gn_verdict.get('per_class', {})}",
+                       "info_level": "info"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning(

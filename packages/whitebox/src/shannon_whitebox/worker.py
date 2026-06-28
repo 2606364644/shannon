@@ -33,6 +33,7 @@ from .pipeline.activities import (
     run_route_chain_building,
     log_phase_start_activity,
     log_phase_complete_activity,
+    log_info_activity,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
@@ -104,6 +105,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             run_gitnexus_chain_verdict,
             run_route_chain_building,
             log_phase_start_activity, log_phase_complete_activity,
+            log_info_activity,
         ],
     )
 

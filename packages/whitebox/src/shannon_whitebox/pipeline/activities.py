@@ -211,6 +211,12 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
 
 
 @activity.defn
+async def log_info_activity(input: ActivityInput) -> None:
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    await get_audit_session().log_info(input.info_message, input.info_level)
+
+
+@activity.defn
 async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
     """GitNexus track LLM chain-judgement pass for authz (spec §5.7).
 

@@ -48,6 +48,8 @@ class ActivityInput:
     workspace_path: str | None = None
     agent_name: str | None = None    # run_agent/run_vuln_agent 的 agent enum value（如 "pre-recon"/"recon"/"injection-vuln"）
     phase: str | None = None          # log_phase_* 的 phase label（如 "setup"/"pre-recon"/"recon"/"reporting"）
+    info_message: str | None = None   # log_info_activity 用户提示（替代 workflow.logger.info→stderr 抢行）
+    info_level: str = "info"          # "info" | "warning"
 
 
 @dataclass
