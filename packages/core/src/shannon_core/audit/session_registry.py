@@ -22,6 +22,7 @@ class NullAuditSession:
     async def log_event(self, event_type: str, event_data: Any) -> None: pass
     async def log_phase_start(self, phase: str) -> None: pass
     async def log_phase_complete(self, phase: str) -> None: pass
+    async def log_info(self, message: str, level: str = "info") -> None: pass
     async def log_workflow_complete(self, summary: Any) -> None: pass
     async def log_error(self, error: Any, context: str | None = None, *,
                         attempt: int | None = None,

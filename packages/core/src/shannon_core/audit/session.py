@@ -101,6 +101,15 @@ class AuditSession:
         if self._workflow_logger:
             await self._workflow_logger.log_phase(phase, "complete")
 
+    async def log_info(self, message: str, level: str = "info") -> None:
+        """Emit a user-facing info/warning line (routed via dispatcher, not stderr).
+
+        Replaces bare ``logger.warning/info`` in workflow threads, which would
+        hit stderr and collide with the Live footer (redirect_stderr=False).
+        """
+        if self._workflow_logger:
+            await self._workflow_logger.log_info(message, level=level)
+
     async def log_step(self, name: str, phase: str, event: str,
                        duration_ms: int | None = None, error: str | None = None,
                        intent: str | None = None) -> None:
