@@ -949,7 +949,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                     await _sess.log_info(
                         f"GitNexus 注入轨：3 类 0 findings（taint_flows={taint_flows_count}，"
                         f"sink_call_sites={sink_call_sites_count}）→ 靠 LLM 轨兜底。"
-                        f"taint_flows=0 常因 parameter_graph 空壳"
+                        f"常因 parameter_graph 空壳"
                         f"（GitNexus 调用图未产出 taint / Plan 1 未落地）。",
                         "warning",
                     )
