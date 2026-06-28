@@ -18,6 +18,26 @@ class AgentOutcome:
     error: str = ""
 
 
+def exploit_result_to_outcome(result: dict, agent_name: str, vuln_type: str) -> AgentOutcome:
+    """把 exploit activity 返回的 ``AgentMetrics.model_dump()`` dict 映射为展示用 ``AgentOutcome``。
+
+    字段对齐原始 TS ``AgentMetrics``（``durationMs``/``costUsd``/``numTurns``）：
+    ``duration_ms``（毫秒）→ ``duration_s``（秒，``/1000``）；``num_turns``/``cost_usd``
+    nullable → 0 兜底。
+
+    修复 getattr(dict, …) 永返 default 的归零 bug（``run_exploit_agent`` 返回 dict，
+    workflow completed 分支曾用属性访问取字段）。
+    """
+    return AgentOutcome(
+        agent_name=agent_name,
+        vuln_type=vuln_type,
+        status="completed",
+        duration_s=(result.get("duration_ms") or 0) / 1000,
+        cost_usd=result.get("cost_usd") or 0.0,
+        turns=result.get("num_turns") or 0,
+    )
+
+
 _STATUS_ICONS = {
     "completed": "✅",
     "failed": "❌",

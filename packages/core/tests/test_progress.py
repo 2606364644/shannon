@@ -1,8 +1,10 @@
 """Tests for shannon_core.utils.progress — AgentOutcome and format_exploit_summary."""
 
+from shannon_core.models.metrics import AgentMetrics
 from shannon_core.utils.progress import (
     AgentOutcome,
     _format_duration,
+    exploit_result_to_outcome,
     format_exploit_summary,
 )
 
@@ -134,3 +136,49 @@ class TestFormatExploitSummary:
         skipped_line = [l for l in lines if "⏭️" in l][0]
         assert "dur=-" in skipped_line
         assert "cost=-" in skipped_line
+
+
+# ---------------------------------------------------------------------------
+# exploit_result_to_outcome — exploit activity dict → AgentOutcome 映射
+# ---------------------------------------------------------------------------
+
+
+class TestExploitResultToOutcome:
+    """锁定 run_exploit_agent 返回的 AgentMetrics.model_dump() dict → AgentOutcome 字段映射。
+
+    回归：原 completed 分支 getattr(result, "duration_s") 取属性，但 result 是 dict
+    （getattr 永返 default）+ 字段名错位（duration_ms vs duration_s、num_turns vs turns），
+    导致 AgentOutcome 指标恒 0、format_exploit_summary 全 0。
+    """
+
+    def test_maps_real_model_dump(self):
+        metrics = AgentMetrics(duration_ms=1500, cost_usd=0.01, num_turns=3)
+        o = exploit_result_to_outcome(
+            metrics.model_dump(), agent_name="injection-exploit", vuln_type="injection"
+        )
+        assert o.agent_name == "injection-exploit"
+        assert o.vuln_type == "injection"
+        assert o.status == "completed"
+        assert o.duration_s == 1.5          # 1500ms → 1.5s
+        assert o.cost_usd == 0.01
+        assert o.turns == 3
+        assert o.error == ""
+
+    def test_nullable_and_missing_keys_default_to_zero(self):
+        # AgentMetrics 仅 duration_ms 必填；cost_usd/num_turns 可为 None
+        metrics = AgentMetrics(duration_ms=0, cost_usd=None, num_turns=None)
+        o = exploit_result_to_outcome(
+            metrics.model_dump(), agent_name="xss-exploit", vuln_type="xss"
+        )
+        assert o.duration_s == 0.0
+        assert o.cost_usd == 0.0
+        assert o.turns == 0
+
+    def test_missing_duration_ms_key_defaults_to_zero(self):
+        # 防御：dict 完全没有 duration_ms key（极端情况）
+        o = exploit_result_to_outcome(
+            {"cost_usd": 0.5, "num_turns": 4}, agent_name="ssrf-exploit", vuln_type="ssrf"
+        )
+        assert o.duration_s == 0.0
+        assert o.cost_usd == 0.5
+        assert o.turns == 4
