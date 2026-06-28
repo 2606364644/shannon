@@ -38,7 +38,7 @@ class RichConsoleRenderer:
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
-            AgentEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
+            AgentEvent, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
             ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
         )
         match event:
@@ -54,6 +54,7 @@ class RichConsoleRenderer:
                 if self._show_tools:
                     self._render_tool(event)
             case LlmTurnEvent(): self._render_llm(event)
+            case InfoEvent(): self._render_info(event)
             case ErrorEvent(): self._render_error(event)
             case SummaryEvent(): self._render_summary(event)
             case ResumeEvent(): self._render_resume(event)
@@ -83,6 +84,18 @@ class RichConsoleRenderer:
     def _render_step(self, e) -> None:
         self._console.print(
             f"[{e.timestamp}] [cyan]{tag('STEP')}[/]  {step_body(e)}", highlight=False)
+
+    def _render_info(self, e) -> None:
+        if e.level == "warning":
+            self._console.print(
+                f"[{e.timestamp}] [yellow]{tag('WARNING')}[/]  {e.message}",
+                highlight=False,
+            )
+        else:
+            self._console.print(
+                f"[{e.timestamp}] [cyan]{tag('INFO')}[/]  {e.message}",
+                highlight=False,
+            )
 
     def _render_phase(self, e) -> None:
         body = pad_rule(phase_body(e))

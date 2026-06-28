@@ -228,6 +228,27 @@ async def test_file_summary_uses_ok_symbol_for_success():
     assert "✓ xss-vuln" in buf.s
 
 
+async def test_file_renderer_info_event_info_level():
+    from shannon_core.display.file_renderer import FileLogRenderer
+    from shannon_core.display.events import InfoEvent
+    from unittest.mock import AsyncMock
+    writer = AsyncMock()
+    await FileLogRenderer(writer).render(
+        InfoEvent(timestamp="2026-06-28 12:00:00", category="INFO", message="hi", level="info"))
+    written = writer.write.await_args.args[0]
+    assert "[INFO]" in written and "hi" in written and written.endswith("\n")
+
+
+async def test_file_renderer_info_event_warning_level():
+    from shannon_core.display.file_renderer import FileLogRenderer
+    from shannon_core.display.events import InfoEvent
+    from unittest.mock import AsyncMock
+    writer = AsyncMock()
+    await FileLogRenderer(writer).render(
+        InfoEvent(timestamp="t", category="INFO", message="careful", level="warning"))
+    assert "[WARNING]" in writer.write.await_args.args[0]
+
+
 async def test_phase_step_agent_labels_align_in_file():
     """file [PHASE]/[STEP ]/[AGENT] 标签列等宽 -> 正文起点同列。"""
     from shannon_core.display.events import StepEvent

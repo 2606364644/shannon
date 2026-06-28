@@ -33,7 +33,7 @@ class FileLogRenderer:
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
-            AgentEvent, ErrorEvent, LlmTurnEvent, PhaseEvent,
+            AgentEvent, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
             ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
         )
         match event:
@@ -45,10 +45,15 @@ class FileLogRenderer:
             case LlmTurnEvent(): await self._writer.write(self._llm(event))
             case ErrorEvent(): await self._writer.write(self._error(event))
             case SummaryEvent(): await self._writer.write(self._summary(event))
+            case InfoEvent(): await self._writer.write(self._info(event))
             case ResumeEvent(): await self._writer.write(self._resume(event))
 
     def _step(self, e) -> str:
         return f"[{e.timestamp}] [{tag('STEP')}] {step_body(e)}\n"
+
+    def _info(self, e) -> str:
+        label = "WARNING" if e.level == "warning" else "INFO"
+        return f"[{e.timestamp}] [{label}] {e.message}\n"
 
     def _header(self, e) -> str:
         lines = [_SEP, "Shannon Pentest - Workflow Log", _SEP]

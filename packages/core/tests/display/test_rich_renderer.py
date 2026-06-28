@@ -321,3 +321,25 @@ async def test_phase_step_agent_bodies_align_same_column():
     s = step_line.index("○")
     a = agent_line.index("▶")
     assert p == s == a, f"PHASE/STEP/AGENT 正文未对齐: phase={p} step={s} agent={a}"
+
+
+async def test_rich_renderer_info_event_info_level_cyan():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import InfoEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(
+        InfoEvent(timestamp="t", category="INFO", message="hi", level="info"))
+    printed = console.print.call_args.args[0]
+    assert "INFO" in printed and "cyan" in printed and "hi" in printed
+
+
+async def test_rich_renderer_info_event_warning_level_yellow():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import InfoEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(
+        InfoEvent(timestamp="t", category="INFO", message="careful", level="warning"))
+    printed = console.print.call_args.args[0]
+    assert "WARNING" in printed and "yellow" in printed
