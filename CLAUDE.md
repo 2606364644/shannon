@@ -48,7 +48,7 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 
 ## 3. 关键参考
 
-- **设计 / 计划**：`docs/superpowers/specs/`、`docs/superpowers/plans/`（含 `2026-06-25-injection-recall-port-{design,plan}.md`）。
+- **设计 / 计划**：`docs/superpowers/`（spec/plan 工作目录，**先看 `README.md` 主题索引**）；活跃层 `specs/`、`plans/`（日期 >2026-06-15）+ 归档 `specs/archive/`、`plans/archive/`（≤2026-06-15，历史已完成）。例：`2026-06-25-injection-recall-port-{design,plan}.md`。
 - **架构总览**：`docs/architecture.md`、`docs/whitebox-refactoring-assessment.md`、`docs/gap/`（gap 分析）。
 - **测试陷阱**：全套 pytest 有预存挂起 / 失败（见各 package 的 test 说明）——只跑改动相关测试文件，勿广跑全套。
 - **分支**：`feat/fork-py`（本地多项改动未 push；动代码前先看 `git log` 与 memory 了解在途工作）。
