@@ -41,7 +41,8 @@ def cli():
 @click.option("--rewind", "rewind", default=None,
               type=click.Choice(["pre-recon", "recon", "vuln"]),
               help="回退到指定阶段重跑（pre-recon/recon/vuln）")
-def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url, fresh, rewind):
+@click.option("--debug", is_flag=True, help="扫描失败时在终端打印完整堆栈（调试用）")
+def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url, fresh, rewind, debug):
     """Start a white-box security scan."""
     if fresh and rewind:
         raise click.UsageError("--fresh 与 --rewind 互斥，不能同时使用。")
@@ -67,7 +68,23 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
     ensure_prerequisite("gitnexus", profile="whitebox")
     import sys
     use_rich = sys.stdout.isatty() and not plain
-    result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
+    from shannon_core.utils.paths import resolve_workspaces_dir
+    try:
+        result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
+    except Exception as e:
+        from shannon_core.cli.error_render import format_workflow_failure, persist_workflow_traceback
+        workspace_dir = None
+        if input.workspace_name:
+            workspace_dir = Path(resolve_workspaces_dir(input.repo_path)) / input.workspace_name
+        log_path = persist_workflow_traceback(e, workspace_dir)
+        click.echo(format_workflow_failure(e))
+        if log_path:
+            click.echo(f"  完整错误已记录到 {log_path}")
+        click.echo("  加 --debug 可在终端查看完整堆栈。")
+        if debug:
+            import traceback as _tb
+            _tb.print_exc()
+        raise SystemExit(1)
     if result.get("status") == "cancelled":
         click.echo("Scan cancelled.")
         raise SystemExit(130)

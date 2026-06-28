@@ -386,3 +386,43 @@ def test_start_exits_130_on_cancelled():
 
     assert result.exit_code == 130
     assert "Scan cancelled." in result.output
+
+
+def test_start_workflow_failure_shows_friendly_and_exits_1():
+    """run_scan 抛 ApplicationFailure → CLI 友好展示 + exit 1，不裸抛 traceback。"""
+    from temporalio.exceptions import ApplicationError
+
+    err = ApplicationError(
+        "Target http://localhost:4000 resolves to loopback address 127.0.0.1",
+        type="InvalidTargetError",
+    )
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_whitebox.worker.run_scan", side_effect=err),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
+
+    assert result.exit_code == 1
+    assert "InvalidTargetError" in result.output
+    assert "loopback" in result.output.lower() or "本机" in result.output
+    assert "--debug" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_start_workflow_failure_debug_prints_traceback():
+    """--debug 时额外把完整 traceback 打到 stderr。"""
+    from temporalio.exceptions import ApplicationError
+
+    err = ApplicationError("boom loopback detail", type="InvalidTargetError")
+    with (
+        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_whitebox.worker.run_scan", side_effect=err),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--debug"])
+
+    assert result.exit_code == 1
+    assert "Traceback" in result.output
