@@ -6,6 +6,7 @@ can be used interchangeably by the rest of shannon-py.
 
 from __future__ import annotations
 
+import os
 from typing import Protocol, runtime_checkable
 
 
@@ -118,3 +119,29 @@ class BrowserEngineFactory:
                 f"Available: {list(cls._engines.keys())}"
             )
         return cls._engines[engine_name]()
+
+    @classmethod
+    def resolve_name(cls, config_path: str | None = None) -> str:
+        """Resolve the effective browser engine name.
+
+        Priority (matches ``config/parser.py`` env-override semantics):
+        1. ``SHANNON_BROWSER_ENGINE`` env var (highest)
+        2. ``browser_engine`` field parsed from *config_path* (when provided)
+        3. Default ``"agent-browser"``
+        """
+        env_engine = os.environ.get("SHANNON_BROWSER_ENGINE")
+        if env_engine:
+            return env_engine.strip()
+        if config_path:
+            try:
+                from shannon_core.config.parser import parse_config
+
+                cfg = parse_config(config_path)
+                if cfg.browser_engine:
+                    return cfg.browser_engine
+            except Exception:
+                # Config unreadable → fall through to default rather than crash
+                # the preflight gate. The workflow's hard check_available()
+                # will surface real config errors later.
+                pass
+        return "agent-browser"

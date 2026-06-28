@@ -208,6 +208,26 @@ class TestBrowserEngineFactory:
         with pytest.raises(KeyError, match="stub"):
             BrowserEngineFactory.get_engine("nonexistent")
 
+    def test_resolve_name_defaults_to_agent_browser(self, monkeypatch):
+        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+        assert BrowserEngineFactory.resolve_name(None) == "agent-browser"
+
+    def test_resolve_name_env_overrides_default(self, monkeypatch):
+        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "playwright")
+        assert BrowserEngineFactory.resolve_name(None) == "playwright"
+
+    def test_resolve_name_reads_config(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("browser_engine: playwright\n")
+        assert BrowserEngineFactory.resolve_name(str(cfg)) == "playwright"
+
+    def test_resolve_name_env_beats_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "agent-browser")
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("browser_engine: playwright\n")
+        assert BrowserEngineFactory.resolve_name(str(cfg)) == "agent-browser"
+
 
 # ---------------------------------------------------------------------------
 # Import / subpackage smoke test
