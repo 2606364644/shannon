@@ -121,3 +121,40 @@ class TestEnsurePrerequisite:
         ):
             mock_run.return_value = MagicMock(returncode=1)
             ensure_prerequisite("gitnexus", profile="whitebox")
+
+
+class TestEnsureBrowserEngine:
+    """Tests for the engine-aware ensure_browser_engine helper."""
+
+    def test_checks_agent_browser_by_default(self, monkeypatch):
+        """No config, no env → default agent-browser → check 'agent-browser' binary."""
+        import shannon_core.services.engines  # noqa: F401  (register engines)
+        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+
+        captured = {}
+        monkeypatch.setattr(
+            "shannon_core.runtime.prerequisites.ensure_prerequisite",
+            lambda name, *, profile: captured.update(name=name, profile=profile),
+        )
+
+        from shannon_core.runtime.prerequisites import ensure_browser_engine
+        ensure_browser_engine(None)
+
+        assert captured["name"] == "agent-browser"
+        assert captured["profile"] == "blackbox"
+
+    def test_env_selects_playwright(self, monkeypatch):
+        """SHANNON_BROWSER_ENGINE=playwright → check 'playwright-cli' binary."""
+        import shannon_core.services.engines  # noqa: F401
+        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "playwright")
+
+        captured = {}
+        monkeypatch.setattr(
+            "shannon_core.runtime.prerequisites.ensure_prerequisite",
+            lambda name, *, profile: captured.update(name=name, profile=profile),
+        )
+
+        from shannon_core.runtime.prerequisites import ensure_browser_engine
+        ensure_browser_engine(None)
+
+        assert captured["name"] == "playwright-cli"

@@ -127,8 +127,8 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
 
     click.echo(f"Starting black-box scan on {url}")
     asyncio.run(ensure_infra(address=temporal_address))
-    from shannon_core.runtime.prerequisites import ensure_prerequisite
-    ensure_prerequisite("playwright-cli", profile="blackbox")
+    from shannon_core.runtime.prerequisites import ensure_browser_engine
+    ensure_browser_engine(input.config_path, profile="blackbox")
     import sys
     use_rich = sys.stdout.isatty() and not plain
     try:

@@ -101,3 +101,26 @@ def ensure_prerequisite(name: str, *, profile: str) -> None:
 
     # Declined install or install failed → degraded confirmation
     _confirm_degraded(name)
+
+
+def ensure_browser_engine(
+    config_path: str | None = None,
+    *,
+    profile: str = "blackbox",
+) -> None:
+    """Resolve the active browser engine and check its CLI binary.
+
+    Engine name resolution (env > config > default) mirrors the workflow's own
+    resolution, so the preflight gate checks the *same* binary the run will
+    actually use — not a hardcoded ``playwright-cli``.
+
+    Args:
+        config_path: Optional YAML config path to read ``browser_engine`` from.
+        profile: bootstrap.sh profile passed through to :func:`ensure_prerequisite`.
+    """
+    import shannon_core.services.engines  # noqa: F401  (ensure engines registered)
+    from shannon_core.services.browser_engine import BrowserEngineFactory
+
+    engine_name = BrowserEngineFactory.resolve_name(config_path)
+    engine = BrowserEngineFactory.get_engine(engine_name)
+    ensure_prerequisite(engine.cli_binary, profile=profile)
