@@ -173,3 +173,90 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
     _, kwargs = stub_executor.execute.call_args
     assert kwargs.get("skip_artifact_postprocess") is True
     assert kwargs.get("structured_output_schema") is not None
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_retries_on_reject(tmp_path):
+    """spec §3.3: validate 产生 rejected → 反馈原因给 agent 重跑, max 2 次(3 calls)."""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [{"ID": "INJ-VULN-1", "vulnerability_type": "injection",
+                             "externally_exploitable": True, "confidence": "high"}]}))
+
+    # 第 1 次：phantom-ID verdict → L2 拒绝；第 2 次：合法 verdict → accepted
+    first_metrics = AgentMetrics(
+        duration_ms=100, cost_usd=0.01, num_turns=2, model="stub",
+        structured_output={"verdicts": [{
+            "vulnerability_id": "INJ-PHANTOM", "status": "exploited",
+            "severity": "high", "impact": "i",
+            "exploitation_steps": ["s"], "proof_of_impact": "p"}]})
+    second_metrics = AgentMetrics(
+        duration_ms=200, cost_usd=0.02, num_turns=4, model="stub",
+        structured_output={"verdicts": [{
+            "vulnerability_id": "INJ-VULN-1", "status": "exploited",
+            "severity": "high", "impact": "fixed",
+            "exploitation_steps": ["s1"], "proof_of_impact": "p1"}]})
+
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(side_effect=[first_metrics, second_metrics])
+
+    ex = ExploitExecutor(stub_executor)
+    metrics = await ex.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="http://t")
+
+    # 1 initial + 1 retry = 2 calls
+    assert stub_executor.execute.call_count == 2
+    # 第 2 次调用的 prompt_variables 含 validation_feedback, 且 feedback 含 phantom id + 拒因
+    retry_kwargs = stub_executor.execute.call_args_list[1].kwargs
+    feedback = retry_kwargs["prompt_variables"].get("validation_feedback", "")
+    assert "INJ-PHANTOM" in feedback
+    # 拒因含 L2 标记（id 不在 queue）
+    assert "queue" in feedback.lower() or "L2" in feedback
+    # 第 1 次调用（初始）feedback 为空
+    first_kwargs = stub_executor.execute.call_args_list[0].kwargs
+    assert first_kwargs["prompt_variables"].get("validation_feedback", "") == ""
+    # 最终 metrics 是第 2 次（accepted）的
+    assert metrics is second_metrics
+    # 最终落盘反映 accepted（clean）verdict
+    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    assert "INJ-VULN-1" in ev
+    assert "INJ-PHANTOM" not in ev
+    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    assert vj["accepted_ids"] == ["INJ-VULN-1"]
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_retry_cap_at_max(tmp_path):
+    """spec §3.3: 持续 rejected → max 2 reruns（3 calls）后停止，按最终 validation 渲染。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [{"ID": "INJ-VULN-1", "vulnerability_type": "injection",
+                             "externally_exploitable": True, "confidence": "high"}]}))
+
+    bad_metrics = AgentMetrics(
+        duration_ms=100, cost_usd=0.01, num_turns=2, model="stub",
+        structured_output={"verdicts": [{
+            "vulnerability_id": "INJ-PHANTOM", "status": "exploited",
+            "severity": "high", "impact": "i",
+            "exploitation_steps": ["s"], "proof_of_impact": "p"}]})
+
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(return_value=bad_metrics)
+
+    ex = ExploitExecutor(stub_executor)
+    await ex.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="http://t")
+
+    # 1 initial + 2 retries = 3 calls (MAX_RETRIES=2)
+    assert stub_executor.execute.call_count == 3
+    # 最终仍 rejected → 按 final validation 渲染（rejected 进 Unverified，coverage 未覆盖）
+    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    assert vj["accepted_ids"] == []
+    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    assert "INJ-PHANTOM" in ev  # rejected → Unverified section
