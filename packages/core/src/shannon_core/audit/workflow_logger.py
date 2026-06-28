@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.display.dispatcher import DisplayDispatcher
 from shannon_core.display.events import (
-    AgentEvent, AgentMetric, ErrorEvent, LlmTurnEvent, PhaseEvent,
+    AgentEvent, AgentMetric, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
     ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
 )
 from shannon_core.display.file_renderer import FileLogRenderer
@@ -122,6 +122,21 @@ class WorkflowLogger:
         await self._dispatcher.dispatch(PhaseEvent(
             timestamp=format_log_time(), category="PHASE", phase=phase,
             event=event, steps=tuple(steps), step_intents=tuple(step_intents)))
+
+    async def log_info(self, message: str, level: str = "info") -> None:
+        """Emit a user-facing info/warning line.
+
+        Routes through the dispatcher (not bare logging → stderr), so the line
+        scrolls above the Live footer and is persisted to workflow.log — avoids
+        the stderr/footer collision that bare ``logger.warning`` causes in the
+        workflow sandbox thread.
+        """
+        if self._dispatcher is None:
+            return
+        await self._dispatcher.dispatch(InfoEvent(
+            timestamp=format_log_time(), category="INFO",
+            message=message, level=level,
+        ))
 
     async def log_step(self, name: str, phase: str, event: Literal["start", "complete"],
                        duration_ms: int | None = None, error: str | None = None,

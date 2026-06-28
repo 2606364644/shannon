@@ -72,6 +72,18 @@ class LlmTurnEvent(DisplayEvent):
 
 
 @dataclass(frozen=True)
+class InfoEvent(DisplayEvent):
+    """A user-facing info/warning message emitted from the workflow itself.
+
+    Routed through the dispatcher like other events, so it scrolls above the
+    Live footer (no stderr/footer collision) and is persisted to workflow.log.
+    level: "info" (cyan) or "warning" (yellow).
+    """
+    message: str
+    level: Literal["info", "warning"] = "info"
+
+
+@dataclass(frozen=True)
 class ErrorEvent(DisplayEvent):
     error_type: str
     message: str

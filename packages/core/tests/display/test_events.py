@@ -132,3 +132,16 @@ def test_phase_event_carries_step_intents():
 def test_phase_event_step_intents_default_empty():
     e = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
     assert e.step_intents == ()
+
+
+def test_info_event_defaults_to_info_level():
+    from shannon_core.display.events import InfoEvent
+    e = InfoEvent(timestamp="2026-06-28 12:00:00", category="INFO", message="hello")
+    assert e.message == "hello"
+    assert e.level == "info"
+
+
+def test_info_event_warning_level():
+    from shannon_core.display.events import InfoEvent
+    e = InfoEvent(timestamp="t", category="INFO", message="careful", level="warning")
+    assert e.level == "warning"
