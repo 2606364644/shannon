@@ -15,6 +15,7 @@ from shannon_core.prompts.manager import PromptManager
 from shannon_core.utils.paths import resolve_deliverables_path
 
 from .shared import BlackboxActivityInput
+from shannon_blackbox.services.exploitation_checker import QueueValidationResult
 
 
 def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
@@ -294,13 +295,18 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
-async def validate_exploitation_queue(input: BlackboxActivityInput):
+async def validate_exploitation_queue(input: BlackboxActivityInput) -> QueueValidationResult:
     """在 activity 内执行 exploitation queue 校验（文件 I/O 须在 sandbox 外）。
 
     ExploitationChecker.validate_queue 内部走 aiofiles（async_path_exists/async_read_file
     → run_in_executor），workflow sandbox 内直调会抛 NotImplementedError。本 activity 包装它，
-    文件 I/O 全在 activity 内完成，workflow 侧只 execute_activity 拿回 QueueValidationResult
-    （dataclass，temporalio data_converter 自动序列化/反序列化，故无返回类型注解）。
+    文件 I/O 全在 activity 内完成，workflow 侧只 execute_activity 拿回 QueueValidationResult。
+
+    返回类型注解必须保留：temporalio 默认 converter 序列化 dataclass→json/plain，反序列化时
+    只有拿到 ret_type 作 type_hint 才能还原 dataclass（worker/_workflow_instance.py:
+    ``ret_types = [ret_type] if ret_type else None``）。缺注解→ret_type=None→workflow 侧拿到
+    dict→validation.valid 抛 AttributeError（真机 exploitation gating 崩，单测不经 converter
+    往返而漏）。见 test_validate_exploitation_queue_roundtrips_as_dataclass。
     """
     from shannon_blackbox.services.exploitation_checker import ExploitationChecker
     try:

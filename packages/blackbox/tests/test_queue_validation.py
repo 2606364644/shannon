@@ -93,3 +93,40 @@ class TestValidateQueue:
             deliverables_path=tmp_path, vuln_type="injection", exploit_enabled=False
         )
         assert result is False
+
+
+def test_validate_exploitation_queue_roundtrips_as_dataclass():
+    """Regression（真机崩溃，见 commit 66b8744 follow-up）：activity 必须声明
+    ``-> QueueValidationResult`` 返回注解。
+
+    根因：temporalio 默认 converter 序列化 dataclass→``json/plain``，反序列化时只有拿到
+    ret_type 作 type_hint 才能还原 dataclass（``_workflow_instance.py``:
+    ``ret_types = [ret_type] if ret_type else None``）。activity 无返回注解 → ret_type=None →
+    workflow 侧 ``validation`` 拿到 dict → ``workflows.py:270`` ``validation.valid`` 抛
+    ``AttributeError: 'dict' object has no attribute 'valid'``。
+
+    本测试此前漏掉：进程内直调 ``validate_queue`` 不经 Temporal converter 往返，拿到的还是
+    dataclass 对象，故 ``.valid`` 能用、单测绿、真机崩。这里强制走 converter 往返复现真实路径。
+    """
+    import typing
+
+    from temporalio.converter import DataConverter
+
+    from shannon_blackbox.pipeline.activities import validate_exploitation_queue
+
+    # 1) temporalio 从函数注解提取 ret_type；无注解则 workflow 侧反序列化落回 dict。
+    hints = typing.get_type_hints(validate_exploitation_queue)
+    assert hints.get("return") is QueueValidationResult, (
+        "validate_exploitation_queue 缺返回类型注解 -> QueueValidationResult —— temporalio "
+        "反序列化会落回 dict，workflow 侧 validation.valid 抛 AttributeError"
+    )
+
+    # 2) 经默认 converter 往返（模拟 workflow execute_activity 返回路径），仍是 dataclass，
+    #    且 workflow 消费的 .valid/.is_expected/.message/.context 全部可用。
+    pc = DataConverter.default.payload_converter
+    obj = QueueValidationResult(valid=True, message="ok", context={"queue_path": "x"})
+    rt = pc.from_payloads([pc.to_payloads([obj])[0]], [hints["return"]])[0]
+    assert isinstance(rt, QueueValidationResult)
+    assert rt.valid is True
+    assert rt.is_expected is True
+    assert rt.message == "ok"
