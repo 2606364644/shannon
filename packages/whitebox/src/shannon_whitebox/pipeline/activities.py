@@ -291,6 +291,28 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
             md, dom_cands, fw_cands, http_route_count, entry_point_total = build_authz_gitnexus_track(str(deliverables))
             candidate_count = len(dom_cands) + len(fw_cands)
 
+            # 可观测性（spec §3.2）：GitNexus 轨候选状态经 InfoEvent 通道，避免静默空转。
+            # best-effort：显示通道失败绝不影响扫描（对齐 log_info_activity 防御）。
+            try:
+                _session = get_audit_session()
+                if candidate_count == 0:
+                    await _session.log_info(
+                        f"authz GitNexus 轨：0 候选（dominance={len(dom_cands)}, "
+                        f"framework={len(fw_cands)}；http_route 入口点="
+                        f"{http_route_count}/{entry_point_total}）→ 跳过 LLM 判定，"
+                        f"authz 全靠 LLM 轨兜底。http_route=0 常因 code_index 入口点未识别"
+                        f"（语言误判/调用图未就绪/纯静态页）。",
+                        "warning",
+                    )
+                else:
+                    await _session.log_info(
+                        f"authz GitNexus 轨：{candidate_count} 候选（dominance="
+                        f"{len(dom_cands)}, framework={len(fw_cands)}）→ 调 LLM 判定。",
+                        "info",
+                    )
+            except Exception:
+                pass
+
             vulnerabilities: list[dict] = []
             if candidate_count > 0:
                 prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
@@ -325,6 +347,14 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     if not data.get("evidence_chain"):
                         data["evidence_chain"] = "gitnexus track candidate (dominance/framework)"
                     vulnerabilities.append(data)
+
+                try:
+                    await get_audit_session().log_info(
+                        f"authz GitNexus 轨：产出 {len(vulnerabilities)} 条 verdict。",
+                        "info",
+                    )
+                except Exception:
+                    pass
 
             atomic_write_json(
                 deliverables / "authz_gitnexus_queue.json",

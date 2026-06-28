@@ -1,6 +1,6 @@
 # packages/whitebox/tests/test_run_authz_gitnexus_judge.py
 import json
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 
@@ -70,6 +70,7 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
     queue_path = tmp_path / "authz_gitnexus_queue.json"
@@ -105,6 +106,7 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
     assert called["n"] == 0  # LLM not called
@@ -131,10 +133,71 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
                 await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
     data = json.loads((tmp_path / "authz_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"] == []  # lenient
+
+
+@pytest.mark.asyncio
+async def test_judge_logs_warning_when_no_candidates(tmp_path):
+    """0 候选 → 发 warning（经 InfoEvent），点明 http_route 入口点数。"""
+    (tmp_path / "code_index.json").write_text(json.dumps({
+        "repository": "r", "language": "typescript", "total_blocks": 0,
+        "total_entry_points": 0, "total_chains": 0, "blocks": [], "edges": [],
+        "entry_points": [], "chains": [],
+    }))
+
+    async def fake_run(prompt, **kwargs):
+        return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+                inst = gs.return_value
+                inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
+                await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    levels = [call.args[1] for call in inst.log_info.call_args_list]
+    msgs = [call.args[0] for call in inst.log_info.call_args_list]
+    assert "warning" in levels
+    assert any("0 候选" in m and "http_route" in m for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_judge_logs_info_when_candidates(tmp_path):
+    """有候选 → 发 info（调 LLM + 产出 verdict 数）。"""
+    _write_index_with_candidate(tmp_path)
+
+    async def fake_run(prompt, **kwargs):
+        return type("R", (), {
+            "success": True, "error": None, "retryable": False, "turns": 1,
+            "cost": 0.0, "text": "", "model": "m", "stop_reason": "end",
+            "tokens": None,
+            "structured_output": {"vulnerabilities": [{
+                "ID": "AUTHZ-GN-01", "vulnerability_type": "Horizontal",
+                "externally_exploitable": True, "endpoint": "PUT /api/u/:id",
+                "vulnerable_code_location": "u.js:update:10", "role_context": "user",
+                "guard_evidence": "none", "side_effect": "update", "reason": "no ownership",
+                "minimal_witness": "x", "confidence": "high", "notes": "",
+            }]},
+        })()
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+                inst = gs.return_value
+                inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
+                await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    levels = [call.args[1] for call in inst.log_info.call_args_list]
+    msgs = [call.args[0] for call in inst.log_info.call_args_list]
+    assert "info" in levels
+    assert any("候选" in m for m in msgs)
+    assert any("verdict" in m for m in msgs)  # 判定后那条
 
 
 def _noop_cm_factory():
