@@ -5,13 +5,10 @@
 且 validate_deliverable 不被调用。
 """
 import asyncio
-from pathlib import Path
-
-import pytest
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def test_skip_postprocess_avoids_queue_write(tmp_path, monkeypatch):
