@@ -7,29 +7,11 @@ from temporalio import workflow
 from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
-from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results
+from shannon_core.utils.paths import resolve_deliverables_path, has_valid_whitebox_results
 
 from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 
 logger = logging.getLogger(__name__)
-
-
-def _load_correlation_context(corr_workspace_path: Path) -> dict | None:
-    """读关联 workspace 的 topology/boundaries 作为 exploitation 上下文。
-
-    纯函数（不依赖 Temporal，可单测）。文件缺失返回 None（workflow 退回原逻辑）。
-    注意：corr_workspace_path 必须已解析到 workspaces/<session>（调用方用
-    resolve_workspaces_dir() 拼接，与 A6 创建关联 workspace 的逻辑一致）。
-    """
-    import json
-    dlv = corr_workspace_path / "deliverables"
-    topo_f, bound_f = dlv / "cross-service-topology.json", dlv / "trust-boundaries.json"
-    if not (topo_f.exists() and bound_f.exists()):
-        return None
-    return {
-        "topology": json.loads(topo_f.read_text(encoding="utf-8")),
-        "boundaries": json.loads(bound_f.read_text(encoding="utf-8")),
-    }
 
 
 def has_correlation_results(corr_ws_deliverables: Path, vuln_classes: list[str]) -> bool:
@@ -81,11 +63,20 @@ class BlackboxScanWorkflow:
     async def run(self, input: BlackboxPipelineInput) -> BlackboxPipelineState:
         self._state.start_time = workflow.time_ns() / 1e9
 
+        # workspaces 根由 sandbox 外（CLI/worker）解析后经 input 传入；sandbox 内禁
+        # os.getenv/Path.cwd（否则 RestrictedWorkflowAccessError）。run 体内只用此值，零 I/O。
+        if not input.workspaces_root:
+            raise ValueError(
+                "BlackboxPipelineInput.workspaces_root must be set before starting the "
+                "workflow (sandbox cannot resolve it)."
+            )
+        ws_root = Path(input.workspaces_root)
+
         selected_classes: list[str] = input.vuln_classes or list(ALL_VULN_CLASSES)
 
         # Compute workspace_path consistent with whitebox (workspaces/<name>/)
         if input.workspace_name:
-            workspace_path = str(resolve_workspaces_dir(input.repo_path) / input.workspace_name)
+            workspace_path = str(ws_root / input.workspace_name)
         else:
             workspace_path = input.repo_path
 
@@ -170,17 +161,22 @@ class BlackboxScanWorkflow:
                 repo_path=input.repo_path,
                 deliverables_subdir=input.deliverables_subdir,
                 workspace_name=input.workspace_name,
-                workspaces_root=resolve_workspaces_dir(input.repo_path),
+                workspaces_root=ws_root,
             )
 
             # B2: 当指定关联 workspace 时，加载其 topology/boundaries 作为 exploitation 上下文。
-            # resolve_workspaces_dir() 与 A6 创建关联 workspace 的逻辑一致（honors SHANNON_WORKER_ROOT
-            # + find_project_root()），不能用硬编码 Path("workspaces")——否则 CWD 漂移会找不到产物。
+            # ws_root 由 sandbox 外（CLI/worker）解析后经 input 传入（honors SHANNON_WORKER_ROOT +
+            # find_project_root() 口径）；文件读取经 activity 完成（sandbox 禁 Path.exists/read_text）。
             corr_ctx = None
             corr_ws_path = None
             if input.correlated_workspace:
-                corr_ws_path = resolve_workspaces_dir() / input.correlated_workspace
-                corr_ctx = _load_correlation_context(corr_ws_path)
+                corr_ws_path = ws_root / input.correlated_workspace
+                corr_ctx = await workflow.execute_activity(
+                    activities.load_correlation_context,
+                    str(corr_ws_path),
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=retry_for("log"),
+                )
             self._state.correlation_context = corr_ctx  # 供 exploitation 读取（B3）
 
             has_whitebox_results = False

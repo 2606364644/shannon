@@ -13,6 +13,7 @@ from .pipeline.activities import (
     run_report_agent,
     log_phase_start_activity,
     log_phase_complete_activity,
+    load_correlation_context,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
 from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
@@ -52,6 +53,11 @@ def _to_workflow_summary(result: BlackboxPipelineState, total_duration_ms: int) 
 async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> BlackboxPipelineState:
     """跑黑盒扫描；Ctrl+C 时优雅取消并返回 BlackboxPipelineState(status="cancelled")。"""
+    # 防御：确保 workspaces_root 在 sandbox 外解析好（CLI 通常已填；兜底其它入口/测试）。
+    # workflow sandbox 内禁 os.getenv/Path.cwd，run() 会因 workspaces_root 为 None 而 fail-fast。
+    if not input.workspaces_root:
+        input.workspaces_root = str(resolve_workspaces_dir(input.repo_path))
+
     # 纯黑盒场景（无白盒 session 可接）：worker 自建一个 blackbox session，
     # deliverables 落 workspaces/<自建session>/deliverables（spec 决策 6）。
     if not input.workspace_name:
@@ -77,6 +83,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
             run_exploit_agent, assemble_report, run_report_agent,
             log_phase_start_activity, log_phase_complete_activity,
+            load_correlation_context,
         ],
     )
 

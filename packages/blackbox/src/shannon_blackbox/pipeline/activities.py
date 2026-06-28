@@ -387,3 +387,23 @@ async def log_phase_complete_activity(input: BlackboxActivityInput) -> None:
     from shannon_core.audit.session_registry import get_audit_session
     phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
+
+
+@activity.defn
+async def load_correlation_context(corr_workspace_path: str) -> dict | None:
+    """读关联 workspace 的 topology/boundaries 作为 exploitation 上下文（B2）。
+
+    在 activity 内做文件 I/O（workflow sandbox 禁 Path.exists/read_text）。
+    文件缺失返回 None（workflow 退回原逻辑）。corr_workspace_path 由 workflow 在
+    sandbox 外用 ws_root 拼好后以 str 传入（Path 不便跨 Temporal payload 序列化）。
+    """
+    import json
+    corr_workspace_path = Path(corr_workspace_path)
+    dlv = corr_workspace_path / "deliverables"
+    topo_f, bound_f = dlv / "cross-service-topology.json", dlv / "trust-boundaries.json"
+    if not (topo_f.exists() and bound_f.exists()):
+        return None
+    return {
+        "topology": json.loads(topo_f.read_text(encoding="utf-8")),
+        "boundaries": json.loads(bound_f.read_text(encoding="utf-8")),
+    }

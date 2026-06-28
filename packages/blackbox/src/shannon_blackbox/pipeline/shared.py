@@ -14,6 +14,7 @@ class BlackboxPipelineInput(BasePipelineInput):
     retry_profile: str | None = None          # "production" | "testing" | "subscription"
     rerun: bool = False  # 强制重跑黑盒（归档旧 evidence + 新 workflow id）
     correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：复用 topology 做网关层校验，Phase B 接入）
+    workspaces_root: str | None = None  # sandbox 外（CLI/worker）解析的 workspaces 根绝对路径（sandbox 内禁 os.getenv/Path.cwd）
 
 
 @dataclass

@@ -88,9 +88,12 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
             click.echo("No white-box workspaces found. Run a white-box scan first.")
             raise SystemExit(1)
 
+    repo_path_resolved = str(Path(repo).resolve()) if repo else None
+    # workspaces 根在 sandbox 外解析（workflow sandbox 禁 os.getenv/Path.cwd），经 input 传入
+    from shannon_core.utils.paths import resolve_workspaces_dir
     input = BlackboxPipelineInput(
         web_url=url,
-        repo_path=str(Path(repo).resolve()) if repo else None,
+        repo_path=repo_path_resolved,
         workspace_name=resolved_workspace,
         config_path=config_path,
         output_path=str(Path(output).resolve()) if output else None,
@@ -100,6 +103,7 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         max_concurrent=max_concurrent,
         retry_profile=retry_profile,
         correlated_workspace=correlated_workspace,
+        workspaces_root=str(resolve_workspaces_dir(repo_path_resolved)),
     )
 
     # 幂等检测：默认（非 --rerun）若已跑过黑盒 → 告知、不启动 worker（省 Temporal 连接）
