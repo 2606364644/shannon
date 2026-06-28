@@ -269,3 +269,16 @@ async def test_run_scan_self_creates_session_when_workspace_name_empty(tmp_path,
     session_data = json.loads((ws_dir / "session.json").read_text(encoding="utf-8"))
     assert session_data["scan_type"] == "blackbox"
     assert session_data["web_url"] == "https://standalone.example.com"
+
+
+def test_all_activities_registered():
+    """护栏：worker.py 必须注册 pipeline/activities.py 里所有 @activity.defn。
+
+    防 finalize_report 式漏注册（temporal NotFoundError → production retry 卡死~24h）。
+    见 docs/superpowers/specs/2026-06-29-blackbox-finalize-report-worker-registration-design.md。
+    """
+    from shannon_core.testing.activity_registration import assert_all_activities_registered
+    from shannon_blackbox import worker
+    from shannon_blackbox.pipeline import activities
+
+    assert_all_activities_registered(worker, [activities])
