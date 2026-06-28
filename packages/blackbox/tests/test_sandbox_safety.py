@@ -118,3 +118,27 @@ def test_worker_registers_log_info_activity():
         f"log_info_activity 在 worker.py 仅出现 {count} 次，预期 >= 2"
         "（import 一处 + activities 列表一处）。"
     )
+
+
+def test_completed_branch_uses_exploit_result_to_outcome():
+    """防回归：exploit completed 分支必须用 exploit_result_to_outcome 构造 AgentOutcome。
+
+    run_exploit_agent 返回 AgentMetrics.model_dump() dict；completed 分支曾用
+    getattr(result, "duration_s"|"cost_usd"|"turns") 取属性——getattr(dict) 永返 default
+    + 字段名错位，导致 AgentOutcome 指标恒 0、format_exploit_summary 全 0（spec §2/§5.2，
+    commit f16982b）。该锚点锁定 completed 分支走纯函数映射，不回退到 getattr(dict)。
+    """
+    src = WORKFLOW_FILE.read_text()
+    assert "exploit_result_to_outcome(" in src, (
+        "workflows.py 未调用 exploit_result_to_outcome —— exploit completed 分支必须用它"
+        "构造 AgentOutcome（dict 字段映射），否则回到 getattr(dict) 指标归零 bug"
+    )
+    for forbidden in [
+        'getattr(result, "duration_s"',
+        'getattr(result, "cost_usd"',
+        'getattr(result, "turns"',
+    ]:
+        assert forbidden not in src, (
+            f"workflows.py 仍含 `{forbidden}` —— getattr(dict) 永返 default，"
+            "exploit 指标归零（应改用 exploit_result_to_outcome）"
+        )

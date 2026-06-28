@@ -40,7 +40,11 @@ def has_correlation_results(corr_ws_deliverables: Path, vuln_classes: list[str])
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
-    from shannon_core.utils.progress import AgentOutcome, format_exploit_summary
+    from shannon_core.utils.progress import (
+        AgentOutcome,
+        exploit_result_to_outcome,
+        format_exploit_summary,
+    )
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.browser_engine import BrowserEngineFactory
     import shannon_core.services.engines  # noqa: F401 – registers engines
@@ -362,18 +366,9 @@ class BlackboxScanWorkflow:
                         else:
                             self._state.completed_agents.append(agent_name.value)
                             self._state.agent_metrics[agent_name.value] = result
-                            # Extract metrics from result if available
-                            duration_s = getattr(result, "duration_s", 0.0)
-                            cost_usd = getattr(result, "cost_usd", 0.0)
-                            turns = getattr(result, "turns", 0)
-                            outcomes.append(AgentOutcome(
-                                agent_name=agent_name.value,
-                                vuln_type=vt,
-                                status="completed",
-                                duration_s=duration_s,
-                                cost_usd=cost_usd,
-                                turns=turns,
-                            ))
+                            outcomes.append(
+                                exploit_result_to_outcome(result, agent_name.value, vt)
+                            )
 
                     # Add skipped outcomes for vuln types that were not scheduled
                     for vt, validation in validation_results:
