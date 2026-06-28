@@ -59,6 +59,7 @@ class AgentExecutor:
         audit_logger: "ActivityLogger | None" = None,
         tool_audit_logger: "ToolAuditLogger | None" = None,
         max_turns: int | None = None,
+        skip_artifact_postprocess: bool = False,
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -130,11 +131,16 @@ class AgentExecutor:
             )
 
         queue_filename = get_queue_filename(agent_name)
-        if result.structured_output is not None and queue_filename:
+        if (
+            not skip_artifact_postprocess
+            and result.structured_output is not None
+            and queue_filename
+        ):
             queue_path = deliverables / queue_filename
             atomic_write_json(queue_path, result.structured_output)
 
-        await validate_deliverable(deliverables, agent_name)
+        if not skip_artifact_postprocess:
+            await validate_deliverable(deliverables, agent_name)
 
         await GitManager.commit(deliverables, agent_name)
 
