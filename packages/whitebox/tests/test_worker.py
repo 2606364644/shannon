@@ -181,9 +181,13 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_run_scan_uses_dynamic_task_queue(tmp_path):
+async def test_run_scan_uses_dynamic_task_queue(tmp_path, monkeypatch):
     """run_scan should generate a unique task queue per scan, not use a fixed name."""
     from shannon_whitebox.pipeline.shared import PipelineState
+
+    # 隔离 workspaces 到 tmp_path：否则 resolve_workspaces_dir 走 cwd-based 落到真实
+    # 项目 workspaces/，既污染真实目录，又让 resume 探测命中遗留 workspace 而 abort。
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -228,10 +232,14 @@ async def test_run_scan_uses_dynamic_task_queue(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path):
+async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path, monkeypatch):
     """run_scan should return {"status": "cancelled"} when the workflow is interrupted."""
     from shannon_core.runtime.scan_runner import ScanCancelled
     from shannon_whitebox.worker import run_scan
+
+    # 隔离 workspaces 到 tmp_path：否则 resolve_workspaces_dir 走 cwd-based 落到真实
+    # 项目 workspaces/，既污染真实目录，又让 resume 探测命中遗留 workspace 而 abort。
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
