@@ -48,6 +48,8 @@ class BlackboxActivityInput:
     phase: str | None = None          # log_phase_* 的 phase label（如 "preflight"/"recon-blackbox"/"exploitation"/"reporting"）
     correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：由 workflow 从 PipelineInput 透传，Phase B 接入）
     correlation_context: dict | None = None  # B3：关联 workspace topology/boundaries（由 workflow 从 state 注入，exploit activity 消费）
+    info_message: str | None = None   # log_info_activity 的用户提示文本（替代裸 logger.warning→stderr 抢行）
+    info_level: str = "info"          # "info" | "warning"（rich 着色：cyan/yellow）
 
 
 @dataclass

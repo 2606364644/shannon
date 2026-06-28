@@ -206,23 +206,32 @@ class BlackboxScanWorkflow:
                     found_classes.extend(vt for vt in corr_classes if vt not in found_classes)
                     self._state.has_whitebox_results = True
                     self._state.found_whitebox_classes = found_classes
-                    logger.info(
-                        "Correlation workspace results detected at %s for classes: %s — "
-                        "skipping RECON_BLACKBOX (§6.2 closed loop)",
-                        corr_dlv, corr_classes,
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        BlackboxActivityInput(**{**act_input.__dict__,
+                           "info_message": f"Correlation workspace results detected at {corr_dlv} for classes: {corr_classes} — skipping RECON_BLACKBOX (§6.2 closed loop)",
+                           "info_level": "info"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
                     )
 
             if has_whitebox_results:
-                logger.info(
-                    "Whitebox results detected at %s for classes: %s — skipping RECON_BLACKBOX",
-                    deliverables,
-                    found_classes,
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                       "info_message": f"Whitebox results detected at {deliverables} for classes: {found_classes} — skipping RECON_BLACKBOX",
+                       "info_level": "info"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
             else:
-                logger.warning(
-                    "No whitebox results found at %s — running RECON_BLACKBOX from scratch. "
-                    "Tip: pass --repo <path> to reuse whitebox scan results.",
-                    deliverables,
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                       "info_message": f"No whitebox results found at {deliverables} — running RECON_BLACKBOX from scratch. Tip: pass --repo <path> to reuse whitebox scan results.",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
                 )
 
             if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
@@ -274,11 +283,13 @@ class BlackboxScanWorkflow:
                                 vt, validation.message,
                             )
                         else:
-                            logger.warning(
-                                "Skipping exploit for %s (anomalous): %s | queue_path=%s",
-                                vt,
-                                validation.message,
-                                validation.context.get("queue_path", "N/A"),
+                            await workflow.execute_activity(
+                                activities.log_info_activity,
+                                BlackboxActivityInput(**{**act_input.__dict__,
+                                   "info_message": f"Skipping exploit for {vt} (anomalous): {validation.message} | queue_path={validation.context.get('queue_path', 'N/A')}",
+                                   "info_level": "warning"}),
+                                start_to_close_timeout=timedelta(seconds=10),
+                                retry_policy=retry_for("log"),
                             )
                         continue
                     agent_name = AgentName(f"{vt}-exploit")
@@ -309,7 +320,14 @@ class BlackboxScanWorkflow:
                     else:
                         icon = _VALIDATION_ICONS["anomalous"]
                     summary_lines.append(f"  {icon} {vt}: {v.message}")
-                logger.info("\n".join(summary_lines))
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                       "info_message": "\n".join(summary_lines),
+                       "info_level": "info"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
 
                 # Track scheduled vuln types for skipped outcomes
                 scheduled_vuln_types = {vt for vt, _ in exploit_tasks}
@@ -366,7 +384,14 @@ class BlackboxScanWorkflow:
                                 status="skipped",
                             ))
 
-                    logger.info(format_exploit_summary(outcomes))
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        BlackboxActivityInput(**{**act_input.__dict__,
+                           "info_message": format_exploit_summary(outcomes),
+                           "info_level": "info"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,

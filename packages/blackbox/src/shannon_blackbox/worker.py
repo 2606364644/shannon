@@ -14,6 +14,7 @@ from .pipeline.activities import (
     run_report_agent,
     log_phase_start_activity,
     log_phase_complete_activity,
+    log_info_activity,
     load_correlation_context,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
@@ -84,6 +85,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
             run_exploit_agent, validate_exploitation_queue, assemble_report, run_report_agent,
             log_phase_start_activity, log_phase_complete_activity,
+            log_info_activity,
             load_correlation_context,
         ],
     )

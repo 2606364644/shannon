@@ -420,6 +420,12 @@ async def log_phase_complete_activity(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
+async def log_info_activity(input: BlackboxActivityInput) -> None:
+    from shannon_core.audit.session_registry import get_audit_session
+    await get_audit_session().log_info(input.info_message, input.info_level)
+
+
+@activity.defn
 async def load_correlation_context(corr_workspace_path: str) -> dict | None:
     """读关联 workspace 的 topology/boundaries 作为 exploitation 上下文（B2）。
 

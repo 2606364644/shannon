@@ -104,3 +104,17 @@ def test_worker_registers_validate_exploitation_queue():
         f"validate_exploitation_queue 在 worker.py 仅出现 {count} 次，预期 >= 2"
         "（import 一处 + activities 列表一处）。"
     )
+
+
+def test_worker_registers_log_info_activity():
+    """防回归：log_info_activity 必须在 worker.py 注册（import + activities 列表）。
+
+    见 temporalio-activity-worker-registration 教训：新 activity 三处同步，第 3 处 worker
+    注册易漏。提示经 activity 走显示通道，未注册则 workflow 调用时 Temporal 找不到 activity 崩。
+    """
+    worker_src = WORKER_FILE.read_text()
+    count = worker_src.count("log_info_activity")
+    assert count >= 2, (
+        f"log_info_activity 在 worker.py 仅出现 {count} 次，预期 >= 2"
+        "（import 一处 + activities 列表一处）。"
+    )
