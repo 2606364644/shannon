@@ -288,7 +288,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
             intent=intent_for("authz-gitnexus-judge"),
         ):
             repo, deliverables, _ = _get_paths(input)
-            md, dom_cands, fw_cands = build_authz_gitnexus_track(str(deliverables))
+            md, dom_cands, fw_cands, http_route_count, entry_point_total = build_authz_gitnexus_track(str(deliverables))
             candidate_count = len(dom_cands) + len(fw_cands)
 
             vulnerabilities: list[dict] = []

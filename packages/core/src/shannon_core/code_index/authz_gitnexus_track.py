@@ -25,6 +25,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from shannon_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
 
@@ -54,6 +55,15 @@ class IDORCandidateChain:
     sink_id: str              # FuncBlock.id of the side-effect sink
     path: tuple[str, ...]     # ordered FuncBlock.id list, handler→sink
     guard_nodes_on_path: tuple[str, ...]  # ownership-guard node ids on path (empty=none)
+
+
+class AuthzTrackBuildResult(NamedTuple):
+    """build_authz_gitnexus_track 的返回：候选 + 入口点诊断（spec §3.1）。"""
+    markdown: str
+    dominance_candidates: list[IDORCandidateChain]
+    framework_candidates: list[FrameworkIDORCandidate]
+    http_route_count: int       # entry_type=="http_route" 且 route 非空的入口点数（dominance 直接输入）
+    entry_point_total: int      # code_index entry_points 总数（含 gitnexus 合成项）
 
 
 def _is_side_effect_sink(block: FuncBlock | None) -> bool:
@@ -284,12 +294,14 @@ def render_authz_gitnexus_candidates(
 
 def build_authz_gitnexus_track(
     deliverables_dir: str,
-) -> tuple[str, list[IDORCandidateChain], list[FrameworkIDORCandidate]]:
+) -> AuthzTrackBuildResult:
     """Read code_index.json + framework_analysis.json, build IDOR candidates.
 
-    Returns (markdown, dominance_candidates, framework_candidates):
+    Returns AuthzTrackBuildResult:
     - markdown: rendered candidates for the judge-LLM prompt (Task 5).
     - dominance_candidates / framework_candidates: raw lists for test asserts.
+    - http_route_count / entry_point_total: 入口点诊断（Task 2 可观测性消费，
+      spec §3.1）。
 
     Lenient: missing/invalid code_index.json → empty dominance candidates
     (framework candidates may still come from framework_analysis.json).
@@ -326,8 +338,21 @@ def build_authz_gitnexus_track(
     md = render_authz_gitnexus_candidates(
         dominance_cands, framework_cands, index=index, entry_points=entry_points,
     )
-    logger.info(
-        "authz GitNexus track built: %d dominance + %d framework candidates",
-        len(dominance_cands), len(framework_cands),
+    entry_point_total = len(index.entry_points)
+    http_route_count = sum(
+        1 for ep in index.entry_points
+        if ep.entry_type == "http_route" and ep.route is not None
     )
-    return md, dominance_cands, framework_cands
+    logger.info(
+        "authz GitNexus track built: %d dominance + %d framework candidates "
+        "(http_route entry points: %d/%d)",
+        len(dominance_cands), len(framework_cands),
+        http_route_count, entry_point_total,
+    )
+    return AuthzTrackBuildResult(
+        markdown=md,
+        dominance_candidates=dominance_cands,
+        framework_candidates=framework_cands,
+        http_route_count=http_route_count,
+        entry_point_total=entry_point_total,
+    )

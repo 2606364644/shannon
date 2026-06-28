@@ -59,7 +59,7 @@ def test_e2e_dominance_candidate_plus_framework_candidate(tmp_path):
         ],
     )
 
-    md, dom, fw = build_authz_gitnexus_track(str(tmp_path))
+    md, dom, fw, http_route_count, entry_point_total = build_authz_gitnexus_track(str(tmp_path))
 
     # dominance: only the unguarded handler → 1 candidate (guarded handler skipped)
     assert len(dom) == 1
@@ -76,7 +76,7 @@ def test_e2e_dominance_candidate_plus_framework_candidate(tmp_path):
 
 
 def test_e2e_graceful_degradation_no_index(tmp_path):
-    md, dom, fw = build_authz_gitnexus_track(str(tmp_path))
+    md, dom, fw, http_route_count, entry_point_total = build_authz_gitnexus_track(str(tmp_path))
     assert "无" in md or "no" in md.lower()
     assert dom == [] and fw == []
 
@@ -93,5 +93,5 @@ def test_e2e_guarded_handler_not_a_candidate(tmp_path):
         [{"entry_point_id": "u.js:update:10", "path": ["u.js:update:10", "repo.js:update:1"],
           "depth": 1, "has_unresolved": False}],
     )
-    md, dom, fw = build_authz_gitnexus_track(str(tmp_path))
+    md, dom, fw, http_route_count, entry_point_total = build_authz_gitnexus_track(str(tmp_path))
     assert dom == []  # ownership guard present
