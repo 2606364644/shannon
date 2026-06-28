@@ -133,6 +133,24 @@ def test_maybe_browser_action_non_browser_returns_none():
     assert maybe_browser_action({"command": "ls -la"}) is None
 
 
+def test_maybe_browser_action_agent_browser_navigate():
+    assert maybe_browser_action(
+        {"command": "agent-browser --session s1 open https://a.com"}
+    ) == "🌐 Navigating to a.com"
+
+
+def test_maybe_browser_action_agent_browser_click():
+    assert maybe_browser_action(
+        {"command": "agent-browser --session s1 click @e5"}
+    ) == "🖱️ Clicking @e5"
+
+
+def test_maybe_browser_action_agent_browser_snapshot():
+    assert maybe_browser_action(
+        {"command": "agent-browser --session s1 snapshot"}
+    ) == "📸 Taking page snapshot"
+
+
 from shannon_core.display.formatters import first_nonempty_line
 
 

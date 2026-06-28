@@ -125,9 +125,21 @@ def default_tool_params(tool_name: str, params: dict) -> str:
 
 
 def maybe_browser_action(params: dict) -> str | None:
-    """Parse a playwright-cli Bash command into an emoji phrase. None if not browser."""
+    """Parse a browser-CLI Bash command into an emoji phrase. None if not browser.
+
+    Recognises both ``playwright-cli -s=<id> <sub>`` and
+    ``agent-browser --session <id> <sub>`` command shapes.
+    """
     command = params.get("command", "") if isinstance(params, dict) else ""
-    match = re.match(r"playwright-cli\s+(?:-s=\S+\s+)?(\S+)(?:\s+(.*))?", command)
+
+    # agent-browser: `agent-browser --session <id> <subcommand> [args]`
+    ab_match = re.match(
+        r"agent-browser\s+(?:--session\s+\S+\s+)?(\S+)(?:\s+(.*))?", command
+    )
+    # playwright-cli: `playwright-cli -s=<id> <subcommand> [args]`
+    pw_match = re.match(r"playwright-cli\s+(?:-s=\S+\s+)?(\S+)(?:\s+(.*))?", command)
+
+    match = ab_match or pw_match
     if not match:
         return None
     subcommand, args = match.group(1), (match.group(2) or "").strip()
