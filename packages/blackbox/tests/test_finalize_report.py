@@ -34,7 +34,7 @@ async def test_assemble_report_activity_generates_findings(tmp_path):
 @pytest.mark.asyncio
 async def test_model_injection_in_finalize(tmp_path):
     """finalize_report should inject model info from session.json."""
-    from shannon_blackbox.services.report_assembler import ReportAssembler
+    from shannon_core.services.report_assembler import ReportAssembler
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

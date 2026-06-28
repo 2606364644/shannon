@@ -263,7 +263,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
 @activity.defn
 async def assemble_report(input: BlackboxActivityInput) -> None:
     try:
-        from shannon_blackbox.services.report_assembler import ReportAssembler
+        from shannon_core.services.report_assembler import ReportAssembler
         from shannon_core.models.agents import ALL_VULN_CLASSES
         from shannon_core.services.findings_renderer import FindingsRenderer
 
@@ -385,7 +385,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
 @activity.defn
 async def finalize_report(input: BlackboxActivityInput) -> None:
     try:
-        from shannon_blackbox.services.report_assembler import ReportAssembler
+        from shannon_core.services.report_assembler import ReportAssembler
         from shannon_core.interfaces.report_output_provider import NoOpReportOutputProvider
 
         deliverables = _get_deliverables_path(input)

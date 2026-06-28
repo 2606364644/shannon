@@ -152,7 +152,7 @@ async def test_close_coverage_gaps_idempotent(tmp_path):
 @pytest.mark.asyncio
 async def test_uncovered_section_reaches_final_report(tmp_path):
     """组合：close_coverage_gaps 写 evidence 节 → ReportAssembler 把 evidence 全文带进报告。"""
-    from shannon_blackbox.services.report_assembler import ReportAssembler
+    from shannon_core.services.report_assembler import ReportAssembler
 
     _write_queue(tmp_path, "auth", ["AUTH-VULN-01", "AUTH-VULN-02"])
     (tmp_path / "auth_exploitation_evidence.md").write_text(

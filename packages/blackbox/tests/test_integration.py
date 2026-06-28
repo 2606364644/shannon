@@ -12,7 +12,7 @@ from shannon_core.prompts.manager import PromptManager
 from shannon_blackbox.agents.exploit_executor import ExploitExecutor
 from shannon_blackbox.agents.recon_executor import ReconExecutor
 from shannon_blackbox.services.exploitation_checker import ExploitationChecker
-from shannon_blackbox.services.report_assembler import ReportAssembler
+from shannon_core.services.report_assembler import ReportAssembler
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from shannon_blackbox.services.report_assembler import ReportAssembler
+from shannon_core.services.report_assembler import ReportAssembler
 
 
 @pytest.mark.asyncio
