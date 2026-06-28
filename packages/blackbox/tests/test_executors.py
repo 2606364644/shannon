@@ -133,3 +133,43 @@ async def test_validate_authentication_forwards_audit_logger(tmp_path):
     # so instead verify the signature accepts the kwarg via a config-bearing path:
     # (covered structurally by the implementation accepting audit_logger and
     # forwarding it; the no-config path simply never reaches execute().)
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
+    """ExploitExecutor 拿到 structured_output 后应：校验 → 写 evidence.md → 写 verdicts.json。"""
+    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    # queue 含 1 个有效 id
+    (deliverables / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [{"ID": "INJ-VULN-1", "vulnerability_type": "injection",
+                             "externally_exploitable": True, "confidence": "high"}]}))
+
+    fake_metrics = AgentMetrics(
+        duration_ms=100, cost_usd=0.01, num_turns=2, model="stub",
+        structured_output={"verdicts": [{
+            "vulnerability_id": "INJ-VULN-1", "status": "exploited",
+            "severity": "high", "impact": "i",
+            "exploitation_steps": ["s"], "proof_of_impact": "p"}]})
+
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(return_value=fake_metrics)
+
+    ex = ExploitExecutor(stub_executor)
+    await ex.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="http://t", pipeline_testing=True)
+
+    # evidence.md 被渲染
+    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    assert "### INJ-VULN-1" in ev
+    # verdicts.json 被落盘
+    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    assert vj["accepted_ids"] == ["INJ-VULN-1"]
+    # 传给底层 executor 的参数：structured_output_schema + skip_artifact_postprocess
+    _, kwargs = stub_executor.execute.call_args
+    assert kwargs.get("skip_artifact_postprocess") is True
+    assert kwargs.get("structured_output_schema") is not None
