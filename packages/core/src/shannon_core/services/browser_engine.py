@@ -23,6 +23,15 @@ class BrowserEngine(Protocol):
         """Engine identifier string, e.g. ``'playwright'`` or ``'agent-browser'``."""
         ...
 
+    @property
+    def cli_binary(self) -> str:
+        """Name of the CLI binary to look up on PATH, e.g. ``'playwright-cli'``.
+
+        Distinct from ``name`` (the registry identifier): playwright registers as
+        ``'playwright'`` but its binary is ``'playwright-cli'``.
+        """
+        ...
+
     def session_flag(self, session_id: str) -> str:
         """Return the CLI flag string for session isolation.
 

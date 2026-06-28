@@ -102,6 +102,11 @@ class AgentBrowserEngine:
         """Engine identifier string."""
         return "agent-browser"
 
+    @property
+    def cli_binary(self) -> str:
+        """PATH binary name for availability checks."""
+        return "agent-browser"
+
     def session_flag(self, session_id: str) -> str:
         """Return the CLI flag string for session isolation.
 

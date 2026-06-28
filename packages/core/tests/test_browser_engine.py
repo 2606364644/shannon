@@ -24,6 +24,10 @@ class _StubEngine:
     def name(self) -> str:  # pragma: no cover – simple property
         return "stub"
 
+    @property
+    def cli_binary(self) -> str:  # pragma: no cover – simple property
+        return "stub-cli"
+
     def session_flag(self, session_id: str) -> str:
         return f"--stub-session {session_id}"
 
@@ -258,3 +262,11 @@ class TestRegisteredEngines:
         from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
         engine = AgentBrowserEngine()
         assert isinstance(engine, BrowserEngine)
+
+    def test_playwright_cli_binary(self):
+        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        assert PlaywrightEngine().cli_binary == "playwright-cli"
+
+    def test_agent_browser_cli_binary(self):
+        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        assert AgentBrowserEngine().cli_binary == "agent-browser"

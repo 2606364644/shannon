@@ -114,6 +114,11 @@ class PlaywrightEngine:
         """Engine identifier string."""
         return "playwright"
 
+    @property
+    def cli_binary(self) -> str:
+        """PATH binary name for availability checks."""
+        return "playwright-cli"
+
     def session_flag(self, session_id: str) -> str:
         """Return the CLI flag string for session isolation."""
         return f"-s={session_id}"
