@@ -882,10 +882,24 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
 
         pgraph_path = deliverables / "parameter_graph.json"
         if not pgraph_path.exists():
+            try:
+                await get_audit_session().log_info(
+                    "GitNexus 注入轨：parameter_graph.json 缺失 → 跳过 3 类判定，靠 LLM 轨兜底。",
+                    "warning",
+                )
+            except Exception:
+                pass
             return {"per_class": {}, "skipped": "no parameter_graph.json"}
         try:
             pgraph = ParameterPropagationGraph.model_validate_json(pgraph_path.read_text())
         except Exception:
+            try:
+                await get_audit_session().log_info(
+                    "GitNexus 注入轨：parameter_graph.json 无效 → 跳过 3 类判定，靠 LLM 轨兜底。",
+                    "warning",
+                )
+            except Exception:
+                pass
             return {"per_class": {}, "skipped": "invalid parameter_graph.json"}
 
         # XSS routes by SinkCallSite.category == XSS (SlotContext has no render

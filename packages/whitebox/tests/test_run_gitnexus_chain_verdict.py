@@ -8,9 +8,15 @@ from shannon_whitebox.pipeline import activities
 
 
 class _RecordingSession:
+    def __init__(self):
+        self.info_calls: list[tuple[str, str]] = []
+
     @asynccontextmanager
     async def track_step(self, phase: str, name: str, intent: str | None = None):
         yield
+
+    async def log_info(self, message: str, level: str = "info"):
+        self.info_calls.append((message, level))
 
 
 def _input(repo):
@@ -119,7 +125,8 @@ async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
     monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
-    set_audit_session(_RecordingSession())
+    session = _RecordingSession()
+    set_audit_session(session)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
@@ -127,6 +134,10 @@ async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 
     assert result["per_class"] == {}
     assert not (deliverables / "injection_gitnexus_queue.json").exists()
+    # 可观测性（spec §3.2）：pgraph 缺失 early return 发 warning。
+    levels = [lvl for (_msg, lvl) in session.info_calls]
+    assert "warning" in levels
+    assert any("缺失" in msg for (msg, _lvl) in session.info_calls)
 
 
 @pytest.mark.asyncio
@@ -172,10 +183,15 @@ async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
     monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
-    set_audit_session(_RecordingSession())
+    session = _RecordingSession()
+    set_audit_session(session)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
         clear_audit_session()
 
     assert result["per_class"] == {}
+    # 可观测性（spec §3.3）：pgraph 无效 early return 发 warning。
+    levels = [lvl for (_msg, lvl) in session.info_calls]
+    assert "warning" in levels
+    assert any("无效" in msg for (msg, _lvl) in session.info_calls)
