@@ -88,3 +88,28 @@ def test_format_unknown_type_falls_back():
     out = format_workflow_failure(RuntimeError("something weird boom"))
     assert "TransientError" in out  # classify(RuntimeError 未知) → TransientError
     assert "something weird boom" in out
+
+
+from shannon_core.cli.error_render import persist_workflow_traceback
+
+
+def test_persist_writes_activity_failures_log(tmp_path):
+    exc = ApplicationError("boom", type="InvalidTargetError")
+    path = persist_workflow_traceback(exc, tmp_path)
+    assert path == tmp_path / "activity_failures.log"
+    content = path.read_text(encoding="utf-8")
+    assert "boom" in content
+    assert "workflow-level failure" in content
+
+
+def test_persist_returns_none_when_no_workspace():
+    assert persist_workflow_traceback(RuntimeError("x"), None) is None
+
+
+def test_persist_appends_to_existing(tmp_path):
+    log = tmp_path / "activity_failures.log"
+    log.write_text("PREEXISTING\n", encoding="utf-8")
+    persist_workflow_traceback(ApplicationError("second"), tmp_path)
+    content = log.read_text(encoding="utf-8")
+    assert "PREEXISTING" in content
+    assert "second" in content

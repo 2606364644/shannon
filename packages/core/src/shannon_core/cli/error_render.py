@@ -95,3 +95,23 @@ def format_workflow_failure(exc: Exception) -> str:
     else:
         detail = f"扫描因 {rc.error_type} 失败：{rc.message}"
     return f"✗ 扫描失败：{rc.error_type}\n  {detail}"
+
+
+def persist_workflow_traceback(exc: Exception, workspace_dir: Path | None) -> Path | None:
+    """把完整 traceback append 到 ``<workspace_dir>/activity_failures.log``（best-effort）。
+
+    workspace_dir 为 None（如 standalone 黑盒无 workspace）或写失败时返回 None；
+    调用方据此决定是否提示「加 --debug 看堆栈」。绝不抛异常（别让落盘盖过友好展示）。
+    """
+    if workspace_dir is None:
+        return None
+    try:
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        log_path = workspace_dir / "activity_failures.log"
+        tb = "".join(traceback.format_exception(exc))
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write("\n=== workflow-level failure ===\n")
+            f.write(tb)
+        return log_path
+    except OSError:
+        return None
