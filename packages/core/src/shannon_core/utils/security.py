@@ -102,9 +102,10 @@ async def check_url_reachable(
         async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
             if pinned_ip and original_host:
                 parsed = urlparse(url)
+                port_suffix = f":{parsed.port}" if parsed.port else ""
                 ip_url = url.replace(
                     f"{parsed.scheme}://{parsed.netloc}",
-                    f"{parsed.scheme}://{pinned_ip}",
+                    f"{parsed.scheme}://{pinned_ip}{port_suffix}",
                     1,
                 )
                 headers = {"Host": original_host}
