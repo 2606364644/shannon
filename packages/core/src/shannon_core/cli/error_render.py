@@ -56,3 +56,42 @@ def extract_root_cause(exc: Exception) -> RootCause:
 
     message = str(deepest) or str(exc)
     return RootCause(error_type=error_type, message=message)
+
+
+def _invalid_target_hint(message: str) -> str:
+    """InvalidTargetError 按 message 子串区分 loopback / SSRF / 不可解析三支。"""
+    msg = message.lower()
+    if "loopback" in msg:
+        return (
+            "目标解析到本机 loopback 地址。黑盒扫描不允许扫 loopback/内网地址（SSRF 防护）。\n"
+            "  建议：用公网地址，或目标容器在宿主网络可达的地址。"
+        )
+    if "ssrf" in msg or "169.254" in msg:
+        return "目标解析到 SSRF 敏感网段（169.254.x.x）。\n  建议：换非链路本地地址。"
+    if "cannot resolve" in msg or "resolve" in msg:
+        return "无法解析目标域名。\n  建议：检查 URL 拼写 / DNS / 目标是否启动。"
+    return f"目标地址无效：{message}\n  建议：检查目标 URL。"
+
+
+# error_type → 人话诊断 + 建议。callable 接收原始 message（用于按子串细分）。
+FRIENDLY_HINTS: dict[str, str | Callable[[str], str]] = {
+    "InvalidTargetError": _invalid_target_hint,
+    "ConfigurationError": "配置或必要文件有问题。\n  建议：检查 profile / config 文件。",
+    "AuthenticationError": "鉴权失败。\n  建议：检查 API key / profile 配置。",
+    "AuthLoginFailedError": "目标登录失败。\n  建议：检查登录流程配置 / 凭据。",
+    "GitError": "Git 操作失败。\n  建议：检查仓库路径 / git 可用性。",
+    "PermissionError": "权限不足。\n  建议：检查访问权限 / token。",
+}
+
+
+def format_workflow_failure(exc: Exception) -> str:
+    """组装多行友好串。落盘 / --debug 提示由 CLI 层补充（保持本函数纯）。"""
+    rc = extract_root_cause(exc)
+    hint = FRIENDLY_HINTS.get(rc.error_type)
+    if callable(hint):
+        detail = hint(rc.message)
+    elif isinstance(hint, str):
+        detail = hint
+    else:
+        detail = f"扫描因 {rc.error_type} 失败：{rc.message}"
+    return f"✗ 扫描失败：{rc.error_type}\n  {detail}"

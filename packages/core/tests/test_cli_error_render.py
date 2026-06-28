@@ -46,3 +46,45 @@ def test_root_cause_falls_back_to_classify_when_no_type():
 def test_root_cause_message_from_deepest():
     rc = extract_root_cause(RuntimeError("shallow msg"))
     assert rc.message == "shallow msg"
+
+
+from shannon_core.cli.error_render import format_workflow_failure
+
+
+def test_format_loopback_target():
+    exc = ApplicationError(
+        "Target http://localhost:4000 resolves to loopback address 127.0.0.1",
+        type="InvalidTargetError",
+    )
+    out = format_workflow_failure(exc)
+    assert "InvalidTargetError" in out
+    assert "loopback" in out.lower() or "本机" in out
+    assert "SSRF" in out or "ssrf" in out.lower()
+
+
+def test_format_ssrf_target():
+    exc = ApplicationError(
+        "Target resolves to SSRF-sensitive IP 169.254.1.1", type="InvalidTargetError"
+    )
+    out = format_workflow_failure(exc)
+    assert "169.254" in out or "SSRF" in out
+
+
+def test_format_unresolvable_target():
+    exc = ApplicationError("Cannot resolve hostname for http://x", type="InvalidTargetError")
+    out = format_workflow_failure(exc)
+    assert "解析" in out or "resolve" in out.lower()
+
+
+def test_format_configuration_error():
+    exc = ApplicationError("config missing field", type="ConfigurationError")
+    out = format_workflow_failure(exc)
+    assert "ConfigurationError" in out
+    assert "配置" in out
+
+
+def test_format_unknown_type_falls_back():
+    """未命中映射的 error_type 走通用兜底（含原始 message）。"""
+    out = format_workflow_failure(RuntimeError("something weird boom"))
+    assert "TransientError" in out  # classify(RuntimeError 未知) → TransientError
+    assert "something weird boom" in out
