@@ -107,6 +107,36 @@ install_chromium() {
     ok "chromium installed"
 }
 
+install_agent_browser() {
+    if has agent-browser; then
+        ok "agent-browser (already installed)"
+        return 0
+    fi
+    if ! confirm "Install agent-browser (default blackbox browser engine)?"; then
+        warn "agent-browser skipped"
+        return 0
+    fi
+    echo "Installing agent-browser..."
+    if ! npm install -g agent-browser@latest; then
+        fail "agent-browser installation failed."
+        echo "  Manual: npm install -g agent-browser"
+        return 1
+    fi
+    echo "Downloading Chrome for agent-browser..."
+    if ! agent-browser install; then
+        fail "agent-browser install (Chrome download) failed."
+        echo "  Manual: agent-browser install"
+        return 1
+    fi
+    if has agent-browser; then
+        ok "agent-browser installed"
+    else
+        fail "agent-browser not found after install."
+        echo "  Manual: npm install -g agent-browser && agent-browser install"
+        return 1
+    fi
+}
+
 check_docker() {
     if has docker; then
         ok "docker"
@@ -128,11 +158,13 @@ case "$PROFILE" in
         install_gitnexus || FAILED=1
         ;;
     blackbox)
+        install_agent_browser || FAILED=1
         install_playwright_cli || FAILED=1
         install_chromium || FAILED=1
         ;;
     all)
         install_gitnexus || FAILED=1
+        install_agent_browser || FAILED=1
         install_playwright_cli || FAILED=1
         install_chromium || FAILED=1
         check_docker
