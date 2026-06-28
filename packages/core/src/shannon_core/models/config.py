@@ -70,6 +70,6 @@ class Config(BaseModel):
     report: ReportConfig | None = None
     rules_of_engagement: str | None = None
     auto_detect_whitebox: bool = True
-    browser_engine: BrowserEngineType = "playwright"
+    browser_engine: BrowserEngineType = "agent-browser"
 
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]

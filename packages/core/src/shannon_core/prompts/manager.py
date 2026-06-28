@@ -95,7 +95,7 @@ class PromptManager:
         )
 
         # Resolve the browser engine via factory
-        engine = BrowserEngineFactory.get_engine(variables.get("browser_engine", "playwright"))
+        engine = BrowserEngineFactory.get_engine(variables.get("browser_engine", "agent-browser"))
 
         # Legacy placeholder – kept so that existing templates still work
         result = result.replace("{{PLAYWRIGHT_SESSION}}", session_id)

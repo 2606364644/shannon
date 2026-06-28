@@ -391,8 +391,8 @@ def test_browser_session_flag_injected(prompts_dir):
     manager = PromptManager(prompts_dir)
     result = manager.load_sync("browser-flag-test", {"web_url": "https://example.com", "repo_path": "/r"})
     assert "{{BROWSER_SESSION_FLAG}}" not in result
-    # Default engine is playwright, so flag should contain -s=
-    assert "-s=" in result
+    # Default engine is agent-browser, so flag should contain --session
+    assert "--session" in result
     assert "Session:" in result
     assert "End" in result
 
@@ -405,8 +405,8 @@ def test_browser_commands_injected(prompts_dir):
     manager = PromptManager(prompts_dir)
     result = manager.load_sync("browser-cmd-test", {"web_url": "https://example.com", "repo_path": "/r"})
     assert "{{BROWSER_COMMANDS}}" not in result
-    # Default engine is playwright, so reference should mention playwright
-    assert "playwright" in result.lower()
+    # Default engine is agent-browser, so reference should mention agent-browser
+    assert "agent-browser" in result.lower()
     assert "Commands:" in result
     assert "Done" in result
 
@@ -418,9 +418,10 @@ def test_browser_session_id_variable(prompts_dir):
     result = manager.load_sync("sid-test", {
         "web_url": "https://example.com",
         "repo_path": "/r",
+        "browser_engine": "playwright",
         "browser_session_id": "custom-sess",
     })
-    # Default playwright engine uses -s=<id> format
+    # playwright engine uses -s=<id> format
     assert "-s=custom-sess" in result
 
 
@@ -431,6 +432,7 @@ def test_playwright_session_backward_compat(prompts_dir):
     result = manager.load_sync("pw-compat-test", {
         "web_url": "https://example.com",
         "repo_path": "/r",
+        "browser_engine": "playwright",
         "playwright_session": "legacy-sess",
     })
     assert "-s=legacy-sess" in result

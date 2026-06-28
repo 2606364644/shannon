@@ -115,7 +115,7 @@ class BlackboxScanWorkflow:
             from shannon_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
 
-        engine_name = cfg.browser_engine if cfg else "playwright"
+        engine_name = cfg.browser_engine if cfg else "agent-browser"
         try:
             engine = BrowserEngineFactory.get_engine(engine_name)
         except KeyError as e:

@@ -177,12 +177,12 @@ class TestBlackboxBrowserEngineIntegration:
         assert engine.name == "agent-browser"
 
     def test_default_engine_without_config(self):
-        """Without config, engine defaults to playwright."""
+        """Without config, engine defaults to agent-browser."""
         import shannon_core.services.engines  # noqa: F401
 
-        engine_name = "playwright"
+        engine_name = "agent-browser"
         engine = BrowserEngineFactory.get_engine(engine_name)
-        assert engine.name == "playwright"
+        assert engine.name == "agent-browser"
 
     def test_engine_write_config_replaces_write_stealth_config(self, tmp_path):
         """engine.write_config() should produce the same result as write_stealth_config."""

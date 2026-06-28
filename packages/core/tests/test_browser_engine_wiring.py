@@ -67,12 +67,12 @@ class TestBrowserEngineEnvVarOverride:
         config = parse_config(config_path)
         assert config.browser_engine == "agent-browser"
 
-    def test_default_playwright_without_env_var(self, tmp_path, monkeypatch):
-        """Without SHANNON_BROWSER_ENGINE, browser_engine defaults to playwright."""
+    def test_default_agent_browser_without_env_var(self, tmp_path, monkeypatch):
+        """Without SHANNON_BROWSER_ENGINE, browser_engine defaults to agent-browser."""
         monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
         config_path = _write_config(tmp_path, "description: test app\n")
         config = parse_config(config_path)
-        assert config.browser_engine == "playwright"
+        assert config.browser_engine == "agent-browser"
 
     def test_invalid_env_var_raises_validation_error(self, tmp_path, monkeypatch):
         """Invalid SHANNON_BROWSER_ENGINE value (e.g. 'chromium') should raise PentestError."""
