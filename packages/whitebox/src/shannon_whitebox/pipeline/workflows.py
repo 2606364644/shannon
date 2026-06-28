@@ -304,9 +304,14 @@ class WhiteboxScanWorkflow:
                         retry_policy=retry_for("log"),
                     )
                 except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "Auth config scan failed (non-fatal, auth track degrades to LLM-only): %s", exc)
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        ActivityInput(**{**act_input.__dict__,
+                           "info_message": f"Auth config scan failed (non-fatal, auth track degrades to LLM-only): {exc}",
+                           "info_level": "warning"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
             if input.enable_llm_track:
                 vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
                 for vt in selected_classes:
@@ -361,9 +366,14 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Authz GitNexus judge failed (non-fatal, LLM-only track continues): %s", exc)
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"Authz GitNexus judge failed (non-fatal, LLM-only track continues): {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             # === GitNexus-track chain verdict: inj/xss/ssrf (spec §5.4-5.6) ===
             # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
             # Runs before run_merge_dual_track_queues (which reads those queues).
@@ -385,9 +395,14 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("log"),
                 )
             except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "GitNexus chain verdict failed (non-fatal, LLM-only track continues): %s", exc)
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"GitNexus chain verdict failed (non-fatal, LLM-only track continues): {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             await workflow.execute_activity(
                 activities.run_merge_dual_track_queues,
                 act_input,
@@ -421,8 +436,14 @@ class WhiteboxScanWorkflow:
                 )
             except Exception as exc:
                 # Non-fatal — attack chains enhance the report but don't block the pipeline
-                import logging
-                logging.getLogger(__name__).warning("Attack chain assembly failed: %s", exc)
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"Attack chain assembly failed: {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "attack-chain"}),

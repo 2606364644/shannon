@@ -331,7 +331,7 @@ async def test_rich_renderer_info_event_info_level_cyan():
     await RichConsoleRenderer(console=console).render(
         InfoEvent(timestamp="t", category="INFO", message="hi", level="info"))
     printed = console.print.call_args.args[0]
-    assert "INFO" in printed and "cyan" in printed and "hi" in printed
+    assert "INFO " in printed and "cyan" in printed and "hi" in printed  # tag('INFO') pad，验列对齐非裸 INFO
 
 
 async def test_rich_renderer_info_event_warning_level_yellow():

@@ -1,0 +1,24 @@
+"""log_info_activity 防御性 best-effort 测试。
+
+显示侧通道失败绝不影响扫描——尤其当 log_info_activity 在 workflow 的 except 块里被调时
+（非致命降级诊断迁移），session.log_info 抛不能替换原异常流。
+"""
+import pytest
+from unittest.mock import AsyncMock
+
+from shannon_whitebox.pipeline.activities import log_info_activity
+from shannon_whitebox.pipeline.shared import ActivityInput
+
+
+@pytest.mark.asyncio
+async def test_log_info_activity_swallows_session_error(monkeypatch):
+    """session.log_info 抛时 activity 不传播（best-effort）。"""
+    mock_session = AsyncMock()
+    mock_session.log_info = AsyncMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(
+        "shannon_whitebox.audit.session_registry.get_audit_session",
+        lambda: mock_session,
+    )
+    inp = ActivityInput(repo_path="x", info_message="m", info_level="warning")
+    await log_info_activity(inp)  # 不应抛
+    mock_session.log_info.assert_awaited_once_with("m", "warning")

@@ -8,7 +8,7 @@ tooling): every method is a no-op so callers never null-check.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 _current: "Any" = None
 
@@ -22,7 +22,7 @@ class NullAuditSession:
     async def log_event(self, event_type: str, event_data: Any) -> None: pass
     async def log_phase_start(self, phase: str) -> None: pass
     async def log_phase_complete(self, phase: str) -> None: pass
-    async def log_info(self, message: str, level: str = "info") -> None: pass
+    async def log_info(self, message: str, level: Literal["info", "warning"] = "info") -> None: pass
     async def log_workflow_complete(self, summary: Any) -> None: pass
     async def log_error(self, error: Any, context: str | None = None, *,
                         attempt: int | None = None,

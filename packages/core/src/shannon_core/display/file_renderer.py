@@ -53,7 +53,7 @@ class FileLogRenderer:
 
     def _info(self, e) -> str:
         label = "WARNING" if e.level == "warning" else "INFO"
-        return f"[{e.timestamp}] [{label}] {e.message}\n"
+        return f"[{e.timestamp}] [{tag(label)}] {e.message}\n"
 
     def _header(self, e) -> str:
         lines = [_SEP, "Shannon Pentest - Workflow Log", _SEP]

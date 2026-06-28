@@ -123,7 +123,7 @@ class WorkflowLogger:
             timestamp=format_log_time(), category="PHASE", phase=phase,
             event=event, steps=tuple(steps), step_intents=tuple(step_intents)))
 
-    async def log_info(self, message: str, level: str = "info") -> None:
+    async def log_info(self, message: str, level: Literal["info", "warning"] = "info") -> None:
         """Emit a user-facing info/warning line.
 
         Routes through the dispatcher (not bare logging → stderr), so the line

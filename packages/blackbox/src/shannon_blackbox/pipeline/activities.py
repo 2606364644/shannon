@@ -422,7 +422,10 @@ async def log_phase_complete_activity(input: BlackboxActivityInput) -> None:
 @activity.defn
 async def log_info_activity(input: BlackboxActivityInput) -> None:
     from shannon_core.audit.session_registry import get_audit_session
-    await get_audit_session().log_info(input.info_message, input.info_level)
+    try:
+        await get_audit_session().log_info(input.info_message, input.info_level)
+    except Exception:
+        pass  # best-effort: 显示侧通道失败绝不影响扫描（尤其 except 块里调，避免替换原异常）
 
 
 @activity.defn

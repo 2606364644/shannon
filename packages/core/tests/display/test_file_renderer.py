@@ -236,7 +236,7 @@ async def test_file_renderer_info_event_info_level():
     await FileLogRenderer(writer).render(
         InfoEvent(timestamp="2026-06-28 12:00:00", category="INFO", message="hi", level="info"))
     written = writer.write.await_args.args[0]
-    assert "[INFO]" in written and "hi" in written and written.endswith("\n")
+    assert "[INFO ]" in written and "hi" in written and written.endswith("\n")  # tag() pad 到 LABEL_WIDTH，与 [STEP ]/[PHASE] 列对齐
 
 
 async def test_file_renderer_info_event_warning_level():

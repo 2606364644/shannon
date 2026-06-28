@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.models.metrics import SessionMetadata
 from shannon_core.models.audit import AgentEndResult, AgentLogDetails, ResumeInfo, WorkflowSummary
@@ -101,7 +101,7 @@ class AuditSession:
         if self._workflow_logger:
             await self._workflow_logger.log_phase(phase, "complete")
 
-    async def log_info(self, message: str, level: str = "info") -> None:
+    async def log_info(self, message: str, level: Literal["info", "warning"] = "info") -> None:
         """Emit a user-facing info/warning line (routed via dispatcher, not stderr).
 
         Replaces bare ``logger.warning/info`` in workflow threads, which would
