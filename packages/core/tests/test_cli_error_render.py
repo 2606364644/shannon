@@ -48,6 +48,23 @@ def test_root_cause_message_from_deepest():
     assert rc.message == "shallow msg"
 
 
+def test_root_cause_prefers_shallowest_typed_in_multi_layer_chain():
+    """temporalio 序列化 ``raise ApplicationFailure(type=语义) from e`` 的整条 cause：
+    外层 AppError(type=activity 语义分类) → 深层 AppError(type=原始异常类名, 如 PentestError)。
+    应选**最浅**的语义 type（activity 主动设的），而非深处被 worker 包装的异常类名噪声层。
+    回归：真机 blackbox start loopback 曾因选错深层 PentestError 而走通用兜底（error_type=PentestError）。
+    """
+    deep = _FakeTemporalError("Target resolves to loopback", type="PentestError")
+    shallow = _FakeTemporalError(
+        "InvalidTargetError: Target resolves to loopback",
+        cause=deep,
+        type="InvalidTargetError",
+    )
+    rc = extract_root_cause(shallow)
+    assert rc.error_type == "InvalidTargetError"
+    assert "loopback" in rc.message
+
+
 from shannon_core.cli.error_render import format_workflow_failure
 
 

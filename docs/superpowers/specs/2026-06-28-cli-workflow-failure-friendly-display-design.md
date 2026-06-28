@@ -73,9 +73,10 @@ preflight activity 抛 PentestError
   → worker.run_scan except 块: log_workflow_complete(failed); raise            [已有，不动]
   → CLI start 的 try/except 接住                                               ★新增
       ├─ format_workflow_failure(exc) → 友好串                                 [core 新增]
-      │     ├─ extract_root_cause(exc): 沿 __cause__ 链挖最深层
-      │     │     ├─ 取 ApplicationFailure.type (优先)
-      │     │     └─ 兜底: classify_error_for_temporal(最深层异常)
+      │     ├─ extract_root_cause(exc): 沿 .cause/__cause__ 链，取**最浅**带 .type 的层
+      │     │     ├─ activity 语义 type（InvalidTargetError 等）在最外层 ApplicationFailure
+      │     │     │  深处是 worker 包装的原始异常（type=类名，如 PentestError）→ 最浅优先避噪声
+      │     │     └─ 兜底: 全链无 .type 时 classify_error_for_temporal(最深层异常)
       │     └─ 查 FRIENDLY_HINTS[type] → 人话诊断 + 建议
       ├─ persist_workflow_traceback(exc, workspace_dir): 完整堆栈 append 到 activity_failures.log
       ├─ click.echo(友好串)
@@ -88,7 +89,7 @@ preflight activity 抛 PentestError
 **新增 `packages/core/src/shannon_core/cli/error_render.py`**
 
 - `RootCause`（dataclass）：`error_type: str`、`message: str`
-- `extract_root_cause(exc) -> RootCause`：遍历 `__cause__` 链到最深层；优先取带 `.type` 属性的 temporalio 异常的 `type`；`type` 缺失时对最深层异常跑 `classify_error_for_temporal` 兜底分类；`message` 取最深层异常的 `str()`
+- `extract_root_cause(exc) -> RootCause`：遍历 temporalio `.cause` + Python `__cause__` 链（外→内），取**最浅**（第一个）带 `.type` 的异常的 type——activity 主动设的语义分类层（如 `InvalidTargetError`）总在 failure chain 最外层；`raise ApplicationFailure(...) from e` 的原始异常被 worker 包装成更深层、`type=异常类名`（如 `PentestError`，语义差，是噪声层），故最浅优先；全链无 `.type` 时对最深层跑 `classify_error_for_temporal` 兜底；`message` 取选中异常的 `str()`
 - `FRIENDLY_HINTS: dict[str, str | Callable[[str], str]]`：error_type → 提示文案
   - `InvalidTargetError` 用 callable，按 message 子串区分 loopback / SSRF / 不可解析三支
   - 其余 error_type 用静态串

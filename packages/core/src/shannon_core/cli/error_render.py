@@ -42,20 +42,22 @@ def _walk_cause_chain(exc: Exception) -> list[Exception]:
 
 
 def extract_root_cause(exc: Exception) -> RootCause:
-    """挖到最深层异常：优先取链上带 ``.type`` 的 temporalio 异常的 type，否则 classify 兜底。"""
+    """挖根因：选**最浅**（第一个）带 ``.type`` 的 temporalio 异常——activity 主动设的语义分类层
+    总在 failure chain 最外层；``raise ApplicationFailure(...) from e`` 的原始异常被 worker 包装成
+    更深层、``type=异常类名``（语义差，如 PentestError），故最浅优先，不取深处噪声层。
+    全链无 ``.type`` 时对最深层跑 classify 兜底。
+    """
     chain = _walk_cause_chain(exc)
     deepest = chain[-1]
 
-    error_type: str | None = None
-    for err in chain:  # 从外到内，后写者更深、覆盖前者
+    for err in chain:  # 从外到内，最浅带 .type 优先
         t = getattr(err, "type", None)
         if t:
-            error_type = t
-    if not error_type:
-        error_type = classify_error_for_temporal(deepest)[0]
+            return RootCause(error_type=t, message=str(err) or str(exc))
 
-    message = str(deepest) or str(exc)
-    return RootCause(error_type=error_type, message=message)
+    # 全链无 temporalio type → 对最深层 classify 兜底
+    error_type = classify_error_for_temporal(deepest)[0]
+    return RootCause(error_type=error_type, message=str(deepest) or str(exc))
 
 
 def _invalid_target_hint(message: str) -> str:
