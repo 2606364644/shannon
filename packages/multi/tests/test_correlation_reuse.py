@@ -2,8 +2,9 @@
 
 被测函数 `has_correlation_results` 是从 Temporal workflow `run` 里抽出的纯助手,
 用来回答:关联 workspace 的 deliverables 里是否存在对 `vuln_classes` 中至少一个
-漏洞类有效的 `{vc}_exploitation_queue.json`(有效性复用 `has_valid_whitebox_results`,
-即每条 entry 必须含 title/description/severity/location 四字段)。
+漏洞类有效的 `{vc}_exploitation_queue.json`。有效性复用 `has_valid_whitebox_results`,
+对齐原始 TS validateQueueStructure:文件存在 + ``vulnerabilities`` 非空数组(**不**校验
+条目内部字段——title/description/severity/location 是 exploit 阶段字段,非 vuln queue 字段)。
 
 这是 spec §7 "必要产物,非可选" 的检测端——A6 写,黑盒(B2/B3)读。
 """
@@ -21,11 +22,16 @@ def _write_queue(dlv, vc, entries):
 
 
 _VALID_ENTRY = {
-    "title": "SSRF via gateway forwarding",
-    "description": "gateway forwards user-controlled url to backend sink",
-    "severity": "high",
-    "location": "gateway POST /orders → order-svc.CreateOrder",
-    # 跨服务额外标注 —— subset 检查允许多字段(spec §7 B1)
+    # 真实 vuln queue 字段(ID/vulnerability_type/externally_exploitable/confidence/
+    # source_endpoint/...);无 title/description/severity/location(exploit 阶段字段)
+    "ID": "SSRF-VULN-01",
+    "vulnerability_type": "URL_Manipulation",
+    "externally_exploitable": True,
+    "confidence": "high",
+    "source_endpoint": "POST /orders",
+    "vulnerable_parameter": "url",
+    "vulnerable_code_location": "gateway/forwarder.js:42",
+    # 跨服务额外标注(对齐 TS,subset 不再校验,多字段不破坏检测)
     "service": "order-svc",
     "cross_service_source": "gateway",
 }
@@ -50,12 +56,12 @@ def test_false_when_queue_missing_for_all_classes(tmp_path):
     assert has_correlation_results(dlv, ["ssrf", "idor"]) is False
 
 
-def test_false_when_queue_invalid_missing_required_field(tmp_path):
-    """spec §7 B1 硬约束:缺 title/description/severity/location 任一即判无效。"""
+def test_true_without_exploit_phase_fields(tmp_path):
+    """回归锚定:对齐 TS,不校验 title/description/severity/location(exploit 阶段字段)。
+    _VALID_ENTRY 用真实 vuln queue 字段,无那 4 字段,仍判有效。"""
     dlv = tmp_path / "deliverables"
-    bad = {k: v for k, v in _VALID_ENTRY.items() if k != "location"}
-    _write_queue(dlv, "ssrf", [bad])
-    assert has_correlation_results(dlv, ["ssrf"]) is False
+    _write_queue(dlv, "ssrf", [_VALID_ENTRY])
+    assert has_correlation_results(dlv, ["ssrf"]) is True
 
 
 def test_false_when_vulnerabilities_empty(tmp_path):

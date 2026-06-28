@@ -280,7 +280,7 @@ These components were analyzed and found to have robust defenses. They are low-p
       4. Confirm `{{DELIVERABLES_PATH}}/auth_analysis_deliverable.md` is complete with all sections
       **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
 
-**Note:** Write your deliverable markdown via the Write tool first. The exploitation queue is captured automatically at the end of your session.
+**Note:** Write your deliverable markdown via the Write tool first. The exploitation queue (`auth_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
 
 **ONLY AFTER** both systematic analysis AND successful deliverable generation, announce "**AUTH ANALYSIS COMPLETE**" and stop.
 

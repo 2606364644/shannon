@@ -137,52 +137,50 @@ class TestResolveDeliverablesPath:
 
 
 class TestHasValidWhiteboxResults:
+    """对齐原始 TS validateQueueStructure:文件存在 + ``vulnerabilities`` 非空数组即 True。
+
+    不校验条目内部字段——``title``/``description``/``severity``/``location`` 是 exploit
+    阶段字段,非 vuln queue 字段(回归锚点见 ``test_accepts_real_vuln_queue_fields``)。
+    """
+
     def test_file_not_found(self, tmp_path):
         assert has_valid_whitebox_results(tmp_path / "nonexistent.json") is False
 
-    def test_valid_vulnerabilities(self, tmp_path):
+    def test_accepts_real_vuln_queue_fields(self, tmp_path):
+        """回归锚点:真实 vuln queue 字段(ID/vulnerability_type/source/path/sink_call/
+        verdict/externally_exploitable/confidence,**无** title/description/severity/
+        location)→ True。锁定'不再误要求 exploit 阶段那 4 字段'。"""
         queue_file = tmp_path / "injection_exploitation_queue.json"
         queue_file.write_text(json.dumps({
             "vulnerabilities": [{
-                "title": "V-001",
-                "description": "Test vulnerability",
-                "severity": "medium",
-                "location": "test.py:1",
+                "ID": "INJ-VULN-01",
+                "vulnerability_type": "SQLi",
+                "externally_exploitable": True,
+                "confidence": "high",
+                "source": "req.body.q at routes/search.js:12",
+                "path": "search → sink",
+                "sink_call": "db.query:30",
+                "verdict": "vulnerable",
+                "witness_payload": "' OR 1=1--",
             }]
         }))
         assert has_valid_whitebox_results(queue_file) is True
 
-    def test_valid_with_required_fields(self, tmp_path):
-        """Vulnerability entries with all required fields should pass validation."""
+    def test_accepts_minimal_entry(self, tmp_path):
+        """对齐 TS:条目字段极少也 True(只校验数组非空,不查条目字段)。"""
         queue_file = tmp_path / "injection_exploitation_queue.json"
         queue_file.write_text(json.dumps({
-            "vulnerabilities": [{
-                "title": "SQL Injection",
-                "description": "User input concatenated into SQL query",
-                "severity": "high",
-                "location": "src/api/users.py:42",
-            }]
+            "vulnerabilities": [{"ID": "V-001"}]
         }))
         assert has_valid_whitebox_results(queue_file) is True
 
-    def test_rejects_missing_required_fields(self, tmp_path):
-        """Vulnerability entries missing required fields should be rejected."""
-        queue_file = tmp_path / "injection_exploitation_queue.json"
-        queue_file.write_text(json.dumps({
-            "vulnerabilities": [{
-                "title": "SQL Injection",
-                # Missing: description, severity, location
-            }]
-        }))
-        assert has_valid_whitebox_results(queue_file) is False
-
-    def test_rejects_non_dict_entries(self, tmp_path):
-        """Non-dict entries in vulnerabilities should be rejected."""
+    def test_accepts_non_dict_entries(self, tmp_path):
+        """对齐 TS validateQueueStructure:不查条目内部,非空数组即 True(条目非 dict 亦然)。"""
         queue_file = tmp_path / "injection_exploitation_queue.json"
         queue_file.write_text(json.dumps({
             "vulnerabilities": ["not a dict", 42]
         }))
-        assert has_valid_whitebox_results(queue_file) is False
+        assert has_valid_whitebox_results(queue_file) is True
 
     def test_empty_vulnerabilities(self, tmp_path):
         queue_file = tmp_path / "injection_exploitation_queue.json"

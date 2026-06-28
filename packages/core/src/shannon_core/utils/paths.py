@@ -85,27 +85,22 @@ def deliverables_dir_for_workspace(workspace_path: Path) -> Path:
     return workspace_path / get_default_deliverables_subdir()
 
 
-REQUIRED_VULN_FIELDS = {"title", "description", "severity", "location"}
-
-
 def has_valid_whitebox_results(queue_file: Path) -> bool:
-    """检查 exploitation queue 文件是否包含有效漏洞条目。
+    """检查 exploitation queue 是否含有效漏洞条目(对齐原始 TS validateQueueStructure)。
 
-    验证 vulnerabilities 列表中的每个条目都包含必需字段：
-    title, description, severity, location。
+    原始 shannon 全链路只校验:文件存在 + ``vulnerabilities`` 是非空数组;**不校验条目
+    内部字段**——``title``/``description``/``severity``/``location`` 是 exploit 阶段
+    (exploit-collector)的字段,并非 vuln 分析阶段 queue 的字段。重构早期误把这套
+    exploit 字段当成 vuln queue 的必填校验,导致即便 queue 正常落盘(字段实为
+    ``ID``/``vulnerability_type``/``source``/``path``/``verdict``/...)也判 False,
+    黑盒 preflight 永远报 "No whitebox results found"。此处对齐 TS:条目级容错
+    交给 ``VulnerabilityQueue.parse_lenient``。
     """
     if not queue_file.exists():
         return False
     try:
         data = json.loads(queue_file.read_text(encoding="utf-8"))
         vulns = data.get("vulnerabilities")
-        if not isinstance(vulns, list) or len(vulns) == 0:
-            return False
-        for v in vulns:
-            if not isinstance(v, dict):
-                return False
-            if not REQUIRED_VULN_FIELDS.issubset(v.keys()):
-                return False
-        return True
+        return isinstance(vulns, list) and len(vulns) > 0
     except (json.JSONDecodeError, KeyError, OSError):
         return False
