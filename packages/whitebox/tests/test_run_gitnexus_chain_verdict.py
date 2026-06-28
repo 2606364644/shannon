@@ -100,7 +100,8 @@ async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
     monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
-    set_audit_session(_RecordingSession())
+    session = _RecordingSession()
+    set_audit_session(session)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
@@ -112,6 +113,11 @@ async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
     assert len(data["vulnerabilities"]) == 1
     assert data["vulnerabilities"][0]["source_track"] == "gitnexus"
     assert "injection" in result["per_class"]
+    # 可观测性（spec §3.4）：有 findings → 汇总 info（per-class 明细）。
+    levels = [lvl for (_msg, lvl) in session.info_calls]
+    msgs = [msg for (msg, _lvl) in session.info_calls]
+    assert "info" in levels
+    assert any("inj=1" in m for m in msgs)
 
 
 @pytest.mark.asyncio
@@ -195,3 +201,29 @@ async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
     levels = [lvl for (_msg, lvl) in session.info_calls]
     assert "warning" in levels
     assert any("无效" in msg for (msg, _lvl) in session.info_calls)
+
+
+@pytest.mark.asyncio
+async def test_summary_warns_when_all_classes_zero(tmp_path, monkeypatch):
+    """空壳 parameter_graph（taint_flows=[]）→ 3 类 0 findings → 汇总 warning（spec §3.4）。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    _write_pgraph(deliverables, [])
+
+    async def fake_llm(prompt, **kw):
+        raise AssertionError("empty pgraph should not call LLM")
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    session = _RecordingSession()
+    set_audit_session(session)
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert result["per_class"] == {}
+    levels = [lvl for (_msg, lvl) in session.info_calls]
+    msgs = [msg for (msg, _lvl) in session.info_calls]
+    assert "warning" in levels
+    assert any("3 类 0 findings" in m and "taint_flows=0" in m for m in msgs)

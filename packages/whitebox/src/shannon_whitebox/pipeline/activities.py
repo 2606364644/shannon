@@ -941,6 +941,28 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                     )
                     per_class[vc] = len(findings)
 
+            taint_flows_count = len(pgraph.taint_flows)
+            sink_call_sites_count = len(sink_call_sites)
+            try:
+                _sess = get_audit_session()
+                if not per_class:  # 3 类全 0 findings
+                    await _sess.log_info(
+                        f"GitNexus 注入轨：3 类 0 findings（taint_flows={taint_flows_count}，"
+                        f"sink_call_sites={sink_call_sites_count}）→ 靠 LLM 轨兜底。"
+                        f"taint_flows=0 常因 parameter_graph 空壳"
+                        f"（GitNexus 调用图未产出 taint / Plan 1 未落地）。",
+                        "warning",
+                    )
+                else:
+                    await _sess.log_info(
+                        f"GitNexus 注入轨：inj={per_class.get('injection', 0)}, "
+                        f"xss={per_class.get('xss', 0)}, ssrf={per_class.get('ssrf', 0)} "
+                        f"findings（taint_flows={taint_flows_count}）。",
+                        "info",
+                    )
+            except Exception:
+                pass
+
         return {"per_class": per_class}
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
