@@ -50,7 +50,8 @@ def cli():
 @click.option("--rerun", is_flag=True, help="强制重跑黑盒（归档旧 evidence，基于已有白盒结果重新跑）")
 @click.option("--correlated-workspace", default=None,
               help="Cross-repo correlation workspace (reuse topology for gateway-layer validation)")
-def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain, rerun, correlated_workspace):
+@click.option("--debug", is_flag=True, help="扫描失败时在终端打印完整堆栈（调试用）")
+def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_exploit, pipeline_testing, temporal_address, max_concurrent, retry_profile, plain, rerun, correlated_workspace, debug):
     """Start a black-box security scan."""
     from shannon_blackbox.worker import run_scan
     from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
@@ -130,7 +131,22 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
     ensure_prerequisite("playwright-cli", profile="blackbox")
     import sys
     use_rich = sys.stdout.isatty() and not plain
-    result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
+    try:
+        result = asyncio.run(run_scan(input, temporal_address, use_rich=use_rich))
+    except Exception as e:
+        from shannon_core.cli.error_render import format_workflow_failure, persist_workflow_traceback
+        workspace_dir = None
+        if input.workspaces_root and input.workspace_name:
+            workspace_dir = Path(input.workspaces_root) / input.workspace_name
+        log_path = persist_workflow_traceback(e, workspace_dir)
+        click.echo(format_workflow_failure(e))
+        if log_path:
+            click.echo(f"  完整错误已记录到 {log_path}")
+        click.echo("  加 --debug 可在终端查看完整堆栈。")
+        if debug:
+            import traceback as _tb
+            _tb.print_exc()
+        raise SystemExit(1)
     if result.status == "cancelled":
         click.echo("Scan cancelled.")
         raise SystemExit(130)

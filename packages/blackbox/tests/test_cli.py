@@ -638,3 +638,58 @@ def test_max_concurrent_default_3_when_unset(monkeypatch):
     """No env, no flag → default 3."""
     input = _capture_input(monkeypatch, extra_args=[], env_value=None)
     assert input.max_concurrent == 3
+
+
+def test_start_workflow_failure_shows_friendly_and_exits_1(tmp_path, monkeypatch):
+    """run_scan 抛 ApplicationFailure → CLI 友好展示 + exit 1，不裸抛 traceback。"""
+    from temporalio.exceptions import ApplicationError
+
+    err = ApplicationError(
+        "Target http://localhost:4000 resolves to loopback address 127.0.0.1",
+        type="InvalidTargetError",
+    )
+    monkeypatch.chdir(tmp_path)
+    ep = _patch_env_profile()
+    with (
+        ep[0], ep[1],
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_blackbox.worker.run_scan", side_effect=err),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://localhost:4000"])
+
+    assert result.exit_code == 1
+    assert "InvalidTargetError" in result.output
+    assert "loopback" in result.output.lower() or "本机" in result.output
+    assert "--debug" in result.output
+    assert "Traceback" not in result.output  # 默认不裸抛堆栈
+
+
+def test_start_workflow_failure_debug_prints_traceback(tmp_path, monkeypatch):
+    """--debug 时除友好串外，额外把完整 traceback 打到 stderr。"""
+    from temporalio.exceptions import ApplicationError
+
+    err = ApplicationError("boom loopback detail", type="InvalidTargetError")
+    monkeypatch.chdir(tmp_path)
+    ep = _patch_env_profile()
+    with (
+        ep[0], ep[1],
+        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_blackbox.worker.run_scan", side_effect=err),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--url", "http://localhost:4000", "--debug"])
+
+    assert result.exit_code == 1
+    assert "Traceback" in result.output  # --debug 打了堆栈（CliRunner mix_stderr）
+
+
+def test_start_help_shows_debug_option():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["start", "--help"])
+    assert result.exit_code == 0
+    assert "--debug" in result.output
