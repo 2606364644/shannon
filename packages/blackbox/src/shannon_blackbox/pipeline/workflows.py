@@ -40,7 +40,6 @@ def has_correlation_results(corr_ws_deliverables: Path, vuln_classes: list[str])
 
 with workflow.unsafe.imports_passed_through():
     from . import activities
-    from ..services.exploitation_checker import ExploitationChecker
     from shannon_core.utils.progress import AgentOutcome, format_exploit_summary
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
     from shannon_core.services.browser_engine import BrowserEngineFactory
@@ -258,9 +257,14 @@ class BlackboxScanWorkflow:
                 validation_results = []
                 exploit_tasks = []
                 for vt in selected_classes:
-                    validation = await ExploitationChecker.validate_queue(
-                        deliverables_path=deliverables,
-                        vuln_type=vt,
+                    exploit_check_input = BlackboxActivityInput(
+                        **{**act_input.__dict__, "vuln_type": vt}
+                    )
+                    validation = await workflow.execute_activity(
+                        activities.validate_exploitation_queue,
+                        exploit_check_input,
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=retry_for("log"),
                     )
                     validation_results.append((vt, validation))
                     if not validation.valid:

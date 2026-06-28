@@ -27,6 +27,11 @@ FORBIDDEN_FUNCS = {
 }
 # 属性形式的不安全 API：(模块名, 属性名)；同时覆盖 os.environ[...] 与 os.getenv(...)/Path.cwd()
 FORBIDDEN_ATTRS = {("os", "getenv"), ("os", "environ"), ("Path", "cwd")}
+# 类方法形式的间接文件 I/O：ExploitationChecker.validate_queue/should_exploit/check_coverage。
+# 这些方法内部走 aiofiles（async_path_exists/async_read_file → run_in_executor），workflow sandbox
+# 内直调会抛 NotImplementedError（同 _load_correlation_context 的违规模式）。文件 I/O 须经
+# validate_exploitation_queue activity 完成。
+FORBIDDEN_METHODS = {"validate_queue", "should_exploit", "check_coverage"}
 
 
 def _run_body_nodes(tree: ast.AST) -> list[ast.AST]:
@@ -50,6 +55,10 @@ def _forbidden_hits(nodes: list[ast.AST]) -> list[str]:
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             if (node.value.id, node.attr) in FORBIDDEN_ATTRS:
                 hits.append(f"{node.value.id}.{node.attr}")
+        # 类方法间接文件 I/O：ExploitationChecker.validate_queue(...) / .should_exploit(...) / .check_coverage(...)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in FORBIDDEN_METHODS:
+                hits.append(node.func.attr)
     return hits
 
 
@@ -79,4 +88,19 @@ def test_worker_registers_load_correlation_context():
         f"load_correlation_context 在 worker.py 仅出现 {count} 次，预期 >= 2"
         "（import 一处 + activities 列表一处）。新 activity 必须在 worker 注册，否则运行时 "
         "Temporal 找不到 activity 实现而崩溃。"
+    )
+
+
+def test_worker_registers_validate_exploitation_queue():
+    """防回归：validate_exploitation_queue activity 必须在 worker.py 注册。
+
+    ExploitationChecker.validate_queue 含文件 I/O（aiofiles → run_in_executor），workflow sandbox
+    内直调会抛 NotImplementedError。该调用经 activity 包装后，必须在 worker 注册，否则运行时
+    Temporal 找不到 activity 实现而崩溃。见 temporalio-activity-worker-registration 教训。
+    """
+    worker_src = WORKER_FILE.read_text()
+    count = worker_src.count("validate_exploitation_queue")
+    assert count >= 2, (
+        f"validate_exploitation_queue 在 worker.py 仅出现 {count} 次，预期 >= 2"
+        "（import 一处 + activities 列表一处）。"
     )

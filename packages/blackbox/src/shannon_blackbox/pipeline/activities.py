@@ -294,6 +294,30 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
+async def validate_exploitation_queue(input: BlackboxActivityInput):
+    """在 activity 内执行 exploitation queue 校验（文件 I/O 须在 sandbox 外）。
+
+    ExploitationChecker.validate_queue 内部走 aiofiles（async_path_exists/async_read_file
+    → run_in_executor），workflow sandbox 内直调会抛 NotImplementedError。本 activity 包装它，
+    文件 I/O 全在 activity 内完成，workflow 侧只 execute_activity 拿回 QueueValidationResult
+    （dataclass，temporalio data_converter 自动序列化/反序列化，故无返回类型注解）。
+    """
+    from shannon_blackbox.services.exploitation_checker import ExploitationChecker
+    try:
+        deliverables = _get_deliverables_path(input)
+        return await ExploitationChecker.validate_queue(
+            vuln_type=input.vuln_type,
+            deliverables_path=deliverables,
+        )
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_report_agent(input: BlackboxActivityInput) -> dict:
     from shannon_core.audit.session_registry import get_audit_session
     from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
