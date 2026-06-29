@@ -213,6 +213,14 @@ class OpenAIProvider(BaseProvider):
                 # 无可用 RunResult，构造一个最小结果对象
                 run_result = _MaxTurnsStub(collector.text)
                 stop_reason = "max_turns"
+            except StructuredOutputParseError:
+                # L1：L0 容错失败 → 轻量重输，模拟 Claude SDK 单次内部重试。
+                # 失败（None）→ re-raise → 外层 except Exception → _handle_error → L2。
+                await collector.close()
+                reparsed = await self._lightweight_reparse(collector.text, output_format, model)
+                if reparsed is None:
+                    raise
+                run_result = reparsed
 
             duration = int((time.time() - start_time) * 1000)
             return map_run_result(
