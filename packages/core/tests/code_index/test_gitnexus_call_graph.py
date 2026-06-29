@@ -86,13 +86,11 @@ class TestBuildCallGraphFromGitNexus:
                 ],
                 "definitions": [],
             },
-            "cypher": [
-                {
-                    "caller_file": "app.py", "caller_name": "handler",
-                    "caller_line": 5, "callee_file": "svc.py",
-                    "callee_name": "get_users", "confidence": 0.9,
-                },
-            ],
+            "cypher": {
+                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |",
+                "row_count": 1,
+                "rows": [{"caller_file": "app.py", "caller_name": "handler", "caller_line": 5, "callee_file": "svc.py", "callee_name": "get_users"}],
+            },
         })
         result = await build_call_graph_from_gitnexus(
             repo_path="/tmp/repo",
@@ -116,6 +114,47 @@ class TestBuildCallGraphFromGitNexus:
             )
 
     @pytest.mark.asyncio
+    async def test_cypher_rows_produce_edges_and_chains(self):
+        """核心回归锚点：GitNexus 1.6.7 cypher 返回 {markdown,row_count}（_parse_tool_result
+        填 rows）。build_call_graph 必须从 rows 构建非空 edges/chains——生产里一直为 0。"""
+        blocks = [
+            _block("handler", "app.py", 1),
+            _block("get_users", "svc.py", 10),
+        ]
+        mcp = FakeMCPClient(responses={
+            "query": {
+                "process_symbols": [],
+                "definitions": [{"name": "handler", "filePath": "app.py", "startLine": 1}],
+            },
+            "cypher": {
+                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |",
+                "row_count": 1,
+                "rows": [{
+                    "caller_file": "app.py", "caller_name": "handler", "caller_line": 1,
+                    "callee_file": "svc.py", "callee_name": "get_users",
+                }],
+            },
+        })
+        result = await build_call_graph_from_gitnexus(
+            repo_path="/tmp/repo", mcp_client=mcp, blocks=blocks,
+        )
+        assert len(result.edges) == 1
+        assert result.edges[0].callee_name == "get_users"
+        assert len(result.entry_points) == 1
+        assert len(result.chains) >= 1
+
+    @pytest.mark.asyncio
+    async def test_cypher_none_or_no_rows_yields_no_edges(self):
+        """_parse_tool_result 失败返 None / cypher 无 rows 时，edges 必须为空且不崩。"""
+        blocks = [_block("handler", "app.py", 1)]
+        for bad in (None, "Error: multiple repos", {"markdown": "| x |"}):
+            mcp = FakeMCPClient(responses={
+                "query": {"definitions": []}, "cypher": bad,
+            })
+            result = await build_call_graph_from_gitnexus("/tmp/repo", mcp, blocks)
+            assert result.edges == []
+
+    @pytest.mark.asyncio
     async def test_builds_chains_from_edges(self):
         blocks = [
             _block("handler", "app.py", 1),
@@ -130,18 +169,14 @@ class TestBuildCallGraphFromGitNexus:
                 ],
                 "definitions": [],
             },
-            "cypher": [
-                {
-                    "caller_file": "app.py", "caller_name": "handler",
-                    "caller_line": 5, "callee_file": "svc.py",
-                    "callee_name": "get_users", "confidence": 0.9,
-                },
-                {
-                    "caller_file": "svc.py", "caller_name": "get_users",
-                    "caller_line": 15, "callee_file": "db.py",
-                    "callee_name": "execute", "confidence": 0.85,
-                },
-            ],
+            "cypher": {
+                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |\n| svc.py | get_users | db.py | execute |",
+                "row_count": 2,
+                "rows": [
+                    {"caller_file": "app.py", "caller_name": "handler", "caller_line": 5, "callee_file": "svc.py", "callee_name": "get_users"},
+                    {"caller_file": "svc.py", "caller_name": "get_users", "caller_line": 15, "callee_file": "db.py", "callee_name": "execute"},
+                ],
+            },
         })
         result = await build_call_graph_from_gitnexus(
             repo_path="/tmp/repo",

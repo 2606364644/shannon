@@ -236,31 +236,33 @@ async def build_call_graph_from_gitnexus(
             "cypher",
             {"query": "MATCH (caller)-[r:CodeRelation {type: 'CALLS'}]->(callee) RETURN caller.filePath AS caller_file, caller.name AS caller_name, caller.startLine AS caller_line, callee.filePath AS callee_file, callee.name AS callee_name, r.confidence AS confidence LIMIT 5000"},
         )
-        if isinstance(cypher_result, list):
-            for record in cypher_result:
-                if not isinstance(record, dict):
-                    continue
-                caller_name = record.get("caller_name")
-                callee_name = record.get("callee_name")
-                if not caller_name or not callee_name:
-                    continue
-                caller_file = record.get("caller_file", "")
-                caller_line = record.get("caller_line", 0) or 0
-                callee_file = record.get("callee_file")
-                if isinstance(caller_line, str):
-                    try:
-                        caller_line = int(caller_line)
-                    except (ValueError, TypeError):
-                        caller_line = 0
-                caller_id = f"{caller_file}:{caller_name}:{caller_line}" if caller_file else caller_name
-                resolved = callee_file is not None
-                edges.append(CallEdge(
-                    caller_id=caller_id,
-                    callee_name=callee_name,
-                    callee_file=callee_file,
-                    resolved=resolved,
-                    line=caller_line,
-                ))
+        # GitNexus 1.6.7 cypher 返回 {markdown, row_count}（_parse_tool_result
+        # 已把 markdown 表格解析成 rows）。失败/ambiguous 时 cypher_result 为 None。
+        cypher_rows = cypher_result.get("rows", []) if isinstance(cypher_result, dict) else []
+        for record in cypher_rows:
+            if not isinstance(record, dict):
+                continue
+            caller_name = record.get("caller_name")
+            callee_name = record.get("callee_name")
+            if not caller_name or not callee_name:
+                continue
+            caller_file = record.get("caller_file", "")
+            caller_line = record.get("caller_line", 0) or 0
+            callee_file = record.get("callee_file")
+            if isinstance(caller_line, str):
+                try:
+                    caller_line = int(caller_line)
+                except (ValueError, TypeError):
+                    caller_line = 0
+            caller_id = f"{caller_file}:{caller_name}:{caller_line}" if caller_file else caller_name
+            resolved = callee_file is not None
+            edges.append(CallEdge(
+                caller_id=caller_id,
+                callee_name=callee_name,
+                callee_file=callee_file,
+                resolved=resolved,
+                line=caller_line,
+            ))
     except Exception as exc:
         logger.warning("Cypher query for call edges failed (%s); edge list will be empty", exc)
 
