@@ -138,6 +138,59 @@ class TestBlackboxWorkflowErrorPropagation:
         assert len(state.failed_agents) == 2
 
 
+def test_exploit_tasks_unpacking_arity_matches_construction():
+    """exploit_tasks 元素是 3-tuple (vt, agent_name, task)；所有解包点 arity 必须与构造一致。
+
+    回归 guard for 9f770e3d0：scheduled_vuln_types 曾误用 2-tuple 解包 (vt, _)，
+    对 3-tuple 抛 "too many values to unpack (expected 2)" ValueError，导致任何
+    调度了漏洞的黑盒扫描（exploit_tasks 非空）在 exploitation 阶段直接崩溃。
+    空跑（无漏洞 → exploit_tasks=[]）从不触发，故长期潜伏。
+    """
+    import ast
+    from shannon_blackbox.pipeline import workflows as wf
+
+    tree = ast.parse(Path(wf.__file__).read_text())
+
+    construct_arity = None
+    unpack_arities = []
+
+    def _is_exploit_tasks(node: ast.AST) -> bool:
+        return isinstance(node, ast.Name) and node.id == "exploit_tasks"
+
+    for node in ast.walk(tree):
+        # 构造点：exploit_tasks.append((vt, agent_name, task))
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "exploit_tasks"):
+            for arg in node.args:
+                if isinstance(arg, ast.Tuple):
+                    construct_arity = len(arg.elts)
+        # 解包点 1：comprehension target —— for <tuple> in exploit_tasks
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            for gen in node.generators:
+                if isinstance(gen.target, ast.Tuple) and _is_exploit_tasks(gen.iter):
+                    unpack_arities.append(len(gen.target.elts))
+        # 解包点 2：赋值 —— <tuple> = exploit_tasks[...]
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Tuple):
+                    src = node.value.value if isinstance(node.value, ast.Subscript) else node.value
+                    if _is_exploit_tasks(src):
+                        unpack_arities.append(len(tgt.elts))
+
+    assert construct_arity == 3, (
+        f"exploit_tasks 构造元组 arity 变了 ({construct_arity}); "
+        "若有意改动，请同步更新本测试与所有解包点"
+    )
+    assert unpack_arities, "未找到 exploit_tasks 解包点，本测试可能已失效"
+    assert all(a == construct_arity for a in unpack_arities), (
+        f"exploit_tasks 解包 arity {unpack_arities} 与构造 arity {construct_arity} 不一致; "
+        "某处解包目标数 != 构造元组元素数，会抛 ValueError: too many values to unpack"
+    )
+
+
 class TestBlackboxBrowserEngineIntegration:
     """Test browser engine resolution logic used by BlackboxScanWorkflow."""
 

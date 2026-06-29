@@ -334,7 +334,7 @@ class BlackboxScanWorkflow:
                 )
 
                 # Track scheduled vuln types for skipped outcomes
-                scheduled_vuln_types = {vt for vt, _ in exploit_tasks}
+                scheduled_vuln_types = {vt for vt, _, _ in exploit_tasks}
 
                 if exploit_tasks:
                     semaphore = asyncio.Semaphore(input.max_concurrent)
