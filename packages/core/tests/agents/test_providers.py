@@ -1947,3 +1947,27 @@ class TestBaseProviderContract:
         provider = AnthropicProvider(cfg)
         assert provider.config is cfg
         assert provider.type == "anthropic_api"
+
+
+from shannon_core.models.errors import ErrorCode
+from shannon_core.agents.openai_output_schema import StructuredOutputParseError
+
+
+def _openai_provider():
+    return OpenAIProvider(ProviderConfig(
+        type="openai_compatible", api_key="test", base_url="https://x.example.com"))
+
+
+def test_classify_structured_output_parse_error():
+    p = _openai_provider()
+    code, retryable = p._classify_error(StructuredOutputParseError("bad json"))
+    assert code == "OutputValidationError"
+    assert retryable is True
+
+
+def test_handle_error_sets_output_validation_failed_enum():
+    p = _openai_provider()
+    result = p._handle_error(StructuredOutputParseError("bad json"), 100, "m")
+    assert result.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED
+    assert result.success is False
+    assert result.retryable is True

@@ -20,7 +20,8 @@ from agents import (
 from openai import AsyncOpenAI
 
 from .narration import narration_directive
-from .openai_output_schema import RawJsonSchemaOutputSchema
+from .openai_output_schema import RawJsonSchemaOutputSchema, StructuredOutputParseError
+from shannon_core.models.errors import ErrorCode
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
 from .providers import BaseProvider, ProviderConfig
@@ -186,6 +187,12 @@ class OpenAIProvider(BaseProvider):
 
     def _handle_error(self, error: Exception, duration: int, model: str) -> ClaudeRunResult:
         error_code, retryable = self._classify_error(error)
+        # StructuredOutputParseError 走 ErrorCode enum（供 executor isinstance 守卫透传 →
+        # classify_error_for_temporal Level 1 匹配 OUTPUT_VALIDATION_FAILED）；其他错误
+        # 保留 _classify_error 的字符串（Temporal error type，executor 不透传，保持
+        # AGENT_EXECUTION_FAILED 现有行为，避免破坏 RateLimit/Timeout 分类）。
+        if isinstance(error, StructuredOutputParseError):
+            error_code = ErrorCode.OUTPUT_VALIDATION_FAILED
         return ClaudeRunResult(
             text="",
             success=False,
@@ -205,6 +212,8 @@ class OpenAIProvider(BaseProvider):
         BaseProvider._is_retryable_error 只匹配自定义异常类；openai/httpx/agents
         抛的是普通异常，需基于消息和类型名分类。
         """
+        if isinstance(error, StructuredOutputParseError):
+            return ("OutputValidationError", True)
         error_msg = str(error).lower()
         error_type = type(error).__name__.lower()
         # 速率限制 → 可重试
