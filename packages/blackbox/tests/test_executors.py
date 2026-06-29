@@ -173,3 +173,24 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
     _, kwargs = stub_executor.execute.call_args
     assert kwargs.get("skip_artifact_postprocess") is True
     assert kwargs.get("structured_output_schema") is not None
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_passes_auth_state_file(mock_repo):
+    """exploit agent receives AUTH_STATE_FILE so it can load the preflight's
+    authenticated session (the <shared_authenticated_session> partial consumes
+    {{AUTH_STATE_FILE}} / {{AUTH_LOAD_COMMAND}})."""
+    repo, deliverables = mock_repo
+    mock_executor = AsyncMock()
+    mock_executor.execute.return_value = AgentMetrics(duration_ms=1, cost_usd=0.0, num_turns=1)
+    exploit = ExploitExecutor(mock_executor)
+    await exploit.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT,
+        vuln_type="injection",
+        workspace_path=repo,
+        deliverables_path=deliverables,
+        web_url="https://example.com",
+    )
+    pv = mock_executor.execute.call_args.kwargs["prompt_variables"]
+    assert "AUTH_STATE_FILE" in pv
+    assert pv["AUTH_STATE_FILE"] == str(repo / "auth-state.json")
