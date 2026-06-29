@@ -72,6 +72,13 @@ class TestAgentBrowserEngineCommandsReference:
         ref = engine.commands_reference()
         assert "playwright" not in ref.lower()
 
+    def test_commands_reference_lists_state_save_load(self):
+        """reference must document state save/load for cross-session auth reuse."""
+        engine = AgentBrowserEngine()
+        ref = engine.commands_reference()
+        assert "state save" in ref
+        assert "state load" in ref
+
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -79,15 +86,17 @@ class TestAgentBrowserEngineCommandsReference:
 
 
 class TestAgentBrowserEngineAuth:
-    def test_auth_save_command_returns_empty(self):
+    def test_auth_save_command_uses_state_save(self):
+        """auth_save_command must emit `state save <path>` (agent-browser native)."""
         engine = AgentBrowserEngine()
         result = engine.auth_save_command("sess-1", "/tmp/auth.json")
-        assert result == ""
+        assert result == "state save /tmp/auth.json"
 
-    def test_auth_load_command_returns_empty(self):
+    def test_auth_load_command_uses_state_load(self):
+        """auth_load_command must emit `state load <path>`."""
         engine = AgentBrowserEngine()
         result = engine.auth_load_command("sess-1", "/tmp/auth.json")
-        assert result == ""
+        assert result == "state load /tmp/auth.json"
 
 
 # ---------------------------------------------------------------------------

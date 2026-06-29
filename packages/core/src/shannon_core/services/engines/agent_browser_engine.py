@@ -72,9 +72,15 @@ COOKIES:
     Clear all cookies in the current session.
 
 AUTH STATE:
-  Agent-browser uses a persistent Chrome profile via the --profile <path> flag.
-  Auth state (cookies, localStorage, etc.) is automatically persisted to the
-  profile directory. No explicit save/load commands are needed.
+  agent-browser --session <session> state save <path>
+    Save cookies, localStorage, and auth state to a portable JSON file.
+  agent-browser --session <session> state load <path>
+    Restore saved auth state from a JSON file into the current session.
+
+  Auth state also auto-persists via the --profile flag, but use
+  `state save/load` to share auth across sessions (save in one, load in
+  another). When a prompt gives an explicit AUTH_SAVE/AUTH_LOAD command,
+  run it verbatim against {{AUTH_STATE_FILE}}.
 
 ANTI-DETECTION:
   Anti-detection measures are built-in to agent-browser. No stealth scripts
@@ -122,12 +128,18 @@ class AgentBrowserEngine:
     # -- Auth helpers --------------------------------------------------------
 
     def auth_save_command(self, session_id: str, path: str) -> str:
-        """Return empty string — agent-browser auto-persists via --profile."""
-        return ""
+        """Return the CLI command that saves auth state (cookies/localStorage) to *path*.
+
+        agent-browser's native `state save <path>` writes a portable JSON file
+        (cookies + storage + auth state), mirroring playwright's `state-save`.
+        Used so auth-validation can hand login state to concurrent exploit agents
+        via the shared auth-state.json (profile isolation alone can't cross sessions).
+        """
+        return f"state save {path}"
 
     def auth_load_command(self, session_id: str, path: str) -> str:
-        """Return empty string — agent-browser auto-restores via --profile."""
-        return ""
+        """Return the CLI command that restores auth state from *path*."""
+        return f"state load {path}"
 
     # -- Config management ---------------------------------------------------
 
