@@ -600,3 +600,41 @@ def test_code_path_rules_placeholders_resolved_without_config(prompts_dir, caplo
     unresolved = [r for r in caplog.records if "Unresolved" in r.message]
     assert unresolved == []
 
+
+def test_renders_auth_save_command_agent_browser(tmp_path):
+    """{{AUTH_SAVE_COMMAND}} resolves to agent-browser `state save <path>`."""
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "probe.txt").write_text("save: {{AUTH_SAVE_COMMAND}}")
+    manager = PromptManager(prompts)
+    result = manager.load_sync("probe", {
+        "browser_engine": "agent-browser",
+        "browser_session_id": "sess-1",
+        "AUTH_STATE_FILE": "/tmp/auth.json",
+    })
+    assert "state save /tmp/auth.json" in result
+
+
+def test_renders_auth_load_command_playwright(tmp_path):
+    """{{AUTH_LOAD_COMMAND}} resolves to playwright `state-load <path>`."""
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "probe.txt").write_text("load: {{AUTH_LOAD_COMMAND}}")
+    manager = PromptManager(prompts)
+    result = manager.load_sync("probe", {
+        "browser_engine": "playwright",
+        "browser_session_id": "sess-1",
+        "AUTH_STATE_FILE": "/tmp/auth.json",
+    })
+    assert "state-load /tmp/auth.json" in result
+
+
+def test_auth_save_load_command_empty_without_state_file(tmp_path):
+    """No AUTH_STATE_FILE → both placeholders empty (no auth path in scope)."""
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "probe.txt").write_text("[{{AUTH_SAVE_COMMAND}}][{{AUTH_LOAD_COMMAND}}]")
+    manager = PromptManager(prompts)
+    result = manager.load_sync("probe", {"browser_engine": "agent-browser"})
+    assert result == "[][]"
+

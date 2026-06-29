@@ -104,6 +104,22 @@ class PromptManager:
         result = result.replace("{{BROWSER_SESSION_FLAG}}", engine.session_flag(session_id))
         result = result.replace("{{BROWSER_COMMANDS}}", engine.commands_reference())
 
+        # Auth state save/load commands (engine-specific). Only emitted when an
+        # auth-state file is in scope (auth-validation + exploit reuse path).
+        auth_state_file = variables.get("AUTH_STATE_FILE", "")
+        if auth_state_file:
+            result = result.replace(
+                "{{AUTH_SAVE_COMMAND}}",
+                engine.auth_save_command(session_id, auth_state_file),
+            )
+            result = result.replace(
+                "{{AUTH_LOAD_COMMAND}}",
+                engine.auth_load_command(session_id, auth_state_file),
+            )
+        else:
+            result = result.replace("{{AUTH_SAVE_COMMAND}}", "")
+            result = result.replace("{{AUTH_LOAD_COMMAND}}", "")
+
         if config:
             result = result.replace("{{DESCRIPTION}}", f"Description: {config.description}" if config.description else "")
             result = result.replace("{{AUTH_CONTEXT}}", self._build_auth_context(config))
