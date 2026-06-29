@@ -516,6 +516,22 @@ async def run_code_index(input: ActivityInput) -> dict:
                 index, str(deliverables), rule_gaps=rule_gaps,
             )
 
+            # 可观测性：调用图统计。chains=0 是 GitNexus 轨空壳的核心信号
+            #（→ taint_flows=0 → 3 类 builder 全空 → GitNexus 轨无结果）。
+            # 对齐 06-29 authz/injection-gitnexus-track-observability 的 InfoEvent 风格。
+            try:
+                empty_call_graph = index.total_chains == 0
+                await get_audit_session().log_info(
+                    f"GitNexus code-index：blocks={index.total_blocks}, "
+                    f"entry_points={index.total_entry_points}, chains={index.total_chains}, "
+                    f"degradation={index.degradation_level}"
+                    + (" → ⚠️ 调用图空壳（chains=0 → taint_flows=0 → GitNexus 轨将无结果）"
+                       if empty_call_graph else ""),
+                    "warning" if empty_call_graph else "info",
+                )
+            except Exception:
+                pass
+
         return {
             "total_blocks": index.total_blocks,
             "total_entry_points": index.total_entry_points,

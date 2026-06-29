@@ -29,3 +29,73 @@ async def test_run_code_index_raises_when_gitnexus_unavailable(tmp_path):
 
         with pytest.raises(ApplicationFailure, match="GitNexus"):
             await run_code_index(input)
+
+
+@pytest.mark.asyncio
+async def test_run_code_index_logs_chains_warning_when_empty(tmp_path):
+    """chains=0 时 log_info 发 warning（调用图空壳 → GitNexus 轨无结果的核心信号）。
+    对齐 06-29 authz/injection-gitnexus-track-observability 的 InfoEvent 模式。"""
+    input = ActivityInput(repo_path=str(tmp_path), workspace_name="test")
+    fake_index = MagicMock(
+        total_blocks=10, total_entry_points=0, total_chains=0, degradation_level="full",
+    )
+
+    with patch("shannon_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
+         patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
+         patch("shannon_core.code_index.build_code_index_with_gitnexus",
+               new=AsyncMock(return_value=(fake_index, []))), \
+         patch("shannon_core.code_index.write_index_files",
+               return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
+        cm = mock_sess.return_value.track_step.return_value
+        cm.__aenter__ = AsyncMock(return_value=None)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        # log_info 在 activity 中被 await，必须是 AsyncMock 才能记录 await_args。
+        mock_sess.return_value.log_info = AsyncMock()
+        mock_engine = MagicMock()
+        mock_engine.is_available.return_value = True
+        mock_engine.ensure_indexed.return_value = MagicMock(success=True)
+        mock_engine_cls.return_value = mock_engine
+        mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
+
+        await run_code_index(input)
+
+        mock_sess.return_value.log_info.assert_awaited()
+        args = mock_sess.return_value.log_info.await_args
+        assert args.args[1] == "warning"
+        assert "chains=0" in args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_run_code_index_logs_info_when_chains_present(tmp_path):
+    """chains>0 时 log_info 发 info（调用图正常）。"""
+    input = ActivityInput(repo_path=str(tmp_path), workspace_name="test")
+    fake_index = MagicMock(
+        total_blocks=10, total_entry_points=3, total_chains=5, degradation_level="none",
+    )
+
+    with patch("shannon_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
+         patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
+         patch("shannon_core.code_index.build_code_index_with_gitnexus",
+               new=AsyncMock(return_value=(fake_index, []))), \
+         patch("shannon_core.code_index.write_index_files",
+               return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
+        cm = mock_sess.return_value.track_step.return_value
+        cm.__aenter__ = AsyncMock(return_value=None)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        # log_info 在 activity 中被 await，必须是 AsyncMock 才能记录 await_args。
+        mock_sess.return_value.log_info = AsyncMock()
+        mock_engine = MagicMock()
+        mock_engine.is_available.return_value = True
+        mock_engine.ensure_indexed.return_value = MagicMock(success=True)
+        mock_engine_cls.return_value = mock_engine
+        mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
+
+        await run_code_index(input)
+
+        args = mock_sess.return_value.log_info.await_args
+        assert args.args[1] == "info"
+        assert "chains=5" in args.args[0]
