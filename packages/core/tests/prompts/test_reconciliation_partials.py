@@ -42,3 +42,23 @@ def test_coverage_reconciliation_partial_exists_and_has_core_sections():
     assert "per-endpoint" in text.lower() or "N independent" in text, "CR-E 缺每端点粒度规则"
     # self-check 硬阻
     assert "AUTHORIZATION ANALYSIS COMPLETE" in text, "缺 self-check 硬阻"
+
+
+def test_recon_includes_enumeration_completeness():
+    text = (PROMPTS_DIR / "recon.txt").read_text()
+    assert "@include(shared/_enumeration-completeness.txt)" in text, \
+        "recon.txt 未 @include _enumeration-completeness.txt"
+
+
+def test_recon_route_mapper_has_frontend_and_gateway_angles():
+    text = (PROMPTS_DIR / "recon.txt").read_text()
+    # 用新增的特定措辞断言（recon.txt §2 原有 "Frontend:"，用泛 "frontend" 会假绿）
+    assert "frontend-call layer" in text, "Route Mapper 缺 frontend-call 枚举角度"
+    assert "gateway layer" in text, "Route Mapper 缺 gateway 枚举角度"
+    assert "Enumeration angles" in text, "Route Mapper 缺 5 角度枚举指令"
+
+
+def test_recon_deliverable_has_section_43():
+    text = (PROMPTS_DIR / "recon.txt").read_text()
+    assert "4.3 Enumeration Reconciliation" in text, \
+        "recon deliverable 缺 §4.3 Enumeration Reconciliation 表格结构"

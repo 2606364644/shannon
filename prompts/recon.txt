@@ -140,7 +140,7 @@ You must follow this methodical four-step process:
 3.  **Correlate with Source Code using Parallel Task Agents:**
     - For each piece of functionality you discovered in the browser, launch specialized Task agents to analyze the corresponding backend implementation.
     - Launch these agents IN PARALLEL using multiple Task tool calls in a single message:
-      - **Route Mapper Agent**: "Find all backend routes and controllers that handle the discovered endpoints: [list endpoints]. Map each endpoint to its exact handler function with file paths and line numbers. **Group detection:** Identify all routes that map to the SAME handler function — these share identical processing logic, and a vulnerability in the handler affects every route in the group. For each group, produce a per-route table where EACH route gets its own row with Method, Path, Auth Middleware (or **none** if absent), and Router Line (exact line number). Do NOT group multiple routes into a single cell — each route must be verified independently by reading its exact router line. Include the router definition file:line range (e.g., router.js:40-42) for each group so downstream agents can cross-reference."
+      - **Route Mapper Agent**: "Find all backend routes and controllers that handle the discovered endpoints: [list endpoints]. Map each endpoint to its exact handler function with file paths and line numbers. **Group detection:** Identify all routes that map to the SAME handler function — these share identical processing logic, and a vulnerability in the handler affects every route in the group. For each group, produce a per-route table where EACH route gets its own row with Method, Path, Auth Middleware (or **none** if absent), and Router Line (exact line number). Do NOT group multiple routes into a single cell — each route must be verified independently by reading its exact router line. Include the router definition file:line range (e.g., router.js:40-42) for each group so downstream agents can cross-reference. **Enumeration angles (cover ALL FIVE; for each return a source anchor count = grep pattern + file + count of route sources matched):** (1) route-definition layer — router verbs / framework decorators / config-driven route tables; (2) controller-method layer — handler methods referenced by routes; (3) interface-contract layer — proto http annotations, OpenAPI/swagger specs, graphql schema; (4) frontend-call layer — search frontend code for axios/fetch/rpc calls and reverse-infer backend endpoints NOT declared in route files; (5) gateway layer — scan nginx `location`/`proxy_pass`, ingress routes, gateway config for additional endpoints. The per-angle anchor counts drive the Section 4.3 Enumeration Reconciliation table."
       - **Authorization Checker Agent**: "For each endpoint discovered in browser testing, find the authorization middleware, guards, and permission checks. Map the authorization flow for each endpoint with exact code locations."
       - **Input Validator Agent**: "Analyze the input validation logic for all discovered form fields and API parameters. Find validation rules, sanitization, and data processing for each input with exact file paths. Additionally, enumerate ALL fields from the application's input type definitions (TypeScript interfaces, Zod schemas, Joi schemas, Pydantic models, JSON Schema). Report wildcard or catch-all fields (e.g., `[key: string]: unknown`) alongside explicit fields, noting that additional undeclared parameters may pass through. Provide a complete parameter inventory for each endpoint."
       - **Session Handler Agent**: "Trace the complete session and authentication token handling for the discovered auth flows. Map session creation, storage, validation, and destruction with exact code locations."
@@ -293,6 +293,20 @@ Present this as a table:
 2. For each model, enumerate all auto-generated endpoints
 3. Mark each endpoint with its framework origin
 4. Note any overrides or customizations applied after auto-generation
+
+## 4.3 Enumeration Reconciliation
+
+Produce this table AFTER merging all five enumeration angles into Section 4 (see `shared/_enumeration-completeness.txt`). One row per angle. Every non-zero Delta MUST be classified `dedup` / `out-of-scope` / `true-miss`; every `true-miss` MUST be added back to Section 4 (and Section 4.1 if it shares a handler) before announcing completion.
+
+| Angle | Anchor Count | Reported (deduped) | Delta | Explanation (dedup / out-of-scope / true-miss) |
+|---|---|---|---|---|
+| Route-definition | | | | |
+| Controller-method | | | | |
+| Interface-contract | | | | |
+| Frontend-call | | | | |
+| Gateway | | | | |
+
+**Self-check:** zero `true-miss` remaining, else do NOT announce "RECONNAISSANCE COMPLETE".
 
 ## 5. Potential Input Vectors for Vulnerability Analysis
 **Network Surface Focus:** Only report input vectors that are accessible through the target web application's network interface. Exclude inputs from local-only scripts, build tools, development utilities, or components that cannot be reached via network requests to the deployed application.
@@ -466,6 +480,8 @@ CRITICAL: Only include sources tracing to dangerous sinks (shell, DB, file ops, 
 
 ---
 </deliverable_instructions>
+
+@include(shared/_enumeration-completeness.txt)
 
 <conclusion_trigger>
 **DELIVERABLE SAVING:**
