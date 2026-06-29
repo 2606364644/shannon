@@ -308,7 +308,8 @@ class _ReparsedRunResult:
     """L1 轻量重输成功后的最小 RunResult stub。
 
     仅含 map_run_result 需要的 final_output（= recovered dict）+ context_wrapper.usage
-    （带 L1 chat completion 的真实 token，避免统计失真；cost 仍走 GLM 0.0 早退）。
+    （带 L1 chat completion 的真实 token，避免统计失真；cost 经 map_run_result
+    的 pricing 换算，非 GLM 0.0 早退——见 pricing.py）。
     usage 用普通类承载（不用 MagicMock），避免 map_run_result 的
     getattr(usage, "input_tokens", 0) 被 MagicMock 恒真干扰。
     """

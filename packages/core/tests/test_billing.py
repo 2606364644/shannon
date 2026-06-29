@@ -54,3 +54,13 @@ def test_cap_reached():
 
 def test_monthly_limit():
     assert is_spending_cap_behavior(turns=1, cost=0.0, text="monthly limit exceeded")
+
+def test_spending_cap_ignored_when_cost_positive():
+    """不变量回归：cost>0 时 spending-cap 文本检测早退 False（spec §4.6）。
+
+    claude 引擎 cost 一直非 0、本次让 openai cost 也非 0 → 两引擎均不会被判
+    spending-cap；真正限额检测靠结构化错误码。锁住此行为不被误改。
+    """
+    assert not is_spending_cap_behavior(turns=1, cost=0.01, text="spending cap reached")
+    assert not is_spending_cap_behavior(turns=1, cost=5.0, text="quota exceeded")
+    assert not is_spending_cap_behavior(turns=2, cost=0.5, text="billing limit reached")
