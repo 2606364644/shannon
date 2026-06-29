@@ -22,9 +22,10 @@ This runs as a preflight check for our AI pentester. The user supplies credentia
 <publish_session>
 After verification confirms login_success, save the authenticated browser session so the rest of the pipeline can reuse it instead of logging in again:
 
-  Use your browser's session state save command with {{BROWSER_SESSION_FLAG}} to save authentication state to {{AUTH_STATE_FILE}}
+  Run this exact command (substituting the session flag you've been using):
+    {{AUTH_SAVE_COMMAND}}
 
-Run this only when login_success is true. Skip it on failure.
+This writes the portable auth-state JSON to {{AUTH_STATE_FILE}}. Run it only when login_success is true. Skip it on failure. Do NOT hand-write a summary JSON — run the command verbatim so downstream agents can load the real cookies/localStorage.
 </publish_session>
 
 <critical>

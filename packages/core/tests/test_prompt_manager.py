@@ -638,3 +638,22 @@ def test_auth_save_load_command_empty_without_state_file(tmp_path):
     result = manager.load_sync("probe", {"browser_engine": "agent-browser"})
     assert result == "[][]"
 
+
+def test_validate_auth_prompt_emits_save_command():
+    """validate-authentication prompt renders a concrete save command."""
+    from shannon_core.utils.paths import find_project_root  # noqa: F401
+    prompts_dir = Path(__file__).resolve().parents[3] / "prompts"
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("validate-authentication", {
+        "browser_engine": "agent-browser",
+        "browser_session_id": "sess-1",
+        "AUTH_STATE_FILE": "/tmp/auth.json",
+        "AUTH_CONTEXT": "(auth context)",
+        "LOGIN_INSTRUCTIONS": "(login steps)",
+        "BROWSER_COMMANDS": "(browser ref)",
+        "BROWSER_SESSION_FLAG": "--session sess-1",
+    })
+    assert "state save /tmp/auth.json" in result
+    # 泛指文字应已不在（被变量替换语义取代）
+    assert "browser's session state save command" not in result
+

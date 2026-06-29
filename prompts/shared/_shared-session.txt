@@ -4,9 +4,9 @@ session to:
 
   {{AUTH_STATE_FILE}}
 
-Restore it before doing anything else:
+Restore it before doing anything else — run this exact command:
 
-  Use your browser's session state load command with {{BROWSER_SESSION_FLAG}} to restore authentication state from {{AUTH_STATE_FILE}}
+  {{AUTH_LOAD_COMMAND}}
 
 Then run verification (per the success_condition in your authentication
 config) to confirm the restored session is still valid:
