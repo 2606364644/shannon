@@ -4,8 +4,7 @@
 output 的顶层 agent）。用 monkeypatch 让 Runner.run_streamed 的 stream_events 抛
 StructuredOutputParseError，验证 call() 调 _lightweight_reparse。
 """
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

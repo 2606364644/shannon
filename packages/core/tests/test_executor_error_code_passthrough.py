@@ -79,3 +79,21 @@ def test_executor_keeps_agent_execution_failed_for_string_code(tmp_path, monkeyp
             skip_artifact_postprocess=True,
         ))
     assert exc.value.error_code == ErrorCode.AGENT_EXECUTION_FAILED
+
+
+def test_executor_keeps_agent_execution_failed_for_none_code(tmp_path, monkeypatch):
+    """result.error_code=None（provider 未设）→ AGENT_EXECUTION_FAILED（None 不是 ErrorCode 实例）。"""
+    deliverables, ax = _patch_runtime(monkeypatch, tmp_path)
+
+    async def fake_run(**kw):
+        await asyncio.sleep(0)
+        return _stub_result(error_code=None)
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    with pytest.raises(PentestError) as exc:
+        _run(ax.execute(
+            agent_name=exec_mod.AgentName.INJECTION_VULN,
+            repo_path=str(deliverables), deliverables_path=str(deliverables),
+            skip_artifact_postprocess=True,
+        ))
+    assert exc.value.error_code == ErrorCode.AGENT_EXECUTION_FAILED

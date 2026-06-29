@@ -263,6 +263,8 @@ class OpenAIProvider(BaseProvider):
         抛的是普通异常，需基于消息和类型名分类。
         """
         if isinstance(error, StructuredOutputParseError):
+            # string here is superseded by _handle_error's ErrorCode enum override;
+            # retryable=True is what this branch contributes.
             return ("OutputValidationError", True)
         error_msg = str(error).lower()
         error_type = type(error).__name__.lower()

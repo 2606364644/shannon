@@ -84,3 +84,10 @@ def test_validate_json_raises_structured_output_parse_error_on_prose():
     s = RawJsonSchemaOutputSchema({"type": "object"})
     with pytest.raises(StructuredOutputParseError):
         s.validate_json("纯叙述收尾，没有 JSON")
+
+
+def test_structured_output_parse_error_not_model_behavior_error():
+    """不变量：不继承 ModelBehaviorError，避免被 openai-agents error handler 误吞。"""
+    from agents import ModelBehaviorError
+    assert not issubclass(StructuredOutputParseError, ModelBehaviorError)
+    assert issubclass(StructuredOutputParseError, Exception)
