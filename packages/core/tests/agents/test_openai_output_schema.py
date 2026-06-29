@@ -1,4 +1,8 @@
-from shannon_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
+from shannon_core.agents.openai_output_schema import (
+    RawJsonSchemaOutputSchema,
+    StructuredOutputParseError,
+    _extract_json_payload,
+)
 
 
 def test_is_plain_text_false_when_schema_given():
@@ -36,3 +40,29 @@ def test_name_is_stable():
     s = RawJsonSchemaOutputSchema({"type": "object"})
     assert isinstance(s.name(), str)
     assert len(s.name()) > 0
+
+
+def test_extract_json_payload_plain():
+    assert _extract_json_payload('{"k": "v"}') == '{"k": "v"}'
+
+
+def test_extract_json_payload_markdown_fence_with_lang():
+    assert _extract_json_payload('```json\n{"k": "v"}\n```') == '{"k": "v"}'
+
+
+def test_extract_json_payload_markdown_fence_no_lang():
+    assert _extract_json_payload('```\n{"k": "v"}\n```') == '{"k": "v"}'
+
+
+def test_extract_json_payload_leading_prose():
+    text = '分析完成，结论如下：\n{"vulnerabilities": []}\n以上。'
+    assert _extract_json_payload(text) == '{"vulnerabilities": []}'
+
+
+def test_extract_json_payload_empty_or_blank():
+    assert _extract_json_payload("") is None
+    assert _extract_json_payload("   ") is None
+
+
+def test_extract_json_payload_no_braces():
+    assert _extract_json_payload("纯叙述收尾，没有 JSON") is None

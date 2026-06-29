@@ -20,6 +20,43 @@ from typing import Any
 from agents import AgentOutputSchemaBase
 
 
+class StructuredOutputParseError(Exception):
+    """openai 引擎 structured output 解析失败（L0 容错后仍无法提取合法 JSON）。
+
+    不继承 ModelBehaviorError：避免被 openai-agents SDK 的 error handler 路径
+    误吞，确保由 providers_openai 的 L1/L2 显式处理。承载 OUTPUT_VALIDATION_FAILED
+    语义（对齐 TS message-handlers.ts:355）。
+    """
+
+
+def _extract_json_payload(text: str) -> str | None:
+    """从 LLM 输出文本提取 JSON 字符串（L0/L1 复用）。
+
+    模拟 Claude SDK「把 LLM 文本变成合法 JSON」的契约（TS 侧 SDK 免费；
+    openai-agents 无此层，Python 自己补）。处理 GLM 常见收尾形态：
+      1. markdown fence 包裹（```json ... ``` / ``` ... ```）；
+      2. 前导叙述 + JSON（取首个 { 到末个 } 的子串）。
+    全无 { / } → 返回 None（调用方据此抛 StructuredOutputParseError）。
+    """
+    if not text:
+        return None
+    s = text.strip()
+    if not s:
+        return None
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines:
+            lines = lines[1:]            # 去首行 ```（含可能的语言标签）
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]        # 去末行 ```
+            s = "\n".join(lines).strip()
+    start = s.find("{")
+    end = s.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return s[start : end + 1]
+
+
 class RawJsonSchemaOutputSchema(AgentOutputSchemaBase):
     """持有原始 JSON Schema 的 AgentOutputSchemaBase 实现（non-strict）。"""
 
