@@ -71,6 +71,7 @@ async def test_verify_valid_state_with_origins(tmp_path):
     result = await verify_auth_state(state_file)
     assert result.success is True
 
+@pytest.mark.asyncio
 async def test_verify_accepts_storagestate_with_cookies(tmp_path):
     """agent-browser `state save` ≈ Playwright storageState {cookies, origins}.
     verify_auth_state must accept it when cookies present."""

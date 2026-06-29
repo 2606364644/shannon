@@ -641,7 +641,6 @@ def test_auth_save_load_command_empty_without_state_file(tmp_path):
 
 def test_validate_auth_prompt_emits_save_command():
     """validate-authentication prompt renders a concrete save command."""
-    from shannon_core.utils.paths import find_project_root  # noqa: F401
     prompts_dir = Path(__file__).resolve().parents[3] / "prompts"
     manager = PromptManager(prompts_dir)
     result = manager.load_sync("validate-authentication", {
