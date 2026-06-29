@@ -1664,6 +1664,61 @@ class TestExtractResultFailureSemantics:
         assert result.stop_reason == "refusal"
 
 
+class TestExtractResultStructuredOutputFallback:
+    """Anthropic structured_output 兜底：SDK 没解析出时从 collected_text 提取 JSON。
+
+    GLM 后端下 CLI SDK 的 result_message.structured_output 常为 None（final 文本
+    夹中文说明+JSON），导致 vuln agent 的 {vt}_exploitation_queue.json 不落盘、
+    黑盒 preflight 误报 "No whitebox results"。此处对齐 openai 引擎兜底。
+    """
+
+    def setup_method(self):
+        self.provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+
+    def test_fallback_recovers_json_from_mixed_text(self):
+        # GLM 典型形态：中文前导叙述 + ```json fence 包裹的 queue
+        text = (
+            "分析完成，漏洞队列如下：\n"
+            "```json\n"
+            '{"vulnerabilities": [{"ID": "X"}]}\n'
+            "```\n"
+            "以上。"
+        )
+        msg = _result_msg(collected_text=text)  # structured_output 缺省 None
+        result = self.provider._extract_result(
+            msg, duration=10, model="m", turn_count=1,
+            output_format={"type": "object"},
+        )
+        assert result.structured_output == {"vulnerabilities": [{"ID": "X"}]}
+
+    def test_sdk_structured_output_wins_over_fallback(self):
+        # SDK 已解析出 structured_output 时不用兜底（优先级，避免劣化）
+        text = '前置说明 {"should_not_be_used": true} 收尾'
+        msg = _result_msg(structured_output={"from": "sdk"}, collected_text=text)
+        result = self.provider._extract_result(
+            msg, duration=10, model="m", turn_count=1,
+            output_format={"type": "object"},
+        )
+        assert result.structured_output == {"from": "sdk"}
+
+    def test_no_output_format_skips_fallback(self):
+        # 非结构化 agent（recon/report）不传 output_format → 不触发兜底
+        text = '纯叙述，含个 {"k": 1} 但不该被当 structured_output'
+        msg = _result_msg(collected_text=text)
+        result = self.provider._extract_result(
+            msg, duration=10, model="m", turn_count=1,
+        )
+        assert result.structured_output is None
+
+    def test_fallback_garbage_text_returns_none(self):
+        msg = _result_msg(collected_text="纯叙述收尾，没有 JSON")
+        result = self.provider._extract_result(
+            msg, duration=10, model="m", turn_count=1,
+            output_format={"type": "object"},
+        )
+        assert result.structured_output is None
+
+
 class TestClassifyResultFailure:
     """L2: _classify_result_failure maps structured signals to (error_code, retryable)."""
 

@@ -9,6 +9,7 @@ Anthropic Provider 实现
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from shannon_core.models.errors import classify_error_for_temporal
 
 from .narration import narration_directive
+from .openai_output_schema import _extract_json_payload
 from .providers import BaseProvider
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
@@ -113,7 +115,10 @@ class AnthropicProvider(BaseProvider):
 
             # 提取结果（使用 dispatcher 的 turn_count）
             turn_count = getattr(result_message, "turn_count", 1)
-            result = self._extract_result(result_message, duration, model, turn_count)
+            result = self._extract_result(
+                result_message, duration, model, turn_count,
+                output_format=output_format,
+            )
 
             # L2: read result-level metadata mounted by _execute_query (L1)
             subtype = getattr(result_message, "result_subtype", None)
@@ -327,6 +332,7 @@ class AnthropicProvider(BaseProvider):
         duration: int,
         model: str,
         turn_count: int = 1,
+        output_format: dict | None = None,
     ) -> ClaudeRunResult:
         """从 ResultMessage 提取结果"""
         # 提取文本内容
@@ -350,6 +356,21 @@ class AnthropicProvider(BaseProvider):
         structured_output = None
         if hasattr(result_message, "structured_output") and result_message.structured_output:
             structured_output = result_message.structured_output
+        elif output_format and text:
+            # 兜底：SDK 未解析出 structured_output 时（GLM 后端常见，final 文本夹
+            # 中文说明+JSON），从 collected_text 提取 JSON。对齐 openai 引擎
+            # （openai_result_mapper + openai_output_schema._extract_json_payload）。
+            payload = _extract_json_payload(text)
+            if payload:
+                try:
+                    structured_output = json.loads(payload)
+                except json.JSONDecodeError:
+                    structured_output = None
+                else:
+                    logger.info(
+                        "structured_output recovered from collected_text fallback "
+                        "(SDK result_message.structured_output was empty)"
+                    )
 
         # L2: derive success from result-level failure semantics + persist stop_reason.
         # Reads the metadata mounted by _execute_query (L1).

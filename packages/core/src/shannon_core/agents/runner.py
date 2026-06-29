@@ -81,8 +81,10 @@ class ClaudeRunResult:
       ("ExecutionLimitError", False)；限流 → ("RateLimitError", True)；
       超时 → ("TimeoutError", True)；鉴权 → ("AuthenticationError", False)。
       字符串与 models/errors.py:classify_error_for_temporal 对齐。
-    - structured_output: 调用方传入 output_format 时，provider 有义务产出非 None
-      （走原生结构化输出，不靠 json.loads 兜底）。
+    - structured_output: 调用方传入 output_format 时，provider 有义务产出非 None。
+      优先走原生结构化输出（SDK 的 result_message.structured_output），缺失时从
+      final 文本兜底提取 JSON（双引擎一致：anthropic 走 _extract_json_payload，
+      openai 走 openai_result_mapper）。
     - cost: best-effort 归集。不支持计费的 provider 允许 0.0（spending-cap 兜底
       不受影响——见 utils/billing.is_spending_cap_behavior 的 cost>0→False 早退）。
     - spending-cap 检测: best-effort，provider 可差异。openai 复用 provider 无关的
