@@ -24,6 +24,11 @@ from shannon_core.code_index.sink_detector import (
     _rule_matches,
     is_entry_hint,
 )
+from shannon_core.code_index.llm_concurrency import (
+    DEFAULT_PER_CALL_TIMEOUT,
+    map_llm_with_bounds,
+)
+from shannon_core.config.concurrency import get_max_concurrent
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -225,11 +230,17 @@ def _aggregate_gaps(soft_sinks: list[SinkCallSite]) -> list[RuleGap]:
 async def discover_sinks_llm(
     suspicious: list[SuspiciousCall],
     llm_client: LLMClient | None,
+    *,
+    concurrency: int | None = None,
+    per_call_timeout: float | None = None,
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
-    """对含可疑 call 的函数逐个调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
+    """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
-    LLM 不可用(None / raise / 不可解析)→ 该函数跳过, 返回空(降级, spec §3.5)。
+    LLM 不可用(None / raise / 超时 / 不可解析)→ 该函数跳过, 返回空(降级, spec §3.5)。
     调用粒度 = function 级(去重分组, 一函数一次 LLM 调用)。
+    并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
+    单次调用超过 per_call_timeout(默认 DEFAULT_PER_CALL_TIMEOUT=60s)→ 该函数降级跳过。
+    大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
     """
     if llm_client is None or not suspicious:
         return [], []
@@ -237,21 +248,27 @@ async def discover_sinks_llm(
     for sc in suspicious:
         by_func[sc.block.id].append(sc)
 
-    soft_sinks: list[SinkCallSite] = []
-    for func_id, calls in by_func.items():
+    async def _discover_one(item: tuple[str, list[SuspiciousCall]]) -> list[SinkCallSite]:
+        _, calls = item
         block = calls[0].block
         prompt = _build_discovery_prompt(block, calls)
-        try:
-            raw = await llm_client(prompt)
-        except Exception as exc:
-            logger.warning("discover_sinks_llm failed for %s: %s", func_id, exc)
-            continue  # 降级: 该函数跳过
+        raw = await llm_client(prompt)
         verdicts = _parse_verdicts(raw)
-        # 按 call_ref(callee:line) 对回 SuspiciousCall
         vmap = {str(v.get("call_ref")): v for v in verdicts}
+        out: list[SinkCallSite] = []
         for sc in calls:
             v = vmap.get(f"{sc.callee}:{sc.line}")
             if v is None or not v.get("is_sink"):
                 continue
-            soft_sinks.append(_to_soft_sink(sc, v))
+            out.append(_to_soft_sink(sc, v))
+        return out
+
+    conc = concurrency if concurrency is not None else get_max_concurrent()
+    timeout = (per_call_timeout if per_call_timeout is not None
+               else DEFAULT_PER_CALL_TIMEOUT)
+    per_func = await map_llm_with_bounds(
+        list(by_func.items()), _discover_one,
+        concurrency=conc, per_call_timeout=timeout, label="discover_sinks_llm",
+    )
+    soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
     return soft_sinks, _aggregate_gaps(soft_sinks)

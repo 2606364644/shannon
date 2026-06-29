@@ -245,3 +245,29 @@ async def test_soft_sink_does_not_break_injection_whitelist():
     # 关键断言: finding 身份(sink_call)能追溯回软 sink —— 没被任何过滤丢弃.
     assert f.sink_call == soft_sink.id
     assert f.verdict == "vulnerable"
+
+
+async def test_discover_partial_failure_keeps_successful_sinks():
+    """并发改造(治本2):部分函数 LLM 挂死(超时)→ 被跳过,成功函数仍产 soft sink。
+
+    两个不同 block 的 suspicious(raw_query + exec_one),并发跑;raw_query 函数
+    正常返回,exec_one 函数挂死 → per_call_timeout 砍掉它。成功的 raw_query
+    soft sink 必须保留(不被并发的失败项带垮)。
+    """
+    import asyncio
+    calls = [
+        _suspicious(line=1, callee="raw_query"),
+        _suspicious(line=2, callee="exec_one"),
+    ]
+
+    async def client(prompt, **kw):
+        if "raw_query:1" in prompt:
+            return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                                "category": "sql", "slot": "sql_value",
+                                "arg_index": 0, "rationale": "x"}])
+        await asyncio.sleep(10)  # exec_one 挂死
+
+    soft, _ = await discover_sinks_llm(
+        calls, client, concurrency=2, per_call_timeout=0.2)
+    assert len(soft) == 1
+    assert soft[0].callee_name == "raw_query"
