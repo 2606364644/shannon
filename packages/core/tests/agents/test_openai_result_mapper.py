@@ -2,13 +2,20 @@ import json
 from unittest.mock import MagicMock
 
 from shannon_core.agents.openai_result_mapper import map_run_result
+from shannon_core.agents.pricing import compute_cost_usd
 from shannon_core.agents.runner import ClaudeRunResult, TokenUsage
 
 
-def _usage(inp, outp):
+def _usage(inp, outp, cached=0):
     u = MagicMock()
     u.input_tokens = inp
     u.output_tokens = outp
+    # 显式设 input_tokens_details：cached>0 时给带 cached_tokens 的 mock，否则 None
+    # （避免 MagicMock 恒真污染 cache_read）
+    if cached:
+        u.input_tokens_details = MagicMock(cached_tokens=cached)
+    else:
+        u.input_tokens_details = None
     return u
 
 
@@ -31,7 +38,8 @@ def test_map_plain_text():
     assert res.model == "GLM-5.2[1m]"
     assert res.tokens.input_tokens == 10
     assert res.tokens.output_tokens == 5
-    assert res.cost == 0.0
+    assert res.cost == compute_cost_usd("GLM-5.2[1m]", res.tokens)
+    assert res.cost > 0.0  # glm-5.2 在价目表 → 不再恒 0
 
 
 def test_map_stop_reason_max_turns():
@@ -71,4 +79,39 @@ def test_map_structured_output_list_final():
     rr = _run_result([{"k": "v"}], _usage(1, 1))
     res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "array"})
     assert res.structured_output == [{"k": "v"}]
+
+
+def test_map_extracts_cache_read():
+    """_usage_from 提取 input_tokens_details.cached_tokens → cache_read；cache_creation=0。"""
+    rr = _run_result("hi", _usage(1000, 500, cached=300))
+    res = map_run_result(rr, duration_ms=10, model="glm-4.6", turns=1)
+    assert res.tokens.cache_read_input_tokens == 300
+    assert res.tokens.cache_creation_input_tokens == 0
+
+
+def test_map_cost_nonzero_for_priced_model():
+    rr = _run_result("hi", _usage(1_000_000, 0))
+    res = map_run_result(rr, duration_ms=10, model="glm-4.6", turns=1)
+    assert res.cost > 0.0
+    assert res.cost == compute_cost_usd("glm-4.6", res.tokens)
+
+
+def test_map_cost_zero_unknown_model_warning(caplog):
+    """未知模型 → cost=0.0 + warning（spec §4.3）。"""
+    rr = _run_result("hi", _usage(1000, 500))
+    with caplog.at_level("WARNING", logger="shannon_core.agents.openai_result_mapper"):
+        res = map_run_result(rr, duration_ms=10, model="mystery-model-xyz", turns=1)
+    assert res.cost == 0.0
+    assert any("未在价目表" in r.getMessage() for r in caplog.records)
+
+
+def test_map_unknown_model_warning_dedup(caplog):
+    """同模型进程内只 warning 一次（spec §4.3 去重）。"""
+    from shannon_core.agents import openai_result_mapper as m
+    m._WARNED_UNKNOWN_MODELS.clear()  # 隔离跨测试污染
+    rr = _run_result("hi", _usage(1000, 500))
+    with caplog.at_level("WARNING", logger="shannon_core.agents.openai_result_mapper"):
+        map_run_result(rr, duration_ms=10, model="dedup-model-xyz", turns=1)
+        map_run_result(rr, duration_ms=10, model="dedup-model-xyz", turns=1)
+    assert sum(1 for r in caplog.records if "未在价目表" in r.getMessage()) == 1
 
