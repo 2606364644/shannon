@@ -1,0 +1,68 @@
+<coverage_reconciliation>
+**Pre-Termination Checklist: Full USER-Endpoint Coverage Reconciliation**
+
+This checklist MUST be completed AFTER you finish analyzing every Section 8 candidate and
+BEFORE you emit your deliverable or announce completion. Its purpose is to catch endpoints
+that Recon listed in Section 4 but that never made it into Section 8 — the historical source
+of authorization false-negatives (e.g. an endpoint whose only vector is a tenant/region
+selector like `brokerage`, not a classic object id, so Recon did not flag it as a candidate).
+
+### Step CR-A: Build the USER endpoint universe (F)
+
+Open `.shannon/deliverables/recon_deliverable.md` Section 4 (API Endpoint Inventory). Collect
+every endpoint whose Required Role is `user` (authenticated, non-admin) into set **F**. Record
+each as `METHOD /path`. Include endpoints even when their Client-Controlled Parameters column
+is `None` or lists only non-obvious selectors.
+
+### Step CR-B: Collect already-judged endpoints (C)
+
+Gather the set of endpoints you have already produced a verdict for:
+- every `endpoint` field in your exploitation queue (vulnerable verdicts), AND
+- every endpoint recorded in your `set_safe_vectors` output (safe verdicts).
+
+Call this set **C**.
+
+### Step CR-C: Compute the coverage gap and judge each
+
+Compute **G = F \ C** (USER endpoints with no verdict yet). For EACH endpoint in G you MUST
+produce a verdict — there is no "skip". For each, trace from the endpoint to its side effect
+and decide:
+
+- **Vulnerable** → add a finding to the exploitation queue (follow the per-endpoint granularity
+  rule in Step CR-E).
+- **Safe** → record it explicitly in `set_safe_vectors` with the guard that protects it.
+
+A non-empty G at termination = INCOMPLETE analysis.
+
+### Step CR-D: Judge by data ownership, not by parameter presence
+
+The vector test is NOT "does this endpoint have a client-controllable parameter" — many
+parameters are benign. The test is:
+
+> Does any client-controllable parameter, when its value is changed, cause the endpoint to
+> RETURN or MUTATE data that does not belong to the caller — another user's object, or another
+> tenant's/region's data — without a sufficient ownership/tenant-binding guard?
+
+- Parameters that only affect presentation of the caller's OWN data are NOT vectors:
+  pagination (`page`, `per_page`, `offset`, `limit`), sort (`order_by`, `sort`), filtering the
+  caller's own records (`type`, `status`, `date_start`, `date_end`), locale/UI (`lang`, `site`,
+  `channel`). Verdict: safe, unless another parameter on the same endpoint is a vector.
+- Parameters that select WHOSE data is touched ARE vectors: object identifiers (`coupon_id`,
+  `account_id`, `order_id`, `id`) AND tenant/region/identity selectors (`brokerage`, `market`,
+  `region`, `tenant_id`, `org_id`) when the server forwards the caller's identity unboundedly.
+  Verdict: vulnerable unless a sufficient guard dominates all paths.
+
+When a parameter's role is ambiguous, trace the code to the sink rather than guessing.
+
+### Step CR-E: Per-endpoint granularity (no global hand-waves)
+
+Do NOT collapse a whole class of endpoints into a single "any /api/* with brokerage" finding.
+If a tenant/region selector (or any shared vector) affects N endpoints, produce N independent
+findings — one per endpoint — each with its own `endpoint`, `vulnerable_code_location`, and
+`minimal_witness`. The shared root cause may be cited in `reason`/`notes`, but every affected
+endpoint must appear as its own queue entry so the exploitation phase can verify each
+independently.
+
+**Self-check before terminating:** Is G empty? Is every USER endpoint from Section 4 either in
+the exploitation queue or in safe_vectors? If not, do not announce completion.
+</coverage_reconciliation>

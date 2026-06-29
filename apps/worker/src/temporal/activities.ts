@@ -335,6 +335,13 @@ export async function runReconAgent(input: ActivityInput): Promise<AgentMetrics>
   await atomicWrite(mdPath, markdown);
   logger.info(`Wrote recon_deliverable.md from structured data (${markdown.length} bytes)`);
 
+  // Persist the structured endpoint catalog so downstream authz coverage
+  // reconciliation can mechanically diff USER endpoints against the queue
+  // without re-parsing markdown. Advisory input only — never blocks the pipeline.
+  const reconEndpoints = collected.endpoints ?? [];
+  await atomicWrite(path.join(dir, 'recon_endpoints.json'), reconEndpoints);
+  logger.info(`Wrote recon_endpoints.json (${reconEndpoints.length} endpoints)`);
+
   // Save frontend route analysis to shared knowledge (non-fatal)
   try {
     const sessionMetadata = buildSessionMetadata(input);
@@ -387,6 +394,14 @@ async function runVulnAgentWithCollector(
   await atomicWrite(mdPath, markdown);
   logger.info(`Wrote ${vulnClass}_analysis_deliverable.md from structured data (${markdown.length} bytes)`);
 
+  // For authz, persist the endpoint subjects judged safe so the deterministic
+  // coverage check can distinguish "judged safe" endpoints from genuine gaps.
+  if (vulnClass === 'authz') {
+    const safeEndpoints = (collected.safe_vectors?.vectors ?? []).map((v) => v.subject);
+    await atomicWrite(path.join(dir, 'authz_safe_vectors.json'), safeEndpoints);
+    logger.info(`Wrote authz_safe_vectors.json (${safeEndpoints.length} safe endpoints)`);
+  }
+
   return metrics;
 }
 
@@ -408,6 +423,36 @@ export async function runSsrfVulnAgent(input: ActivityInput): Promise<AgentMetri
 
 export async function runAuthzVulnAgent(input: ActivityInput): Promise<AgentMetrics> {
   return runVulnAgentWithCollector('authz-vuln', 'authz', input);
+}
+
+/**
+ * Deterministic authz coverage reconciliation. Mechanically verifies every
+ * USER-authenticated endpoint from recon was judged (vulnerable OR safe) by the
+ * authz agent — closing the false-negative gap for endpoints whose only vector
+ * is a non-object-id selector (e.g. `brokerage`) that recon may not have
+ * surfaced in Section 8. Emits authz_coverage_report.json; advisory only,
+ * never blocks the pipeline.
+ */
+export async function runAuthzCoverageCheck(input: ActivityInput): Promise<void> {
+  const { checkAuthzCoverage } = await import('../services/authz-coverage-check.js');
+  const logger = createActivityLogger();
+  const dir = deliverablesDir(input.repoPath, input.deliverablesSubdir);
+  const report = await checkAuthzCoverage(dir);
+  await atomicWrite(path.join(dir, 'authz_coverage_report.json'), report);
+  if (report.missingDataFiles.length > 0) {
+    logger.info(
+      `Authz coverage check skipped — missing data files: ${report.missingDataFiles.join(', ')}`,
+    );
+    return;
+  }
+  if (report.uncovered.length > 0) {
+    logger.warn(
+      `Authz coverage gap: ${report.uncovered.length}/${report.totalUserEndpoints} USER endpoints not covered`,
+      { uncovered: report.uncovered },
+    );
+  } else {
+    logger.info(`Authz coverage complete: all ${report.totalUserEndpoints} USER endpoints covered`);
+  }
 }
 
 // misconfig has no MCP collector — the agent writes its deliverable directly.

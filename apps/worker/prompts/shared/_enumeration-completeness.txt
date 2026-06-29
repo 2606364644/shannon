@@ -1,0 +1,63 @@
+<enumeration_completeness>
+**Pre-Termination Checklist: Enumeration Completeness Reconciliation**
+
+This checklist MUST be completed AFTER your multi-angle enumeration has been merged
+into Section 4 and BEFORE you announce "RECONNAISSANCE COMPLETE". Its purpose is to
+catch endpoints that exist in the source code but never made it into your Section 4
+inventory — the historical source of downstream authorization false-negatives (an
+entire path-prefix family silently skipped, so the authz phase never sees it and
+cannot test it).
+
+### Step EC-A: Confirm multi-angle enumeration coverage
+
+You MUST have launched parallel Task agents for ALL FIVE enumeration angles and merged
+their results (deduplicated) into Section 4:
+1. **Route-definition layer** — router.get/post/put/delete, framework decorators, and config-driven route tables (e.g. a paths-to-config object like `match.ts`).
+2. **Controller-method layer** — handler methods referenced by routes.
+3. **Interface-contract layer** — proto http annotations (`method_option_http_api` / `http_url`), OpenAPI/swagger specs, graphql schema.
+4. **Frontend-call layer** — axios/fetch/rpc calls in frontend code, reverse-inferred backend endpoints.
+5. **Gateway layer** — nginx `location`/`proxy_pass`, ingress routes.
+
+If any angle was skipped, launch it now and merge. Each angle's Task agent MUST return
+BOTH (a) the endpoints it found AND (b) a source anchor count — how many route sources
+it counted in code, with the grep pattern and file used (this count drives Section 4.2).
+
+### Step EC-B: Anchor-count reconciliation (the mechanical check)
+
+Sum the source anchor counts per angle. Compare each against the deduplicated endpoint
+count you wrote to Section 4. Produce the **`### 4.2 Enumeration Reconciliation`** table
+(one row per angle — see deliverable structure). Every non-zero delta MUST be classified:
+- `dedup` — same endpoint surfaced by another angle (name the duplicate angle).
+- `out-of-scope` — not reachable via a web entry point (per the `scope_boundaries` section).
+- `true-miss` — a real omission; you MUST go back and add it to Section 4 (and to Section
+  4.1 if it shares a handler) before terminating.
+
+### Step EC-C: No silent prefix-family gaps
+
+Scan Section 4 for path-prefix families declared in code (e.g. every route under
+`/asset-analysis/*`, `/account/*`, `/order/*`). If a family has N members in code but
+fewer appear in Section 4, each missing member is a `true-miss` — add it.
+
+### Step EC-D: Shared-handler groups complete
+
+Section 4.1 lists every route sharing a handler, one row per route, with pre-auth
+(`**none**`) variants flagged. No route packed into a shared cell; no group member
+missing from its table.
+
+### Step EC-E: Parameter completeness
+
+Every Section 4 endpoint lists ALL client-controllable parameters it reads/forwards in
+the `Client-Controlled Parameters` column. Template-rendering endpoints have their
+hidden-parameter cross-check (Section 5) completed.
+
+### Step EC-F: Source/sink handoff
+
+Section 9 injection sources enumerated. Sources are fully covered once endpoints and
+their parameters are complete — verify no endpoint's input parameters were dropped.
+XSS/SSRF sink catalogs are produced upstream by pre-recon; confirm Section 9 hands the
+injection-side sources to the downstream injection agent.
+
+**Self-check before terminating:** Is the `### 4.2 Enumeration Reconciliation` table
+present with every delta classified and zero `true-miss` remaining? If not, do NOT
+announce "RECONNAISSANCE COMPLETE".
+</enumeration_completeness>

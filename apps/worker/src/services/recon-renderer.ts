@@ -220,7 +220,7 @@ function renderEndpoints(endpoints: readonly Endpoint[] | undefined): string {
     e.method,
     e.path,
     e.required_role,
-    e.object_id_parameters.length > 0 ? e.object_id_parameters.join(', ') : 'None',
+    e.client_controlled_parameters.length > 0 ? e.client_controlled_parameters.join(', ') : 'None',
     e.authorization_mechanism,
     `${e.description} (${e.code_pointer})`,
   ]);
@@ -232,7 +232,7 @@ function renderEndpoints(endpoints: readonly Endpoint[] | undefined): string {
         'Method',
         'Endpoint Path',
         'Required Role',
-        'Object ID Parameters',
+        'Client-Controlled Parameters',
         'Authorization Mechanism',
         'Description & Code Pointer',
       ],
@@ -447,7 +447,7 @@ function renderAuthzCandidates(data: AuthzCandidatesInput | undefined): string {
     nextId(),
     c.priority,
     c.endpoint_pattern,
-    c.object_id_parameter,
+    c.client_controlled_parameters.join(', '),
     c.data_type,
     c.sensitivity,
   ]);
@@ -473,7 +473,7 @@ function renderAuthzCandidates(data: AuthzCandidatesInput | undefined): string {
     '',
     horizontal.length > 0
       ? renderTable(
-          ['ID', 'Priority', 'Endpoint Pattern', 'Object ID Parameter', 'Data Type', 'Sensitivity'],
+          ['ID', 'Priority', 'Endpoint Pattern', 'Client-Controlled Parameters', 'Data Type', 'Sensitivity'],
           horizontalRows,
         )
       : '*(no horizontal candidates identified)*',

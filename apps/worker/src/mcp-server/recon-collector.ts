@@ -147,9 +147,16 @@ const EndpointSchema = z.object({
   method: z.enum(HTTP_METHOD_VALUES).describe('HTTP method. Use WS for WebSocket upgrade endpoints.'),
   path: z.string().min(1).describe('Endpoint path with parameter placeholders, e.g. "/api/users/{user_id}".'),
   required_role: z.string().min(1).describe('Minimum role needed (anon, user, admin, etc.).'),
-  object_id_parameters: z
+  client_controlled_parameters: z
     .array(z.string())
-    .describe('Parameters that identify specific objects (user_id, order_id, etc.). Empty array if none.'),
+    .describe(
+      'All client-controllable parameters on this endpoint that the server reads and forwards ' +
+        '(query, body, header, or cookie values). Includes object identifiers (coupon_id, ' +
+        'account_id, order_id), tenant/region selectors (brokerage, market, site), and any other ' +
+        'request-controlled value. Do NOT pre-filter by parameter type — list every client-' +
+        'controllable parameter so downstream authz analysis can judge which are authorization ' +
+        'vectors. Empty array if none.',
+    ),
   authorization_mechanism: z
     .string()
     .min(1)
@@ -391,10 +398,15 @@ const HorizontalCandidateSchema = z.object({
     .string()
     .min(1)
     .describe('Endpoint pattern with the object identifier. E.g. "/api/orders/{order_id}".'),
-  object_id_parameter: z
-    .string()
+  client_controlled_parameters: z
+    .array(z.string().min(1))
     .min(1)
-    .describe('The parameter name that identifies the target object (e.g., "order_id", "user_id").'),
+    .describe(
+      'The client-controllable parameter(s) that could act as authorization vector(s) on this ' +
+        'endpoint — object identifiers (coupon_id, account_id), tenant/region selectors (brokerage, ' +
+        'market), or any request-controlled value whose change would alter whose data is returned ' +
+        'or mutated. Do NOT pre-filter by parameter type.',
+    ),
   data_type: z.string().min(1).describe('Type of data exposed: user_data, financial, admin_config, user_files, etc.'),
   sensitivity: z
     .string()
@@ -426,8 +438,10 @@ export const AuthzCandidatesInputSchema = z.object({
   horizontal: z
     .array(HorizontalCandidateSchema)
     .describe(
-      "Endpoints with object identifiers that could allow horizontal access to other users' " +
-        'resources. Becomes Section 8.1. The renderer assigns stable AUTHZ-CAND-NN IDs.',
+      'USER-authenticated endpoints whose client-controllable parameters could allow horizontal ' +
+        "access to other users' resources (object IDs, tenant/region selectors, or any request-" +
+        'controlled value that changes whose data is returned/mutated). Becomes Section 8.1. ' +
+        'The renderer assigns stable AUTHZ-CAND-NN IDs.',
     ),
   vertical: z
     .array(VerticalCandidateSchema)

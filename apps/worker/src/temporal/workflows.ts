@@ -570,6 +570,17 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
       log.warn(`Attack chain assembly failed: ${errMsg}`);
     }
 
+    // === Authz coverage reconciliation (advisory, non-fatal) ===
+    // Mechanically verify every USER endpoint from recon was judged by authz,
+    // so endpoints whose only vector is a non-object-id selector (e.g.
+    // brokerage) cannot slip through unanalyzed.
+    try {
+      await a.runAuthzCoverageCheck(activityInput);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.warn(`Authz coverage check failed: ${errMsg}`);
+    }
+
     // === Phase 5: Reporting ===
     if (!shouldSkip('report')) {
       state.currentPhase = 'reporting';
@@ -798,6 +809,14 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     state.currentPhase = 'vulnerability-analysis';
     state.currentAgent = null;
     await a.logPhaseTransition(activityInput, 'vulnerability-analysis', 'complete');
+
+    // === Authz coverage reconciliation (advisory, non-fatal) ===
+    try {
+      await a.runAuthzCoverageCheck(activityInput);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.warn(`Authz coverage check failed: ${errMsg}`);
+    }
 
     // === Phase 4: Reporting ===
     state.currentPhase = 'reporting';

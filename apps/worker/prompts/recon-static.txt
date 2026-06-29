@@ -120,7 +120,13 @@ You must follow this methodical three-step process:
 2.  **Deep Source Code Analysis using Parallel Task Agents:**
     - Since no live target is available, perform exhaustive static analysis of the source code.
     - Launch these agents IN PARALLEL using multiple Task tool calls in a single message:
-      - **Route Mapper Agent**: "Find all backend routes and controllers in the codebase. Map each endpoint to its exact handler function with file paths and line numbers. Include HTTP method, path pattern, and any middleware applied. **Group detection:** Identify all routes that map to the SAME handler function — these share identical processing logic, and a vulnerability in the handler affects every route in the group. For each group, note whether routes differ in authentication middleware. Include the router definition file:line (e.g., router.js:40-42) for each group so downstream agents can cross-reference."
+      - **Multi-Angle Route Enumeration (FIVE parallel Task agents):** Enumerate endpoints from FIVE independent angles, one Task agent per angle, ALL launched in the same message. Different angles catch different blind spots; merge their results (deduplicated) into Section 4. Each angle's Task agent MUST return BOTH (a) the endpoints it found (METHOD /path + file:line + handler) AND (b) a source anchor count — how many route sources it counted in code, with the grep pattern and file used. This count drives the Section 4.2 reconciliation; do not omit it.
+        - **Angle 1 — Route definitions:** router.get/post/put/delete, framework decorators, config-driven route tables (e.g. a paths-to-config object like `match.ts`). Count the route-definition entries.
+        - **Angle 2 — Controller methods:** handler methods referenced by routes. Count the handlers bound to a route.
+        - **Angle 3 — Interface contracts:** proto http annotations (`method_option_http_api` / `http_url`), OpenAPI/swagger specs, graphql schema. Count the contract-declared operations.
+        - **Angle 4 — Frontend calls:** axios/fetch/rpc calls in frontend code, reverse-inferred backend endpoints. Count the distinct backend paths called.
+        - **Angle 5 — Gateway config:** nginx `location`/`proxy_pass`, ingress routes. Count the proxied paths.
+        After merging, perform **group detection**: identify routes that map to the SAME handler function — these share processing logic, and a vulnerability in the handler affects every route in the group. For each group, note whether routes differ in authentication middleware, and include the router definition file:line (e.g., router.js:40-42) for downstream cross-reference (feeds Section 4.1).
       - **Authorization Checker Agent**: "For each route discovered, find the authorization middleware, guards, and permission checks. Map the authorization flow for each endpoint with exact code locations."
       - **Input Validator Agent**: "Analyze the input validation logic for all API parameters and form fields in the codebase. Find validation rules, sanitization, and data processing for each input with exact file paths. Additionally, enumerate ALL fields from the application's input type definitions (TypeScript interfaces, Zod schemas, Joi schemas, Pydantic models, JSON Schema). Report wildcard or catch-all fields (e.g., `[key: string]: unknown`) alongside explicit fields, noting that additional undeclared parameters may pass through. Provide a complete parameter inventory for each endpoint."
       - **Session Handler Agent**: "Trace the complete session and authentication token handling in the codebase. Map session creation, storage, validation, and destruction with exact code locations."
@@ -134,6 +140,13 @@ You must follow this methodical three-step process:
     - Use their exact file paths, code locations, and analysis to populate your deliverable sections
     - Cross-reference findings across source code modules to create comprehensive attack surface maps
     - Systematically identify and list all potential attack vectors based on the combined source code intelligence
+
+3.5 **Enumeration Reconciliation (MANDATORY before documenting Section 4):**
+    - Sum the source anchor counts returned by the five enumeration angles in step 2.
+    - Compare each angle's anchor count against the deduplicated endpoint set you are about to write to Section 4.
+    - Produce the `### 4.2 Enumeration Reconciliation` table (one row per angle: anchor count, reported deduped count, delta, explanation).
+    - Classify every non-zero delta as `dedup` / `out-of-scope` / `true-miss`. For every `true-miss`, go back and add the missing endpoint to Section 4 (and Section 4.1 if it shares a handler) before proceeding.
+    - You may NOT consider Section 4 complete while any delta remains unclassified.
 </systematic_approach>
 
 <deliverable_instructions>
@@ -192,10 +205,10 @@ A brief overview of the application's purpose, core technology stack (e.g., Next
 **Static Analysis Note:** These endpoints are derived from static route analysis of source code. They represent all discovered route definitions, not necessarily only those reachable in the current deployment.
 
 A table of all discovered API endpoints with authorization details for vulnerability analysis.
-| Method | Endpoint Path | Required Role | Object ID Parameters | Authorization Mechanism | Description & Code Pointer |
+| Method | Endpoint Path | Required Role | Client-Controlled Parameters | Authorization Mechanism | Description & Code Pointer |
 |---|---|---|---|---|---|
 | **Required Role:** Minimum role needed (anon, user, admin, etc.) |
-| **Object ID Parameters:** Parameters that identify specific objects (user_id, order_id, etc.) |
+| **Client-Controlled Parameters:** All client-controllable parameters the server reads/forwards (object IDs like user_id/order_id, tenant/region selectors like brokerage/market, filters, pagination — any request-controlled value). Do NOT pre-filter by type; list all so authz can judge which are vectors. |
 | **Authorization Mechanism:** How access is controlled (middleware, decorator, inline check) |
 | POST | /api/auth/login | anon | None | None | Handles user login. See `auth.controller.ts`. |
 | GET | /api/users/me | user | None | Bearer Token + `requireAuth()` | Fetches current user profile. See `users.service.ts`. |
@@ -253,6 +266,25 @@ available on one route just because you found it there first.
 Example: If `GET /preview/v2` and `GET /preview/iframe-demo` both route to `controller.index.preview`,
 and the handler reads `ctx.query.bizEntity`, then BOTH route rows must list `bizEntity` as a parameter —
 even if one route has no authentication middleware.
+
+### 4.2 Enumeration Reconciliation
+
+A per-angle accounting proving the Section 4 inventory is complete against the source.
+Produce this table after merging the five enumeration angles and BEFORE announcing
+completion. Every non-zero delta MUST be classified; an unclassified delta means the
+inventory is incomplete.
+
+| Source Angle | Anchor Count | Reported (deduped) | Delta | Explanation |
+|---|---|---|---|---|
+| **Source Angle:** One of: Route definitions, Controller methods, Interface contracts, Frontend calls, Gateway config |
+| **Anchor Count:** How many route sources this angle counted in code (with the grep pattern + file used) |
+| **Reported (deduped):** How many of those made it into Section 4 after dedup |
+| **Delta:** Anchor Count − Reported |
+| **Explanation:** `dedup` (dup of another angle — name it) / `out-of-scope` (not web-reachable) / `true-miss` (added to Section 4) |
+| Route definitions | 147 | 147 | 0 | — |
+| ... | ... | ... | ... | ... |
+
+If any row's Delta is non-zero and unclassified, the enumeration is INCOMPLETE.
 
 ## 5. Potential Input Vectors for Vulnerability Analysis
 **Static Analysis Note:** These input vectors are derived from source code analysis. All listed vectors correspond to endpoints and handlers found in the codebase.
@@ -374,15 +406,16 @@ Link each role to its implementation details.
 This section identifies specific endpoints and patterns that are prime candidates for authorization testing, organized by vulnerability type.
 
 ### 8.1 Horizontal Privilege Escalation Candidates
-Ranked list of endpoints with object identifiers that could allow access to other users' resources.
-| Priority | Endpoint Pattern | Object ID Parameter | Data Type | Sensitivity |
+Every USER-authenticated endpoint is a candidate. Do NOT pre-filter by whether it has an object-id parameter — tenant/region selectors (e.g. brokerage, market) and any client-controllable value the server forwards can also be horizontal vectors. List ALL USER endpoints here; the authz phase judges per-parameter whether each is a real vector.
+| Priority | Endpoint Pattern | Client-Controlled Parameters | Data Type | Sensitivity |
 |---|---|---|---|---|
 | **Priority:** High, Medium, Low based on data sensitivity |
-| **Object ID Parameter:** The parameter name that identifies the target object |
+| **Client-Controlled Parameters:** The client-controllable parameter(s) that could act as vector(s) — object IDs, tenant/region selectors, or any request-controlled value that changes whose data is returned/mutated |
 | **Data Type:** user_data, financial, admin_config, etc. |
 | High | `/api/orders/{order_id}` | order_id | financial | User can access other users' orders |
 | High | `/api/users/{user_id}/profile` | user_id | user_data | Profile data access |
 | Medium | `/api/files/{file_id}` | file_id | user_files | File access |
+| High | `/api/cards/usable-count` | brokerage | financial | Cross-region read of other users' usable coupon counts (no object-id param — the vector is a tenant/region selector forwarded unboundedly) |
 
 ### 8.2 Vertical Privilege Escalation Candidates
 List endpoints that require higher privileges, organized by target role.
@@ -426,6 +459,8 @@ CRITICAL: Only include sources tracing to dangerous sinks (shell, DB, file ops, 
 
 ---
 </deliverable_instructions>
+
+@include(shared/_enumeration-completeness.txt)
 
 <conclusion_trigger>
 **DELIVERABLE SAVING:**

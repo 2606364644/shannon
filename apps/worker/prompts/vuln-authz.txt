@@ -197,6 +197,8 @@ When Recon reports an endpoint with `Framework Origin: finale-rest auto-generate
 
 @include(shared/_cross-route-enumeration.txt)
 
+@include(shared/_coverage-reconciliation.txt)
+
 ---
 
 ### 2) Vertical Authorization Analysis
@@ -311,6 +313,7 @@ For each analysis you perform from the lists above, you must make a final **verd
 
 <coverage_requirements>
 - Test **all** endpoints from recon section 8
+- Run the full USER-endpoint coverage reconciliation (see `shared/_coverage-reconciliation.txt`): every USER-authenticated endpoint in Section 4 of the recon deliverable must receive a verdict — vulnerable endpoints go to the exploitation queue, safe endpoints go to `set_safe_vectors`. A USER endpoint with no verdict is INCOMPLETE analysis. This catches endpoints whose only vector is a non-object-id selector (e.g. `brokerage`) that Recon may not have surfaced in Section 8.
 - Include both REST and GraphQL endpoints
 </coverage_requirements>
 
