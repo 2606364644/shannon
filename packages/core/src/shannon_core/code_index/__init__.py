@@ -172,16 +172,28 @@ async def build_code_index_with_gitnexus(
     # ⑤ LLM taint analysis (only for functions with sinks)
     blocks_by_id = {b.id: b for b in all_blocks}
 
-    intra_results = {}
-    for func_id, func_sinks in sinks_by_func.items():
+    # ⑤ LLM taint analysis (only for functions with sinks) — 并发(治本 2):
+    # 串行 per-function LLM 会被 ③b 产的 soft sinks 放大,拖垮 activity 超时。
+    async def _taint_one(item):
+        func_id, func_sinks = item
         block = blocks_by_id.get(func_id)
         if block is None:
-            continue
-        intra_results[func_id] = await analyze_taint_llm(
+            return None
+        result = await analyze_taint_llm(
             block=block,
             sinks_in_func=func_sinks,
             llm_client=llm_client,
         )
+        return (func_id, result)
+
+    from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
+    from shannon_core.config.concurrency import get_max_concurrent
+    taint_pairs = await map_llm_with_bounds(
+        list(sinks_by_func.items()), _taint_one,
+        concurrency=get_max_concurrent(),
+        label="analyze_taint_llm",
+    )
+    intra_results = {func_id: result for func_id, result in taint_pairs}
 
     # ⑥ Deterministic cross-function propagation
     taint_flows = propagate_across_chains(
