@@ -220,7 +220,7 @@ async def test_discover_partial_failure_keeps_successful_sinks():
     soft, _ = await discover_sinks_llm(
         calls, client, concurrency=2, per_call_timeout=0.2)
     assert len(soft) == 1
-    assert soft[0].callee == "raw_query"
+    assert soft[0].callee_name == "raw_query"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
