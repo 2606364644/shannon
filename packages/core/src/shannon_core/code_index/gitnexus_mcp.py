@@ -110,8 +110,13 @@ class GitNexusMCPClient:
             arguments: Tool-specific arguments.
 
         Returns:
-            Parsed tool result (usually a list of dicts).
+            Parsed tool result (usually a dict; None on parse failure).
         """
+        # Inject repo (path form; GitNexus schema accepts "name or path").
+        # Required when multiple repos are indexed in the global registry
+        # (~/.gitnexus/registry.json) — otherwise GitNexus returns
+        # 'Error: Multiple repositories indexed...'. Harmless when only one.
+        arguments.setdefault("repo", str(self.repo_root))
         result = await self._send_request("tools/call", {
             "name": tool_name,
             "arguments": arguments,

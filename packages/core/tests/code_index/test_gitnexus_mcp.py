@@ -238,3 +238,32 @@ class TestParseToolResultRobustness:
     def test_empty_result_returns_none(self, tmp_path):
         client = GitNexusMCPClient(tmp_path)
         assert client._parse_tool_result({}) is None
+
+
+class TestCallToolInjectsRepo:
+    @pytest.mark.asyncio
+    async def test_injects_repo_path(self, tmp_path):
+        """多 repo 索引时 GitNexus 要求 repo 参数；call_tool 必须自动注入 path 形式。"""
+        client = GitNexusMCPClient(tmp_path)
+        captured: dict = {}
+
+        async def fake_send(method: str, params: dict):
+            captured.update(params)
+            return {"content": [{"type": "text", "text": "{}"}]}
+
+        client._send_request = fake_send  # bypass subprocess
+        await client.call_tool("query", {"query": "entry point"})
+        assert captured["arguments"]["repo"] == str(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_does_not_override_explicit_repo(self, tmp_path):
+        client = GitNexusMCPClient(tmp_path)
+        captured: dict = {}
+
+        async def fake_send(method: str, params: dict):
+            captured.update(params)
+            return {"content": [{"type": "text", "text": "{}"}]}
+
+        client._send_request = fake_send
+        await client.call_tool("query", {"query": "x", "repo": "explicit-name"})
+        assert captured["arguments"]["repo"] == "explicit-name"
