@@ -4,7 +4,7 @@ import json
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
 
 
 class TestGitNexusMCPClient:
@@ -181,3 +181,24 @@ class TestGitNexusMCPClient:
 
         with pytest.raises(ConnectionError, match="timed out"):
             await client._send_request("tools/call", {})
+
+
+class TestParseMdTable:
+    def test_normal_table(self):
+        md = "| caller_file | caller_name |\n| --- | --- |\n| app.py | handler |\n| svc.py | get_users |"
+        assert _parse_md_table(md) == [
+            {"caller_file": "app.py", "caller_name": "handler"},
+            {"caller_file": "svc.py", "caller_name": "get_users"},
+        ]
+
+    def test_empty_table(self):
+        assert _parse_md_table("") == []
+        assert _parse_md_table("| a |\n| --- |") == []  # 只有表头+分隔，无数据行
+
+    def test_missing_separator_returns_empty(self):
+        # 无 |---| 分隔行 → len(lines) < 3 → []
+        assert _parse_md_table("| a |\n| 1 |") == []
+
+    def test_column_mismatch_skipped(self):
+        md = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 |"  # 末行列数不齐
+        assert _parse_md_table(md) == [{"a": "1", "b": "2"}]

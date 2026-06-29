@@ -17,6 +17,26 @@ MCP_READ_TIMEOUT = 30
 MCP_STOP_TIMEOUT = 5
 
 
+def _parse_md_table(markdown: str) -> list[dict]:
+    """Parse a GitNexus cypher markdown table into list[dict].
+
+    GitNexus 1.6.7 returns cypher results as ``{"markdown": "| col | col |\\n| --- |\\n| ... |"}``
+    rather than raw records. Extract rows into dicts keyed by header name.
+    Skip the header row and the ``| --- |`` separator. Rows with a column
+    count mismatch are dropped.
+    """
+    lines = [ln for ln in markdown.strip().split("\n") if ln.strip().startswith("|")]
+    if len(lines) < 3:
+        return []
+    headers = [h.strip() for h in lines[0].strip("|").split("|")]
+    rows: list[dict] = []
+    for line in lines[2:]:  # skip header (lines[0]) + separator (lines[1])
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) == len(headers):
+            rows.append(dict(zip(headers, cells)))
+    return rows
+
+
 class GitNexusMCPClient:
     """MCP client for GitNexus — communicates via stdio JSON-RPC.
 
