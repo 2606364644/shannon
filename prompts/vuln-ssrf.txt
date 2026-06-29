@@ -96,7 +96,7 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 **Structure:** The `vulnerability` JSON object MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability json (SSRF-VULN-XX)",
-		"vulnerability_type": "URL_Manipulation | Redirect_Abuse | Webhook_Injection | API_Proxy_Bypass | File_Fetch_Abuse | Service_Discovery",
+		"vulnerability_type": "URL_Manipulation | Redirect_Abuse | Webhook_Injection | API_Proxy_Bypass | File_Fetch_Abuse | Service_Discovery | Open_Redirect",
 		"externally_exploitable": true | false,
 	  "source_endpoint": "{HTTP_METHOD} {endpoint_path}",
 	  "vulnerable_parameter": "Name of the parameter that accepts user input (e.g., 'url', 'callback', 'webhook_url').",
@@ -118,6 +118,11 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 
 NOTE ON "FOR ALL": whenever an item begins with "for all …", use the TodoWrite tool to create a separate task for each relevant endpoint/flow that needs to be analyzed.
 From `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md`, use Section 10 (SSRF Sinks) to guide your tasks.
+
+> **Two url→sink shapes — analyze both.** A user-controlled URL reaches a sink in two distinct ways, and one endpoint (e.g. a short-link / URL-shortener service) can be BOTH:
+> - **Server-side FETCH** (the server makes an outbound request to the user URL) = classic **SSRF** (§1–§7).
+> - **Server-side REDIRECT** (the server returns a 3xx / `Location` sending the *victim's browser* to the user URL) = **Open Redirect** (§8).
+> When you meet a `url` / `redirect` / `callback` / `next` / `return` parameter, first decide which shape applies — and for short-link / redirect endpoints, check both. Do not default every URL parameter to SSRF-fetch and silently miss the redirect surface.
 
 ## 1) Identify HTTP Client Usage Patterns
 - For all endpoints that accept URL parameters, callback URLs, webhook URLs, or file paths, trace how these inputs are processed.
@@ -160,6 +165,26 @@ From `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md`, use Section 10 (SSRF Sink
 - Check if response content is returned to the user (blind vs non-blind SSRF).
 - Validate that response size limits prevent memory exhaustion.
 **If failed → classify:** `file_fetch_abuse` → **suggested attack:** data_exfiltration.
+
+## 8) Open Redirect (URL Jump) Detection
+
+A user-controlled URL that the server turns into a **3xx redirect target** (the victim's browser is sent to the attacker URL) — distinct from SSRF, where the *server itself* fetches the URL. The canonical case is a **short-link / URL-shortener / "create-short-url" endpoint**: the server stores a `code ↔ url` mapping and later issues `GET /<code>` → **302 → the attacker-supplied URL**, turning a trusted official domain into a phishing launchpad. The same endpoint may ALSO be SSRF (if the server fetches the URL to validate/preview it) — check both; do not assume a URL parameter is only SSRF-fetch.
+
+**Phase A — Sink Discovery.** For all endpoints that accept a URL/redirect parameter, identify server-side redirect sinks: framework redirect methods (`res.redirect`, `ctx.redirect`, `redirect()`), raw `Location` header writes, `<meta http-refresh>`, and client-side jumps (`window.location`). A short-link service is a redirect sink by construction (`POST {url}` → store mapping → `GET /<short-code>` 302). Map each sink to its code location and the parameter that controls the target.
+**If redirect sinks found → Phase B.**
+
+**Phase B — Source-to-Sink Tracing.** For each redirect sink, trace user-controllable input (`url`, `redirect`, `next`, `callback`, `return`, `target`, or the short-link-creation `url` body field) to the sink. Determine whether the redirect target is fully user-controlled, partially controlled, or derived from a whitelist.
+**If user-controllable → Phase C.**
+
+**Phase C — Validation Analysis.** Identify what guards the target: domain whitelist, relative-path enforcement, URL-scheme restriction, regex. Evaluate bypassability: `startsWith('/')` defeated by a `//attacker` (protocol-relative) prefix; URL encoding / double-encoding; protocol-relative `//` URLs; **parser differential** (the BFF/WHATWG parser sees a whitelisted host, but the downstream redirect issuer parses a different — external — host); domain-similarity attacks. Note: a **hostname whitelist is a redirect-control shape** (it limits which domains you may jump to), NOT an SSRF-defense shape (SSRF-to-internal is gated by IP/host blocklists) — so a whitelist gap on a redirect endpoint is an Open-Redirect bypass, not merely an SSRF bypass.
+**If validation absent or bypassable → classify:** `Open_Redirect` → **suggested attack:** `open_redirect_protocol_bypass` / `open_redirect_encoding_bypass` / `open_redirect_domain_bypass`.
+**If validation sufficient → mark safe.**
+
+**Phase D — Impact Assessment.** Login/callback redirect with tokens or sensitive data in the URL → High (token leakage). General redirect on a trusted domain → Medium (phishing). Post-action redirect → lower. Note whether tokens or sensitive data appear in the redirect URL.
+
+**False positives to avoid:** path-only redirects (`/return/path`) are SAFE (same-origin); same-site / relative redirects are NOT open redirects; API-only JSON endpoints that never issue a browser redirect do not apply; a whitelist that correctly restricts to owned domains is sufficient even if not "strict".
+
+**Source discipline:** derive everything from the recon deliverable + your own grep of the source (TS-style self-sufficiency). Do NOT `@include` deterministic product files or reference static-dataflow-hints.
 
 ## **Backward Taint Analysis Methodology for SSRF**
 
