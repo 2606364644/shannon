@@ -89,3 +89,13 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000 / USD_CNY_RATE
     assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
+
+
+def test_compute_cost_clamps_negative_billable():
+    """cached > input 时 billable_input clamp 到 0（防御性，spec §4.1 max 守卫）。"""
+    p = GLM_PRICING_CNY["glm-4.6"]
+    usage = TokenUsage(input_tokens=100, output_tokens=0, cache_read_input_tokens=500)
+    cost = compute_cost_usd("glm-4.6", usage)
+    # billable_input = max(100 - 500, 0) = 0；cache_hit = 500
+    expected = (0 * p["input"] + 500 * p["cache_read"]) / 1_000_000 / USD_CNY_RATE
+    assert cost == pytest.approx(expected)

@@ -98,6 +98,8 @@ def test_map_cost_nonzero_for_priced_model():
 
 def test_map_cost_zero_unknown_model_warning(caplog):
     """未知模型 → cost=0.0 + warning（spec §4.3）。"""
+    from shannon_core.agents import openai_result_mapper as _m
+    _m._WARNED_UNKNOWN_MODELS.clear()  # 隔离模块级去重状态
     rr = _run_result("hi", _usage(1000, 500))
     with caplog.at_level("WARNING", logger="shannon_core.agents.openai_result_mapper"):
         res = map_run_result(rr, duration_ms=10, model="mystery-model-xyz", turns=1)

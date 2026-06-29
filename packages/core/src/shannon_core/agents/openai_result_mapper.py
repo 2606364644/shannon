@@ -58,7 +58,7 @@ def map_run_result(
             _WARNED_UNKNOWN_MODELS.add(norm)
             _log.warning(
                 "openai 引擎成本核算：模型 %r 未在价目表中，cost 回落 0.0（不假估算）。"
-                "可经 SHANNON_PRICING_OVERRIDE 补充。",
+                " 可经 SHANNON_PRICING_OVERRIDE 补充。",
                 model,
             )
 
