@@ -76,6 +76,18 @@ class TestRetryFor:
     def test_auth_validation_category(self):
         assert retry_for("auth-validation") == AUTH_VALIDATION_RETRY
 
+    def test_code_index_category_uses_bounded_retry(self):
+        """确定性 code_index 轨不能套 PRODUCTION_RETRY(max 50)。
+
+        run_code_index 内部的 LLM sink discovery 对大仓会跑满 10 分钟
+        start_to_close_timeout;超时是幂等的(同输入再跑照样超时),PRODUCTION_RETRY
+        会把它放大成 50x ≈ 数小时的"卡死"(2026-06-30 juice-shop 实测)。
+        确定性轨用短重试,给 transient 错误几次机会即可。
+        """
+        policy = retry_for("code-index")
+        assert policy is not PRODUCTION_RETRY
+        assert policy.maximum_attempts <= 3
+
     def test_unknown_category_raises(self):
         import pytest
         with pytest.raises(ValueError):

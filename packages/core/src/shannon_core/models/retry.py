@@ -62,6 +62,20 @@ VULN_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
+# code_index activity(确定性 GitNexus 轨)专用:短重试。
+# run_code_index 内部的 LLM sink discovery 对大仓会跑满 start_to_close_timeout
+# (10 分钟)超时;超时是幂等的(同输入再跑照样超时),绝不能套 PRODUCTION_RETRY
+# (max 50)——那会把单次超时放大成 50x ≈ 数小时卡死(2026-06-30 juice-shop 实测:
+# attempt 1/2/3 各 10m10s 超时,PRE_RECON 早已完成但 gather 等代码索引重试耗尽)。
+# max 3:给 transient(MCP 连接抖动/IO)几次机会,但不放大幂等超时。
+CODE_INDEX_RETRY = RetryPolicy(
+    maximum_attempts=3,
+    initial_interval=timedelta(seconds=10),
+    maximum_interval=timedelta(minutes=1),
+    backoff_coefficient=2.0,
+    non_retryable_error_types=NON_RETRYABLE,
+)
+
 
 def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     """Select a retry policy by mode name.
@@ -76,7 +90,7 @@ def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     return profiles.get(mode or "production", PRODUCTION_RETRY)
 
 
-Category = Literal["standard", "vuln", "log", "preflight", "auth-validation"]
+Category = Literal["standard", "vuln", "log", "preflight", "auth-validation", "code-index"]
 
 
 def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
@@ -85,6 +99,7 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
     - standard: LLM agent + 确定性处理。委托 get_retry_policy(mode) 保留 mode 感知
       (testing/subscription);不传 mode 默认 production。
     - vuln:     per-vt vuln agent,有界 VULN_RETRY。
+    - code-index: 确定性 code_index 轨,短 CODE_INDEX_RETRY(防幂等超时被放大)。
     - log:      phase log marker(10s 写),短 policy。
     - preflight / auth-validation: 现有短 tier。
     """
@@ -92,6 +107,8 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
         return get_retry_policy(mode)
     if category == "vuln":
         return VULN_RETRY
+    if category == "code-index":
+        return CODE_INDEX_RETRY
     if category == "log":
         return PREFLIGHT_RETRY
     if category == "preflight":

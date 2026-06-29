@@ -149,7 +149,7 @@ class WhiteboxScanWorkflow:
                     workflow.execute_activity(
                         activities.run_code_index, act_input,
                         start_to_close_timeout=timedelta(minutes=10),
-                        retry_policy=retry_for("standard"),
+                        retry_policy=retry_for("code-index"),
                     ),
                     workflow.execute_activity(
                         activities.run_agent,
