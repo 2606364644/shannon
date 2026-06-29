@@ -26,3 +26,19 @@ def test_enumeration_completeness_partial_exists_and_has_core_sections():
     assert "_cross-route-enumeration" in text, "EC-D 未交叉引用 _cross-route-enumeration.txt"
     # self-check 硬阻
     assert "RECONNAISSANCE COMPLETE" in text, "缺 self-check 硬阻（do NOT announce RECONNAISSANCE COMPLETE）"
+
+
+def test_coverage_reconciliation_partial_exists_and_has_core_sections():
+    p = PROMPTS_DIR / "shared" / "_coverage-reconciliation.txt"
+    assert p.exists(), "missing prompts/shared/_coverage-reconciliation.txt"
+    text = p.read_text()
+    # CR-A: USER 端点全集 F
+    assert "USER" in text, "CR-A 缺 USER 端点全集 F"
+    # CR-C: G = F \ C 覆盖差集
+    assert ("F \\ C" in text) or ("G = F" in text), "CR-C 缺 G = F \\ C 差集判定"
+    # CR-D: 数据所有权判向量（tenant/region selector 也是向量）
+    assert "tenant" in text.lower(), "CR-D 缺 tenant/region selector 向量分类"
+    # CR-E: 每端点粒度（禁止全局合并）
+    assert "per-endpoint" in text.lower() or "N independent" in text, "CR-E 缺每端点粒度规则"
+    # self-check 硬阻
+    assert "AUTHORIZATION ANALYSIS COMPLETE" in text, "缺 self-check 硬阻"
