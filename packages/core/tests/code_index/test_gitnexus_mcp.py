@@ -202,3 +202,39 @@ class TestParseMdTable:
     def test_column_mismatch_skipped(self):
         md = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 |"  # 末行列数不齐
         assert _parse_md_table(md) == [{"a": "1", "b": "2"}]
+
+
+class TestParseToolResultRobustness:
+    def test_json_with_trailing_hint(self, tmp_path):
+        """GitNexus 1.6.7: JSON + trailing 提示文本（json.loads 会 Extra data 失败）。"""
+        client = GitNexusMCPClient(tmp_path)
+        text = '{"processes": [], "definitions": [{"name": "handler"}]}\nUse context({...}) for details.'
+        result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
+        assert isinstance(result, dict)
+        assert result["definitions"] == [{"name": "handler"}]
+
+    def test_cypher_markdown_table_decoded_to_rows(self, tmp_path):
+        client = GitNexusMCPClient(tmp_path)
+        text = '{"markdown": "| caller_file | caller_name |\\n| --- | --- |\\n| app.py | handler |", "row_count": 1}\nhint'
+        result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
+        assert result["rows"] == [{"caller_file": "app.py", "caller_name": "handler"}]
+
+    def test_error_text_returns_none_with_warning(self, tmp_path, caplog):
+        client = GitNexusMCPClient(tmp_path)
+        text = 'Error: Multiple repositories indexed. Specify which one with the "repo" parameter.'
+        with caplog.at_level("WARNING", logger="shannon_core.code_index.gitnexus_mcp"):
+            result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
+        assert result is None
+        assert "non-JSON" in caplog.text
+
+    def test_ambiguous_returns_none_with_warning(self, tmp_path, caplog):
+        client = GitNexusMCPClient(tmp_path)
+        text = '{"status": "ambiguous", "message": "Found 4 symbols matching"}\nhint'
+        with caplog.at_level("WARNING", logger="shannon_core.code_index.gitnexus_mcp"):
+            result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
+        assert result is None
+        assert "ambiguous" in caplog.text
+
+    def test_empty_result_returns_none(self, tmp_path):
+        client = GitNexusMCPClient(tmp_path)
+        assert client._parse_tool_result({}) is None

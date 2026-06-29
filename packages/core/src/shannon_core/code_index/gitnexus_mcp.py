@@ -175,21 +175,47 @@ class GitNexusMCPClient:
         await self.stop()
 
     def _parse_tool_result(self, result: dict) -> list | dict | str | None:
-        """Parse MCP tool result content into Python objects."""
+        """Parse MCP tool result content into Python objects.
+
+        GitNexus 1.6.7 returns ``<JSON object> + trailing human hint`` in one
+        text blob (strict ``json.loads`` fails with "Extra data"). Delegate to
+        ``_parse_text`` which uses ``raw_decode`` to parse the leading JSON and
+        tolerate the trailing hint, decode cypher markdown tables, and return
+        ``None`` on non-JSON / ambiguous payloads so downstream ``isinstance``
+        guards treat them as empty instead of silently iterating a string.
+        """
         if not result:
             return None
-
         content = result.get("content", [])
         if not content:
             return result
-
-        # MCP tool results have content array with type=text items
         for item in content:
             if item.get("type") == "text":
-                text = item.get("text", "")
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError:
-                    return text
-
+                return self._parse_text(item.get("text", ""))
         return result
+
+    @staticmethod
+    def _parse_text(text: str) -> list | dict | str | None:
+        """Parse one GitNexus tool text blob.
+
+        Returns the leading JSON object (dict/list), with cypher markdown
+        tables decoded into ``obj["rows"]``. Returns ``None`` on non-JSON text
+        (e.g. ``"Error: Multiple repositories indexed..."``) or
+        ``status:"ambiguous"`` so consumers see an empty result, not a string.
+        """
+        stripped = text.lstrip()
+        try:
+            obj, _end = json.JSONDecoder().raw_decode(stripped)
+        except json.JSONDecodeError:
+            logger.warning("GitNexus tool returned non-JSON text: %.120s", stripped)
+            return None
+        if isinstance(obj, dict):
+            if obj.get("status") == "ambiguous":
+                logger.warning(
+                    "GitNexus tool returned ambiguous result: %.120s",
+                    str(obj.get("message", "")),
+                )
+                return None
+            if "markdown" in obj and "row_count" in obj:
+                obj["rows"] = _parse_md_table(obj["markdown"])
+        return obj
