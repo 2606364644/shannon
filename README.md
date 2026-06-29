@@ -66,6 +66,8 @@ profile 文件决定走哪个引擎和用哪个模型。**`SHANNON_AI_PROVIDER` 
 | `anthropic_api` | claude-agent-sdk（Claude Code CLI） | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` |
 | `openai_compatible` | openai-agents（OpenAI 兼容接口） | `SHANNON_OPENAI_BASE_URL` + `SHANNON_OPENAI_API_KEY` |
 
+> 注：`anthropic_api` 是 Claude Code CLI 的"第一方 API 部署模式"（与 `bedrock`/`vertex` 同组，三者都起 CLI 子进程，区别仅在 CLI 连哪个后端）。凭据与 `ANTHROPIC_BASE_URL` 经 SDK env 透传给 CLI 子进程，**不是 shannon-py 代码直连**；`ANTHROPIC_BASE_URL` 可指向任意 anthropic 兼容端点（如智谱 GLM，非官方）。
+
 每个 profile 还需指定三档模型（large / medium / small），例如：
 
 ```bash

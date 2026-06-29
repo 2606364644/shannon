@@ -34,6 +34,10 @@ class ProviderFields:
 
 
 PROVIDER_SETTINGS: dict[str, ProviderFields] = {
+    # anthropic_api / bedrock / vertex 是 Claude Code CLI 的三种 deployment mode, 三者都经
+    # claude_agent_sdk 起 CLI 子进程(见 providers_anthropic.AnthropicProvider), 区别仅在 CLI
+    # 连哪个后端。"api" 指"走 Anthropic 第一方 messages API 协议"(非云厂商托管), 不是
+    # "shannon-py 代码直连 HTTP"; ANTHROPIC_BASE_URL 可重定向到任意 anthropic 兼容端点(如智谱 GLM)。
     "anthropic_api": ProviderFields(
         base_url="ANTHROPIC_BASE_URL",
         api_key="ANTHROPIC_API_KEY",
