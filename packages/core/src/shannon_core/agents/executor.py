@@ -123,11 +123,19 @@ class AgentExecutor:
 
         if not result.success:
             await GitManager.rollback(deliverables, "execution failure")
+            # 透传 provider 设的合法 ErrorCode（如 OUTPUT_VALIDATION_FAILED）；
+            # provider 的字符串 error_code（Temporal error type，非 enum）不透传，
+            # 保持 AGENT_EXECUTION_FAILED 现有行为（避免破坏 RateLimit/Timeout 分类）。
+            error_code = (
+                result.error_code
+                if isinstance(result.error_code, ErrorCode)
+                else ErrorCode.AGENT_EXECUTION_FAILED
+            )
             raise PentestError(
                 result.error or f"Agent {agent_name.value} execution failed",
                 "validation",
                 retryable=result.retryable,
-                error_code=ErrorCode.AGENT_EXECUTION_FAILED,
+                error_code=error_code,
             )
 
         queue_filename = get_queue_filename(agent_name)
