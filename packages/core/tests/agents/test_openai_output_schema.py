@@ -1,3 +1,5 @@
+import pytest
+
 from shannon_core.agents.openai_output_schema import (
     RawJsonSchemaOutputSchema,
     StructuredOutputParseError,
@@ -66,3 +68,19 @@ def test_extract_json_payload_empty_or_blank():
 
 def test_extract_json_payload_no_braces():
     assert _extract_json_payload("纯叙述收尾，没有 JSON") is None
+
+
+def test_validate_json_parses_markdown_fence():
+    s = RawJsonSchemaOutputSchema({"type": "object"})
+    assert s.validate_json('```json\n{"k": "v"}\n```') == {"k": "v"}
+
+
+def test_validate_json_parses_leading_prose():
+    s = RawJsonSchemaOutputSchema({"type": "object"})
+    assert s.validate_json('结论如下：{"k": "v"}') == {"k": "v"}
+
+
+def test_validate_json_raises_structured_output_parse_error_on_prose():
+    s = RawJsonSchemaOutputSchema({"type": "object"})
+    with pytest.raises(StructuredOutputParseError):
+        s.validate_json("纯叙述收尾，没有 JSON")

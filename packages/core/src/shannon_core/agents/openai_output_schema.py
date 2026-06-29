@@ -77,5 +77,9 @@ class RawJsonSchemaOutputSchema(AgentOutputSchemaBase):
         return "shannon_raw_json_schema"
 
     def validate_json(self, json_str: str) -> Any:
-        # best-effort：仅解析 JSON，不做 schema 完整校验（GLM 已被 response_format 约束）
-        return json.loads(json_str)
+        # L0 容错解析：剥 fence + 子串提取（模拟 Claude SDK 的 LLM→JSON 接管契约；
+        # TS 侧 SDK 免费，openai-agents 无此层，Python 自己补）。
+        candidate = _extract_json_payload(json_str)
+        if candidate is None:
+            raise StructuredOutputParseError(json_str)
+        return json.loads(candidate)
