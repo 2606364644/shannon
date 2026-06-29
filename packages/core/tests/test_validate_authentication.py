@@ -71,6 +71,17 @@ async def test_verify_valid_state_with_origins(tmp_path):
     result = await verify_auth_state(state_file)
     assert result.success is True
 
+async def test_verify_accepts_storagestate_with_cookies(tmp_path):
+    """agent-browser `state save` ≈ Playwright storageState {cookies, origins}.
+    verify_auth_state must accept it when cookies present."""
+    state_file = tmp_path / "auth-state.json"
+    state_file.write_text(json.dumps({
+        "cookies": [{"name": "s", "value": "v", "domain": "example.com"}],
+        "origins": [],
+    }))
+    result = await verify_auth_state(state_file)
+    assert result.success is True
+
 
 # --- cleanup_auth_state tests ---
 
