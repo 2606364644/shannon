@@ -12,6 +12,7 @@ from shannon_core.code_index.gitnexus_call_graph import (
     find_sinks_by_patterns,
     get_function_context,
 )
+from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 
 def _block(name: str, file: str = "app.py", line: int = 1) -> FuncBlock:
@@ -28,13 +29,23 @@ def _block(name: str, file: str = "app.py", line: int = 1) -> FuncBlock:
 
 
 class FakeMCPClient:
-    """Fake GitNexus MCP client returning canned responses."""
+    """Fake GitNexus MCP client returning canned responses.
+
+    When a canned response is a ``str`` (raw GitNexus text blob), route it
+    through ``GitNexusMCPClient._parse_text`` to mirror the production
+    ``call_tool`` → ``_parse_tool_result`` → ``_parse_text`` parsing chain
+    (markdown→rows→edges end-to-end). ``dict`` / ``None`` / ``list`` inputs
+    are returned as-is so existing pre-parsed dict fixtures keep working.
+    """
 
     def __init__(self, responses: dict[str, list | dict | None]):
         self._responses = responses
 
     async def call_tool(self, tool_name: str, arguments: dict):
-        return self._responses.get(tool_name)
+        resp = self._responses.get(tool_name)
+        if isinstance(resp, str):
+            return GitNexusMCPClient._parse_text(resp)
+        return resp
 
 
 class TestParseProcessResponse:
@@ -116,7 +127,11 @@ class TestBuildCallGraphFromGitNexus:
     @pytest.mark.asyncio
     async def test_cypher_rows_produce_edges_and_chains(self):
         """核心回归锚点：GitNexus 1.6.7 cypher 返回 {markdown,row_count}（_parse_tool_result
-        填 rows）。build_call_graph 必须从 rows 构建非空 edges/chains——生产里一直为 0。"""
+        填 rows）。build_call_graph 必须从 rows 构建非空 edges/chains——生产里一直为 0。
+
+        端到端：喂真实格式 str（JSON+trailing 提示，markdown 表格里没预填 rows），
+        经 FakeMCPClient.call_tool → _parse_text → rows → build_call_graph。
+        不再绕过 _parse_tool_result 预填 rows。"""
         blocks = [
             _block("handler", "app.py", 1),
             _block("get_users", "svc.py", 10),
@@ -126,14 +141,12 @@ class TestBuildCallGraphFromGitNexus:
                 "process_symbols": [],
                 "definitions": [{"name": "handler", "filePath": "app.py", "startLine": 1}],
             },
-            "cypher": {
-                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |",
-                "row_count": 1,
-                "rows": [{
-                    "caller_file": "app.py", "caller_name": "handler", "caller_line": 1,
-                    "callee_file": "svc.py", "callee_name": "get_users",
-                }],
-            },
+            "cypher": (
+                '{"markdown": "| caller_file | caller_name | callee_file | callee_name |\\n'
+                '| --- | --- | --- | --- |\\n'
+                '| app.py | handler | svc.py | get_users |", "row_count": 1}\n'
+                'Use context(...) for details.'
+            ),
         })
         result = await build_call_graph_from_gitnexus(
             repo_path="/tmp/repo", mcp_client=mcp, blocks=blocks,
