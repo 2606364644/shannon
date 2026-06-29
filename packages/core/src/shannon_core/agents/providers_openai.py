@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -20,7 +21,11 @@ from agents import (
 from openai import AsyncOpenAI
 
 from .narration import narration_directive
-from .openai_output_schema import RawJsonSchemaOutputSchema, StructuredOutputParseError
+from .openai_output_schema import (
+    RawJsonSchemaOutputSchema,
+    StructuredOutputParseError,
+    _extract_json_payload,
+)
 from shannon_core.models.errors import ErrorCode
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
@@ -139,6 +144,43 @@ class OpenAIProvider(BaseProvider):
 
         return run
 
+    async def _lightweight_reparse(self, text: str, output_format: dict | None, model: str):
+        """L1：L0 容错失败后，发单个轻量 chat completion 让 GLM 把分析转纯 JSON。
+
+        模拟 Claude SDK 单次内部重试（openai-agents 无此层）。仅 1 个 chat completion，
+        无 agent loop / 工具 / narration directive。不传 response_format（GLM 第三方后端
+        兼容不确定），靠 prompt + _extract_json_payload 兜底。任一步失败 → None（进 L2）。
+        """
+        if not output_format or not text or not text.strip():
+            return None
+        client = self._get_client()
+        prompt = (
+            "将以下分析结论转为符合 schema 的纯 JSON，只输出 JSON 本体，"
+            "不要任何解释、前言或 markdown 代码围栏：\n" + text
+        )
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception:
+            return None
+        choices = getattr(resp, "choices", None)
+        content = ""
+        if choices:
+            content = getattr(choices[0].message, "content", "") or ""
+        candidate = _extract_json_payload(content)
+        if candidate is None:
+            return None
+        try:
+            recovered = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "prompt_tokens", 0) or 0
+        out_tok = getattr(usage, "completion_tokens", 0) or 0
+        return _ReparsedRunResult(recovered, in_tok, out_tok)
+
     async def call(
         self,
         prompt: str,
@@ -249,4 +291,27 @@ class _MaxTurnsStub:
                 output_tokens = 0
             usage = _U()
         self.final_output = text
+        self.context_wrapper = _CW()
+
+
+class _ReparsedRunResult:
+    """L1 轻量重输成功后的最小 RunResult stub。
+
+    仅含 map_run_result 需要的 final_output（= recovered dict）+ context_wrapper.usage
+    （带 L1 chat completion 的真实 token，避免统计失真；cost 仍走 GLM 0.0 早退）。
+    usage 用普通类承载（不用 MagicMock），避免 map_run_result 的
+    getattr(usage, "input_tokens", 0) 被 MagicMock 恒真干扰。
+    """
+    def __init__(self, final_output, input_tokens: int = 0, output_tokens: int = 0):
+        self.final_output = final_output
+
+        class _U:
+            def __init__(self):
+                self.input_tokens = input_tokens
+                self.output_tokens = output_tokens
+
+        class _CW:
+            def __init__(self):
+                self.usage = _U()
+
         self.context_wrapper = _CW()
