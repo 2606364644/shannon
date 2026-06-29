@@ -311,10 +311,7 @@ For each analysis you perform from the lists above, you must make a final **verd
 </analytical_pitfalls_to_avoid>
 
 
-<coverage_requirements>
-- Test **all** endpoints from recon section 8
-- Include both REST and GraphQL endpoints
-</coverage_requirements>
+@include(shared/_coverage-reconciliation.txt)
 
 </methodology_and_domain_expertise>
 

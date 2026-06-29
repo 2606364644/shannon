@@ -62,3 +62,20 @@ def test_recon_deliverable_has_section_43():
     text = (PROMPTS_DIR / "recon.txt").read_text()
     assert "4.3 Enumeration Reconciliation" in text, \
         "recon deliverable 缺 §4.3 Enumeration Reconciliation 表格结构"
+
+
+def test_authz_includes_coverage_reconciliation():
+    text = (PROMPTS_DIR / "vuln-authz.txt").read_text()
+    assert "@include(shared/_coverage-reconciliation.txt)" in text, \
+        "vuln-authz.txt 未 @include _coverage-reconciliation.txt"
+
+
+def test_authz_weak_coverage_requirements_replaced():
+    """薄弱的 <coverage_requirements> 一句话应被对账 partial 取代。"""
+    text = (PROMPTS_DIR / "vuln-authz.txt").read_text()
+    # 原文是 <coverage_requirements> Test all endpoints ... </coverage_requirements>
+    # 替换后该块不应再以独立 <coverage_requirements> 标签形式存在
+    assert "@include(shared/_coverage-reconciliation.txt)" in text
+    # 确认没有残留的空洞 coverage_requirements 块（允许文字提及 coverage）
+    assert "<coverage_requirements>\n- Test **all**" not in text, \
+        "薄弱的 <coverage_requirements> 块未被替换"
