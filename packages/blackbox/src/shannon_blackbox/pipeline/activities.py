@@ -446,3 +446,120 @@ async def load_correlation_context(corr_workspace_path: str) -> dict | None:
         "topology": json.loads(topo_f.read_text(encoding="utf-8")),
         "boundaries": json.loads(bound_f.read_text(encoding="utf-8")),
     }
+
+
+@activity.defn
+async def resolve_blackbox_engine(input: BlackboxActivityInput) -> str:
+    """preflight: 解析 config + 解析/校验 engine + 写 deny rules + 写 stealth config。
+
+    把原 workflow run() 体内 config/engine 初始化块的文件 I/O 与副作用（parse_config 读
+    yaml、check_available 走 shutil.which、sync_code_path_deny_rules 写 settings.json、
+    write_config 写 stealth config）整体挪进 activity——workflow sandbox 禁这些操作。
+    返回 engine_name 供后续 exploit 循环复用（workflow 侧不再持有不可序列化的 engine 对象）。
+    错误语义与原 workflow 块一致（BROWSER_ENGINE_UNAVAILABLE）。
+    """
+    try:
+        from shannon_core.config.parser import parse_config
+        from shannon_core.services.settings_writer import sync_code_path_deny_rules
+        from shannon_core.services.browser_engine import BrowserEngineFactory
+        import shannon_core.services.engines  # noqa: F401 – registers engines
+
+        cfg = parse_config(input.config_path) if input.config_path else None
+        engine_name = cfg.browser_engine if cfg else "agent-browser"
+        try:
+            engine = BrowserEngineFactory.get_engine(engine_name)
+        except KeyError as e:
+            raise PentestError(
+                f"No browser engine registered as '{engine_name}'.",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            ) from e
+        if not engine.check_available():
+            raise PentestError(
+                f"Browser engine '{engine.name}' is not available. "
+                f"Install it with: npm install -g {engine.name} && {engine.name} install",
+                "browser",
+                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
+            )
+        if cfg and cfg.rules and cfg.rules.avoid:
+            sync_code_path_deny_rules(cfg.rules.avoid)
+        if input.repo_path:
+            engine.write_config(input.repo_path)
+        return engine_name
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def detect_whitebox_results(
+    deliverables_path: str,
+    vuln_classes: list[str],
+    correlation_deliverables_path: str | None,
+) -> dict:
+    """preflight: 检测单仓/关联 workspace 的有效白盒 queue（文件 I/O，sandbox 禁）。
+
+    复刻原 workflow run() 的 has_valid_whitebox_results + §6.2 correlation 检测逻辑：
+    单仓无结果才查关联（ADD 语义，任一有效即 skip recon）。state 更新与 log 留在
+    workflow 侧（用返回值驱动）。corr 路径由 workflow 在 sandbox 外拼好后以 str 传入。
+    返回 {has_whitebox_results, found_classes, corr_classes}。
+    """
+    from shannon_core.utils.paths import has_valid_whitebox_results
+
+    dlv = Path(deliverables_path)
+    found_classes = [
+        vt for vt in vuln_classes
+        if has_valid_whitebox_results(dlv / f"{vt}_exploitation_queue.json")
+    ]
+    corr_classes: list[str] = []
+    if correlation_deliverables_path and not found_classes:
+        corr_dlv = Path(correlation_deliverables_path)
+        corr_classes = [
+            vt for vt in vuln_classes
+            if has_valid_whitebox_results(corr_dlv / f"{vt}_exploitation_queue.json")
+        ]
+    return {
+        "has_whitebox_results": bool(found_classes or corr_classes),
+        "found_classes": found_classes,
+        "corr_classes": corr_classes,
+    }
+
+
+@activity.defn
+async def write_engine_config_for_session(
+    repo_path: str, session_id: str, engine_name: str,
+) -> None:
+    """exploit 循环: 为每个 agent session 写浏览器 stealth config（文件 I/O，sandbox 禁）。
+
+    engine_name 由 resolve_blackbox_engine 在 preflight 解析后经 workflow 透传——engine
+    对象不可跨 workflow/activity 边界，故每次按 engine_name 重新 get_engine。
+    write_config 幂等（wrote/skipped-existing），即便 exploit executor 内部也写无害。
+    """
+    from shannon_core.services.browser_engine import BrowserEngineFactory
+    import shannon_core.services.engines  # noqa: F401 – registers engines
+
+    engine = BrowserEngineFactory.get_engine(engine_name)
+    engine.write_config(repo_path, session_id=session_id)
+
+
+@activity.defn
+async def cleanup_engine_configs(repo_path: str, engine_name: str) -> None:
+    """finally 收尾: 清理各 session 的浏览器 stealth config（文件 I/O，sandbox 禁）。
+
+    与 write_engine_config_for_session 对称——engine_name 由 resolve_blackbox_engine 在
+    preflight 解析后经 workflow 透传，engine 对象不可跨 workflow/activity 边界故按 engine_name
+    重新 get_engine。best-effort cleanup（write_config 幂等，残留 config 下次覆盖），失败由
+    workflow 侧 try/except 吞掉不阻断收尾。session_id 集合取自 AGENT_SESSION_MAPPING（同 worker
+    进程，get_session_id 在 workflow 侧填充）。
+    """
+    from shannon_core.services.browser_engine import BrowserEngineFactory
+    from shannon_core.services.playwright_config_writer import AGENT_SESSION_MAPPING
+    import shannon_core.services.engines  # noqa: F401 – registers engines
+
+    engine = BrowserEngineFactory.get_engine(engine_name)
+    for session_id in set(AGENT_SESSION_MAPPING.values()):
+        engine.cleanup_config(repo_path, session_id=session_id)
+    engine.cleanup_config(repo_path)

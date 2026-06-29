@@ -9,6 +9,8 @@ find_project_root/get_default_deliverables_subdir（env/cwd 解析）与 _load_c
 import ast
 from pathlib import Path
 
+import pytest
+
 WORKFLOW_FILE = (
     Path(__file__).resolve().parents[1]
     / "src" / "shannon_blackbox" / "pipeline" / "workflows.py"
@@ -24,6 +26,10 @@ FORBIDDEN_FUNCS = {
     "find_project_root",
     "get_default_deliverables_subdir",
     "_load_correlation_context",  # 文件 I/O（exists/read_text），须挪进 activity
+    "parse_config",               # 读 yaml 文件 I/O，须挪进 resolve_blackbox_engine activity
+    "sync_code_path_deny_rules",  # 写 ~/.claude/settings.json，须挪进 activity
+    "has_valid_whitebox_results", # 读 queue 文件，须挪进 detect_whitebox_results activity
+    "has_correlation_results",    # 读 correlation queue，须挪进 detect_whitebox_results activity
 }
 # 属性形式的不安全 API：(模块名, 属性名)；同时覆盖 os.environ[...] 与 os.getenv(...)/Path.cwd()
 FORBIDDEN_ATTRS = {("os", "getenv"), ("os", "environ"), ("Path", "cwd")}
@@ -31,7 +37,11 @@ FORBIDDEN_ATTRS = {("os", "getenv"), ("os", "environ"), ("Path", "cwd")}
 # 这些方法内部走 aiofiles（async_path_exists/async_read_file → run_in_executor），workflow sandbox
 # 内直调会抛 NotImplementedError（同 _load_correlation_context 的违规模式）。文件 I/O 须经
 # validate_exploitation_queue activity 完成。
-FORBIDDEN_METHODS = {"validate_queue", "should_exploit", "check_coverage"}
+FORBIDDEN_METHODS = {
+    "validate_queue", "should_exploit", "check_coverage",
+    "write_config",    # engine.write_config 写 stealth config 文件，须挪进 activity
+    "check_available", # engine.check_available 走 shutil.which(env/PATH)，须挪进 activity
+}
 
 
 def _run_body_nodes(tree: ast.AST) -> list[ast.AST]:
@@ -73,6 +83,35 @@ def test_run_body_has_no_forbidden_sandbox_calls():
         + "\n  ".join(sorted(set(hits)))
         + "\nworkspaces 根应在 sandbox 外（CLI/worker）解析后通过 input.workspaces_root 传入；"
         "文件 I/O 应挪进 activity。"
+    )
+
+
+def test_run_body_execute_activity_has_at_most_two_positional_args():
+    """防回归：workflow body 内 workflow.execute_activity(...) 位置参数 ≤ 2。
+
+    temporalio 的 execute_activity(activity, args=None, *, ...) 最多 2 个位置参数
+    （activity + args）。给 activity 传多个参数必须包成 args=[...]——直接展开成位置参数
+    会抛 TypeError: takes from 1 to 2 positional arguments（sandbox-violation-fix 真机冒烟
+    暴露：detect_whitebox_results / write_engine_config_for_session 误传 4 位置参数，workflow
+    一跑到就崩）。本守卫填补原 AST 守卫只查 forbidden API、不查调用签名的盲区。
+    """
+    tree = ast.parse(WORKFLOW_FILE.read_text())
+    nodes = _run_body_nodes(tree)
+    assert nodes, "未找到 BlackboxScanWorkflow.run —— 守卫测试接线坏了"
+
+    offenders = []
+    for node in nodes:
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute_activity"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "workflow"
+                and len(node.args) > 2):
+            offenders.append(len(node.args))
+    assert not offenders, (
+        f"workflow.execute_activity 发现 {len(offenders)} 处位置参数 > 2（{offenders}）。"
+        "temporalio execute_activity 最多 2 位置参数（activity + args），多参数须用 args=[...]"
+        "关键字传入。"
     )
 
 
@@ -142,3 +181,25 @@ def test_completed_branch_uses_exploit_result_to_outcome():
             f"workflows.py 仍含 `{forbidden}` —— getattr(dict) 永返 default，"
             "exploit 指标归零（应改用 exploit_result_to_outcome）"
         )
+
+
+@pytest.mark.parametrize("activity_name", [
+    "resolve_blackbox_engine",
+    "detect_whitebox_results",
+    "write_engine_config_for_session",
+    "cleanup_engine_configs",
+])
+def test_worker_registers_blackbox_config_activity(activity_name):
+    """防回归：3 个 config/engine activity 必须在 worker.py 注册（import + activities 列表）。
+
+    这 3 个 activity 承接原 workflow run() 体内的文件 I/O（parse_config / check_available /
+    sync_code_path_deny_rules / write_config / has_valid_whitebox_results），把 sandbox 违规
+    挪进 activity。见 temporalio-activity-worker-registration 教训：新 activity 三处同步
+    （定义/调用/worker 注册），第 3 处 worker 注册易漏——漏注册则 Temporal 找不到 activity 崩溃。
+    """
+    worker_src = WORKER_FILE.read_text()
+    count = worker_src.count(activity_name)
+    assert count >= 2, (
+        f"{activity_name} 在 worker.py 仅出现 {count} 次，预期 >= 2"
+        "（import 一处 + activities 列表一处）。"
+    )

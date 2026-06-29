@@ -17,6 +17,10 @@ from .pipeline.activities import (
     log_phase_complete_activity,
     log_info_activity,
     load_correlation_context,
+    resolve_blackbox_engine,
+    detect_whitebox_results,
+    write_engine_config_for_session,
+    cleanup_engine_configs,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
 from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
@@ -89,6 +93,8 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,
             load_correlation_context,
+            resolve_blackbox_engine, detect_whitebox_results, write_engine_config_for_session,
+            cleanup_engine_configs,
         ],
     )
 

@@ -45,12 +45,9 @@ with workflow.unsafe.imports_passed_through():
         exploit_result_to_outcome,
         format_exploit_summary,
     )
-    from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
-    from shannon_core.services.browser_engine import BrowserEngineFactory
-    import shannon_core.services.engines  # noqa: F401 – registers engines
+    from shannon_core.services.settings_writer import cleanup_settings
     from shannon_core.services.playwright_config_writer import (
         get_session_id,
-        AGENT_SESSION_MAPPING,
     )
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
     from shannon_core.models.retry import retry_for
@@ -112,37 +109,15 @@ class BlackboxScanWorkflow:
             retry_policy=retry_for("preflight"),
         )
 
-        # Resolve config and browser engine
-        cfg = None
-        engine = None
-        if input.config_path:
-            from shannon_core.config.parser import parse_config
-            cfg = parse_config(input.config_path)
-
-        engine_name = cfg.browser_engine if cfg else "agent-browser"
-        try:
-            engine = BrowserEngineFactory.get_engine(engine_name)
-        except KeyError as e:
-            raise PentestError(
-                f"No browser engine registered as '{engine_name}'.",
-                "browser",
-                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
-            ) from e
-        if not engine.check_available():
-            raise PentestError(
-                f"Browser engine '{engine.name}' is not available. "
-                f"Install it with: npm install -g {engine.name} && {engine.name} install",
-                "browser",
-                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
-            )
-
-        # Write code path deny rules (S6)
-        if cfg and cfg.rules and cfg.rules.avoid:
-            sync_code_path_deny_rules(cfg.rules.avoid)
-
-        # Write browser engine config (S5) — only if repo path provided
-        if input.repo_path:
-            engine.write_config(input.repo_path)
+        # Resolve config and browser engine — 文件 I/O 与副作用(parse_config 读 yaml /
+        # check_available 走 shutil.which / sync_code_path_deny_rules 写 settings.json /
+        # write_config 写 stealth config)经 resolve_blackbox_engine activity 完成,
+        # sandbox 禁这些操作。返回 engine_name 供 exploit 循环复用。
+        engine_name = await workflow.execute_activity(
+            activities.resolve_blackbox_engine, act_input,
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=retry_for("log"),
+        )
 
         # Auth validation when config is present
         if input.config_path:
@@ -182,42 +157,43 @@ class BlackboxScanWorkflow:
                 )
             self._state.correlation_context = corr_ctx  # 供 exploitation 读取（B3）
 
-            has_whitebox_results = False
-            found_classes: list[str] = []
-            for vt in selected_classes:
-                queue_file = deliverables / f"{vt}_exploitation_queue.json"
-                if has_valid_whitebox_results(queue_file):
-                    has_whitebox_results = True
-                    found_classes.append(vt)
+            # 白盒结果检测（单仓 + §6.2 关联 workspace ADD 源）——文件 I/O（读 queue）经
+            # detect_whitebox_results activity 完成（sandbox 禁 has_valid_whitebox_results/
+            # has_correlation_results）。corr 路径由 sandbox 外拼好以 str 传入；ADD 语义
+            # （单仓无结果才查关联）在 activity 内。state 更新与 log 留 workflow（用返回值驱动）。
+            corr_dlv_path = (
+                str(corr_ws_path / "deliverables")
+                if (input.correlated_workspace and corr_ws_path is not None)
+                else None
+            )
+            wb = await workflow.execute_activity(
+                activities.detect_whitebox_results,
+                args=[str(deliverables), selected_classes, corr_dlv_path],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=retry_for("log"),
+            )
+            has_whitebox_results: bool = wb["has_whitebox_results"]
+            found_classes: list[str] = wb["found_classes"]
             self._state.has_whitebox_results = has_whitebox_results
             self._state.found_whitebox_classes = found_classes
 
-            # §6.2 闭环(final-review fix):当指定关联 workspace 时，把 A6 写入关联 workspace
-            # deliverables 的 merged `{vt}_exploitation_queue.json` 也作为 recon-skip 复用源。
-            # 语义=ADD(任一来源有效即跳过 recon)，非 replace——保留 --correlated-workspace
-            # 与 --repo/--latest 合法的组合用法。仅在 input.correlated_workspace 设置时进入
-            # 此分支：correlated_workspace 为 None 时 has_correlation_results 根本不被调用，
-            # 上述单仓 deliverables 检查逻辑字节不变(单仓零回归)。
-            if input.correlated_workspace and corr_ws_path is not None and not has_whitebox_results:
-                corr_dlv = corr_ws_path / "deliverables"
-                if has_correlation_results(corr_dlv, selected_classes):
-                    has_whitebox_results = True
-                    # 记录由关联 workspace 贡献的类(用于日志可观测)
-                    corr_classes = [
-                        vt for vt in selected_classes
-                        if has_valid_whitebox_results(corr_dlv / f"{vt}_exploitation_queue.json")
-                    ]
-                    found_classes.extend(vt for vt in corr_classes if vt not in found_classes)
-                    self._state.has_whitebox_results = True
-                    self._state.found_whitebox_classes = found_classes
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        BlackboxActivityInput(**{**act_input.__dict__,
-                           "info_message": f"Correlation workspace results detected at {corr_dlv} for classes: {corr_classes} — skipping RECON_BLACKBOX (§6.2 closed loop)",
-                           "info_level": "info"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
+            # §6.2 闭环：关联 workspace 贡献了结果时（单仓无结果、关联命中），合并 found_classes
+            # 并记录日志（ADD 源可观测性）。corr_classes 非空 ⟺ activity 内单仓无结果且关联命中。
+            corr_classes: list[str] = wb["corr_classes"]
+            if corr_classes:
+                found_classes = found_classes + [
+                    vt for vt in corr_classes if vt not in found_classes
+                ]
+                self._state.has_whitebox_results = True
+                self._state.found_whitebox_classes = found_classes
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                       "info_message": f"Correlation workspace results detected at {corr_ws_path}/deliverables for classes: {corr_classes} — skipping RECON_BLACKBOX (§6.2 closed loop)",
+                       "info_level": "info"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
 
             if has_whitebox_results:
                 await workflow.execute_activity(
@@ -300,7 +276,12 @@ class BlackboxScanWorkflow:
                     if agent_name.value not in self._state.completed_agents:
                         self._state.current_agent = agent_name.value
                         session_id = get_session_id(agent_name.value)
-                        engine.write_config(input.repo_path, session_id=session_id)
+                        await workflow.execute_activity(
+                            activities.write_engine_config_for_session,
+                            args=[input.repo_path, session_id, engine_name],
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=retry_for("log"),
+                        )
                         exploit_input = BlackboxActivityInput(
                             **{**act_input.__dict__,
                                "agent_name": agent_name.value,
@@ -436,11 +417,19 @@ class BlackboxScanWorkflow:
             return self._state
         finally:
             cleanup_settings()
-            if engine and input.repo_path:
-                # Clean up session-specific configs
-                for session_id in set(AGENT_SESSION_MAPPING.values()):
-                    engine.cleanup_config(input.repo_path, session_id=session_id)
-                engine.cleanup_config(input.repo_path)
+            # engine 对象由 resolve_blackbox_engine activity 持有（workflow 侧不持有不可序列化
+            # 对象）；stealth config 清理经 cleanup_engine_configs activity 完成。engine_name 在
+            # 上方 try 外由 resolve_blackbox_engine 解析（line 117，先于本 try），此处必已定义。
+            if engine_name and input.repo_path:
+                try:
+                    await workflow.execute_activity(
+                        activities.cleanup_engine_configs,
+                        args=[input.repo_path, engine_name],
+                        start_to_close_timeout=timedelta(seconds=15),
+                        retry_policy=retry_for("log"),
+                    )
+                except Exception:
+                    pass  # best-effort cleanup，失败不阻断 workflow 收尾
             cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
 
     @workflow.query(name="PipelineProgress")
