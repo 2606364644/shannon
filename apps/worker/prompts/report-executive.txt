@@ -90,6 +90,11 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
      * `# [Type] {{REPORT_VULN_HEADING}}`
      * `## {{REPORT_VULN_SUBHEADING}}`
 {{REPORT_FILTER_RULES}}
+   - When a per-class finding merges multiple endpoints (a shared handler /
+     pattern), keep its summary but ensure it references the deterministically
+     generated "附录 A:完整可利用端点清单" for the full per-endpoint list. Do not
+     rewrite such a finding to list only representative endpoints, and do not
+     state an affected-endpoint count in the summary — the count lives in 附录 A.
    - REMOVE ANY OTHER SECTIONS (even if they contain vulnerability IDs), such as:
      * `## Potential Vulnerabilities (Validation Blocked)` (All agents)
      * Standalone "Recommendations" sections

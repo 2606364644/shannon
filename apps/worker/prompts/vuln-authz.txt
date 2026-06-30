@@ -315,6 +315,16 @@ For each analysis you perform from the lists above, you must make a final **verd
 - Test **all** endpoints from recon section 8
 - Run the full USER-endpoint coverage reconciliation (see `shared/_coverage-reconciliation.txt`): every USER-authenticated endpoint in Section 4 of the recon deliverable must receive a verdict — vulnerable endpoints go to the exploitation queue, safe endpoints go to `set_safe_vectors`. A USER endpoint with no verdict is INCOMPLETE analysis. This catches endpoints whose only vector is a non-object-id selector (e.g. `brokerage`) that Recon may not have surfaced in Section 8.
 - Include both REST and GraphQL endpoints
+
+### Appendix Reference for Collapsed Findings
+
+When a single finding legitimately merges multiple endpoints that share one
+authorization root cause (for example a shared transparent-forward handler
+spanning many routes), you MUST state in that finding: "本条为合并摘要,逐端点完整清单见附录 A". Do NOT list only a handful of representative endpoints with
+"等"/"例如"/"representative"/"including but not limited to" — those signal an
+exhaustive list when there is none. The exact affected-endpoint count is
+produced deterministically in 附录 A by the orchestrator; do not invent a count
+yourself.
 </coverage_requirements>
 
 </methodology_and_domain_expertise>
