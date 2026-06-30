@@ -8,6 +8,7 @@ import { fs, path } from 'zx';
 import { deliverablesDir } from '../paths.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import { ErrorCode } from '../types/errors.js';
+import { buildAffectedEndpointsAppendix } from './affected-endpoints-appendix.js';
 import { PentestError } from './error-handling.js';
 
 interface DeliverableFile {
@@ -166,4 +167,48 @@ export async function injectModelIntoReport(
 
   // 5. Write modified report back
   await fs.writeFile(reportPath, reportContent);
+}
+
+/**
+ * Append the deterministic "complete exploitable endpoints" appendix to the
+ * final report. Must run AFTER report-executive — which would otherwise clean
+ * the appendix away — so it mirrors injectModelIntoReport's post-report timing.
+ * Idempotent: skips when the appendix heading is already present. The appendix
+ * is an enhancement only: any failure is logged and never blocks the report.
+ */
+export async function injectAffectedEndpointsAppendix(
+  repoPath: string,
+  deliverablesSubdir: string | undefined,
+  logger: ActivityLogger,
+): Promise<void> {
+  let appendix: string | null;
+  try {
+    appendix = await buildAffectedEndpointsAppendix(repoPath, deliverablesSubdir, logger);
+  } catch (error) {
+    const err = error as Error;
+    logger.warn(`Failed to build affected-endpoints appendix: ${err.message}`);
+    return;
+  }
+  if (appendix === null) {
+    logger.info('No exploitable endpoints found; skipping appendix injection');
+    return;
+  }
+
+  const reportPath = path.join(
+    deliverablesDir(repoPath, deliverablesSubdir),
+    'comprehensive_security_assessment_report.md',
+  );
+  if (!(await fs.pathExists(reportPath))) {
+    logger.warn('Final report not found, skipping appendix injection');
+    return;
+  }
+
+  const existing = await fs.readFile(reportPath, 'utf8');
+  if (existing.includes('## 附录 A:完整可利用端点清单')) {
+    logger.info('Appendix already present, skipping injection');
+    return;
+  }
+  const updated = `${existing.trimEnd()}\n\n${appendix}\n`;
+  await fs.writeFile(reportPath, updated);
+  logger.info('Affected-endpoints appendix injected into final report');
 }
