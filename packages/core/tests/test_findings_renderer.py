@@ -374,3 +374,82 @@ async def test_render_standard_empty_queue_still_none_found(tmp_path):
     findings = (deliverables / "xss_findings.md").read_text()
     assert "No XSS vulnerabilities found." in findings
     assert "auto-recovered" not in findings.lower()
+
+
+@pytest.mark.asyncio
+async def test_render_findings_with_subdirs_queue_in_whitebox_findings_in_blackbox(tmp_path):
+    """Parameterized renderer: queue read from whitebox/, findings land in blackbox/.
+
+    Blackbox caller passes deliverables_path=<root> with queue_subdir=WHITEBOX_SUBDIR
+    and findings_subdir=BLACKBOX_SUBDIR. The renderer must read queues from <root>/whitebox/
+    and write findings to <root>/blackbox/ — never colliding with whitebox findings
+    written to <root>/whitebox/ by the whitebox caller.
+    """
+    from shannon_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
+
+    root = tmp_path / "deliverables"
+    (root / WHITEBOX_SUBDIR).mkdir(parents=True)
+    # blackbox/ will be created by the renderer
+
+    queue = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJECTION-BB-001", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="query", path="/search", sink_call="db.execute",
+        ),
+    ])
+    # queue lives in whitebox/ (Task 2 routing)
+    (root / WHITEBOX_SUBDIR / "injection_exploitation_queue.json").write_text(
+        queue.model_dump_json()
+    )
+
+    await FindingsRenderer.render_findings_from_queues(
+        root,
+        queue_subdir=WHITEBOX_SUBDIR,
+        findings_subdir=BLACKBOX_SUBDIR,
+    )
+
+    # findings must land in blackbox/
+    bb_findings = root / BLACKBOX_SUBDIR / "injection_findings.md"
+    assert bb_findings.exists(), "findings must land in blackbox/ subdirectory"
+    content = bb_findings.read_text()
+    assert "### INJECTION-BB-001" in content
+    assert "**Sink Call:** db.execute" in content
+
+    # findings must NOT leak into root or whitebox/
+    assert not (root / "injection_findings.md").exists(), \
+        "findings must not leak to deliverables root"
+    assert not (root / WHITEBOX_SUBDIR / "injection_findings.md").exists(), \
+        "findings must not leak into whitebox/ (would collide with whitebox caller)"
+
+
+@pytest.mark.asyncio
+async def test_render_findings_with_subdirs_reads_legacy_queue_at_root(tmp_path):
+    """Parameterized renderer: queue_subdir falls back to root when not in subdir.
+
+    resolve_track_deliverable falls back to deliverables_dir/filename when the
+  track subdir lacks the file — so a legacy root-level queue is still readable.
+    """
+    from shannon_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
+
+    root = tmp_path / "deliverables"
+    root.mkdir()
+
+    queue = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJECTION-LEGACY", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+        ),
+    ])
+    # legacy: queue at root, not in whitebox/
+    (root / "injection_exploitation_queue.json").write_text(queue.model_dump_json())
+
+    await FindingsRenderer.render_findings_from_queues(
+        root,
+        queue_subdir=WHITEBOX_SUBDIR,
+        findings_subdir=BLACKBOX_SUBDIR,
+    )
+
+    bb_findings = root / BLACKBOX_SUBDIR / "injection_findings.md"
+    assert bb_findings.exists()
+    assert "### INJECTION-LEGACY" in bb_findings.read_text()

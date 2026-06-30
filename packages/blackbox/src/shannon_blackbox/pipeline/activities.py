@@ -12,7 +12,12 @@ from shannon_core.utils.security import validate_target_url, check_url_reachable
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.prompts.manager import PromptManager
-from shannon_core.utils.paths import resolve_deliverables_path
+from shannon_core.utils.paths import (
+    BLACKBOX_SUBDIR,
+    WHITEBOX_SUBDIR,
+    blackbox_dir,
+    resolve_deliverables_path,
+)
 
 from .shared import BlackboxActivityInput
 from shannon_blackbox.services.exploitation_checker import QueueValidationResult
@@ -269,14 +274,18 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 
         deliverables = _get_deliverables_path(input)
         vuln_classes: list[str] = list(ALL_VULN_CLASSES)
-        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        bb = blackbox_dir(deliverables)
+        bb.mkdir(parents=True, exist_ok=True)
+        report_path = bb / "comprehensive_security_assessment_report.md"
 
         report_config = None
         if input.config_path:
             from shannon_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
             report_config = cfg.report
-        await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
+        await FindingsRenderer.render_findings_from_queues(
+            deliverables, report_config,
+            queue_subdir=WHITEBOX_SUBDIR, findings_subdir=BLACKBOX_SUBDIR)
 
         # AU-6: exploit queue→evidence 闭环——未覆盖条目写入 evidence 未覆盖节，
         # ReportAssembler 读 evidence 全文时自动带入最终报告。
@@ -285,7 +294,8 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
 
         # Order invariant: close_coverage_gaps mutates evidence above; ReportAssembler
         # reads evidence here — do not reorder (uncovered section would be missed).
-        await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+        # ReportAssembler 收 bb（blackbox/）：黑盒 evidence/findings 在 blackbox/ 自洽。
+        await ReportAssembler.assemble(bb, vuln_classes, report_path)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -389,7 +399,7 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
         from shannon_core.interfaces.report_output_provider import NoOpReportOutputProvider
 
         deliverables = _get_deliverables_path(input)
-        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        report_path = blackbox_dir(deliverables) / "comprehensive_security_assessment_report.md"
 
         session_path = Path(input.workspace_path) / "session.json" if input.workspace_path else None
         if session_path:

@@ -14,6 +14,7 @@ from shannon_core.models.queue_schemas import (
     XssVulnerability,
 )
 from shannon_core.utils.file_io import async_path_exists, async_read_file, async_write_file
+from shannon_core.utils.paths import resolve_track_deliverable
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +204,44 @@ class FindingsRenderer:
     async def render_findings_from_queues(
         deliverables_path: Path,
         report_config: ReportConfig | None = None,
+        *,
+        queue_subdir: str | None = None,
+        findings_subdir: str | None = None,
     ) -> None:
+        """Render findings MD from queue JSON.
+
+        Shared by both whitebox and blackbox callers. The two keyword-only params
+        route queue READS and findings WRITES to track subdirectories without
+        coupling this shared service to either caller's layout:
+
+        - ``findings_subdir``: when set, findings MD is written to
+          ``deliverables_path / findings_subdir /`` (created if missing). When
+          ``None`` (the whitebox default), findings are written directly under
+          ``deliverables_path`` — preserving the pre-2026-07 behaviour so the
+          whitebox caller's reads/writes stay inside ``whitebox/``.
+        - ``queue_subdir``: when set, queue JSON is read via
+          :func:`resolve_track_deliverable` (``deliverables_path / queue_subdir /
+          filename`` with legacy root fallback). When ``None``, queues are read
+          directly under ``deliverables_path``.
+
+        Defaults (``None``/``None``) preserve the old single-positional-arg
+        behaviour — existing whitebox callers are unaffected.
+        """
         config = report_config or ReportConfig()
+        if findings_subdir:
+            findings_base = deliverables_path / findings_subdir
+            findings_base.mkdir(parents=True, exist_ok=True)
+        else:
+            findings_base = deliverables_path
         for _vuln_class, class_cfg in CLASS_CONFIG.items():
-            findings_path = deliverables_path / class_cfg.findings_file
+            findings_path = findings_base / class_cfg.findings_file
             if await async_path_exists(findings_path):
                 continue
-            queue_path = deliverables_path / class_cfg.queue_file
+            if queue_subdir:
+                queue_path = resolve_track_deliverable(
+                    deliverables_path, queue_subdir, class_cfg.queue_file)
+            else:
+                queue_path = deliverables_path / class_cfg.queue_file
             if not await async_path_exists(queue_path):
                 continue
 
