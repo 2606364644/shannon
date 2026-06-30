@@ -517,19 +517,25 @@ async def detect_whitebox_results(
     workflow 侧（用返回值驱动）。corr 路径由 workflow 在 sandbox 外拼好后以 str 传入。
     返回 {has_whitebox_results, found_classes, corr_classes}。
     """
-    from shannon_core.utils.paths import has_valid_whitebox_results
+    from shannon_core.utils.paths import (
+        has_valid_whitebox_results,
+        resolve_track_deliverable,
+        WHITEBOX_SUBDIR,
+    )
 
     dlv = Path(deliverables_path)
     found_classes = [
         vt for vt in vuln_classes
-        if has_valid_whitebox_results(dlv / f"{vt}_exploitation_queue.json")
+        if has_valid_whitebox_results(
+            resolve_track_deliverable(dlv, WHITEBOX_SUBDIR, f"{vt}_exploitation_queue.json"))
     ]
     corr_classes: list[str] = []
     if correlation_deliverables_path and not found_classes:
         corr_dlv = Path(correlation_deliverables_path)
         corr_classes = [
             vt for vt in vuln_classes
-            if has_valid_whitebox_results(corr_dlv / f"{vt}_exploitation_queue.json")
+            if has_valid_whitebox_results(
+                resolve_track_deliverable(corr_dlv, WHITEBOX_SUBDIR, f"{vt}_exploitation_queue.json"))
         ]
     return {
         "has_whitebox_results": bool(found_classes or corr_classes),

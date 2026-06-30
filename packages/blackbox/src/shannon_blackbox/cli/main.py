@@ -311,11 +311,15 @@ def show(workspace_name):
     summary = info["deliverables_summary"]
     if summary["vuln_queues"] or summary["reports"]:
         click.echo("\n  Deliverables:")
-        from shannon_core.utils.paths import deliverables_dir_for_workspace
+        from shannon_core.utils.paths import (
+            deliverables_dir_for_workspace,
+            resolve_track_deliverable,
+            WHITEBOX_SUBDIR,
+        )
         deliverables_dir = deliverables_dir_for_workspace(ws)
         for vc in summary["vuln_queues"]:
             filename = f"{vc}_exploitation_queue.json"
-            filepath = deliverables_dir / filename
+            filepath = resolve_track_deliverable(deliverables_dir, WHITEBOX_SUBDIR, filename)
             if filepath.exists():
                 try:
                     data = json.loads(filepath.read_text(encoding="utf-8"))

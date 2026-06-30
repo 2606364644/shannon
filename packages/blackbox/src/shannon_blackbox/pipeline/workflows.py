@@ -7,7 +7,12 @@ from temporalio import workflow
 from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES
-from shannon_core.utils.paths import resolve_deliverables_path, has_valid_whitebox_results
+from shannon_core.utils.paths import (
+    resolve_deliverables_path,
+    has_valid_whitebox_results,
+    resolve_track_deliverable,
+    WHITEBOX_SUBDIR,
+)
 
 from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 
@@ -32,7 +37,8 @@ def has_correlation_results(corr_ws_deliverables: Path, vuln_classes: list[str])
     if not vuln_classes:
         return False
     for vt in vuln_classes:
-        queue_file = corr_ws_deliverables / f"{vt}_exploitation_queue.json"
+        queue_file = resolve_track_deliverable(
+            corr_ws_deliverables, WHITEBOX_SUBDIR, f"{vt}_exploitation_queue.json")
         if has_valid_whitebox_results(queue_file):
             return True
     return False
