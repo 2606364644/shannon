@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 
 import click
@@ -8,6 +9,7 @@ from pathlib import Path
 from shannon_core.config.env_loader import load_env
 from shannon_core.config.profile_validator import validate_active_profile
 from shannon_core.config.concurrency import get_max_concurrent, is_llm_track_enabled
+from shannon_core.config.vuln_selection import resolve_vuln_classes, InvalidVulnClass
 
 from shannon_core.services.temporal_infra import (
     ensure_infra,
@@ -42,10 +44,25 @@ def cli():
               type=click.Choice(["pre-recon", "recon", "vuln"]),
               help="回退到指定阶段重跑（pre-recon/recon/vuln）")
 @click.option("--debug", is_flag=True, help="扫描失败时在终端打印完整堆栈（调试用）")
-def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url, fresh, rewind, debug):
+@click.option(
+    "--vuln-classes", "vuln_classes_cli", default=None,
+    help="逗号分隔的 vuln 类（如 injection,xss）；优先于 SHANNON_VULN_CLASSES env 与 YAML vuln_classes。"
+)
+def start(repo, output, workspace, config_path, pipeline_testing, temporal_address, plain, url, fresh, rewind, debug, vuln_classes_cli):
     """Start a white-box security scan."""
     if fresh and rewind:
         raise click.UsageError("--fresh 与 --rewind 互斥，不能同时使用。")
+
+    # vuln 类优先级链: CLI > env（YAML/默认在 workflow 层 select_vuln_classes 兜底）。
+    # env 在 CLI 层读（workflow sandbox 不变量：workflow.run() 内禁 env 解析）。
+    try:
+        override = resolve_vuln_classes(
+            vuln_classes_cli,
+            os.environ.get("SHANNON_VULN_CLASSES"),
+        )
+    except InvalidVulnClass as e:
+        raise click.UsageError(str(e)) from e
+
     from shannon_whitebox.worker import run_scan
 
     input = PipelineInput(
@@ -57,6 +74,7 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
         pipeline_testing_mode=pipeline_testing,
         max_concurrent=get_max_concurrent(),
         enable_llm_track=is_llm_track_enabled(),
+        vuln_classes=override,
     )
     if fresh:
         setattr(input, "_fresh", True)

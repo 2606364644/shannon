@@ -426,3 +426,92 @@ def test_start_workflow_failure_debug_prints_traceback():
 
     assert result.exit_code == 1
     assert "Traceback" in result.output
+
+
+def _patch_start_env(monkeypatch, tmp_path):
+    """patch 掉 start 命令里的 infra/prereq/run_scan，返回捕获 PipelineInput 的 dict。"""
+    from unittest.mock import AsyncMock
+
+    captured: dict = {}
+
+    async def fake_run_scan(input, *args, **kwargs):
+        captured["vuln_classes"] = input.vuln_classes
+        return {
+            "status": "completed",
+            "workspace_name": "ws",
+            "deliverables_path": str(tmp_path),
+            "web_url": "",
+        }
+
+    # cli/main.py:49 是函数内 `from shannon_whitebox.worker import run_scan`，
+    # patch worker 模块源头即可被函数内 import 取到。
+    monkeypatch.setattr("shannon_whitebox.worker.run_scan", fake_run_scan)
+    # ensure_infra 是顶部 import，绑定在 cli.main 命名空间。
+    monkeypatch.setattr("shannon_whitebox.cli.main.ensure_infra", AsyncMock(return_value=None))
+    # ensure_prerequisite 是函数内 import（line 67），patch 源头模块。
+    monkeypatch.setattr(
+        "shannon_core.runtime.prerequisites.ensure_prerequisite",
+        lambda *a, **k: None,
+    )
+    return captured
+
+
+def test_start_vuln_classes_option_sets_pipeline_input(monkeypatch, tmp_path):
+    """--vuln-classes 逗号分隔 → PipelineInput.vuln_classes。"""
+    captured = _patch_start_env(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["start", "-r", str(repo), "--vuln-classes", "injection,xss", "--plain"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["vuln_classes"] == ["injection", "xss"]
+
+
+def test_start_vuln_classes_env_sets_pipeline_input(monkeypatch, tmp_path):
+    """SHANNON_VULN_CLASSES env → PipelineInput.vuln_classes。"""
+    monkeypatch.setenv("SHANNON_VULN_CLASSES", "injection,ssrf")
+    captured = _patch_start_env(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["start", "-r", str(repo), "--plain"])
+    assert result.exit_code == 0, result.output
+    assert captured["vuln_classes"] == ["injection", "ssrf"]
+
+
+def test_start_vuln_classes_cli_overrides_env(monkeypatch, tmp_path):
+    """CLI > env 优先。"""
+    monkeypatch.setenv("SHANNON_VULN_CLASSES", "ssrf")
+    captured = _patch_start_env(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["start", "-r", str(repo), "--vuln-classes", "xss", "--plain"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["vuln_classes"] == ["xss"]
+
+
+def test_start_vuln_classes_invalid_raises_usage_error(monkeypatch, tmp_path):
+    """非法 vuln 类 → click.UsageError（exit_code != 0，提示含合法值）。"""
+    captured = _patch_start_env(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["start", "-r", str(repo), "--vuln-classes", "injection,foo", "--plain"],
+    )
+    assert result.exit_code != 0
+    assert "foo" in result.output
+    # run_scan 不应被调用（解析在构造 PipelineInput 前就失败）
+    assert "vuln_classes" not in captured
