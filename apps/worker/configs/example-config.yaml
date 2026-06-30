@@ -4,8 +4,8 @@
 # Description of the target environment (optional, max 500 chars)
 description: "Next.js e-commerce app on PostgreSQL. Local dev environment — .env files contain local-only credentials, not deployed to production."
 
-# Limit which vulnerability classes run end-to-end (optional, default: all six)
-# vuln_classes: [injection, xss, auth, authz, ssrf, misconfig]
+# Limit which vulnerability classes run end-to-end (optional, default: all five)
+# vuln_classes: [injection, xss, auth, authz, ssrf]
 
 # Skip the exploitation phase (optional, default: "true")
 # exploit: "false"

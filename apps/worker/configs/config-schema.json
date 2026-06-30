@@ -144,13 +144,13 @@
     },
     "vuln_classes": {
       "type": "array",
-      "description": "Vulnerability classes to test. When omitted, all six classes run. When set, only listed classes run; their vuln+exploit agents and report sections are included.",
+      "description": "Vulnerability classes to test. When omitted, all five classes run. When set, only listed classes run; their vuln+exploit agents and report sections are included.",
       "items": {
         "type": "string",
-        "enum": ["injection", "xss", "auth", "authz", "ssrf", "misconfig"]
+        "enum": ["injection", "xss", "auth", "authz", "ssrf"]
       },
       "minItems": 1,
-      "maxItems": 6,
+      "maxItems": 5,
       "uniqueItems": true
     },
     "exploit": {
