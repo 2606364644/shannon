@@ -90,17 +90,6 @@ const AuthzVulnerability = baseVulnerability.extend({
   minimal_witness: z.string().optional(),
 });
 
-const MisconfigVulnerability = baseVulnerability.extend({
-  source_endpoint: z.string().optional(),
-  vulnerable_code_location: z.string().optional(),
-  missing_defense: z.string().optional(),
-  exploitation_hypothesis: z.string().optional(),
-  suggested_exploit_technique: z.string().optional(),
-  vulnerable_parameter: z.string().optional(),
-  redirect_sink: z.string().optional(),
-  existing_validation: z.string().optional(),
-});
-
 // === Inferred Entry Types (consumed by renderer) ===
 
 export type InjectionFinding = z.infer<typeof InjectionVulnerability>;
@@ -108,7 +97,6 @@ export type XssFinding = z.infer<typeof XssVulnerability>;
 export type AuthFinding = z.infer<typeof AuthVulnerability>;
 export type SsrfFinding = z.infer<typeof SsrfVulnerability>;
 export type AuthzFinding = z.infer<typeof AuthzVulnerability>;
-export type MisconfigFinding = z.infer<typeof MisconfigVulnerability>;
 
 // === Convert to JSON Schema for SDK ===
 
@@ -202,22 +190,6 @@ function buildOutputFormats(exploit: boolean): Partial<Record<AgentName, JsonSch
         ),
       }),
     ),
-    'misconfig-vuln': toOutputFormat(
-      z.object({
-        vulnerabilities: z.array(
-          base.extend({
-            source_endpoint: z.string().optional(),
-            vulnerable_code_location: z.string().optional(),
-            missing_defense: z.string().optional(),
-            exploitation_hypothesis: z.string().optional(),
-            suggested_exploit_technique: z.string().optional(),
-            vulnerable_parameter: z.string().optional(),
-            redirect_sink: z.string().optional(),
-            existing_validation: z.string().optional(),
-          }),
-        ),
-      }),
-    ),
   };
 }
 
@@ -230,7 +202,6 @@ const VULN_AGENT_QUEUE_FILENAMES: Partial<Record<AgentName, string>> = {
   'auth-vuln': 'auth_exploitation_queue.json',
   'ssrf-vuln': 'ssrf_exploitation_queue.json',
   'authz-vuln': 'authz_exploitation_queue.json',
-  'misconfig-vuln': 'misconfig_exploitation_queue.json',
 };
 
 /** Returns the structured output format for a vuln agent, or undefined for non-vuln agents. */

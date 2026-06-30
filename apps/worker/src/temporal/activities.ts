@@ -440,9 +440,7 @@ export async function runAuthzCoverageCheck(input: ActivityInput): Promise<void>
   const report = await checkAuthzCoverage(dir);
   await atomicWrite(path.join(dir, 'authz_coverage_report.json'), report);
   if (report.missingDataFiles.length > 0) {
-    logger.info(
-      `Authz coverage check skipped — missing data files: ${report.missingDataFiles.join(', ')}`,
-    );
+    logger.info(`Authz coverage check skipped — missing data files: ${report.missingDataFiles.join(', ')}`);
     return;
   }
   if (report.uncovered.length > 0) {
@@ -453,11 +451,6 @@ export async function runAuthzCoverageCheck(input: ActivityInput): Promise<void>
   } else {
     logger.info(`Authz coverage complete: all ${report.totalUserEndpoints} USER endpoints covered`);
   }
-}
-
-// misconfig has no MCP collector — the agent writes its deliverable directly.
-export async function runMisconfigVulnAgent(input: ActivityInput): Promise<AgentMetrics> {
-  return runAgentActivity('misconfig-vuln', input);
 }
 
 interface ExploitQueueEntry {
@@ -545,11 +538,6 @@ export async function runSsrfExploitAgent(input: ActivityInput): Promise<AgentMe
 
 export async function runAuthzExploitAgent(input: ActivityInput): Promise<AgentMetrics> {
   return runExploitAgentWithCollector('authz-exploit', 'authz', input);
-}
-
-// misconfig has no MCP collector — the agent writes its evidence directly.
-export async function runMisconfigExploitAgent(input: ActivityInput): Promise<AgentMetrics> {
-  return runAgentActivity('misconfig-exploit', input);
 }
 
 export async function runReportAgent(input: ActivityInput): Promise<AgentMetrics> {

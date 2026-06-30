@@ -62,11 +62,6 @@ const VULN_SUMMARY_SPECS: Record<VulnClass, VulnSummarySpec> = {
     evidenceSection: 'SSRF Exploitation Evidence',
     noneFoundLabel: 'SSRF',
   },
-  misconfig: {
-    heading: 'Security Misconfiguration Vulnerabilities',
-    evidenceSection: 'Security Misconfiguration Exploitation Evidence',
-    noneFoundLabel: 'security misconfiguration',
-  },
 };
 
 function renderVulnSummarySubsections(selected: readonly VulnClass[]): string {

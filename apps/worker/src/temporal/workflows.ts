@@ -391,13 +391,6 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
         runVuln: () => a.runAuthzVulnAgent(activityInput),
         runExploit: () => a.runAuthzExploitAgent(activityInput),
       },
-      {
-        vulnType: 'misconfig',
-        vulnAgent: 'misconfig-vuln',
-        exploitAgent: 'misconfig-exploit',
-        runVuln: () => a.runMisconfigVulnAgent(activityInput),
-        runExploit: () => a.runMisconfigExploitAgent(activityInput),
-      },
     ];
   }
 
@@ -764,7 +757,7 @@ export async function whiteboxPipelineWorkflow(input: PipelineInput): Promise<Pi
     const reconInput: ActivityInput = { ...activityInput, promptOverride: 'recon-static' };
     await runSequentialPhase('recon', 'recon', a.runReconAgent, reconInput);
 
-    // === Phase 3: Vulnerability Analysis (6 agents) ===
+    // === Phase 3: Vulnerability Analysis (5 agents) ===
     state.currentPhase = 'vulnerability-analysis';
     state.currentAgent = 'pipelines';
     await a.logPhaseTransition(activityInput, 'vulnerability-analysis', 'start');
@@ -999,7 +992,6 @@ export async function blackboxPipelineWorkflow(input: PipelineInput): Promise<Pi
       auth: a.runAuthExploitAgent,
       ssrf: a.runSsrfExploitAgent,
       authz: a.runAuthzExploitAgent,
-      misconfig: a.runMisconfigExploitAgent,
     };
 
     const exploitThunks = vulnTypesWithQueues.map((vulnType) => {

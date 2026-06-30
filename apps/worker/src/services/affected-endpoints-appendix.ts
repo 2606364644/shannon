@@ -83,16 +83,6 @@ const CLASS_CONFIGS: readonly ClassAppendixConfig[] = [
     }),
   },
   {
-    heading: 'Security Misconfiguration',
-    queueFile: 'misconfig_exploitation_queue.json',
-    extract: (r) => ({
-      id: str(r.ID),
-      endpoint: str(r.source_endpoint),
-      witness: '',
-      location: str(r.vulnerable_code_location),
-    }),
-  },
-  {
     heading: 'Injection',
     queueFile: 'injection_exploitation_queue.json',
     extract: (r) => ({
