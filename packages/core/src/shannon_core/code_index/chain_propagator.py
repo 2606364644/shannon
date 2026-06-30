@@ -17,11 +17,14 @@ Algorithm:
 
 import logging
 import re
+from collections import defaultdict
 
 from shannon_core.code_index.models import CallChain, FuncBlock, ParameterSource
 from shannon_core.code_index.parameter_models import (
     IntraResult,
     PropagationStep,
+    SinkCallSite,
+    SourcePoint,
     TaintFlow,
 )
 
@@ -332,3 +335,128 @@ def _map_call_site_params_reverse(
             continue
         result.add(arg_expr)
     return result
+
+
+def _tainted_params_reaching_sink(
+    sink: "SinkCallSite",
+    intra: "IntraResult",
+) -> set[str]:
+    """sink 所在函数的哪些参数 tainted(到达 sink)。
+
+    优先用 intra.tainted_params(LLM/确定性 intra 分析);回退:dangerous_slots
+    的 expression 反推(若 intra 缺失)。
+    """
+    if intra and intra.tainted_params:
+        return set(intra.tainted_params)
+    # 回退:从 dangerous_slots.expression 提取参数名(浅)
+    out: set[str] = set()
+    for slot in getattr(sink, "dangerous_slots", []) or []:
+        expr = (slot.expression or "").strip()
+        if expr:
+            out.add(expr)
+    return out
+
+
+def _source_points_matching(
+    entry_id: str,
+    tainted_in_entry: set[str],
+    source_points: list["SourcePoint"],
+) -> list["SourcePoint"]:
+    """entry 的 tainted 变量命中哪些 SourcePoint(substring 匹配,过近似)。"""
+    out = []
+    for sp in source_points:
+        if sp.entry_point_id != entry_id:
+            continue
+        # SourcePoint.expression(如 req.query.x)或 param_name(x)出现在 entry 的 tainted 集合
+        for t in tainted_in_entry:
+            if sp.param_name in t or sp.expression in t or t in sp.expression:
+                out.append(sp)
+                break
+    return out
+
+
+def propagate_backward_across_chains(
+    chains: list[CallChain],
+    blocks: list[FuncBlock],
+    intra_results: dict[str, IntraResult],
+    sink_call_sites: list["SinkCallSite"],
+    source_points: list["SourcePoint"],
+    *,
+    max_depth: int = 20,
+) -> list[TaintFlow]:
+    """backward(Sink→Source):从 SinkCallSite 反向沿 chain 回溯,终点用 SourcePoint 锚定。
+
+    双向锚定:起点 SinkCallSite(sink 真实)+ 终点 SourcePoint(source 真实)。
+    只有反向追到真实 SourcePoint 的链才成立(产 TaintFlow);否则丢弃。
+    产出仍是 source→sink 语义的 TaintFlow(propagation_steps 正序化),下游零改动。
+    """
+    if not chains or not sink_call_sites:
+        return []
+
+    blocks_by_id: dict[str, FuncBlock] = {b.id: b for b in blocks}
+    sinks_by_caller: dict[str, list["SinkCallSite"]] = defaultdict(list)
+    for s in sink_call_sites:
+        sinks_by_caller[s.caller_id].append(s)
+
+    flows: list[TaintFlow] = []
+    for chain in chains:
+        if not chain.path:
+            continue
+        # 找 chain 上含 sink 的节点
+        for sink_step, sid in enumerate(chain.path):
+            sinks_here = sinks_by_caller.get(sid, [])
+            if not sinks_here:
+                continue
+            sink_func = blocks_by_id.get(sid)
+            if sink_func is None:
+                continue
+            for sink in sinks_here:
+                seed = _tainted_params_reaching_sink(
+                    sink, intra_results.get(sid))
+                if not seed:
+                    continue
+                # 反向沿 path[sink_step → 0]
+                current_tainted = set(seed)
+                steps_rev: list[PropagationStep] = []
+                anchored: list["SourcePoint"] = []
+                for i in range(sink_step, -1, -1):
+                    func_id = chain.path[i]
+                    if i == 0:
+                        # 到达 entry:终点锚定
+                        anchored = _source_points_matching(
+                            func_id, current_tainted, source_points)
+                        break
+                    callee = blocks_by_id.get(func_id)
+                    caller = blocks_by_id.get(chain.path[i - 1])
+                    if callee is None or caller is None:
+                        continue
+                    caller_tainted = _map_call_site_params_reverse(
+                        callee_block=callee, callee_tainted=current_tainted,
+                        caller_block=caller)
+                    steps_rev.append(PropagationStep(
+                        from_func_id=callee.id,
+                        from_param=next(iter(current_tainted), ""),
+                        to_func_id=caller.id,
+                        to_param=next(iter(caller_tainted), ""),
+                        code_location=f"{callee.file_path}:{callee.start_line}",
+                        confidence=0.9,
+                    ))
+                    current_tainted = caller_tainted
+                    if sink_step - (i - 1) > max_depth:
+                        break
+                for sp in anchored:
+                    steps_fwd = list(reversed(steps_rev))
+                    flows.append(TaintFlow(
+                        flow_id=f"{sp.entry_point_id}->{sink.id}",
+                        entry_point_id=sp.entry_point_id,
+                        source_param=sp.param_name,
+                        source_type=sp.source_type,  # 精确,非硬编码 QUERY_PARAM
+                        propagation_steps=steps_fwd,
+                        sink_call_site_id=sink.id,
+                        confidence=min(
+                            (s.confidence for s in steps_fwd),
+                            default=0.9,
+                        ),
+                        notes="backward-anchored",
+                    ))
+    return flows

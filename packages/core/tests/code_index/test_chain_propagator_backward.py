@@ -1,5 +1,11 @@
-from shannon_core.code_index.models import FuncBlock
-from shannon_core.code_index.chain_propagator import _map_call_site_params_reverse
+from shannon_core.code_index.models import CallChain, FuncBlock, ParameterSource
+from shannon_core.code_index.parameter_models import (
+    IntraResult, SinkCallSite, SinkCategory, SlotContext, SourcePoint, TaintFlow,
+)
+from shannon_core.code_index.chain_propagator import (
+    _map_call_site_params_reverse,
+    propagate_backward_across_chains,
+)
 
 
 def _blk(fid, source, params):
@@ -37,3 +43,61 @@ def test_reverse_map_conservative_when_no_call_args_found():
         callee_block=callee, callee_tainted={"p"}, caller_block=caller)
     # 找不到调用实参 → 保守:caller 所有 params 视为 tainted
     assert out == {"req"}
+
+
+def _sink(caller_id, line=10):
+    return SinkCallSite(
+        id=f"{caller_id}::eval::{line}:0", caller_id=caller_id, callee_name="eval",
+        callee_receiver=None, category=SinkCategory.COMMAND, sink_subtype="command_eval",
+        file_path="a.js", line=line, column=0,
+        dangerous_slots=[], rule_id="ts-eval", needs_review=False,
+    )
+
+
+def _source(entry_id, param, stype, expr):
+    return SourcePoint(
+        id=f"{entry_id}::{param}::1", entry_point_id=entry_id, param_name=param,
+        source_type=stype, expression=expr, file_path="a.js", line=1,
+        confidence=0.9, rule_id="ts-express-query",
+    )
+
+
+def test_backward_anchor_succeeds_when_sink_reaches_sourcepoint():
+    # chain: handler(entry) → callee(含 eval sink)
+    handler = _blk("a.js:handler:1",
+                   "function handler(req){ callee(req.query.x); }", ["req"])
+    callee = _blk("a.js:callee:5",
+                  "function callee(p){ eval(p); }", ["p"])
+    chain = CallChain(entry_point_id=handler.id, path=[handler.id, callee.id],
+                      depth=1, has_unresolved=False)
+    # callee 的 intra:tainted_params={p}, hits={sink_id: conf}
+    sink = _sink(callee.id, line=6)
+    intra = {
+        handler.id: IntraResult(tainted_params={"req.query.x"}, hits={}),
+        callee.id: IntraResult(tainted_params={"p"}, hits={sink.id: 0.9}),
+    }
+    sps = [_source(handler.id, "x", ParameterSource.QUERY_PARAM, "req.query.x")]
+    flows = propagate_backward_across_chains(
+        [chain], [handler, callee], intra, [sink], sps)
+    assert len(flows) == 1
+    assert isinstance(flows[0], TaintFlow)
+    assert flows[0].sink_call_site_id == sink.id
+    assert flows[0].source_type == ParameterSource.QUERY_PARAM  # 精确,非硬编码
+
+
+def test_backward_drops_chain_when_no_sourcepoint_anchor():
+    # sink 存在但反向追不到任何 SourcePoint(entry 无可控 source)→ 丢弃
+    handler = _blk("a.js:handler:1",
+                   "function handler(req){ callee('safe_literal'); }", ["req"])
+    callee = _blk("a.js:callee:5",
+                  "function callee(p){ eval(p); }", ["p"])
+    chain = CallChain(entry_point_id=handler.id, path=[handler.id, callee.id],
+                      depth=1, has_unresolved=False)
+    sink = _sink(callee.id, line=6)
+    intra = {
+        handler.id: IntraResult(tainted_params=set(), hits={}),
+        callee.id: IntraResult(tainted_params={"p"}, hits={sink.id: 0.9}),
+    }
+    flows = propagate_backward_across_chains(
+        [chain], [handler, callee], intra, [sink], [])  # 无 SourcePoint
+    assert flows == []  # 双向锚定:无 source 锚 → 丢弃
