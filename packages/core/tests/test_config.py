@@ -96,3 +96,20 @@ def test_auto_detect_whitebox_disabled():
     """auto_detect_whitebox can be set to False."""
     c = Config(auto_detect_whitebox=False)
     assert c.auto_detect_whitebox is False
+
+
+def test_config_rejects_unknown_vuln_class():
+    """F1 防回退: YAML vuln_classes 非法值 → pydantic Literal 在加载时拒绝（parse_config 当场报错），
+    不流到 AgentName("foo-vuln") 运行中崩溃。CLI/env 经 resolve_vuln_classes→_parse_and_validate 校验，
+    YAML 经 pydantic Literal 校验——两侧都 fail fast。锁住 Literal 不被未来放宽。
+
+    背景：final review 曾误报 YAML 值未校验（F1）；实测 pydantic 对 list[VulnClass]（VulnClass=Literal[...]）
+    逐元素校验，非法值在 Config 构造时即 ValidationError。本测试锁住该行为。
+    """
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError) as exc:
+        Config(vuln_classes=["injection", "foo"])
+    msg = str(exc.value)
+    assert "foo" in msg
+    for legal in ("injection", "xss", "auth", "authz", "ssrf"):
+        assert legal in msg
