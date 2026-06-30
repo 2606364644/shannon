@@ -14,6 +14,7 @@ from shannon_core.agents.runner import run_claude_prompt
 from shannon_core.agents.validators import get_queue_filename, validate_deliverable
 from shannon_core.git_manager import GitManager
 from shannon_core.prompts.manager import PromptManager
+from shannon_core.services.validate_authentication import auth_state_path
 
 if TYPE_CHECKING:
     from shannon_core.logging.activity_logger import ActivityLogger
@@ -81,6 +82,11 @@ class AgentExecutor:
             "repo_path": str(repo),
             "deliverables_path": str(deliverables),
             "scratchpad_path": str(deliverables.parent / "scratchpad"),
+            # 统一注入 auth-state 路径（对齐 TS agent-execution.ts:133）。
+            # workspace_path = deliverables.parent（≡ input.workspace_path，
+            # 见 spec §3.3）。仅"有 auth 配置 + prompt include shared-session
+            # partial"的 agent 生效；其余 manager strip block，no-op（spec §4）。
+            "AUTH_STATE_FILE": str(auth_state_path(deliverables.parent)),
         }
         if config:
             variables["browser_engine"] = config.browser_engine
