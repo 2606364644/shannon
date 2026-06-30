@@ -150,7 +150,7 @@ prompt 直接列出要 spawn 的子 agent 角色，数量与仓库大小无关�
 | 发现 sink | pre-recon Sink Hunter | A（角色固定） | 1 个 Sink Hunter 子 agent；它内部 glob 后逐文件 Read，是否对每文件/变体再 spawn **未强制**，由该子 agent 自主 |
 | 验证 sink 调用链 | vuln `injection-vuln` 等 | B（数据驱动） | ≈ Section 7 的 source 数，每 source 一条追链子 agent |
 
-**数量级**（无固定值，给量级感）：pre-recon 固定 6 个；每个 vuln agent ≈ 其前置 Section 的 source/sink 条数（小仓库几个，大仓库十几个）；6 个 vuln agent 并行 → 整个白盒子 agent 总数从十几个到上百个。这就是 `maxTurns: 10_000` 的实际压力来源（主 agent 持续 spawn + 子 agent 各自几十次工具调用）。
+**数量级**（无固定值，给量级感）：pre-recon 固定 6 个；每个 vuln agent ≈ 其前置 Section 的 source/sink 条数（小仓库几个，大仓库十几个）；5 个 vuln agent 并行 → 整个白盒子 agent 总数从十几个到上百个。这就是 `maxTurns: 10_000` 的实际压力来源（主 agent 持续 spawn + 子 agent 各自几十次工具调用）。
 
 ---
 
@@ -428,7 +428,7 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 
 ### 6.4 并行 vuln agent 的隔离
 
-白盒路径的漏洞分析阶段是 **5 条**独立 pipeline 并行（`WHITEBOX_VULN_CLASSES` = injection / xss / auth / authz / ssrf，`workflows.ts:645, 761-771`；local runner 使用 `ALL_VULN_CLASSES`，值相同，`types/config.ts:27`）。pentest 路径有 **6 条**（含 misconfig，`buildPipelineConfigs` `workflows.ts:351-402`）。注意 `workflows.ts:13` 注释写的是"5 pipelined pairs"（指 pentest 的 vuln→exploit 配对数），但 pentest 实际 6 个含 misconfig，该数已过时；白盒不跑 exploit、本无配对概念，此注释与白盒路径无关。
+白盒路径的漏洞分析阶段是 **5 条**独立 pipeline 并行（`WHITEBOX_VULN_CLASSES` = injection / xss / auth / authz / ssrf，`workflows.ts:645, 761-771`；local runner 使用 `ALL_VULN_CLASSES`，值相同，`types/config.ts:27`）。pentest 路径同为 **5 条**（`buildPipelineConfigs`，`workflows.ts:351-402`）；`workflows.ts:13` 注释 "5 pipelined pairs" 与 pentest 一致。白盒不跑 exploit、本无配对概念，此注释与白盒路径无关。
 
 **白盒编排——两条路径的并行模型不同**：
 
@@ -468,9 +468,8 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 
 | # | 落差 | 详情 |
 |---|---|---|
-| 1 | **白盒未纳入 misconfig** | `WHITEBOX_VULN_CLASSES`（`workflows.ts:645`）= 5 个（injection/xss/auth/authz/ssrf），不含 misconfig。misconfig 仅在 pentest 路径（`buildPipelineConfigs` `:351-402`）。openspec proposal `2026-05-26-add-misconfig-agent` 计划纳入白盒但未落地。 |
-| 2 | **Section 7 "Injection Sources" prompt 间断裂** | `vuln-injection.txt:141` 指示 injection agent 读 pre-recon 的 "Section 7. Injection Sources (Command Injection and SQL Injection)"，但 `pre-recon-code.txt:254` 的 deliverable 大纲里 Section 7 实际是 "Overall Codebase Indexing"。injection agent 的注入源清单无确定上游契约。 |
-| 3 | **源码注释滞后** | `workflows.ts:756` 注释写 "(6 agents)"，白盒实际 5 个（vulnAgents 定义在 `:761-771`）；`:13` 注释写 "5 pipelined pairs"（指 pentest 的 vuln→exploit 配对），对 pentest 过时（实际 6 个含 misconfig）。 |
+| 1 | **Section 7 "Injection Sources" prompt 间断裂** | `vuln-injection.txt:141` 指示 injection agent 读 pre-recon 的 "Section 7. Injection Sources (Command Injection and SQL Injection)"，但 `pre-recon-code.txt:254` 的 deliverable 大纲里 Section 7 实际是 "Overall Codebase Indexing"。injection agent 的注入源清单无确定上游契约。 |
+| 2 | **源码注释滞后** | `workflows.ts` Phase 3 注释曾写 "(6 agents)" 与白盒实际 5 个不符（已订正为 5）。 |
 
 ---
 
@@ -491,7 +490,7 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 - `apps/worker/src/services/container.ts` — per-workflow DI container；`AuditSession` 逐 agent 注入（不进容器，`NOTE @ :35-39, :54-55`）
 - `apps/worker/src/temporal/workflows.ts:645` — `WHITEBOX_VULN_CLASSES`（白盒 5 个 vuln）
 - `apps/worker/src/temporal/workflows.ts:761-771` — 白盒 vulnAgents 定义（5 条，`Promise.allSettled @ :795`）
-- `apps/worker/src/temporal/workflows.ts:351-402` — pentest `buildPipelineConfigs`（6 条含 misconfig，`runWithConcurrencyLimit @ :407`）
+- `apps/worker/src/temporal/workflows.ts:351-402` — pentest `buildPipelineConfigs`（5 条，`runWithConcurrencyLimit @ :407`）
 - `apps/worker/src/temporal/activities.ts:578` — `syncCodePathDenyRules`，每 workflow 一次
 
 **报告与翻译（local runner Phase 5-7）**
@@ -503,7 +502,7 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 **白盒分析 prompt**
 - `apps/worker/prompts/pre-recon-code.txt` — sink/入口点发现（Sections 9/10）
 - `apps/worker/prompts/vuln-injection.txt` — 调用链追踪 + slot 研判
-- `apps/worker/prompts/vuln-ssrf.txt` / `vuln-xss.txt` / `vuln-authz.txt` / `vuln-misconfig.txt` — 各专项研判
+- `apps/worker/prompts/vuln-ssrf.txt` / `vuln-xss.txt` / `vuln-authz.txt` — 各专项研判
 
 **Shared partials（辅助机制）**
 - `apps/worker/prompts/shared/_endpoint-security-context.txt` — endpoint 可达性查表
@@ -515,4 +514,4 @@ phase agent 之间不共享内存，只通过磁盘 deliverable 通信。每个 
 - `apps/worker/src/ai/settings-writer.ts` — 把 `code_path` deny 规则写入 `~/.claude/settings.json`，SDK 在工具层强制（即便 `bypassPermissions`）
 
 **配置类型**
-- `apps/worker/src/types/config.ts:27` — `ALL_VULN_CLASSES`（5 项：injection/xss/auth/authz/ssrf；misconfig 排除于默认值，需通过 `vuln_classes` 配置启用）
+- `apps/worker/src/types/config.ts:27` — `ALL_VULN_CLASSES`（5 项：injection/xss/auth/authz/ssrf）

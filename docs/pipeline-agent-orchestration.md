@@ -1,6 +1,6 @@
 # Shannon Pipeline Agent 编排全景
 
-> 适用版本：当前 `feat/fork` 分支。注意 `CLAUDE.md` 里 "5 parallel agents" 的描述已过时——漏洞类别现为 **6 个**（新增 `misconfig`）。
+> 适用版本：当前 `feat/fork` 分支。漏洞类别为 **5 个**（injection / xss / auth / authz / ssrf）。
 
 Shannon 是一个**两层 agent**体系：
 
@@ -11,14 +11,14 @@ Shannon 是一个**两层 agent**体系：
 
 ## 第一层：Phase Agent 编排（Temporal / TS 层）
 
-Agent 注册表：`apps/worker/src/session-manager.ts`（`AGENTS` record）。全量列表 `ALL_AGENTS`：`apps/worker/src/types/agents.ts:15`。漏洞类型 `VulnType`：`injection | xss | auth | ssrf | authz | misconfig`（`apps/worker/src/types/agents.ts:59`）。
+Agent 注册表：`apps/worker/src/session-manager.ts`（`AGENTS` record）。全量列表 `ALL_AGENTS`：`apps/worker/src/types/agents.ts:15`。漏洞类型 `VulnType`：`injection | xss | auth | ssrf | authz`（`apps/worker/src/types/agents.ts`）。
 
 编排逻辑全在 `apps/worker/src/temporal/workflows.ts`，共 **三种工作流变体**。
 
 ### 1. 默认完整流水线 `pentestPipelineWorkflow`
 
 ```
-pre-recon → recon → [6 个 vuln→exploit 流水线并行] → attack-chains → report
+pre-recon → recon → [5 个 vuln→exploit 流水线并行] → attack-chains → report
 ```
 
 | 阶段 | agent 数 | 派发方式 |
@@ -26,14 +26,14 @@ pre-recon → recon → [6 个 vuln→exploit 流水线并行] → attack-chains
 | 预检（preflight / auth-validation） | 1 个 `validate-authentication` | 顺序；浏览器单次真实登录存 session，**不计入 `ALL_AGENTS`** |
 | **Pre-Recon** | 1 个 `pre-recon` | 顺序（`runSequentialPhase`），建架构基线 |
 | **Recon** | 1 个 `recon` | 顺序，依赖 pre-recon |
-| **漏洞分析 + 利用** | 最多 **6 vuln + 6 exploit** | **6 路 pipelined 并行**（见下） |
+| **漏洞分析 + 利用** | 最多 **5 vuln + 5 exploit** | **5 路 pipelined 并行**（见下） |
 | 攻击链组装 | 0 | `buildAttackChainsActivity`，非 agent，失败非致命 |
 | **报告** | 1 个 `report` | 顺序 |
 
 **Phase 3-4 核心逻辑**（`workflows.ts:474-557`）：每种漏洞类型是一条**独立流水线**，不是"先所有 vuln 再所有 exploit"两道栅栏：
 
 ```
-对每个 vuln 类别 ∈ {injection, xss, auth, ssrf, authz, misconfig}:
+对每个 vuln 类别 ∈ {injection, xss, auth, ssrf, authz}:
     vuln agent  →  mergeFindingsIntoQueue  →  checkExploitationQueue
                                                     ↓ shouldExploit && exploit=true
                                                exploit agent
@@ -43,10 +43,10 @@ pre-recon → recon → [6 个 vuln→exploit 流水线并行] → attack-chains
 
 - **无同步栅栏**——某类的 exploit 在它自己的 vuln 跑完后**立即**启动，不等其它类。
 - **exploit 是条件性的**——`checkExploitationQueue` 判定该类是否有可利用发现，`shouldExploit=false` 则跳过。`exploit` 开关默认 `true`（`workflows.ts:273`），可在 config 关闭。
-- **并发上限**：`max_concurrent = pipelineConfig.max_concurrent_pipelines ?? ALL_VULN_CLASSES.length`（默认 6 全开）。`runWithConcurrencyLimit` 按 limit 放行；结果是**完成顺序**而非输入顺序（`workflows.ts:407`）。
+- **并发上限**：`max_concurrent = pipelineConfig.max_concurrent_pipelines ?? ALL_VULN_CLASSES.length`（默认 5 全开）。`runWithConcurrencyLimit` 按 limit 放行；结果是**完成顺序**而非输入顺序（`workflows.ts:407`）。
 - **vuln_classes 可裁剪**——config 里 `vuln_classes` 缩减后，被排除的类整条流水线跳过（`workflows.ts:544`）。
 
-完整跑（exploit 开启且全命中）= `1 + 1 + 6 + 6 + 1` = **15 个 agent**，正好对应 `ALL_AGENTS`（`agents.ts:15-31`）。`exploit: false` 时 = **9 个**。
+完整跑（exploit 开启且全命中）= `1 + 1 + 5 + 5 + 1` = **13 个 agent**，正好对应 `ALL_AGENTS`（`agents.ts:15-31`）。`exploit: false` 时 = **8 个**。
 
 ### 2. 白盒流水线 `whiteboxPipelineWorkflow`
 
@@ -56,7 +56,7 @@ pre-recon → recon(static) → [5 个 vuln 并行] → report     （无 exploi
 
 - Phase 1 pre-recon：1 个，顺序
 - Phase 2 **recon-static**：1 个，顺序（`promptOverride: 'recon-static'`，`workflows.ts:753`）
-- Phase 3：**5 个 vuln agent 并行**——`WHITEBOX_VULN_CLASSES = ['injection','xss','auth','authz','ssrf']`（`workflows.ts:645`），**无 misconfig、无 exploit**，用 `Promise.allSettled` 全并发
+- Phase 3：**5 个 vuln agent 并行**——`WHITEBOX_VULN_CLASSES = ['injection','xss','auth','authz','ssrf']`（`workflows.ts:645`），**无 exploit**，用 `Promise.allSettled` 全并发
 - Phase 4：1 个 report
 
 白盒总计 **8 个 agent**。本地白盒 runner 的 vuln 并发还受 `SHANNON_CONCURRENCY=<n>` / `--concurrency` 限制（其它两种变体不受此 env 限制）。
@@ -73,7 +73,7 @@ auth-validation → [对每个有 queue 的类型跑 exploit] → report
 - 对这些类型 `Promise.allSettled` 全并发跑对应 **exploit agent**（每个仍先过 `checkExploitationQueue`）
 - 1 个 report
 
-agent 数 = `命中队列的类型数(≤6)` + 1 个 report。
+agent 数 = `命中队列的类型数(≤5)` + 1 个 report。
 
 ### 派发的底层机制（三变体通用）
 
@@ -82,7 +82,7 @@ agent 数 = `命中队列的类型数(≤6)` + 1 个 report。
 1. **Activity wrapper**（`apps/worker/src/temporal/activities.ts`，如 `runInjectionVulnAgent`）——薄层，心跳 + 错误分类 + 容器生命周期。
 2. **`AgentExecutionService`**（`apps/worker/src/services/agent-execution.ts`）——统一 agent 生命周期，由 `AGENTS` 注册表驱动，自动重试 **3 次/agent**。
 3. **`claude-executor.ts`**——走 Claude Agent SDK（`maxTurns: 10_000`，`bypassPermissions`）真正执行。
-4. **浏览器隔离**：每个 agent 固定分配一个 playwright session（`agent1`~`agent6`），见 `session-manager.ts:183` 的 `PLAYWRIGHT_SESSION_MAPPING`，按 `promptTemplate` 路由，保证并行不互相踩 session。
+4. **浏览器隔离**：每个 agent 固定分配一个 playwright session（`agent1`~`agent5`），见 `session-manager.ts:183` 的 `PLAYWRIGHT_SESSION_MAPPING`，按 `promptTemplate` 路由，保证并行不互相踩 session。
 5. **resume**：已完成 agent 由 `shouldSkip()` 跳过，`computeExpectedAgents(vulnClasses, exploit)` 按本次 scope 算期望集（`workflows.ts:53`），全部完成即短路返回。
 
 ---
@@ -132,7 +132,7 @@ agent 数 = `命中队列的类型数(≤6)` + 1 个 report。
 
 Route Mapper / Authorization Checker / Input Validator / Session Handler（step 2，4 并行）+ Authorization Architecture（step 2.5）。
 
-#### Phase 3 — `vuln-*`（6 个：injection / xss / auth / authz / ssrf / misconfig）⭐ 数量动态
+#### Phase 3 — `vuln-*`（5 个：injection / xss / auth / authz / ssrf）⭐ 数量动态
 
 每个 vuln agent 都是「**强制 delegate** + 数量随代码规模动态决定」：
 
@@ -140,7 +140,7 @@ Route Mapper / Authorization Checker / Input Validator / Session Handler（step 
 - 主 agent 自己只负责综合分析 + 通过 MCP collector 写 `*_exploitation_queue.json`。
 - subagent 数量**不固定**——主 agent 按目标代码量自行决定，可能几个到十几个。Shannon 没有任何代码层限制。
 
-#### Phase 4 — `exploit-*`（6 个）⭐ 数量动态，用法不同
+#### Phase 4 — `exploit-*`（5 个）⭐ 数量动态，用法不同
 
 exploit agent 的 subagent **不是用来读代码，而是用来跑自动化脚本**：
 
@@ -151,7 +151,6 @@ exploit agent 的 subagent **不是用来读代码，而是用来跑自动化脚
 | exploit-auth | 多步认证自动化脚本 |
 | exploit-authz | 多用户迭代 / 角色切换测试 / 工作流自动化 |
 | exploit-ssrf | 内网扫描 / cloud metadata / 端口扫 |
-| exploit-misconfig | 多步自动化脚本 |
 
 数量动态，按需派生；主 agent 用 TodoWrite 管理任务清单。
 
@@ -176,10 +175,10 @@ config 里 `rules.focus` 写的 `[FILE]` / `[GLOB]` 条目也走 Task 工具：
 
 | 变体 | agent 数 |
 |---|---|
-| 默认完整（exploit 全命中） | **15**（pre-recon 1 + recon 1 + 6 vuln + 6 exploit + report 1） |
-| 默认完整（`exploit: false`） | **9** |
+| 默认完整（exploit 全命中） | **13**（pre-recon 1 + recon 1 + 5 vuln + 5 exploit + report 1） |
+| 默认完整（`exploit: false`） | **8** |
 | 白盒 `whiteboxPipelineWorkflow` | **8**（pre-recon 1 + recon 1 + 5 vuln + report 1） |
-| 黑盒 `blackboxPipelineWorkflow` | `命中队列类型数(≤6)` + report 1 |
+| 黑盒 `blackboxPipelineWorkflow` | `命中队列类型数(≤5)` + report 1 |
 
 ### 第二层（prompt 驱动，估算）
 
@@ -187,11 +186,11 @@ config 里 `rules.focus` 写的 `[FILE]` / `[GLOB]` 条目也走 Task 工具：
 |---|---|
 | pre-recon | **固定 6**（3 + 3 两波） |
 | recon | **固定 6 角色**（黑盒）/ **5 角色**（白盒 static） |
-| 6 个 vuln-* | 每个 **3 ~ 10+**（动态） |
-| 6 个 exploit-* | 每个 **2 ~ 8**（动态，按 exploit 复杂度） |
+| 5 个 vuln-* | 每个 **3 ~ 10+**（动态） |
+| 5 个 exploit-* | 每个 **2 ~ 8**（动态，按 exploit 复杂度） |
 | report | ~0 |
 
-一次完整扫描，第一层最多 **15 个**，第二层 subagent 至少 **12 个固定角色 + 动态几十个**，总量在 **50 ~ 150 个 subagent 量级**，完全由 prompt 驱动、TS 不感知。白盒 / 黑盒变体按各自缺省的 phase 对应缩减。
+一次完整扫描，第一层最多 **13 个**，第二层 subagent 至少 **12 个固定角色 + 动态几十个**，总量在 **50 ~ 150 个 subagent 量级**，完全由 prompt 驱动、TS 不感知。白盒 / 黑盒变体按各自缺省的 phase 对应缩减。
 
 ---
 

@@ -13,8 +13,7 @@
 | D3 | 三层 LLM 信息衰减 | 高 | PRE_RECON → RECON → Vuln 三次传递 | 早期遗漏向后传播且不可恢复 |
 | D4 | 错误状态覆盖 | 中 | state.error 是单值 str | 多个 agent 失败时只保留最后一个错误 |
 | D5 | Vuln Agent 无重试策略 | 中 | 无 retry_policy | 网络抖动可能导致某类漏洞完全跳过 |
-| D6 | 并行 Git 竞争风险 | 中 | 6 agent 共享 repo 目录 | git add -A && commit 可能冲突 |
-| D7 | Misconfig Agent 不一致 | 低 | prompt 风格与其他 5 个差异大 | 可能为半成品或后加入的模块 |
+| D6 | 并行 Git 竞争风险 | 中 | 5 agent 共享 repo 目录 | git add -A && commit 可能冲突 |
 
 ---
 
@@ -122,7 +121,7 @@ LLM 只在最后一步介入，只负责"判断是否是漏洞"，前面所有�
 
 ---
 
-## 五、D4-D7：工程层缺陷
+## 五、D4-D6：工程层缺陷
 
 ### 5.1 D4：错误状态覆盖
 
@@ -157,21 +156,9 @@ vuln_tasks.append(
 
 ### 5.3 D6：并行 Git 竞争风险
 
-6 个 vuln agent 并行运行，都往同一个 repo 的 `.shannon/deliverables/` 写文件。每个 agent 执行时都调用 `GitManager.create_checkpoint()`（git add -A && git commit）和 `GitManager.commit()`。
+5 个 vuln agent 并行运行，都往同一个 repo 的 `.shannon/deliverables/` 写文件。每个 agent 执行时都调用 `GitManager.create_checkpoint()`（git add -A && git commit）和 `GitManager.commit()`。
 
 多个 agent 同时执行 `git add -A` 可能导致：一个 agent 的 deliverable 被另一个 agent 的 commit 包含，或者 index.lock 冲突。
-
-### 5.4 D7：Misconfig Agent 不一致
-
-| 维度 | vuln-misconfig.txt（89 行） | 其他 5 个 vuln prompt（290-370 行） |
-|-|-|-|
-| TodoWrite 追踪 | 无 | 有任务管理 |
-| conclusion_trigger | 无 | 有严格触发条件 |
-| 共享 session 引用 | 无 | 有 |
-| 入口点引用机制 | 无 | 有 pre_recon 章节引用 |
-| false_positives_to_avoid | 无 | 有详细列表 |
-
-**推断**：misconfig-vuln 可能是后来加入的模块，尚未按其他 5 个 agent 的标准对齐。
 
 ---
 
@@ -196,7 +183,6 @@ vuln_tasks.append(
 4. **修复 state.error 为 list**：`PipelineState.errors: list[str]` 收集所有失败
 5. **为 Vuln Agent 添加 RetryPolicy**：至少 3 次重试
 6. **Git 并行隔离**：每个 agent 使用独立的 git worktree 或纯文件写入替代 git commit
-7. **对齐 misconfig prompt**：按其他 5 个 agent 的标准重写
 
 ### 7.1 理想的融合架构
 
@@ -216,7 +202,7 @@ vuln_tasks.append(
 │  └─ 输出: recon_deliverable.md                       │
 ├──────────────────────────────────────────────────────┤
 │ Phase 3: Vuln Analysis (保留)                        │
-│  ├─ 6 个 agent 并行，但每个 agent 可参考调用图       │
+│  ├─ 5 个 agent 并行，但每个 agent 可参考调用图       │
 │  ├─ 覆盖度度量: "已分析 K/N 条调用链"                │
 │  └─ 输出: deliverables + queue JSON                  │
 └──────────────────────────────────────────────────────┘

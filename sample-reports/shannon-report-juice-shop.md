@@ -27,9 +27,6 @@ SSRF vulnerability in profile image URL upload with HTTP method bypass enabling 
 **Open Ports and Services:**
 [REDACTED]
 
-**Security Misconfigurations:**
-[REDACTED]
-
 **SSL/TLS Configuration:**
 [REDACTED]
 

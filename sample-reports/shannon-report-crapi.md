@@ -26,8 +26,6 @@ A critical SSRF vulnerability was successfully exploited through the contact mec
 
 **Open Ports and Exposed Services:**
 [REDACTED]
-**Security Misconfigurations:**
-[REDACTED]
 
 **Subdomain Discovery:**
 [REDACTED]
