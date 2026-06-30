@@ -10,7 +10,7 @@ import { ConfigLoaderService } from '../services/config-loader.js';
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
 import { runPreflightChecks } from '../services/preflight.js';
-import { assembleFinalReport, injectModelIntoReport } from '../services/reporting.js';
+import { assembleFinalReport, injectAffectedEndpointsAppendix, injectModelIntoReport } from '../services/reporting.js';
 import type { AgentName } from '../types/agents.js';
 import { ALL_VULN_CLASSES, type DistributedConfig, type ProviderConfig } from '../types/config.js';
 import { ConsoleActivityLogger } from './console-logger.js';
@@ -507,6 +507,15 @@ async function run(): Promise<void> {
         await injectModelIntoReport(args.repoPath, undefined, path.join(WORKSPACES_DIR, sessionId), logger);
       } catch (error) {
         logger.warn(`Model re-injection had issues: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      // Inject deterministic exploitable-endpoints appendix AFTER report-executive
+      // (which overwrites the assembled file) and BEFORE translation (Phase 7) so
+      // the Chinese deliverable includes the appendix via whole-document translation.
+      try {
+        await injectAffectedEndpointsAppendix(args.repoPath, undefined, logger);
+      } catch (error) {
+        logger.warn(`Appendix injection had issues: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

@@ -37,7 +37,7 @@ import { mapFrontendRoutes } from '../services/frontend-mapper.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
 import { runPreflightChecks } from '../services/preflight.js';
 import { type ExploitationDecision, type VulnType, validateQueueSafe } from '../services/queue-validation.js';
-import { assembleFinalReport, injectModelIntoReport } from '../services/reporting.js';
+import { assembleFinalReport, injectAffectedEndpointsAppendix, injectModelIntoReport } from '../services/reporting.js';
 import { validateAuthentication } from '../services/validate-authentication.js';
 import { AGENTS } from '../session-manager.js';
 import type { AgentName } from '../types/agents.js';
@@ -829,6 +829,12 @@ export async function injectReportMetadataActivity(input: ActivityInput): Promis
   } catch (error) {
     const err = error as Error;
     logger.warn(`Error injecting model into report: ${err.message}`);
+  }
+  try {
+    await injectAffectedEndpointsAppendix(repoPath, deliverablesSubdir, logger);
+  } catch (error) {
+    const err = error as Error;
+    logger.warn(`Error injecting affected-endpoints appendix: ${err.message}`);
   }
 }
 
