@@ -288,3 +288,37 @@ class TestCallToolInjectsRepo:
         client._send_request = fake_send
         await client.call_tool("query", {"query": "x", "repo": "explicit-name"})
         assert captured["arguments"]["repo"] == "explicit-name"
+
+
+class TestReadResource:
+    @pytest.mark.asyncio
+    async def test_read_resource_returns_text_without_checking_type(self, tmp_path):
+        """MCP resource content 是 {uri,mimeType,text}（无 type 字段），不同于 tools/call 的 {type:'text'}。
+        read_resource 必须直接取 text，不查 type。"""
+        client = GitNexusMCPClient(tmp_path)
+
+        async def fake_send(method, params):
+            assert method == "resources/read"
+            assert params["uri"] == "gitnexus://repo/svc/process/Init → GetOffset"
+            return {"contents": [
+                {"uri": "gitnexus://repo/svc/process/Init → GetOffset",
+                 "mimeType": "text/yaml", "text": "trace:\n  1: init (main.go)"},
+            ]}
+        client._send_request = fake_send
+
+        text = await client.read_resource("gitnexus://repo/svc/process/Init → GetOffset")
+        assert "1: init (main.go)" in text
+
+    @pytest.mark.asyncio
+    async def test_read_resource_empty_when_no_contents(self, tmp_path):
+        client = GitNexusMCPClient(tmp_path)
+        client._send_request = AsyncMock(return_value={"contents": []})
+        assert await client.read_resource("any") == ""
+
+    @pytest.mark.asyncio
+    async def test_read_resource_empty_on_exception(self, tmp_path):
+        client = GitNexusMCPClient(tmp_path)
+        async def boom(method, params):
+            raise RuntimeError("not found")
+        client._send_request = boom
+        assert await client.read_resource("any") == ""

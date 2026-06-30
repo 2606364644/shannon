@@ -124,6 +124,28 @@ class GitNexusMCPClient:
         })
         return self._parse_tool_result(result)
 
+    async def read_resource(self, uri: str) -> str:
+        """Read an MCP resource and return its concatenated text.
+
+        MCP resource content items are ``{uri, mimeType, text}`` — **no ``type``
+        field**, unlike tools/call's ``{type: "text", text}``. We take ``text``
+        directly from every content item. Returns ``""`` on empty/missing/
+        error (process traces are best-effort; one missing trace must not abort
+        the whole call graph build).
+        """
+        try:
+            result = await self._send_request("resources/read", {"uri": uri})
+        except Exception as exc:
+            logger.warning("GitNexus resource read failed (%s): %s", uri, exc)
+            return ""
+        if not result:
+            return ""
+        parts: list[str] = []
+        for item in result.get("contents", []) or []:
+            if isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+        return "\n".join(parts)
+
     async def _send_request(self, method: str, params: dict) -> dict:
         """Send a JSON-RPC request and read the response."""
         if self._process is None:
