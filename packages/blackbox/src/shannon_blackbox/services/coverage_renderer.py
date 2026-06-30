@@ -10,6 +10,11 @@ from shannon_core.utils.file_io import (
     async_read_file,
     async_write_file,
 )
+from shannon_core.utils.paths import (
+    BLACKBOX_SUBDIR,
+    WHITEBOX_SUBDIR,
+    resolve_track_deliverable,
+)
 
 from shannon_blackbox.services.exploitation_checker import (
     CoverageResult,
@@ -94,8 +99,12 @@ async def close_coverage_gaps(
     """
     uncovered_results: list[CoverageResult] = []
     for vc in vuln_classes:
-        queue_path = deliverables_path / f"{vc}_exploitation_queue.json"
-        evidence_path = deliverables_path / f"{vc}_exploitation_evidence.md"
+        queue_path = resolve_track_deliverable(
+            deliverables_path, WHITEBOX_SUBDIR, f"{vc}_exploitation_queue.json"
+        )
+        evidence_path = resolve_track_deliverable(
+            deliverables_path, BLACKBOX_SUBDIR, f"{vc}_exploitation_evidence.md"
+        )
         result = await ExploitationChecker.check_coverage(queue_path, evidence_path, vc)
         if result is None or not result.uncovered_ids:
             continue
@@ -109,6 +118,9 @@ async def close_coverage_gaps(
             logger.warning("queue %s parsed leniently: %s", queue_path.name, parsed.warnings)
         queue = parsed.queue
         section = render_unverified_section(result, queue)
+        # 新结构下 evidence_path 指向 blackbox/，写前确保父目录存在；
+        # 老结构 evidence_path 在根，mkdir 是无害 no-op。
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
         await async_write_file(evidence_path, evidence_text.rstrip("\n") + "\n" + section)
         logger.warning(
             "exploit coverage gap: %s — %d/%d uncovered: %s",

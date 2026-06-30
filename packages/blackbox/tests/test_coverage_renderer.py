@@ -206,3 +206,28 @@ async def test_close_coverage_gaps_logs_lenient_recovery_warning(tmp_path, caplo
         await close_coverage_gaps(tmp_path, ["auth"])
 
     assert any("leniently" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_close_coverage_gaps_reads_queue_from_whitebox_writes_evidence_to_blackbox(tmp_path):
+    """新结构：queue 在 whitebox/、evidence 在 blackbox/。"""
+    from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
+    dlv = tmp_path / "deliverables"
+    (dlv / "whitebox").mkdir(parents=True)
+    (dlv / "blackbox").mkdir(parents=True)
+    # queue 有 2 条，evidence 只覆盖 1 条 → 1 条未覆盖
+    (dlv / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities": ['
+        '{"ID": "INJ-VULN-1", "vulnerability_type": "SQLi", '
+        '"externally_exploitable": true, "confidence": "high"},'
+        '{"ID": "INJ-VULN-2", "vulnerability_type": "SQLi", '
+        '"externally_exploitable": true, "confidence": "high"}'
+        ']}'
+    )
+    (dlv / "blackbox" / "injection_exploitation_evidence.md").write_text(
+        "# Evidence\n## Successfully Exploited\n### INJ-VULN-1: a\nverified")
+    results = await close_coverage_gaps(dlv, ["injection"])
+    assert len(results) == 1
+    assert "INJ-VULN-2" in results[0].uncovered_ids
+    # 未覆盖节写到 blackbox/ 的 evidence
+    assert "Unverified" in (dlv / "blackbox" / "injection_exploitation_evidence.md").read_text()
