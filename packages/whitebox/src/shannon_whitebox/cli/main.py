@@ -17,7 +17,7 @@ from shannon_core.services.temporal_infra import (
     stop_temporal,
 )
 from shannon_core.session import SessionManager
-from shannon_core.utils.paths import resolve_workspaces_dir
+from shannon_core.utils.paths import resolve_workspaces_dir, resolve_track_deliverable, WHITEBOX_SUBDIR
 from shannon_whitebox.pipeline.shared import PipelineInput
 
 
@@ -107,7 +107,7 @@ def start(repo, output, workspace, config_path, pipeline_testing, temporal_addre
                 if summary["vuln_queues"]:
                     click.echo("Results summary:")
                     for vc in sorted(summary["vuln_queues"]):
-                        queue_file = summary_path / f"{vc}_exploitation_queue.json"
+                        queue_file = resolve_track_deliverable(summary_path, WHITEBOX_SUBDIR, f"{vc}_exploitation_queue.json")
                         try:
                             data = json.loads(queue_file.read_text(encoding="utf-8"))
                             count = len(data.get("vulnerabilities", []))
@@ -282,7 +282,7 @@ def show(workspace_name):
         deliverables_dir = deliverables_dir_for_workspace(ws)
         for vc in summary["vuln_queues"]:
             filename = f"{vc}_exploitation_queue.json"
-            filepath = deliverables_dir / filename
+            filepath = resolve_track_deliverable(deliverables_dir, WHITEBOX_SUBDIR, filename)
             if filepath.exists():
                 try:
                     data = json.loads(filepath.read_text(encoding="utf-8"))

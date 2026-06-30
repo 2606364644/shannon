@@ -39,8 +39,8 @@ async def test_scan_writes_config_json_and_gitnexus_queue(tmp_path, monkeypatch)
     (repo / "app.js").write_text(
         "app.post('/login', (req, res) => { res.cookie('session', t); });\n"
     )
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (repo, deliverables, tmp_path))
     set_audit_session(_RecordingSession())
@@ -78,8 +78,8 @@ async def test_scan_zero_findings_writes_empty_files(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "app.js").write_text("const x = 1;\n")  # nothing suspicious
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (repo, deliverables, tmp_path))
     set_audit_session(_RecordingSession())
@@ -99,8 +99,8 @@ async def test_scan_zero_findings_writes_empty_files(tmp_path, monkeypatch):
 async def test_scan_does_not_crash_on_empty_repo(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (repo, deliverables, tmp_path))
     set_audit_session(_RecordingSession())
@@ -122,8 +122,8 @@ async def test_finding_category_maps_to_vulnerability_type(tmp_path, monkeypatch
         "app.use(cors({ origin: '*' }));  // cors\n"
         "app.post('/login', (req,res)=>{}); // rate_limit\n"
     )
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (repo, deliverables, tmp_path))
     set_audit_session(_RecordingSession())

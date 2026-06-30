@@ -90,8 +90,8 @@ def _write_sink(deliverables, sink_id, category, sink_subtype):
 
 @pytest.mark.asyncio
 async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [_flow("sql_value")])
 
     async def fake_llm(prompt, **kw):
@@ -123,8 +123,8 @@ async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
     """Plan 1 not landed -> no parameter_graph.json -> all gitnexus queues absent."""
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
 
     async def fake_llm(prompt, **kw):
         raise AssertionError("should not call LLM")
@@ -148,8 +148,8 @@ async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_writes_xss_and_ssrf_queues(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     xss_sid = "app.py:h:innerHTML:5:0"
     # xss routes via SinkCallSite.category == XSS (SlotContext has no render slot),
     # so a sink_call_site must exist in code_index.json with a matching id.
@@ -180,8 +180,8 @@ async def test_writes_xss_and_ssrf_queues(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
     """Corrupt parameter_graph.json -> skip, don't crash."""
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "parameter_graph.json").write_text("not json")
 
     async def fake_llm(prompt, **kw):
@@ -206,8 +206,8 @@ async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_summary_warns_when_all_classes_zero(tmp_path, monkeypatch):
     """空壳 parameter_graph（taint_flows=[]）→ 3 类 0 findings → 汇总 warning（spec §3.4）。"""
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [])
 
     async def fake_llm(prompt, **kw):

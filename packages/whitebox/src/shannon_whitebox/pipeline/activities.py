@@ -30,11 +30,16 @@ logger = logging.getLogger(__name__)
 
 
 def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
+    from shannon_core.utils.paths import WHITEBOX_SUBDIR
+
     deliverables = resolve_deliverables_path(
         repo_path=input.repo_path,
         deliverables_subdir=input.deliverables_subdir,
         workspace_name=input.workspace_name,
     )
+    # 白盒产物隔离到 deliverables/whitebox/（与黑盒 blackbox/ 对称）。
+    # 写侧永远落新结构；黑盒读白盒 queue 走 resolve_track_deliverable fallback。
+    deliverables = deliverables / WHITEBOX_SUBDIR
     repo = Path(input.repo_path)
     workspaces = repo.parent / "workspaces"
     return repo, deliverables, workspaces

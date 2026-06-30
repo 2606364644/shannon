@@ -29,7 +29,10 @@ def _write_index_with_candidate(tmp_path):
             "start_line": 1, "end_line": 3,
             "source_code": "function update(){ db.user.update(); }",
             "parameters": [], "decorators": [], "language": "typescript"}
-    (tmp_path / "code_index.json").write_text(json.dumps({
+    # code_index.json 属于 deliverables（activity 从 deliverables 读），落 whitebox/ 子目录。
+    dlv = tmp_path / "whitebox"
+    dlv.mkdir(parents=True, exist_ok=True)
+    (dlv / "code_index.json").write_text(json.dumps({
         "repository": "r", "language": "typescript", "total_blocks": 2,
         "total_entry_points": 1, "total_chains": 1, "blocks": [handler, sink],
         "edges": [],
@@ -65,7 +68,7 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
             }]},
         })()
 
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
@@ -73,7 +76,7 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
                 inst.log_info = AsyncMock()
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    queue_path = tmp_path / "authz_gitnexus_queue.json"
+    queue_path = tmp_path / "whitebox" / "authz_gitnexus_queue.json"
     assert queue_path.exists()
     data = json.loads(queue_path.read_text())
     assert len(data["vulnerabilities"]) == 1
@@ -101,7 +104,7 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
         called["n"] += 1
         return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
 
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
@@ -110,8 +113,8 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
     assert called["n"] == 0  # LLM not called
-    assert (tmp_path / "authz_gitnexus_queue.json").exists()
-    data = json.loads((tmp_path / "authz_gitnexus_queue.json").read_text())
+    assert (tmp_path / "whitebox" / "authz_gitnexus_queue.json").exists()
+    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"] == []
     assert result["candidate_count"] == 0
 
@@ -128,7 +131,7 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
             "cost": 0.0, "model": "m", "stop_reason": "end", "tokens": None,
         })()
 
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
@@ -136,7 +139,7 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
                 inst.log_info = AsyncMock()
                 await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    data = json.loads((tmp_path / "authz_gitnexus_queue.json").read_text())
+    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"] == []  # lenient
 
 
@@ -152,7 +155,7 @@ async def test_judge_logs_warning_when_no_candidates(tmp_path):
     async def fake_run(prompt, **kwargs):
         return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
 
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
@@ -185,7 +188,7 @@ async def test_judge_logs_info_when_candidates(tmp_path):
             }]},
         })()
 
-    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path, tmp_path)):
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value

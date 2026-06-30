@@ -26,8 +26,8 @@ class _RecordingSession:
 
 
 async def test_assemble_report_writes_comprehensive_report(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "auth_analysis_deliverable.md").write_text(
         "# 认证分析报告\nAUTH-VULN-01", encoding="utf-8")
     monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))

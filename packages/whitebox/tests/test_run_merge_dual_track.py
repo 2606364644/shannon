@@ -31,8 +31,8 @@ def _input(repo):
 
 @pytest.mark.asyncio
 async def test_merge_writes_exploitation_queue_from_llm_only(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_queue.json").write_text(
         json.dumps(
             {
@@ -68,8 +68,8 @@ async def test_merge_writes_exploitation_queue_from_llm_only(tmp_path, monkeypat
 
 @pytest.mark.asyncio
 async def test_merge_combines_both_tracks(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_queue.json").write_text(
         json.dumps(
             {
@@ -123,8 +123,8 @@ async def test_merge_combines_both_tracks(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_merge_skips_vuln_classes_with_no_llm_queue(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
     set_audit_session(_RecordingSession())
     try:
@@ -136,8 +136,8 @@ async def test_merge_skips_vuln_classes_with_no_llm_queue(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_merge_handles_invalid_llm_queue_leniently(tmp_path, monkeypatch):
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_queue.json").write_text("not json")
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
     set_audit_session(_RecordingSession())
@@ -155,8 +155,8 @@ async def test_merge_handles_invalid_llm_queue_leniently(tmp_path, monkeypatch):
 async def test_merge_keeps_gitnexus_only_when_llm_queue_absent(tmp_path, monkeypatch):
     """A4: LLM queue 缺席时，GitNexus-only 发现仍并入报告（真兜底）。
     df33ec5 时此场景 continue 跳过，GitNexus 产物被丢。"""
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     # 注意：不写 injection_exploitation_queue.json（LLM 轨缺席）
     (deliverables / "injection_gitnexus_queue.json").write_text(
         json.dumps(
@@ -197,8 +197,8 @@ async def test_merge_keeps_gitnexus_only_when_llm_queue_absent(tmp_path, monkeyp
 async def test_merge_logs_gitnexus_only_findings(tmp_path, monkeypatch, caplog):
     """可观测: GitNexus-only 发现并入时打 info 日志（A4 生效的直接信号）。"""
     import logging
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_gitnexus_queue.json").write_text(
         json.dumps(
             {"vulnerabilities": [{
@@ -225,8 +225,8 @@ async def test_merge_logs_gitnexus_only_findings(tmp_path, monkeypatch, caplog):
 async def test_merge_preserves_gitnexus_only_reachability_false(tmp_path, monkeypatch):
     """铁律: GitNexus-only 发现 externally_exploitable=False（内部可达）合并后保持 False，
     不被 verdict=vulnerable 覆写（dual_track_merger.py:52-57）。"""
-    deliverables = tmp_path / "deliverables"
-    deliverables.mkdir()
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
     (deliverables / "injection_gitnexus_queue.json").write_text(
         json.dumps(
             {"vulnerabilities": [{
