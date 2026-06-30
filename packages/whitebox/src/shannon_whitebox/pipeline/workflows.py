@@ -478,7 +478,9 @@ class WhiteboxScanWorkflow:
             # 轴1:拼接各分项 → 综合报告(确定性)
             self._state.current_agent = "assemble-report"
             await workflow.execute_activity(
-                activities.assemble_report, act_input,
+                activities.assemble_report,
+                ActivityInput(**{**act_input.__dict__,
+                                 "vuln_classes": [str(vt) for vt in selected_classes]}),
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry_for("standard"),
             )

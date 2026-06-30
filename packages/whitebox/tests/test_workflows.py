@@ -166,3 +166,22 @@ def test_workflow_run_resolves_vuln_classes_via_select_function():
     assert (
         "input.vuln_classes or list(ALL_VULN_CLASSES)" not in src
     ), "不得回退到旧断链形式（丢失 YAML vuln_classes）"
+
+
+def test_assemble_report_reads_vuln_classes_from_input():
+    """assemble_report 应从 input.vuln_classes 读（默认 ALL），不再硬编码。"""
+    import inspect
+
+    from shannon_whitebox.pipeline.activities import assemble_report
+
+    src = inspect.getsource(assemble_report)
+    assert "input.vuln_classes" in src, "assemble_report 必须读 input.vuln_classes"
+
+
+def test_activity_input_has_vuln_classes_field():
+    """ActivityInput 必须有 vuln_classes 字段（默认 None），供 assemble_report 接收 selected。"""
+    from shannon_whitebox.pipeline.shared import ActivityInput
+
+    ai = ActivityInput(repo_path="/tmp/x")
+    assert hasattr(ai, "vuln_classes")
+    assert ai.vuln_classes is None

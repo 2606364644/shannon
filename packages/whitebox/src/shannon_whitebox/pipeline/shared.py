@@ -50,6 +50,7 @@ class ActivityInput:
     phase: str | None = None          # log_phase_* 的 phase label（如 "setup"/"pre-recon"/"recon"/"reporting"）
     info_message: str | None = None   # log_info_activity 用户提示（替代 workflow.logger.info→stderr 抢行）
     info_level: str = "info"          # "info" | "warning"
+    vuln_classes: list[str] | None = None   # assemble_report 用（默认 ALL，由 workflow 传 selected）
 
 
 @dataclass

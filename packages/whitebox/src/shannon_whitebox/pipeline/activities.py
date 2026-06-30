@@ -827,7 +827,7 @@ async def assemble_report(input: ActivityInput) -> None:
 
         _, deliverables, _ = _get_paths(input)
         report_path = deliverables / "comprehensive_security_assessment_report.md"
-        vuln_classes = list(ALL_VULN_CLASSES)
+        vuln_classes = input.vuln_classes or list(ALL_VULN_CLASSES)
         async with get_audit_session().track_step(
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
