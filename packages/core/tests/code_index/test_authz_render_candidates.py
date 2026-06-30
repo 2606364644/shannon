@@ -41,7 +41,7 @@ def test_render_dominance_candidate_lists_endpoint_and_path():
     index = _index()
     cand = IDORCandidateChain(
         endpoint_id="u.js:update:10", handler_id="u.js:update:10",
-        sink_id="repo.js:update:1",
+        sink_id="repo.js:update:1", sink_step_idx=1,
         path=("u.js:update:10", "repo.js:update:1"), guard_nodes_on_path=(),
     )
     out = render_authz_gitnexus_candidates([cand], [], index=index, entry_points=index.entry_points)
@@ -68,7 +68,7 @@ def test_render_includes_verdict_directive():
     index = _index()
     cand = IDORCandidateChain(
         endpoint_id="u.js:update:10", handler_id="u.js:update:10",
-        sink_id="repo.js:update:1",
+        sink_id="repo.js:update:1", sink_step_idx=1,
         path=("u.js:update:10", "repo.js:update:1"), guard_nodes_on_path=(),
     )
     out = render_authz_gitnexus_candidates([cand], [], index=index, entry_points=index.entry_points)

@@ -34,6 +34,15 @@ def _ep(handler_id, route, method="DELETE"):
     )
 
 
+def _proc_ep(handler_id):
+    """process entry: entry_type='gitnexus_process', route=None（SRPC 业务入口）。"""
+    return EntryPoint(
+        func_block_id=handler_id, entry_type="gitnexus_process", route=None,
+        http_method=None, confidence=0.9, evidence="GitNexus process entry",
+        needs_llm_review=False, source="gitnexus",
+    )
+
+
 def test_no_candidates_when_handler_has_ownership_guard():
     """Handler body has ORM ownership predicate → no unguarded sink path."""
     handler = _block(
@@ -112,4 +121,40 @@ def test_respects_max_paths_per_endpoint():
 
 def test_empty_index_yields_no_candidates():
     index = _idx([], [], [], [])
+    assert find_unguarded_sink_paths(index) == []
+
+
+def test_process_entry_route_none_is_admitted():
+    """断点①: process entry route=None 必须进候选（不能被 route is not None 挡）。"""
+    handler = _block("h.js:f:1", "function f(req){ await s(req.id); }")
+    sink = _block("s.js:g:1", "function g(){ db.user.update(); }")
+    chain = CallChain(entry_point_id=handler.id, path=[handler.id, sink.id], depth=1, has_unresolved=False)
+    index = _idx([handler, sink], [], [chain], [_proc_ep(handler.id)])
+    cands = find_unguarded_sink_paths(index)
+    assert len(cands) == 1
+    assert cands[0].endpoint_id == handler.id
+
+
+def test_side_effect_sink_in_middle_of_chain_is_found():
+    """断点②(决策7): sink 在链中间(非 terminal) → 扫全链命中。模拟 0→21 的核心。
+    链: entry → middle(side-effect sink) → leaf(非 sink)。terminal 非 sink。"""
+    entry = _block("e.js:e:1", "function e(req){ m(req); leaf(); }")
+    middle = _block("m.js:m:1", "function m(){ db.user.update(); }")   # side-effect sink 在中间
+    leaf = _block("l.js:l:1", "function l(){ return 1; }")             # terminal 非 sink
+    chain = CallChain(entry_point_id=entry.id, path=[entry.id, middle.id, leaf.id], depth=2, has_unresolved=False)
+    index = _idx([entry, middle, leaf], [], [chain], [_ep(entry.id, "/api/x")])
+    cands = find_unguarded_sink_paths(index)
+    assert len(cands) == 1
+    c = cands[0]
+    assert c.sink_id == middle.id
+    assert c.sink_step_idx == 1   # middle 是 path[1]
+
+
+def test_ownership_guard_on_segment_blocks_candidate():
+    """决策6: ownership 守卫出现在 entry→sink_step 段 → 不产候选。"""
+    entry = _block("e.js:e:1", "function e(req){ const o = db.find({where:{userId:req.user.id}}); m(o); }")
+    middle = _block("m.js:m:1", "function m(){ db.user.update(); }")
+    chain = CallChain(entry_point_id=entry.id, path=[entry.id, middle.id], depth=1, has_unresolved=False)
+    index = _idx([entry, middle], [], [chain], [_ep(entry.id, "/api/x")])
+    # entry 源码含 ownership 谓词 → handler_has_ownership_guard 短路（既有逻辑）→ 无候选
     assert find_unguarded_sink_paths(index) == []

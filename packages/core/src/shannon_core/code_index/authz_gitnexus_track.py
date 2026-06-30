@@ -53,6 +53,7 @@ class IDORCandidateChain:
     endpoint_id: str          # EntryPoint.func_block_id of the handler
     handler_id: str           # FuncBlock.id of the handler (= endpoint_id here)
     sink_id: str              # FuncBlock.id of the side-effect sink
+    sink_step_idx: int        # sink 在 path 中的下标（spec §4.8 决策7，扫全链）
     path: tuple[str, ...]     # ordered FuncBlock.id list, handler→sink
     guard_nodes_on_path: tuple[str, ...]  # ownership-guard node ids on path (empty=none)
 
@@ -81,6 +82,20 @@ def _handler_has_ownership_guard(handler: FuncBlock) -> bool:
     return OWNERSHIP_PREDICATE_RE.search(handler.source_code) is not None
 
 
+def _segment_has_ownership_guard(segment_ids: list[str], blocks_by_id: dict[str, FuncBlock]) -> bool:
+    """entry→sink_step 段（含两端）任一 FuncBlock 源码含 ownership 谓词 → True（决策6）。"""
+    from shannon_core.code_index.patterns import OWNERSHIP_PREDICATE_RE
+    for sid in segment_ids:
+        b = blocks_by_id.get(sid)
+        if b is not None and OWNERSHIP_PREDICATE_RE.search(b.source_code):
+            return True
+    return False
+
+
+# authz 判定的 entry 类型白名单（spec §4.8 改1）。gitnexus_process 放宽 route 守卫。
+_AUTHZ_ENTRY_TYPES = ("http_route", "rpc", "gitnexus_process")
+
+
 def find_unguarded_sink_paths(
     index: CodeIndex,
     *,
@@ -88,24 +103,28 @@ def find_unguarded_sink_paths(
 ) -> list[IDORCandidateChain]:
     """Find handler→sink paths lacking an ownership guard (IDOR candidates).
 
-    Heuristic (spec §8): for each HTTP EntryPoint's handler, walk the
-    CallChains rooted at it; for any chain whose tail is a side-effect sink
-    AND whose handler carries no ownership predicate, emit a candidate.
-    Conservative — flags any path reaching a sink without an ownership check
-    in the handler, even if some OTHER path has one (dominance under-approx:
-    a guard that doesn't cover every path still yields a candidate).
+    四处改（spec §4.8）：
+      1. entry 过滤扩 http_route/rpc/gitnexus_process；gitnexus_process 放宽 route 守卫
+         （route=None 的 SRPC 业务入口必须放行，断点①）。
+      2. sink 扫全链任意步 side-effect（替 path[-1]，决策7，扫全链命中中间 sink）。
+      3. ownership guard 扫 entry→sink_step 段（替只查 handler，决策6）。
+    handler 自身含 ownership 谓词 → 短路（dominance，既有逻辑保留）。
 
     Dedup by (endpoint_id, sink_id). Capped per endpoint to bound the
     judge-LLM cost.
     """
     blocks_by_id: dict[str, FuncBlock] = {b.id: b for b in index.blocks}
-    http_eps = [ep for ep in index.entry_points
-                if ep.entry_type == "http_route" and ep.route is not None]
+    # 改1: entry 过滤 + gitnexus_process 放宽 route 守卫（断点①）
+    entry_eps = [
+        ep for ep in index.entry_points
+        if ep.entry_type in _AUTHZ_ENTRY_TYPES
+        and (ep.entry_type == "gitnexus_process" or ep.route is not None)
+    ]
 
     candidates: list[IDORCandidateChain] = []
     seen: set[tuple[str, str]] = set()  # (endpoint_id, sink_id)
 
-    for ep in http_eps:
+    for ep in entry_eps:
         handler = blocks_by_id.get(ep.func_block_id)
         if handler is None:
             continue  # unresolved handler — Plan 6 surfaces "unknown"; skip here
@@ -118,29 +137,40 @@ def find_unguarded_sink_paths(
         for chain in index.chains:
             if chain.entry_point_id != ep.func_block_id or not chain.path:
                 continue
-            sink_id = chain.path[-1]
-            key = (ep.func_block_id, sink_id)
-            if key in seen:
-                continue
-            if not _is_side_effect_sink(blocks_by_id.get(sink_id)):
-                continue
-            # Path reached a side-effect sink with no ownership guard in the
-            # handler → IDOR candidate.
-            seen.add(key)
-            candidates.append(IDORCandidateChain(
-                endpoint_id=ep.func_block_id,
-                handler_id=ep.func_block_id,
-                sink_id=sink_id,
-                path=tuple(chain.path),
-                guard_nodes_on_path=(),  # handler guard absent → no guards
-            ))
-            count_for_ep += 1
+            # 改2: 扫全链找 side-effect sink（替 path[-1]，决策7）。
+            # 跳过 step_idx==0（entry/handler 自身节点）：sink 必须是被调用的 callee，
+            # handler 自身源码里的 side-effect 不算"到达 sink"（path handler→handler 退化）。
+            for step_idx, sid in enumerate(chain.path):
+                if step_idx == 0:
+                    continue
+                if not _is_side_effect_sink(blocks_by_id.get(sid)):
+                    continue
+                key = (ep.func_block_id, sid)
+                if key in seen:
+                    continue
+                # 改3: ownership 扫 entry→sink_step 段（含两端，决策6）
+                if _segment_has_ownership_guard(chain.path[: step_idx + 1], blocks_by_id):
+                    continue
+                seen.add(key)
+                candidates.append(IDORCandidateChain(
+                    endpoint_id=ep.func_block_id,
+                    handler_id=ep.func_block_id,
+                    sink_id=sid,
+                    sink_step_idx=step_idx,
+                    path=tuple(chain.path),
+                    guard_nodes_on_path=(),  # segment guard absent → no guards
+                ))
+                count_for_ep += 1
+                if count_for_ep >= max_paths_per_endpoint:
+                    break
             if count_for_ep >= max_paths_per_endpoint:
                 break
 
     logger.info(
-        "authz GitNexus track: %d HTTP endpoints, %d IDOR candidate chains",
-        len(http_eps), len(candidates),
+        "authz GitNexus track: %d entry endpoints (%d gitnexus_process), %d IDOR candidate chains",
+        len(entry_eps),
+        sum(1 for ep in entry_eps if ep.entry_type == "gitnexus_process"),
+        len(candidates),
     )
     return candidates
 
@@ -343,11 +373,14 @@ def build_authz_gitnexus_track(
         1 for ep in index.entry_points
         if ep.entry_type == "http_route" and ep.route is not None
     )
+    gn_process_count = sum(
+        1 for ep in index.entry_points if ep.entry_type == "gitnexus_process"
+    )
     logger.info(
         "authz GitNexus track built: %d dominance + %d framework candidates "
-        "(http_route entry points: %d/%d)",
+        "(entry points: http_route=%d, gitnexus_process=%d, total=%d)",
         len(dominance_cands), len(framework_cands),
-        http_route_count, entry_point_total,
+        http_route_count, gn_process_count, entry_point_total,
     )
     return AuthzTrackBuildResult(
         markdown=md,
