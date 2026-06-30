@@ -135,6 +135,24 @@ class TestResolveDeliverablesPath:
                 deliverables_subdir="deliverables",
             )
 
+    def test_deliverables_parent_is_workspace(self, tmp_path):
+        """deliverables.parent ≡ workspace_path（auth save/load 路径一致性根基）。
+
+        AgentExecutor 基层用 deliverables.parent 推导 AUTH_STATE_FILE，须与 auth save
+        用的 input.workspace_path 同目录（spec §3.3）。锁定此隐含约定，防 deliverables
+        结构变更悄悄破坏 save/load 一致性。
+        """
+        ws_root = tmp_path / "workspaces"
+        ws_root.mkdir()
+        deliverables = resolve_deliverables_path(
+            repo_path=None,
+            deliverables_subdir="deliverables",
+            workspace_name="session",
+            workspaces_root=ws_root,
+        )
+        assert deliverables.parent == ws_root / "session"
+        assert deliverables.name == "deliverables"
+
 
 class TestHasValidWhiteboxResults:
     """对齐原始 TS validateQueueStructure:文件存在 + ``vulnerabilities`` 非空数组即 True。
