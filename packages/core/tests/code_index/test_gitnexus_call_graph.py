@@ -7,12 +7,10 @@ from shannon_core.code_index.models import (
 )
 from shannon_core.code_index.gitnexus_call_graph import (
     build_call_graph_from_gitnexus,
-    _parse_process_response,
     trace_from_sink,
     find_sinks_by_patterns,
     get_function_context,
 )
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 
 def _block(name: str, file: str = "app.py", line: int = 1) -> FuncBlock:
@@ -28,178 +26,92 @@ def _block(name: str, file: str = "app.py", line: int = 1) -> FuncBlock:
     )
 
 
-class FakeMCPClient:
-    """Fake GitNexus MCP client returning canned responses.
+class FakeTraceMCPClient:
+    """Fake MCP: cypher 返 process labels；read_resource 按 label 返 trace 文本。
 
-    When a canned response is a ``str`` (raw GitNexus text blob), route it
-    through ``GitNexusMCPClient._parse_text`` to mirror the production
-    ``call_tool`` → ``_parse_tool_result`` → ``_parse_text`` parsing chain
-    (markdown→rows→edges end-to-end). ``dict`` / ``None`` / ``list`` inputs
-    are returned as-is so existing pre-parsed dict fixtures keep working.
+    cypher 返 None 表示未索引（GitNexusNotIndexedError 路径）。
+    匹配 process_trace_reader.read_all_process_traces 的协议：
+    ``call_tool("cypher", ...)`` → ``{"rows": [{"label": <lb>}, ...]}``，
+    ``read_resource(<…>/process/<label>)`` → trace 文本。
     """
 
-    def __init__(self, responses: dict[str, list | dict | None]):
-        self._responses = responses
+    def __init__(self, labels=None, traces=None, cypher_none=False):
+        self._labels = labels or []
+        self._traces = traces or {}
+        self._cypher_none = cypher_none
 
-    async def call_tool(self, tool_name: str, arguments: dict):
-        resp = self._responses.get(tool_name)
-        if isinstance(resp, str):
-            return GitNexusMCPClient._parse_text(resp)
-        return resp
+    async def call_tool(self, tool_name, arguments):
+        if self._cypher_none:
+            return None
+        return {"rows": [{"label": lb} for lb in self._labels]}
 
-
-class TestParseProcessResponse:
-    def test_extracts_edges_from_flat_process(self):
-        process_data = [
-            {
-                "caller": {"file": "app.py", "name": "handler", "line": 5},
-                "callee": {"file": "svc.py", "name": "get_users", "line": 12},
-            },
-            {
-                "caller": {"file": "svc.py", "name": "get_users", "line": 15},
-                "callee": {"file": "db.py", "name": "execute", "line": 30},
-            },
-        ]
-        edges = _parse_process_response(process_data)
-        assert len(edges) == 2
-        assert edges[0].caller_id == "app.py:handler:5"
-        assert edges[0].callee_name == "get_users"
-        assert edges[0].callee_file == "svc.py"
-        assert edges[0].resolved is True
-        assert edges[0].line == 5
-
-    def test_empty_process_returns_empty(self):
-        edges = _parse_process_response([])
-        assert edges == []
-
-    def test_missing_fields_skipped(self):
-        process_data = [
-            {"caller": {"file": "app.py", "name": "handler"}, "callee": {"name": "missing_file"}},
-        ]
-        edges = _parse_process_response(process_data)
-        assert len(edges) == 1
-        assert edges[0].resolved is False
+    async def read_resource(self, uri):
+        for lb, text in self._traces.items():
+            if uri.endswith(lb):
+                return text
+        return ""
 
 
-class TestBuildCallGraphFromGitNexus:
+class TestBuildCallGraphFromGitnexus:
     @pytest.mark.asyncio
-    async def test_builds_call_graph_from_mcp(self):
+    async def test_chains_nonempty_from_process_traces(self):
+        """核心回归锚点：process trace → 非空 chains（生产一直空壳=chains=0）。"""
         blocks = [
-            _block("handler", "app.py", 1),
-            _block("get_users", "svc.py", 10),
-            _block("execute", "db.py", 30),
+            _block("init", "main.go", 1),
+            _block("Search", "svc.go", 10),
+            _block("GetOffset", "repo.go", 30),
         ]
-        mcp = FakeMCPClient(responses={
-            "query": {
-                "processes": [{"summary": "HandlerFlow", "priority": 0.9}],
-                "process_symbols": [
-                    {"name": "handler", "type": "Function", "filePath": "app.py", "startLine": 1},
-                ],
-                "definitions": [],
-            },
-            "cypher": {
-                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |",
-                "row_count": 1,
-                "rows": [{"caller_file": "app.py", "caller_name": "handler", "caller_line": 5, "callee_file": "svc.py", "callee_name": "get_users"}],
-            },
-        })
-        result = await build_call_graph_from_gitnexus(
-            repo_path="/tmp/repo",
-            mcp_client=mcp,
-            blocks=blocks,
+        mcp = FakeTraceMCPClient(
+            labels=["Init → GetOffset"],
+            traces={"Init → GetOffset": "1: init (main.go)\n2: Search (svc.go)\n3: GetOffset (repo.go)\n"},
         )
-        assert len(result.edges) == 1
-        assert result.edges[0].callee_name == "get_users"
+        result = await build_call_graph_from_gitnexus(
+            repo_path="/tmp/svc", mcp_client=mcp, blocks=blocks,
+        )
+        assert len(result.chains) == 1
+        chain = result.chains[0]
+        assert chain.entry_point_id == "main.go:init:1"
+        assert chain.path == ["main.go:init:1", "svc.go:Search:10", "repo.go:GetOffset:30"]
+        # entry_points = path[0] 对应 FuncBlock（去重）
         assert len(result.entry_points) == 1
-        assert result.entry_points[0].function_name == "handler"
+        assert result.entry_points[0].function_name == "init"
+        # edges 废弃（process trace 不产 edges）
+        assert result.edges == []
 
     @pytest.mark.asyncio
-    async def test_raises_when_gitnexus_unavailable(self):
+    async def test_raises_when_not_indexed(self):
+        """cypher probe 返 None（未索引）→ GitNexusNotIndexedError。"""
         from shannon_core.code_index.models import GitNexusNotIndexedError
-        mcp = FakeMCPClient(responses={"query": None})
+        mcp = FakeTraceMCPClient(cypher_none=True)
         with pytest.raises(GitNexusNotIndexedError):
             await build_call_graph_from_gitnexus(
-                repo_path="/tmp/repo",
-                mcp_client=mcp,
-                blocks=[],
+                repo_path="/tmp/svc", mcp_client=mcp, blocks=[],
             )
 
     @pytest.mark.asyncio
-    async def test_cypher_rows_produce_edges_and_chains(self):
-        """核心回归锚点：GitNexus 1.6.7 cypher 返回 {markdown,row_count}（_parse_tool_result
-        填 rows）。build_call_graph 必须从 rows 构建非空 edges/chains——生产里一直为 0。
-
-        端到端：喂真实格式 str（JSON+trailing 提示，markdown 表格里没预填 rows），
-        经 FakeMCPClient.call_tool → _parse_text → rows → build_call_graph。
-        不再绕过 _parse_tool_result 预填 rows。"""
-        blocks = [
-            _block("handler", "app.py", 1),
-            _block("get_users", "svc.py", 10),
-        ]
-        mcp = FakeMCPClient(responses={
-            "query": {
-                "process_symbols": [],
-                "definitions": [{"name": "handler", "filePath": "app.py", "startLine": 1}],
-            },
-            "cypher": (
-                '{"markdown": "| caller_file | caller_name | callee_file | callee_name |\\n'
-                '| --- | --- | --- | --- |\\n'
-                '| app.py | handler | svc.py | get_users |", "row_count": 1}\n'
-                'Use context(...) for details.'
-            ),
-        })
+    async def test_empty_when_no_processes(self):
+        """有索引但 0 process → 空 chains（不抛，降级由上游处理）。"""
+        mcp = FakeTraceMCPClient(labels=[])
         result = await build_call_graph_from_gitnexus(
-            repo_path="/tmp/repo", mcp_client=mcp, blocks=blocks,
+            repo_path="/tmp/svc", mcp_client=mcp, blocks=[_block("init", "main.go", 1)],
         )
-        assert len(result.edges) == 1
-        assert result.edges[0].callee_name == "get_users"
-        assert len(result.entry_points) == 1
-        assert len(result.chains) >= 1
+        assert result.chains == []
+        assert result.entry_points == []
 
     @pytest.mark.asyncio
-    async def test_cypher_none_or_no_rows_yields_no_edges(self):
-        """_parse_tool_result 失败返 None / cypher 无 rows 时，edges 必须为空且不崩。"""
-        blocks = [_block("handler", "app.py", 1)]
-        for bad in (None, "Error: multiple repos", {"markdown": "| x |"}):
-            mcp = FakeMCPClient(responses={
-                "query": {"definitions": []}, "cypher": bad,
-            })
-            result = await build_call_graph_from_gitnexus("/tmp/repo", mcp, blocks)
-            assert result.edges == []
-
-    @pytest.mark.asyncio
-    async def test_builds_chains_from_edges(self):
-        blocks = [
-            _block("handler", "app.py", 1),
-            _block("get_users", "svc.py", 10),
-            _block("execute", "db.py", 30),
-        ]
-        mcp = FakeMCPClient(responses={
-            "query": {
-                "processes": [{"summary": "HandlerFlow", "priority": 0.9}],
-                "process_symbols": [
-                    {"name": "handler", "type": "Function", "filePath": "app.py", "startLine": 1},
-                ],
-                "definitions": [],
+    async def test_multiple_traces_distinct_entries(self):
+        blocks = [_block("init", "main.go", 1), _block("Upload", "h.go", 5), _block("Save", "s.go", 9)]
+        mcp = FakeTraceMCPClient(
+            labels=["Flow1", "Flow2"],
+            traces={
+                "Flow1": "1: init (main.go)\n2: Save (s.go)\n",
+                "Flow2": "1: Upload (h.go)\n2: Save (s.go)\n",
             },
-            "cypher": {
-                "markdown": "| caller_file | caller_name | callee_file | callee_name |\n| --- | --- | --- | --- |\n| app.py | handler | svc.py | get_users |\n| svc.py | get_users | db.py | execute |",
-                "row_count": 2,
-                "rows": [
-                    {"caller_file": "app.py", "caller_name": "handler", "caller_line": 5, "callee_file": "svc.py", "callee_name": "get_users"},
-                    {"caller_file": "svc.py", "caller_name": "get_users", "caller_line": 15, "callee_file": "db.py", "callee_name": "execute"},
-                ],
-            },
-        })
-        result = await build_call_graph_from_gitnexus(
-            repo_path="/tmp/repo",
-            mcp_client=mcp,
-            blocks=blocks,
         )
-        assert len(result.chains) >= 1
-        chain = result.chains[0]
-        assert chain.entry_point_id == "app.py:handler:1"
-        assert "svc.py:get_users:10" in chain.path
+        result = await build_call_graph_from_gitnexus("/tmp/svc", mcp, blocks)
+        assert len(result.chains) == 2
+        entry_ids = {b.id for b in result.entry_points}
+        assert entry_ids == {"main.go:init:1", "h.go:Upload:5"}
 
 
 class FakeImpactMCPClient:
