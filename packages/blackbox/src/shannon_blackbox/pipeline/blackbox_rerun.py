@@ -14,6 +14,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from shannon_core.utils.paths import BLACKBOX_SUBDIR
+
 # Blackbox deliverable filename patterns (glob). 归档清单
 # （archive_blackbox_deliverables 用）。删 clean 后只剩 rerun 用。
 BB_DELIVERABLE_PATTERNS: list[str] = [
@@ -24,20 +26,22 @@ BB_DELIVERABLE_PATTERNS: list[str] = [
 
 
 def detect_blackbox_completed(deliverables: Path) -> bool:
-    """Return True if any `*_exploitation_evidence.md` exists in deliverables."""
-    return bool(list(deliverables.glob("*_exploitation_evidence.md")))
+    """Return True if any `*_exploitation_evidence.md` exists in blackbox/ subdir."""
+    return bool(list((deliverables / BLACKBOX_SUBDIR).glob("*_exploitation_evidence.md")))
 
 
 def archive_blackbox_deliverables(deliverables: Path, run_ts: str) -> Path:
     """Move blackbox deliverables (evidence/findings/report) to a dated archive dir.
 
     归档清单复用 bb_deliverable_patterns。白盒产出物（analysis_deliverable 等）不归档。
-    返回归档目录 deliverables/.blackbox-archive/<run_ts>/。
+    归档源与目标都在 deliverables/blackbox/ 内（黑盒产出物隔离）。
+    返回归档目录 deliverables/blackbox/.blackbox-archive/<run_ts>/。
     """
-    archive = deliverables / ".blackbox-archive" / run_ts
+    bb = deliverables / BLACKBOX_SUBDIR
+    archive = bb / ".blackbox-archive" / run_ts
     archive.mkdir(parents=True, exist_ok=True)
     for pattern in BB_DELIVERABLE_PATTERNS:
-        for src in deliverables.glob(pattern):
+        for src in bb.glob(pattern):
             dest = archive / src.name
             if dest.exists():
                 # 同 run_ts 下重名（秒级时间戳双 rerun / 测试复用 run_ts）：
