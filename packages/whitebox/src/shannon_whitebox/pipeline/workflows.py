@@ -7,6 +7,7 @@ from temporalio.exceptions import CancelledError
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError
+from shannon_core.config.vuln_selection import select_vuln_classes
 
 from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgress
 from .step_intents import step_names, step_intents
@@ -37,7 +38,18 @@ class WhiteboxScanWorkflow:
             self._state.completed_agents = list(input.resume_completed_agents)
         self._state.start_time = workflow.time_ns() / 1e9
 
-        selected_classes: list[VulnType] = input.vuln_classes or list(ALL_VULN_CLASSES)
+        # Resolve config (YAML) early so vuln-class selection can consult cfg.vuln_classes.
+        cfg = None
+        if input.config_path:
+            from shannon_core.config.parser import parse_config
+            cfg = parse_config(input.config_path)
+
+        # vuln 类优先级链: CLI/env override(经 input.vuln_classes) > YAML(cfg.vuln_classes) > 默认全跑。
+        # 修通 pre-existing 断链（旧: input.vuln_classes or ALL_VULN_CLASSES，丢弃 cfg.vuln_classes）。
+        selected_classes: list[VulnType] = select_vuln_classes(
+            input.vuln_classes,
+            cfg.vuln_classes if cfg else None,
+        )
 
         # Compute workspace_path so activities know where to write auth-state.json
         if input.workspace_name:
@@ -93,13 +105,8 @@ class WhiteboxScanWorkflow:
             retry_policy=retry_for("log"),
         )
 
-        # Resolve config and browser engine
-        cfg = None
+        # Resolve browser engine (cfg 已在 run() 开头解析)
         engine = None
-        if input.config_path:
-            from shannon_core.config.parser import parse_config
-            cfg = parse_config(input.config_path)
-
         engine_name = cfg.browser_engine if cfg else "playwright"
         try:
             engine = BrowserEngineFactory.get_engine(engine_name)

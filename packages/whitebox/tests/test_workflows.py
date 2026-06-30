@@ -147,3 +147,22 @@ def test_run_prefills_completed_agents_from_input():
     # 守卫逻辑：pre-recon / recon 已在 completed -> 应跳过
     assert "pre-recon" in state.completed_agents
     assert "recon" in state.completed_agents
+
+
+def test_workflow_run_resolves_vuln_classes_via_select_function():
+    """防回退: selected_classes 必须经 select_vuln_classes(input.vuln_classes, cfg.vuln_classes) 解析。
+
+    旧断链形式 `input.vuln_classes or list(ALL_VULN_CLASSES)` 会让 cfg 解析后的
+    cfg.vuln_classes 被丢弃（YAML vuln_classes 不生效）。本锚点守住修通成果。
+    spec docs/superpowers/specs/2026-07-01-whitebox-vuln-classes-selection-design.md §2.3/§4.3。
+    """
+    import inspect
+
+    from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+
+    src = inspect.getsource(WhiteboxScanWorkflow.run)
+    assert "select_vuln_classes" in src, "run() 必须调用 select_vuln_classes"
+    assert "cfg.vuln_classes" in src, "run() 必须把 cfg.vuln_classes 传给 select_vuln_classes"
+    assert (
+        "input.vuln_classes or list(ALL_VULN_CLASSES)" not in src
+    ), "不得回退到旧断链形式（丢失 YAML vuln_classes）"
