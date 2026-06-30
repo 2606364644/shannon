@@ -277,3 +277,58 @@ def _map_call_site_params(
         result = set(callee_params)
 
     return result
+
+
+# Literal-expression filter for backward param mapping: a purely literal arg
+# (quoted string or bare number) is not a real taint source, so it must not be
+# added to caller-side tainted. Variable/expression args pass through.
+_LITERAL_RE = re.compile(r'^(["\']).*\1$|^-?\d+(\.\d+)?$')
+
+
+def _is_literal_arg(arg_expr: str) -> bool:
+    """Return True if arg_expr is a pure literal (quoted string or number)."""
+    return bool(_LITERAL_RE.match(arg_expr.strip()))
+
+
+def _map_call_site_params_reverse(
+    callee_block: FuncBlock,
+    callee_tainted: set[str],
+    caller_block: FuncBlock,
+) -> set[str]:
+    """反向参数映射(backward):已知 callee 的 tainted params,反推 caller 调用时
+    传的哪些实参被污染 → 返回 caller 端被污染的变量名/表达式集合。
+
+    与 forward 版 ``_map_call_site_params`` 对称:forward 已知 caller tainted 推
+    callee params,backward 已知 callee tainted params 反推 caller 实参。
+    复用 ``_find_call_args_for_callee``(找 caller 里调用 callee 的实参列表)。
+
+    对 callee 的每个 tainted param(按位置 i)看 caller 的 call_args[i],
+    若该实参是变量/表达式(非纯字面量)→ 加入结果(作为 caller 端 tainted)。
+    找不到调用实参 → 保守回退:caller 所有 params 视为 tainted(对齐 forward 保守)。
+    """
+    callee_params = callee_block.parameters
+    if not callee_params:
+        return set()
+
+    call_args = _find_call_args_for_callee(caller_block, callee_block.id)
+    if not call_args:
+        # 保守:无法定位调用 → caller 所有参数视为 tainted
+        return set(caller_block.parameters)
+
+    tainted_indices = {
+        i for i, p in enumerate(callee_params) if p in callee_tainted
+    }
+    result: set[str] = set()
+    for idx in tainted_indices:
+        if idx >= len(call_args):
+            break
+        arg_expr = call_args[idx].strip()
+        if not arg_expr:
+            continue
+        # arg_expr 是 caller 端表达式(如 req.query.x / userId / getVal(x))。
+        # 纯字面量(引号字符串 / 纯数字)不是真实污染源 → 跳过;
+        # 变量/表达式 → 作为 caller 端 tainted(下游 _source_points_matching 用 substring 匹配)。
+        if _is_literal_arg(arg_expr):
+            continue
+        result.add(arg_expr)
+    return result
