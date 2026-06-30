@@ -266,7 +266,9 @@ class TestPipelineAutoIndexing:
                     ):
                         with patch("shannon_core.code_index.detect_sinks", return_value=[]):
                             with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
-                                with patch("shannon_core.code_index.propagate_across_chains", return_value=[]):
+                                # pipeline 已切 backward(B3):patch target 须跟到
+                                # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
+                                with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
                                     index, rule_gaps = await build_code_index_with_gitnexus(
                                         str(tmp_path),
                                         mcp_client=FakeImpactMCPClient(responses={}),
@@ -305,7 +307,9 @@ class TestPipelineAutoIndexing:
                     ):
                         with patch("shannon_core.code_index.detect_sinks", return_value=[]):
                             with patch("shannon_core.code_index.detect_entry_points", return_value=detected):
-                                with patch("shannon_core.code_index.propagate_across_chains", return_value=[]):
+                                # pipeline 已切 backward(B3):patch target 须跟到
+                                # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
+                                with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
                                     index, _ = await build_code_index_with_gitnexus(
                                         str(tmp_path), mcp_client=FakeImpactMCPClient(responses={}),
                                         llm_client=AsyncMock(return_value="{}"),
