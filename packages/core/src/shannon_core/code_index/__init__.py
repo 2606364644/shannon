@@ -16,7 +16,10 @@ from shannon_core.code_index.file_discovery import discover_security_files
 from shannon_core.code_index.models import DegradationLevel, FileManifest
 from shannon_core.code_index.gitnexus_call_graph import build_call_graph_from_gitnexus
 from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
-from shannon_core.code_index.chain_propagator import propagate_across_chains
+from shannon_core.code_index.chain_propagator import (
+    propagate_across_chains,
+    propagate_backward_across_chains,
+)
 from shannon_core.code_index.parameter_models import ParameterPropagationGraph
 from shannon_core.code_index.sink_discovery_llm import (
     RuleGap,
@@ -200,18 +203,6 @@ async def build_code_index_with_gitnexus(
     )
     intra_results = {func_id: result for func_id, result in taint_pairs}
 
-    # ⑥ Deterministic cross-function propagation
-    taint_flows = propagate_across_chains(
-        chains=call_graph.chains,
-        blocks=all_blocks,
-        intra_results=intra_results,
-    )
-    pgraph = ParameterPropagationGraph(
-        taint_flows=taint_flows,
-        language_coverage=[language],
-    )
-    logger.info("Built parameter propagation graph: %d taint flows", len(pgraph.taint_flows))
-
     # ⑦ entry 组装：detect_entry_points ∪ process entry（G2）
     #    process entry = call_graph.entry_points(path[0] FuncBlock) 中 detect 未识别的，
     #    entry_type="gitnexus_process"（SRPC/RPC 业务入口，非 HTTP）；同 id 时 detect 优先
@@ -252,6 +243,28 @@ async def build_code_index_with_gitnexus(
     if soft_sources:
         source_points = source_points + soft_sources
         logger.info("LLM source discovery added %d soft sources", len(soft_sources))
+
+    # ⑥' propagation（Phase B：inject/xss/ssrf 改 backward Sink→Source）
+    #    双向锚定：起点 SinkCallSite + 终点 SourcePoint。
+    #    forward propagate_across_chains 保留（过渡）：供 authz _source_reaches_sink
+    #    复用底层 _map_call_site_params + 回归测试。
+    #    注：必须在 ⑧b source detect 之后（backward 消费 source_points 锚定终点）。
+    taint_flows = propagate_backward_across_chains(
+        chains=call_graph.chains,
+        blocks=all_blocks,
+        intra_results=intra_results,
+        sink_call_sites=sink_call_sites,
+        source_points=source_points,
+    )
+    pgraph = ParameterPropagationGraph(
+        taint_flows=taint_flows,
+        language_coverage=[language],
+    )
+    logger.info(
+        "propagate_backward: %d sinks → %d anchored taint_flows "
+        "(source_points=%d, dropped unanchored)",
+        len(sink_call_sites), len(pgraph.taint_flows), len(source_points),
+    )
 
     # ⑨ Assemble CodeIndex
     return (

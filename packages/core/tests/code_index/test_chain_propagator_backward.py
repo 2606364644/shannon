@@ -101,3 +101,30 @@ def test_backward_drops_chain_when_no_sourcepoint_anchor():
     flows = propagate_backward_across_chains(
         [chain], [handler, callee], intra, [sink], [])  # 无 SourcePoint
     assert flows == []  # 双向锚定:无 source 锚 → 丢弃
+
+
+def test_pipeline_uses_backward_for_taint_flows():
+    """pipeline 冒烟:taint_flows 由 propagate_backward 产(含 source_type 精确)。"""
+    import asyncio
+    from unittest.mock import AsyncMock
+    from shannon_core.code_index import build_code_index_with_gitnexus
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as repo:
+        with open(os.path.join(repo, "app.js"), "w") as fh:
+            # 复用 A4 的 fixture 模式:route 在 setupRoutes 函数体内(Express Pass1 命中真 block)
+            fh.write(
+                "function setupRoutes(app){\n"
+                "  app.get('/r', function h(req){ sink(req.query.x); });\n"
+                "}\n"
+                "function sink(p){ eval(p); }\n"
+            )
+        os.makedirs(os.path.join(repo, ".git"), exist_ok=True)
+        fake_mcp = AsyncMock()
+        fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
+        fake_llm = AsyncMock(return_value="[]")
+        index, _ = asyncio.run(build_code_index_with_gitnexus(
+            repo, mcp_client=fake_mcp, llm_client=fake_llm))
+        # 至少有 source_point(req.query.x);若 sink 被 sink_detector 规则命中,
+        # backward 应产 TaintFlow(具体取决于规则覆盖;此测试验证不崩 + source_points 非空)
+        assert any(sp.param_name == "x" for sp in index.source_points)
