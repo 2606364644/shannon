@@ -176,10 +176,9 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_exploit_executor_passes_auth_state_file(mock_repo):
-    """exploit agent receives AUTH_STATE_FILE so it can load the preflight's
-    authenticated session (the <shared_authenticated_session> partial consumes
-    {{AUTH_STATE_FILE}} / {{AUTH_LOAD_COMMAND}})."""
+async def test_exploit_executor_no_longer_injects_auth_state_file(mock_repo):
+    """AUTH_STATE_FILE 由 AgentExecutor.execute 基层统一注入（方案 B），
+    exploit_executor 不再显式传——单一来源，避免双注入。"""
     repo, deliverables = mock_repo
     mock_executor = AsyncMock()
     mock_executor.execute.return_value = AgentMetrics(duration_ms=1, cost_usd=0.0, num_turns=1)
@@ -191,6 +190,6 @@ async def test_exploit_executor_passes_auth_state_file(mock_repo):
         deliverables_path=deliverables,
         web_url="https://example.com",
     )
-    pv = mock_executor.execute.call_args.kwargs["prompt_variables"]
-    assert "AUTH_STATE_FILE" in pv
-    assert pv["AUTH_STATE_FILE"] == str(repo / "auth-state.json")
+    pv = mock_executor.execute.call_args.kwargs.get("prompt_variables") or {}
+    assert "AUTH_STATE_FILE" not in pv, \
+        "AUTH_STATE_FILE 应由 AgentExecutor 基层注入，exploit_executor 不再显式传"
