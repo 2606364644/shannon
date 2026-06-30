@@ -70,6 +70,7 @@ class GitNexusMCPClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            limit=4 * 1024 * 1024,  # readline 默认 64KB 限制会崩全量 cypher；提到 4MB
         )
         # Send MCP initialize request
         await self._send_request("initialize", {

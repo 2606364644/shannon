@@ -182,6 +182,27 @@ class TestGitNexusMCPClient:
         with pytest.raises(ConnectionError, match="timed out"):
             await client._send_request("tools/call", {})
 
+    @pytest.mark.asyncio
+    async def test_start_passes_4mb_read_limit(self, tmp_path):
+        """readline 64KB bug 修复：start() 必须给 create_subprocess_exec 传 limit=4MB,
+        否则全量 cypher(>64KB) 会让 stdout.readline() 抛 'Separator found, chunk longer than limit'。"""
+        client = GitNexusMCPClient(tmp_path)
+        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = MagicMock()
+            mock_proc.stdin = MagicMock()
+            mock_proc.stdin.drain = AsyncMock()
+            mock_proc.stdout = AsyncMock()
+            mock_proc.stdout.readline = AsyncMock(return_value=json.dumps({
+                "jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}
+            }).encode())
+            mock_proc.wait = AsyncMock()
+            mock_exec.return_value = mock_proc
+
+            await client.start()
+            _, kwargs = mock_exec.call_args
+            assert kwargs.get("limit") == 4 * 1024 * 1024
+            await client.stop()
+
 
 class TestParseMdTable:
     def test_normal_table(self):
