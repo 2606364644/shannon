@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass
+
+from shannon_core.code_index.models import CallChain, FuncBlock
 
 logger = logging.getLogger(__name__)
 
@@ -72,3 +75,51 @@ async def read_all_process_traces(mcp_client, repo_name: str) -> list[ProcessTra
         ))
     logger.info("process_trace_reader: %d/%d traces parsed", len(traces), len(labels))
     return traces
+
+
+def trace_to_chain(trace: ProcessTrace, blocks: list[FuncBlock]) -> CallChain | None:
+    """把 ProcessTrace 转成 CallChain —— steps 四级对齐到 FuncBlock.id。
+
+    四级匹配（spec §4.4）：
+      ① (file_path, name) 精确
+      ② file_path 尾匹配（GitNexus filePath 与 tree-sitter 出入时兜底）
+      ③ name 全仓唯一（文件不符也认）
+      ④ 失败 → 占位 "<file>:<name>" + has_unresolved=True
+    """
+    by_full: dict[tuple[str, str], FuncBlock] = {}
+    by_name: dict[str, list[FuncBlock]] = defaultdict(list)
+    for b in blocks:
+        by_full.setdefault((b.file_path, b.function_name), b)
+        by_name[b.function_name].append(b)
+
+    def resolve(name: str, fpath: str) -> tuple[str, bool]:
+        # ① 精确
+        b = by_full.get((fpath, name))
+        if b:
+            return b.id, True
+        # ② 尾匹配
+        for cc in by_name.get(name, []):
+            if cc.file_path == fpath or cc.file_path.endswith(fpath) or fpath.endswith(cc.file_path):
+                return cc.id, True
+        # ③ name 唯一
+        cands = by_name.get(name, [])
+        if len(cands) == 1:
+            return cands[0].id, True
+        # ④ 占位
+        return f"{fpath}:{name}", False
+
+    path: list[str] = []
+    has_unresolved = False
+    for _idx, name, fpath in trace.steps:
+        block_id, ok = resolve(name, fpath)
+        path.append(block_id)
+        if not ok:
+            has_unresolved = True
+    if not path:
+        return None
+    return CallChain(
+        entry_point_id=path[0],
+        path=path,
+        depth=len(path) - 1,
+        has_unresolved=has_unresolved,
+    )
