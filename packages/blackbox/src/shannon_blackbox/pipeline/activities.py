@@ -399,7 +399,9 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
         from shannon_core.interfaces.report_output_provider import NoOpReportOutputProvider
 
         deliverables = _get_deliverables_path(input)
-        report_path = blackbox_dir(deliverables) / "comprehensive_security_assessment_report.md"
+        bb = blackbox_dir(deliverables)
+        bb.mkdir(parents=True, exist_ok=True)
+        report_path = bb / "comprehensive_security_assessment_report.md"
 
         session_path = Path(input.workspace_path) / "session.json" if input.workspace_path else None
         if session_path:

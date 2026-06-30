@@ -115,6 +115,67 @@ async def test_assemble_report_does_not_overwrite_whitebox_report(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_assemble_report_body_contains_evidence_content(tmp_path, monkeypatch):
+    """Issue 2: assembled blackbox report BODY must contain evidence-derived content.
+
+    blackbox passes ``bb=deliverables/blackbox/`` to ReportAssembler. The whitebox
+    analysis deliverable is NOT under ``bb/`` (it lives in ``whitebox/``), so the
+    assembler must lean on its evidence→findings→analysis fallback chain to still
+    emit a non-empty report. This anchors that: with evidence at
+    ``blackbox/{vc}_exploitation_evidence.md`` + queue at ``whitebox/``, the
+    assembled report body carries the evidence token. If the fallback chain ever
+    silently produced an empty body (e.g. a regression that broke evidence reads),
+    the token assertion would fail.
+    """
+    workspaces_root = tmp_path / "workspaces"
+    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(workspaces_root))
+    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "deliverables")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    inp = _make_input(repo, "bb-session-body")
+
+    from shannon_core.utils.paths import resolve_deliverables_path
+    deliverables = resolve_deliverables_path(
+        repo_path=inp.repo_path,
+        deliverables_subdir=inp.deliverables_subdir,
+        workspace_name=inp.workspace_name,
+    )
+    deliverables.mkdir(parents=True, exist_ok=True)
+
+    # queue in whitebox/ (Task 2 routing) — drives findings rendering + coverage
+    wb = deliverables / WHITEBOX_SUBDIR
+    wb.mkdir(parents=True)
+    queue = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJECTION-BB-001", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="q", path="/s", sink_call="db.execute",
+        ),
+    ])
+    (wb / "injection_exploitation_queue.json").write_text(queue.model_dump_json())
+
+    # evidence in blackbox/ — assembler reads bb/ first (evidence > findings > analysis)
+    bb = deliverables / BLACKBOX_SUBDIR
+    bb.mkdir(parents=True)
+    evidence_token = "EVIDENCE-TOKEN-INJECTION-BB-001-DYNAMIC"
+    (bb / "injection_exploitation_evidence.md").write_text(
+        f"# Exploitation Evidence\n\n## {evidence_token}\nDynamic verify output.\n"
+    )
+
+    await assemble_report(inp)
+
+    bb_report = deliverables / BLACKBOX_SUBDIR / "comprehensive_security_assessment_report.md"
+    assert bb_report.exists(), "blackbox report must be assembled"
+    body = bb_report.read_text()
+    assert evidence_token in body, (
+        "blackbox report body must contain the evidence token — empty/missing body "
+        "means the evidence→findings→analysis fallback chain broke"
+    )
+    assert body.strip() != "", "report body must not be empty"
+
+
+@pytest.mark.asyncio
 async def test_finalize_report_writes_blackbox_dir_path(tmp_path, monkeypatch):
     """finalize_report resolves report_path under deliverables/blackbox/."""
     workspaces_root = tmp_path / "workspaces"
