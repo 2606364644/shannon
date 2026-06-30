@@ -226,9 +226,15 @@ def find_unguarded_sink_paths(
             if count_for_ep >= max_paths_per_endpoint:
                 break
 
+    gn_process_with_sources = sum(
+        1 for ep in entry_eps
+        if ep.entry_type == "gitnexus_process" and sources_by_ep.get(ep.func_block_id)
+    )
     logger.info(
-        "authz GitNexus track: %d entry endpoints with sources, %d IDOR candidates",
+        "authz GitNexus track: %d entry endpoints with sources "
+        "(gitnexus_process=%d), %d IDOR candidates",
         len([ep for ep in entry_eps if sources_by_ep.get(ep.func_block_id)]),
+        gn_process_with_sources,
         len(candidates),
     )
     return candidates
@@ -416,6 +422,17 @@ def build_authz_gitnexus_track(
         dominance_cands = find_unguarded_sink_paths(index)
 
     framework_cands = find_framework_idor_candidates(out / "framework_analysis.json")
+
+    # 三重过滤可观测性：各阶段存活计数（source/entry/candidate），便于定位空壳根因。
+    sp_list = index.source_points if index is not None else []
+    sources_total = len(sp_list)
+    entry_with_sources = len({sp.entry_point_id for sp in sp_list})
+    logger.info(
+        "authz build: source_points=%d, entries_with_sources=%d, "
+        "dominance_candidates=%d, framework_candidates=%d",
+        sources_total, entry_with_sources,
+        len(dominance_cands), len(framework_cands),
+    )
 
     if index is None:
         index = CodeIndex(
