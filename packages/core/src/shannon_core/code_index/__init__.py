@@ -23,6 +23,11 @@ from shannon_core.code_index.sink_discovery_llm import (
     collect_suspicious_calls,
     discover_sinks_llm,
 )
+from shannon_core.code_index.source_detector import detect_sources
+from shannon_core.code_index.source_discovery_llm import (
+    collect_source_candidates,
+    discover_sources_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +237,23 @@ async def build_code_index_with_gitnexus(
         len(all_entry_points), len(process_entries), len(gitnexus_entry_points),
     )
 
-    # ⑧ Assemble CodeIndex
+    # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink）
+    entry_point_ids = {ep.func_block_id for ep in gitnexus_entry_points}
+    source_points = detect_sources(
+        all_blocks, parser, entry_point_ids, source_provider=_provide_source,
+    )
+    logger.info("Detected %d rule-based source points", len(source_points))
+
+    # ⑧b-LLM source 补召回：规则未命中的 entry handler → 软 SourcePoint
+    source_candidates = collect_source_candidates(
+        all_blocks, entry_point_ids, source_provider=_provide_source,
+    )
+    soft_sources = await discover_sources_llm(source_candidates, llm_client)
+    if soft_sources:
+        source_points = source_points + soft_sources
+        logger.info("LLM source discovery added %d soft sources", len(soft_sources))
+
+    # ⑨ Assemble CodeIndex
     return (
         CodeIndex(
             repository=str(repo),
@@ -245,6 +266,7 @@ async def build_code_index_with_gitnexus(
             entry_points=gitnexus_entry_points,
             chains=call_graph.chains,
             sink_call_sites=sink_call_sites,
+            source_points=source_points,
             file_manifest=file_manifest,
             degradation_level=DegradationLevel.FULL,
             parameter_graph=pgraph,

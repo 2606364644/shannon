@@ -106,3 +106,44 @@ def test_dedup_same_field_same_type():
                          source_provider=_provider_from(block))
     ids = [(s.entry_point_id, s.param_name, s.source_type) for s in out]
     assert len(ids) == len(set(ids))  # no duplicates
+
+
+def test_build_code_index_populates_source_points():
+    """pipeline 冒烟:build_code_index_with_gitnexus ⑧b 填充 source_points。
+
+    route 注册放在 setup 函数体内(Express Pass 1: app.get 在 FuncBlock.source_code
+    内 → func_block_id 是真实 block id,非 Pass 2 合成 "::0"),使 entry handler 真实
+    被识别并落入 detect_sources 的扫描范围。断言 source_points 真实被填充(无 mock)。
+    """
+    import asyncio
+    from unittest.mock import AsyncMock
+    from shannon_core.code_index import build_code_index_with_gitnexus
+    import tempfile, os
+
+    # route 注册 + handler 取用都在 setupRoutes 函数体内 → detect_entry_points Pass 1 命中
+    src = (
+        "function setupRoutes(app) {\n"
+        "  app.get('/allocations/:userId', function displayAllocations(req, res){\n"
+        "    const userId = req.params.userId;\n"
+        "    const threshold = req.query.threshold;\n"
+        "  });\n"
+        "}\n"
+    )
+
+    with tempfile.TemporaryDirectory() as repo:
+        f = os.path.join(repo, "app.js")
+        with open(f, "w") as fh:
+            fh.write(src)
+        os.makedirs(os.path.join(repo, ".git"), exist_ok=True)
+
+        fake_mcp = AsyncMock()
+        fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
+        fake_llm = AsyncMock(return_value="[]")  # LLM soft 无产出
+
+        index, rule_gaps = asyncio.run(build_code_index_with_gitnexus(
+            repo, mcp_client=fake_mcp, llm_client=fake_llm,
+        ))
+        # entry handler 的 req.params.userId / req.query.threshold 应被识别
+        names = {(s.param_name, s.source_type.value) for s in index.source_points}
+        assert ("userId", "path") in names
+        assert ("threshold", "query") in names
