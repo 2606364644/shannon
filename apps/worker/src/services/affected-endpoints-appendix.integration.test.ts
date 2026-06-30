@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { path } from 'zx';
 import type { ActivityLogger } from '../types/activity-logger.js';
@@ -16,14 +17,17 @@ const REAL_DELIVERABLES = path.resolve(
 );
 
 describe('affected-endpoints appendix (real authz queue)', () => {
-  it('includes all 91 authz endpoints and the stock-pos-preference finding', async () => {
-    const classes = await collectExploitableEntries(REAL_DELIVERABLES, '', noopLogger);
-    const authz = classes.find((c) => c.heading === 'Authorization');
-    expect(authz).toBeDefined();
-    expect(authz?.entries.length).toBe(91);
-    const md = renderAppendixMarkdown(classes);
-    expect(md).toContain('AUTHZ-VULN-49');
-    expect(md).toContain('GET /asset-analysis/stock-pos-preference');
-    expect(md).toContain('| Authorization | 91 |');
-  });
+  it.skipIf(!existsSync(REAL_DELIVERABLES))(
+    'includes all 91 authz endpoints and the stock-pos-preference finding',
+    async () => {
+      const classes = await collectExploitableEntries(REAL_DELIVERABLES, '', noopLogger);
+      const authz = classes.find((c) => c.heading === 'Authorization');
+      expect(authz).toBeDefined();
+      expect(authz?.entries.length).toBe(91);
+      const md = renderAppendixMarkdown(classes);
+      expect(md).toContain('AUTHZ-VULN-49');
+      expect(md).toContain('GET /asset-analysis/stock-pos-preference');
+      expect(md).toContain('| Authorization | 91 |');
+    },
+  );
 });
