@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
-from shannon_whitebox.pipeline.activities import run_code_index
+from shannon_whitebox.pipeline.activities import run_code_index, _get_paths
 from shannon_whitebox.pipeline.shared import ActivityInput
 
 
@@ -99,3 +99,23 @@ async def test_run_code_index_logs_info_when_chains_present(tmp_path):
         args = mock_sess.return_value.log_info.await_args
         assert args.args[1] == "info"
         assert "chains=5" in args.args[0]
+
+
+def test_get_paths_routes_deliverables_to_whitebox_subdir(tmp_path):
+    """_get_paths 必须把 deliverables 落到 whitebox/ 子目录（Task 2 产物隔离核心改动）。
+
+    不 monkeypatch _get_paths，直接调用真实实现，守护
+    `deliverables = deliverables / WHITEBOX_SUBDIR` 这一行——其他 whitebox 测试都
+    patch 掉 _get_paths，该行因此无执行覆盖（回归风险缺口）。本测试补这块覆盖：
+    只给 repo_path（不给 workspace_name），resolve_deliverables_path 走过渡兼容分支
+    返回 Path(repo_path)/deliverables，再经 _get_paths 追加 WHITEBOX_SUBDIR。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    inp = ActivityInput(repo_path=str(repo))
+
+    _, deliverables, _ = _get_paths(inp)
+
+    assert deliverables.name == "whitebox"
+    assert deliverables.parent.name == "deliverables"
+

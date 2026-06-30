@@ -92,7 +92,12 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
 @pytest.mark.asyncio
 async def test_judge_skips_llm_when_no_candidates(tmp_path):
     """No candidates → write empty queue, do NOT call LLM (save cost)."""
-    (tmp_path / "code_index.json").write_text(json.dumps({
+    # code_index.json 属于 deliverables（activity 从 deliverables/whitebox 读），
+    # 落 whitebox/ 子目录，使 index 真正被读到——match 测试名 "no_candidates"
+    # 的意图（index 存在但无候选），而非 index 整体缺失。
+    dlv = tmp_path / "whitebox"
+    dlv.mkdir(parents=True, exist_ok=True)
+    (dlv / "code_index.json").write_text(json.dumps({
         "repository": "r", "language": "typescript", "total_blocks": 0,
         "total_entry_points": 0, "total_chains": 0, "blocks": [], "edges": [],
         "entry_points": [], "chains": [],
@@ -146,7 +151,11 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
 @pytest.mark.asyncio
 async def test_judge_logs_warning_when_no_candidates(tmp_path):
     """0 候选 → 发 warning（经 InfoEvent），点明 http_route 入口点数。"""
-    (tmp_path / "code_index.json").write_text(json.dumps({
+    # code_index.json 属于 deliverables（activity 从 deliverables/whitebox 读），
+    # 落 whitebox/ 子目录，使 index 真正被读到——match "no_candidates" 的意图。
+    dlv = tmp_path / "whitebox"
+    dlv.mkdir(parents=True, exist_ok=True)
+    (dlv / "code_index.json").write_text(json.dumps({
         "repository": "r", "language": "typescript", "total_blocks": 0,
         "total_entry_points": 0, "total_chains": 0, "blocks": [], "edges": [],
         "entry_points": [], "chains": [],
