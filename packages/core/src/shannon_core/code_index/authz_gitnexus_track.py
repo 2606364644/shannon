@@ -96,6 +96,48 @@ def _segment_has_ownership_guard(segment_ids: list[str], blocks_by_id: dict[str,
 _AUTHZ_ENTRY_TYPES = ("http_route", "rpc", "gitnexus_process")
 
 
+def _source_reaches_sink(
+    ep_sources: list,
+    segment_ids: list[str],
+    blocks_by_id: dict[str, FuncBlock],
+) -> bool:
+    """SourcePoint 参数值是否正向流到 segment 末端的 sink 函数（复用 forward 工具）。
+
+    从 entry 的 SourcePoint 表达式集合（seed）正向沿 segment 传播，用
+    chain_propagator._map_call_site_params（forward）逐跳映射，看 tainted 能否
+    到达 segment 末端的 sink 函数参数。过近似（substring），宁过报。
+    """
+    from shannon_core.code_index.chain_propagator import _map_call_site_params
+
+    if not ep_sources or len(segment_ids) < 2:
+        # 单节点 segment（entry 自身是 sink）→ 看 SourcePoint 表达式是否直接在该函数体
+        if len(segment_ids) == 1:
+            blk = blocks_by_id.get(segment_ids[0])
+            if blk is None:
+                return False
+            return any(
+                (sp.expression or sp.param_name) and
+                (sp.expression in blk.source_code or sp.param_name in blk.source_code)
+                for sp in ep_sources
+            )
+        return False
+
+    # seed: entry 的 SourcePoint 表达式/参数名集合
+    current_tainted: set[str] = {
+        sp.expression or sp.param_name for sp in ep_sources if sp.expression or sp.param_name
+    }
+    for i in range(len(segment_ids) - 1):
+        caller = blocks_by_id.get(segment_ids[i])
+        callee = blocks_by_id.get(segment_ids[i + 1])
+        if caller is None or callee is None:
+            continue
+        current_tainted = _map_call_site_params(
+            caller_block=caller, caller_tainted=current_tainted, callee_block=callee)
+        if not current_tainted:
+            return False
+    return bool(current_tainted)
+
+
 def find_unguarded_sink_paths(
     index: CodeIndex,
     *,
