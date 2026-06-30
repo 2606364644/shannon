@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -56,6 +57,7 @@ class IDORCandidateChain:
     sink_step_idx: int        # sink 在 path 中的下标（spec §4.8 决策7，扫全链）
     path: tuple[str, ...]     # ordered FuncBlock.id list, handler→sink
     guard_nodes_on_path: tuple[str, ...]  # ownership-guard node ids on path (empty=none)
+    source_point_ids: tuple[str, ...] = ()  # 命中的 SourcePoint（Phase C：source 证据）
 
 
 class AuthzTrackBuildResult(NamedTuple):
@@ -145,17 +147,23 @@ def find_unguarded_sink_paths(
 ) -> list[IDORCandidateChain]:
     """Find handler→sink paths lacking an ownership guard (IDOR candidates).
 
-    四处改（spec §4.8）：
-      1. entry 过滤扩 http_route/rpc/gitnexus_process；gitnexus_process 放宽 route 守卫
-         （route=None 的 SRPC 业务入口必须放行，断点①）。
-      2. sink 扫全链任意步 side-effect（替 path[-1]，决策7，扫全链命中中间 sink）。
-      3. ownership guard 扫 entry→sink_step 段（替只查 handler，决策6）。
-    handler 自身含 ownership 谓词 → 短路（dominance，既有逻辑保留）。
+    三重过滤（Phase C，source-anchored）：
+      ① entry 接收用户可控输入（有至少一个 SourcePoint）——无 SourcePoint 的
+         entry 跳过（降过报：内部入口无外部 source 通常非 IDOR）。
+      ② 参数实际正向流到 side-effect sink（`_source_reaches_sink`，复用 forward 工具）。
+      ③ entry→sink_step 段（含两端）无 ownership 谓词（决策6）。
+    另：sink 扫全链任意步 side-effect（决策7）；handler 自身含 ownership 谓词 → 短路
+    （dominance，既有逻辑保留）。命中时收集 source_point_ids 作为 source 证据。
 
     Dedup by (endpoint_id, sink_id). Capped per endpoint to bound the
     judge-LLM cost.
     """
     blocks_by_id: dict[str, FuncBlock] = {b.id: b for b in index.blocks}
+    # SourcePoint 按 entry 分组
+    sources_by_ep: dict[str, list] = defaultdict(list)
+    for sp in (index.source_points or []):
+        sources_by_ep[sp.entry_point_id].append(sp)
+
     # 改1: entry 过滤 + gitnexus_process 放宽 route 守卫（断点①）
     entry_eps = [
         ep for ep in index.entry_points
@@ -167,6 +175,9 @@ def find_unguarded_sink_paths(
     seen: set[tuple[str, str]] = set()  # (endpoint_id, sink_id)
 
     for ep in entry_eps:
+        ep_sources = sources_by_ep.get(ep.func_block_id, [])
+        if not ep_sources:                       # ① 无 SourcePoint → 跳过（降过报）
+            continue
         handler = blocks_by_id.get(ep.func_block_id)
         if handler is None:
             continue  # unresolved handler — Plan 6 surfaces "unknown"; skip here
@@ -190,9 +201,15 @@ def find_unguarded_sink_paths(
                 key = (ep.func_block_id, sid)
                 if key in seen:
                     continue
+                segment = chain.path[: step_idx + 1]
                 # 改3: ownership 扫 entry→sink_step 段（含两端，决策6）
-                if _segment_has_ownership_guard(chain.path[: step_idx + 1], blocks_by_id):
+                if _segment_has_ownership_guard(segment, blocks_by_id):
                     continue
+                # ② 参数实际流到 sink（forward 传播）
+                if not _source_reaches_sink(ep_sources, segment, blocks_by_id):
+                    continue
+                # ③ 已通过 ownership 检查；收集命中的 SourcePoint 作为 source 证据
+                hit_sp_ids = tuple(sp.id for sp in ep_sources)
                 seen.add(key)
                 candidates.append(IDORCandidateChain(
                     endpoint_id=ep.func_block_id,
@@ -201,6 +218,7 @@ def find_unguarded_sink_paths(
                     sink_step_idx=step_idx,
                     path=tuple(chain.path),
                     guard_nodes_on_path=(),  # segment guard absent → no guards
+                    source_point_ids=hit_sp_ids,
                 ))
                 count_for_ep += 1
                 if count_for_ep >= max_paths_per_endpoint:
@@ -209,9 +227,8 @@ def find_unguarded_sink_paths(
                 break
 
     logger.info(
-        "authz GitNexus track: %d entry endpoints (%d gitnexus_process), %d IDOR candidate chains",
-        len(entry_eps),
-        sum(1 for ep in entry_eps if ep.entry_type == "gitnexus_process"),
+        "authz GitNexus track: %d entry endpoints with sources, %d IDOR candidates",
+        len([ep for ep in entry_eps if sources_by_ep.get(ep.func_block_id)]),
         len(candidates),
     )
     return candidates

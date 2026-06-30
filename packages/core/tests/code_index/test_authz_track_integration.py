@@ -9,10 +9,10 @@ import json
 from shannon_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
 
 
-def _block(bid, source):
+def _block(bid, source, params=None):
     fp, fn, ln = bid.rsplit(":", 2)
     return {"id": bid, "file_path": fp, "function_name": fn, "start_line": int(ln),
-            "end_line": int(ln) + 5, "source_code": source, "parameters": [],
+            "end_line": int(ln) + 5, "source_code": source, "parameters": params or [],
             "decorators": [], "language": "typescript"}
 
 
@@ -22,11 +22,19 @@ def _ep(handler, route, method="DELETE"):
             "needs_llm_review": False, "authentication": "required", "source": "code_index"}
 
 
-def _write(tmp_path, eps, blocks, chains, fw_endpoints=None):
+def _sp(handler, expression, param_name):
+    return {"id": f"{handler}::{param_name}::1", "entry_point_id": handler,
+            "param_name": param_name, "source_type": "path",
+            "expression": expression, "file_path": "u.js", "line": 10,
+            "confidence": 0.9, "rule_id": "test-rule"}
+
+
+def _write(tmp_path, eps, blocks, chains, fw_endpoints=None, source_points=None):
     (tmp_path / "code_index.json").write_text(json.dumps({
         "repository": "r", "language": "typescript", "total_blocks": len(blocks),
         "total_entry_points": len(eps), "total_chains": len(chains),
         "blocks": blocks, "edges": [], "entry_points": eps, "chains": chains,
+        "source_points": source_points or [],
     }))
     if fw_endpoints is not None:
         (tmp_path / "framework_analysis.json").write_text(json.dumps({
@@ -36,10 +44,10 @@ def _write(tmp_path, eps, blocks, chains, fw_endpoints=None):
 
 
 def test_e2e_dominance_candidate_plus_framework_candidate(tmp_path):
-    handler = _block("u.js:update:10", "async function update(req){ await repo.update(req.params.id); }")
+    handler = _block("u.js:update:10", "async function update(req){ await persist(req.params.id); }")
     guarded = _block("g.js:safe:1",
                      "async function safe(req){ const r = await db.user.findFirst({where:{userId:req.user.id}}); await r.save(); }")
-    sink = _block("repo.js:update:1", "function update(){ db.user.update(); }")
+    sink = _block("repo.js:persist:1", "function persist(id){ db.user.update(); }", params=["id"])
     safe_sink = _block("repo.js:safeupdate:1", "function safeupdate(){ r.save(); }")
     _write(
         tmp_path,
@@ -47,7 +55,7 @@ def test_e2e_dominance_candidate_plus_framework_candidate(tmp_path):
          _ep("g.js:safe:1", "/api/owned/:id", "PUT")],
         [handler, guarded, sink, safe_sink],
         [
-            {"entry_point_id": "u.js:update:10", "path": ["u.js:update:10", "repo.js:update:1"],
+            {"entry_point_id": "u.js:update:10", "path": ["u.js:update:10", "repo.js:persist:1"],
              "depth": 1, "has_unresolved": False},
             {"entry_point_id": "g.js:safe:1", "path": ["g.js:safe:1", "repo.js:safeupdate:1"],
              "depth": 1, "has_unresolved": False},  # guarded → not a candidate
@@ -57,19 +65,20 @@ def test_e2e_dominance_candidate_plus_framework_candidate(tmp_path):
              "model": "Feedback", "middleware": ("isAuthenticated",),
              "vulnerability_indicators": ("No ownership check",)},
         ],
+        source_points=[_sp("u.js:update:10", "req.params.id", "id")],
     )
 
     md, dom, fw, http_route_count, entry_point_total = build_authz_gitnexus_track(str(tmp_path))
 
     # dominance: only the unguarded handler → 1 candidate (guarded handler skipped)
     assert len(dom) == 1
-    assert dom[0].sink_id == "repo.js:update:1"
+    assert dom[0].sink_id == "repo.js:persist:1"
     # framework: 1 auto-generated
     assert len(fw) == 1
     assert fw[0].method == "DELETE"
     # markdown surfaces both
     assert "DELETE /api/Feedbacks/:id" in md
-    assert "repo.js:update:1" in md
+    assert "repo.js:persist:1" in md
     assert "finale-rest" in md
     # verdict directive
     assert "verdict" in md.lower() or "判定" in md

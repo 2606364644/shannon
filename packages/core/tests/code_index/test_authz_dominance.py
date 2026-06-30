@@ -1,28 +1,39 @@
 # packages/core/tests/code_index/test_authz_dominance.py
 from shannon_core.code_index.models import (
-    CallChain, CallEdge, CodeIndex, EntryPoint, FuncBlock,
+    CallChain, CallEdge, CodeIndex, EntryPoint, FuncBlock, ParameterSource,
 )
+from shannon_core.code_index.parameter_models import SourcePoint
 from shannon_core.code_index.authz_gitnexus_track import (
     IDORCandidateChain,
     find_unguarded_sink_paths,
 )
 
 
-def _block(bid, source, name=None):
+def _block(bid, source, name=None, params=None):
     file_path, func_name, line = bid.rsplit(":", 2)
     return FuncBlock(
         id=bid, file_path=file_path, function_name=name or func_name,
         start_line=int(line), end_line=int(line) + 5, source_code=source,
-        parameters=[], language="typescript",
+        parameters=params or [], language="typescript",
     )
 
 
-def _idx(blocks, edges, chains, entry_points=None):
+def _idx(blocks, edges, chains, entry_points=None, source_points=None):
     return CodeIndex(
         repository="r", language="typescript", total_blocks=len(blocks),
         total_entry_points=len(entry_points or []), total_chains=len(chains),
         blocks=blocks, edges=edges, entry_points=entry_points or [],
-        chains=chains,
+        chains=chains, source_points=source_points or [],
+    )
+
+
+def _sp(handler_id, expression, param_name, sp_id=None):
+    """Build a SourcePoint anchored at handler_id with given user-controlled expression."""
+    return SourcePoint(
+        id=sp_id or f"{handler_id}::{param_name}::1",
+        entry_point_id=handler_id, param_name=param_name,
+        source_type=ParameterSource.PATH_PARAM, expression=expression,
+        file_path="x", line=1, confidence=0.9, rule_id="test-rule",
     )
 
 
@@ -66,29 +77,34 @@ def test_candidate_when_no_ownership_guard_reaches_sink():
     """Handler reaches a side-effect sink (ORM update) with no ownership predicate."""
     handler = _block(
         "u.js:update:10",
-        "async function update(req){ await repo.update(req.params.id, req.body); }",
+        "async function update(req){ await persist(req.params.id, req.body); }",
     )
-    sink = _block("repo.js:update:1", "function update(){ db.user.update(); }")
+    sink = _block("repo.js:persist:1", "function persist(id, body){ db.user.update(); }", params=["id", "body"])
     chain = CallChain(
         entry_point_id=handler.id, path=[handler.id, sink.id],
         depth=1, has_unresolved=False,
     )
-    index = _idx([handler, sink], [], [chain], [_ep(handler.id, "/api/Feedbacks/:id")])
+    sp = _sp(handler.id, "req.params.id", "id")
+    index = _idx([handler, sink], [], [chain], [_ep(handler.id, "/api/Feedbacks/:id")],
+                 source_points=[sp])
     cands = find_unguarded_sink_paths(index)
     assert len(cands) == 1
     c = cands[0]
     assert c.handler_id == handler.id
     assert c.sink_id == sink.id
     assert c.guard_nodes_on_path == ()  # no guard
+    assert sp.id in c.source_point_ids  # source 证据
 
 
 def test_candidate_dedup_by_endpoint_sink():
     """Two chains to the same sink from the same endpoint → one candidate."""
     handler = _block("h.js:f:1", "async function f(req){ await s(req.id); }")
-    sink = _block("s.js:g:1", "function g(){ db.user.remove(); }")
+    sink = _block("s.js:g:1", "function g(id){ db.user.remove(); }", params=["id"])
     ch1 = CallChain(entry_point_id=handler.id, path=[handler.id, sink.id], depth=1, has_unresolved=False)
     ch2 = CallChain(entry_point_id=handler.id, path=[handler.id, "x.js:m:1", sink.id], depth=2, has_unresolved=False)
-    index = _idx([handler, sink], [], [ch1, ch2], [_ep(handler.id, "/api/u/:id")])
+    sp = _sp(handler.id, "req.id", "id")
+    index = _idx([handler, sink], [], [ch1, ch2], [_ep(handler.id, "/api/u/:id")],
+                 source_points=[sp])
     cands = find_unguarded_sink_paths(index)
     assert len(cands) == 1  # deduped by (endpoint, sink)
 
@@ -104,9 +120,10 @@ def test_chains_without_side_effect_sink_are_skipped():
 
 def test_respects_max_paths_per_endpoint():
     """Cap candidate count per endpoint to bound the judge-LLM cost."""
-    handler = _block("h.js:f:1", "function f(){ sink1(); }")
+    # handler 把 tainted 传给每个 sink（gi 接 id 参数）
+    handler = _block("h.js:f:1", "function f(req){ sink0(req.id); sink1(req.id); sink2(req.id); sink3(req.id); sink4(req.id); }")
     sinks = [
-        _block(f"s.js:g{i}:1", f"function g{i}(){{ db.user.update(); }}")
+        _block(f"s.js:g{i}:1", f"function g{i}(id){{ db.user.update(); }}", params=["id"])
         for i in range(5)
     ]
     chains = [
@@ -114,7 +131,9 @@ def test_respects_max_paths_per_endpoint():
                   depth=1, has_unresolved=False)
         for s in sinks
     ]
-    index = _idx([handler, *sinks], [], chains, [_ep(handler.id, "/api/u/:id")])
+    sp = _sp(handler.id, "req.id", "id")
+    index = _idx([handler, *sinks], [], chains, [_ep(handler.id, "/api/u/:id")],
+                 source_points=[sp])
     cands = find_unguarded_sink_paths(index, max_paths_per_endpoint=2)
     assert len(cands) == 2
 
@@ -127,9 +146,11 @@ def test_empty_index_yields_no_candidates():
 def test_process_entry_route_none_is_admitted():
     """断点①: process entry route=None 必须进候选（不能被 route is not None 挡）。"""
     handler = _block("h.js:f:1", "function f(req){ await s(req.id); }")
-    sink = _block("s.js:g:1", "function g(){ db.user.update(); }")
+    sink = _block("s.js:g:1", "function g(id){ db.user.update(); }", params=["id"])
     chain = CallChain(entry_point_id=handler.id, path=[handler.id, sink.id], depth=1, has_unresolved=False)
-    index = _idx([handler, sink], [], [chain], [_proc_ep(handler.id)])
+    sp = _sp(handler.id, "req.id", "id")
+    index = _idx([handler, sink], [], [chain], [_proc_ep(handler.id)],
+                 source_points=[sp])
     cands = find_unguarded_sink_paths(index)
     assert len(cands) == 1
     assert cands[0].endpoint_id == handler.id
@@ -139,10 +160,12 @@ def test_side_effect_sink_in_middle_of_chain_is_found():
     """断点②(决策7): sink 在链中间(非 terminal) → 扫全链命中。模拟 0→21 的核心。
     链: entry → middle(side-effect sink) → leaf(非 sink)。terminal 非 sink。"""
     entry = _block("e.js:e:1", "function e(req){ m(req); leaf(); }")
-    middle = _block("m.js:m:1", "function m(){ db.user.update(); }")   # side-effect sink 在中间
+    middle = _block("m.js:m:1", "function m(arg){ db.user.update(); }", params=["arg"])   # side-effect sink 在中间
     leaf = _block("l.js:l:1", "function l(){ return 1; }")             # terminal 非 sink
     chain = CallChain(entry_point_id=entry.id, path=[entry.id, middle.id, leaf.id], depth=2, has_unresolved=False)
-    index = _idx([entry, middle, leaf], [], [chain], [_ep(entry.id, "/api/x")])
+    sp = _sp(entry.id, "req", "req")
+    index = _idx([entry, middle, leaf], [], [chain], [_ep(entry.id, "/api/x")],
+                 source_points=[sp])
     cands = find_unguarded_sink_paths(index)
     assert len(cands) == 1
     c = cands[0]
