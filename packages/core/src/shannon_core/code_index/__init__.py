@@ -207,28 +207,30 @@ async def build_code_index_with_gitnexus(
     )
     logger.info("Built parameter propagation graph: %d taint flows", len(pgraph.taint_flows))
 
-    # ⑦ Convert GitNexus entry_point FuncBlocks → EntryPoint objects
-    #    GitNexus returns FuncBlock[] but CodeIndex expects EntryPoint[].
-    #    Run detect_entry_points on all blocks, then intersect with GitNexus results.
-    gitnexus_ep_ids = {ep.id for ep in call_graph.entry_points}
+    # ⑦ entry 组装：detect_entry_points ∪ process entry（G2）
+    #    process entry = call_graph.entry_points(path[0] FuncBlock) 中 detect 未识别的，
+    #    entry_type="gitnexus_process"（SRPC/RPC 业务入口，非 HTTP）；同 id 时 detect 优先
+    #    （保留其 route/http_method）。替代旧的 detect ∩ gitnexus（intersect）。
     all_entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
-    # Keep entry points that GitNexus also identified
-    gitnexus_entry_points = [
-        ep for ep in all_entry_points if ep.func_block_id in gitnexus_ep_ids
-    ]
-    # Add synthetic EntryPoint for GitNexus-only discoveries not found by scanner
-    detected_ids = {ep.func_block_id for ep in gitnexus_entry_points}
+    detected_ids = {ep.func_block_id for ep in all_entry_points}
+    process_entries: list[EntryPoint] = []
     for ep_block in call_graph.entry_points:
         if ep_block.id not in detected_ids:
-            gitnexus_entry_points.append(EntryPoint(
+            process_entries.append(EntryPoint(
                 func_block_id=ep_block.id,
-                entry_type="gitnexus",
+                entry_type="gitnexus_process",
                 route=None,
                 http_method=None,
                 confidence=0.9,
-                evidence=f"GitNexus identified entry point: {ep_block.function_name}",
+                evidence=f"GitNexus process entry: {ep_block.function_name}",
                 needs_llm_review=False,
+                source="gitnexus",
             ))
+    gitnexus_entry_points = list(all_entry_points) + process_entries
+    logger.info(
+        "entry assembly: %d detect + %d gitnexus_process = %d total",
+        len(all_entry_points), len(process_entries), len(gitnexus_entry_points),
+    )
 
     # ⑧ Assemble CodeIndex
     return (

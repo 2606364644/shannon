@@ -278,6 +278,46 @@ class TestPipelineAutoIndexing:
         assert index.parameter_graph.taint_flows == []
 
     @pytest.mark.asyncio
+    async def test_entry_points_union_detect_and_process(self, tmp_path):
+        """G2: CodeIndex.entry_points = detect_entry_points ∪ process entry。
+        process entry 用 entry_type='gitnexus_process'；同 id 时 detect 优先。"""
+        from shannon_core.code_index import build_code_index_with_gitnexus
+        from shannon_core.code_index.models import CallGraphResult, EntryPoint
+
+        source_file = tmp_path / "app.py"
+        source_file.write_text("def cli_main(): pass\ndef Upload(): pass\n")
+        cli = _block("cli_main", "app.py", 1)        # detect 会识别为 cli
+        upload = _block("Upload", "app.py", 5)        # process entry（detect 不识别）
+        parser = MagicMock()
+        parser.parse_file.return_value = [cli, upload]
+
+        detected = [EntryPoint(
+            func_block_id=cli.id, entry_type="cli", route=None, http_method=None,
+            confidence=0.9, evidence="cli", needs_llm_review=False, source="code_index",
+        )]
+
+        with patch("shannon_core.code_index.detect_language", return_value="python"):
+            with patch("shannon_core.code_index.discover_source_files", return_value=[source_file]):
+                with patch("shannon_core.code_index.get_parser", return_value=parser):
+                    with patch(
+                        "shannon_core.code_index.build_call_graph_from_gitnexus",
+                        new=AsyncMock(return_value=CallGraphResult(entry_points=[upload])),
+                    ):
+                        with patch("shannon_core.code_index.detect_sinks", return_value=[]):
+                            with patch("shannon_core.code_index.detect_entry_points", return_value=detected):
+                                with patch("shannon_core.code_index.propagate_across_chains", return_value=[]):
+                                    index, _ = await build_code_index_with_gitnexus(
+                                        str(tmp_path), mcp_client=FakeImpactMCPClient(responses={}),
+                                        llm_client=AsyncMock(return_value="{}"),
+                                    )
+
+        by_id = {ep.func_block_id: ep for ep in index.entry_points}
+        assert cli.id in by_id and by_id[cli.id].entry_type == "cli"           # detect 优先
+        assert upload.id in by_id and by_id[upload.id].entry_type == "gitnexus_process"  # process 补
+        assert by_id[upload.id].route is None
+        assert by_id[upload.id].source == "gitnexus"
+
+    @pytest.mark.asyncio
     async def test_indexing_failure_raises(self, tmp_path):
         """ensure_indexed() 失败时,build_code_index_with_gitnexus 必须硬失败。"""
         from shannon_core.code_index import build_code_index_with_gitnexus
