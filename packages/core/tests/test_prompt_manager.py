@@ -656,3 +656,31 @@ def test_validate_auth_prompt_emits_save_command():
     # 泛指文字应已不在（被变量替换语义取代）
     assert "browser's session state save command" not in result
 
+
+def test_shared_session_stripped_even_with_auth_state_file(prompts_dir):
+    """方案 B no-op 守卫：AgentExecutor 基层总注入 AUTH_STATE_FILE（即便无 auth 配置），
+    但无 config.authentication 时 manager 仍 strip 整个 <shared_authenticated_session>
+    block——含已注入的 load command。即 AUTH_STATE_FILE 常驻不破坏 no-op（spec §4）。
+
+    与 test_shared_session_block_removed_when_config_none 的区别：本测试显式传
+    AUTH_STATE_FILE + 用 {{AUTH_LOAD_COMMAND}} 占位符，锁定"AUTH_STATE_FILE 存在 +
+    load 占位符在 block 内 + 无 auth → block 连同 load 一起被 strip"。
+    """
+    (prompts_dir / "noop-test.txt").write_text(
+        "Before\n"
+        "<shared_authenticated_session>\n"
+        "Restore: {{AUTH_LOAD_COMMAND}} file {{AUTH_STATE_FILE}}\n"
+        "</shared_authenticated_session>\n"
+        "After\n"
+    )
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync(
+        "noop-test",
+        {"web_url": "https://x.com", "repo_path": "/r",
+         "AUTH_STATE_FILE": "/ws/auth-state.json"},
+        config=None,
+    )
+    assert "<shared_authenticated_session>" not in result
+    assert "state load" not in result  # load command 随 block 被 strip
+    assert "Before" in result and "After" in result
+
