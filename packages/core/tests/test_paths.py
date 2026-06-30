@@ -256,3 +256,49 @@ class TestDeliverablesDirForWorkspace:
         ws = tmp_path / "workspaces" / "orphan"
         ws.mkdir(parents=True)
         assert deliverables_dir_for_workspace(ws) == ws / "deliverables"
+
+
+from shannon_core.utils.paths import (
+    WHITEBOX_SUBDIR, BLACKBOX_SUBDIR,
+    whitebox_dir, blackbox_dir, resolve_track_deliverable,
+)
+
+
+class TestTrackSubdirHelpers:
+    def test_whitebox_dir_appends_subdir(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        assert whitebox_dir(dlv) == dlv / "whitebox"
+
+    def test_blackbox_dir_appends_subdir(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        assert blackbox_dir(dlv) == dlv / "blackbox"
+
+    def test_subdir_constants(self):
+        assert WHITEBOX_SUBDIR == "whitebox"
+        assert BLACKBOX_SUBDIR == "blackbox"
+
+
+class TestResolveTrackDeliverable:
+    def test_prefers_new_track_subdir(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        (dlv / "whitebox").mkdir(parents=True)
+        (dlv / "whitebox" / "injection_exploitation_queue.json").write_text("{}")
+        # 老结构也存在，但新结构优先
+        (dlv / "injection_exploitation_queue.json").write_text("{}")
+        result = resolve_track_deliverable(dlv, "whitebox", "injection_exploitation_queue.json")
+        assert result == dlv / "whitebox" / "injection_exploitation_queue.json"
+
+    def test_falls_back_to_legacy_root(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        dlv.mkdir()
+        # 仅老结构存在（老 workspace）
+        (dlv / "injection_exploitation_queue.json").write_text("{}")
+        result = resolve_track_deliverable(dlv, "whitebox", "injection_exploitation_queue.json")
+        assert result == dlv / "injection_exploitation_queue.json"
+
+    def test_returns_new_path_when_neither_exists(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        dlv.mkdir()
+        result = resolve_track_deliverable(dlv, "blackbox", "x_evidence.md")
+        # 都不存在 → 返回新结构路径（让调用方自然 not-found）
+        assert result == dlv / "blackbox" / "x_evidence.md"
