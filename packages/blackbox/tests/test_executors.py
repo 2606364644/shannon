@@ -176,6 +176,47 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_exploit_executor_falls_back_to_agent_written_verdict_file(tmp_path):
+    """structured_output 空（GLM/CLI agent 用 Write 落盘而非 final JSON）时，
+    executor 应回退读 agent 写的 .shannon/deliverables/{vuln}_exploitation_verdicts.json。
+    复现 invite_code_center 真机根因（verdict 双重丢失 → 报告全 Unverified）。"""
+    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [{"ID": "INJ-VULN-1", "vulnerability_type": "injection",
+                             "externally_exploitable": True, "confidence": "high"}]}))
+    # agent 用 Write 工具把 verdict 落盘到隔离子目录（富结构 + 大写 severity，未按
+    # schema 返回 final JSON）——这是 GLM/claude-agent-sdk 引擎下的既成行为。
+    agent_out = deliverables / ".shannon" / "deliverables"
+    agent_out.mkdir(parents=True)
+    (agent_out / "injection_exploitation_verdicts.json").write_text(json.dumps({
+        "verdicts": [{
+            "vulnerability_id": "INJ-VULN-1", "status": "exploited",
+            "severity": "CRITICAL", "impact": "i",
+            "exploitation_steps": [{"step": 1, "action": "do x"}],
+            "proof_of_impact": {"confirmed": True}}]}))
+
+    # structured_output=None：agent final message 是自然语言
+    fake_metrics = AgentMetrics(duration_ms=100, cost_usd=0.01, num_turns=2, model="stub",
+                                structured_output=None)
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(return_value=fake_metrics)
+
+    ex = ExploitExecutor(stub_executor)
+    await ex.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="http://t", pipeline_testing=True)
+
+    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    assert "### INJ-VULN-1" in ev
+    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    assert vj["accepted_ids"] == ["INJ-VULN-1"]
+
+
+@pytest.mark.asyncio
 async def test_exploit_executor_no_longer_injects_auth_state_file(mock_repo):
     """AUTH_STATE_FILE 由 AgentExecutor.execute 基层统一注入（方案 B），
     exploit_executor 不再显式传——单一来源，避免双注入。"""
