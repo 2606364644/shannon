@@ -163,11 +163,11 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
         workspace_path=deliverables.parent, deliverables_path=deliverables,
         web_url="http://t", pipeline_testing=True)
 
-    # evidence.md 被渲染
-    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    # evidence.md 被渲染（落 blackbox/）
+    ev = (deliverables / "blackbox" / "injection_exploitation_evidence.md").read_text()
     assert "### INJ-VULN-1" in ev
-    # verdicts.json 被落盘
-    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    # verdicts.json 被落盘（落 blackbox/）
+    vj = json.loads((deliverables / "blackbox" / "injection_exploit_verdicts.json").read_text())
     assert vj["accepted_ids"] == ["INJ-VULN-1"]
     # 传给底层 executor 的参数：structured_output_schema + skip_artifact_postprocess
     _, kwargs = stub_executor.execute.call_args
@@ -210,10 +210,51 @@ async def test_exploit_executor_falls_back_to_agent_written_verdict_file(tmp_pat
         workspace_path=deliverables.parent, deliverables_path=deliverables,
         web_url="http://t", pipeline_testing=True)
 
-    ev = (deliverables / "injection_exploitation_evidence.md").read_text()
+    ev = (deliverables / "blackbox" / "injection_exploitation_evidence.md").read_text()
     assert "### INJ-VULN-1" in ev
-    vj = json.loads((deliverables / "injection_exploit_verdicts.json").read_text())
+    vj = json.loads((deliverables / "blackbox" / "injection_exploit_verdicts.json").read_text())
     assert vj["accepted_ids"] == ["INJ-VULN-1"]
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_reads_queue_from_whitebox_subdir(tmp_path):
+    """新结构：白盒 queue 在 deliverables/whitebox/，exploit_executor 走 fallback 读到。"""
+    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    dlv = tmp_path / "deliverables"
+    (dlv / "whitebox").mkdir(parents=True)
+    (dlv / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities": [{"ID": "INJ-1", "vulnerability_type": "SQLi"}]}'
+    )
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(
+        return_value=AgentMetrics(duration_ms=10, cost_usd=0.0, num_turns=1, model="stub"))
+    executor = ExploitExecutor(stub_executor)
+    await executor.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=tmp_path, deliverables_path=dlv, web_url="https://x.com",
+    )
+    # evidence 落 blackbox/
+    assert (dlv / "blackbox" / "injection_exploitation_evidence.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_falls_back_to_legacy_queue(tmp_path):
+    """老 workspace：queue 在 deliverables 根，fallback 读到。"""
+    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    dlv = tmp_path / "deliverables"
+    dlv.mkdir()
+    (dlv / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities": [{"ID": "INJ-1", "vulnerability_type": "SQLi"}]}'
+    )
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(
+        return_value=AgentMetrics(duration_ms=10, cost_usd=0.0, num_turns=1, model="stub"))
+    executor = ExploitExecutor(stub_executor)
+    await executor.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=tmp_path, deliverables_path=dlv, web_url="https://x.com",
+    )
+    assert (dlv / "blackbox" / "injection_exploitation_evidence.md").exists()
 
 
 @pytest.mark.asyncio
