@@ -6,7 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from shannon_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
+    from shannon_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite, SourcePoint
 
 
 class Verdict(str, Enum):
@@ -84,6 +84,7 @@ class CodeIndex(BaseModel):
     degradation_level: "DegradationLevel | None" = None
     # Spec B: AST-precise sink detection (use forward ref; resolved at runtime via model_rebuild)
     sink_call_sites: list["SinkCallSite"] = []
+    source_points: list["SourcePoint"] = []
     parameter_graph: "ParameterPropagationGraph | None" = None
 
 
@@ -209,7 +210,9 @@ class GitNexusConnectionError(Exception):
 # Resolve forward references for sink_call_sites (Spec B)
 def _resolve_forward_refs() -> None:
     try:
-        from shannon_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite  # noqa: F401
+        from shannon_core.code_index.parameter_models import (  # noqa: F401
+            ParameterPropagationGraph, SinkCallSite, SourcePoint,
+        )
         CodeIndex.model_rebuild()
     except ImportError:
         pass

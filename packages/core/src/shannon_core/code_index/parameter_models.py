@@ -160,3 +160,24 @@ class SinkCallSite(BaseModel):
     dangerous_slots: list[DangerousSlot]    # 规则库标注的危险参数位 + slot
     rule_id: str                            # 命中的规则 id（可追溯到规则库定义）
     needs_review: bool = False              # best-effort 判定 / 动态调用 / 模板类，需 LLM 复核
+
+
+class SourcePoint(BaseModel):
+    """入口 handler 中一个用户可控的外部输入取用点 —— 与 SinkCallSite 对称。
+
+    平行 SinkCallSite：sink 是"危险调用点"，source 是"外部输入取用点"。
+    对齐原版 Input Vector 表：param_name/expression/validation/source_type。
+    id 格式："{entry_point_id}::{param_name}::{line}"。
+    """
+    id: str
+    entry_point_id: str           # handler FuncBlock.id
+    param_name: str               # 字段名，如 "userId" / "threshold"
+    source_type: ParameterSource  # query/path/body/form/header/cookie/file/session/internal/unknown
+    expression: str               # 取用表达式，如 "req.params.userId"
+    file_path: str
+    line: int                     # 取用点行号
+    column: int = 0
+    validation: str = "NONE"      # 取用点验证（NONE/parseInt/regex/escape...），对齐原版 Validation 列
+    confidence: float = 0.9
+    rule_id: str                  # 规则 id 或 "llm-discovered"
+    needs_review: bool = False
