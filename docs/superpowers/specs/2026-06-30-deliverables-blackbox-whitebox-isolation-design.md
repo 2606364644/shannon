@@ -97,27 +97,29 @@
 WHITEBOX_SUBDIR = "whitebox"
 BLACKBOX_SUBDIR = "blackbox"
 
-def whitebox_dir(workspace_path: Path) -> Path:
-    """白盒产物目录：workspace/deliverables/whitebox/"""
-    return deliverables_dir_for_workspace(workspace_path) / WHITEBOX_SUBDIR
+def whitebox_dir(deliverables_dir: Path) -> Path:
+    """白盒产物子目录（写侧）：deliverables_dir/whitebox/。
+    deliverables_dir 是 workspaces/<session>/deliverables 根。"""
+    return deliverables_dir / WHITEBOX_SUBDIR
 
-def blackbox_dir(workspace_path: Path) -> Path:
-    """黑盒产物目录：workspace/deliverables/blackbox/"""
-    return deliverables_dir_for_workspace(workspace_path) / BLACKBOX_SUBDIR
+def blackbox_dir(deliverables_dir: Path) -> Path:
+    """黑盒产物子目录（写侧）：deliverables_dir/blackbox/。
+    deliverables_dir 是 workspaces/<session>/deliverables 根。"""
+    return deliverables_dir / BLACKBOX_SUBDIR
 
-def resolve_track_deliverable(workspace_path: Path, track: str, filename: str) -> Path:
-    """读侧 fallback：先 track 子目录，找不到回退 deliverables 根（兼容老 workspace）。
+def resolve_track_deliverable(deliverables_dir: Path, track: str, filename: str) -> Path:
+    """读侧 fallback：先 deliverables_dir/{track}/filename，无则回退 deliverables_dir/filename。
     都不存在时返回新结构路径，让调用方按既定 not-found 语义处理。"""
-    base = deliverables_dir_for_workspace(workspace_path)
-    new = base / track / filename
+    new = deliverables_dir / track / filename
     if new.exists():
         return new
-    legacy = base / filename
+    legacy = deliverables_dir / filename
     return legacy if legacy.exists() else new
 ```
 
-- **写侧**：白盒 `whitebox_dir(ws) / filename`，黑盒 `blackbox_dir(ws) / filename`，**永远写新结构**。
-- **读侧**：按归属走 `resolve_track_deliverable(ws, track, filename)`，fallback 集中在此一处，业务侧无感。
+- **写侧**：白盒 `whitebox_dir(deliverables) / filename`，黑盒 `blackbox_dir(deliverables) / filename`，**永远写新结构**（`deliverables` = `_get_paths`/`_get_deliverables_path`/`resolve_deliverables_path` 返回的 deliverables 根）。
+- **读侧**：按归属走 `resolve_track_deliverable(deliverables, track, filename)`，fallback 集中在此一处，业务侧无感。
+- **签名**：三个 helper 均收 **`deliverables_dir`**（`workspaces/<session>/deliverables` 根，**非** `workspace_path`）——所有调用点持有的都是 deliverables 根。plan 落地细化：spec 初稿写 `workspace_path`，落地发现调用点持 deliverables 根，故改。
 
 **为何选做法 1**（备选见 §8）：新增 3 个 helper，写侧直拼、读侧 fallback 集中在 core 一处。业务侧（whitebox/blackbox/multi）只换调用，最小侵入、兼容性可控。
 
@@ -125,27 +127,27 @@ def resolve_track_deliverable(workspace_path: Path, track: str, filename: str) -
 
 原则：**写永远写新结构，读按归属走对应 fallback**。
 
-#### ① 白盒写侧 → `whitebox_dir(ws)/`
+#### ① 白盒写侧 → `whitebox_dir(deliverables)/`
 
-`packages/whitebox/.../pipeline/activities.py` 所有写 deliverables 的点（清单见 §3.1）改用 `whitebox_dir(ws)`。
+`packages/whitebox/.../pipeline/activities.py` 所有写点经统一入口 `_get_paths` 拿 deliverables，改 `_get_paths` 一处返回 `deliverables/whitebox/` 即全局跟进（清单见 §3.1）。
 
-#### ② 黑盒写侧 → `blackbox_dir(ws)/`
+#### ② 黑盒写侧 → `blackbox_dir(deliverables)/`
 
-`packages/blackbox/.../` 所有写点（§3.2）改用 `blackbox_dir(ws)`。最终报告与白盒报告物理隔离，**不再覆盖**。
+`packages/blackbox/.../` 写点（report/evidence/findings/verdicts）改用 `blackbox_dir(deliverables)`。黑盒 `_get_deliverables_path` **保持返回根**（同一根既被用于读白盒 queue、又被用于写黑盒 evidence，不能整体改），各子模块内部按轨分流。最终报告与白盒报告物理隔离，**不再覆盖**。
 
 #### ③ 读侧桥接（按归属选 resolver）
 
-- **黑盒读白盒 queue** → `resolve_track_deliverable(ws, "whitebox", f"{vt}_exploitation_queue.json")`，覆盖 §3.3 所列读点。
-- **黑盒读自己 evidence** → `resolve_track_deliverable(ws, "blackbox", f"{vc}_exploitation_evidence.md")`。
+- **黑盒读白盒 queue** → `resolve_track_deliverable(deliverables, "whitebox", f"{vt}_exploitation_queue.json")`，覆盖 §3.3 所列读点。
+- **黑盒读自己 evidence** → `resolve_track_deliverable(deliverables, "blackbox", f"{vc}_exploitation_evidence.md")`。
 - **multi 关联读子仓白盒 queue** → 同 whitebox fallback。
-- **correlation workspace 自身产物**（merged queue / topology / boundaries / correlation-report）：独立 workspace、不分轨，保持其 deliverables 根。黑盒 `has_correlation_results`（`workflows.py:35`）读 correlation workspace 的 merged queue 时，走 `resolve_track_deliverable(corr_ws, "whitebox", f"{vt}_exploitation_queue.json")`：先查 `corr_ws/deliverables/whitebox/`（不存在）→ fallback 到 `corr_ws/deliverables/` 根（命中 merged queue），**天然兼容，无需 correlation workspace 分轨**。
-- **签名注意**：`resolve_track_deliverable` 与 `whitebox_dir`/`blackbox_dir` 均接收 **`workspace_path`**（即 `workspaces/<session>`），内部自行拼 `deliverables/`。调用方（含 multi/correlation 侧）必须传 workspace_path 而非已拼好的 deliverables 目录，否则路径会多拼一层。
+- **correlation workspace 自身产物**（merged queue / topology / boundaries / correlation-report）：独立 workspace、不分轨，保持其 deliverables 根。黑盒 `has_correlation_results`（`workflows.py:35`）读 correlation workspace 的 merged queue 时，走 `resolve_track_deliverable(corr_dlv, "whitebox", f"{vt}_exploitation_queue.json")`（`corr_dlv` = correlation workspace 的 deliverables 根）：先查 `corr_dlv/whitebox/`（不存在）→ fallback 到 `corr_dlv/` 根（命中 merged queue），**天然兼容，无需 correlation workspace 分轨**。
+- **签名注意**：三个 helper 均收 **`deliverables_dir`**（`workspaces/<session>/deliverables` 根，**非** `workspace_path`）——所有调用点持有的都是 deliverables 根，直接传入即可。
 
 #### ④ rerun 归档迁移到 `blackbox/` 内
 
 `blackbox_rerun.py`：
-- `detect_blackbox_completed`：glob `*_exploitation_evidence.md` 改在 `blackbox_dir(ws)` 下找。
-- `archive_blackbox_deliverables`：归档源与目标都进 `blackbox_dir(ws)` → `blackbox/.blackbox-archive/<run_ts>/`。注释"白盒产物不归档"天然成立——白盒在另一子目录。
+- `detect_blackbox_completed`：glob `*_exploitation_evidence.md` 改在 `deliverables/blackbox/` 下找。
+- `archive_blackbox_deliverables`：归档源与目标都进 `deliverables/blackbox/` → `blackbox/.blackbox-archive/<run_ts>/`。注释"白盒产物不归档"天然成立——白盒在另一子目录。
 
 **待实现时核实**：黑盒 CLI `main.py:317` 的 `{vc}_exploitation_queue.json` 默认按"读白盒 queue（展示/导出）"处理（黑盒只读不回写，与用户排除的语义混淆痛点一致）；若 plan 阶段发现黑盒有回写，再按"白盒候选 vs 黑盒验证后"分开命名。
 
