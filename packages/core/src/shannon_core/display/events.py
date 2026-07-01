@@ -124,7 +124,8 @@ class ResumeEvent(DisplayEvent):
 class GitnexusLlmEvent(DisplayEvent):
     """GitNexus 轨 LLM 环节的进度行 —— 与 LLM 轨 LlmTurnEvent 对偶：
     LLM 轨是单个 agent 的 turn 流，GitNexus 轨是批量函数/候选的并发判定。
-    专属标签 GN-LLM 便于 grep 所有 LLM 活动。"""
+    归 LLM 活动族渲染：终端 🔍 [GitNexus] (cyan, 冷暖对偶 💭 [Agent] magenta)，
+    workflow.log [LLM]   [GitNexus]；grep 锚点 [GitNexus]。category 字段保留 GN-LLM 作内部 subtype。"""
     phase: str
     kind: Literal["progress", "hit", "summary", "note"]
     done: int
