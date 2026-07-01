@@ -4,6 +4,7 @@ import logging
 import os
 
 _DEFAULT = 3
+_PER_CALL_TIMEOUT_DEFAULT = 60.0
 _log = logging.getLogger(__name__)
 
 
@@ -45,3 +46,34 @@ def is_gitnexus_llm_enabled() -> bool:
     (discover_sinks_llm / analyze_taint_llm / chain_verdict). 默认开.
     关闭 → llm_client 走 raise → 各处降级到纯规则 + is_entry_hint(spec §3.3 边界)."""
     return _is_truthy_env("SHANNON_GITNEXUS_LLM_ENABLED", default=True)
+
+
+def get_per_call_timeout() -> float:
+    """Read SHANNON_LLM_PER_CALL_TIMEOUT (单次 GitNexus 轨 LLM 调用上限秒数).
+
+    discover_sinks_llm / discover_sources_llm / analyze_taint_llm 共用
+    map_llm_with_bounds, 每个函数一次 LLM 调用; 超过此值即降级跳过该函数(治本 2,
+    防大仓 N 个函数串行累加拖垮 activity 的 start_to_close_timeout)。
+
+    返回 env 值(float>0); 未设 / 畸形 / <=0 回退默认(60s)并 warning。
+    畸形值绝不崩 scan(对齐 get_max_concurrent 的容错契约)。
+
+    提高此值(如 180)给单次调用更多时间(含 provider 内部 retry), 代价是大仓
+    N 个函数的总耗时上升——需与 activity 的 start_to_close_timeout 平衡。
+    """
+    raw = os.environ.get("SHANNON_LLM_PER_CALL_TIMEOUT")
+    if raw is None:
+        return _PER_CALL_TIMEOUT_DEFAULT
+    try:
+        val = float(raw)
+    except ValueError:
+        _log.warning(
+            "SHANNON_LLM_PER_CALL_TIMEOUT=%r not a float; falling back to %s",
+            raw, _PER_CALL_TIMEOUT_DEFAULT)
+        return _PER_CALL_TIMEOUT_DEFAULT
+    if val <= 0:
+        _log.warning(
+            "SHANNON_LLM_PER_CALL_TIMEOUT=%s must be >0; falling back to %s",
+            val, _PER_CALL_TIMEOUT_DEFAULT)
+        return _PER_CALL_TIMEOUT_DEFAULT
+    return val

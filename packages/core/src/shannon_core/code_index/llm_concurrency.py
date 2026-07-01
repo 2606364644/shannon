@@ -11,14 +11,16 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable, TypeVar
 
+from shannon_core.config.concurrency import get_per_call_timeout
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 R = TypeVar("R")
 
-# 单次 LLM 调用(含 provider 内部 retry)上限秒数。超过即降级跳过该函数。
-# 60s 对 GLM medium tier 单次 prompt→JSON 足够;analyze_taint_llm 内部 retry 在此
-# 内会被 cancel(有意,防 retry 累加)。后续如需可 env 化。
+# 单次 LLM 调用(含 provider 内部 retry)上限秒数的硬回退默认。
+# 运行期实际值由 get_per_call_timeout() 读 SHANNON_LLM_PER_CALL_TIMEOUT(env)决定,
+# 未设 = 此值(60s);analyze_taint_llm 内部 retry 超此时长会被 cancel(有意,防累加)。
 DEFAULT_PER_CALL_TIMEOUT = 60.0
 
 
@@ -39,7 +41,7 @@ async def map_llm_with_bounds(
     fn: Callable[[T], Awaitable[R]],
     *,
     concurrency: int,
-    per_call_timeout: float = DEFAULT_PER_CALL_TIMEOUT,
+    per_call_timeout: float | None = None,
     label: str = "llm",
 ) -> list[R]:
     """并发跑 fn(item):Semaphore(concurrency) 限并发 + 每个套 wait_for(per_call_timeout)。
@@ -47,12 +49,17 @@ async def map_llm_with_bounds(
     单次超时/异常 → 该项跳过,gather 不因单个失败而 fail。
     返回成功项结果列表(丢弃失败项)。顺序为并发完成序,不保证与 items 一致。
 
+    per_call_timeout=None 时读 SHANNON_LLM_PER_CALL_TIMEOUT(env),未设 = 60s
+    (get_per_call_timeout);显式传值(测试 / 调用方覆盖)优先。
+
     日志策略(2026-07-01):
     - 部分失败:per-item warning(timeout/error 措辞分开) + 1 条总结。诊断价值高、量小。
     - 全部失败(典型 = LLM 全挂/API down):压成 1 条总结,不再 per-item 刷屏。
       注:SHANNON_GITNEXUS_LLM_ENABLED=0 时 consumer 入口(discover_sinks/sources)
       会直接早退,根本不进入本函数;全失败压缩主要防御真 LLM 故障场景。
     """
+    if per_call_timeout is None:
+        per_call_timeout = get_per_call_timeout()
     sem = asyncio.Semaphore(concurrency)
 
     async def _bounded(idx: int, item: T) -> R | _Skip:

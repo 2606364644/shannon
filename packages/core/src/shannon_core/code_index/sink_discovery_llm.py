@@ -24,10 +24,7 @@ from shannon_core.code_index.sink_detector import (
     _rule_matches,
     is_entry_hint,
 )
-from shannon_core.code_index.llm_concurrency import (
-    DEFAULT_PER_CALL_TIMEOUT,
-    map_llm_with_bounds,
-)
+from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
@@ -241,8 +238,8 @@ async def discover_sinks_llm(
     LLM 不可用(None / raise / 超时 / 不可解析)→ 该函数跳过, 返回空(降级, spec §3.5)。
     调用粒度 = function 级(去重分组, 一函数一次 LLM 调用)。
     并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
-    单次调用超过 per_call_timeout(默认 DEFAULT_PER_CALL_TIMEOUT=60s)→ 该函数降级跳过。
-    大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
+    单次调用超过 per_call_timeout(默认 None → 读 SHANNON_LLM_PER_CALL_TIMEOUT, 未设 60s)
+    → 该函数降级跳过。大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
 
     progress_cb: best-effort 进度上报(每 function 一 tick + 一次 finalize 汇总);
     cb=None 全程 no-op。
@@ -278,11 +275,9 @@ async def discover_sinks_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    timeout = (per_call_timeout if per_call_timeout is not None
-               else DEFAULT_PER_CALL_TIMEOUT)
     per_func = await map_llm_with_bounds(
         list(by_func.items()), _discover_one,
-        concurrency=conc, per_call_timeout=timeout, label="discover_sinks_llm",
+        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sinks_llm",
     )
     soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
     skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃

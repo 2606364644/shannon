@@ -55,6 +55,21 @@ async def test_empty_items_returns_empty():
     assert await map_llm_with_bounds([], fn, concurrency=2) == []
 
 
+async def test_default_timeout_resolved_from_env(monkeypatch):
+    """不传 per_call_timeout 时读 SHANNON_LLM_PER_CALL_TIMEOUT(治本 2 配套)。
+
+    覆盖 analyze_taint_llm 调用点(__init__.py:220 不显式传 timeout)。
+    """
+    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "0.05")
+
+    async def fn(x):
+        await asyncio.sleep(10)  # 远超 0.05s env 值 → 必被砍
+        return x
+
+    results = await map_llm_with_bounds([1, 2], fn, concurrency=2)
+    assert results == []  # 全部按 env 超时跳过
+
+
 # --- 日志质量: 全失败压缩 + timeout/error 措辞区分 (2026-07-01) ---
 # 背景: 关闭 GitNexus LLM(SHANNON_GITNEXUS_LLM_ENABLED=0)或 LLM 全挂时,
 # 旧实现对每个 item 打 "failed/timed out (>60s)" warning,N 个 item 刷屏 N 条,

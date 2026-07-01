@@ -15,9 +15,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from shannon_core.code_index.models import ParameterSource
 from shannon_core.code_index.parameter_models import SourcePoint
 from shannon_core.code_index.source_detector import DEFAULT_SOURCE_RULES
-from shannon_core.code_index.llm_concurrency import (
-    DEFAULT_PER_CALL_TIMEOUT, map_llm_with_bounds,
-)
+from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
@@ -177,11 +175,9 @@ async def discover_sources_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    timeout = (per_call_timeout if per_call_timeout is not None
-               else DEFAULT_PER_CALL_TIMEOUT)
     per_func = await map_llm_with_bounds(
         list(by_func.items()), _discover_one,
-        concurrency=conc, per_call_timeout=timeout, label="discover_sources_llm",
+        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sources_llm",
     )
     all_sources = [s for func_sources in per_func for s in func_sources]
     skipped = len(by_func) - len(per_func)
