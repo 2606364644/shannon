@@ -33,7 +33,7 @@ class FileLogRenderer:
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
-            AgentEvent, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
+            AgentEvent, ErrorEvent, GitnexusLlmEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
             ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
         )
         match event:
@@ -43,6 +43,7 @@ class FileLogRenderer:
             case AgentEvent(): await self._writer.write(self._agent(event))
             case ToolCallEvent(): await self._writer.write(self._tool(event))
             case LlmTurnEvent(): await self._writer.write(self._llm(event))
+            case GitnexusLlmEvent(): await self._writer.write(self._gitnexus(event))
             case ErrorEvent(): await self._writer.write(self._error(event))
             case SummaryEvent(): await self._writer.write(self._summary(event))
             case InfoEvent(): await self._writer.write(self._info(event))
@@ -95,6 +96,22 @@ class FileLogRenderer:
         who = _prefixed(e.agent_name)
         content = e.content[:200] + "..." if len(e.content) > 200 else e.content
         return f"[{e.timestamp}] [LLM]   {who}: Turn {e.turn}: {content}\n"
+
+    _HITS_NOUN = {
+        "sink-discovery": "sinks", "source-discovery": "sources",
+        "taint-analysis": "taint_flows", "chain-verdict": "vulnerable",
+    }
+
+    def _gitnexus(self, e) -> str:
+        tag_label = "[GN-LLM]"
+        if e.kind == "hit":
+            return f"[{e.timestamp}] {tag_label} {e.phase}  ✓ {e.detail}\n"
+        if e.kind == "summary":
+            return (f"[{e.timestamp}] {tag_label} {e.phase}  "
+                    f"done {e.done}/{e.total} → {e.detail}\n")
+        noun = self._HITS_NOUN.get(e.phase, "hits")
+        return (f"[{e.timestamp}] {tag_label} {e.phase}  {e.done}/{e.total}  "
+                f"· {e.hits} {noun} so far\n")
 
     def _error(self, e) -> str:
         msg = f"[{e.timestamp}] [ERROR] {e.error_type}: {e.message}"

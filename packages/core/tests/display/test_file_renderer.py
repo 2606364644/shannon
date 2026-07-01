@@ -269,3 +269,51 @@ async def test_phase_step_agent_labels_align_in_file():
     s = step_line.index("○")
     a = agent_line.index("▶")
     assert p == s == a, f"file 标签列未对齐: phase={p} step={s} agent={a}"
+
+
+import asyncio
+from shannon_core.display.events import GitnexusLlmEvent
+from shannon_core.display.file_renderer import FileLogRenderer
+
+
+def _render(e) -> str:
+    out: list[str] = []
+    r = FileLogRenderer(writer=_AsyncAppend(out))
+    asyncio.run(r.render(e))
+    return out[0]
+
+
+class _AsyncAppend:
+    def __init__(self, buf): self._buf = buf
+    async def write(self, s): self._buf.append(s)
+
+
+def _evt(kind, **kw):
+    base = dict(timestamp="2026-07-01 14:32:05", category="GN-LLM",
+                phase="sink-discovery", kind=kind, done=10, total=87, hits=3)
+    base.update(kw)
+    return GitnexusLlmEvent(**base)
+
+
+def test_gitnexus_progress_line():
+    assert _render(_evt("progress")) == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  10/87  · 3 sinks so far\n")
+
+
+def test_gitnexus_hit_line():
+    e = _evt("hit", done=5, hits=1, detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
+    assert _render(e) == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ✓ 'pg.executeQuery' "
+        "@ src/api/users.py:42 slot=args\n")
+
+
+def test_gitnexus_summary_line():
+    e = _evt("summary", done=87, hits=12, detail="12 soft sinks · 5 rule gaps · 2 timeouts")
+    assert _render(e) == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  done 87/87 → "
+        "12 soft sinks · 5 rule gaps · 2 timeouts\n")
+
+
+def test_gitnexus_progress_noun_varies_by_phase():
+    e = _evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
+    assert "· 2 vulnerable so far" in _render(e)

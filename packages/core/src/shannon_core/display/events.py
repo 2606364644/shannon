@@ -118,3 +118,16 @@ class ResumeEvent(DisplayEvent):
     new_workflow_id: str
     checkpoint_hash: str
     completed_agents: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GitnexusLlmEvent(DisplayEvent):
+    """GitNexus 轨 LLM 环节的进度行 —— 与 LLM 轨 LlmTurnEvent 对偶：
+    LLM 轨是单个 agent 的 turn 流，GitNexus 轨是批量函数/候选的并发判定。
+    专属标签 GN-LLM 便于 grep 所有 LLM 活动。"""
+    phase: str
+    kind: Literal["progress", "hit", "summary"]
+    done: int
+    total: int
+    hits: int
+    detail: str | None = None
