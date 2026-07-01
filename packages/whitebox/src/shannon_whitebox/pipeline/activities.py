@@ -869,7 +869,7 @@ def _make_verdict_llm_client(repo_path: str):
 def _make_gitnexus_progress_cb(session):
     """采样 + 包装 session.log_gitnexus_progress。best-effort（吞 session 异常）。
 
-    触发规则：final→summary；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
+    触发规则：final→summary；note 非空→note；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
     phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink-discovery /
     source-discovery / taint-analysis / chain-verdict）。cb=None 路径（LLM 关）由
     core emitter 兜底（emitter 自身 cb=None no-op），非本层职责。
@@ -877,6 +877,8 @@ def _make_gitnexus_progress_cb(session):
     async def cb(sample) -> None:
         if sample.final:
             kind, detail = "summary", sample.detail
+        elif sample.note:
+            kind, detail = "note", sample.note
         elif sample.detail:
             kind, detail = "hit", sample.detail
         elif sample.done == 1 or sample.done % 10 == 0:

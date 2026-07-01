@@ -175,9 +175,17 @@ async def discover_sources_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
+    items = list(by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名(同 sink_discovery_llm): per-handler 超时/错误诊断走 dispatcher 通道。
+        block = items[idx][1][0].block
+        await emitter.note(f"{block.function_name}: {message}")
+
     per_func = await map_llm_with_bounds(
-        list(by_func.items()), _discover_one,
+        items, _discover_one,
         concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sources_llm",
+        on_skip=_on_skip,
     )
     all_sources = [s for func_sources in per_func for s in func_sources]
     skipped = len(by_func) - len(per_func)

@@ -36,6 +36,27 @@ class _Skip:
     exc: Exception | None
 
 
+# per-skip 诊断上报回调: (idx, message)。idx 为 items 索引(调用方可映射回业务身份,
+# 如函数名); message 由本模块拼好(含 timeout 秒数/error exc)。
+# best-effort: 抛异常由 _notify_skip 吞掉, 绝不影响扫描结果。
+OnSkip = Callable[[int, str], Awaitable[None]]
+
+
+async def _notify_skip(on_skip: OnSkip | None, idx: int, message: str) -> None:
+    """best-effort 把 per-skip 诊断上报到注入的 on_skip。
+
+    外层(discover_sinks_llm 等)把 on_skip 转成 emitter.note → progress_cb →
+    GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。on_skip=None
+    (未注入)或 on_skip 抛异常时 no-op, 绝不影响扫描结果。
+    """
+    if on_skip is None:
+        return
+    try:
+        await on_skip(idx, message)
+    except Exception:
+        pass  # best-effort: 显示通道失败不影响扫描
+
+
 async def map_llm_with_bounds(
     items: list[T],
     fn: Callable[[T], Awaitable[R]],
@@ -43,6 +64,7 @@ async def map_llm_with_bounds(
     concurrency: int,
     per_call_timeout: float | None = None,
     label: str = "llm",
+    on_skip: OnSkip | None = None,
 ) -> list[R]:
     """并发跑 fn(item):Semaphore(concurrency) 限并发 + 每个套 wait_for(per_call_timeout)。
 
@@ -52,9 +74,16 @@ async def map_llm_with_bounds(
     per_call_timeout=None 时读 SHANNON_LLM_PER_CALL_TIMEOUT(env),未设 = 60s
     (get_per_call_timeout);显式传值(测试 / 调用方覆盖)优先。
 
-    日志策略(2026-07-01):
-    - 部分失败:per-item warning(timeout/error 措辞分开) + 1 条总结。诊断价值高、量小。
-    - 全部失败(典型 = LLM 全挂/API down):压成 1 条总结,不再 per-item 刷屏。
+    诊断策略(2026-07-01, 走 dispatcher 通道, 不裸 logger.warning):
+    - per-skip 诊断(timeout/error)经 on_skip 回调上报 → 外层 emitter.note →
+      progress_cb → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
+      绝不裸 logger.warning: worker 进程 redirect_stderr=False 是硬约束(否则 rich 在
+      sandbox 线程 circular import 炸 workflow task), 裸 warning 经 lastResort 直写
+      stderr, Rich Live 不协调, 与 footer spinner 行碰撞 → 首条被 \\r 重绘截断粘连。
+    - logger 降到 DEBUG 作文件级兜底(on_skip=None 或排查时 elevate); DEBUG 不进终端
+      lastResort(WARNING+ 才进), 故不撞 footer。
+    - 全失败(典型 = LLM 全挂/API down):压成 1 条 DEBUG 总结, 不 per-skip 调 on_skip
+      (避免 N 条刷屏); 总数由外层 finalize summary 报告。
       注:SHANNON_GITNEXUS_LLM_ENABLED=0 时 consumer 入口(discover_sinks/sources)
       会直接早退,根本不进入本函数;全失败压缩主要防御真 LLM 故障场景。
     """
@@ -78,12 +107,17 @@ async def map_llm_with_bounds(
     if not skips:
         return successes
 
+    def _skip_msg(s: _Skip) -> str:
+        if s.kind == "timeout":
+            return f"timed out (>{per_call_timeout}s), skipped"
+        return f"failed, skipped: {s.exc}"
+
     if len(skips) == len(items):
-        # 全失败: 压成 1 条总结(含首个错误样本),不再 per-item 刷屏。
+        # 全失败: 压成 1 条 DEBUG 总结(不 per-skip 调 on_skip, 避免刷屏)。
         first = skips[0]
         reason = (f"timed out (>{per_call_timeout}s)" if first.kind == "timeout"
                   else f"failed: {first.exc}")
-        logger.warning(
+        logger.debug(
             "%s: all %d/%d items skipped — likely systemic (LLM unavailable "
             "or disabled). First: %s. Returning empty; deterministic fallback "
             "applies downstream.",
@@ -91,12 +125,9 @@ async def map_llm_with_bounds(
         )
     else:
         for s in skips:
-            if s.kind == "timeout":
-                logger.warning(
-                    "%s[%d] timed out (>%ss), skipped", label, s.idx, per_call_timeout)
-            else:
-                logger.warning(
-                    "%s[%d] failed, skipped: %s", label, s.idx, s.exc)
-        logger.warning("%s: %d/%d items skipped", label, len(skips), len(items))
+            msg = _skip_msg(s)
+            logger.debug("%s[%d] %s", label, s.idx, msg)
+            await _notify_skip(on_skip, s.idx, msg)
+        logger.debug("%s: %d/%d items skipped", label, len(skips), len(items))
 
     return successes

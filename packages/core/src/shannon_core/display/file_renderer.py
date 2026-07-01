@@ -110,6 +110,8 @@ class FileLogRenderer:
         if e.kind == "summary":
             return (f"[{e.timestamp}] {tag_label} {e.phase}  "
                     f"done {e.done}/{e.total} → {e.detail}\n")
+        if e.kind == "note":
+            return f"[{e.timestamp}] {tag_label} {e.phase}  ! {e.detail}\n"
         noun = self._HITS_NOUN.get(e.phase, "hits")
         return (f"[{e.timestamp}] {tag_label} {e.phase}  {e.done}/{e.total}  "
                 f"· {e.hits} {noun} so far\n")

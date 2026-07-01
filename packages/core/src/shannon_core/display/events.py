@@ -126,7 +126,7 @@ class GitnexusLlmEvent(DisplayEvent):
     LLM 轨是单个 agent 的 turn 流，GitNexus 轨是批量函数/候选的并发判定。
     专属标签 GN-LLM 便于 grep 所有 LLM 活动。"""
     phase: str
-    kind: Literal["progress", "hit", "summary"]
+    kind: Literal["progress", "hit", "summary", "note"]
     done: int
     total: int
     hits: int

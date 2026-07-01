@@ -318,3 +318,13 @@ async def test_gitnexus_progress_noun_varies_by_phase():
     e = _gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
     out = await _gn_render(e)
     assert "· 2 vulnerable so far" in out
+
+
+async def test_gitnexus_note_line():
+    """note 行: per-skip timeout/error 诊断, 用 ! 区别 hit 的 ✓(grep 友好, 无 ANSI)。"""
+    e = _gn_evt("note", done=5, hits=1,
+                detail="src/api/users.py:raw_query: timed out (>60s), skipped")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ! "
+        "src/api/users.py:raw_query: timed out (>60s), skipped\n")

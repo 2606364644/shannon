@@ -78,3 +78,19 @@ async def test_phase_threaded_from_sample():
     cb = _make_gitnexus_progress_cb(sess)
     await cb(_sample(1, phase="chain-verdict"))
     assert sess.calls[0][0] == "chain-verdict"
+
+
+@pytest.mark.asyncio
+async def test_note_emitted_via_note_field():
+    """sample.note → log_gitnexus_progress(kind='note', detail=note)。
+
+    per-skip timeout/error 经 emitter.note 上报, cb 路由成 note kind, 走 dispatcher
+    正确换行 —— 取代裸 logger.warning(撞 Rich Live footer, redirect_stderr=False 硬约束)。
+    """
+    sess = _FakeSession()
+    cb = _make_gitnexus_progress_cb(sess)
+    await cb(ProgressSample(
+        "sink-discovery", 5, 87, 1, None, False,
+        note="src/api/users.py:raw_query: timed out (>60s), skipped"))
+    assert sess.calls[0][1] == "note"
+    assert sess.calls[0][5] == "src/api/users.py:raw_query: timed out (>60s), skipped"

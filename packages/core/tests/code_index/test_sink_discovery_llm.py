@@ -314,3 +314,33 @@ async def test_discover_sinks_llm_progress_cb_none_ok():
 
     soft, gaps = await discover_sinks_llm(calls, client, progress_cb=None)
     assert soft == []
+
+
+async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
+    """per-function 超时 → emitter.note 经 progress_cb 上报(走 dispatcher, 非裸 warning)。
+
+    on_skip 注入: 超时函数名经 idx 映射进 note detail, 取代撞 Rich Live footer 的
+    裸 logger.warning(redirect_stderr=False 硬约束)。
+    """
+    import asyncio
+    from shannon_core.code_index.progress import ProgressSample
+
+    calls = [_suspicious(line=1), _suspicious(line=2)]  # 2 个不同 block.id
+
+    async def client(prompt, **kw):
+        if "raw_query:1" in prompt:
+            await asyncio.sleep(10)  # 第一个函数挂死 → 超时
+        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+
+    samples: list[ProgressSample] = []
+
+    async def cb(s):
+        samples.append(s)
+
+    await discover_sinks_llm(
+        calls, client, progress_cb=cb, concurrency=2, per_call_timeout=0.2)
+
+    notes = [s for s in samples if s.note]
+    assert notes, f"超时应经 note 上报: {samples}"
+    assert "timed out" in notes[0].note
+    assert "handler" in notes[0].note  # block.function_name 经 idx 映射

@@ -275,9 +275,18 @@ async def discover_sinks_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
+    items = list(by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名: 让用户看到有意义的标识, 而非内部 enumerate 序号; 经 emitter.note
+        # 走 progress_cb → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
+        block = items[idx][1][0].block
+        await emitter.note(f"{block.function_name}: {message}")
+
     per_func = await map_llm_with_bounds(
-        list(by_func.items()), _discover_one,
+        items, _discover_one,
         concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sinks_llm",
+        on_skip=_on_skip,
     )
     soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
     skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃

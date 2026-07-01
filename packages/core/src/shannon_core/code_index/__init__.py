@@ -217,10 +217,21 @@ async def build_code_index_with_gitnexus(
 
     from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
     from shannon_core.config.concurrency import get_max_concurrent
+    taint_items = list(sinks_by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名(同 sink/source discovery): per-function taint 超时/错误诊断走
+        # dispatcher 通道, 取代撞 footer 的裸 logger.warning。
+        func_id = taint_items[idx][0]
+        block = blocks_by_id.get(func_id)
+        who = block.function_name if block else func_id
+        await taint_emitter.note(f"{who}: {message}")
+
     taint_pairs = await map_llm_with_bounds(
-        list(sinks_by_func.items()), _taint_one,
+        taint_items, _taint_one,
         concurrency=get_max_concurrent(),
         label="analyze_taint_llm",
+        on_skip=_on_skip,
     )
     await taint_emitter.finalize(
         f"{sum(_count_taint_flows(r) for _, r in taint_pairs)} taint_flows")

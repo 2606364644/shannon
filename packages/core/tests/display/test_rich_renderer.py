@@ -390,3 +390,24 @@ async def test_rich_gitnexus_summary_shows_done_arrow_detail():
     assert "done 87/87" in printed
     assert "→" in printed
     assert "12 soft sinks" in printed
+
+
+async def test_rich_gitnexus_note_shows_warn_symbol_and_detail():
+    """note 行(per-skip timeout/error 诊断)用 ⚠ 区别 hit 的 ✓, 经 dispatcher 正确换行。
+
+    取代裸 logger.warning(撞 Rich Live footer, 因 redirect_stderr=False 是硬约束)。
+    """
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="note",
+        done=5, total=87, hits=1,
+        detail="src/api/users.py:raw_query: timed out (>60s), skipped"))
+    printed = console.print.call_args.args[0]
+    assert "⚠" in printed            # note 用 ⚠ 区别 hit 的 ✓
+    assert "✓" not in printed        # 不误用 hit 符号
+    assert "timed out" in printed
+    assert "magenta" in printed      # GN-LLM 色(与 progress/hit/summary 同)
+    assert "sink-discovery" in printed

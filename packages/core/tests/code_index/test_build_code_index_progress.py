@@ -179,3 +179,91 @@ async def test_taint_emitter_built_with_cb_and_ticks(monkeypatch):
     assert hits_delta == 1, te.ticks
     assert detail == "taint flow in handler", detail
     assert te.finalized is True
+
+
+@pytest.mark.asyncio
+async def test_taint_skip_emits_note_via_emitter_note(monkeypatch):
+    """per-function taint 超时 → taint_emitter.note 经 cb 上报(走 dispatcher, 非裸 warning)。
+
+    on_skip 注入: 超时函数名经 idx → blocks_by_id 映射进 note detail。需部分失败
+    (全失败分支不调 on_skip): handler2 超时 + handler 成功。fake_sink 用真实 block.id
+    作 caller_id, 确保 _taint_one 能查到 block(返回 tuple, 非 None)。
+    """
+    import asyncio
+    from shannon_core.code_index.models import CallGraphResult
+    from types import SimpleNamespace
+
+    tmp = tempfile.mkdtemp()
+    block_src = (
+        "def handler(req):\n    return query(req.param)\n"
+        "def handler2(req):\n    return query(req.param)\n"
+    )
+    with open(os.path.join(tmp, "app.py"), "w") as f:
+        f.write(block_src)
+
+    async def _fake_call_graph(*a, **kw):
+        return CallGraphResult(edges=[], chains=[], entry_points=[])
+
+    def _fake_detect_sinks(blocks, parser, source_provider=None):
+        # 真实 block.id 作 caller_id → _taint_one 必能查到 block(返回 tuple, 非 None)
+        return [SimpleNamespace(caller_id=b.id) for b in blocks]
+
+    monkeypatch.setattr(ci, "collect_suspicious_calls", lambda *a, **kw: [])
+    async def _fake_discover_sinks(suspicious, llm_client, **kw):
+        return [], []
+    async def _fake_discover_sources(candidates, llm_client, **kw):
+        return []
+    async def _fake_taint(*a, **kw):
+        block = kw.get("block")
+        if block is not None and block.function_name == "handler2":
+            await asyncio.sleep(10)  # handler2 挂死 → 超时
+        return IntraResult(tainted_params=set(), hits={}, local_steps=[])
+
+    monkeypatch.setattr(ci, "build_call_graph_from_gitnexus", _fake_call_graph)
+    monkeypatch.setattr(ci, "detect_sinks", _fake_detect_sinks)
+    monkeypatch.setattr(ci, "discover_sinks_llm", _fake_discover_sinks)
+    monkeypatch.setattr(ci, "discover_sources_llm", _fake_discover_sources)
+    monkeypatch.setattr(ci, "analyze_taint_llm", _fake_taint)
+    def _abort_after_taint(*a, **kw):
+        raise _ShortCircuit("after taint emitter")
+    monkeypatch.setattr(ci, "propagate_backward_across_chains", _abort_after_taint)
+    # 短超时(覆盖 env 默认 60s), 让 handler 的 sleep(10) 必超时
+    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "0.2")
+
+    instances: list = []
+
+    class _CapturingEmitter:
+        def __init__(self, phase, total, cb):
+            self.phase = phase
+            self.total = total
+            self.cb = cb
+            self.ticks: list = []
+            self.notes: list = []
+            self.finalized = False
+            instances.append(self)
+
+        async def tick(self, detail=None, hits_delta=0):
+            self.ticks.append((detail, hits_delta))
+
+        async def note(self, note):
+            self.notes.append(note)
+
+        async def finalize(self, summary_detail):
+            self.finalized = True
+            self.summary = summary_detail
+
+    monkeypatch.setattr(ci, "ProgressEmitter", _CapturingEmitter)
+
+    async def cb(sample):
+        pass
+
+    with pytest.raises(_ShortCircuit):
+        await ci.build_code_index_with_gitnexus(
+            tmp, mcp_client=object(), llm_client=None, progress_cb=cb,
+        )
+
+    taint_emitters = [e for e in instances if e.phase == "taint-analysis"]
+    assert len(taint_emitters) == 1, instances
+    te = taint_emitters[0]
+    assert te.notes, f"超时应经 note 上报: notes={te.notes}"
+    assert any("handler2" in n and "timed out" in n for n in te.notes), te.notes

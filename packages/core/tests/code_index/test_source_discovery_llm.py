@@ -79,6 +79,37 @@ def test_discover_sources_llm_reports_progress_and_hits():
     assert samples[-1].done == len({c.block.id for c in cands})
 
 
+def test_discover_sources_llm_skip_emits_note_via_progress_cb():
+    """per-handler 超时 → emitter.note 经 progress_cb 上报(走 dispatcher, 非裸 warning)。
+
+    on_skip 注入: 超时 handler 名经 idx 映射进 note detail。
+    """
+    from shannon_core.code_index.progress import ProgressSample
+
+    b1 = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')
+    b2 = _block("g.js", "g", 1, 'function g(req){ const y = input.get("y"); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+
+    async def fake_llm(prompt):
+        if "function f" in prompt:  # f 的 source code → 挂死超时
+            await asyncio.sleep(10)
+        return '[]'
+
+    samples: list[ProgressSample] = []
+
+    async def cb(s):
+        samples.append(s)
+
+    asyncio.run(discover_sources_llm(cands, fake_llm, progress_cb=cb,
+                                     concurrency=2, per_call_timeout=0.2))
+
+    notes = [s for s in samples if s.note]
+    assert notes, f"超时应经 note 上报: {samples}"
+    assert "timed out" in notes[0].note
+    assert "f" in notes[0].note  # block.function_name 经 idx 映射
+
+
 def test_discover_sources_llm_progress_cb_none_ok():
     """progress_cb=None 全程 no-op, 返回正常。"""
     block = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')

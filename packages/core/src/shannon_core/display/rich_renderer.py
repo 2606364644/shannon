@@ -139,6 +139,10 @@ class RichConsoleRenderer:
             self._console.print(
                 f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
                 f"done {e.done}/{e.total} → {e.detail}", highlight=False)
+        elif e.kind == "note":
+            self._console.print(
+                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
+                f"⚠ {e.detail}", highlight=False)
         else:
             self._console.print(
                 f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
