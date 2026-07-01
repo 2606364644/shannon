@@ -1,0 +1,127 @@
+# Source 规则库 —— 映射 SourceRule(source_detector.py)。
+#
+# 字段:
+#   rule_id      规则标识(唯一)
+#   languages    适用语言列表
+#   pattern      正则字符串;group(1) 必须捕获 param_name。YAML 双引号串里反斜杠须双写(\\)、
+#                内嵌双引号用 \"、单引号原样 '。
+#   source_type  ParameterSource 枚举值:
+#                  query/path/body/form/header/cookie/file/session/internal/unknown
+#
+# 未知 source_type → loader fail-fast(ValueError)。
+
+rules:
+  # ===== Express / Node.js(typescript/javascript)=====
+  - rule_id: ts-express-path
+    languages: [typescript, javascript]
+    pattern: "req\\.params\\.([A-Za-z_]\\w*)"
+    source_type: path
+
+  - rule_id: ts-express-query
+    languages: [typescript, javascript]
+    pattern: "req\\.query\\.([A-Za-z_]\\w*)"
+    source_type: query
+
+  - rule_id: ts-express-body
+    languages: [typescript, javascript]
+    pattern: "req\\.body\\.([A-Za-z_]\\w*)"
+    source_type: body
+
+  - rule_id: ts-express-header
+    languages: [typescript, javascript]
+    pattern: "req\\.(?:headers|header)\\.([A-Za-z_]\\w*)"
+    source_type: header
+
+  - rule_id: ts-express-cookie
+    languages: [typescript, javascript]
+    pattern: "req\\.cookies\\.([A-Za-z_]\\w*)"
+    source_type: cookie
+
+  # ===== Django / Flask(python)=====
+  - rule_id: py-django-get
+    languages: [python]
+    pattern: "request\\.GET\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: query
+
+  - rule_id: py-django-post
+    languages: [python]
+    pattern: "request\\.POST\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: body
+
+  - rule_id: py-flask-args
+    languages: [python]
+    pattern: "request\\.args\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: query
+
+  - rule_id: py-flask-form
+    languages: [python]
+    pattern: "request\\.form\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: body
+
+  - rule_id: py-flask-json
+    languages: [python]
+    pattern: "request\\.json\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: body
+
+  # ===== PHP =====
+  - rule_id: php-get
+    languages: [php]
+    pattern: "\\$_GET\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: query
+
+  - rule_id: php-post
+    languages: [php]
+    pattern: "\\$_POST\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: body
+
+  - rule_id: php-request
+    languages: [php]
+    pattern: "\\$_REQUEST\\[['\"]([A-Za-z_]\\w*)['\"]\\]"
+    source_type: query
+
+  # ===== Go Gin =====
+  - rule_id: go-gin-query
+    languages: [go]
+    pattern: "c\\.Query\\(['\"]([A-Za-z_]\\w*)['\"]\\)"
+    source_type: query
+
+  - rule_id: go-gin-param
+    languages: [go]
+    pattern: "c\\.Param\\(['\"]([A-Za-z_]\\w*)['\"]\\)"
+    source_type: path
+
+  - rule_id: go-gin-postform
+    languages: [go]
+    pattern: "c\\.PostForm\\(['\"]([A-Za-z_]\\w*)['\"]\\)"
+    source_type: body
+
+  # ===== Java Spring(注解式参数)=====
+  - rule_id: java-request-param
+    languages: [java]
+    pattern: "@RequestParam(?:\\([^)]*\\))?\\s+\\w+\\s+([A-Za-z_]\\w*)"
+    source_type: query
+
+  - rule_id: java-path-variable
+    languages: [java]
+    pattern: "@PathVariable(?:\\([^)]*\\))?\\s+\\w+\\s+([A-Za-z_]\\w*)"
+    source_type: path
+
+  # ===== 补充:vuln-range 三项目反哺 source 缺口 =====
+
+  # Java @RequestBody(crAPI 最高频 source,13 处;原规则只有 @RequestParam/@PathVariable)
+  - rule_id: java-request-body
+    languages: [java]
+    pattern: "@RequestBody(?:\\s*\\([^)]*\\))?\\s+\\w+\\s+([A-Za-z_]\\w*)"
+    source_type: body
+
+  # Python DRF request.data(crAPI workshop 主力 source;原规则只有 request.GET/POST/args/form/json)
+  - rule_id: py-drf-request-data
+    languages: [python]
+    pattern: "request\\.data(?:\\[['\"]|\\.get\\(['\"])([A-Za-z_]\\w*)"
+    source_type: body
+
+  # Go net/http r.URL.Query().Get(crAPI Go 非 Gin;原规则只有 Gin c.Query/Param/PostForm)
+  - rule_id: go-nethttp-query
+    languages: [go]
+    pattern: "r\\.URL\\.Query\\(\\)\\.Get\\(['\"]([A-Za-z_]\\w*)['\"]\\)"
+    source_type: query

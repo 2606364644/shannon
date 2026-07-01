@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from shannon_core.code_index.models import ParameterSource
 from shannon_core.code_index.parameter_models import SourcePoint
+from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -31,62 +32,22 @@ class SourceRule:
     source_type: ParameterSource
 
 
-def _G(pattern: str) -> re.Pattern:
-    """helper:包裹 param-name 捕获组的正则。"""
-    return re.compile(pattern)
+def _build_source_rules(raw: dict) -> "tuple[SourceRule, ...]":
+    """YAML dict → tuple[SourceRule]。未知 source_type fail-fast(ValueError)。"""
+    rules: list[SourceRule] = []
+    for item in raw.get("rules", []):
+        rules.append(SourceRule(
+            rule_id=item["rule_id"],
+            languages=tuple(item.get("languages") or ()),
+            pattern=re.compile(item["pattern"]),
+            source_type=ParameterSource(item["source_type"]),
+        ))
+    return tuple(rules)
 
 
-# ===== Default source rule library(对齐原版 Input Vector 表 5 类)=====
-# 按此模式扩展其余框架:每条 = (语言, 取用模式 with group(1)=param_name, source_type)。
-DEFAULT_SOURCE_RULES: tuple[SourceRule, ...] = (
-    # --- Express / Node.js(typescript/javascript)---
-    SourceRule("ts-express-path", ("typescript", "javascript"),
-               _G(r"req\.params\.([A-Za-z_]\w*)"), ParameterSource.PATH_PARAM),
-    SourceRule("ts-express-query", ("typescript", "javascript"),
-               _G(r"req\.query\.([A-Za-z_]\w*)"), ParameterSource.QUERY_PARAM),
-    SourceRule("ts-express-body", ("typescript", "javascript"),
-               _G(r"req\.body\.([A-Za-z_]\w*)"), ParameterSource.BODY_FIELD),
-    SourceRule("ts-express-header", ("typescript", "javascript"),
-               _G(r"req\.(?:headers|header)\.([A-Za-z_]\w*)"), ParameterSource.HEADER),
-    SourceRule("ts-express-cookie", ("typescript", "javascript"),
-               _G(r"req\.cookies\.([A-Za-z_]\w*)"), ParameterSource.COOKIE),
-
-    # --- Django / Flask(python)---
-    SourceRule("py-django-get", ("python",),
-               _G(r"request\.GET\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.QUERY_PARAM),
-    SourceRule("py-django-post", ("python",),
-               _G(r"request\.POST\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.BODY_FIELD),
-    SourceRule("py-flask-args", ("python",),
-               _G(r"request\.args\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.QUERY_PARAM),
-    SourceRule("py-flask-form", ("python",),
-               _G(r"request\.form\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.BODY_FIELD),
-    SourceRule("py-flask-json", ("python",),
-               _G(r"request\.json\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.BODY_FIELD),
-
-    # --- PHP ---
-    SourceRule("php-get", ("php",),
-               _G(r"\$_GET\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.QUERY_PARAM),
-    SourceRule("php-post", ("php",),
-               _G(r"\$_POST\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.BODY_FIELD),
-    SourceRule("php-request", ("php",),
-               _G(r"\$_REQUEST\[['\"]([A-Za-z_]\w*)['\"]\]"), ParameterSource.QUERY_PARAM),
-
-    # --- Go Gin ---
-    SourceRule("go-gin-query", ("go",),
-               _G(r"c\.Query\(['\"]([A-Za-z_]\w*)['\"]\)"), ParameterSource.QUERY_PARAM),
-    SourceRule("go-gin-param", ("go",),
-               _G(r"c\.Param\(['\"]([A-Za-z_]\w*)['\"]\)"), ParameterSource.PATH_PARAM),
-    SourceRule("go-gin-postform", ("go",),
-               _G(r"c\.PostForm\(['\"]([A-Za-z_]\w*)['\"]\)"), ParameterSource.BODY_FIELD),
-
-    # --- Java Spring(注解式参数,在签名或参数声明上)---
-    SourceRule("java-request-param", ("java",),
-               _G(r"@RequestParam(?:\([^)]*\))?\s+\w+\s+([A-Za-z_]\w*)"),
-               ParameterSource.QUERY_PARAM),
-    SourceRule("java-path-variable", ("java",),
-               _G(r"@PathVariable(?:\([^)]*\))?\s+\w+\s+([A-Za-z_]\w*)"),
-               ParameterSource.PATH_PARAM),
-)
+# ===== Default source rule library(外部化:data/source_rules.yml)=====
+DEFAULT_SOURCE_RULES: tuple[SourceRule, ...] = _build_source_rules(
+    load_yaml(DATA_DIR / "source_rules.yml"))
 
 
 def _line_of(text: str, offset: int) -> int:

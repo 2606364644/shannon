@@ -1,0 +1,552 @@
+# Sink 规则库 —— 映射 SinkRule(sink_detector.py)。
+#
+# 字段:
+#   rule_id              规则标识(唯一)
+#   languages            适用语言列表
+#   callee               被调函数/方法名(精确字符串;loader 不动大小写 —— Go "Raw" 大写是导出语义)
+#   receiver_pattern     receiver 正则字符串(null = 裸调用,无 receiver);现有全是 ^...$ 锚定、无 flag
+#   category             SinkCategory 枚举值:sql/command/file/template/deserialization/ssrf/xss/log/redirect
+#   sink_subtype         细分类型,如 sql_raw / command_shell
+#   dangerous_slots      危险参数位列表;每项 {arg_index, slot}
+#                          slot ∈ SlotContext:sql_value/sql_identifier/cmd_argument/file_path/template_expr/url/deserialize/generic
+#   needs_review_default 省略即 false;true 表示静态精度不足、需 Spec C LLM 复核
+#
+# 未知 category/slot 值 → loader fail-fast(ValueError),不回落。
+
+rules:
+  # ===== SQL =====
+  - rule_id: py-db-cursor-execute
+    languages: [python]
+    callee: execute
+    receiver_pattern: "^(cursor|cnx|conn|db|database)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: py-db-cursor-executemany
+    languages: [python]
+    callee: executemany
+    receiver_pattern: "^(cursor|cnx|conn|db|database)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-db-query
+    languages: [typescript]
+    callee: query
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true   # receiver unknown for `db.query`
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: go-db-query
+    languages: [go]
+    callee: Query
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-stmt-executequery
+    languages: [java]
+    callee: executeQuery
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-stmt-execute
+    languages: [java]
+    callee: execute
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: php-mysqli-query
+    languages: [php]
+    callee: query
+    receiver_pattern: "^(mysqli|pdo|db|DB)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: php-db-select-static
+    languages: [php]
+    callee: select
+    receiver_pattern: "^(DB)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # ===== ORM Raw / string-built SQL(最高漏报类)=====
+  - rule_id: py-django-raw
+    languages: [python]
+    callee: raw
+    receiver_pattern: "^(objects)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: py-sqlalchemy-text
+    languages: [python]
+    callee: text
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true   # bare callee; receiver unknown
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-knex-raw
+    languages: [typescript]
+    callee: raw
+    receiver_pattern: "^(knex)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-sequelize-query
+    languages: [typescript]
+    callee: query
+    receiver_pattern: "^(sequelize)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: go-gorm-raw
+    languages: [go]
+    callee: Raw
+    receiver_pattern: "^(db|gorm|DB)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: go-gorm-exec
+    languages: [go]
+    callee: Exec
+    receiver_pattern: "^(db|gorm|DB)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-jpa-createnativequery
+    languages: [java]
+    callee: createNativeQuery
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: php-laravel-whereraw
+    languages: [php]
+    callee: whereRaw
+    receiver_pattern: null
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: php-db-raw
+    languages: [php]
+    callee: raw
+    receiver_pattern: "^(DB)$"
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # ===== Command execution =====
+  - rule_id: py-os-system
+    languages: [python]
+    callee: system
+    receiver_pattern: "^(os|commands)$"
+    category: command
+    sink_subtype: command_shell
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: py-os-popen
+    languages: [python]
+    callee: popen
+    receiver_pattern: "^(os|commands)$"
+    category: command
+    sink_subtype: command_shell
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: py-subprocess-run
+    languages: [python]
+    callee: run
+    receiver_pattern: "^(subprocess)$"
+    category: command
+    sink_subtype: command_subprocess
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: py-subprocess-popen
+    languages: [python]
+    callee: Popen
+    receiver_pattern: "^(subprocess)$"
+    category: command
+    sink_subtype: command_subprocess
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: py-subprocess-call
+    languages: [python]
+    callee: call
+    receiver_pattern: "^(subprocess)$"
+    category: command
+    sink_subtype: command_subprocess
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: py-subprocess-checkoutput
+    languages: [python]
+    callee: check_output
+    receiver_pattern: "^(subprocess)$"
+    category: command
+    sink_subtype: command_subprocess
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: ts-eval
+    languages: [typescript]
+    callee: eval
+    receiver_pattern: null
+    category: command
+    sink_subtype: js_eval
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  - rule_id: ts-child-process-exec
+    languages: [typescript]
+    callee: exec
+    receiver_pattern: null
+    category: command
+    sink_subtype: command_exec
+    needs_review_default: true   # callee common; receiver check via 'child_process'
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: go-exec-command
+    languages: [go]
+    callee: Command
+    receiver_pattern: "^(exec)$"
+    category: command
+    sink_subtype: command_exec
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: java-runtime-exec
+    languages: [java]
+    callee: exec
+    receiver_pattern: "^(Runtime|getRuntime)$"
+    category: command
+    sink_subtype: command_exec
+    needs_review_default: true   # receiver is an arbitrarily-named Runtime instance
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: php-shell-exec
+    languages: [php]
+    callee: shell_exec
+    receiver_pattern: null
+    category: command
+    sink_subtype: command_shell
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: php-system
+    languages: [php]
+    callee: system
+    receiver_pattern: null
+    category: command
+    sink_subtype: command_shell
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: php-passthru
+    languages: [php]
+    callee: passthru
+    receiver_pattern: null
+    category: command
+    sink_subtype: command_shell
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: php-proc-exec
+    languages: [php]
+    callee: exec
+    receiver_pattern: null
+    category: command
+    sink_subtype: command_exec
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  # ===== Deserialization =====
+  - rule_id: py-pickle-loads
+    languages: [python]
+    callee: loads
+    receiver_pattern: "^(pickle|cPickle|marshal)$"
+    category: deserialization
+    sink_subtype: deser_pickle
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  - rule_id: py-pickle-load
+    languages: [python]
+    callee: load
+    receiver_pattern: "^(pickle|cPickle|marshal)$"
+    category: deserialization
+    sink_subtype: deser_pickle
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  - rule_id: py-yaml-load
+    languages: [python]
+    callee: load
+    receiver_pattern: "^(yaml)$"
+    category: deserialization
+    sink_subtype: deser_yaml
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  - rule_id: php-unserialize
+    languages: [php]
+    callee: unserialize
+    receiver_pattern: null
+    category: deserialization
+    sink_subtype: deser_unserialize
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  - rule_id: java-objectinput-readobject
+    languages: [java]
+    callee: readObject
+    receiver_pattern: null
+    category: deserialization
+    sink_subtype: deser_java
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  # ===== SSRF =====
+  - rule_id: py-requests-get
+    languages: [python]
+    callee: get
+    receiver_pattern: "^(requests|httpx|urllib3)$"
+    category: ssrf
+    sink_subtype: ssrf_http_client
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: py-requests-post
+    languages: [python]
+    callee: post
+    receiver_pattern: "^(requests|httpx|urllib3)$"
+    category: ssrf
+    sink_subtype: ssrf_http_client
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: py-requests-put
+    languages: [python]
+    callee: put
+    receiver_pattern: "^(requests|httpx|urllib3)$"
+    category: ssrf
+    sink_subtype: ssrf_http_client
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: py-urllib-urlopen
+    languages: [python]
+    callee: urlopen
+    receiver_pattern: null
+    category: ssrf
+    sink_subtype: ssrf_urllib
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-fetch
+    languages: [typescript]
+    callee: fetch
+    receiver_pattern: null
+    category: ssrf
+    sink_subtype: ssrf_fetch
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-axios-get
+    languages: [typescript]
+    callee: get
+    receiver_pattern: "^(axios)$"
+    category: ssrf
+    sink_subtype: ssrf_axios
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: go-http-get
+    languages: [go]
+    callee: Get
+    receiver_pattern: "^(http|net)$"
+    category: ssrf
+    sink_subtype: ssrf_http
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: go-http-post
+    languages: [go]
+    callee: Post
+    receiver_pattern: "^(http|net)$"
+    category: ssrf
+    sink_subtype: ssrf_http
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: java-httpclient-send
+    languages: [java]
+    callee: send
+    receiver_pattern: "^(HttpURLConnection|OkHttpClient|HttpClient)$"
+    category: ssrf
+    sink_subtype: ssrf_java_http
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: php-curl-exec
+    languages: [php]
+    callee: curl_exec
+    receiver_pattern: null
+    category: ssrf
+    sink_subtype: ssrf_curl
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: php-file-get-contents
+    languages: [php]
+    callee: file_get_contents
+    receiver_pattern: null
+    category: ssrf
+    sink_subtype: ssrf_fgmc
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # ===== SSTI / Template =====
+  - rule_id: py-render-template-string
+    languages: [python]
+    callee: render_template_string
+    receiver_pattern: null
+    category: template
+    sink_subtype: ssti_flask
+    dangerous_slots: [{arg_index: 0, slot: template_expr}]
+
+  - rule_id: py-jinja-template-render
+    languages: [python]
+    callee: render
+    receiver_pattern: "^(flask|jinja2)$"
+    category: template
+    sink_subtype: ssti_jinja
+    dangerous_slots: [{arg_index: 0, slot: template_expr}]
+
+  # ===== Code-level XSS(best-effort,needs_review)=====
+  - rule_id: ts-innerhtml
+    languages: [typescript]
+    callee: innerHTML
+    receiver_pattern: null
+    category: xss
+    sink_subtype: xss_dom
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  - rule_id: ts-document-write
+    languages: [typescript]
+    callee: write
+    receiver_pattern: "^(document)$"
+    category: xss
+    sink_subtype: xss_dom
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  # ===== File =====
+  - rule_id: php-file-put-contents
+    languages: [php]
+    callee: file_put_contents
+    receiver_pattern: null
+    category: file
+    sink_subtype: file_write
+    dangerous_slots: [{arg_index: 0, slot: file_path}]
+
+  - rule_id: php-include
+    languages: [php]
+    callee: include
+    receiver_pattern: null
+    category: file
+    sink_subtype: file_include
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: file_path}]
+
+  - rule_id: php-require
+    languages: [php]
+    callee: require
+    receiver_pattern: null
+    category: file
+    sink_subtype: file_include
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: file_path}]
+
+  # ===== Open redirect(needs_review:须结合 param source)=====
+  - rule_id: ts-res-redirect
+    languages: [typescript]
+    callee: redirect
+    receiver_pattern: null
+    category: redirect
+    sink_subtype: open_redirect
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: py-flask-redirect
+    languages: [python]
+    callee: redirect
+    receiver_pattern: null
+    category: redirect
+    sink_subtype: open_redirect
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # ===== 补充:vuln-range 三项目反哺(NodeGoat/crAPI/juice-shop 实测缺口)=====
+
+  # --- Java Spring SSRF(crAPI RestTemplate;send@HttpClient 规则未覆盖 Spring 企业级)---
+  - rule_id: java-resttemplate-getforobject
+    languages: [java]
+    callee: getForObject
+    receiver_pattern: "^(restTemplate|RestTemplate|webClient|WebClient)$"
+    category: ssrf
+    sink_subtype: ssrf_resttemplate
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: java-resttemplate-exchange
+    languages: [java]
+    callee: exchange
+    receiver_pattern: "^(restTemplate|RestTemplate|webClient|WebClient)$"
+    category: ssrf
+    sink_subtype: ssrf_resttemplate
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # --- Node.js vm RCE/XXE/YAML(juice-shop fileUpload/b2bOrder:vm.runInContext)---
+  - rule_id: ts-vm-runincontext
+    languages: [typescript, javascript]
+    callee: runInContext
+    receiver_pattern: "^(vm)$"
+    category: command
+    sink_subtype: vm_eval
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  # --- Pug SSTI(juice-shop userProfile/videoHandler:pug.compile + 用户输入替换)---
+  - rule_id: ts-pug-compile
+    languages: [typescript, javascript]
+    callee: compile
+    receiver_pattern: "^(pug)$"
+    category: template
+    sink_subtype: ssti_pug
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: template_expr}]
+
+  # --- Angular 显式 bypass XSS(juice-shop 10 处 bypassSecurityTrustHtml)---
+  # 显式 sink(开发者主动 bypass sanitizer,不像 innerHTML 到处都是 → 误报低)。
+  # needs_review 交 LLM 确认数据可控;即使前端组件非 entry point,也作 sink 标记供 LLM 轨用。
+  - rule_id: ts-bypass-security-trust-html
+    languages: [typescript, javascript]
+    callee: bypassSecurityTrustHtml
+    receiver_pattern: "^(sanitizer|domSanitizer|Sanitizer|sanitizerService)$"
+    category: xss
+    sink_subtype: xss_angular_bypass
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  # --- Node needle SSRF(NodeGoat research.js:needle.get 拼用户控 URL)---
+  - rule_id: ts-needle-get
+    languages: [typescript, javascript]
+    callee: get
+    receiver_pattern: "^(needle)$"
+    category: ssrf
+    sink_subtype: ssrf_needle
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]

@@ -7,7 +7,6 @@ parser.iter_calls / destructure_call / extract_arg_expressions, 接受双遍历
 """
 import json
 import logging
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Awaitable
@@ -24,6 +23,7 @@ from shannon_core.code_index.sink_detector import (
     _rule_matches,
     is_entry_hint,
 )
+from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
 from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
@@ -37,12 +37,62 @@ logger = logging.getLogger(__name__)
 LLMClient = Callable[..., Awaitable[str]]
 
 
-# sink-ish callee/receiver 模式(spec §3.1 初稿): 比规则库宽松, 精确判定交 LLM。
-_SUSPICIOUS_CALLEE_RE = re.compile(
-    r"(query|exec(ute)?|render|redirect|include|require|unserialize|"
-    r"pickle|loads|system|popen|raw|where|format|template|open|fetch)",
-    re.IGNORECASE,
-)
+@dataclass(frozen=True)
+class SinkCandidateGroup:
+    """一组 sink 候选模式(替换旧版 flat 子串正则;详见 data/sink_candidates.yml 顶部说明)。
+
+    命中(且规则库未命中)→ 送轻量 LLM 判定。只决定「要不要送 LLM」,不产 SinkCallSite。
+    - callees:精确 callee 名(loader 不动大小写;匹配时按 language 决定大小写策略)。
+    - receivers_any:None = 任意 receiver 命中(含裸调用);tuple = receiver 必须 ∈ 集合。
+    """
+    languages: tuple[str, ...]
+    callees: tuple[str, ...]
+    receivers_any: tuple[str, ...] | None
+
+
+# go/java 导出方法首字母大写是语义 → case-sensitive;其余语言不敏感。
+_CASE_SENSITIVE_LANGS = frozenset({"go", "java"})
+
+
+def _build_sink_candidates(raw: dict) -> tuple[SinkCandidateGroup, ...]:
+    """YAML dict → tuple[SinkCandidateGroup]。"""
+    groups: list[SinkCandidateGroup] = []
+    for item in raw.get("candidates", []):
+        groups.append(SinkCandidateGroup(
+            languages=tuple(item.get("languages") or ()),
+            callees=tuple(item.get("callees") or ()),
+            receivers_any=tuple(item["receivers_any"]) if item.get("receivers_any") else None,
+        ))
+    return tuple(groups)
+
+
+# Sink 候选模式表(外部化:data/sink_candidates.yml)。
+_SINK_CANDIDATES: tuple[SinkCandidateGroup, ...] = _build_sink_candidates(
+    load_yaml(DATA_DIR / "sink_candidates.yml"))
+
+
+def _matches_candidate(language: str, callee: str, receiver: str | None) -> bool:
+    """按语言查候选表:callee 精确比较(语言决定大小写)+ receiver 精确集合约束。
+
+    - go/java:case-sensitive(大写导出方法)。
+    - 其余:case-insensitive(lower() 后比较)。
+    - receivers_any 省略 → 任意 receiver 命中(含裸);给定 → receiver 必须 ∈ 集合,
+      receiver=None 不命中(收窄,防裸调用误触发,如裸 format/open)。
+    """
+    case_sensitive = language in _CASE_SENSITIVE_LANGS
+    cmp_callee = callee if case_sensitive else callee.lower()
+    for g in _SINK_CANDIDATES:
+        if language not in g.languages:
+            continue
+        target = g.callees if case_sensitive else tuple(c.lower() for c in g.callees)
+        if cmp_callee not in target:
+            continue
+        if g.receivers_any is None:
+            return True
+        if receiver is not None and receiver in g.receivers_any:
+            return True
+        # receivers_any 给定但 receiver 不匹配 → 此组不命中,继续看下一组
+    return False
 
 
 @dataclass(frozen=True)
@@ -88,8 +138,7 @@ def collect_suspicious_calls(
                 continue
             if _is_rule_hit(block.language, callee, receiver):
                 continue  # 规则已命中, detect_sinks 会产 SinkCallSite, 不重复
-            target = callee if receiver is None else f"{receiver}.{callee}"
-            if not _SUSPICIOUS_CALLEE_RE.search(target):
+            if not _matches_candidate(block.language, callee, receiver):
                 continue
             try:
                 arg_exprs = parser.extract_arg_expressions(call, source)

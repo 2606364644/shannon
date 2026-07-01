@@ -34,6 +34,18 @@ from shannon_core.code_index.source_detector import detect_sources, DEFAULT_SOUR
 from shannon_core.code_index.models import FuncBlock
 
 
+def test_default_source_rules_externalized_stable():
+    """外部化锚点:source 规则库搬迁到 YAML 后数量不退化(原 18 条)。
+
+    detect_sources 硬编码迭代 DEFAULT_SOURCE_RULES,若 YAML 写错(漏语言分组)此前无任何
+    回归保护 —— 此断言是唯一护栏。
+    """
+    assert len(DEFAULT_SOURCE_RULES) >= 18
+    ids = {r.rule_id for r in DEFAULT_SOURCE_RULES}
+    for rid in ("ts-express-path", "py-django-get", "php-get", "go-gin-query", "java-request-param"):
+        assert rid in ids, f"missing source rule {rid}"
+
+
 def _block(file_path, func_name, start_line, source, language="typescript", params=None):
     return FuncBlock(
         id=f"{file_path}:{func_name}:{start_line}", file_path=file_path,

@@ -45,13 +45,13 @@ def _block(name="handler", file="app.py", language="python", source="def handler
 
 
 def test_collects_sinkish_unmatched_call():
-    # raw_query 是 sink-ish(query) 但规则库无 raw_query@custom_db → 收集
+    # system 在候选表(通用 command 列)但规则库只覆盖 os/subprocess receiver → 收集
     block = _block()
-    parser = _FakeParser([("raw_query", "custom_db", ["\"SELECT \" + uid"], 1)])
+    parser = _FakeParser([("system", None, ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
     assert len(out) == 1
-    assert out[0].callee == "raw_query"
-    assert out[0].receiver == "custom_db"
+    assert out[0].callee == "system"
+    assert out[0].receiver is None
 
 
 def test_skips_rule_hit_call():
@@ -67,6 +67,58 @@ def test_skips_non_sinkish_call():
     parser = _FakeParser([("helper", None, ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
     assert out == []
+
+
+def test_wide_words_no_longer_trigger():
+    """宽词 format/open/where/fetch 已从候选表删除 —— 裸调用不再误触发送 LLM(防回退)。"""
+    for callee in ("format", "open", "where", "fetch"):
+        block = _block()
+        parser = _FakeParser([(callee, None, ["uid"], 1)])
+        out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+        assert out == [], f"{callee} 不应再触发补召回(宽词已删)"
+
+
+def test_go_capitalized_raw_collected():
+    """Go tx.Raw(...) —— 大写 Raw 命中候选(case-sensitive go 列);规则 receiver 未覆盖 tx → 收集。"""
+    block = _block(language="go")
+    parser = _FakeParser([("Raw", "tx", ["uid"], 1)])
+    out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+    assert len(out) == 1
+    assert out[0].callee == "Raw"
+
+
+def test_jpa_createnativequery_collected():
+    """Java em.createNativeQuery(...) —— 命中候选;规则只覆盖 bare → 收集(补召回)。"""
+    block = _block(language="java")
+    parser = _FakeParser([("createNativeQuery", "em", ["uid"], 1)])
+    out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+    assert len(out) == 1
+    assert out[0].callee == "createNativeQuery"
+
+
+def test_receiver_constraint_filters():
+    """TS raw —— 候选 receivers_any 集合命中才收集;集合外 receiver 不收集(收窄生效)。"""
+    block = _block(language="typescript")
+    hit = _FakeParser([("raw", "mongoose", ["uid"], 1)])      # mongoose ∈ 候选 receivers
+    miss = _FakeParser([("raw", "somethingElse", ["uid"], 1)])  # ∉ 候选 receivers
+    assert len(collect_suspicious_calls([block], hit, source_provider=lambda b: b"src")) == 1
+    assert collect_suspicious_calls([block], miss, source_provider=lambda b: b"src") == []
+
+
+def test_case_sensitivity_by_language():
+    """go/java 大小写敏感;python 等其余不敏感。"""
+    # go: Raw 命中(大写),raw 不命中(小写,case-sensitive)
+    go = _block(language="go")
+    assert len(collect_suspicious_calls(
+        [go], _FakeParser([("Raw", "tx", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
+    assert collect_suspicious_calls(
+        [go], _FakeParser([("raw", "tx", ["uid"], 1)]), source_provider=lambda b: b"src") == []
+    # python: Text 与 text 都命中(不敏感);session ∈ 候选 receivers,规则只覆盖 bare → 收集
+    py = _block()
+    assert len(collect_suspicious_calls(
+        [py], _FakeParser([("Text", "session", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
+    assert len(collect_suspicious_calls(
+        [py], _FakeParser([("text", "session", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
 
 
 def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid"):

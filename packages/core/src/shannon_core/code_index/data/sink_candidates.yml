@@ -1,0 +1,132 @@
+# Sink 候选模式表 —— 替换 sink_discovery_llm.py 旧版 flat 正则 _SUSPICIOUS_CALLEE_RE。
+#
+# 语义:规则库(sink_rules.yml)未命中、但命中本表的 call → 送轻量 LLM 判定是否真 sink
+# (产 rule_id="llm-discovered" 软 SinkCallSite)。本表只决定「要不要送 LLM」,不产 SinkCallSite。
+#
+# 设计目标(相对旧 flat 正则):
+#   1. 按语言收窄 —— 旧正则 IGNORECASE 子串匹配,不分语言。
+#   2. 宽词去噪 —— 删除 where/format/open/fetch(大仓误触发主力:几乎每个函数都有)。
+#      这些的覆盖交给确定性规则 + LLM 轨 source→sink 链,不靠补召回宽词。
+#   3. 补漏 —— Go 大写 Raw/Exec、JPA createNativeQuery、SQLAlchemy text、sequelize literal 等
+#      旧正则漏召的(来自原始项目 vuln-injection.txt:150-160 checklist)。
+#
+# 大小写策略(loader 按当前 call 的 language 决定,不在 YAML 声明):
+#   go / java  → 大小写敏感(导出方法首字母大写是语义)
+#   其余语言  → 不敏感(lower() 后比较)
+#
+# 匹配语义(_matches_candidate):
+#   - 按 language 筛选候选组。
+#   - callee 按 language 大小写策略比较(精确,非子串)。
+#   - receivers_any 省略/null → 任意 receiver 命中(含裸调用)。
+#   - receivers_any 给定    → receiver 必须精确 ∈ 集合(receiver=None 不命中,收窄)。
+
+candidates:
+  # ===== SQL / ORM Raw(按语言;补规则漏召的 receiver 变体)=====
+  # 注:命中确定性规则的 call 会被 _is_rule_hit 排除,不会重复送 LLM。
+  - languages: [go]
+    callees: [Raw, Exec, Query, Expr]
+    note: "原始 checklist: db.Raw / gorm.Expr / db.Exec / db.Query(大写,case-sensitive)"
+
+  - languages: [typescript, javascript]
+    callees: [query, raw, literal, execute]
+    receivers_any: [sequelize, knex, typeorm, mongoose, db]
+    note: "sequelize.query/.literal / knex.raw / typeorm.query / mongoose;裸 query 已被 ts-db-query 规则覆盖"
+
+  - languages: [python]
+    callees: [execute, executemany, raw, text]
+    receivers_any: [cursor, cnx, conn, db, objects, session]
+    note: "cursor.execute 规则已覆盖常见 receiver;本组补 db2/custom cursor + SQLAlchemy text@session"
+
+  - languages: [java]
+    callees: [createNativeQuery, executeQuery, execute, prepareStatement]
+    note: "JPA createNativeQuery / JDBC Statement(规则只覆盖 bare,本组补 receiver 变体)"
+
+  - languages: [php]
+    callees: [query, whereRaw, raw, select]
+    receivers_any: [mysqli, pdo, db, DB]
+    note: "mysqli/pdo query + Laravel whereRaw / DB::raw(规则覆盖部分,补 receiver 变体)"
+
+  # ===== Command execution(语义强、量小,无 receiver 约束)=====
+  - languages: [python, php, java, typescript, javascript]
+    callees: [system, popen, shell_exec, passthru, eval]
+    note: "command exec;捕获自定义 shell wrapper(规则 receiver 未覆盖的)"
+
+  # ===== Deserialization =====
+  - languages: [python]
+    callees: [loads, load]
+    receivers_any: [pickle, cPickle, marshal, yaml]
+    note: "pickle/marshal/yaml 反序列化(规则已覆盖常见,补 receiver 变体)"
+
+  - languages: [php, java, typescript, javascript, python]
+    callees: [unserialize, readObject]
+    note: "php unserialize / java readObject(规则覆盖部分语言,补齐)"
+
+  # ===== File include(LFI)=====
+  - languages: [php, typescript, javascript]
+    callees: [include, require, require_once, include_once]
+    note: "file include / path traversal"
+
+  # ===== SSTI(Python Flask/Jinja)=====
+  - languages: [python]
+    callees: [render_template_string, render]
+    receivers_any: [flask, jinja2]
+    note: "规则覆盖 bare render_template_string + flask/jinja render;补 receiver 变体"
+
+  # ===== Open redirect =====
+  - languages: [python, typescript, javascript, php]
+    callees: [redirect]
+    note: "open redirect(规则覆盖 flask/ts res,补齐其余框架)"
+
+  # ===== NoSQL injection(MongoDB / MarsDB;$where 拼接 + 操作符注入)=====
+  # 三项目核心漏洞类(NodeGoat/juice-shop/crAPI Go)。collection 变量名多样,精确
+  # receiver 难写;真漏洞取决于参数结构($where 字符串拼接 / {field:{$ne:..}} 操作符),
+  # 故走补召回交 LLM 判定 —— 不上确定性 sink rule(否则每个 .find() 都产 SinkCallSite,
+  # 海量误报)。命中规则库的 call 仍被 _is_rule_hit 排除。
+  - languages: [typescript, javascript]
+    callees: [find, findOne, findAndModify, update, updateMany, updateOne, aggregate]
+    note: "MarsDB/MongoDB;juice-shop $where 拼接 + reviewsCollection.update(req.body)"
+
+  - languages: [go]
+    callees: [Find, FindOne, Update, UpdateOne, UpdateMany, Aggregate]
+    note: "mongo-driver;crAPI community FindOne(bsonMap) 操作符注入 + post.go $regex 注入"
+
+  - languages: [python, php]
+    callees: [find, findOne, update, update_one, update_many, aggregate]
+    note: "pymongo / PHP mongo"
+
+  # ===== Log injection / log4j JNDI(用户输入进日志)=====
+  # Java log4j 2.x:LOG.error("...{}", email) 解析 ${jndi:} → RCE(crAPI UserServiceImpl)。
+  # 通用日志注入:用户输入未净化进日志,伪造日志行。log 调用密度高,故带 receiver 约束
+  # (显式 logger 变量,避开 console.log 海量误报),走 LLM 判定。
+  - languages: [java]
+    callees: [error, warn, info, debug, trace, fatal]
+    receivers_any: [log, LOG, logger, LOGGER]
+    note: "log4j/slf4j;crAPI JNDI via LOG.error('...{}', email)"
+
+  - languages: [python, typescript, javascript, php]
+    callees: [error, warn, info, debug, fatal]
+    receivers_any: [logger, LOG, log, logging, winston, pino]
+    note: "日志注入(显式 logger 变量,避开 console.log);NodeGoat console.log 归 LLM 轨"
+
+  # ===== Path traversal(用户输入拼进文件路径)=====
+  # source(filename)→ 文件读写 sink。带 receiver 约束降误报,走 LLM 判定路径是否含
+  # 未净化用户输入 + 穿越(../绝对路径)。Python builtin open 密度过高(几乎每个模块都有)
+  # 会拖垮大仓补召回 → 归 LLM 轨/数据流;其余语言 file sink 密度可控,进 candidate。
+  - languages: [typescript, javascript]
+    callees: [readFileSync, readFile, writeFileSync, writeFile, createReadStream, createWriteStream]
+    receivers_any: [fs, fsp, filesystem]
+    note: "Node fs;juice-shop readFile(path.join) + createWriteStream(zip slip)"
+
+  - languages: [go]
+    callees: [ReadFile, Open, OpenFile, Create, WriteFile, ReadDir]
+    receivers_any: [os, ioutil]
+    note: "Go os/ioutil"
+
+  - languages: [java]
+    callees: [readAllBytes, newInputStream, newBufferedReader, readString]
+    receivers_any: [Files]
+    note: "Java Files;new FileInputStream 另算(constructor,规则未覆盖)"
+
+  - languages: [php]
+    callees: [fopen, readfile, fwrite]
+    note: "PHP file(file_get_contents 已归 SSRF 规则,不重复)"
