@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from shannon_core.display.formatters import (
     agent_body, agent_prefix, format_duration,
-    format_error_block, humanize_tool_call, first_nonempty_line,
+    format_error_block, gitnexus_body, humanize_tool_call, first_nonempty_line,
     pad_rule, phase_body, step_body, tag,
 )
 
@@ -25,7 +25,6 @@ class RichConsoleRenderer:
         "AGENT": "blue",
         "TOOL": "yellow",
         "LLM": "magenta",
-        "GN-LLM": "magenta",
         "ERROR": "bold red",
         "RESUME": "dim yellow",
     }
@@ -131,22 +130,9 @@ class RichConsoleRenderer:
             f"Turn {e.turn}: {line}[/]", highlight=False)
 
     def _render_gitnexus(self, e) -> None:
-        if e.kind == "hit":
-            self._console.print(
-                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  ✓ {e.detail}",
-                highlight=False)
-        elif e.kind == "summary":
-            self._console.print(
-                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
-                f"done {e.done}/{e.total} → {e.detail}", highlight=False)
-        elif e.kind == "note":
-            self._console.print(
-                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
-                f"⚠ {e.detail}", highlight=False)
-        else:
-            self._console.print(
-                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
-                f"{e.done}/{e.total}  · {e.hits} so far", highlight=False)
+        self._console.print(
+            f"[{e.timestamp}] [cyan]🔍 [GitNexus] {gitnexus_body(e)}[/]",
+            highlight=False)
 
     def _render_error(self, e) -> None:
         line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"

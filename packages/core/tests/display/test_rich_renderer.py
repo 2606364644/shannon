@@ -345,9 +345,9 @@ async def test_rich_renderer_info_event_warning_level_yellow():
     assert "WARNING" in printed and "yellow" in printed
 
 
-# --- GitnexusLlmEvent (Task 2: GN-LLM 标签，与 LLM 轨 LlmTurnEvent 对偶) ---
+# --- GitnexusLlmEvent (归 LLM 活动族: 🔍 [GitNexus] cyan, 对偶 💭 [Agent] magenta) ---
 
-async def test_rich_gitnexus_progress_uses_magenta_and_gn_llm_tag():
+async def test_rich_gitnexus_progress_uses_cyan_gitnexus_prefix_and_noun():
     from shannon_core.display.rich_renderer import RichConsoleRenderer
     from shannon_core.display.events import GitnexusLlmEvent
     from unittest.mock import MagicMock
@@ -356,11 +356,13 @@ async def test_rich_gitnexus_progress_uses_magenta_and_gn_llm_tag():
         timestamp="2026-07-01 14:32:05", category="GN-LLM",
         phase="sink-discovery", kind="progress", done=10, total=87, hits=3))
     printed = console.print.call_args.args[0]
-    assert "GN-LLM" in printed          # tag('GN-LLM') 内容
-    assert "magenta" in printed         # STYLE_MAP["GN-LLM"] 色
+    assert "🔍 [GitNexus]" in printed   # 归 LLM 族前缀
+    assert "cyan" in printed            # 冷暖对偶（agent Turn=magenta）
+    assert "magenta" not in printed     # 不再与 agent Turn 同色
     assert "sink-discovery" in printed
     assert "10/87" in printed
-    assert "3" in printed               # hits 数字
+    assert "3 sinks" in printed         # 加 noun
+    assert "so far" not in printed      # 去 so far
 
 
 async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
@@ -375,7 +377,8 @@ async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
     printed = console.print.call_args.args[0]
     assert "✓" in printed
     assert "pg.executeQuery" in printed
-    assert "magenta" in printed
+    assert "cyan" in printed
+    assert "magenta" not in printed
 
 
 async def test_rich_gitnexus_summary_shows_done_arrow_detail():
@@ -390,6 +393,7 @@ async def test_rich_gitnexus_summary_shows_done_arrow_detail():
     assert "done 87/87" in printed
     assert "→" in printed
     assert "12 soft sinks" in printed
+    assert "cyan" in printed            # 归族后 cyan（对偶 agent Turn magenta）
 
 
 async def test_rich_gitnexus_note_shows_warn_symbol_and_detail():
@@ -409,5 +413,5 @@ async def test_rich_gitnexus_note_shows_warn_symbol_and_detail():
     assert "⚠" in printed            # note 用 ⚠ 区别 hit 的 ✓
     assert "✓" not in printed        # 不误用 hit 符号
     assert "timed out" in printed
-    assert "magenta" in printed      # GN-LLM 色(与 progress/hit/summary 同)
+    assert "cyan" in printed         # 归族后 cyan（对偶 agent Turn magenta）
     assert "sink-discovery" in printed
