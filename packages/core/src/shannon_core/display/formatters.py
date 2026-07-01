@@ -266,3 +266,33 @@ def agent_body(e) -> str:
         parts.append(f"${e.cost_usd:.4f}")
     metrics = f" ({', '.join(parts)})" if parts else ""
     return f"{AGENT_DONE} {title} Completed{metrics}"
+
+
+_GITNEXUS_HITS_NOUN = {
+    "sink-discovery": "sinks",
+    "source-discovery": "sources",
+    "taint-analysis": "taint_flows",
+    "chain-verdict": "vulnerable",
+}
+
+
+def gitnexus_hits_noun(phase: str) -> str:
+    """progress 计数行的计数对象名；未知 phase 兜底 'hits'。"""
+    return _GITNEXUS_HITS_NOUN.get(phase, "hits")
+
+
+def gitnexus_body(e) -> str:
+    """GitNexus LLM 行正文（纯文本，rich/file 共用）。
+
+    对齐 step_body/agent_body 模式：四种 kind 的措辞在此单一来源。
+    归 LLM 活动族（rich 🔍 [GitNexus] / file [LLM]   [GitNexus]）后，前缀由
+    renderer 负责，本函数只产 {phase} + 计数/汇总/命中/诊断 body。
+    progress 加 noun（sinks/sources/taint_flows/vulnerable），去 so far。
+    """
+    if e.kind == "hit":
+        return f"{e.phase}  ✓ {e.detail}"
+    if e.kind == "summary":
+        return f"{e.phase}  done {e.done}/{e.total} → {e.detail}"
+    if e.kind == "note":
+        return f"{e.phase}  ⚠ {e.detail}"
+    return f"{e.phase}  {e.done}/{e.total}  · {e.hits} {gitnexus_hits_noun(e.phase)}"
