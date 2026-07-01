@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
 from shannon_whitebox.pipeline import activities
 
 
@@ -51,7 +52,9 @@ async def test_verdict_agent_attaches_tool_audit_logger(monkeypatch):
 
     monkeypatch.setattr("shannon_core.agents.runner.run_claude_prompt", fake_run)
 
-    logger_instance = MagicMock()
+    # spec=SessionToolAuditLogger 强制真实签名：close 缺 duration_ms 会抛 TypeError，
+    # 防止生产代码再次漏传该必填参数（regression guard）。
+    logger_instance = MagicMock(spec=SessionToolAuditLogger)
     logger_instance.initialize = AsyncMock()
     logger_instance.close = AsyncMock()
 
@@ -71,7 +74,11 @@ async def test_verdict_agent_attaches_tool_audit_logger(monkeypatch):
 
     assert captured.get("tool_audit_logger") is logger_instance
     logger_instance.initialize.assert_awaited_once()
+    # close 必须带 success + duration_ms（int），对齐 SessionToolAuditLogger.close 真实签名。
     logger_instance.close.assert_awaited_once()
+    close_kwargs = logger_instance.close.await_args.kwargs
+    assert close_kwargs["success"] is True
+    assert isinstance(close_kwargs["duration_ms"], int)
 
 
 @pytest.mark.asyncio

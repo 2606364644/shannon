@@ -893,8 +893,10 @@ async def run_gitnexus_verdict_agent(
         tool_audit_logger = SessionToolAuditLogger(
             audit_session, "gitnexus-verdict", attempt=1
         )
-        await tool_audit_logger.initialize()
+    agent_start = time.monotonic()
     try:
+        if tool_audit_logger is not None:
+            await tool_audit_logger.initialize()
         return await run_claude_prompt(
             prompt=prompt,
             repo_path=repo_path,
@@ -906,7 +908,10 @@ async def run_gitnexus_verdict_agent(
     finally:
         if tool_audit_logger is not None:
             # 异常向上抛由 caller 处理；finally 内保守传 success（best-effort，对齐 run_agent）。
-            await tool_audit_logger.close(success=True)
+            await tool_audit_logger.close(
+                success=True,
+                duration_ms=int((time.monotonic() - agent_start) * 1000),
+            )
 
 
 def _make_gitnexus_progress_cb(session):
