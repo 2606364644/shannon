@@ -18,6 +18,7 @@ from shannon_core.code_index.source_detector import DEFAULT_SOURCE_RULES
 from shannon_core.code_index.llm_concurrency import (
     DEFAULT_PER_CALL_TIMEOUT, map_llm_with_bounds,
 )
+from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
 if TYPE_CHECKING:
@@ -144,13 +145,20 @@ async def discover_sources_llm(
     *,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
+    progress_cb: ProgressCb = None,
 ) -> list[SourcePoint]:
-    """对候选 handler 并发调 LLM → 软 SourcePoint。LLM 不可用 → 空(降级)。"""
+    """对候选 handler 并发调 LLM → 软 SourcePoint。LLM 不可用 → 空(降级)。
+
+    progress_cb: best-effort 进度上报(每 handler 一 tick + 一次 finalize 汇总);
+    cb=None 全程 no-op。
+    """
     if llm_client is None or not candidates:
         return []
     by_func: dict[str, list[SourceCandidate]] = defaultdict(list)
     for c in candidates:
         by_func[c.block.id].append(c)
+
+    emitter = ProgressEmitter("source-discovery", len(by_func), progress_cb)
 
     async def _discover_one(item):
         _, cands = item
@@ -158,8 +166,15 @@ async def discover_sources_llm(
         prompt = _build_prompt(block)
         raw = await llm_client(prompt)
         fields = _parse_fields(raw)
-        return [_to_soft_source(block, f) for f in fields
-                if f.get("is_source") is True]
+        out = [_to_soft_source(block, f) for f in fields
+               if f.get("is_source") is True]
+        detail = None
+        if out:
+            s0 = out[0]
+            detail = (f"'{s0.param_name}' @ {s0.file_path}:{s0.line}"
+                      f" source={s0.source_type.value}")
+        await emitter.tick(detail=detail, hits_delta=len(out))
+        return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
     timeout = (per_call_timeout if per_call_timeout is not None
@@ -168,4 +183,7 @@ async def discover_sources_llm(
         list(by_func.items()), _discover_one,
         concurrency=conc, per_call_timeout=timeout, label="discover_sources_llm",
     )
-    return [s for func_sources in per_func for s in func_sources]
+    all_sources = [s for func_sources in per_func for s in func_sources]
+    skipped = len(by_func) - len(per_func)
+    await emitter.finalize(f"{len(all_sources)} sources · {skipped} timeouts")
+    return all_sources

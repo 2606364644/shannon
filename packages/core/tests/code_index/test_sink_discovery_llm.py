@@ -271,3 +271,46 @@ async def test_discover_partial_failure_keeps_successful_sinks():
         calls, client, concurrency=2, per_call_timeout=0.2)
     assert len(soft) == 1
     assert soft[0].callee_name == "raw_query"
+
+
+async def test_discover_sinks_llm_reports_progress_and_hits():
+    """progress_cb: 每个 function 一次 tick(命中带 detail) + 末尾 finalize 汇总。"""
+    from shannon_core.code_index.progress import ProgressSample
+
+    # 两个不同 block(line=1/2 → block.id 不同), 第一个判 sink, 第二个判非 sink。
+    calls = [_suspicious(line=1), _suspicious(line=2)]
+
+    async def client(prompt, **kw):
+        if "raw_query:1" in prompt:
+            return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                                "category": "sql", "slot": "sql_value",
+                                "arg_index": 0, "rationale": "x"}])
+        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+
+    samples: list[ProgressSample] = []
+
+    async def cb(s: ProgressSample):
+        samples.append(s)
+
+    soft, _ = await discover_sinks_llm(calls, client, progress_cb=cb)
+    assert len(soft) == 1  # 只有第一个判 sink
+
+    # 至少有一条 tick 带 hit detail(命中行) —— detail 非 None 标识命中。
+    hit_ticks = [s for s in samples if not s.final and s.detail]
+    assert hit_ticks, f"no hit-detail tick emitted: {samples}"
+    assert "raw_query" in hit_ticks[0].detail  # detail 提到命中的 callee
+
+    # 最后一条是 finalize 汇总, final=True, done == 唯一 function 数(2 个 block)。
+    assert samples[-1].final is True
+    assert samples[-1].done == len({sc.block.id for sc in calls})
+
+
+async def test_discover_sinks_llm_progress_cb_none_ok():
+    """progress_cb=None 全程 no-op, 返回正常(空 verdict → 空 soft)。"""
+    calls = [_suspicious(line=1)]
+
+    async def client(prompt, **kw):
+        return "[]"  # 无 verdict → 无 soft sink
+
+    soft, gaps = await discover_sinks_llm(calls, client, progress_cb=None)
+    assert soft == []
