@@ -504,6 +504,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
                         auto_index=False,
+                        progress_cb=_make_gitnexus_progress_cb(get_audit_session()),
                     )
             except PentestError:
                 raise
@@ -865,6 +866,31 @@ def _make_verdict_llm_client(repo_path: str):
     return _client
 
 
+def _make_gitnexus_progress_cb(session):
+    """采样 + 包装 session.log_gitnexus_progress。best-effort（吞 session 异常）。
+
+    触发规则：final→summary；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
+    phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink-discovery /
+    source-discovery / taint-analysis / chain-verdict）。cb=None 路径（LLM 关）由
+    core emitter 兜底（emitter 自身 cb=None no-op），非本层职责。
+    """
+    async def cb(sample) -> None:
+        if sample.final:
+            kind, detail = "summary", sample.detail
+        elif sample.detail:
+            kind, detail = "hit", sample.detail
+        elif sample.done == 1 or sample.done % 10 == 0:
+            kind, detail = "progress", None
+        else:
+            return
+        try:
+            await session.log_gitnexus_progress(
+                sample.phase, kind, sample.done, sample.total, sample.hits, detail)
+        except Exception:
+            pass
+    return cb
+
+
 @activity.defn
 async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
@@ -936,6 +962,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             intent=None,
         ):
             llm = _make_verdict_llm_client(str(repo))
+            _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
 
             for vc, builder in (
                 ("injection", build_injection_findings),
@@ -945,9 +972,11 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 try:
                     if vc == "xss":
                         findings = await builder(pgraph, llm_client=llm,
-                                                 sink_call_sites=sink_call_sites)
+                                                 sink_call_sites=sink_call_sites,
+                                                 progress_cb=_chain_cb)
                     else:
-                        findings = await builder(pgraph, llm_client=llm)
+                        findings = await builder(pgraph, llm_client=llm,
+                                                 progress_cb=_chain_cb)
                 except Exception as exc:
                     # one vuln class failing must not block the others
                     logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
