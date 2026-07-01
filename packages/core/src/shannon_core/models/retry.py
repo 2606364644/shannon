@@ -76,6 +76,18 @@ CODE_INDEX_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
+# GitNexus 多轮 verdict agent 专用:短重试 + 多轮。
+# 多轮 agent(带 grep/read 追链)比单次贵,max 3 避免幂等失败被放大;
+# 区别于 PRODUCTION_RETRY(max 50,给单次 LLM agent)。详见
+# docs/superpowers/specs/2026-07-02-gitnexus-deep-agent-infra-design.md §3.3。
+GITNEXUS_VERDICT_RETRY = RetryPolicy(
+    maximum_attempts=3,
+    initial_interval=timedelta(seconds=30),
+    maximum_interval=timedelta(minutes=2),
+    backoff_coefficient=2.0,
+    non_retryable_error_types=NON_RETRYABLE,
+)
+
 
 def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     """Select a retry policy by mode name.
@@ -90,7 +102,7 @@ def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     return profiles.get(mode or "production", PRODUCTION_RETRY)
 
 
-Category = Literal["standard", "vuln", "log", "preflight", "auth-validation", "code-index"]
+Category = Literal["standard", "vuln", "log", "preflight", "auth-validation", "code-index", "gitnexus-verdict"]
 
 
 def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
@@ -102,6 +114,7 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
     - code-index: 确定性 code_index 轨,短 CODE_INDEX_RETRY(防幂等超时被放大)。
     - log:      phase log marker(10s 写),短 policy。
     - preflight / auth-validation: 现有短 tier。
+    - gitnexus-verdict: 多轮 verdict agent,有界 GITNEXUS_VERDICT_RETRY。
     """
     if category == "standard":
         return get_retry_policy(mode)
@@ -115,6 +128,8 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
         return PREFLIGHT_RETRY
     if category == "auth-validation":
         return AUTH_VALIDATION_RETRY
+    if category == "gitnexus-verdict":
+        return GITNEXUS_VERDICT_RETRY
     raise ValueError(f"unknown activity category: {category!r}")
 
 
