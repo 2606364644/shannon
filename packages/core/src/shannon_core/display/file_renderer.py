@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from shannon_core.display.formatters import (
     agent_body, agent_title, format_duration, format_error_block,
-    humanize_tool_call, phase_body, step_body, tag,
+    gitnexus_body, humanize_tool_call, phase_body, step_body, tag,
 )
 
 from shannon_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
@@ -98,23 +98,8 @@ class FileLogRenderer:
         content = e.content[:200] + "..." if len(e.content) > 200 else e.content
         return f"[{e.timestamp}] [LLM]   {who}: Turn {e.turn}: {content}\n"
 
-    _HITS_NOUN = {
-        "sink-discovery": "sinks", "source-discovery": "sources",
-        "taint-analysis": "taint_flows", "chain-verdict": "vulnerable",
-    }
-
     def _gitnexus(self, e) -> str:
-        tag_label = "[GN-LLM]"
-        if e.kind == "hit":
-            return f"[{e.timestamp}] {tag_label} {e.phase}  ✓ {e.detail}\n"
-        if e.kind == "summary":
-            return (f"[{e.timestamp}] {tag_label} {e.phase}  "
-                    f"done {e.done}/{e.total} → {e.detail}\n")
-        if e.kind == "note":
-            return f"[{e.timestamp}] {tag_label} {e.phase}  ! {e.detail}\n"
-        noun = self._HITS_NOUN.get(e.phase, "hits")
-        return (f"[{e.timestamp}] {tag_label} {e.phase}  {e.done}/{e.total}  "
-                f"· {e.hits} {noun} so far\n")
+        return f"[{e.timestamp}] [LLM]   [GitNexus] {gitnexus_body(e)}\n"
 
     def _error(self, e) -> str:
         msg = f"[{e.timestamp}] [ERROR] {e.error_type}: {e.message}"

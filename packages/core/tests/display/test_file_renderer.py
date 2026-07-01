@@ -271,7 +271,7 @@ async def test_phase_step_agent_labels_align_in_file():
     assert p == s == a, f"file 标签列未对齐: phase={p} step={s} agent={a}"
 
 
-# --- GitnexusLlmEvent (Task 2: GN-LLM 标签，与 LLM 轨 LlmTurnEvent 对偶) ---
+# --- GitnexusLlmEvent (归 LLM 族: [LLM]   [GitNexus], 对偶 _llm 的 [LLM]   [Agent]) ---
 
 from shannon_core.display.events import GitnexusLlmEvent
 
@@ -293,7 +293,7 @@ async def _gn_render(e) -> str:
 async def test_gitnexus_progress_line():
     out = await _gn_render(_gn_evt("progress"))
     assert out == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  10/87  · 3 sinks so far\n")
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  10/87  · 3 sinks\n")
 
 
 async def test_gitnexus_hit_line():
@@ -301,7 +301,7 @@ async def test_gitnexus_hit_line():
                 detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
     out = await _gn_render(e)
     assert out == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ✓ 'pg.executeQuery' "
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  ✓ 'pg.executeQuery' "
         "@ src/api/users.py:42 slot=args\n")
 
 
@@ -310,21 +310,21 @@ async def test_gitnexus_summary_line():
                 detail="12 soft sinks · 5 rule gaps · 2 timeouts")
     out = await _gn_render(e)
     assert out == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  done 87/87 → "
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  done 87/87 → "
         "12 soft sinks · 5 rule gaps · 2 timeouts\n")
 
 
 async def test_gitnexus_progress_noun_varies_by_phase():
     e = _gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
     out = await _gn_render(e)
-    assert "· 2 vulnerable so far" in out
+    assert "· 2 vulnerable" in out      # 去 so far
 
 
 async def test_gitnexus_note_line():
-    """note 行: per-skip timeout/error 诊断, 用 ! 区别 hit 的 ✓(grep 友好, 无 ANSI)。"""
+    """note 行: per-skip timeout/error 诊断, 用 ⚠ 区别 hit 的 ✓(与 rich 一致)。"""
     e = _gn_evt("note", done=5, hits=1,
                 detail="src/api/users.py:raw_query: timed out (>60s), skipped")
     out = await _gn_render(e)
     assert out == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ! "
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  ⚠ "
         "src/api/users.py:raw_query: timed out (>60s), skipped\n")
