@@ -25,6 +25,7 @@ class RichConsoleRenderer:
         "AGENT": "blue",
         "TOOL": "yellow",
         "LLM": "magenta",
+        "GN-LLM": "magenta",
         "ERROR": "bold red",
         "RESUME": "dim yellow",
     }
@@ -38,8 +39,9 @@ class RichConsoleRenderer:
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
-            AgentEvent, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
-            ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
+            AgentEvent, ErrorEvent, GitnexusLlmEvent, InfoEvent, LlmTurnEvent,
+            PhaseEvent, ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent,
+            WorkflowHeader,
         )
         match event:
             case WorkflowHeader(): self._render_header(event)
@@ -54,6 +56,7 @@ class RichConsoleRenderer:
                 if self._show_tools:
                     self._render_tool(event)
             case LlmTurnEvent(): self._render_llm(event)
+            case GitnexusLlmEvent(): self._render_gitnexus(event)
             case InfoEvent(): self._render_info(event)
             case ErrorEvent(): self._render_error(event)
             case SummaryEvent(): self._render_summary(event)
@@ -126,6 +129,20 @@ class RichConsoleRenderer:
         self._console.print(
             f"[{e.timestamp}] [magenta]💭 {agent_prefix(e.agent_name)} "
             f"Turn {e.turn}: {line}[/]", highlight=False)
+
+    def _render_gitnexus(self, e) -> None:
+        if e.kind == "hit":
+            self._console.print(
+                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  ✓ {e.detail}",
+                highlight=False)
+        elif e.kind == "summary":
+            self._console.print(
+                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
+                f"done {e.done}/{e.total} → {e.detail}", highlight=False)
+        else:
+            self._console.print(
+                f"[{e.timestamp}] [magenta]{tag('GN-LLM')}[/]  {e.phase}  "
+                f"{e.done}/{e.total}  · {e.hits} so far", highlight=False)
 
     def _render_error(self, e) -> None:
         line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"

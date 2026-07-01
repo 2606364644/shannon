@@ -343,3 +343,50 @@ async def test_rich_renderer_info_event_warning_level_yellow():
         InfoEvent(timestamp="t", category="INFO", message="careful", level="warning"))
     printed = console.print.call_args.args[0]
     assert "WARNING" in printed and "yellow" in printed
+
+
+# --- GitnexusLlmEvent (Task 2: GN-LLM 标签，与 LLM 轨 LlmTurnEvent 对偶) ---
+
+async def test_rich_gitnexus_progress_uses_magenta_and_gn_llm_tag():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="2026-07-01 14:32:05", category="GN-LLM",
+        phase="sink-discovery", kind="progress", done=10, total=87, hits=3))
+    printed = console.print.call_args.args[0]
+    assert "GN-LLM" in printed          # tag('GN-LLM') 内容
+    assert "magenta" in printed         # STYLE_MAP["GN-LLM"] 色
+    assert "sink-discovery" in printed
+    assert "10/87" in printed
+    assert "3" in printed               # hits 数字
+
+
+async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="hit",
+        done=5, total=87, hits=1,
+        detail="'pg.executeQuery' @ src/api/users.py:42 slot=args"))
+    printed = console.print.call_args.args[0]
+    assert "✓" in printed
+    assert "pg.executeQuery" in printed
+    assert "magenta" in printed
+
+
+async def test_rich_gitnexus_summary_shows_done_arrow_detail():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="summary",
+        done=87, total=87, hits=12, detail="12 soft sinks · 5 rule gaps"))
+    printed = console.print.call_args.args[0]
+    assert "done 87/87" in printed
+    assert "→" in printed
+    assert "12 soft sinks" in printed

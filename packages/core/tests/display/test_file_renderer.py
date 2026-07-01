@@ -269,3 +269,52 @@ async def test_phase_step_agent_labels_align_in_file():
     s = step_line.index("○")
     a = agent_line.index("▶")
     assert p == s == a, f"file 标签列未对齐: phase={p} step={s} agent={a}"
+
+
+# --- GitnexusLlmEvent (Task 2: GN-LLM 标签，与 LLM 轨 LlmTurnEvent 对偶) ---
+
+from shannon_core.display.events import GitnexusLlmEvent
+
+
+def _gn_evt(kind, **kw):
+    base = dict(timestamp="2026-07-01 14:32:05", category="GN-LLM",
+                phase="sink-discovery", kind=kind, done=10, total=87, hits=3)
+    base.update(kw)
+    return GitnexusLlmEvent(**base)
+
+
+async def _gn_render(e) -> str:
+    """Render a single event through FileLogRenderer and return the written text."""
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(e)
+    return renderer._writer.text
+
+
+async def test_gitnexus_progress_line():
+    out = await _gn_render(_gn_evt("progress"))
+    assert out == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  10/87  · 3 sinks so far\n")
+
+
+async def test_gitnexus_hit_line():
+    e = _gn_evt("hit", done=5, hits=1,
+                detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ✓ 'pg.executeQuery' "
+        "@ src/api/users.py:42 slot=args\n")
+
+
+async def test_gitnexus_summary_line():
+    e = _gn_evt("summary", done=87, hits=12,
+                detail="12 soft sinks · 5 rule gaps · 2 timeouts")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  done 87/87 → "
+        "12 soft sinks · 5 rule gaps · 2 timeouts\n")
+
+
+async def test_gitnexus_progress_noun_varies_by_phase():
+    e = _gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
+    out = await _gn_render(e)
+    assert "· 2 vulnerable so far" in out
