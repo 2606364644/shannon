@@ -370,7 +370,7 @@ class WhiteboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.run_authz_gitnexus_judge, act_input,
                     start_to_close_timeout=timedelta(minutes=30),  # 原 10；多轮 agent 窗口（spec-0）
-                    retry_policy=retry_for("standard"),
+                    retry_policy=retry_for("gitnexus-verdict"),  # 原 standard；spec-1a 切（多轮 agent，max 3）
                 )
             except Exception as exc:
                 await workflow.execute_activity(

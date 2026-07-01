@@ -68,20 +68,40 @@ def test_chain_verdict_timeout_increased_for_multi_turn():
     )
 
 
-def test_verdict_activities_keep_standard_retry_policy():
-    """guardrail: authz_judge / chain_verdict 仍用 retry_for('standard')。
+def test_authz_judge_uses_gitnexus_verdict_retry():
+    """authz_judge retry 切 gitnexus-verdict（多轮 agent，max 3）。
 
-    spec-0 Task 4 范围界定：只改超时，不改 retry_policy。切
-    ``"gitnexus-verdict"`` 是 spec-1 的事。若有人提前切了 retry policy，
-    这条测试会先红——提醒那是 spec-1 的改动，本 task 不应一起做。
+    spec-1a Task 5: ``run_authz_gitnexus_judge`` 启用多轮 verdict agent
+    后，standard（PRODUCTION_RETRY max 50）会把 agent 超时放大成数小时
+    卡死；切 gitnexus-verdict（GITNEXUS_VERDICT_RETRY max 3）做有界重试。
+    Anchored on the activity symbol so it can't match an unrelated retry_for
+    elsewhere in the workflow.
     """
     src = inspect.getsource(workflows)
-    # 两个 verdict activity 都应紧跟 retry_for("standard")，而非 gitnexus-verdict
-    assert 'retry_for("standard")' in src, (
-        "authz_judge/chain_verdict retry_policy 应保持 retry_for('standard')；"
-        "切 'gitnexus-verdict' 是 spec-1 的事"
+    m = re.search(
+        r"run_authz_gitnexus_judge[\s\S]*?retry_policy=retry_for\(\"(\w[\w-]*)\"\)",
+        src,
     )
-    assert "gitnexus-verdict" not in src, (
-        "workflows.py 中不应出现 'gitnexus-verdict' retry policy；"
-        "那是 spec-1 启用多轮时的改动，本 task 不碰"
+    assert m is not None, "找不到 authz_judge retry_policy"
+    assert m.group(1) == "gitnexus-verdict", (
+        f"authz_judge 应切 gitnexus-verdict（spec-1a 多轮 agent，max 3），"
+        f"实际为 {m.group(1)}"
+    )
+
+
+def test_chain_verdict_keeps_standard_retry():
+    """chain_verdict (inj/xss/ssrf) 仍 standard（spec-1a 只切 authz_judge）。
+
+    spec-1a 只把 authz_judge 切到 gitnexus-verdict；chain_verdict 不在本
+    plan 切。Anchored on the activity symbol.
+    """
+    src = inspect.getsource(workflows)
+    m = re.search(
+        r"run_gitnexus_chain_verdict[\s\S]*?retry_policy=retry_for\(\"(\w[\w-]*)\"\)",
+        src,
+    )
+    assert m is not None, "找不到 chain_verdict retry_policy"
+    assert m.group(1) == "standard", (
+        f"chain_verdict 应保持 retry_for('standard')（spec-1a 只切 authz_judge），"
+        f"实际为 {m.group(1)}"
     )
