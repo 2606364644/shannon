@@ -23,6 +23,9 @@ class NullAuditSession:
     async def log_phase_start(self, phase: str) -> None: pass
     async def log_phase_complete(self, phase: str) -> None: pass
     async def log_info(self, message: str, level: Literal["info", "warning"] = "info") -> None: pass
+    async def log_gitnexus_progress(self, phase: str, kind: str, done: int,
+                                    total: int, hits: int,
+                                    detail: str | None = None) -> None: pass
     async def log_workflow_complete(self, summary: Any) -> None: pass
     async def log_error(self, error: Any, context: str | None = None, *,
                         attempt: int | None = None,

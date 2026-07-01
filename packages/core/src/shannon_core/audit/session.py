@@ -68,6 +68,14 @@ class AuditSession:
         if self._workflow_logger:
             await self._workflow_logger.log_tool_start(agent_name, tool_name, parameters)
 
+    async def log_gitnexus_progress(self, phase: str, kind: str, done: int,
+                                    total: int, hits: int,
+                                    detail: str | None = None) -> None:
+        """Route a GitNexus-track LLM progress line to the workflow log."""
+        if self._workflow_logger:
+            await self._workflow_logger.log_gitnexus_progress(
+                phase, kind, done, total, hits, detail)
+
     async def end_agent(self, agent_name: str, result: AgentEndResult) -> None:
         """Log end events and update metrics.
 
