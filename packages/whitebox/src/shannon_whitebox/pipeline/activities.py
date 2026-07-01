@@ -871,22 +871,42 @@ async def run_gitnexus_verdict_agent(
     prompt: str,
     repo_path: str,
     structured_output_schema: dict | None = None,
+    audit_session=None,
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
     max_turns 走 SHANNON_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。返回完整 ClaudeRunResult
     （含 turns/cost/structured_output），不截断为 str——区别于 _make_verdict_llm_client 的单次薄包装。
 
-    供 spec-1 的 run_authz_gitnexus_judge 多轮判定用。单测 mock run_claude_prompt 验证 max_turns 透传。
+    audit_session 非 None 时构造 SessionToolAuditLogger（对齐 run_agent :167/183/198），多轮
+    grep/read 工具调用经逐轮审计；为 None 时 tool_audit_logger=None（行为同前，向后兼容）。
+
+    供 spec-1 的 run_authz_gitnexus_judge 多轮判定用。单测 mock run_claude_prompt 验证
+    max_turns 透传 / audit_session 注入 tool_audit_logger。
     """
     from shannon_core.agents.runner import run_claude_prompt  # 延迟 import，对齐 :859
-    return await run_claude_prompt(
-        prompt=prompt,
-        repo_path=repo_path,
-        model_tier="medium",
-        max_turns=int(os.getenv("SHANNON_GITNEXUS_VERDICT_MAX_TURNS", "30")),
-        structured_output_schema=structured_output_schema,
-    )
+    tool_audit_logger = None
+    if audit_session is not None:
+        from shannon_whitebox.audit.session_tool_audit_logger import (
+            SessionToolAuditLogger,
+        )
+        tool_audit_logger = SessionToolAuditLogger(
+            audit_session, "gitnexus-verdict", attempt=1
+        )
+        await tool_audit_logger.initialize()
+    try:
+        return await run_claude_prompt(
+            prompt=prompt,
+            repo_path=repo_path,
+            model_tier="medium",
+            max_turns=int(os.getenv("SHANNON_GITNEXUS_VERDICT_MAX_TURNS", "30")),
+            structured_output_schema=structured_output_schema,
+            tool_audit_logger=tool_audit_logger,
+        )
+    finally:
+        if tool_audit_logger is not None:
+            # 异常向上抛由 caller 处理；finally 内保守传 success（best-effort，对齐 run_agent）。
+            await tool_audit_logger.close(success=True)
 
 
 def _make_gitnexus_progress_cb(session):
