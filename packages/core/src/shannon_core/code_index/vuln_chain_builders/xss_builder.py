@@ -25,6 +25,7 @@ from shannon_core.code_index.parameter_models import (
     TaintFlow,
 )
 from shannon_core.code_index.models import ParameterSource
+from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.models.queue_schemas import XssVulnerability
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ async def build_xss_findings(
     *,
     llm_client: Callable[..., Awaitable[str]],
     sink_call_sites: dict[str, SinkCallSite] | None = None,
+    progress_cb: ProgressCb = None,
 ) -> list[XssVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="xss", sink_call_sites=sink_call_sites,
@@ -150,9 +152,16 @@ async def build_xss_findings(
     for s in _find_stored_xss_synthesis(pgraph):
         candidates.append(_synthesize_stored_candidate(s))
 
+    emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[XssVulnerability] = []
     for i, chain in enumerate(candidates, start=1):
         verdict = await judge_chain_verdict(chain, llm_client=llm_client)
+        is_vuln = (verdict.verdict == "vulnerable")
+        detail = None
+        if is_vuln:
+            detail = (f"XSS-GN-{i:02d} vulnerable: source={chain.source_param} "
+                      f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
+        await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         is_stored = chain.flow_id.startswith("stored#")
         findings.append(XssVulnerability(
             ID=f"XSS-GN-{i:02d}",
@@ -171,6 +180,8 @@ async def build_xss_findings(
             source_track="gitnexus",
             evidence_chain=verdict.evidence_chain,
         ))
+    await emitter.finalize(
+        f"{len(findings)} vulnerable · {len(candidates)} candidates judged")
     logger.info("xss gitnexus-track: %d candidates (incl. %d synthesized Stored) → %d findings",
                 len(candidates),
                 sum(1 for c in candidates if c.flow_id.startswith("stored#")),

@@ -1,5 +1,6 @@
 import pytest
 
+from shannon_core.code_index.chain_verdict import ChainVerdict
 from shannon_core.code_index.vuln_chain_builders.xss_builder import (
     build_xss_findings, _find_stored_xss_synthesis,
 )
@@ -125,3 +126,77 @@ async def test_build_xss_empty_pgraph_returns_empty():
         raise AssertionError("no LLM on empty pgraph")
 
     assert await build_xss_findings(pgraph, llm_client=fake_llm) == []
+
+
+@pytest.mark.asyncio
+async def test_build_xss_findings_reports_chain_progress(monkeypatch):
+    """progress_cb receives a tick per candidate + a final summary sample."""
+    samples: list = []
+
+    async def cb(s):
+        samples.append(s)
+
+    sid = "app.py:h:innerHTML:5:0"
+    # 2 reflected candidates
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[
+            _flow("generic", source="q1", sink_id=sid),
+            _flow("generic", source="q2", sink_id=sid),
+        ],
+        language_coverage=["typescript"],
+    )
+
+    call_count = {"n": 0}
+
+    async def fake_judge(chain, *, llm_client):
+        call_count["n"] += 1
+        is_vuln = (call_count["n"] == 2)  # second chain vulnerable
+        return ChainVerdict(
+            verdict="vulnerable" if is_vuln else "safe",
+            witness_payload="><script>" if is_vuln else None,
+            evidence_chain="q->innerHTML",
+            mismatch_reason=None,
+            confidence="high",
+        )
+
+    monkeypatch.setattr(
+        "shannon_core.code_index.vuln_chain_builders.xss_builder.judge_chain_verdict",
+        fake_judge,
+    )
+
+    async def fake_llm(prompt, **kw):
+        raise AssertionError("judge is monkeypatched; llm_client unused")
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm,
+        sink_call_sites={sid: _xss_sink(sid)},
+        progress_cb=cb,
+    )
+
+    assert len(findings) == 2
+    non_final = [s for s in samples if not s.final]
+    assert len(non_final) == 2
+    assert samples[-1].final is True
+    assert samples[-1].total == 2
+    hit_samples = [s for s in non_final if s.detail]
+    assert len(hit_samples) == 1
+    assert hit_samples[0].detail.startswith("XSS-GN-02")
+    assert hit_samples[0].hits == 1
+
+
+@pytest.mark.asyncio
+async def test_build_xss_findings_progress_cb_none_no_raise():
+    """cb=None (default) must run without raising."""
+    sid = "app.py:h:innerHTML:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("generic", source="q", sink_id=sid)],
+        language_coverage=["typescript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
+                '"q->innerHTML","mismatch_reason":null,"confidence":"high"}')
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+    assert len(findings) == 1

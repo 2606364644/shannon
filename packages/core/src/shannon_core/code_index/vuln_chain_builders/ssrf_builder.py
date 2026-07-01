@@ -15,6 +15,7 @@ from shannon_core.code_index.chain_verdict import (
     judge_chain_verdict,
 )
 from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.models.queue_schemas import SsrfVulnerability
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,19 @@ async def build_ssrf_findings(
     pgraph: ParameterPropagationGraph,
     *,
     llm_client: Callable[..., Awaitable[str]],
+    progress_cb: ProgressCb = None,
 ) -> list[SsrfVulnerability]:
     candidates = extract_candidate_chains(pgraph, vuln_class="ssrf")
+    emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[SsrfVulnerability] = []
     for i, chain in enumerate(candidates, start=1):
         verdict = await judge_chain_verdict(chain, llm_client=llm_client)
+        is_vuln = (verdict.verdict == "vulnerable")
+        detail = None
+        if is_vuln:
+            detail = (f"SSRF-GN-{i:02d} vulnerable: source={chain.source_param} "
+                      f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
+        await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         findings.append(SsrfVulnerability(
             ID=f"SSRF-GN-{i:02d}",
             vulnerability_type="URL_Manipulation",
@@ -47,6 +56,8 @@ async def build_ssrf_findings(
             source_track="gitnexus",
             evidence_chain=verdict.evidence_chain,
         ))
+    await emitter.finalize(
+        f"{len(findings)} vulnerable · {len(candidates)} candidates judged")
     logger.info("ssrf gitnexus-track: %d candidates → %d findings",
                 len(candidates), len(findings))
     return findings
