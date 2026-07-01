@@ -156,7 +156,7 @@ async def discover_sources_llm(
     if llm_client is None or not candidates:
         # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
         await ProgressEmitter("source-discovery", 0, progress_cb).finalize(
-            "0 sources · 0 timeouts")
+            "0 sources · 0 skipped (timeout/error)")
         return []
     by_func: dict[str, list[SourceCandidate]] = defaultdict(list)
     for c in candidates:
@@ -188,5 +188,6 @@ async def discover_sources_llm(
     )
     all_sources = [s for func_sources in per_func for s in func_sources]
     skipped = len(by_func) - len(per_func)
-    await emitter.finalize(f"{len(all_sources)} sources · {skipped} timeouts")
+    await emitter.finalize(
+        f"{len(all_sources)} sources · {skipped} skipped (timeout/error)")
     return all_sources

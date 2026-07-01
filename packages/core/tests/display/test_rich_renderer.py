@@ -343,3 +343,51 @@ async def test_rich_renderer_info_event_warning_level_yellow():
         InfoEvent(timestamp="t", category="INFO", message="careful", level="warning"))
     printed = console.print.call_args.args[0]
     assert "WARNING" in printed and "yellow" in printed
+
+
+# --- GitNexus 轨 LLM 进度行三态(spec §10 对应分支渲染轻测) ---
+from shannon_core.display.events import GitnexusLlmEvent
+
+
+def _gn_evt(kind, **kw) -> GitnexusLlmEvent:
+    base = dict(timestamp="2026-07-01 14:32:05", category="GN-LLM",
+                phase="sink-discovery", kind=kind, done=10, total=87, hits=3)
+    base.update(kw)
+    return GitnexusLlmEvent(**base)
+
+
+async def test_gitnexus_progress_renders_tag_phase_fraction_hits():
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(_gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34))
+    out = renderer._console.export_text()
+    assert "GN-LLM" in out            # 专属标签(便于 grep 全部 LLM 活动)
+    assert "chain-verdict" in out     # phase
+    assert "10/34" in out             # done/total
+    assert "2" in out                 # hits so far
+
+
+async def test_gitnexus_hit_renders_check_and_detail():
+    renderer, _ = _renderer_with_capture()
+    e = _gn_evt("hit", done=5, hits=1,
+                detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
+    await renderer.render(e)
+    out = renderer._console.export_text()
+    assert "GN-LLM" in out
+    assert "✓" in out                 # 命中符号
+    assert "sink-discovery" in out    # phase
+    assert "pg.executeQuery" in out   # detail(函数名)
+    assert "src/api/users.py:42" in out  # detail(位置)
+
+
+async def test_gitnexus_summary_renders_done_arrow_detail():
+    renderer, _ = _renderer_with_capture()
+    e = _gn_evt("summary", done=87, hits=12,
+                detail="12 soft sinks · 5 rule gaps · 2 skipped (timeout/error)")
+    await renderer.render(e)
+    out = renderer._console.export_text()
+    assert "GN-LLM" in out
+    assert "sink-discovery" in out
+    assert "done" in out              # summary 收尾标记
+    assert "87/87" in out             # done/total
+    assert "→" in out                 # summary 箭头
+    assert "12 soft sinks" in out     # detail

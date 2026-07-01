@@ -251,7 +251,7 @@ async def discover_sinks_llm(
     if llm_client is None or not suspicious:
         # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
         await ProgressEmitter("sink-discovery", 0, progress_cb).finalize(
-            "0 soft sinks · 0 rule gaps · 0 timeouts")
+            "0 soft sinks · 0 rule gaps · 0 skipped (timeout/error)")
         return [], []
     by_func: dict[str, list[SuspiciousCall]] = defaultdict(list)
     for sc in suspicious:
@@ -291,5 +291,6 @@ async def discover_sinks_llm(
     gaps = _aggregate_gaps(soft_sinks)
     skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃
     await emitter.finalize(
-        f"{len(soft_sinks)} soft sinks · {len(gaps)} rule gaps · {skipped} timeouts")
+        f"{len(soft_sinks)} soft sinks · {len(gaps)} rule gaps · "
+        f"{skipped} skipped (timeout/error)")
     return soft_sinks, gaps
