@@ -28,6 +28,7 @@ from shannon_core.code_index.llm_concurrency import (
     DEFAULT_PER_CALL_TIMEOUT,
     map_llm_with_bounds,
 )
+from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
 if TYPE_CHECKING:
@@ -233,6 +234,7 @@ async def discover_sinks_llm(
     *,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
+    progress_cb: ProgressCb = None,
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
     """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
@@ -241,12 +243,17 @@ async def discover_sinks_llm(
     并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
     单次调用超过 per_call_timeout(默认 DEFAULT_PER_CALL_TIMEOUT=60s)→ 该函数降级跳过。
     大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
+
+    progress_cb: T1 的 best-effort 进度回调(per-function tick + 末尾 finalize);
+    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。
     """
     if llm_client is None or not suspicious:
         return [], []
     by_func: dict[str, list[SuspiciousCall]] = defaultdict(list)
     for sc in suspicious:
         by_func[sc.block.id].append(sc)
+
+    emitter = ProgressEmitter("sink-discovery", len(by_func), progress_cb)
 
     async def _discover_one(item: tuple[str, list[SuspiciousCall]]) -> list[SinkCallSite]:
         _, calls = item
@@ -261,6 +268,12 @@ async def discover_sinks_llm(
             if v is None or not v.get("is_sink"):
                 continue
             out.append(_to_soft_sink(sc, v))
+        detail = None
+        if out:
+            s0 = out[0]
+            slot = s0.dangerous_slots[0].slot.value if s0.dangerous_slots else "generic"
+            detail = f"'{s0.callee_name}' @ {s0.file_path}:{s0.line} slot={slot}"
+        await emitter.tick(detail=detail, hits_delta=len(out))
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
@@ -271,4 +284,8 @@ async def discover_sinks_llm(
         concurrency=conc, per_call_timeout=timeout, label="discover_sinks_llm",
     )
     soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
-    return soft_sinks, _aggregate_gaps(soft_sinks)
+    gaps = _aggregate_gaps(soft_sinks)
+    skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃
+    await emitter.finalize(
+        f"{len(soft_sinks)} soft sinks · {len(gaps)} rule gaps · {skipped} timeouts")
+    return soft_sinks, gaps

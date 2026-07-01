@@ -271,3 +271,57 @@ async def test_discover_partial_failure_keeps_successful_sinks():
         calls, client, concurrency=2, per_call_timeout=0.2)
     assert len(soft) == 1
     assert soft[0].callee_name == "raw_query"
+
+
+async def test_discover_sinks_llm_reports_progress_and_hits():
+    """T4: progress_cb 接进来后,per-function tick + 末尾 finalize 均上报。
+
+    复用文件内已有的 `_suspicious` helper(brief 占位名 `_build_two_suspicious_calls`
+    在本文件不存在;`_suspicious` 每次构造的 block.id 含 line,故 line 不同的两个
+    suspicious 分属 2 个函数)。构造 2 个函数(raw_query 命中 sink / exec_one 未命中),
+    断言:
+      - 至少一条 sample 带非空 detail(命中 tick)
+      - 末尾 sample.final=True 且汇总文案含软 sink 计数
+      - done == 去重函数数
+    """
+    from shannon_core.code_index.progress import ProgressSample
+
+    calls = [
+        _suspicious(line=1, callee="raw_query"),
+        _suspicious(line=2, callee="exec_one"),
+    ]
+    samples: list[ProgressSample] = []
+
+    async def client(prompt, **kw):
+        # 每个函数的 prompt 只含它自己的 call_ref;按 call_ref 返判定。
+        if "raw_query:1" in prompt:
+            return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
+                                "category": "sql", "slot": "sql_value",
+                                "arg_index": 0, "rationale": "x"}])
+        return json.dumps([{"call_ref": "exec_one:2", "is_sink": False}])
+
+    async def cb(s: ProgressSample):
+        samples.append(s)
+
+    soft, gaps = await discover_sinks_llm(calls, client, progress_cb=cb)
+    # 至少 1 个命中 tick(detail 非 None)
+    assert any(s.detail for s in samples)
+    # 末尾是 finalize 汇总
+    assert samples[-1].final is True
+    assert "soft sinks" in (samples[-1].detail or "")
+    # done = 去重后的函数数
+    assert samples[-1].done == len({sc.block.id for sc in calls})
+    # 软 sink 真产出
+    assert len(soft) == 1
+    assert soft[0].callee_name == "raw_query"
+
+
+async def test_discover_sinks_llm_progress_cb_none_ok():
+    """T4: progress_cb=None 时全程 no-op,功能不回归(返回空 sink)。"""
+    calls = [_suspicious(line=1, callee="raw_query")]
+
+    async def client(prompt, **kw):
+        return "[]"  # LLM 判无 sink
+
+    soft, gaps = await discover_sinks_llm(calls, client, progress_cb=None)
+    assert soft == []
