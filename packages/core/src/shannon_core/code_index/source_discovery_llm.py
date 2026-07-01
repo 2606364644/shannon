@@ -150,9 +150,13 @@ async def discover_sources_llm(
     """对候选 handler 并发调 LLM → 软 SourcePoint。LLM 不可用 → 空(降级)。
 
     progress_cb: T1 的 best-effort 进度回调(per-function tick + 末尾 finalize);
-    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。
+    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。即便早退
+    (llm_client=None / 无候选)也发一次 finalize,使通道显示汇总行(T5 不变量)。
     """
     if llm_client is None or not candidates:
+        # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
+        await ProgressEmitter("source-discovery", 0, progress_cb).finalize(
+            "0 sources · 0 timeouts")
         return []
     by_func: dict[str, list[SourceCandidate]] = defaultdict(list)
     for c in candidates:

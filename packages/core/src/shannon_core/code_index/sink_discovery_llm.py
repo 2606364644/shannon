@@ -245,9 +245,13 @@ async def discover_sinks_llm(
     大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
 
     progress_cb: T1 的 best-effort 进度回调(per-function tick + 末尾 finalize);
-    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。
+    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。即便早退
+    (llm_client=None / 无候选)也发一次 finalize,使通道显示汇总行(T5 不变量)。
     """
     if llm_client is None or not suspicious:
+        # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
+        await ProgressEmitter("sink-discovery", 0, progress_cb).finalize(
+            "0 soft sinks · 0 rule gaps · 0 timeouts")
         return [], []
     by_func: dict[str, list[SuspiciousCall]] = defaultdict(list)
     for sc in suspicious:
