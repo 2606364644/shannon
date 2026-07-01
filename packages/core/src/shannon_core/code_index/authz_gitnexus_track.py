@@ -325,14 +325,15 @@ def render_authz_gitnexus_candidates(
         return "（无确定性 IDOR 候选。GitNexus 索引或 framework 分析可能未就绪。）"
 
     blocks_by_id = {b.id: b for b in index.blocks}
+    source_by_id = {sp.id: sp for sp in index.source_points}
     lines: list[str] = ["## Authz GitNexus Track — IDOR 候选链（确定性，待 LLM 判定）", ""]
 
     # ----- dominance candidates -----
     if dominance_cands:
         lines.append("### 1) 调用图 dominance 候选（handler→sink 无 ownership 守卫）")
         lines.append("")
-        lines.append("| Endpoint | Handler | Sink | 调用路径 | Handler 片段 | Sink 片段 |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("| Endpoint | Handler | Sink | 调用路径 | Params | Handler 片段 | Sink 片段 |")
+        lines.append("|---|---|---|---|---|---|---|")
         for c in dominance_cands:
             label = _endpoint_label(c.endpoint_id, entry_points)
             handler_src = _snippet(blocks_by_id[c.handler_id].source_code, max_snippet) \
@@ -340,9 +341,13 @@ def render_authz_gitnexus_candidates(
             sink_src = _snippet(blocks_by_id[c.sink_id].source_code, max_snippet) \
                 if c.sink_id in blocks_by_id else "—"
             path_str = " → ".join(c.path)
+            sps = [source_by_id[sid] for sid in c.source_point_ids if sid in source_by_id]
+            params = "; ".join(
+                f"{sp.param_name}({sp.source_type}): {sp.expression}" for sp in sps
+            ) or "—"
             lines.append(
                 f"| `{label}` | `{c.handler_id}` | `{c.sink_id}` | `{path_str}` "
-                f"| `{handler_src}` | `{sink_src}` |"
+                f"| `{params}` | `{handler_src}` | `{sink_src}` |"
             )
         lines.append("")
         lines.append(
