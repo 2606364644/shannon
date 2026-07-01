@@ -125,3 +125,56 @@ async def test_build_xss_empty_pgraph_returns_empty():
         raise AssertionError("no LLM on empty pgraph")
 
     assert await build_xss_findings(pgraph, llm_client=fake_llm) == []
+
+
+@pytest.mark.asyncio
+async def test_build_xss_findings_reports_chain_progress(monkeypatch):
+    """build_xss_findings must drive a chain-verdict ProgressEmitter: one tick
+    per candidate + a final summary sample. xss retains sink_call_sites param."""
+    from shannon_core.code_index.progress import ProgressSample
+    from shannon_core.code_index.vuln_chain_builders import xss_builder
+
+    samples: list = []
+
+    async def cb(s: ProgressSample):
+        samples.append(s)
+
+    sid_a = "app.py:h:innerHTML:5:0"
+    sid_b = "app.py:h:innerHTML:6:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[
+            _flow("generic", source="a", sink_id=sid_a),
+            _flow("generic", source="b", sink_id=sid_b),
+        ],
+        language_coverage=["typescript"],
+    )
+    sink_call_sites = {sid_a: _xss_sink(sid_a), sid_b: _xss_sink(sid_b)}
+
+    async def fake_judge(chain, *, llm_client):
+        return type("V", (), {
+            "verdict": "vulnerable", "confidence": "high",
+            "evidence_chain": "x->innerHTML", "mismatch_reason": "no encode",
+            "witness_payload": "><script>",
+        })()
+    monkeypatch.setattr(xss_builder, "judge_chain_verdict", fake_judge)
+
+    async def fake_llm(prompt, **kw):
+        raise AssertionError("judge_chain_verdict is mocked; llm unused")
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm,
+        sink_call_sites=sink_call_sites, progress_cb=cb,
+    )
+
+    non_final = [s for s in samples if not s.final]
+    finals = [s for s in samples if s.final]
+    assert len(non_final) == 2
+    assert len(finals) == 1
+    assert all(s.phase == "chain-verdict" for s in samples)
+    assert non_final[-1].done == 2 and non_final[-1].total == 2
+    assert non_final[-1].hits == 2
+    # vulnerable tick detail carries XSS-GN-NN prefix
+    assert non_final[0].detail.startswith("XSS-GN-01 vulnerable:")
+    assert "→ sink=" in non_final[0].detail
+    assert "2 vulnerable" in finals[0].detail
+    assert len(findings) == 2

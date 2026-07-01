@@ -90,3 +90,68 @@ async def test_build_injection_skips_non_injection_slots():
 
     findings = await build_injection_findings(pgraph, llm_client=fake_llm)
     assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_build_injection_findings_reports_chain_progress(monkeypatch):
+    """build_injection_findings must drive a chain-verdict ProgressEmitter:
+    one tick per candidate + a final summary sample."""
+    from shannon_core.code_index.progress import ProgressSample
+    from shannon_core.code_index.vuln_chain_builders import injection_builder
+
+    samples: list = []
+
+    async def cb(s: ProgressSample):
+        samples.append(s)
+
+    # 3 candidate chains (sql_value slot picked up by injection builder)
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value") for _ in range(3)],
+        language_coverage=["python"],
+    )
+
+    # Mark every chain vulnerable so each tick should carry INJ-GN-NN detail.
+    async def fake_judge(chain, *, llm_client):
+        return type("V", (), {
+            "verdict": "vulnerable", "confidence": "high",
+            "evidence_chain": "q->db", "mismatch_reason": "concat",
+            "witness_payload": "'",
+        })()
+    monkeypatch.setattr(injection_builder, "judge_chain_verdict", fake_judge)
+
+    async def fake_llm(prompt, **kw):
+        raise AssertionError("judge_chain_verdict is mocked; llm unused")
+
+    findings = await build_injection_findings(pgraph, llm_client=fake_llm, progress_cb=cb)
+
+    # 3 candidates → 3 non-final ticks, then 1 final
+    non_final = [s for s in samples if not s.final]
+    finals = [s for s in samples if s.final]
+    assert len(non_final) == 3
+    assert len(finals) == 1
+    # phase + counters
+    assert all(s.phase == "chain-verdict" for s in samples)
+    assert non_final[-1].done == 3 and non_final[-1].total == 3
+    assert non_final[-1].hits == 3            # all vulnerable
+    # vulnerable tick detail carries INJ-GN-NN prefix + source→sink
+    assert non_final[0].detail.startswith("INJ-GN-01 vulnerable:")
+    assert "→ sink=" in non_final[0].detail
+    # final summary mentions the count
+    assert "3 vulnerable" in finals[0].detail
+    # findings still produced unchanged
+    assert len(findings) == 3
+
+
+@pytest.mark.asyncio
+async def test_build_injection_findings_progress_cb_none_is_noop():
+    """progress_cb=None must keep the builder working exactly as before."""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value")], language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')
+
+    findings = await build_injection_findings(pgraph, llm_client=fake_llm, progress_cb=None)
+    assert len(findings) == 1
