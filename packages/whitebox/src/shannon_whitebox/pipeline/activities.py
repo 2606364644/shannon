@@ -443,6 +443,36 @@ async def run_auth_validation(input: ActivityInput) -> None:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
+
+def _make_gitnexus_progress_cb(session):
+    """采样 + 包装 session.log_gitnexus_progress。best-effort（T7）。
+
+    采样规则（避免刷屏 workflow.log）：
+    - final → summary（detail 承载汇总文案）
+    - detail 非空 → hit（即时上报，不看 done）
+    - done==1 或 done%10==0 → progress
+    - 其余静默
+    phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink-discovery /
+    source-discovery / taint-analysis / chain-verdict 四段正确 phase）。
+    session 异常被吞——进度通道绝不能影响扫描主流程。
+    """
+    async def cb(sample) -> None:
+        if sample.final:
+            kind, detail = "summary", sample.detail
+        elif sample.detail:
+            kind, detail = "hit", sample.detail
+        elif sample.done == 1 or sample.done % 10 == 0:
+            kind, detail = "progress", None
+        else:
+            return
+        try:
+            await session.log_gitnexus_progress(
+                sample.phase, kind, sample.done, sample.total, sample.hits, detail)
+        except Exception:
+            pass
+    return cb
+
+
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -474,6 +504,12 @@ async def run_code_index(input: ActivityInput) -> dict:
 
             _llm_taint_client = _make_gitnexus_llm_client(str(repo))
 
+            # --- GitNexus 进度回调：采样后转发到 audit session（T7）---
+            # 采样：final→summary；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
+            # phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink/source/taint/chain-verdict）。
+            # best-effort：session 异常被吞，绝不影响扫描主流程。
+            _progress_cb = _make_gitnexus_progress_cb(get_audit_session())
+
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry
             # (~/.gitnexus/registry.json).  The correct order is:
@@ -504,6 +540,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
                         auto_index=False,
+                        progress_cb=_progress_cb,
                     )
             except PentestError:
                 raise
@@ -937,6 +974,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         ):
             llm = _make_verdict_llm_client(str(repo))
 
+            # 三个 builder 共用同一 cb（phase=chain-verdict，由 core 的 ProgressEmitter 定）。
+            _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
+
             for vc, builder in (
                 ("injection", build_injection_findings),
                 ("xss", build_xss_findings),
@@ -945,9 +985,11 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 try:
                     if vc == "xss":
                         findings = await builder(pgraph, llm_client=llm,
-                                                 sink_call_sites=sink_call_sites)
+                                                 sink_call_sites=sink_call_sites,
+                                                 progress_cb=_chain_cb)
                     else:
-                        findings = await builder(pgraph, llm_client=llm)
+                        findings = await builder(pgraph, llm_client=llm,
+                                                 progress_cb=_chain_cb)
                 except Exception as exc:
                     # one vuln class failing must not block the others
                     logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
