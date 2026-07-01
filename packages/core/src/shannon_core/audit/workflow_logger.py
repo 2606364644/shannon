@@ -171,6 +171,22 @@ class WorkflowLogger:
             timestamp=format_log_time(), category="LLM", agent_name=agent_name,
             turn=turn, content=content))
 
+    async def log_gitnexus_progress(self, phase: str, kind: str, done: int,
+                                    total: int, hits: int,
+                                    detail: str | None = None) -> None:
+        """Emit a GitNexus-track LLM progress line (sink/source/taint/chain-verdict).
+
+        Routed through the dispatcher like other events → scrolls above the Live
+        footer and persists to workflow.log. best-effort: no-op when no dispatcher.
+        """
+        if self._dispatcher is None:
+            return
+        from shannon_core.display.events import GitnexusLlmEvent
+        await self._dispatcher.dispatch(GitnexusLlmEvent(
+            timestamp=format_log_time(), category="GN-LLM", phase=phase, kind=kind,
+            done=done, total=total, hits=hits, detail=detail,
+        ))
+
     async def log_event(self, event_type: str, message: str) -> None:
         """Log a generic categorized event.
 
