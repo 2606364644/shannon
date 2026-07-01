@@ -2026,3 +2026,17 @@ def test_handle_error_sets_output_validation_failed_enum():
     assert result.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED
     assert result.success is False
     assert result.retryable is True
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (spec-0): BaseProvider.call ABC 签名须含 max_turns（Liskov 补齐）
+# 两实现 AnthropicProvider/OpenAIProvider 已有该参数，ABC 补齐签名即可。
+# ---------------------------------------------------------------------------
+def test_base_provider_call_has_max_turns_parameter():
+    """ABC 签名须含 max_turns（两实现已有，补齐 Liskov）。"""
+    import inspect
+    from shannon_core.agents.providers import BaseProvider
+
+    sig = inspect.signature(BaseProvider.call)
+    assert "max_turns" in sig.parameters
+    assert sig.parameters["max_turns"].default is None
