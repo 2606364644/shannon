@@ -328,17 +328,16 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                         "authz_gitnexus_candidates": md,
                     },
                 )
-                result = await run_claude_prompt(
+                result = await run_gitnexus_verdict_agent(
                     prompt=prompt,
                     repo_path=str(repo),
-                    model_tier="medium",
-                    api_key=input.api_key,
                     structured_output_schema={
                         "type": "object",
                         "properties": {
                             "vulnerabilities": {"type": "array"},
                         },
                     },
+                    audit_session=get_audit_session(),
                 )
                 raw = result.structured_output
                 if raw is None and result.text:

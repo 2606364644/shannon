@@ -69,7 +69,7 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
@@ -110,7 +110,7 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
         return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
@@ -137,7 +137,7 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
@@ -165,7 +165,7 @@ async def test_judge_logs_warning_when_no_candidates(tmp_path):
         return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
@@ -198,7 +198,7 @@ async def test_judge_logs_info_when_candidates(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_claude_prompt", new=fake_run):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
             with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
