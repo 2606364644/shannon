@@ -257,6 +257,18 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
 
 
 @activity.defn
+def _entry_points_brief(http_route_count: int, entry_point_total: int) -> str:
+    """spec-1a T4: 格式化 entry_points_summary 给 explore prompt。
+
+    确定性层识别的入口点摘要（explore prompt 会提示此为「可能不全，自行 grep 补」）。
+    """
+    return (
+        f"{http_route_count} http_route / {entry_point_total} total entry points"
+        if (http_route_count or entry_point_total)
+        else "0 http_route / 0 total (deterministic layer identified no entry points; grep routes yourself)"
+    )
+
+
 async def log_info_activity(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
@@ -319,9 +331,10 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 pass
 
             vulnerabilities: list[dict] = []
+            # prompt_manager 两分支共用（T4：0 候选探索分支也要加载 explore prompt）。
+            prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+            prompt_manager = PromptManager(prompts_dir)
             if candidate_count > 0:
-                prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
-                prompt_manager = PromptManager(prompts_dir)
                 prompt = prompt_manager.load_sync(
                     "authz_gitnexus_judge",
                     variables={
@@ -355,6 +368,51 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 try:
                     await get_audit_session().log_info(
                         f"authz GitNexus 轨：产出 {len(vulnerabilities)} 条 verdict。",
+                        "info",
+                    )
+                except Exception:
+                    pass
+            else:
+                # spec-1a G2：0 候选不静默写空 queue——多轮 agent 自主探索仓库找 IDOR。
+                # 确定性层常因入口点未识别（语言误判/调用图未就绪/纯静态页）漏召回，
+                # agent 自主 grep route + read handler 补候选（软候选，needs_review=True）。
+                explore_prompt = prompt_manager.load_sync(
+                    "authz_gitnexus_explore",
+                    variables={
+                        "entry_points_summary": _entry_points_brief(
+                            http_route_count, entry_point_total
+                        ),
+                    },
+                )
+                result = await run_gitnexus_verdict_agent(
+                    prompt=explore_prompt,
+                    repo_path=str(repo),
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                    audit_session=get_audit_session(),
+                )
+                raw = result.structured_output if hasattr(result, "structured_output") else None
+                if raw is None and getattr(result, "text", None):
+                    raw = result.text  # fallback to text; parse_lenient handles
+                parsed = VulnerabilityQueue.parse_lenient(
+                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
+                )
+                for v in parsed.queue.vulnerabilities:
+                    data = v.model_dump()
+                    data["source_track"] = "gitnexus"
+                    data["needs_review"] = True  # 探索发现，软候选（未经确定性 dominance 验证）
+                    if not data.get("evidence_chain"):
+                        data["evidence_chain"] = "gitnexus explore-discovered (0 deterministic candidates)"
+                    vulnerabilities.append(data)
+
+                try:
+                    await get_audit_session().log_info(
+                        f"authz GitNexus 轨（探索）：0 确定性候选 → 自主探索产出 "
+                        f"{len(vulnerabilities)} 条软候选（needs_review=True）。",
                         "info",
                     )
                 except Exception:

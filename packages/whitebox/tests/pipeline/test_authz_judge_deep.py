@@ -166,6 +166,58 @@ async def test_authz_judge_verdict_writes_queue_with_source_track(tmp_path, monk
     assert v["evidence_chain"]  # populated
 
 
+@pytest.mark.asyncio
+async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
+    """spec-1a Task 4: candidate_count==0 时调 verdict_agent 自主探索（非静默写空 queue）。
+
+    核心断言（不削弱）：0 候选时 explored==1（explore prompt 被调一次），且 prompt 含
+    explore/route 字样。产软候选 needs_review=True + source_track='gitnexus'。
+    """
+    import shannon_whitebox.pipeline.activities as act
+
+    # 0 候选 fixture（dom=fw=0）
+    fake_result = _fake_build_result(markdown="", dom=0, fw=0, http=0, total=0)
+    monkeypatch.setattr(
+        "shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+        lambda d: fake_result,
+    )
+
+    explored = {"n": 0, "prompt": None}
+
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+        explored["n"] += 1
+        explored["prompt"] = prompt
+        assert "explore" in prompt.lower() or "route" in prompt.lower(), "应用探索 prompt"
+        r = MagicMock()
+        r.structured_output = {"vulnerabilities": []}
+        r.text = "{}"
+        return r
+
+    monkeypatch.setattr(act, "run_gitnexus_verdict_agent", fake_verdict)
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    monkeypatch.setattr(act, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+
+    session = MagicMock()
+    session.track_step = _noop_cm_factory()
+    session.log_info = AsyncMock()
+    monkeypatch.setattr(
+        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+    )
+
+    inp = MagicMock()
+    inp.workspace_name = "ws"
+    inp.api_key = None
+
+    await act.run_authz_gitnexus_judge(inp)
+
+    assert explored["n"] == 1, "0 候选时应触发自主探索"
+    # entry_points_summary 变量被填充（非裸 placeholder）
+    assert explored["prompt"] is not None
+    assert "{{entry_points_summary}}" not in explored["prompt"], "变量应被填充"
+
+
 def _fake_build_result(*, markdown="## 候选", dom=1, fw=0, http=1, total=1):
     """构造可按位置解包成 5 元组的 AuthzTrackBuildResult（MagicMock 默认 __iter__ 返空，
     解包触发 'got 0' 错，故必须用真 NamedTuple）。dom/fw 控候选数量。"""

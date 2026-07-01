@@ -91,7 +91,12 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
 
 @pytest.mark.asyncio
 async def test_judge_skips_llm_when_no_candidates(tmp_path):
-    """No candidates → write empty queue, do NOT call LLM (save cost)."""
+    """0 candidates → spec-1a G2: no longer silent empty queue.
+
+    Now triggers autonomous explore (calls run_gitnexus_verdict_agent once
+    with the explore prompt). This test asserts the post-T4 contract:
+    explore is invoked, queue still exists, candidate_count==0.
+    """
     # code_index.json 属于 deliverables（activity 从 deliverables/whitebox 读），
     # 落 whitebox/ 子目录，使 index 真正被读到——match 测试名 "no_candidates"
     # 的意图（index 存在但无候选），而非 index 整体缺失。
@@ -103,11 +108,15 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
         "entry_points": [], "chains": [],
     }))
 
-    called = {"n": 0}
+    called = {"n": 0, "prompt": None}
 
     async def fake_run(prompt, **kwargs):
         called["n"] += 1
-        return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
+        called["prompt"] = prompt
+        return type("R", (), {
+            "success": True, "structured_output": {"vulnerabilities": []},
+            "text": "{}",
+        })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
         with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
@@ -117,11 +126,14 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
                 inst.log_info = AsyncMock()
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    assert called["n"] == 0  # LLM not called
+    # spec-1a G2: 0 候选触发自主探索（不再静默空）
+    assert called["n"] == 1, "0 候选应触发 explore（非静默写空 queue）"
+    assert called["prompt"] is not None
+    assert "explore" in called["prompt"].lower() or "route" in called["prompt"].lower()
     assert (tmp_path / "whitebox" / "authz_gitnexus_queue.json").exists()
     data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
-    assert data["vulnerabilities"] == []
-    assert result["candidate_count"] == 0
+    assert data["vulnerabilities"] == []  # explore 返空，queue 仍空（无幻觉）
+    assert result["candidate_count"] == 0  # 确定性候选仍 0（explore 不改 candidate_count）
 
 
 @pytest.mark.asyncio
