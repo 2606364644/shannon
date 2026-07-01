@@ -459,14 +459,11 @@ async def run_code_index(input: ActivityInput) -> dict:
             # Create LLM client for taint analysis (+ LLM sink discovery)
             def _make_gitnexus_llm_client(repo_path: str):
                 """封装 run_claude_prompt 成 analyze_taint_llm/discover 期望的
-                async (prompt)->str 契约。env 关时返回 raise-client 触发降级。"""
+                async (prompt)->str 契约。env 关时返回 None → consumer 入口各自
+                静默降级(discover_sinks/sources 早退返回空, analyze_taint_llm 走
+                deterministic fallback), 不再跑 N 个无用的 raise-task 刷屏(2026-07-01)。"""
                 if not is_gitnexus_llm_enabled():
-                    async def _disabled(prompt: str, **kwargs) -> str:
-                        raise RuntimeError(
-                            "GitNexus LLM disabled (SHANNON_GITNEXUS_LLM_ENABLED=0); "
-                            "using deterministic fallback"
-                        )
-                    return _disabled
+                    return None
 
                 async def _client(prompt: str, **kwargs) -> str:
                     result = await run_claude_prompt(

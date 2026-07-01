@@ -1,5 +1,7 @@
 """llm_taint_analyzer 单元测试 — LLM 逐函数 taint 分析。"""
 import json
+import logging
+
 import pytest
 
 from shannon_core.code_index.models import FuncBlock, TypedParameter, ParameterSource
@@ -310,3 +312,40 @@ class TestDeterministicIntraFallback:
         result = _deterministic_intra_fallback(block, [])
         assert result.hits == {}
         assert result.tainted_params == {"user_input"}
+
+
+class TestNoClientSilentFallback:
+    """llm_client=None(本就无 LLM,预期降级)应静默 fallback — 不打 warning,
+    避免 SHANNON_GITNEXUS_LLM_ENABLED=0 时每个函数一条 "LLM taint analysis failed" 刷屏。
+    真 LLM 失败(client 有但调用 raise)仍保留 warning(运维需知)。"""
+
+    async def test_no_client_is_silent(self, caplog):
+        block = _block("handler", params=["req"])
+        sink = _sink(block.id)
+        with caplog.at_level(
+            logging.WARNING, logger="shannon_core.code_index.llm_taint_analyzer"
+        ):
+            result = await analyze_taint_llm(
+                block, [sink], typed_params=None, llm_client=None)
+        # 返回 deterministic fallback(保守标记所有 params tainted)
+        assert isinstance(result, IntraResult)
+        assert "req" in result.tainted_params
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings == [], (
+            f"None client 应静默 fallback, 实得 warning: "
+            f"{[r.getMessage() for r in warnings]}")
+
+    async def test_real_failure_keeps_warning(self, caplog):
+        """client 有但调用失败 → 仍打 warning(真故障, 非预期降级)。"""
+        block = _block("handler", params=["req"])
+        sink = _sink(block.id)
+        failing = FakeLLMClient(response=None)  # __call__ raises RuntimeError
+        with caplog.at_level(
+            logging.WARNING, logger="shannon_core.code_index.llm_taint_analyzer"
+        ):
+            await analyze_taint_llm(block, [sink], typed_params=None, llm_client=failing)
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, (
+            f"真失败应 1 条 warning, 实得 {len(warnings)}: "
+            f"{[r.getMessage() for r in warnings]}")
+        assert "failed" in warnings[0].getMessage().lower()

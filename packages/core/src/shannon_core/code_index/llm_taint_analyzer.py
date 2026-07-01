@@ -345,9 +345,18 @@ async def analyze_taint_llm(
     # params tainted and all sinks hit at 1.0. tainted_params stays
     # conservative (all params) to preserve propagate seed / cross-function
     # propagation — no recall loss.
-    logger.warning(
-        "LLM taint analysis failed for %s (last error: %s). "
-        "Using deterministic fallback (is_entry_hint tiered hits).",
-        block.id, last_exc,
-    )
+    if llm_client is None:
+        # 预期降级路径(SHANNON_GITNEXUS_LLM_ENABLED=0 或未配置 LLM client):
+        # 静默 fallback,不打 warning — 避免每个函数一条 "LLM taint analysis
+        # failed" 刷屏(2026-07-01)。
+        logger.debug(
+            "analyze_taint_llm: no LLM client, using deterministic fallback for %s",
+            block.id,
+        )
+    else:
+        logger.warning(
+            "LLM taint analysis failed for %s (last error: %s). "
+            "Using deterministic fallback (is_entry_hint tiered hits).",
+            block.id, last_exc,
+        )
     return _deterministic_intra_fallback(block, sinks_in_func)
