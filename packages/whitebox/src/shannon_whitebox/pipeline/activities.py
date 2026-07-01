@@ -256,7 +256,6 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
     await get_audit_session().log_phase_complete(phase)
 
 
-@activity.defn
 def _entry_points_brief(http_route_count: int, entry_point_total: int) -> str:
     """spec-1a T4: 格式化 entry_points_summary 给 explore prompt。
 
@@ -269,6 +268,7 @@ def _entry_points_brief(http_route_count: int, entry_point_total: int) -> str:
     )
 
 
+@activity.defn
 async def log_info_activity(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
