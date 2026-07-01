@@ -60,7 +60,7 @@
 | D1 | **层级归属** | GN-LLM 退出结构标签栏，归入 LLM 活动族 | `events.py:124` 注释已明示是 `LlmTurnEvent` 对偶；颜色同 magenta 亦佐证。归族后视觉传达"双 LLM 轨并行"架构语义。 |
 | D2 | **符号 + 颜色对偶** | agent Turn = `💭 magenta`（暖/思考）｜GitNexus = `🔍 cyan`（冷/扫描分析） | 双轨**平级**（CLAUDE.md §1）→ 必须**同档常规色**，不可一 bright 一正常（暗示主次）。`🔍` 与 `💭` 同为 emoji 风格统一（`⚙` 否决：单色 dingbat 与 emoji 字重不搭）。冷暖对偶 + 符号语义对偶（思考 ↔ 扫描分析，贴 GitNexus"代码索引 + 判定"）。 |
 | D3 | **progress 措辞** | `{done}/{total}  · {hits} {noun}`（加 noun、去 so far） | 终端 `· 0 so far` 含义模糊；加 noun（sinks/sources/taint_flows）自洽。去 so far：`done<total` 已暗含进行中，summary 行另有完整汇总。 |
-| D4 | **标签列宽度** | `LABEL_WIDTH = 5 → 7` | 容纳最长标签 `WARNING`(7)，所有走 `tag()` 的标签（PHASE/STEP/AGENT/INFO/WARNING）`ljust(7)` 对齐，顺手修 INFO(4)/WARNING(7) pre-existing 错位。GN-LLM 归族后退出标签栏，这批更干净。 |
+| D4 | ~~**标签列宽度** `LABEL_WIDTH = 5 → 7`~~ | **⛔ 执行时推翻（2026-07-02）**：D1 归族后 GN-LLM 退出标签列，D4 主目标（容纳 GN-LLM）消失；剩余收益仅 WARNING minor 错位，但成本实测扩大（whitebox `test_log_phase` 绿→红，~18 处 whitebox/blackbox 集成断言破裂，安全网外静默风险）。**砍掉，LABEL_WIDTH 保持 5**。详见 plan 修订记录。 |
 | D5 | **body / noun 共享** | `_HITS_NOUN` 上提为 `formatters.gitnexus_hits_noun(phase)`；新增 `formatters.gitnexus_body(e)` | 对齐现有 `step_body`/`agent_body`/`phase_body` 模式（formatters.py:222+），rich/file 共用单一来源，消除"rich 漏 noun"根因。 |
 | D6 | **grep 锚点** | `GN-LLM` → `[GitNexus]` | 归族后无 GN-LLM 标签；`[GitNexus]` 是 rich/file 两路共有的稳定子串，可 grep。更新 events 注释 + memory。 |
 

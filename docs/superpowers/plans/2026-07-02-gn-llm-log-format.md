@@ -393,6 +393,14 @@ git commit -m "refactor(display): file GitNexus 行归 [LLM] 栏 [LLM]   [GitNex
 
 ---
 
+## ⛔ Task 4: `LABEL_WIDTH` 5→7 — DROPPED（执行时推翻，不执行）
+
+**推翻原因（2026-07-02 执行审查发现）：** D4=7 是在 GN-LLM 仍处标签列时选的（preview 里 `GN-LLM  sink-discovery` 在标签列），目的是容纳 GN-LLM(6)。但 D1 归族决定 GN-LLM 退出标签列（`🔍 [GitNexus]`/`[LLM]` 前缀）后，**GN-LLM 不再制造标签列错位，D4 的主要目标消失**。剩余收益仅 WARNING(7) vs 5 宽的 minor pre-existing 错位；而成本经实测扩大——whitebox `test_log_phase`（绿）等约 18 处 whitebox/blackbox 集成测试断言字面 `[PHASE]`/`[AGENT]`，改 7 全部破裂，且在"只跑改动相关测试"安全网外有静默风险。成本/收益翻负，**砍掉，LABEL_WIDTH 保持 5**。Task 1/2/3/5 不受影响（GN-LLM 归族后不用 `tag()`，[LLM] 硬编码不走 `tag()`）。
+
+> 以下 Task 4 原始内容保留作历史记录，**不执行**。
+
+---
+
 ## Task 4: `LABEL_WIDTH` 5→7（标签列对齐，顺带修 INFO/WARNING 错位）
 
 > 此任务触及多个测试文件的精确断言，全部是同一变更（标签栏 5→7）的连锁字符串更新，故归一个 task。
