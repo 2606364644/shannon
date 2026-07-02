@@ -94,6 +94,14 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
     # workspace 根必须与 run_whitebox 写入根一致(run_whitebox 用 resolve_workspaces_dir(repo_path)),
     # 否则 SHANNON_WORKER_ROOT 或 cwd≠project-root 时读取会落空(A6 review Important #1)。
     from shannon_core.utils.paths import resolve_workspaces_dir
+    from shannon_multi.correlation_event_writer import CorrelationEventWriter
+
+    # 联动进度 writer：在 repo 扫描开始前就绪，events.ndjson 路径与下方
+    # SessionManager.create_workspace(name=config.correlation.out_workspace) 同根同目录。
+    # （create_workspace 幂等：目录已存在不报错；session.json 仍由它写。）
+    corr_writer = CorrelationEventWriter(
+        resolve_workspaces_dir() / config.correlation.out_workspace / "events.ndjson")
+    overall_failed = False
 
     # 1. N repo 白盒:复用 or 现扫
     per_repo_deliverables: dict[str, Path] = {}
@@ -104,6 +112,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
         # 与 run_whitebox 的 resolve_workspaces_dir(input.repo_path) 对齐。
         repo_ws_root = resolve_workspaces_dir(p.repo_path)
         if p.reuse:
+            await corr_writer.repo(p.service, "started")
             ws_path = repo_ws_root / p.workspace
             # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知且盘上存在时)。
             # final-review MINOR 5: 复用 workspace 的 path 可能已失配/移动,
@@ -113,12 +122,20 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                 rpt = detect_drift(sess.get("created_at", 0.0), os.path.getmtime(p.repo_path))
                 if rpt.drifted:
                     drift_warnings.append(f"{p.service}: {rpt.note}")
+            await corr_writer.repo(p.service, "completed", detail="reused")
         else:
+            await corr_writer.repo(p.service, "started")
             wb_input = PipelineInput(repo_path=p.repo_path, workspace_name=p.workspace,
                                      config_path=p.scan_config,
                                      pipeline_testing_mode=pipeline_testing)
-            result = await run_whitebox(wb_input, temporal_address)
+            try:
+                result = await run_whitebox(wb_input, temporal_address)
+            except Exception:
+                overall_failed = True
+                await corr_writer.repo(p.service, "failed", detail="scan error")
+                raise
             ws_path = repo_ws_root / result["workspace_name"]
+            await corr_writer.repo(p.service, "completed")
         dlv = deliverables_dir_for_workspace(ws_path)
         per_repo_deliverables[p.service] = dlv
         # 收集该仓所有 exploitation_queue(spec §7 合并, B1)
@@ -195,8 +212,12 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                     "status": "unverified", "boundaries": []}
 
     edge_pairs = [(r.from_, r.to) for r in config.relations]
+    await corr_writer.phase("correlation", "started")
     edge_results = await asyncio.gather(
         *[_run_edge(f, t, runner=edge_runner) for f, t in edge_pairs])
+    # per-edge 进度（_run_edge 已把异常映射为 status=error,spec §8 单边隔离,不致 scan 失败）
+    for er in edge_results:
+        await corr_writer.edge(f"{er['from']}->{er['to']}", er.get("status", "ok"))
     merged = _merge_edge_results(edge_results)
 
     # 4. 组装 topology + boundaries
@@ -217,6 +238,8 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
         _group_by_service(entries)) for vc, entries in per_repo_queue.items()}
     report_md = _render_report(topology, boundaries, merged_queues, drift_warnings)
     write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues, report_md)
+
+    await corr_writer.scan_end("failed" if overall_failed else "completed")
 
     return {"out_workspace": config.correlation.out_workspace,
             "deliverables_path": str(out_dlv),
