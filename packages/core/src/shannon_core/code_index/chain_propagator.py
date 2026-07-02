@@ -446,6 +446,14 @@ def propagate_backward_across_chains(
                         break
                 for sp in anchored:
                     steps_fwd = list(reversed(steps_rev))
+                    # 合并 sink 所在函数的 intra summary step(携带 sanitizer/transformation)。
+                    # 统一覆盖单函数(sink_step=0,跨函数 hop 为空)与多函数场景——
+                    # 之前 local_steps 不被消费导致 sanitizer 管道断链。
+                    sink_intra = intra_results.get(sid)
+                    if sink_intra:
+                        steps_fwd.extend(
+                            s for s in sink_intra.local_steps if s.to_param == sink.id
+                        )
                     flows.append(TaintFlow(
                         flow_id=f"{sp.entry_point_id}->{sink.id}",
                         entry_point_id=sp.entry_point_id,
