@@ -267,6 +267,66 @@ class TestPhpEntryPoints:
         assert len(eps) == 0
 
 
+class TestFrameworkExpansionG4:
+    """G4 (spec-1b): extend entry_points to FastAPI / JAX-RS / Laravel / echo+chi."""
+
+    def test_python_fastapi_app_get_detected(self):
+        """FastAPI @app.get (receiver=app, existing @router.* did not cover)."""
+        block = _block(
+            id="app.py:h:1",
+            file_path="app.py",
+            function_name="h",
+            decorators=["@app.get('/items/{id}')"],
+            language="python",
+        )
+        eps = detect_entry_points([block], "python")
+        routes = [(e.route, e.http_method) for e in eps]
+        assert ("/items/{id}", "GET") in routes, \
+            f"FastAPI @app.get should be detected, got {routes}"
+
+    def test_java_jaxrs_method_annotation_detected(self):
+        """JAX-RS @GET (javax.ws.rs, existing Spring @*Mapping did not cover)."""
+        block = _block(
+            id="A.java:h:1",
+            file_path="A.java",
+            function_name="h",
+            decorators=["@GET"],
+            language="java",
+        )
+        eps = detect_entry_points([block], "java")
+        assert any(e.http_method == "GET" and e.entry_type == "http_route" for e in eps), \
+            f"JAX-RS @GET should be detected, got {[(e.http_method, e.entry_type) for e in eps]}"
+
+    def test_php_laravel_route_registration_detected(self):
+        """Laravel Route::get (top-level call, in source_code, not decorator)."""
+        block = _block(
+            id="routes/api.php:reg:1",
+            file_path="routes/api.php",
+            function_name="reg",
+            source_code="Route::get('/users/{id}', [UserController::class,'show']);",
+            language="php",
+        )
+        eps = detect_entry_points([block], "php")
+        routes = [(e.route, e.http_method) for e in eps]
+        assert ("/users/{id}", "GET") in routes, \
+            f"Laravel Route::get should be detected, got {routes}"
+
+    def test_go_echo_route_registration_detected(self):
+        """echo/gin e.GET / chi r.Get route-registration style."""
+        block = _block(
+            id="main.go:setup:1",
+            file_path="main.go",
+            function_name="setup",
+            parameters=["e echo.Context"],
+            source_code='e.GET("/orders/{id}", getOrder)',
+            language="go",
+        )
+        eps = detect_entry_points([block], "go")
+        routes = [(e.route, e.http_method) for e in eps]
+        assert ("/orders/{id}", "GET") in routes, \
+            f"echo e.GET should be detected, got {routes}"
+
+
 class TestUnknownLanguage:
     def test_unknown_language_returns_empty(self):
         block = _block(language="rust")

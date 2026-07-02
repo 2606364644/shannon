@@ -31,7 +31,8 @@ def detect_entry_points(
 # Python
 _PYTHON_RULES: list[tuple[str, re.Pattern, str | None, float]] = [
     ("http_route", re.compile(r"@.*\.route\(\s*['\"](.+?)['\"]"), None, 0.95),
-    ("http_route", re.compile(r"@router\.(get|post|put|delete|patch)\(\s*['\"](.+?)['\"]"), None, 0.95),
+    # G4: receiver 扩 app/api_router（FastAPI），加 api_route；group(1)=receiver/group(2)=method/group(3)=route
+    ("http_route", re.compile(r"@(app|api_router|router)\.(get|post|put|delete|patch|api_route)\(\s*['\"](.+?)['\"]"), None, 0.95),
     ("http_route", re.compile(r"@(api_view|require_http_methods)"), None, 0.90),
     ("message_consumer", re.compile(r"@(celery\.task|app\.task|shared_task)"), None, 0.90),
 ]
@@ -69,9 +70,11 @@ def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
                         method_match = re.search(r"""methods\s*=\s*\[['"](\w+)['"]\]""", decorator)
                         http_method = method_match.group(1) if method_match else "GET"
 
-                    elif re.match(r"@router\.(get|post|put|delete|patch)", decorator):
-                        http_method = m.group(1).upper()
-                        route = m.group(2) if m.lastindex >= 2 else None
+                    elif re.match(r"@(app|api_router|router)\.(get|post|put|delete|patch|api_route)", decorator):
+                        # G4: receiver=group(1), method=group(2), route=group(3)
+                        method_tok = m.group(2)
+                        http_method = None if method_tok == "api_route" else method_tok.upper()
+                        route = m.group(3) if m.lastindex and m.lastindex >= 3 else None
 
                     entry_points.append(EntryPoint(
                         func_block_id=block.id,
@@ -100,6 +103,15 @@ def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
             ))
 
     return entry_points
+
+
+# G4: echo/gin e.GET / chi r.Get 路由注册式（在 source_code）
+_GO_ROUTE_PATTERN = re.compile(r"\b\w+\.(GET|POST|PUT|DELETE|PATCH|Any|Get|Post|Put|Delete|Patch)\(\s*['\"]([^'\"]+)['\"]")
+_GO_METHOD_NORM: dict[str, str] = {
+    "GET": "GET", "POST": "POST", "PUT": "PUT", "DELETE": "DELETE",
+    "PATCH": "PATCH", "Any": "*",
+    "Get": "GET", "Post": "POST", "Put": "PUT", "Delete": "DELETE", "Patch": "PATCH",
+}
 
 
 # Go
@@ -136,6 +148,24 @@ def _detect_go(blocks: list[FuncBlock]) -> list[EntryPoint]:
                 confidence=0.30,
                 evidence="func main()",
                 needs_llm_review=True,
+            ))
+
+    # G4: echo/gin/chi 路由注册式（在 source_code）
+    for block in blocks:
+        for m in _GO_ROUTE_PATTERN.finditer(block.source_code):
+            method_tok = m.group(1)
+            route = m.group(2)
+            http_method = _GO_METHOD_NORM.get(method_tok)
+            if http_method is None:
+                continue
+            entry_points.append(EntryPoint(
+                func_block_id=block.id,
+                entry_type="http_route",
+                route=route,
+                http_method=http_method,
+                confidence=0.90,
+                evidence=f"Go route registration: {m.group(0).strip()}",
+                needs_llm_review=False,
             ))
 
     return entry_points
@@ -335,6 +365,8 @@ def _detect_typescript(
 # Java
 _JAVA_ANNOTATION_RULES: list[tuple[str, re.Pattern, str, float]] = [
     ("http_route", re.compile(r"@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)"), "http_route", 0.95),
+    # G4: JAX-RS method 注解（javax.ws.rs），无 @Path 类级组合故 confidence 略低 + needs_review
+    ("http_route", re.compile(r"@(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b"), "http_route", 0.85),
     ("message_consumer", re.compile(r"@RabbitListener"), "message_consumer", 0.90),
 ]
 
@@ -355,7 +387,12 @@ def _detect_java(blocks: list[FuncBlock]) -> list[EntryPoint]:
                             "PutMapping": "PUT", "DeleteMapping": "DELETE",
                             "PatchMapping": "PATCH", "RequestMapping": None,
                         }
-                        http_method = method_map.get(ann)
+                        if ann in method_map:
+                            http_method = method_map[ann]
+                        elif ann.upper() in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+                            http_method = ann.upper()  # JAX-RS (G4)
+                        else:
+                            http_method = None
 
                     route = None
                     route_match = re.search(r'[\'"](/[^\'"]+)[\'"]', decorator)
@@ -380,6 +417,13 @@ def _detect_java(blocks: list[FuncBlock]) -> list[EntryPoint]:
 _PHP_DECORATOR_RULES: list[tuple[str, re.Pattern, float]] = [
     ("http_route", re.compile(r"#\[Route\("), 0.95),
 ]
+
+# G4: Laravel / $router 路由注册（顶层调用，在 source_code 里）
+_LARAVEL_ROUTE_PATTERN = re.compile(r"(?:Route::|\$router->)(get|post|put|delete|patch|any|match)\(\s*['\"]([^'\"]+)['\"]")
+_LARAVEL_METHOD_MAP: dict[str, str | None] = {
+    "get": "GET", "post": "POST", "put": "PUT", "delete": "DELETE",
+    "patch": "PATCH", "any": "*", "match": "*",
+}
 
 
 def _detect_php(blocks: list[FuncBlock]) -> list[EntryPoint]:
@@ -410,5 +454,21 @@ def _detect_php(blocks: list[FuncBlock]) -> list[EntryPoint]:
                         needs_llm_review=confidence < LLM_REVIEW_THRESHOLD,
                     ))
                     break
+
+    # G4: Laravel Route:: / $router-> 注册式（在 source_code，非 decorator）
+    for block in blocks:
+        for m in _LARAVEL_ROUTE_PATTERN.finditer(block.source_code):
+            method_tok = m.group(1)
+            route = m.group(2)
+            http_method = _LARAVEL_METHOD_MAP.get(method_tok)
+            entry_points.append(EntryPoint(
+                func_block_id=block.id,
+                entry_type="http_route",
+                route=route,
+                http_method=http_method,
+                confidence=0.90,
+                evidence=f"Laravel route: {m.group(0).strip()}",
+                needs_llm_review=False,
+            ))
 
     return entry_points
