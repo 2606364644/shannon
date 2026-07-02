@@ -212,3 +212,85 @@ def to_burp_raw(spec: HttpRequestSpec, host: str) -> str:
         lines.append(spec.body)
     lines.append("")
     return "\n".join(lines)
+
+
+# Task 4: 模板表（5 类漏洞骨架 + authz 成对 + open_redirect 分流）
+
+_OPEN_REDIRECT_HINTS = ("redirect", "open redirect", "jump", "next", "location header")
+
+
+def _is_open_redirect(vuln: Any) -> bool:
+    technique = (getattr(vuln, "suggested_exploit_technique", None) or "").lower()
+    if "redirect" in technique:
+        return True
+    witness = (getattr(vuln, "witness_payload", None) or "").lower()
+    return witness.startswith(("http://", "https://")) and "redirect" in technique
+
+
+def _base_spec(vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand) -> HttpRequestSpec:
+    method, path = derive_method_path(vuln)
+    info = find_endpoint_info(endpoints, path)
+    if not method and info and info.get("method"):
+        method = info["method"].upper()
+    auth_st = derive_auth_state(info)
+    return HttpRequestSpec(
+        method=method or "GET",
+        path=path or "/",
+        headers=auth_header(auth_st, info),
+        auth_state=auth_st,
+        confidence_band=band,
+        source_id=getattr(vuln, "ID", ""),
+        vuln_class=vuln_class,
+    )
+
+
+def build_template_spec(
+    vuln: Any, vuln_class: str, host: str, endpoints: dict, band: ConfidenceBand
+) -> HttpRequestSpec | list[HttpRequestSpec] | None:
+    """返回 None = 模板无法处理（需 LLM）；list = 成对/多步。"""
+    if vuln_class == "authz":
+        return _build_authz_pair(vuln, endpoints, band)
+    if vuln_class == "auth":
+        return None  # 默认走 LLM（§5.3）
+
+    spec = _base_spec(vuln, vuln_class, endpoints, band)
+    witness = getattr(vuln, "witness_payload", None) or ""
+    if not witness:
+        return None  # 无 witness_payload，模板拼不出，交 LLM
+
+    if vuln_class == "injection":
+        param = extract_param_name(getattr(vuln, "source", None)) or "id"
+        spec.query = {param: witness}
+        return spec
+    if vuln_class == "xss":
+        param = extract_param_name(getattr(vuln, "source", None)) or "q"
+        spec.query = {param: witness}
+        return spec
+    if vuln_class == "ssrf":
+        if _is_open_redirect(vuln):
+            param = extract_param_name(getattr(vuln, "source", None)) or "next"
+            spec.query = {param: witness}
+            return spec
+        param = getattr(vuln, "vulnerable_parameter", None) or "url"
+        spec.method = spec.method if spec.method != "GET" else "POST"
+        spec.body = f"{param}={witness}"
+        return spec
+    return None
+
+
+def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[HttpRequestSpec]:
+    """§4.4：A 访己（合法）/ A 访 B（越权）成对。"""
+    method, path = derive_method_path(vuln)
+    info = find_endpoint_info(endpoints, path)
+    auth_st = derive_auth_state(info)
+    if auth_st != AuthState.REQUIRED:
+        auth_st = AuthState.REQUIRED  # authz 漏洞默认需登录
+    headers = {"Authorization": "Bearer <AUTH_TOKEN_ATTACKER>"}
+    common = dict(
+        method=method or "GET", path=path or "/", headers=dict(headers),
+        auth_state=auth_st, confidence_band=band,
+        source_id=getattr(vuln, "ID", ""), vuln_class="authz",
+    )
+    legit = HttpRequestSpec(**common, note="合法：访问自己资源（<OWNER_RESOURCE_ID>）")
+    cross = HttpRequestSpec(**common, note="越权：访问受害者资源（<VICTIM_RESOURCE_ID>）")
+    return [legit, cross]

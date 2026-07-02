@@ -141,3 +141,58 @@ def test_to_burp_raw_post_body():
     assert "POST /api/fetch HTTP/1.1" in raw
     assert "Content-Length:" in raw
     assert "url=http://127.0.0.1:8080" in raw
+
+
+# Task 4: 模板表（5 类漏洞骨架 + authz 成对 + open_redirect 分流）
+from types import SimpleNamespace
+from shannon_core.services.poc_generator import (
+    build_template_spec, ConfidenceBand, AuthState,
+)
+
+
+def _inj(**kw):
+    base = dict(ID="INJ-1", vulnerability_type="SQLi", externally_exploitable=True,
+                source="GET /api/users?id=1", witness_payload="' OR '1'='1",
+                verdict="vulnerable", confidence="needs_review")
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_template_injection():
+    spec = build_template_spec(_inj(), "injection", "https://t.example.com", {}, ConfidenceBand.CONFIRMED)
+    assert spec.method == "GET"
+    assert spec.path == "/api/users"
+    assert spec.query == {"id": "' OR '1'='1"}
+
+
+def test_template_ssrf_open_redirect_subform():
+    v = SimpleNamespace(ID="SSRF-1", externally_exploitable=True,
+                        source="GET /jump?next=https://evil.com",
+                        witness_payload="https://evil.com",
+                        suggested_exploit_technique="open redirect via next param")
+    spec = build_template_spec(v, "ssrf", "https://t.example.com", {}, ConfidenceBand.HIGH)
+    assert spec.method == "GET"
+    assert spec.query == {"next": "https://evil.com"}
+
+
+def test_template_ssrf_body_subform():
+    v = SimpleNamespace(ID="SSRF-2", externally_exploitable=True,
+                        source="POST /api/fetch", witness_payload="http://127.0.0.1:8080",
+                        vulnerable_parameter="url", suggested_exploit_technique="ssrf")
+    spec = build_template_spec(v, "ssrf", "https://t.example.com", {}, ConfidenceBand.HIGH)
+    assert spec.method == "POST"
+    assert spec.body == "url=http://127.0.0.1:8080"
+
+
+def test_template_authz_returns_pair():
+    v = SimpleNamespace(ID="AUTHZ-1", externally_exploitable=True,
+                        endpoint="GET /api/score/:staffId", minimal_witness="swap staffId")
+    result = build_template_spec(v, "authz", "https://t.example.com", {}, ConfidenceBand.CONFIRMED)
+    assert isinstance(result, list) and len(result) == 2  # 成对
+    assert all(s.path == "/api/score/:staffId" for s in result)
+
+
+def test_template_auth_returns_none_needs_llm():
+    v = SimpleNamespace(ID="AUTH-1", externally_exploitable=True,
+                        exploitation_hypothesis="missing jwt verify")
+    assert build_template_spec(v, "auth", "https://t.example.com", {}, ConfidenceBand.HIGH) is None
