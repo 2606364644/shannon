@@ -162,7 +162,10 @@ def _run_checkers(index: CodeIndex, handlers: list[FuncBlock]) -> list[AuthCandi
     candidates: list[AuthCandidate] = []
     for handler in handlers:
         endpoint = ep_to_route.get(handler.id)
-        for checker in (_check_session_regenerate_missing,):  # T3/T4 追加
+        for checker in (_check_session_regenerate_missing,
+                        _check_logout_destroy_missing,
+                        _check_password_hash_missing,
+                        _check_jwt_verify_missing):  # T3 追加 3 检查器
             c = checker(handler, index, endpoint)
             if c is not None:
                 candidates.append(c)
@@ -239,6 +242,128 @@ def _check_session_regenerate_missing(
         verdict_signal=VerdictSignal.MISSING_POSITIVE,
         evidence_callee="session.regenerate",
         expected="登录成功后调用 session.regenerate 轮换会话 ID（防 session 固定）",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
+
+
+# —— T3 检查器原语规则表（spike §3.1 / §2.5）—— per-language
+_LOGOUT_DESTROY_PRIMITIVES = {
+    "typescript": re.compile(r"\b(session\.destroy|session\.remove|req\.logout)\b", re.IGNORECASE),
+    "javascript": re.compile(r"\b(session\.destroy|session\.remove|req\.logout)\b", re.IGNORECASE),
+}
+_PASSWORD_HASH_PRIMITIVES = {
+    "typescript": re.compile(r"\b(bcrypt|argon2|pbkdf2|scrypt)\b", re.IGNORECASE),
+    "javascript": re.compile(r"\b(bcrypt|argon2|pbkdf2|scrypt)\b", re.IGNORECASE),
+    "go": re.compile(r"\b(bcrypt|argon2id|crypto\.scrypt)\b", re.IGNORECASE),
+    "python": re.compile(r"\b(bcrypt|argon2|pbkdf2|scrypt|werkzeug|passlib)\b", re.IGNORECASE),
+}
+_JWT_VERIFY_PRIMITIVES = {
+    "typescript": re.compile(r"\b(jwt\.verify|jsonwebtoken\.verify)\b", re.IGNORECASE),
+    "javascript": re.compile(r"\b(jwt\.verify|jsonwebtoken\.verify)\b", re.IGNORECASE),
+    "go": re.compile(r"\b(jwt\.Parse|jwt\.Verify|ParseWithClaims)\b", re.IGNORECASE),
+    "python": re.compile(r"\b(jwt\.decode|jwt\.verify)\b", re.IGNORECASE),
+}
+_PASSWORD_WRITE_RE = re.compile(r"(password|passwd|pwd)", re.IGNORECASE)
+_IDTOKEN_USE_RE = re.compile(r"\b(id_token|idToken|openid|oidc)\b", re.IGNORECASE)
+
+
+def _check_logout_destroy_missing(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 2：有 login 但无 logout/destroy（全库）→ 候选。Node.js only 首批。
+
+    登录成功型 handler 触发；全库（所有 blocks）无 session.destroy / req.logout → 候选。
+    """
+    if handler.language not in ("typescript", "javascript"):
+        return None
+    if not _is_login_success_handler(handler, endpoint):
+        return None
+    pattern = _LOGOUT_DESTROY_PRIMITIVES[handler.language]
+    # 全库无 logout/destroy 原语 → 候选
+    has_anywhere = any(pattern.search(b.source_code) for b in index.blocks)
+    if has_anywhere:
+        return None
+    return AuthCandidate(
+        id=f"{handler.id}:logout_destroy_missing:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.LOGOUT_DESTROY_MISSING,
+        verdict_signal=VerdictSignal.MISSING_POSITIVE,
+        evidence_callee="session.destroy / req.logout",
+        expected="提供 logout 端点并在服务端销毁 session（撤销机制）",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
+
+
+def _check_password_hash_missing(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 3：signup/reset handler 写密码但无 hash 原语 → 明文存储候选。
+
+    仅在 signup/register/reset/password 类端点；handler 源码命中 password 写入且
+    handler 内 + 可达路径均无 hash 原语 → 候选。
+    """
+    lang = handler.language
+    pattern = _PASSWORD_HASH_PRIMITIVES.get(lang)
+    if pattern is None:
+        return None
+    if not (endpoint and re.search(r"(signup|register|reset|password)", endpoint, re.IGNORECASE)):
+        return None
+    if not _PASSWORD_WRITE_RE.search(handler.source_code):
+        return None  # 不碰密码，不报
+    if _handler_has_primitive(handler, pattern):
+        return None
+    if _path_has_primitive(handler.id, index, pattern):
+        return None
+    return AuthCandidate(
+        id=f"{handler.id}:password_hash_missing:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.PASSWORD_HASH_MISSING,
+        verdict_signal=VerdictSignal.MISSING_POSITIVE,
+        evidence_callee="bcrypt/argon2/scrypt",
+        expected="密码写入存储前经密码学 hash（bcrypt/argon2/scrypt）",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
+
+
+def _check_jwt_verify_missing(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 4：OIDC handler 用 id_token 但无 jwt.verify → 未验签候选。
+
+    仅在 oauth/oidc/callback/token 类端点；handler 源码命中 id_token/openid 用法且
+    handler 内 + 可达路径均无 jwt.verify/ParseWithClaims → 候选。
+    """
+    lang = handler.language
+    pattern = _JWT_VERIFY_PRIMITIVES.get(lang)
+    if pattern is None:
+        return None
+    if not (endpoint and re.search(r"(oauth|oidc|callback|token)", endpoint, re.IGNORECASE)):
+        return None
+    if not _IDTOKEN_USE_RE.search(handler.source_code):
+        return None  # 不碰 id_token，不报
+    if _handler_has_primitive(handler, pattern):
+        return None
+    if _path_has_primitive(handler.id, index, pattern):
+        return None
+    return AuthCandidate(
+        id=f"{handler.id}:jwt_verify_missing:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.JWT_VERIFY_MISSING,
+        verdict_signal=VerdictSignal.MISSING_POSITIVE,
+        evidence_callee="jwt.verify/ParseWithClaims",
+        expected="OIDC id_token 需本地验签 + 校验 iss/aud/exp/sub claims",
         file_path=handler.file_path,
         line=handler.start_line,
         code_snippet=handler.source_code[:200],

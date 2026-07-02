@@ -94,3 +94,39 @@ def test_session_regenerate_present_no_finding():
     cands = _run_checkers(index, _identify_auth_handlers(index))
     assert not any(c.check_type == AuthCheckType.SESSION_REGENERATE_MISSING for c in cands), \
         "有 regenerate 调用不应产缺失候选"
+
+
+# —— T3: logout_destroy / password_hash / jwt_verify 检查器 ——
+
+
+def test_logout_destroy_missing_nodejs():
+    """login 端点存在但无 logout 端点 / 无 session.destroy → 候选（moa-auth #9）。"""
+    handler = _blk("app.ts:login", name="login",
+                   source="function login(ctx){ ctx.session.user = u; }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/login",
+                    http_method="POST", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    assert any(c.check_type == AuthCheckType.LOGOUT_DESTROY_MISSING for c in cands)
+
+
+def test_password_hash_missing_nodejs():
+    """signup handler 写密码但无 bcrypt/argon2 → 明文存储候选。"""
+    handler = _blk("app.ts:signup", name="signup",
+                   source="function signup(ctx){ const pwd = ctx.request.body.password; db.save({pwd}); }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/signup",
+                    http_method="POST", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    assert any(c.check_type == AuthCheckType.PASSWORD_HASH_MISSING for c in cands)
+
+
+def test_jwt_verify_missing_nodejs():
+    """OIDC callback handler 用 id_token 但无 jwt.verify → 未验签候选（futu #13 类）。"""
+    handler = _blk("app.ts:oidc", name="oidcCallback",
+                   source="function oidcCallback(ctx){ const claims = decode(id_token); ctx.session.sub = claims.sub; }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/oauth/callback",
+                    http_method="GET", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    assert any(c.check_type == AuthCheckType.JWT_VERIFY_MISSING for c in cands)
