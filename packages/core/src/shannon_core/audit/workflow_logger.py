@@ -80,6 +80,13 @@ class WorkflowLogger:
             ))
         if self._use_rich and self._dashboard is not None:
             renderers.append(self._dashboard)
+        # 【新增】Web 事件落盘 renderer（env 启用，未设=零影响）。
+        # 挂载独立的 StructuredEventRenderer，把原子 DisplayEvent 序列化成 ndjson 行，
+        # 供 shannon-web 后端 SSE 通道 tail/重放。env 未设时整段跳过，行为零变化。
+        web_event_file = os.environ.get("SHANNON_WEB_EVENT_FILE")
+        if web_event_file:
+            from shannon_core.display.structured_event_renderer import StructuredEventRenderer
+            renderers.append(StructuredEventRenderer(web_event_file))
         self._dispatcher = DisplayDispatcher(renderers)
 
         ws = workflow_id or self._meta.id
@@ -241,6 +248,19 @@ class WorkflowLogger:
             completed_agents=resume_info.completed_agents))
 
     async def close(self) -> None:
+        # 【新增】遍历 renderers 调 close：Web renderer（StructuredEventRenderer）需
+        # flush+关 ndjson 文件句柄；其它 renderer（FileLogRenderer/RichConsoleRenderer/
+        # LiveDashboardRenderer）目前无 close 方法 → getattr 取不到就跳过，行为不变。
+        # 必须在关 stream 之前做，避免 renderer 持有的引用在 stream 关闭后失效。
+        if self._dispatcher is not None:
+            for r in getattr(self._dispatcher, "_renderers", []):
+                close_fn = getattr(r, "close", None)
+                if close_fn is not None:
+                    try:
+                        await close_fn()
+                    except Exception:
+                        # 任何一个 renderer close 失败都不能阻断其它 renderer / stream 关闭。
+                        logger.warning("renderer close failed: %s", type(r).__name__, exc_info=True)
         if self._stream is not None:
             await self._stream.close()
             self._stream = None
