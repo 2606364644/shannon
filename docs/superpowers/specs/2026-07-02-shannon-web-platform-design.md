@@ -421,6 +421,86 @@ GITLAB_USER / GITLAB_TOKEN          # git clone 凭证
 
 ---
 
-## 范围与拆分
+## ndjson 事件 schema（跨子项目硬契约）
 
-本 spec 聚焦"Web 平台 v1"：开启扫描（三类型）+ 结果展示（HTML/产物/日志）+ 实时 dashboard 复刻。后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF、**黑盒 `--correlated-workspace` 衔接联动产出做后续验证**（`blackbox/cli/main.py:51` 已有该 flag，v1 不暴露到表单）、**联动扫描指定各 repo 的 branch/commit**（需扩 `MultiRepoConfig` schema + orchestrator checkout，v1 单仓库 git URL 模式已支持 branch/commit）。规模适中，单个实现计划可覆盖，无需进一步拆分。
+`StructuredEventRenderer` 写的每行 JSON 是**前后端 + core 三方契约**，必须先钉死。两条规则：
+
+1. **每行一个原子 `DisplayEvent`**（renderer 契约只能拿 event，见前述）。每行通用字段 + 按 event 类型附加字段。
+2. **前端 reducer 复刻 `DashboardState.apply(event)` 逻辑**（`packages/core/src/shannon_core/display/dashboard_state.py:70-132`）把事件流累积成快照——状态条字段（current_phase/completed_units/total_units/total_cost/running agents）全从 reducer 算出，ndjson **不直接推快照**。
+
+### 通用字段（每行必有）
+
+```json
+{"ts": "2026-07-02T09:44:01.123Z", "category": "PHASE|STEP|AGENT|TOOL|LLM|ERROR|INFO|WARN|RESUME|SUMMARY|HEADER|GITNEXUS", "type": "<EventType>", ...event 字段}
+```
+
+- `ts`：ISO8601 UTC 毫秒（取自 event.timestamp）
+- `category`：事件族（前端按此上色，对应 `RichConsoleRenderer.STYLE_MAP`）
+- `type`：具体事件类名（PhaseEvent/StepEvent/AgentEvent/ToolCallEvent/LlmTurnEvent/InfoEvent/ErrorEvent/SummaryEvent/ResumeEvent/WorkflowHeader/GitnexusLlmEvent）
+
+### 各 type 的附加字段（对应 `events.py` dataclass）
+
+| type | 附加字段 |
+|---|---|
+| `WorkflowHeader` | `workflow_id`, `target_url`, `repo_path`, `mode`, `web_ui_url`, `logs_cmd`, `workspace` |
+| `PhaseEvent` | `phase`, `event`("start"\|"complete"), `steps`[], `step_intents`[] |
+| `StepEvent` | `name`, `phase`, `event`("start"\|"complete"), `duration_ms`, `error`, `intent` |
+| `AgentEvent` | `agent_name`, `event`("start"\|"end"), `attempt`, `duration_ms`, `cost_usd`, `success`, `error` |
+| `ToolCallEvent` | `agent_name`, `tool_name`, `parameters`(any) |
+| `LlmTurnEvent` | `agent_name`, `turn`, `content` |
+| `InfoEvent` | `message`, `level`("info"\|"warning") |
+| `ErrorEvent` | `error_type`, `message`, `context`, `classified`, `display_retryable`, `attempt`, `max_attempts`, `detail_path` |
+| `SummaryEvent` | `status`, `total_duration_ms`, `total_cost_usd`, `agents`[{name,duration_ms,cost_usd,success}], `error` |
+| `ResumeEvent` | `previous_workflow_id`, `new_workflow_id`, `checkpoint_hash`, `completed_agents`[] |
+| `GitnexusLlmEvent` | （见 events.py，按其字段） |
+
+### 收尾标记行（非 DisplayEvent，由 renderer/ScanManager 写）
+
+```json
+{"ts": "...", "category": "CONTROL", "type": "scan_end", "status": "completed|failed|killed|crashed", "returncode": 0, "stderr_tail": "..."}
+```
+- `completed|failed`：renderer 收 `SummaryEvent` 写（status 取 SummaryEvent.status）。
+- `killed|crashed`：ScanManager 补写（子进程被 SIGINT/崩溃，无 SummaryEvent）。
+- 前端收到 `scan_end` 关闭 SSE 流。
+
+### 联动专属事件（orchestrator 写到 correlation workspace 的 ndjson）
+
+```json
+{"ts": "...", "category": "CONTROL", "type": "correlation_progress", "node": "repo|edge", "name": "<repo_service|from->to>", "status": "started|completed|failed", "detail": "..."}
+```
+
+### 前端 reducer 契约
+
+前端用 TS 实现一个 `dashboardReducer(state, event) -> state`，逻辑 1:1 复刻 `DashboardState.apply`（含 `AgentRow` 累积、`_set_unit`、`total_cost`/`completed_units` 派生属性）。**这是前端独立单测的核心**——给定事件序列，断言快照字段，与 core 的 `DashboardState` 单测对齐（同输入同输出）。
+
+---
+
+## 范围与拆分（两个子项目）
+
+本总体 spec 定架构、选型、契约（ndjson schema）、边界，作为**上位设计**。实现拆成 **2 个子项目**，各自走完整的 spec→plan→实现→review 循环：
+
+### 子项目 1：后端 + core renderer + 契约（先做）
+
+- `StructuredEventRenderer`（core 唯一改动）+ 单测
+- `packages/web` 后端全部：6 组件（WorkspacesIndexer/ScanManager/EventTailer/DeliverablesReader/MultiRepoConfigStore/GitFetcher）+ FastAPI app + 全部 API + SSE
+- 联动小增强：orchestrator 写 correlation ndjson（asyncio.Lock）
+- docker-compose 加 web 服务 + Dockerfile
+- 后端单测（按测试策略表的前 5 层）
+- **可独立交付/冒烟**：用 curl + SSE 客户端验证全流程，不依赖前端
+
+### 子项目 2：前端 SPA（后做，依赖子项目 1 契约）
+
+- React + Vite + TS 工程脚手架
+- 2 页面（开启扫描页 / 项目列表页）+ 详情子页 5 tab
+- 6 组件 + SSE hook + `dashboardReducer`（复刻 `DashboardState.apply`）
+- 前端单测（vitest + testing-library，含 reducer 与 core 对齐测试）
+- Vite proxy 接子项目 1 后端
+
+### 拆分理由
+
+- 三子系统（core renderer / 后端 / 前端）有清晰契约边界（ndjson schema 是硬契约）。
+- 子项目 1 可独立冒烟，不阻塞等前端；子项目 2 对着已定稿的契约实现，不卡后端。
+- 每个 plan 规模适中（~12-18 task），review 轻，TDD 节奏不被打乱。
+- **契约稳定性**：ndjson schema 在本总体 spec 已钉死，两子项目不得擅自改；如需改，回本总体 spec 改并同步两子项目。
+
+后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF、黑盒 `--correlated-workspace` 衔接联动产出做后续验证、联动扫描指定各 repo 的 branch/commit。
