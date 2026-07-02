@@ -67,9 +67,9 @@ shannon-py 当前是纯 CLI 工具：`shannon-whitebox start` / `shannon-blackbo
 这是本设计对扫描器的**唯一**侵入点，且是架构内的自然延伸：
 
 - **位置**：`packages/core/src/shannon_core/display/structured_event_renderer.py`
-- **契约**：实现 `async render(event: DisplayEvent)`，把事件序列化成一行 JSON 追加写到 env `SHANNON_WEB_EVENT_FILE` 指定的 `events.ndjson`，每事件 flush。
+- **契约**：实现 `async render(event: DisplayEvent)`，把事件序列化成一行 JSON 追加写到 env `SHANNON_WEB_EVENT_FILE` 指定的 `events.ndjson`，每事件 flush。**只写原子 `DisplayEvent`（PhaseEvent/StepEvent/AgentEvent/ToolCallEvent/LlmTurnEvent/InfoEvent/ErrorEvent/SummaryEvent...，见 `events.py`），不写聚合快照**——renderer 契约只能拿到 `event`，拿不到 `LiveDashboardRenderer` 内部的 `DashboardState`。前端维护一个 reducer 把事件流累积成快照（复刻 `DashboardState.apply(event)` 逻辑），状态条 + 滚动日志区共用同一条事件流。
 - **启用**：env `SHANNON_WEB_EVENT_FILE=<path>`；worker 起 dispatcher 时若该 env 存在则 `dispatcher.add(StructuredEventRenderer(path))`。未设 env = 行为完全不变（零影响现有 CLI）。
-- **收尾**：扫描结束写一行 `{"type":"scan_end","status":"completed|failed",...}` 收尾标记。
+- **收尾（双路兜底）**：① renderer 收到 `SummaryEvent` → 写一行 `{"type":"scan_end","status":"completed|failed",...}`（status 取 SummaryEvent.status）；② ScanManager 监子进程退出，若 ndjson 仍无 `scan_end`（子进程被 SIGINT 杀 / 崩溃 / OOM，`SummaryEvent` 没发），**由 ScanManager 补写** `{"type":"scan_end","status":"killed|crashed","returncode":N,"stderr_tail":"..."}`。双路保证前端总能收到流关闭信号。
 - **架构依据**：`DisplayDispatcher`（`packages/core/src/shannon_core/display/dispatcher.py`）本就是多 renderer 事件总线，契约只有一个 `async render(event)`，且支持 `add(renderer)` 运行时挂载。项目已有写 `workflow.log` 的 `FileRenderer`，本 renderer 是同类活。
 - **意义**：让扫描器的进度可观测性脱离终端——任何消费者（Web/CI/别的工具）都能 tail `events.ndjson`，不是 Web 专用。
 - **业务扫描逻辑零改**：只是 dispatcher 多挂一个 renderer。
@@ -90,7 +90,7 @@ ScanManager 一个模型管三种扫描，**无不对称**：
 | 类型 | CLI | 输入 | 复用逻辑 |
 |---|---|---|---|
 | 白盒 | `shannon-whitebox start -r … --url … -w …` | repo（本地路径 / git URL）+ url + ws 名 | — |
-| 黑盒 | `shannon-blackbox start --url … --repo … -w …` | url + repo + ws 名 | 表单复选框「复用最新白盒结果」勾选则加 `--latest`（自动取同 workspace 最新白盒）；不勾则独立跑 |
+| 黑盒 | `shannon-blackbox start --url … --repo … -w …` | url + repo + ws 名 | 表单复选框「复用最新白盒结果」勾选则加 `--latest`。**`--latest` 真实存在**（`packages/blackbox/src/shannon_blackbox/cli/main.py:36`），语义=复用**按 url 匹配**的最近白盒 workspace deliverables；注意 CLI 内部还有"软默认 --latest"逻辑（无 flag 也尝试复用），且 `--latest` 与 `-w` 冲突时 `-w` 优先（`cli/main.py:62-63`）。Web 表单不勾选时为避免软默认复用意外，传 `--repo` 显式 standalone（或确认 worker 在有 repo 时走 standalone 路径） |
 | 联动 | `shannon-multi start -c …` | multi-repo.yaml（上传 / 选 / 手写） | **编排器自带**：声明了 workspace 的 repo 复用、没声明的现扫（`packages/multi/src/shannon_multi/orchestrator.py:16-31, 98-122`） |
 
 执行伪代码：
@@ -120,8 +120,9 @@ ScanManager.execute(scan_type, params):
 - 联动有一个 **correlation workspace**（`out_workspace`，`orchestrator.py:146`），是联动的"主"workspace。
 - 子白盒扫描各写自己 workspace 的 `events.ndjson`。
 - 联动的实时视图 = **tail correlation workspace 的 ndjson**（编排器层进度：N 个 repo 扫了几个、进入关联阶段、各 edge 状态），可展开下钻看子 workspace 的 ndjson。
-- **小增强**：orchestrator 在关键节点（每个 repo 扫描开始/结束、关联阶段开始、每个 edge 完成）写事件到 correlation workspace 的 `events.ndjson`。这是 orchestrator 加几行写 ndjson 的小改动，不是执行方式问题。
-- **诚实局限**：关联阶段的 per-edge agent 走 `AgentExecutor`（`orchestrator.py:181`），不一定经 `AuditSession` 的 dispatcher，所以 edge 内部的细粒度事件可能进不了 ndjson。但编排器层（repo 级 + edge 级状态）的进度能覆盖——对"看联动整体进度"够用。此局限在实现时写明，不藏。
+- **小增强**：orchestrator 在关键节点（每个 repo 扫描开始/结束、关联阶段开始、每个 edge 完成）写事件到 correlation workspace 的 `events.ndjson`。**并发安全**：orchestrator 用一个独立 `asyncio.Lock` 保护 ndjson append 写（多 repo 顺序跑 + edge 并发跑，append 需串行化；不复用 dispatcher，因 orchestrator 无 dispatcher 接入点）。写简单 JSON 行：`{"type":"correlation_progress","node":"repo|edge","name":"...","status":"started|completed|failed",...}`。
+- **诚实局限**：关联阶段的 per-edge agent 走 `AgentExecutor`（`orchestrator.py:181`），不经 `AuditSession` 的 dispatcher，所以 edge 内部的细粒度事件（agent turn/tool call）进不了 ndjson，只有 orchestrator 主动写的 edge 级状态。但编排器层（repo 级 + edge 级状态）的进度能覆盖——对"看联动整体进度"够用。此局限在实现时写明，不藏。
+- **列表页呈现**：列表页只显示 correlation workspace 为主行（状态=联动整体，图标 🔗 区分）；子白盒 workspace **不在列表单独显示**，只在 correlation 详情页"下钻"里列出。
 
 ### 开启扫描页表单（按类型动态切换字段）
 
@@ -131,8 +132,12 @@ ScanManager.execute(scan_type, params):
 [白盒/黑盒字段区]
   代码来源: ○ 本地路径 [____]  ○ git URL [____]   (git URL 后端注入 GitLab 凭证)
   目标 URL: [____]
-  workspace 名: [____]  (可空,自动生成)
+  workspace 名: [____]  (可空,自动生成 {repo_name}_{timestamp} 保唯一)
   [仅黑盒] ☑ 复用最新白盒结果 (加 --latest)
+
+  提交前校验:若填写的 workspace 名已存在 → 弹确认
+    "该 workspace 已存在,CLI 将断点续扫(恢复已有进度),确认继续?"
+  (CLI -w 语义=存在则恢复,故同名不会新扫而是续扫;自动生成名规避此情况)
 
 [联动字段区]
   multi-repo.yaml: [上传文件] 或 [从已有选] 或 [手写编辑器]
@@ -149,6 +154,7 @@ ScanManager.execute(scan_type, params):
 - 自动注入 `https://${GITLAB_USER}:${GITLAB_TOKEN}@` 前缀 clone。
 - clone 到 `repos/<repo_name>/`（URL 末段去 `.git`）。
 - 凭证缺失 → 友好报错（不泄露是否私有仓）；clone 失败 → 透传 git stderr（**脱敏 token**）。
+- **重复 clone 策略**：`repos/<name>/` 已存在 → `git pull` 更新（而非重新 clone，省带宽）；pull 失败（如本地改动冲突）→ 删除目录后重新 clone 作为 fallback。前端表单可勾选「强制重新 clone」（跳过 pull 直接删了重 clone）。
 
 ---
 
@@ -156,7 +162,7 @@ ScanManager.execute(scan_type, params):
 
 | 组件 | 职责 | 关键点 |
 |---|---|---|
-| `WorkspacesIndexer` | 扫 `workspaces/*/` 读 `session.json` 建列表 | 按 mtime 增量；**状态判定**：有 `events.ndjson` 且无 `scan_end` 行 = 进行中●；有 `scan_end` 且 `status=completed` = ✓；否则 ✗ |
+| `WorkspacesIndexer` | 扫 `workspaces/*/` 读 `session.json` 建列表 | 按 mtime 增量；**状态判定**（三态 + 一特殊）：有 `scan_end` 且 `status=completed` = ✓完成；有 `scan_end` 且 `status≠completed` = ✗失败；无 `scan_end` **且** 该 ws 是本 Web 会话内启动、ScanManager 记录的 pid 仍活 = ●进行中；无 `scan_end` **但** pid 不在（Web 重启后 pid 丢失 / 老中断 ws / 子进程崩溃未补写） = ⚠未正常结束（灰色，区别于进行中，前端可点"标记为失败"或重扫） |
 | `ScanManager` | subprocess 起 CLI + 生命周期 | 并发限流 env `SHANNON_WEB_MAX_CONCURRENT`（默认 1）；SIGINT 优雅取消（复用 CLI 双击退出）；僵尸清理；wall-clock 超时 env `SHANNON_WEB_SCAN_TIMEOUT`（默认 0=不限） |
 | `EventTailer` | tail `events.ndjson` → SSE | 记 offset 的 `tail -f`；读到 `scan_end` 关闭流；损坏行跳过计数 |
 | `DeliverablesReader` | 读 `deliverables/` | md 原文返回（前端渲染）；queue.json 等返回 JSON；支持下载 |
@@ -389,13 +395,14 @@ GITLAB_USER / GITLAB_TOKEN          # git clone 凭证
 
 ## 关键风险与缓解
 
-1. **联动子扫描 events 不全**：关联阶段 per-edge agent 走 `AgentExecutor` 不经 dispatcher，edge 内部细粒度事件可能缺失。缓解：编排器层（repo 级 + edge 级）进度能覆盖，对"看整体进度"够用；局限实现时写明。
-2. **subprocess stdout/stderr 处理**：子进程 `workflow.log` 已落盘，stdout/stderr 要异步读取避免管道阻塞。ScanManager 用 `asyncio.create_subprocess_exec` + 后台读行任务。
+1. **联动子扫描 events 不全**：关联阶段 per-edge agent 走 `AgentExecutor` 不经 dispatcher，edge 内部细粒度事件（agent turn/tool call）缺失，只有 orchestrator 主动写的 edge 级状态（已在「联动扫描的事件汇聚」写明）。缓解：编排器层（repo 级 + edge 级）进度能覆盖，对"看联动整体进度"够用。
+2. **subprocess stdout/stderr 处理**：子进程 `workflow.log` 已落盘，stdout/stderr 要异步读取避免管道阻塞。ScanManager 用 `asyncio.create_subprocess_exec` + 后台读行任务。stderr tail 在崩溃时供 ScanManager 补写 `scan_end` 的 `stderr_tail` 字段。
 3. **events.ndjson 与现有 `workflow.log` 关系**：`workflow.log` 是 `FileRenderer` 写的纯文本日志（现有）；`events.ndjson` 是 `StructuredEventRenderer` 写的结构化事件（新增）。两者并行，不互斥——`workflow.log` 给人读，`events.ndjson` 给 Web 消费。LogsTab 同时展示两者。
-4. **Temporal 预存慢/挂起**：Web 不解决，前置检查 + 友好报错，不阻塞 Web 进程。
+4. **scan_end 兜底可靠性**：`SummaryEvent` 在 SIGINT/OOM 崩溃时不发，靠 ScanManager 补写兜底；但 ScanManager 自身崩溃（Web 进程挂）则无人补写——Web 重启后该 ws 落入"⚠未正常结束"态（见 WorkspacesIndexer 状态判定），用户可手动标记失败或重扫，不卡死。
+5. **Temporal 预存慢/挂起**：Web 不解决，前置检查 + 友好报错，不阻塞 Web 进程。
 
 ---
 
 ## 范围与拆分
 
-本 spec 聚焦"Web 平台 v1"：开启扫描（三类型）+ 结果展示（HTML/产物/日志）+ 实时 dashboard 复刻。后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF。规模适中，单个实现计划可覆盖，无需进一步拆分。
+本 spec 聚焦"Web 平台 v1"：开启扫描（三类型）+ 结果展示（HTML/产物/日志）+ 实时 dashboard 复刻。后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF、**黑盒 `--correlated-workspace` 衔接联动产出做后续验证**（`blackbox/cli/main.py:51` 已有该 flag，v1 不暴露到表单）。规模适中，单个实现计划可覆盖，无需进一步拆分。
