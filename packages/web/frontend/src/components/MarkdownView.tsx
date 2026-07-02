@@ -122,7 +122,14 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 );
                 if (firstStrongIdx !== -1) {
                   const strongEl = kids[firstStrongIdx] as ReactElement<{ children?: ReactNode }>;
-                  const keyText = flatten(strongEl.props.children).replace(/:?\s*$/, "");
+                  const rawKey = flatten(strongEl.props.children);
+                  // 冒号守卫：<strong> 文本必须以 `:`（ASCII）或 `：`（全角）结尾才视为 kv 键。
+                  // 否则像执行摘要编号列表 `1. **RCE**（INJ-01）：eval`（strong=`RCE`，无冒号）
+                  // 会被误判为 kv 行。无冒号 → 走默认 <li> 渲染。
+                  if (!/[：:]\s*$/.test(rawKey)) {
+                    return <li {...props}>{children}</li>;
+                  }
+                  const keyText = rawKey.replace(/[:：]\s*$/, "").trim();
                   if (keyText) {
                     const restKids = kids.slice(firstStrongIdx + 1);
                     // 去掉 value 前导空白字符串节点，保留元素节点（<code> 等）

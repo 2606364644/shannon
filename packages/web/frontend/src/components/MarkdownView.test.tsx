@@ -87,6 +87,16 @@ describe("MarkdownView", () => {
     // 关键值不被重复渲染进同一个文本节点（key/val 分离的结构性证据）
     expect(vtRow?.querySelector(".kv-key")?.textContent).not.toContain("CommandInjection");
     expect(vtRow?.querySelector(".kv-val")?.textContent).not.toContain("vulnerability_type");
+    // 负向断言（守冒号守卫，防 I-1 回归）：fixture 中真正的 kv 项 = 5（目标/评估日期/
+    // vulnerability_type/verdict/witness_payload，均以 `:` 或 `：` 结尾）。
+    // 执行摘要编号列表 `1. **RCE**（INJ-01）：eval` 等 bold-led 但无冒号的项
+    // 不应被重构成 .kv-row。若无冒号守卫，此计数会变 7（多出 RCE/SSRF），断言失败。
+    expect(kvRows.length).toBe(5);
+    const kvKeys = Array.from(kvRows).map(
+      (li) => li.querySelector(".kv-key")?.textContent ?? "",
+    );
+    expect(kvKeys).not.toContain("RCE");
+    expect(kvKeys).not.toContain("SSRF");
   });
 
   it("代码块带复制按钮（witness PoC 可复制）", () => {
