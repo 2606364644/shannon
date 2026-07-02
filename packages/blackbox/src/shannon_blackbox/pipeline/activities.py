@@ -418,6 +418,31 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
+async def generate_poc_report(input: BlackboxActivityInput) -> None:
+    """报告增强：生成 curl/Burp PoC md（黑盒）。失败不阻塞主报告。"""
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from shannon_core.services.poc_generator import PoCGenerator
+        from shannon_core.models.config import ALL_VULN_CLASSES
+        from shannon_core.utils.paths import blackbox_dir
+
+        deliverables = _get_deliverables_path(input)
+        bb = blackbox_dir(deliverables)
+        bb.mkdir(parents=True, exist_ok=True)
+        await PoCGenerator.generate(
+            deliverables_dir=bb,
+            vuln_classes=list(ALL_VULN_CLASSES),
+            target_url=(input.web_url or None),
+            track="blackbox",
+            repo_path=input.repo_path,
+            api_key=input.api_key,
+        )
+    except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
+        log.warning("poc: blackbox generate_poc_report failed (non-blocking): %s", exc)
+
+
+@activity.defn
 async def log_phase_start_activity(input: BlackboxActivityInput) -> None:
     from shannon_core.audit.session_registry import get_audit_session
     phase = input.phase or input.workspace_name or "unknown"
