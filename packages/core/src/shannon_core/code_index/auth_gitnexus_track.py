@@ -165,7 +165,9 @@ def _run_checkers(index: CodeIndex, handlers: list[FuncBlock]) -> list[AuthCandi
         for checker in (_check_session_regenerate_missing,
                         _check_logout_destroy_missing,
                         _check_password_hash_missing,
-                        _check_jwt_verify_missing):  # T3 追加 3 检查器
+                        _check_jwt_verify_missing,
+                        _check_weak_random_token,
+                        _check_oauth_state_missing):  # T4 追加 2 检查器
             c = checker(handler, index, endpoint)
             if c is not None:
                 candidates.append(c)
@@ -364,6 +366,90 @@ def _check_jwt_verify_missing(
         verdict_signal=VerdictSignal.MISSING_POSITIVE,
         evidence_callee="jwt.verify/ParseWithClaims",
         expected="OIDC id_token 需本地验签 + 校验 iss/aud/exp/sub claims",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
+
+
+# —— T4 检查器原语规则表（spike §3.1 / §2.5）—— per-language
+# NEGATIVE_SINK_HIT 型：误用弱随机原语生成 token/secret
+_WEAK_RANDOM_PRIMITIVES = {
+    "typescript": re.compile(r"\b(Math\.random|crypto\.pseudoRandomBytes)\b", re.IGNORECASE),
+    "javascript": re.compile(r"\b(Math\.random|crypto\.pseudoRandomBytes)\b", re.IGNORECASE),
+    "go": re.compile(r"math/rand\b"),  # 非 _crypto/rand（futu #6）
+    "python": re.compile(r"\brandom\.(random|randint|choice)\b"),
+}
+# token 生成语境：仅在这些 handler 上报（避免普通 Math.random 误报）
+_TOKEN_GEN_CONTEXT_RE = re.compile(r"(token|secret|nonce|reset|otp|code)", re.IGNORECASE)
+
+# 缺失型：OAuth callback handler 内（+可达路径）应校验 state/nonce/PKCE
+_OAUTH_HANDLER_RE = re.compile(r"(oauth|oidc|callback|authorize)", re.IGNORECASE)
+_OAUTH_SECURITY_RE = re.compile(r"\b(state|nonce|code_challenge|code_verifier|pkce)\b", re.IGNORECASE)
+
+
+def _check_weak_random_token(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 5：token/reset/otp handler 用 Math.random/math.rand → NEGATIVE_SINK_HIT。
+
+    只在 token 生成语境（route 含 token/secret/nonce/reset/otp/code）的 handler 上；
+    handler 源码命中弱随机原语 → 误用候选（futu #6 类）。
+    """
+    lang = handler.language
+    pattern = _WEAK_RANDOM_PRIMITIVES.get(lang)
+    if pattern is None:
+        return None
+    # 只在 token 生成语境（reset/otp/token/nonce handler）
+    if not (endpoint and re.search(_TOKEN_GEN_CONTEXT_RE, endpoint)):
+        return None
+    m = pattern.search(handler.source_code)
+    if not m:
+        return None
+    return AuthCandidate(
+        id=f"{handler.id}:weak_random_token:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.WEAK_RANDOM_TOKEN,
+        verdict_signal=VerdictSignal.NEGATIVE_SINK_HIT,
+        evidence_callee=m.group(0),
+        expected="token/secret/reset token 用密码学安全随机（crypto.randomBytes / crypto/rand / randomUUID）",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
+
+
+def _check_oauth_state_missing(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 6：OAuth callback handler 内无 state/nonce/PKCE → 缺失候选（futu #12 类）。
+
+    仅在 oauth/oidc/callback/authorize 类端点；handler 内 + 可达路径均无
+    state/nonce/code_challenge/code_verifier/pkce → 缺失候选。
+    """
+    if not (endpoint and _OAUTH_HANDLER_RE.search(endpoint)):
+        return None
+    # handler 内 + 可达路径有无 state/nonce/code_challenge
+    if _OAUTH_SECURITY_RE.search(handler.source_code):
+        return None
+    blocks_by_id = {b.id: b for b in index.blocks}
+    for chain in index.chains:
+        if chain.entry_point_id != handler.id:
+            continue
+        if any(_OAUTH_SECURITY_RE.search(blocks_by_id[n].source_code)
+               for n in chain.path if n in blocks_by_id):
+            return None
+    return AuthCandidate(
+        id=f"{handler.id}:oauth_state_missing:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.OAUTH_STATE_MISSING,
+        verdict_signal=VerdictSignal.MISSING_POSITIVE,
+        evidence_callee="state/nonce/code_challenge",
+        expected="OAuth callback 校验 state（CSRF）+ nonce（replay）+ PKCE（code 拦截）",
         file_path=handler.file_path,
         line=handler.start_line,
         code_snippet=handler.source_code[:200],

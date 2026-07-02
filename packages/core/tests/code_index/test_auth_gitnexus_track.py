@@ -130,3 +130,29 @@ def test_jwt_verify_missing_nodejs():
     index = _index([handler], [ep])
     cands = _run_checkers(index, _identify_auth_handlers(index))
     assert any(c.check_type == AuthCheckType.JWT_VERIFY_MISSING for c in cands)
+
+
+# —— T4: weak_random_token / oauth_state_missing 检查器 ——
+
+
+def test_weak_random_token_nodejs():
+    """token/reset handler 用 Math.random 生成 token → NEGATIVE_SINK_HIT 候选。"""
+    handler = _blk("app.ts:reset", name="reset",
+                   source="function reset(ctx){ const token = Math.random().toString(36); db.save({token}); }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/reset",
+                    http_method="POST", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    weak = [c for c in cands if c.check_type == AuthCheckType.WEAK_RANDOM_TOKEN]
+    assert len(weak) == 1 and weak[0].verdict_signal == VerdictSignal.NEGATIVE_SINK_HIT
+
+
+def test_oauth_state_missing_nodejs():
+    """OAuth callback handler 内无 state 校验 → 缺失候选（futu #12 类）。"""
+    handler = _blk("app.ts:cb", name="oauthCallback",
+                   source="function oauthCallback(ctx){ const code = ctx.query.code; const token = exchange(code); ctx.session.user = token; }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/oauth/callback",
+                    http_method="GET", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    assert any(c.check_type == AuthCheckType.OAUTH_STATE_MISSING for c in cands)
