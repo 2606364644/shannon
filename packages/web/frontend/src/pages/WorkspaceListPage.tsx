@@ -30,7 +30,7 @@ export function WorkspaceListPage() {
     <div className="page">
       <h1>
         Workspaces <button onClick={load} aria-label="refresh">↻</button>{" "}
-        <Link to="/scan/new"><button>+ new scan</button></Link>
+        <button><Link to="/scan/new">+ new scan</Link></button>
       </h1>
       {!loading && items.length === 0 ? (
         <p className="empty">no workspaces yet</p>

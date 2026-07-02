@@ -270,4 +270,38 @@ describe("DeliverablesTab", () => {
     expect(screen.getByText(/加载产物/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/漏洞聚合/)).toBeInTheDocument());
   });
+
+  it("产物聚合 fetch 失败渲染错误态（不永久 loading）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+    renderAt("/p/ws/deliverables");
+    await waitFor(() => expect(screen.getByText(/产物加载失败/)).toBeInTheDocument());
+    // 关键守卫：不渲染永久 loading 占位
+    expect(screen.queryByText(/加载产物/)).not.toBeInTheDocument();
+  });
+
+  it("文件预览 fetch 失败渲染错误态（不空白永久 loading）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return HttpResponse.json({ detail: "file boom" }, { status: 500 });
+        }
+        return HttpResponse.json(
+          makeSummary({
+            files: [{ path: "whitebox/injection_findings.md", size: 10, kind: "md" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/deliverables");
+    await waitFor(() => expect(screen.getByText("injection_findings.md")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("injection_findings.md"));
+    await waitFor(() => expect(screen.getByText(/文件加载失败/)).toBeInTheDocument());
+    // 关键守卫：md kind fetch 失败时不卡在『加载…』占位
+    expect(screen.queryByText(/^加载…$/)).not.toBeInTheDocument();
+  });
 });

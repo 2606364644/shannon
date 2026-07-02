@@ -9,13 +9,18 @@ import { VulnCard } from "../../components/VulnCard";
 export function DeliverablesTab() {
   const { workspace } = useParams<{ workspace: string }>();
   const [data, setData] = useState<DeliverablesSummary | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<DeliverablesFile | null>(null);
   useEffect(() => {
     if (!workspace) return;
     setData(null);
     setSel(null);
-    apiGet<DeliverablesSummary>(`/workspaces/${workspace}/deliverables`).then(setData).catch(() => setData(null));
+    setErr(null);
+    apiGet<DeliverablesSummary>(`/workspaces/${workspace}/deliverables`)
+      .then(setData)
+      .catch((e) => { setData(null); setErr(String(e)); });
   }, [workspace]);
+  if (err) return <div className="trace error">产物加载失败：{err}</div>;
   if (!data) return <div className="trace">加载产物…</div>;
   return (
     <div className="deliverables-layout">
@@ -39,12 +44,17 @@ export function DeliverablesTab() {
 
 function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
   const [content, setContent] = useState("");
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     setContent("");
+    setErr(null);
     if (file.kind === "md" || file.kind === "other_json" || file.kind.endsWith("_queue")) {
-      apiGetText(`/workspaces/${ws}/deliverables?path=${encodeURIComponent(file.path)}`).then(setContent).catch(() => setContent(""));
+      apiGetText(`/workspaces/${ws}/deliverables?path=${encodeURIComponent(file.path)}`)
+        .then(setContent)
+        .catch((e) => { setContent(""); setErr(String(e)); });
     }
   }, [ws, file.path]);
+  if (err) return <div className="trace error">文件加载失败：{err}</div>;
   if (file.kind === "empty_json") return <div className="trace">无数据（常态空）</div>;
   if (file.kind === "big_json")
     return (
