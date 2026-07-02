@@ -109,23 +109,29 @@ def compute_deliverables_summary(workspace_path: Path) -> dict:
 
 
 def get_workspace_vuln_counts(workspace_path: Path) -> dict[str, int]:
-    """Count vulnerabilities per class in a workspace's deliverables."""
+    """Count vulnerabilities per class in a workspace's deliverables.
+
+    Scans the deliverables dir recursively so it finds queue files under either
+    the legacy top-level layout (``deliverables/<cls>_exploitation_queue.json``)
+    or the production track-scoped layout (``deliverables/{whitebox,blackbox}/...``).
+    """
     deliverables_dir = deliverables_dir_for_workspace(workspace_path)
     counts: dict[str, int] = {}
 
     if not deliverables_dir.exists():
         return counts
 
-    for f in sorted(deliverables_dir.iterdir()):
-        if f.is_file() and f.name.endswith("_exploitation_queue.json"):
-            vuln_class = f.name.replace("_exploitation_queue.json", "")
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                vulns = data.get("vulnerabilities", [])
-                if isinstance(vulns, list):
-                    counts[vuln_class] = len(vulns)
-            except (json.JSONDecodeError, OSError):
-                counts[vuln_class] = 0
+    for f in sorted(deliverables_dir.rglob("*_exploitation_queue.json")):
+        if not f.is_file():
+            continue
+        vuln_class = f.name.replace("_exploitation_queue.json", "")
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            vulns = data.get("vulnerabilities", [])
+            if isinstance(vulns, list):
+                counts[vuln_class] = len(vulns)
+        except (json.JSONDecodeError, OSError):
+            counts[vuln_class] = 0
 
     return counts
 
