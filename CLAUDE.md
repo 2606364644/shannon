@@ -18,12 +18,12 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 - **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**。
 
 **双轨可配置（演进方向，2026-06-26 提出，设计中 ★）：**
-- **战略**：把双轨从"固定并行"演进为**可配置开关**——**GitNexus 轨做可靠兜底，LLM 轨做可选的纯 LLM 增强（创意轨）**。**token 紧张时关闭 LLM 轨**（靠 GitNexus 轨兜底），**token 宽裕时打开 LLM 轨**（双轨 OR）。默认 LLM 轨**开**（env `SHANNON_LLM_TRACK_ENABLED`，默认 `"1"`）。**auth/authz 的 GitNexus 兜底经深度 agent（吃确定性候选）实现，非轻量判定**（2026-07-02 epic：spec-1a authz 已落地，spec-1b 候选来源扩展 + spec-2a/2b auth 待做）；故"关 LLM 轨保 auth/authz 深度"在 spec-1b（候选非空）完成后才成立，空窗期 LLM 轨常开。
+- **战略**：把双轨从"固定并行"演进为**可配置开关**——**GitNexus 轨做可靠兜底，LLM 轨做可选的纯 LLM 增强（创意轨）**。**token 紧张时关闭 LLM 轨**（靠 GitNexus 轨兜底），**token 宽裕时打开 LLM 轨**（双轨 OR）。默认 LLM 轨**开**（env `SHANNON_LLM_TRACK_ENABLED`，默认 `"1"`）。**auth/authz 的 GitNexus 兜底经深度 agent（吃确定性候选）实现，非轻量判定**（2026-07-02 epic 全 done：spec-0 基础设施 + spec-1a authz 深度判定 + spec-1b 候选来源扩展 + spec-2a spike / spec-2b auth 深度 agent）。故"关 LLM 轨保 auth/authz 深度"代码层成立（authz 候选非空已解、auth 缺失/误用型确定性覆盖），真机冒烟待验；auth 业务逻辑型（如 fail-open bypass）仍靠 LLM 轨（spec-2a 裁决）。
 - **为支撑"GitNexus 轨独立兜底"**，GitNexus 轨从纯确定性演进为"**确定性兜底 + 可选 LLM 补召回**"：`sink_detector` 规则（`data/sink_rules.yml`）未命中的可疑 call（由 `data/sink_candidates.yml` 候选模式表按语言+receiver 精确筛选，已替换旧版 flat 子串正则）用轻量 LLM 找 sink，产 `rule_id="llm-discovered"` 的软 `SinkCallSite`（与规则 sink 同流、可区分）+ `rule_gap_report.json` 反哺规则库优化。LLM 不可用（stub / 超时）时退回纯规则 + `is_entry_hint`（`deterministic-fallback` 立场 B 成果，作为"LLM 不可用档"，不浪费）。
 - **不变的铁律**：LLM 轨仍纯 LLM 自给自足、不吃确定性产物（上条铁律不动）；本次演进只动 GitNexus 轨自己接 LLM + 加 LLM 轨开关，**不破坏双轨独立性**。
 - **设计 spec**：`docs/superpowers/specs/2026-06-26-gitnexus-llm-sink-discovery-design.md`（撰写中，brainstorming 进行时）。
 
-**auth / authz 特殊：** 它们不是 source→sink taint（属 missing-control），确定性 sink 规则不覆盖。但 authz 有自己的"GitNexus 风格"轨（`run_authz_gitnexus_judge`：IDOR 候选 + **深度 agent 判定**——`run_gitnexus_verdict_agent` 多轮，候选>0 吃候选深判 owner 检查、候选=0 自主探索 IDOR，2026-07-02 spec-1a 落地；候选来源扩展 OpenAPI/框架见 spec-1b 待做），auth 有 config 扫描器（`auth_config_scan.json`）兜底（auth 深度 agent 待 spec-2b，依赖 spec-2a auth 候选模型 spike 通过）。所以"扫不出"时先分清是哪条轨、哪个 vuln 类。
+**auth / authz 特殊：** 它们不是 source→sink taint（属 missing-control），确定性 sink 规则不覆盖。但 authz 有自己的"GitNexus 风格"轨（`run_authz_gitnexus_judge`：IDOR 候选 + **深度 agent 判定**——`run_gitnexus_verdict_agent` 多轮，候选>0 吃候选深判 owner 检查、候选=0 自主探索 IDOR；候选来源扩展 OpenAPI/框架 2026-07-02 spec-1b 落地），auth 有 config 扫描器（`auth_config_scan.json`）兜底 + **深度 agent**（`run_auth_gitnexus_judge`：2026-07-02 spec-2b 落地，三信号端点识别 + 6 检查器，覆盖缺失/误用型子集——session 固定 / token / SSO-OAuth / recovery；业务逻辑型如 fail-open bypass 仍靠 LLM 轨，spec-2a spike 裁决）。所以"扫不出"时先分清是哪条轨、哪个 vuln 类。
 
 详见 `docs/architecture.md`、`docs/superpowers/specs/2026-06-25-injection-recall-port-design.md`。
 
