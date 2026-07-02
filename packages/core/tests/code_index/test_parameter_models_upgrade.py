@@ -7,6 +7,7 @@ from shannon_core.code_index.parameter_models import (
     PropagationStep,
     SlotContext,
     TaintFlow,
+    TaintPath,
 )
 
 
@@ -89,3 +90,38 @@ def test_pgraph_serializes_with_new_fields():
     assert raw["language_coverage"] == ["python"]
     assert raw["taint_flows"][0]["sink_call_site_id"] == "a.py:f:execute:2:4"
     assert raw["taint_flows"][0]["sink_slot"] == "sql_value"
+
+
+# --- Task 1: intermediate_vars / post_sanitized_concat 字段契约 ---
+
+
+def test_propagation_step_defaults_intermediate_vars_empty():
+    """PropagationStep 新字段 intermediate_vars 默认空(旧 json 兼容)。"""
+    step = PropagationStep(from_func_id="f1", from_param="x", to_func_id="f2", to_param="y")
+    assert step.intermediate_vars == []
+
+
+def test_propagation_step_roundtrip_intermediate_vars():
+    step = PropagationStep(
+        from_func_id="f1", from_param="x", to_func_id="f2", to_param="y",
+        intermediate_vars=["raw", "escaped"],
+    )
+    restored = PropagationStep.model_validate_json(step.model_dump_json())
+    assert restored.intermediate_vars == ["raw", "escaped"]
+
+
+def test_taint_path_defaults_post_sanitized_concat_false():
+    """TaintPath 新字段 post_sanitized_concat 默认 False(旧 json 兼容)。"""
+    path = TaintPath(source_param="x", sink_id="s1", sink_arg_index=0)
+    assert path.post_sanitized_concat is False
+
+
+def test_taint_path_old_json_without_post_concat_field_compat():
+    """旧 json 无 post_sanitized_concat 字段 → 反序列化默认 False。"""
+    old = {
+        "source_param": "x", "sink_id": "s1", "sink_arg_index": 0,
+        "intermediate_vars": [], "sanitized": False,
+        "sanitizer_description": None, "confidence": 0.9,
+    }
+    path = TaintPath.model_validate(old)
+    assert path.post_sanitized_concat is False

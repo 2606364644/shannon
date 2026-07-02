@@ -26,7 +26,7 @@ synthesis in xss_builder still works off TaintFlow source_type/slot).
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from shannon_core.code_index.parameter_models import (
@@ -43,7 +43,7 @@ _INJECTION_SLOTS = {"sql_value", "sql_identifier", "cmd_argument",
                     "file_path", "template_expr", "deserialize"}
 _SSRF_SLOTS = {"url"}
 
-_DIRECTION = {"injection": "forward", "xss": "backward", "ssrf": "backward"}
+_DIRECTION = {"injection": "backward", "xss": "backward", "ssrf": "backward"}
 
 # LLM pass prompt template (lightweight; full methodology stays in vuln-*.txt).
 _VERDICT_PROMPT = """You are a lightweight chain-verdict pass for the {vuln_class} GitNexus track.
@@ -54,6 +54,7 @@ Candidate chain:
 - source: {source_param} ({source_type})
 - sink: {sink_call_site_id}
 - slot/render_context: {sink_slot}
+- sink arg expressions (source code reaching the dangerous slot): {sink_expressions}
 - direction: {direction_hint}
 - propagation steps: {steps_repr}
 - sanitizer annotations (best-effort, NOT judged for effectiveness): {sanitizers_repr}
@@ -62,6 +63,7 @@ Candidate chain:
 Rules:
 - post-sanitize concatenation = sanitizer considered INEFFECTIVE (tainted again).
 - A defense is effective ONLY if it matches the slot/render_context AND no concat after.
+- Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
 - Be decisive: return vulnerable OR safe.
 
 Respond with a compact JSON object ONLY:
@@ -83,6 +85,7 @@ class CandidateChain:
     direction_hint: str
     post_sanitize_concat: bool
     render_context: str = ""   # xss only; derived from SinkCallSite.sink_subtype
+    sink_expressions: list[str] = field(default_factory=list)   # sink dangerous_slots 的实参源码表达式(供判定 LLM)
 
 
 @dataclass(frozen=True)
@@ -139,12 +142,16 @@ def _render_context_for(sink_subtype: str) -> str:
 
 
 def _detect_post_sanitize_concat(steps: list[PropagationStep]) -> bool:
-    """True if a concat step appears AFTER a sanitizer-bearing step.
+    """True if a sanitizer is followed by re-tainting concatenation.
 
-    Mirrors spec §5.4 (vuln-injection.txt:156): sanitization followed by
-    concatenation taints the slot again. Best-effort keyword detection on the
-    transformation text (sanitize_hint:<name>/escape/encode/quote markers).
+    两种形态都认:
+    1. summary step 编码标记(transformation 含 '|post_concat',由 _intra_result_from_llm 产)
+    2. 多 step 序列: sanitize/escape/encode/quote step 后跟 concat step(原逻辑,向后兼容)
     """
+    for s in steps:
+        tf = (s.transformation or "").lower()
+        if "post_concat" in tf:          # summary step 标记(Task 2/3 产物)
+            return True
     seen_sanitizer = False
     for s in steps:
         tf = (s.transformation or "").lower()
@@ -191,6 +198,12 @@ def extract_candidate_chains(
         render_context = ""
         if vuln_class == "xss" and sink_site is not None:
             render_context = _render_context_for(sink_site.sink_subtype)
+        # sink dangerous_slots 的实参表达式(inj/ssrf 也需 sink_call_sites 透传)
+        sink_expressions: list[str] = []
+        if sink_call_sites is not None:
+            scs = sink_call_sites.get(flow.sink_call_site_id)
+            if scs is not None:
+                sink_expressions = [slot.expression for slot in scs.dangerous_slots if slot.expression]
         chains.append(CandidateChain(
             vuln_class=vuln_class,
             flow_id=flow.flow_id,
@@ -204,6 +217,7 @@ def extract_candidate_chains(
             direction_hint=direction,
             post_sanitize_concat=_detect_post_sanitize_concat(flow.propagation_steps),
             render_context=render_context,
+            sink_expressions=sink_expressions,
         ))
     return chains
 
@@ -224,9 +238,11 @@ async def judge_chain_verdict(
         source_type=candidate.source_type,
         sink_call_site_id=candidate.sink_call_site_id,
         sink_slot=candidate.render_context or candidate.sink_slot,
+        sink_expressions="; ".join(candidate.sink_expressions) or "(none)",
         direction_hint=candidate.direction_hint,
         steps_repr="; ".join(
             f"{s.code_location}:{s.transformation or 'noop'}"
+            + (f"|vars={','.join(s.intermediate_vars)}" if s.intermediate_vars else "")
             for s in candidate.propagation_steps
         ) or "(none)",
         sanitizers_repr="; ".join(

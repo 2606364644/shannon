@@ -16,6 +16,7 @@ from typing import Callable, Awaitable
 from shannon_core.code_index.models import FuncBlock, TypedParameter
 from shannon_core.code_index.parameter_models import (
     IntraResult,
+    PropagationStep,
     SinkCallSite,
     TaintAnalysisResult,
     TaintPath,
@@ -154,6 +155,7 @@ def build_taint_prompt(
                 "intermediate_vars": ["var1"],
                 "sanitized": False,
                 "sanitizer_description": None,
+                "post_sanitized_concat": False,
                 "confidence": 0.9,
             }
         ],
@@ -164,6 +166,8 @@ def build_taint_prompt(
         "Rules:\n"
         "- tainted_params: list all parameters that can reach a sink\n"
         "- propagation_paths: one entry per param->sink path\n"
+        "- post_sanitized_concat: true if the path is sanitized but then re-tainted "
+        "(e.g. escape() result concatenated with raw input, or merged with another source)\n"
         "- confidence: 0.0-1.0, how certain the taint reaches the sink\n"
         "- Only include paths you are confident about"
     )
@@ -200,26 +204,46 @@ def _intra_result_from_llm(
     """Convert TaintAnalysisResult to IntraResult.
 
     Validates tainted_params against block.parameters and sink_ids against
-    known sinks.
+    known sinks. Preserves sanitizer info (sanitized/sanitizer_description/
+    intermediate_vars/post_sanitized_concat) into local_steps as summary
+    PropagationStep — 之前硬编码 local_steps=[] 导致 sanitizer 管道断链。
     """
     valid_params = set(block.parameters)
     valid_sink_ids = {s.id for s in sinks_in_func}
+    sink_line_map = {s.id: s.line for s in sinks_in_func}
 
-    # Filter tainted_params to only known parameters
     tainted = {p for p in llm_result.tainted_params if p in valid_params}
 
-    # Build hits map from validated propagation paths
     hits: dict[str, float] = {}
+    local_steps: list[PropagationStep] = []
     for path in llm_result.propagation_paths:
-        if path.sink_id in valid_sink_ids and path.source_param in valid_params:
-            # Keep highest confidence for each sink
-            existing = hits.get(path.sink_id, 0.0)
-            hits[path.sink_id] = max(existing, path.confidence)
+        if path.sink_id not in valid_sink_ids or path.source_param not in valid_params:
+            continue
+        existing = hits.get(path.sink_id, 0.0)
+        hits[path.sink_id] = max(existing, path.confidence)
+
+        # summary step:函数内 param→sink 路径,transformation 编码 sanitizer + post_concat
+        tf: str | None = None
+        if path.sanitized:
+            desc = path.sanitizer_description or "unknown"
+            tf = f"sanitize_hint:{desc}"
+            if path.post_sanitized_concat:
+                tf += "|post_concat"
+        local_steps.append(PropagationStep(
+            from_func_id=block.id,
+            from_param=path.source_param,
+            to_func_id=block.id,            # sink 在本函数内
+            to_param=path.sink_id,
+            transformation=tf,
+            code_location=f"{block.file_path}:{sink_line_map.get(path.sink_id, block.start_line)}",
+            intermediate_vars=list(path.intermediate_vars),
+            confidence=path.confidence,
+        ))
 
     return IntraResult(
         tainted_params=tainted,
         hits=hits,
-        local_steps=[],
+        local_steps=local_steps,
     )
 
 

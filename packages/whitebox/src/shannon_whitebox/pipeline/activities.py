@@ -1264,13 +1264,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 ("ssrf", build_ssrf_findings),
             ):
                 try:
-                    if vc == "xss":
-                        findings = await builder(pgraph, llm_client=llm,
-                                                 sink_call_sites=sink_call_sites,
-                                                 progress_cb=_chain_cb)
-                    else:
-                        findings = await builder(pgraph, llm_client=llm,
-                                                 progress_cb=_chain_cb)
+                    findings = await builder(pgraph, llm_client=llm,
+                                             sink_call_sites=sink_call_sites,
+                                             progress_cb=_chain_cb)
                 except Exception as exc:
                     # one vuln class failing must not block the others
                     logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)

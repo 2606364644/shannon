@@ -46,6 +46,7 @@ class PropagationStep(BaseModel):
     to_param: str
     transformation: str | None = None  # "concat" / "encode" / "format" / "sanitize_hint:<name>" / None
     code_location: str = ""            # "{file}:{line}"
+    intermediate_vars: list[str] = []  # 函数内中间变量(供 chain_verdict 追踪信息密度)
     confidence: float = 1.0            # 本步映射的可信度
 
 
@@ -101,6 +102,7 @@ class TaintPath(BaseModel):
     intermediate_vars: list[str] = []
     sanitized: bool = False
     sanitizer_description: str | None = None
+    post_sanitized_concat: bool = False   # 消毒后再拼接(escape 后又 concat 污染源/多源合并)
     confidence: float = 1.0
 
 
