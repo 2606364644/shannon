@@ -137,8 +137,9 @@ class ScanManager:
         raise ValueError("correlation 扫描需 config_name 或 config_content")
 
     def _config_store_dir(self) -> Path:
-        # MultiRepoConfigStore 写入目录（list_configs 同源）
-        return Path(getattr(self._config_store, "_dir", "configs"))
+        # MultiRepoConfigStore 写入目录（list_configs 同源）。
+        # 走 public `dir` 属性；老 stub 无 dir 时 fallback 到 "configs"。
+        return Path(getattr(self._config_store, "dir", "configs"))
 
     def _gen_ws_name(self, req: ScanRequest) -> str:
         base = "scan"
@@ -167,7 +168,14 @@ class ScanManager:
         s_out = asyncio.create_task(drain(proc.stdout))
         s_err = asyncio.create_task(drain(proc.stderr, stderr_sink))
         try:
-            rc = await proc.wait()
+            if self._scan_timeout > 0:
+                try:
+                    rc = await asyncio.wait_for(proc.wait(), self._scan_timeout)
+                except asyncio.TimeoutError:
+                    proc.send_signal(signal.SIGINT)
+                    rc = await proc.wait()
+            else:
+                rc = await proc.wait()
         finally:
             await asyncio.gather(s_out, s_err, return_exceptions=True)
 

@@ -14,6 +14,10 @@ class MultiRepoConfigStore:
         self._dir = Path(configs_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def dir(self) -> Path:
+        return self._dir
+
     def list_configs(self) -> list[str]:
         return sorted(
             p.stem[len(self.PREFIX):]

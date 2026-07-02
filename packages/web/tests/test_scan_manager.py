@@ -131,6 +131,22 @@ async def test_correlation_resolves_yaml_and_runs(tmp_workspaces, fake_ok, monke
     assert str(captured["yaml"]).endswith("web-multi-demo.yaml")
 
 
+@pytest.mark.asyncio
+async def test_scan_timeout_sends_sigint_and_writes_killed(tmp_workspaces, fake_long, monkeypatch):
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None, max_concurrent=2,
+                      scan_timeout=0.5)
+    _patch_ok(monkeypatch, mgr)
+    monkeypatch.setattr(mgr, "_build_argv",
+                        lambda req, t, ws, yaml=None: [sys.executable, str(fake_long)])
+    await mgr.start(ScanRequest(type="whitebox",
+                                source=PathSource(kind="path", value="/x"),
+                                url="u", workspace="WT"))
+    # 超时 0.5s + 余量，等 _watch 收 SIGINT 写 scan_end
+    await asyncio.sleep(1.5)
+    text = (tmp_workspaces / "WT" / "events.ndjson").read_text()
+    assert '"scan_end"' in text and '"killed"' in text  # SIGINT → rc<0 → killed
+
+
 class _MemStore:
     """极简 store stub：write_temp/write 返回固定路径。"""
     def write(self, name, content):

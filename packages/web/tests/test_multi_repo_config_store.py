@@ -44,3 +44,9 @@ def test_path_traversal_rejected(tmp_path):
     store = MultiRepoConfigStore(tmp_path)
     with pytest.raises(ValueError):
         store.read("../etc")
+
+
+def test_dir_property_exposes_configs_dir(tmp_path):
+    store = MultiRepoConfigStore(tmp_path)
+    assert store.dir == tmp_path
+    assert store.dir.exists() and store.dir.is_dir()
