@@ -71,7 +71,13 @@ def _is_valid_queue_file(filepath: Path) -> bool:
 
 
 def summarize_deliverables_dir(deliverables_dir: Path) -> dict:
-    """Scan a deliverables directory and return a summary of vuln queues and reports."""
+    """Scan a deliverables directory and return a summary of vuln queues and reports.
+
+    Scans recursively so it finds files under either the legacy top-level layout
+    (``deliverables/<cls>_exploitation_queue.json``) or the production track-scoped
+    layout (``deliverables/{whitebox,blackbox}/...``). Aligns with
+    ``get_workspace_vuln_counts`` which is also recursive.
+    """
     vuln_queues: list[str] = []
     reports: list[str] = []
 
@@ -79,21 +85,24 @@ def summarize_deliverables_dir(deliverables_dir: Path) -> dict:
         return {"vuln_queues": vuln_queues, "reports": reports}
 
     # Check per-class exploitation queue files: {class}_exploitation_queue.json
-    for f in sorted(deliverables_dir.iterdir()):
-        if f.is_file() and f.name.endswith("_exploitation_queue.json"):
-            vuln_class = f.name.replace("_exploitation_queue.json", "")
-            if _is_valid_queue_file(f):
-                vuln_queues.append(vuln_class)
+    for f in sorted(deliverables_dir.rglob("*_exploitation_queue.json")):
+        if not f.is_file():
+            continue
+        vuln_class = f.name.replace("_exploitation_queue.json", "")
+        if _is_valid_queue_file(f) and vuln_class not in vuln_queues:
+            vuln_queues.append(vuln_class)
 
-    # Also check the generic exploitation_queue.json
-    generic_queue = deliverables_dir / "exploitation_queue.json"
-    if generic_queue.exists() and _is_valid_queue_file(generic_queue):
-        if "general" not in vuln_queues:
-            vuln_queues.insert(0, "general")
+    # Also check the generic exploitation_queue.json (rglob covers both top-level
+    # and nested; the "general" mapping is preserved).
+    for f in sorted(deliverables_dir.rglob("exploitation_queue.json")):
+        if f.is_file() and _is_valid_queue_file(f):
+            if "general" not in vuln_queues:
+                vuln_queues.insert(0, "general")
+            break
 
     # Collect report files (*.md)
-    for f in sorted(deliverables_dir.iterdir()):
-        if f.is_file() and f.name.endswith(".md"):
+    for f in sorted(deliverables_dir.rglob("*.md")):
+        if f.is_file() and f.name not in reports:
             reports.append(f.name)
 
     return {"vuln_queues": vuln_queues, "reports": reports}
