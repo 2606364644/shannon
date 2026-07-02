@@ -1,9 +1,22 @@
 # packages/core/tests/test_poc_generator.py
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
+from shannon_core.models.queue_schemas import (
+    VulnerabilityQueue, InjectionVulnerability, XssVulnerability,
+)
 from shannon_core.services.poc_generator import (
     HttpRequestSpec, ConfidenceBand, AuthState,
     extract_method_path, extract_param_name, derive_method_path,
     classify_confidence, resolve_host, derive_auth_state, auth_header,
+    parse_recon_endpoints, find_endpoint_info,
+    to_curl, to_burp_raw,
+    build_template_spec,
+    build_llm_prompt, llm_fill_gap, LLM_REQUEST_SCHEMA,
+    render_poc_md, empty_poc_md,
+    PoCGenerator,
 )
 
 
@@ -60,8 +73,6 @@ def test_derive_auth_state_and_header():
 
 
 # Task 2: recon 端点表解析
-from pathlib import Path
-from shannon_core.services.poc_generator import parse_recon_endpoints, find_endpoint_info
 
 RECON_SAMPLE = """# Recon
 
@@ -102,7 +113,6 @@ def test_find_endpoint_info_exact_and_prefix():
 
 
 # Task 3: curl / Burp raw 双格式化
-from shannon_core.services.poc_generator import to_curl, to_burp_raw
 
 
 def test_to_curl_url_encodes_query():
@@ -140,14 +150,22 @@ def test_to_burp_raw_post_body():
     raw = to_burp_raw(spec, "https://t.example.com")
     assert "POST /api/fetch HTTP/1.1" in raw
     assert "Content-Length:" in raw
+    assert "Content-Type: application/x-www-form-urlencoded" in raw
     assert "url=http://127.0.0.1:8080" in raw
 
 
+def test_to_burp_raw_json_body_gets_json_content_type():
+    """LLM gap-fill 可能返回 JSON body，应标 application/json 而非 form-urlencoded。"""
+    spec = HttpRequestSpec(method="POST", path="/auth/callback", body='{"id_token":"forged.none.sig"}')
+    raw = to_burp_raw(spec, "https://t.example.com")
+    assert "Content-Type: application/json" in raw
+    assert "application/x-www-form-urlencoded" not in raw
+    assert '{"id_token":"forged.none.sig"}' in raw
+    # Content-Length 仍按字节长度
+    assert f"Content-Length: {len(spec.body.encode('utf-8'))}" in raw
+
+
 # Task 4: 模板表（5 类漏洞骨架 + authz 成对 + open_redirect 分流）
-from types import SimpleNamespace
-from shannon_core.services.poc_generator import (
-    build_template_spec, ConfidenceBand, AuthState,
-)
 
 
 def _inj(**kw):
@@ -207,8 +225,6 @@ def test_template_no_witness_returns_none_defers_to_llm():
 
 
 # Task 5: 富信息 LLM 补缺口
-import json
-from shannon_core.services.poc_generator import build_llm_prompt, llm_fill_gap, LLM_REQUEST_SCHEMA
 
 _AUTH_VULN = SimpleNamespace(
     ID="AUTH-1", vulnerability_type="missing-jwt-verify",
@@ -258,7 +274,6 @@ async def test_llm_fill_gap_failure_returns_none(monkeypatch):
 
 
 # Task 6: md 渲染（概览表 + 详细 PoC + 空表兜底）
-from shannon_core.services.poc_generator import render_poc_md, empty_poc_md, ConfidenceBand, AuthState
 
 _INJ_ENTRY = (
     "injection", _inj(),
@@ -270,21 +285,46 @@ _INJ_ENTRY = (
 
 
 def test_render_poc_md_overview_and_detail():
-    md = render_poc_md([_INJ_ENTRY], "https://t.example.com", "whitebox", has_placeholder=False)
+    md = render_poc_md([_INJ_ENTRY], "https://t.example.com", "whitebox")
     assert "# 可利用漏洞 PoC 集合（白盒）" in md
     assert "| ID | 类型 | 路径 | 认证 | 置信度 |" in md
     assert "INJ-1" in md and "injection" in md and "✓ 已确认" in md
     assert "curl -i" in md
     assert "GET /api/users?id=" in md  # Burp raw
     assert "Host: t.example.com" in md
-    # 无占位符时不显示替换说明块
-    assert "TARGET[:PORT]" not in md
+    # placeholder 块现在总是渲染（即便 host 真实，需登录 PoC 仍含占位符）
+    assert "⚠️ 使用前替换" in md
 
 
 def test_render_poc_md_placeholder_block_when_host_missing():
-    md = render_poc_md([_INJ_ENTRY], "https://TARGET[:PORT]", "blackbox", has_placeholder=True)
+    md = render_poc_md([_INJ_ENTRY], "https://TARGET[:PORT]", "blackbox")
     assert "⚠️ 使用前替换" in md
     assert "TARGET[:PORT]" in md
+
+
+def test_render_poc_md_authz_pair():
+    """authz 成对 PoC：概览表 1 行，详细含「请求 1/2」「请求 2/2」+ 两 curl。"""
+    vuln = SimpleNamespace(ID="AUTHZ-1", merge_source="gitnexus")
+    common = dict(
+        method="GET", path="/api/score/:staffId",
+        headers={"Authorization": "Bearer <AUTH_TOKEN_ATTACKER>"},
+        auth_state=AuthState.REQUIRED, confidence_band=ConfidenceBand.CONFIRMED,
+        source_id="AUTHZ-1", vuln_class="authz",
+    )
+    spec_legit = HttpRequestSpec(**common, note="合法：访问自己资源（<OWNER_RESOURCE_ID>）")
+    spec_cross = HttpRequestSpec(**common, note="越权：访问受害者资源（<VICTIM_RESOURCE_ID>）")
+    entry = ("authz", vuln, [spec_legit, spec_cross])
+    md = render_poc_md([entry], "https://t.example.com", "whitebox")
+    # 概览表仅 AUTHZ-1 一行（不是两行）
+    assert md.count("| AUTHZ-1 |") == 1
+    # 详细段两条请求标题都在
+    assert "（请求 1/2）" in md
+    assert "（请求 2/2）" in md
+    # 两条 curl 都渲染
+    assert md.count("curl -i") == 2
+    # 两条 note 都出现
+    assert "合法：访问自己资源" in md
+    assert "越权：访问受害者资源" in md
 
 
 def test_empty_poc_md():
@@ -293,11 +333,6 @@ def test_empty_poc_md():
 
 
 # Task 7: generate() 主流程
-import json
-from shannon_core.models.queue_schemas import (
-    VulnerabilityQueue, InjectionVulnerability, XssVulnerability,
-)
-from shannon_core.services.poc_generator import PoCGenerator
 
 
 def _wb_queue(tmp_path):

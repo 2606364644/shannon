@@ -2,10 +2,17 @@
 """外部可达漏洞 PoC 自动生成（curl / Burp），报告后处理。"""
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
+
+from shannon_core.agents.runner import run_claude_prompt  # 模块级名称，便于测试 monkeypatch
+from shannon_core.models.queue_schemas import VulnerabilityQueue
 
 
 class ConfidenceBand(str, Enum):
@@ -116,7 +123,6 @@ def auth_header(auth_state: AuthState, endpoint_info: dict | None) -> dict[str, 
 
 
 # Task 2: recon 端点表解析
-from pathlib import Path
 
 _SECURITY_CTX_RE = re.compile(r"^#{2,3}\s+(?:[\d.]+\s+)?Endpoint Security Context.*$", re.MULTILINE)
 
@@ -176,7 +182,6 @@ def find_endpoint_info(endpoints: dict[str, dict], path: str | None) -> dict | N
 
 
 # Task 3: curl / Burp raw 双格式化
-from urllib.parse import urlencode
 
 
 def _host_only(host: str) -> str:
@@ -205,7 +210,13 @@ def to_burp_raw(spec: HttpRequestSpec, host: str) -> str:
     for k, v in spec.headers.items():
         lines.append(f"{k}: {v}")
     if spec.body:
-        lines.append("Content-Type: application/x-www-form-urlencoded")
+        # LLM gap-fill 可能返回 JSON body（如 {"id_token":"forged"}），按 body 形态判定 Content-Type，
+        # 避免对 JSON body 强加 form-urlencoded 致服务器拒绝。
+        body_stripped = spec.body.lstrip()
+        if body_stripped[:1] in ("{", "["):
+            lines.append("Content-Type: application/json")
+        else:
+            lines.append("Content-Type: application/x-www-form-urlencoded")
         lines.append(f"Content-Length: {len(spec.body.encode('utf-8'))}")
     lines.append("")
     if spec.body:
@@ -294,9 +305,6 @@ def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[
 
 
 # Task 5: 富信息 LLM 补缺口
-import json as _json
-
-from shannon_core.agents.runner import run_claude_prompt  # 顶层 import 便于 monkeypatch
 
 _LLM_RICH_FIELDS = (
     "ID", "vulnerability_type", "source", "source_endpoint", "endpoint", "path",
@@ -324,8 +332,8 @@ def build_llm_prompt(vuln: Any, vuln_class: str, host: str, recon_ctx: dict) -> 
     return (
         f"You are reconstructing a replayable HTTP PoC for a confirmed {vuln_class} vulnerability.\n\n"
         f"Target host: {host}\n"
-        f"Vulnerability fields:\n{_json.dumps(fields, ensure_ascii=False, indent=2)}\n"
-        f"Recon endpoint context:\n{_json.dumps(recon_ctx, ensure_ascii=False, indent=2)}\n\n"
+        f"Vulnerability fields:\n{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+        f"Recon endpoint context:\n{json.dumps(recon_ctx, ensure_ascii=False, indent=2)}\n\n"
         "Output a JSON object describing the HTTP request shape to reproduce this vulnerability. "
         "Use witness_payload as the attack value. Fill method/path/query/body. "
         "Do NOT include the Authorization/Cookie auth header (added separately). "
@@ -375,9 +383,7 @@ _AUTH_LABEL = {
 }
 
 
-def _placeholder_block(has_placeholder: bool) -> str:
-    if not has_placeholder:
-        return ""
+def _placeholder_block() -> str:
     return (
         "\n> ⚠️ 使用前替换：\n"
         "> - `TARGET[:PORT]` → 实际部署地址\n"
@@ -414,14 +420,13 @@ def _detail_section(vuln_class: str, vuln: Any, spec: HttpRequestSpec, host: str
     return "\n".join(lines)
 
 
-def render_poc_md(entries, host: str, track: str, *, has_placeholder: bool) -> str:
+def render_poc_md(entries, host: str, track: str) -> str:
     """渲染 PoC 集合 Markdown（概览表 + 详细 curl/Burp）。
 
     Args:
         entries: list[tuple[vuln_class, vuln, HttpRequestSpec | list[HttpRequestSpec]]]
         host: 目标 host（可能为占位符）
         track: "whitebox" 或 "blackbox"
-        has_placeholder: 是否显示占位符替换说明块
 
     Returns:
         完整 PoC 文档 Markdown 字符串
@@ -438,7 +443,7 @@ def render_poc_md(entries, host: str, track: str, *, has_placeholder: bool) -> s
         f"\n> 目标 host: {host} ｜ 生成自 *_exploitation_queue.json\n"
         f"> 共 {n} 条外部可达 PoC · 已确认 {counts[ConfidenceBand.CONFIRMED]} 条 · "
         f"高置信 {counts[ConfidenceBand.HIGH]} 条 · 疑似 {counts[ConfidenceBand.SUSPECTED]} 条"
-        f"{_placeholder_block(has_placeholder)}\n"
+        f"{_placeholder_block()}\n"
     )
     if not entries:
         return header.strip() + "\n"
@@ -464,10 +469,6 @@ def empty_poc_md(track: str) -> str:
 
 
 # Task 7: generate() 主流程（编排 + 过滤 + LLM 仲裁 + 降级 + 读写）
-import json
-import logging
-
-from shannon_core.models.queue_schemas import VulnerabilityQueue
 
 logger = logging.getLogger(__name__)
 _POC_FILENAME = "exploitable_poc_collection.md"
@@ -551,7 +552,7 @@ class PoCGenerator:
                     logger.warning("poc: build failed for %s: %s", getattr(v, "ID", "?"), exc)
 
         # placeholder 块总是显示：即便 host 真实，需登录的 PoC 仍含 <AUTH_TOKEN>/<SESSION_COOKIE> 占位符，operator 需替换指引。
-        md = render_poc_md(entries, host, track, has_placeholder=True) if entries else empty_poc_md(track)
+        md = render_poc_md(entries, host, track) if entries else empty_poc_md(track)
         out = deliverables_dir / _POC_FILENAME
         out.write_text(md, encoding="utf-8")
         return out
