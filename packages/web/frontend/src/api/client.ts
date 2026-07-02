@@ -21,3 +21,10 @@ export const apiGet = <T>(path: string) => request<T>(path);
 export const apiPost = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const apiDelete = <T>(path: string) => request<T>(path, { method: "DELETE" });
+
+/** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。 */
+export async function apiGetText(path: string): Promise<string> {
+  const res = await fetch(`/api${path}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.text();
+}
