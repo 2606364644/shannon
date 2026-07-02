@@ -1,0 +1,96 @@
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { ScanNewPage } from "./ScanNewPage";
+
+// Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
+vi.mock("@monaco-editor/react", () => ({
+  default: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (
+    <textarea data-testid="monaco" value={value} onChange={(e) => onChange?.(e.target.value)} />
+  ),
+}));
+
+const server = setupServer(
+  http.get("/api/workspaces", () =>
+    HttpResponse.json([
+      { name: "existing-ws", scan_type: "whitebox", status: "completed", created_at: 0 },
+    ]),
+  ),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => {
+  server.resetHandlers();
+  cleanup();
+});
+afterAll(() => server.close());
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <ScanNewPage />
+    </MemoryRouter>,
+  );
+}
+
+describe("ScanNewPage", () => {
+  it("默认白盒：显示代码来源，无 reuse 复选框；切黑盒显示 reuse", () => {
+    renderPage();
+    expect(screen.getByText(/代码来源/)).toBeInTheDocument();
+    // 黑盒专属复选框默认不出现
+    expect(screen.queryByText(/复用最新白盒/)).toBeNull();
+    // 切到黑盒 → reuse 复选框出现（--latest 软默认陷阱标注）
+    fireEvent.click(screen.getByRole("tab", { name: "黑盒" }));
+    expect(screen.getByText(/复用最新白盒/)).toBeInTheDocument();
+  });
+
+  it("切联动：显示 yaml 编辑器，隐藏白盒字段", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "联动" }));
+    expect(screen.getByTestId("monaco")).toBeInTheDocument();
+    // 联动页不显示白盒/黑盒的代码来源字段
+    expect(screen.queryByText(/代码来源/)).toBeNull();
+  });
+
+  it("黑盒 --latest 陷阱：reuse 复选框旁有可追溯说明（不勾选=standalone）", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "黑盒" }));
+    expect(screen.getByText(/--latest/)).toBeInTheDocument();
+    expect(screen.getByText(/standalone/)).toBeInTheDocument();
+  });
+
+  it("workspace 名冲突 → 弹断点续扫确认", async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/自动/), {
+      target: { value: "existing-ws" },
+    });
+    await waitFor(() => expect(screen.getByText(/断点续扫/)).toBeInTheDocument());
+  });
+
+  it("提交 400 → 提示 Temporal 未就绪", async () => {
+    server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 400 })));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(screen.getByText(/Temporal/i)).toBeInTheDocument());
+  });
+
+  it("提交 409 → 提示并发扫描超限", async () => {
+    server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 409 })));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(screen.getByText(/并发扫描超限/)).toBeInTheDocument());
+  });
+
+  it("提交 422 → 提示 yaml 校验失败", async () => {
+    server.use(
+      http.post("/api/scan", () =>
+        HttpResponse.json({ detail: [{ msg: "bad yaml" }] }, { status: 422 }),
+      ),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(screen.getByText(/yaml 校验失败/)).toBeInTheDocument());
+  });
+});
