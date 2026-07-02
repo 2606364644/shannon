@@ -113,3 +113,63 @@ def auth_header(auth_state: AuthState, endpoint_info: dict | None) -> dict[str, 
     if has_session and not has_token:
         return {"Cookie": "session=<SESSION_COOKIE>"}
     return {"Authorization": "Bearer <AUTH_TOKEN>"}
+
+
+# Task 2: recon 端点表解析
+from pathlib import Path
+
+_SECURITY_CTX_RE = re.compile(r"^#{2,3}\s+(?:[\d.]+\s+)?Endpoint Security Context.*$", re.MULTILINE)
+
+
+def _find_security_context_section(md: str) -> str | None:
+    m = _SECURITY_CTX_RE.search(md)
+    if not m:
+        return None
+    rest = md[m.start():]
+    nxt = re.search(r"\n#{2,3}\s[\d.]*[A-Za-z]", rest[1:])
+    section = rest[: nxt.start() + 1] if nxt else rest
+    idx = section.find("|")
+    return section[idx:] if idx >= 0 else None
+
+
+def parse_recon_endpoints(recon_path: Path) -> dict[str, dict]:
+    """解析 recon_deliverable.md 的 Endpoint Security Context 表。
+
+    section 编号跨轨不稳（黑盒 ## 4.2 / 白盒 ## 2.1），用关键词定位。
+    列名 Path / Endpoint Path 宽容匹配。返回 {path_lower: {method,auth,middleware}}。
+    """
+    if not recon_path.exists():
+        return {}
+    from shannon_core.code_index.gitnexus_mcp import _parse_md_table
+
+    md = recon_path.read_text(encoding="utf-8")
+    section = _find_security_context_section(md)
+    if not section:
+        return {}
+    out: dict[str, dict] = {}
+    for row in _parse_md_table(section):
+        path = (row.get("Path") or row.get("Endpoint Path") or "").strip().strip("`")
+        if not path:
+            continue
+        out[path.lower()] = {
+            "method": (row.get("Method") or "").strip(),
+            "auth": (row.get("Auth") or row.get("Required Role") or "").strip(),
+            "middleware": (row.get("Middleware") or "").strip(),
+        }
+    return out
+
+
+def find_endpoint_info(endpoints: dict[str, dict], path: str | None) -> dict | None:
+    if not path or not endpoints:
+        return None
+    key = path.lower()
+    if key in endpoints:
+        return endpoints[key]
+    # 前缀匹配：path 可能带具体 id，recon 里是 :param 模板
+    for ep_key, info in endpoints.items():
+        # 检查是否为相同端点（参数部分不同）
+        base_key = ep_key.split("/:")[0] if "/:" in ep_key else ep_key.rstrip("/").rstrip("/*")
+        base_path = key.split("/:")[0] if "/:" in key else key
+        if base_key and base_path.startswith(base_key):
+            return info
+    return None

@@ -57,3 +57,45 @@ def test_derive_auth_state_and_header():
     assert auth_header(AuthState.REQUIRED, {"middleware": "koa-session"}) == {"Cookie": "session=<SESSION_COOKIE>"}
     # 无需登录 → 无头
     assert auth_header(AuthState.NONE, None) == {}
+
+
+# Task 2: recon 端点表解析
+from pathlib import Path
+from shannon_core.services.poc_generator import parse_recon_endpoints, find_endpoint_info
+
+RECON_SAMPLE = """# Recon
+
+Some intro.
+
+## 2. Endpoint Map
+
+| Method | Path | Handler | Auth (policy) | Parameters | Notes |
+|--------|------|---------|---------------|------------|-------|
+| GET | `/api/code/payload/share` | share | GUEST | none | public |
+
+## 2.1 Endpoint Security Context
+
+| Method | Path | Auth | Middleware | Framework Origin | Ownership Check | Notes |
+|--------|------|------|------------|------------------|-----------------|-------|
+| GET | `/api/code/payload/share` | anon | ticketFNS | manual | n/a | public |
+| GET | `/api/score/:staffId` | user | oa-login, validator | manual | none | IDOR |
+"""
+
+
+def test_parse_recon_endpoints_finds_security_context(tmp_path):
+    recon = tmp_path / "recon_deliverable.md"
+    recon.write_text(RECON_SAMPLE, encoding="utf-8")
+    eps = parse_recon_endpoints(recon)
+    assert "/api/code/payload/share" in eps
+    assert eps["/api/code/payload/share"]["auth"] == "anon"
+    assert eps["/api/score/:staffid"]["middleware"] == "oa-login, validator"
+
+
+def test_parse_recon_endpoints_missing_file(tmp_path):
+    assert parse_recon_endpoints(tmp_path / "nope.md") == {}
+
+
+def test_find_endpoint_info_exact_and_prefix():
+    eps = {"/api/score/:staffid": {"auth": "user"}, "/api/code/payload/share": {"auth": "anon"}}
+    assert find_endpoint_info(eps, "/api/score/:staffId") is not None
+    assert find_endpoint_info(eps, "/unknown") is None
