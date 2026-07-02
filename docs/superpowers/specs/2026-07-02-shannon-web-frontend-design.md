@@ -84,12 +84,13 @@ packages/web/frontend/
 
 ### 2.3 开启扫描页（`ScanNewPage.tsx`）
 
-扫描类型 3 选 1（白盒/黑盒/联动）→ 动态表单（总体 spec 表单示意图）：
+扫描类型 3 选 1（白盒/黑盒/联动）→ 动态表单（总体 spec 表单示意图），**统一 segmented 入口、按类型动态显隐字段**：
 
 - **白盒/黑盒区**：代码来源（本地路径 / git URL）；git URL 模式显示分支/commit 可选 + 强制重新 clone；目标 URL；workspace 名（可空自动生成）；仅黑盒显示「复用最新白盒结果」复选框。
+  - **黑盒 `--latest` 软默认陷阱**（主 spec §扫描类型）：CLI 有软默认 `--latest`（无 flag 也尝试复用按 url 匹配的最近白盒）。前端复选框：勾选 → 传 `--latest`；**不勾选 → 后端传 `--repo` 显式 standalone 规避软默认复用**。复选框旁 ⓘ 标注此语义，避免用户困惑。
 - **联动区**：multi-repo.yaml 上传 / 从已有选（`GET /api/multi-configs`）/ 手写编辑器（YamlEditor），「保存为配置」或「直接运行」。
-- **workspace 名冲突校验**：填写时 `GET /api/workspaces` 查重，同名弹确认"将断点续扫"。
-- 提交 `POST /api/scan` → 202 → 跳 `/p/{ws}/live`。
+- **workspace 名冲突校验**：填写时 `GET /api/workspaces` 查重，同名弹确认「将断点续扫」（CLI `-w` 语义=存在则恢复，诚实呈现「恢复已有进度」，非 generic name-exists 错误）。
+- **提交 `POST /api/scan`**：成功 → 202 → 跳 `/p/{ws}/live`。**失败错误码**：400（Temporal `localhost:7233` 未就绪）/ 409（并发超限）/ 422（联动 yaml 校验失败，附行号）—— 前端按码显示可操作提示（如 400 提示「先启动 Temporal」）。
 
 ---
 
@@ -97,34 +98,63 @@ packages/web/frontend/
 
 ### 3.1 概览 tab（`OverviewTab.tsx`）
 
-`GET /api/workspaces/{ws}` → 渲染 `session.json` 指标。**兼容新旧两格式**（扁平 / 嵌套 `session` 子对象——后端已用 SessionManager 归一，前端只消费归一后的 API 响应，但 TS 类型要含两格式字段的可选性）：
+`GET /api/workspaces/{ws}` → 渲染 `session.json` 指标。**兼容新旧两格式**（扁平 / 嵌套 `session` 子对象；后端 SessionManager 归一，前端消费归一后响应，TS 类型含两格式可选）。
 
-- 顶部：StatusBadge + scan_type + web_url + repo_path + 时间区间。
-- 成本/耗时大数字：`metrics.total_cost_usd` / `metrics.total_duration_ms`。
-- 各阶段 breakdown：`metrics.phases`（pre-recon/recon/vulnerability/exploitation/reporting 的 duration_ms/duration_percentage/cost_usd/agent_count）—— 表格或进度条。
-- 各 agent 明细：`metrics.agents`（name → duration/cost/success/attempt/model）—— 表格，失败 agent 标红。
-- 联动 workspace：额外显示"下钻"区，列出子白盒 ws（`links.child_workspaces` 或 correlation 专属字段），点击跳子 ws 详情。
+真实字段（以 NodeGoat `session.json` 为准）：顶层 `web_url`/`repo_path`/`created_at`(unix)/`scan_type`/`status`/`completed_at`/`links`{parent_workspace,child_workspaces}/`deliverables_summary`/`completed_agents`/`metrics`/`session`(嵌套旧格式)；`metrics` = `total_duration_ms`/`total_cost_usd`/`phases`/`agents`。
+
+**⚠ status 矛盾兜底 + flag 后端**：真实存在顶层 `status:"running"` 与嵌套 `session.status:"completed"` 不一致（顶层未随 session 结束回写，疑似后端归一 bug）。前端：优先消费归一后 status；两源矛盾时状态条显示矛盾标注、**不假装单一**；此为**子项目 1 后端归一待修问题，需 flag 给后端**。
+
+呈现（signature = 阶段瀑布）：
+- **状态条**：StatusBadge + `scan_type` + `web_url` + `repo_path` + 时间区间（`created_at`→`completed_at`）。
+- **大数字**（Plex Mono）：`total_cost_usd` / `total_duration_ms`(→分秒) / agent 数。
+- **阶段瀑布（signature）**：`metrics.phases` **按实际 key 动态渲染**（阶段集不写死 —— NodeGoat 为 `pre-recon`/`recon`/`vulnerability-analysis`/`reporting` 4 阶段、**无 exploitation**、名带 `-analysis`；黑盒/联动阶段集不同）。横向条宽度 = `duration_percentage`，标注 `duration_ms`(→分秒) / `cost_usd` / `agent_count`，一眼看出主战场阶段。
+- **agent 明细**（等宽台账）：`metrics.agents`（key=agent 名 → `duration_ms`/`cost_usd`/`success`/`attempt_number`/`model`/可选 `error`）。**分级标色**：`success:false`→红；`attempt_number>1` 或 `error` 存在→黄（重试/警告，如 injection-vuln 撞 429 重试）；正常→默认。不把重试误判为失败。
+- **联动 workspace**：`links.child_workspaces` 非空时显「下钻」区，列子白盒 ws，点击跳子 ws 详情。
+
+跨 tab 统一：等宽台账风格（WorkspaceListPage）、Plex Mono 数据、语义色。
 
 ### 3.2 报告 tab（`ReportTab.tsx`）
 
 `GET /api/workspaces/{ws}/report` → md 原文 → `MarkdownView` 渲染。
 
-**报告有两种结构**（探索发现），MarkdownView 都要支持：
-- 仅静态分析：`# {Class} Findings` → `## Identified Vulnerabilities` → `### {ID}: {Type}` + 加粗键值字段。
-- 含利用证据：顶部 `## Exploited` → `### {ID}` + Severity/Impact/Exploitation Steps/Proof of Impact（含 JSON 代码块）+ `## Other Verdicts`。
+**报告结构**（以真实 `comprehensive_security_assessment_report.md` 为准 —— 单结构、按漏洞类型组织；**非早期探索概括的「静态/利用证据两种结构」，该概括已废弃**）：
 
-MarkdownView 用 `react-markdown` + `rehype-highlight`（代码块语法高亮，含 JSON）+ `rehype-slug` + `rehype-autolink-headings`（目录锚点）。左 TOC（从 H1/H2/H3 生成）右正文，长报告可折叠。**无表格**（探索确认报告无 markdown 表格），但保留 GFM 表格能力以防未来。
+1. `## 执行摘要` —— 总体结论 + **「最高风险发现」编号列表**（按业务影响排序，每条带 vuln ID + 类型 + 可达性 + 一句话）+ 修复优先级建议。→ ReportTab 的 **hero**：置顶展开、可折叠，每条锚链到正文对应漏洞。
+2. `## 按漏洞类型汇总` —— 每类型一个 `### {Type}` 块（`Count` / `Severity range` / `Key findings`）→ TOC 类型行 + 类型概览的数据源。
+3. 类型详情 —— `## {Type}`（Injection / Cross-Site Scripting (XSS) / Authentication / Authorization (AuthZ) / Server-Side Request Forgery (SSRF)）→ 每漏洞一个 `### {ID}: {title}`，正文为加粗键值字段。
+
+**每漏洞字段两种变体**，MarkdownView 都渲染成对齐键值行（非普通列表）：Injection 类用 `- **key:** value` 列表（`vulnerability_type` / `externally_exploitable` / `source` / `sink_call` / `verdict` / `witness_payload` / `confidence` / `notes` 等）；XSS/Auth/Authz/SSRF 类用 `**Summary:**` 下 `- **key:** value` + 收尾 `**Notes:**`。
+
+**呈现决策（signature）**：
+- **可达性索引，不做 severity 色点** —— severity 在真实报告稀疏不统一（仅类型汇总节有 range、个别 `Verdict（High）` 带过），撑不起逐条色点；改用 `externally_exploitable: true`（几乎每条都有、语义关键 = 公网可达优先修）做 TOC 漏洞项标记（●可达 / ○内部），类型行带 `Count + Severity range`。
+- **witness_payload = PoC 代码块** —— 真实利用证据是单字符串 `witness_payload`（非虚构的 Steps + Proof JSON），渲染成等宽代码块 + 一键复制。
+- 布局：执行摘要 hero 置顶 + 左 TOC（按类型分组 + 可达性 ●）右正文（键值对齐 + witness PoC）。
+
+MarkdownView 用 `react-markdown` + `rehype-highlight` + `rehype-slug` + `rehype-autolink-headings`（目录锚点）。长报告可折叠。**无表格**（真实报告无 markdown 表格），保留 GFM 表格能力以防未来。
 
 ### 3.3 产物 tab（`DeliverablesTab.tsx`）
 
-`GET /api/workspaces/{ws}/deliverables` → 产物清单 `{vuln_queues, reports}` + 文件树。
+`GET /api/workspaces/{ws}/deliverables` → 产物清单 + 文件树。两区域：
 
-- `FileTree` 组件渲染 deliverables 目录树（含 `whitebox/`/`blackbox/` 子目录，新旧布局兼容——后端已归一）。
-- 点击文件：
-  - `.md` → MarkdownView 预览。
-  - `.json`（`*_exploitation_queue.json` / `attack_chains.json` / `code_index.json` 等）→ JSON 树查看器（折叠/展开），空 `[]`（如 attack_chains 常态）优雅显示"无数据"。
-  - 其他 → 下载。
-- 漏洞队列 JSON 重点呈现：`vulnerabilities[]` 渲染成卡片（ID / vulnerability_type / externally_exploitable 徽章 / confidence / source_endpoint），点击展开详情。
+**① 漏洞聚合网格（signature，置顶）** —— 跨所有 `*_exploitation_queue.json` 聚合 `vulnerabilities[]`，一屏看全（终端要 cat 多个 queue 自己拼，这是 web 增量价值）。每张卡片：
+- 标题行：`ID` + `vulnerability_type` + 徽章组
+- 徽章：`externally_exploitable` ●可达（跨 ReportTab 统一）+ **`merge_source` 双轨徽章**（`llm-only`→[💭LLM轨] / `gitnexus-only`→[🔍GN轨] / `both`→[✓双轨确认]，色板对齐 LiveTab：LLM magenta / GitNexus cyan）+ `confidence`
+- 摘要：`source_endpoint` · `vulnerable_code_location`
+- 展开详情：`missing_defense` / `exploitation_hypothesis` / `suggested_exploit_technique` / `notes`（大段，Witness payloads 嵌文本内）
+
+> 真实字段说明：exploitation_queue 的 `evidence_chain`/`source_track`/`witness_payload`/`path`/`verdict` 在 NodeGoat **全为 null**，不作为卡片字段；真实可用结构化字段为 `missing_defense`/`exploitation_hypothesis`/`suggested_exploit_technique`。
+> **injection 类无独立 queue**（真实数据缺口，NodeGoat 仅 `injection_analysis_deliverable.md` + 报告 md）：聚合网格标注「injection 漏洞见报告 / analysis_deliverable」，不假装聚合全。
+
+**② 文件树**（`FileTree` 渲染 deliverables 目录，含 `whitebox/`/`blackbox/`，新旧布局后端已归一），点击按类型分流：
+- `*_exploitation_queue.json` → 复用①的漏洞卡片（不另起 JSON 树）
+- `*_findings.md` → MarkdownView，**标注「≈ 对应 `*_llm_queue.json`」**（两者逐字同内容，不重复呈现）
+- 其他 `.md`（`comprehensive_report` / `*_analysis_deliverable.md` / `recon` / `pre_recon` / `code_index_summary`）→ MarkdownView；`comprehensive_report.md` 标「⤴ 跳 ReportTab」
+- 空数组 JSON（`attack_chains.json` / `route_chains.json` / `*_gitnexus_queue.json` 常态 `[]`）→ 「无数据（常态空）」优雅空态
+- 大 JSON（`code_index.json` 可达 100KB+）→ JSON 树查看器 + **虚拟滚动**（react-window）
+- 其他 `.json`（`audit_plan` / `entry_points` / `parameter_graph` / `framework_analysis` / `frontend_mapping` / `auth_config_scan`）→ JSON 树查看器（折叠/展开）
+- 其他类型 → 下载
+
+**跨 tab 统一**：可达性 ●、双轨语义色（LLM 💭 magenta / GitNexus 🔍 cyan）与 LiveTab 一致。
 
 ### 3.4 日志 tab（`LogsTab.tsx`）
 
@@ -236,9 +266,11 @@ function useEventSource<T>(url: string): { events: T[]; status: "open"|"closed"|
 | `useEventSource.test.ts` | 事件累积 / scan_end 关闭 / 重连带 Last-Event-ID |
 | `DashboardPanel.test.tsx` | 状态条字段渲染 / 运行中 agent 行 / elapsed 自增 |
 | `LogStream.test.tsx` | 按 category 上色 / 事件渲染 |
-| `MarkdownView.test.tsx` | 标题/代码块/TOC 锚点 / 两种报告结构 |
+| `MarkdownView.test.tsx` | 执行摘要 hero/折叠 + TOC 按类型+可达性 ● + 键值对齐 + witness PoC + 两种字段变体 |
+| `DeliverablesTab.test.tsx` | 漏洞聚合网格 + `merge_source` 双轨徽章 + 可达性 ● + injection 无 queue 标注 + findings≈llm_queue 等价 + 空态 / 大 JSON 虚拟滚动 |
+| `OverviewTab.test.tsx` | 阶段瀑布(动态阶段集) + 大数字 + agent 明细 `attempt_number`/`error` 重试分级标色 + status 矛盾兜底 + 联动 child_workspaces |
 | `YamlEditor.test.tsx` | yaml parse 校验 / 保存/直接运行 |
-| `ScanNewPage.test.tsx` | 类型切换动态表单 / workspace 名冲突弹确认 |
+| `ScanNewPage.test.tsx` | 3 类 segmented 切换动态字段 + 黑盒 `--latest` 勾选/不勾选传参 + workspace 名冲突断点续扫确认 + 提交错误码(400/409/422)处理 |
 | `WorkspaceListPage.test.tsx` | 列表渲染 / 状态徽章 / 联动 🔗 |
 
 vitest + @testing-library/react。**不 mock 后端真实响应**——用 MSW（Mock Service Worker）模拟 API + SSE，对齐子项目 1 的 ndjson schema。
@@ -258,5 +290,5 @@ vitest + @testing-library/react。**不 mock 后端真实响应**——用 MSW�
 
 1. **reducer 与 core 漂移**：core 的 `DashboardState.apply` 若将来改动，前端 reducer 不会自动同步。缓解：reducer 对齐测试 + 总体 spec 契约稳定性条款（改 core apply 要同步前端）。
 2. **大日志文件渲染**：`agents/*.log` 可达 100KB+，全量渲染卡顿。缓解：虚拟滚动（react-window）或分页 tail。
-3. **报告结构差异**：两种报告结构（静态分析 vs 利用证据）TOC 生成要兼容。缓解：MarkdownView 从实际标题动态生成 TOC，不写死结构。
+3. **报告字段两变体**：Injection 类 `- **key:** value` 与 XSS/Auth/Authz/SSRF 类 `**Summary:**`+`**Notes:**` 结构不同，键值渲染要兼容。缓解：MarkdownView 检测 `### {ID}` 下两种加粗键值包裹、统一渲染成对齐键值行；TOC 从真实 H2/H3 动态生成，不写死结构。
 4. **SSE 长连接稳定性**：扫描可能跑几十分钟，SSE 连接稳定性 + 重连续传是体验关键。缓解：useEventSource 重连 + Last-Event-ID 续传 + 状态条显示连接状态。

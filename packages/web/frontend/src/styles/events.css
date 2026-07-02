@@ -1,0 +1,146 @@
+:root {
+  --void: #0B0F14; --panel: #141A22; --ink: #C9D1D9; --trace: #6B7785; --rule: #1F2733;
+  --cyan: #22D3EE;   /* phase / info / GitNexus */
+  --blue: #58A6FF;   /* agent start */
+  --green: #3FB950;  /* ok / done / 双轨确认 */
+  --red: #F85149;    /* error / fail / exploited 可达 */
+  --yellow: #D29922; /* tool / warn */
+  --magenta: #BC8CFF;/* llm / LLM 轨 */
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+}
+body { background: var(--void); color: var(--ink); font-family: var(--font-sans); margin: 0; }
+.mono { font-family: var(--font-mono); }
+.serif { font-family: var(--font-serif); }
+.trace { color: var(--trace); }
+.ev-phase     { color: var(--cyan); font-weight: bold; }
+.ev-agent     { color: var(--blue); }
+.ev-agent-ok  { color: var(--green); }
+.ev-agent-fail{ color: var(--red); }
+.ev-tool      { color: var(--yellow); }
+.ev-llm       { color: var(--magenta); }
+.ev-error     { color: var(--red); font-weight: bold; }
+.ev-info      { color: var(--cyan); }
+.ev-warn      { color: var(--yellow); }
+.status-badge { font-size: 0.85em; padding: 1px 6px; border: 1px solid var(--rule); border-radius: 3px; }
+/* braille spinner（对齐 core rich renderer） */
+.spinner::before { content: "⠋"; animation: spin 1.05s steps(1) infinite; display: inline-block; width: 1ch; color: var(--cyan); }
+@keyframes spin {
+  0%   { content: "⠋"; } 10% { content: "⠙"; } 20% { content: "⠹"; } 30% { content: "⠸"; }
+  40%  { content: "⠼"; } 50% { content: "⠴"; } 60% { content: "⠦"; } 70% { content: "⠧"; }
+  80%  { content: "⠇"; } 90% { content: "⠏"; }
+}
+@media (prefers-reduced-motion: reduce) { .spinner::before { animation: none; content: "•"; } }
+
+/* === Task 12 assembly: deferred rules（Tasks 7-12 组件 emit 但此前无规则的类）===
+   operator-console 暗主题：#0B0F14 底、Plex Mono 数据行、复用上面已定义的语义色变量。
+   目标：组件视觉自洽，非未样式化 div。极简，不镀金。 */
+
+/* 通用页面容器 + 标题 */
+.page { padding: 20px 28px; max-width: 1400px; margin: 0 auto; }
+.page h1 { font-family: var(--font-serif); font-size: 1.5em; margin: 0 0 16px; }
+.page h1 button, .page h1 a button {
+  background: var(--panel); border: 1px solid var(--rule); color: var(--ink);
+  padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 0.85em;
+}
+.empty, .error { color: var(--trace); }
+
+/* ledger 表（WorkspaceListPage / OverviewTab AgentTable 共享）*/
+.ledger { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.ledger th { color: var(--trace); text-align: left; font-weight: normal; border-bottom: 1px solid var(--rule); padding: 4px 10px; }
+.ledger td { padding: 4px 10px; border-bottom: 1px solid var(--rule); }
+.ledger-row { color: var(--ink); }
+.ledger-child td { border-bottom: none; font-size: 0.88em; }
+
+/* status-bar（WorkspaceListPage 行首色条）+ 行级状态色 */
+.status-bar { display: inline-block; width: 3px; height: 14px; vertical-align: middle; margin-right: 6px; background: var(--trace); }
+.status-running { background: var(--cyan); }
+.status-completed, .status-done { background: var(--green); color: var(--green); }
+.status-failed, .status-killed { background: var(--red); color: var(--red); }
+.status-crashed { background: var(--yellow); color: var(--yellow); }
+
+/* badge（VulnCard 双轨徽章 + 置信度）*/
+.badge { font-size: 0.78em; padding: 1px 6px; border: 1px solid var(--rule); border-radius: 3px; margin-left: 4px; }
+
+/* === ScanNewPage（Task 10）=== */
+.scan-page .segmented { display: inline-flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.segmented button { background: var(--panel); color: var(--ink); border: none; padding: 6px 16px; cursor: pointer; border-right: 1px solid var(--rule); }
+.segmented button:last-child { border-right: none; }
+.seg-active { background: var(--cyan) !important; color: var(--void) !important; }
+.form-area, .correlation-area { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+.form-area label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.form-area input[type="text"], .form-area input:not([type]), .form-area select, .form-area input[type="checkbox"] { accent-color: var(--cyan); }
+.form-area input, .correlation-area input { background: var(--void); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 8px; font-family: var(--font-mono); }
+.git-extra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-left: 12px; }
+.confirm-dialog { background: var(--panel); padding: 10px 14px; border-radius: 4px; border-left: 3px solid var(--yellow); }
+.confirm-continue { background: var(--yellow); color: var(--void); border: none; padding: 4px 12px; border-radius: 3px; cursor: pointer; font-weight: bold; }
+.confirm-dialog button { background: var(--panel); border: 1px solid var(--rule); color: var(--ink); padding: 4px 10px; border-radius: 3px; margin-left: 8px; cursor: pointer; }
+.err-banner { padding: 8px 12px; background: var(--panel); border-radius: 4px; margin: 12px 0; max-width: 640px; }
+.submit-btn { background: var(--cyan); color: var(--void); border: none; padding: 8px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 16px; }
+.submit-btn:disabled { background: var(--panel); color: var(--trace); cursor: not-allowed; }
+.yaml-editor { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+
+/* === WorkspaceDetail shell（Task 12）=== */
+.workspace-detail { padding: 16px 28px; max-width: 1400px; margin: 0 auto; }
+.workspace-detail h2 { font-family: var(--font-mono); margin: 0 0 12px; }
+.tab-nav { display: flex; gap: 0; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
+.tab-nav a { color: var(--trace); text-decoration: none; padding: 8px 18px; border-bottom: 2px solid transparent; font-size: 0.95em; }
+.tab-nav a:hover { color: var(--ink); }
+.tab-active { color: var(--cyan) !important; border-bottom-color: var(--cyan) !important; }
+.tab-body { min-height: 300px; }
+
+/* === OverviewTab（Task 12）=== */
+.overview { display: flex; flex-direction: column; gap: 20px; }
+.ov-statusbar { font-size: 0.95em; }
+.big-numbers { display: flex; gap: 36px; }
+.big-numbers > div { display: flex; flex-direction: column; }
+.big { font-size: 1.8em; font-weight: bold; color: var(--ink); }
+.phase-waterfall h3 { font-family: var(--font-serif); margin: 0 0 8px; font-size: 1em; }
+.pw-bars { display: flex; align-items: flex-end; gap: 2px; height: 80px; }
+.pw-bar { background: var(--cyan); min-width: 60px; padding: 4px; color: var(--void); border-radius: 2px 2px 0 0; overflow: hidden; }
+.pw-name { font-size: 0.78em; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-meta { font-size: 0.7em; opacity: 0.85; }
+.agent-table th { color: var(--trace); }
+
+/* === LogsTab（Task 12）=== */
+.logs-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; height: calc(100vh - 180px); }
+.logs-files { border-right: 1px solid var(--rule); overflow-y: auto; padding-right: 8px; }
+.log-file { padding: 3px 8px; cursor: pointer; border-radius: 3px; font-size: 0.85em; color: var(--ink); }
+.log-file:hover { background: var(--panel); }
+.log-file.sel { background: var(--panel); color: var(--cyan); }
+.logs-content { overflow: auto; }
+.logs-content pre { white-space: pre-wrap; word-break: break-word; font-size: 0.82em; line-height: 1.5; }
+.log-row { font-size: 0.85em; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-type { color: var(--trace); font-size: 0.9em; margin: 0 4px; }
+
+/* === LiveTab（Task 12）=== */
+.live-tab { display: flex; flex-direction: column; gap: 12px; }
+.dashboard-panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 14px; }
+.dp-bar { font-size: 0.95em; }
+.dp-agents { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.dp-agent { font-size: 0.85em; }
+.log-stream { max-height: 480px; overflow-y: auto; background: var(--void); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 10px; font-size: 0.82em; }
+
+/* === DeliverablesTab（Task 11）=== */
+.deliverables-layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+.vuln-grid h3 { font-family: var(--font-serif); margin: 0 0 10px; }
+.deliverables-side { border-left: 1px solid var(--rule); padding-left: 16px; max-height: calc(100vh - 200px); overflow: auto; }
+.file-tree { list-style: none; margin: 0; padding: 0; font-size: 0.88em; }
+.file-tree ul { list-style: none; padding-left: 0; }
+.ft-row { padding: 1px 0; }
+.ft-toggle { background: none; border: none; color: var(--ink); cursor: pointer; padding: 0; font-family: inherit; }
+.ft-caret { color: var(--trace); }
+.ft-file { cursor: pointer; color: var(--ink); }
+.ft-file:hover { color: var(--cyan); }
+.ft-name { color: var(--ink); }
+
+/* VulnCard（Task 11）*/
+.vuln-card { border: 1px solid var(--rule); border-radius: 4px; margin-bottom: 6px; background: var(--panel); }
+.vuln-card.reachable { border-left: 3px solid var(--red); }
+.vc-head { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.9em; }
+.vc-id { color: var(--red); font-weight: bold; }
+.vc-detail { padding: 8px 14px; border-top: 1px solid var(--rule); font-size: 0.9em; line-height: 1.6; }
+.vc-detail code { color: var(--cyan); }
+.vc-notes { color: var(--trace); }
+
