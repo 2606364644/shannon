@@ -94,6 +94,8 @@ async def test_auth_judge_multiturn_when_candidates_and_appends_queue(tmp_path, 
     assert len(q["vulnerabilities"]) == 3, (
         f"queue 应追加到 3 条，实际 {len(q['vulnerabilities'])}"
     )
+    # 2 条 config 类预置条目必须原样保留（防回归：丢/重排一条但 count 仍 == 3）。
+    assert {"AUTH-GN-COOKIE-1", "AUTH-GN-HSTS-1"} <= {v["ID"] for v in q["vulnerabilities"]}
     # 追加的 verdict 条目标 source_track=gitnexus
     appended = q["vulnerabilities"][-1]
     assert appended["source_track"] == "gitnexus"

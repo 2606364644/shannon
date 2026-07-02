@@ -449,7 +449,7 @@ async def run_auth_gitnexus_judge(input: ActivityInput) -> dict:
     1. build_auth_gitnexus_track 读 code_index.json → 三信号识别 auth handler → 跑检查器
        → 产 0-N AuthCandidate + markdown 表格。
     2. candidate_count>0 → 多轮 verdict_agent（run_gitnexus_verdict_agent）判定；保守，
-       不确定判 vulnerable。candidate_count==0 → 跳过判定（探索段 T6）。
+       不确定判 vulnerable。candidate_count==0 → 触发自主探索（多轮 agent 读 auth 源码，T6）。
     3. parse_lenient 容错解析；verdict 标 source_track="gitnexus"。
     4. 读现有 auth_gitnexus_queue.json（若存在）+ 追加逻辑类 verdict → atomic_write_json。
     """
@@ -474,7 +474,7 @@ async def run_auth_gitnexus_judge(input: ActivityInput) -> dict:
                 if candidate_count == 0:
                     await _session.log_info(
                         f"auth GitNexus 轨：0 候选（handler={handler_count}, "
-                        f"entry_point={entry_point_total}）→ 跳过 LLM 判定（探索段 T6）。"
+                        f"entry_point={entry_point_total}）→ 触发自主探索（多轮 agent 读 auth 源码）。"
                         f"handler=0 常因入口点未识别（语言误判/调用图未就绪）。",
                         "warning",
                     )
@@ -576,23 +576,23 @@ async def run_auth_gitnexus_judge(input: ActivityInput) -> dict:
                 except Exception:
                     pass
 
-        # 追加 auth_gitnexus_queue.json（config_scan 先产；读现有 + 合并，非覆盖）。
-        # 注意：写操作放在 track_step 块外，与 authz 写策略一致（authz 在块内写，但块外
-        # 写亦安全——atomic_write_json 保证原子性，且本 activity 唯一写点）。
-        queue_path = deliverables / "auth_gitnexus_queue.json"
-        existing: list[dict] = []
-        if queue_path.exists():
-            try:
-                existing = json.loads(queue_path.read_text()).get("vulnerabilities", [])
-            except Exception:
-                existing = []
-        atomic_write_json(queue_path, {"vulnerabilities": existing + vulnerabilities})
+            # 追加 auth_gitnexus_queue.json（config_scan 先产；读现有 + 合并，非覆盖）。
+            # 写操作放在 track_step 块内（对标 authz activities.py:421-430），归因到 step span
+            # 且受 span 的错误边界覆盖；atomic_write_json 保证原子性，本 activity 唯一写点。
+            queue_path = deliverables / "auth_gitnexus_queue.json"
+            existing: list[dict] = []
+            if queue_path.exists():
+                try:
+                    existing = json.loads(queue_path.read_text()).get("vulnerabilities", [])
+                except Exception:
+                    existing = []
+            atomic_write_json(queue_path, {"vulnerabilities": existing + vulnerabilities})
 
-        return {
-            "candidate_count": candidate_count,
-            "verdict_count": len(vulnerabilities),
-            "handler_count": handler_count,
-        }
+            return {
+                "candidate_count": candidate_count,
+                "verdict_count": len(vulnerabilities),
+                "handler_count": handler_count,
+            }
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
