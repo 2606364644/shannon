@@ -24,6 +24,7 @@ from shannon_core.code_index.parameter_models import (
     IntraResult,
     PropagationStep,
     SinkCallSite,
+    SlotContext,
     SourcePoint,
     TaintFlow,
 )
@@ -454,6 +455,9 @@ def propagate_backward_across_chains(
                         steps_fwd.extend(
                             s for s in sink_intra.local_steps if s.to_param == sink.id
                         )
+                    # 透传 sink 的危险槽位到 flow(否则 sink_slot=GENERIC 被
+                    # _route_for 拒掉 inj/ssrf,sanitizer 信息到不了 verdict prompt)。
+                    primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
                     flows.append(TaintFlow(
                         flow_id=f"{sp.entry_point_id}->{sink.id}",
                         entry_point_id=sp.entry_point_id,
@@ -461,6 +465,8 @@ def propagate_backward_across_chains(
                         source_type=sp.source_type,  # 精确,非硬编码 QUERY_PARAM
                         propagation_steps=steps_fwd,
                         sink_call_site_id=sink.id,
+                        sink_slot=primary.slot if primary else SlotContext.GENERIC,
+                        tainted_arg_index=primary.arg_index if primary else -1,
                         confidence=min(
                             (s.confidence for s in steps_fwd),
                             default=0.9,
