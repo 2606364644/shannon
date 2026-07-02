@@ -221,10 +221,7 @@ _OPEN_REDIRECT_HINTS = ("redirect", "open redirect", "jump", "next", "location h
 
 def _is_open_redirect(vuln: Any) -> bool:
     technique = (getattr(vuln, "suggested_exploit_technique", None) or "").lower()
-    if "redirect" in technique:
-        return True
-    witness = (getattr(vuln, "witness_payload", None) or "").lower()
-    return witness.startswith(("http://", "https://")) and "redirect" in technique
+    return any(hint in technique for hint in _OPEN_REDIRECT_HINTS)
 
 
 def _base_spec(vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand) -> HttpRequestSpec:

@@ -196,3 +196,11 @@ def test_template_auth_returns_none_needs_llm():
     v = SimpleNamespace(ID="AUTH-1", externally_exploitable=True,
                         exploitation_hypothesis="missing jwt verify")
     assert build_template_spec(v, "auth", "https://t.example.com", {}, ConfidenceBand.HIGH) is None
+
+
+def test_template_no_witness_returns_none_defers_to_llm():
+    """inj/xss/ssrf without witness_payload → None (defers to LLM)."""
+    v = SimpleNamespace(ID="INJ-X", vulnerability_type="SQLi", externally_exploitable=True,
+                        source="GET /api/users?id=1", witness_payload="",
+                        verdict=None, confidence="low")
+    assert build_template_spec(v, "injection", "https://t.example.com", {}, ConfidenceBand.SUSPECTED) is None
