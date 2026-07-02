@@ -105,3 +105,42 @@ def test_chain_verdict_keeps_standard_retry():
         f"chain_verdict 应保持 retry_for('standard')（spec-1a 只切 authz_judge），"
         f"实际为 {m.group(1)}"
     )
+
+
+def test_entry_point_fusion_not_gated_by_llm_track():
+    """G6: run_entry_point_fusion 不被 enable_llm_track 门控（schema 源关 LLM 轨时仍跑）。
+
+    断言 workflows.py 中 run_entry_point_fusion 调用在 if enable_llm_track 块外。
+    """
+    src = inspect.getsource(workflows)
+
+    # 找 run_entry_point_fusion 的 execute_activity 调用块的 await 行（真正
+    # 决定门控的缩进层级——`activities.run_X` 参数行始终比 await 多一级缩进，
+    # 无法区分"在 if 内（await=20, activities=24）"与"同级（await=16,
+    # activities=20）"）。锚 await 行才稳。
+    fusion_line = None
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        if "run_entry_point_fusion" in line and "activities." in line:
+            # 回溯到对应的 await workflow.execute_activity( 行
+            for k in range(i - 1, -1, -1):
+                if "execute_activity(" in lines[k] and "workflow." in lines[k]:
+                    fusion_line = k
+                    break
+            break
+
+    assert fusion_line is not None, "找不到 run_entry_point_fusion 的 await execute_activity 调用"
+
+    fusion_indent = len(lines[fusion_line]) - len(lines[fusion_line].lstrip())
+    # 找 fusion 之前最近的 if enable_llm_track
+    prev_enable_indent = None
+    for j in range(fusion_line - 1, -1, -1):
+        if "if input.enable_llm_track:" in lines[j]:
+            prev_enable_indent = len(lines[j]) - len(lines[j].lstrip())
+            break
+    if prev_enable_indent is not None:
+        assert fusion_indent <= prev_enable_indent, (
+            f"run_entry_point_fusion 应在 enable_llm_track 块外"
+            f"（await 缩进 {fusion_indent} <= if {prev_enable_indent}），"
+            "G6 要求 schema 源关 LLM 轨时仍跑"
+        )

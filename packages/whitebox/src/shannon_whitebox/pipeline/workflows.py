@@ -178,12 +178,14 @@ class WhiteboxScanWorkflow:
                         retry_policy=retry_for("standard"),
                     )
 
-                    # Entry point fusion: merge deterministic + LLM discoveries (needs LLM deliverable)
-                    await workflow.execute_activity(
-                        activities.run_entry_point_fusion, act_input,
-                        start_to_close_timeout=timedelta(minutes=2),
-                        retry_policy=retry_for("standard"),
-                    )
+                # Entry point fusion: schema/convention 无条件跑（纯确定性 + LLM 源靠
+                # deliverable 存在性内部 skip）；G6 解耦——不再被 enable_llm_track 门控，
+                # 让关 LLM 轨时 GitNexus 轨仍融合 OpenAPI schema 源（兜底不丢入口）。
+                await workflow.execute_activity(
+                    activities.run_entry_point_fusion, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
+                )
 
                 # Adjudicate merged entry points by confidence
                 await workflow.execute_activity(
