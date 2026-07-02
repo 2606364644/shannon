@@ -52,3 +52,31 @@ async def test_creates_parent_dir(tmp_path):
     w = CorrelationEventWriter(tmp_path / "nested" / "dir" / "e.ndjson")
     await w.phase("correlation", "started")
     assert (tmp_path / "nested" / "dir" / "e.ndjson").exists()
+
+
+@pytest.mark.asyncio
+async def test_edge_maps_ok_to_completed(tmp_path):
+    w = CorrelationEventWriter(tmp_path / "e.ndjson")
+    await w.edge("a->b", "ok")
+    r = _rows(tmp_path / "e.ndjson")[-1]
+    assert r["status"] == "completed"
+    assert "raw=ok" in r["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edge_maps_error_to_failed(tmp_path):
+    w = CorrelationEventWriter(tmp_path / "e.ndjson")
+    await w.edge("a->b", "error", "network down")
+    r = _rows(tmp_path / "e.ndjson")[-1]
+    assert r["status"] == "failed"
+    assert "network down" in r["detail"]
+    assert "raw=error" in r["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edge_passes_through_spec_status(tmp_path):
+    w = CorrelationEventWriter(tmp_path / "e.ndjson")
+    await w.edge("a->b", "completed")
+    r = _rows(tmp_path / "e.ndjson")[-1]
+    assert r["status"] == "completed"
+    assert r["detail"] is None  # spec 值透传，无 raw 追加

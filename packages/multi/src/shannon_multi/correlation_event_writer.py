@@ -12,6 +12,11 @@ from pathlib import Path
 
 import aiofiles
 
+# edge() 层单点映射：orchestrator 透传的 raw edge 状态（ok/unverified/error）
+# → spec L469 钉死的硬契约状态（started|completed|failed）。
+# repo()/phase()/scan_end() 已用 spec 值，不动。
+_EDGE_STATUS_MAP = {"ok": "completed", "unverified": "completed", "error": "failed"}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -40,9 +45,12 @@ class CorrelationEventWriter:
                             "name": name, "status": status})
 
     async def edge(self, name: str, status: str, detail: str | None = None) -> None:
+        mapped = _EDGE_STATUS_MAP.get(status, status)
+        if mapped != status:  # 发生映射，保留 raw 进 detail 以便追溯
+            detail = f"raw={status}" if detail is None else f"{detail} (raw={status})"
         await self._append({"ts": _now_iso(), "category": "CONTROL",
                             "type": "correlation_progress", "node": "edge",
-                            "name": name, "status": status, "detail": detail})
+                            "name": name, "status": mapped, "detail": detail})
 
     async def scan_end(self, status: str) -> None:
         await self._append({"ts": _now_iso(), "category": "CONTROL",
