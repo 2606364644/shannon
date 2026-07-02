@@ -131,6 +131,8 @@ ScanManager.execute(scan_type, params):
 ─────────────────────────────────
 [白盒/黑盒字段区]
   代码来源: ○ 本地路径 [____]  ○ git URL [____]   (git URL 后端注入 GitLab 凭证)
+     [仅 git URL] 分支(可选) [____]  commit(可选) [____]  (commit 优先;本地路径模式不显示)
+     ☐ 强制重新 clone (已存在时跳过 pull 直接删了重 clone)
   目标 URL: [____]
   workspace 名: [____]  (可空,自动生成 {repo_name}_{timestamp} 保唯一)
   [仅黑盒] ☑ 复用最新白盒结果 (加 --latest)
@@ -146,7 +148,7 @@ ScanManager.execute(scan_type, params):
      · 「直接运行」→ 后端临时落盘到 configs/web-multi-tmp-{ts}.yaml,扫完保留供回看
 ```
 
-### git clone 凭证（GitLab HTTP Basic）
+### git clone 凭证与 branch/commit（GitLab HTTP Basic）
 
 用户在前端只填**裸 URL**（如 `https://gitlab.futunn.com/webinfra/passport_moomoo_nodejs.git`），后端 `GitFetcher`：
 
@@ -155,6 +157,22 @@ ScanManager.execute(scan_type, params):
 - clone 到 `repos/<repo_name>/`（URL 末段去 `.git`）。
 - 凭证缺失 → 友好报错（不泄露是否私有仓）；clone 失败 → 透传 git stderr（**脱敏 token**）。
 - **重复 clone 策略**：`repos/<name>/` 已存在 → `git pull` 更新（而非重新 clone，省带宽）；pull 失败（如本地改动冲突）→ 删除目录后重新 clone 作为 fallback。前端表单可勾选「强制重新 clone」（跳过 pull 直接删了重 clone）。
+
+**branch/commit 支持（仅单仓库 git URL 模式）**：
+
+表单 git URL 模式加两个可选字段：
+
+```
+git URL:      [____]
+分支(可选):   [____]   默认仓默认分支
+commit(可选): [____]   指定则 checkout 到此 commit(优先级高于分支)
+```
+
+- GitFetcher clone 后 checkout：指定分支 → `git clone --branch <branch>`；指定 commit → clone 后 `git fetch --all && git checkout <commit>`（commit 可能不在默认分支，需先 fetch 全部分支）。
+- **commit 优先级高于 branch**：两者都填时 checkout 到 commit（branch 仅作 fetch hint）。
+- 现有扫描器 CLI **无 branch/commit 参数**（已核实 `whitebox/cli/main.py` 无此参数），扫描扫的是 `repos/<name>/` 当前工作区状态——GitFetcher 在交付给 CLI 前完成 checkout 即可，**CLI 零改**。
+- **本地路径模式不支持** branch/commit：本地路径是用户自管代码，Web 不擅自 checkout 改用户工作区状态。
+- **联动扫描 v1 不支持** branch/commit：`MultiRepoConfig` schema（`packages/core/src/shannon_core/models/multi_repo_config.py`）无 branch/commit 字段，支持需改 schema + parser + orchestrator 现扫前 checkout，超 v1 薄封装边界；标 follow-up（联动多 repo 各自分支/commit 需求时再扩 schema）。
 
 ---
 
@@ -405,4 +423,4 @@ GITLAB_USER / GITLAB_TOKEN          # git clone 凭证
 
 ## 范围与拆分
 
-本 spec 聚焦"Web 平台 v1"：开启扫描（三类型）+ 结果展示（HTML/产物/日志）+ 实时 dashboard 复刻。后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF、**黑盒 `--correlated-workspace` 衔接联动产出做后续验证**（`blackbox/cli/main.py:51` 已有该 flag，v1 不暴露到表单）。规模适中，单个实现计划可覆盖，无需进一步拆分。
+本 spec 聚焦"Web 平台 v1"：开启扫描（三类型）+ 结果展示（HTML/产物/日志）+ 实时 dashboard 复刻。后续可演进项（不在本 spec）：跨 workspace 合并视图、漏洞趋势统计、多用户/鉴权、报告导出 PDF、**黑盒 `--correlated-workspace` 衔接联动产出做后续验证**（`blackbox/cli/main.py:51` 已有该 flag，v1 不暴露到表单）、**联动扫描指定各 repo 的 branch/commit**（需扩 `MultiRepoConfig` schema + orchestrator checkout，v1 单仓库 git URL 模式已支持 branch/commit）。规模适中，单个实现计划可覆盖，无需进一步拆分。
