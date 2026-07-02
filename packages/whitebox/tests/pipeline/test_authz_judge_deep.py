@@ -215,7 +215,7 @@ async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
     assert explored["n"] == 1, "0 候选时应触发自主探索"
     # entry_points_summary 变量被填充（非裸 placeholder）
     assert explored["prompt"] is not None
-    assert "{{entry_points_summary}}" not in explored["prompt"], "变量应被填充"
+    assert "{{ENTRY_POINTS_SUMMARY}}" not in explored["prompt"], "变量应被填充（模板用大写 placeholder）"
 
 
 def _fake_build_result(*, markdown="## 候选", dom=1, fw=0, http=1, total=1):

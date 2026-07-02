@@ -395,8 +395,8 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     },
                     audit_session=get_audit_session(),
                 )
-                raw = result.structured_output if hasattr(result, "structured_output") else None
-                if raw is None and getattr(result, "text", None):
+                raw = result.structured_output
+                if raw is None and result.text:
                     raw = result.text  # fallback to text; parse_lenient handles
                 parsed = VulnerabilityQueue.parse_lenient(
                     raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
@@ -928,7 +928,7 @@ async def run_gitnexus_verdict_agent(
     prompt: str,
     repo_path: str,
     structured_output_schema: dict | None = None,
-    audit_session=None,
+    audit_session: "AuditSession | None" = None,
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
