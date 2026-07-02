@@ -461,3 +461,122 @@ def empty_poc_md(track: str) -> str:
     """空表兜底：无 externally_exploitable 漏洞时调用。"""
     track_cn = "白盒" if track == "whitebox" else "黑盒"
     return f"# 可利用漏洞 PoC 集合（{track_cn}）\n\n本次扫描无 externally_exploitable 漏洞，未生成 PoC。\n"
+
+
+# Task 7: generate() 主流程（编排 + 过滤 + LLM 仲裁 + 降级 + 读写）
+import json
+import logging
+
+from shannon_core.models.queue_schemas import VulnerabilityQueue
+
+logger = logging.getLogger(__name__)
+_POC_FILENAME = "exploitable_poc_collection.md"
+
+
+def _resolve_input(deliverables_dir: Path, filename: str) -> Path | None:
+    """先在 track 目录找，不存在回退 parent（兼容老平铺 session）。"""
+    p = deliverables_dir / filename
+    if p.exists():
+        return p
+    parent = deliverables_dir.parent / filename
+    if parent.exists():
+        return parent
+    return None
+
+
+def _load_accepted_ids(deliverables_dir: Path, vuln_class: str) -> set[str]:
+    p = _resolve_input(deliverables_dir, f"{vuln_class}_exploit_verdicts.json")
+    if not p:
+        return set()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return set(data.get("accepted_ids", []))
+    except Exception:
+        return set()
+
+
+def _spec_from_llm_guess(guess: dict, vuln: Any, vuln_class: str, band: ConfidenceBand) -> HttpRequestSpec:
+    return HttpRequestSpec(
+        method=(guess.get("method") or "GET").upper(),
+        path=guess.get("path") or "/",
+        query={k: str(v) for k, v in (guess.get("query") or {}).items()},
+        headers={k: str(v) for k, v in (guess.get("headers") or {}).items()},
+        body=guess.get("body"),
+        auth_state=AuthState.UNKNOWN,
+        confidence_band=band,
+        source_id=getattr(vuln, "ID", ""),
+        vuln_class=vuln_class,
+    )
+
+
+class PoCGenerator:
+    @staticmethod
+    async def generate(
+        deliverables_dir: Path,
+        vuln_classes: list[str],
+        target_url: str | None,
+        track: str,
+        *,
+        repo_path: str | None = None,
+        api_key: str | None = None,
+        model_tier: str = "medium",
+    ) -> Path:
+        host = resolve_host(target_url)
+        has_placeholder = (host == "https://TARGET[:PORT]")
+        recon_path = _resolve_input(deliverables_dir, "recon_deliverable.md")
+        endpoints = parse_recon_endpoints(recon_path) if recon_path else {}
+
+        entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
+        for vc in vuln_classes:
+            queue_path = _resolve_input(deliverables_dir, f"{vc}_exploitation_queue.json")
+            if not queue_path:
+                continue
+            try:
+                parsed = VulnerabilityQueue.parse_lenient(queue_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning("poc: queue %s unreadable: %s", vc, exc)
+                continue
+            if parsed.warnings:
+                logger.warning("poc: queue %s lenient: %s", vc, parsed.warnings)
+            accepted = _load_accepted_ids(deliverables_dir, vc)
+            for v in parsed.queue.vulnerabilities:
+                if not getattr(v, "externally_exploitable", False):
+                    continue
+                try:
+                    spec = await PoCGenerator._build_entry(v, vc, host, endpoints, accepted,
+                                                           repo_path=repo_path, api_key=api_key,
+                                                           model_tier=model_tier)
+                    if spec is not None:
+                        entries.append((vc, v, spec))
+                except Exception as exc:  # 单条失败不阻塞其余
+                    logger.warning("poc: build failed for %s: %s", getattr(v, "ID", "?"), exc)
+
+        md = render_poc_md(entries, host, track, has_placeholder=True) if entries else empty_poc_md(track)
+        if not has_placeholder:
+            md = md.replace(_placeholder_block(True), "")  # 无占位符时移除替换块（已由 render 控制，双保险）
+        out = deliverables_dir / _POC_FILENAME
+        out.write_text(md, encoding="utf-8")
+        return out
+
+    @staticmethod
+    async def _build_entry(vuln, vuln_class, host, endpoints, accepted, *,
+                           repo_path, api_key, model_tier) -> HttpRequestSpec | list[HttpRequestSpec] | None:
+        band = classify_confidence(vuln, is_accepted=(getattr(vuln, "ID", "") in accepted))
+        template = build_template_spec(vuln, vuln_class, host, endpoints, band)
+        if template is not None:
+            return template
+        # 模板无法处理（auth / 缺 witness_payload / 缺 path）→ 富信息 LLM
+        method, path = derive_method_path(vuln)
+        info = find_endpoint_info(endpoints, path)
+        recon_ctx = {path or "?": info} if info else {}
+        guess = await llm_fill_gap(vuln, vuln_class, host, recon_ctx,
+                                   repo_path=repo_path or "/tmp/poc-gen",
+                                   api_key=api_key, model_tier=model_tier)
+        if not guess:
+            # LLM 不可用/失败 → 骨架 + 标注
+            spec = _base_spec(vuln, vuln_class, endpoints, band)
+            spec.note = "请求形态未推断（LLM 不可用），需手工补全 body/参数"
+            return spec
+        if guess.get("steps"):
+            return [_spec_from_llm_guess(s, vuln, vuln_class, band) for s in guess["steps"]]
+        return _spec_from_llm_guess(guess, vuln, vuln_class, band)

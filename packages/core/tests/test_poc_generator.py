@@ -290,3 +290,99 @@ def test_render_poc_md_placeholder_block_when_host_missing():
 def test_empty_poc_md():
     md = empty_poc_md("whitebox")
     assert "无 externally_exploitable" in md
+
+
+# Task 7: generate() 主流程
+import json
+from shannon_core.models.queue_schemas import (
+    VulnerabilityQueue, InjectionVulnerability, XssVulnerability,
+)
+from shannon_core.services.poc_generator import PoCGenerator
+
+
+def _wb_queue(tmp_path):
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    q = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJ-1", vulnerability_type="SQLi", externally_exploitable=True,
+            confidence="needs_review", verdict="vulnerable",
+            source="GET /api/users?id=1", witness_payload="' OR '1'='1",
+        ),
+        InjectionVulnerability(
+            ID="INJ-2", vulnerability_type="SQLi", externally_exploitable=False,  # 被过滤
+            confidence="low", source="GET /api/x?id=1", witness_payload="' OR 1=1",
+        ),
+    ])
+    (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(indent=2), encoding="utf-8")
+    (d / "recon_deliverable.md").write_text("# R\n\n## 2.1 Endpoint Security Context\n\n| Method | Path | Auth | Middleware |\n|--|--|--|--|\n| GET | `/api/users` | anon | none |\n", encoding="utf-8")
+    return d
+
+
+async def test_generate_writes_poc_md_and_filters(tmp_path):
+    d = _wb_queue(tmp_path)
+    out = await PoCGenerator.generate(
+        deliverables_dir=d, vuln_classes=["injection"],
+        target_url="https://t.example.com", track="whitebox",
+    )
+    assert out.name == "exploitable_poc_collection.md"
+    md = out.read_text(encoding="utf-8")
+    assert "INJ-1" in md
+    assert "INJ-2" not in md  # externally_exploitable=False 被过滤
+    assert "curl -i" in md
+
+
+async def test_generate_empty_when_all_filtered(tmp_path):
+    d = _wb_queue(tmp_path)
+    # 全部改成不可达
+    q = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(ID="INJ-9", vulnerability_type="SQLi", externally_exploitable=False,
+                               confidence="low", source="GET /a?id=1", witness_payload="x"),
+    ])
+    (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com", "whitebox")
+    assert "无 externally_exploitable" in out.read_text(encoding="utf-8")
+
+
+async def test_generate_placeholder_host_when_target_empty(tmp_path):
+    d = _wb_queue(tmp_path)
+    out = await PoCGenerator.generate(d, ["injection"], None, "whitebox")
+    md = out.read_text(encoding="utf-8")
+    assert "TARGET[:PORT]" in md and "⚠️ 使用前替换" in md
+
+
+async def test_generate_blackbox_uses_accepted_ids(tmp_path):
+    d = tmp_path / "deliverables" / "blackbox"
+    d.mkdir(parents=True)
+    q = VulnerabilityQueue(vulnerabilities=[
+        XssVulnerability(ID="XSS-1", vulnerability_type="Reflected", externally_exploitable=True,
+                         confidence="low", source="GET /share?locale=x",
+                         witness_payload="</script><script>1</script>", verdict=None),
+    ])
+    (d / "xss_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    (d / "xss_exploit_verdicts.json").write_text(
+        json.dumps({"vuln_class": "xss", "accepted_ids": ["XSS-1"], "rejected": []}), encoding="utf-8")
+    out = await PoCGenerator.generate(d, ["xss"], "https://t.example.com", "blackbox")
+    md = out.read_text(encoding="utf-8")
+    assert "✓ 已确认" in md  # accepted_ids → CONFIRMED
+
+
+async def test_generate_llm_failure_degrades_gracefully(tmp_path):
+    """auth 漏洞走 LLM；LLM 失败 → 退骨架+标注，不阻塞。"""
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    from shannon_core.models.queue_schemas import AuthVulnerability
+    q = VulnerabilityQueue(vulnerabilities=[
+        AuthVulnerability(ID="AUTH-1", vulnerability_type="missing-jwt", externally_exploitable=True,
+                          confidence="needs_review", exploitation_hypothesis="no verify",
+                          suggested_exploit_technique="forge jwt"),
+    ])
+    (d / "auth_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    import shannon_core.services.poc_generator as mod
+    async def boom(prompt, **kw):
+        raise RuntimeError("llm down")
+    mod.run_claude_prompt = boom  # 模拟不可用
+    out = await PoCGenerator.generate(d, ["auth"], "https://t.example.com", "whitebox", repo_path="/tmp/x")
+    md = out.read_text(encoding="utf-8")
+    assert "AUTH-1" in md  # 仍产出条目
+    assert "请求形态未推断" in md or "curl -i" in md
