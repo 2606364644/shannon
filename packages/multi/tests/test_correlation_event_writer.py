@@ -74,6 +74,26 @@ async def test_edge_maps_error_to_failed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_edge_maps_low_to_failed(tmp_path):
+    """low 信任 → 视作未通过 → failed（TopologyEdge.status 允许 low，final-review Finding 2）。"""
+    w = CorrelationEventWriter(tmp_path / "e.ndjson")
+    await w.edge("a->b", "low")
+    r = _rows(tmp_path / "e.ndjson")[-1]
+    assert r["status"] == "failed"
+    assert "raw=low" in r["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edge_maps_declared_missing_to_failed(tmp_path):
+    """declared-missing → failed（TopologyEdge.status 允许 declared-missing，final-review Finding 2）。"""
+    w = CorrelationEventWriter(tmp_path / "e.ndjson")
+    await w.edge("a->b", "declared-missing")
+    r = _rows(tmp_path / "e.ndjson")[-1]
+    assert r["status"] == "failed"
+    assert "raw=declared-missing" in r["detail"]
+
+
+@pytest.mark.asyncio
 async def test_edge_passes_through_spec_status(tmp_path):
     w = CorrelationEventWriter(tmp_path / "e.ndjson")
     await w.edge("a->b", "completed")

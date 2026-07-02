@@ -24,6 +24,14 @@ class MultiRepoConfigStore:
             for p in self._dir.glob(f"{self.PREFIX}*.yaml")
         )
 
+    def path_for(self, name: str) -> Path:
+        """返回校验后的配置文件路径（不读不写，仅定位 + 复用 _path 的遍历校验）。
+
+        供调用方仅定位文件（如 ScanManager 给子进程传 yaml 路径）而不触发写入；
+        复用 _path 的 "/" / ".." / 空 名校验，避免直接拼路径绕过遍历防护。
+        """
+        return self._path(name)
+
     def read(self, name: str) -> str:
         p = self._path(name)
         if not p.exists():

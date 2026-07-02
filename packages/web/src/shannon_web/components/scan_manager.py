@@ -54,12 +54,22 @@ class ScanManager:
         await self._check_temporal()
         if len(self._procs) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
-        ws = req.workspace or self._gen_ws_name(req)
+
+        if req.type == "correlation":
+            # correlation 子进程（shannon-multi start -c）忽略 ws 参数，orchestrator
+            # 把 correlation_progress/scan_end 写到
+            # resolve_workspaces_dir()/config.correlation.out_workspace/events.ndjson。
+            # 故 event_file 必须用 yaml 里的 out_workspace，否则 SSE 收不到联动进度
+            # 且 _has_scan_end 查错文件（final-review Finding 1）。
+            target, yaml_path = await self._resolve_inputs(req)
+            ws = self._resolve_out_workspace(yaml_path)
+        else:
+            target, yaml_path = await self._resolve_inputs(req)
+            ws = req.workspace or self._gen_ws_name(req)
+
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
         event_file = ws_dir / "events.ndjson"
-
-        target, yaml_path = await self._resolve_inputs(req)
 
         argv = self._build_argv(req, target, ws, yaml_path)
         env = {**os.environ, "SHANNON_WEB_EVENT_FILE": str(event_file)}
@@ -129,20 +139,31 @@ class ScanManager:
             yaml_path = await self._resolve_correlation_yaml(req)
         return target, yaml_path
 
+    def _resolve_out_workspace(self, yaml_path: Path | None) -> str:
+        """从 correlation yaml 解析 out_workspace，作为 event_file 所在 ws。
+
+        orchestrator 写 correlation_progress/scan_end 到
+        resolve_workspaces_dir()/out_workspace/events.ndjson；ScanManager 的
+        event_file 必须与之同 ws，否则 SSE 收不到联动进度（final-review Finding 1）。
+        """
+        from shannon_core.config.parser import parse_multi_repo_config
+        if yaml_path is None or not Path(yaml_path).exists():
+            raise ValueError("correlation 扫描需可解析的 yaml 以取 out_workspace")
+        cfg = parse_multi_repo_config(yaml_path)
+        return cfg.correlation.out_workspace
+
     async def _resolve_correlation_yaml(self, req: ScanRequest) -> Path:
         assert self._config_store is not None, "correlation 需 config_store"
         if req.config_name:
-            return self._config_store_dir() / f"web-multi-{req.config_name}.yaml"
+            # 走 store 的校验路径（复用 _path 的遍历校验：禁止 "/" / ".." / 空），
+            # 不能直接拼 web-multi-{name}.yaml 否则 config_name="../evil" 路径遍历
+            # 绕过 store 校验（final-review Finding 3）。
+            return self._config_store.path_for(req.config_name)
         if req.config_content:
             if req.save_as:
                 return self._config_store.write(req.save_as, req.config_content)
             return self._config_store.write_temp(req.config_content)
         raise ValueError("correlation 扫描需 config_name 或 config_content")
-
-    def _config_store_dir(self) -> Path:
-        # MultiRepoConfigStore 写入目录（list_configs 同源）。
-        # 走 public `dir` 属性；老 stub 无 dir 时 fallback 到 "configs"。
-        return Path(getattr(self._config_store, "dir", "configs"))
 
     def _gen_ws_name(self, req: ScanRequest) -> str:
         base = "scan"

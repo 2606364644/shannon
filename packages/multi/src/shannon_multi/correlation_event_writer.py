@@ -12,10 +12,19 @@ from pathlib import Path
 
 import aiofiles
 
-# edge() 层单点映射：orchestrator 透传的 raw edge 状态（ok/unverified/error）
+# edge() 层单点映射：orchestrator 透传的 raw edge 状态（TopologyEdge.status）
 # → spec L469 钉死的硬契约状态（started|completed|failed）。
 # repo()/phase()/scan_end() 已用 spec 值，不动。
-_EDGE_STATUS_MAP = {"ok": "completed", "unverified": "completed", "error": "failed"}
+# TopologyEdge.status 允许 ok|low|unverified|error|declared-missing（schemas.py:31），
+# 全量映射：ok/unverified→completed；low/error/declared-missing→failed（low 信任
+# 判定为未通过；raw 仍进 detail 保信息）。
+_EDGE_STATUS_MAP = {
+    "ok": "completed",
+    "unverified": "completed",
+    "low": "failed",
+    "error": "failed",
+    "declared-missing": "failed",
+}
 
 
 def _now_iso() -> str:
