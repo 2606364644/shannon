@@ -16,6 +16,7 @@ from shannon_core.code_index.parameter_models import (
 )
 from shannon_core.code_index.llm_taint_analyzer import (
     _deterministic_intra_fallback,
+    _intra_result_from_llm,
     _is_literal_expression,
     analyze_taint_llm,
     build_taint_prompt,
@@ -349,3 +350,77 @@ class TestNoClientSilentFallback:
             f"真失败应 1 条 warning, 实得 {len(warnings)}: "
             f"{[r.getMessage() for r in warnings]}")
         assert "failed" in warnings[0].getMessage().lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _intra_result_from_llm sanitizer info → local_steps
+# ---------------------------------------------------------------------------
+
+
+def _blk():
+    return FuncBlock(
+        id="app.py:handler", function_name="handler", file_path="app.py",
+        start_line=10, end_line=20, parameters=["q"], source_code="def handler(q): ...",
+        language="python",
+    )
+
+
+def _sink2(sid="app.py:handler:db.execute:15:0", line=15):
+    return SinkCallSite(
+        id=sid, caller_id="app.py:handler", callee_name="execute",
+        callee_receiver="db", category=SinkCategory.SQL, sink_subtype="sql_raw_query",
+        file_path="app.py", line=line, column=8, dangerous_slots=[], rule_id="py-sql-execute",
+    )
+
+
+def test_intra_result_preserves_sanitizer_in_local_steps():
+    """sanitized=True 的 path → local_steps summary step 携带 sanitize_hint。"""
+    llm_result = TaintAnalysisResult(
+        tainted_params=["q"],
+        propagation_paths=[TaintPath(
+            source_param="q", sink_id="app.py:handler:db.execute:15:0", sink_arg_index=0,
+            intermediate_vars=["raw"], sanitized=True,
+            sanitizer_description="html.escape", post_sanitized_concat=True,
+            confidence=0.9,
+        )],
+    )
+    result = _intra_result_from_llm(_blk(), llm_result, [_sink2()])
+    assert isinstance(result, IntraResult)
+    assert len(result.local_steps) == 1
+    step = result.local_steps[0]
+    assert step.transformation is not None
+    assert "sanitize_hint:html.escape" in step.transformation
+    assert "post_concat" in step.transformation          # post_sanitized_concat 编码进 transformation
+    assert step.intermediate_vars == ["raw"]
+    assert step.to_param == "app.py:handler:db.execute:15:0"   # 指向 sink
+    assert step.code_location == "app.py:15"
+    # tainted_params / hits 仍保留(不回归)
+    assert result.tainted_params == {"q"}
+    assert "app.py:handler:db.execute:15:0" in result.hits
+
+
+def test_intra_result_unsanitized_path_has_null_transformation():
+    """sanitized=False 的 path → summary step transformation=None(无防护标注)。"""
+    llm_result = TaintAnalysisResult(
+        tainted_params=["q"],
+        propagation_paths=[TaintPath(
+            source_param="q", sink_id="app.py:handler:db.execute:15:0", sink_arg_index=0,
+            sanitized=False, sanitizer_description=None, confidence=0.8,
+        )],
+    )
+    result = _intra_result_from_llm(_blk(), llm_result, [_sink2()])
+    assert len(result.local_steps) == 1
+    assert result.local_steps[0].transformation is None
+
+
+def test_intra_result_skips_invalid_sink_or_param():
+    """sink_id / source_param 不在已知集合 → 跳过(不进 local_steps/hits)。"""
+    llm_result = TaintAnalysisResult(
+        tainted_params=["q"],
+        propagation_paths=[TaintPath(
+            source_param="evil",   # 非函数参数
+            sink_id="app.py:handler:db.execute:15:0", sink_arg_index=0, confidence=0.9,
+        )],
+    )
+    result = _intra_result_from_llm(_blk(), llm_result, [_sink2()])
+    assert result.local_steps == []
