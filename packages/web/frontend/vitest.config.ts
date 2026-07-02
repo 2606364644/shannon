@@ -3,5 +3,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  test: { environment: "jsdom", setupFiles: ["./src/test-setup.ts"], globals: true },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
+    globals: true,
+    // dist-tsc/ 是 tsc -b 的 emit 产物 (tsconfig outDir), 不该被 vitest 拾取
+    exclude: ["**/dist-tsc/**", "**/dist/**", "**/node_modules/**"],
+  },
 });
