@@ -98,9 +98,12 @@ class ScanManager:
     async def _check_temporal(self) -> None:
         import socket
 
+        host = os.environ.get("SHANNON_TEMPORAL_HOST", "localhost")
+        port = int(os.environ.get("SHANNON_TEMPORAL_PORT", "7233"))
+
         def _probe() -> bool:
             try:
-                with socket.create_connection(("localhost", 7233), timeout=1.0):
+                with socket.create_connection((host, port), timeout=1.0):
                     return True
             except OSError:
                 return False

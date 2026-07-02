@@ -19,5 +19,26 @@ services:
       retries: 10
       start_period: 30s
 
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    container_name: shannon-py-web
+    ports:
+      - "${SHANNON_WEB_PORT:-7878}:7878"
+    volumes:
+      - ./workspaces:/app/workspaces
+      - ./repos:/app/repos
+      - ./configs:/app/configs
+      - ./.env:/app/.env:ro
+    environment:
+      - SHANNON_WEB_MAX_CONCURRENT=${SHANNON_WEB_MAX_CONCURRENT:-1}
+      - SHANNON_WEB_SCAN_TIMEOUT=${SHANNON_WEB_SCAN_TIMEOUT:-0}
+      - SHANNON_TEMPORAL_HOST=temporal
+      - SHANNON_TEMPORAL_PORT=7233
+    depends_on:
+      temporal:
+        condition: service_healthy
+
 volumes:
   temporal-data:
