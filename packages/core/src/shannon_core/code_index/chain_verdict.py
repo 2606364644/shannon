@@ -43,7 +43,7 @@ _INJECTION_SLOTS = {"sql_value", "sql_identifier", "cmd_argument",
                     "file_path", "template_expr", "deserialize"}
 _SSRF_SLOTS = {"url"}
 
-_DIRECTION = {"injection": "forward", "xss": "backward", "ssrf": "backward"}
+_DIRECTION = {"injection": "backward", "xss": "backward", "ssrf": "backward"}
 
 # LLM pass prompt template (lightweight; full methodology stays in vuln-*.txt).
 _VERDICT_PROMPT = """You are a lightweight chain-verdict pass for the {vuln_class} GitNexus track.
@@ -139,12 +139,16 @@ def _render_context_for(sink_subtype: str) -> str:
 
 
 def _detect_post_sanitize_concat(steps: list[PropagationStep]) -> bool:
-    """True if a concat step appears AFTER a sanitizer-bearing step.
+    """True if a sanitizer is followed by re-tainting concatenation.
 
-    Mirrors spec §5.4 (vuln-injection.txt:156): sanitization followed by
-    concatenation taints the slot again. Best-effort keyword detection on the
-    transformation text (sanitize_hint:<name>/escape/encode/quote markers).
+    两种形态都认:
+    1. summary step 编码标记(transformation 含 '|post_concat',由 _intra_result_from_llm 产)
+    2. 多 step 序列: sanitize/escape/encode/quote step 后跟 concat step(原逻辑,向后兼容)
     """
+    for s in steps:
+        tf = (s.transformation or "").lower()
+        if "post_concat" in tf:          # summary step 标记(Task 2/3 产物)
+            return True
     seen_sanitizer = False
     for s in steps:
         tf = (s.transformation or "").lower()

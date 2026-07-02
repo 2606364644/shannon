@@ -50,7 +50,7 @@ def test_extract_injection_routes_sql_and_command_sinks():
     chains = extract_candidate_chains(pgraph, vuln_class="injection")
     assert len(chains) == 2
     assert all(c.vuln_class == "injection" for c in chains)
-    assert all(c.direction_hint == "forward" for c in chains)
+    assert all(c.direction_hint == "backward" for c in chains)
 
 
 def test_extract_xss_routes_only_xss_sinks():
@@ -117,6 +117,21 @@ def test_post_sanitize_concat_false_when_no_concat_after():
     chains = extract_candidate_chains(pgraph, vuln_class="injection")
     assert len(chains) == 1
     assert chains[0].post_sanitize_concat is False
+
+
+def test_post_sanitize_concat_detected_from_summary_step_marker():
+    """summary step 的 transformation 含 |post_concat 标记 → post_sanitize_concat=True.
+
+    覆盖 Task 2/3 产的 summary step 形态(sanitize_hint:<desc>|post_concat)。
+    """
+    steps = [_step("sanitize_hint:html.escape|post_concat")]
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value", steps=steps)],
+        language_coverage=["python"],
+    )
+    chains = extract_candidate_chains(pgraph, vuln_class="injection")
+    assert len(chains) == 1
+    assert chains[0].post_sanitize_concat is True
 
 
 @pytest.mark.asyncio
