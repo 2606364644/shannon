@@ -18,6 +18,10 @@ class WorkspacesIndexer:
         else:
             self._active_pids[ws] = pid
 
+    def sync_active(self, pids: dict[str, int]) -> None:
+        """ScanManager 每次 list 时注入当前在跑 pid 表（替换式，避免 stale）。"""
+        self._active_pids = dict(pids)
+
     @staticmethod
     def _pid_alive(pid: int) -> bool:
         try:
