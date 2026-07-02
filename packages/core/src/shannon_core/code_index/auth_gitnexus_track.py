@@ -16,8 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
-from shannon_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
-from shannon_core.code_index.parsers import get_parser
+from shannon_core.code_index.models import CodeIndex, FuncBlock
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,6 @@ def _identify_auth_handlers(index: CodeIndex) -> list[FuncBlock]:
     信号 3（最鲁棒）：handler 源码命中 auth 原语调用。
     任一信号命中即收（取并集，去重 by FuncBlock.id）。
     """
-    blocks_by_id: dict[str, FuncBlock] = {b.id: b for b in index.blocks}
     ep_to_route: dict[str, str] = {}
     for ep in index.entry_points:
         if ep.route:
@@ -138,7 +136,6 @@ def build_auth_gitnexus_track(deliverables_dir: str) -> AuthTrackBuildResult:
 
     检查器在 T2-T4 加入；本 task (T1) 只建骨架（端点识别 + 空候选 + 诊断）。
     """
-    import json
     out = Path(deliverables_dir)
     code_index_path = out / "code_index.json"
     if not code_index_path.exists():
@@ -160,8 +157,93 @@ def build_auth_gitnexus_track(deliverables_dir: str) -> AuthTrackBuildResult:
 
 
 def _run_checkers(index: CodeIndex, handlers: list[FuncBlock]) -> list[AuthCandidate]:
-    """跑 6 检查器。T1 返回空（占位）；T2-T4 实装。"""
-    return []
+    """跑所有已实装检查器。"""
+    ep_to_route = {ep.func_block_id: f"{ep.http_method or 'ANY'} {ep.route}" for ep in index.entry_points if ep.route}
+    candidates: list[AuthCandidate] = []
+    for handler in handlers:
+        endpoint = ep_to_route.get(handler.id)
+        for checker in (_check_session_regenerate_missing,):  # T3/T4 追加
+            c = checker(handler, index, endpoint)
+            if c is not None:
+                candidates.append(c)
+    return candidates
+
+
+# —— 检查器原语规则表（spike §3.1 / §2.5）—— per-language
+# MISSING_POSITIVE 型：应调用的安全原语；handler 内 + 可达路径均无 → 候选
+_SESSION_REGENERATE_PRIMITIVES = {
+    "typescript": re.compile(r"\b(session\.regenerate)\b", re.IGNORECASE),
+    "javascript": re.compile(r"\b(session\.regenerate)\b", re.IGNORECASE),
+    # Go session 库多样（gorilla/chi/gin-session），首批后置（spec R4）
+}
+
+
+def _handler_has_primitive(handler: FuncBlock, pattern: re.Pattern | None) -> str | None:
+    """handler 源码命中 pattern → 返回命中片段；否则 None。"""
+    if pattern is None:
+        return None
+    m = pattern.search(handler.source_code)
+    return m.group(0) if m else None
+
+
+def _path_has_primitive(handler_id: str, index: CodeIndex, pattern: re.Pattern | None) -> bool:
+    """可达路径（CallChain）上是否有 pattern 命中（session.regenerate 在 helper 里）。
+
+    GitNexus 不可用（chains 空）时退化为 False（只看 handler 内）。
+    """
+    if pattern is None:
+        return False
+    blocks_by_id = {b.id: b for b in index.blocks}
+    for chain in index.chains:
+        if chain.entry_point_id != handler_id:
+            continue
+        for nid in chain.path:
+            blk = blocks_by_id.get(nid)
+            if blk and pattern.search(blk.source_code):
+                return True
+    return False
+
+
+def _is_login_success_handler(handler: FuncBlock, endpoint: str | None) -> bool:
+    """该 handler 是否"登录成功写 session"型（login/oauth callback/token 签发等）。
+
+    启发式：endpoint 含 login/callback/token/signin/auth/oauth，或源码写 ctx.session/req.session。
+    """
+    if endpoint:
+        if re.search(r"(login|callback|token|signin|auth|oauth)", endpoint, re.IGNORECASE):
+            return True
+    return bool(re.search(r"\b(req|ctx)\.session\.\w+\s*=", handler.source_code, re.IGNORECASE))
+
+
+def _check_session_regenerate_missing(
+    handler: FuncBlock, index: CodeIndex, endpoint: str | None,
+) -> AuthCandidate | None:
+    """检查器 1：登录成功 handler 内（+可达路径）无 session.regenerate → session 固定候选。
+
+    首批 Node.js only（Go session 库多样后置，spec R4）。
+    """
+    if handler.language not in ("typescript", "javascript"):
+        return None
+    if not _is_login_success_handler(handler, endpoint):
+        return None
+    pattern = _SESSION_REGENERATE_PRIMITIVES[handler.language]
+    if _handler_has_primitive(handler, pattern):
+        return None  # 有 regenerate，不报
+    if _path_has_primitive(handler.id, index, pattern):
+        return None  # 可达路径有，不报
+    return AuthCandidate(
+        id=f"{handler.id}:session_regenerate_missing:{handler.start_line}",
+        handler_id=handler.id,
+        endpoint=endpoint,
+        check_type=AuthCheckType.SESSION_REGENERATE_MISSING,
+        verdict_signal=VerdictSignal.MISSING_POSITIVE,
+        evidence_callee="session.regenerate",
+        expected="登录成功后调用 session.regenerate 轮换会话 ID（防 session 固定）",
+        file_path=handler.file_path,
+        line=handler.start_line,
+        code_snippet=handler.source_code[:200],
+        confidence="high",
+    )
 
 
 def _render_auth_candidates(candidates: list[AuthCandidate]) -> str:

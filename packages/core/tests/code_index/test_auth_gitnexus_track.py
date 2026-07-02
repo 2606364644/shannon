@@ -1,6 +1,6 @@
 from shannon_core.code_index.auth_gitnexus_track import (
     AuthCandidate, AuthCheckType, VerdictSignal,
-    build_auth_gitnexus_track, _identify_auth_handlers,
+    build_auth_gitnexus_track, _identify_auth_handlers, _run_checkers,
 )
 from shannon_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
 
@@ -66,3 +66,31 @@ def test_auth_candidate_model_fields():
     )
     assert c.check_type == AuthCheckType.SESSION_REGENERATE_MISSING
     assert c.needs_deep_agent is True
+
+
+def test_session_regenerate_missing_nodejs():
+    """Node.js login handler 内无 ctx.session.regenerate → MISSING_POSITIVE 候选。"""
+    # OAuth callback handler 写 session 但无 regenerate（moa-auth #1 场景）
+    handler = _blk("app.ts:callback", name="callback",
+                   source="function callback(ctx){ ctx.session.user = userInfo; ctx.redirect(ref); }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route",
+                    route="/callback", http_method="GET", confidence=0.9,
+                    evidence="route", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    regen = [c for c in cands if c.check_type == AuthCheckType.SESSION_REGENERATE_MISSING]
+    assert len(regen) == 1, f"应产 1 个 session_regenerate_missing 候选，实际 {len(regen)}"
+    assert regen[0].verdict_signal == VerdictSignal.MISSING_POSITIVE
+    assert regen[0].confidence == "high"
+
+
+def test_session_regenerate_present_no_finding():
+    """handler 内有 ctx.session.regenerate → 不产候选（避免误报）。"""
+    handler = _blk("app.ts:login", name="login",
+                   source="function login(ctx){ ctx.session.regenerate(); ctx.session.user = u; }")
+    ep = EntryPoint(func_block_id=handler.id, entry_type="http_route", route="/login",
+                    http_method="POST", confidence=0.9, evidence="r", needs_llm_review=False)
+    index = _index([handler], [ep])
+    cands = _run_checkers(index, _identify_auth_handlers(index))
+    assert not any(c.check_type == AuthCheckType.SESSION_REGENERATE_MISSING for c in cands), \
+        "有 regenerate 调用不应产缺失候选"
