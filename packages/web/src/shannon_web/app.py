@@ -23,7 +23,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.git_fetcher import GitFetcher
     from .components.multi_repo_config_store import MultiRepoConfigStore
     from .components.scan_manager import ScanManager
-    from .api import workspaces, scan, multi_configs
+    from .api import events, multi_configs, scan, workspaces
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
@@ -36,6 +36,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(workspaces.router)
     app.include_router(scan.router)
     app.include_router(multi_configs.router)
+    app.include_router(events.router)
 
     @app.get("/health")
     async def health() -> dict:
