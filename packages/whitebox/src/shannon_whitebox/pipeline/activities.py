@@ -437,6 +437,122 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_auth_gitnexus_judge(input: ActivityInput) -> dict:
+    """auth GitNexus 轨：候选多轮深度判定 + 追加 auth_gitnexus_queue.json。
+
+    对标 run_authz_gitnexus_judge（spec-1a），差异在 queue 写策略：
+    - authz：OVERWRITE（atomic_write_json 直接覆盖）。
+    - auth ：APPEND——run_auth_config_scan 先产 config 类（cookie/HSTS/CORS/JWT/限流）
+             条目，本 activity 产逻辑类（session 固定/明文密码/JWT 未验签/OAuth state 缺失/
+             弱随机 token）verdict，读现有 + 合并，非覆盖。
+
+    1. build_auth_gitnexus_track 读 code_index.json → 三信号识别 auth handler → 跑检查器
+       → 产 0-N AuthCandidate + markdown 表格。
+    2. candidate_count>0 → 多轮 verdict_agent（run_gitnexus_verdict_agent）判定；保守，
+       不确定判 vulnerable。candidate_count==0 → 跳过判定（探索段 T6）。
+    3. parse_lenient 容错解析；verdict 标 source_track="gitnexus"。
+    4. 读现有 auth_gitnexus_queue.json（若存在）+ 追加逻辑类 verdict → atomic_write_json。
+    """
+    from shannon_whitebox.audit.session_registry import get_audit_session
+    from shannon_core.code_index.auth_gitnexus_track import build_auth_gitnexus_track
+    from shannon_core.models.queue_schemas import VulnerabilityQueue
+
+    try:
+        async with get_audit_session().track_step(
+            "vulnerability-analysis", "auth-gitnexus-judge",
+            intent=intent_for("auth-gitnexus-judge"),
+        ):
+            repo, deliverables, _ = _get_paths(input)
+            md, candidates, handler_count, entry_point_total = build_auth_gitnexus_track(
+                str(deliverables)
+            )
+            candidate_count = len(candidates)
+
+            # 可观测性：候选状态经 InfoEvent（避免静默空转），best-effort 不影响扫描。
+            try:
+                _session = get_audit_session()
+                if candidate_count == 0:
+                    await _session.log_info(
+                        f"auth GitNexus 轨：0 候选（handler={handler_count}, "
+                        f"entry_point={entry_point_total}）→ 跳过 LLM 判定（探索段 T6）。"
+                        f"handler=0 常因入口点未识别（语言误判/调用图未就绪）。",
+                        "warning",
+                    )
+                else:
+                    await _session.log_info(
+                        f"auth GitNexus 轨：{candidate_count} 候选 → 调多轮 verdict_agent 判定。",
+                        "info",
+                    )
+            except Exception:
+                pass
+
+            vulnerabilities: list[dict] = []
+            prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+            prompt_manager = PromptManager(prompts_dir)
+            if candidate_count > 0:
+                prompt = prompt_manager.load_sync(
+                    "auth_gitnexus_judge",
+                    variables={"AUTH_GITNEXUS_CANDIDATES": md},
+                )
+                result = await run_gitnexus_verdict_agent(
+                    prompt=prompt,
+                    repo_path=str(repo),
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                    audit_session=get_audit_session(),
+                )
+                raw = result.structured_output
+                if raw is None and result.text:
+                    raw = result.text  # fallback to text; parse_lenient handles
+                parsed = VulnerabilityQueue.parse_lenient(
+                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
+                )
+                for v in parsed.queue.vulnerabilities:
+                    data = v.model_dump()
+                    data["source_track"] = "gitnexus"
+                    if not data.get("evidence_chain"):
+                        data["evidence_chain"] = "gitnexus track candidate (auth logic)"
+                    vulnerabilities.append(data)
+
+                try:
+                    await get_audit_session().log_info(
+                        f"auth GitNexus 轨：产出 {len(vulnerabilities)} 条 verdict。",
+                        "info",
+                    )
+                except Exception:
+                    pass
+            # candidate_count == 0 分支在 T6（探索）
+
+        # 追加 auth_gitnexus_queue.json（config_scan 先产；读现有 + 合并，非覆盖）。
+        # 注意：写操作放在 track_step 块外，与 authz 写策略一致（authz 在块内写，但块外
+        # 写亦安全——atomic_write_json 保证原子性，且本 activity 唯一写点）。
+        queue_path = deliverables / "auth_gitnexus_queue.json"
+        existing: list[dict] = []
+        if queue_path.exists():
+            try:
+                existing = json.loads(queue_path.read_text()).get("vulnerabilities", [])
+            except Exception:
+                existing = []
+        atomic_write_json(queue_path, {"vulnerabilities": existing + vulnerabilities})
+
+        return {
+            "candidate_count": candidate_count,
+            "verdict_count": len(vulnerabilities),
+            "handler_count": handler_count,
+        }
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
 async def run_credential_check(input: ActivityInput) -> None:
 
     from shannon_whitebox.audit.session_registry import get_audit_session

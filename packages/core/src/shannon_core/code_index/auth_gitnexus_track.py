@@ -458,11 +458,23 @@ def _check_oauth_state_missing(
 
 
 def _render_auth_candidates(candidates: list[AuthCandidate]) -> str:
-    """T5 完善表格；T1 占位（judge activity T5 才接入）。"""
+    """渲染候选为 markdown 表格（对标 render_authz_gitnexus_candidates）。
+
+    T5：judge activity T5 接入；judge prompt 消费此 markdown。
+    """
     if not candidates:
-        return "（auth GitNexus 轨：0 候选。端点识别或检查器未命中。）"
-    lines = ["## Auth GitNexus Track — auth 逻辑类候选（确定性，待 LLM 判定）", ""]
+        return "（auth GitNexus 轨：0 候选。端点识别或检查器未命中，交探索 agent。）"
+    lines = [
+        "## Auth GitNexus Track — auth 逻辑类候选（确定性，待 LLM 判定）",
+        "",
+        "| Endpoint | Check Type | Signal | Evidence | Expected | Handler 片段 |",
+        "|---|---|---|---|---|---|",
+    ]
     for c in candidates:
-        lines.append(f"- `{c.check_type.value}` @ `{c.endpoint or c.handler_id}` "
-                     f"({c.file_path}:{c.line}) — {c.expected}")
+        lines.append(
+            f"| `{c.endpoint or c.handler_id}` | `{c.check_type.value}` | "
+            f"{c.verdict_signal.value} | `{c.evidence_callee or '—'}` | "
+            f"{c.expected} | `{c.code_snippet[:120]}` |"
+        )
+    lines += ["", "### 判定指令：对每条候选产一条 AuthVulnerability（保守，不确定判 vulnerable）。"]
     return "\n".join(lines)
