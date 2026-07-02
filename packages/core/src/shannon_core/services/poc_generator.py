@@ -173,3 +173,42 @@ def find_endpoint_info(endpoints: dict[str, dict], path: str | None) -> dict | N
         if base_key and base_path.startswith(base_key):
             return info
     return None
+
+
+# Task 3: curl / Burp raw 双格式化
+from urllib.parse import urlencode
+
+
+def _host_only(host: str) -> str:
+    return (
+        host.replace("https://", "").replace("http://", "").rstrip("/")
+    )
+
+
+def to_curl(spec: HttpRequestSpec, host: str) -> str:
+    url = host.rstrip("/") + spec.path
+    if spec.query:
+        url += "?" + urlencode(spec.query)
+    parts = [f"curl -i -X {spec.method} '{url}'"]
+    for k, v in spec.headers.items():
+        parts.append(f"  -H '{k}: {v}'")
+    if spec.body:
+        parts.append(f"  --data '{spec.body}'")
+    return " \\\n".join(parts)
+
+
+def to_burp_raw(spec: HttpRequestSpec, host: str) -> str:
+    path = spec.path
+    if spec.query:
+        path += "?" + "&".join(f"{k}={v}" for k, v in spec.query.items())  # 原始 payload
+    lines = [f"{spec.method} {path} HTTP/1.1", f"Host: {_host_only(host)}"]
+    for k, v in spec.headers.items():
+        lines.append(f"{k}: {v}")
+    if spec.body:
+        lines.append("Content-Type: application/x-www-form-urlencoded")
+        lines.append(f"Content-Length: {len(spec.body.encode('utf-8'))}")
+    lines.append("")
+    if spec.body:
+        lines.append(spec.body)
+    lines.append("")
+    return "\n".join(lines)

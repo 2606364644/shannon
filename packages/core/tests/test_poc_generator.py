@@ -99,3 +99,45 @@ def test_find_endpoint_info_exact_and_prefix():
     eps = {"/api/score/:staffid": {"auth": "user"}, "/api/code/payload/share": {"auth": "anon"}}
     assert find_endpoint_info(eps, "/api/score/:staffId") is not None
     assert find_endpoint_info(eps, "/unknown") is None
+
+
+# Task 3: curl / Burp raw 双格式化
+from shannon_core.services.poc_generator import to_curl, to_burp_raw
+
+
+def test_to_curl_url_encodes_query():
+    spec = HttpRequestSpec(
+        method="GET", path="/api/users",
+        query={"id": "' OR '1'='1"},
+        headers={"Authorization": "Bearer <AUTH_TOKEN>"},
+    )
+    curl = to_curl(spec, "https://invite-code.moomoo.com")
+    assert curl.startswith("curl -i -X GET 'https://invite-code.moomoo.com/api/users?")
+    assert "%27" in curl  # 单引号被编码
+    assert "Authorization: Bearer <AUTH_TOKEN>" in curl
+
+
+def test_to_curl_placeholder_host():
+    spec = HttpRequestSpec(method="GET", path="/share", query={"locale": "<script>"})
+    curl = to_curl(spec, "https://TARGET[:PORT]")
+    assert "https://TARGET[:PORT]/share?" in curl
+
+
+def test_to_burp_raw_keeps_raw_payload():
+    spec = HttpRequestSpec(
+        method="GET", path="/api/users",
+        query={"id": "' OR '1'='1"},
+        headers={"Authorization": "Bearer <AUTH_TOKEN>"},
+    )
+    raw = to_burp_raw(spec, "https://invite-code.moomoo.com")
+    assert raw.startswith("GET /api/users?id=' OR '1'='1 HTTP/1.1")
+    assert "Host: invite-code.moomoo.com" in raw
+    assert "' OR '1'='1" in raw  # 原始未编码
+
+
+def test_to_burp_raw_post_body():
+    spec = HttpRequestSpec(method="POST", path="/api/fetch", body="url=http://127.0.0.1:8080")
+    raw = to_burp_raw(spec, "https://t.example.com")
+    assert "POST /api/fetch HTTP/1.1" in raw
+    assert "Content-Length:" in raw
+    assert "url=http://127.0.0.1:8080" in raw
