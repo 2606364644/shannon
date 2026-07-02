@@ -106,7 +106,11 @@ def _detect_python(blocks: list[FuncBlock]) -> list[EntryPoint]:
 
 
 # G4: echo/gin e.GET / chi r.Get 路由注册式（在 source_code）
-_GO_ROUTE_PATTERN = re.compile(r"\b\w+\.(GET|POST|PUT|DELETE|PATCH|Any|Get|Post|Put|Delete|Patch)\(\s*['\"]([^'\"]+)['\"]")
+# Review fix (Minor): receiver 白名单（路由器惯例变量名），避免 db.Get / cache.Delete 等非路由调用误报
+_GO_ROUTE_RECEIVERS = r"(?:e|r|router|engine|mux|app|api|group|server)"
+_GO_ROUTE_PATTERN = re.compile(
+    rf"\b{_GO_ROUTE_RECEIVERS}\.(GET|POST|PUT|DELETE|PATCH|Any|Get|Post|Put|Delete|Patch)\(\s*['\"]([^'\"]+)['\"]"
+)
 _GO_METHOD_NORM: dict[str, str] = {
     "GET": "GET", "POST": "POST", "PUT": "PUT", "DELETE": "DELETE",
     "PATCH": "PATCH", "Any": "*",

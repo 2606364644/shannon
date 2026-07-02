@@ -238,15 +238,17 @@ class TestJavaEntryPoints:
 
 class TestPhpEntryPoints:
     def test_laravel_route_get(self):
-        # Laravel routes are typically in Route::get('/path', ...) calls,
-        # which are detected from source_code, not decorators.
+        # Laravel Route::get('/path', ...) 现在被检测（spec-1b G4：Laravel 路由注册式
+        # 在 source_code 中识别）。原为 asserts-nothing 占位测试，转为正向断言。
         block = _block(
             source_code="Route::get('/api/users', function () { return getUsers(); });",
             function_name="getUsers",
             language="php",
         )
         eps = detect_entry_points([block], "php")
-        # Route::get doesn't decorate getUsers, so this specific function shouldn't be detected
+        routes = [(e.route, e.http_method) for e in eps]
+        assert ("/api/users", "GET") in routes, \
+            f"Laravel Route::get should be detected, got {routes}"
 
     def test_symfony_route_attribute(self):
         block = _block(
@@ -325,6 +327,33 @@ class TestFrameworkExpansionG4:
         routes = [(e.route, e.http_method) for e in eps]
         assert ("/orders/{id}", "GET") in routes, \
             f"echo e.GET should be detected, got {routes}"
+
+    def test_go_non_route_call_not_detected(self):
+        """Review fix (Minor): 非 router receiver 不应误报为 http_route。
+
+        db.Get("user:1") / cache.Delete("k") / client.Put("/v1/item") 都不是路由
+        注册——receiver 不在白名单（e/r/router/engine/mux/app/api/group/server），
+        故即便 method token 形似 GET/Delete/Put 也不应产 http_route EntryPoint。
+        """
+        block = _block(
+            id="store.go:op:1",
+            file_path="store.go",
+            function_name="op",
+            parameters=["db *sql.DB", "cache *redis.Client"],
+            source_code=(
+                'func op(db *sql.DB, cache *redis.Client) {\n'
+                '    db.Get("user:1")\n'
+                '    cache.Delete("k")\n'
+                '    client.Put("/v1/item")\n'
+                '}\n'
+            ),
+            language="go",
+        )
+        eps = detect_entry_points([block], "go")
+        http_routes = [e for e in eps if e.entry_type == "http_route"]
+        bad_routes = {e.route for e in http_routes} & {"user:1", "k", "/v1/item"}
+        assert not bad_routes, \
+            f"non-route calls must not be detected as http_route, got {bad_routes}"
 
 
 class TestUnknownLanguage:
