@@ -367,7 +367,7 @@ async def test_generate_blackbox_uses_accepted_ids(tmp_path):
     assert "✓ 已确认" in md  # accepted_ids → CONFIRMED
 
 
-async def test_generate_llm_failure_degrades_gracefully(tmp_path):
+async def test_generate_llm_failure_degrades_gracefully(tmp_path, monkeypatch):
     """auth 漏洞走 LLM；LLM 失败 → 退骨架+标注，不阻塞。"""
     d = tmp_path / "deliverables" / "whitebox"
     d.mkdir(parents=True)
@@ -381,8 +381,8 @@ async def test_generate_llm_failure_degrades_gracefully(tmp_path):
     import shannon_core.services.poc_generator as mod
     async def boom(prompt, **kw):
         raise RuntimeError("llm down")
-    mod.run_claude_prompt = boom  # 模拟不可用
+    monkeypatch.setattr(mod, "run_claude_prompt", boom)
     out = await PoCGenerator.generate(d, ["auth"], "https://t.example.com", "whitebox", repo_path="/tmp/x")
     md = out.read_text(encoding="utf-8")
     assert "AUTH-1" in md  # 仍产出条目
-    assert "请求形态未推断" in md or "curl -i" in md
+    assert "请求形态未推断" in md

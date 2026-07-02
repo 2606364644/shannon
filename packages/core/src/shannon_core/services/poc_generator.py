@@ -522,7 +522,6 @@ class PoCGenerator:
         model_tier: str = "medium",
     ) -> Path:
         host = resolve_host(target_url)
-        has_placeholder = (host == "https://TARGET[:PORT]")
         recon_path = _resolve_input(deliverables_dir, "recon_deliverable.md")
         endpoints = parse_recon_endpoints(recon_path) if recon_path else {}
 
@@ -551,9 +550,8 @@ class PoCGenerator:
                 except Exception as exc:  # 单条失败不阻塞其余
                     logger.warning("poc: build failed for %s: %s", getattr(v, "ID", "?"), exc)
 
+        # placeholder 块总是显示：即便 host 真实，需登录的 PoC 仍含 <AUTH_TOKEN>/<SESSION_COOKIE> 占位符，operator 需替换指引。
         md = render_poc_md(entries, host, track, has_placeholder=True) if entries else empty_poc_md(track)
-        if not has_placeholder:
-            md = md.replace(_placeholder_block(True), "")  # 无占位符时移除替换块（已由 render 控制，双保险）
         out = deliverables_dir / _POC_FILENAME
         out.write_text(md, encoding="utf-8")
         return out
