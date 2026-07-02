@@ -54,6 +54,7 @@ Candidate chain:
 - source: {source_param} ({source_type})
 - sink: {sink_call_site_id}
 - slot/render_context: {sink_slot}
+- sink arg expressions (source code reaching the dangerous slot): {sink_expressions}
 - direction: {direction_hint}
 - propagation steps: {steps_repr}
 - sanitizer annotations (best-effort, NOT judged for effectiveness): {sanitizers_repr}
@@ -62,6 +63,7 @@ Candidate chain:
 Rules:
 - post-sanitize concatenation = sanitizer considered INEFFECTIVE (tainted again).
 - A defense is effective ONLY if it matches the slot/render_context AND no concat after.
+- Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
 - Be decisive: return vulnerable OR safe.
 
 Respond with a compact JSON object ONLY:
@@ -236,9 +238,11 @@ async def judge_chain_verdict(
         source_type=candidate.source_type,
         sink_call_site_id=candidate.sink_call_site_id,
         sink_slot=candidate.render_context or candidate.sink_slot,
+        sink_expressions="; ".join(candidate.sink_expressions) or "(none)",
         direction_hint=candidate.direction_hint,
         steps_repr="; ".join(
             f"{s.code_location}:{s.transformation or 'noop'}"
+            + (f"|vars={','.join(s.intermediate_vars)}" if s.intermediate_vars else "")
             for s in candidate.propagation_steps
         ) or "(none)",
         sanitizers_repr="; ".join(

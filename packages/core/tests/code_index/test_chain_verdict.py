@@ -214,3 +214,30 @@ def test_extract_sink_expressions_empty_when_no_sink_call_sites():
     chains = extract_candidate_chains(pgraph, vuln_class="injection")   # 不传 sink_call_sites
     assert len(chains) == 1
     assert chains[0].sink_expressions == []
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_prompt_includes_sink_expressions_and_intermediate_vars():
+    """prompt 含 sink_expressions + steps_repr 含 intermediate_vars(判定信息密度)。"""
+    chain = CandidateChain(
+        vuln_class="injection", flow_id="f1", entry_point_id="ep",
+        source_param="q", source_type="query", sink_call_site_id="db.execute:1",
+        sink_slot="sql_value",
+        propagation_steps=[PropagationStep(
+            step_id="s1", from_func_id="f", from_param="q", to_func_id="f", to_param="sink",
+            transformation="sanitize_hint:html.escape", code_location="app.py:5",
+            intermediate_vars=["raw", "esc"],
+        )],
+        sanitizer_annotations=[], direction_hint="backward",
+        post_sanitize_concat=False,
+        sink_expressions=["'sel ' + q"],
+    )
+    captured = {}
+
+    async def fake_llm(prompt, **kw):
+        captured["prompt"] = prompt
+        return '{"verdict":"safe","witness_payload":null,"evidence_chain":"q->db","mismatch_reason":null,"confidence":"high"}'
+
+    await judge_chain_verdict(chain, llm_client=fake_llm)
+    assert "'sel ' + q" in captured["prompt"]            # sink_expressions 进 prompt
+    assert "raw" in captured["prompt"] and "esc" in captured["prompt"]   # intermediate_vars 进 steps_repr
