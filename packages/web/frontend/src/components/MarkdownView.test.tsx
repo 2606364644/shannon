@@ -54,18 +54,39 @@ describe("MarkdownView", () => {
     expect(toc?.textContent).toContain("Injection");
   });
 
-  it("执行摘要 hero 置顶 + 含最高风险发现", () => {
+  it("执行摘要 hero 置顶 + 含最高风险发现（vuln-ID 提取到专属元素）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
     const hero = container.querySelector('[data-testid="exec-summary-hero"]');
     expect(hero).not.toBeNull();
+    // 整条文本仍可见（RCE / 描述）
     expect(hero?.textContent).toContain("RCE");
-    expect(hero?.textContent).toContain("INJ-01");
+    // vuln-ID 被提取进专属 .kv-vuln-id 元素：回归若删掉提取（只保留整行文本）
+    // 则 .kv-vuln-id 不存在，本断言失败。
+    const vulnIdSpans = hero?.querySelectorAll(".kv-vuln-id");
+    expect(vulnIdSpans?.length).toBeGreaterThan(0);
+    expect(vulnIdSpans?.[0].textContent).toBe("INJ-01");
+    // 多 vuln-ID 用 / 连接（INJ-04 等），守 join 行为
+    const inj04 = Array.from(vulnIdSpans ?? []).find((s) =>
+      s.textContent?.includes("INJ-04"),
+    );
+    expect(inj04).toBeDefined();
   });
 
-  it("键值字段渲染成 key-value 行", () => {
+  it("键值字段渲染成 key-value 行（结构化 .kv-row / .kv-key / .kv-val）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
-    expect(container.textContent).toContain("vulnerability_type");
-    expect(container.textContent).toContain("CommandInjection");
+    // 断言结构化处理存在：custom li 把 `- **key:** value` 拆成 .kv-row > (.kv-key + .kv-val)
+    const kvRows = container.querySelectorAll("li.kv-row");
+    expect(kvRows.length).toBeGreaterThan(0);
+    // 找到 vulnerability_type 那一行
+    const vtRow = Array.from(kvRows).find((li) =>
+      li.querySelector(".kv-key")?.textContent?.includes("vulnerability_type"),
+    );
+    expect(vtRow).toBeDefined();
+    expect(vtRow?.querySelector(".kv-key")?.textContent).toBe("vulnerability_type");
+    expect(vtRow?.querySelector(".kv-val")?.textContent).toBe("CommandInjection");
+    // 关键值不被重复渲染进同一个文本节点（key/val 分离的结构性证据）
+    expect(vtRow?.querySelector(".kv-key")?.textContent).not.toContain("CommandInjection");
+    expect(vtRow?.querySelector(".kv-val")?.textContent).not.toContain("vulnerability_type");
   });
 
   it("代码块带复制按钮（witness PoC 可复制）", () => {

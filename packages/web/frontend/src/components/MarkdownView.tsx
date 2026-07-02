@@ -112,16 +112,39 @@ export function MarkdownView({ markdown }: { markdown: string }) {
             ]}
             components={{
               // 加粗键值：`- **key:** value` → 对齐 key-value 行
+              // react-markdown 把 `**key:**` 解析为 <strong>key:</strong>，故检测首个
+              // <strong> 子节点（text 以 `:` 结尾）作为 key，余下作为 value（保留原 ReactNode
+              // 以免吞掉行内 <code> 等）。
               li: ({ children, ...props }) => {
-                const text = flatten(children);
-                const m = /^\*\*(.+?):\*\*\s*(.*)$/.exec(text);
-                if (m) {
-                  return (
-                    <li {...props} className="kv-row">
-                      <span className="kv-key mono">{m[1]}</span>
-                      <span className="kv-val">{m[2]}</span>
-                    </li>
-                  );
+                const kids = Array.isArray(children) ? children : [children];
+                const firstStrongIdx = kids.findIndex(
+                  (k) => typeof k !== "string" && (k as ReactElement)?.type === "strong",
+                );
+                if (firstStrongIdx !== -1) {
+                  const strongEl = kids[firstStrongIdx] as ReactElement<{ children?: ReactNode }>;
+                  const keyText = flatten(strongEl.props.children).replace(/:?\s*$/, "");
+                  if (keyText) {
+                    const restKids = kids.slice(firstStrongIdx + 1);
+                    // 去掉 value 前导空白字符串节点，保留元素节点（<code> 等）
+                    const valKids: ReactNode[] = [];
+                    let trimming = true;
+                    for (const k of restKids) {
+                      if (trimming && typeof k === "string" && /^\s*$/.test(k)) continue;
+                      if (trimming && typeof k === "string") {
+                        valKids.push(k.replace(/^\s+/, ""));
+                        trimming = false;
+                      } else {
+                        valKids.push(k);
+                        trimming = false;
+                      }
+                    }
+                    return (
+                      <li {...props} className="kv-row">
+                        <span className="kv-key mono">{keyText}</span>
+                        <span className="kv-val">{valKids}</span>
+                      </li>
+                    );
+                  }
                 }
                 return <li {...props}>{children}</li>;
               },
