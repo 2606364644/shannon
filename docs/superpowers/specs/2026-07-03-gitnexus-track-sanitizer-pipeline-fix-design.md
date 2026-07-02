@@ -122,7 +122,7 @@ for path in llm_result.propagation_paths:
 return IntraResult(tainted_params=tainted, hits=hits, local_steps=local_steps)
 ```
 
-**(2) `propagate_backward_across_chains`(chain_propagator.py:413-461)**:在 sink 段(`for sink in sinks_here` 内,seed 计算后)取该 sink 的 intra summary step,插入 `TaintFlow.propagation_steps` 的 sink 端:
+**(2) `propagate_backward_across_chains`(chain_propagator.py:413-461)**:在 sink 段(`for sink in sinks_here` 内)取该 sink 的 intra summary step,合并进 `TaintFlow.propagation_steps`。**必须覆盖单函数注入场景**(`sink_step=0`:sink 所在函数就是 entry、无跨函数 hop——这是最常见的注入模式,如 entry handler 直接 `db.query(req.query.x)`);当前该场景 `steps_fwd=[]`(chain_propagator.py:422-428 `i==0` 直接 break),连 intra summary step 都没机会合并。合并逻辑统一:
 
 ```python
 # 伪代码:sink 段(line 413 循环内,steps_rev 构造后、reversed 前)
@@ -133,7 +133,9 @@ if intra:
 # steps_fwd = reversed(跨函数 hops) + sink_local_steps(保持 entry→sink 方向)
 ```
 
-产出 `TaintFlow.propagation_steps` = `[entry→...→sink_func 的跨函数 hops..., sink_func 内 param→sink 的 summary step(带 transformation)]`。`extract_candidate_chains`(chain_verdict.py:194-207)已 `list(flow.propagation_steps)` 拷进 `CandidateChain`,transformation 自动随流。
+产出 `TaintFlow.propagation_steps` = `[entry→...→sink_func 的跨函数 hops..., sink_func 内 param→sink 的 summary step(带 transformation)]`。**单函数场景**(`sink_step=0`):跨函数 hops 为空,flow 仍 append 该 sink 的 intra summary step(propagation_steps = `[summary step]`),sanitizer 才能流通。合并时机:在每个 `TaintFlow` 构造处(chain_propagator.py:449-461 的 `flows.append`),统一查 `sink_call_site_id` 对应 sink 所在函数的 intra summary step(`to_param == sink.id`)append 到 `steps_fwd` 末尾——不依赖 `sink_step` 值,天然覆盖单函数/多函数两种 case。`extract_candidate_chains`(chain_verdict.py:194-207)已 `list(flow.propagation_steps)` 拷进 `CandidateChain`,transformation 自动随流。
+
+> **param 粒度不匹配(已知局限,可接受)**:跨函数 hop 终点 param 与 intra summary step 的 `from_param` 可能不一致(都是 sink_func 的 params 但未必同一个)。chain_verdict 消费 `transformation`/`expression`,不依赖 step 间 param 一致性,故不影响判定正确性;仅数据流叙事不够严谨,留 follow-up。
 
 **结果**:`annotate_sanitizers`(chain_verdict.py:190)在 summary step 的 `"sanitize_hint:..."` 上匹配 `_TRANSFORMATION_FRAGMENTS`(sanitizer_library.py:157-168)→ `SanitizerAnnotation` 非空 → chain_verdict prompt 的 `sanitizers_repr` 非空 → LLM 判防护有效性。**sanitize_library 22 条规则不再空转。**
 
@@ -218,7 +220,7 @@ intra LLM
 | 2 | llm_taint_analyzer.py:147-169 | `build_taint_prompt` schema + Rules 加 `post_sanitized_concat` | post-concat(项5) |
 | 3 | parameter_models.py:40-49 | `PropagationStep` 加 `intermediate_vars` | 项4 |
 | 4 | parameter_models.py:96-104 | `TaintPath` 加 `post_sanitized_concat` | post-concat(项5) |
-| 5 | chain_propagator.py:413-461 | `propagate_backward` sink 段合并 intra `local_steps` | 断点 B |
+| 5 | chain_propagator.py:413-461 | `propagate_backward` 合并 intra `local_steps` 进 `TaintFlow`(统一覆盖单函数 `sink_step=0` + 多函数场景) | 断点 B |
 | 6 | chain_verdict.py:46 | `_DIRECTION["injection"]="backward"` | direction_hint(项3) |
 | 7 | chain_verdict.py:141-156 | `_detect_post_sanitize_concat` 加 `post_concat` 标记识别 | post-concat(项5) |
 | 8 | chain_verdict.py:72-86 | `CandidateChain` 加 `sink_expressions` | expression(项4) |
@@ -259,11 +261,13 @@ intra LLM
 
 ## 8. 真机验证(对齐 memory 口径)
 
-跑 NodeGoat 白盒后:
+> **前置依赖(关键,先看这条)**:本 spec 修复「sanitizer 管道接通」,但管道有水的前提是 GitNexus 调用图产出 `chains > 0`。`propagate_backward` 在 `chains=0` 时直接返回 `[]`(chain_propagator.py:393)→ 无 TaintFlow → intra sanitizer 无处合并 → transformation 仍空。三靶场 NodeGoat 长期 chains=0(MCP 调用层失配,已修 @8734a319 **待真机验**,见 memory `gitnexus-mcp-call-layer-fix-status`)。**若验证时 `taint_flows=0`,transformation 仍空属前置问题(GitNexus MCP),非本 spec 修复缺陷**——必须先确认 chains>0,本 spec 的 sanitizer 管道才有验证意义。
 
-1. `jq '.taint_flows[].propagation_steps[].transformation' parameter_graph.json | sort | uniq -c` → 出现非 null(`sanitize_hint:...`)
-2. `jq '.[].verdict' injection_gitnexus_queue.json | sort | uniq -c` → 不再 ~100% vulnerable(有 `safe` 出现,因 sanitizer 流通后 LLM 能判防护有效)
-3. (可观测性)确认 `[GN-LLM]`/chain-verdict 相关日志无「sanitizers_repr=(none)」占满
+跑 NodeGoat 白盒后(前提:`taint_flows > 0`):
+
+1. **主信号(硬证据)**:`jq '.taint_flows[].propagation_steps[].transformation' parameter_graph.json | sort | uniq -c` → 出现非 null(`sanitize_hint:...`)。这是修复生效的直接证据。
+2. **辅助信号(有前提)**:`jq '.[].verdict' injection_gitnexus_queue.json | sort | uniq -c` → 出现 `safe`。**前提:目标存在「有真防护的 chain」**——若 NodeGoat 注入点全是真漏洞(无防护),verdict 本就该全 vulnerable,不代表修复失败;此信号仅在目标含防护 chain 时才有意义。
+3. (可观测性)确认 chain-verdict 相关日志的 `sanitizers_repr` 不再恒 `(none)`。
 
 ---
 
@@ -271,7 +275,9 @@ intra LLM
 
 - **forward `propagate_across_chains`(chain_propagator.py:136)**:当前注释「保留过渡,供 authz `_source_reaches_sink` 复用」。本 spec 不动它。若后续确认 authz 不再依赖,可单独清理。
 - **intra LLM schema 进一步增强**(如逐步 transformation 而非路径级 summary):本 spec 用路径级 summary step(每条 param→sink 路径一个 step),足够让 sanitizer/post_concat/intermediate_vars 流通;更细粒度的函数内 step 拆分留 follow-up。
-- **`sink_expressions` 的 inj/ssrf 路径传参**:已确认 injection_builder/ssrf_builder 不传 `sink_call_sites`(仅 xss_builder 传)。实现时需让两个 builder 接收并透传,activity 把 `sink_call_sites` 喂给 builder(改动 #11)。
+- **`sink_expressions` 的 inj/ssrf 路径传参(已核实)**:activity `run_gitnexus_chain_verdict` **已持有 `sink_call_sites`**(activities.py:1245-1250,从 `code_index.json` 读),仅 xss 透传(line 1267-1270)、inj/ssrf 走 else 未传(line 1271-1273)。改动 #11 = else 分支补传 `sink_call_sites` + builder 签名接收并透传,**数据源已有,无需额外读文件**。
+- **`expression` 数据源是 `code_index.json`(非 `parameter_graph.json`)**:`SinkCallSite` 存在 `code_index.json` 的 `sink_call_sites`,不在 pgraph。若 `code_index.json` 缺失(activity line 1247 `if exists` 守卫),`sink_call_sites={}`,`expression` 取不到——`expression` 增强依赖 `code_index.json` 落盘。
+- **`annotate_sanitizers` 正则匹配的二级依赖(脆弱)**:`transformation="sanitize_hint:<LLM 返回的 description>"`,经 `_TRANSFORMATION_FRAGMENTS`(sanitizer_library.py:157-168)正则翻译成结构化 `SanitizerAnnotation`。若 LLM 返回的 description 不含可识别 sanitizer 名(如 "custom sanitizer"/"input cleaned"),正则匹配不到 → annotation 仍空。即 transformation 字段流通了,但「翻译成结构化标注」这步仍受 LLM 措辞影响;后续可让 LLM 直接返回结构化 `defense_type` 而非自由文本 description。
 
 ---
 
