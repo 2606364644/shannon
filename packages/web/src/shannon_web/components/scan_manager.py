@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import aiofiles
+
+from shannon_web.models import ScanRequest
+
+
+class TemporalUnavailable(Exception):
+    pass
+
+
+class TooManyScans(Exception):
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(f"已有扫描在跑（并发上限 {limit}）")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class ScanManager:
+    def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
+                 git_fetcher: Any = None, max_concurrent: int = 1,
+                 scan_timeout: float = 0.0) -> None:
+        self._workspaces_dir = Path(workspaces_dir)
+        self._repos_dir = Path(repos_dir)
+        self._config_store = config_store
+        self._git = git_fetcher
+        self._max_concurrent = max(1, max_concurrent)
+        self._scan_timeout = scan_timeout
+        self._procs: dict[str, asyncio.subprocess.Process] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+
+    # ---- 公共 API ----
+    def active_pids(self) -> dict[str, int]:
+        return {ws: p.pid for ws, p in self._procs.items() if p.returncode is None}
+
+    async def reap_zombies(self) -> None:
+        """lifespan 启动时扫无主子进程（本会话 _procs 外的）。v1: 无操作占位，
+        真正无主 ws 由 WorkspacesIndexer 判 interrupted 呈现。"""
+        return None
+
+    async def start(self, req: ScanRequest) -> str:
+        await self._check_temporal()
+        if len(self._procs) >= self._max_concurrent:
+            raise TooManyScans(self._max_concurrent)
+        ws = req.workspace or self._gen_ws_name(req)
+        ws_dir = self._workspaces_dir / ws
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        event_file = ws_dir / "events.ndjson"
+
+        target, yaml_path = await self._resolve_inputs(req)
+
+        argv = self._build_argv(req, target, ws, yaml_path)
+        env = {**os.environ, "SHANNON_WEB_EVENT_FILE": str(event_file)}
+        proc = await asyncio.create_subprocess_exec(
+            *argv, env=env,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        self._procs[ws] = proc
+        self._tasks[ws] = asyncio.create_task(self._watch(ws, proc, event_file))
+        return ws
+
+    async def cancel(self, ws: str) -> bool:
+        proc = self._procs.get(ws)
+        if proc is None:
+            return False
+        try:
+            proc.send_signal(signal.SIGINT)
+        except ProcessLookupError:
+            pass
+        return True
+
+    # ---- 钩子（可 monkeypatch）----
+    def _build_argv(self, req: ScanRequest, target: str | None,
+                    ws: str, yaml_path: Path | None = None) -> list[str]:
+        if req.type == "whitebox":
+            return ["shannon-whitebox", "start", "-r", target or "", "--url", req.url or "", "-w", ws]
+        if req.type == "blackbox":
+            cmd = ["shannon-blackbox", "start", "--url", req.url or "", "--repo", target or "", "-w", ws]
+            if req.reuse_latest:
+                cmd.append("--latest")
+            return cmd
+        if req.type == "correlation":
+            return ["shannon-multi", "start", "-c", str(yaml_path)]
+        raise ValueError(f"unknown scan type: {req.type}")
+
+    async def _check_temporal(self) -> None:
+        import socket
+
+        def _probe() -> bool:
+            try:
+                with socket.create_connection(("localhost", 7233), timeout=1.0):
+                    return True
+            except OSError:
+                return False
+
+        loop = asyncio.get_running_loop()
+        if not await loop.run_in_executor(None, _probe):
+            raise TemporalUnavailable()
+
+    # ---- 内部 ----
+    async def _resolve_inputs(self, req: ScanRequest) -> tuple[str | None, Path | None]:
+        target: str | None = None
+        yaml_path: Path | None = None
+        if req.source is not None:
+            if req.source.kind == "git":
+                if self._git is None or not self._git.available():
+                    raise PermissionError("git 模式不可用：缺少 GitLab 凭证")
+                p = await self._git.fetch(req.source.value, req.source.branch,
+                                          req.source.commit, req.source.force_reclone)
+                target = str(p)
+            else:
+                target = req.source.value
+        if req.type == "correlation":
+            yaml_path = await self._resolve_correlation_yaml(req)
+        return target, yaml_path
+
+    async def _resolve_correlation_yaml(self, req: ScanRequest) -> Path:
+        assert self._config_store is not None, "correlation 需 config_store"
+        if req.config_name:
+            return self._config_store_dir() / f"web-multi-{req.config_name}.yaml"
+        if req.config_content:
+            if req.save_as:
+                return self._config_store.write(req.save_as, req.config_content)
+            return self._config_store.write_temp(req.config_content)
+        raise ValueError("correlation 扫描需 config_name 或 config_content")
+
+    def _config_store_dir(self) -> Path:
+        # MultiRepoConfigStore 写入目录（list_configs 同源）
+        return Path(getattr(self._config_store, "_dir", "configs"))
+
+    def _gen_ws_name(self, req: ScanRequest) -> str:
+        base = "scan"
+        if req.source:
+            base = Path(req.source.value).stem or "scan"
+        elif req.config_name:
+            base = req.config_name
+        return f"{base}_{int(time.time())}"
+
+    async def _watch(self, ws: str, proc: asyncio.subprocess.Process, event_file: Path) -> None:
+        stderr_tail = bytearray()
+
+        def stderr_sink(line: bytes) -> None:
+            stderr_tail.extend(line)
+            if len(stderr_tail) > 2048:
+                del stderr_tail[:len(stderr_tail) - 2048]
+
+        async def drain(stream, sink=None):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                if sink is not None:
+                    sink(line)
+
+        s_out = asyncio.create_task(drain(proc.stdout))
+        s_err = asyncio.create_task(drain(proc.stderr, stderr_sink))
+        try:
+            rc = await proc.wait()
+        finally:
+            await asyncio.gather(s_out, s_err, return_exceptions=True)
+
+        if not self._has_scan_end(event_file):
+            status = "killed" if (rc is not None and rc < 0) else "crashed"
+            tail_text = bytes(stderr_tail[-2048:]).decode("utf-8", "replace")
+            await self._write_scan_end(event_file, status, rc if rc is not None else -1, tail_text)
+        self._procs.pop(ws, None)
+        self._tasks.pop(ws, None)
+
+    @staticmethod
+    def _has_scan_end(event_file: Path) -> bool:
+        if not event_file.exists():
+            return False
+        for line in event_file.read_text("utf-8", errors="replace").splitlines()[-5:]:
+            try:
+                if json.loads(line).get("type") == "scan_end":
+                    return True
+            except json.JSONDecodeError:
+                continue
+        return False
+
+    async def _write_scan_end(self, event_file: Path, status: str,
+                              returncode: int, stderr_tail: str) -> None:
+        payload = {
+            "ts": _now_iso(), "category": "CONTROL", "type": "scan_end",
+            "status": status, "returncode": returncode, "stderr_tail": stderr_tail,
+        }
+        async with aiofiles.open(event_file, "a") as fh:
+            await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
