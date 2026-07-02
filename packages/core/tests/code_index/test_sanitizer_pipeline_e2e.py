@@ -111,5 +111,5 @@ async def test_sanitizer_pipeline_flows_end_to_end():
     assert "html.escape" in captured["prompt"]
     assert "'sel ' + q" in captured["prompt"]
     assert "raw" in captured["prompt"]
-    assert "True" in captured["prompt"]   # post_sanitize_concat=True 进 prompt
+    assert "post-sanitize concatenation detected: True" in captured["prompt"]
     assert verdict.verdict == "safe"      # sanitizer 流通后 LLM 能判 safe(非机械 vulnerable)

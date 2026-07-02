@@ -147,14 +147,14 @@ def _detect_post_sanitize_concat(steps: list[PropagationStep]) -> bool:
     两种形态都认:
     1. summary step 编码标记(transformation 含 '|post_concat',由 _intra_result_from_llm 产)
     2. 多 step 序列: sanitize/escape/encode/quote step 后跟 concat step(原逻辑,向后兼容)
+
+    Mirrors spec §5.4.
     """
+    seen_sanitizer = False
     for s in steps:
         tf = (s.transformation or "").lower()
         if "post_concat" in tf:          # summary step 标记(Task 2/3 产物)
             return True
-    seen_sanitizer = False
-    for s in steps:
-        tf = (s.transformation or "").lower()
         if "sanitize" in tf or "escape" in tf or "encode" in tf or "quote" in tf:
             seen_sanitizer = True
             continue

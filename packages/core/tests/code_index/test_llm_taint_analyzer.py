@@ -417,10 +417,17 @@ def test_intra_result_skips_invalid_sink_or_param():
     """sink_id / source_param 不在已知集合 → 跳过(不进 local_steps/hits)。"""
     llm_result = TaintAnalysisResult(
         tainted_params=["q"],
-        propagation_paths=[TaintPath(
-            source_param="evil",   # 非函数参数
-            sink_id="app.py:handler:db.execute:15:0", sink_arg_index=0, confidence=0.9,
-        )],
+        propagation_paths=[
+            TaintPath(
+                source_param="evil",   # 非函数参数 → 跳过
+                sink_id="app.py:handler:db.execute:15:0", sink_arg_index=0, confidence=0.9,
+            ),
+            TaintPath(
+                source_param="q",       # 合法参数
+                sink_id="bogus:db.execute:99:0",   # 但 sink_id 不在已知集合 → 跳过
+                sink_arg_index=0, confidence=0.9,
+            ),
+        ],
     )
     result = _intra_result_from_llm(_blk(), llm_result, [_sink2()])
     assert result.local_steps == []

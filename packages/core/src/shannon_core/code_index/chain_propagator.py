@@ -201,6 +201,12 @@ def propagate_across_chains(
                 if not steps_total:
                     chain_confidence = sink_confidence
 
+                # Forward path intentionally does NOT set sink_slot (defaults to
+                # SlotContext.GENERIC). It is consumed only by authz
+                # `_source_reaches_sink`, which does NOT route through `_route_for`
+                # — so GENERIC is harmless here. Do NOT route forward flows
+                # through inj/ssrf `_route_for` without first threading sink_slot
+                # (see backward path / T3-fix in propagate_backward_across_chains).
                 flow_id = f"{head_id}->{sink_id}"
                 flows.append(TaintFlow(
                     flow_id=flow_id,
@@ -210,7 +216,7 @@ def propagate_across_chains(
                     propagation_steps=steps_total,
                     sink_call_site_id=sink_id,
                     confidence=chain_confidence,
-                    notes="",
+                    notes="forward: no sink_slot (authz _source_reaches_sink only)",
                 ))
 
             # Prepare next hop: map tainted through call site to callee params
@@ -457,6 +463,11 @@ def propagate_backward_across_chains(
                         )
                     # 透传 sink 的危险槽位到 flow(否则 sink_slot=GENERIC 被
                     # _route_for 拒掉 inj/ssrf,sanitizer 信息到不了 verdict prompt)。
+                    # TODO(multi-slot): a sink with >1 dangerous_slot only carries the
+                    # primary slot here; secondary slots lose _route_for routing.
+                    # Verdict LLM still sees ALL expressions via extract_candidate_chains
+                    # so judgment is intact — only routing is single-slot. Per-slot
+                    # fan-out is a larger redesign (deferred, see task-3-fix-report).
                     primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
                     flows.append(TaintFlow(
                         flow_id=f"{sp.entry_point_id}->{sink.id}",
