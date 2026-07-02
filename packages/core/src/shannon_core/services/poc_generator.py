@@ -352,3 +352,112 @@ async def llm_fill_gap(
     if not getattr(result, "success", False) or not getattr(result, "structured_output", None):
         return None
     return result.structured_output
+
+
+# Task 6: md 渲染（概览表 + 详细 PoC + 空表兜底）
+
+BAND_LABEL = {
+    ConfidenceBand.CONFIRMED: "✓ 已确认",
+    ConfidenceBand.HIGH: "● 高置信",
+    ConfidenceBand.SUSPECTED: "⚠ 疑似",
+}
+
+BAND_FULL = {
+    ConfidenceBand.CONFIRMED: "已确认可复现",
+    ConfidenceBand.HIGH: "高置信",
+    ConfidenceBand.SUSPECTED: "疑似待验证",
+}
+
+_AUTH_LABEL = {
+    AuthState.NONE: "无需登录",
+    AuthState.REQUIRED: "需登录",
+    AuthState.UNKNOWN: "未知",
+}
+
+
+def _placeholder_block(has_placeholder: bool) -> str:
+    if not has_placeholder:
+        return ""
+    return (
+        "\n> ⚠️ 使用前替换：\n"
+        "> - `TARGET[:PORT]` → 实际部署地址\n"
+        "> - `<AUTH_TOKEN>` / `<SESSION_COOKIE>` → 有效登录凭证\n"
+    )
+
+
+def _overview_row(vuln_class: str, spec: HttpRequestSpec) -> str:
+    auth = _AUTH_LABEL.get(spec.auth_state, "未知")
+    if spec.auth_state == AuthState.UNKNOWN:
+        auth = "⚠ 未知"
+    path_cell = f"{spec.method} {spec.path}"
+    return f"| {spec.source_id} | {vuln_class} | {path_cell} | {auth} | {BAND_LABEL[spec.confidence_band]} |"
+
+
+def _detail_section(vuln_class: str, vuln: Any, spec: HttpRequestSpec, host: str) -> str:
+    band_mark = {"confirmed": "✓", "high": "●", "suspected": "⚠"}[spec.confidence_band.value]
+    auth = _AUTH_LABEL.get(spec.auth_state, "未知")
+    note = f"\n> {spec.note}" if spec.note else ""
+    lines = [
+        f"### {band_mark} {spec.source_id} · {vuln_class} @ {spec.method} {spec.path}",
+        f"**置信度：{BAND_FULL[spec.confidence_band]}** ｜ 认证：{auth} ｜ 来源：{getattr(vuln, 'merge_source', '-')}{note}",
+        "",
+        "**curl:**",
+        "```bash",
+        to_curl(spec, host),
+        "```",
+        "",
+        "**Burp Repeater (raw):**",
+        "```http",
+        to_burp_raw(spec, host),
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def render_poc_md(entries, host: str, track: str, *, has_placeholder: bool) -> str:
+    """渲染 PoC 集合 Markdown（概览表 + 详细 curl/Burp）。
+
+    Args:
+        entries: list[tuple[vuln_class, vuln, HttpRequestSpec | list[HttpRequestSpec]]]
+        host: 目标 host（可能为占位符）
+        track: "whitebox" 或 "blackbox"
+        has_placeholder: 是否显示占位符替换说明块
+
+    Returns:
+        完整 PoC 文档 Markdown 字符串
+    """
+    track_cn = "白盒" if track == "whitebox" else "黑盒"
+    counts = {b: 0 for b in ConfidenceBand}
+    for _, _, spec_or_list in entries:
+        specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
+        for s in specs:
+            counts[s.confidence_band] += 1
+    n = sum(counts.values())
+    header = (
+        f"# 可利用漏洞 PoC 集合（{track_cn}）\n"
+        f"\n> 目标 host: {host} ｜ 生成自 *_exploitation_queue.json\n"
+        f"> 共 {n} 条外部可达 PoC · 已确认 {counts[ConfidenceBand.CONFIRMED]} 条 · "
+        f"高置信 {counts[ConfidenceBand.HIGH]} 条 · 疑似 {counts[ConfidenceBand.SUSPECTED]} 条"
+        f"{_placeholder_block(has_placeholder)}\n"
+    )
+    if not entries:
+        return header.strip() + "\n"
+    overview = ["\n## 概览\n", "| ID | 类型 | 路径 | 认证 | 置信度 |", "|----|------|------|------|--------|"]
+    for vuln_class, _, spec_or_list in entries:
+        specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
+        overview.append(_overview_row(vuln_class, specs[0]))
+    detail = ["\n## 详细 PoC\n"]
+    for vuln_class, vuln, spec_or_list in entries:
+        specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
+        for i, s in enumerate(specs):
+            heading = f"（请求 {i+1}/{len(specs)}）" if len(specs) > 1 else ""
+            detail.append(_detail_section(vuln_class, vuln, s, host).replace(
+                f" · {vuln_class} @ ", f"{heading} · {vuln_class} @ "))
+            detail.append("\n---\n")
+    return header + "\n".join(overview) + "\n" + "\n".join(detail)
+
+
+def empty_poc_md(track: str) -> str:
+    """空表兜底：无 externally_exploitable 漏洞时调用。"""
+    track_cn = "白盒" if track == "whitebox" else "黑盒"
+    return f"# 可利用漏洞 PoC 集合（{track_cn}）\n\n本次扫描无 externally_exploitable 漏洞，未生成 PoC。\n"

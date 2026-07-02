@@ -255,3 +255,38 @@ async def test_llm_fill_gap_failure_returns_none(monkeypatch):
     monkeypatch.setattr(mod, "run_claude_prompt", boom)
     out = await llm_fill_gap(_AUTH_VULN, "auth", "https://t.example.com", {}, repo_path="/tmp/x")
     assert out is None
+
+
+# Task 6: md 渲染（概览表 + 详细 PoC + 空表兜底）
+from shannon_core.services.poc_generator import render_poc_md, empty_poc_md, ConfidenceBand, AuthState
+
+_INJ_ENTRY = (
+    "injection", _inj(),
+    HttpRequestSpec(method="GET", path="/api/users", query={"id": "' OR '1'='1"},
+                    headers={"Authorization": "Bearer <AUTH_TOKEN>"},
+                    auth_state=AuthState.REQUIRED, confidence_band=ConfidenceBand.CONFIRMED,
+                    source_id="INJ-1", vuln_class="injection"),
+)
+
+
+def test_render_poc_md_overview_and_detail():
+    md = render_poc_md([_INJ_ENTRY], "https://t.example.com", "whitebox", has_placeholder=False)
+    assert "# 可利用漏洞 PoC 集合（白盒）" in md
+    assert "| ID | 类型 | 路径 | 认证 | 置信度 |" in md
+    assert "INJ-1" in md and "injection" in md and "✓ 已确认" in md
+    assert "curl -i" in md
+    assert "GET /api/users?id=" in md  # Burp raw
+    assert "Host: t.example.com" in md
+    # 无占位符时不显示替换说明块
+    assert "TARGET[:PORT]" not in md
+
+
+def test_render_poc_md_placeholder_block_when_host_missing():
+    md = render_poc_md([_INJ_ENTRY], "https://TARGET[:PORT]", "blackbox", has_placeholder=True)
+    assert "⚠️ 使用前替换" in md
+    assert "TARGET[:PORT]" in md
+
+
+def test_empty_poc_md():
+    md = empty_poc_md("whitebox")
+    assert "无 externally_exploitable" in md
