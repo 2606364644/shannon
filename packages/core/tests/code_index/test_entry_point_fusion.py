@@ -481,3 +481,63 @@ class TestSaveAdjudication:
             (tmp_path / "entry_points.json").read_text()
         )
         assert result.adjudicated_entry_points[0].verdict.value == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (G5b): run_entry_point_fusion 接 OpenAPI schema 源
+# ---------------------------------------------------------------------------
+from pathlib import Path  # noqa: E402
+
+
+def _seed_code_index(deliverables: Path, entry_points=None):
+    """写最小 code_index.json（含现有确定性 entry_points）。
+
+    CodeIndex (models.py:72) 必填字段全部补齐, 让 model_validate_json 成功。
+    """
+    (deliverables / "code_index.json").write_text(json.dumps({
+        "repository": str(deliverables),
+        "language": "python",
+        "total_blocks": 0,
+        "total_entry_points": len(entry_points or []),
+        "total_chains": 0,
+        "blocks": [],
+        "edges": [],
+        "entry_points": entry_points or [],
+        "chains": [],
+        "sink_call_sites": [],
+    }))
+
+
+def test_fusion_appends_schema_source(tmp_path):
+    """repo_path 给定 + repo 有 openapi.json → schema 源 EntryPoint 追加进 index。"""
+    _seed_code_index(tmp_path)  # 现有确定性 entry_points=[]
+    (tmp_path / "openapi.json").write_text(json.dumps({
+        "paths": {"/api/orders/{id}": {"GET": {}}}
+    }))
+    index = run_entry_point_fusion(str(tmp_path), repo_path=str(tmp_path))
+    schema_eps = [e for e in index.entry_points if e.source == "schema_file"]
+    assert any(e.route == "/api/orders/{id}" and e.http_method == "GET" for e in schema_eps), \
+        f"schema 源应追加，实际 {[e.route for e in schema_eps]}"
+
+
+def test_fusion_dedups_by_func_block_id(tmp_path):
+    """schema 源 func_block_id 与现有确定性重复时不追加。"""
+    dup = {"func_block_id": "openapi:openapi.json:GET:/x",
+           "entry_type": "http_route", "route": "/x", "http_method": "GET",
+           "confidence": 0.95, "evidence": "det", "needs_llm_review": False,
+           "source": "code_index"}
+    _seed_code_index(tmp_path, entry_points=[dup])
+    (tmp_path / "openapi.json").write_text(json.dumps({"paths": {"/x": {"GET": {}}}}))
+    index = run_entry_point_fusion(str(tmp_path), repo_path=str(tmp_path))
+    # schema 源不会被追加（func_block_id 冲突），仍只有 1 条 /x
+    xs = [e for e in index.entry_points if e.route == "/x"]
+    assert len(xs) == 1, f"func_block_id 重复应去重，实际 {len(xs)} 条 /x"
+
+
+def test_fusion_without_repo_path_skips_schema(tmp_path):
+    """repo_path=None（旧行为）→ 不扫 OpenAPI，schema 源为空。"""
+    _seed_code_index(tmp_path)
+    (tmp_path / "openapi.json").write_text(json.dumps({"paths": {"/y": {"GET": {}}}}))
+    index = run_entry_point_fusion(str(tmp_path))  # 不传 repo_path
+    assert not any(e.source == "schema_file" for e in index.entry_points), \
+        "不传 repo_path 不应扫 OpenAPI"

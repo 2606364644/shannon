@@ -616,7 +616,7 @@ async def run_entry_point_fusion(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
         async with get_audit_session().track_step("pre-recon", "entry-point-fusion", intent=intent_for("entry-point-fusion")):
-            index = _fusion(str(deliverables))
+            index = _fusion(str(deliverables), repo_path=str(repo))
 
         return {
             "total_entry_points": index.total_entry_points,

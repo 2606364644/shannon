@@ -360,21 +360,28 @@ def write_index_files(
     return json_path, summary_path
 
 
-def run_entry_point_fusion(deliverables_dir: str) -> CodeIndex:
-    """Merge deterministic entry points with LLM-discovered entry points.
+def run_entry_point_fusion(
+    deliverables_dir: str, repo_path: str | None = None,
+) -> CodeIndex:
+    """Merge deterministic entry points with LLM- and schema-discovered entry points.
 
-    Reads code_index.json and pre_recon_deliverable.md, parses LLM entry
-    points from the deliverable, merges with deterministic entry points,
-    and updates code_index.json in place.
+    Sources merged (all dedup by func_block_id, deterministic code_index as base):
+    - deterministic (code_index.json entry_points) — base
+    - LLM (pre_recon_deliverable.md, parsed) — only if deliverable exists
+    - OpenAPI/Swagger schema files (repo_path) — only if repo_path given (G5)
 
     Args:
         deliverables_dir: Path to the deliverables directory containing
             code_index.json and pre_recon_deliverable.md.
+        repo_path: Optional repo root to scan for OpenAPI/Swagger schema
+            files. When None (default), no schema scan is performed
+            (back-compat with pre-G5 callers).
 
     Returns:
         Updated CodeIndex with merged entry points.
     """
     from shannon_core.code_index.entry_point_fusion import parse_llm_entry_points
+    from shannon_core.code_index.schema_entry_parser import parse_openapi_schema_files
 
     out = Path(deliverables_dir)
     code_index_path = out / "code_index.json"
@@ -386,7 +393,7 @@ def run_entry_point_fusion(deliverables_dir: str) -> CodeIndex:
 
     index = CodeIndex.model_validate_json(code_index_path.read_text())
 
-    # Parse LLM entry points from deliverable (if it exists)
+    # Source: LLM pre-recon (only if deliverable exists)
     llm_eps: list[EntryPoint] = []
     if deliverable_path.exists():
         deliverable_text = deliverable_path.read_text()
@@ -395,22 +402,33 @@ def run_entry_point_fusion(deliverables_dir: str) -> CodeIndex:
     else:
         logger.info("No pre_recon_deliverable.md found; LLM fusion skipped")
 
-    # Merge: deterministic entry points as the base, LLM as supplementary
-    deterministic_ids = {ep.func_block_id for ep in index.entry_points}
+    # Source: OpenAPI/Swagger schema files (G5; only if repo_path given)
+    schema_eps: list[EntryPoint] = []
+    if repo_path:
+        schema_eps = parse_openapi_schema_files(repo_path)
+        logger.info("Parsed %d schema entry points from OpenAPI files", len(schema_eps))
 
-    # Add LLM-only discoveries
+    # Merge: deterministic as base, append LLM- and schema-only discoveries
+    deterministic_ids = {ep.func_block_id for ep in index.entry_points}
     merged_entries = list(index.entry_points)
-    added = 0
+    added_llm = 0
+    added_schema = 0
     for ep in llm_eps:
         if ep.func_block_id not in deterministic_ids:
             merged_entries.append(ep)
-            added += 1
+            added_llm += 1
         else:
             logger.debug("LLM entry point %s already in deterministic results, skipping", ep.func_block_id)
+    for ep in schema_eps:
+        if ep.func_block_id not in deterministic_ids:
+            merged_entries.append(ep)
+            added_schema += 1
+        else:
+            logger.debug("Schema entry point %s already in deterministic results, skipping", ep.func_block_id)
 
     logger.info(
-        "Entry point fusion: %d deterministic + %d LLM-only = %d total",
-        len(index.entry_points), added, len(merged_entries),
+        "Entry point fusion: %d deterministic + %d LLM-only + %d schema-only = %d total",
+        len(index.entry_points), added_llm, added_schema, len(merged_entries),
     )
 
     # Update index
