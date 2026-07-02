@@ -525,7 +525,56 @@ async def run_auth_gitnexus_judge(input: ActivityInput) -> dict:
                     )
                 except Exception:
                     pass
-            # candidate_count == 0 分支在 T6（探索）
+            else:  # candidate_count == 0 → spec-2b T6：多轮 agent 自主探索（非静默空 queue）
+                # 确定性层 0 候选（常见于 auth handler 漏召回/入口点未识别）时，agent
+                # 自主 grep route + read auth handler 补软候选（needs_review=True，
+                # evidence_chain 标 explore-discovered）。对标 authz 探索段 :375-419。
+                try:
+                    await get_audit_session().log_info(
+                        "auth GitNexus 轨：0 候选 → 触发自主探索（多轮 agent 读 auth 源码）。",
+                        "warning",
+                    )
+                except Exception:
+                    pass
+                explore_prompt = prompt_manager.load_sync(
+                    "auth_gitnexus_explore",
+                    variables={
+                        "ENTRY_POINTS_SUMMARY": f"{entry_point_total} entry points (handler_count={handler_count})",
+                    },
+                )
+                result = await run_gitnexus_verdict_agent(
+                    prompt=explore_prompt,
+                    repo_path=str(repo),
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                    audit_session=get_audit_session(),
+                )
+                raw = result.structured_output
+                if raw is None and result.text:
+                    raw = result.text  # fallback to text; parse_lenient handles
+                parsed = VulnerabilityQueue.parse_lenient(
+                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
+                )
+                for v in parsed.queue.vulnerabilities:
+                    data = v.model_dump()
+                    data["source_track"] = "gitnexus"
+                    data["needs_review"] = True  # 探索发现，软候选（未经确定性检查器验证）
+                    if not data.get("evidence_chain"):
+                        data["evidence_chain"] = "gitnexus explore-discovered (0 deterministic candidates)"
+                    vulnerabilities.append(data)
+
+                try:
+                    await get_audit_session().log_info(
+                        f"auth GitNexus 轨（探索）：0 确定性候选 → 自主探索产出 "
+                        f"{len(vulnerabilities)} 条软候选（needs_review=True）。",
+                        "info",
+                    )
+                except Exception:
+                    pass
 
         # 追加 auth_gitnexus_queue.json（config_scan 先产；读现有 + 合并，非覆盖）。
         # 注意：写操作放在 track_step 块外，与 authz 写策略一致（authz 在块内写，但块外

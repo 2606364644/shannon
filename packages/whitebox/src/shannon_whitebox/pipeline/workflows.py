@@ -321,6 +321,27 @@ class WhiteboxScanWorkflow:
                         start_to_close_timeout=timedelta(seconds=10),
                         retry_policy=retry_for("log"),
                     )
+                # === Auth GitNexus-track logic-class judge (spec-2b T6) ===
+                # config_scan 先产 auth_gitnexus_queue.json 的 config 类条目
+                # (cookie/HSTS/CORS/JWT/限流)；auth_judge 追加逻辑类 verdict
+                # (session 固定/明文密码/OAuth state 缺失/弱随机 token)，读现有 +
+                # 合并非覆盖。Graceful：失败时 queue 保留 config_scan 产出，不阻塞
+                # LLM 轨。多轮 agent 窗口（候选>0 深判 / 候选=0 自主探索）。
+                try:
+                    await workflow.execute_activity(
+                        activities.run_auth_gitnexus_judge, act_input,
+                        start_to_close_timeout=timedelta(minutes=30),
+                        retry_policy=retry_for("gitnexus-verdict"),
+                    )
+                except Exception as exc:
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        ActivityInput(**{**act_input.__dict__,
+                           "info_message": f"Auth GitNexus judge failed (non-fatal, config-scan queue preserved, LLM-only track continues): {exc}",
+                           "info_level": "warning"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
             if input.enable_llm_track:
                 vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
                 for vt in selected_classes:

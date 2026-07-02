@@ -15,6 +15,7 @@ from .pipeline.activities import (
     assemble_report,
     run_agent,
     run_auth_config_scan,
+    run_auth_gitnexus_judge,
     run_auth_validation,
     run_authz_gitnexus_judge,
     run_code_index,
@@ -95,7 +96,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         workflows=[WhiteboxScanWorkflow],
         activities=[
             render_findings, assemble_report, run_agent, run_auth_validation,
-            run_auth_config_scan,
+            run_auth_config_scan, run_auth_gitnexus_judge,
             run_authz_gitnexus_judge, run_code_index,
             run_credential_check, run_merge_dual_track_queues,
             run_merge_sink_reports, run_entry_point_fusion,

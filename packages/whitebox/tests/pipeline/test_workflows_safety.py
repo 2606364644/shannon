@@ -144,3 +144,35 @@ def test_entry_point_fusion_not_gated_by_llm_track():
             f"（await 缩进 {fusion_indent} <= if {prev_enable_indent}），"
             "G6 要求 schema 源关 LLM 轨时仍跑"
         )
+
+
+def test_auth_gitnexus_judge_runs_after_config_scan():
+    """spec-2b T6: run_auth_gitnexus_judge 在 run_auth_config_scan 之后编排。
+
+    config_scan 先产 auth_gitnexus_queue.json 的 config 类条目（cookie/HSTS/
+    CORS/JWT/限流），auth_judge 再追加逻辑类 verdict（session 固定/明文密码等）。
+    源序锚点（inspect.getsource）保证二者顺序，避免被重排。
+    """
+    src = inspect.getsource(workflows)
+    lines = src.splitlines()
+
+    # 锚 activities.<name> 参数行（与 test_entry_point_fusion_not_gated 同手法），
+    # 回溯到对应 await workflow.execute_activity( 行做源序比较。
+    def _await_line(name: str) -> int | None:
+        for i, line in enumerate(lines):
+            if f"activities.{name}" in line:
+                for k in range(i - 1, -1, -1):
+                    if "execute_activity(" in lines[k] and "workflow." in lines[k]:
+                        return k
+                break
+        return None
+
+    i_config = _await_line("run_auth_config_scan")
+    i_judge = _await_line("run_auth_gitnexus_judge")
+    assert i_config is not None, "找不到 run_auth_config_scan 的 execute_activity 调用"
+    assert i_judge is not None, "找不到 run_auth_gitnexus_judge 的 execute_activity 调用"
+    assert i_config < i_judge, (
+        f"run_auth_gitnexus_judge 应在 run_auth_config_scan 之后"
+        f"（config_scan 先产 config 类 queue，auth_judge 再追加逻辑类），"
+        f"源序 config={i_config} >= judge={i_judge}"
+    )

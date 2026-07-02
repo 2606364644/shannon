@@ -97,3 +97,58 @@ async def test_auth_judge_multiturn_when_candidates_and_appends_queue(tmp_path, 
     # 追加的 verdict 条目标 source_track=gitnexus
     appended = q["vulnerabilities"][-1]
     assert appended["source_track"] == "gitnexus"
+
+
+@pytest.mark.asyncio
+async def test_auth_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
+    """spec-2b T6: candidate_count==0 → 触发自主探索（非静默空 queue）。
+
+    确定性层 0 候选（常见于入口点未识别/auth handler 漏召回）时，多轮 agent
+    自主 grep+read auth handler 补软候选（needs_review=True）。
+    """
+    import shannon_whitebox.pipeline.activities as act
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+
+    from shannon_core.code_index.auth_gitnexus_track import AuthTrackBuildResult
+    fake_result = AuthTrackBuildResult(
+        markdown="", candidates=[], handler_count=0, entry_point_total=0,
+    )
+    monkeypatch.setattr(
+        "shannon_core.code_index.auth_gitnexus_track.build_auth_gitnexus_track",
+        lambda d: fake_result,
+    )
+
+    explored = {"n": 0}
+
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+        explored["n"] += 1
+        # 探索 prompt 必须含 auth 探索词汇（login/session/explore 任一）
+        assert (
+            "login" in prompt.lower()
+            or "session" in prompt.lower()
+            or "explore" in prompt.lower()
+        ), "0 候选应触发探索 prompt（含 login/session/explore 词汇）"
+        r = MagicMock()
+        r.structured_output = {"vulnerabilities": []}
+        r.text = "{}"
+        return r
+
+    monkeypatch.setattr(act, "run_gitnexus_verdict_agent", fake_verdict)
+    monkeypatch.setattr(act, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+
+    # get_audit_session mock：track_step async cm + log_info async（复用 T5 mock 基建）
+    session = MagicMock()
+    session.track_step = _noop_cm_factory()
+    session.log_info = AsyncMock()
+    monkeypatch.setattr(
+        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+    )
+
+    inp = MagicMock()
+    inp.workspace_name = "ws"
+    inp.api_key = None
+
+    await act.run_auth_gitnexus_judge(inp)
+    assert explored["n"] == 1, "0 候选应触发一次自主探索 verdict_agent"
