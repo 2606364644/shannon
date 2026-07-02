@@ -7,6 +7,8 @@ from shannon_core.code_index.chain_verdict import (
     ChainVerdict,
 )
 from shannon_core.code_index.parameter_models import (
+    DangerousSlot,
+    SlotContext,
     ParameterPropagationGraph,
     SinkCallSite,
     SinkCategory,
@@ -176,3 +178,39 @@ async def test_judge_chain_verdict_defaults_safe_on_llm_failure():
     # graceful: never crash; mark needs_review (do not silently declare safe/vulnerable)
     assert verdict.confidence == "low"
     assert "needs_review" in (verdict.mismatch_reason or "") or verdict.verdict in ("safe", "vulnerable")
+
+
+def _slot_sink(sink_id, slot=SlotContext.SQL_VALUE, expr="req.query.q"):
+    return SinkCallSite(
+        id=sink_id, caller_id="app.py:handler", callee_name="execute",
+        callee_receiver="db", category=SinkCategory.SQL, sink_subtype="sql_raw_query",
+        file_path="app.py", line=5, column=10,
+        dangerous_slots=[DangerousSlot(arg_index=0, slot=slot, expression=expr, is_entry_hint=True)],
+        rule_id="py-sql-execute",
+    )
+
+
+def test_extract_fills_sink_expressions_from_dangerous_slots():
+    """injection 路径:sink_call_sites 的 dangerous_slots.expression → CandidateChain.sink_expressions。"""
+    sid = "app.py:handler:db.execute:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value", sink_id=sid)],
+        language_coverage=["python"],
+    )
+    chains = extract_candidate_chains(
+        pgraph, vuln_class="injection",
+        sink_call_sites={sid: _slot_sink(sid, SlotContext.SQL_VALUE, "q + suffix")},
+    )
+    assert len(chains) == 1
+    assert chains[0].sink_expressions == ["q + suffix"]
+
+
+def test_extract_sink_expressions_empty_when_no_sink_call_sites():
+    """inj/ssrf 未传 sink_call_sites → sink_expressions 默认空(向后兼容,不报错)。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value")],
+        language_coverage=["python"],
+    )
+    chains = extract_candidate_chains(pgraph, vuln_class="injection")   # 不传 sink_call_sites
+    assert len(chains) == 1
+    assert chains[0].sink_expressions == []

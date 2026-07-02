@@ -5,6 +5,7 @@ from shannon_core.code_index.vuln_chain_builders.ssrf_builder import (
     build_ssrf_findings,
 )
 from shannon_core.code_index.parameter_models import (
+    DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow,
 )
 from shannon_core.code_index.models import ParameterSource
@@ -130,4 +131,36 @@ async def test_build_ssrf_findings_progress_cb_none_no_raise():
                 '"url->fetch","mismatch_reason":null,"confidence":"high"}')
 
     findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_ssrf_accepts_sink_call_sites_param():
+    """ssrf builder accepts sink_call_sites (forwarding contract).
+
+    sink_expressions reaching the verdict PROMPT is covered by Task 6 (prompt
+    wiring) and the Task 7 end-to-end test. Here we only lock the builder
+    signature + that forwarding does not break extract→judge.
+    """
+    sid = "app.py:proxy:fetch:5:0"
+    sink = SinkCallSite(
+        id=sid, caller_id="app.py:proxy", callee_name="fetch",
+        callee_receiver="http", category=SinkCategory.SSRF,
+        sink_subtype="ssrf_http_client", file_path="app.py", line=5, column=10,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL,
+            expression="'http://api/' + user_url", is_entry_hint=True)],
+        rule_id="py-ssrf-fetch",
+    )
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow()], language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
+                '"url->fetch","mismatch_reason":null,"confidence":"high"}')
+
+    findings = await build_ssrf_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
+    assert isinstance(findings, list)
     assert len(findings) == 1

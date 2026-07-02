@@ -12,7 +12,7 @@ from shannon_core.code_index.chain_verdict import (
     extract_candidate_chains,
     judge_chain_verdict,
 )
-from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from shannon_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.models.queue_schemas import InjectionVulnerability
 
@@ -38,9 +38,12 @@ async def build_injection_findings(
     pgraph: ParameterPropagationGraph,
     *,
     llm_client: Callable[..., Awaitable[str]],
+    sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
 ) -> list[InjectionVulnerability]:
-    candidates = extract_candidate_chains(pgraph, vuln_class="injection")
+    candidates = extract_candidate_chains(
+        pgraph, vuln_class="injection", sink_call_sites=sink_call_sites,
+    )
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[InjectionVulnerability] = []
     for i, chain in enumerate(candidates, start=1):

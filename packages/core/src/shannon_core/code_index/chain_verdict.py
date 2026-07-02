@@ -26,7 +26,7 @@ synthesis in xss_builder still works off TaintFlow source_type/slot).
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from shannon_core.code_index.parameter_models import (
@@ -83,6 +83,7 @@ class CandidateChain:
     direction_hint: str
     post_sanitize_concat: bool
     render_context: str = ""   # xss only; derived from SinkCallSite.sink_subtype
+    sink_expressions: list[str] = field(default_factory=list)   # sink dangerous_slots 的实参源码表达式(供判定 LLM)
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,12 @@ def extract_candidate_chains(
         render_context = ""
         if vuln_class == "xss" and sink_site is not None:
             render_context = _render_context_for(sink_site.sink_subtype)
+        # sink dangerous_slots 的实参表达式(inj/ssrf 也需 sink_call_sites 透传)
+        sink_expressions: list[str] = []
+        if sink_call_sites is not None:
+            scs = sink_call_sites.get(flow.sink_call_site_id)
+            if scs is not None:
+                sink_expressions = [slot.expression for slot in scs.dangerous_slots if slot.expression]
         chains.append(CandidateChain(
             vuln_class=vuln_class,
             flow_id=flow.flow_id,
@@ -208,6 +215,7 @@ def extract_candidate_chains(
             direction_hint=direction,
             post_sanitize_concat=_detect_post_sanitize_concat(flow.propagation_steps),
             render_context=render_context,
+            sink_expressions=sink_expressions,
         ))
     return chains
 

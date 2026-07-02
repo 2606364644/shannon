@@ -5,6 +5,7 @@ from shannon_core.code_index.vuln_chain_builders.injection_builder import (
 )
 from shannon_core.code_index.chain_verdict import ChainVerdict
 from shannon_core.code_index.parameter_models import (
+    DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow, PropagationStep,
 )
 from shannon_core.code_index.models import ParameterSource
@@ -165,4 +166,37 @@ async def test_build_injection_findings_progress_cb_none_no_raise():
                 '"q->db","mismatch_reason":null,"confidence":"high"}')
 
     findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_injection_accepts_sink_call_sites_param():
+    """inj builder accepts sink_call_sites (forwarding contract).
+
+    sink_expressions reaching the verdict PROMPT is covered by Task 6 (prompt
+    wiring) and the Task 7 end-to-end test (asserts the expression is in the
+    prompt). Here we only lock the builder signature + that forwarding does
+    not break extract→judge.
+    """
+    sid = "app.py:handler:db.execute:5:0"
+    sink = SinkCallSite(
+        id=sid, caller_id="app.py:handler", callee_name="execute",
+        callee_receiver="db", category=SinkCategory.SQL,
+        sink_subtype="sql_raw_query", file_path="app.py", line=5, column=10,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.SQL_VALUE,
+            expression="'SELECT * FROM t WHERE id=' + q", is_entry_hint=True)],
+        rule_id="py-sql-execute",
+    )
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value")], language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"x","confidence":"high"}')
+
+    findings = await build_injection_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
+    assert isinstance(findings, list)
     assert len(findings) == 1
