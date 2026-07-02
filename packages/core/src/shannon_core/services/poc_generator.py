@@ -291,3 +291,64 @@ def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[
     legit = HttpRequestSpec(**common, note="合法：访问自己资源（<OWNER_RESOURCE_ID>）")
     cross = HttpRequestSpec(**common, note="越权：访问受害者资源（<VICTIM_RESOURCE_ID>）")
     return [legit, cross]
+
+
+# Task 5: 富信息 LLM 补缺口
+import json as _json
+
+from shannon_core.agents.runner import run_claude_prompt  # 顶层 import 便于 monkeypatch
+
+_LLM_RICH_FIELDS = (
+    "ID", "vulnerability_type", "source", "source_endpoint", "endpoint", "path",
+    "witness_payload", "sink_call", "vulnerable_code_location",
+    "exploitation_hypothesis", "suggested_exploit_technique", "missing_defense",
+    "minimal_witness", "evidence_chain", "confidence", "notes",
+)
+
+LLM_REQUEST_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]},
+        "path": {"type": ["string", "null"]},
+        "query": {"type": ["object", "null"]},
+        "headers": {"type": ["object", "null"]},
+        "body": {"type": ["string", "null"]},
+        "steps": {"type": ["array", "null"]},
+    },
+    "required": ["method"],
+}
+
+
+def build_llm_prompt(vuln: Any, vuln_class: str, host: str, recon_ctx: dict) -> str:
+    fields = {f: getattr(vuln, f) for f in _LLM_RICH_FIELDS if getattr(vuln, f, None)}
+    return (
+        f"You are reconstructing a replayable HTTP PoC for a confirmed {vuln_class} vulnerability.\n\n"
+        f"Target host: {host}\n"
+        f"Vulnerability fields:\n{_json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+        f"Recon endpoint context:\n{_json.dumps(recon_ctx, ensure_ascii=False, indent=2)}\n\n"
+        "Output a JSON object describing the HTTP request shape to reproduce this vulnerability. "
+        "Use witness_payload as the attack value. Fill method/path/query/body. "
+        "Do NOT include the Authorization/Cookie auth header (added separately). "
+        "If multi-step, put each step object in `steps`. Output JSON only."
+    )
+
+
+async def llm_fill_gap(
+    vuln: Any, vuln_class: str, host: str, recon_ctx: dict, *,
+    repo_path: str, api_key: str | None = None, model_tier: str = "medium",
+) -> dict | None:
+    """富信息 LLM 补缺口。失败/不可用返回 None（调用方退纯模板+标注）。"""
+    prompt = build_llm_prompt(vuln, vuln_class, host, recon_ctx)
+    try:
+        result = await run_claude_prompt(
+            prompt=prompt,
+            repo_path=repo_path or "/tmp/poc-gen",
+            model_tier=model_tier,
+            structured_output_schema=LLM_REQUEST_SCHEMA,
+            api_key=api_key,
+        )
+    except Exception:
+        return None
+    if not getattr(result, "success", False) or not getattr(result, "structured_output", None):
+        return None
+    return result.structured_output

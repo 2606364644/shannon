@@ -204,3 +204,54 @@ def test_template_no_witness_returns_none_defers_to_llm():
                         source="GET /api/users?id=1", witness_payload="",
                         verdict=None, confidence="low")
     assert build_template_spec(v, "injection", "https://t.example.com", {}, ConfidenceBand.SUSPECTED) is None
+
+
+# Task 5: 富信息 LLM 补缺口
+import json
+from shannon_core.services.poc_generator import build_llm_prompt, llm_fill_gap, LLM_REQUEST_SCHEMA
+
+_AUTH_VULN = SimpleNamespace(
+    ID="AUTH-1", vulnerability_type="missing-jwt-verify",
+    externally_exploitable=True,
+    exploitation_hypothesis="id_token signature not verified",
+    suggested_exploit_technique="forge jwt with alg=none",
+    source_endpoint="POST /auth/callback",
+    confidence="needs_review",
+)
+
+
+def test_llm_schema_has_required_fields():
+    assert LLM_REQUEST_SCHEMA["type"] == "object"
+    assert "method" in LLM_REQUEST_SCHEMA["properties"]
+
+
+def test_build_llm_prompt_is_rich_info():
+    prompt = build_llm_prompt(_AUTH_VULN, "auth", "https://t.example.com", {"POST /auth/callback": {"auth": "anon"}})
+    # 富信息：含 host、hypothesis、technique（不脱敏）
+    assert "https://t.example.com" in prompt
+    assert "id_token signature not verified" in prompt
+    assert "forge jwt with alg=none" in prompt
+
+
+async def test_llm_fill_gap_success(monkeypatch):
+    async def fake_run(prompt, **kw):
+        assert kw.get("structured_output_schema") is LLM_REQUEST_SCHEMA
+        return SimpleNamespace(success=True, structured_output={
+            "method": "POST", "path": "/auth/callback",
+            "body": "id_token=forged.none.sig", "query": None, "headers": None, "steps": None,
+        }, error=None)
+
+    import shannon_core.services.poc_generator as mod
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+    out = await llm_fill_gap(_AUTH_VULN, "auth", "https://t.example.com", {}, repo_path="/tmp/x")
+    assert out["method"] == "POST"
+    assert out["body"] == "id_token=forged.none.sig"
+
+
+async def test_llm_fill_gap_failure_returns_none(monkeypatch):
+    async def boom(prompt, **kw):
+        raise RuntimeError("llm down")
+    import shannon_core.services.poc_generator as mod
+    monkeypatch.setattr(mod, "run_claude_prompt", boom)
+    out = await llm_fill_gap(_AUTH_VULN, "auth", "https://t.example.com", {}, repo_path="/tmp/x")
+    assert out is None
