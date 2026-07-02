@@ -41,7 +41,7 @@ function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
   const [content, setContent] = useState("");
   useEffect(() => {
     setContent("");
-    if (file.kind === "md" || file.kind === "exploitation_queue" || file.kind === "other_json") {
+    if (file.kind === "md" || file.kind === "other_json" || file.kind.endsWith("_queue")) {
       apiGetText(`/workspaces/${ws}/deliverables?path=${encodeURIComponent(file.path)}`).then(setContent).catch(() => setContent(""));
     }
   }, [ws, file.path]);

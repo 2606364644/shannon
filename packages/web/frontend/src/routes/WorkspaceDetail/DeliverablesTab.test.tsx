@@ -213,6 +213,52 @@ describe("DeliverablesTab", () => {
     await waitFor(() => expect(screen.getByText(/大 JSON/)).toBeInTheDocument());
   });
 
+  it("llm_queue kind 点击触发 ?path= 请求并渲染文本（防 exploitation_queue 唯一守卫退化）", async () => {
+    let pathRequested = false;
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          pathRequested = true;
+          return new HttpResponse('[{"ID":"INJ-LLM"}]', { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({
+            files: [{ path: "whitebox/injection_llm_queue.json", size: 20, kind: "llm_queue" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/deliverables");
+    await waitFor(() => expect(screen.getByText("injection_llm_queue.json")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("injection_llm_queue.json"));
+    await waitFor(() => expect(pathRequested).toBe(true));
+    await waitFor(() => expect(screen.getByText(/INJ-LLM/)).toBeInTheDocument());
+  });
+
+  it("gitnexus_queue kind 点击触发 ?path= 请求并渲染文本（防 exploitation_queue 唯一守卫退化）", async () => {
+    let pathRequested = false;
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          pathRequested = true;
+          return new HttpResponse('[{"ID":"XSS-GN"}]', { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({
+            files: [{ path: "whitebox/xss_gitnexus_queue.json", size: 20, kind: "gitnexus_queue" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/deliverables");
+    await waitFor(() => expect(screen.getByText("xss_gitnexus_queue.json")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("xss_gitnexus_queue.json"));
+    await waitFor(() => expect(pathRequested).toBe(true));
+    await waitFor(() => expect(screen.getByText(/XSS-GN/)).toBeInTheDocument());
+  });
+
   it("加载中显示 trace 占位", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", async () => {
