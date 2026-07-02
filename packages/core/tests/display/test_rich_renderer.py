@@ -345,49 +345,73 @@ async def test_rich_renderer_info_event_warning_level_yellow():
     assert "WARNING" in printed and "yellow" in printed
 
 
-# --- GitNexus 轨 LLM 进度行三态(spec §10 对应分支渲染轻测) ---
-from shannon_core.display.events import GitnexusLlmEvent
+# --- GitnexusLlmEvent (归 LLM 活动族: 🔍 [GitNexus] cyan, 对偶 💭 [Agent] magenta) ---
+
+async def test_rich_gitnexus_progress_uses_cyan_gitnexus_prefix_and_noun():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="2026-07-01 14:32:05", category="GN-LLM",
+        phase="sink-discovery", kind="progress", done=10, total=87, hits=3))
+    printed = console.print.call_args.args[0]
+    assert "🔍 [GitNexus]" in printed   # 归 LLM 族前缀
+    assert "cyan" in printed            # 冷暖对偶（agent Turn=magenta）
+    assert "magenta" not in printed     # 不再与 agent Turn 同色
+    assert "sink-discovery" in printed
+    assert "10/87" in printed
+    assert "3 sinks" in printed         # 加 noun
+    assert "so far" not in printed      # 去 so far
 
 
-def _gn_evt(kind, **kw) -> GitnexusLlmEvent:
-    base = dict(timestamp="2026-07-01 14:32:05", category="GN-LLM",
-                phase="sink-discovery", kind=kind, done=10, total=87, hits=3)
-    base.update(kw)
-    return GitnexusLlmEvent(**base)
+async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="hit",
+        done=5, total=87, hits=1,
+        detail="'pg.executeQuery' @ src/api/users.py:42 slot=args"))
+    printed = console.print.call_args.args[0]
+    assert "✓" in printed
+    assert "pg.executeQuery" in printed
+    assert "cyan" in printed
+    assert "magenta" not in printed
 
 
-async def test_gitnexus_progress_renders_tag_phase_fraction_hits():
-    renderer, _ = _renderer_with_capture()
-    await renderer.render(_gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34))
-    out = renderer._console.export_text()
-    assert "GN-LLM" in out            # 专属标签(便于 grep 全部 LLM 活动)
-    assert "chain-verdict" in out     # phase
-    assert "10/34" in out             # done/total
-    assert "2" in out                 # hits so far
+async def test_rich_gitnexus_summary_shows_done_arrow_detail():
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="summary",
+        done=87, total=87, hits=12, detail="12 soft sinks · 5 rule gaps"))
+    printed = console.print.call_args.args[0]
+    assert "done 87/87" in printed
+    assert "→" in printed
+    assert "12 soft sinks" in printed
+    assert "cyan" in printed            # 归族后 cyan（对偶 agent Turn magenta）
 
 
-async def test_gitnexus_hit_renders_check_and_detail():
-    renderer, _ = _renderer_with_capture()
-    e = _gn_evt("hit", done=5, hits=1,
-                detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
-    await renderer.render(e)
-    out = renderer._console.export_text()
-    assert "GN-LLM" in out
-    assert "✓" in out                 # 命中符号
-    assert "sink-discovery" in out    # phase
-    assert "pg.executeQuery" in out   # detail(函数名)
-    assert "src/api/users.py:42" in out  # detail(位置)
+async def test_rich_gitnexus_note_shows_warn_symbol_and_detail():
+    """note 行(per-skip timeout/error 诊断)用 ⚠ 区别 hit 的 ✓, 经 dispatcher 正确换行。
 
-
-async def test_gitnexus_summary_renders_done_arrow_detail():
-    renderer, _ = _renderer_with_capture()
-    e = _gn_evt("summary", done=87, hits=12,
-                detail="12 soft sinks · 5 rule gaps · 2 skipped (timeout/error)")
-    await renderer.render(e)
-    out = renderer._console.export_text()
-    assert "GN-LLM" in out
-    assert "sink-discovery" in out
-    assert "done" in out              # summary 收尾标记
-    assert "87/87" in out             # done/total
-    assert "→" in out                 # summary 箭头
-    assert "12 soft sinks" in out     # detail
+    取代裸 logger.warning(撞 Rich Live footer, 因 redirect_stderr=False 是硬约束)。
+    """
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from shannon_core.display.events import GitnexusLlmEvent
+    from unittest.mock import MagicMock
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
+        timestamp="t", category="GN-LLM", phase="sink-discovery", kind="note",
+        done=5, total=87, hits=1,
+        detail="src/api/users.py:raw_query: timed out (>60s), skipped"))
+    printed = console.print.call_args.args[0]
+    assert "⚠" in printed            # note 用 ⚠ 区别 hit 的 ✓
+    assert "✓" not in printed        # 不误用 hit 符号
+    assert "timed out" in printed
+    assert "cyan" in printed         # 归族后 cyan（对偶 agent Turn magenta）
+    assert "sink-discovery" in printed

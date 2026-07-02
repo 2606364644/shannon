@@ -5,8 +5,6 @@ from shannon_core.audit.session_registry import NullAuditSession
 
 def test_null_session_log_gitnexus_progress_is_noop():
     # NullAuditSession must expose the method (no AttributeError) and be awaitable.
-    # asyncio.run (而非 get_event_loop().run_until_complete) —— py3.12 无当前 loop 时后者抛
-    # RuntimeError: There is no current event loop，致本路径 0 覆盖。
     asyncio.run(
         NullAuditSession().log_gitnexus_progress(
             "sink-discovery", "hit", 5, 87, 1, "'x' @ f.py:1 slot=a"))

@@ -7,7 +7,6 @@ parser.iter_calls / destructure_call / extract_arg_expressions, 接受双遍历
 """
 import json
 import logging
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Awaitable
@@ -24,10 +23,8 @@ from shannon_core.code_index.sink_detector import (
     _rule_matches,
     is_entry_hint,
 )
-from shannon_core.code_index.llm_concurrency import (
-    DEFAULT_PER_CALL_TIMEOUT,
-    map_llm_with_bounds,
-)
+from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
+from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
@@ -40,12 +37,62 @@ logger = logging.getLogger(__name__)
 LLMClient = Callable[..., Awaitable[str]]
 
 
-# sink-ish callee/receiver 模式(spec §3.1 初稿): 比规则库宽松, 精确判定交 LLM。
-_SUSPICIOUS_CALLEE_RE = re.compile(
-    r"(query|exec(ute)?|render|redirect|include|require|unserialize|"
-    r"pickle|loads|system|popen|raw|where|format|template|open|fetch)",
-    re.IGNORECASE,
-)
+@dataclass(frozen=True)
+class SinkCandidateGroup:
+    """一组 sink 候选模式(替换旧版 flat 子串正则;详见 data/sink_candidates.yml 顶部说明)。
+
+    命中(且规则库未命中)→ 送轻量 LLM 判定。只决定「要不要送 LLM」,不产 SinkCallSite。
+    - callees:精确 callee 名(loader 不动大小写;匹配时按 language 决定大小写策略)。
+    - receivers_any:None = 任意 receiver 命中(含裸调用);tuple = receiver 必须 ∈ 集合。
+    """
+    languages: tuple[str, ...]
+    callees: tuple[str, ...]
+    receivers_any: tuple[str, ...] | None
+
+
+# go/java 导出方法首字母大写是语义 → case-sensitive;其余语言不敏感。
+_CASE_SENSITIVE_LANGS = frozenset({"go", "java"})
+
+
+def _build_sink_candidates(raw: dict) -> tuple[SinkCandidateGroup, ...]:
+    """YAML dict → tuple[SinkCandidateGroup]。"""
+    groups: list[SinkCandidateGroup] = []
+    for item in raw.get("candidates", []):
+        groups.append(SinkCandidateGroup(
+            languages=tuple(item.get("languages") or ()),
+            callees=tuple(item.get("callees") or ()),
+            receivers_any=tuple(item["receivers_any"]) if item.get("receivers_any") else None,
+        ))
+    return tuple(groups)
+
+
+# Sink 候选模式表(外部化:data/sink_candidates.yml)。
+_SINK_CANDIDATES: tuple[SinkCandidateGroup, ...] = _build_sink_candidates(
+    load_yaml(DATA_DIR / "sink_candidates.yml"))
+
+
+def _matches_candidate(language: str, callee: str, receiver: str | None) -> bool:
+    """按语言查候选表:callee 精确比较(语言决定大小写)+ receiver 精确集合约束。
+
+    - go/java:case-sensitive(大写导出方法)。
+    - 其余:case-insensitive(lower() 后比较)。
+    - receivers_any 省略 → 任意 receiver 命中(含裸);给定 → receiver 必须 ∈ 集合,
+      receiver=None 不命中(收窄,防裸调用误触发,如裸 format/open)。
+    """
+    case_sensitive = language in _CASE_SENSITIVE_LANGS
+    cmp_callee = callee if case_sensitive else callee.lower()
+    for g in _SINK_CANDIDATES:
+        if language not in g.languages:
+            continue
+        target = g.callees if case_sensitive else tuple(c.lower() for c in g.callees)
+        if cmp_callee not in target:
+            continue
+        if g.receivers_any is None:
+            return True
+        if receiver is not None and receiver in g.receivers_any:
+            return True
+        # receivers_any 给定但 receiver 不匹配 → 此组不命中,继续看下一组
+    return False
 
 
 @dataclass(frozen=True)
@@ -91,8 +138,7 @@ def collect_suspicious_calls(
                 continue
             if _is_rule_hit(block.language, callee, receiver):
                 continue  # 规则已命中, detect_sinks 会产 SinkCallSite, 不重复
-            target = callee if receiver is None else f"{receiver}.{callee}"
-            if not _SUSPICIOUS_CALLEE_RE.search(target):
+            if not _matches_candidate(block.language, callee, receiver):
                 continue
             try:
                 arg_exprs = parser.extract_arg_expressions(call, source)
@@ -241,17 +287,13 @@ async def discover_sinks_llm(
     LLM 不可用(None / raise / 超时 / 不可解析)→ 该函数跳过, 返回空(降级, spec §3.5)。
     调用粒度 = function 级(去重分组, 一函数一次 LLM 调用)。
     并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
-    单次调用超过 per_call_timeout(默认 DEFAULT_PER_CALL_TIMEOUT=60s)→ 该函数降级跳过。
-    大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
+    单次调用超过 per_call_timeout(默认 None → 读 SHANNON_LLM_PER_CALL_TIMEOUT, 未设 60s)
+    → 该函数降级跳过。大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
 
-    progress_cb: T1 的 best-effort 进度回调(per-function tick + 末尾 finalize);
-    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。即便早退
-    (llm_client=None / 无候选)也发一次 finalize,使通道显示汇总行(T5 不变量)。
+    progress_cb: best-effort 进度上报(每 function 一 tick + 一次 finalize 汇总);
+    cb=None 全程 no-op。
     """
     if llm_client is None or not suspicious:
-        # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
-        await ProgressEmitter("sink-discovery", 0, progress_cb).finalize(
-            "0 soft sinks · 0 rule gaps · 0 skipped (timeout/error)")
         return [], []
     by_func: dict[str, list[SuspiciousCall]] = defaultdict(list)
     for sc in suspicious:
@@ -275,22 +317,29 @@ async def discover_sinks_llm(
         detail = None
         if out:
             s0 = out[0]
-            slot = s0.dangerous_slots[0].slot.value if s0.dangerous_slots else "generic"
+            slot = (s0.dangerous_slots[0].slot.value
+                    if s0.dangerous_slots else "generic")
             detail = f"'{s0.callee_name}' @ {s0.file_path}:{s0.line} slot={slot}"
         await emitter.tick(detail=detail, hits_delta=len(out))
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    timeout = (per_call_timeout if per_call_timeout is not None
-               else DEFAULT_PER_CALL_TIMEOUT)
+    items = list(by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名: 让用户看到有意义的标识, 而非内部 enumerate 序号; 经 emitter.note
+        # 走 progress_cb → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
+        block = items[idx][1][0].block
+        await emitter.note(f"{block.function_name}: {message}")
+
     per_func = await map_llm_with_bounds(
-        list(by_func.items()), _discover_one,
-        concurrency=conc, per_call_timeout=timeout, label="discover_sinks_llm",
+        items, _discover_one,
+        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sinks_llm",
+        on_skip=_on_skip,
     )
     soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
-    gaps = _aggregate_gaps(soft_sinks)
     skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃
     await emitter.finalize(
-        f"{len(soft_sinks)} soft sinks · {len(gaps)} rule gaps · "
-        f"{skipped} skipped (timeout/error)")
-    return soft_sinks, gaps
+        f"{len(soft_sinks)} soft sinks · {len(_aggregate_gaps(soft_sinks))} rule gaps"
+        f" · {skipped} timeouts")
+    return soft_sinks, _aggregate_gaps(soft_sinks)

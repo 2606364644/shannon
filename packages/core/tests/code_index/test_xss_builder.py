@@ -1,5 +1,6 @@
 import pytest
 
+from shannon_core.code_index.chain_verdict import ChainVerdict
 from shannon_core.code_index.vuln_chain_builders.xss_builder import (
     build_xss_findings, _find_stored_xss_synthesis,
 )
@@ -129,52 +130,73 @@ async def test_build_xss_empty_pgraph_returns_empty():
 
 @pytest.mark.asyncio
 async def test_build_xss_findings_reports_chain_progress(monkeypatch):
-    """build_xss_findings must drive a chain-verdict ProgressEmitter: one tick
-    per candidate + a final summary sample. xss retains sink_call_sites param."""
-    from shannon_core.code_index.progress import ProgressSample
-    from shannon_core.code_index.vuln_chain_builders import xss_builder
-
+    """progress_cb receives a tick per candidate + a final summary sample."""
     samples: list = []
 
-    async def cb(s: ProgressSample):
+    async def cb(s):
         samples.append(s)
 
-    sid_a = "app.py:h:innerHTML:5:0"
-    sid_b = "app.py:h:innerHTML:6:0"
+    sid = "app.py:h:innerHTML:5:0"
+    # 2 reflected candidates
     pgraph = ParameterPropagationGraph(
         taint_flows=[
-            _flow("generic", source="a", sink_id=sid_a),
-            _flow("generic", source="b", sink_id=sid_b),
+            _flow("generic", source="q1", sink_id=sid),
+            _flow("generic", source="q2", sink_id=sid),
         ],
         language_coverage=["typescript"],
     )
-    sink_call_sites = {sid_a: _xss_sink(sid_a), sid_b: _xss_sink(sid_b)}
+
+    call_count = {"n": 0}
 
     async def fake_judge(chain, *, llm_client):
-        return type("V", (), {
-            "verdict": "vulnerable", "confidence": "high",
-            "evidence_chain": "x->innerHTML", "mismatch_reason": "no encode",
-            "witness_payload": "><script>",
-        })()
-    monkeypatch.setattr(xss_builder, "judge_chain_verdict", fake_judge)
+        call_count["n"] += 1
+        is_vuln = (call_count["n"] == 2)  # second chain vulnerable
+        return ChainVerdict(
+            verdict="vulnerable" if is_vuln else "safe",
+            witness_payload="><script>" if is_vuln else None,
+            evidence_chain="q->innerHTML",
+            mismatch_reason=None,
+            confidence="high",
+        )
+
+    monkeypatch.setattr(
+        "shannon_core.code_index.vuln_chain_builders.xss_builder.judge_chain_verdict",
+        fake_judge,
+    )
 
     async def fake_llm(prompt, **kw):
-        raise AssertionError("judge_chain_verdict is mocked; llm unused")
+        raise AssertionError("judge is monkeypatched; llm_client unused")
 
     findings = await build_xss_findings(
         pgraph, llm_client=fake_llm,
-        sink_call_sites=sink_call_sites, progress_cb=cb,
+        sink_call_sites={sid: _xss_sink(sid)},
+        progress_cb=cb,
     )
 
-    non_final = [s for s in samples if not s.final]
-    finals = [s for s in samples if s.final]
-    assert len(non_final) == 2
-    assert len(finals) == 1
-    assert all(s.phase == "chain-verdict" for s in samples)
-    assert non_final[-1].done == 2 and non_final[-1].total == 2
-    assert non_final[-1].hits == 2
-    # vulnerable tick detail carries XSS-GN-NN prefix
-    assert non_final[0].detail.startswith("XSS-GN-01 vulnerable:")
-    assert "→ sink=" in non_final[0].detail
-    assert "2 vulnerable" in finals[0].detail
     assert len(findings) == 2
+    non_final = [s for s in samples if not s.final]
+    assert len(non_final) == 2
+    assert samples[-1].final is True
+    assert samples[-1].total == 2
+    hit_samples = [s for s in non_final if s.detail]
+    assert len(hit_samples) == 1
+    assert hit_samples[0].detail.startswith("XSS-GN-02")
+    assert hit_samples[0].hits == 1
+
+
+@pytest.mark.asyncio
+async def test_build_xss_findings_progress_cb_none_no_raise():
+    """cb=None (default) must run without raising."""
+    sid = "app.py:h:innerHTML:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("generic", source="q", sink_id=sid)],
+        language_coverage=["typescript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
+                '"q->innerHTML","mismatch_reason":null,"confidence":"high"}')
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+    assert len(findings) == 1

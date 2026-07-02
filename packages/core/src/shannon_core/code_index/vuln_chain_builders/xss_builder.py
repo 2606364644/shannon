@@ -157,11 +157,10 @@ async def build_xss_findings(
     for i, chain in enumerate(candidates, start=1):
         verdict = await judge_chain_verdict(chain, llm_client=llm_client)
         is_vuln = (verdict.verdict == "vulnerable")
-        detail: str | None = None
+        detail = None
         if is_vuln:
-            detail = (f"XSS-GN-{i:02d} vulnerable: "
-                      f"source={chain.source_param} ({chain.entry_point_id}) "
-                      f"→ sink={chain.sink_call_site_id}")
+            detail = (f"XSS-GN-{i:02d} vulnerable: source={chain.source_param} "
+                      f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
         await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         is_stored = chain.flow_id.startswith("stored#")
         findings.append(XssVulnerability(

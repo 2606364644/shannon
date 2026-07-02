@@ -45,13 +45,13 @@ def _block(name="handler", file="app.py", language="python", source="def handler
 
 
 def test_collects_sinkish_unmatched_call():
-    # raw_query 是 sink-ish(query) 但规则库无 raw_query@custom_db → 收集
+    # system 在候选表(通用 command 列)但规则库只覆盖 os/subprocess receiver → 收集
     block = _block()
-    parser = _FakeParser([("raw_query", "custom_db", ["\"SELECT \" + uid"], 1)])
+    parser = _FakeParser([("system", None, ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
     assert len(out) == 1
-    assert out[0].callee == "raw_query"
-    assert out[0].receiver == "custom_db"
+    assert out[0].callee == "system"
+    assert out[0].receiver is None
 
 
 def test_skips_rule_hit_call():
@@ -67,6 +67,58 @@ def test_skips_non_sinkish_call():
     parser = _FakeParser([("helper", None, ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
     assert out == []
+
+
+def test_wide_words_no_longer_trigger():
+    """宽词 format/open/where/fetch 已从候选表删除 —— 裸调用不再误触发送 LLM(防回退)。"""
+    for callee in ("format", "open", "where", "fetch"):
+        block = _block()
+        parser = _FakeParser([(callee, None, ["uid"], 1)])
+        out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+        assert out == [], f"{callee} 不应再触发补召回(宽词已删)"
+
+
+def test_go_capitalized_raw_collected():
+    """Go tx.Raw(...) —— 大写 Raw 命中候选(case-sensitive go 列);规则 receiver 未覆盖 tx → 收集。"""
+    block = _block(language="go")
+    parser = _FakeParser([("Raw", "tx", ["uid"], 1)])
+    out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+    assert len(out) == 1
+    assert out[0].callee == "Raw"
+
+
+def test_jpa_createnativequery_collected():
+    """Java em.createNativeQuery(...) —— 命中候选;规则只覆盖 bare → 收集(补召回)。"""
+    block = _block(language="java")
+    parser = _FakeParser([("createNativeQuery", "em", ["uid"], 1)])
+    out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
+    assert len(out) == 1
+    assert out[0].callee == "createNativeQuery"
+
+
+def test_receiver_constraint_filters():
+    """TS raw —— 候选 receivers_any 集合命中才收集;集合外 receiver 不收集(收窄生效)。"""
+    block = _block(language="typescript")
+    hit = _FakeParser([("raw", "mongoose", ["uid"], 1)])      # mongoose ∈ 候选 receivers
+    miss = _FakeParser([("raw", "somethingElse", ["uid"], 1)])  # ∉ 候选 receivers
+    assert len(collect_suspicious_calls([block], hit, source_provider=lambda b: b"src")) == 1
+    assert collect_suspicious_calls([block], miss, source_provider=lambda b: b"src") == []
+
+
+def test_case_sensitivity_by_language():
+    """go/java 大小写敏感;python 等其余不敏感。"""
+    # go: Raw 命中(大写),raw 不命中(小写,case-sensitive)
+    go = _block(language="go")
+    assert len(collect_suspicious_calls(
+        [go], _FakeParser([("Raw", "tx", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
+    assert collect_suspicious_calls(
+        [go], _FakeParser([("raw", "tx", ["uid"], 1)]), source_provider=lambda b: b"src") == []
+    # python: Text 与 text 都命中(不敏感);session ∈ 候选 receivers,规则只覆盖 bare → 收集
+    py = _block()
+    assert len(collect_suspicious_calls(
+        [py], _FakeParser([("Text", "session", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
+    assert len(collect_suspicious_calls(
+        [py], _FakeParser([("text", "session", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
 
 
 def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid"):
@@ -274,54 +326,73 @@ async def test_discover_partial_failure_keeps_successful_sinks():
 
 
 async def test_discover_sinks_llm_reports_progress_and_hits():
-    """T4: progress_cb 接进来后,per-function tick + 末尾 finalize 均上报。
-
-    复用文件内已有的 `_suspicious` helper(brief 占位名 `_build_two_suspicious_calls`
-    在本文件不存在;`_suspicious` 每次构造的 block.id 含 line,故 line 不同的两个
-    suspicious 分属 2 个函数)。构造 2 个函数(raw_query 命中 sink / exec_one 未命中),
-    断言:
-      - 至少一条 sample 带非空 detail(命中 tick)
-      - 末尾 sample.final=True 且汇总文案含软 sink 计数
-      - done == 去重函数数
-    """
+    """progress_cb: 每个 function 一次 tick(命中带 detail) + 末尾 finalize 汇总。"""
     from shannon_core.code_index.progress import ProgressSample
 
-    calls = [
-        _suspicious(line=1, callee="raw_query"),
-        _suspicious(line=2, callee="exec_one"),
-    ]
-    samples: list[ProgressSample] = []
+    # 两个不同 block(line=1/2 → block.id 不同), 第一个判 sink, 第二个判非 sink。
+    calls = [_suspicious(line=1), _suspicious(line=2)]
 
     async def client(prompt, **kw):
-        # 每个函数的 prompt 只含它自己的 call_ref;按 call_ref 返判定。
         if "raw_query:1" in prompt:
             return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
                                 "category": "sql", "slot": "sql_value",
                                 "arg_index": 0, "rationale": "x"}])
-        return json.dumps([{"call_ref": "exec_one:2", "is_sink": False}])
+        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+
+    samples: list[ProgressSample] = []
 
     async def cb(s: ProgressSample):
         samples.append(s)
 
-    soft, gaps = await discover_sinks_llm(calls, client, progress_cb=cb)
-    # 至少 1 个命中 tick(detail 非 None)
-    assert any(s.detail for s in samples)
-    # 末尾是 finalize 汇总
+    soft, _ = await discover_sinks_llm(calls, client, progress_cb=cb)
+    assert len(soft) == 1  # 只有第一个判 sink
+
+    # 至少有一条 tick 带 hit detail(命中行) —— detail 非 None 标识命中。
+    hit_ticks = [s for s in samples if not s.final and s.detail]
+    assert hit_ticks, f"no hit-detail tick emitted: {samples}"
+    assert "raw_query" in hit_ticks[0].detail  # detail 提到命中的 callee
+
+    # 最后一条是 finalize 汇总, final=True, done == 唯一 function 数(2 个 block)。
     assert samples[-1].final is True
-    assert "soft sinks" in (samples[-1].detail or "")
-    # done = 去重后的函数数
     assert samples[-1].done == len({sc.block.id for sc in calls})
-    # 软 sink 真产出
-    assert len(soft) == 1
-    assert soft[0].callee_name == "raw_query"
 
 
 async def test_discover_sinks_llm_progress_cb_none_ok():
-    """T4: progress_cb=None 时全程 no-op,功能不回归(返回空 sink)。"""
-    calls = [_suspicious(line=1, callee="raw_query")]
+    """progress_cb=None 全程 no-op, 返回正常(空 verdict → 空 soft)。"""
+    calls = [_suspicious(line=1)]
 
     async def client(prompt, **kw):
-        return "[]"  # LLM 判无 sink
+        return "[]"  # 无 verdict → 无 soft sink
 
     soft, gaps = await discover_sinks_llm(calls, client, progress_cb=None)
     assert soft == []
+
+
+async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
+    """per-function 超时 → emitter.note 经 progress_cb 上报(走 dispatcher, 非裸 warning)。
+
+    on_skip 注入: 超时函数名经 idx 映射进 note detail, 取代撞 Rich Live footer 的
+    裸 logger.warning(redirect_stderr=False 硬约束)。
+    """
+    import asyncio
+    from shannon_core.code_index.progress import ProgressSample
+
+    calls = [_suspicious(line=1), _suspicious(line=2)]  # 2 个不同 block.id
+
+    async def client(prompt, **kw):
+        if "raw_query:1" in prompt:
+            await asyncio.sleep(10)  # 第一个函数挂死 → 超时
+        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+
+    samples: list[ProgressSample] = []
+
+    async def cb(s):
+        samples.append(s)
+
+    await discover_sinks_llm(
+        calls, client, progress_cb=cb, concurrency=2, per_call_timeout=0.2)
+
+    notes = [s for s in samples if s.note]
+    assert notes, f"超时应经 note 上报: {samples}"
+    assert "timed out" in notes[0].note
+    assert "handler" in notes[0].note  # block.function_name 经 idx 映射

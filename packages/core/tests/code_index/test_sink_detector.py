@@ -215,6 +215,40 @@ class TestSinkRuleLibrary:
         ids = [r.rule_id for r in DEFAULT_RULES]
         assert len(ids) == len(set(ids))
 
+    def test_rule_id_set_externalized_stable(self):
+        """外部化锚点:DEFAULT_RULES 的 rule_id 全集须等于搬迁前的 56 条(防 YAML 丢/换规则)。
+
+        搬迁自旧硬编码 DEFAULT_RULES tuple;若 YAML 写错(漏条/改 id),此断言 fail。
+        比数量断言更强 —— 防止「数量对但换了一批」。
+        """
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        expected = {
+            "go-db-query", "go-exec-command", "go-gorm-exec", "go-gorm-raw",
+            "go-http-get", "go-http-post", "java-httpclient-send",
+            "java-jpa-createnativequery", "java-objectinput-readobject",
+            "java-runtime-exec", "java-stmt-execute", "java-stmt-executequery",
+            "php-curl-exec", "php-db-raw", "php-db-select-static",
+            "php-file-get-contents", "php-file-put-contents", "php-include",
+            "php-laravel-whereraw", "php-mysqli-query", "php-passthru",
+            "php-proc-exec", "php-require", "php-shell-exec", "php-system",
+            "php-unserialize", "py-db-cursor-execute", "py-db-cursor-executemany",
+            "py-django-raw", "py-flask-redirect", "py-jinja-template-render",
+            "py-os-popen", "py-os-system", "py-pickle-load", "py-pickle-loads",
+            "py-render-template-string", "py-requests-get", "py-requests-post",
+            "py-requests-put", "py-sqlalchemy-text", "py-subprocess-call",
+            "py-subprocess-checkoutput", "py-subprocess-popen", "py-subprocess-run",
+            "py-urllib-urlopen", "py-yaml-load", "ts-axios-get",
+            "ts-child-process-exec", "ts-db-query", "ts-document-write", "ts-eval",
+            "ts-fetch", "ts-innerhtml", "ts-knex-raw", "ts-res-redirect",
+            "ts-sequelize-query",
+            # 补充(vuln-range 三项目反哺):RestTemplate SSRF / vm / Pug / Angular XSS / needle
+            "java-resttemplate-exchange", "java-resttemplate-getforobject",
+            "ts-pug-compile", "ts-vm-runincontext",
+            "ts-bypass-security-trust-html", "ts-needle-get",
+        }
+        got = {r.rule_id for r in DEFAULT_RULES}
+        assert got == expected, f"missing={expected-got} extra={got-expected}"
+
 
 class TestIsEntryHint:
     def test_function_param_identifier(self):

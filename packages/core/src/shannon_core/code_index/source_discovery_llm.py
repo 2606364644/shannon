@@ -15,9 +15,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from shannon_core.code_index.models import ParameterSource
 from shannon_core.code_index.parameter_models import SourcePoint
 from shannon_core.code_index.source_detector import DEFAULT_SOURCE_RULES
-from shannon_core.code_index.llm_concurrency import (
-    DEFAULT_PER_CALL_TIMEOUT, map_llm_with_bounds,
-)
+from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.config.concurrency import get_max_concurrent
 
@@ -149,14 +147,10 @@ async def discover_sources_llm(
 ) -> list[SourcePoint]:
     """对候选 handler 并发调 LLM → 软 SourcePoint。LLM 不可用 → 空(降级)。
 
-    progress_cb: T1 的 best-effort 进度回调(per-function tick + 末尾 finalize);
-    None 时全程 no-op(测试 / 未注入 / SHANNON_GITNEXUS_LLM_ENABLED=0)。即便早退
-    (llm_client=None / 无候选)也发一次 finalize,使通道显示汇总行(T5 不变量)。
+    progress_cb: best-effort 进度上报(每 handler 一 tick + 一次 finalize 汇总);
+    cb=None 全程 no-op。
     """
     if llm_client is None or not candidates:
-        # 早退仍发 finalize(0 候选汇总),保持通道行为一致(T5)。
-        await ProgressEmitter("source-discovery", 0, progress_cb).finalize(
-            "0 sources · 0 skipped (timeout/error)")
         return []
     by_func: dict[str, list[SourceCandidate]] = defaultdict(list)
     for c in candidates:
@@ -170,7 +164,8 @@ async def discover_sources_llm(
         prompt = _build_prompt(block)
         raw = await llm_client(prompt)
         fields = _parse_fields(raw)
-        out = [_to_soft_source(block, f) for f in fields if f.get("is_source") is True]
+        out = [_to_soft_source(block, f) for f in fields
+               if f.get("is_source") is True]
         detail = None
         if out:
             s0 = out[0]
@@ -180,14 +175,19 @@ async def discover_sources_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    timeout = (per_call_timeout if per_call_timeout is not None
-               else DEFAULT_PER_CALL_TIMEOUT)
+    items = list(by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名(同 sink_discovery_llm): per-handler 超时/错误诊断走 dispatcher 通道。
+        block = items[idx][1][0].block
+        await emitter.note(f"{block.function_name}: {message}")
+
     per_func = await map_llm_with_bounds(
-        list(by_func.items()), _discover_one,
-        concurrency=conc, per_call_timeout=timeout, label="discover_sources_llm",
+        items, _discover_one,
+        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sources_llm",
+        on_skip=_on_skip,
     )
     all_sources = [s for func_sources in per_func for s in func_sources]
     skipped = len(by_func) - len(per_func)
-    await emitter.finalize(
-        f"{len(all_sources)} sources · {skipped} skipped (timeout/error)")
+    await emitter.finalize(f"{len(all_sources)} sources · {skipped} timeouts")
     return all_sources

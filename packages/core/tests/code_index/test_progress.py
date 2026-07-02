@@ -60,3 +60,34 @@ async def test_concurrent_ticks_do_not_lose_count():
     emitter = ProgressEmitter("sink-discovery", 50, lambda s: seen.append(s) or asyncio.sleep(0))
     await _drain(emitter, [(None, 0)] * 40 + [("hit", 1)] * 10)
     assert emitter._done == 50 and emitter._hits == 10
+
+
+@pytest.mark.asyncio
+async def test_note_emits_sample_without_changing_counts():
+    """emitter.note 发带 note 的 sample, 不改 done/hits 计数(detail=None, final=False)。
+
+    用于 map_llm_with_bounds 的 per-skip 诊断(timeout/error)经 progress_cb 上报 —— 走
+    dispatcher 通道(GitnexusLlmEvent note 行, Rich Live 协调正确换行), 而非裸
+    logger.warning(撞 Rich Live footer, 因 redirect_stderr=False 是硬约束)。
+    """
+    seen = []
+    emitter = ProgressEmitter("sink-discovery", 5, lambda s: seen.append(s) or asyncio.sleep(0))
+    await emitter.tick(hits_delta=1)                       # done=1, hits=1
+    await emitter.note("[f1] timed out (>60s), skipped")
+    assert seen[-1].note == "[f1] timed out (>60s), skipped"
+    assert seen[-1].detail is None
+    assert seen[-1].final is False
+    # note 不改计数(区别于 tick)
+    assert emitter._done == 1 and emitter._hits == 1
+
+
+@pytest.mark.asyncio
+async def test_note_cb_none_and_exception_swallowed():
+    """note 与 tick/finalize 同为 best-effort: cb=None no-op, cb raise 吞掉。"""
+    emitter = ProgressEmitter("sink-discovery", 2, None)
+    await emitter.note("x")  # must not raise
+
+    async def boom(s):
+        raise RuntimeError("display channel down")
+    emitter2 = ProgressEmitter("sink-discovery", 2, boom)
+    await emitter2.note("x")  # must not raise

@@ -256,6 +256,18 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
     await get_audit_session().log_phase_complete(phase)
 
 
+def _entry_points_brief(http_route_count: int, entry_point_total: int) -> str:
+    """spec-1a T4: 格式化 entry_points_summary 给 explore prompt。
+
+    确定性层识别的入口点摘要（explore prompt 会提示此为「可能不全，自行 grep 补」）。
+    """
+    return (
+        f"{http_route_count} http_route / {entry_point_total} total entry points"
+        if (http_route_count or entry_point_total)
+        else "0 http_route / 0 total (deterministic layer identified no entry points; grep routes yourself)"
+    )
+
+
 @activity.defn
 async def log_info_activity(input: ActivityInput) -> None:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -319,26 +331,26 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 pass
 
             vulnerabilities: list[dict] = []
+            # prompt_manager 两分支共用（T4：0 候选探索分支也要加载 explore prompt）。
+            prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+            prompt_manager = PromptManager(prompts_dir)
             if candidate_count > 0:
-                prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
-                prompt_manager = PromptManager(prompts_dir)
                 prompt = prompt_manager.load_sync(
                     "authz_gitnexus_judge",
                     variables={
                         "authz_gitnexus_candidates": md,
                     },
                 )
-                result = await run_claude_prompt(
+                result = await run_gitnexus_verdict_agent(
                     prompt=prompt,
                     repo_path=str(repo),
-                    model_tier="medium",
-                    api_key=input.api_key,
                     structured_output_schema={
                         "type": "object",
                         "properties": {
                             "vulnerabilities": {"type": "array"},
                         },
                     },
+                    audit_session=get_audit_session(),
                 )
                 raw = result.structured_output
                 if raw is None and result.text:
@@ -356,6 +368,51 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 try:
                     await get_audit_session().log_info(
                         f"authz GitNexus 轨：产出 {len(vulnerabilities)} 条 verdict。",
+                        "info",
+                    )
+                except Exception:
+                    pass
+            else:
+                # spec-1a G2：0 候选不静默写空 queue——多轮 agent 自主探索仓库找 IDOR。
+                # 确定性层常因入口点未识别（语言误判/调用图未就绪/纯静态页）漏召回，
+                # agent 自主 grep route + read handler 补候选（软候选，needs_review=True）。
+                explore_prompt = prompt_manager.load_sync(
+                    "authz_gitnexus_explore",
+                    variables={
+                        "entry_points_summary": _entry_points_brief(
+                            http_route_count, entry_point_total
+                        ),
+                    },
+                )
+                result = await run_gitnexus_verdict_agent(
+                    prompt=explore_prompt,
+                    repo_path=str(repo),
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                    audit_session=get_audit_session(),
+                )
+                raw = result.structured_output if hasattr(result, "structured_output") else None
+                if raw is None and getattr(result, "text", None):
+                    raw = result.text  # fallback to text; parse_lenient handles
+                parsed = VulnerabilityQueue.parse_lenient(
+                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
+                )
+                for v in parsed.queue.vulnerabilities:
+                    data = v.model_dump()
+                    data["source_track"] = "gitnexus"
+                    data["needs_review"] = True  # 探索发现，软候选（未经确定性 dominance 验证）
+                    if not data.get("evidence_chain"):
+                        data["evidence_chain"] = "gitnexus explore-discovered (0 deterministic candidates)"
+                    vulnerabilities.append(data)
+
+                try:
+                    await get_audit_session().log_info(
+                        f"authz GitNexus 轨（探索）：0 确定性候选 → 自主探索产出 "
+                        f"{len(vulnerabilities)} 条软候选（needs_review=True）。",
                         "info",
                     )
                 except Exception:
@@ -443,36 +500,6 @@ async def run_auth_validation(input: ActivityInput) -> None:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
-
-def _make_gitnexus_progress_cb(session):
-    """采样 + 包装 session.log_gitnexus_progress。best-effort（T7）。
-
-    采样规则（避免刷屏 workflow.log）：
-    - final → summary（detail 承载汇总文案）
-    - detail 非空 → hit（即时上报，不看 done）
-    - done==1 或 done%10==0 → progress
-    - 其余静默
-    phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink-discovery /
-    source-discovery / taint-analysis / chain-verdict 四段正确 phase）。
-    session 异常被吞——进度通道绝不能影响扫描主流程。
-    """
-    async def cb(sample) -> None:
-        if sample.final:
-            kind, detail = "summary", sample.detail
-        elif sample.detail:
-            kind, detail = "hit", sample.detail
-        elif sample.done == 1 or sample.done % 10 == 0:
-            kind, detail = "progress", None
-        else:
-            return
-        try:
-            await session.log_gitnexus_progress(
-                sample.phase, kind, sample.done, sample.total, sample.hits, detail)
-        except Exception:
-            pass
-    return cb
-
-
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
@@ -504,12 +531,6 @@ async def run_code_index(input: ActivityInput) -> dict:
 
             _llm_taint_client = _make_gitnexus_llm_client(str(repo))
 
-            # --- GitNexus 进度回调：采样后转发到 audit session（T7）---
-            # 采样：final→summary；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
-            # phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink/source/taint/chain-verdict）。
-            # best-effort：session 异常被吞，绝不影响扫描主流程。
-            _progress_cb = _make_gitnexus_progress_cb(get_audit_session())
-
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry
             # (~/.gitnexus/registry.json).  The correct order is:
@@ -540,7 +561,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
                         auto_index=False,
-                        progress_cb=_progress_cb,
+                        progress_cb=_make_gitnexus_progress_cb(get_audit_session()),
                     )
             except PentestError:
                 raise
@@ -902,6 +923,81 @@ def _make_verdict_llm_client(repo_path: str):
     return _client
 
 
+async def run_gitnexus_verdict_agent(
+    *,
+    prompt: str,
+    repo_path: str,
+    structured_output_schema: dict | None = None,
+    audit_session=None,
+) -> "ClaudeRunResult":
+    """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
+
+    max_turns 走 SHANNON_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。返回完整 ClaudeRunResult
+    （含 turns/cost/structured_output），不截断为 str——区别于 _make_verdict_llm_client 的单次薄包装。
+
+    audit_session 非 None 时构造 SessionToolAuditLogger（对齐 run_agent :167/183/198），多轮
+    grep/read 工具调用经逐轮审计；为 None 时 tool_audit_logger=None（行为同前，向后兼容）。
+
+    供 spec-1 的 run_authz_gitnexus_judge 多轮判定用。单测 mock run_claude_prompt 验证
+    max_turns 透传 / audit_session 注入 tool_audit_logger。
+    """
+    from shannon_core.agents.runner import run_claude_prompt  # 延迟 import，对齐 :859
+    tool_audit_logger = None
+    if audit_session is not None:
+        from shannon_whitebox.audit.session_tool_audit_logger import (
+            SessionToolAuditLogger,
+        )
+        tool_audit_logger = SessionToolAuditLogger(
+            audit_session, "gitnexus-verdict", attempt=1
+        )
+    agent_start = time.monotonic()
+    try:
+        if tool_audit_logger is not None:
+            await tool_audit_logger.initialize()
+        return await run_claude_prompt(
+            prompt=prompt,
+            repo_path=repo_path,
+            model_tier="medium",
+            max_turns=int(os.getenv("SHANNON_GITNEXUS_VERDICT_MAX_TURNS", "30")),
+            structured_output_schema=structured_output_schema,
+            tool_audit_logger=tool_audit_logger,
+        )
+    finally:
+        if tool_audit_logger is not None:
+            # 异常向上抛由 caller 处理；finally 内保守传 success（best-effort，对齐 run_agent）。
+            await tool_audit_logger.close(
+                success=True,
+                duration_ms=int((time.monotonic() - agent_start) * 1000),
+            )
+
+
+def _make_gitnexus_progress_cb(session):
+    """采样 + 包装 session.log_gitnexus_progress。best-effort（吞 session 异常）。
+
+    触发规则：final→summary；note 非空→note；detail 非空→hit；done==1 或 done%10==0→progress；其余静默。
+    phase 透传自 sample.phase（core 的 ProgressEmitter 已带 sink-discovery /
+    source-discovery / taint-analysis / chain-verdict）。cb=None 路径（LLM 关）由
+    core emitter 兜底（emitter 自身 cb=None no-op），非本层职责。
+    """
+    async def cb(sample) -> None:
+        if sample.final:
+            kind, detail = "summary", sample.detail
+        elif sample.note:
+            kind, detail = "note", sample.note
+        elif sample.detail:
+            kind, detail = "hit", sample.detail
+        elif sample.done == 1 or sample.done % 10 == 0:
+            kind, detail = "progress", None
+        else:
+            return
+        try:
+            await session.log_gitnexus_progress(
+                sample.phase, kind, sample.done, sample.total, sample.hits, detail)
+        except Exception:
+            pass
+    return cb
+
+
 @activity.defn
 async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
@@ -973,8 +1069,6 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             intent=None,
         ):
             llm = _make_verdict_llm_client(str(repo))
-
-            # 三个 builder 共用同一 cb（phase=chain-verdict，由 core 的 ProgressEmitter 定）。
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
 
             for vc, builder in (

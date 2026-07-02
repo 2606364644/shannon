@@ -46,10 +46,10 @@ async def build_injection_findings(
     for i, chain in enumerate(candidates, start=1):
         verdict = await judge_chain_verdict(chain, llm_client=llm_client)
         is_vuln = (verdict.verdict == "vulnerable")
-        detail: str | None = None
+        detail = None
         if is_vuln:
-            detail = (f"INJ-GN-{i:02d} vulnerable: "
-                      f"source={_source_text(chain)} → sink={chain.sink_call_site_id}")
+            detail = (f"INJ-GN-{i:02d} vulnerable: source={_source_text(chain)} "
+                      f"→ sink={chain.sink_call_site_id}")
         await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         concat_note = ""
         if chain.post_sanitize_concat:

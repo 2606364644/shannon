@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from shannon_core.display.dispatcher import DisplayDispatcher
 from shannon_core.display.events import (
-    AgentEvent, AgentMetric, ErrorEvent, InfoEvent, LlmTurnEvent, PhaseEvent,
-    ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
+    AgentEvent, AgentMetric, ErrorEvent, GitnexusLlmEvent, InfoEvent, LlmTurnEvent,
+    PhaseEvent, ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent, WorkflowHeader,
 )
 from shannon_core.display.file_renderer import FileLogRenderer
 from shannon_core.display.formatters import format_log_time
@@ -181,7 +181,6 @@ class WorkflowLogger:
         """
         if self._dispatcher is None:
             return
-        from shannon_core.display.events import GitnexusLlmEvent
         await self._dispatcher.dispatch(GitnexusLlmEvent(
             timestamp=format_log_time(), category="GN-LLM", phase=phase, kind=kind,
             done=done, total=total, hits=hits, detail=detail,

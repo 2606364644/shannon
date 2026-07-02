@@ -23,6 +23,7 @@ class ProgressSample:
     hits: int
     detail: str | None       # 命中细节（hit 行）；None=未命中
     final: bool = False      # True=结束汇总行（detail 此时承载汇总文案）
+    note: str | None = None  # 非计数诊断行（per-skip timeout/error）；不走 hit/summary 路由
 
 
 ProgressCb = Callable[[ProgressSample], Awaitable[None]] | None
@@ -61,5 +62,23 @@ class ProgressEmitter:
             await self._cb(ProgressSample(
                 self._phase, self._done, self._total, self._hits,
                 summary_detail, final=True))
+        except Exception:
+            pass  # best-effort
+
+    async def note(self, note: str) -> None:
+        """发一条非计数诊断行（如 per-item timeout/error skip），不改 done/hits。
+
+        把 map_llm_with_bounds 的 per-skip 诊断经 progress_cb 上报 → activity cb →
+        GitnexusLlmEvent(note) → dispatcher → Rich Live 协调正确换行。替代裸
+        logger.warning（worker 进程 redirect_stderr=False 是硬约束，裸 warning 经
+        lastResort 直写 stderr，撞 footer spinner 行导致首条不换行/截断）。
+        best-effort：cb=None no-op，cb raise 吞掉（对齐 tick/finalize）。
+        """
+        if self._cb is None:
+            return
+        try:
+            await self._cb(ProgressSample(
+                phase=self._phase, done=self._done, total=self._total,
+                hits=self._hits, detail=None, final=False, note=note))
         except Exception:
             pass  # best-effort

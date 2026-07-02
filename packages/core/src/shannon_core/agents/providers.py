@@ -72,6 +72,7 @@ class BaseProvider(ABC):
         output_format: dict | None = None,
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
+        max_turns: int | None = None,
     ) -> ClaudeRunResult:
         """
         调用 AI 模型执行 prompt
@@ -83,6 +84,7 @@ class BaseProvider(ABC):
             output_format: 结构化输出格式 (JSON Schema)
             deliverables_subdir: 产物子目录
             audit_logger: provider 无关的逐轮审计日志记录器（可选）
+            max_turns: agent 最大轮数（None=引擎默认 200）；>1 启用多轮 agent
 
         Returns:
             ClaudeRunResult: 执行结果（字段语义不变量见 runner.ClaudeRunResult docstring）

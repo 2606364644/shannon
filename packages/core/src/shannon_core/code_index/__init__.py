@@ -21,6 +21,7 @@ from shannon_core.code_index.chain_propagator import (
     propagate_backward_across_chains,
 )
 from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from shannon_core.code_index.progress import ProgressEmitter
 from shannon_core.code_index.sink_discovery_llm import (
     RuleGap,
     collect_suspicious_calls,
@@ -85,9 +86,6 @@ async def build_code_index_with_gitnexus(
         auto_index: If True, attempt to ensure GitNexus has indexed the repo
             via the CLI engine before proceeding. Raises PentestError if
             GitNexus CLI is unavailable or indexing fails (no fallback).
-        progress_cb: T1 的 best-effort 进度回调（async (ProgressSample) -> None）。
-            None 时全程 no-op；透传给 discover_sinks_llm / discover_sources_llm，
-            并在 LLM taint analysis 环节做 per-function tick + 末尾 finalize。
 
     Raises:
         PentestError: if GitNexus CLI is unavailable, indexing fails, or (later) MCP query fails.
@@ -187,19 +185,17 @@ async def build_code_index_with_gitnexus(
 
     # ⑤ LLM taint analysis (only for functions with sinks) — 并发(治本 2):
     # 串行 per-function LLM 会被 ③b 产的 soft sinks 放大,拖垮 activity 超时。
-    # T5: ProgressEmitter 每 function tick一次(hits=taint flow 计数),末尾 finalize。
-    from shannon_core.code_index.progress import ProgressEmitter
 
     def _count_taint_flows(result) -> int:
-        """result 是 analyze_taint_llm 的返回（IntraResult）。
+        """per-function taint-flow 计数。
 
-        IntraResult.hits: dict[sink_id, confidence] —— 每个 entry 表示一个被 taint
-        到达的 sink = 一条 taint flow（确定性 fallback / LLM 均填此结构）。
+        analyze_taint_llm 返回 IntraResult(tainted_params: set, hits: dict,
+        local_steps: list)。tainted_params 非空 = 该函数存在 source→sink
+        taint，计为 1 个 taint flow（per-function 粒度，与 map 的 item 粒度一致）。
         """
         if result is None:
             return 0
-        hits = getattr(result, "hits", None)
-        return len(hits) if hits is not None else 0
+        return 1 if result.tainted_params else 0
 
     taint_emitter = ProgressEmitter("taint-analysis", len(sinks_by_func), progress_cb)
 
@@ -207,7 +203,7 @@ async def build_code_index_with_gitnexus(
         func_id, func_sinks = item
         block = blocks_by_id.get(func_id)
         if block is None:
-            await taint_emitter.tick(detail=None, hits_delta=0)   # 仍计数
+            await taint_emitter.tick(detail=None, hits_delta=0)  # 仍计数保持准确
             return None
         result = await analyze_taint_llm(
             block=block,
@@ -221,10 +217,21 @@ async def build_code_index_with_gitnexus(
 
     from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
     from shannon_core.config.concurrency import get_max_concurrent
+    taint_items = list(sinks_by_func.items())
+
+    async def _on_skip(idx, message):
+        # idx → 函数名(同 sink/source discovery): per-function taint 超时/错误诊断走
+        # dispatcher 通道, 取代撞 footer 的裸 logger.warning。
+        func_id = taint_items[idx][0]
+        block = blocks_by_id.get(func_id)
+        who = block.function_name if block else func_id
+        await taint_emitter.note(f"{who}: {message}")
+
     taint_pairs = await map_llm_with_bounds(
-        list(sinks_by_func.items()), _taint_one,
+        taint_items, _taint_one,
         concurrency=get_max_concurrent(),
         label="analyze_taint_llm",
+        on_skip=_on_skip,
     )
     await taint_emitter.finalize(
         f"{sum(_count_taint_flows(r) for _, r in taint_pairs)} taint_flows")

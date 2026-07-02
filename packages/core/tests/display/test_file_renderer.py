@@ -271,49 +271,60 @@ async def test_phase_step_agent_labels_align_in_file():
     assert p == s == a, f"file 标签列未对齐: phase={p} step={s} agent={a}"
 
 
-import asyncio
+# --- GitnexusLlmEvent (归 LLM 族: [LLM]   [GitNexus], 对偶 _llm 的 [LLM]   [Agent]) ---
+
 from shannon_core.display.events import GitnexusLlmEvent
-from shannon_core.display.file_renderer import FileLogRenderer
 
 
-def _render(e) -> str:
-    out: list[str] = []
-    r = FileLogRenderer(writer=_AsyncAppend(out))
-    asyncio.run(r.render(e))
-    return out[0]
-
-
-class _AsyncAppend:
-    def __init__(self, buf): self._buf = buf
-    async def write(self, s): self._buf.append(s)
-
-
-def _evt(kind, **kw):
+def _gn_evt(kind, **kw):
     base = dict(timestamp="2026-07-01 14:32:05", category="GN-LLM",
                 phase="sink-discovery", kind=kind, done=10, total=87, hits=3)
     base.update(kw)
     return GitnexusLlmEvent(**base)
 
 
-def test_gitnexus_progress_line():
-    assert _render(_evt("progress")) == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  10/87  · 3 sinks so far\n")
+async def _gn_render(e) -> str:
+    """Render a single event through FileLogRenderer and return the written text."""
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(e)
+    return renderer._writer.text
 
 
-def test_gitnexus_hit_line():
-    e = _evt("hit", done=5, hits=1, detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
-    assert _render(e) == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  ✓ 'pg.executeQuery' "
+async def test_gitnexus_progress_line():
+    out = await _gn_render(_gn_evt("progress"))
+    assert out == (
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  10/87  · 3 sinks\n")
+
+
+async def test_gitnexus_hit_line():
+    e = _gn_evt("hit", done=5, hits=1,
+                detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  ✓ 'pg.executeQuery' "
         "@ src/api/users.py:42 slot=args\n")
 
 
-def test_gitnexus_summary_line():
-    e = _evt("summary", done=87, hits=12, detail="12 soft sinks · 5 rule gaps · 2 timeouts")
-    assert _render(e) == (
-        "[2026-07-01 14:32:05] [GN-LLM] sink-discovery  done 87/87 → "
+async def test_gitnexus_summary_line():
+    e = _gn_evt("summary", done=87, hits=12,
+                detail="12 soft sinks · 5 rule gaps · 2 timeouts")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  done 87/87 → "
         "12 soft sinks · 5 rule gaps · 2 timeouts\n")
 
 
-def test_gitnexus_progress_noun_varies_by_phase():
-    e = _evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
-    assert "· 2 vulnerable so far" in _render(e)
+async def test_gitnexus_progress_noun_varies_by_phase():
+    e = _gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
+    out = await _gn_render(e)
+    assert "· 2 vulnerable" in out      # 去 so far
+
+
+async def test_gitnexus_note_line():
+    """note 行: per-skip timeout/error 诊断, 用 ⚠ 区别 hit 的 ✓(与 rich 一致)。"""
+    e = _gn_evt("note", done=5, hits=1,
+                detail="src/api/users.py:raw_query: timed out (>60s), skipped")
+    out = await _gn_render(e)
+    assert out == (
+        "[2026-07-01 14:32:05] [LLM]   [GitNexus] sink-discovery  ⚠ "
+        "src/api/users.py:raw_query: timed out (>60s), skipped\n")

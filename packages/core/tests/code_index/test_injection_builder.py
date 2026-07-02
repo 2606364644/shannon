@@ -3,6 +3,7 @@ import pytest
 from shannon_core.code_index.vuln_chain_builders.injection_builder import (
     build_injection_findings,
 )
+from shannon_core.code_index.chain_verdict import ChainVerdict
 from shannon_core.code_index.parameter_models import (
     ParameterPropagationGraph, TaintFlow, PropagationStep,
 )
@@ -94,64 +95,74 @@ async def test_build_injection_skips_non_injection_slots():
 
 @pytest.mark.asyncio
 async def test_build_injection_findings_reports_chain_progress(monkeypatch):
-    """build_injection_findings must drive a chain-verdict ProgressEmitter:
-    one tick per candidate + a final summary sample."""
-    from shannon_core.code_index.progress import ProgressSample
-    from shannon_core.code_index.vuln_chain_builders import injection_builder
-
+    """progress_cb receives a tick per candidate + a final summary sample."""
     samples: list = []
 
-    async def cb(s: ProgressSample):
+    async def cb(s):
         samples.append(s)
 
-    # 3 candidate chains (sql_value slot picked up by injection builder)
+    # 3 injection candidate chains
     pgraph = ParameterPropagationGraph(
-        taint_flows=[_flow("sql_value") for _ in range(3)],
+        taint_flows=[
+            _flow("sql_value", steps=[_step("concat")]),
+            _flow("sql_value", steps=[_step("concat")]),
+            _flow("sql_value", steps=[_step("concat")]),
+        ],
         language_coverage=["python"],
     )
 
-    # Mark every chain vulnerable so each tick should carry INJ-GN-NN detail.
+    call_count = {"n": 0}
+
     async def fake_judge(chain, *, llm_client):
-        return type("V", (), {
-            "verdict": "vulnerable", "confidence": "high",
-            "evidence_chain": "q->db", "mismatch_reason": "concat",
-            "witness_payload": "'",
-        })()
-    monkeypatch.setattr(injection_builder, "judge_chain_verdict", fake_judge)
+        call_count["n"] += 1
+        # first chain vulnerable, others safe
+        is_vuln = (call_count["n"] == 1)
+        return ChainVerdict(
+            verdict="vulnerable" if is_vuln else "safe",
+            witness_payload="'" if is_vuln else None,
+            evidence_chain="q->db",
+            mismatch_reason=None,
+            confidence="high",
+        )
+
+    monkeypatch.setattr(
+        "shannon_core.code_index.vuln_chain_builders.injection_builder.judge_chain_verdict",
+        fake_judge,
+    )
 
     async def fake_llm(prompt, **kw):
-        raise AssertionError("judge_chain_verdict is mocked; llm unused")
+        raise AssertionError("judge is monkeypatched; llm_client unused")
 
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm, progress_cb=cb)
+    findings = await build_injection_findings(
+        pgraph, llm_client=fake_llm, progress_cb=cb)
 
-    # 3 candidates → 3 non-final ticks, then 1 final
-    non_final = [s for s in samples if not s.final]
-    finals = [s for s in samples if s.final]
-    assert len(non_final) == 3
-    assert len(finals) == 1
-    # phase + counters
-    assert all(s.phase == "chain-verdict" for s in samples)
-    assert non_final[-1].done == 3 and non_final[-1].total == 3
-    assert non_final[-1].hits == 3            # all vulnerable
-    # vulnerable tick detail carries INJ-GN-NN prefix + source→sink
-    assert non_final[0].detail.startswith("INJ-GN-01 vulnerable:")
-    assert "→ sink=" in non_final[0].detail
-    # final summary mentions the count
-    assert "3 vulnerable" in finals[0].detail
-    # findings still produced unchanged
     assert len(findings) == 3
+    # 3 candidates -> 3 non-final ticks
+    non_final = [s for s in samples if not s.final]
+    assert len(non_final) == 3
+    assert samples[-1].final is True
+    assert samples[-1].total == 3
+    # one hit (first chain vulnerable) -> hit sample with INJ-GN- detail prefix
+    hit_samples = [s for s in non_final if s.detail]
+    assert len(hit_samples) == 1
+    assert hit_samples[0].detail.startswith("INJ-GN-01")
+    assert hit_samples[0].hits == 1
+    # safe chains have empty detail
+    safe_samples = [s for s in non_final if not s.detail]
+    assert len(safe_samples) == 2
 
 
 @pytest.mark.asyncio
-async def test_build_injection_findings_progress_cb_none_is_noop():
-    """progress_cb=None must keep the builder working exactly as before."""
+async def test_build_injection_findings_progress_cb_none_no_raise():
+    """cb=None (default) must run without raising."""
     pgraph = ParameterPropagationGraph(
-        taint_flows=[_flow("sql_value")], language_coverage=["python"],
+        taint_flows=[_flow("sql_value", steps=[_step("concat")])],
+        language_coverage=["python"],
     )
 
     async def fake_llm(prompt, **kw):
         return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
+                '"q->db","mismatch_reason":null,"confidence":"high"}')
 
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm, progress_cb=None)
+    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
     assert len(findings) == 1

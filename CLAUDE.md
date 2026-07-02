@@ -14,12 +14,12 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 **铁律（易踩，反复强调）：**
 - **不要把确定性层产物喂进 LLM 轨 prompt。** LLM 轨靠自身方法论 + 双轨 OR 由 GitNexus 轨独立补召回；把确定性结果喂 LLM 轨会让它依赖确定性层（而确定性层 / GitNexus 经常超时 / 不可用），破坏独立性。**确定性→LLM 轨的 hints 桥梁（原 `static_dataflow_hints.md` 产物 + `prompts/shared/_static-dataflow-hints.txt` partial + `@include`）已彻底拆除——勿重建**（2026-06-26 injection-recall follow-up）。任何新 prompt 不得 `@include` 确定性产物；`packages/core/tests/prompts/test_static_dataflow_hints_decoupling.py` 锁定此不变量。
 - **改 LLM 轨 prompt** 时，源只从 recon + grep 派生（TS 式），不引确定性 hints。
-- **扩 sink 覆盖** 分两条路：LLM 轨改 prompt 清单（`vuln-*.txt`），GitNexus 轨改代码规则（`packages/core/src/shannon_core/code_index/sink_detector.py`）。
+- **扩 sink 覆盖** 分两条路：LLM 轨改 prompt 清单（`vuln-*.txt`），GitNexus 轨改规则 YAML（确定性 sink 改 `packages/core/src/shannon_core/code_index/data/sink_rules.yml`、补召回候选改同目录 `sink_candidates.yml`、source 改 `source_rules.yml`；detector `.py` 只管加载/匹配逻辑，不再内联规则）。
 - **合并**：`run_merge_dual_track_queues`（`dual_track_merger.py`）做 verdict OR；`externally_exploitable` 是**可达性标签**（true=公网 / false=内部或跨服务），**不能被 verdict 覆写**。
 
 **双轨可配置（演进方向，2026-06-26 提出，设计中 ★）：**
 - **战略**：把双轨从"固定并行"演进为**可配置开关**——**GitNexus 轨做可靠兜底，LLM 轨做可选的纯 LLM 增强（创意轨）**。**token 紧张时关闭 LLM 轨**（靠 GitNexus 轨兜底），**token 宽裕时打开 LLM 轨**（双轨 OR）。默认 LLM 轨**开**（env `SHANNON_LLM_TRACK_ENABLED`，默认 `"1"`）。
-- **为支撑"GitNexus 轨独立兜底"**，GitNexus 轨从纯确定性演进为"**确定性兜底 + 可选 LLM 补召回**"：`sink_detector`（`packages/core/src/shannon_core/code_index/sink_detector.py`）规则未命中的可疑函数（半 sink 模式）用轻量 LLM 找 sink，产 `rule_id="llm-discovered"` 的软 `SinkCallSite`（与规则 sink 同流、可区分）+ `rule_gap_report.json` 反哺规则库优化。LLM 不可用（stub / 超时）时退回纯规则 + `is_entry_hint`（`deterministic-fallback` 立场 B 成果，作为"LLM 不可用档"，不浪费）。
+- **为支撑"GitNexus 轨独立兜底"**，GitNexus 轨从纯确定性演进为"**确定性兜底 + 可选 LLM 补召回**"：`sink_detector` 规则（`data/sink_rules.yml`）未命中的可疑 call（由 `data/sink_candidates.yml` 候选模式表按语言+receiver 精确筛选，已替换旧版 flat 子串正则）用轻量 LLM 找 sink，产 `rule_id="llm-discovered"` 的软 `SinkCallSite`（与规则 sink 同流、可区分）+ `rule_gap_report.json` 反哺规则库优化。LLM 不可用（stub / 超时）时退回纯规则 + `is_entry_hint`（`deterministic-fallback` 立场 B 成果，作为"LLM 不可用档"，不浪费）。
 - **不变的铁律**：LLM 轨仍纯 LLM 自给自足、不吃确定性产物（上条铁律不动）；本次演进只动 GitNexus 轨自己接 LLM + 加 LLM 轨开关，**不破坏双轨独立性**。
 - **设计 spec**：`docs/superpowers/specs/2026-06-26-gitnexus-llm-sink-discovery-design.md`（撰写中，brainstorming 进行时）。
 

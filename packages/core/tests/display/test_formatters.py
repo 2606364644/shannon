@@ -294,3 +294,50 @@ def test_agent_body_end_failed():
     e = AgentEvent(timestamp="t", category="AGENT", agent_name="xss-vuln",
                    event="end", attempt=1, duration_ms=100, success=False, error="boom")
     assert agent_body(e) == "✗ [XSS] xss-vuln failed (100ms) — boom"
+
+
+from shannon_core.display.formatters import gitnexus_body, gitnexus_hits_noun
+from shannon_core.display.events import GitnexusLlmEvent
+
+
+def _gn_evt(kind, **kw):
+    base = dict(timestamp="t", category="GN-LLM", phase="sink-discovery",
+                kind=kind, done=10, total=87, hits=3)
+    base.update(kw)
+    return GitnexusLlmEvent(**base)
+
+
+def test_gitnexus_hits_noun_known_phases():
+    assert gitnexus_hits_noun("sink-discovery") == "sinks"
+    assert gitnexus_hits_noun("source-discovery") == "sources"
+    assert gitnexus_hits_noun("taint-analysis") == "taint_flows"
+    assert gitnexus_hits_noun("chain-verdict") == "vulnerable"
+
+
+def test_gitnexus_hits_noun_unknown_falls_back():
+    assert gitnexus_hits_noun("mystery-phase") == "hits"
+
+
+def test_gitnexus_body_progress_includes_noun_no_so_far():
+    assert gitnexus_body(_gn_evt("progress")) == "sink-discovery  10/87  · 3 sinks"
+
+
+def test_gitnexus_body_progress_noun_varies_by_phase():
+    e = _gn_evt("progress", phase="chain-verdict", hits=2, done=10, total=34)
+    assert gitnexus_body(e) == "chain-verdict  10/34  · 2 vulnerable"
+
+
+def test_gitnexus_body_hit_shows_checkmark_and_detail():
+    e = _gn_evt("hit", detail="'pg.executeQuery' @ src/api/users.py:42 slot=args")
+    assert gitnexus_body(e) == "sink-discovery  ✓ 'pg.executeQuery' @ src/api/users.py:42 slot=args"
+
+
+def test_gitnexus_body_summary_shows_done_arrow_detail():
+    e = _gn_evt("summary", done=87, hits=12,
+                detail="12 soft sinks · 5 rule gaps · 2 timeouts")
+    assert gitnexus_body(e) == "sink-discovery  done 87/87 → 12 soft sinks · 5 rule gaps · 2 timeouts"
+
+
+def test_gitnexus_body_note_shows_warn_and_detail():
+    e = _gn_evt("note", detail="src/api/users.py: timed out (>60s), skipped")
+    assert gitnexus_body(e) == "sink-discovery  ⚠ src/api/users.py: timed out (>60s), skipped"
