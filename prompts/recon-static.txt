@@ -27,59 +27,59 @@ Vulnerability classes to test: {{VULN_CLASSES_TESTED}}
 
 <methodology>
 
-### Phase 1: Source Code Mapping
+### Phase 1: Multi-Angle Source Mapping (5 parallel Task agents)
 
-Launch parallel Task Agents to scan different aspects:
+Launch FIVE Task agents IN PARALLEL in a single message, one per enumeration angle.
+Each angle catches different blind spots; merge their results (deduplicated) into Section 4.
+Each Task agent MUST return BOTH (a) the endpoints it found
+(METHOD /path + file:line + handler) AND (b) a source anchor count — how many route
+sources it counted in code, with the grep pattern and file used. This count drives
+the Section 4.3 reconciliation; do not omit it.
 
-**Task Agent A — Architecture Scanner**
-- Identify framework (Express, Django, Flask, Spring, Rails, etc.)
-- Map directory structure and conventions
-- Identify configuration files (database, secrets, environment)
-- Locate middleware chain
+- **Angle 1 — Route definitions:** router.get/post/put/delete, framework decorators,
+  config-driven route tables (e.g. paths-to-config object). Count route-definition entries.
+- **Angle 2 — Controller methods:** handler methods referenced by routes. Count handlers
+  bound to a route.
+- **Angle 3 — Interface contracts:** proto http annotations, OpenAPI/swagger specs,
+  graphql schema. Count contract-declared operations.
+- **Angle 4 — Frontend calls:** axios/fetch/rpc calls in frontend code, reverse-inferred
+  backend endpoints NOT declared in route files. Count distinct backend paths called.
+  (If the target is a pure-backend service with no frontend code, this angle yields
+  zero — classify `not-applicable` in §4.3 with the grep zero-result evidence.)
+- **Angle 5 — Gateway config:** nginx `location`/`proxy_pass`, ingress routes, gateway
+  config. Count proxied paths. (If no gateway/ingress config exists in the repo,
+  classify `not-applicable` with grep evidence.)
 
-**Task Agent B — Entry Point Mapper**
-- Find all route/endpoint definitions
-- Map HTTP methods to handler functions
-- Identify URL parameters, query parameters, request body schemas
-- Find WebSocket endpoints and server-sent event handlers
+After merging, perform **group detection**: identify routes mapping to the SAME handler
+function — these share processing logic; a vulnerability in the handler affects every
+route in the group. For each group note whether routes differ in auth middleware, and
+include the router definition file:line (feeds Section 4.1).
 
-**Task Agent C — Security Pattern Hunter**
-- Locate authentication middleware and session management
-- Find authorization checks (role guards, ownership validators)
-- Identify input validation and sanitization functions
-- Map cryptographic operations and key management
-
-**Task Agent D — Sink & Source Hunter**
-- Find all database query calls (SQL, ORM, NoSQL)
-- Locate command execution functions (exec, system, subprocess)
-- Find HTML rendering and template output points
-- Identify file I/O operations and path handling
-
-**Task Agent E — Data Flow Tracer**
-- Map how user input flows from entry points to sinks
-- Identify intermediate transformations (encoding, parsing, serialization)
-- Trace session/token handling across requests
-- Map inter-service communication patterns
+Also launch IN PARALLEL: Authorization Checker Agent, Input Validator Agent (enumerate
+ALL fields from input type definitions — TS interfaces / Zod / Joi / Pydantic / JSON
+Schema, incl. wildcard `[key: string]: unknown`), Session Handler Agent.
 
 ### Phase 2: Security Pattern Correlation
+For each vulnerability class being tested, correlate code patterns with known classes
+(injection sinks / XSS contexts / auth boundaries / SSRF entry points / access control).
+Populate §3 / §6 / §7.
 
-For each vulnerability class being tested:
-
-**Injection**: Map all source→sink paths where user input reaches SQL queries, command execution, or template rendering without sanitization.
-
-**XSS**: Identify all locations where user-controlled data is rendered in HTML without encoding. Check both server-side templates and client-side DOM manipulation.
-
-**Auth**: Map the authentication flow end-to-end: credential handling, session creation, token validation, password storage, MFA integration.
-
-**SSRF**: Find all URL-handling code where user input influences outbound HTTP requests. Check for URL validation and allowlisting.
-
-**AuthZ**: Map authorization checks per endpoint. Identify endpoints where ownership validation or role checking is missing.
-
-**Misconfig**: Check for security header middleware, CORS configuration, cookie security flags, redirect validation.
+### Step 3.5: Enumeration Reconciliation (MANDATORY before writing Section 4)
+- Sum the source anchor counts returned by the five angles in Phase 1.
+- Compare each angle's anchor count against the deduplicated endpoint set you are about
+  to write to Section 4.
+- Produce the `### 4.3 Enumeration Reconciliation` table (one row per angle: anchor count,
+  reported deduped count, delta, explanation).
+- Classify every non-zero delta as `dedup` / `out-of-scope` / `not-applicable` / `true-miss`.
+  `not-applicable` REQUIRES a grep zero-result evidence (pattern + zero files matched).
+  For every `true-miss`, go back and add the missing endpoint to Section 4 (and 4.1 if
+  shared handler) before proceeding.
+- You may NOT consider Section 4 complete while any delta remains unclassified.
 
 ### Phase 3: Attack Surface Documentation
-
-Compile findings into a structured deliverable.
+Compile findings into the deliverable per `<output_format>` + the pre-termination
+checklist in `shared/_enumeration-completeness.txt` (EC-A through EC-F). Do NOT announce
+"RECONNAISSANCE COMPLETE" until §4.3 has zero `true-miss` and §4.1 / §5 are populated.
 
 </methodology>
 
