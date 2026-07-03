@@ -7,6 +7,7 @@ dependencies = [
     "shannon-blackbox",
     "shannon-combined",
     "shannon-multi",
+    "shannon-web",
 ]
 
 [tool.uv.sources]
@@ -15,6 +16,7 @@ shannon-whitebox = { workspace = true }
 shannon-blackbox = { workspace = true }
 shannon-combined = { workspace = true }
 shannon-multi = { workspace = true }
+shannon-web = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]

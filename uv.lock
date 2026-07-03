@@ -1261,6 +1261,7 @@ dependencies = [
     { name = "shannon-blackbox" },
     { name = "shannon-combined" },
     { name = "shannon-multi" },
+    { name = "shannon-web" },
     { name = "shannon-whitebox" },
 ]
 
@@ -1278,6 +1279,7 @@ requires-dist = [
     { name = "shannon-blackbox", editable = "packages/blackbox" },
     { name = "shannon-combined", editable = "packages/combined" },
     { name = "shannon-multi", editable = "packages/multi" },
+    { name = "shannon-web", editable = "packages/web" },
     { name = "shannon-whitebox", editable = "packages/whitebox" },
 ]
 
