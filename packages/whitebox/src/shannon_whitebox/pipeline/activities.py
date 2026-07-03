@@ -1617,68 +1617,87 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
 
 
 @activity.defn
-async def run_attack_chain_assembly(input: ActivityInput) -> dict:
-    """Assemble multi-step attack chains from all analysis results."""
-    from shannon_whitebox.audit.session_registry import get_audit_session
-    try:
-        from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
-        from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
-        from shannon_core.services.attack_chain_builder import build_attack_chains
-        import dataclasses
-        import logging
+async def run_attack_chain_llm_agent(input: ActivityInput) -> dict:
+    """LLM-track attack chain agent (creative-driven, multi-step inference).
 
+    Runs the ATTACK_CHAIN agent (attack-chain.txt prompt) via the shared executor.
+    Reads recon + exploitation_queue (LLM-track self-produced) — NEVER GitNexus
+    deterministic artifacts (CLAUDE.md §1). The prompt instructs the agent to
+    Write attack_chains_llm_queue.json itself; we do NOT pass structured_output
+    schema (consistent with report agent — see _vuln_output_schema returning None).
+    """
+    try:
+        act_input = ActivityInput(
+            **{**input.__dict__, "agent_name": AgentName.ATTACK_CHAIN.value}
+        )
+        result = await run_agent(act_input)
+        # run_agent 返回 metrics.model_dump() (dict)，字段名 num_turns。
+        # chain_count 这里仅是 activity-level metadata（真实 chain 数由
+        # assembly_v2 读 attack_chains_llm_queue.json 计数返回）。
+        return {"chain_count": result.get("num_turns", 0), "track": "llm"}
+    except (PentestError, Exception) as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(
+            str(e), type=error_type, non_retryable=not retryable
+        ) from e
+
+
+@activity.defn
+async def run_attack_chain_assembly_v2(input: ActivityInput) -> dict:
+    """GitNexus-track assembly + dual-track merge → attack_chains.json.
+
+    1. Read {vt}_gitnexus_queue.json findings (GitNexus own output).
+    2. assemble_attack_chains (deterministic cross-endpoint correlation).
+    3. Read attack_chains_llm_queue.json (from run_attack_chain_llm_agent).
+    4. merge_attack_chains → attack_chains.json.
+
+    GitNexus unavailable → gitnexus_chains=[] (graceful), LLM track covers.
+    CLAUDE.md §1: 不反向喂 LLM 轨 prompt — assembly 只读两轨各自产物做合并。
+    """
+    try:
         repo, deliverables, _ = _get_paths(input)
         log = logging.getLogger(__name__)
 
-        async with get_audit_session().track_step("attack-chain", "attack-chain-assembly", intent=intent_for("attack-chain-assembly")):
-            # Load results (JSON stores tuples as lists, convert back)
-            def _to_endpoint(d: dict) -> InferredEndpoint:
-                return InferredEndpoint(
-                    method=d["method"], path=d["path"], source=d["source"],
-                    model=d.get("model"), middleware=tuple(d.get("middleware", [])),
-                    vulnerability_indicators=tuple(d.get("vulnerability_indicators", [])),
+        # 1. GitNexus findings per class
+        gn_by_class: dict[str, list] = {}
+        for vt in ("injection", "xss", "ssrf", "authz"):
+            qpath = deliverables / f"{vt}_gitnexus_queue.json"
+            if qpath.exists():
+                try:
+                    data = json.loads(qpath.read_text("utf-8"))
+                    gn_by_class[vt] = data.get("vulnerabilities", []) or []
+                except (json.JSONDecodeError, OSError):
+                    gn_by_class[vt] = []
+
+        # 2. Assemble GitNexus chains
+        from shannon_core.code_index.attack_chain_assembler import assemble_attack_chains
+        gn_chains = assemble_attack_chains(gn_by_class, log)
+        gn_path = deliverables / "attack_chains_gitnexus_queue.json"
+        atomic_write_json(gn_path, {"chains": gn_chains})
+
+        # 3. LLM chains（attack-chain agent Write 落盘）
+        llm_chains: list = []
+        llm_path = deliverables / "attack_chains_llm_queue.json"
+        if llm_path.exists():
+            try:
+                llm_chains = (
+                    json.loads(llm_path.read_text("utf-8")).get("chains", []) or []
                 )
+            except (json.JSONDecodeError, OSError):
+                llm_chains = []
 
-            def _to_route(d: dict) -> FrontendRoute:
-                return FrontendRoute(
-                    path=d["path"], component=d["component"], authenticated=d["authenticated"],
-                )
+        # 4. Merge → attack_chains.json
+        from shannon_core.code_index.dual_track_merger import merge_attack_chains
+        merged = merge_attack_chains(llm_chains, gn_chains)
+        atomic_write_json(deliverables / "attack_chains.json", {"chains": merged})
 
-            def _to_xss(d: dict) -> XssAttackChain:
-                return XssAttackChain(
-                    entry_point=d["entry_point"], storage_endpoint=d["storage_endpoint"],
-                    render_endpoint=d["render_endpoint"], sink=d["sink"], confidence=d["confidence"],
-                )
-
-            framework_result = FrameworkAnalysisResult()
-            framework_path = deliverables / "framework_analysis.json"
-            if framework_path.exists():
-                data = json.loads(framework_path.read_text())
-                endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
-                framework_result = FrameworkAnalysisResult(
-                    inferred_endpoints=endpoints,
-                    recommendations=data.get("recommendations", []),
-                )
-
-            frontend_result = FrontendAnalysisResult()
-            frontend_path = deliverables / "frontend_mapping.json"
-            if frontend_path.exists():
-                data = json.loads(frontend_path.read_text())
-                routes = [_to_route(r) for r in data.get("routes", []) if isinstance(r, dict)]
-                xss_chains = [_to_xss(c) for c in data.get("xss_chains", []) if isinstance(c, dict)]
-                frontend_result = FrontendAnalysisResult(routes=routes, xss_chains=xss_chains)
-
-            chains = await build_attack_chains(framework_result, frontend_result, log)
-
-            # Write assembled chains
-            chains_data = [dataclasses.asdict(c) for c in chains]
-            chains_path = deliverables / "attack_chains.json"
-            atomic_write_json(chains_path, chains_data)
-
-        return {"chain_count": len(chains)}
-    except PentestError as e:
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+        return {
+            "chain_count": len(merged),
+            "llm_count": len(llm_chains),
+            "gitnexus_count": len(gn_chains),
+        }
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+        raise ApplicationFailure(
+            str(e), type=error_type, non_retryable=not retryable
+        ) from e

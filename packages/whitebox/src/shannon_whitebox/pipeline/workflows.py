@@ -446,7 +446,11 @@ class WhiteboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
 
-            # === Attack Chain Assembly ===
+            # === Attack Chain (dual-track, post-vuln) ===
+            # LLM track (run_attack_chain_llm_agent) 跑 attack-chain agent
+            # (Write attack_chains_llm_queue.json)；GitNexus track
+            # (run_attack_chain_assembly_v2) 组装 GitNexus chains + 合并两轨
+            # → attack_chains.json。两步均非 fatal（attack chains 增强报告不阻塞）。
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 args=[
@@ -460,16 +464,32 @@ class WhiteboxScanWorkflow:
             self._state.current_phase = "attack-chain"
             try:
                 await workflow.execute_activity(
-                    activities.run_attack_chain_assembly, act_input,
+                    activities.run_attack_chain_llm_agent, act_input,
+                    start_to_close_timeout=timedelta(minutes=30),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:
+                # Non-fatal — LLM track 失败时 GitNexus 轨仍可独立产 chains
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"Attack chain LLM agent failed (non-fatal, GitNexus-only track continues): {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
+            try:
+                await workflow.execute_activity(
+                    activities.run_attack_chain_assembly_v2, act_input,
                     start_to_close_timeout=timedelta(minutes=5),
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
-                # Non-fatal — attack chains enhance the report but don't block the pipeline
+                # Non-fatal — attack chains 增强报告但不阻塞主流程
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"Attack chain assembly failed: {exc}",
+                       "info_message": f"Attack chain assembly v2 failed (non-fatal): {exc}",
                        "info_level": "warning"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
