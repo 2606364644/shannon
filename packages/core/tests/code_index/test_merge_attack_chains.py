@@ -37,3 +37,35 @@ def test_merge_gitnexus_empty_when_unavailable():
     merged = merge_attack_chains(llm, [])
     assert len(merged) == 1
     assert merged[0]["merge_source"] == "llm-only"
+
+
+def test_merge_confidence_promotion_when_gitnexus_higher():
+    """同 endpoint 序列下，gn confidence rank 更高 → 覆盖 existing 的 confidence。"""
+    llm = [_chain("llm-xss", ["POST /a", "GET /b"], confidence="probable")]
+    gn = [_chain("gn-xss", ["POST /a", "GET /b"], source="gitnexus", confidence="confirmed")]
+    merged = merge_attack_chains(llm, gn)
+    assert len(merged) == 1
+    assert merged[0]["merge_source"] == "both"
+    assert merged[0]["confidence"] == "confirmed"
+
+
+def test_merge_keeps_different_vuln_types_same_endpoints():
+    """vuln_type 是 sequence key 末位，故 xss 链与 injection 链同路由不合并。"""
+    llm = [_chain("llm-xss", ["POST /a", "GET /b"])]
+    llm[0]["vuln_type"] = "xss"
+    gn = [_chain("gn-inj", ["POST /a", "GET /b"], source="gitnexus")]
+    gn[0]["vuln_type"] = "injection"
+    merged = merge_attack_chains(llm, gn)
+    assert len(merged) == 2
+    sources = {c["merge_source"] for c in merged}
+    assert sources == {"llm-only", "gitnexus-only"}
+
+
+def test_merge_output_does_not_contain_internal_keys():
+    """内部 _source / _gn_merged 标记不应流到合并输出。"""
+    llm = [_chain("llm-xss", ["POST /a", "GET /b"])]
+    gn = [_chain("gn-xss", ["POST /a", "GET /b"], source="gitnexus", confidence="confirmed")]
+    merged = merge_attack_chains(llm, gn)
+    assert len(merged) == 1
+    assert "_source" not in merged[0]
+    assert "_gn_merged" not in merged[0]

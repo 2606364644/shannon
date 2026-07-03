@@ -208,7 +208,6 @@ def merge_attack_chains(
     GitNexus (evidence-driven) confidence wins if higher; the LLM (creative) fills
     coverage GitNexus misses.
     """
-    merged: list[dict] = []
     by_seq: dict[tuple, dict] = {}
 
     for chain in llm_chains:
@@ -237,6 +236,9 @@ def merge_attack_chains(
             chain["merge_source"] = "gitnexus-only"
             by_seq[seq] = chain
 
-    merged = list(by_seq.values())
+    merged: list[dict] = list(by_seq.values())
+    # pop internal `_gn_merged` guard so it never leaks into attack_chains.json output
+    for chain in merged:
+        chain.pop("_gn_merged", None)
     logger.info("merge_attack_chains: %d chain(s) (both/llm-only/gitnexus-only)", len(merged))
     return merged
