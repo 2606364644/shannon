@@ -9,3 +9,20 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* braille spinner（DSF 自包含，不依赖 events.css） */
+@keyframes shannon-spin {
+  0% { content: "⠋"; } 10% { content: "⠙"; } 20% { content: "⠹"; } 30% { content: "⠸"; }
+  40% { content: "⠼"; } 50% { content: "⠴"; } 60% { content: "⠦"; } 70% { content: "⠧"; }
+  80% { content: "⠇"; } 90% { content: "⠏"; }
+}
+.shannon-spinner::before {
+  content: "⠋";
+  animation: shannon-spin 1.05s steps(1) infinite;
+  display: inline-block;
+  width: 1ch;
+  color: hsl(var(--primary));
+}
+@media (prefers-reduced-motion: reduce) {
+  .shannon-spinner::before { animation: none; content: "•"; }
+}
