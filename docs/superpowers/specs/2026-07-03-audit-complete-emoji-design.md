@@ -1,4 +1,4 @@
-# 终局 🎉/💥 装饰（Audit Complete Emoji）
+# 终局 🎉/🚨 装饰（Audit Complete Emoji）
 
 - **日期**: 2026-07-03
 - **状态**: 已实现（TDD）
@@ -14,12 +14,14 @@
 
 **核心张力**：动机是装饰（好看），但项目约定要求 emoji 必须有语义锚点 + 收口到单一来源。解法 = 找一个天然事件锚点（扫描收官），让 emoji 既满足装饰、又承载语义。
 
-**成功 / 失败对仗**：终局有 `completed` / `failed` 两态。成功用 🎉（庆祝）、失败用 💥（爆破），形成视觉对仗，且不撞现有 `✗`（失败状态符号）与 `⚠️`（警告 emoji）。初版 spec 仅给成功态加 🎉、失败态不动；后用户要求失败也给 emoji，扩展为双态。
+**成功 / 失败对仗**：终局有 `completed` / `failed` 两态。成功用 🎉（庆祝）、失败用 😕（困惑脸），形成视觉对仗，且不撞现有 `✗`（失败状态符号）。😕 与 💭（LLM turn 思考气泡）虽同人形/面部系，但视觉区分明显（困惑黄脸 vs 思考气泡），且场景不重叠（😕 仅终局 failed / 💭 仅 LLM turn），不混淆。
+
+**演进**：初版 spec 仅成功态 🎉、失败态不动；后用户要求失败也给 emoji → 加 💥（爆破）→ 换 🚨（报警灯，过严肃）→ 换 😕（困惑脸，与 🎉 庆祝形成情绪对仗，最契合"扫描没成功"的语义）。
 
 ## 2. 目标与非目标
 
 **目标**
-- 给终局 emoji 一个语义锚点：`SummaryEvent`——`status == "completed"` → 🎉；`status != "completed"` → 💥。
+- 给终局 emoji 一个语义锚点：`SummaryEvent`——`status == "completed"` → 🎉；`status != "completed"` → 😕。
 - 守住符号单一来源铁律：常量收口到 `symbols.py`，不散落字面量。
 - 不污染 `workflow.log` 文件正文（护 grep + 守 2026-06-22 spec「文件正文不动」铁律）。
 
@@ -31,7 +33,7 @@
 
 ## 3. 方案
 
-在 `SummaryEvent`（终局事件）的终端 `Panel.fit` 正文行首加 emoji：`completed` → 🎉，`failed` → 💥。仅终端 renderer。
+在 `SummaryEvent`（终局事件）的终端 `Panel.fit` 正文行首加 emoji：`completed` → 🎉，`failed` → 🚨。仅终端 renderer。
 
 **终端 completed（绿框）**：
 ```
@@ -44,7 +46,7 @@
 **终端 failed（红框）**：
 ```
 ╭──────────────────────────────────────────╮
-│ 💥 Workflow FAILED                       │
+│ 😕 Workflow FAILED                       │
 │ Duration: 14m 25s    Total Cost: $3.4990 │
 ╰──────────────────────────────────────────╯
 ```
@@ -61,9 +63,9 @@ Workflow COMPLETED      （或 Workflow FAILED）
 `display/symbols.py` 新增两个常量，注释说明它们是终局装饰、非状态符号族：
 
 ```python
-# 终局装饰（非 STEP/AGENT 状态符号族），扫描收官 Panel 行首：成功 🎉 / 失败 💥
+# 终局装饰（非 STEP/AGENT 状态符号族），扫描收官 Panel 行首：成功 🎉 / 失败 😕
 AUDIT_COMPLETE_OK = "🎉"
-AUDIT_COMPLETE_FAIL = "💥"
+AUDIT_COMPLETE_FAIL = "😕"
 ```
 
 ## 5. 改动文件清单
@@ -99,10 +101,10 @@ def _render_summary(self, e) -> None:
 
 ## 7. 测试策略
 
-- `packages/core/tests/display/test_symbols.py`：`AUDIT_COMPLETE_OK == "🎉"` + `AUDIT_COMPLETE_FAIL == "💥"`。
+- `packages/core/tests/display/test_symbols.py`：`AUDIT_COMPLETE_OK == "🎉"` + `AUDIT_COMPLETE_FAIL == "😕"`。
 - `packages/core/tests/display/test_rich_renderer.py`：
-  - `status="completed"` → 含 🎉、不含 💥；
-  - `status="failed"` → 含 💥、不含 🎉、含 `FAILED`。
+  - `status="completed"` → 含 🎉、不含 😕；
+  - `status="failed"` → 含 😕、不含 🎉、含 `FAILED`。
 - **回归**：跑 `packages/core/tests/display/` 子集，**不跑全套**（全套 hang，见 memory `feat-fork-py-test-gotchas`）。
 
 ## 8. 风险与边界
@@ -110,14 +112,14 @@ def _render_summary(self, e) -> None:
 | 风险 | 缓解 |
 |---|---|
 | 不渲染 emoji 的终端（Windows cmd / 部分 CI）显示 `?` | 项目已大量用 emoji，运行环境已知支持，**不增新风险** |
-| 失败 💥 显得戏谑 | 用户明确要求失败也给 emoji；💥 是与 🎉 对仗的最克制选择，且不撞现有 `✗` / `⚠️` |
+| 😕 与 💭 同属面部/思考系可能混淆 | 视觉区分（困惑黄脸 vs 思考气泡）+ 场景不重叠（😕 仅终局 failed / 💭 仅 LLM turn） |
 | 误把 emoji 加进文件日志 | 已在非目标 + 改动清单双重声明「文件不动」；`test_file_renderer` 22 例全绿佐证 |
 
 ## 9. 验收标准
 
-- [x] `symbols.py` 含 `AUDIT_COMPLETE_OK = "🎉"` 与 `AUDIT_COMPLETE_FAIL = "💥"`，`_render_summary` 从常量 import（无散落字面量）。
+- [x] `symbols.py` 含 `AUDIT_COMPLETE_OK = "🎉"` 与 `AUDIT_COMPLETE_FAIL = "😕"`，`_render_summary` 从常量 import（无散落字面量）。
 - [x] 终端 `completed` 时 summary `Panel` 正文行首出现 🎉。
-- [x] 终端 `failed` 时 summary `Panel` 正文行首出现 💥（红框）。
+- [x] 终端 `failed` 时 summary `Panel` 正文行首出现 😕（红框）。
 - [x] `workflow.log` 文件正文不含 emoji（`Workflow COMPLETED` / `Workflow FAILED` 保持纯 ASCII）。
 - [x] `packages/core/tests/display/` 子集全绿（192 passed）。
 - [ ] 人工冒烟（真仓库跑一次 completed + 一次 failed）确认两态 emoji 显示正确。

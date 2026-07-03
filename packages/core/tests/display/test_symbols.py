@@ -27,4 +27,4 @@ def test_summary_symbols():
 def test_audit_complete_symbol():
     # 终局装饰（非 STEP/AGENT 状态符号族），出现在扫描收官 Panel 行首：成功 🎉 / 失败 💥
     assert AUDIT_COMPLETE_OK == "🎉"
-    assert AUDIT_COMPLETE_FAIL == "💥"
+    assert AUDIT_COMPLETE_FAIL == "😕"

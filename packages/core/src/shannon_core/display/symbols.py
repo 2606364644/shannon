@@ -16,6 +16,6 @@ AGENT_FAIL = "✗"
 SUMMARY_OK = "✓"
 SUMMARY_FAIL = "✗"
 
-# 终局装饰（非 STEP/AGENT 状态符号族），扫描收官 Panel 行首：成功 🎉 / 失败 💥
+# 终局装饰（非 STEP/AGENT 状态符号族），扫描收官 Panel 行首：成功 🎉 / 失败 😕
 AUDIT_COMPLETE_OK = "🎉"
-AUDIT_COMPLETE_FAIL = "💥"
+AUDIT_COMPLETE_FAIL = "😕"

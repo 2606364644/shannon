@@ -165,8 +165,9 @@ async def test_summary_failed_renders_failure_emoji():
         total_duration_ms=1000, total_cost_usd=0.01,
         agents=[], error="boom"))
     out = renderer._console.export_text()
-    assert "💥" in out
+    assert "😕" in out
     assert "🎉" not in out
+    assert "🚨" not in out  # 旧失败 emoji 不残留
     assert "FAILED" in out
 
 
