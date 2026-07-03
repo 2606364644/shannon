@@ -10,6 +10,8 @@ import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
 import { LiveTab } from "./routes/WorkspaceDetail/LiveTab";
 import { apiGet } from "./api/client";
 import type { SessionData } from "./api/types";
+import { AppShell } from "./components/layout/AppShell";
+import { DevComponentsPage } from "./pages/DevComponentsPage";
 
 // 默认 tab：进行中 → live，完成 → report。fetch status 后 navigate（replace 避免占历史栈）。
 function DefaultTab() {
@@ -24,15 +26,29 @@ function DefaultTab() {
   return null;
 }
 
+const devRoutes = import.meta.env.DEV
+  ? [{ path: "/dev/components", element: <DevComponentsPage /> }]
+  : [];
+
 export const router = createBrowserRouter([
-  { path: "/", element: <WorkspaceListPage /> },
-  { path: "/scan/new", element: <ScanNewPage /> },
-  { path: "/p/:workspace", element: <WorkspaceDetail />, children: [
-    { index: true, element: <DefaultTab /> },
-    { path: "overview", element: <OverviewTab /> },
-    { path: "report", element: <ReportTab /> },
-    { path: "deliverables", element: <DeliverablesTab /> },
-    { path: "logs", element: <LogsTab /> },
-    { path: "live", element: <LiveTab /> },
-  ]},
+  {
+    element: <AppShell />,
+    children: [
+      { path: "/", element: <WorkspaceListPage /> },
+      { path: "/scan/new", element: <ScanNewPage /> },
+      {
+        path: "/p/:workspace",
+        element: <WorkspaceDetail />,
+        children: [
+          { index: true, element: <DefaultTab /> },
+          { path: "overview", element: <OverviewTab /> },
+          { path: "report", element: <ReportTab /> },
+          { path: "deliverables", element: <DeliverablesTab /> },
+          { path: "logs", element: <LogsTab /> },
+          { path: "live", element: <LiveTab /> },
+        ],
+      },
+      ...devRoutes,
+    ],
+  },
 ]);
