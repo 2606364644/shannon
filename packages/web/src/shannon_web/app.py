@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
@@ -30,6 +30,7 @@ def _mount_frontend(app: FastAPI, cfg) -> None:
     if not dist.is_dir():
         return
     index_html = dist / "index.html"
+    dist_resolved = dist.resolve()
     assets_dir = dist / "assets"
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
@@ -40,7 +41,11 @@ def _mount_frontend(app: FastAPI, cfg) -> None:
 
     @app.get("/{full_path:path}")
     async def _spa_fallback(full_path: str):
-        candidate = dist / full_path
+        candidate = (dist / full_path).resolve()
+        try:
+            candidate.relative_to(dist_resolved)
+        except ValueError:
+            raise HTTPException(status_code=404)
         if full_path and candidate.is_file():
             return FileResponse(candidate)
         return FileResponse(index_html)

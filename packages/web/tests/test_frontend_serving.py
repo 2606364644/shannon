@@ -64,6 +64,8 @@ def test_root_static_file_returned(monkeypatch, tmp_path):
     client = _client_with_dist(monkeypatch, tmp_path)
     r = client.get("/vite.svg")
     assert r.status_code == 200
+    assert "<svg" in r.text            # vite.svg 内容,非 index.html
+    assert 'id="root"' not in r.text   # 不是 fallback 的 index.html
 
 
 def test_no_frontend_dir_means_no_serving(monkeypatch):
@@ -80,3 +82,16 @@ def test_missing_dist_dir_does_not_crash(monkeypatch, tmp_path):
     client = TestClient(create_app())
     r = client.get("/")
     assert r.status_code == 404
+
+
+def test_path_traversal_blocked(monkeypatch, tmp_path):
+    # dist 外放一个"敏感文件",确认遍历 payload 拿不到
+    secret = tmp_path / "secrets.txt"
+    secret.write_text("TOPSECRET")
+    dist = _make_dist(tmp_path)   # dist 是 tmp_path/dist,secrets.txt 在 tmp_path 根(dist 之外)
+    monkeypatch.setenv("SHANNON_WEB_FRONTEND_DIR", str(dist))
+    client = TestClient(create_app())
+    for payload in ("/%2e%2e/secrets.txt", "/%2e%2e%2fsecrets.txt", "/..%2fsecrets.txt"):
+        r = client.get(payload)
+        assert r.status_code == 404, f"{payload} should be blocked"
+        assert "TOPSECRET" not in r.text
