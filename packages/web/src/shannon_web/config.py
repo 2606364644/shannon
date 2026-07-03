@@ -14,6 +14,7 @@ class WebConfig:
         self.gitlab_token = os.environ.get("GITLAB_TOKEN")
         self.repos_dir = Path(os.environ.get("SHANNON_REPOS_DIR", "repos"))
         self.configs_dir = Path(os.environ.get("SHANNON_CONFIGS_DIR", "configs"))
+        self.frontend_dir = os.environ.get("SHANNON_WEB_FRONTEND_DIR")
 
     @property
     def workspaces_dir(self) -> Path:
