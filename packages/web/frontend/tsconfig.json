@@ -11,7 +11,11 @@
     "types": ["vitest/globals", "@testing-library/jest-dom"],
     "skipLibCheck": true,
     "outDir": "dist-tsc",
-    "rootDir": "src"
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src"]
 }
