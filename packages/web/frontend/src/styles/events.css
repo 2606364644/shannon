@@ -1,3 +1,4 @@
+/* @deprecated 迁移期保留——子项目 2-5 逐页消化后清除。新组件禁向此文件追加规则。*/
 :root {
   --void: #0B0F14; --panel: #141A22; --ink: #C9D1D9; --trace: #6B7785; --rule: #1F2733;
   --cyan: #22D3EE;   /* phase / info / GitNexus */

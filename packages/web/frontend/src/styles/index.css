@@ -1,0 +1,11 @@
+/* DSF entry。
+   @import 必须在 @tailwind 之前（CSS 规范：@import 须先于其它语句；否则 Vite 报 warning
+   且不内联 → events.css/tokens.css 丢失）。tokens 定义 shadcn/语义变量；events.css 迁移期旧规则。
+   @tailwind base 的 preflight 不设 background/color，不覆盖 events.css 的 element 规则；
+   events.css 的 class 规则（.page/.ledger/.ev-*）特异性高于 preflight element reset，
+   故加载顺序对视觉无影响。spinner keyframes / card-reachable 由 Task 6/7 末尾追加。*/
+@import "./tokens.css";
+@import "./events.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
