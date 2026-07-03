@@ -33,6 +33,11 @@ count you wrote to Section 4. Produce the **### 4.3 Enumeration Reconciliation**
 delta MUST be classified:
 - `dedup` — same endpoint surfaced by another angle (name the duplicate angle).
 - `out-of-scope` — not reachable via a web entry point (per scope_boundaries).
+- `not-applicable` — the target codebase contains NO source for this angle (e.g. a
+  pure-backend service has no frontend-call layer; no nginx/ingress config exists).
+  You MUST justify this with a grep zero-result: state the grep pattern you ran and
+  that it matched zero files. A bare `not-applicable` with no evidence is forbidden —
+  it will be treated as an unclassified delta and blocks termination.
 - `true-miss` — a real omission; you MUST go back and add it to Section 4 (and to
   Section 4.1 if it shares a handler) before terminating.
 
