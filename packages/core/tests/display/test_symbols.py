@@ -3,6 +3,7 @@ from shannon_core.display.symbols import (
     AGENT_START, AGENT_DONE, AGENT_FAIL,
     SUMMARY_OK, SUMMARY_FAIL,
     AUDIT_COMPLETE_OK,
+    AUDIT_COMPLETE_FAIL,
 )
 
 
@@ -24,5 +25,6 @@ def test_summary_symbols():
 
 
 def test_audit_complete_symbol():
-    # 终局成功装饰（非 STEP/AGENT 状态符号族），仅扫描 completed 时出现在 Panel 行首
+    # 终局装饰（非 STEP/AGENT 状态符号族），出现在扫描收官 Panel 行首：成功 🎉 / 失败 💥
     assert AUDIT_COMPLETE_OK == "🎉"
+    assert AUDIT_COMPLETE_FAIL == "💥"

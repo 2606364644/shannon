@@ -15,7 +15,7 @@ from shannon_core.display.formatters import (
 )
 
 from shannon_core.display.symbols import (
-    AUDIT_COMPLETE_OK, SUMMARY_OK, SUMMARY_FAIL,
+    AUDIT_COMPLETE_FAIL, AUDIT_COMPLETE_OK, SUMMARY_OK, SUMMARY_FAIL,
 )
 
 
@@ -155,7 +155,7 @@ class RichConsoleRenderer:
         from rich.table import Table
         ok = e.status == "completed"
         status = e.status.upper()
-        prefix = f"{AUDIT_COMPLETE_OK} " if ok else ""
+        prefix = f"{AUDIT_COMPLETE_OK if ok else AUDIT_COMPLETE_FAIL} "
         self._console.print(Panel.fit(
             f"{prefix}Workflow [bold]{status}[/]\n"
             f"Duration: {format_duration(e.total_duration_ms)}    "
