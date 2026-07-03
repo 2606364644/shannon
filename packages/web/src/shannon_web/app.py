@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 
 from .config import get_config
 
@@ -12,6 +15,35 @@ async def lifespan(app: FastAPI):
     # startup（僵尸清理在任务 9 接入 ScanManager 后填充）
     yield
     # shutdown（任务 9 接入 ScanManager 取消在途扫描后填充）
+
+
+def _mount_frontend(app: FastAPI, cfg) -> None:
+    """挂载前端 SPA 静态托管（生产/集成模式）。
+
+    cfg.frontend_dir 为空或目录不存在时直接返回（dev 模式前端走 vite 5173）。
+    必须在所有 /api/* 路由与 /health 注册**之后**调用——catch-all 靠 FastAPI
+    注册顺序保证 API 优先命中。
+    """
+    if not cfg.frontend_dir:
+        return
+    dist = Path(cfg.frontend_dir)
+    if not dist.is_dir():
+        return
+    index_html = dist / "index.html"
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/")
+    async def _spa_root():
+        return FileResponse(index_html)
+
+    @app.get("/{full_path:path}")
+    async def _spa_fallback(full_path: str):
+        candidate = dist / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index_html)
 
 
 def create_app(overrides: dict | None = None) -> FastAPI:
@@ -41,6 +73,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok", "git_available": cfg.git_available}
+
+    _mount_frontend(app, cfg)
 
     return app
 
