@@ -45,7 +45,13 @@ function buildBody(type: ScanType, f: FormState): ScanRequest {
 function renderError(e: ApiError): string {
   if (e.status === 400) return "Temporal 未就绪（localhost:7233）。先启动：docker-compose up temporal";
   if (e.status === 409) return "并发扫描超限，请等当前扫描完成或取消一个";
-  if (e.status === 422) return "yaml 校验失败：" + JSON.stringify(e.body);
+  if (e.status === 422) {
+    // FastAPI 校验错误体：{detail:[{loc,msg,type},...]}。提取首条 msg 友好展示，
+    // 不把整个 JSON 数组（含 loc/type 内部字段）丢给用户。无 detail → 回退纯标签。
+    const detail = (e.body as { detail?: { msg?: string }[] })?.detail;
+    const msg = Array.isArray(detail) && detail.length > 0 ? detail[0]?.msg : undefined;
+    return "yaml 校验失败" + (msg ? "：" + msg : "");
+  }
   return `提交失败（${e.status}）`;
 }
 
