@@ -9,7 +9,7 @@ COPY packages/web/frontend/ ./
 RUN npm run build            # → /fe/dist
 
 # ---- stage 2: python backend + 拷前端 dist ----
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # GitFetcher 需要 git；ca-certificates for https clone
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
