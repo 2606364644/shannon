@@ -1,4 +1,14 @@
 # packages/web/Dockerfile
+
+# ---- stage 1: build frontend ----
+FROM node:20-slim AS frontend
+WORKDIR /fe
+COPY packages/web/frontend/package.json packages/web/frontend/package-lock.json ./
+RUN npm ci
+COPY packages/web/frontend/ ./
+RUN npm run build            # → /fe/dist
+
+# ---- stage 2: python backend + 拷前端 dist ----
 FROM python:3.11-slim
 
 # GitFetcher 需要 git；ca-certificates for https clone
@@ -16,6 +26,10 @@ COPY packages ./packages
 
 # 装全部 workspace 包（含 shannon-whitebox/-blackbox/-multi CLI + shannon-web）
 RUN uv sync --frozen
+
+# 拷前端 build 产物 + 触发后端 serve 静态
+COPY --from=frontend /fe/dist /app/frontend_dist
+ENV SHANNON_WEB_FRONTEND_DIR=/app/frontend_dist
 
 EXPOSE 7878
 # uv run 把 .venv/bin 注入 PATH，子进程 exec shannon-whitebox 可解析
