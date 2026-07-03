@@ -188,3 +188,55 @@ def _merge_intel(
                 )
             )
     return merged
+
+
+def _chain_endpoint_sequence(chain: dict) -> tuple:
+    """Dedup key: ordered tuple of step endpoints (normalized lower)."""
+    steps = chain.get("steps", [])
+    return tuple((s.get("endpoint", "") or "").strip().lower() for s in steps) + (chain.get("vuln_type", ""),)
+
+
+def merge_attack_chains(
+    llm_chains: list[dict],
+    gitnexus_chains: list[dict],
+) -> list[dict]:
+    """Merge LLM-track and GitNexus-track attack chains by endpoint-sequence dedup.
+
+    Unlike merge_dual_track_queues (which dedups Vulnerability by location+sink),
+    attack chains dedup by the ordered endpoint sequence + vuln_type. merge_source:
+    both / llm-only / gitnexus-only. When both tracks have the same chain, the
+    GitNexus (evidence-driven) confidence wins if higher; the LLM (creative) fills
+    coverage GitNexus misses.
+    """
+    merged: list[dict] = []
+    by_seq: dict[tuple, dict] = {}
+
+    for chain in llm_chains:
+        chain = dict(chain)
+        chain.pop("_source", None)
+        seq = _chain_endpoint_sequence(chain)
+        chain["merge_source"] = "llm-only"
+        by_seq[seq] = chain
+
+    for chain in gitnexus_chains:
+        chain = dict(chain)
+        chain.pop("_source", None)
+        seq = _chain_endpoint_sequence(chain)
+        if seq in by_seq:
+            existing = by_seq[seq]
+            existing["merge_source"] = "both"
+            # evidence-driven confidence wins if higher
+            rank = {"confirmed": 3, "probable": 2, "theoretical": 1}
+            if rank.get(chain.get("confidence", ""), 0) > rank.get(existing.get("confidence", ""), 0):
+                existing["confidence"] = chain["confidence"]
+            # merge step descriptions (GitNexus adds file:line evidence)
+            if chain.get("steps") and not existing.get("_gn_merged"):
+                existing["gitnexus_evidence"] = chain.get("steps")
+                existing["_gn_merged"] = True
+        else:
+            chain["merge_source"] = "gitnexus-only"
+            by_seq[seq] = chain
+
+    merged = list(by_seq.values())
+    logger.info("merge_attack_chains: %d chain(s) (both/llm-only/gitnexus-only)", len(merged))
+    return merged
