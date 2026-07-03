@@ -15,6 +15,8 @@ Phase 3 — Attack Surface Documentation: Produce a structured attack surface do
 @include(shared/_target.txt)
 @include(shared/_code-path-rules.txt)
 @include(shared/_rules-of-engagement.txt)
+@include(shared/_cross-route-enumeration.txt)
+@include(shared/_enumeration-completeness.txt)
 
 <context>
 Authentication Context:
@@ -84,124 +86,66 @@ Compile findings into a structured deliverable.
 <output_format>
 Write your findings to `{{DELIVERABLES_PATH}}/recon_deliverable.md` with these sections:
 
-## 1. Architecture Overview
-- Framework and language
-- Directory structure summary
-- Key configuration files
+## 0) HOW TO READ
+Static source-code reconnaissance — no live requests. Downstream vuln agents consume §4 (endpoint inventory + §4.2 security context), §5 (input vectors), §8 (authz candidates), §9 (injection sources).
 
-## 2. Endpoint Map
-| Method | Path | Handler | Auth | Parameters | Notes |
-|--------|------|---------|------|------------|-------|
+## 1. Executive Summary
+- Framework / language / key tech
 
-## 2.1 Endpoint Security Context
+## 2. Technology & Service Map
+- Frontend / Backend / Infra
 
-For every endpoint in Section 2, document its security context. This is **descriptive analysis** — document what protections exist, NOT whether they are sufficient.
+## 3. Authentication & Session Management Flow
+### 3.1 Role Assignment / 3.2 Privilege Storage & Validation / 3.3 Role Switching & Impersonation
 
+## 4. API Endpoint Inventory
+| Method | Endpoint Path | Required Role | Object ID Parameters | Authorization Mechanism | Description & Code Pointer |
+
+### 4.1 Shared Controller Route Groups
+Per the shared/_cross-route-enumeration.txt checklist: every route sharing a handler
+listed one row per route; pre-auth (`**none**` middleware) variants flagged with ⚠️.
+Format: `#### Group: <handler> (<file:line>)` + table `| Method | Path | Auth Middleware | Router Line |`.
+
+### 4.2 Endpoint Security Context
+For every endpoint in Section 4, document (descriptive — what protections exist, NOT sufficiency):
 | Method | Path | Auth | Middleware | Framework Origin | Ownership Check | Notes |
-|--------|------|------|------------|------------------|-----------------|-------|
-| (per endpoint) | | anon/user/admin | (middleware chain) | manual / finale-rest auto-generated / epilogue auto-generated | none detected / yes (file:line) | |
+Framework Origin: manual / finale-rest auto-generated / epilogue auto-generated.
+When auto-REST frameworks detected (`finale.initialize()` / `epilogue.initialize()` / `finale.resource()`):
+enumerate all auto-generated endpoints per model, mark Origin, note ownership is typically
+absent by default ("none detected" unless explicit check found). Field conflicts → take the dangerous side.
 
-**Framework Endpoints (finale-rest / epilogue):**
-When auto-REST frameworks are detected (search for `finale.initialize()`, `epilogue.initialize()`, `finale.resource()`, `epilogue.resource()`):
-1. List all models configured with the framework
-2. For each model, enumerate all auto-generated endpoints: `GET/POST /api/{Model}s`, `GET/PUT/DELETE /api/{Model}s/:id`
-3. Mark each endpoint's Framework Origin (finale-rest auto-generated / epilogue auto-generated)
-4. Note any overrides or customizations applied after auto-generation
-5. For auto-generated endpoints, ownership validation is typically absent by default — record "none detected" unless an explicit ownership check is found
+### 4.3 Enumeration Reconciliation
+Produce AFTER merging all five enumeration angles (see shared/_enumeration-completeness.txt).
+| Angle | Anchor Count | Reported (deduped) | Delta | Explanation |
+Angles: Route-definition / Controller-method / Interface-contract / Frontend-call / Gateway.
+Every non-zero Delta MUST be classified `dedup` / `out-of-scope` / `not-applicable` / `true-miss`;
+every `true-miss` MUST be added back to Section 4 (and 4.1 if shared handler) before terminating.
 
-## 3. Authentication Architecture
-- Mechanism: [session/JWT/OAuth/...]
-- Login flow: [steps]
-- Session handling: [cookies/tokens/...]
-- MFA: [present/absent/type]
+## 5. Potential Input Vectors (Parameter Completeness Verification)
+For every Section 4 endpoint list ALL client-controllable parameters:
+| Endpoint | URL Params | POST Body | Headers | Cookies | Template Variables | Hidden Parameters | Extraction Code Location |
+Template-rendering endpoints: complete the hidden-parameter cross-check (undeclared fields
+like `[key: string]: unknown` / wildcard / catch-all that may pass through).
 
-## 4. Authorization Architecture
-- Role hierarchy: ...
-- Permission model: ...
-- Endpoints missing auth checks: ...
+## 6. Network & Interaction Map
+### 6.1 Entities `| Title | Type | Zone | Tech | Data | Notes |`
+### 6.2 Entity Metadata
+### 6.3 Flows `| FROM→TO | Channel | Path/Port | Guards | Touches |`
+### 6.4 Guards Directory `| Guard Name | Category | Statement |`
 
-## 5. Input Vectors
-| Source | Parameter | Reaches Sink | Sink Type | Sanitization |
-|--------|-----------|-------------|-----------|-------------|
-
-## 6. Security-Relevant File Paths
-- Authentication: [file paths]
-- Authorization: [file paths]
-- Input validation: [file paths]
-- Database access: [file paths]
-- Configuration: [file paths]
-
-## 6.4 Guards Directory
-
-Map all authorization guards and middleware:
-| Guard Name | File:Line | Protected Routes | Check Type |
-|------------|-----------|------------------|------------|
-
-For each guard, document:
-- What it checks (role, ownership, permission, custom)
-- Which routes/endpoints it protects
-- Whether it can be bypassed
-
-## 6.5 Privilege Lattice
-
-Map the role/permission hierarchy:
-```
-Admin → Manager → User → Anonymous
-         ↓
-       Editor → Viewer
-```
-
-For each role:
-- What resources it can access
-- What operations it can perform
-- How role assignment works (database, config, token claim)
-
-## 6.6 Authorization Vulnerability Candidates
-
-For each endpoint, document:
-| Endpoint | Required Role | Object ID Params | Auth Check Present | Risk |
-|----------|--------------|------------------|--------------------|------|
-
-Focus on:
-- Endpoints with object ID parameters that lack ownership validation
-- Admin-only endpoints without role checks
-- Endpoints that perform different actions based on user context but don't verify the context
+## 7. Role & Privilege Architecture
+### 7.1 Discovered Roles / 7.2 Privilege Lattice / 7.3 Role Entry Points / 7.4 Role-to-Code Mapping
 
 ## 8. Authorization Vulnerability Candidates
-This section identifies specific endpoints and code patterns that are prime candidates for authorization testing, organized by vulnerability type. Pure static analysis — no live requests are made; document candidates by reading code (route definitions, middleware chains, handlers).
-
 ### 8.1 Horizontal Privilege Escalation Candidates
-Ranked list of endpoints that take an object-id parameter and reach a side effect (DB read/write, file access) without a sufficient ownership check binding the id to the requesting user/session.
-| Priority | Endpoint | Object ID Parameter | Ownership Check | Data Type | Reason |
-|----------|----------|---------------------|-----------------|-----------|--------|
-| **Priority:** High / Medium / Low based on data sensitivity | | | **Ownership Check:** none detected / yes (file:line) / partial (which paths) | | |
-| High | `DELETE /api/orders/{order_id}` | order_id | none detected | financial | id passed straight to DB; no `WHERE user_id = session.user_id` |
-| High | `GET /api/users/{user_id}/profile` | user_id | none detected | user_data | no ownership guard on handler |
-| Medium | `GET /api/files/{file_id}` | file_id | partial | user_files | check only on some branches |
-
+`| Priority | Endpoint Pattern | Object ID Param | Ownership Check | Data Type | Reason |`
 ### 8.2 Vertical Privilege Escalation Candidates
-List endpoints that perform privileged/admin operations but lack a sufficient role/capability guard (or where the guard runs after the side effect).
-| Target Role | Endpoint | Functionality | Role Guard | Risk Level |
-|-------------|----------|---------------|------------|------------|
-| admin | `/api/admin/users` | User management | none detected | High |
-| admin | `/api/admin/settings` | System configuration | partial (check after write) | High |
-| admin | `/api/admin/reports/analytics` | Business intelligence | isAuthenticated only (no role check) | Medium |
-| admin | `/api/backup/*` | Data backup/restore | none detected | High |
-
-**Note:** Exclude endpoints intentionally shared across roles (e.g. `/profile` accessible to both user and admin).
-
+`| Target Role | Endpoint | Functionality | Role Guard | Risk Level |`
 ### 8.3 Context-Based Authorization Candidates
-Multi-step workflow endpoints that assume prior steps were completed; document where later steps fail to verify prior state (status flag, stage token, nonce) before applying a state change.
-| Workflow | Endpoint | Expected Prior State | State Verified? | Bypass Potential |
-|-----------|----------|----------------------|-----------------|------------------|
-| Checkout | `/api/checkout/confirm` | Cart populated, payment method selected | no status check | Direct access to confirmation |
-| Onboarding | `/api/setup/step3` | Steps 1 and 2 completed | no stage token | Skip setup steps |
-| Password Reset | `/api/auth/reset/confirm` | Reset token generated | token not validated | Direct password reset |
-| Multi-step Forms | `/api/wizard/finalize` | Form data from previous steps | no session state check | Skip validation steps |
+`| Workflow | Endpoint | Expected Prior State | State Verified? | Bypass Potential |`
 
-## 7. Attack Surface Priority
-- High priority targets: ...
-- Recommended test order: ...
+## 9. Injection Sources (Command/SQL/LFI·RFI/SSTI/Path Traversal/Deserialization)
+file:line list, 5 categories.
 </output_format>
 
 <critical>
