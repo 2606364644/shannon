@@ -84,7 +84,11 @@ export function MarkdownView({ markdown }: { markdown: string }) {
             <ol>
               {topRisks.map((r, i) => (
                 <li key={i}>
-                  {r.vulnIds.length > 0 && <span className="mono kv-vuln-id">{r.vulnIds.join("/")}</span>}{" "}
+                  {r.vulnIds.length > 0 && (
+                    <a href={`#${r.vulnIds[0]}`} className="mono kv-vuln-id">
+                      {r.vulnIds.join("/")}
+                    </a>
+                  )}{" "}
                   {r.text}
                 </li>
               ))}

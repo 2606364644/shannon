@@ -107,6 +107,22 @@ describe("MarkdownView", () => {
     expect(code?.querySelector(".copy-btn")).not.toBeNull();
   });
 
+  it("执行摘要 hero 条目锚链接到正文对应漏洞（href=#<vulnId>）", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const hero = container.querySelector('[data-testid="exec-summary-hero"]');
+    expect(hero).not.toBeNull();
+    // 每个 hero 条目的 vuln-ID 应包裹在 <a href="#INJ-01"> 等锚链接里（spec §3.2）
+    const anchors = hero?.querySelectorAll("a[href^='#']");
+    expect(anchors?.length).toBeGreaterThan(0);
+    const hrefs = Array.from(anchors ?? []).map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("#INJ-01");
+    expect(hrefs).toContain("#SSRF-01");
+    expect(hrefs).toContain("#INJ-04");
+    // 锚文本含 vuln-ID（可点击）
+    const firstAnchor = anchors?.[0];
+    expect(firstAnchor?.textContent).toMatch(/INJ-01/);
+  });
+
   it("无执行摘要时不渲染 hero（不写死结构）", () => {
     const { container } = render(<MarkdownView markdown={"# 报告\n\n正文"} />);
     expect(container.querySelector('[data-testid="exec-summary-hero"]')).toBeNull();
