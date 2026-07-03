@@ -240,7 +240,7 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 
 
 # ── vuln prompt_variables 注入（Task 7 / SharedKnowledge 接通） ──────────
-# 5 个 vuln agent（INJECTION/XSS/SSRF/AUTHZ/AUTH_VULN）专用：在 vuln prompt
+# 5 个 vuln agent（INJECTION_VULN/XSS_VULN/SSRF_VULN/AUTHZ_VULN/AUTH_VULN）专用：在 vuln prompt
 # 渲染前注入 {{RECON_CONTEXT}}（LLM 摘要 recon_deliverable.md §4+§8）+
 # {{FRAMEWORK_ANALYSIS}}（条件：framework_analysis.json inferred_endpoints 非空）。
 # 守铁律（CLAUDE.md §1）：注入源仅限 LLM 轨产物（recon md + pre-recon 代码层推断），

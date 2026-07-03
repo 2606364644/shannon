@@ -1,5 +1,4 @@
 # packages/core/tests/agents/test_recon_context_summarizer.py
-import asyncio
 import pytest
 from shannon_core.agents.recon_context_summarizer import summarize_recon_context
 
@@ -46,7 +45,6 @@ async def test_summarizer_degrades_gracefully_on_llm_failure():
 @pytest.mark.asyncio
 async def test_summarizer_decoupled_from_deterministic():
     """守铁律：summarizer prompt 不引确定性产物。"""
-    from pathlib import Path
     import inspect
     src = inspect.getsource(__import__("shannon_core.agents.recon_context_summarizer", fromlist=["x"]))
     for tok in ("parameter_graph", "SinkCallSite", "static_dataflow_hints"):

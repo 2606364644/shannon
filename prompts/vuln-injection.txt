@@ -148,10 +148,10 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
   - **1) Derive candidate Injection Sources (do NOT rely on a non-existent "Injection Sources" section):**
 		  - a. From `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md` real attack-surface sections — **External Entry Points**, **Data Flow Security**, **Input Validation Patterns** — extract input vectors as candidate sources.
 		  - b. **Actively grep the whole repo** for the sink checklist above (ORM Raw / dynamic identifiers / indirect command). The recon and pre-recon deliverables are a STARTING POINT, NOT exhaustive sink list.
-Analyzing ONLY the endpoints they list will miss sinks that were never enumerated — you
-MUST extend the sink search yourself with grep (per the language-specific sink list in
-this prompt), covering paths recon did not list. An entire path-prefix family silently
-absent from recon is the historical source of false-negatives; do not let it happen here.
+			    Analyzing ONLY the endpoints they list will miss sinks that were never enumerated — you
+			    MUST extend the sink search yourself with grep (per the language-specific sink list in
+			    this prompt), covering paths recon did not list. An entire path-prefix family silently
+			    absent from recon is the historical source of false-negatives; do not let it happen here.
 		  - Note: All sources are marked as Tainted until they Hit a Sanitization that matches the sink context. normalizers (lowercasing, trimming, JSON parse, schema decode) — still **tainted**.
     - **2) Trace Data Flow Paths from Source to Sink**
 		    - For each source, your goal is to identify every unique "Data Flow Path" to a database sink. A path is a distinct route the data takes through the code.
