@@ -26,7 +26,7 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 function renderAt(path: string) {
-  render(
+  return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/p/:workspace/deliverables" element={<DeliverablesTab />} />
@@ -193,11 +193,13 @@ describe("DeliverablesTab", () => {
     expect(pathRequested).toBe(false);
   });
 
-  it("big_json kind 显示前 500 字符占位提示", async () => {
+  it("big_json kind 显示『文件过大』提示（含字节数），无空 <pre> 占位", async () => {
+    let pathRequested = false;
     server.use(
       http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
+          pathRequested = true;
           return new HttpResponse("{}".repeat(50), { headers: { "content-type": "text/plain" } });
         }
         return HttpResponse.json(
@@ -207,10 +209,18 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    const { container } = renderAt("/p/ws/deliverables");
     await waitFor(() => expect(screen.getByText("parameter_graph.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("parameter_graph.json"));
-    await waitFor(() => expect(screen.getByText(/大 JSON/)).toBeInTheDocument());
+    // 显示『文件过大』提示 + 字节数（size 来自 summary）
+    await waitFor(() => expect(screen.getByText(/文件过大/)).toBeInTheDocument());
+    expect(screen.getByText(/99999/)).toBeInTheDocument();
+    // 守卫：不渲染空 <pre>（旧实现 content 永远为空 → <pre></pre>）
+    const pres = container.querySelectorAll("pre");
+    const emptyPres = Array.from(pres).filter((p) => p.textContent === "");
+    expect(emptyPres.length).toBe(0);
+    // 守卫：big_json 不发 ?path= 请求（无 range 支持，不浪费 fetch）
+    expect(pathRequested).toBe(false);
   });
 
   it("llm_queue kind 点击触发 ?path= 请求并渲染文本（防 exploitation_queue 唯一守卫退化）", async () => {

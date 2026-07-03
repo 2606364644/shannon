@@ -10,7 +10,7 @@ const MAP: Record<string, { icon: string; cls: string }> = {
 export function StatusBadge({ status, correlation = false }: { status: string; correlation?: boolean }) {
   const m = MAP[status] ?? { icon: "?", cls: "ev-warn" };
   return (
-    <span className={`status-badge ${m.cls}`}>
+    <span className={`status-badge ${m.cls}`} title={status}>
       <span className="mono">{m.icon}</span> {status}{correlation ? " 🔗" : ""}
     </span>
   );

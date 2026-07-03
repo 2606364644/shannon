@@ -83,14 +83,34 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(screen.getByText(/并发扫描超限/)).toBeInTheDocument());
   });
 
-  it("提交 422 → 提示 yaml 校验失败", async () => {
+  it("提交 422 → 提示 yaml 校验失败（友好消息，不含原始 JSON 数组）", async () => {
     server.use(
       http.post("/api/scan", () =>
-        HttpResponse.json({ detail: [{ msg: "bad yaml" }] }, { status: 422 }),
+        HttpResponse.json(
+          { detail: [{ loc: ["body", "config_yaml"], msg: "repo url required", type: "value_error" }] },
+          { status: 422 },
+        ),
       ),
     );
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
-    await waitFor(() => expect(screen.getByText(/yaml 校验失败/)).toBeInTheDocument());
+    const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
+    // 友好消息：提取 detail[0].msg
+    expect(banner.textContent).toContain("repo url required");
+    // 负向断言：原始 JSON 结构（loc/type 字段）不得泄露到横幅
+    expect(banner.textContent).not.toContain('[{"loc"');
+    expect(banner.textContent).not.toContain("value_error");
+    expect(banner.textContent).not.toContain('"loc"');
+  });
+
+  it("422 但无 detail 字段 → 回退到纯标签", async () => {
+    server.use(
+      http.post("/api/scan", () => HttpResponse.json({ something: "else" }, { status: 422 })),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
+    // 无 detail → 只剩标签前缀，不含原始 JSON
+    expect(banner.textContent).not.toContain("{");
   });
 });

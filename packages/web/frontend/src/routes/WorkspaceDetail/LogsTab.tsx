@@ -1,26 +1,39 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 import { FixedSizeList } from "react-window";
 import { apiGet } from "../../api/client";
 
-const VIRTUAL_THRESHOLD = 100_000;
+// 按行数（而非字符数）判阈值：spec/log-prose 谈论的是行计数，大日志=多行。
+// 5000 行覆盖典型 workflow.log / activity_failures.log（数百~数千行），同时避免
+// 给中量日志误开虚拟化（旧 100k 字符阈值会因长行提前触发）。
+const VIRTUAL_LINE_THRESHOLD = 5000;
 const ROW_HEIGHT = 20;
+
+type LogEv = { ts?: string; type?: string; message?: string; tool_name?: string };
+
+// Row 提到模块作用域 + memo：避免每次父组件渲染时重新定义 Row，导致 FixedSizeList
+// 重新渲染所有可见行（react-window 用 children 引用相等性判断是否复用行）。
+const Row = memo(function Row({ index, style, data }: {
+  index: number;
+  style: CSSProperties;
+  data: string[];
+}) {
+  const l = data[index];
+  let ev: LogEv | null = null;
+  try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
+  if (ev) {
+    return (
+      <div style={style} className="log-row ev-info">
+        [{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
+      </div>
+    );
+  }
+  return <div style={style} className="trace">{l}</div>;
+});
 
 // react-window 包装：行高 20px，对齐 Task 8 LogStream 同模式（FixedSizeList + itemData）。
 function VirtualLines({ lines }: { lines: string[] }) {
-  const Row = ({ index, style, data }: { index: number; style: React.CSSProperties; data: string[] }) => {
-    const l = data[index];
-    let ev: { ts?: string; type?: string; message?: string; tool_name?: string } | null = null;
-    try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
-    if (ev) {
-      return (
-        <div style={style} className="log-row ev-info">
-          [{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
-        </div>
-      );
-    }
-    return <div style={style} className="trace">{l}</div>;
-  };
   return (
     <FixedSizeList height={500} width="100%" itemCount={lines.length} itemSize={ROW_HEIGHT} itemData={lines}>
       {Row}
@@ -41,7 +54,7 @@ export function LogsTab() {
 
   const isJsonl = sel?.endsWith(".log") && !sel.endsWith("workflow.log") && !sel.endsWith("activity_failures.log");
   const lines = content.split(/\r?\n/).filter(Boolean);
-  const big = content.length > VIRTUAL_THRESHOLD;
+  const big = lines.length > VIRTUAL_LINE_THRESHOLD;
 
   return (
     <div className="logs-layout">
@@ -52,7 +65,7 @@ export function LogsTab() {
         {!sel && <div className="trace">选择左侧日志文件</div>}
         {sel && big && isJsonl ? (
           <>
-            <div className="trace">⚠ 大文件（{content.length} 字符），虚拟滚动渲染</div>
+            <div className="trace">⚠ 大文件（{lines.length} 行），虚拟滚动渲染</div>
             <VirtualLines lines={lines} />
           </>
         ) : isJsonl ? (
