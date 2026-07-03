@@ -163,6 +163,35 @@ uv run shannon-blackbox workspaces
 uv run shannon-blackbox logs my-scan          # --follow 实时跟踪
 ```
 
+## Web 平台（可选）
+
+除 CLI 外，shannon-py 提供一个 Web 平台（`packages/web`）用于扫描调度与结果查看——前端 SPA（Vite + React）+ 后端 API（FastAPI），**单容器部署**：后端在 `:7878` 同时 serve 前端静态产物与 API，同源无 CORS。
+
+### 一键部署（Docker）
+
+```bash
+docker compose up --build
+# 浏览器访问 http://localhost:7878（前端 + API 同源）
+```
+
+compose 起两个服务：`temporal`（workflow 引擎，:7233 gRPC / :8233 Web UI）与 `web`（前端 + API，:7878）。
+
+### 本地开发（热更新）
+
+前后端分离跑，前端走 Vite 热更新：
+
+```bash
+# 终端 1：后端
+uv run uvicorn shannon_web.app:app --port 7878
+
+# 终端 2：前端（:5173，proxy /api → 7878）
+cd packages/web/frontend && npm install && npm run dev
+```
+
+浏览器访问 `http://localhost:5173`。
+
+> 生产（单容器）与开发（分离）共用同一份后端代码：后端 serve 静态由 `SHANNON_WEB_FRONTEND_DIR` 控制，开发时不设此变量即跳过。详见 [设计 spec](docs/superpowers/specs/2026-07-03-web-single-container-deploy-design.md)。
+
 ## 架构概览
 
 shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
@@ -190,10 +219,16 @@ shannon-py/
 ├── packages/
 │   ├── core/                    # 共享模型、配置解析、agent 集成层与工具函数
 │   ├── whitebox/                # 白盒源码漏洞分析扫描器
-│   └── blackbox/                # 黑盒运行时漏洞验证和报告生成
+│   ├── blackbox/                # 黑盒运行时漏洞验证和报告生成
+│   ├── combined/                # 白盒+黑盒组合编排
+│   ├── multi/                   # 多仓 / 跨仓扫描
+│   └── web/                     # Web 平台：后端 FastAPI + 前端 SPA
+│       └── frontend/            # Vite + React 前端（构建产物由后端单容器 serve）
+├── apps/                        # 原始 TS 参考（cli / worker）
 ├── prompts/                     # Prompt 模板文件
 ├── scripts/                     # 验证 / 调试脚本（如 validate_*_task_probe.py）
 ├── docs/                        # 项目文档
+├── docker-compose.yml           # temporal + web 单容器部署
 ├── .env.example                 # 共享配置模板
 ├── .env.profiles.example/       # 各 profile 的引擎/账号模板
 └── pyproject.toml               # uv workspace 配置

@@ -1,5 +1,7 @@
 # Shannon Web 前端（子项目 2）实现 Plan
 
+> **更新（2026-07-03）**：前端部署形态已定为**单容器**（后端 FastAPI serve 前端 SPA），见 `docs/superpowers/specs/2026-07-03-web-single-container-deploy-design.md`。本文档当初"生产由后端静态托管或 nginx"的悬而未决项已兑现为前者。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 实现 shannon web 平台前端 SPA——React + Vite + TS 脚手架 + 2 主页面（项目列表 / 开启扫描）+ 详情子页 5 tab（overview/report/deliverables/logs/live）+ 6 组件 + `dashboardReducer`（1:1 复刻 core `DashboardState.apply`）+ SSE hook + 单测，对着子项目 1 已定稿的 ndjson 契约 + REST API；MSW 模拟离线测，Vite proxy 接后端。
