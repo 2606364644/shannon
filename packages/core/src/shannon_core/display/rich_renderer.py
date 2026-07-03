@@ -15,7 +15,7 @@ from shannon_core.display.formatters import (
 )
 
 from shannon_core.display.symbols import (
-    SUMMARY_OK, SUMMARY_FAIL,
+    AUDIT_COMPLETE_OK, SUMMARY_OK, SUMMARY_FAIL,
 )
 
 
@@ -153,12 +153,14 @@ class RichConsoleRenderer:
 
     def _render_summary(self, e) -> None:
         from rich.table import Table
+        ok = e.status == "completed"
         status = e.status.upper()
+        prefix = f"{AUDIT_COMPLETE_OK} " if ok else ""
         self._console.print(Panel.fit(
-            f"Workflow [bold]{status}[/]\n"
+            f"{prefix}Workflow [bold]{status}[/]\n"
             f"Duration: {format_duration(e.total_duration_ms)}    "
             f"Total Cost: ${e.total_cost_usd:.4f}",
-            border_style="green" if e.status == "completed" else "red",
+            border_style="green" if ok else "red",
         ))
         if e.agents:
             table = Table(show_header=True, header_style="bold")

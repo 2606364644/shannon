@@ -146,6 +146,29 @@ async def test_summary_completed_renders_panel():
     assert "✓" in out  # summary 行用 SUMMARY_OK
 
 
+async def test_summary_completed_renders_celebration_emoji():
+    """扫描成功收官时 summary Panel 行首带 🎉（终局装饰，非状态符号族）。"""
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=12400, total_cost_usd=0.3450,
+        agents=[AgentMetric(name="xss-vuln", duration_ms=4100, cost_usd=0.165)]))
+    out = renderer._console.export_text()
+    assert "🎉" in out
+
+
+async def test_summary_failed_omits_celebration_emoji():
+    """失败态不庆祝：无 🎉，红色 FAILED 框不变。"""
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="failed",
+        total_duration_ms=1000, total_cost_usd=0.01,
+        agents=[], error="boom"))
+    out = renderer._console.export_text()
+    assert "🎉" not in out
+    assert "FAILED" in out
+
+
 async def test_resume_renders_message():
     renderer, _ = _renderer_with_capture()
     await renderer.render(ResumeEvent(
