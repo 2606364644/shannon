@@ -30,3 +30,12 @@ def test_starting_context_decoupled_from_deterministic():
         content = _read(name)
         for tok in ("parameter_graph", "SinkCallSite", "static_dataflow_hints"):
             assert tok not in content, f"{name} 引确定性 token: {tok}"
+
+
+def test_injection_has_strong_source_list_warning():
+    """injection 必须有强 source-list 警示（上游列表非穷尽、未枚举 sink 必漏）。"""
+    content = _read("vuln-injection.txt")
+    # 强信号关键词
+    assert "not exhaustive" in content.lower() or "非穷尽" in content or "not complete" in content.lower()
+    # 必须指示自己 grep 扩展
+    assert "grep" in content.lower()
