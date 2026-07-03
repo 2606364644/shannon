@@ -57,10 +57,12 @@ function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
   if (err) return <div className="trace error">文件加载失败：{err}</div>;
   if (file.kind === "empty_json") return <div className="trace">无数据（常态空）</div>;
   if (file.kind === "big_json")
+    // apiGetText 无 range/limit 支持，大 JSON 全量拉取代价高且卡 UI。
+    // 改为诚实的『文件过大』提示 + 字节数，引导用户去产物目录/日志查看，
+    // 不渲染永远为空的 <pre>（content 未 fetch，旧实现是死预览）。
     return (
       <div className="trace">
-        大 JSON，用树查看器（虚拟滚动）
-        <pre className="mono">{content.slice(0, 500)}…</pre>
+        ⚠ 文件过大（{file.size} 字节），请在产物目录查看
       </div>
     );
   if (file.kind === "md") return <MarkdownViewLazy content={content} />;
