@@ -26,3 +26,8 @@
 @media (prefers-reduced-motion: reduce) {
   .shannon-spinner::before { animation: none; content: "•"; }
 }
+
+/* Card 可达性变体（spec §4，供子项目 VulnCard：<Card className="card-reachable">） */
+.card-reachable {
+  border-left: 3px solid hsl(var(--c-red));
+}
