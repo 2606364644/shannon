@@ -132,7 +132,7 @@ git commit -m "feat(core): 注册 ATTACK_CHAIN agent（attack-chain prompt_templ
 # packages/core/tests/prompts/test_attack_chain_decoupling.py
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def test_attack_chain_prompt_exists():

@@ -54,7 +54,7 @@
 # packages/core/tests/prompts/test_enumeration_completeness.py
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def test_enumeration_completeness_has_not_applicable_delta():
@@ -144,7 +144,7 @@ git commit -m "feat(prompt): _enumeration-completeness 加 not-applicable delta 
 # packages/core/tests/prompts/test_recon_static_reconciliation.py
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def _read(name: str) -> str:
@@ -440,7 +440,7 @@ git commit -m "feat(prompt): recon-static 补 5 角度并行枚举 + Step 3.5 �
 # packages/core/tests/prompts/test_vuln_starting_context.py
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def _read(name: str) -> str:
@@ -759,7 +759,7 @@ git commit -m "feat(core): recon_context_summarizer 轻量 LLM 摘要 recon md �
 # packages/core/tests/prompts/test_vuln_recon_context_injection.py
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def _read(name):
