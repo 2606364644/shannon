@@ -18,6 +18,7 @@ from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.logging import create_activity_logger
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.agents.runner import run_claude_prompt
+from shannon_core.agents.recon_context_summarizer import summarize_recon_context
 from shannon_core.config.concurrency import is_gitnexus_llm_enabled
 from shannon_core.prompts.manager import PromptManager
 from shannon_core.session import SessionManager
@@ -179,6 +180,11 @@ async def run_agent(input: ActivityInput) -> dict:
         if agent_name == AgentName.PRE_RECON:
             prompt_variables = prompt_variables or {}
 
+        if _is_vuln_agent(agent_name):
+            prompt_variables = await _build_vuln_prompt_variables(
+                input, prompt_variables or {}
+            )
+
         await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
         await tool_audit_logger.initialize()
         metrics = await executor.execute(
@@ -231,6 +237,86 @@ async def run_agent(input: ActivityInput) -> dict:
 @activity.defn
 async def run_vuln_agent(input: ActivityInput) -> dict:
     return await run_agent(input)
+
+
+# ── vuln prompt_variables 注入（Task 7 / SharedKnowledge 接通） ──────────
+# 5 个 vuln agent（INJECTION/XSS/SSRF/AUTHZ/AUTH_VULN）专用：在 vuln prompt
+# 渲染前注入 {{RECON_CONTEXT}}（LLM 摘要 recon_deliverable.md §4+§8）+
+# {{FRAMEWORK_ANALYSIS}}（条件：framework_analysis.json inferred_endpoints 非空）。
+# 守铁律（CLAUDE.md §1）：注入源仅限 LLM 轨产物（recon md + pre-recon 代码层推断），
+# 绝不引 GitNexus 确定性层产物。
+_VULN_AGENT_NAMES = frozenset({
+    AgentName.INJECTION_VULN,
+    AgentName.XSS_VULN,
+    AgentName.SSRF_VULN,
+    AgentName.AUTHZ_VULN,
+    AgentName.AUTH_VULN,
+})
+
+
+def _is_vuln_agent(agent_name: AgentName) -> bool:
+    return agent_name in _VULN_AGENT_NAMES
+
+
+def _make_recon_summary_llm_client(repo_path: str):
+    """LLM client for summarize_recon_context.
+
+    Always attempts an LLM call (not gated by GitNexus-LLM toggle, since the
+    summarizer belongs to the LLM track, not GitNexus). When the LLM provider
+    itself is unavailable, run_claude_prompt raises and the summarizer degrades
+    gracefully to raw §4/§8 extraction (non-fatal).
+    """
+    async def _client(prompt: str, **kwargs) -> str:
+        result = await run_claude_prompt(
+            prompt=prompt, repo_path=repo_path, model_tier="medium",
+        )
+        return result.text
+    return _client
+
+
+async def _build_vuln_prompt_variables(
+    input: ActivityInput, base: dict
+) -> dict:
+    """Inject structured recon prior knowledge into vuln prompt_variables.
+
+    - RECON_CONTEXT: LLM-summarized §4/§8 of recon_deliverable.md (always injected;
+      degrades to raw extract if LLM unavailable). Source = LLM-track recon output.
+    - FRAMEWORK_ANALYSIS: from framework_analysis.json — injected ONLY when
+      inferred_endpoints is non-empty (whitebox samples are often empty).
+    Both sources are LLM-track / code-layer pre-recon output — NEVER GitNexus
+    deterministic-layer (CLAUDE.md §1 ironclad rule).
+    """
+    repo, deliverables, _ = _get_paths(input)
+
+    # RECON_CONTEXT: summarize recon_deliverable.md §4/§8
+    recon_md_path = deliverables / "recon_deliverable.md"
+    recon_md = recon_md_path.read_text("utf-8") if recon_md_path.exists() else ""
+    llm_client = _make_recon_summary_llm_client(str(repo))
+    recon_context = await summarize_recon_context(recon_md, llm_client)
+    base["RECON_CONTEXT"] = recon_context
+
+    # FRAMEWORK_ANALYSIS: conditional — only when inferred_endpoints non-empty
+    fw_path = deliverables / "framework_analysis.json"
+    fw_lines: list[str] = []
+    if fw_path.exists():
+        try:
+            fw = json.loads(fw_path.read_text("utf-8"))
+            endpoints = fw.get("inferred_endpoints", []) or []
+            if endpoints:
+                fw_lines.append(
+                    "Framework-inferred endpoints (auto-generated, verify each):"
+                )
+                for ep in endpoints:
+                    fw_lines.append(
+                        f"- {ep.get('method', '?')} {ep.get('path', '?')} "
+                        f"[source={ep.get('source', '?')}, "
+                        f"middleware={ep.get('middleware', [])}]"
+                    )
+        except (json.JSONDecodeError, OSError):
+            pass  # non-fatal
+    base["FRAMEWORK_ANALYSIS"] = "\n".join(fw_lines) if fw_lines else ""
+
+    return base
 
 
 @activity.defn

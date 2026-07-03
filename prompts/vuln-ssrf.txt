@@ -40,6 +40,13 @@ Success criterion: A complete source-to-sink trace for every identified SSRF vul
 - Your primary source of truth for the application's structure is the reconnaissance report located at `{{DELIVERABLES_PATH}}/recon_deliverable.md`. You must derive your list of testable endpoints from this file.
 </starting_context>
 
+**Structured Recon Context (prior knowledge):**
+{{RECON_CONTEXT}}
+
+(Auto-summarized from `{{DELIVERABLES_PATH}}/recon_deliverable.md` §4 + §8. If empty,
+the recon deliverable is the source of truth — read it directly.)
+{{FRAMEWORK_ANALYSIS}}
+
 @include(shared/_cross-route-enumeration.txt)
 
 <system_architecture>

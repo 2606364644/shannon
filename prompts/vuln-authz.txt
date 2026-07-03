@@ -44,6 +44,13 @@ Success criterion: A complete, code-backed analysis of every potential authoriza
 - You are the final analysis specialist. Your findings complete the analysis phase.
 </starting_context>
 
+**Structured Recon Context (prior knowledge):**
+{{RECON_CONTEXT}}
+
+(Auto-summarized from `{{DELIVERABLES_PATH}}/recon_deliverable.md` §4 + §8. If empty,
+the recon deliverable is the source of truth — read it directly.)
+{{FRAMEWORK_ANALYSIS}}
+
 <endpoint_security_context_reading>
 ### Read Endpoint Security Context (REQUIRED — Do This First)
 
