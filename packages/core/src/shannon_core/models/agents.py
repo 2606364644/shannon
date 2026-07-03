@@ -22,6 +22,7 @@ class AgentName(str, Enum):
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
     CROSS_REPO_CORRELATION = "cross-repo-correlation"
+    ATTACK_CHAIN = "attack-chain"
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -150,6 +151,15 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,  # 产物由编排器从 LLM 输出解析落盘
         model_tier="large",
     ),
+    AgentName.ATTACK_CHAIN: AgentDefinition(
+        name=AgentName.ATTACK_CHAIN,
+        display_name="Attack Chain Analysis",
+        prerequisites=[AgentName.INJECTION_VULN, AgentName.XSS_VULN,
+                       AgentName.SSRF_VULN, AgentName.AUTHZ_VULN],
+        prompt_template="attack-chain",
+        deliverable_filename=None,   # 产 queue（attack_chains_llm_queue.json），不产 md
+        model_tier="medium",
+    ),
 }
 
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
@@ -178,4 +188,5 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "report": "reporting",
     "validate-authentication": "pre-recon",
     "cross-repo-correlation": "correlation",
+    AgentName.ATTACK_CHAIN: "attack-chain",
 }
