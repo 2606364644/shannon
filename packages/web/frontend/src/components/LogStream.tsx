@@ -35,8 +35,10 @@ const VIRTUAL_THRESHOLD = 500;
 function Row({ index, style, data }: { index: number; style: React.CSSProperties; data: NdjsonEvent[] }) {
   const e = data[index];
   return (
-    <div style={style} className={`log-row mono ${CAT_CLASS[e.category] ?? "trace"}`}>
-      <span className="trace">[{tsClock(e.ts)}]</span> <span className="ev-type">{e.type}</span> {summarize(e)}
+    <div style={style} className={`whitespace-nowrap overflow-hidden text-ellipsis ${CAT_CLASS[e.category] ?? "text-muted-foreground"}`}>
+      <span className="text-muted-foreground">[{tsClock(e.ts)}]</span>{" "}
+      <span className="text-muted-foreground">{e.type}</span>{" "}
+      {summarize(e)}
     </div>
   );
 }
@@ -44,7 +46,7 @@ function Row({ index, style, data }: { index: number; style: React.CSSProperties
 export function LogStream({ events }: { events: NdjsonEvent[] }) {
   if (events.length > VIRTUAL_THRESHOLD) {
     return (
-      <div className="log-stream">
+      <div className="h-[400px] overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs" aria-live="polite">
         <FixedSizeList
           height={400}
           width="100%"
@@ -58,10 +60,12 @@ export function LogStream({ events }: { events: NdjsonEvent[] }) {
     );
   }
   return (
-    <div className="log-stream">
+    <div className="max-h-[480px] space-y-0 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs" aria-live="polite">
       {events.map((e, i) => (
-        <div key={i} className={`log-row mono ${CAT_CLASS[e.category] ?? "trace"}`}>
-          <span className="trace">[{tsClock(e.ts)}]</span> <span className="ev-type">{e.type}</span> {summarize(e)}
+        <div key={i} style={{ lineHeight: "20px" }} className={`whitespace-nowrap overflow-hidden text-ellipsis ${CAT_CLASS[e.category] ?? "text-muted-foreground"}`}>
+          <span className="text-muted-foreground">[{tsClock(e.ts)}]</span>{" "}
+          <span className="text-muted-foreground">{e.type}</span>{" "}
+          {summarize(e)}
         </div>
       ))}
     </div>
