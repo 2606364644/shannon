@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
@@ -65,6 +65,24 @@ function validateUrl(v: string): string | null {
   return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
 }
 
+// 前端推算 workspace 名预览（basename + _YYYYMMDD-HHMMSS），与后端实际生成可能略有出入，
+// 仅作输入辅助提示。git URL 取最后一段去 .git；path 取末段。
+function deriveName(kind: "path" | "git", v: string): string {
+  const trimmed = v.trim();
+  if (!trimmed) return "";
+  let base = "";
+  if (kind === "path") {
+    base = trimmed.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+  } else {
+    base = trimmed.replace(/\.git$/, "").split(/[\/:]/).pop() ?? "";
+  }
+  if (!base) return "";
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${base}_${ts}`;
+}
+
 export function ScanNewPage() {
   const nav = useNavigate();
   const [type, setType] = useState<ScanType>("whitebox");
@@ -109,6 +127,11 @@ export function ScanNewPage() {
   const isValid =
     !sourceValueErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
 
+  const derivedName = useMemo(
+    () => (type === "correlation" ? "" : deriveName(f.sourceKind, f.sourceValue)),
+    [type, f.sourceKind, f.sourceValue],
+  );
+
   async function submit() {
     if (type === "correlation" && yamlErr) {
       setErr("yaml 有错，无法运行");
@@ -150,6 +173,7 @@ export function ScanNewPage() {
             sourceValueErr={sourceValueErr}
             urlErr={urlErr}
             loadingConflict={loadingConflict}
+            derivedName={derivedName}
           />
         </TabsContent>
         <TabsContent value="blackbox">
@@ -162,6 +186,7 @@ export function ScanNewPage() {
             sourceValueErr={sourceValueErr}
             urlErr={urlErr}
             loadingConflict={loadingConflict}
+            derivedName={derivedName}
           />
         </TabsContent>
         <TabsContent value="correlation">

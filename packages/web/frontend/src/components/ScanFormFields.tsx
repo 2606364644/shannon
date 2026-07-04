@@ -16,9 +16,10 @@ interface ScanFormFieldsProps {
   sourceValueErr: string | null;
   urlErr: string | null;
   loadingConflict: boolean;
+  derivedName: string;
 }
 
-export function ScanFormFields({ type, f, set, conflict, sourceValueErr, urlErr, loadingConflict }: ScanFormFieldsProps) {
+export function ScanFormFields({ type, f, set, conflict, sourceValueErr, urlErr, loadingConflict, derivedName }: ScanFormFieldsProps) {
   return (
     <Card>
       <CardHeader>
@@ -86,6 +87,9 @@ export function ScanFormFields({ type, f, set, conflict, sourceValueErr, urlErr,
             {loadingConflict && <div className="ev-warn text-xs">检测重名中…</div>}
             {conflict && !loadingConflict && (
               <div className="ev-warn text-xs">workspace「{conflict}」已存在 → 将断点续扫</div>
+            )}
+            {!f.wsName && derivedName && (
+              <div className="trace">预览名：{derivedName}（预览，实际由后端生成）</div>
             )}
           </div>
         </fieldset>

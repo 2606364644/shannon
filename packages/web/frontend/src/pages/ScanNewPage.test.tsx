@@ -167,4 +167,17 @@ describe("ScanNewPage", () => {
     expect(screen.getByText(/需为绝对路径/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
   });
+
+  it("wsName 空 + sourceValue 填 → 显预览名（basename + _YYYYMMDD-HHMMSS）", () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+    expect(screen.getByText(/预览名：foo_\d{8}-\d{6}/)).toBeInTheDocument();
+  });
+
+  it("wsName 填了 → 不显预览", () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+    fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "myname" } });
+    expect(screen.queryByText(/预览名/)).toBeNull();
+  });
 });
