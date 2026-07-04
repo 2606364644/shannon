@@ -2,6 +2,8 @@ import { createBrowserRouter, useNavigate, useParams } from "react-router-dom";
 import { useEffect } from "react";
 import { WorkspaceListPage } from "./pages/WorkspaceListPage";
 import { ScanNewPage } from "./pages/ScanNewPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import WorkspaceDetail from "./routes/WorkspaceDetail";
 import { OverviewTab } from "./routes/WorkspaceDetail/OverviewTab";
 import { ReportTab } from "./routes/WorkspaceDetail/ReportTab";
@@ -34,7 +36,8 @@ export const router = createBrowserRouter([
   {
     element: <AppShell />,
     children: [
-      { path: "/", element: <WorkspaceListPage /> },
+      { path: "/", element: <DashboardPage /> },
+      { path: "/workspaces", element: <WorkspaceListPage /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         path: "/p/:workspace",
@@ -48,6 +51,7 @@ export const router = createBrowserRouter([
           { path: "live", element: <LiveTab /> },
         ],
       },
+      { path: "/settings", element: <SettingsPage /> },
       ...devRoutes,
     ],
   },

@@ -17,10 +17,10 @@ interface NavItem {
  * - Settings → 未来 /settings（disabled，子项目 5 启用）
  */
 const NAV: NavItem[] = [
-  { label: "Dashboard", to: "/", disabled: true, end: true },
-  { label: "Workspaces", to: "/", end: true },
+  { label: "Dashboard", to: "/", end: true },
+  { label: "Workspaces", to: "/workspaces", end: true },
   { label: "Scan", to: "/scan/new" },
-  { label: "Settings", to: "/settings", disabled: true },
+  { label: "Settings", to: "/settings" },
 ];
 
 export function TopBar() {

@@ -20,4 +20,10 @@ describe("router.tsx 结构", () => {
     expect(router).toContain("WorkspaceDetail");
     expect(router).toContain("DefaultTab");
   });
+  it("子项目5:Dashboard/Settings 路由 + Workspaces 迁 /workspaces", () => {
+    expect(router).toContain("DashboardPage");
+    expect(router).toContain("SettingsPage");
+    expect(router).toContain('"/workspaces"');
+    expect(router).toContain('"/settings"');
+  });
 });
