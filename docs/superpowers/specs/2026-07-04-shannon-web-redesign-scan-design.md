@@ -148,6 +148,8 @@ useEffect(() => {
 - 三者都额外要求：无提交中态（`submitting`）
 
 > 校验只 warn（红字）+ 控制 disable，不 sanitize 用户输入；git URL 正则宽松（https/ssh/git@）避免误拒合法值。
+>
+> **色 token（接子项目 2 F3）**：错误红字用 `text-destructive`（DSF `--destructive←red`），**不用裸 `text-red`**——子项目 2 F3 标 plan-wide color-token 迁移时清所有非 DSF token 色，本子项目作为新页不加重负债。表单 warn 黄字暂借 `ev-warn`（事件 class），spec §3 未定义 warn 的 shadcn token → 留本子项目 follow-up。
 
 ### 2.5 workspace 名预览
 wsName 为空时，wsName Input 下方显：

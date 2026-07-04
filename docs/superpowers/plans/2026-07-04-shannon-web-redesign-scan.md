@@ -18,6 +18,7 @@
   - `Card={Card,CardHeader,CardTitle,CardContent,CardFooter,CardDescription}`
   - `Input,Label,Button,Checkbox,Select={Select,SelectTrigger,SelectValue,SelectContent,SelectItem},Textarea`
 - **增量迁移**：仅 `ScanNewPage` 内部样式迁 Tailwind；**不动其他业务页**；旧 `events.css` 保留（其他页仍消费 `.ledger`/`.trace`）；本页可继续用 `.trace` class（共用灰字）。
+- **色 token 约束（接子项目 2 F3）**：错误红字用 DSF `text-destructive`（`--destructive←red`，spec §四条约束映射），**不用裸 `text-red`**——子项目 2 F3 follow-up 标 plan-wide color-token 迁移时清所有非 DSF token 色，本子项目作为新页不新增负债。表单 warn 黄字暂借 `ev-warn`（事件 class，spec §3 保留范围）；spec §3 未定义 warn 的 shadcn token（加 token 属 DSF 改动，超出范围）→ 留子项目 3 自己的 follow-up（warn token 统一时清）。
 - **不动其他 DSF 产物**：tokens.css / tailwind.config / TopBar / AppShell / ThemeToggle / `@/lib/theme` 不改。**例外**：`ui/sonner.tsx` 因 DSF 漏挂 + next-themes 坏依赖，本子项目 Task 1 修（去 next-themes，读 `document.documentElement.classList`）。
 - **前端测试栈**：vitest（globals + jsdom）+ MSW（`setupServer` + `http`/`HttpResponse`）+ @testing-library/react；lifecycle：`beforeAll listen / afterEach resetHandlers+cleanup / afterAll close`；Monaco mock：`vi.mock("@monaco-editor/react", () => ({ default: (props) => <textarea data-testid="monaco" .../> }))`。
 - **前端命令必须 `cd packages/web/frontend`**（cwd 不持久，每条 bash 显式 cd）。
@@ -641,7 +642,7 @@ Modify `packages/web/frontend/src/components/ScanFormFields.tsx`：
               <Input ... />
               {f.sourceKind === "path" && (<FileSystemPicker ... />)}
             </div>
-            {sourceValueErr && <div className="text-red text-xs">{sourceValueErr}</div>}
+            {sourceValueErr && <div className="text-destructive text-xs">{sourceValueErr}</div>}
 ```
 ```tsx
             <Input id="wsName" ... />
@@ -663,7 +664,7 @@ Modify `packages/web/frontend/src/components/ScanFormFields.tsx`：
   loadingConflict={loadingConflict}
 />
 ```
-- url Input 下方加 `{urlErr && <div className="text-red text-xs">{urlErr}</div>}`。
+- url Input 下方加 `{urlErr && <div className="text-destructive text-xs">{urlErr}</div>}`。
 
 > 移除原 conflict 大横幅（Task 3 内的 `<div className="confirm-dialog ev-warn">⚠ ... 断点续扫 ...</div>`）—— 改为 wsName 下的紧凑黄字提示。**注意**：现有测试 4 `getByText(/断点续扫/)` 仍需命中 → 保留黄字含"断点续扫"四字（上面 `将断点续扫` 含）。绿。
 
