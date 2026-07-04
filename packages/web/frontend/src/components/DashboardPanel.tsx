@@ -7,26 +7,50 @@ function fmtMs(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+const UNIT_STATUS_CLS: Record<string, string> = {
+  running: "text-cyan",
+  done: "text-green",
+  failed: "text-red",
+};
+
 export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; elapsedMs: number }) {
   const running = Object.values(state.agents).filter((a) => a.status === "running");
   return (
-    <div className="dashboard-panel">
-      <div className="dp-bar mono">
-        <span className="ev-phase">{state.current_phase ?? "—"}</span>
-        {" · "}
-        <span>step {state.completed_units}/{state.total_units}</span>
-        {" · "}
-        <span>{fmtMs(elapsedMs)}</span>
-        {" · "}
-        <span>${state.total_cost.toFixed(2)}</span>
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sm">
+        <span className="font-bold text-cyan">{state.current_phase ?? "—"}</span>
+        <span className="text-muted-foreground">step {state.completed_units}/{state.total_units}</span>
+        <span className="text-muted-foreground">agents {state.completed_count}/{Object.keys(state.agents).length}</span>
+        <span className="text-muted-foreground">{fmtMs(elapsedMs)}</span>
+        <span className="text-muted-foreground">${state.total_cost.toFixed(2)}</span>
       </div>
-      <div className="dp-agents">
+      {state.phase_units.length > 0 && (
+        <div className="mt-2 space-y-0.5 text-xs">
+          {state.phase_units.map((unit) => {
+            const st = state.unit_status[unit];
+            return (
+              <div key={unit} className="flex gap-2">
+                <span className={UNIT_STATUS_CLS[st ?? ""] ?? "text-muted-foreground"}>
+                  {st === "running" ? "○" : st === "done" ? "✓" : st === "failed" ? "✗" : "·"}
+                </span>
+                <span className="text-foreground">{unit}</span>
+                {state.unit_intent[unit] && (
+                  <span className="text-muted-foreground">— {state.unit_intent[unit]}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-2 space-y-0.5">
         {running.map((a) => (
-          <div key={a.name} className="dp-agent mono">
-            <span className="spinner" /> {a.name} <span className="trace">t{a.turn}</span> {a.last_action_detail ?? a.last_action ?? ""}
+          <div key={a.name} className="font-mono text-xs">
+            <span className="spinner" aria-hidden /> {a.name}{" "}
+            <span className="text-muted-foreground">t{a.turn}</span>{" "}
+            {a.last_action_detail ?? a.last_action ?? ""}
           </div>
         ))}
-        {running.length === 0 && <div className="trace">无运行中 agent</div>}
+        {running.length === 0 && <div className="text-xs text-muted-foreground">无运行中 agent</div>}
       </div>
     </div>
   );
