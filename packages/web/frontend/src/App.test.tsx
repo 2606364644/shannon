@@ -11,11 +11,11 @@ const server = setupServer(http.get("/api/workspaces", () => HttpResponse.json([
 beforeAll(() => server.listen()); afterAll(() => server.close());
 
 describe("App 集成冒烟", () => {
-  it("根路由渲染 WorkspaceListPage（main 内；TopBar 的 Workspaces nav 在 header 被排除）", async () => {
+  it("根路由渲染 DashboardPage（main 内含空态提示；子项目5 Task3 改根路由）", async () => {
     render(<App />);
     const main = screen.getByRole("main");
     await waitFor(() => {
-      expect(within(main).getByText(/Workspaces/i)).toBeInTheDocument();
+      expect(within(main).getByText(/还没有扫描/i)).toBeInTheDocument();
     });
   });
   it("RouterProvider 可用（导出 router）", () => {

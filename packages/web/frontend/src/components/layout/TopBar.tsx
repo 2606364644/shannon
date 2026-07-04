@@ -9,13 +9,7 @@ interface NavItem {
   end?: boolean;
 }
 
-/*
- * DSF 阶段导航项（迁移期）：
- * - Workspaces → 现有路由 /（WorkspaceListPage 当前位置；子项目 2 改 /workspaces 后同步改 to）
- * - Scan → /scan/new（启用）
- * - Dashboard → 未来 /（disabled，子项目 5 启用）
- * - Settings → 未来 /settings（disabled，子项目 5 启用）
- */
+// 顶层导航:Dashboard / Workspaces / Scan / Settings(子项目5 全启用)
 const NAV: NavItem[] = [
   { label: "Dashboard", to: "/", end: true },
   { label: "Workspaces", to: "/workspaces", end: true },

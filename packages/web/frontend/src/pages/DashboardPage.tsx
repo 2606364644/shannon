@@ -100,7 +100,7 @@ export function DashboardPage() {
           <div className="grid gap-3 md:grid-cols-2">
             {running.map((w) => (
               <Link key={w.name} to={`/p/${w.name}/live`} className="block">
-                <Card className="transition-color hover:border-primary">
+                <Card className="transition-colors hover:border-primary">
                   <CardContent className="space-y-1 p-4 font-mono text-sm">
                     <div className="flex items-center justify-between">
                       <StatusBadge status={w.status} />

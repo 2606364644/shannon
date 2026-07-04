@@ -120,6 +120,14 @@ export function DevComponentsPage() {
         <span className="text-sm text-muted-foreground">点切换深/浅，刷新验持久化</span>
       </Section>
 
+      <Section title="子项目5 新页(Dashboard / Settings)">
+        <span className="text-sm text-muted-foreground">访问 </span>
+        <code className="font-mono text-cyan">/</code>
+        <span className="text-sm text-muted-foreground"> 看 Dashboard 进站概览,</span>
+        <code className="font-mono text-cyan">/settings</code>
+        <span className="text-sm text-muted-foreground"> 看主题 + 系统状态 + 关于。ThemeToggle 切深/浅验对比度。</span>
+      </Section>
+
       <Section title="Buttons">
         <Button>default</Button>
         <Button variant="secondary">secondary</Button>
