@@ -35,6 +35,13 @@ function renderPage() {
   );
 }
 
+// Radix Tabs 的 TabsTrigger 在 onMouseDown（button===0）里调 onValueChange 激活，
+// 而 fireEvent.click 在 jsdom 里不发 mousedown 事件——故切 tab 用 mouseDown
+// 模拟真实激活手势（不是 click）。
+function clickTab(name: string) {
+  fireEvent.mouseDown(screen.getByRole("tab", { name }));
+}
+
 describe("ScanNewPage", () => {
   it("默认白盒：显示代码来源，无 reuse 复选框；切黑盒显示 reuse", () => {
     renderPage();
@@ -42,13 +49,13 @@ describe("ScanNewPage", () => {
     // 黑盒专属复选框默认不出现
     expect(screen.queryByText(/复用最新白盒/)).toBeNull();
     // 切到黑盒 → reuse 复选框出现（--latest 软默认陷阱标注）
-    fireEvent.click(screen.getByRole("tab", { name: "黑盒" }));
+    clickTab("黑盒");
     expect(screen.getByText(/复用最新白盒/)).toBeInTheDocument();
   });
 
   it("切联动：显示 yaml 编辑器，隐藏白盒字段", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "联动" }));
+    clickTab("联动");
     expect(screen.getByTestId("monaco")).toBeInTheDocument();
     // 联动页不显示白盒/黑盒的代码来源字段
     expect(screen.queryByText(/代码来源/)).toBeNull();
@@ -56,7 +63,7 @@ describe("ScanNewPage", () => {
 
   it("黑盒 --latest 陷阱：reuse 复选框旁有可追溯说明（不勾选=standalone）", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "黑盒" }));
+    clickTab("黑盒");
     expect(screen.getByText(/--latest/)).toBeInTheDocument();
     expect(screen.getByText(/standalone/)).toBeInTheDocument();
   });
