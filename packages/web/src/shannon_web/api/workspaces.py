@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import shutil
+
 from fastapi import APIRouter, HTTPException, Request
+
+from shannon_web.components.workspaces_indexer import WorkspacesIndexer
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -27,6 +31,23 @@ async def get_workspace(ws: str, request: Request):
         if row["name"] == ws:
             return row
     raise HTTPException(404, "workspace not found")
+
+
+@router.delete("/{ws}")
+async def delete_workspace(ws: str, request: Request):
+    p = _workspace_path(request, ws)  # 404 if 不存在
+    idx = request.app.state.indexer
+    active = request.app.state.scan_manager.active_pids()
+    # scan_manager 跟踪本进程 spawn 的子进程；indexer 在先前请求中 sync 过 pid（或
+    # 测试直接注入）。任一来源有 alive pid 即视为运行中，避免误删。
+    pid = active.get(ws)
+    if pid is None:
+        pid = getattr(idx, "_active_pids", {}).get(ws)
+    if pid and WorkspacesIndexer._pid_alive(pid):
+        raise HTTPException(status_code=409, detail="workspace running, cancel scan first")
+    shutil.rmtree(p)
+    idx.set_active_pid(ws, None)
+    return {"deleted": ws}
 
 
 @router.get("/{ws}/deliverables")
