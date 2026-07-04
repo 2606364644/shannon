@@ -16,6 +16,16 @@ const MD = `# 综合安全评估报告
 1. SSRF-01 漏洞示例
 `;
 
+function renderAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/p/:workspace/report" element={<ReportTab />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe("ReportTab", () => {
   it("GET /report (text/plain) → 经 MarkdownView 渲染（标题 H1 出现）", async () => {
     server.use(
@@ -23,45 +33,48 @@ describe("ReportTab", () => {
         new HttpResponse(MD, { headers: { "content-type": "text/plain" } }),
       ),
     );
-    render(
-      <MemoryRouter initialEntries={["/p/ws/report"]}>
-        <Routes>
-          <Route path="/p/:workspace/report" element={<ReportTab />} />
-        </Routes>
-      </MemoryRouter>,
+    renderAt("/p/ws/report");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument(),
     );
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument());
   });
 
-  it("加载中显示 trace 占位", async () => {
+  it("加载中渲染 Skeleton（animate-pulse）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/report", async () => {
         await new Promise((r) => setTimeout(r, 50));
         return new HttpResponse(MD, { headers: { "content-type": "text/plain" } });
       }),
     );
-    render(
-      <MemoryRouter initialEntries={["/p/ws/report"]}>
-        <Routes>
-          <Route path="/p/:workspace/report" element={<ReportTab />} />
-        </Routes>
-      </MemoryRouter>,
+    renderAt("/p/ws/report");
+    expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
+    // 等到加载完成确保不泄漏 act warning
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument(),
     );
-    expect(screen.getByText(/加载报告/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument());
   });
 
-  it("请求失败显示错误态", async () => {
+  it("请求失败渲染 ErrorState（role=alert）不永久 loading", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/report", () => HttpResponse.text("not found", { status: 404 })),
+      http.get("/api/workspaces/:ws/report", () =>
+        HttpResponse.text("not found", { status: 404 }),
+      ),
     );
-    render(
-      <MemoryRouter initialEntries={["/p/ws/report"]}>
-        <Routes>
-          <Route path="/p/:workspace/report" element={<ReportTab />} />
-        </Routes>
-      </MemoryRouter>,
+    renderAt("/p/ws/report");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    // 守卫：不渲染加载占位 / 空态
+    expect(screen.queryByText(/报告尚未生成/)).not.toBeInTheDocument();
+  });
+
+  it("空报告（apiGetText 返 \"\"）渲染 Empty 而非加载态", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/report", () =>
+        new HttpResponse("", { headers: { "content-type": "text/plain" } }),
+      ),
     );
-    await waitFor(() => expect(screen.getByText(/报告加载失败/)).toBeInTheDocument());
+    renderAt("/p/ws/report");
+    await waitFor(() => expect(screen.getByText(/报告尚未生成/)).toBeInTheDocument());
+    // 守卫：不渲染 Skeleton 加载态
+    expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument();
   });
 });
