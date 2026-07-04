@@ -68,7 +68,7 @@ describe("LogsTab", () => {
     // 虚拟滚动提示出现
     await waitFor(() => expect(screen.getByText(/虚拟滚动/)).toBeInTheDocument());
     // 结构断言：虚拟化只渲染可见窗口，远小于总行数 6000
-    const renderedRows = container.querySelectorAll(".log-row, .trace");
+    const renderedRows = container.querySelectorAll(".ev-info, .trace");
     expect(renderedRows.length).toBeLessThan(100);
   });
 
@@ -91,7 +91,7 @@ describe("LogsTab", () => {
     // 不虚拟滚动：无『虚拟滚动』提示
     expect(screen.queryByText(/虚拟滚动/)).not.toBeInTheDocument();
     // 全部 100 行渲染（断言非虚拟化）：非 JSON 行渲染为 .trace
-    const rows = container.querySelectorAll(".log-row, .trace");
+    const rows = container.querySelectorAll(".ev-info, .trace");
     expect(rows.length).toBe(100);
   });
 

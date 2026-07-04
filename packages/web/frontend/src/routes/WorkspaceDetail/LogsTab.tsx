@@ -27,7 +27,7 @@ const Row = memo(function Row({ index, style, data }: {
   try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
   if (ev) {
     return (
-      <div style={style} className="log-row ev-info">
+      <div style={style} className="ev-info font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">
         [{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
       </div>
     );
@@ -121,7 +121,7 @@ export function LogsTab() {
           lines.map((l, i) => {
             let ev: LogEv | null = null;
             try { ev = JSON.parse(l); } catch { /* 非 JSON */ }
-            if (ev) return <div key={i} className="log-row ev-info">[{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
+            if (ev) return <div key={i} className="ev-info font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
             return <div key={i} className="trace">{l}</div>;
           })
         ) : (
