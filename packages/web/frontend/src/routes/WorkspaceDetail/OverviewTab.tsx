@@ -3,6 +3,14 @@ import { useParams } from "react-router-dom";
 import type { SessionData, SessionMetrics } from "../../api/types";
 import { apiGet } from "../../api/client";
 import { StatusBadge } from "../../components/StatusBadge";
+import { ErrorState } from "../../components/ErrorState";
+import { Empty } from "../../components/Empty";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -12,22 +20,69 @@ function fmtMs(ms: number): string {
 export function OverviewTab() {
   const { workspace } = useParams<{ workspace: string }>();
   const [s, setS] = useState<SessionData | null>(null);
-  useEffect(() => { apiGet<SessionData>(`/workspaces/${workspace}`).then(setS); }, [workspace]);
-  if (!s?.metrics) return <div className="trace">无 metrics</div>;
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setErr(null);
+    setLoading(true);
+    apiGet<SessionData>(`/workspaces/${workspace}`)
+      .then((data) => { setS(data); setLoading(false); })
+      .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
+  }, [workspace]);
+
+  if (err) return <ErrorState message={`概览加载失败：${err}`} />;
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
+      </div>
+    );
+  }
+  if (!s?.metrics) {
+    return <Empty title="等待扫描" hint="metrics 将在 pre-recon 阶段后出现" />;
+  }
+
   const m = s.metrics;
   const statusConflict = !!(s.status && s.session?.status && s.status !== s.session.status);
 
   return (
-    <div className="overview">
-      <div className="ov-statusbar">
-        <StatusBadge status={s.status ?? s.session?.status ?? "?"} /> {s.scan_type} {s.repo_path}
-        {statusConflict && <span className="ev-warn"> ⚠ 顶层 {s.status} vs session.{s.session!.status}（归一未覆盖顶层，已 flag 后端）</span>}
-      </div>
-      <div className="big-numbers mono">
-        <div><span className="big">${m.total_cost_usd.toFixed(2)}</span> <span className="trace">total cost</span></div>
-        <div><span className="big">{fmtMs(m.total_duration_ms)}</span> <span className="trace">duration</span></div>
-        <div><span className="big">{Object.keys(m.agents).length}</span> <span className="trace">agents</span></div>
-      </div>
+    <div className="space-y-5">
+      {/* status bar */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <StatusBadge status={s.status ?? s.session?.status ?? "?"} />
+          <span>{s.scan_type}</span>
+          <span className="font-mono text-muted-foreground">{s.repo_path}</span>
+          {/*
+            前端 status 矛盾兜底渲染（黄色 Badge）。
+            后端归一层已对 mismatch 做了 flag；此处仅作可视化提示，不修改状态语义。
+          */}
+          {statusConflict && (
+            <Badge variant="outline" className="border-yellow/40 text-yellow">
+              ⚠ 顶层 {s.status} vs session.{s.session!.status}
+            </Badge>
+          )}
+        </div>
+      </Card>
+
+      {/* big numbers */}
+      <Card className="p-4">
+        <div className="grid grid-cols-3 gap-6 font-mono">
+          <div>
+            <div className="text-2xl font-bold text-foreground">${m.total_cost_usd.toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">total cost</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-foreground">{fmtMs(m.total_duration_ms)}</div>
+            <div className="text-xs text-muted-foreground">duration</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-foreground">{Object.keys(m.agents).length}</div>
+            <div className="text-xs text-muted-foreground">agents</div>
+          </div>
+        </div>
+      </Card>
+
       <PhaseWaterfall phases={m.phases} fmt={fmtMs} />
       <AgentTable agents={m.agents} fmt={fmtMs} />
     </div>
@@ -37,37 +92,61 @@ export function OverviewTab() {
 function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt: (ms: number) => string }) {
   const entries = Object.entries(phases);
   return (
-    <div className="phase-waterfall">
-      <h3>阶段瀑布</h3>
-      <div className="pw-bars">
+    <Card className="p-4">
+      <CardTitle className="mb-2 font-serif text-base">阶段瀑布</CardTitle>
+      <div className="flex items-end gap-0.5 h-20">
         {entries.map(([name, p]) => (
-          <div key={name} className="pw-bar" style={{ width: `${p.duration_percentage}%` }} title={`${name}: ${p.duration_percentage}%`}>
-            <div className="pw-name">{name}</div>
-            <div className="pw-meta mono">{p.duration_percentage}% · {fmt(p.duration_ms)} · ${p.cost_usd.toFixed(2)} · {p.agent_count}a</div>
+          <div
+            key={name}
+            className="bg-cyan min-w-[60px] p-1 text-background rounded-t-sm overflow-hidden"
+            style={{ width: `${p.duration_percentage}%` }}
+            title={`${name}: ${p.duration_percentage}%`}
+          >
+            <div className="text-xs font-bold truncate">{name}</div>
+            <div className="text-[0.7rem] opacity-85 font-mono">
+              {p.duration_percentage}% · {fmt(p.duration_ms)} · ${p.cost_usd.toFixed(2)} · {p.agent_count}a
+            </div>
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
 function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (ms: number) => string }) {
   return (
-    <table className="ledger mono agent-table">
-      <thead><tr><th>agent</th><th>duration</th><th>cost</th><th>attempt</th><th>model</th></tr></thead>
-      <tbody>
-        {Object.entries(agents).map(([name, a]) => {
-          const warned = a.attempt_number > 1 || !!a.error;
-          const cls = a.success === false ? "ev-agent-fail" : warned ? "ev-warn" : "";
-          return (
-            <tr key={name} className={cls}>
-              <td>{name}</td><td>{fmt(a.duration_ms)}</td><td>${a.cost_usd.toFixed(2)}</td>
-              <td>{warned ? `⚠ ${a.attempt_number}${a.error ? `(${a.error.slice(0, 20)})` : ""}` : a.attempt_number}</td>
-              <td className="trace">{a.model}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <Card className="p-4">
+      <CardTitle className="mb-2 font-serif text-base">agent 账本</CardTitle>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>agent</TableHead>
+            <TableHead>duration</TableHead>
+            <TableHead>cost</TableHead>
+            <TableHead>attempt</TableHead>
+            <TableHead>model</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Object.entries(agents).map(([name, a]) => {
+            const warned = a.attempt_number > 1 || !!a.error;
+            // 失败红、重试/出错黄（语义化颜色，不再用 .ev-* 事件类）
+            const attemptCls = a.success === false ? "text-red" : warned ? "text-yellow" : "";
+            const attemptText = warned
+              ? `⚠ ${a.attempt_number}${a.error ? `(${a.error.slice(0, 20)})` : ""}`
+              : a.attempt_number;
+            return (
+              <TableRow key={name}>
+                <TableCell className="font-mono">{name}</TableCell>
+                <TableCell className="font-mono">{fmt(a.duration_ms)}</TableCell>
+                <TableCell className="font-mono">${a.cost_usd.toFixed(2)}</TableCell>
+                <TableCell className={`font-mono ${attemptCls}`}>{attemptText}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{a.model}</TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Card>
   );
 }
