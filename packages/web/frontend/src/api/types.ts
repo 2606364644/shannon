@@ -83,6 +83,7 @@ export interface Workspace {
   total_cost_usd?: number;
   total_duration_ms?: number;
   links?: { parent_workspace?: string | null; child_workspaces?: string[] };
+  is_correlation?: boolean;
 }
 
 export interface SessionMetrics {
@@ -155,4 +156,17 @@ export interface ScanRequest {
 
 export interface ScanResponse {
   workspace: string;
+}
+
+export interface FsEntry {
+  name: string;
+  type: "dir" | "file";
+  size?: number;
+  mtime?: number;
+}
+export interface FsBrowseResult {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+  truncated?: boolean;
 }
