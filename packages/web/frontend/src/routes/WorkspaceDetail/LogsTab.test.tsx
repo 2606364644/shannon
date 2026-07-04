@@ -110,4 +110,34 @@ describe("LogsTab", () => {
     fireEvent.click(screen.getByText("notes.txt"));
     await waitFor(() => expect(screen.getByText(/plain text content/)).toBeInTheDocument());
   });
+
+  it("文件列表项是 button（键盘可达）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("file")) {
+          return HttpResponse.json({ content: "log content" });
+        }
+        return HttpResponse.json({ files: ["workflow.log", "recon.log"] });
+      }),
+    );
+    renderAt("/p/ws/logs");
+    await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
+    // 文件名以 .log 结尾的 button 存在（键盘可达 + aria-current 可用）
+    const fileButtons = screen.getAllByRole("button").filter((b) => /\.log$/.test(b.textContent ?? ""));
+    expect(fileButtons.length).toBeGreaterThan(0);
+    // 选中的文件 button 带 aria-current（选中态可达性）
+    fireEvent.click(fileButtons[0]);
+    await waitFor(() => expect(fileButtons[0]).toHaveAttribute("aria-current", "true"));
+  });
+
+  it("fetch 文件列表失败渲染 ErrorState（role=alert）不永久 loading", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/logs", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+    renderAt("/p/ws/logs");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
 });
