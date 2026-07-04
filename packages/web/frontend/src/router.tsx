@@ -7,7 +7,7 @@ import { OverviewTab } from "./routes/WorkspaceDetail/OverviewTab";
 import { ReportTab } from "./routes/WorkspaceDetail/ReportTab";
 import { DeliverablesTab } from "./routes/WorkspaceDetail/DeliverablesTab";
 import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
-import { LiveTab } from "./routes/WorkspaceDetail/LiveTab";
+import LiveTab from "./routes/WorkspaceDetail/LiveTab";
 import { apiGet } from "./api/client";
 import type { SessionData } from "./api/types";
 import { AppShell } from "./components/layout/AppShell";
