@@ -69,4 +69,30 @@ describe("DashboardPage 骨架 + 汇总", () => {
     renderPage();
     expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
   });
+
+  it("running 卡片墙:整张可点跳 /p/ws-run/live", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
+    const link = screen.getByRole("link", { name: /查看实时/ });
+    expect(link.getAttribute("href")).toBe("/p/ws-run/live");
+  });
+
+  it("最近扫描区:非 running 行 + 「查看全部」跳 /workspaces", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-today")).toBeInTheDocument());
+    expect(screen.getByText("ws-old")).toBeInTheDocument();
+    // 「查看全部 →」跳列表页
+    expect(screen.getByRole("link", { name: /查看全部/ }).getAttribute("href")).toBe("/workspaces");
+    // 最近行整行可点跳 /p/{ws}
+    expect(screen.getByRole("link", { name: /ws-today/ }).getAttribute("href")).toBe("/p/ws-today");
+  });
+
+  it("无 running → 显示空态文案", async () => {
+    server.use(http.get("/api/workspaces", () => HttpResponse.json([
+      { name: "ws-done", scan_type: "whitebox", status: "completed", created_at: todaySec, completed_at: todaySec, vuln_count: 1, is_correlation: false },
+    ])));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-done")).toBeInTheDocument());
+    expect(screen.getByText(/当前无运行中扫描/)).toBeInTheDocument();
+  });
 });
