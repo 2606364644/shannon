@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -61,14 +62,16 @@ async def deliverables_file(ws: str, filename: str, request: Request, track: str
         raise HTTPException(404, "file not found")
 
 
-@router.get("/{ws}/report")
+@router.get("/{ws}/report", response_class=PlainTextResponse)
 async def report(ws: str, request: Request):
     from shannon_web.components.deliverables_reader import DeliverablesReader
     reader = DeliverablesReader(_workspace_path(request, ws))
     reports = reader.summary().get("reports", [])
     chosen = next((x for x in reports if "comprehensive" in x.lower()), reports[0] if reports else None)
     if not chosen:
-        raise HTTPException(404, "no report")
+        # 无报告产物 → 200 空文本:前端 ReportTab Empty「报告尚未生成」契约。
+        # workspace 不存在已由 _workspace_path 抛 404,这里只处理「存在但无报告」。
+        return ""
     return reader.read(chosen)
 
 
