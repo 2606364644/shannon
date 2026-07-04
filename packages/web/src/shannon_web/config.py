@@ -15,6 +15,9 @@ class WebConfig:
         self.repos_dir = Path(os.environ.get("SHANNON_REPOS_DIR", "repos"))
         self.configs_dir = Path(os.environ.get("SHANNON_CONFIGS_DIR", "configs"))
         self.frontend_dir = os.environ.get("SHANNON_WEB_FRONTEND_DIR")
+        self.fs_roots: list[Path] = [
+            Path(p).resolve() for p in os.environ.get("SHANNON_FS_ROOTS", "").split(",") if p.strip()
+        ]
 
     @property
     def workspaces_dir(self) -> Path:
