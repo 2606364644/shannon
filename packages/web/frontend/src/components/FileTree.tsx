@@ -32,7 +32,7 @@ export function FileTree({
 }) {
   const root = buildTree(files);
   return (
-    <ul className="file-tree">
+    <ul className="list-none p-0 text-sm">
       {Array.from(root.children.values()).map((n) => (
         <NodeView key={n.path} node={n} depth={0} onSelect={onSelect} />
       ))}
@@ -53,22 +53,31 @@ function NodeView({
   const isDir = node.children.size > 0;
   return (
     <li>
-      <div style={{ paddingLeft: depth * 14 }} className="ft-row">
+      <div style={{ paddingLeft: depth * 14 }} className="py-px">
         {isDir ? (
-          <button className="ft-toggle" onClick={() => setOpen((o) => !o)}>
-            <span className="ft-caret">{open ? "▾" : "▸"}</span> 📂{" "}
-            <span className="ft-name">{node.name}</span>
+          <button
+            className="flex items-center gap-1 bg-transparent p-0 font-inherit text-foreground hover:text-primary"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <span className="text-muted-foreground" aria-hidden>{open ? "▾" : "▸"}</span>
+            <span aria-hidden>📂</span>
+            <span>{node.name}</span>
           </button>
         ) : (
-          <span className="ft-file mono" onClick={() => onSelect(node.file!)}>
-            📄 <span className="ft-name">{node.name}</span>
-            {node.file?.kind === "empty_json" && <span className="trace"> （空）</span>}
-            {node.file?.kind === "big_json" && <span className="trace"> （大）</span>}
-          </span>
+          <button
+            className="flex items-center gap-1 bg-transparent p-0 text-left font-mono hover:text-primary"
+            onClick={() => onSelect(node.file!)}
+          >
+            <span aria-hidden>📄</span>
+            <span>{node.name}</span>
+            {node.file?.kind === "empty_json" && <span className="text-xs text-muted-foreground">（空）</span>}
+            {node.file?.kind === "big_json" && <span className="text-xs text-muted-foreground">（大）</span>}
+          </button>
         )}
       </div>
       {isDir && open && Array.from(node.children.values()).map((c) => (
-        <ul key={c.path}>
+        <ul key={c.path} className="list-none p-0">
           <NodeView node={c} depth={depth + 1} onSelect={onSelect} />
         </ul>
       ))}
