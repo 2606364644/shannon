@@ -153,3 +153,35 @@ def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
     # 不再是 indexer row(无 vuln_count/vuln_counts/is_correlation)
     assert "vuln_count" not in d
     assert "is_correlation" not in d
+
+
+def test_get_workspace_normalizes_legacy_agents(app_with_ws, tmp_workspaces):
+    """get_workspace 归一化旧格式 metrics.agents(juice-shop_whitebox-* 实例)。
+    回归:旧格式 final_duration_ms/total_cost_usd/status/attempts[] 直接透传时,
+    前端 OverviewTab a.cost_usd.toFixed() 崩(Cannot read properties of undefined)。"""
+    _ws(tmp_workspaces, "Legacy", metrics={
+        "total_duration_ms": 1000, "total_cost_usd": 8.79,
+        "phases": {"recon": {"duration_ms": 1000, "duration_percentage": 100.0,
+                             "cost_usd": 8.79, "agent_count": 1}},
+        "agents": {
+            "recon": {
+                "status": "success",
+                "attempts": [{"attempt_number": 1, "duration_ms": 1000, "cost_usd": 8.79,
+                              "success": True, "model": "claude-opus-4-7"}],
+                "final_duration_ms": 1000, "total_cost_usd": 8.79,
+                "model": "claude-opus-4-7", "checkpoint": "abc",
+            },
+        },
+    })
+    d = TestClient(app_with_ws).get("/api/workspaces/Legacy").json()
+    a = d["metrics"]["agents"]["recon"]
+    # 归一化到新 schema(types.ts SessionMetrics.agents)
+    assert a["cost_usd"] == 8.79            # total_cost_usd → cost_usd
+    assert a["duration_ms"] == 1000         # final_duration_ms → duration_ms
+    assert a["success"] is True             # status == "success"
+    assert a["attempt_number"] == 1         # attempts[-1].attempt_number
+    assert a["model"] == "claude-opus-4-7"
+    # 旧 key 不透出(前端不再读到 final_duration_ms/total_cost_usd/attempts)
+    assert "final_duration_ms" not in a
+    assert "total_cost_usd" not in a
+    assert "attempts" not in a

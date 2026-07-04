@@ -29,6 +29,7 @@ async def get_workspace(ws: str, request: Request):
     idx.sync_active(request.app.state.scan_manager.active_pids())
     p = _workspace_path(request, ws)  # 404 if 不存在
     from shannon_core.session import SessionManager
+    from shannon_web.components.metrics_normalizer import normalize_metrics
     from shannon_web.components.workspaces_indexer import _to_unix
     mgr = SessionManager(request.app.state.config.workspaces_dir)
     data = mgr.get_session_data(p)
@@ -40,8 +41,9 @@ async def get_workspace(ws: str, request: Request):
         "created_at": _to_unix(mgr.get_created_at(p)),
         "completed_at": _to_unix(mgr.get_completed_at(p)),
         "links": data.get("links", {}),
-        # metrics 透传:子树结构与前端 SessionMetrics 完全一致(phases/agents 字段对齐)
-        "metrics": data.get("metrics", {}),
+        # metrics 归一化:agents 兼容旧格式(final_duration_ms/total_cost_usd/status/
+        # attempts[]),统一到 types.ts SessionMetrics schema;phases 透传不动。
+        "metrics": normalize_metrics(data.get("metrics", {})),
         "session": data.get("session", {}),
     }
 
