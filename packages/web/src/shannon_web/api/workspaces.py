@@ -79,7 +79,7 @@ async def deliverables_file(ws: str, filename: str, request: Request, track: str
 async def report(ws: str, request: Request):
     from shannon_web.components.deliverables_reader import DeliverablesReader
     reader = DeliverablesReader(_workspace_path(request, ws))
-    reports = reader.summary().get("reports", [])
+    reports = reader.list_reports()
     chosen = next((x for x in reports if "comprehensive" in x.lower()), reports[0] if reports else None)
     if not chosen:
         # 无报告产物 → 200 空文本:前端 ReportTab Empty「报告尚未生成」契约。

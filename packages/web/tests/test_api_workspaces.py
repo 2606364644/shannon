@@ -28,14 +28,42 @@ def test_report_deliverables_logs(app_with_ws, tmp_workspaces):
     dl = ws / "deliverables" / "whitebox"
     dl.mkdir(parents=True)
     (dl / "comprehensive_security_assessment_report.md").write_text("# R")
-    (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [{}]}))
+    (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [
+        {"ID": "XSS-01", "vulnerability_type": "xss", "externally_exploitable": False}]}))
     client = TestClient(app_with_ws)
     assert client.get("/api/workspaces/A/report").text == "# R"
     s = client.get("/api/workspaces/A/deliverables").json()
-    assert "xss" in s["vuln_queues"]
+    # 新 DeliverablesSummary shape(非旧 vuln_queues/reports)
+    assert any(v.get("ID") == "XSS-01" for v in s["aggregated_vulnerabilities"])
+    assert any(f["path"] == "whitebox/xss_exploitation_queue.json" for f in s["files"])
     f = client.get("/api/workspaces/A/deliverables/xss_exploitation_queue.json")
     assert f.status_code == 200 and "vulnerabilities" in f.json()
     assert client.get("/api/workspaces/A/deliverables/missing.json").status_code == 404
+
+
+def test_deliverables_summary_shape(app_with_ws, tmp_workspaces):
+    """deliverables 端点返 DeliverablesSummary {track, files, aggregated_vulnerabilities, notes}。
+    files 排除 .git/schemas;kind 判定;path 含 track 前缀(#5,#7)。"""
+    _ws(tmp_workspaces, "D")
+    ws = tmp_workspaces / "D"
+    dl = ws / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [
+        {"ID": "XSS-01", "vulnerability_type": "xss", "externally_exploitable": True}]}))
+    (dl / "report.md").write_text("# R")
+    (dl / "empty_authz_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": []}))
+    (dl / ".git").mkdir()
+    (dl / ".git" / "config").write_text("x")
+    s = TestClient(app_with_ws).get("/api/workspaces/D/deliverables").json()
+    assert s["track"] == "whitebox"
+    assert "vuln_queues" not in s and "reports" not in s  # 旧 shape 移除
+    paths = [f["path"] for f in s["files"]]
+    assert not any(".git" in p for p in paths)  # .git 排除
+    assert "whitebox/xss_exploitation_queue.json" in paths  # path 含 track 前缀
+    assert any(f["kind"] == "md" for f in s["files"])
+    assert any(f["kind"] == "empty_json" for f in s["files"])  # 空 queue → empty_json
+    assert any(v["ID"] == "XSS-01" for v in s["aggregated_vulnerabilities"])
+    assert s["notes"]["injection_has_no_queue"] is True  # 无 injection queue
 
 
 def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
