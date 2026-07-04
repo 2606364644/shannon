@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import shutil
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -61,9 +62,24 @@ async def delete_workspace(ws: str, request: Request):
 
 
 @router.get("/{ws}/deliverables")
-async def deliverables_summary(ws: str, request: Request):
+async def deliverables_summary(ws: str, request: Request, path: str | None = Query(None)):
     from shannon_web.components.deliverables_reader import DeliverablesReader
-    return DeliverablesReader(_workspace_path(request, ws)).summary()
+    reader = DeliverablesReader(_workspace_path(request, ws))
+    if path is None:
+        return reader.summary()
+    # ?path=whitebox/xxx → 文件内容 text/plain(前端 FilePreview apiGetText 打此端点)
+    parts = path.split("/", 1)
+    if len(parts) == 2 and parts[0] in ("whitebox", "blackbox"):
+        track, filename = parts[0], parts[1]
+    else:
+        track, filename = "whitebox", path  # legacy 兜底(无 track 前缀)
+    try:
+        content = reader.read(filename, track)
+    except FileNotFoundError:
+        raise HTTPException(404, "file not found")
+    if isinstance(content, str):
+        return PlainTextResponse(content)
+    return PlainTextResponse(json.dumps(content, ensure_ascii=False, indent=2))
 
 
 @router.get("/{ws}/deliverables/{filename}")

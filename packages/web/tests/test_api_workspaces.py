@@ -66,6 +66,32 @@ def test_deliverables_summary_shape(app_with_ws, tmp_workspaces):
     assert s["notes"]["injection_has_no_queue"] is True  # 无 injection queue
 
 
+def test_deliverables_file_preview_dual_mode(app_with_ws, tmp_workspaces):
+    """deliverables 端点双模式:无 path→summary JSON;?path=whitebox/xxx→文件内容 text/plain(#6)。
+    前端 FilePreview apiGetText('/deliverables?path=...') 打这个端点。"""
+    _ws(tmp_workspaces, "F")
+    ws = tmp_workspaces / "F"
+    dl = ws / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [{"ID": "X"}]}))
+    (dl / "report.md").write_text("# R")
+    client = TestClient(app_with_ws)
+    # 无 path → JSON summary
+    assert client.get("/api/workspaces/F/deliverables").headers["content-type"].startswith("application/json")
+    # ?path= md → text/plain + 原样内容
+    r = client.get("/api/workspaces/F/deliverables?path=whitebox/report.md")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert r.text == "# R"
+    # ?path= json → text/plain(JSON 序列化,FilePreview <pre> 渲染)
+    rj = client.get("/api/workspaces/F/deliverables?path=whitebox/xss_exploitation_queue.json")
+    assert rj.status_code == 200
+    assert rj.headers["content-type"].startswith("text/plain")
+    assert "X" in rj.text
+    # ?path= 不存在 → 404
+    assert client.get("/api/workspaces/F/deliverables?path=whitebox/nope.json").status_code == 404
+
+
 def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
     """workspace 存在但无报告产物 → 200 + 空文本(前端 ReportTab Empty「报告尚未生成」契约),
     非 404。404 保留给 workspace 不存在(_workspace_path 已抛)。
