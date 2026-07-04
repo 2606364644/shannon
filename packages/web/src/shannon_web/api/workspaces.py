@@ -26,10 +26,23 @@ async def list_workspaces(request: Request):
 async def get_workspace(ws: str, request: Request):
     idx = request.app.state.indexer
     idx.sync_active(request.app.state.scan_manager.active_pids())
-    for row in idx.list_workspaces():
-        if row["name"] == ws:
-            return row
-    raise HTTPException(404, "workspace not found")
+    p = _workspace_path(request, ws)  # 404 if 不存在
+    from shannon_core.session import SessionManager
+    from shannon_web.components.workspaces_indexer import _to_unix
+    mgr = SessionManager(request.app.state.config.workspaces_dir)
+    data = mgr.get_session_data(p)
+    return {
+        "web_url": mgr.get_web_url(p),
+        "repo_path": data.get("repo_path"),
+        "scan_type": mgr.get_scan_type(p),
+        "status": idx._status_of(ws, mgr.get_status(p)),
+        "created_at": _to_unix(mgr.get_created_at(p)),
+        "completed_at": _to_unix(mgr.get_completed_at(p)),
+        "links": data.get("links", {}),
+        # metrics 透传:子树结构与前端 SessionMetrics 完全一致(phases/agents 字段对齐)
+        "metrics": data.get("metrics", {}),
+        "session": data.get("session", {}),
+    }
 
 
 @router.delete("/{ws}")

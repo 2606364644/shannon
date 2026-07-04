@@ -49,3 +49,33 @@ def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
     assert r.text == ""
     # workspace 不存在仍 404
     assert client.get("/api/workspaces/nope/report").status_code == 404
+
+
+def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
+    """get_workspace 返 SessionData(含 metrics.phases/agents + session 嵌套),非 indexer row。
+    OverviewTab 依赖 metrics 渲染阶段瀑布 + agent 账本(#4)。"""
+    _ws(tmp_workspaces, "A",
+        created_at=1780000000.0, completed_at=1780000005.0,
+        repo_path="/repo",
+        metrics={
+            "total_duration_ms": 1000, "total_cost_usd": 1.5,
+            "phases": {"recon": {"duration_ms": 1000, "duration_percentage": 100, "cost_usd": 1.5, "agent_count": 1}},
+            "agents": {"recon": {"duration_ms": 1000, "cost_usd": 1.5, "success": True, "attempt_number": 1, "model": "x"}},
+        },
+        session={"id": "A", "status": "completed", "createdAt": "2026-05-29T10:00:00Z"})
+    d = TestClient(app_with_ws).get("/api/workspaces/A").json()
+    # SessionData 字段
+    assert d["repo_path"] == "/repo"
+    assert d["scan_type"] == "whitebox"
+    assert d["status"] == "completed"
+    assert isinstance(d["created_at"], (int, float))   # unix number(非 ISO str)
+    assert isinstance(d["completed_at"], (int, float))
+    # metrics 透传(结构对齐前端 SessionMetrics)
+    assert "recon" in d["metrics"]["phases"]
+    assert "recon" in d["metrics"]["agents"]
+    assert d["metrics"]["total_cost_usd"] == 1.5
+    # session 嵌套(旧格式,status 矛盾检测用)
+    assert d["session"]["id"] == "A"
+    # 不再是 indexer row(无 vuln_count/vuln_counts/is_correlation)
+    assert "vuln_count" not in d
+    assert "is_correlation" not in d
