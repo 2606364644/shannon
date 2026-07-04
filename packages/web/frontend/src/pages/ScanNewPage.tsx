@@ -52,6 +52,19 @@ function renderError(e: ApiError): string {
   return `提交失败（${e.status}）`;
 }
 
+function validateSourceValue(kind: "path" | "git", v: string): string | null {
+  if (!v.trim()) return "代码来源不能为空";
+  if (kind === "path") {
+    return /^(\/|[A-Za-z]:[\\/])/.test(v) ? null : "本地路径需为绝对路径（如 /root/code/foo）";
+  }
+  return /^(https?:|git@|ssh:)/.test(v) ? null : "需为 git URL（https:// / git@ / ssh:）";
+}
+
+function validateUrl(v: string): string | null {
+  if (!v.trim()) return "目标 URL 不能为空";
+  return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
+}
+
 export function ScanNewPage() {
   const nav = useNavigate();
   const [type, setType] = useState<ScanType>("whitebox");
@@ -67,6 +80,8 @@ export function ScanNewPage() {
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   const [conflict, setConflict] = useState<string | null>(null);
+  const [loadingConflict, setLoadingConflict] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
   const [err, setErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
@@ -74,12 +89,25 @@ export function ScanNewPage() {
   useEffect(() => {
     if (!f.wsName) {
       setConflict(null);
+      setLoadingConflict(false);
       return;
     }
-    apiGet<Workspace[]>("/workspaces").then((ws) => {
-      setConflict(ws.some((w) => w.name === f.wsName) ? f.wsName : null);
-    });
+    setLoadingConflict(true);
+    const t = setTimeout(() => {
+      apiGet<Workspace[]>("/workspaces")
+        .then((ws) => {
+          setConflict(ws.some((w) => w.name === f.wsName) ? f.wsName : null);
+        })
+        .finally(() => setLoadingConflict(false));
+    }, 300);
+    return () => clearTimeout(t);
   }, [f.wsName]);
+
+  const sourceValueErr = validateSourceValue(f.sourceKind, f.sourceValue);
+  const urlErr = validateUrl(f.url);
+  const isCorrelation = type === "correlation";
+  const isValid =
+    !sourceValueErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
 
   async function submit() {
     if (type === "correlation" && yamlErr) {
@@ -88,10 +116,13 @@ export function ScanNewPage() {
     }
     try {
       setErr("");
+      setSubmitting(true);
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f));
       nav(`/p/${r.workspace}/live`);
     } catch (e) {
       if (e instanceof ApiError) setErr(renderError(e));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -116,6 +147,9 @@ export function ScanNewPage() {
             set={set}
             conflict={conflict}
             onConflictDismiss={() => set({ wsName: "" })}
+            sourceValueErr={sourceValueErr}
+            urlErr={urlErr}
+            loadingConflict={loadingConflict}
           />
         </TabsContent>
         <TabsContent value="blackbox">
@@ -125,6 +159,9 @@ export function ScanNewPage() {
             set={set}
             conflict={conflict}
             onConflictDismiss={() => set({ wsName: "" })}
+            sourceValueErr={sourceValueErr}
+            urlErr={urlErr}
+            loadingConflict={loadingConflict}
           />
         </TabsContent>
         <TabsContent value="correlation">
@@ -143,7 +180,7 @@ export function ScanNewPage() {
       </Tabs>
 
       {err && <div className="err-banner ev-error">{err}</div>}
-      <button className="submit-btn" onClick={submit} disabled={!!conflict}>
+      <button className="submit-btn" onClick={submit} disabled={!isValid || submitting || !!conflict}>
         开始扫描 ▶
       </button>
       <div className="trace">→ 202 → 跳 /p/{"{ws}"}/live · 错误：400(Temporal)/409(并发)/422(yaml)</div>

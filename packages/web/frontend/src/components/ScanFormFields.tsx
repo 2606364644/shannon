@@ -13,9 +13,12 @@ interface ScanFormFieldsProps {
   conflict: string | null;
   // 暂保留（Task 7 移 inline 横幅时清）；本 task 未消费，故不解构以避 noUnusedParameters。
   onConflictDismiss: () => void;
+  sourceValueErr: string | null;
+  urlErr: string | null;
+  loadingConflict: boolean;
 }
 
-export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) {
+export function ScanFormFields({ type, f, set, conflict, sourceValueErr, urlErr, loadingConflict }: ScanFormFieldsProps) {
   return (
     <Card>
       <CardHeader>
@@ -49,6 +52,7 @@ export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) 
                 />
               )}
             </div>
+            {sourceValueErr && <div className="text-destructive text-xs">{sourceValueErr}</div>}
           </div>
           {f.sourceKind === "git" && (
             <div className="space-y-2 git-extra">
@@ -69,6 +73,7 @@ export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) 
           <div className="space-y-2">
             <Label htmlFor="url">目标 URL</Label>
             <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder="http://example.com" />
+            {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="wsName">workspace 名</Label>
@@ -78,6 +83,10 @@ export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) 
               onChange={(e) => set({ wsName: e.target.value })}
               placeholder="空=自动 {repo}_{timestamp}"
             />
+            {loadingConflict && <div className="ev-warn text-xs">检测重名中…</div>}
+            {conflict && !loadingConflict && (
+              <div className="ev-warn text-xs">workspace「{conflict}」已存在 → 将断点续扫</div>
+            )}
           </div>
         </fieldset>
 
@@ -92,13 +101,6 @@ export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) 
               --latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone，规避 CLI 软默认复用
             </div>
           </fieldset>
-        )}
-
-        {conflict && (
-          <div className="confirm-dialog ev-warn">
-            ⚠ workspace「{conflict}」已存在，CLI -w 语义=存在则恢复，将
-            <b>断点续扫</b>（恢复已有进度）。
-          </div>
         )}
       </CardContent>
     </Card>

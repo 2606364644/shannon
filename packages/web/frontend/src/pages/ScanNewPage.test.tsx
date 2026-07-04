@@ -42,10 +42,17 @@ function clickTab(name: string) {
   fireEvent.mouseDown(screen.getByRole("tab", { name }));
 }
 
+// Task 5 起，提交按钮在必填空 / 格式错时 disabled；测试提交场景前先填齐合法值。
+function fillValid() {
+  fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+  fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+}
+
 describe("ScanNewPage", () => {
   it("默认白盒：显示代码来源，无 reuse 复选框；切黑盒显示 reuse", () => {
     renderPage();
-    expect(screen.getByText(/代码来源/)).toBeInTheDocument();
+    // 用 exact 精确命中 <legend>代码来源</legend>；即时校验空值错误文"代码来源不能为空"也匹配 /代码来源/，需避开。
+    expect(screen.getByText("代码来源", { exact: true })).toBeInTheDocument();
     // 黑盒专属复选框默认不出现
     expect(screen.queryByText(/复用最新白盒/)).toBeNull();
     // 切到黑盒 → reuse 复选框出现（--latest 软默认陷阱标注）
@@ -79,6 +86,7 @@ describe("ScanNewPage", () => {
   it("提交 400 → 提示 Temporal 未就绪", async () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 400 })));
     renderPage();
+    fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(screen.getByText(/Temporal/i)).toBeInTheDocument());
   });
@@ -86,6 +94,7 @@ describe("ScanNewPage", () => {
   it("提交 409 → 提示并发扫描超限", async () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 409 })));
     renderPage();
+    fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(screen.getByText(/并发扫描超限/)).toBeInTheDocument());
   });
@@ -100,6 +109,7 @@ describe("ScanNewPage", () => {
       ),
     );
     renderPage();
+    fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
     // 友好消息：提取 detail[0].msg
@@ -115,6 +125,7 @@ describe("ScanNewPage", () => {
       http.post("/api/scan", () => HttpResponse.json({ something: "else" }, { status: 422 })),
     );
     renderPage();
+    fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
     // 无 detail → 只剩标签前缀，不含原始 JSON
@@ -141,5 +152,19 @@ describe("ScanNewPage", () => {
     // FileSystemPicker Dialog 打开（title 默认"选择代码目录"）
     await waitFor(() => expect(screen.getByText("选择代码目录")).toBeInTheDocument());
     expect(screen.getByText("code")).toBeInTheDocument();
+  });
+
+  it("必填空 → 提交 disabled；填齐 → enabled", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
+    fillValid();
+    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled();
+  });
+
+  it("path 非绝对 → 红字 + 提交 disabled", () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "relative/path" } });
+    expect(screen.getByText(/需为绝对路径/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
   });
 });
