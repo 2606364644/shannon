@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { toast } from "sonner";
 import { ScanNewPage } from "./ScanNewPage";
 
 // Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
@@ -23,6 +24,7 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
+  vi.restoreAllMocks();
   cleanup();
 });
 afterAll(() => server.close());
@@ -75,31 +77,39 @@ describe("ScanNewPage", () => {
     expect(screen.getByText(/standalone/)).toBeInTheDocument();
   });
 
-  it("workspace 名冲突 → 弹断点续扫确认", async () => {
+  it("workspace 名冲突 + 点提交 → 弹断点续扫 Dialog", async () => {
     renderPage();
+    fillValid();
     fireEvent.change(screen.getByPlaceholderText(/自动/), {
       target: { value: "existing-ws" },
     });
-    await waitFor(() => expect(screen.getByText(/断点续扫/)).toBeInTheDocument());
+    // 等 debounce 冲突检测完（loadingConflict 期间 button disabled）
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    const dlg = await waitFor(() => screen.getByRole("dialog"));
+    expect(dlg.textContent).toMatch(/断点续扫/);
+    expect(dlg.textContent).toContain("existing-ws");
   });
 
-  it("提交 400 → 提示 Temporal 未就绪", async () => {
+  it("提交 400 → toast 提示 Temporal 未就绪", async () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 400 })));
+    const spy = vi.spyOn(toast, "error");
     renderPage();
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
-    await waitFor(() => expect(screen.getByText(/Temporal/i)).toBeInTheDocument());
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/Temporal/i)));
   });
 
-  it("提交 409 → 提示并发扫描超限", async () => {
+  it("提交 409 → toast 并发扫描超限", async () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 409 })));
+    const spy = vi.spyOn(toast, "error");
     renderPage();
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
-    await waitFor(() => expect(screen.getByText(/并发扫描超限/)).toBeInTheDocument());
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/并发扫描超限/)));
   });
 
-  it("提交 422 → 提示 yaml 校验失败（友好消息，不含原始 JSON 数组）", async () => {
+  it("提交 422 → toast yaml 校验失败（友好消息，不含原始 JSON）", async () => {
     server.use(
       http.post("/api/scan", () =>
         HttpResponse.json(
@@ -108,28 +118,29 @@ describe("ScanNewPage", () => {
         ),
       ),
     );
+    const spy = vi.spyOn(toast, "error");
     renderPage();
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
-    const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
-    // 友好消息：提取 detail[0].msg
-    expect(banner.textContent).toContain("repo url required");
-    // 负向断言：原始 JSON 结构（loc/type 字段）不得泄露到横幅
-    expect(banner.textContent).not.toContain('[{"loc"');
-    expect(banner.textContent).not.toContain("value_error");
-    expect(banner.textContent).not.toContain('"loc"');
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const arg = (spy.mock.calls[0] as string[])[0];
+    expect(arg).toContain("yaml 校验失败");
+    expect(arg).toContain("repo url required");
+    expect(arg).not.toContain("value_error");
   });
 
-  it("422 但无 detail 字段 → 回退到纯标签", async () => {
+  it("422 无 detail → toast 回退纯标签", async () => {
     server.use(
       http.post("/api/scan", () => HttpResponse.json({ something: "else" }, { status: 422 })),
     );
+    const spy = vi.spyOn(toast, "error");
     renderPage();
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
-    const banner = await waitFor(() => screen.getByText(/yaml 校验失败/));
-    // 无 detail → 只剩标签前缀，不含原始 JSON
-    expect(banner.textContent).not.toContain("{");
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const arg = (spy.mock.calls[0] as string[])[0];
+    expect(arg).toContain("yaml 校验失败");
+    expect(arg).not.toContain("{");
   });
 
   it("path 时显「📁 浏览」trigger", () => {
@@ -179,5 +190,33 @@ describe("ScanNewPage", () => {
     fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
     fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "myname" } });
     expect(screen.queryByText(/预览名/)).toBeNull();
+  });
+
+  it("续扫 Dialog：取消 → 清空 wsName", async () => {
+    renderPage();
+    fillValid();
+    fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "existing-ws" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(screen.getByRole("button", { name: /取消/ }));
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/自动/) as HTMLInputElement).value).toBe(""),
+    );
+  });
+
+  it("续扫 Dialog：确认续扫 → 提交 /scan 202（无 toast.error）", async () => {
+    server.use(
+      http.post("/api/scan", () => HttpResponse.json({ workspace: "existing-ws" }, { status: 202 })),
+    );
+    const spy = vi.spyOn(toast, "error");
+    renderPage();
+    fillValid();
+    fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "existing-ws" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(screen.getByRole("button", { name: /确认续扫/ }));
+    await waitFor(() => expect(spy).not.toHaveBeenCalled());
   });
 });

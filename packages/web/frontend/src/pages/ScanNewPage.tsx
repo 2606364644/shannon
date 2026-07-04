@@ -1,11 +1,16 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
@@ -100,8 +105,8 @@ export function ScanNewPage() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [loadingConflict, setLoadingConflict] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
-  const [err, setErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
 
   useEffect(() => {
@@ -132,21 +137,29 @@ export function ScanNewPage() {
     [type, f.sourceKind, f.sourceValue],
   );
 
-  async function submit() {
+  async function doSubmit() {
     if (type === "correlation" && yamlErr) {
-      setErr("yaml 有错，无法运行");
+      toast.error("yaml 有错，无法运行");
       return;
     }
     try {
-      setErr("");
       setSubmitting(true);
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f));
       nav(`/p/${r.workspace}/live`);
     } catch (e) {
-      if (e instanceof ApiError) setErr(renderError(e));
+      if (e instanceof ApiError) toast.error(renderError(e));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function onSubmit() {
+    // 冲突（wsName 重名）→ 不 disable 提交，而是点提交时弹续扫确认 Dialog。
+    if (conflict) {
+      setConfirmOpen(true);
+      return;
+    }
+    void doSubmit();
   }
 
   return (
@@ -204,11 +217,29 @@ export function ScanNewPage() {
         </TabsContent>
       </Tabs>
 
-      {err && <div className="err-banner ev-error">{err}</div>}
-      <button className="submit-btn" onClick={submit} disabled={!isValid || submitting || !!conflict}>
+      <Button className="submit-btn" onClick={onSubmit} disabled={!isValid || submitting}>
         开始扫描 ▶
-      </button>
+      </Button>
       <div className="trace">→ 202 → 跳 /p/{"{ws}"}/live · 错误：400(Temporal)/409(并发)/422(yaml)</div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent onInteractOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>断点续扫确认</DialogTitle>
+            <DialogDescription>
+              workspace「{conflict ?? ""}」已存在。CLI -w 语义=存在则恢复，将断点续扫（恢复已有进度）。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { set({ wsName: "" }); setConfirmOpen(false); }}>
+              取消（清空名）
+            </Button>
+            <Button onClick={() => { setConfirmOpen(false); void doSubmit(); }}>
+              确认续扫
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
