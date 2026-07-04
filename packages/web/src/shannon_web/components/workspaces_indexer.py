@@ -34,13 +34,17 @@ class WorkspacesIndexer:
         except Exception:
             return False
 
+    def is_running(self, ws: str) -> bool:
+        """公开访问器：ws 是否有 alive pid（替换外部对 _active_pids/_pid_alive 的私有 reach）。"""
+        pid = self._active_pids.get(ws)
+        return pid is not None and self._pid_alive(pid)
+
     def _status_of(self, ws_name: str, session_status: str | None) -> str:
         if session_status == "completed":
             return "completed"
         if session_status == "failed":
             return "failed"
-        pid = self._active_pids.get(ws_name)
-        alive = pid is not None and self._pid_alive(pid)
+        alive = self.is_running(ws_name)
         if alive:
             return "running"
         if session_status == "running":
