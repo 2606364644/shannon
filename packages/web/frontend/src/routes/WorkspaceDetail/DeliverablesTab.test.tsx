@@ -127,22 +127,29 @@ describe("DeliverablesTab", () => {
     expect(screen.queryByText(/双轨确认/)).not.toBeInTheDocument();
   });
 
-  it("injection 无 queue 标注", async () => {
+  it("injection 无 queue 用 Badge + 原生 title tooltip（不暴露裸 queue 文案）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", () =>
         HttpResponse.json(makeSummary({ notes: { injection_has_no_queue: true } })),
       ),
     );
     renderAt("/p/ws/deliverables");
-    await waitFor(() => expect(screen.getByText(/injection 类无独立 queue/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/injection 类/)).toBeInTheDocument());
+    // Badge 提供原生 title tooltip（不暴露实现细节的裸 queue 文案给普通断言）
+    const badge = screen.getByText(/injection 类/).closest("[title]");
+    expect(badge).not.toBeNull();
+    expect(badge!.getAttribute("title")).toMatch(/injection/);
+    // 关键守卫：不再出现裸的『无独立 queue』文案（实现细节已藏进 title）
+    expect(screen.queryByText(/无独立 queue/)).not.toBeInTheDocument();
   });
 
-  it("空产物（聚合 0 + 无 injection 标注）显示空态", async () => {
+  it("空产物（聚合 0 + 无 injection 标注）显示空态组件", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
     );
     renderAt("/p/ws/deliverables");
     await waitFor(() => expect(screen.getByText(/漏洞聚合/)).toHaveTextContent("漏洞聚合 · 0"));
+    // Empty 组件渲染『暂无聚合漏洞』标题
     expect(screen.getByText(/暂无聚合漏洞/)).toBeInTheDocument();
   });
 
@@ -269,19 +276,22 @@ describe("DeliverablesTab", () => {
     await waitFor(() => expect(screen.getByText(/XSS-GN/)).toBeInTheDocument());
   });
 
-  it("加载中显示 trace 占位", async () => {
+  it("加载中显示 Skeleton 占位（不暴露 trace 文案）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", async () => {
         await new Promise((r) => setTimeout(r, 50));
         return HttpResponse.json(makeSummary());
       }),
     );
-    renderAt("/p/ws/deliverables");
-    expect(screen.getByText(/加载产物/)).toBeInTheDocument();
+    const { container } = renderAt("/p/ws/deliverables");
+    // Skeleton 占位（animate-pulse）出现
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    // 关键守卫：不暴露旧 trace『加载产物』文案
+    expect(screen.queryByText(/加载产物/)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/漏洞聚合/)).toBeInTheDocument());
   });
 
-  it("产物聚合 fetch 失败渲染错误态（不永久 loading）", async () => {
+  it("产物聚合 fetch 失败渲染 ErrorState 错误态（不永久 loading）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
@@ -289,11 +299,13 @@ describe("DeliverablesTab", () => {
     );
     renderAt("/p/ws/deliverables");
     await waitFor(() => expect(screen.getByText(/产物加载失败/)).toBeInTheDocument());
-    // 关键守卫：不渲染永久 loading 占位
+    // ErrorState 用 role="alert"
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    // 关键守卫：不渲染 Skeleton 占位
     expect(screen.queryByText(/加载产物/)).not.toBeInTheDocument();
   });
 
-  it("文件预览 fetch 失败渲染错误态（不空白永久 loading）", async () => {
+  it("文件预览 fetch 失败渲染局部 ErrorState（不整页崩，左侧 vuln grid 仍可用）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
         const url = new URL(request.url);
@@ -313,5 +325,9 @@ describe("DeliverablesTab", () => {
     await waitFor(() => expect(screen.getByText(/文件加载失败/)).toBeInTheDocument());
     // 关键守卫：md kind fetch 失败时不卡在『加载…』占位
     expect(screen.queryByText(/^加载…$/)).not.toBeInTheDocument();
+    // 关键守卫：FilePreview 错误是局部的，至少有一个 role="alert"（ErrorState 渲染）
+    expect(screen.getAllByRole("alert").length).toBeGreaterThanOrEqual(1);
+    // 守卫：左侧 vuln grid 标题仍可见（页面主体未崩）
+    expect(screen.getByText(/漏洞聚合/)).toBeInTheDocument();
   });
 });
