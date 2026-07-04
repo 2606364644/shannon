@@ -72,10 +72,11 @@ describe("MarkdownView", () => {
     expect(inj04).toBeDefined();
   });
 
-  it("键值字段渲染成 key-value 行（结构化 .kv-row / .kv-key / .kv-val）", () => {
+  it("键值字段渲染成 key-value 行（结构化 kv-row / kv-key / kv-val）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
-    // 断言结构化处理存在：custom li 把 `- **key:** value` 拆成 .kv-row > (.kv-key + .kv-val)
-    const kvRows = container.querySelectorAll("li.kv-row");
+    // 断言结构化处理存在：custom li 把 `- **key:** value` 拆成 kv-row > (kv-key + kv-val)。
+    // prose 化后用 data-testid="kv-row" 检测（旧 .kv-row class 已换 Tailwind utilities）。
+    const kvRows = container.querySelectorAll('li[data-testid="kv-row"]');
     expect(kvRows.length).toBeGreaterThan(0);
     // 找到 vulnerability_type 那一行
     const vtRow = Array.from(kvRows).find((li) =>
@@ -90,7 +91,7 @@ describe("MarkdownView", () => {
     // 负向断言（守冒号守卫，防 I-1 回归）：fixture 中真正的 kv 项 = 5（目标/评估日期/
     // vulnerability_type/verdict/witness_payload，均以 `:` 或 `：` 结尾）。
     // 执行摘要编号列表 `1. **RCE**（INJ-01）：eval` 等 bold-led 但无冒号的项
-    // 不应被重构成 .kv-row。若无冒号守卫，此计数会变 7（多出 RCE/SSRF），断言失败。
+    // 不应被重构成 kv-row。若无冒号守卫，此计数会变 7（多出 RCE/SSRF），断言失败。
     expect(kvRows.length).toBe(5);
     const kvKeys = Array.from(kvRows).map(
       (li) => li.querySelector(".kv-key")?.textContent ?? "",
@@ -126,5 +127,10 @@ describe("MarkdownView", () => {
   it("无执行摘要时不渲染 hero（不写死结构）", () => {
     const { container } = render(<MarkdownView markdown={"# 报告\n\n正文"} />);
     expect(container.querySelector('[data-testid="exec-summary-hero"]')).toBeNull();
+  });
+
+  it("md-body 容器带 prose 类", () => {
+    render(<MarkdownView markdown="# T" />);
+    expect(document.querySelector(".prose")).toBeInTheDocument();
   });
 });

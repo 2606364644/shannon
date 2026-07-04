@@ -37,6 +37,17 @@
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", Georgia, serif;
   --radius: 3px;
+
+  /* 层 D · @tailwindcss/typography prose 主题（深） */
+  --prose-body: 213 22% 82%;
+  --prose-headings: 0 0% 100%;
+  --prose-links: 189 94% 53%;
+  --prose-bold: 0 0% 100%;
+  --prose-code: 189 94% 53%;
+  --prose-code-bg: 217 26% 16%;
+  --prose-quotes: 213 12% 47%;
+  --prose-bullets: 213 12% 47%;
+  --prose-hr: 217 26% 16%;
 }
 
 .light {
@@ -67,4 +78,15 @@
   --c-green: 137 66% 30%;
   --c-red: 0 73% 51%;
   --c-yellow: 40 94% 36%;
+
+  /* 层 D · prose 主题（浅） */
+  --prose-body: 217 26% 16%;
+  --prose-headings: 217 26% 16%;
+  --prose-links: 190 92% 36%;
+  --prose-bold: 217 26% 16%;
+  --prose-code: 190 92% 36%;
+  --prose-code-bg: 213 30% 92%;
+  --prose-quotes: 213 12% 47%;
+  --prose-bullets: 213 12% 47%;
+  --prose-hr: 213 25% 85%;
 }

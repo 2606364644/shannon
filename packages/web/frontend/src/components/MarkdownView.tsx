@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
-import "../styles/markdown.css";
+import { Button } from "@/components/ui/button";
 
 interface Heading {
   id: string;
@@ -71,21 +71,32 @@ export function MarkdownView({ markdown }: { markdown: string }) {
   const showHero = !!execH2 && topRisks.length > 0;
 
   return (
-    <div className="md-view">
+    <div className="space-y-4">
       {showHero && (
-        <div data-testid="exec-summary-hero" className="hero">
-          <div className="hero-title">
-            最高风险发现（按业务影响排序）
-            <button onClick={() => setHeroCollapsed((c) => !c)} aria-label="toggle hero">
+        <div
+          data-testid="exec-summary-hero"
+          className="rounded-md border border-border bg-card p-4"
+        >
+          <div className="mb-2 flex items-center justify-between font-serif text-base">
+            <span>最高风险发现（按业务影响排序）</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setHeroCollapsed((c) => !c)}
+              aria-label="toggle hero"
+            >
               {heroCollapsed ? "展开 ▸" : "折叠 ▾"}
-            </button>
+            </Button>
           </div>
           {!heroCollapsed && (
-            <ol>
+            <ol className="list-decimal space-y-1 pl-6 text-sm">
               {topRisks.map((r, i) => (
                 <li key={i}>
                   {r.vulnIds.length > 0 && (
-                    <a href={`#${r.vulnIds[0]}`} className="mono kv-vuln-id">
+                    <a
+                      href={`#${r.vulnIds[0]}`}
+                      className="kv-vuln-id font-mono text-primary"
+                    >
                       {r.vulnIds.join("/")}
                     </a>
                   )}{" "}
@@ -97,17 +108,23 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         </div>
       )}
 
-      <div className="md-layout">
-        <nav data-testid="toc" className="toc">
+      <div className="grid grid-cols-[220px_1fr] gap-6">
+        <nav data-testid="toc" className="sticky top-4 space-y-1 text-sm">
           {headings
             .filter((h) => h.level >= 2)
             .map((h, i) => (
-              <a key={`${i}-${h.id}`} href={`#${h.id}`} className={`toc-l${h.level}`}>
+              <a
+                key={`${i}-${h.id}`}
+                href={`#${h.id}`}
+                className={`block text-muted-foreground hover:text-primary ${
+                  h.level === 3 ? "pl-3 text-xs" : ""
+                }`}
+              >
                 {h.text}
               </a>
             ))}
         </nav>
-        <div className="md-body serif">
+        <div className="prose prose-sm max-w-none font-serif">
           <ReactMarkdown
             rehypePlugins={[
               rehypeSlug,
@@ -150,8 +167,12 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                       }
                     }
                     return (
-                      <li {...props} className="kv-row">
-                        <span className="kv-key mono">{keyText}</span>
+                      <li
+                        {...props}
+                        data-testid="kv-row"
+                        className="flex gap-2"
+                      >
+                        <span className="kv-key font-mono text-muted-foreground">{keyText}</span>
                         <span className="kv-val">{valKids}</span>
                       </li>
                     );
@@ -161,17 +182,19 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               },
               // witness PoC 代码块：可复制
               code: ({ className, children, ...props }) => (
-                <code {...props} className={`md-code ${className ?? ""}`}>
+                <code {...props} className={`font-mono ${className ?? ""}`}>
                   {children}
-                  <button
-                    className="copy-btn"
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="copy-btn ml-1 text-xs"
                     onClick={(e) => {
                       navigator.clipboard?.writeText(String(children));
                       e.currentTarget.textContent = "✓";
                     }}
                   >
                     复制
-                  </button>
+                  </Button>
                 </code>
               ),
             }}

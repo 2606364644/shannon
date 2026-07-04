@@ -10,6 +10,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* prose 覆盖层：把 @tailwindcss/typography 的 --tw-prose-* 接到双主题 --prose-* channel */
+.prose {
+  --tw-prose-body: hsl(var(--prose-body));
+  --tw-prose-headings: hsl(var(--prose-headings));
+  --tw-prose-links: hsl(var(--prose-links));
+  --tw-prose-bold: hsl(var(--prose-bold));
+  --tw-prose-code: hsl(var(--prose-code));
+  --tw-prose-pre-bg: hsl(var(--prose-code-bg));
+  --tw-prose-quotes: hsl(var(--prose-quotes));
+  --tw-prose-bullets: hsl(var(--prose-bullets));
+  --tw-prose-hr: hsl(var(--prose-hr));
+}
+
 /* braille spinner（DSF 自包含，不依赖 events.css） */
 @keyframes shannon-spin {
   0% { content: "⠋"; } 10% { content: "⠙"; } 20% { content: "⠹"; } 30% { content: "⠸"; }
