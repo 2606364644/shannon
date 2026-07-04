@@ -27,9 +27,9 @@ export const apiDelete = <T>(path: string) => request<T>(path, { method: "DELETE
 export const browseFs = (path: string) =>
   apiGet<FsBrowseResult>(`/fs/browse?path=${encodeURIComponent(path)}`);
 export const deleteWorkspace = (ws: string) =>
-  apiDelete<{ deleted: string }>(`workspaces/${encodeURIComponent(ws)}`);
+  apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export const cancelScan = (ws: string) =>
-  apiDelete<{ cancelled: string }>(`scan/${encodeURIComponent(ws)}`);
+  apiDelete<{ cancelled: string }>(`/scan/${encodeURIComponent(ws)}`);
 
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。 */
 export async function apiGetText(path: string): Promise<string> {

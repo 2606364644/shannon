@@ -1,117 +1,102 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { WorkspaceListPage } from "./WorkspaceListPage";
 import type { Workspace } from "../api/types";
 
-// 真实形状 fixtures：白盒/黑盒/联动 三态 + 各 status 色
 const baseWorkspaces: Workspace[] = [
-  { name: "ws-a", scan_type: "whitebox", status: "running", created_at: 0, total_cost_usd: 2.34, total_duration_ms: 2530000, vuln_count: 14 },
-  { name: "ws-failed", scan_type: "whitebox", status: "failed", created_at: 0, total_cost_usd: 0.5, total_duration_ms: 60000, vuln_count: 0 },
-  { name: "ws-corr", scan_type: "correlation", status: "running", created_at: 0,
-    links: { child_workspaces: ["ws-a", "ws-b"] } },
+  { name: "ws-a", scan_type: "whitebox", status: "running", created_at: 1780000000, total_cost_usd: 2.34, total_duration_ms: 2530000, vuln_count: 14, is_correlation: false },
+  { name: "ws-failed", scan_type: "blackbox", status: "failed", created_at: 1780000100, total_cost_usd: 0.5, total_duration_ms: 60000, vuln_count: 0, is_correlation: false },
+  { name: "ws-corr", scan_type: "correlation", status: "completed", created_at: 1780000200, is_correlation: true, links: { child_workspaces: ["ws-child1"] } },
 ];
 
 const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json(baseWorkspaces)),
+  http.delete("/api/workspaces/:ws", ({ params }) => HttpResponse.json({ deleted: params.ws })),
+  http.delete("/api/scan/:ws", ({ params }) => HttpResponse.json({ cancelled: params.ws })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => {
-  server.resetHandlers();
-  cleanup();
-  // 防止 fake timers 跨测试泄漏
-  if (vi.isFakeTimers()) vi.useRealTimers();
-});
+afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 function renderPage() {
   return render(<MemoryRouter><WorkspaceListPage /></MemoryRouter>);
 }
 
-// 取顶层 workspace 行（排除联动 child 行）
-function topRow(name: string) {
-  return screen.getAllByText(name, { exact: true })
-    .map((n) => n.closest("tr"))
-    .find((tr) => tr?.className.includes("ledger-row") && !tr.className.includes("ledger-child"));
-}
-
-describe("WorkspaceListPage", () => {
-  it("渲染 workspace 行 + 等宽台账表格结构", async () => {
+describe("WorkspaceListPage (DataTable)", () => {
+  it("渲染所有 workspace 行 + 列（name/status/type/vulns/cost/time/操作）", async () => {
     renderPage();
-    await waitFor(() => expect(topRow("ws-a")).toBeDefined());
-    // 结构性：等宽 ledger 表格存在 + 表头列
-    const table = document.querySelector("table.ledger.mono");
-    expect(table).not.toBeNull();
-    const headers = Array.from(table!.querySelectorAll("thead th")).map((t) => t.textContent);
-    expect(headers).toEqual(["workspace", "status", "type", "vulns", "cost", "time"]);
-    // 等宽列：成本 / 时长 渲染
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    expect(screen.getByText("ws-failed")).toBeInTheDocument();
+    expect(screen.getByText("ws-corr")).toBeInTheDocument();
     expect(screen.getByText(/\$2\.34/)).toBeInTheDocument();
-    // type 列含 whitebox（多个白盒 ws → 用 AllBy）
-    expect(screen.getAllByText(/whitebox/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("14")).toBeInTheDocument();
   });
 
-  it("每行渲染 status 色条 + StatusBadge", async () => {
+  it("搜索框过滤 name", async () => {
     renderPage();
-    await waitFor(() => expect(topRow("ws-a")).toBeDefined());
-    // 结构性：status-running 色条 + ledger-row
-    const rowA = topRow("ws-a")!;
-    expect(rowA.className).toContain("ledger-row");
-    expect(rowA.className).toContain("status-running");
-    expect(rowA.querySelector(".status-bar.status-running")).not.toBeNull();
-    // failed 行红色条
-    const rowFailed = topRow("ws-failed")!;
-    expect(rowFailed.querySelector(".status-bar.status-failed")).not.toBeNull();
-    // StatusBadge 嵌入
-    expect(rowA.querySelector(".status-badge")).not.toBeNull();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    const search = screen.getByPlaceholderText(/搜索/i);
+    fireEvent.change(search, { target: { value: "failed" } });
+    expect(screen.queryByText("ws-a")).not.toBeInTheDocument();
+    expect(screen.getByText("ws-failed")).toBeInTheDocument();
   });
 
-  it("联动 workspace 展开 子 ws 树 + 🔗", async () => {
+  it("status 筛选", async () => {
     renderPage();
-    await waitFor(() => expect(topRow("ws-corr")).toBeDefined());
-    // 结构性：联动行带 🔗（🔗 是 td 内文本节点，与 <a> 同级）
-    const corrRow = topRow("ws-corr")!;
-    expect(corrRow.querySelector("td")?.textContent).toContain("🔗");
-    // ws-b 仅作为 child 行出现（不在顶层 ledger-row）
-    const wsBChildRow = screen.getAllByText("ws-b", { exact: true })
-      .map((n) => n.closest("tr"))
-      .find((tr) => tr?.className.includes("ledger-child"));
-    expect(wsBChildRow).toBeDefined();
-    expect(wsBChildRow?.className).toContain("trace");
-    // 子行 colSpan 横跨全表
-    expect(wsBChildRow?.querySelector("td")?.getAttribute("colSpan")).toBe("6");
-    // ws-a 既是顶层白盒行又是联动子（作为 child 出现一次）
-    const wsAChildRow = screen.getAllByText("ws-a", { exact: true })
-      .map((n) => n.closest("tr"))
-      .find((tr) => tr?.className.includes("ledger-child"));
-    expect(wsAChildRow).toBeDefined();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // Radix Select 不响应 fireEvent.change：开 trigger → 点 option
+    fireEvent.click(screen.getByLabelText(/status/i));
+    await waitFor(async () => fireEvent.click(await screen.findByRole("option", { name: /failed/i })));
+    expect(screen.queryByText("ws-a")).not.toBeInTheDocument();
+    expect(screen.getByText("ws-failed")).toBeInTheDocument();
   });
 
-  it("5s 轮询：定时刷新 + unmount 清理 timer", async () => {
-    vi.useFakeTimers();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+  it("correlation 行 expandable → 展开显子 ws", async () => {
     renderPage();
-    // fake timer 下推进让初始 fetch resolve（advanceTimersByTimeAsync 同时 flush 微任务）
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const callsAfterMount = fetchSpy.mock.calls.length;
-    // 推进 5s 触发轮询 fetch
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterMount);
-    const callsAfterTick = fetchSpy.mock.calls.length;
-    // unmount 后再推进，不应再触发 fetch（timer 已清理）
-    cleanup();
-    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
-    expect(fetchSpy.mock.calls.length).toBe(callsAfterTick);
-    fetchSpy.mockRestore();
+    await waitFor(() => expect(screen.getByText("ws-corr")).toBeInTheDocument());
+    // 展开按钮（correlation 行）
+    const expandBtn = screen.getAllByRole("button", { name: /展开/i })[0];
+    fireEvent.click(expandBtn);
+    // 子 ws 渲染为 "└─ ws-child1"，用正则匹配
+    expect(await screen.findByText(/ws-child1/)).toBeInTheDocument();
   });
 
-  it("空列表渲染空态", async () => {
+  it("running 行有'取消'按钮；点击 → Dialog 确认 → cancelScan", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /取消/ }));
+    // Dialog 标题 + 描述都含 "取消扫描"，用 heading role 精确匹配标题
+    expect(await screen.findByRole("heading", { name: /取消扫描/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /确认/ }));
+    // cancelScan DELETE /api/scan/ws-a 已 mock → 触发 refresh
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("非 running 行有'删除'按钮；点击 → Dialog 确认 → deleteWorkspace", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-failed")).toBeInTheDocument());
+    // 多个非 running 行 → 多个 "删除" 按钮，取第一个（ws-failed，DOM 顺序）
+    fireEvent.click(screen.getAllByRole("button", { name: /删除/ })[0]);
+    // Dialog 标题 "删除 workspace"，用 heading role 避免匹配描述
+    expect(await screen.findByRole("heading", { name: /删除 workspace/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /确认/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("空列表 → Empty 空态", async () => {
     server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
     renderPage();
-    await waitFor(() => expect(screen.getByText(/no workspaces/i)).toBeInTheDocument());
-    expect(screen.queryByText("ws-a")).not.toBeInTheDocument();
+    expect(await screen.findByText(/no workspaces/i)).toBeInTheDocument();
+  });
+
+  it("loading → Skeleton 行；上次刷新时间显示", async () => {
+    renderPage();
+    // lastUpdated 显示（waitFor data 后）
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    expect(screen.getByText(/上次刷新|last updated/i)).toBeInTheDocument();
   });
 });

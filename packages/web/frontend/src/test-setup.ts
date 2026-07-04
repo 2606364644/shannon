@@ -28,3 +28,8 @@ if (typeof window.localStorage?.clear !== "function") {
   };
   Object.defineProperty(window, "localStorage", { value: polyfill, configurable: true });
 }
+
+// jsdom 未实现 Element.prototype.scrollIntoView；Radix Select/Combobox 打开时调用，缺则抛错导致整个组件树卸载
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}
