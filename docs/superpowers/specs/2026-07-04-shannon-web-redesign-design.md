@@ -89,13 +89,16 @@
 | 2 | **列表页 + 文件浏览器** | WorkspaceListPage 重做（搜索 / 筛选 / 排序 / 删除 / 空态 / loading / 上次刷新）+ 后端 `GET /api/fs/browse` + 前端文件浏览器模态框 | 1 |
 | 3 | **扫描页重做** | ScanNewPage 表单：segmented 切换 / 分组 / 即时校验 / 集成文件浏览器 / workspace 名预览 | 1, 2（文件浏览器） |
 | 4 | **详情 5 tab 重做** | 概览 / 报告 / 产物 / 日志 / 实时 各自视觉 + 交互精进（`dashboardReducer` 逻辑不动） | 1 |
-| 5 | **新功能页** | Dashboard 首页（跨 ws 概览）+ 设置页（主题 + 引擎 / Temporal / worker 状态展示 + 清理归档） | 1 |
+| 5 | **新功能页** | Dashboard 首页（跨 ws 概览）+ 设置页（主题 + 引擎 / Temporal / worker 状态展示 + 关于/版本） | 1 |
 
 **顺序**：1 →（2 / 3 / 4 / 5 依赖 1，可一定程度并行）。
 
 每个子项目独立 spec → plan → impl 周期。本 spec 后续各子项目 spec：
-- 子项目 1 DSF：`2026-07-04-shannon-web-redesign-dsf-design.md`
-- 子项目 2-5：后续各自 spec（待 DSF 落地后开）。
+- 子项目 1 DSF：`2026-07-04-shannon-web-redesign-dsf-design.md`（✅ spec + 已实现）
+- 子项目 2 列表 + 文件浏览器：`2026-07-04-shannon-web-redesign-list-fs-design.md`（✅ spec + 已实现）
+- 子项目 3 扫描页：`2026-07-04-shannon-web-redesign-scan-design.md`（✅ spec + 已实现）
+- 子项目 4 详情 5 tab：`2026-07-04-shannon-web-redesign-detail-design.md`（✅ spec + 已实现）
+- 子项目 5 dashboard + settings：`2026-07-04-shannon-web-redesign-dashboard-settings-design.md`（✅ spec，待 plan + 实现）
 
 ---
 
