@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +14,17 @@ import { Spinner } from "@/components/Spinner";
 import { Empty } from "@/components/Empty";
 import { MergeSourceBadge, ReachableBadge } from "@/components/vuln-badges";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { FileSystemPicker } from "@/components/FileSystemPicker";
+
+function FileSystemPickerDemo() {
+  const [path, setPath] = useState("/");
+  return (
+    <div className="flex items-center gap-2">
+      <FileSystemPicker value={path} onChange={setPath} />
+      <span className="font-mono text-sm text-muted-foreground">已选：{path}</span>
+    </div>
+  );
+}
 
 export function DevComponentsPage() {
   return (
@@ -91,6 +103,10 @@ export function DevComponentsPage() {
           </CardHeader>
           <CardContent>content</CardContent>
         </Card>
+      </Section>
+
+      <Section title="FileSystemPicker">
+        <FileSystemPickerDemo />
       </Section>
     </div>
   );
