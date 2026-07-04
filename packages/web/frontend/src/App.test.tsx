@@ -25,7 +25,7 @@ describe("App 集成冒烟", () => {
 
 describe("App Toaster 挂载", () => {
   it("App 根挂 <Toaster />（toast 通道）", () => {
-    const { container } = render(<App />);
+    render(<App />);
     // sonner <Toaster /> 默认渲染 <section aria-label="Notifications"> 到 body
     expect(screen.getByLabelText(/notifications/i)).toBeInTheDocument();
   });

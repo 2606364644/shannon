@@ -3,11 +3,13 @@ import { useNavigate } from "react-router-dom";
 import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
+import { ScanFormFields } from "../components/ScanFormFields";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
-interface FormState {
+export interface FormState {
   sourceKind: "path" | "git";
   sourceValue: string;
   branch: string;
@@ -93,104 +95,6 @@ export function ScanNewPage() {
     }
   }
 
-  // 白盒/黑盒共享同一 form-area（仅 blackbox 多 reuse_latest，靠 type==="blackbox" 判断）。
-  // Task 2 抽为内部函数避免在 TabsContent 内复制；Task 3 提升为 <ScanFormFields> 组件。
-  function renderForm() {
-    return (
-      <div className="form-area">
-        <label>
-          代码来源：
-          <select
-            value={f.sourceKind}
-            onChange={(e) => set({ sourceKind: e.target.value as "path" | "git" })}
-          >
-            <option value="path">本地路径</option>
-            <option value="git">git URL</option>
-          </select>
-          <input
-            value={f.sourceValue}
-            onChange={(e) => set({ sourceValue: e.target.value })}
-            placeholder={f.sourceKind === "path" ? "/root/code/foo" : "https://gitlab.example/foo.git"}
-          />
-        </label>
-        {f.sourceKind === "git" && (
-          <div className="git-extra">
-            <input
-              value={f.branch}
-              onChange={(e) => set({ branch: e.target.value })}
-              placeholder="分支(可选)"
-            />
-            <input
-              value={f.commit}
-              onChange={(e) => set({ commit: e.target.value })}
-              placeholder="commit(可选,优先)"
-            />
-            <label>
-              <input
-                type="checkbox"
-                checked={f.forceReclone}
-                onChange={(e) => set({ forceReclone: e.target.checked })}
-              />{" "}
-              强制重新 clone
-            </label>
-          </div>
-        )}
-        <label>
-          目标 URL：
-          <input
-            value={f.url}
-            onChange={(e) => set({ url: e.target.value })}
-            placeholder="http://example.com"
-          />
-        </label>
-        <label>
-          workspace 名：
-          <input
-            value={f.wsName}
-            onChange={(e) => set({ wsName: e.target.value })}
-            placeholder="空=自动 {repo}_{timestamp}"
-          />
-        </label>
-        {type === "blackbox" && (
-          <label>
-            <input
-              type="checkbox"
-              checked={f.reuseLatest}
-              onChange={(e) => set({ reuseLatest: e.target.checked })}
-            />{" "}
-            复用最新白盒结果{" "}
-            <span className="trace">
-              --latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone，规避 CLI 软默认复用
-            </span>
-          </label>
-        )}
-        {conflict && (
-          <div className="confirm-dialog ev-warn">
-            ⚠ workspace「{conflict}」已存在，CLI -w 语义=存在则恢复，将
-            <b>断点续扫</b>（恢复已有进度）。
-            <button onClick={() => set({ wsName: "" })}>取消</button>
-            <button className="confirm-continue" onClick={submit}>
-              确认续扫
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderCorrelation() {
-    return (
-      <div className="correlation-area">
-        <YamlEditor
-          value={f.yaml}
-          onChange={(v) => set({ yaml: v })}
-          onError={(m) => setYamlErr(m)}
-        />
-        <div className="trace">{yamlErr ? `⚠ ${yamlErr}` : "yaml 合法"}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="page scan-page">
       <Tabs
@@ -203,11 +107,39 @@ export function ScanNewPage() {
           <TabsTrigger value="blackbox">黑盒</TabsTrigger>
           <TabsTrigger value="correlation">联动</TabsTrigger>
         </TabsList>
-        {/* Radix Tabs 仅 mount 激活 tab 的 TabsContent；type 由 onValueChange 驱动，
-            renderForm() 闭包读 type → 黑盒 tab 激活时 reuse 块自然显。 */}
-        <TabsContent value="whitebox">{renderForm()}</TabsContent>
-        <TabsContent value="blackbox">{renderForm()}</TabsContent>
-        <TabsContent value="correlation">{renderCorrelation()}</TabsContent>
+        {/* Radix Tabs 仅 mount 激活 tab 的 TabsContent；type 由 onValueChange 驱动。
+            白盒/黑盒共享 <ScanFormFields>，靠 type prop 决定 reuse 块是否渲染。 */}
+        <TabsContent value="whitebox">
+          <ScanFormFields
+            type="whitebox"
+            f={f}
+            set={set}
+            conflict={conflict}
+            onConflictDismiss={() => set({ wsName: "" })}
+          />
+        </TabsContent>
+        <TabsContent value="blackbox">
+          <ScanFormFields
+            type="blackbox"
+            f={f}
+            set={set}
+            conflict={conflict}
+            onConflictDismiss={() => set({ wsName: "" })}
+          />
+        </TabsContent>
+        <TabsContent value="correlation">
+          <Card>
+            <CardHeader><CardTitle>联动扫描</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <YamlEditor
+                value={f.yaml}
+                onChange={(v) => set({ yaml: v })}
+                onError={(m) => setYamlErr(m)}
+              />
+              <div className="trace">{yamlErr ? `⚠ ${yamlErr}` : "yaml 合法"}</div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {err && <div className="err-banner ev-error">{err}</div>}
