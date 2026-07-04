@@ -1,16 +1,21 @@
-"use client"
+"use client";
 
-import { useTheme } from "next-themes"
-import { Toaster as Sonner } from "sonner"
+import { Toaster as Sonner } from "sonner";
 
-type ToasterProps = React.ComponentProps<typeof Sonner>
+type ToasterProps = React.ComponentProps<typeof Sonner>;
+
+// 本项目主题走 @/lib/theme（applyTheme 写 document.documentElement.classList），
+// 非 next-themes。Toaster 渲染时读一次 html class 决定深/浅（toast 是短弹窗，
+// 切主题时通常不在屏，一次性读够用）。
+function readTheme(): "dark" | "light" {
+  if (typeof document === "undefined") return "dark";
+  return document.documentElement.classList.contains("light") ? "light" : "dark";
+}
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={readTheme()}
       className="toaster group"
       toastOptions={{
         classNames: {
@@ -25,7 +30,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       {...props}
     />
-  )
-}
+  );
+};
 
-export { Toaster }
+export { Toaster };

@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { router } from "./router";
 import App from "./App";
+import { Toaster } from "@/components/ui/sonner";
 
 // jsdom 默认 location.pathname = "/"，createBrowserRouter 读 History API → 落地根路由。
 const server = setupServer(http.get("/api/workspaces", () => HttpResponse.json([])));
@@ -19,5 +20,17 @@ describe("App 集成冒烟", () => {
   });
   it("RouterProvider 可用（导出 router）", () => {
     expect(router).toBeDefined();
+  });
+});
+
+describe("App Toaster 挂载", () => {
+  it("App 根挂 <Toaster />（toast 通道）", () => {
+    const { container } = render(<App />);
+    // sonner <Toaster /> 默认渲染 <section aria-label="Notifications"> 到 body
+    expect(screen.getByLabelText(/notifications/i)).toBeInTheDocument();
+  });
+  it("Toaster 组件可独立渲染（导出可用）", () => {
+    render(<Toaster />);
+    expect(screen.getByLabelText(/notifications/i)).toBeInTheDocument();
   });
 });
