@@ -57,7 +57,7 @@ class WorkspacesIndexer:
         for ws_path in mgr.list_workspaces():
             name = ws_path.name
             try:
-                mgr.get_session_data(ws_path)  # 触发读，失败则跳过
+                data = mgr.get_session_data(ws_path)
             except Exception:
                 continue
             scan_type = mgr.get_scan_type(ws_path)
@@ -66,11 +66,16 @@ class WorkspacesIndexer:
                 vuln = get_workspace_vuln_counts(ws_path)
             except Exception:
                 vuln = {}
+            metrics = data.get("metrics", {}) if isinstance(data, dict) else {}
             out.append({
                 "name": name,
                 "scan_type": scan_type,
                 "status": status,
                 "vuln_counts": vuln,
+                "vuln_count": sum(vuln.values()) if vuln else 0,
+                "total_cost_usd": metrics.get("total_cost_usd"),
+                "total_duration_ms": metrics.get("total_duration_ms"),
+                "links": data.get("links", {}) if isinstance(data, dict) else {},
                 "created_at": mgr.get_created_at(ws_path),
                 "completed_at": mgr.get_completed_at(ws_path),
                 "is_correlation": scan_type == "correlation",
