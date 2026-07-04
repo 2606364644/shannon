@@ -121,6 +121,20 @@ class DeliverablesReader:
                 out.append(f.name)
         return out
 
+    def list_logs(self) -> list[str]:
+        """列日志文件:顶层 *.log + agents/*.log(返 'agents/{name}' 含前缀,
+        前端回传 ?file=agents/xxx 经 read_log 解析)。"""
+        out: list[str] = []
+        for f in sorted(self._ws.glob("*.log")):
+            if f.is_file():
+                out.append(f.name)
+        agents_dir = self._ws / "agents"
+        if agents_dir.is_dir():
+            for f in sorted(agents_dir.glob("*.log")):
+                if f.is_file():
+                    out.append(f"agents/{f.name}")
+        return out
+
     def read(self, filename: str, track: str = WHITEBOX_SUBDIR) -> dict | list | str:
         p = resolve_track_deliverable(self._deliverables, track, filename)
         if not p.exists():

@@ -105,9 +105,12 @@ async def report(ws: str, request: Request):
 
 
 @router.get("/{ws}/logs")
-async def logs(ws: str, request: Request, name: str = "workflow.log"):
+async def logs(ws: str, request: Request, file: str | None = Query(None)):
     from shannon_web.components.deliverables_reader import DeliverablesReader
+    reader = DeliverablesReader(_workspace_path(request, ws))
+    if file is None:
+        return {"files": reader.list_logs()}
     try:
-        return DeliverablesReader(_workspace_path(request, ws)).read_log(name)
+        return {"content": reader.read_log(file)}
     except FileNotFoundError:
         raise HTTPException(404, "log not found")

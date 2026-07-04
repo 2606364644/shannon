@@ -92,6 +92,26 @@ def test_deliverables_file_preview_dual_mode(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/F/deliverables?path=whitebox/nope.json").status_code == 404
 
 
+def test_logs_dual_mode(app_with_ws, tmp_workspaces):
+    """logs 端点双模式:无 file→{files};有 file→{content}。参数 file 对齐前端 LogsTab ?file=(#8,#9)。"""
+    _ws(tmp_workspaces, "L")
+    ws = tmp_workspaces / "L"
+    (ws / "workflow.log").write_text("wf content")
+    (ws / "activity_failures.log").write_text("af content")
+    agents = ws / "agents"
+    agents.mkdir()
+    (agents / "1782_recon_attempt-1.log").write_text("agent content")
+    client = TestClient(app_with_ws)
+    files = client.get("/api/workspaces/L/logs").json()["files"]
+    assert "workflow.log" in files
+    assert "activity_failures.log" in files
+    assert "agents/1782_recon_attempt-1.log" in files
+    assert client.get("/api/workspaces/L/logs?file=workflow.log").json()["content"] == "wf content"
+    # agents/ 相对路径回传 → read_log 解析
+    assert client.get("/api/workspaces/L/logs?file=agents/1782_recon_attempt-1.log").json()["content"] == "agent content"
+    assert client.get("/api/workspaces/L/logs?file=nope.log").status_code == 404
+
+
 def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
     """workspace 存在但无报告产物 → 200 + 空文本(前端 ReportTab Empty「报告尚未生成」契约),
     非 404。404 保留给 workspace 不存在(_workspace_path 已抛)。
