@@ -1,10 +1,33 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 from shannon_core.session import SessionManager
 from shannon_core.workspace import get_workspace_vuln_counts
+
+
+def _to_unix(v) -> float | None:
+    """归一 created_at/completed_at 为 unix float|None:float|int 直用、ISO str 解析、None/异常→None。
+    前端 Workspace.created_at/SessionData.created_at 期望 number(unix);修后端透传 ISO str
+    致前端 new Date(unix*1000) Invalid Date 的契约断裂。"""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _created_at_key(row: dict) -> float:
+    """sort key:复用 _to_unix,缺失/异常→0.0(排最后)。
+    修 sort 时 float 与 None-fallback-str 不可比、曾致 /api/workspaces 500 的 bug。"""
+    return _to_unix(row.get("created_at")) or 0.0
 
 
 class WorkspacesIndexer:
@@ -76,9 +99,9 @@ class WorkspacesIndexer:
                 "total_cost_usd": metrics.get("total_cost_usd"),
                 "total_duration_ms": metrics.get("total_duration_ms"),
                 "links": data.get("links", {}) if isinstance(data, dict) else {},
-                "created_at": mgr.get_created_at(ws_path),
-                "completed_at": mgr.get_completed_at(ws_path),
+                "created_at": _to_unix(mgr.get_created_at(ws_path)),
+                "completed_at": _to_unix(mgr.get_completed_at(ws_path)),
                 "is_correlation": scan_type == "correlation",
             })
-        out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        out.sort(key=_created_at_key, reverse=True)
         return out
