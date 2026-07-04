@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { FileSystemPicker } from "./FileSystemPicker";
 import type { FormState } from "../pages/ScanNewPage";
 
 interface ScanFormFieldsProps {
@@ -33,12 +34,21 @@ export function ScanFormFields({ type, f, set, conflict }: ScanFormFieldsProps) 
               </SelectContent>
             </Select>
             <Label htmlFor="sourceValue">路径 / URL</Label>
-            <Input
-              id="sourceValue"
-              value={f.sourceValue}
-              onChange={(e) => set({ sourceValue: e.target.value })}
-              placeholder={f.sourceKind === "path" ? "/root/code/foo" : "https://gitlab.example/foo.git"}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="sourceValue"
+                value={f.sourceValue}
+                onChange={(e) => set({ sourceValue: e.target.value })}
+                placeholder={f.sourceKind === "path" ? "/root/code/foo" : "https://gitlab.example/foo.git"}
+              />
+              {f.sourceKind === "path" && (
+                <FileSystemPicker
+                  value={f.sourceValue}
+                  onChange={(v) => set({ sourceValue: v })}
+                  triggerLabel="📁 浏览"
+                />
+              )}
+            </div>
           </div>
           {f.sourceKind === "git" && (
             <div className="space-y-2 git-extra">

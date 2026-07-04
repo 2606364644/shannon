@@ -120,4 +120,26 @@ describe("ScanNewPage", () => {
     // 无 detail → 只剩标签前缀，不含原始 JSON
     expect(banner.textContent).not.toContain("{");
   });
+
+  it("path 时显「📁 浏览」trigger", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: /📁 浏览/ })).toBeInTheDocument();
+  });
+
+  it("点「📁 浏览」→ 打开文件浏览器 → 显目录 entry", async () => {
+    server.use(
+      http.get("/api/fs/browse", () =>
+        HttpResponse.json({
+          path: "/",
+          parent: null,
+          entries: [{ name: "code", type: "dir" }],
+        }),
+      ),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /📁 浏览/ }));
+    // FileSystemPicker Dialog 打开（title 默认"选择代码目录"）
+    await waitFor(() => expect(screen.getByText("选择代码目录")).toBeInTheDocument());
+    expect(screen.getByText("code")).toBeInTheDocument();
+  });
 });
