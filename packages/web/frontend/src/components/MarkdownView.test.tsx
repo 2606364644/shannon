@@ -133,4 +133,17 @@ describe("MarkdownView", () => {
     render(<MarkdownView markdown="# T" />);
     expect(document.querySelector(".prose")).toBeInTheDocument();
   });
+
+  it("GFM 表格渲染成 <table>（依赖 remark-gfm）", () => {
+    const md = `
+| 类型 | 数量 |
+|------|------|
+| INJ  | 4    |
+| XSS  | 2    |
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(container.querySelectorAll("th").length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll("td").length).toBeGreaterThanOrEqual(2);
+  });
 });

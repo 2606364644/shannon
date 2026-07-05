@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 
 interface Heading {
@@ -126,6 +127,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         </nav>
         <div className="prose prose-sm max-w-none font-serif">
           <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
             rehypePlugins={[
               rehypeSlug,
               [rehypeAutolinkHeadings, { behavior: "wrap" }],
