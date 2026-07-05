@@ -56,7 +56,7 @@ export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingCo
             {sourceValueErr && <div className="text-destructive text-xs">{sourceValueErr}</div>}
           </div>
           {f.sourceKind === "git" && (
-            <div className="space-y-2 git-extra">
+            <div className="space-y-2 border-t border-border pt-4 mt-4">
               <div className="flex gap-2">
                 <Input value={f.branch} onChange={(e) => set({ branch: e.target.value })} placeholder="分支(可选)" />
                 <Input value={f.commit} onChange={(e) => set({ commit: e.target.value })} placeholder="commit(可选,优先)" />
@@ -84,9 +84,9 @@ export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingCo
               onChange={(e) => set({ wsName: e.target.value })}
               placeholder="空=自动 {repo}_{timestamp}"
             />
-            {loadingConflict && <div className="ev-warn text-xs">检测重名中…</div>}
+            {loadingConflict && <div className="text-xs text-yellow">检测重名中…</div>}
             {!f.wsName && derivedName && (
-              <div className="trace">预览名：{derivedName}（预览，实际由后端生成）</div>
+              <div className="text-xs text-muted-foreground">预览名：{derivedName}（预览，实际由后端生成）</div>
             )}
           </div>
         </fieldset>
@@ -98,7 +98,7 @@ export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingCo
               <Checkbox id="reuseLatest" checked={f.reuseLatest} onCheckedChange={(v) => set({ reuseLatest: !!v })} />
               <Label htmlFor="reuseLatest">复用最新白盒结果</Label>
             </div>
-            <div className="trace">
+            <div className="text-xs text-muted-foreground">
               --latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone，规避 CLI 软默认复用
             </div>
           </fieldset>

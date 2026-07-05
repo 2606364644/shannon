@@ -163,7 +163,7 @@ export function ScanNewPage() {
   }
 
   return (
-    <div className="page scan-page">
+    <div className="space-y-4">
       <Tabs
         defaultValue="whitebox"
         onValueChange={(v) => setType(v as ScanType)}
@@ -211,16 +211,18 @@ export function ScanNewPage() {
                 onChange={(v) => set({ yaml: v })}
                 onError={(m) => setYamlErr(m)}
               />
-              <div className="trace">{yamlErr ? `⚠ ${yamlErr}` : "yaml 合法"}</div>
+              <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
+                {yamlErr ? `⚠ ${yamlErr}` : "yaml 合法"}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      <Button className="submit-btn" onClick={onSubmit} disabled={!isValid || submitting}>
+      <Button size="lg" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
         开始扫描 ▶
       </Button>
-      <div className="trace">→ 202 → 跳 /p/{"{ws}"}/live · 错误：400(Temporal)/409(并发)/422(yaml)</div>
+      <div className="text-xs text-muted-foreground">→ 202 → 跳 /p/{"{ws}"}/live · 错误：400(Temporal)/409(并发)/422(yaml)</div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent onInteractOutside={(e) => e.preventDefault()}>

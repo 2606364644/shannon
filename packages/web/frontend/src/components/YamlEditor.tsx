@@ -34,7 +34,7 @@ export function YamlEditor({
   }, [value, onError]);
 
   return (
-    <div className="yaml-editor">
+    <div className="border border-border rounded-md overflow-hidden">
       <Editor
         height="320px"
         language="yaml"

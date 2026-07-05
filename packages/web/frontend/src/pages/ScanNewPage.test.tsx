@@ -219,4 +219,14 @@ describe("ScanNewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /确认续扫/ }));
     await waitFor(() => expect(spy).not.toHaveBeenCalled());
   });
+
+  it("扫描页无 events.css 遗留 class（浅色主题不断裂）", () => {
+    const { container } = renderPage();
+    expect(container.querySelector(".page.scan-page")).toBeNull();
+    expect(container.querySelector(".submit-btn")).toBeNull();
+    expect(container.querySelector(".trace")).toBeNull();
+    expect(container.querySelector(".git-extra")).toBeNull();
+    expect(container.querySelector(".yaml-editor")).toBeNull();
+    expect(container.querySelector(".ev-warn")).toBeNull();
+  });
 });
