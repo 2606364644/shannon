@@ -1,0 +1,70 @@
+# =============================================================================
+# Shannon 多仓库（微服务）关联扫描配置 —— 示例：前端 Node.js + 后端 gRPC
+# -----------------------------------------------------------------------------
+# 本文件由 packages/core/src/shannon_core/config/parser.py 的
+# parse_multi_repo_config() 解析，schema 锁定在
+# packages/core/src/shannon_core/models/multi_repo_config.py（Pydantic，extra=forbid，
+# 即任何没在这两个文件里出现的字段都会被拒，想加字段必须先改 model）。
+#
+# 顶层结构（4 段）：
+#   description  —— 可选，纯描述，会进关联 workspace 的元信息
+#   repos        —— 必填，本次要扫描的全部仓库（dict，键是你自己起的仓库名）
+#   relations    —— 可选，仓库间的调用边；描述“谁调谁、走什么协议”
+#   correlation  —— 必填，跨服务关联分析结果的落点
+#
+# 铁律（model_validator 强制，违反整个配置加载失败）：
+#   1. repos 里至少一个 role: entrypoint（跨服务调用图的入口）
+#   2. 每个 repo 必须有 path 或 workspace 之一（path=扫本地代码目录，
+#      workspace=复用已存在的 shannon workspace）
+#   3. relations 的 from / to 必须是 repos 里已声明的仓库名
+# =============================================================================
+
+description: "前端 Node.js (entrypoint) -> 后端 gRPC (backend) 关联扫描示例"
+
+# -----------------------------------------------------------------------------
+# repos：在这里填你要扫描的微服务仓库。
+# 键 = 仓库名（自定义，下面 relations 用它来引用）；值 = RepoSpec。
+#
+# RepoSpec 字段：
+#   path         本地仓库绝对路径（与 workspace 二选一）。★前端/后端仓库就填这里★
+#   workspace    复用已有 workspace 名（与 path 二选一）
+#   role         只能 entrypoint | backend（默认 backend）
+#                · entrypoint = 跨服务调用图的入口，通常是公网可达、主动发起调用的那一端
+#                · backend    = 被调用方
+#   scan_config  可选，挂一份单仓扫描 YAML 的路径，给该仓库单独加规则/认证等
+#   proto_roots  gRPC proto 文件根目录列表（预留字段，当前关联引擎尚未消费，
+#                仅作声明；需要时在此列出 proto 根，便于后续 gRPC 边界分析使用）
+# -----------------------------------------------------------------------------
+repos:
+  # —— 前端 Node.js 仓库（公网入口，发起跨服务调用 → entrypoint）——
+  frontend-web:
+    path: /code/frontend-web          # ★改成本地 Node.js 仓库的绝对路径
+    role: entrypoint                  # 前端是入口：用户/浏览器从这里进来触发后端
+    # scan_config: configs/frontend-scan.yaml   # 可选：该仓库专属的扫描配置
+
+  # —— 后端 gRPC 仓库（被前端调用 → backend）——
+  backend-grpc:
+    path: /code/backend-grpc          # ★改成本地 gRPC 后端仓库的绝对路径
+    role: backend                     # 默认即 backend，写出来更清楚
+    # proto_roots:                    # 预留：gRPC proto 根目录，当前版本未实际读取
+    #   - /code/backend-grpc/proto
+
+# -----------------------------------------------------------------------------
+# relations：仓库间的调用边（仅当有多仓库关联时才需要）。
+# 每条边：
+#   from     调用方仓库名（必须是 repos 里声明过的键）
+#   to       被调方仓库名（必须是 repos 里声明过的键）
+#   protocol 只能 grpc | http | graphql（默认 grpc）
+# -----------------------------------------------------------------------------
+relations:
+  - from: frontend-web                # 前端 Node.js 发起调用
+    to: backend-grpc                  # 调到后端 gRPC 服务
+    protocol: grpc                    # ★微服务场景这里写 grpc
+
+# -----------------------------------------------------------------------------
+# correlation：跨服务关联分析的输出落点。
+#   out_workspace  关联结果写入的 workspace 名（在 SHANNON_WORKER_ROOT 下创建，
+#                  存放关联 deliverables、topology、events.ndjson 等）
+# -----------------------------------------------------------------------------
+correlation:
+  out_workspace: cor-out              # 改成你想要的关联 workspace 名
