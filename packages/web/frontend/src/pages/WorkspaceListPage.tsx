@@ -19,6 +19,16 @@ import type { Workspace } from "@/api/types";
 
 const helper = createColumnHelper<Workspace>();
 
+const STATUS_COLOR: Record<string, string> = {
+  running: "bg-cyan",
+  completed: "bg-green",
+  done: "bg-green",
+  failed: "bg-red",
+  killed: "bg-red",
+  crashed: "bg-yellow",
+};
+const statusColor = (s: string) => STATUS_COLOR[s] ?? "bg-yellow";
+
 function fmtTime(unix?: number): string {
   if (!unix) return "—";
   return new Date(unix * 1000).toLocaleString();
@@ -60,7 +70,7 @@ export function WorkspaceListPage() {
     helper.accessor("name", {
       header: "workspace", cell: (info) => (
         <span className="flex items-center gap-2">
-          <span className={`status-bar status-${info.row.original.status}`} />
+          <span className={`inline-block w-0.5 self-stretch rounded ${statusColor(info.row.original.status)}`} />
           <Link to={`/p/${info.getValue()}`} className="font-mono hover:text-primary">{info.getValue()}</Link>
           {info.row.original.is_correlation ? " 🔗" : ""}
         </span>

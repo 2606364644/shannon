@@ -99,4 +99,11 @@ describe("WorkspaceListPage (DataTable)", () => {
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
     expect(screen.getByText(/上次刷新|last updated/i)).toBeInTheDocument();
   });
+
+  it("行首无 status-bar 遗留 class、running 行有 bg-cyan 色条", async () => {
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    expect(container.querySelector(".status-bar")).toBeNull();
+    expect(container.querySelector('[class*="bg-cyan"]')).not.toBeNull();
+  });
 });
