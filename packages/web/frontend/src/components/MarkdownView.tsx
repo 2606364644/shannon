@@ -1,10 +1,11 @@
-import { useMemo, useState, type ReactNode, type ReactElement } from "react";
+import { useMemo, useState, Children, type ReactNode, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Heading {
   id: string;
@@ -86,7 +87,8 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               onClick={() => setHeroCollapsed((c) => !c)}
               aria-label="toggle hero"
             >
-              {heroCollapsed ? "展开 ▸" : "折叠 ▾"}
+              {heroCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+              <span className="sr-only">{heroCollapsed ? "展开" : "折叠"}</span>
             </Button>
           </div>
           {!heroCollapsed && (
@@ -109,102 +111,119 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         </div>
       )}
 
-      <div className="grid grid-cols-[220px_1fr] gap-6">
-        <nav data-testid="toc" className="sticky top-4 space-y-1 text-sm">
-          {headings
-            .filter((h) => h.level >= 2)
-            .map((h, i) => (
-              <a
-                key={`${i}-${h.id}`}
-                href={`#${h.id}`}
-                className={`block text-muted-foreground hover:text-primary ${
-                  h.level === 3 ? "pl-3 text-xs" : ""
-                }`}
-              >
-                {h.text}
-              </a>
-            ))}
-        </nav>
-        <div className="prose prose-sm max-w-none font-serif">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[
-              rehypeSlug,
-              [rehypeAutolinkHeadings, { behavior: "wrap" }],
-              rehypeHighlight,
-            ]}
-            components={{
-              // 加粗键值：`- **key:** value` → 对齐 key-value 行
-              // react-markdown 把 `**key:**` 解析为 <strong>key:</strong>，故检测首个
-              // <strong> 子节点（text 以 `:` 结尾）作为 key，余下作为 value（保留原 ReactNode
-              // 以免吞掉行内 <code> 等）。
-              li: ({ children, ...props }) => {
-                const kids = Array.isArray(children) ? children : [children];
-                const firstStrongIdx = kids.findIndex(
-                  (k) => typeof k !== "string" && (k as ReactElement)?.type === "strong",
-                );
-                if (firstStrongIdx !== -1) {
-                  const strongEl = kids[firstStrongIdx] as ReactElement<{ children?: ReactNode }>;
-                  const rawKey = flatten(strongEl.props.children);
-                  // 冒号守卫：<strong> 文本必须以 `:`（ASCII）或 `：`（全角）结尾才视为 kv 键。
-                  // 否则像执行摘要编号列表 `1. **RCE**（INJ-01）：eval`（strong=`RCE`，无冒号）
-                  // 会被误判为 kv 行。无冒号 → 走默认 <li> 渲染。
-                  if (!/[：:]\s*$/.test(rawKey)) {
-                    return <li {...props}>{children}</li>;
-                  }
-                  const keyText = rawKey.replace(/[:：]\s*$/, "").trim();
-                  if (keyText) {
-                    const restKids = kids.slice(firstStrongIdx + 1);
-                    // 去掉 value 前导空白字符串节点，保留元素节点（<code> 等）
-                    const valKids: ReactNode[] = [];
-                    let trimming = true;
-                    for (const k of restKids) {
-                      if (trimming && typeof k === "string" && /^\s*$/.test(k)) continue;
-                      if (trimming && typeof k === "string") {
-                        valKids.push(k.replace(/^\s+/, ""));
-                        trimming = false;
-                      } else {
-                        valKids.push(k);
-                        trimming = false;
+      {(() => {
+        const tocItems = headings.filter((h) => h.level >= 2);
+        const gridCls = tocItems.length > 0 ? "grid grid-cols-[220px_1fr] gap-6" : "grid grid-cols-1";
+        return (
+          <div className={gridCls}>
+            {tocItems.length > 0 && (
+              <nav data-testid="toc" className="sticky top-4 space-y-1 text-sm">
+                {tocItems.map((h, i) => (
+                  <a
+                    key={`${i}-${h.id}`}
+                    href={`#${h.id}`}
+                    className={`block text-muted-foreground hover:text-primary ${
+                      h.level === 3 ? "pl-3 text-xs" : ""
+                    }`}
+                  >
+                    {h.text}
+                  </a>
+                ))}
+              </nav>
+            )}
+            <div className="prose prose-sm max-w-none font-sans prose-headings:font-serif">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[
+                  rehypeSlug,
+                  [rehypeAutolinkHeadings, { behavior: "wrap" }],
+                  rehypeHighlight,
+                ]}
+                components={{
+                  // KV 行（冒号守卫逻辑保持不变，仅 className 加 items-baseline / shrink-0）
+                  li: ({ children, ...props }) => {
+                    const kids = Array.isArray(children) ? children : [children];
+                    const firstStrongIdx = kids.findIndex(
+                      (k) => typeof k !== "string" && (k as ReactElement)?.type === "strong",
+                    );
+                    if (firstStrongIdx !== -1) {
+                      const strongEl = kids[firstStrongIdx] as ReactElement<{ children?: ReactNode }>;
+                      const rawKey = flatten(strongEl.props.children);
+                      if (!/[：:]\s*$/.test(rawKey)) {
+                        return <li {...props}>{children}</li>;
+                      }
+                      const keyText = rawKey.replace(/[:：]\s*$/, "").trim();
+                      if (keyText) {
+                        const restKids = kids.slice(firstStrongIdx + 1);
+                        const valKids: ReactNode[] = [];
+                        let trimming = true;
+                        for (const k of restKids) {
+                          if (trimming && typeof k === "string" && /^\s*$/.test(k)) continue;
+                          if (trimming && typeof k === "string") {
+                            valKids.push(k.replace(/^\s+/, ""));
+                            trimming = false;
+                          } else {
+                            valKids.push(k);
+                            trimming = false;
+                          }
+                        }
+                        return (
+                          <li {...props} data-testid="kv-row" className="flex items-baseline gap-2">
+                            <span className="kv-key shrink-0 font-mono text-muted-foreground">{keyText}</span>
+                            <span className="kv-val">{valKids}</span>
+                          </li>
+                        );
                       }
                     }
+                    return <li {...props}>{children}</li>;
+                  },
+                  // block code：仅渲染 <code>（含 hljs language-xxx class），装饰交给 pre
+                  code: ({ className, children, ...props }) => (
+                    <code {...props} className={`font-mono ${className ?? ""}`}>{children}</code>
+                  ),
+                  // pre：只包 block code → 加语言角标 + 复制按钮
+                  pre: ({ children, ...props }) => {
+                    const codeChild = Children.toArray(children)[0] as ReactElement<{
+                      className?: string;
+                      children?: ReactNode;
+                    }>;
+                    const cls = (codeChild?.props as { className?: string } | undefined)?.className ?? "";
+                    const lang = /language-(\w+)/.exec(cls)?.[1] ?? "";
+                    const text = flatten(codeChild?.props?.children);
                     return (
-                      <li
-                        {...props}
-                        data-testid="kv-row"
-                        className="flex gap-2"
-                      >
-                        <span className="kv-key font-mono text-muted-foreground">{keyText}</span>
-                        <span className="kv-val">{valKids}</span>
-                      </li>
+                      <pre {...props} data-testid="code-block" className="relative">
+                        {lang && (
+                          <span
+                            data-testid="code-lang"
+                            className="absolute right-2 top-1 font-mono text-xs text-muted-foreground"
+                          >
+                            {lang}
+                          </span>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          data-testid="copy-btn"
+                          className="copy-btn absolute right-2 bottom-1 text-xs opacity-60 hover:opacity-100"
+                          onClick={(e) => {
+                            navigator.clipboard?.writeText(text);
+                            e.currentTarget.textContent = "✓";
+                          }}
+                        >
+                          复制
+                        </Button>
+                        {children}
+                      </pre>
                     );
-                  }
-                }
-                return <li {...props}>{children}</li>;
-              },
-              // witness PoC 代码块：可复制
-              code: ({ className, children, ...props }) => (
-                <code {...props} className={`font-mono ${className ?? ""}`}>
-                  {children}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="copy-btn ml-1 text-xs"
-                    onClick={(e) => {
-                      navigator.clipboard?.writeText(String(children));
-                      e.currentTarget.textContent = "✓";
-                    }}
-                  >
-                    复制
-                  </Button>
-                </code>
-              ),
-            }}
-          >
-            {markdown}
-          </ReactMarkdown>
-        </div>
-      </div>
+                  },
+                }}
+              >
+                {markdown}
+              </ReactMarkdown>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

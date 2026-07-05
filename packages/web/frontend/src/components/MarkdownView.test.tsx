@@ -35,7 +35,10 @@ Count: 4
 
 - **vulnerability_type:** CommandInjection
 - **verdict:** vulnerable
-- **witness_payload:** \`preTax=res.send(...)\`
+- **witness_payload:**
+  \`\`\`bash
+  preTax=res.send(...)
+  \`\`\`
 `;
 
 describe("MarkdownView", () => {
@@ -52,6 +55,13 @@ describe("MarkdownView", () => {
     const toc = container.querySelector('[data-testid="toc"]');
     expect(toc?.textContent).toContain("执行摘要");
     expect(toc?.textContent).toContain("Injection");
+  });
+
+  it("无 level>=2 标题时不渲染 TOC、外层退单栏", () => {
+    const { container } = render(<MarkdownView markdown={"# 只有一级标题\n\n正文"} />);
+    expect(container.querySelector('[data-testid="toc"]')).toBeNull();
+    // 外层 grid 退单栏：无双栏 class
+    expect(container.querySelector(".grid.grid-cols-\\[220px_1fr\\]")).toBeNull();
   });
 
   it("执行摘要 hero 置顶 + 含最高风险发现（vuln-ID 提取到专属元素）", () => {
@@ -100,12 +110,27 @@ describe("MarkdownView", () => {
     expect(kvKeys).not.toContain("SSRF");
   });
 
-  it("代码块带复制按钮（witness PoC 可复制）", () => {
+  it("block code（witness PoC）在 <pre> 内、带复制按钮 + 语言角标", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
+    const pre = container.querySelector('pre[data-testid="code-block"]');
+    expect(pre).not.toBeNull();
+    expect(pre?.textContent).toContain("preTax=res.send(...)");
+    expect(pre?.querySelector(".copy-btn")).not.toBeNull();
+  });
+
+  it("inline code 无 pre 包装、无复制按钮", () => {
+    const { container } = render(<MarkdownView markdown={"正文 `inline_x` 结尾"} />);
     const code = container.querySelector("code");
     expect(code).not.toBeNull();
-    expect(code?.textContent).toContain("preTax=res.send(...)");
-    expect(code?.querySelector(".copy-btn")).not.toBeNull();
+    expect(code?.textContent).toBe("inline_x");
+    expect(container.querySelector("pre")).toBeNull();
+    expect(container.querySelector(".copy-btn")).toBeNull();
+  });
+
+  it("带语言标记的 block code 显语言角标", () => {
+    const { container } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
+    const lang = container.querySelector('[data-testid="code-lang"]');
+    expect(lang?.textContent).toBe("bash");
   });
 
   it("执行摘要 hero 条目锚链接到正文对应漏洞（href=#<vulnId>）", () => {
