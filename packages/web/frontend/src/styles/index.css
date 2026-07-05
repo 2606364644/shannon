@@ -6,6 +6,7 @@
    故加载顺序对视觉无影响。spinner keyframes / card-reachable 由 Task 6/7 末尾追加。*/
 @import "./tokens.css";
 @import "./events.css";
+@import "./report.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

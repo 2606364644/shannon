@@ -1,0 +1,59 @@
+/* 报告页专属：hljs token 配色（接 DSF --c- 语义色）+ 表格 + scroll-margin + pre 背景。
+   深色（:root 默认）为主，.light 覆盖一套调亮度保 AA 对比。 */
+
+/* —— hljs token 配色（深色默认） —— */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal { color: hsl(var(--c-cyan)); }
+.hljs-string,
+.hljs-regexp  { color: hsl(var(--c-green)); }
+.hljs-number  { color: hsl(var(--c-magenta)); }
+.hljs-title,
+.hljs-title.function_,
+.hljs-attr    { color: hsl(var(--c-yellow)); }
+.hljs-meta    { color: hsl(var(--c-red)); }
+.hljs-comment { color: hsl(var(--muted-foreground)); font-style: italic; }
+
+/* —— 表格 —— */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.prose table th,
+.prose table td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.prose table th {
+  background: hsl(var(--muted));
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.prose :where(table) { display: block; overflow-x: auto; }
+
+/* —— 锚跳转避 sticky 遮挡（TopBar h-12 + 详情页 header 元信息行） —— */
+.prose :is(h1, h2, h3) { scroll-margin-top: 80px; }
+
+/* —— block code 容器背景 —— */
+.prose pre {
+  border-radius: var(--radius);
+  background: hsl(var(--muted));
+  overflow-x: auto;
+}
+.prose pre code { background: transparent; padding: 0; }
+
+/* —— 浅色覆盖（保 AA 对比，cyan/green/yellow 提升亮度） —— */
+.light .hljs-keyword,
+.light .hljs-built_in,
+.light .hljs-literal { color: hsl(var(--c-cyan) / 0.92); }
+.light .hljs-string,
+.light .hljs-regexp  { color: hsl(var(--c-green) / 0.92); }
+.light .hljs-title,
+.light .hljs-title.function_,
+.light .hljs-attr    { color: hsl(var(--c-yellow) / 0.95); }
+.light .hljs-meta    { color: hsl(var(--c-red) / 0.9); }
+.light .hljs-comment { color: hsl(var(--muted-foreground)); }
