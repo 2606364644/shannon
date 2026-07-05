@@ -14,10 +14,11 @@ describe("ThemeToggle", () => {
     expect(screen.getByRole("button", { name: /切换主题/ })).toBeInTheDocument();
   });
 
-  it("dark 状态下显 ☀️（提示切到浅色）", () => {
+  it("dark 状态下显 Sun 图标（提示切到浅色）", () => {
     document.documentElement.classList.add("dark");
-    render(<ThemeToggle />);
-    expect(screen.getByRole("button", { name: /切换主题/ }).textContent).toContain("☀️");
+    const { container } = render(<ThemeToggle />);
+    // lucide-react Sun 渲染为 svg.lucide-sun（替代原 ☀️ emoji）
+    expect(container.querySelector("svg.lucide-sun")).not.toBeNull();
   });
 
   it("点击切换 dark→light 并持久化", () => {
@@ -36,5 +37,12 @@ describe("ThemeToggle", () => {
     render(<ThemeToggle />);
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("用 lucide svg 图标而非 emoji", () => {
+    const { container } = render(<ThemeToggle />);
+    // 含 svg（lucide 渲染 svg），不含 ☀️/🌙 emoji
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(container.textContent ?? "").not.toMatch(/[☀️🌙]/);
   });
 });

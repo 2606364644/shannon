@@ -27,12 +27,12 @@ const Row = memo(function Row({ index, style, data }: {
   try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
   if (ev) {
     return (
-      <div style={style} className="ev-info font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">
+      <div style={style} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">
         [{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
       </div>
     );
   }
-  return <div style={style} className="trace">{l}</div>;
+  return <div style={style} className="text-sm text-muted-foreground">{l}</div>;
 });
 
 // react-window 包装：行高 20px，对齐 Task 8 LogStream 同模式（FixedSizeList + itemData）。
@@ -110,19 +110,19 @@ export function LogsTab() {
         ))}
       </div>
       <div ref={viewportRef} className="overflow-auto h-full">
-        {!sel && <div className="trace">选择左侧日志文件</div>}
+        {!sel && <div className="text-sm text-muted-foreground">选择左侧日志文件</div>}
         {sel && contentErr && <ErrorState message={contentErr} />}
         {sel && !contentErr && isJsonl && big ? (
           <>
-            <div className="trace">⚠ 大文件（{lines.length} 行），虚拟滚动渲染</div>
+            <div className="text-sm text-muted-foreground">⚠ 大文件（{lines.length} 行），虚拟滚动渲染</div>
             <VirtualLines lines={lines} height={viewportH} />
           </>
         ) : sel && !contentErr && isJsonl ? (
           lines.map((l, i) => {
             let ev: LogEv | null = null;
             try { ev = JSON.parse(l); } catch { /* 非 JSON */ }
-            if (ev) return <div key={i} className="ev-info font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
-            return <div key={i} className="trace">{l}</div>;
+            if (ev) return <div key={i} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
+            return <div key={i} className="text-sm text-muted-foreground">{l}</div>;
           })
         ) : (
           sel && !contentErr && <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{content}</pre>

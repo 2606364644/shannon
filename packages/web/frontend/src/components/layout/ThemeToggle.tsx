@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { applyTheme, getInitialTheme, type Theme } from "@/lib/theme";
 
@@ -19,7 +20,7 @@ export function ThemeToggle() {
       aria-label="切换主题"
       title={theme === "dark" ? "切换到浅色" : "切换到深色"}
     >
-      {theme === "dark" ? "☀️" : "🌙"}
+      {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
     </Button>
   );
 }

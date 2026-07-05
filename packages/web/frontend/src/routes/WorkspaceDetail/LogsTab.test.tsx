@@ -68,7 +68,8 @@ describe("LogsTab", () => {
     // 虚拟滚动提示出现
     await waitFor(() => expect(screen.getByText(/虚拟滚动/)).toBeInTheDocument());
     // 结构断言：虚拟化只渲染可见窗口，远小于总行数 6000
-    const renderedRows = container.querySelectorAll(".ev-info, .trace");
+    // 行类已 DSF 化：trace→text-sm text-muted-foreground，ev-info→border-l-2
+    const renderedRows = container.querySelectorAll(".text-muted-foreground, .border-l-2");
     expect(renderedRows.length).toBeLessThan(100);
   });
 
@@ -90,8 +91,8 @@ describe("LogsTab", () => {
     await waitFor(() => expect(screen.getByText(/line-0/)).toBeInTheDocument());
     // 不虚拟滚动：无『虚拟滚动』提示
     expect(screen.queryByText(/虚拟滚动/)).not.toBeInTheDocument();
-    // 全部 100 行渲染（断言非虚拟化）：非 JSON 行渲染为 .trace
-    const rows = container.querySelectorAll(".ev-info, .trace");
+    // 全部 100 行渲染（断言非虚拟化）：非 JSON 行渲染为 text-sm text-muted-foreground（原 .trace）
+    const rows = container.querySelectorAll(".text-muted-foreground, .border-l-2");
     expect(rows.length).toBe(100);
   });
 

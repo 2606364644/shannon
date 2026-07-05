@@ -45,7 +45,7 @@ export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; el
       <div className="mt-2 space-y-0.5">
         {running.map((a) => (
           <div key={a.name} className="font-mono text-xs">
-            <span className="spinner" aria-hidden /> {a.name}{" "}
+            <span className="shannon-spinner" aria-hidden /> {a.name}{" "}
             <span className="text-muted-foreground">t{a.turn}</span>{" "}
             {a.last_action_detail ?? a.last_action ?? ""}
           </div>
