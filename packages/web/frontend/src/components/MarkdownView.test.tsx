@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MarkdownView } from "./MarkdownView";
 
 // 真实报告结构镜像（参考 NodeGoat comprehensive_security_assessment_report.md）：
@@ -42,12 +42,17 @@ Count: 4
 `;
 
 describe("MarkdownView", () => {
-  it("渲染 H1/H2/H3 标题", () => {
+  it("渲染 H1/H2 标题；vuln 块进卡片（INJ-VULN-01 不再是 heading）", () => {
     render(<MarkdownView markdown={MD} />);
-    // H1/H2/H3 都渲染；执行摘要出现于正文 H2 与 TOC，故用 heading role 精确取
     expect(screen.getByRole("heading", { level: 1, name: "安全评估报告" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "执行摘要" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: /INJ-VULN-01/ })).toBeInTheDocument();
+    // prose 段的 ### 类型小节仍是 heading
+    expect(screen.getByRole("heading", { level: 3, name: "Injection" })).toBeInTheDocument();
+    // INJ-VULN-01 块进卡片，不再渲染为 heading
+    expect(screen.queryByRole("heading", { level: 3, name: /INJ-VULN-01/ })).not.toBeInTheDocument();
+    const card = screen.getByTestId("vuln-card");
+    expect(card).toHaveAttribute("data-severity");
+    expect(card).toHaveTextContent("INJ-VULN-01");
   });
 
   it("TOC 含类型 + 执行摘要条目", () => {
@@ -110,12 +115,20 @@ describe("MarkdownView", () => {
     expect(kvKeys).not.toContain("SSRF");
   });
 
-  it("block code（witness PoC）在 <pre> 内、带复制按钮 + 语言角标", () => {
-    const { container } = render(<MarkdownView markdown={MD} />);
+  it("vuln 块的 witness_payload 进卡片 PoC（折叠，展开后显示）", () => {
+    render(<MarkdownView markdown={MD} />);
+    const toggle = screen.getByTestId("poc-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("poc-code").textContent).toContain("preTax=res.send(...)");
+  });
+
+  it("prose 段 block code 在 <pre> 内、带复制按钮 + 语言角标", () => {
+    const { container } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
     const pre = container.querySelector('pre[data-testid="code-block"]');
     expect(pre).not.toBeNull();
-    expect(pre?.textContent).toContain("preTax=res.send(...)");
     expect(pre?.querySelector(".copy-btn")).not.toBeNull();
+    expect(container.querySelector('[data-testid="code-lang"]')?.textContent).toBe("bash");
   });
 
   it("inline code 无 pre 包装、无复制按钮", () => {

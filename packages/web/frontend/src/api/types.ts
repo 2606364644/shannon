@@ -129,6 +129,34 @@ export interface Vulnerability {
   witness_payload?: string | null; path?: string | null; verdict?: string | null;
 }
 
+/** 漏洞危害等级（前端推断，非后端权威字段——见 lib/vuln-block.ts inferSeverity）。 */
+export type Severity = "Critical" | "High" | "Medium" | "Low";
+
+/** 从 markdown `### XXX-VULN-NN` 块解析出的单个 kv 字段。 */
+export interface ParsedVulnField {
+  key: string;
+  val: string;
+}
+
+/**
+ * 从报告 markdown 解析出的单个漏洞块（`### XXX-VULN-NN — 标题` + 后续 kv-list + witness fenced code）。
+ * 由 splitByVulnBlocks + parseVulnBlock 产出，供 MarkdownVulnCard 渲染、inferSeverity 推断等级。
+ */
+export interface ParsedVulnBlock {
+  id: string;                       // "XSS-VULN-04"
+  prefix: string;                   // "XSS"（ID 前缀，用于类型着色）
+  title: string;                    // 标题描述（去 ★ 后）
+  starred: boolean;                 // 标题含 ★ 首要标记
+  vulnType: string;                 // vulnerability_type 字段值
+  fields: ParsedVulnField[];        // 块内 kv-list
+  witnessPayload?: string;          // fenced code 内容（PoC）
+  externallyExploitable: boolean | null;
+  authRequired: boolean | null;
+  confidence: string | null;        // 归一化小写：high | med | low | null
+  verdict: string | null;
+  raw: string;                      // 原始块 markdown（调试）
+}
+
 export interface DeliverablesFile {
   path: string;        // 相对 deliverables/{track}/ 的路径
   size: number;
