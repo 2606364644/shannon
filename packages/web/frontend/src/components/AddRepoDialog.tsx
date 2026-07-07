@@ -36,6 +36,9 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
         if (e.status === 503) toast.error("未配置 git 凭证（GITLAB_USER/TOKEN）");
         else if (e.status === 409) toast.error("仓库已存在，可改用更新");
         else toast.error(`添加失败（${e.status}）`);
+      } else {
+        toast.error("添加失败（网络错误）");
+        console.error("createRepo failed:", e);
       }
     } finally {
       setBusy(false);
