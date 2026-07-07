@@ -12,6 +12,7 @@ from typing import Any
 import aiofiles
 
 from shannon_web.models import ScanRequest
+from .repo_manager import _validate_repo_name
 
 
 class TemporalUnavailable(Exception):
@@ -84,10 +85,17 @@ class ScanManager:
         # 在子进程拉起前登记，确保 active_repo_sources() 能看到在途请求（即便
         # proc 尚未赋值回 _procs）。
         self._active_reqs[ws] = req
-        proc = await asyncio.create_subprocess_exec(
-            *argv, env=env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv, env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+        except BaseException:
+            # spawn 失败（FileNotFoundError on the binary / fork-exec failure 等）：
+            # _watch 不会被调度，必须在此清理 _active_reqs，否则 active_repo_sources()
+            # 会持续误报引用 → DELETE /repos 误判 409 直到重启。
+            self._active_reqs.pop(ws, None)
+            raise
         self._procs[ws] = proc
         self._tasks[ws] = asyncio.create_task(self._watch(ws, proc, event_file))
         return ws
@@ -149,10 +157,12 @@ class ScanManager:
     def _resolve_repo_path(self, name: str) -> str:
         """将 repo 名解析为 repos_dir/<name>，并校验 state==ready。
 
+        - 非法名（含 '/' / '..' 等）→ ValueError（path-traversal 兜底）
         - 目录不存在 → ValueError（前端 4xx 语义）
         - 元数据缺失或 JSON 损坏 → 视为 ready，不阻塞扫描
         - state 非 ready（cloning/error 等）→ ValueError，提示去 /repos 完成 clone
         """
+        _validate_repo_name(name)
         repo_dir = self._repos_dir / name
         if not repo_dir.is_dir():
             raise ValueError(f"仓库不存在：{name}")
@@ -220,24 +230,28 @@ class ScanManager:
         s_out = asyncio.create_task(drain(proc.stdout))
         s_err = asyncio.create_task(drain(proc.stderr, stderr_sink))
         try:
-            if self._scan_timeout > 0:
-                try:
-                    rc = await asyncio.wait_for(proc.wait(), self._scan_timeout)
-                except asyncio.TimeoutError:
-                    proc.send_signal(signal.SIGINT)
+            try:
+                if self._scan_timeout > 0:
+                    try:
+                        rc = await asyncio.wait_for(proc.wait(), self._scan_timeout)
+                    except asyncio.TimeoutError:
+                        proc.send_signal(signal.SIGINT)
+                        rc = await proc.wait()
+                else:
                     rc = await proc.wait()
-            else:
-                rc = await proc.wait()
-        finally:
-            await asyncio.gather(s_out, s_err, return_exceptions=True)
+            finally:
+                await asyncio.gather(s_out, s_err, return_exceptions=True)
 
-        if not self._has_scan_end(event_file):
-            status = "killed" if (rc is not None and rc < 0) else "crashed"
-            tail_text = bytes(stderr_tail[-2048:]).decode("utf-8", "replace")
-            await self._write_scan_end(event_file, status, rc if rc is not None else -1, tail_text)
-        self._procs.pop(ws, None)
-        self._tasks.pop(ws, None)
-        self._active_reqs.pop(ws, None)
+            if not self._has_scan_end(event_file):
+                status = "killed" if (rc is not None and rc < 0) else "crashed"
+                tail_text = bytes(stderr_tail[-2048:]).decode("utf-8", "replace")
+                await self._write_scan_end(event_file, status, rc if rc is not None else -1, tail_text)
+        finally:
+            # 清理清理型登记必须兜底：即便 _write_scan_end / proc.wait 抛出，
+            # _procs/_tasks/_active_reqs 也得释放，否则 active_repo_sources() 误报引用。
+            self._procs.pop(ws, None)
+            self._tasks.pop(ws, None)
+            self._active_reqs.pop(ws, None)
 
     @staticmethod
     def _has_scan_end(event_file: Path) -> bool:

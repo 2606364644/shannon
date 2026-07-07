@@ -11,10 +11,11 @@ export function RepoDetailPage() {
   const { name = "" } = useParams<{ name: string }>();
   const nav = useNavigate();
   const [repo, setRepo] = useState<RepoDetail | null>(null);
+  const [error, setError] = useState<boolean>(false);
   const [branch, setBranch] = useState("");
 
   useEffect(() => {
-    getRepo(name).then(setRepo).catch(() => toast.error("加载失败"));
+    getRepo(name).then(setRepo).catch(() => { setError(true); toast.error("加载失败"); });
   }, [name]);
 
   async function doCheckout() {
@@ -28,7 +29,29 @@ export function RepoDetailPage() {
     }
   }
 
-  if (!repo) return <div className="text-sm text-muted-foreground">加载中…</div>;
+  async function doPull() {
+    try {
+      await pullRepo(name);
+      toast.success("更新中");
+      setRepo(await getRepo(name));
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(`更新失败（${e.status}）`);
+    }
+  }
+
+  if (!repo) {
+    if (error) {
+      return (
+        <div className="space-y-4">
+          <div className="border border-destructive bg-card p-4 text-sm text-destructive">
+            仓库加载失败，可能不存在或已被删除。
+          </div>
+          <Link to="/repos" className="text-sm text-muted-foreground hover:underline">← 返回仓库列表</Link>
+        </div>
+      );
+    }
+    return <div className="text-sm text-muted-foreground">加载中…</div>;
+  }
 
   const busy = repo.state === "cloning" || repo.state === "pulling";
 
@@ -46,7 +69,7 @@ export function RepoDetailPage() {
         <Button onClick={() => nav(`/scan/new?repo=${encodeURIComponent(name)}`)} disabled={repo.state !== "ready"}>
           发起扫描
         </Button>
-        <Button variant="outline" onClick={async () => { await pullRepo(name); toast.success("更新中"); }}>
+        <Button variant="outline" onClick={() => void doPull()}>
           更新 pull
         </Button>
       </div>

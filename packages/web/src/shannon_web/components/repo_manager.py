@@ -6,13 +6,21 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import aiofiles
 
 from .git_fetcher import GitFetcher
 
 _PROGRESS_RE = re.compile(r"(?:Receiving objects|Resolving deltas|Compressing objects|Counting objects):\s+(\d+)%")
+
+
+def _validate_repo_name(name: str) -> None:
+    """校验仓库名不含路径分隔符/遍历分量，防止越界 repos_dir（path-traversal 兜底）。
+
+    raise ValueError if name 含 '/' 或 '\\'、等于 '..' 或 '.'、为空、或含 NUL 字节。
+    """
+    if not name or "\x00" in name or "/" in name or "\\" in name or name in (".", ".."):
+        raise ValueError(f"非法仓库名：{name!r}")
 
 
 class TooManyClones(Exception):
@@ -125,6 +133,7 @@ class RepoManager:
         if not self._git.available():
             raise PermissionError("未配置 git 凭证（GITLAB_USER/TOKEN）")
         name = name or self._git.repo_name(url)
+        _validate_repo_name(name)
         target = self._dir / name
         if target.exists():
             raise ValueError(f"仓库已存在：{name}（可改用更新 pull）")
@@ -139,29 +148,32 @@ class RepoManager:
 
     async def _clone_task(self, name: str, url: str, branch: str | None,
                           commit: str | None, target: Path) -> None:
-        async with self._sem:
-            ok = await self._run_git_with_progress(
-                name, phase="cloning",
-                argv=self._build_clone_argv(self._git._inject_auth(url), target, branch))
-            if not ok:
+        try:
+            async with self._sem:
+                ok = await self._run_git_with_progress(
+                    name, phase="cloning",
+                    argv=self._build_clone_argv(self._git._inject_auth(url), target, branch))
                 # _mark_failed 已写 state=failed；跳过 ready 收尾，保持 failed 状态
-                pass
-            else:
-                # commit checkout（可选）
-                if commit:
-                    await self._run_git_with_progress(
-                        name, phase="cloning",
-                        argv=["git", "-C", str(target), "fetch", "--all"])
-                    proc = await asyncio.create_subprocess_exec(
-                        "git", "-C", str(target), "checkout", commit,
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    await proc.wait()
-                head = await self._head_commit(target)
-                self._write_meta(name, state="ready", last_pull_at=_now_iso(),
-                                 size_bytes=_dir_size(target),
-                                 source={**self._read_meta(name).get("source", {}), "commit": head})
-                await self._append_event(name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
-        self._jobs.pop(name, None)
+                if ok:
+                    # commit checkout（可选）
+                    if commit:
+                        await self._run_git_with_progress(
+                            name, phase="cloning",
+                            argv=["git", "-C", str(target), "fetch", "--all"])
+                        proc = await asyncio.create_subprocess_exec(
+                            "git", "-C", str(target), "checkout", commit,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                        await proc.wait()
+                        if proc.returncode != 0:
+                            self._mark_failed(name, f"commit {commit} checkout 失败")
+                            return
+                    head = await self._head_commit(target)
+                    self._write_meta(name, state="ready", last_pull_at=_now_iso(),
+                                     size_bytes=_dir_size(target),
+                                     source={**self._read_meta(name).get("source", {}), "commit": head})
+                    await self._append_event(name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
+        finally:
+            self._jobs.pop(name, None)
 
     async def pull(self, name: str) -> None:
         target = self._dir / name
@@ -174,18 +186,20 @@ class RepoManager:
         self._jobs[name] = task
 
     async def _pull_task(self, name: str, target: Path) -> None:
-        async with self._sem:
-            ok = await self._run_git_with_progress(
-                name, phase="pulling", argv=["git", "-C", str(target), "pull", "--ff-only"])
-            if ok:
-                head = await self._head_commit(target)
-                self._write_meta(name, state="ready", last_pull_at=_now_iso(),
-                                 size_bytes=_dir_size(target),
-                                 source={**self._read_meta(name).get("source", {}), "commit": head})
-                await self._append_event(name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
-            else:
-                self._mark_failed(name, "pull 失败")
-        self._jobs.pop(name, None)
+        try:
+            async with self._sem:
+                ok = await self._run_git_with_progress(
+                    name, phase="pulling", argv=["git", "-C", str(target), "pull", "--ff-only"])
+                if ok:
+                    head = await self._head_commit(target)
+                    self._write_meta(name, state="ready", last_pull_at=_now_iso(),
+                                     size_bytes=_dir_size(target),
+                                     source={**self._read_meta(name).get("source", {}), "commit": head})
+                    await self._append_event(name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
+                else:
+                    self._mark_failed(name, "pull 失败")
+        finally:
+            self._jobs.pop(name, None)
 
     # ---- checkout / delete ----
     async def checkout(self, name: str, branch: str) -> None:
@@ -284,7 +298,11 @@ class RepoManager:
 
     # ---- 旧目录迁移 ----
     def migrate_legacy(self) -> int:
-        """把无 .shannon-repo.json 的旧 repos/<name> 纳入管理。返回迁移数。"""
+        """把无 .shannon-repo.json 的旧 repos/<name> 纳入管理。返回迁移数。
+
+        单个仓库迁移失败（PermissionError / 损坏符号链接 / .git/config 不可读等）
+        不影响其他仓库与整体启动——lifespan 启动期调用，绝不可因一个坏目录 abort。
+        """
         if not self._dir.is_dir():
             return 0
         n = 0
@@ -294,12 +312,15 @@ class RepoManager:
             meta = sub / ".shannon-repo.json"
             if meta.exists():
                 continue
-            url, branch = self._infer_from_git(sub)
-            import os
-            self._write_meta(sub.name,
-                source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
-                cloned_at=datetime.fromtimestamp(sub.stat().st_mtime, timezone.utc).isoformat(),
-                state="ready", last_error=None)
+            try:
+                url, branch = self._infer_from_git(sub)
+                self._write_meta(sub.name,
+                    source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
+                    cloned_at=datetime.fromtimestamp(sub.stat().st_mtime, timezone.utc).isoformat(),
+                    state="ready", last_error=None)
+            except Exception:
+                # 单个坏仓库不应阻断迁移或启动；跳过即可（目录仍在，下次启动可重试）
+                continue
             n += 1
         return n
 

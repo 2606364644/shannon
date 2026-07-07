@@ -53,7 +53,30 @@ async def test_clone_failed_writes_failed_state(tmp_path, monkeypatch):
     await asyncio.sleep(0.3)
     meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
     assert meta["state"] == "failed"
-    assert "t@" not in meta["last_error"]  # token 脱敏
+    assert "t@" not in meta["last_error"]  # token 脱敏（last_error 是固定串，本就行）
+    # 真正的安全属性：stderr 的 `https://u:t@host` 经 _git.redact 写进 clone.ndjson 的
+    # message 字段，必须脱敏为 `https://***:***@host`，绝不含 `u:t@` token 模式。
+    ndjson = (tmp_path / "repos" / "foo" / "clone.ndjson").read_text("utf-8", errors="replace")
+    assert "u:t@" not in ndjson
+    assert "***:***@" in ndjson
+
+
+@pytest.mark.asyncio
+async def test_clone_rejects_path_traversal_name(tmp_path, monkeypatch):
+    """name 含路径分隔符/遍历分量必须 ValueError，防止越界 repos_dir mkdir/clone/rmtree
+    （final-review I-6）。
+
+    注：name=None 走 repo_name(url) 派生路径（合法，不进 _validate_repo_name），
+    故只测显式传非法名的情形。
+    """
+    rm = _rm(tmp_path, monkeypatch)
+    # 防御：若校验被绕过，绝不能真起 git clone 子进程（会挂）
+    def _no_real_clone(*a, **kw):
+        raise AssertionError("validation should block before _build_clone_argv")
+    monkeypatch.setattr(rm, "_build_clone_argv", _no_real_clone)
+    for evil in ("../evil", "a/b", ".", "..", "x\\y", "x/y"):
+        with pytest.raises(ValueError, match="非法仓库名"):
+            await rm.clone("https://gitlab.example/foo.git", None, None, evil)
 
 
 @pytest.mark.asyncio
