@@ -1,0 +1,77 @@
+import asyncio
+import json
+import sys
+import textwrap
+import pytest
+from shannon_web.components.repo_manager import RepoManager, TooManyClones
+
+
+def _rm(tmp_path, monkeypatch) -> RepoManager:
+    monkeypatch.setenv("SHANNON_REPOS_DIR", str(tmp_path / "repos"))
+    from shannon_web.config import get_config; get_config.cache_clear()
+    from shannon_web.components.git_fetcher import GitFetcher
+    cfg = get_config()
+    return RepoManager(cfg.repos_dir, GitFetcher(cfg.repos_dir, "u", "t"), max_concurrent=3)
+
+
+@pytest.fixture
+def fake_clone_ok(tmp_path):
+    """假 git 子进程：写一行 progress 到 stderr 后退出 0。"""
+    s = tmp_path / "ok.py"
+    s.write_text(textwrap.dedent('''
+        import sys
+        sys.stderr.write("Receiving objects: 40%\\n")
+        sys.exit(0)
+    '''))
+    return s
+
+
+@pytest.mark.asyncio
+async def test_clone_writes_ndjson_and_meta(tmp_path, monkeypatch, fake_clone_ok):
+    rm = _rm(tmp_path, monkeypatch)
+    monkeypatch.setattr(rm, "_build_clone_argv",
+                        lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
+    name = await rm.clone("https://gitlab.example/foo.git", None, None, None)
+    assert name == "foo"
+    # 等 task 结束
+    await asyncio.sleep(0.3)
+    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    assert meta["state"] == "ready"
+    lines = (tmp_path / "repos" / "foo" / "clone.ndjson").read_text().splitlines()
+    assert any("40" in l and '"progress"' in l for l in lines)
+    assert any('"clone_end"' in l and '"ready"' in l for l in lines)
+
+
+@pytest.mark.asyncio
+async def test_clone_failed_writes_failed_state(tmp_path, monkeypatch):
+    crash = tmp_path / "crash.py"
+    crash.write_text('import sys; sys.stderr.write("boom https://u:t@host\\n"); sys.exit(1)')
+    rm = _rm(tmp_path, monkeypatch)
+    monkeypatch.setattr(rm, "_build_clone_argv",
+                        lambda url, target, branch: [sys.executable, str(crash)])
+    await rm.clone("https://gitlab.example/foo.git", None, None, None)
+    await asyncio.sleep(0.3)
+    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    assert meta["state"] == "failed"
+    assert "t@" not in meta["last_error"]  # token 脱敏
+
+
+@pytest.mark.asyncio
+async def test_name_conflict_raises(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    (tmp_path / "repos").mkdir()
+    (tmp_path / "repos" / "foo").mkdir()
+    with pytest.raises(ValueError, match="已存在"):
+        await rm.clone("https://gitlab.example/foo.git", None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_limit(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    # Plan-internal deviation: brief's clone() guard is `len(self._jobs) >= self._max_concurrent`.
+    # _rm hardcodes max_concurrent=3, so override to 1 to make len(_jobs)=1 trigger the raise.
+    rm._max_concurrent = 1
+    rm._sem = asyncio.Semaphore(1)  # secondary backstop (harmless)
+    rm._jobs["busy"] = asyncio.create_task(asyncio.sleep(10))
+    with pytest.raises(TooManyClones):
+        await rm.clone("https://gitlab.example/bar.git", None, None, None)
