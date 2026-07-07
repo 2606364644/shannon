@@ -90,3 +90,21 @@ def test_encode_sse_format():
     assert out.startswith("id: 42\n")
     assert "data: " in out
     assert out.endswith("\n\n")
+
+
+@pytest.mark.asyncio
+async def test_stops_on_custom_stop_type(tmp_path):
+    f = tmp_path / "c.ndjson"
+    f.write_text(
+        _line({"type": "progress", "ts": "t1", "category": "INFO", "progress": 40}) + "\n"
+        + _line({"type": "clone_end", "ts": "t2", "category": "CONTROL", "status": "ready"}) + "\n"
+    )
+    t = EventTailer(f)
+    seen: list[dict] = []
+
+    async def cb(d, eid):
+        seen.append(d)
+
+    await t.tail(cb, stop_type="clone_end")
+    assert seen[-1]["type"] == "clone_end"
+    assert seen[0]["progress"] == 40

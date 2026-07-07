@@ -44,16 +44,18 @@ class EventTailer:
         on_event: OnEvent,
         last_event_id: int | None = None,
         idle_timeout: float = 300.0,
+        stop_type: str = "scan_end",
     ) -> None:
         """Tail the file, dispatching each parsed line to ``on_event``.
 
-        Stops once a line whose ``type`` is ``scan_end`` is observed, or once the
-        file fails to appear within ``idle_timeout`` seconds.
+        Stops once a line whose ``type`` equals ``stop_type`` is observed
+        (default ``scan_end``), or once the file fails to appear within
+        ``idle_timeout`` seconds.
         """
         if last_event_id is not None:
             self._offset = last_event_id
         waited = 0.0
-        while not self._path.exists():  # 等文件出现
+        while not self._path.exists():
             await asyncio.sleep(0.2)
             waited += 0.2
             if waited > idle_timeout:
@@ -67,7 +69,7 @@ class EventTailer:
                 self._offset += len(chunk)
                 self._carry += chunk.decode("utf-8", "replace")
                 lines = self._carry.split("\n")
-                self._carry = lines.pop()  # 末尾可能不完整，留存
+                self._carry = lines.pop()
                 for line in lines:
                     line = line.strip()
                     if not line:
@@ -78,7 +80,7 @@ class EventTailer:
                         self.corrupt_count += 1
                         continue
                     await on_event(data, self._offset)
-                    if data.get("type") == "scan_end":
+                    if data.get("type") == stop_type:
                         closed = True
                         break
             else:
