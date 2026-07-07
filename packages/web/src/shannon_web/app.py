@@ -12,7 +12,7 @@ from .config import get_config
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup（僵尸清理在任务 9 接入 ScanManager 后填充）
+    app.state.repo_manager.migrate_legacy()  # 旧 repos 目录纳入管理
     yield
     # shutdown（任务 9 接入 ScanManager 取消在途扫描后填充）
 
@@ -59,8 +59,9 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.workspaces_indexer import WorkspacesIndexer
     from .components.git_fetcher import GitFetcher
     from .components.multi_repo_config_store import MultiRepoConfigStore
+    from .components.repo_manager import RepoManager
     from .components.scan_manager import ScanManager
-    from .api import events, fs, multi_configs, scan, system_status, workspaces
+    from .api import events, fs, multi_configs, repos, scan, system_status, workspaces
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
@@ -69,10 +70,13 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.state.scan_manager = overrides.get("scan_manager") or ScanManager(
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
         max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout)
+    app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
+        cfg.repos_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
     app.include_router(workspaces.router)
     app.include_router(scan.router)
     app.include_router(multi_configs.router)
+    app.include_router(repos.router)
     app.include_router(events.router)
     app.include_router(fs.router)
     app.include_router(system_status.router)
