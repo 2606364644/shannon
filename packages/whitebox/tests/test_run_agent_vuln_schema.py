@@ -31,6 +31,9 @@ class TestVulnOutputSchema:
 
     @pytest.mark.parametrize("agent", VULN_AGENTS)
     def test_vuln_agent_returns_schema(self, agent):
+        """vuln agent 返回**裸 JSON Schema**(业务层语义;不感知引擎)。SDK 信封契约
+        ``{type:'json_schema', schema:{...}}`` 的包装由 providers_anthropic._build_options
+        负责;openai 引擎直接用裸 schema。"""
         schema = activities._vuln_output_schema(agent)
         assert schema is not None
         assert schema["type"] == "object"
@@ -112,6 +115,7 @@ async def test_run_agent_passes_schema_for_vuln(tmp_path):
     captured = await _run_agent_capturing("injection-vuln", tmp_path)
     schema = captured.get("structured_output_schema")
     assert schema is not None
+    # 业务层透传裸 schema;SDK 信封包装在 providers_anthropic._build_options
     assert "vulnerabilities" in schema["properties"]
 
 
