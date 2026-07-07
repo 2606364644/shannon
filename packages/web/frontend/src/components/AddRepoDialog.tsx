@@ -16,6 +16,7 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
   const [url, setUrl] = useState("");
   const [branch, setBranch] = useState("");
   const [commit, setCommit] = useState("");
+  const [group, setGroup] = useState("");
   const [busy, setBusy] = useState(false);
 
   const urlOk = /^(https?:|git@|ssh:)/.test(url.trim());
@@ -27,10 +28,11 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
         git_url: url.trim(),
         branch: branch.trim() || undefined,
         commit: commit.trim() || undefined,
+        group: group.trim() || undefined,
       });
       onCreated(r.name);
       onOpenChange(false);
-      setUrl(""); setBranch(""); setCommit("");
+      setUrl(""); setBranch(""); setCommit(""); setGroup("");
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.status === 503) toast.error("未配置 git 凭证（GITLAB_USER/TOKEN）");
@@ -57,6 +59,10 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
             <Label htmlFor="repo-url">git URL</Label>
             <Input id="repo-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://gitlab.example/foo.git" />
             {!urlOk && url && <div className="text-xs text-destructive">需为 git URL（https: / git@ / ssh:）</div>}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="repo-group">分组（可选）</Label>
+            <Input id="repo-group" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="如 frontend / backend，留空则放顶层" />
           </div>
           <div className="flex gap-2">
             <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="分支(可选)" />

@@ -41,7 +41,7 @@ export const router = createBrowserRouter([
       { path: "/", element: <DashboardPage /> },
       { path: "/workspaces", element: <WorkspaceListPage /> },
       { path: "/repos", element: <ReposPage /> },
-      { path: "/repos/:name", element: <RepoDetailPage /> },
+      { path: "/repos/*", element: <RepoDetailPage /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         path: "/p/:workspace",

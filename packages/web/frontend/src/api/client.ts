@@ -31,16 +31,20 @@ export const deleteWorkspace = (ws: string) =>
 export const cancelScan = (ws: string) =>
   apiDelete<{ cancelled: string }>(`/scan/${encodeURIComponent(ws)}`);
 
+/** 仓库名（可为 group/repo）按段 encode：保留 `/` 作路径分隔，每段安全转义。
+ *  /repos/frontend/foo 直接命中后端 {name:path}，含空格等特殊字符的段也安全。 */
+const encRepo = (name: string) => name.split("/").map(encodeURIComponent).join("/");
+
 export const listRepos = () => apiGet<Repo[]>("/repos");
-export const getRepo = (name: string) => apiGet<RepoDetail>(`/repos/${encodeURIComponent(name)}`);
-export const createRepo = (body: { git_url: string; branch?: string; commit?: string; name?: string }) =>
+export const getRepo = (name: string) => apiGet<RepoDetail>(`/repos/${encRepo(name)}`);
+export const createRepo = (body: { git_url: string; branch?: string; commit?: string; name?: string; group?: string }) =>
   apiPost<{ name: string }>("/repos", body);
 export const deleteRepo = (name: string) =>
-  apiDelete<{ deleted: string }>(`/repos/${encodeURIComponent(name)}`);
+  apiDelete<{ deleted: string }>(`/repos/${encRepo(name)}`);
 export const pullRepo = (name: string) =>
-  apiPost<{ pulling: string }>(`/repos/${encodeURIComponent(name)}/pull`, {});
+  apiPost<{ pulling: string }>(`/repos/${encRepo(name)}/pull`, {});
 export const checkoutRepo = (name: string, branch: string) =>
-  apiPost<{ checked_out: string }>(`/repos/${encodeURIComponent(name)}/checkout`, { branch });
+  apiPost<{ checked_out: string }>(`/repos/${encRepo(name)}/checkout`, { branch });
 
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。 */
 export async function apiGetText(path: string): Promise<string> {

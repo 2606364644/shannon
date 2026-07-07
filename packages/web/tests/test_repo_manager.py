@@ -98,3 +98,68 @@ async def test_concurrent_limit(tmp_path, monkeypatch):
     rm._jobs["busy"] = asyncio.create_task(asyncio.sleep(10))
     with pytest.raises(TooManyClones):
         await rm.clone("https://gitlab.example/bar.git", None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_clone_with_group(tmp_path, monkeypatch, fake_clone_ok):
+    """clone(group=...) 落到 repos/<group>/<name>，返回 group/repo 名。"""
+    rm = _rm(tmp_path, monkeypatch)
+    monkeypatch.setattr(rm, "_build_clone_argv",
+                        lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
+    name = await rm.clone("https://gitlab.example/foo.git", None, None, None, group="frontend")
+    assert name == "frontend/foo"
+    await asyncio.sleep(0.3)
+    meta_path = tmp_path / "repos" / "frontend" / "foo" / ".shannon-repo.json"
+    assert meta_path.exists()
+    assert json.loads(meta_path.read_text())["state"] == "ready"
+
+
+def test_list_repos_groups(tmp_path, monkeypatch):
+    """分组目录下的真仓库识别为 group/repo；分组目录本身不当仓库；同名跨组不冲突。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    for rel in ["frontend/foo", "backend/honor", "frontend/honor"]:
+        d = base / rel; d.mkdir(parents=True)
+        (d / ".git").mkdir()  # 真仓库标志
+    (base / "baz").mkdir()
+    (base / "baz" / ".git").mkdir()  # 扁平仓库
+    views = {r["name"]: r for r in rm.list_repos()}
+    assert set(views) == {"frontend/foo", "backend/honor", "frontend/honor", "baz"}
+    assert "frontend" not in views and "backend" not in views  # 分组目录不入列
+    assert views["frontend/foo"]["group"] == "frontend"
+    assert views["baz"]["group"] is None
+    # frontend/honor 与 backend/honor 同名跨组共存
+    assert "frontend/honor" in views and "backend/honor" in views
+
+
+def test_get_repo_rejects_group_dir(tmp_path, monkeypatch):
+    """get_repo 对分组目录（无 .git 无 meta）返回 None，不当作仓库。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    (base / "frontend" / "foo").mkdir(parents=True)
+    (base / "frontend" / "foo" / ".git").mkdir()
+    assert rm.get_repo("frontend/foo") is not None
+    assert rm.get_repo("frontend") is None  # 分组目录
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_rmtree_group_dir(tmp_path, monkeypatch):
+    """delete 分组目录绝不能 rmtree 子仓库（误删/越界防护）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    for rel in ["frontend/foo", "frontend/bar"]:
+        d = base / rel; d.mkdir(parents=True)
+        (d / ".git").mkdir()
+    await rm.delete("frontend")  # 分组目录：不应删任何子仓库
+    assert (base / "frontend" / "foo" / ".git").exists()
+    assert (base / "frontend" / "bar" / ".git").exists()
+
+
+def test_validate_repo_name_allows_group():
+    """_validate_repo_name 允许 group/repo，拒多层/遍历/空段/首尾斜杠。"""
+    from shannon_web.components.repo_manager import _validate_repo_name
+    _validate_repo_name("foo")
+    _validate_repo_name("frontend/foo")
+    for evil in ("a/b/c", "../evil", "a//b", "/a", "a/", "a/../b", ".", "..", "a\\b"):
+        with pytest.raises(ValueError, match="非法"):
+            _validate_repo_name(evil)

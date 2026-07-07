@@ -203,6 +203,7 @@ export type RepoState = "ready" | "cloning" | "pulling" | "failed" | "stale";
 
 export interface Repo {
   name: string;
+  group?: string | null;  // 分组名（如 frontend/backend）；扁平仓库为 null
   source?: { kind: string; url?: string; branch?: string; commit?: string };
   state: RepoState;
   size_bytes?: number;

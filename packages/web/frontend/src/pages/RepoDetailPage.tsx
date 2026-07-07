@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { CloneProgress } from "@/components/CloneProgress";
 
 export function RepoDetailPage() {
-  const { name = "" } = useParams<{ name: string }>();
+  // 路由用 splat /repos/* 承载 group/repo 名（含 '/'）；useParams["*"] 取整段
+  const params = useParams();
+  const name = params["*"] ?? "";
   const nav = useNavigate();
   const [repo, setRepo] = useState<RepoDetail | null>(null);
   const [error, setError] = useState<boolean>(false);

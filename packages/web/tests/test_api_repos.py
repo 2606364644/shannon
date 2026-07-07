@@ -78,3 +78,17 @@ async def test_sse_events(tmp_path, monkeypatch):
                 if line.startswith("data:") and "clone_end" in line:
                     break
     assert any("40" in l for l in lines if l.startswith("data:"))
+
+
+def test_get_repo_grouped_path(tmp_path, monkeypatch):
+    """{name:path} 吃 group/repo 含 '/' 的路径，返回 group 字段。"""
+    app = _app(tmp_path, monkeypatch, {})
+    base = tmp_path / "repos"
+    d = base / "frontend" / "foo"; d.mkdir(parents=True)
+    (d / ".shannon-repo.json").write_text(json.dumps({"name": "frontend/foo", "state": "ready"}))
+    r = TestClient(app).get("/api/repos/frontend/foo")
+    assert r.status_code == 200
+    assert r.json()["name"] == "frontend/foo"
+    assert r.json()["group"] == "frontend"
+    # 分组目录本身 404
+    assert TestClient(app).get("/api/repos/frontend").status_code == 404

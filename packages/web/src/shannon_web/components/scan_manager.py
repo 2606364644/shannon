@@ -12,7 +12,7 @@ from typing import Any
 import aiofiles
 
 from shannon_web.models import ScanRequest
-from .repo_manager import _validate_repo_name
+from .repo_manager import _resolve_repo_dir
 
 
 class TemporalUnavailable(Exception):
@@ -155,15 +155,14 @@ class ScanManager:
         return target, yaml_path
 
     def _resolve_repo_path(self, name: str) -> str:
-        """将 repo 名解析为 repos_dir/<name>，并校验 state==ready。
+        """将 repo 名（可为 group/repo）解析为 repos_dir 内绝对路径，并校验 state==ready。
 
-        - 非法名（含 '/' / '..' 等）→ ValueError（path-traversal 兜底）
+        - 非法名（含 '..' / 多层 '/' / 首尾 '/' 等）→ ValueError（_resolve_repo_dir 双重防线）
         - 目录不存在 → ValueError（前端 4xx 语义）
         - 元数据缺失或 JSON 损坏 → 视为 ready，不阻塞扫描
         - state 非 ready（cloning/error 等）→ ValueError，提示去 /repos 完成 clone
         """
-        _validate_repo_name(name)
-        repo_dir = self._repos_dir / name
+        repo_dir = _resolve_repo_dir(self._repos_dir, name)
         if not repo_dir.is_dir():
             raise ValueError(f"仓库不存在：{name}")
         meta_file = repo_dir / ".shannon-repo.json"

@@ -13,14 +13,55 @@ from .git_fetcher import GitFetcher
 
 _PROGRESS_RE = re.compile(r"(?:Receiving objects|Resolving deltas|Compressing objects|Counting objects):\s+(\d+)%")
 
+# 仓库名：`repo` 或 `group/repo`（至多一层分组）。每段非空、不含 / \ NUL。
+_REPO_NAME_RE = re.compile(r"^[^\x00/\\]+(/[^\x00/\\]+)?$")
+# 单段目录名（不含 / \ NUL）——clone 时 name/group 各段独立校验
+_REPO_SEGMENT_RE = re.compile(r"^[^\x00/\\]+$")
+
+
+def _validate_repo_segment(seg: str, label: str = "名字段") -> None:
+    """校验单段目录名（不含 / \\ NUL，非 . ..，非空）。供 clone 的 name/group 各段校验。"""
+    if not seg or "\x00" in seg or not _REPO_SEGMENT_RE.match(seg) or seg in (".", ".."):
+        raise ValueError(f"非法{label}：{seg!r}")
+
 
 def _validate_repo_name(name: str) -> None:
-    """校验仓库名不含路径分隔符/遍历分量，防止越界 repos_dir（path-traversal 兜底）。
+    """校验仓库名合法且无遍历分量（path-traversal 第一道防线）。
 
-    raise ValueError if name 含 '/' 或 '\\'、等于 '..' 或 '.'、为空、或含 NUL 字节。
+    允许 `repo` 或 `group/repo`（至多一层分组，映射 repos_dir/<group>/<repo>）；
+    禁止 `..`/`.` 分量、空分量（`a//b`）、首尾 `/`（`/a`、`a/`）、`\\`、NUL、
+    多层嵌套（`a/b/c`）。第二道防线见 _resolve_repo_dir 的 resolve().is_relative_to()。
+
+    raise ValueError if name 非法。
     """
-    if not name or "\x00" in name or "/" in name or "\\" in name or name in (".", ".."):
+    if not name or "\x00" in name or not _REPO_NAME_RE.match(name):
         raise ValueError(f"非法仓库名：{name!r}")
+    # 正则已禁多层/空段/首尾斜杠，再防 `..` / `.` 作为整段（如 `..`、`a/..`）
+    for part in name.split("/"):
+        _validate_repo_segment(part, "仓库名")
+
+
+def _resolve_repo_dir(repos_dir: Path, name: str) -> Path:
+    """校验仓库名并解析为 repos_dir 内的绝对路径（path-traversal 双重防线）。
+
+    即便 _validate_repo_name 正则有漏，resolve().is_relative_to() 兜底确保
+    最终路径不越界 repos_dir。返回 resolve 后的绝对路径。
+    """
+    _validate_repo_name(name)
+    base = Path(repos_dir).resolve()
+    p = (base / name).resolve()
+    if not p.is_relative_to(base):
+        raise ValueError(f"非法仓库名：{name!r}")
+    return p
+
+
+def _is_repo(d: Path) -> bool:
+    """目录是仓库 iff 有 `.git`（clone 产物）或 `.shannon-repo.json`（已纳入管理）。
+
+    并集：既识别用户已 clone 的真仓库（有 .git），也识别已纳入管理但 .git 损坏的
+    （有 meta）。分组目录两者皆无 → False，不被当仓库。
+    """
+    return (d / ".git").exists() or (d / ".shannon-repo.json").exists()
 
 
 class TooManyClones(Exception):
@@ -57,37 +98,58 @@ class RepoManager:
     def is_busy(self, name: str) -> bool:
         return name in self._jobs
 
+    def _repo_dir(self, name: str) -> Path:
+        """校验仓库名并解析为 repos_dir 内的绝对路径（path-traversal 双重防线）。"""
+        return _resolve_repo_dir(self._dir, name)
+
     def list_repos(self) -> list[dict]:
         self._dir.mkdir(parents=True, exist_ok=True)
         out: list[dict] = []
         for sub in sorted(self._dir.iterdir()):
             if not sub.is_dir() or sub.name.startswith("."):
                 continue
-            out.append(self._repo_view(sub.name))
+            if _is_repo(sub):
+                try:
+                    out.append(self._repo_view(sub.name))
+                except ValueError:
+                    continue
+                continue
+            # 非仓库目录 → 可能是分组目录，深入一层找 repos/<group>/<repo>
+            for sub2 in sorted(sub.iterdir()):
+                if not sub2.is_dir() or sub2.name.startswith("."):
+                    continue
+                if _is_repo(sub2):
+                    try:
+                        out.append(self._repo_view(f"{sub.name}/{sub2.name}"))
+                    except ValueError:
+                        continue
         return out
 
     def get_repo(self, name: str) -> dict | None:
-        d = self._dir / name
-        if not d.is_dir():
+        try:
+            d = self._repo_dir(name)
+        except ValueError:
+            return None
+        if not d.is_dir() or not _is_repo(d):
             return None
         view = self._repo_view(name)
         view["recent_events"] = self._recent_events(name, 20)
         return view
 
     def _repo_view(self, name: str) -> dict:
-        d = self._dir / name
         meta = self._read_meta(name)
         state = meta.get("state", "ready")
         # stale：磁盘 cloning/pulling 但内存无 job → 重启后未完成
         if state in ("cloning", "pulling") and not self.is_busy(name):
             state = "stale"
-        view = {"name": name, **meta, "state": state}
+        group = name.split("/", 1)[0] if "/" in name else None
+        view = {"name": name, "group": group, **meta, "state": state}
         if self.is_busy(name):
             view["progress"] = self._last_progress(name)
         return view
 
     def _read_meta(self, name: str) -> dict:
-        f = self._dir / name / ".shannon-repo.json"
+        f = self._repo_dir(name) / ".shannon-repo.json"
         if not f.exists():
             return {"name": name, "source": {"kind": "unknown"}, "state": "ready"}
         try:
@@ -96,13 +158,13 @@ class RepoManager:
             return {"name": name, "source": {"kind": "unknown"}, "state": "ready"}
 
     def _write_meta(self, name: str, **patch) -> None:
-        f = self._dir / name / ".shannon-repo.json"
+        f = self._repo_dir(name) / ".shannon-repo.json"
         meta = self._read_meta(name) if f.exists() else {"name": name}
         meta.update(patch)
         f.write_text(json.dumps(meta, ensure_ascii=False))
 
     def _last_progress(self, name: str) -> int | None:
-        f = self._dir / name / "clone.ndjson"
+        f = self._repo_dir(name) / "clone.ndjson"
         if not f.exists():
             return None
         last_pct = None
@@ -116,7 +178,7 @@ class RepoManager:
         return last_pct
 
     def _recent_events(self, name: str, n: int) -> list[dict]:
-        f = self._dir / name / "clone.ndjson"
+        f = self._repo_dir(name) / "clone.ndjson"
         if not f.exists():
             return []
         out: list[dict] = []
@@ -129,22 +191,28 @@ class RepoManager:
 
     # ---- clone / pull ----
     async def clone(self, url: str, branch: str | None, commit: str | None,
-                    name: str | None) -> str:
+                    name: str | None, group: str | None = None) -> str:
         if not self._git.available():
             raise PermissionError("未配置 git 凭证（GITLAB_USER/TOKEN）")
         name = name or self._git.repo_name(url)
-        _validate_repo_name(name)
-        target = self._dir / name
+        # name/group 各为单段目录名；组合成 group/repo 后整体由 _repo_dir 校验 + 兜底
+        _validate_repo_segment(name, "仓库名")
+        if group:
+            _validate_repo_segment(group, "分组名")
+            final_name = f"{group}/{name}"
+        else:
+            final_name = name
+        target = self._repo_dir(final_name)
         if target.exists():
-            raise ValueError(f"仓库已存在：{name}（可改用更新 pull）")
+            raise ValueError(f"仓库已存在：{final_name}（可改用更新 pull）")
         if len(self._jobs) >= self._max_concurrent:
             raise TooManyClones(self._max_concurrent)
         target.mkdir(parents=True, exist_ok=False)
-        self._write_meta(name, source={"kind": "git", "url": url, "branch": branch, "commit": commit},
+        self._write_meta(final_name, source={"kind": "git", "url": url, "branch": branch, "commit": commit},
                          cloned_at=_now_iso(), state="cloning", last_error=None)
-        task = asyncio.create_task(self._clone_task(name, url, branch, commit, target))
-        self._jobs[name] = task
-        return name
+        task = asyncio.create_task(self._clone_task(final_name, url, branch, commit, target))
+        self._jobs[final_name] = task
+        return final_name
 
     async def _clone_task(self, name: str, url: str, branch: str | None,
                           commit: str | None, target: Path) -> None:
@@ -176,8 +244,8 @@ class RepoManager:
             self._jobs.pop(name, None)
 
     async def pull(self, name: str) -> None:
-        target = self._dir / name
-        if not target.is_dir():
+        target = self._repo_dir(name)
+        if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
         if name in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
@@ -203,8 +271,8 @@ class RepoManager:
 
     # ---- checkout / delete ----
     async def checkout(self, name: str, branch: str) -> None:
-        target = self._dir / name
-        if not target.is_dir():
+        target = self._repo_dir(name)
+        if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
         if name in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
@@ -227,8 +295,9 @@ class RepoManager:
     async def delete(self, name: str) -> None:
         if name in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
-        target = self._dir / name
-        if target.is_dir():
+        target = self._repo_dir(name)
+        # 仅删除真仓库目录（有 .git 或 meta），绝不 rmtree 分组目录（含多个子仓库）
+        if target.is_dir() and _is_repo(target):
             shutil.rmtree(target, ignore_errors=False)
 
     # ---- git 子进程 + stderr 进度解析 ----
@@ -276,13 +345,13 @@ class RepoManager:
     def _mark_failed(self, name: str, msg: str) -> None:
         self._write_meta(name, state="failed", last_error=msg, last_pull_at=_now_iso())
         # clone_end 失败事件（同步写，task 内调用）
-        f = self._dir / name / "clone.ndjson"
+        f = self._repo_dir(name) / "clone.ndjson"
         with open(f, "a") as fh:
             fh.write(json.dumps({"ts": _now_iso(), "type": "clone_end",
                                  "status": "failed", "error": msg}, ensure_ascii=False) + "\n")
 
     async def _append_event(self, name: str, payload: dict) -> None:
-        f = self._dir / name / "clone.ndjson"
+        f = self._repo_dir(name) / "clone.ndjson"
         async with aiofiles.open(f, "a") as fh:
             await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -298,9 +367,12 @@ class RepoManager:
 
     # ---- 旧目录迁移 ----
     def migrate_legacy(self) -> int:
-        """把无 .shannon-repo.json 的旧 repos/<name> 纳入管理。返回迁移数。
+        """把已 clone 但未纳入管理的旧仓库（有 .git 无 .shannon-repo.json）补写 meta。
 
-        单个仓库迁移失败（PermissionError / 损坏符号链接 / .git/config 不可读等）
+        扫两层（扁平 repos/<name> + 分组 repos/<group>/<name>），只处理有 .git 的目录，
+        跳过无 .git 的分组目录（避免把 frontend/backend 这类分组目录误当仓库纳入）。
+
+        单个仓库迁移失败（PermissionError / 损坏符号链接 / .git/config 不可读 / 非法名等）
         不影响其他仓库与整体启动——lifespan 启动期调用，绝不可因一个坏目录 abort。
         """
         if not self._dir.is_dir():
@@ -309,20 +381,31 @@ class RepoManager:
         for sub in self._dir.iterdir():
             if not sub.is_dir() or sub.name.startswith("."):
                 continue
-            meta = sub / ".shannon-repo.json"
-            if meta.exists():
+            if (sub / ".git").exists():
+                n += self._migrate_one(sub, sub.name)
                 continue
-            try:
-                url, branch = self._infer_from_git(sub)
-                self._write_meta(sub.name,
-                    source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
-                    cloned_at=datetime.fromtimestamp(sub.stat().st_mtime, timezone.utc).isoformat(),
-                    state="ready", last_error=None)
-            except Exception:
-                # 单个坏仓库不应阻断迁移或启动；跳过即可（目录仍在，下次启动可重试）
-                continue
-            n += 1
+            # 非仓库目录 → 可能分组目录，深入一层找真仓库
+            for sub2 in sub.iterdir():
+                if not sub2.is_dir() or sub2.name.startswith("."):
+                    continue
+                if (sub2 / ".git").exists():
+                    n += self._migrate_one(sub2, f"{sub.name}/{sub2.name}")
         return n
+
+    def _migrate_one(self, repo: Path, name: str) -> int:
+        """单个仓库补写 meta（已纳入管理或失败则返回 0，成功返回 1）。"""
+        if (repo / ".shannon-repo.json").exists():
+            return 0
+        try:
+            url, branch = self._infer_from_git(repo)
+            self._write_meta(name,
+                source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
+                cloned_at=datetime.fromtimestamp(repo.stat().st_mtime, timezone.utc).isoformat(),
+                state="ready", last_error=None)
+        except Exception:
+            # 单个坏仓库不应阻断迁移或启动；跳过即可（目录仍在，下次启动可重试）
+            return 0
+        return 1
 
     @staticmethod
     def _infer_from_git(repo: Path) -> tuple[str | None, str | None]:

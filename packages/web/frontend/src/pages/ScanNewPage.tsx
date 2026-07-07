@@ -59,10 +59,11 @@ function validateUrl(v: string): string | null {
 }
 
 // 前端推算 workspace 名预览（basename + _YYYYMMDD-HHMMSS），与后端实际生成可能略有出入，
-// 仅作输入辅助提示。repo→仓库名；path→basename（末段）。
+// 仅作输入辅助提示。repo→仓库名末段；path→basename（末段）。
 function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: string): string {
+  // selectedRepo 可为 group/repo，取末段作 ws 名 base（与后端 _gen_ws_name Path(value).stem 对齐）
   const base = kind === "repo"
-    ? selectedRepo
+    ? (selectedRepo.split("/").pop() ?? "")
     : (pathValue.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
   if (!base) return "";
   const d = new Date();

@@ -12,7 +12,7 @@ class PathSource(BaseModel):
 
 class RepoSource(BaseModel):
     kind: Literal["repo"]
-    value: str  # 仓库名（repos_dir 下的目录名）
+    value: str  # 仓库名（可为 group/repo 或扁平 repo，对应 repos_dir 下相对路径）
 
 
 Source = Union[PathSource, RepoSource]

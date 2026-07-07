@@ -57,4 +57,20 @@ describe("ReposPage", () => {
     expect(screen.getByText(/clone 中/)).toBeInTheDocument();
     expect(screen.getByText(/未完成/)).toBeInTheDocument();
   });
+
+  it("按分组折叠渲染（group/repo 跨组同名不冲突）", async () => {
+    server.use(
+      http.get("/api/repos", () => HttpResponse.json([
+        { name: "frontend/honor", group: "frontend", state: "ready", source: { kind: "git", url: "https://x/hon-fe.git" } },
+        { name: "backend/honor", group: "backend", state: "ready", source: { kind: "git", url: "https://x/hon-be.git" } },
+      ])),
+    );
+    renderPage();
+    // 两个分组 section 都渲染（section 标题 button 含分组名 + 计数）
+    expect(await screen.findByRole("button", { name: /frontend \(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /backend \(1\)/ })).toBeInTheDocument();
+    // 同名 honor 跨组共存：两个链接都在
+    const honorLinks = screen.getAllByRole("link", { name: /honor/ });
+    expect(honorLinks).toHaveLength(2);
+  });
 });
