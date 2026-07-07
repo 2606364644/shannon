@@ -4,8 +4,13 @@ networks:
 
 services:
   temporal:
+    # 可选：仅 docker compose --profile infra up 时启动。
+    # 本机已有外部 temporal（占 7233）时，不起此服务：
+    # 用 ./scripts/up.sh 自动检测，加载 docker-compose.override.external-temporal.yml 复用外部 temporal。
+    # 或手动：docker compose -f docker-compose.yml -f docker-compose.override.external-temporal.yml up -d web
     image: temporalio/temporal:latest
     container_name: shannon-py-temporal
+    profiles: ["infra"]
     command: ["server", "start-dev", "--db-filename", "/home/temporal/temporal.db", "--ip", "0.0.0.0"]
     ports:
       - "127.0.0.1:7233:7233"   # gRPC

@@ -1,0 +1,49 @@
+# docker-compose.override.external-temporal.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# 【模板文件 · 入库可分享】复用本机已存在的外部 temporal 容器
+#
+# 适用场景：
+#   本机已有一个独立运行、被多个项目共用的 temporal 容器
+#   （例如容器名 shannon-temporal，在 shannon-net 网络，占 127.0.0.1:7233），
+#   你不想让 compose 再自建 temporal 去抢 7233 端口。
+#
+# 用法（二选一）：
+#
+#   方式 A（推荐 · 命令不变）：
+#     cp docker-compose.override.external-temporal.yml docker-compose.override.yml
+#     docker compose up -d --build web
+#     （docker-compose.override.yml 被 .gitignore 排除，纯本地；
+#      compose 自动合并它，命令与"自建模式"完全一致）
+#
+#   方式 B（显式加载 · 不复制）：
+#     docker compose -f docker-compose.yml \
+#                    -f docker-compose.override.external-temporal.yml \
+#                    up -d --build web
+#
+# 切回"自建 temporal"模式（干净环境）：
+#     rm docker-compose.override.yml          # 删掉本地副本
+#     docker compose --profile infra up -d    # 主 compose 自建 temporal + web
+#
+# 前提条件：
+#   - 外部 temporal 容器在运行，容器名 = shannon-temporal（见下 SHANNON_TEMPORAL_HOST）
+#   - 存在 docker 网络名 shannon-net（外部 temporal 所在网络）
+#   若你的容器名/网络名不同，改下方两处即可。
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  web:
+    # 主 compose 里 web depends_on temporal(service_healthy)；
+    # 复用外部 temporal 时 temporal 不在 compose 管辖，必须去掉依赖，否则 web 永远等不到 healthy。
+    depends_on: !reset []
+    environment:
+      # 容器名直连：shannon-temporal 在 shannon-net 网络里可被 DNS 解析
+      # （绕开外部 temporal 绑 127.0.0.1 导致容器够不到的限制）
+      - SHANNON_TEMPORAL_HOST=shannon-temporal
+      - SHANNON_TEMPORAL_PORT=7233
+    networks:
+      - default          # 保留 shannon-py-net（compose 内部通信）
+      - shannon-net      # 接入外部 temporal 所在网络
+
+networks:
+  shannon-net:
+    external: true       # 复用已存在的 shannon-net，不新建
