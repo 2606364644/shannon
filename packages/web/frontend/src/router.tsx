@@ -1,6 +1,8 @@
 import { createBrowserRouter, useNavigate, useParams } from "react-router-dom";
 import { useEffect } from "react";
 import { WorkspaceListPage } from "./pages/WorkspaceListPage";
+import { ReposPage } from "./pages/ReposPage";
+import { RepoDetailPage } from "./pages/RepoDetailPage";
 import { ScanNewPage } from "./pages/ScanNewPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -38,6 +40,8 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <DashboardPage /> },
       { path: "/workspaces", element: <WorkspaceListPage /> },
+      { path: "/repos", element: <ReposPage /> },
+      { path: "/repos/:name", element: <RepoDetailPage /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         path: "/p/:workspace",

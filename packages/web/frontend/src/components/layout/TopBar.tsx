@@ -13,6 +13,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "Dashboard", to: "/", end: true },
   { label: "Workspaces", to: "/workspaces", end: true },
+  { label: "仓库", to: "/repos", end: true },
   { label: "Scan", to: "/scan/new" },
   { label: "Settings", to: "/settings" },
 ];
