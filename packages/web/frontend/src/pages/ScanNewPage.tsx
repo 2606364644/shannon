@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
@@ -15,11 +15,9 @@ import { Button } from "@/components/ui/button";
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
 export interface FormState {
-  sourceKind: "path" | "git";
-  sourceValue: string;
-  branch: string;
-  commit: string;
-  forceReclone: boolean;
+  sourceKind: "repo" | "path";
+  selectedRepo: string;       // repo kind 用
+  sourceValue: string;        // path kind 用
   url: string;
   wsName: string;
   reuseLatest: boolean;
@@ -28,17 +26,10 @@ export interface FormState {
 
 function buildBody(type: ScanType, f: FormState): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
-  // 旧 UI 字面量 "git" → 新契约 "repo"（仓库名）于边界翻译；
-  // ScanFormFields 的 repo-picker 改造属 Task 10。
-  const body: ScanRequest = {
-    type,
-    source: {
-      kind: f.sourceKind === "git" ? "repo" : "path",
-      value: f.sourceValue,
-    },
-    url: f.url,
-    workspace_name: f.wsName || undefined,
-  };
+  const source = f.sourceKind === "repo"
+    ? { kind: "repo" as const, value: f.selectedRepo }
+    : { kind: "path" as const, value: f.sourceValue };
+  const body: ScanRequest = { type, source, url: f.url, workspace_name: f.wsName || undefined };
   if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
   return body;
 }
@@ -56,12 +47,10 @@ function renderError(e: ApiError): string {
   return `提交失败（${e.status}）`;
 }
 
-function validateSourceValue(kind: "path" | "git", v: string): string | null {
-  if (!v.trim()) return "代码来源不能为空";
-  if (kind === "path") {
-    return /^(\/|[A-Za-z]:[\\/])/.test(v) ? null : "本地路径需为绝对路径（如 /root/code/foo）";
-  }
-  return /^(https?:|git@|ssh:)/.test(v) ? null : "需为 git URL（https:// / git@ / ssh:）";
+function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: string): string | null {
+  if (kind === "repo") return selectedRepo ? null : "请选择仓库";
+  if (!pathValue.trim()) return "代码来源不能为空";
+  return /^(\/|[A-Za-z]:[\\/])/.test(pathValue) ? null : "本地路径需为绝对路径（如 /root/code/foo）";
 }
 
 function validateUrl(v: string): string | null {
@@ -70,16 +59,11 @@ function validateUrl(v: string): string | null {
 }
 
 // 前端推算 workspace 名预览（basename + _YYYYMMDD-HHMMSS），与后端实际生成可能略有出入，
-// 仅作输入辅助提示。git URL 取最后一段去 .git；path 取末段。
-function deriveName(kind: "path" | "git", v: string): string {
-  const trimmed = v.trim();
-  if (!trimmed) return "";
-  let base = "";
-  if (kind === "path") {
-    base = trimmed.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
-  } else {
-    base = trimmed.replace(/\.git$/, "").split(/[\/:]/).pop() ?? "";
-  }
+// 仅作输入辅助提示。repo→仓库名；path→basename（末段）。
+function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: string): string {
+  const base = kind === "repo"
+    ? selectedRepo
+    : (pathValue.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
   if (!base) return "";
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -89,13 +73,13 @@ function deriveName(kind: "path" | "git", v: string): string {
 
 export function ScanNewPage() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const presetRepo = params.get("repo");
   const [type, setType] = useState<ScanType>("whitebox");
   const [f, setF] = useState<FormState>({
-    sourceKind: "path",
+    sourceKind: "repo",
+    selectedRepo: "",
     sourceValue: "",
-    branch: "",
-    commit: "",
-    forceReclone: false,
     url: "",
     wsName: "",
     reuseLatest: false,
@@ -107,6 +91,12 @@ export function ScanNewPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
+
+  // URL ?repo=<name>（来自 RepoDetailPage「发起扫描」按钮）预选仓库 + 切到 repo kind。
+  useEffect(() => {
+    if (presetRepo) set({ sourceKind: "repo", selectedRepo: presetRepo });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetRepo]);
 
   useEffect(() => {
     if (!f.wsName) {
@@ -125,15 +115,15 @@ export function ScanNewPage() {
     return () => clearTimeout(t);
   }, [f.wsName]);
 
-  const sourceValueErr = validateSourceValue(f.sourceKind, f.sourceValue);
+  const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue);
   const urlErr = validateUrl(f.url);
   const isCorrelation = type === "correlation";
   const isValid =
-    !sourceValueErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
+    !sourceErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
 
   const derivedName = useMemo(
-    () => (type === "correlation" ? "" : deriveName(f.sourceKind, f.sourceValue)),
-    [type, f.sourceKind, f.sourceValue],
+    () => (type === "correlation" ? "" : deriveName(f.sourceKind, f.selectedRepo, f.sourceValue)),
+    [type, f.sourceKind, f.selectedRepo, f.sourceValue],
   );
 
   async function doSubmit() {
@@ -180,9 +170,7 @@ export function ScanNewPage() {
             type="whitebox"
             f={f}
             set={set}
-            conflict={conflict}
-            onConflictDismiss={() => set({ wsName: "" })}
-            sourceValueErr={sourceValueErr}
+            sourceErr={sourceErr}
             urlErr={urlErr}
             loadingConflict={loadingConflict}
             derivedName={derivedName}
@@ -193,9 +181,7 @@ export function ScanNewPage() {
             type="blackbox"
             f={f}
             set={set}
-            conflict={conflict}
-            onConflictDismiss={() => set({ wsName: "" })}
-            sourceValueErr={sourceValueErr}
+            sourceErr={sourceErr}
             urlErr={urlErr}
             loadingConflict={loadingConflict}
             derivedName={derivedName}

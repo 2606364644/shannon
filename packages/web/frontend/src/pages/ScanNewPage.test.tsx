@@ -19,6 +19,8 @@ const server = setupServer(
       { name: "existing-ws", scan_type: "whitebox", status: "completed", created_at: 0 },
     ]),
   ),
+  // 默认仓库列表为空——repo 相关用例各自 server.use 注入。
+  http.get("/api/repos", () => HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -29,9 +31,9 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-function renderPage() {
+function renderPage(initialPath = "/scan/new") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialPath]}>
       <ScanNewPage />
     </MemoryRouter>,
   );
@@ -44,17 +46,42 @@ function clickTab(name: string) {
   fireEvent.mouseDown(screen.getByRole("tab", { name }));
 }
 
-// Task 5 起，提交按钮在必填空 / 格式错时 disabled；测试提交场景前先填齐合法值。
-function fillValid() {
+// Radix Select Trigger 在 jsdom 里走 fireEvent.click 打开下拉（与 WorkspaceListPage
+// 一致）。brief 推荐的 mouseDown 在本 jsdom 版本会触发 pointerCapture 未实现错误，
+// click 是已验证可复现的姿势——见 task-web-10 报告。
+function selectOption(triggerText: RegExp | string, optionName: RegExp | string) {
+  const trigger = screen.getByText(triggerText).closest("button")!;
+  fireEvent.click(trigger);
+  return screen.findByRole("option", { name: optionName }).then((opt) => {
+    fireEvent.click(opt);
+  });
+}
+
+// repo 模式下「selectedRepo」SelectTrigger（placeholder=「选择仓库」）与 legend 都含
+// "选择仓库" 文本，getByText 多匹配——直接按 combobox role index 取第 2 个 trigger。
+function selectRepoOption(optionName: RegExp | string) {
+  const triggers = screen.getAllByRole("combobox");
+  // 第 1 个=sourceKind Select（值=已下载仓库）；第 2 个=selectedRepo Select
+  fireEvent.click(triggers[1]);
+  return screen.findByRole("option", { name: optionName }).then((opt) => {
+    fireEvent.click(opt);
+  });
+}
+
+// Task 10 起：默认 sourceKind=repo，path 模式下需先切到「本地路径」。
+// 默认 schema=「选择仓库」fieldset；这里填合法 path + url 让提交可用。
+async function fillValidPath() {
+  await selectOption(/已下载仓库/, "本地路径");
   fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
   fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
 }
 
 describe("ScanNewPage", () => {
-  it("默认白盒：显示代码来源，无 reuse 复选框；切黑盒显示 reuse", () => {
+  it("默认白盒：显示「选择仓库」fieldset，无 reuse 复选框；切黑盒显示 reuse", async () => {
     renderPage();
-    // 用 exact 精确命中 <legend>代码来源</legend>；即时校验空值错误文"代码来源不能为空"也匹配 /代码来源/，需避开。
-    expect(screen.getByText("代码来源", { exact: true })).toBeInTheDocument();
+    // repo kind 默认：有「+ 添加新仓库」按钮 + 「已下载仓库」SelectValue
+    expect(screen.getByText("已下载仓库")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /\+ 添加新仓库/ })).toBeInTheDocument();
     // 黑盒专属复选框默认不出现
     expect(screen.queryByText(/复用最新白盒/)).toBeNull();
     // 切到黑盒 → reuse 复选框出现（--latest 软默认陷阱标注）
@@ -66,8 +93,8 @@ describe("ScanNewPage", () => {
     renderPage();
     clickTab("联动");
     expect(screen.getByTestId("monaco")).toBeInTheDocument();
-    // 联动页不显示白盒/黑盒的代码来源字段
-    expect(screen.queryByText(/代码来源/)).toBeNull();
+    // 联动页不显示「选择仓库」fieldset
+    expect(screen.queryByText(/\+ 添加新仓库/)).toBeNull();
   });
 
   it("黑盒 --latest 陷阱：reuse 复选框旁有可追溯说明（不勾选=standalone）", () => {
@@ -79,7 +106,7 @@ describe("ScanNewPage", () => {
 
   it("workspace 名冲突 + 点提交 → 弹断点续扫 Dialog", async () => {
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.change(screen.getByPlaceholderText(/自动/), {
       target: { value: "existing-ws" },
     });
@@ -95,7 +122,7 @@ describe("ScanNewPage", () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 400 })));
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/Temporal/i)));
   });
@@ -104,7 +131,7 @@ describe("ScanNewPage", () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 409 })));
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/并发扫描超限/)));
   });
@@ -120,7 +147,7 @@ describe("ScanNewPage", () => {
     );
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalled());
     const arg = (spy.mock.calls[0] as string[])[0];
@@ -135,7 +162,7 @@ describe("ScanNewPage", () => {
     );
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalled());
     const arg = (spy.mock.calls[0] as string[])[0];
@@ -143,8 +170,9 @@ describe("ScanNewPage", () => {
     expect(arg).not.toContain("{");
   });
 
-  it("path 时显「📁 浏览」trigger", () => {
+  it("path 模式显「📁 浏览」trigger", async () => {
     renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
     expect(screen.getByRole("button", { name: /📁 浏览/ })).toBeInTheDocument();
   });
 
@@ -159,34 +187,38 @@ describe("ScanNewPage", () => {
       ),
     );
     renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
     fireEvent.click(screen.getByRole("button", { name: /📁 浏览/ }));
     // FileSystemPicker Dialog 打开（title 默认"选择代码目录"）
     await waitFor(() => expect(screen.getByText("选择代码目录")).toBeInTheDocument());
     expect(screen.getByText("code")).toBeInTheDocument();
   });
 
-  it("必填空 → 提交 disabled；填齐 → enabled", () => {
+  it("repo 默认未选 → 提交 disabled；选 path 填齐 → enabled", async () => {
     renderPage();
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
-    fillValid();
+    await fillValidPath();
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled();
   });
 
-  it("path 非绝对 → 红字 + 提交 disabled", () => {
+  it("path 非绝对 → 红字 + 提交 disabled", async () => {
     renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
     fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "relative/path" } });
     expect(screen.getByText(/需为绝对路径/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
   });
 
-  it("wsName 空 + sourceValue 填 → 显预览名（basename + _YYYYMMDD-HHMMSS）", () => {
+  it("path 模式：wsName 空 + sourceValue 填 → 显预览名（basename + _YYYYMMDD-HHMMSS）", async () => {
     renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
     fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
     expect(screen.getByText(/预览名：foo_\d{8}-\d{6}/)).toBeInTheDocument();
   });
 
-  it("wsName 填了 → 不显预览", () => {
+  it("path 模式：wsName 填了 → 不显预览", async () => {
     renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
     fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
     fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "myname" } });
     expect(screen.queryByText(/预览名/)).toBeNull();
@@ -194,7 +226,7 @@ describe("ScanNewPage", () => {
 
   it("续扫 Dialog：取消 → 清空 wsName", async () => {
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "existing-ws" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
@@ -211,7 +243,7 @@ describe("ScanNewPage", () => {
     );
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    fillValid();
+    await fillValidPath();
     fireEvent.change(screen.getByPlaceholderText(/自动/), { target: { value: "existing-ws" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
@@ -228,5 +260,89 @@ describe("ScanNewPage", () => {
     expect(container.querySelector(".git-extra")).toBeNull();
     expect(container.querySelector(".yaml-editor")).toBeNull();
     expect(container.querySelector(".ev-warn")).toBeNull();
+  });
+
+  // === 新增：repo 预选 / repo 选择 / not-ready ===
+
+  it("URL ?repo=foo → 预选仓库 foo + buildBody source.kind=repo", async () => {
+    let captured: { source?: { kind?: string; value?: string } } | undefined;
+    server.use(
+      http.get("/api/repos", () =>
+        HttpResponse.json([
+          { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+        ]),
+      ),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as { source?: { kind?: string; value?: string } };
+        return HttpResponse.json({ workspace: "foo-ws" }, { status: 202 });
+      }),
+    );
+    renderPage("/scan/new?repo=foo");
+    // 等 repo 列表加载 + preset 生效
+    await waitFor(() => expect(screen.getByText(/foo —/)).toBeInTheDocument());
+    // 填 url 提交
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
+      target: { value: "http://example.com" },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.source?.kind).toBe("repo");
+    expect(captured!.source?.value).toBe("foo");
+  });
+
+  it("手选 repo 且就绪 → buildBody source.kind=repo", async () => {
+    let captured: { source?: { kind?: string; value?: string } } | undefined;
+    server.use(
+      http.get("/api/repos", () =>
+        HttpResponse.json([
+          { name: "bar", state: "ready", source: { kind: "git", url: "https://gitlab.example/bar.git" } },
+        ]),
+      ),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as { source?: { kind?: string; value?: string } };
+        return HttpResponse.json({ workspace: "bar-ws" }, { status: 202 });
+      }),
+    );
+    renderPage();
+    // repo kind 默认；点 selectedRepo SelectTrigger（第 2 个 combobox）→ 选 bar
+    await selectRepoOption(/bar/);
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
+      target: { value: "http://example.com" },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.source?.kind).toBe("repo");
+    expect(captured!.source?.value).toBe("bar");
+  });
+
+  it("选中的 repo 正在 cloning → 显 CloneProgress（clone 中文案）", async () => {
+    server.use(
+      http.get("/api/repos", () =>
+        HttpResponse.json([
+          { name: "wip", state: "cloning", source: { kind: "git", url: "https://gitlab.example/wip.git" } },
+        ]),
+      ),
+      // CloneProgress 走 SSE；返回空流即可（不影响"clone 中"渲染）
+      http.get("/api/repos/wip/events", () => new HttpResponse("", { headers: { "Content-Type": "text/event-stream" } })),
+    );
+    renderPage("/scan/new?repo=wip");
+    await waitFor(() => expect(screen.getByText(/wip —/)).toBeInTheDocument());
+    // 状态=cloning → CloneProgress 渲染"clone 中"
+    await waitFor(() => expect(screen.getByText(/clone 中/)).toBeInTheDocument());
+  });
+
+  it("选中的 repo state=failed → 显仓库未就绪提示", async () => {
+    server.use(
+      http.get("/api/repos", () =>
+        HttpResponse.json([
+          { name: "broken", state: "failed", source: { kind: "git", url: "https://gitlab.example/broken.git" } },
+        ]),
+      ),
+    );
+    renderPage("/scan/new?repo=broken");
+    await waitFor(() => expect(screen.getByText(/broken —/)).toBeInTheDocument());
+    expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
 });

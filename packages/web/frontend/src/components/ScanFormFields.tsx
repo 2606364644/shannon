@@ -1,72 +1,78 @@
+import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { FileSystemPicker } from "./FileSystemPicker";
+import { AddRepoDialog } from "./AddRepoDialog";
+import { CloneProgress } from "./CloneProgress";
+import { listRepos } from "@/api/client";
+import type { Repo } from "@/api/types";
 import type { FormState } from "../pages/ScanNewPage";
 
-interface ScanFormFieldsProps {
+interface Props {
   type: "whitebox" | "blackbox";
   f: FormState;
   set: (patch: Partial<FormState>) => void;
-  conflict: string | null;
-  // 暂保留（Task 7 移 inline 横幅时清）；本 task 未消费，故不解构以避 noUnusedParameters。
-  onConflictDismiss: () => void;
-  sourceValueErr: string | null;
+  sourceErr: string | null;
   urlErr: string | null;
   loadingConflict: boolean;
   derivedName: string;
 }
 
-export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingConflict, derivedName }: ScanFormFieldsProps) {
+export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflict, derivedName }: Props) {
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+
+  useEffect(() => { listRepos().then(setRepos).catch(() => {}); }, [addOpen]);
+
+  const selectedRepoState = repos.find((r) => r.name === f.selectedRepo)?.state;
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{type === "blackbox" ? "黑盒扫描" : "白盒扫描"}</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>{type === "blackbox" ? "黑盒扫描" : "白盒扫描"}</CardTitle></CardHeader>
       <CardContent className="space-y-6">
         <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">代码来源</legend>
-          <div className="space-y-2">
-            <Label htmlFor="sourceKind">来源类型</Label>
-            <Select value={f.sourceKind} onValueChange={(v) => set({ sourceKind: v as "path" | "git" })}>
-              <SelectTrigger id="sourceKind"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="path">本地路径</SelectItem>
-                <SelectItem value="git">git URL</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label htmlFor="sourceValue">路径 / URL</Label>
-            <div className="flex gap-2">
-              <Input
-                id="sourceValue"
-                value={f.sourceValue}
-                onChange={(e) => set({ sourceValue: e.target.value })}
-                placeholder={f.sourceKind === "path" ? "/root/code/foo" : "https://gitlab.example/foo.git"}
-              />
-              {f.sourceKind === "path" && (
-                <FileSystemPicker
-                  value={f.sourceValue}
-                  onChange={(v) => set({ sourceValue: v })}
-                  triggerLabel="📁 浏览"
-                />
+          <legend className="text-sm font-medium">选择仓库</legend>
+          <Select value={f.sourceKind} onValueChange={(v) => set({ sourceKind: v as "repo" | "path" })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="repo">已下载仓库</SelectItem>
+              <SelectItem value="path">本地路径</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {f.sourceKind === "repo" ? (
+            <div className="space-y-2">
+              <Select value={f.selectedRepo} onValueChange={(v) => set({ selectedRepo: v })}>
+                <SelectTrigger><SelectValue placeholder="选择仓库" /></SelectTrigger>
+                <SelectContent>
+                  {repos.map((r) => (
+                    <SelectItem key={r.name} value={r.name}>{r.name} — {r.source?.url ?? r.state}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>+ 添加新仓库</Button>
+              {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (
+                selectedRepoState === "cloning" || selectedRepoState === "pulling"
+                  ? <CloneProgress name={f.selectedRepo} />
+                  : <div className="text-xs text-destructive">仓库未就绪（{selectedRepoState}）</div>
               )}
+              <AddRepoDialog open={addOpen} onOpenChange={setAddOpen}
+                onCreated={(name) => set({ selectedRepo: name })} />
             </div>
-            {sourceValueErr && <div className="text-destructive text-xs">{sourceValueErr}</div>}
-          </div>
-          {f.sourceKind === "git" && (
-            <div className="space-y-2 border-t border-border pt-4 mt-4">
+          ) : (
+            <div className="space-y-2">
               <div className="flex gap-2">
-                <Input value={f.branch} onChange={(e) => set({ branch: e.target.value })} placeholder="分支(可选)" />
-                <Input value={f.commit} onChange={(e) => set({ commit: e.target.value })} placeholder="commit(可选,优先)" />
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox id="forceReclone" checked={f.forceReclone} onCheckedChange={(v) => set({ forceReclone: !!v })} />
-                <Label htmlFor="forceReclone">强制重新 clone</Label>
+                <Input value={f.sourceValue} onChange={(e) => set({ sourceValue: e.target.value })}
+                  placeholder="/root/code/foo" />
+                <FileSystemPicker value={f.sourceValue} onChange={(v) => set({ sourceValue: v })} triggerLabel="📁 浏览" />
               </div>
             </div>
           )}
+          {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
         </fieldset>
 
         <fieldset className="space-y-3">
@@ -78,16 +84,9 @@ export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingCo
           </div>
           <div className="space-y-2">
             <Label htmlFor="wsName">workspace 名</Label>
-            <Input
-              id="wsName"
-              value={f.wsName}
-              onChange={(e) => set({ wsName: e.target.value })}
-              placeholder="空=自动 {repo}_{timestamp}"
-            />
+            <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder="空=自动 {repo}_{timestamp}" />
             {loadingConflict && <div className="text-xs text-yellow">检测重名中…</div>}
-            {!f.wsName && derivedName && (
-              <div className="text-xs text-muted-foreground">预览名：{derivedName}（预览，实际由后端生成）</div>
-            )}
+            {!f.wsName && derivedName && <div className="text-xs text-muted-foreground">预览名：{derivedName}（预览，实际由后端生成）</div>}
           </div>
         </fieldset>
 
@@ -98,9 +97,7 @@ export function ScanFormFields({ type, f, set, sourceValueErr, urlErr, loadingCo
               <Checkbox id="reuseLatest" checked={f.reuseLatest} onCheckedChange={(v) => set({ reuseLatest: !!v })} />
               <Label htmlFor="reuseLatest">复用最新白盒结果</Label>
             </div>
-            <div className="text-xs text-muted-foreground">
-              --latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone，规避 CLI 软默认复用
-            </div>
+            <div className="text-xs text-muted-foreground">--latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone</div>
           </fieldset>
         )}
       </CardContent>
