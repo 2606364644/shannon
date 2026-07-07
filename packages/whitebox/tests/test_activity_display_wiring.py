@@ -71,6 +71,62 @@ async def test_run_agent_failure_path_logs_end_and_error(tmp_path: Path, monkeyp
         await session.close()
 
 
+async def test_run_agent_output_validation_exhausted_is_non_retryable(tmp_path, monkeypatch):
+    """OUTPUT_VALIDATION_FAILED + attempt>=cap(3) → ApplicationFailure(non_retryable=True)。
+
+    对齐 TS MAX_OUTPUT_VALIDATION_RETRIES(shannon/activities.ts:57):vuln agent 反复
+    不吐 exploitation_queue 时,3 次后停止重试,而非吃满通用 VULN_RETRY(8) 白烧 ~5×20min。
+    """
+    from temporalio.exceptions import ApplicationError as ApplicationFailure
+    from shannon_core.models.errors import ErrorCode
+
+    meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
+    session = AuditSession(meta)
+    await session.initialize()
+    set_audit_session(session)
+    try:
+        monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=3))
+        from shannon_whitebox.pipeline import activities as act_mod
+        fake_executor = MagicMock()
+        fake_executor.execute = AsyncMock(side_effect=PentestError(
+            "Missing exploitation queue", "validation",
+            error_code=ErrorCode.OUTPUT_VALIDATION_FAILED))
+        with patch.object(act_mod, "AgentExecutor", return_value=fake_executor):
+            with pytest.raises(ApplicationFailure) as exc_info:
+                await act_mod.run_agent(ActivityInput(
+                    repo_path=str(tmp_path), workspace_name="injection-vuln"))
+        assert exc_info.value.non_retryable is True  # cap 用尽 → 停止重试
+    finally:
+        clear_audit_session()
+        await session.close()
+
+
+async def test_run_agent_output_validation_before_cap_still_retryable(tmp_path, monkeypatch):
+    """OUTPUT_VALIDATION_FAILED + attempt<cap(3) → non_retryable=False,继续重试。"""
+    from temporalio.exceptions import ApplicationError as ApplicationFailure
+    from shannon_core.models.errors import ErrorCode
+
+    meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
+    session = AuditSession(meta)
+    await session.initialize()
+    set_audit_session(session)
+    try:
+        monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=2))
+        from shannon_whitebox.pipeline import activities as act_mod
+        fake_executor = MagicMock()
+        fake_executor.execute = AsyncMock(side_effect=PentestError(
+            "Missing exploitation queue", "validation",
+            error_code=ErrorCode.OUTPUT_VALIDATION_FAILED))
+        with patch.object(act_mod, "AgentExecutor", return_value=fake_executor):
+            with pytest.raises(ApplicationFailure) as exc_info:
+                await act_mod.run_agent(ActivityInput(
+                    repo_path=str(tmp_path), workspace_name="injection-vuln"))
+        assert exc_info.value.non_retryable is False  # 未用尽 → 继续重试
+    finally:
+        clear_audit_session()
+        await session.close()
+
+
 async def test_step_intent_flows_end_to_end_from_registry(tmp_path: Path):
     """Seam test: a step intent sourced from the REAL step_intents.intent_for
     registry flows through AuditSession.track_step -> WorkflowLogger.log_step ->

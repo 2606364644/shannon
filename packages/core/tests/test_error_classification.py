@@ -9,8 +9,64 @@ from shannon_core.models.errors import (
     ErrorCode,
     PentestError,
     classify_error_for_temporal,
+    classify_for_temporal_with_retry_cap,
     is_retryable_error,
+    is_output_validation_retry_exhausted,
 )
+
+
+# ============================================================================
+# is_output_validation_retry_exhausted — OUTPUT_VALIDATION_FAILED 独立 cap(对齐 TS=3)
+# ============================================================================
+class TestIsOutputValidationRetryExhausted:
+    """对齐 TS MAX_OUTPUT_VALIDATION_RETRIES(shannon/activities.ts:57):OUTPUT_VALIDATION_FAILED
+    用更短的独立重试上限(3),而非通用 VULN_RETRY(8)。大仓下 GLM 反复不吐 queue 时,
+    重试=再让模型吐一次 structured output,3 次不行基本就不行,吃满 8 次只白烧 5×~20min。"""
+
+    def test_exhausted_when_attempt_reaches_cap(self):
+        err = PentestError("Missing exploitation queue", "validation",
+                           error_code=ErrorCode.OUTPUT_VALIDATION_FAILED)
+        assert is_output_validation_retry_exhausted(err, attempt=3) is True
+
+    def test_not_exhausted_before_cap(self):
+        err = PentestError("Missing exploitation queue", "validation",
+                           error_code=ErrorCode.OUTPUT_VALIDATION_FAILED)
+        assert is_output_validation_retry_exhausted(err, attempt=2) is False
+
+    def test_other_error_code_not_affected(self):
+        """非 OUTPUT_VALIDATION_FAILED 不受 cap 影响,走通用 VULN_RETRY。"""
+        err = PentestError("agent execution failed", "agent",
+                           error_code=ErrorCode.AGENT_EXECUTION_FAILED)
+        assert is_output_validation_retry_exhausted(err, attempt=3) is False
+
+    def test_non_pentest_error_not_affected(self):
+        assert is_output_validation_retry_exhausted(RuntimeError("boom"), attempt=3) is False
+
+
+# ============================================================================
+# classify_for_temporal_with_retry_cap — classify + OUTPUT_VALIDATION cap(组合)
+# ============================================================================
+class TestClassifyForTemporalWithRetryCap:
+    """classify_error_for_temporal + OUTPUT_VALIDATION_FAILED 独立 cap 的组合。
+
+    activity catch 块的统一入口:catch 块一行调用即可拿到考虑了 cap 的 (type, retryable),
+    无需在黑白盒各自内联 if 判断(core 共享,对齐 TS activities.ts:226-232 统一处理)。
+    """
+
+    def test_output_validation_exhausted_forces_non_retryable(self):
+        err = PentestError("Missing exploitation queue", "validation",
+                           error_code=ErrorCode.OUTPUT_VALIDATION_FAILED)
+        # classify 单独 → (OutputValidationError, True);cap 用尽(attempt=3)→ retryable 降 False
+        assert classify_for_temporal_with_retry_cap(err, attempt=3) == ("OutputValidationError", False)
+
+    def test_output_validation_before_cap_still_retryable(self):
+        err = PentestError("Missing exploitation queue", "validation",
+                           error_code=ErrorCode.OUTPUT_VALIDATION_FAILED)
+        assert classify_for_temporal_with_retry_cap(err, attempt=2) == ("OutputValidationError", True)
+
+    def test_unrelated_non_retryable_error_unaffected(self):
+        err = PentestError("repo missing", "validation", error_code=ErrorCode.REPO_NOT_FOUND)
+        assert classify_for_temporal_with_retry_cap(err, attempt=5) == ("ConfigurationError", False)
 
 
 # ============================================================================

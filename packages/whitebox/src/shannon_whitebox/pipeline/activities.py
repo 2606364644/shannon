@@ -9,7 +9,12 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
 from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
-from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+from shannon_core.models.errors import (
+    ErrorCode,
+    PentestError,
+    classify_error_for_temporal,
+    classify_for_temporal_with_retry_cap,
+)
 from shannon_core.models.metrics import AgentMetrics
 from shannon_core.models.retry import agent_retry_category, retry_for
 from shannon_core.utils.atomic_write import atomic_write_json
@@ -219,7 +224,10 @@ async def run_agent(input: ActivityInput) -> dict:
             attempt_number=attempt, error=str(e)))
         await session.log_error(
             e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
-        error_type, retryable = classify_error_for_temporal(e)
+        # classify + OUTPUT_VALIDATION 独立 cap(对齐 TS MAX_OUTPUT_VALIDATION_RETRIES=3):
+        # vuln agent 反复不吐 exploitation_queue 时,attempt >= cap 则停止重试(non_retryable),
+        # 而非吃满通用 VULN_RETRY(8) 白烧 ~5×20min。
+        error_type, retryable = classify_for_temporal_with_retry_cap(e, attempt)
         # log_error surfaces to the live display; ApplicationFailure surfaces to
         # Temporal for retry decisions — both are intended, not double-logging.
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -231,7 +239,7 @@ async def run_agent(input: ActivityInput) -> dict:
             attempt_number=attempt, error=str(e)))
         await session.log_error(
             e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
-        error_type, retryable = classify_error_for_temporal(e)
+        error_type, retryable = classify_for_temporal_with_retry_cap(e, attempt)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 @activity.defn

@@ -183,6 +183,41 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
     return ("TransientError", True)
 
 
+# 对齐 TS MAX_OUTPUT_VALIDATION_RETRIES (shannon/activities.ts:57):OUTPUT_VALIDATION_FAILED
+# 用更短的独立重试上限,而非通用 VULN_RETRY(max 8)。大仓下 GLM 反复不吐 exploitation_queue
+# 时,重试=再让模型吐一次 structured output,3 次不行基本就不行;吃满 8 次只白烧 ~5×20min。
+# PY 此前漏移植这层 cap(只对齐了 createVulnValidator 的存在性校验,未对齐其 cap)。
+OUTPUT_VALIDATION_RETRY_CAP = 3
+
+
+def is_output_validation_retry_exhausted(error: Exception, attempt: int) -> bool:
+    """OUTPUT_VALIDATION_FAILED 且 attempt >= cap → 已用尽独立上限,应停止重试(non_retryable)。
+
+    在 activity catch 块中据此把 retryable 强制降为 False,对齐 TS activities.ts:226-232
+    (attemptNumber >= MAX_OUTPUT_VALIDATION_RETRIES → ApplicationFailure.nonRetryable)。
+    """
+    return (
+        isinstance(error, PentestError)
+        and error.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED
+        and attempt >= OUTPUT_VALIDATION_RETRY_CAP
+    )
+
+
+def classify_for_temporal_with_retry_cap(
+    error: Exception, attempt: int
+) -> tuple[str, bool]:
+    """classify_error_for_temporal + OUTPUT_VALIDATION_FAILED 独立 cap 的组合入口。
+
+    activity catch 块一行调用即可拿到考虑了 cap 的 ``(error_type, retryable)``:
+    先 classify,若 retryable 且 OUTPUT_VALIDATION 已用尽独立上限(对齐 TS=3),
+    则强制 ``retryable=False``(停止重试)。黑白盒 catch 块共用,避免各自内联 if。
+    """
+    error_type, retryable = classify_error_for_temporal(error)
+    if retryable and is_output_validation_retry_exhausted(error, attempt):
+        retryable = False
+    return error_type, retryable
+
+
 # Types that are ALWAYS non-retryable.
 # For types that may or may not be retryable (AgentExecutionError, UnknownError),
 # use the boolean returned by classify_error_for_temporal().
