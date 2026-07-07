@@ -102,7 +102,10 @@ class FileLogRenderer:
         return f"[{e.timestamp}] [LLM]   [GitNexus] {gitnexus_body(e)}\n"
 
     def _error(self, e) -> str:
-        msg = f"[{e.timestamp}] [ERROR] {e.error_type}: {e.message}"
+        # category=WARNING → [WARNING](attempt 级可恢复,与终端 rich_renderer /
+        # structured_event_renderer 一致);否则 [ERROR](最终失败)。
+        tag = "WARNING" if e.category == "WARNING" else "ERROR"
+        msg = f"[{e.timestamp}] [{tag}] {e.error_type}: {e.message}"
         if e.context:
             msg += f" (context: {e.context})"
         if e.classified:

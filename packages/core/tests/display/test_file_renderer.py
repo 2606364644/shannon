@@ -118,6 +118,16 @@ async def test_error_line_with_context_and_classification():
     assert "[ERROR] RuntimeError: x (context: during scan) [BillingError · 将重试]" in line
 
 
+async def test_error_line_warning_category_uses_warning_tag():
+    """attempt 级 retryable(category=WARNING)→ [WARNING] 标签,与终端一致,不再 [ERROR]。"""
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ErrorEvent(
+        timestamp="t", category="WARNING", error_type="PentestError",
+        message="Missing exploitation queue"))
+    assert "[WARNING]" in renderer._writer.text
+    assert "[ERROR]" not in renderer._writer.text
+
+
 async def test_summary_completed_has_completion_marker():
     renderer = FileLogRenderer(FakeWriter())
     await renderer.render(SummaryEvent(

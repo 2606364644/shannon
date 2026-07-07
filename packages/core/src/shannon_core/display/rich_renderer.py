@@ -135,7 +135,12 @@ class RichConsoleRenderer:
             highlight=False)
 
     def _render_error(self, e) -> None:
-        line = f"[{e.timestamp}] [bold red]ERROR[/]  {e.error_type}: {e.message}"
+        # category 由 workflow_logger.log_error 按 retryable+attempt 决定:
+        # WARNING=attempt 级可恢复(Temporal 会重试,对齐 TS logger.warn),
+        # ERROR=用尽/non-retryable 最终失败。标签与颜色据此区分,不再硬编码 ERROR。
+        is_warning = e.category == "WARNING"
+        tag, color = ("WARNING", "yellow") if is_warning else ("ERROR", "bold red")
+        line = f"[{e.timestamp}] [{color}]{tag}[/]  {e.error_type}: {e.message}"
         if e.context:
             line += f" (context: {e.context})"
         if e.classified:

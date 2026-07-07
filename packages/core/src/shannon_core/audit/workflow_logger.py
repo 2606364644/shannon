@@ -206,6 +206,16 @@ class WorkflowLogger:
             return
         await self._stream.write(f"[{format_log_time()}] [{event_type}] {message}\n")
 
+    @staticmethod
+    def _retry_silent_enabled() -> bool:
+        """SHANNON_SILENT_RETRY 真值 → attempt 级失败静默(不进终端 UI)。
+
+        对齐 TS progress-indicator 不渲染 attempt 级(只 spinner)。仅影响 retryable 且
+        未用尽的 attempt 级;用尽/non-retryable 的 ERROR 不受影响(真失败必须可见)。
+        """
+        return os.getenv("SHANNON_SILENT_RETRY", "").strip().lower() in (
+            "1", "true", "yes", "on")
+
     async def log_error(self, error: Exception, context: str | None = None,
                         *, attempt: int | None = None,
                         max_attempts: int | None = None) -> None:
@@ -215,8 +225,20 @@ class WorkflowLogger:
         # live display's error label identical to what drives retry decisions.
         from shannon_core.models.errors import classify_error_for_temporal
         etype, retryable = classify_error_for_temporal(error)
+        # 对齐原始 TS createVulnValidator 的 logger.warn(shannon/session-manager.ts:143):
+        # retryable 且未用尽(attempt < max)→ WARNING(可恢复,Temporal 会自动重试);
+        # 用尽 / non-retryable → ERROR(最终失败)。PY 此前硬编码 ERROR,导致 attempt 级
+        # 失败(如 exploitation_queue 缺失待重试)满屏 ERROR 误导读作真失败。
+        in_progress_retry = (
+            retryable and bool(attempt) and bool(max_attempts) and attempt < max_attempts
+        )
+        # SHANNON_SILENT_RETRY=1: attempt 级失败静默(不进终端 UI,对齐 TS progress-indicator
+        # 不渲染 attempt 级)。用尽/non-retryable 不受影响(真失败必须可见)。
+        if in_progress_retry and self._retry_silent_enabled():
+            return
+        category = "WARNING" if in_progress_retry else "ERROR"
         await self._dispatcher.dispatch(ErrorEvent(
-            timestamp=format_log_time(), category="ERROR",
+            timestamp=format_log_time(), category=category,
             error_type=type(error).__name__, message=str(error), context=context,
             classified=etype, display_retryable=retryable,
             attempt=attempt, max_attempts=max_attempts,

@@ -133,6 +133,22 @@ async def test_error_renders_in_red_with_classification():
     assert "BillingError" in out
 
 
+async def test_error_renders_warning_category_in_yellow_not_red():
+    """attempt 级 retryable 失败(ErrorEvent.category=WARNING)→ 黄色 WARNING 标签,
+    不再误显红色 ERROR。对齐 TS logger.warn 的可恢复语义。"""
+    from unittest.mock import MagicMock
+    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(ErrorEvent(
+        timestamp="t", category="WARNING", error_type="PentestError",
+        message="Missing exploitation queue", classified="OutputValidationError",
+        display_retryable=True, attempt=1, max_attempts=8))
+    printed = console.print.call_args.args[0]
+    assert "WARNING" in printed        # 标签升 WARNING
+    assert "yellow" in printed         # 黄色(可恢复),非 red
+    assert "Missing exploitation queue" in printed
+
+
 async def test_summary_completed_renders_panel():
     renderer, _ = _renderer_with_capture()
     await renderer.render(SummaryEvent(
