@@ -49,22 +49,37 @@ install_gitnexus() {
         return 0
     fi
     echo "Installing gitnexus via npm..."
-    # GitNexus ships native deps (@ladybugdb/core, tree-sitter grammars).
-    # npm runs install/build scripts by default, so no pnpm-style
-    # onlyBuiltDependencies allow-list is needed — and this matches
-    # GitNexus' official install method (npm install -g gitnexus).
-    if ! npm install -g gitnexus@latest; then
+    local version="latest"
+    # --ignore-scripts: onnxruntime-node's post-install downloads a "build
+    # list" that fails on HTTP 302 (network/CDN) in many environments.
+    # Skipping scripts avoids it; ONNX still works without the post-install.
+    if ! npm install -g --ignore-scripts "gitnexus@${version}"; then
         fail "gitnexus installation failed."
-        echo "  If this is a C++ toolchain error, retry skipping optional grammars:"
-        echo "    GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1 npm install -g gitnexus@latest"
-        echo "  Manual: npm install -g gitnexus@latest"
+        echo "  onnxruntime-node post-install can fail on HTTP 302 (network/CDN);"
+        echo "  --ignore-scripts is already applied. If it still fails, try:"
+        echo "    GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1 npm install -g gitnexus@${version}"
+        echo "  Manual: npm install -g gitnexus@${version}"
         return 1
+    fi
+    # --ignore-scripts also skipped @ladybugdb/core/install.js, which copies
+    # the prebuilt native binary (lbugjs.node) into place. Run it now so
+    # `gitnexus doctor` reports `native ✓ lbugjs.node loaded`.
+    local npm_root install_js
+    npm_root="$(npm root -g)"
+    install_js="$npm_root/gitnexus/node_modules/@ladybugdb/core/install.js"
+    if [[ -f "$install_js" ]]; then
+        if ! node "$install_js"; then
+            warn "@ladybugdb/core/install.js failed; native binary may be missing."
+            echo "  Run \`gitnexus doctor\` to verify; manual: node \"$install_js\""
+        fi
+    else
+        warn "@ladybugdb/core/install.js not found at $install_js"
     fi
     if has gitnexus; then
         ok "gitnexus installed"
     else
         fail "gitnexus not found after install."
-        echo "  Manual: npm install -g gitnexus@latest"
+        echo "  Manual: npm install -g gitnexus@${version}"
         return 1
     fi
 }
@@ -146,6 +161,12 @@ check_docker() {
 }
 
 # ── Run by profile ──────────────────────────────────────────────────
+
+# When sourced (not executed), skip the profile dispatcher so individual
+# install_* functions can be unit-tested in isolation via `source`.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || true
+fi
 
 FAILED=0
 
