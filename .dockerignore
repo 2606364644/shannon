@@ -1,0 +1,35 @@
+# ---- VCS / 元数据 ----
+.git
+.gitignore
+.github
+.gitattributes
+
+# ---- 克隆的外部仓库：构建绝不需要，体积巨大 ★ ----
+repos/
+
+# ---- Python 运行时 / 缓存 / 虚拟环境 ----
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node 依赖（前端在镜像内 npm ci 重装，不要本地这份）----
+**/node_modules/
+**/dist/
+
+# ---- 运行时产物 / 日志 ----
+deliverables/
+.shannon/
+*.log
+*.tmp
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+.DS_Store
+*.swp
