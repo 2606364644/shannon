@@ -24,3 +24,12 @@ configs/*.yaml
 # 本地环境适配 / 运行时数据（不入 git）
 /docker-compose.override.yml
 /packages/web/configs/
+
+# 扫描样本仓库（被扫的目标克隆，不应入库）
+/repos/
+
+# 根目录无 package.json，此 lockfile 是 npm 误生成的空孤儿
+/package-lock.json
+
+# agent 工作目录
+/.claude/plans/
