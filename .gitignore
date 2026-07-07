@@ -19,6 +19,7 @@ uv.lock
 .env.bak
 .env.bak.*
 configs/moomoo.yaml
+configs/*.yaml
 
 # 本地环境适配 / 运行时数据（不入 git）
 /docker-compose.override.yml
