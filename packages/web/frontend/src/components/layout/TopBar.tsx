@@ -9,7 +9,7 @@ interface NavItem {
   end?: boolean;
 }
 
-// 顶层导航:Dashboard / Workspaces / Scan / Settings(子项目5 全启用)
+// 顶层导航:Dashboard / Workspaces / 仓库 / Scan / Settings(子项目5 全启用)
 const NAV: NavItem[] = [
   { label: "Dashboard", to: "/", end: true },
   { label: "Workspaces", to: "/workspaces", end: true },

@@ -3,7 +3,7 @@ import { useEventSource } from "@/api/useEventSource";
 type CloneEvt = { progress?: number; type?: string; status?: string; error?: string };
 
 export function CloneProgress({ name }: { name: string }) {
-  const { events } = useEventSource(`/api/repos/${name}/events`, "clone_end");
+  const { events, status } = useEventSource(`/api/repos/${name}/events`, "clone_end");
   const last = events[events.length - 1] as CloneEvt | undefined;
   const endEvent = [...events].reverse().find((e) => (e as CloneEvt).type === "clone_end") as CloneEvt | undefined;
   const failed = endEvent?.status === "failed";
@@ -14,6 +14,9 @@ export function CloneProgress({ name }: { name: string }) {
   }
   if (endEvent && !failed) {
     return <div className="text-xs text-green">✓ 就绪</div>;
+  }
+  if (status === "error") {
+    return <div className="text-xs text-yellow">clone 中… 连接断开，重连中</div>;
   }
   return (
     <div className="text-xs text-muted-foreground">

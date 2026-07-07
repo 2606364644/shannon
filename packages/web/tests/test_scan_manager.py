@@ -4,7 +4,7 @@ import textwrap
 
 import pytest
 
-from shannon_web.models import PathSource, ScanRequest
+from shannon_web.models import PathSource, RepoSource, ScanRequest
 from shannon_web.components.scan_manager import ScanManager, TemporalUnavailable, TooManyScans
 
 
@@ -215,3 +215,19 @@ async def test_correlation_config_name_traversal_rejected(tmp_path, tmp_workspac
 
     with pytest.raises(ValueError):
         await mgr.start(ScanRequest(type="correlation", config_name="../evil"))
+
+
+def test_active_repo_sources_tracks_running_then_clears(tmp_workspaces):
+    """active_repo_sources() 直接单测：在途 scan 引用的 repo 出现于集合，
+    scan 结束（_active_reqs 清出）后消失。无需真实子进程——直接操纵 _active_reqs。
+    """
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None)
+    assert mgr.active_repo_sources() == set()  # 无在途
+    mgr._active_reqs["ws1"] = ScanRequest(
+        type="whitebox",
+        source=RepoSource(kind="repo", value="foo"),
+        url="http://e",
+    )
+    assert "foo" in mgr.active_repo_sources()  # 在途引用可见
+    mgr._active_reqs.pop("ws1", None)  # 模拟 _watch finally 清理
+    assert mgr.active_repo_sources() == set()  # scan 结束后消失

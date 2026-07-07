@@ -14,8 +14,8 @@ class EventTailer:
     """Tail an ``events.ndjson`` file with tail -f semantics.
 
     Records the byte offset of consumed bytes so callers can resume from a
-    ``Last-Event-ID`` header. Stops after observing a ``scan_end`` event.
-    Corrupt (non-JSON / blank) lines are skipped and counted.
+    ``Last-Event-ID`` header. Stops after observing a configured stop event
+    (default ``scan_end``). Corrupt (non-JSON / blank) lines are skipped and counted.
     """
 
     def __init__(self, path: Path) -> None:

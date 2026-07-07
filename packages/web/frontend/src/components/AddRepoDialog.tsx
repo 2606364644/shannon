@@ -47,7 +47,7 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => { if (busy) e.preventDefault(); }}>
         <DialogHeader>
           <DialogTitle>添加仓库</DialogTitle>
           <DialogDescription>clone git 仓库到本地，之后可反复扫描。</DialogDescription>

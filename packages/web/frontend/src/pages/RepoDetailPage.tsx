@@ -15,7 +15,11 @@ export function RepoDetailPage() {
   const [branch, setBranch] = useState("");
 
   useEffect(() => {
-    getRepo(name).then(setRepo).catch(() => { setError(true); toast.error("加载失败"); });
+    let cancelled = false;
+    getRepo(name)
+      .then((res) => { if (!cancelled) setRepo(res); })
+      .catch(() => { if (!cancelled) { setError(true); toast.error("加载失败"); } });
+    return () => { cancelled = true; };
   }, [name]);
 
   async function doCheckout() {
@@ -26,6 +30,7 @@ export function RepoDetailPage() {
       setRepo(await getRepo(name));
     } catch (e) {
       if (e instanceof ApiError) toast.error(e.status === 422 ? "分支不存在" : `切换失败（${e.status}）`);
+      else { toast.error("切换失败（网络错误）"); console.error("doCheckout failed:", e); }
     }
   }
 
@@ -36,6 +41,7 @@ export function RepoDetailPage() {
       setRepo(await getRepo(name));
     } catch (e) {
       if (e instanceof ApiError) toast.error(`更新失败（${e.status}）`);
+      else { toast.error("更新失败（网络错误）"); console.error("doPull failed:", e); }
     }
   }
 
@@ -96,7 +102,7 @@ export function RepoDetailPage() {
           <div className="mb-2 text-sm font-medium">clone 历史（最近）</div>
           <ul className="space-y-1 text-xs text-muted-foreground">
             {repo.recent_events.slice(-10).map((e, i) => (
-              <li key={i}>{JSON.stringify(e)}</li>
+              <li key={(e as { ts?: string }).ts ?? `evt-${i}`}>{JSON.stringify(e)}</li>
             ))}
           </ul>
         </div>

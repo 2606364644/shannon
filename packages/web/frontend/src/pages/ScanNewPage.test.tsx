@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -57,12 +57,13 @@ function selectOption(triggerText: RegExp | string, optionName: RegExp | string)
   });
 }
 
-// repo 模式下「selectedRepo」SelectTrigger（placeholder=「选择仓库」）与 legend 都含
-// "选择仓库" 文本，getByText 多匹配——直接按 combobox role index 取第 2 个 trigger。
+// repo 模式下 selectedRepo SelectTrigger 在「选择仓库」fieldset 内（该 fieldset 还含
+// sourceKind Select，故取 fieldset 内最后一个 combobox 稳定命中 selectedRepo）。
+// 用 selector: "legend" 避开 SelectValue placeholder=「选择仓库」的同名文本匹配。
 function selectRepoOption(optionName: RegExp | string) {
-  const triggers = screen.getAllByRole("combobox");
-  // 第 1 个=sourceKind Select（值=已下载仓库）；第 2 个=selectedRepo Select
-  fireEvent.click(triggers[1]);
+  const fieldset = screen.getByText("选择仓库", { selector: "legend" }).closest("fieldset")!;
+  const trigger = within(fieldset).getAllByRole("combobox").at(-1)!;
+  fireEvent.click(trigger);
   return screen.findByRole("option", { name: optionName }).then((opt) => {
     fireEvent.click(opt);
   });

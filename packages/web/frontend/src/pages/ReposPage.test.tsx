@@ -39,6 +39,22 @@ describe("ReposPage", () => {
     expect(await screen.findByText("删除仓库", { exact: true })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
     await waitFor(() => expect(screen.queryByText("删除仓库", { exact: true })).toBeNull());
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("cloning / stale 行显对应指示（CloneProgress / 未完成）", async () => {
+    server.use(
+      http.get("/api/repos", () => HttpResponse.json([
+        { name: "wip", state: "cloning", source: { kind: "git" } },
+        { name: "old", state: "stale", source: { kind: "git" } },
+      ])),
+      // CloneProgress 走 SSE；空流不影响「clone 中」渲染
+      http.get("/api/repos/wip/events", () => new HttpResponse("", { headers: { "Content-Type": "text/event-stream" } })),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("wip")).toBeInTheDocument());
+    expect(screen.getByText(/clone 中/)).toBeInTheDocument();
+    expect(screen.getByText(/未完成/)).toBeInTheDocument();
   });
 });

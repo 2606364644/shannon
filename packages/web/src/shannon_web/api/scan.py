@@ -19,6 +19,7 @@ async def create_scan(req: ScanRequest, request: Request):
     except TooManyScans as e:
         raise HTTPException(409, f"已有扫描在跑，并发上限 {e.limit}")
     except PermissionError as e:
+        # OS-level EACCES/EPERM from ws_dir.mkdir()（git-creds 来源已于 Task 3 移除）
         raise HTTPException(400, str(e))
     except ValueError as e:
         raise HTTPException(422, str(e))

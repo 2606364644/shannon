@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { listRepos, deleteRepo, pullRepo, ApiError } from "@/api/client";
@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AddRepoDialog } from "@/components/AddRepoDialog";
 import { CloneProgress } from "@/components/CloneProgress";
+
+const PULL_REFRESH_DELAY_MS = 1500;
 
 function fmtSize(b?: number) {
   if (!b) return "-";
@@ -21,6 +23,7 @@ export function ReposPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const pullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -33,6 +36,7 @@ export function ReposPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => () => { if (pullTimerRef.current) clearTimeout(pullTimerRef.current); }, []);
 
   async function doDelete() {
     if (!pendingDelete) return;
@@ -52,7 +56,8 @@ export function ReposPage() {
     try {
       await pullRepo(name);
       toast.success(`正在更新 ${name}`);
-      setTimeout(() => void refresh(), 1500);
+      if (pullTimerRef.current) clearTimeout(pullTimerRef.current);
+      pullTimerRef.current = setTimeout(() => void refresh(), PULL_REFRESH_DELAY_MS);
     } catch (e) {
       if (e instanceof ApiError) toast.error(`更新失败（${e.status}）`);
     }
@@ -99,8 +104,8 @@ export function ReposPage() {
                   )}
                 </td>
                 <td className="py-2 pr-4 space-x-2">
-                  <Button size="sm" variant="ghost" onClick={() => doPull(r.name)}>更新</Button>
-                  <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingDelete(r.name)}>删除</Button>
+                  <Button size="sm" variant="ghost" aria-label={`更新 ${r.name}`} onClick={() => doPull(r.name)}>更新</Button>
+                  <Button size="sm" variant="ghost" className="text-red" aria-label={`删除 ${r.name}`} onClick={() => setPendingDelete(r.name)}>删除</Button>
                 </td>
               </tr>
             ))}
