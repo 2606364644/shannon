@@ -14,6 +14,9 @@ class WebConfig:
         self.gitlab_user = os.environ.get("GITLAB_USER")
         self.gitlab_token = os.environ.get("GITLAB_TOKEN")
         self.repos_dir = Path(os.environ.get("SHANNON_REPOS_DIR", "repos"))
+        self.repos_max_concurrent_clones = max(
+            1, int(os.environ.get("SHANNON_REPOS_MAX_CONCURRENT_CLONES", "3"))
+        )
         self.configs_dir = Path(os.environ.get("SHANNON_CONFIGS_DIR", "configs"))
         self.frontend_dir = os.environ.get("SHANNON_WEB_FRONTEND_DIR")
         self.fs_roots: list[Path] = [

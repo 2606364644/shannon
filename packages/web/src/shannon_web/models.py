@@ -10,15 +10,12 @@ class PathSource(BaseModel):
     value: str
 
 
-class GitSource(BaseModel):
-    kind: Literal["git"]
-    value: str
-    branch: str | None = None
-    commit: str | None = None
-    force_reclone: bool = False
+class RepoSource(BaseModel):
+    kind: Literal["repo"]
+    value: str  # 仓库名（repos_dir 下的目录名）
 
 
-Source = Union[PathSource, GitSource]
+Source = Union[PathSource, RepoSource]
 
 
 class ScanRequest(BaseModel):
