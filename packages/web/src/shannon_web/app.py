@@ -67,7 +67,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     git_fetcher = GitFetcher(cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token)
     overrides = overrides or {}
     app.state.scan_manager = overrides.get("scan_manager") or ScanManager(
-        cfg.workspaces_dir, cfg.repos_dir, app.state.config_store, git_fetcher,
+        cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
         max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout)
 
     app.include_router(workspaces.router)

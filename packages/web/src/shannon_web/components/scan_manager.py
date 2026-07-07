@@ -30,20 +30,28 @@ def _now_iso() -> str:
 
 class ScanManager:
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
-                 git_fetcher: Any = None, max_concurrent: int = 1,
-                 scan_timeout: float = 0.0) -> None:
+                 max_concurrent: int = 1, scan_timeout: float = 0.0) -> None:
         self._workspaces_dir = Path(workspaces_dir)
         self._repos_dir = Path(repos_dir)
         self._config_store = config_store
-        self._git = git_fetcher
         self._max_concurrent = max(1, max_concurrent)
         self._scan_timeout = scan_timeout
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._tasks: dict[str, asyncio.Task] = {}
+        # 进行中的 scan 请求快照（ws -> ScanRequest），供 active_repo_sources() 判引用
+        self._active_reqs: dict[str, ScanRequest] = {}
 
     # ---- 公共 API ----
     def active_pids(self) -> dict[str, int]:
         return {ws: p.pid for ws, p in self._procs.items() if p.returncode is None}
+
+    def active_repo_sources(self) -> set[str]:
+        """当前正在跑的 scan 引用的 repo 名集合（DELETE /repos 判引用用）。"""
+        out: set[str] = set()
+        for req in self._active_reqs.values():
+            if req.source is not None and req.source.kind == "repo":
+                out.add(req.source.value)
+        return out
 
     async def reap_zombies(self) -> None:
         """lifespan 启动时扫无主子进程（本会话 _procs 外的）。v1: 无操作占位，
@@ -73,6 +81,9 @@ class ScanManager:
 
         argv = self._build_argv(req, target, ws, yaml_path)
         env = {**os.environ, "SHANNON_WEB_EVENT_FILE": str(event_file)}
+        # 在子进程拉起前登记，确保 active_repo_sources() 能看到在途请求（即便
+        # proc 尚未赋值回 _procs）。
+        self._active_reqs[ws] = req
         proc = await asyncio.create_subprocess_exec(
             *argv, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -127,17 +138,34 @@ class ScanManager:
         target: str | None = None
         yaml_path: Path | None = None
         if req.source is not None:
-            if req.source.kind == "git":
-                if self._git is None or not self._git.available():
-                    raise PermissionError("git 模式不可用：缺少 GitLab 凭证")
-                p = await self._git.fetch(req.source.value, req.source.branch,
-                                          req.source.commit, req.source.force_reclone)
-                target = str(p)
-            else:
+            if req.source.kind == "repo":
+                target = self._resolve_repo_path(req.source.value)
+            else:  # path
                 target = req.source.value
         if req.type == "correlation":
             yaml_path = await self._resolve_correlation_yaml(req)
         return target, yaml_path
+
+    def _resolve_repo_path(self, name: str) -> str:
+        """将 repo 名解析为 repos_dir/<name>，并校验 state==ready。
+
+        - 目录不存在 → ValueError（前端 4xx 语义）
+        - 元数据缺失或 JSON 损坏 → 视为 ready，不阻塞扫描
+        - state 非 ready（cloning/error 等）→ ValueError，提示去 /repos 完成 clone
+        """
+        repo_dir = self._repos_dir / name
+        if not repo_dir.is_dir():
+            raise ValueError(f"仓库不存在：{name}")
+        meta_file = repo_dir / ".shannon-repo.json"
+        state = "ready"
+        if meta_file.exists():
+            try:
+                state = json.loads(meta_file.read_text("utf-8", errors="replace")).get("state", "ready")
+            except json.JSONDecodeError:
+                state = "ready"  # 元数据损坏不阻塞扫描
+        if state != "ready":
+            raise ValueError(f"仓库未就绪（state={state}），请先在 /repos 完成 clone")
+        return str(repo_dir)
 
     def _resolve_out_workspace(self, yaml_path: Path | None) -> str:
         """从 correlation yaml 解析 out_workspace，作为 event_file 所在 ws。
@@ -209,6 +237,7 @@ class ScanManager:
             await self._write_scan_end(event_file, status, rc if rc is not None else -1, tail_text)
         self._procs.pop(ws, None)
         self._tasks.pop(ws, None)
+        self._active_reqs.pop(ws, None)
 
     @staticmethod
     def _has_scan_end(event_file: Path) -> bool:
