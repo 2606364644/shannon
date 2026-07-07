@@ -1,27 +1,28 @@
 import { useState, type ReactNode } from "react";
 import type { ParsedVulnBlock, Severity } from "../api/types";
 
-/** severity → 卡片边框 + 底色（走 --c-* alpha，深/浅主题自动重算）。 */
+/** severity → 卡片边框 + 底色（走 --c-* alpha，深/浅主题自动重算）。
+ *  暖色梯度 red→orange→yellow→灰；cyan 留给「公网」等信息标签不进 severity。 */
 const SEVERITY_BORDER: Record<Severity, string> = {
   Critical: "border-red/50 bg-red/5",
-  High: "border-yellow/50 bg-yellow/5",
-  Medium: "border-cyan/50 bg-cyan/5",
+  High: "border-orange/50 bg-orange/5",
+  Medium: "border-yellow/50 bg-yellow/5",
   Low: "border-border",
 };
 
 /** severity → 左侧色条。 */
 const SEVERITY_STRIPE: Record<Severity, string> = {
   Critical: "bg-red",
-  High: "bg-yellow",
-  Medium: "bg-cyan",
+  High: "bg-orange",
+  Medium: "bg-yellow",
   Low: "bg-muted-foreground",
 };
 
 /** severity → id chip / 角标 文字+背景+边框。 */
 const SEVERITY_CHIP: Record<Severity, string> = {
   Critical: "text-red bg-red/10 border-red/30",
-  High: "text-yellow bg-yellow/10 border-yellow/30",
-  Medium: "text-cyan bg-cyan/10 border-cyan/30",
+  High: "text-orange bg-orange/10 border-orange/30",
+  Medium: "text-yellow bg-yellow/10 border-yellow/30",
   Low: "text-muted-foreground bg-muted border-border",
 };
 
@@ -52,6 +53,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
     <article
       data-testid="vuln-card"
       data-severity={severity}
+      id={block.id || undefined}
       className={`flex overflow-hidden rounded-md border ${SEVERITY_BORDER[severity]}`}
     >
       <div className={`w-1 shrink-0 ${SEVERITY_STRIPE[severity]}`} aria-hidden="true" />
@@ -59,7 +61,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
         <header className="flex flex-wrap items-center gap-1.5 mb-1.5 font-mono text-[11px]">
           <span
             data-testid="vuln-id"
-            className={`font-semibold px-1.5 py-0.5 rounded-sm border ${SEVERITY_CHIP[severity]}`}
+            className={`font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_CHIP[severity]}`}
           >
             {block.id}
           </span>
@@ -85,7 +87,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
           )}
           <span
             data-testid="severity-badge"
-            className={`ml-auto px-1.5 py-0.5 rounded-sm border ${SEVERITY_CHIP[severity]}`}
+            className={`ml-auto px-2 py-0.5 rounded-full border ${SEVERITY_CHIP[severity]}`}
             title="依据类型/公网/认证/置信度启发式推断，非权威评级"
           >
             {severity} <span className="opacity-60">推断</span>

@@ -31,18 +31,18 @@ describe("MarkdownVulnCard · severity 着色", () => {
     expect(stripe).not.toBeNull();
   });
 
-  it("High → 黄边框 + bg-yellow 色条", () => {
+  it("High → 橙边框 + bg-orange 色条", () => {
     const { container } = render(<MarkdownVulnCard block={makeBlock()} severity="High" />);
     const card = container.querySelector('[data-testid="vuln-card"]');
     expect(card).toHaveAttribute("data-severity", "High");
-    expect(card?.className).toMatch(/border-yellow/);
-    expect(container.querySelector(".bg-yellow")).not.toBeNull();
+    expect(card?.className).toMatch(/border-orange/);
+    expect(container.querySelector(".bg-orange")).not.toBeNull();
   });
 
-  it("Medium → 青边框 + bg-cyan 色条", () => {
+  it("Medium → 金边框 + bg-yellow 色条", () => {
     const { container } = render(<MarkdownVulnCard block={makeBlock()} severity="Medium" />);
-    expect(container.querySelector('[data-testid="vuln-card"]')?.className).toMatch(/border-cyan/);
-    expect(container.querySelector(".bg-cyan")).not.toBeNull();
+    expect(container.querySelector('[data-testid="vuln-card"]')?.className).toMatch(/border-yellow/);
+    expect(container.querySelector(".bg-yellow")).not.toBeNull();
   });
 
   it("Low → 灰边框 + bg-muted-foreground 色条", () => {

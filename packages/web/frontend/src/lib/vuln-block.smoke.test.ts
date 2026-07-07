@@ -16,10 +16,10 @@ describe.skipIf(skip)("真实 NodeGoat 报告冒烟（解析 + severity 推断�
   const segs = splitByVulnBlocks(md);
   const vulns = segs.filter((s): s is Extract<typeof s, { type: "vuln" }> => s.type === "vuln");
 
-  it("切出 25 个 ### 漏洞块（xss 13 + auth 10 + ssrf 2；inj 4 与 authz 7 是表格形式，无 ### 块）", () => {
-    // 真实报告里 injection 走 ## Exploitation Queue 表格、authz 走 ## 裁决概览 表格，
-    // 均无 ### VULN-NN 详情块 → 不进卡片，留在 prose 段渲染。
-    expect(vulns.length).toBe(25);
+  it("切出 36 个漏洞块（xss 13 + auth 10 + ssrf 2 的 ### 块 + inj 4 + authz 7 的表格块）", () => {
+    // ### 块：xss 13 + auth 10 + ssrf 2 = 25；
+    // 表格块（首列=ID 的 GFM 表）：inj 4（## Exploitation Queue）+ authz 7（## 裁决概览）= 11。
+    expect(vulns.length).toBe(36);
   });
 
   it("无重复 id", () => {

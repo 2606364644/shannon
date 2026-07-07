@@ -53,7 +53,7 @@ export function VulnCard({ v }: { v: Vulnerability }) {
         <span className="ml-auto text-xs text-muted-foreground">{open ? "▴" : "▾"}</span>
       </CardHeader>
       {open && (
-        <CardContent className="space-y-1 font-serif text-sm">
+        <CardContent className="space-y-1 text-sm">
           {v.vulnerable_code_location && (
             <div><b>location:</b> <code className="font-mono text-cyan">{v.vulnerable_code_location}</code></div>
           )}

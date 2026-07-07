@@ -93,7 +93,7 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
   const entries = Object.entries(phases);
   return (
     <Card className="p-4">
-      <CardTitle className="mb-2 font-serif text-base">阶段瀑布</CardTitle>
+      <CardTitle className="mb-2 font-semibold tracking-tight text-base">阶段瀑布</CardTitle>
       <div className="flex items-end gap-0.5 h-20">
         {entries.map(([name, p]) => (
           <div
@@ -116,7 +116,7 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
 function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (ms: number) => string }) {
   return (
     <Card className="p-4">
-      <CardTitle className="mb-2 font-serif text-base">agent 账本</CardTitle>
+      <CardTitle className="mb-2 font-semibold tracking-tight text-base">agent 账本</CardTitle>
       <Table>
         <TableHeader>
           <TableRow>

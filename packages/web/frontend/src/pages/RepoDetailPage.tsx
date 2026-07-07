@@ -67,7 +67,7 @@ export function RepoDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link to="/repos" className="text-sm text-muted-foreground hover:underline">← 仓库</Link>
-        <h1 className="font-serif text-lg">{repo.name}</h1>
+        <h1 className="font-semibold tracking-tight text-lg">{repo.name}</h1>
         <span className={repo.state === "ready" ? "text-green text-sm" : repo.state === "failed" ? "text-destructive text-sm" : "text-muted-foreground text-sm"}>
           {repo.state}
         </span>

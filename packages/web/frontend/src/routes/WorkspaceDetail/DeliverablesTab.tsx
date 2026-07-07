@@ -41,7 +41,7 @@ export function DeliverablesTab() {
   return (
     <div className="grid grid-cols-[1fr_360px] items-start gap-5">
       <div className="space-y-2">
-        <h3 className="mb-2 font-serif text-base">
+        <h3 className="mb-2 font-semibold tracking-tight text-base">
           漏洞聚合 · {data.aggregated_vulnerabilities.length}
         </h3>
         {data.notes?.injection_has_no_queue && (

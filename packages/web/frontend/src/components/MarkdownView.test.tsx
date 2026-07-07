@@ -19,9 +19,9 @@ const MD = `# 安全评估报告
 
 **最高风险发现（按业务影响排序）：**
 
-1. **RCE**（INJ-01）：eval
-2. **SSRF**（SSRF-01）：IMDSv1
-3. **NoSQL $where 注入**（INJ-04）：threshold
+1. **RCE**（INJ-VULN-01）：eval
+2. **SSRF**（SSRF-VULN-01）：IMDSv1
+3. **NoSQL $where 注入**（INJ-VULN-04）：threshold
 
 ## 按漏洞类型汇总
 
@@ -55,18 +55,68 @@ describe("MarkdownView", () => {
     expect(card).toHaveTextContent("INJ-VULN-01");
   });
 
-  it("TOC 含类型 + 执行摘要条目", () => {
+  it("TOC 含类型 + 执行摘要条目（从 DOM 读真实 id）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
     const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc).not.toBeNull();
     expect(toc?.textContent).toContain("执行摘要");
     expect(toc?.textContent).toContain("Injection");
   });
 
-  it("无 level>=2 标题时不渲染 TOC、外层退单栏", () => {
+  it("TOC 每个锚链接命中 DOM 内真实 id（点击可跳转）", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc).not.toBeNull();
+    const links = toc!.querySelectorAll("a[href^='#']");
+    expect(links.length).toBeGreaterThan(0);
+    for (const a of Array.from(links)) {
+      const id = a.getAttribute("href")!.slice(1);
+      // 核心：TOC href 必须对应 DOM 真实元素，否则点击无反应
+      expect(container.querySelector(`[id="${id}"]`)).not.toBeNull();
+    }
+  });
+
+  it("重复同名 h2 → 唯一 DOM id 且 TOC 各自命中（juice-shop 结构）", () => {
+    const md = [
+      "# Injection Findings",
+      "",
+      "## Identified Vulnerabilities",
+      "",
+      "### INJ-VULN-01: SQLi",
+      "",
+      "- **vulnerability_type:** SQLi",
+      "",
+      "# XSS Findings",
+      "",
+      "## Identified Vulnerabilities",
+      "",
+      "### XSS-VULN-01: Stored",
+      "",
+      "- **vulnerability_type:** Stored",
+      "",
+    ].join("\n");
+    const { container } = render(<MarkdownView markdown={md} />);
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc).not.toBeNull();
+    const ivLinks = Array.from(toc!.querySelectorAll("a")).filter((a) =>
+      (a.textContent || "").includes("Identified Vulnerabilities"),
+    );
+    expect(ivLinks.length).toBe(2);
+    const hrefs = ivLinks.map((a) => a.getAttribute("href"));
+    // 两个同名 h2 的 href 必须不同（段级 slugger + 段前缀全局去重）
+    expect(hrefs[0]).not.toBe(hrefs[1]);
+    for (const href of hrefs) {
+      const id = href!.slice(1);
+      // 且每个 href 命中唯一 DOM id（无重复 id）
+      expect(container.querySelectorAll(`[id="${id}"]`).length).toBe(1);
+    }
+  });
+
+  it("章节不足 2 时不渲染 TOC、外层退单栏", () => {
     const { container } = render(<MarkdownView markdown={"# 只有一级标题\n\n正文"} />);
     expect(container.querySelector('[data-testid="toc"]')).toBeNull();
     // 外层 grid 退单栏：无双栏 class
-    expect(container.querySelector(".grid.grid-cols-\\[220px_1fr\\]")).toBeNull();
+    expect(container.querySelector(".grid.grid-cols-\\[200px_1fr\\]")).toBeNull();
   });
 
   it("执行摘要 hero 置顶 + 含最高风险发现（vuln-ID 提取到专属元素）", () => {
@@ -79,10 +129,10 @@ describe("MarkdownView", () => {
     // 则 .kv-vuln-id 不存在，本断言失败。
     const vulnIdSpans = hero?.querySelectorAll(".kv-vuln-id");
     expect(vulnIdSpans?.length).toBeGreaterThan(0);
-    expect(vulnIdSpans?.[0].textContent).toBe("INJ-01");
-    // 多 vuln-ID 用 / 连接（INJ-04 等），守 join 行为
+    expect(vulnIdSpans?.[0].textContent).toBe("INJ-VULN-01");
+    // 多 vuln-ID 用 / 连接（INJ-VULN-04 等），守 join 行为
     const inj04 = Array.from(vulnIdSpans ?? []).find((s) =>
-      s.textContent?.includes("INJ-04"),
+      s.textContent?.includes("INJ-VULN-04"),
     );
     expect(inj04).toBeDefined();
   });
@@ -154,12 +204,12 @@ describe("MarkdownView", () => {
     const anchors = hero?.querySelectorAll("a[href^='#']");
     expect(anchors?.length).toBeGreaterThan(0);
     const hrefs = Array.from(anchors ?? []).map((a) => a.getAttribute("href"));
-    expect(hrefs).toContain("#INJ-01");
-    expect(hrefs).toContain("#SSRF-01");
-    expect(hrefs).toContain("#INJ-04");
+    expect(hrefs).toContain("#INJ-VULN-01");
+    expect(hrefs).toContain("#SSRF-VULN-01");
+    expect(hrefs).toContain("#INJ-VULN-04");
     // 锚文本含 vuln-ID（可点击）
     const firstAnchor = anchors?.[0];
-    expect(firstAnchor?.textContent).toMatch(/INJ-01/);
+    expect(firstAnchor?.textContent).toMatch(/INJ-VULN-01/);
   });
 
   it("无执行摘要时不渲染 hero（不写死结构）", () => {

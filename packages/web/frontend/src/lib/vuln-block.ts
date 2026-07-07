@@ -81,6 +81,9 @@ export function inferSeverity(block: ParsedVulnBlock, topRiskIds?: Set<string>):
 /** 识别漏洞条目标题行：`### PREFIX-VULN-NUM`（PREFIX 全大写字母）。 */
 export const VULN_HEADING_RE = /^### ([A-Z]+)-VULN-(\d+)\b/;
 
+/** 识别漏洞 ID（表格首列、执行摘要引用等）：`PREFIX-VULN-NUM`。 */
+export const VULN_ID_RE = /^[A-Z]+-VULN-\d+$/;
+
 /** 切分产物：prose 段（原样喂 react-markdown）或 vuln 段（解析后的块）。 */
 export type Segment =
   | { type: "prose"; md: string }
@@ -155,10 +158,137 @@ export function parseVulnBlock(raw: string): ParsedVulnBlock {
   };
 }
 
+// ── 漏洞表格解析（Injection Exploitation Queue / Authz 裁决概览）──
+
+/** GFM 表格行：| ... |（至少含一个内部分隔 |）。 */
+function isTableRow(line: string): boolean {
+  const t = line.trim();
+  return t.startsWith("|") && t.endsWith("|") && t.indexOf("|", 1) !== -1;
+}
+
+/** GFM 表格分隔行：| --- | :---: | 等（只含 | : - 空格，且含 -）。 */
+function isTableSeparator(line: string): boolean {
+  const t = line.trim();
+  if (!t.includes("-")) return false;
+  return /^\|?[\s:|-]+\|?$/.test(t);
+}
+
+/** 拆表格行为单元格（去首尾 |，按 | 分，trim）。 */
+function splitTableRow(line: string): string[] {
+  const t = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return t.split("|").map((c) => c.trim());
+}
+
+/** 判断一张表是否是漏洞表：首列头 = ID 且首列数据单元格形如 PREFIX-VULN-NN。 */
+export function isVulnTable(headerFirstCell: string, firstDataCell: string): boolean {
+  return headerFirstCell.trim().toLowerCase() === "id" && VULN_ID_RE.test(firstDataCell.trim());
+}
+
+/** 把漏洞表的一行（表头驱动）解析成 ParsedVulnBlock。 */
+export function parseTableRowToBlock(headers: string[], row: string[]): ParsedVulnBlock {
+  const colMap: Record<string, string> = {};
+  headers.forEach((h, idx) => {
+    colMap[h.trim().toLowerCase()] = (row[idx] ?? "").trim();
+  });
+
+  const id = colMap["id"] || "";
+  const prefix = /^([A-Z]+)-VULN-/.exec(id)?.[1] ?? "";
+  const vulnType =
+    colMap["类型"] ?? colMap["type"] ?? colMap["vulnerability_type"] ?? "";
+
+  const defect =
+    colMap["核心缺陷"] ?? colMap["defect"] ?? colMap["描述"] ?? colMap["description"] ?? "";
+  const source = colMap["源"] ?? colMap["source"] ?? "";
+  const sink = colMap["sink"] ?? colMap["接收点"] ?? "";
+  let title = defect || (source && sink ? `${source} → ${sink}` : "") || vulnType || id;
+  title = title.replace(/`/g, "").trim();
+
+  const authRaw = colMap["认证"] ?? colMap["auth"] ?? colMap["authentication"] ?? "";
+  let authRequired: boolean | null = null;
+  if (authRaw) {
+    if (/pre-?auth|none|无认证|公开/i.test(authRaw)) authRequired = false;
+    else if (/isloggedin|登录|需认证|required|认证/i.test(authRaw)) authRequired = true;
+  }
+
+  const confidence = normalizeConfidence(colMap["置信度"] ?? colMap["confidence"] ?? "");
+
+  const fields: ParsedVulnField[] = headers
+    .map((h, idx) => ({ key: h.trim(), val: (row[idx] ?? "").trim() }))
+    .filter((f) => f.key.toLowerCase() !== "id" && f.val);
+
+  return {
+    id,
+    prefix,
+    title,
+    starred: false,
+    vulnType,
+    fields,
+    witnessPayload: undefined,
+    externallyExploitable: null,
+    authRequired,
+    confidence,
+    verdict: null,
+    raw: `| ${row.join(" | ")} |`,
+  };
+}
+
+/**
+ * 从 prose 段文本里提取漏洞表格，返回交替的 prose/vuln 段序列。
+ * 仅当表头首列 = ID 且首列数据单元格匹配 VULN_ID_RE 才拆成 vuln 段；
+ * 普通表格（如 `| 类型 | 数量 |`）原样留在 prose。
+ */
+export function extractTableVulns(proseMd: string): Segment[] {
+  const lines = proseMd.split(/\r?\n/);
+  const out: Segment[] = [];
+  let proseAccum: string[] = [];
+
+  const flushProse = () => {
+    if (proseAccum.length) {
+      const text = proseAccum.join("\n");
+      if (text.trim()) out.push({ type: "prose", md: text });
+      proseAccum = [];
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const headers = splitTableRow(line);
+      // 读整张表（连续表格行）
+      const tableLines: string[] = [line, lines[i + 1]];
+      let j = i + 2;
+      while (j < lines.length && isTableRow(lines[j])) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+      const dataRows = tableLines.slice(2).map(splitTableRow);
+      const firstCell = dataRows[0]?.[0] ?? "";
+      if (isVulnTable(headers[0] ?? "", firstCell)) {
+        flushProse();
+        for (const row of dataRows) {
+          const block = parseTableRowToBlock(headers, row);
+          out.push({ type: "vuln", raw: `| ${row.join(" | ")} |`, block });
+        }
+      } else {
+        // 非漏洞表（首列非 ID）→ 整张表留 prose
+        proseAccum.push(...tableLines);
+      }
+      i = j;
+      continue;
+    }
+    proseAccum.push(line);
+    i++;
+  }
+  flushProse();
+  return out;
+}
+
 /**
  * 把整份报告 markdown 按 `### XXX-VULN-NN` 锚点切成段：
  * prose 段（无漏洞块的区域）与 vuln 段（单个漏洞块）交替。
  * vuln 段从 `### VULN` 行开始，到下一个 `#/##/###` 标题前结束。
+ * 后处理：prose 段内的漏洞表格（首列=ID）也拆成 vuln 段，覆盖 Injection/Authz 表格形式。
  */
 export function splitByVulnBlocks(md: string): Segment[] {
   const lines = md.split(/\r?\n/);
@@ -198,5 +328,15 @@ export function splitByVulnBlocks(md: string): Segment[] {
   }
   flushProse();
   flushVuln();
-  return segs;
+  // 后处理：prose 段内的漏洞表格（首列=ID）拆成 vuln 段，
+  // 覆盖 Injection Exploitation Queue / Authz 裁决概览这类表格形式。
+  const expanded: Segment[] = [];
+  for (const seg of segs) {
+    if (seg.type === "prose") {
+      expanded.push(...extractTableVulns(seg.md));
+    } else {
+      expanded.push(seg);
+    }
+  }
+  return expanded;
 }

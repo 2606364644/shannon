@@ -1,92 +1,106 @@
 /* DSF tokens — 三层：shadcn token（A）+ 语义色（B）+ 字体/圆角（C）。
    深色 = :root 默认；浅色 = .light。HSL channel 写法供 hsl(var(--x)) 消费。
    语义色用 --c- 前缀（c=channel）避开 events.css 同名 hex 变量（--cyan #22D3EE 等）。
-   hex 真值来源见 spec §1.2，AA 校验以 dev 预览页为准。 */
+   hex 真值来源见 spec §1.2，AA 校验以 dev 预览页为准。
+
+   配色取向（2026-07-08 报告页激进现代化 → Linear/Vercel 暗色）：
+   - 背景从中性炭→深靛紫（更深更饱和，氛围感），卡片靠 lightness 差做层次。
+   - 强调色 primary cyan→indigo/violet（更现代 SaaS），cyan 让位给 hljs + gradient。
+   - severity 暖色梯度（red/orange/yellow/灰）不变，与冷色 primary 形成冷暖对比。
+   - radius 6→8px（更柔）；大数字 gradient text 作 signature focal。 */
 
 :root {
-  /* 层 A · shadcn token（深） */
-  --background: 213 33% 6%;
-  --foreground: 213 22% 82%;
-  --card: 217 26% 11%;
-  --card-foreground: 213 22% 82%;
-  --popover: 217 26% 11%;
-  --popover-foreground: 213 22% 82%;
-  --primary: 189 94% 53%;
-  --primary-foreground: 213 33% 6%;
-  --secondary: 217 26% 16%;
-  --secondary-foreground: 213 22% 82%;
-  --muted: 217 26% 16%;
-  --muted-foreground: 213 12% 47%;
-  --accent: 217 26% 16%;
-  --accent-foreground: 213 22% 82%;
-  --destructive: 0 92% 63%;
-  --destructive-foreground: 213 33% 6%;
-  --border: 217 26% 16%;
-  --input: 217 26% 16%;
-  --ring: 189 94% 53%;
+  /* 层 A · shadcn token（深 · 靛紫暗色） */
+  --background: 250 22% 7%;
+  --foreground: 240 10% 90%;
+  --card: 250 19% 10%;
+  --card-foreground: 240 10% 90%;
+  --popover: 250 19% 10%;
+  --popover-foreground: 240 10% 90%;
+  --primary: 255 82% 68%;
+  --primary-foreground: 250 22% 7%;
+  --secondary: 250 16% 14%;
+  --secondary-foreground: 240 10% 90%;
+  --muted: 250 16% 13%;
+  --muted-foreground: 240 8% 58%;
+  --accent: 250 16% 15%;
+  --accent-foreground: 240 10% 90%;
+  --destructive: 0 75% 68%;
+  --destructive-foreground: 250 22% 7%;
+  --border: 250 16% 19%;
+  --input: 250 16% 19%;
+  --ring: 255 82% 68%;
 
   /* 层 B · 语义色（深，HSL channel；--c- 前缀避 events.css hex --cyan 等同名冲突） */
-  --c-cyan: 189 94% 53%;
-  --c-magenta: 270 100% 80%;
-  --c-green: 137 55% 48%;
-  --c-red: 0 92% 63%;
-  --c-yellow: 40 75% 42%;
+  --c-cyan: 192 90% 56%;
+  --c-magenta: 285 90% 76%;
+  --c-green: 140 60% 52%;
+  --c-red: 0 78% 68%;
+  --c-orange: 24 92% 60%;
+  --c-yellow: 40 92% 58%;
 
   /* 层 C · 字体 / 圆角 */
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", Georgia, serif;
-  --radius: 3px;
+  --radius: 8px;
+
+  /* 层 E · elevation（卡片阴影，主题感知；深主题用深黑阴影浮起，浅主题常规灰） */
+  --shadow-card: 0 2px 8px -2px hsl(250 45% 2% / 0.55), 0 1px 2px hsl(250 45% 2% / 0.4);
 
   /* 层 D · @tailwindcss/typography prose 主题（深） */
-  --prose-body: 213 22% 82%;
-  --prose-headings: 0 0% 100%;
-  --prose-links: 189 94% 53%;
-  --prose-bold: 0 0% 100%;
-  --prose-code: 189 94% 53%;
-  --prose-code-bg: 217 26% 16%;
-  --prose-quotes: 213 12% 47%;
-  --prose-bullets: 213 12% 47%;
-  --prose-hr: 217 26% 16%;
+  --prose-body: 240 10% 90%;
+  --prose-headings: 240 14% 96%;
+  --prose-links: 255 82% 70%;
+  --prose-bold: 240 14% 96%;
+  --prose-code: 255 82% 70%;
+  --prose-code-bg: 250 16% 14%;
+  --prose-quotes: 240 8% 58%;
+  --prose-bullets: 240 8% 58%;
+  --prose-hr: 250 16% 19%;
 }
 
 .light {
   /* 层 A · shadcn token（浅） */
-  --background: 0 0% 100%;
-  --foreground: 217 26% 16%;
+  --background: 240 30% 99%;
+  --foreground: 250 30% 12%;
   --card: 0 0% 100%;
-  --card-foreground: 217 26% 16%;
+  --card-foreground: 250 30% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 217 26% 16%;
-  --primary: 190 92% 36%;
+  --popover-foreground: 250 30% 12%;
+  --primary: 255 70% 58%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 220 30% 96%;
-  --secondary-foreground: 217 26% 16%;
-  --muted: 220 30% 96%;
-  --muted-foreground: 213 12% 47%;
-  --accent: 213 30% 92%;
-  --accent-foreground: 217 26% 16%;
-  --destructive: 0 73% 51%;
+  --secondary: 250 30% 96%;
+  --secondary-foreground: 250 30% 12%;
+  --muted: 250 30% 96%;
+  --muted-foreground: 240 10% 42%;
+  --accent: 250 24% 92%;
+  --accent-foreground: 250 30% 12%;
+  --destructive: 0 72% 50%;
   --destructive-foreground: 0 0% 100%;
-  --border: 213 25% 85%;
-  --input: 213 25% 85%;
-  --ring: 190 92% 36%;
+  --border: 250 20% 88%;
+  --input: 250 20% 88%;
+  --ring: 255 70% 58%;
 
   /* 层 B · 语义色（浅） */
-  --c-cyan: 190 92% 36%;
-  --c-magenta: 262 83% 58%;
-  --c-green: 137 66% 30%;
-  --c-red: 0 73% 51%;
-  --c-yellow: 40 94% 36%;
+  --c-cyan: 192 85% 40%;
+  --c-magenta: 280 80% 50%;
+  --c-green: 140 60% 32%;
+  --c-red: 0 72% 50%;
+  --c-orange: 24 88% 48%;
+  --c-yellow: 38 90% 40%;
 
   /* 层 D · prose 主题（浅） */
-  --prose-body: 217 26% 16%;
-  --prose-headings: 217 26% 16%;
-  --prose-links: 190 92% 36%;
-  --prose-bold: 217 26% 16%;
-  --prose-code: 190 92% 36%;
-  --prose-code-bg: 213 30% 92%;
-  --prose-quotes: 213 12% 47%;
-  --prose-bullets: 213 12% 47%;
-  --prose-hr: 213 25% 85%;
+  --prose-body: 250 30% 12%;
+  --prose-headings: 250 30% 12%;
+  --prose-links: 255 70% 50%;
+  --prose-bold: 250 30% 12%;
+  --prose-code: 255 70% 50%;
+  --prose-code-bg: 250 24% 92%;
+  --prose-quotes: 240 10% 42%;
+  --prose-bullets: 240 10% 42%;
+  --prose-hr: 250 20% 88%;
+
+  /* 层 E · elevation（浅主题常规灰阴影） */
+  --shadow-card: 0 1px 3px hsl(250 40% 30% / 0.08), 0 1px 2px hsl(250 40% 30% / 0.06);
 }

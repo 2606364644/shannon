@@ -117,7 +117,7 @@ export function ReposPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-serif text-lg">仓库</h1>
+        <h1 className="font-semibold tracking-tight text-lg">仓库</h1>
         <Button onClick={() => setAddOpen(true)}>+ 添加仓库</Button>
       </div>
       {loading ? (

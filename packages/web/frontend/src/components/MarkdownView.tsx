@@ -1,13 +1,22 @@
-import { useMemo, useState, Children, type ReactNode, type ReactElement } from "react";
+import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
-import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
+import GithubSlugger from "github-slugger";
 import remarkGfm from "remark-gfm";
+import { visit } from "unist-util-visit";
+import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { MarkdownVulnCard } from "./MarkdownVulnCard";
-import { splitByVulnBlocks, inferSeverity } from "@/lib/vuln-block";
+import { ThreatOverview } from "./report/ThreatOverview";
+import { TypeSummaryCards } from "./report/TypeSummaryCards";
+import { splitByVulnBlocks, inferSeverity, type Segment } from "@/lib/vuln-block";
+import {
+  computeStats,
+  type ParsedTypeSummary,
+  type TopRiskItem,
+} from "@/lib/report-stats";
+import type { ParsedVulnBlock } from "../api/types";
 
 interface Heading {
   id: string;
@@ -15,48 +24,132 @@ interface Heading {
   level: 1 | 2 | 3;
 }
 
-interface TopRisk {
+/** TOC 条目：id 直接取自渲染后 DOM（见 makeSharedSlugPlugin），保证 href 永远命中。 */
+interface TocItem {
+  id: string;
   text: string;
-  vulnIds: string[];
+  level: 1 | 2;
 }
 
-/** 从 md 提取 TOC headings + 执行摘要「最高风险发现」编号条目（提取括号内 vuln ID，如 INJ-01）。 */
+/**
+ * 段级 slug rehype plugin：每个 prose 段（独立 ReactMarkdown 实例）用本函数生成专属
+ * plugin。slugger 在 attacher 内部新建——每次组件渲染 plugin 重新 attach 时纯函数式
+ * 重建，同样输入 → 同样 id，无跨渲染累积。segmentIndex 前缀（= group 在 groups 里的
+ * 稳定索引）跨段保证全局唯一，避开「共享 slugger 在 React 渲染中可变状态不稳定」的
+ * 陷阱：共享 slugger 会在严格模式/重渲染（如切主题）下被重复消费 → 同一标题拿到 -1
+ * 后缀 → DOM id 漂移、与 TOC 错位（用户报告的「点了没反应」真根因）。
+ */
+function makeSegmentSlugPlugin(segmentIndex: number) {
+  return function segmentSlug() {
+    const slugger = new GithubSlugger();
+    return (tree: any) => {
+      visit(tree, "element", (node: any) => {
+        if (typeof node.tagName === "string" && /^h[1-6]$/.test(node.tagName)) {
+          node.properties = node.properties || {};
+          node.properties.id = `s${segmentIndex}-${slugger.slug(toString(node))}`;
+        }
+      });
+    };
+  };
+}
+
+/** 从「INJ-VULN-01/02/03」这类文本提取完整 vuln ID（展开 /02 /03，复用 prefix）。 */
+export function extractVulnIds(text: string): string[] {
+  const ids: string[] = [];
+  const re = /\b([A-Z]+)-VULN-(\d+)((?:\/\d+)*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const prefix = m[1];
+    ids.push(`${prefix}-VULN-${m[2]}`);
+    if (m[3]) {
+      for (const slashNum of m[3].matchAll(/\/(\d+)/g)) {
+        ids.push(`${prefix}-VULN-${slashNum[1]}`);
+      }
+    }
+  }
+  return ids;
+}
+
+/** 从 md 提取 headings + 执行摘要「最高风险发现」+「按类型汇总」结构。
+ *  注意：TOC 不再消费这里的 headings.id（改从 DOM 读真实 id），仅 topRisks /
+ *  typeSummaries / execH2 检测依赖本函数。 */
 function parseStructure(md: string): {
   headings: Heading[];
-  topRisks: TopRisk[];
+  topRisks: TopRiskItem[];
+  typeSummaries: ParsedTypeSummary[];
 } {
   const headings: Heading[] = [];
-  const topRisks: TopRisk[] = [];
+  const slugger = new GithubSlugger();
+  const topRisks: TopRiskItem[] = [];
+  const typeSummaries: ParsedTypeSummary[] = [];
   const lines = md.split(/\r?\n/);
   let inExecSummary = false;
   let inNumberedList = false;
+  let inTypeSummarySection = false;
+  let currentType: ParsedTypeSummary | null = null;
+
+  const flushType = () => {
+    if (currentType) {
+      typeSummaries.push(currentType);
+      currentType = null;
+    }
+  };
+
   for (const line of lines) {
     const hm = /^(#{1,3})\s+(.+)$/.exec(line);
     if (hm) {
       const level = hm[1].length as 1 | 2 | 3;
       const text = hm[2].trim();
-      const id = text
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, "-")
-        .replace(/^-|-$/g, "");
+      const id = slugger.slug(text);
       headings.push({ id, text, level });
-      inExecSummary = text.includes("执行摘要");
+      // 任何标题都关闭编号列表与当前类型小节
       inNumberedList = false;
+      flushType();
+      inExecSummary = text.includes("执行摘要");
+      if (level <= 2) {
+        inTypeSummarySection = text.includes("按漏洞类型汇总");
+      } else if (inTypeSummarySection) {
+        currentType = { prefix: "", displayName: text, count: 0, severityRangeRaw: "" };
+      }
       continue;
     }
+
     if (inExecSummary) {
       const nm = /^\d+\.\s+(.+)$/.exec(line.trim());
       if (nm) {
         inNumberedList = true;
         const text = nm[1].replace(/\*\*/g, "");
-        const vulnIds = Array.from(text.matchAll(/[A-Z]+-\d+/g)).map((m) => m[0]);
+        const vulnIds = extractVulnIds(text);
         topRisks.push({ text, vulnIds });
       } else if (inNumberedList && line.trim() && !/^\d+\./.test(line.trim())) {
         inNumberedList = false;
       }
+      continue;
+    }
+
+    if (inTypeSummarySection && currentType) {
+      const t = line.trim();
+      const cm = /^Count:\s*(\d+)/i.exec(t);
+      if (cm) {
+        currentType.count = parseInt(cm[1], 10);
+        const pm = /（([A-Z]+)-VULN-/.exec(t);
+        if (pm) currentType.prefix = pm[1];
+        continue;
+      }
+      const sm = /^Severity range:\s*(.+)$/i.exec(t);
+      if (sm) {
+        currentType.severityRangeRaw = sm[1].trim();
+        continue;
+      }
+      const fm = /^Key findings:\s*(.+)$/i.exec(t);
+      if (fm) {
+        currentType.findingsText = fm[1].trim();
+        continue;
+      }
     }
   }
-  return { headings, topRisks };
+  flushType();
+  return { headings, topRisks, typeSummaries };
 }
 
 /** 拍平 ReactNode 到纯文本（用于键值检测）。 */
@@ -149,15 +242,30 @@ const PROSE_COMPONENTS = {
 };
 
 const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_PLUGINS = [
-  rehypeSlug,
-  [rehypeAutolinkHeadings, { behavior: "wrap" }],
-  rehypeHighlight,
-];
+
+/** 连续 vuln 段合并成一个 grid 组，prose 段单独成组。 */
+type VulnGroup = { type: "prose"; md: string } | { type: "grid"; blocks: ParsedVulnBlock[] };
+function groupSegments(segments: Segment[]): VulnGroup[] {
+  const groups: VulnGroup[] = [];
+  let vulnAccum: ParsedVulnBlock[] = [];
+  for (const seg of segments) {
+    if (seg.type === "vuln") {
+      vulnAccum.push(seg.block);
+    } else {
+      if (vulnAccum.length) {
+        groups.push({ type: "grid", blocks: vulnAccum });
+        vulnAccum = [];
+      }
+      groups.push({ type: "prose", md: seg.md });
+    }
+  }
+  if (vulnAccum.length) groups.push({ type: "grid", blocks: vulnAccum });
+  return groups;
+}
 
 export function MarkdownView({ markdown }: { markdown: string }) {
   const [heroCollapsed, setHeroCollapsed] = useState(false);
-  const { headings, topRisks } = useMemo(() => parseStructure(markdown), [markdown]);
+  const { headings, topRisks, typeSummaries } = useMemo(() => parseStructure(markdown), [markdown]);
   const execH2 = headings.find((h) => h.text.includes("执行摘要"));
   const showHero = !!execH2 && topRisks.length > 0;
   const topRiskIds = useMemo(() => {
@@ -166,15 +274,73 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     return s;
   }, [topRisks]);
   const segments = useMemo(() => splitByVulnBlocks(markdown), [markdown]);
+  const stats = useMemo(
+    () =>
+      computeStats(
+        segments
+          .filter((s): s is Extract<Segment, { type: "vuln" }> => s.type === "vuln")
+          .map((s) => s.block),
+        topRiskIds,
+        topRisks,
+        typeSummaries,
+      ),
+    [segments, topRiskIds, topRisks, typeSummaries],
+  );
+  const groups = useMemo(() => groupSegments(segments), [segments]);
+
+  // TOC：从渲染后 DOM 读真实 heading id（h1 章节为骨架 + h2 子节；vuln h3 太碎不进 TOC）。
+  // 这保证每个 TOC href 都命中 DOM 真实元素，与 id 生成方式解耦——根治「点了没反应」。
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [tocItems, setTocItems] = useState<TocItem[]>([]);
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) {
+      setTocItems([]);
+      return;
+    }
+    const items: TocItem[] = [];
+    root.querySelectorAll<HTMLElement>("h1[id], h2[id]").forEach((el) => {
+      const id = el.id;
+      if (!id) return;
+      const level = (el.tagName === "H1" ? 1 : 2) as 1 | 2;
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (text) items.push({ id, text, level });
+    });
+    setTocItems(items);
+  }, [markdown, groups]);
+
+  // scroll-spy：高亮当前可视章节。jsdom 无 IntersectionObserver → 跳过（不影响 TOC 渲染）。
+  const [activeId, setActiveId] = useState<string>("");
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || tocItems.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]?.target.id) setActiveId(visible[0].target.id);
+      },
+      { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
+    );
+    for (const { id } of tocItems) {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [tocItems]);
+
+  const twoCol = tocItems.length >= 2;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      <ThreatOverview stats={stats} />
+
       {showHero && (
         <div
           data-testid="exec-summary-hero"
-          className="rounded-md border border-border bg-card p-4"
+          className="rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4"
         >
-          <div className="mb-2 flex items-center justify-between font-serif text-base">
+          <div className="mb-2 flex items-center justify-between font-semibold tracking-tight text-base">
             <span>最高风险发现（按业务影响排序）</span>
             <Button
               size="sm"
@@ -206,53 +372,76 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         </div>
       )}
 
-      {(() => {
-        const tocItems = headings.filter((h) => h.level >= 2);
-        const gridCls = tocItems.length > 0 ? "grid grid-cols-[220px_1fr] gap-6" : "grid grid-cols-1";
-        return (
-          <div className={gridCls}>
-            {tocItems.length > 0 && (
-              <nav data-testid="toc" className="sticky top-4 space-y-1 text-sm">
-                {tocItems.map((h, i) => (
-                  <a
-                    key={`${i}-${h.id}`}
-                    href={`#${h.id}`}
-                    className={`block text-muted-foreground hover:text-primary ${
-                      h.level === 3 ? "pl-3 text-xs" : ""
-                    }`}
-                  >
-                    {h.text}
-                  </a>
-                ))}
-              </nav>
-            )}
-            <div className="space-y-4">
-              {segments.map((seg, i) =>
-                seg.type === "prose" ? (
-                  <div
-                    key={i}
-                    className="prose prose-sm max-w-none font-sans prose-headings:font-serif"
-                  >
-                    <ReactMarkdown
-                      remarkPlugins={REMARK_PLUGINS}
-                      rehypePlugins={REHYPE_PLUGINS as never}
-                      components={PROSE_COMPONENTS as never}
-                    >
-                      {seg.md}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <MarkdownVulnCard
-                    key={i}
-                    block={seg.block}
-                    severity={inferSeverity(seg.block, topRiskIds)}
-                  />
-                ),
-              )}
+      <TypeSummaryCards typeAggs={stats.typeAggs} />
+
+      <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
+        {twoCol && (
+          <nav data-testid="toc" aria-label="目录" className="sticky top-4 self-start">
+            <div className="mb-2 px-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              目录
             </div>
-          </div>
-        );
-      })()}
+            <ul className="space-y-0.5">
+              {tocItems.map((h, i) => {
+                const active = h.id === activeId;
+                return (
+                  <li key={`${i}-${h.id}`}>
+                    <a
+                      href={`#${h.id}`}
+                      className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors ${
+                        h.level === 2 ? "pl-7" : ""
+                      } ${
+                        active
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      }`}
+                    >
+                      <span
+                        className={`h-1 w-1 shrink-0 rounded-full transition-colors ${
+                          active ? "bg-primary" : "bg-transparent group-hover:bg-muted-foreground/60"
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{h.text}</span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        )}
+        <div ref={contentRef} className="space-y-5">
+          {groups.map((g, i) =>
+            g.type === "prose" ? (
+              <div
+                key={i}
+                className="prose prose-sm max-w-none font-sans prose-headings:font-sans prose-headings:tracking-tight prose-h1:mt-0"
+              >
+                <ReactMarkdown
+                  remarkPlugins={REMARK_PLUGINS}
+                  rehypePlugins={[makeSegmentSlugPlugin(i), rehypeHighlight] as never}
+                  components={PROSE_COMPONENTS as never}
+                >
+                  {g.md}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div
+                key={i}
+                data-testid="vuln-grid"
+                className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+              >
+                {g.blocks.map((block) => (
+                  <MarkdownVulnCard
+                    key={block.id}
+                    block={block}
+                    severity={inferSeverity(block, topRiskIds)}
+                  />
+                ))}
+              </div>
+            ),
+          )}
+        </div>
+      </div>
     </div>
   );
 }

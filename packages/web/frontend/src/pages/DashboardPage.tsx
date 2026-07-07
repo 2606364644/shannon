@@ -71,7 +71,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="font-serif text-2xl">Shannon</h1>
+        <h1 className="font-semibold tracking-tight text-2xl">Shannon</h1>
         <Link to="/scan/new"><Button>+ 新建扫描</Button></Link>
       </div>
 
@@ -96,7 +96,7 @@ export function DashboardPage() {
 
       {running.length > 0 ? (
         <section className="space-y-2">
-          <h2 className="font-serif text-lg text-muted-foreground">正在运行</h2>
+          <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">正在运行</h2>
           <div className="grid gap-3 md:grid-cols-2">
             {running.map((w) => (
               <Link key={w.name} to={`/p/${w.name}/live`} className="block">
@@ -125,7 +125,7 @@ export function DashboardPage() {
       {recent.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="font-serif text-lg text-muted-foreground">最近扫描</h2>
+            <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">最近扫描</h2>
             <Link to="/workspaces" className="text-sm text-primary hover:underline">查看全部 →</Link>
           </div>
           <Card>

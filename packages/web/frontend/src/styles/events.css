@@ -3,16 +3,21 @@
    （跨介质不变量）、.spinner、列表页 .ledger/.page/.status-* 与 ScanNewPage 规则。
    新组件用 tokens.css/shadcn；此文件不再追加规则。*/
 :root {
-  --void: #0B0F14; --panel: #141A22; --ink: #C9D1D9; --trace: #6B7785; --rule: #1F2733;
-  --cyan: #22D3EE;   /* phase / info / GitNexus */
-  --blue: #58A6FF;   /* agent start */
-  --green: #3FB950;  /* ok / done / 双轨确认 */
-  --red: #F85149;    /* error / fail / exploited 可达 */
-  --yellow: #D29922; /* tool / warn */
-  --magenta: #BC8CFF;/* llm / LLM 轨 */
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
-  --font-serif: "IBM Plex Serif", Georgia, serif;
+  /* operator-console 语义色：原 hex（独立于 DSF）现全部接 DSF token（hsl channel），
+     深浅主题自动跟随。保留变量名（--void / --ink / --cyan…）让下面 ev-*、page、ledger、
+     scan-page 等规则不改、只换值 —— 全站（含列表页 ledger / 扫描页 / 详情 agent 表）
+     统一到 DSF 深靛+indigo+暖 severity 风格。字体变量沿用 tokens.css。*/
+  --void: hsl(var(--background));
+  --panel: hsl(var(--card));
+  --ink: hsl(var(--foreground));
+  --trace: hsl(var(--muted-foreground));
+  --rule: hsl(var(--border));
+  --cyan: hsl(var(--c-cyan));      /* phase / info / GitNexus */
+  --blue: hsl(var(--primary));     /* agent start（随 indigo 强调） */
+  --green: hsl(var(--c-green));    /* ok / done / 双轨确认 */
+  --red: hsl(var(--c-red));        /* error / fail / exploited 可达 */
+  --yellow: hsl(var(--c-yellow));  /* tool / warn */
+  --magenta: hsl(var(--c-magenta));/* llm / LLM 轨 */
 }
 body { background: var(--void); color: var(--ink); font-family: var(--font-sans); margin: 0; }
 .mono { font-family: var(--font-mono); }

@@ -3,7 +3,11 @@ import {
   inferSeverity,
   SEVERITY_RANK,
   VULN_HEADING_RE,
+  VULN_ID_RE,
   parseVulnBlock,
+  parseTableRowToBlock,
+  isVulnTable,
+  extractTableVulns,
   splitByVulnBlocks,
 } from "./vuln-block";
 import type { ParsedVulnBlock, Severity } from "../api/types";
@@ -295,11 +299,22 @@ describe("splitByVulnBlocks", () => {
     expect(segs.every((s) => s.type === "vuln")).toBe(true);
   });
 
-  it("authz 裁决概览（表格形式，无 ### VULN 块）→ 整段 prose", () => {
+  it("authz 裁决概览（表格形式，首列=ID）→ 解析成 vuln 段", () => {
     const md = "## 裁决概览\n\n| ID | 端点 |\n|----|------|\n| AUTHZ-VULN-01 | /x |\n";
     const segs = splitByVulnBlocks(md);
-    expect(segs.length).toBe(1);
-    expect(segs[0].type).toBe("prose");
+    const vulns = segs.filter((s) => s.type === "vuln");
+    expect(vulns.length).toBe(1);
+    if (vulns[0].type === "vuln") {
+      expect(vulns[0].block.id).toBe("AUTHZ-VULN-01");
+      expect(vulns[0].block.prefix).toBe("AUTHZ");
+    }
+  });
+
+  it("普通表（首列非 ID，如 | 类型 | 数量 |）→ 不拆，留 prose", () => {
+    const md = "| 类型 | 数量 |\n|------|------|\n| INJ | 4 |\n";
+    const segs = splitByVulnBlocks(md);
+    expect(segs.filter((s) => s.type === "vuln").length).toBe(0);
+    expect(segs.some((s) => s.type === "prose")).toBe(true);
   });
 
   it("vuln 块遇到 ## 更高级标题结束", () => {
@@ -322,5 +337,85 @@ describe("splitByVulnBlocks", () => {
     if (segs[0].type === "prose") {
       expect(segs[0].md).toContain("前 prose");
     }
+  });
+});
+
+describe("VULN_ID_RE", () => {
+  it("匹配 PREFIX-VULN-NN", () => {
+    expect(VULN_ID_RE.test("INJ-VULN-01")).toBe(true);
+    expect(VULN_ID_RE.test("AUTHZ-VULN-10")).toBe(true);
+  });
+  it("不匹配短形式或非漏洞 id", () => {
+    expect(VULN_ID_RE.test("INJ-01")).toBe(false);
+    expect(VULN_ID_RE.test("ID")).toBe(false);
+    expect(VULN_ID_RE.test("inj-vuln-01")).toBe(false);
+  });
+});
+
+describe("isVulnTable", () => {
+  it("首列头=ID 且首列数据=VULN id → true", () => {
+    expect(isVulnTable("ID", "INJ-VULN-01")).toBe(true);
+    expect(isVulnTable("id", "AUTHZ-VULN-07")).toBe(true);
+  });
+  it("首列非 ID 或数据非 vuln id → false", () => {
+    expect(isVulnTable("类型", "INJ")).toBe(false);
+    expect(isVulnTable("ID", "INJ-01")).toBe(false);
+    expect(isVulnTable("ID", "")).toBe(false);
+  });
+});
+
+describe("parseTableRowToBlock", () => {
+  it("Injection 表行（6 列）→ vulnType 来自「类型」列，auth 来自「认证」列", () => {
+    const headers = ["ID", "类型", "源", "Sink", "认证", "置信度"];
+    const row = ["INJ-VULN-01", "CommandInjection (SSJS/RCE)", "`preTax`", "`eval()`", "isLoggedIn", "high"];
+    const b = parseTableRowToBlock(headers, row);
+    expect(b.id).toBe("INJ-VULN-01");
+    expect(b.prefix).toBe("INJ");
+    expect(b.vulnType).toBe("CommandInjection (SSJS/RCE)");
+    expect(b.authRequired).toBe(true);
+    expect(b.confidence).toBe("high");
+    expect(b.externallyExploitable).toBeNull();
+    expect(b.witnessPayload).toBeUndefined();
+  });
+
+  it("Authz 表行（5 列，不同表头）→ title 来自「核心缺陷」列", () => {
+    const headers = ["ID", "端点", "类型", "置信度", "核心缺陷"];
+    const row = ["AUTHZ-VULN-01", "GET /allocations/:userId", "Horizontal", "high", "userId 取自 req.params"];
+    const b = parseTableRowToBlock(headers, row);
+    expect(b.id).toBe("AUTHZ-VULN-01");
+    expect(b.vulnType).toBe("Horizontal");
+    expect(b.title).toBe("userId 取自 req.params");
+    expect(b.authRequired).toBeNull();
+    // 非 ID 列都进 fields
+    const keys = b.fields.map((f) => f.key);
+    expect(keys).toContain("类型");
+    expect(keys).toContain("核心缺陷");
+    expect(keys).not.toContain("ID");
+  });
+
+  it("inferSeverity 对表格 block 工作：CommandInjection + isLoggedIn → High，带 topRiskIds → Critical", () => {
+    const headers = ["ID", "类型", "源", "Sink", "认证", "置信度"];
+    const row = ["INJ-VULN-01", "CommandInjection (SSJS/RCE)", "`preTax`", "`eval()`", "isLoggedIn", "high"];
+    const b = parseTableRowToBlock(headers, row);
+    expect(inferSeverity(b)).toBe("High");
+    expect(inferSeverity(b, new Set(["INJ-VULN-01"]))).toBe("Critical");
+  });
+});
+
+describe("extractTableVulns", () => {
+  it("漏洞表 → vuln 段；表前后的 prose 保留", () => {
+    const md = "## Exploitation Queue\n\n| ID | 类型 |\n|----|------|\n| INJ-VULN-01 | RCE |\n| INJ-VULN-02 | RCE |\n\n后续 prose。";
+    const segs = extractTableVulns(md);
+    const vulns = segs.filter((s) => s.type === "vuln");
+    expect(vulns.length).toBe(2);
+    expect(segs[0].type).toBe("prose");
+    expect(segs[segs.length - 1].type).toBe("prose");
+  });
+
+  it("普通表（首列非 ID）→ 留 prose，不产 vuln 段", () => {
+    const md = "| 类型 | 数量 |\n|------|------|\n| INJ | 4 |\n";
+    const segs = extractTableVulns(md);
+    expect(segs.filter((s) => s.type === "vuln").length).toBe(0);
+    expect(segs[0].type).toBe("prose");
   });
 });

@@ -113,7 +113,7 @@ const MOCK_VULNS: Vulnerability[] = [
 export function DevComponentsPage() {
   return (
     <div className="space-y-8">
-      <h1 className="font-serif text-2xl">Component Preview (dev-only)</h1>
+      <h1 className="font-semibold tracking-tight text-2xl">Component Preview (dev-only)</h1>
 
       <Section title="Theme">
         <ThemeToggle />
@@ -234,7 +234,7 @@ export function DevComponentsPage() {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-2">
-      <h2 className="font-serif text-lg text-muted-foreground">{title}</h2>
+      <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">{title}</h2>
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-4">
         {children}
       </div>

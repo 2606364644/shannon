@@ -20,10 +20,10 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-2xl">设置</h1>
+      <h1 className="font-semibold tracking-tight text-2xl">设置</h1>
 
       <Card>
-        <CardHeader><CardTitle className="font-serif text-base">主题</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">主题</CardTitle></CardHeader>
         <CardContent className="flex items-center gap-3 text-sm">
           <Label htmlFor="theme-switch">深色</Label>
           <Switch
@@ -37,7 +37,7 @@ export function SettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="font-serif text-base">系统状态</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">系统状态</CardTitle></CardHeader>
         <CardContent>
           {loading && <Skeleton className="h-20 w-full" />}
           {error && <ErrorState message={`状态加载失败:${error}`} onRetry={refresh} />}
@@ -66,7 +66,7 @@ export function SettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="font-serif text-base">关于</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">关于</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           <div>shannon-py 安全扫描平台 web 控制台。版本信息见上方系统状态面板。</div>
         </CardContent>

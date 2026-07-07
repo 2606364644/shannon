@@ -22,7 +22,7 @@ export function TopBar() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
-        <Link to="/" className="flex items-center gap-1.5 font-serif text-base">
+        <Link to="/" className="flex items-center gap-1.5 font-semibold tracking-tight text-base">
           <span className="text-cyan">⬡</span>
           <span>Shannon</span>
         </Link>

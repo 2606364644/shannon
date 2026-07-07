@@ -1,6 +1,12 @@
 /* 报告页专属：hljs token 配色（接 DSF --c- 语义色）+ 表格 + scroll-margin + pre 背景。
    深色（:root 默认）为主，.light 覆盖一套调亮度保 AA 对比。 */
 
+/* —— 锚点跳转：平滑滚动（尊重 reduced-motion）—— */
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
 /* —— hljs token 配色（深色默认） —— */
 .hljs-keyword,
 .hljs-built_in,
@@ -35,8 +41,44 @@
 }
 .prose :where(table) { display: block; overflow-x: auto; }
 
-/* —— 锚跳转避 sticky 遮挡（TopBar h-12 + 详情页 header 元信息行） —— */
-.prose :is(h1, h2, h3) { scroll-margin-top: 80px; }
+/* —— 锚跳转避 sticky 遮挡（TopBar h-12 + 详情页 header 元信息行）；
+   vuln-card 也覆盖：hero「最高风险」锚链接目标 —— */
+.prose :is(h1, h2, h3),
+[data-testid="vuln-card"] { scroll-margin-top: 80px; }
+
+/* —— 报告正文标题：sans + 现代层次（去 serif 突兀，「# Injection Findings」不再过硬）—— */
+.prose :is(h1, h2, h3) {
+  font-family: var(--font-sans);
+  color: hsl(var(--foreground));
+  letter-spacing: -0.011em;
+}
+.prose h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+  padding-bottom: 0.45rem;
+  margin: 0.6rem 0 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.prose h2 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.75rem;
+}
+.prose h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.2rem 0 0.5rem;
+  color: hsl(var(--foreground) / 0.9);
+}
+
+/* —— 卡片 elevation：深色主题 border 易偏硬，加一缕外阴影让卡片浮起 —— */
+[data-testid="threat-overview"],
+[data-testid="type-card"],
+[data-testid="vuln-card"],
+[data-testid="exec-summary-hero"] {
+  box-shadow: 0 1px 2px hsl(250 40% 2% / 0.35);
+}
 
 /* —— block code 容器背景 —— */
 .prose pre {
