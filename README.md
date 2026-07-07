@@ -48,6 +48,9 @@ cp .env.example .env
 SHANNON_PROFILE=glm-anthropic        # 改这一行切换引擎/账号
 SHANNON_MAX_CONCURRENT=2             # 并发上限：白盒 vuln + 黑盒 exploit agents
 SHANNON_BROWSER_ENGINE=playwright    # playwright(默认) | agent-browser
+# git URL 扫描模式凭据(表单来源选「git URL」时需要;选「本地路径」无需);仅 https + user:token,不支持 ssh
+GITLAB_USER=
+GITLAB_TOKEN=
 # TEMPORAL_ADDRESS=localhost:7233
 ```
 

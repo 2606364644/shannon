@@ -12,7 +12,7 @@ export interface SystemStatus {
   ai_provider: string;
   browser_engine: string;
   temporal: TemporalStatus;
-  git_available: boolean;
+  git: { binary_available: boolean; credentials_configured: boolean };
   version: string;
 }
 

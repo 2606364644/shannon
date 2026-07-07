@@ -8,7 +8,7 @@ const okBody = {
   ai_provider: "claude",
   browser_engine: "agent-browser",
   temporal: { enabled: true, host: "localhost:7233", last_status: "connected", last_error: null },
-  git_available: true,
+  git: { binary_available: true, credentials_configured: true },
   version: "shannon-web 0.1.0",
 };
 
@@ -35,7 +35,18 @@ describe("SettingsPage", () => {
     expect(screen.getByText("agent-browser")).toBeInTheDocument();
     expect(screen.getByText("localhost:7233")).toBeInTheDocument();
     expect(screen.getByText("shannon-web 0.1.0")).toBeInTheDocument();
-    expect(screen.getByText("可用")).toBeInTheDocument(); // git_available
+    // git 拆成两个独立信号(二进制 / GitLab 凭据)
+    expect(screen.getByText("已装")).toBeInTheDocument(); // git 二进制
+    expect(screen.getByText("已配置")).toBeInTheDocument(); // GitLab 凭据
+  });
+
+  it("GitLab 凭据未配置 → 显示未配置提示(本地路径模式无需)", async () => {
+    server.use(http.get("/api/system-status", () => HttpResponse.json({
+      ...okBody,
+      git: { binary_available: true, credentials_configured: false },
+    })));
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByText(/未配置/)).toBeInTheDocument());
   });
 
   it("主题 Switch 切到浅色 → <html> 加 light class + localStorage", async () => {

@@ -8,7 +8,7 @@ const okBody = {
   ai_provider: "claude",
   browser_engine: "agent-browser",
   temporal: { enabled: true, host: "localhost:7233", last_status: "connected", last_error: null },
-  git_available: true,
+  git: { binary_available: true, credentials_configured: true },
   version: "shannon-web 0.1.0",
 };
 

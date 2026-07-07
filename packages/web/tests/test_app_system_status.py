@@ -11,8 +11,11 @@ def test_system_status_shape():
     # 顶层字段
     assert body["ai_provider"] in {"claude", "openai"}
     assert body["browser_engine"] in {"agent-browser", "playwright"}
-    assert isinstance(body["git_available"], bool)
     assert body["version"].startswith("shannon-web")
+    # git 子对象(拆分:二进制存在 / GitLab 凭据已配置,两个独立信号)
+    git = body["git"]
+    assert isinstance(git["binary_available"], bool)
+    assert isinstance(git["credentials_configured"], bool)
     # temporal 子对象
     t = body["temporal"]
     assert t["enabled"] is True

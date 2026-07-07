@@ -47,6 +47,9 @@ async def system_status(request: Request) -> dict:
             "last_status": last_status,
             "last_error": last_error,
         },
-        "git_available": cfg.git_available,
+        "git": {
+            "binary_available": cfg.git_binary_available,
+            "credentials_configured": bool(cfg.gitlab_user and cfg.gitlab_token),
+        },
         "version": f"shannon-web {ver}",
     }

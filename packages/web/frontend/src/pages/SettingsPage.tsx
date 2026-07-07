@@ -54,8 +54,10 @@ export function SettingsPage() {
                   {data.temporal.last_status}
                 </Badge>
               </dd>
-              <dt className="text-muted-foreground">Git</dt>
-              <dd>{data.git_available ? "可用" : "不可用"}</dd>
+              <dt className="text-muted-foreground">git 二进制</dt>
+              <dd>{data.git.binary_available ? "已装" : "缺失"}</dd>
+              <dt className="text-muted-foreground">GitLab 凭据</dt>
+              <dd>{data.git.credentials_configured ? "已配置" : "未配置(仅 git URL 模式需要,本地路径模式无需)"}</dd>
               <dt className="text-muted-foreground">版本</dt>
               <dd>{data.version}</dd>
             </dl>

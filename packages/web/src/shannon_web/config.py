@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from functools import lru_cache
 from pathlib import Path
 
@@ -25,8 +26,8 @@ class WebConfig:
         return Path(resolve_workspaces_dir())
 
     @property
-    def git_available(self) -> bool:
-        return bool(self.gitlab_user and self.gitlab_token)
+    def git_binary_available(self) -> bool:
+        return shutil.which("git") is not None
 
 
 @lru_cache

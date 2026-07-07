@@ -7,4 +7,8 @@ def test_health_ok():
     client = TestClient(create_app())
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    body = r.json()
+    assert body["status"] == "ok"
+    git = body["git"]
+    assert isinstance(git["binary_available"], bool)
+    assert isinstance(git["credentials_configured"], bool)

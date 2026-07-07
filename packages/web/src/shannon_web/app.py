@@ -79,7 +79,13 @@ def create_app(overrides: dict | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok", "git_available": cfg.git_available}
+        return {
+            "status": "ok",
+            "git": {
+                "binary_available": cfg.git_binary_available,
+                "credentials_configured": bool(cfg.gitlab_user and cfg.gitlab_token),
+            },
+        }
 
     _mount_frontend(app, cfg)
 

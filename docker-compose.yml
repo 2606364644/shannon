@@ -31,6 +31,8 @@ services:
       - ./repos:/app/repos
       - ./configs:/app/configs
       - ./.env:/app/.env:ro
+    env_file:
+      - .env
     environment:
       - SHANNON_WEB_MAX_CONCURRENT=${SHANNON_WEB_MAX_CONCURRENT:-1}
       - SHANNON_WEB_SCAN_TIMEOUT=${SHANNON_WEB_SCAN_TIMEOUT:-0}
