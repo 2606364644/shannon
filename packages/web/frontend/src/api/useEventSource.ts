@@ -6,7 +6,7 @@ export interface UseEventSource {
   events: NdjsonEvent[]; status: SseStatus; lastEventId?: string;
 }
 
-export function useEventSource(url: string): UseEventSource {
+export function useEventSource(url: string, stopType: string = "scan_end"): UseEventSource {
   const [events, setEvents] = useState<NdjsonEvent[]>([]);
   const [status, setStatus] = useState<SseStatus>("closed");
   const [lastEventId, setLastEventId] = useState<string | undefined>(undefined);
@@ -21,13 +21,13 @@ export function useEventSource(url: string): UseEventSource {
       let ev: NdjsonEvent;
       try { ev = JSON.parse(line) as NdjsonEvent; } catch { return; }
       if (e.lastEventId) setLastEventId(e.lastEventId);
-      if (ev.type === "scan_end") { setStatus("closed"); es.close(); }
+      if (ev.type === stopType) { setStatus("closed"); es.close(); }
       setEvents((prev) => [...prev, ev]);
     };
     es.onerror = () => setStatus("error");    // EventSource 内置自动重连（带 Last-Event-ID）
     es.onopen = () => setStatus("open");
     return () => es.close();
-  }, [url]);
+  }, [url, stopType]);
 
   return { events, status, lastEventId };
 }

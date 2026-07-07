@@ -28,14 +28,13 @@ export interface FormState {
 
 function buildBody(type: ScanType, f: FormState): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
+  // 旧 UI 字面量 "git" → 新契约 "repo"（仓库名）于边界翻译；
+  // ScanFormFields 的 repo-picker 改造属 Task 10。
   const body: ScanRequest = {
     type,
     source: {
-      kind: f.sourceKind,
+      kind: f.sourceKind === "git" ? "repo" : "path",
       value: f.sourceValue,
-      branch: f.branch || undefined,
-      commit: f.commit || undefined,
-      force_reclone: f.forceReclone || undefined,
     },
     url: f.url,
     workspace_name: f.wsName || undefined,

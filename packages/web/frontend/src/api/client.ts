@@ -1,4 +1,4 @@
-import type { FsBrowseResult } from "./types";
+import type { FsBrowseResult, Repo, RepoDetail } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown) { super(`API ${status}`); this.name = "ApiError"; }
@@ -30,6 +30,17 @@ export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export const cancelScan = (ws: string) =>
   apiDelete<{ cancelled: string }>(`/scan/${encodeURIComponent(ws)}`);
+
+export const listRepos = () => apiGet<Repo[]>("/repos");
+export const getRepo = (name: string) => apiGet<RepoDetail>(`/repos/${encodeURIComponent(name)}`);
+export const createRepo = (body: { git_url: string; branch?: string; commit?: string; name?: string }) =>
+  apiPost<{ name: string }>("/repos", body);
+export const deleteRepo = (name: string) =>
+  apiDelete<{ deleted: string }>(`/repos/${encodeURIComponent(name)}`);
+export const pullRepo = (name: string) =>
+  apiPost<{ pulling: string }>(`/repos/${encodeURIComponent(name)}/pull`, {});
+export const checkoutRepo = (name: string, branch: string) =>
+  apiPost<{ checked_out: string }>(`/repos/${encodeURIComponent(name)}/checkout`, { branch });
 
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。 */
 export async function apiGetText(path: string): Promise<string> {

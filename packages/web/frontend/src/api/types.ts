@@ -174,12 +174,12 @@ export interface DeliverablesSummary {
 
 export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
-  source?: { kind: "path" | "git"; value: string; branch?: string; commit?: string; force_reclone?: boolean };
+  source?: { kind: "repo" | "path"; value: string };
   url?: string;
   workspace_name?: string;
-  reuse_latest_whitebox?: boolean;   // 黑盒 --latest
-  config_yaml?: string;              // 联动手写
-  config_name?: string;              // 联动从已有选
+  reuse_latest_whitebox?: boolean;
+  config_yaml?: string;
+  config_name?: string;
 }
 
 export interface ScanResponse {
@@ -197,4 +197,21 @@ export interface FsBrowseResult {
   parent: string | null;
   entries: FsEntry[];
   truncated?: boolean;
+}
+
+export type RepoState = "ready" | "cloning" | "pulling" | "failed" | "stale";
+
+export interface Repo {
+  name: string;
+  source?: { kind: string; url?: string; branch?: string; commit?: string };
+  state: RepoState;
+  size_bytes?: number;
+  cloned_at?: string;
+  last_pull_at?: string;
+  last_error?: string | null;
+  progress?: number | null;
+}
+
+export interface RepoDetail extends Repo {
+  recent_events?: Array<Record<string, unknown>>;
 }
