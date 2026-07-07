@@ -2,20 +2,20 @@
 # scripts/up.sh —— 一键启动 web,自动判断 temporal 复用还是自建。
 #
 # 用法：
-#   ./scripts/up.sh              # 等价 docker compose up -d --build web
-#   ./scripts/up.sh --build      # 显式带 build
+#   ./scripts/up.sh              # 启动（自动判断复用/自建），等价 up -d --build web
+#   ./scripts/up.sh --build      # 显式带 build（透传给 compose）
 #   ./scripts/up.sh down         # 停掉
 #   ./scripts/up.sh logs web     # 看日志（任意 docker compose 子命令透传）
 #
 # 逻辑：
 #   检测宿主 7233 端口是否被占用（通常意味着已有外部 temporal 在跑）：
-#     - 已占用 → 复用模式：加载 external-temporal override，不再起 compose 的 temporal
-#     - 未占用 → 自建模式：--profile infra，compose 自建 temporal + web
+#     - 已占用 → 复用模式：-f 加载 external-temporal override，不起 compose 的 temporal
+#     - 未占用 → 自建模式：裸 docker compose up（主 compose 默认就自建 temporal）
 #
 # 设计要点：
-#   - 不依赖 docker-compose.override.yml（那个是本地副本，会被 .gitignore 排除，
-#     且在自建模式下会误合并导致冲突）。本脚本纯用 -f 显式加载模板文件。
-#   - 模板 docker-compose.override.external-temporal.yml 已入库可分享。
+#   - 主 docker-compose.yml 默认就是"自建 temporal"，裸跑 docker compose up 不报错。
+#   - 复用模式用 -f 显式加载 docker-compose.override.external-temporal.yml（入库模板）。
+#   - 不依赖本地 docker-compose.override.yml（那个被 .gitignore 排除、且会干扰自动判断）。
 set -euo pipefail
 
 # 切到仓库根（脚本可能在子目录被调用）
@@ -39,7 +39,7 @@ port_in_use() {
   fi
 }
 
-# 如果本地存在 docker-compose.override.yml，警告并跳过它（避免自建模式误合并）
+# 如果本地存在 docker-compose.override.yml，警告（会干扰自动判断）
 if [ -f docker-compose.override.yml ] && [ "$ACTION" != "down" ]; then
   echo "⚠️  检测到本地 docker-compose.override.yml（已被 .gitignore 排除）。" >&2
   echo "    本脚本用 -f 显式加载模板，本地 override 会干扰自动判断。" >&2
@@ -58,12 +58,13 @@ if [ "$ACTION" = "up" ]; then
     fi
     docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d --build "$@" web
   else
-    echo ">> 7233 空闲 → 自建 temporal 模式（--profile infra）"
-    docker compose --profile infra up -d --build "$@" web
+    echo ">> 7233 空闲 → 自建 temporal 模式（主 compose 默认）"
+    docker compose up -d --build "$@" web
   fi
 else
-  # down / logs / ps / restart 等子命令：两种模式服务集不同，统一用 --profile infra
-  # 覆盖最全（自建模式包含 temporal + web；复用模式只有 web，多带个 infra profile 无副作用）
+  # down / logs / ps / restart 等子命令透传。
+  # 注意：复用模式下若 web 接入了 shannon-net，down 只停 compose 管辖的服务，
+  # 不影响外部 temporal 容器。
   echo ">> 透传子命令: $ACTION $*"
-  docker compose --profile infra "$ACTION" "$@"
+  docker compose "$ACTION" "$@"
 fi
