@@ -99,3 +99,25 @@ def test_agent_end_result_has_num_turns_field():
     assert r.num_turns is None  # 默认 None,既有调用零破坏
     r2 = AgentEndResult(success=True, duration_ms=100, cost_usd=0.0, attempt_number=1, num_turns=42)
     assert r2.num_turns == 42
+
+
+def test_agent_end_result_has_cost_and_token_fields():
+    """cost 定价(spec 2026-07-09): AgentEndResult 带 cost_currency + 4 档 token。"""
+    r = AgentEndResult(
+        success=True, duration_ms=10, cost_usd=1.5, cost_currency="CNY",
+        input_tokens=100, output_tokens=50, cache_read_tokens=10, cache_creation_tokens=0,
+    )
+    assert r.cost_currency == "CNY"
+    assert r.input_tokens == 100
+    assert r.cache_creation_tokens == 0
+
+
+def test_audit_types_cost_currency_default_usd():
+    """各类 cost_currency 默认 USD + WorkflowSummary token 汇总默认 0（向后兼容旧 session）。"""
+    assert AgentEndResult(success=True, duration_ms=1, cost_usd=0.0).cost_currency == "USD"
+    assert AgentLogDetails().cost_currency == "USD"
+    assert AgentMetricsSummary(duration_ms=1).cost_currency == "USD"
+    s = WorkflowSummary(status="completed", total_duration_ms=1, total_cost_usd=0.0,
+                        completed_agents=[], agent_metrics={})
+    assert s.cost_currency == "USD"
+    assert s.total_input_tokens == 0

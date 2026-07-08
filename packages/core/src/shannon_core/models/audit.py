@@ -7,34 +7,54 @@ class AgentEndResult(BaseModel):
     success: bool
     duration_ms: int
     cost_usd: float
+    cost_currency: str = "USD"
     attempt_number: int = 1
     model: str | None = None
     error: str | None = None
     is_final_attempt: bool = True
     checkpoint: str | None = None
     num_turns: int | None = None  # B2 观测:agent turn 消耗(来自 AgentMetrics.num_turns)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 class AgentLogDetails(BaseModel):
     attempt_number: int = 1
     duration_ms: int | None = None
     cost_usd: float | None = None
+    cost_currency: str = "USD"
     success: bool | None = None
     error: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 class AgentMetricsSummary(BaseModel):
     duration_ms: int
     cost_usd: float | None = None
+    cost_currency: str = "USD"
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 class WorkflowSummary(BaseModel):
     status: Literal["completed", "failed", "cancelled"]
     total_duration_ms: int
     total_cost_usd: float
+    cost_currency: str = "USD"
     completed_agents: list[str]
     agent_metrics: dict[str, AgentMetricsSummary]
     error: str | None = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_creation_tokens: int = 0
 
 
 class ResumeInfo(BaseModel):
