@@ -1,0 +1,7 @@
+{
+  "currency": "CNY",
+  "models": {
+    "deepseek-v4-pro": {"input": 2.0, "output": 8.0, "cache_read": 0.5, "cache_creation": 0.0},
+    "deepseek-v4-flash": {"input": 0.5, "output": 2.0, "cache_read": 0.1, "cache_creation": 0.0}
+  }
+}
