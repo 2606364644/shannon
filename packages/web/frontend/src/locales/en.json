@@ -14,5 +14,49 @@
     "scan": "Scan",
     "settings": "Settings",
     "mainAria": "Main navigation"
+  },
+  "repos": {
+    "title": "Repositories",
+    "addRepo": "+ Add repository",
+    "searchPlaceholder": "Search repositories",
+    "loading": "Loading…",
+    "empty": "No repositories yet. Click \"+ Add repository\" to clone one.",
+    "noMatch": "No matching repositories.",
+    "expand": "Expand ▸",
+    "collapse": "Collapse ▾",
+    "ungrouped": "Ungrouped",
+    "updating": "Updating {{name}}",
+    "updateAria": "Update {{name}}",
+    "deleteAria": "Delete {{name}}",
+    "table": { "name": "Name", "source": "Source", "branch": "Branch", "size": "Size", "state": "State", "actions": "Actions" },
+    "states": { "ready": "✓ Ready", "failed": "✗ Failed", "stale": "⚠ Incomplete", "cloning": "Cloning", "pulling": "Pulling" },
+    "deleteDialog": { "title": "Delete repository", "desc": "Delete repository {{name}}? The code directory will be permanently removed." },
+    "errors": { "loadFailed": "Failed to load repository list", "inUse": "Repository is in use", "deleteFailed": "Delete failed ({{status}})", "updateFailed": "Update failed ({{status}})" },
+    "addDialog": {
+      "title": "Add repository",
+      "desc": "Clone a git repository locally; you can scan it repeatedly afterwards.",
+      "urlLabel": "git URL",
+      "urlPlaceholder": "https://gitlab.example/foo.git",
+      "urlError": "Must be a git URL (https: / git@ / ssh:)",
+      "groupLabel": "Group (optional)",
+      "groupPlaceholder": "e.g. frontend / backend; leave empty for top level",
+      "branchPlaceholder": "Branch (optional)",
+      "commitPlaceholder": "Commit (optional)",
+      "cloneBtn": "clone",
+      "errors": {
+        "noCreds": "Git credentials not configured (GITLAB_USER/TOKEN)",
+        "exists": "Repository already exists; try update instead",
+        "failed": "Add failed ({{status}})",
+        "network": "Add failed (network error)"
+      }
+    },
+    "clone": {
+      "failed": "Clone failed: {{error}}",
+      "unknownError": "Unknown error",
+      "ready": "✓ Ready",
+      "reconnecting": "Cloning… connection lost, reconnecting",
+      "cloning": "Cloning…",
+      "cloningProgress": "Cloning… {{progress}}%"
+    }
   }
 }

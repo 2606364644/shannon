@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { listRepos, deleteRepo, pullRepo, ApiError } from "@/api/client";
 import type { Repo, RepoState } from "@/api/types";
@@ -15,7 +16,6 @@ import { AddRepoDialog } from "@/components/AddRepoDialog";
 import { CloneProgress } from "@/components/CloneProgress";
 
 const PULL_REFRESH_DELAY_MS = 1500;
-const UNGROUPED = "未分组";
 
 function fmtSize(b?: number) {
   if (!b) return "-";
@@ -26,10 +26,10 @@ function fmtSize(b?: number) {
 
 interface Group { name: string; repos: Repo[]; }
 
-function groupRepos(repos: Repo[]): Group[] {
+function groupRepos(repos: Repo[], ungrouped: string): Group[] {
   const map = new Map<string, Repo[]>();
   for (const r of repos) {
-    const g = r.group ?? UNGROUPED;
+    const g = r.group ?? ungrouped;
     let arr = map.get(g);
     if (!arr) { arr = []; map.set(g, arr); }
     arr.push(r);
@@ -37,23 +37,25 @@ function groupRepos(repos: Repo[]): Group[] {
   return Array.from(map, ([name, rs]) => ({ name, repos: rs }));
 }
 
-// 状态 -> 徽章文本/色（对齐 StatusBadge 的 DSF token 配色）。
-// 文本须保留：✗ 失败 / ⚠ 未完成（测试断言），cloning 走 CloneProgress（含 "clone 中"）。
-const STATE_BADGE: Record<RepoState, { text: string; cls: string }> = {
-  ready:   { text: "✓ 就绪",   cls: "border-green/40 text-green" },
-  failed:  { text: "✗ 失败",   cls: "border-red/40 text-red" },
-  stale:   { text: "⚠ 未完成", cls: "border-yellow/40 text-yellow" },
-  cloning: { text: "clone 中", cls: "border-cyan/40 text-cyan" },
-  pulling: { text: "pull 中",  cls: "border-cyan/40 text-cyan" },
+// 状态 -> 徽章 i18n key/色（对齐 StatusBadge 的 DSF token 配色）。
+// 状态文本已迁移到 i18n（repos.states.*），默认中文渲染保持 ✓就绪 / ✗ 失败 / ⚠ 未完成
+// （测试断言依赖默认中文渲染）；cloning/pulling 走 CloneProgress（含 "clone 中"）。
+const STATE_BADGE: Record<RepoState, { key: string; cls: string }> = {
+  ready:   { key: "repos.states.ready",   cls: "border-green/40 text-green" },
+  failed:  { key: "repos.states.failed",  cls: "border-red/40 text-red" },
+  stale:   { key: "repos.states.stale",   cls: "border-yellow/40 text-yellow" },
+  cloning: { key: "repos.states.cloning", cls: "border-cyan/40 text-cyan" },
+  pulling: { key: "repos.states.pulling", cls: "border-cyan/40 text-cyan" },
 };
 
 function StateCell({ repo }: { repo: Repo }) {
+  const { t } = useTranslation();
   // cloning/pulling 复用 CloneProgress（含进度条 + "clone 中" 文本，测试断言依赖）
   if (repo.state === "cloning" || repo.state === "pulling") {
     return <CloneProgress name={repo.name} />;
   }
   const m = STATE_BADGE[repo.state];
-  return <Badge variant="outline" className={cn("gap-1 font-mono", m.cls)}>{m.text}</Badge>;
+  return <Badge variant="outline" className={cn("gap-1 font-mono", m.cls)}>{t(m.key)}</Badge>;
 }
 
 /** 截断长文本 + hover tooltip 显示完整值（修 URL/仓库名撑爆行、换行错乱的根因）。 */
@@ -69,6 +71,7 @@ function Ellipsis({ value, className }: { value: string; className?: string }) {
 }
 
 export function ReposPage() {
+  const { t } = useTranslation();
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -82,11 +85,11 @@ export function ReposPage() {
     try {
       setRepos(await listRepos());
     } catch (e) {
-      if (e instanceof ApiError) toast.error("加载仓库列表失败");
+      if (e instanceof ApiError) toast.error(t("repos.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => () => { if (pullTimerRef.current) clearTimeout(pullTimerRef.current); }, []);
@@ -98,7 +101,7 @@ export function ReposPage() {
       await deleteRepo(pendingDelete);
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.status === 409 ? "仓库正被使用" : `删除失败（${e.status}）`);
+      if (e instanceof ApiError) toast.error(e.status === 409 ? t("repos.errors.inUse") : t("repos.errors.deleteFailed", { status: e.status }));
     } finally {
       setBusy(false);
       setPendingDelete(null);
@@ -108,11 +111,11 @@ export function ReposPage() {
   async function doPull(name: string) {
     try {
       await pullRepo(name);
-      toast.success(`正在更新 ${name}`);
+      toast.success(t("repos.updating", { name }));
       if (pullTimerRef.current) clearTimeout(pullTimerRef.current);
       pullTimerRef.current = setTimeout(() => void refresh(), PULL_REFRESH_DELAY_MS);
     } catch (e) {
-      if (e instanceof ApiError) toast.error(`更新失败（${e.status}）`);
+      if (e instanceof ApiError) toast.error(t("repos.errors.updateFailed", { status: e.status }));
     }
   }
 
@@ -131,30 +134,30 @@ export function ReposPage() {
     return repos.filter((r) => r.name.toLowerCase().includes(q));
   }, [repos, query]);
 
-  const groups = groupRepos(filtered);
+  const groups = groupRepos(filtered, t("repos.ungrouped"));
 
   return (
     <TooltipProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-semibold tracking-tight text-lg">仓库</h1>
+          <h1 className="font-semibold tracking-tight text-lg">{t("repos.title")}</h1>
           <div className="flex items-center gap-2">
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索仓库名"
+              placeholder={t("repos.searchPlaceholder")}
               className="w-56"
-              aria-label="搜索仓库名"
+              aria-label={t("repos.searchPlaceholder")}
             />
-            <Button onClick={() => setAddOpen(true)}>+ 添加仓库</Button>
+            <Button onClick={() => setAddOpen(true)}>{t("repos.addRepo")}</Button>
           </div>
         </div>
 
         {loading ? (
-          <div className="text-sm text-muted-foreground">加载中…</div>
+          <div className="text-sm text-muted-foreground">{t("repos.loading")}</div>
         ) : filtered.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            {repos.length === 0 ? "暂无仓库。点「+ 添加仓库」clone 一个。" : "无匹配仓库。"}
+            {repos.length === 0 ? t("repos.empty") : t("repos.noMatch")}
           </div>
         ) : (
           <div className="space-y-3">
@@ -171,18 +174,18 @@ export function ReposPage() {
                     <span className="font-medium">
                       {g.name} <span className="text-xs text-muted-foreground">({g.repos.length})</span>
                     </span>
-                    <span className="text-xs text-muted-foreground">{isCollapsed ? "展开 ▸" : "折叠 ▾"}</span>
+                    <span className="text-xs text-muted-foreground">{isCollapsed ? t("repos.expand") : t("repos.collapse")}</span>
                   </button>
                   {!isCollapsed && (
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-t border-border hover:bg-transparent">
-                          <TableHead className="w-56 py-2 pl-4 pr-3 text-muted-foreground">名称</TableHead>
-                          <TableHead className="py-2 px-3 text-muted-foreground">来源</TableHead>
-                          <TableHead className="w-32 py-2 px-3 text-muted-foreground">分支</TableHead>
-                          <TableHead className="w-20 py-2 px-3 text-right text-muted-foreground">大小</TableHead>
-                          <TableHead className="w-24 py-2 px-3 text-muted-foreground">状态</TableHead>
-                          <TableHead className="w-32 py-2 pl-3 pr-4 text-right text-muted-foreground">操作</TableHead>
+                          <TableHead className="w-56 py-2 pl-4 pr-3 text-muted-foreground">{t("repos.table.name")}</TableHead>
+                          <TableHead className="py-2 px-3 text-muted-foreground">{t("repos.table.source")}</TableHead>
+                          <TableHead className="w-32 py-2 px-3 text-muted-foreground">{t("repos.table.branch")}</TableHead>
+                          <TableHead className="w-20 py-2 px-3 text-right text-muted-foreground">{t("repos.table.size")}</TableHead>
+                          <TableHead className="w-24 py-2 px-3 text-muted-foreground">{t("repos.table.state")}</TableHead>
+                          <TableHead className="w-32 py-2 pl-3 pr-4 text-right text-muted-foreground">{t("repos.table.actions")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -228,19 +231,19 @@ export function ReposPage() {
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    aria-label={`更新 ${r.name}`}
+                                    aria-label={t("repos.updateAria", { name: r.name })}
                                     onClick={() => doPull(r.name)}
                                   >
-                                    更新
+                                    {t("common.update")}
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     className="text-red"
-                                    aria-label={`删除 ${r.name}`}
+                                    aria-label={t("repos.deleteAria", { name: r.name })}
                                     onClick={() => setPendingDelete(r.name)}
                                   >
-                                    删除
+                                    {t("common.delete")}
                                   </Button>
                                 </span>
                               </TableCell>
@@ -261,12 +264,12 @@ export function ReposPage() {
         <Dialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>删除仓库</DialogTitle>
-              <DialogDescription>删除仓库 {pendingDelete}？代码目录永久删除。</DialogDescription>
+              <DialogTitle>{t("repos.deleteDialog.title")}</DialogTitle>
+              <DialogDescription>{t("repos.deleteDialog.desc", { name: pendingDelete })}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setPendingDelete(null)}>取消</Button>
-              <Button variant="destructive" disabled={busy} onClick={doDelete}>确认</Button>
+              <Button variant="ghost" onClick={() => setPendingDelete(null)}>{t("common.cancel")}</Button>
+              <Button variant="destructive" disabled={busy} onClick={doDelete}>{t("common.confirm")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

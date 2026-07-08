@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter } from "react-router-dom";
+import i18n from "@/i18n";
 import { ReposPage } from "./ReposPage";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -15,6 +16,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -72,5 +75,26 @@ describe("ReposPage", () => {
     // 同名 honor 跨组共存：两个链接都在
     const honorLinks = screen.getAllByRole("link", { name: /honor/ });
     expect(honorLinks).toHaveLength(2);
+  });
+});
+
+describe("ReposPage i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("中文显示标题与空状态", async () => {
+    server.use(http.get("/api/repos", () => HttpResponse.json([])));
+    renderPage();
+    expect(await screen.findByText("仓库")).toBeInTheDocument();
+    expect(screen.getByText(/暂无仓库/)).toBeInTheDocument();
+  });
+
+  it("切英文后标题变 Repositories", async () => {
+    server.use(http.get("/api/repos", () => HttpResponse.json([])));
+    renderPage();
+    await screen.findByText("仓库");
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(await screen.findByText("Repositories")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [branch, setBranch] = useState("");
   const [commit, setCommit] = useState("");
@@ -35,11 +37,11 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
       setUrl(""); setBranch(""); setCommit(""); setGroup("");
     } catch (e) {
       if (e instanceof ApiError) {
-        if (e.status === 503) toast.error("未配置 git 凭证（GITLAB_USER/TOKEN）");
-        else if (e.status === 409) toast.error("仓库已存在，可改用更新");
-        else toast.error(`添加失败（${e.status}）`);
+        if (e.status === 503) toast.error(t("repos.addDialog.errors.noCreds"));
+        else if (e.status === 409) toast.error(t("repos.addDialog.errors.exists"));
+        else toast.error(t("repos.addDialog.errors.failed", { status: e.status }));
       } else {
-        toast.error("添加失败（网络错误）");
+        toast.error(t("repos.addDialog.errors.network"));
         console.error("createRepo failed:", e);
       }
     } finally {
@@ -51,27 +53,27 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => { if (busy) e.preventDefault(); }}>
         <DialogHeader>
-          <DialogTitle>添加仓库</DialogTitle>
-          <DialogDescription>clone git 仓库到本地，之后可反复扫描。</DialogDescription>
+          <DialogTitle>{t("repos.addDialog.title")}</DialogTitle>
+          <DialogDescription>{t("repos.addDialog.desc")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="repo-url">git URL</Label>
-            <Input id="repo-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://gitlab.example/foo.git" />
-            {!urlOk && url && <div className="text-xs text-destructive">需为 git URL（https: / git@ / ssh:）</div>}
+            <Label htmlFor="repo-url">{t("repos.addDialog.urlLabel")}</Label>
+            <Input id="repo-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("repos.addDialog.urlPlaceholder")} />
+            {!urlOk && url && <div className="text-xs text-destructive">{t("repos.addDialog.urlError")}</div>}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="repo-group">分组（可选）</Label>
-            <Input id="repo-group" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="如 frontend / backend，留空则放顶层" />
+            <Label htmlFor="repo-group">{t("repos.addDialog.groupLabel")}</Label>
+            <Input id="repo-group" value={group} onChange={(e) => setGroup(e.target.value)} placeholder={t("repos.addDialog.groupPlaceholder")} />
           </div>
           <div className="flex gap-2">
-            <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="分支(可选)" />
-            <Input value={commit} onChange={(e) => setCommit(e.target.value)} placeholder="commit(可选)" />
+            <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={t("repos.addDialog.branchPlaceholder")} />
+            <Input value={commit} onChange={(e) => setCommit(e.target.value)} placeholder={t("repos.addDialog.commitPlaceholder")} />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button disabled={!urlOk || busy} onClick={submit}>clone</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+          <Button disabled={!urlOk || busy} onClick={submit}>{t("repos.addDialog.cloneBtn")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

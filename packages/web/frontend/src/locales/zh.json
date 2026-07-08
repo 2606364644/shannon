@@ -14,5 +14,49 @@
     "scan": "Scan",
     "settings": "Settings",
     "mainAria": "主导航"
+  },
+  "repos": {
+    "title": "仓库",
+    "addRepo": "+ 添加仓库",
+    "searchPlaceholder": "搜索仓库名",
+    "loading": "加载中…",
+    "empty": "暂无仓库。点「+ 添加仓库」clone 一个。",
+    "noMatch": "无匹配仓库。",
+    "expand": "展开 ▸",
+    "collapse": "折叠 ▾",
+    "ungrouped": "未分组",
+    "updating": "正在更新 {{name}}",
+    "updateAria": "更新 {{name}}",
+    "deleteAria": "删除 {{name}}",
+    "table": { "name": "名称", "source": "来源", "branch": "分支", "size": "大小", "state": "状态", "actions": "操作" },
+    "states": { "ready": "✓ 就绪", "failed": "✗ 失败", "stale": "⚠ 未完成", "cloning": "clone 中", "pulling": "pull 中" },
+    "deleteDialog": { "title": "删除仓库", "desc": "删除仓库 {{name}}？代码目录永久删除。" },
+    "errors": { "loadFailed": "加载仓库列表失败", "inUse": "仓库正被使用", "deleteFailed": "删除失败（{{status}}）", "updateFailed": "更新失败（{{status}}）" },
+    "addDialog": {
+      "title": "添加仓库",
+      "desc": "clone git 仓库到本地，之后可反复扫描。",
+      "urlLabel": "git URL",
+      "urlPlaceholder": "https://gitlab.example/foo.git",
+      "urlError": "需为 git URL（https: / git@ / ssh:）",
+      "groupLabel": "分组（可选）",
+      "groupPlaceholder": "如 frontend / backend，留空则放顶层",
+      "branchPlaceholder": "分支(可选)",
+      "commitPlaceholder": "commit(可选)",
+      "cloneBtn": "clone",
+      "errors": {
+        "noCreds": "未配置 git 凭证（GITLAB_USER/TOKEN）",
+        "exists": "仓库已存在，可改用更新",
+        "failed": "添加失败（{{status}}）",
+        "network": "添加失败（网络错误）"
+      }
+    },
+    "clone": {
+      "failed": "clone 失败：{{error}}",
+      "unknownError": "未知错误",
+      "ready": "✓ 就绪",
+      "reconnecting": "clone 中… 连接断开，重连中",
+      "cloning": "clone 中…",
+      "cloningProgress": "clone 中… {{progress}}%"
+    }
   }
 }
