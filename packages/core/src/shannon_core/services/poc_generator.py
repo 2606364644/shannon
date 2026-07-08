@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -12,6 +14,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from shannon_core.agents.runner import run_claude_prompt  # 模块级名称，便于测试 monkeypatch
+from shannon_core.display.formatters import format_duration, format_log_time, tag
+from shannon_core.display.symbols import AGENT_START, STEP_DONE, STEP_FAIL, STEP_PENDING
 from shannon_core.models.queue_schemas import VulnerabilityQueue
 
 
@@ -348,12 +352,17 @@ async def llm_fill_gap(
     """富信息 LLM 补缺口。失败/不可用返回 None（调用方退纯模板+标注）。"""
     prompt = build_llm_prompt(vuln, vuln_class, host, recon_ctx)
     try:
+        # PoC 是"输出 JSON"的单次结构化任务，不需要 200-turn 完整 agent
+        # （默认背着 CLAUDE_MAX_TURNS/SHANNON_OPENAI_MAX_TURNS=200 跑，单条 PoC 可能
+        # 多轮空转拖慢总时长，N 条串行 = 体感"卡住无输出"）。限 50 轮兜底，
+        # JSON-only prompt 正常 1-2 轮即返回。env SHANNON_POC_MAX_TURNS 可调。
         result = await run_claude_prompt(
             prompt=prompt,
             repo_path=repo_path or "/tmp/poc-gen",
             model_tier=model_tier,
             structured_output_schema=LLM_REQUEST_SCHEMA,
             api_key=api_key,
+            max_turns=int(os.getenv("SHANNON_POC_MAX_TURNS", "50")),
         )
     except Exception:
         return None
@@ -510,6 +519,26 @@ def _spec_from_llm_guess(guess: dict, vuln: Any, vuln_class: str, band: Confiden
     )
 
 
+# vuln_class → 显示标签，对齐 display 层 _AGENT_PREFIXES 风格（[Injection]/[XSS]…）。
+_POC_CLASS_TAG: dict[str, str] = {
+    "injection": "[Injection]",
+    "xss": "[XSS]",
+    "auth": "[Auth]",
+    "authz": "[Authz]",
+    "ssrf": "[SSRF]",
+}
+
+
+def _poc_emit(body: str) -> None:
+    """对齐 display 层行格式 [timestamp] [POC  ] body。
+
+    PoC 在 activity 层跑、无 audit_session/display 渲染器上下文，走裸 print；但行格式
+    （timestamp + 等宽标签 tag('POC') + 状态符号）与 file_renderer 的 AGENT/STEP 行一致，
+    视觉上融入扫描日志流。复用 display.formatters/symbols，不重复字面量。
+    """
+    print(f"[{format_log_time()}] [{tag('POC')}] {body}", flush=True)
+
+
 class PoCGenerator:
     @staticmethod
     async def generate(
@@ -521,12 +550,21 @@ class PoCGenerator:
         repo_path: str | None = None,
         api_key: str | None = None,
         model_tier: str = "medium",
-    ) -> Path:
+    ) -> Path | None:
+        # 开关：SHANNON_SKIP_POC_REPORT=1 跳过整个 PoC 生成（默认 0=生成 PoC）。
+        # 报告增强本就非关键路径，token 紧张或暂不需要 PoC 时设 1 秒过，不阻塞主报告。
+        if os.getenv("SHANNON_SKIP_POC_REPORT", "0") == "1":
+            logger.info("poc: SHANNON_SKIP_POC_REPORT=1, 跳过 PoC 生成")
+            _poc_emit(f"{STEP_PENDING} SHANNON_SKIP_POC_REPORT=1, 跳过 PoC 生成")
+            return None
+
         host = resolve_host(target_url)
         recon_path = _resolve_input(deliverables_dir, "recon_deliverable.md")
         endpoints = parse_recon_endpoints(recon_path) if recon_path else {}
 
-        entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
+        # 先收集所有 externally_exploitable 漏洞，便于打 (i/N) 进度行。
+        # queue 解析快（小 json），预扫一遍换可读进度，值得。
+        items: list[tuple[str, Any, Any]] = []  # (vuln_class, vuln, accepted_ids)
         for vc in vuln_classes:
             queue_path = _resolve_input(deliverables_dir, f"{vc}_exploitation_queue.json")
             if not queue_path:
@@ -542,19 +580,37 @@ class PoCGenerator:
             for v in parsed.queue.vulnerabilities:
                 if not getattr(v, "externally_exploitable", False):
                     continue
-                try:
-                    spec = await PoCGenerator._build_entry(v, vc, host, endpoints, accepted,
-                                                           repo_path=repo_path, api_key=api_key,
-                                                           model_tier=model_tier)
-                    if spec is not None:
-                        entries.append((vc, v, spec))
-                except Exception as exc:  # 单条失败不阻塞其余
-                    logger.warning("poc: build failed for %s: %s", getattr(v, "ID", "?"), exc)
+                items.append((vc, v, accepted))
+
+        total = len(items)
+        track_cn = "白盒" if track == "whitebox" else "黑盒"
+        _poc_emit(f"{AGENT_START} {track_cn} PoC: {total} 个 externally_exploitable 漏洞")
+
+        entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
+        for i, (vc, v, accepted) in enumerate(items, 1):
+            vid = getattr(v, "ID", "?")
+            label = f"({i}/{total}) {_POC_CLASS_TAG.get(vc, f'[{vc}]')} {vid}"
+            t0 = time.monotonic()
+            try:
+                spec = await PoCGenerator._build_entry(v, vc, host, endpoints, accepted,
+                                                       repo_path=repo_path, api_key=api_key,
+                                                       model_tier=model_tier)
+                dt_ms = int((time.monotonic() - t0) * 1000)
+                if spec is not None:
+                    entries.append((vc, v, spec))
+                    _poc_emit(f"{STEP_DONE} {label}  {format_duration(dt_ms)}")
+                else:
+                    _poc_emit(f"{STEP_PENDING} {label}  skip {format_duration(dt_ms)}")
+            except Exception as exc:  # 单条失败不阻塞其余
+                dt_ms = int((time.monotonic() - t0) * 1000)
+                logger.warning("poc: build failed for %s: %s", vid, exc)
+                _poc_emit(f"{STEP_FAIL} {label}  — {exc} ({format_duration(dt_ms)})")
 
         # placeholder 块总是显示：即便 host 真实，需登录的 PoC 仍含 <AUTH_TOKEN>/<SESSION_COOKIE> 占位符，operator 需替换指引。
         md = render_poc_md(entries, host, track) if entries else empty_poc_md(track)
         out = deliverables_dir / _POC_FILENAME
         out.write_text(md, encoding="utf-8")
+        _poc_emit(f"{STEP_DONE} PoC 完成: {len(entries)}/{total} 写入 {out.name}")
         return out
 
     @staticmethod
