@@ -25,7 +25,8 @@ export interface StepEvent extends CommonFields {
 }
 export interface AgentEvent extends CommonFields {
   type: "AgentEvent"; agent_name: string; event: "start" | "end";
-  attempt: number; duration_ms?: number; cost_usd?: number;
+  attempt: number; duration_ms?: number; cost_usd?: number; cost_currency?: string;
+  input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;
   success?: boolean; error?: string;
 }
 export interface ToolCallEvent extends CommonFields {
@@ -44,7 +45,12 @@ export interface ErrorEvent extends CommonFields {
 }
 export interface SummaryEvent extends CommonFields {
   type: "SummaryEvent"; status: string; total_duration_ms?: number;
-  total_cost_usd?: number; agents?: Array<{ name: string; duration_ms?: number; cost_usd?: number; success?: boolean }>;
+  total_cost_usd?: number; cost_currency?: string;
+  total_input_tokens?: number; total_output_tokens?: number;
+  total_cache_read_tokens?: number; total_cache_creation_tokens?: number;
+  agents?: Array<{ name: string; duration_ms?: number; cost_usd?: number; cost_currency?: string;
+    success?: boolean; input_tokens?: number; output_tokens?: number;
+    cache_read_tokens?: number; cache_creation_tokens?: number }>;
   error?: string;
 }
 export interface ResumeEvent extends CommonFields {
@@ -83,6 +89,7 @@ export interface Workspace {
   completed_at?: number | null;
   vuln_count?: number;
   total_cost_usd?: number;
+  cost_currency?: string;
   total_duration_ms?: number;
   links?: { parent_workspace?: string | null; child_workspaces?: string[] };
   is_correlation?: boolean;
@@ -91,13 +98,19 @@ export interface Workspace {
 export interface SessionMetrics {
   total_duration_ms: number;
   total_cost_usd: number;
+  cost_currency?: string;
+  total_input_tokens?: number; total_output_tokens?: number;
+  total_cache_read_tokens?: number; total_cache_creation_tokens?: number;
   // 阶段集动态（NodeGoat: pre-recon/recon/vulnerability-analysis/reporting）
   phases: Record<string, {
     duration_ms: number; duration_percentage: number; cost_usd: number; agent_count: number;
+    cost_currency?: string;
+    input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;
   }>;
   agents: Record<string, {
-    duration_ms: number; cost_usd: number; success: boolean;
+    duration_ms: number; cost_usd: number; cost_currency?: string; success: boolean;
     attempt_number: number; model: string; error?: string;
+    input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;
   }>;
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { SessionData, SessionMetrics } from "../../api/types";
+import { fmtCost } from "../../utils/currency";
 import { apiGet } from "../../api/client";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ErrorState } from "../../components/ErrorState";
@@ -69,7 +70,7 @@ export function OverviewTab() {
       <Card className="p-4">
         <div className="grid grid-cols-3 gap-6 font-mono">
           <div>
-            <div className="text-2xl font-bold text-foreground">${m.total_cost_usd.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-foreground">{fmtCost(m.total_cost_usd, m.cost_currency)}</div>
             <div className="text-xs text-muted-foreground">total cost</div>
           </div>
           <div>
@@ -104,7 +105,7 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
           >
             <div className="text-xs font-bold truncate">{name}</div>
             <div className="text-[0.7rem] opacity-85 font-mono">
-              {p.duration_percentage}% · {fmt(p.duration_ms)} · ${p.cost_usd.toFixed(2)} · {p.agent_count}a
+              {p.duration_percentage}% · {fmt(p.duration_ms)} · {fmtCost(p.cost_usd, p.cost_currency)} · {p.agent_count}a
             </div>
           </div>
         ))}
@@ -139,7 +140,7 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
               <TableRow key={name}>
                 <TableCell className="font-mono">{name}</TableCell>
                 <TableCell className="font-mono">{fmt(a.duration_ms)}</TableCell>
-                <TableCell className="font-mono">${a.cost_usd.toFixed(2)}</TableCell>
+                <TableCell className="font-mono">{fmtCost(a.cost_usd, a.cost_currency)}</TableCell>
                 <TableCell className={`font-mono ${attemptCls}`}>{attemptText}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{a.model}</TableCell>
               </TableRow>

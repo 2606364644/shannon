@@ -15,6 +15,7 @@ export interface AgentRow {
   last_turn_text: string | null;
   duration_ms: number | null;
   cost_usd: number | null;
+  cost_currency?: string;
   error: string | null;
 }
 
@@ -27,6 +28,7 @@ export interface DashboardState {
   // 派生（core 是 @property；TS 在 reducer 末尾计算并挂上，便于组件直接读）
   completed_count: number;
   total_cost: number;
+  cost_currency?: string;
   total_units: number;
   completed_units: number;
   running_units: string[];
@@ -35,7 +37,7 @@ export interface DashboardState {
 export function emptyState(): DashboardState {
   return {
     current_phase: null, agents: {}, phase_units: [], unit_status: {}, unit_intent: {},
-    completed_count: 0, total_cost: 0, total_units: 0, completed_units: 0, running_units: [],
+    completed_count: 0, total_cost: 0, cost_currency: "USD", total_units: 0, completed_units: 0, running_units: [],
   };
 }
 
@@ -43,7 +45,7 @@ function row(name: string): AgentRow {
   return {
     name, status: "running", attempt: 1, turn: 0,
     last_action: null, last_action_detail: null, last_turn_text: null,
-    duration_ms: null, cost_usd: null, error: null,
+    duration_ms: null, cost_usd: null, cost_currency: "USD", error: null,
   };
 }
 
@@ -133,11 +135,13 @@ export function dashboardReducer(state: DashboardState, event: NdjsonEvent): Das
           status,
           duration_ms: event.duration_ms ?? cur.duration_ms,
           cost_usd: event.cost_usd ?? cur.cost_usd,
+          cost_currency: event.cost_currency ?? cur.cost_currency,
           error: event.error ?? null,
         };
         next = setUnit(state, event.agent_name, status);
       }
-      next = { ...next, agents };
+      // session 内币种一致：取 AgentEvent 的 cost_currency（end 时带）
+      next = { ...next, agents, cost_currency: event.cost_currency ?? next.cost_currency };
       break;
     }
 

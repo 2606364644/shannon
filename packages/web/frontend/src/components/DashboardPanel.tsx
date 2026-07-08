@@ -1,4 +1,5 @@
 import type { DashboardState } from "../state/dashboardReducer";
+import { fmtCost } from "../utils/currency";
 
 function fmtMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -22,7 +23,7 @@ export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; el
         <span className="text-muted-foreground">step {state.completed_units}/{state.total_units}</span>
         <span className="text-muted-foreground">agents {state.completed_count}/{Object.keys(state.agents).length}</span>
         <span className="text-muted-foreground">{fmtMs(elapsedMs)}</span>
-        <span className="text-muted-foreground">${state.total_cost.toFixed(2)}</span>
+        <span className="text-muted-foreground">{fmtCost(state.total_cost, state.cost_currency)}</span>
       </div>
       {state.phase_units.length > 0 && (
         <div className="mt-2 space-y-0.5 text-xs">

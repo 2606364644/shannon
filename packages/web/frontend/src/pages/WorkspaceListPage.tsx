@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { fmtCost } from "@/utils/currency";
 import { Link } from "react-router-dom";
 import {
   createColumnHelper, flexRender, getCoreRowModel,
@@ -86,7 +87,7 @@ export function WorkspaceListPage() {
     helper.accessor("total_cost_usd", {
       header: "cost", cell: (info) => {
         const v = info.getValue();
-        return v != null ? `$${v.toFixed(2)}` : "—";
+        return v != null ? fmtCost(v, info.row.original.cost_currency) : "—";
       },
     }),
     helper.accessor("created_at", { header: "time", cell: (info) => fmtTime(info.getValue()) }),

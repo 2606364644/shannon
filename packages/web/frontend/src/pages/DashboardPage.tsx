@@ -8,6 +8,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { Empty } from "@/components/Empty";
 import { useWorkspaces } from "@/api/useWorkspaces";
 import type { Workspace } from "@/api/types";
+import { fmtCost } from "@/utils/currency";
 
 function isToday(unix: number | null | undefined): boolean {
   if (!unix) return false;
@@ -90,7 +91,7 @@ export function DashboardPage() {
         </CardContent></Card>
         <Card><CardContent className="p-4">
           <div className="text-xs text-muted-foreground">累计 cost</div>
-          <div className="font-mono text-2xl">${totalCost.toFixed(2)}</div>
+          <div className="font-mono text-2xl">{fmtCost(totalCost, data[0]?.cost_currency)}</div>
         </CardContent></Card>
       </div>
 
@@ -108,7 +109,7 @@ export function DashboardPage() {
                     </div>
                     <div className="text-base text-foreground">{w.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {w.total_cost_usd != null ? `$${w.total_cost_usd.toFixed(2)}` : "—"}{" · "}
+                      {w.total_cost_usd != null ? fmtCost(w.total_cost_usd, w.cost_currency) : "—"}{" · "}
                       {w.total_duration_ms ? fmtMs(w.total_duration_ms) : "—"}
                     </div>
                     <div className="text-xs text-primary">查看实时 →</div>
@@ -136,7 +137,7 @@ export function DashboardPage() {
                   <span className="text-foreground">{w.name}</span>
                   <Badge variant="outline">{w.scan_type}</Badge>
                   <span className="text-muted-foreground">{w.vuln_count ?? 0} vuln</span>
-                  <span className="text-muted-foreground">{w.total_cost_usd != null ? `$${w.total_cost_usd.toFixed(2)}` : "—"}</span>
+                  <span className="text-muted-foreground">{w.total_cost_usd != null ? fmtCost(w.total_cost_usd, w.cost_currency) : "—"}</span>
                   <span className="ml-auto text-xs text-muted-foreground">{fmtTime(w.completed_at ?? w.created_at)}</span>
                 </Link>
               ))}
