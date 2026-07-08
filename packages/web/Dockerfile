@@ -18,9 +18,9 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
 
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
