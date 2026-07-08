@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 
 from shannon_core.code_index.parsers.base import BaseParser
-from shannon_core.code_index.models import FuncBlock, CallEdge
+from shannon_core.code_index.models import FuncBlock
 
 
 def test_base_parser_cannot_instantiate():
@@ -23,9 +23,6 @@ def test_concrete_parser_implements_both_methods():
         def parse_file(self, file_path: Path, repo_root: Path) -> list[FuncBlock]:
             return []
 
-        def extract_calls(self, block: FuncBlock, source: bytes) -> list[CallEdge]:
-            return []
-
         def iter_calls(self, block, source):
             return iter([])
 
@@ -37,14 +34,6 @@ def test_concrete_parser_implements_both_methods():
 
     parser = DummyParser()
     assert parser.parse_file(Path("a.py"), Path(".")) == []
-    assert parser.extract_calls(
-        FuncBlock(
-            id="a:f:1", file_path="a", function_name="f",
-            start_line=1, end_line=1, source_code="def f(): pass",
-            parameters=[], language="python",
-        ),
-        b"def f(): pass",
-    ) == []
 
 
 def test_call_node_dataclass():
@@ -67,9 +56,6 @@ def test_concrete_parser_must_implement_iter_calls():
         def parse_file(self, file_path, repo_root):
             return []
 
-        def extract_calls(self, block, source):
-            return []
-
         # missing: iter_calls, destructure_call, extract_arg_expressions
 
     with pytest.raises(TypeError):
@@ -81,9 +67,6 @@ def test_concrete_parser_with_new_methods_instantiates():
 
     class FullParser(BaseParser):
         def parse_file(self, file_path, repo_root):
-            return []
-
-        def extract_calls(self, block, source):
             return []
 
         def iter_calls(self, block, source):

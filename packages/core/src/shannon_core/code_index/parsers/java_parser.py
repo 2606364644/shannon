@@ -4,7 +4,7 @@ from pathlib import Path
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
-from shannon_core.code_index.models import CallEdge, FuncBlock
+from shannon_core.code_index.models import FuncBlock
 from shannon_core.code_index.parsers import register_parser
 from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
@@ -38,19 +38,6 @@ class JavaParser(BaseParser):
                 if block is not None:
                     blocks.append(block)
         return blocks
-
-    def extract_calls(self, block: FuncBlock, source: bytes) -> list[CallEdge]:
-        tree = self._parser.parse(source)
-        edges: list[CallEdge] = []
-
-        for node in _walk(tree.root_node):
-            if node.type == "method_declaration":
-                name_node = node.child_by_field_name("name")
-                if name_node and name_node.text.decode("utf-8") == block.function_name:
-                    if node.start_point[0] + 1 == block.start_line:
-                        edges = self._extract_call_edges(node, source, block.id)
-                        break
-        return edges
 
     def _extract_method_block(self, node, source: bytes, rel_path: str) -> FuncBlock | None:
         name_node = node.child_by_field_name("name")
@@ -97,20 +84,6 @@ class JavaParser(BaseParser):
                     if modifier.type in ("marker_annotation", "annotation"):
                         annotations.append(modifier.text.decode("utf-8"))
         return annotations
-
-    def _extract_call_edges(self, method_node, source: bytes, caller_id: str) -> list[CallEdge]:
-        edges: list[CallEdge] = []
-        for node in _walk(method_node):
-            if node.type == "method_invocation":
-                name_node = node.child_by_field_name("name")
-                if name_node:
-                    edges.append(CallEdge(
-                        caller_id=caller_id,
-                        callee_name=name_node.text.decode("utf-8"),
-                        resolved=False,
-                        line=node.start_point[0] + 1,
-                    ))
-        return edges
 
     def iter_calls(self, block: FuncBlock, source: bytes):
         yield from self._iter_calls_cached(block, source)

@@ -44,28 +44,6 @@ class TestPhpParserFuncBlocks:
             assert block.language == "php"
 
 
-class TestPhpParserCallEdges:
-    def test_extracts_function_calls(self):
-        parser = PhpParser()
-        source = PHP_FILE.read_bytes()
-        blocks = parser.parse_file(PHP_FILE, PHP_FILE.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["getUsers"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "select" in callee_names
-
-    def test_extracts_method_calls(self):
-        parser = PhpParser()
-        source = PHP_FILE.read_bytes()
-        blocks = parser.parse_file(PHP_FILE, PHP_FILE.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["listOrders"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "getOrders" in callee_names
-
-
 class TestPhpParserRegistry:
     def test_registered(self):
         assert "php" in _PARSER_CLASSES

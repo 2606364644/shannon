@@ -55,48 +55,6 @@ class TestPythonParserFuncBlocks:
             assert block.end_line >= block.start_line
 
 
-class TestPythonParserCallEdges:
-    def test_extracts_function_calls(self):
-        parser = PythonParser()
-        source = FLASK_APP.read_bytes()
-        blocks = parser.parse_file(FLASK_APP, FLASK_APP.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["list_users"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "get_users" in callee_names
-        assert "jsonify" in callee_names
-
-    def test_extracts_method_calls(self):
-        parser = PythonParser()
-        source = FLASK_APP.read_bytes()
-        blocks = parser.parse_file(FLASK_APP, FLASK_APP.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["update_user"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "save_user" in callee_names
-
-    def test_call_edge_has_line_number(self):
-        parser = PythonParser()
-        source = FLASK_APP.read_bytes()
-        blocks = parser.parse_file(FLASK_APP, FLASK_APP.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["list_users"], source)
-        for edge in edges:
-            assert edge.line > 0
-
-    def test_empty_function_no_calls(self):
-        parser = PythonParser()
-        source = FLASK_APP.read_bytes()
-        blocks = parser.parse_file(FLASK_APP, FLASK_APP.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["process_item"], source)
-        assert len(edges) == 0
-
-
 class TestPythonParserRegistry:
     def test_registered_in_parser_registry(self):
         from shannon_core.code_index.parsers import _PARSER_CLASSES

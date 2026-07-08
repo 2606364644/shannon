@@ -48,28 +48,6 @@ class TestGoParserFuncBlocks:
             assert block.language == "go"
 
 
-class TestGoParserCallEdges:
-    def test_extracts_function_calls(self):
-        parser = GoParser()
-        source = GO_FILE.read_bytes()
-        blocks = parser.parse_file(GO_FILE, GO_FILE.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["listUsers"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "getUsers" in callee_names
-
-    def test_extracts_method_calls(self):
-        parser = GoParser()
-        source = GO_FILE.read_bytes()
-        blocks = parser.parse_file(GO_FILE, GO_FILE.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["updateUser"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "saveUser" in callee_names
-
-
 class TestGoParserRegistry:
     def test_registered(self):
         assert "go" in _PARSER_CLASSES

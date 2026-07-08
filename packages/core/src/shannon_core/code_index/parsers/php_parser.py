@@ -4,7 +4,7 @@ from pathlib import Path
 import tree_sitter_php as tsphp
 from tree_sitter import Language, Parser
 
-from shannon_core.code_index.models import CallEdge, FuncBlock
+from shannon_core.code_index.models import FuncBlock
 from shannon_core.code_index.parsers import register_parser
 from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
@@ -48,21 +48,6 @@ class PhpParser(BaseParser):
                 if block is not None:
                     blocks.append(block)
         return blocks
-
-    def extract_calls(self, block: FuncBlock, source: bytes) -> list[CallEdge]:
-        tree = self._parser.parse(source)
-        edges: list[CallEdge] = []
-
-        for node in _walk(tree.root_node):
-            if node.type in ("function_definition", "method_declaration"):
-                name_node = node.child_by_field_name("name")
-                if name_node:
-                    name_text = name_node.text.decode("utf-8").lstrip("$")
-                    if name_text == block.function_name:
-                        if node.start_point[0] + 1 == block.start_line:
-                            edges = self._extract_call_edges(node, source, block.id)
-                            break
-        return edges
 
     def _find_class_name(self, node) -> str | None:
         current = node.parent
@@ -137,51 +122,6 @@ class PhpParser(BaseParser):
                 if name_node:
                     params.append(name_node.text.decode("utf-8").lstrip("$"))
         return params
-
-    def _extract_call_edges(self, func_node, source: bytes, caller_id: str) -> list[CallEdge]:
-        edges: list[CallEdge] = []
-        for node in _walk(func_node):
-            if node.type == "function_call_expression":
-                callee_name = self._get_function_call_name(node)
-                if callee_name:
-                    edges.append(CallEdge(
-                        caller_id=caller_id,
-                        callee_name=callee_name,
-                        resolved=False,
-                        line=node.start_point[0] + 1,
-                    ))
-            elif node.type == "scoped_call_expression":
-                # Static calls like DB::select(...)
-                name_node = node.child_by_field_name("name")
-                if name_node:
-                    edges.append(CallEdge(
-                        caller_id=caller_id,
-                        callee_name=name_node.text.decode("utf-8").lstrip("$"),
-                        resolved=False,
-                        line=node.start_point[0] + 1,
-                    ))
-            elif node.type == "member_call_expression":
-                # Instance method calls like $this->getOrders()
-                name_node = node.child_by_field_name("name")
-                if name_node:
-                    edges.append(CallEdge(
-                        caller_id=caller_id,
-                        callee_name=name_node.text.decode("utf-8").lstrip("$"),
-                        resolved=False,
-                        line=node.start_point[0] + 1,
-                    ))
-        return edges
-
-    def _get_function_call_name(self, call_node) -> str | None:
-        func_node = call_node.child_by_field_name("function")
-        if func_node is None:
-            return None
-
-        if func_node.type == "name":
-            return func_node.text.decode("utf-8").lstrip("$")
-        elif func_node.type == "variable_name":
-            return func_node.text.decode("utf-8").lstrip("$")
-        return None
 
     def iter_calls(self, block: FuncBlock, source: bytes):
         yield from self._iter_calls_cached(block, source)

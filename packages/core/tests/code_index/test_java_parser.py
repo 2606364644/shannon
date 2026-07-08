@@ -38,18 +38,6 @@ class TestJavaParserFuncBlocks:
             assert block.language == "java"
 
 
-class TestJavaParserCallEdges:
-    def test_extracts_method_calls(self):
-        parser = JavaParser()
-        source = JAVA_FILE.read_bytes()
-        blocks = parser.parse_file(JAVA_FILE, JAVA_FILE.parent.parent.parent)
-        by_name = {b.function_name: b for b in blocks}
-
-        edges = parser.extract_calls(by_name["listUsers"], source)
-        callee_names = [e.callee_name for e in edges]
-        assert "getUsers" in callee_names
-
-
 class TestJavaParserRegistry:
     def test_registered(self):
         assert "java" in _PARSER_CLASSES

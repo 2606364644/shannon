@@ -4,7 +4,7 @@ from pathlib import Path
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
-from shannon_core.code_index.models import CallEdge, FuncBlock
+from shannon_core.code_index.models import FuncBlock
 from shannon_core.code_index.parsers import register_parser
 from shannon_core.code_index.parsers.base import BaseParser, CallNode
 
@@ -39,19 +39,6 @@ class PythonParser(BaseParser):
                 if block is not None:
                     blocks.append(block)
         return blocks
-
-    def extract_calls(self, block: FuncBlock, source: bytes) -> list[CallEdge]:
-        tree = self._parser.parse(source)
-        edges: list[CallEdge] = []
-
-        for node in _walk(tree.root_node):
-            if node.type in ("function_definition", "async_function_definition"):
-                name_node = node.child_by_field_name("name")
-                if name_node and name_node.text.decode("utf-8") == block.function_name:
-                    if node.start_point[0] + 1 == block.start_line:
-                        edges = self._extract_call_edges(node, source, block.id)
-                        break
-        return edges
 
     def _extract_func_block(self, node, source: bytes, rel_path: str) -> FuncBlock | None:
         name_node = node.child_by_field_name("name")
@@ -110,33 +97,6 @@ class PythonParser(BaseParser):
                 if child.type == "decorator":
                     decorators.append(child.text.decode("utf-8"))
         return decorators
-
-    def _extract_call_edges(self, func_node, source: bytes, caller_id: str) -> list[CallEdge]:
-        edges: list[CallEdge] = []
-        for node in _walk(func_node):
-            if node.type == "call":
-                callee_name = self._get_callee_name(node)
-                if callee_name:
-                    edges.append(CallEdge(
-                        caller_id=caller_id,
-                        callee_name=callee_name,
-                        resolved=False,
-                        line=node.start_point[0] + 1,
-                    ))
-        return edges
-
-    def _get_callee_name(self, call_node) -> str | None:
-        func_node = call_node.child_by_field_name("function")
-        if func_node is None:
-            return None
-
-        if func_node.type == "identifier":
-            return func_node.text.decode("utf-8")
-        elif func_node.type == "attribute":
-            attr = func_node.child_by_field_name("attribute")
-            if attr:
-                return attr.text.decode("utf-8")
-        return None
 
     def iter_calls(self, block: FuncBlock, source: bytes):
         """Yield CallNode for every `call` node inside this function."""
