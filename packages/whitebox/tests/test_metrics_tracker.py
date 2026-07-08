@@ -92,6 +92,30 @@ async def test_end_agent_with_error(tmp_path: Path):
     assert data["metrics"]["agents"]["recon"]["error"] == "Rate limited"
 
 
+async def test_end_agent_persists_cost_currency_and_tokens(tmp_path: Path):
+    """cost 定价(spec 2026-07-09): end_agent 落盘 cost_currency + 4 档 token 到 session.json。"""
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("recon", 1)
+    await tracker.end_agent("recon", AgentEndResult(
+        success=True, duration_ms=100, cost_usd=0.5, cost_currency="CNY",
+        input_tokens=1000, output_tokens=500, cache_read_tokens=100, cache_creation_tokens=0,
+    ))
+    data = _read_session_json(tmp_path)
+    m = data["metrics"]
+    # 顶层汇总
+    assert m["cost_currency"] == "CNY"
+    assert m["total_input_tokens"] == 1000
+    assert m["total_output_tokens"] == 500
+    assert m["total_cache_read_tokens"] == 100
+    assert m["total_cache_creation_tokens"] == 0
+    # agent 级
+    assert m["agents"]["recon"]["cost_currency"] == "CNY"
+    assert m["agents"]["recon"]["input_tokens"] == 1000
+    assert m["agents"]["recon"]["cache_read_tokens"] == 100
+
+
 async def test_update_session_status(tmp_path: Path):
     meta = _make_meta(tmp_path)
     tracker = MetricsTracker(meta)

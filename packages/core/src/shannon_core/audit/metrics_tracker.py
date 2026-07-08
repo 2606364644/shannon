@@ -41,6 +41,11 @@ class MetricsTracker:
             "metrics": {
                 "total_duration_ms": 0,
                 "total_cost_usd": 0,
+                "cost_currency": "USD",
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_cache_creation_tokens": 0,
                 "phases": {},
                 "agents": {},
             },
@@ -67,7 +72,12 @@ class MetricsTracker:
             self._data["metrics"]["agents"][agent_name] = {
                 "duration_ms": 0,
                 "cost_usd": 0,
+                "cost_currency": "USD",
                 "attempts": attempt_number,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
             }
 
     async def end_agent(self, agent_name: str, result: AgentEndResult) -> None:
@@ -78,15 +88,26 @@ class MetricsTracker:
         agents[agent_name].update({
             "duration_ms": result.duration_ms,
             "cost_usd": result.cost_usd,
+            "cost_currency": result.cost_currency,
             "success": result.success,
             "attempt_number": result.attempt_number,
             "model": result.model,
+            "input_tokens": result.input_tokens or 0,
+            "output_tokens": result.output_tokens or 0,
+            "cache_read_tokens": result.cache_read_tokens or 0,
+            "cache_creation_tokens": result.cache_creation_tokens or 0,
         })
         if result.error:
             agents[agent_name]["error"] = result.error
 
         self._data["metrics"]["total_duration_ms"] += result.duration_ms
         self._data["metrics"]["total_cost_usd"] += result.cost_usd
+        # session 内币种一致：取 agent 的 cost_currency（spec 2026-07-09）
+        self._data["metrics"]["cost_currency"] = result.cost_currency
+        self._data["metrics"]["total_input_tokens"] += result.input_tokens or 0
+        self._data["metrics"]["total_output_tokens"] += result.output_tokens or 0
+        self._data["metrics"]["total_cache_read_tokens"] += result.cache_read_tokens or 0
+        self._data["metrics"]["total_cache_creation_tokens"] += result.cache_creation_tokens or 0
 
         # Phase aggregation — only for successful agents
         if result.success:
@@ -108,12 +129,22 @@ class MetricsTracker:
                 "duration_ms": 0,
                 "duration_percentage": 0.0,
                 "cost_usd": 0.0,
+                "cost_currency": "USD",
                 "agent_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
             }
 
         phases[phase_name]["duration_ms"] += result.duration_ms
         phases[phase_name]["cost_usd"] += result.cost_usd
+        phases[phase_name]["cost_currency"] = result.cost_currency
         phases[phase_name]["agent_count"] += 1
+        phases[phase_name]["input_tokens"] += result.input_tokens or 0
+        phases[phase_name]["output_tokens"] += result.output_tokens or 0
+        phases[phase_name]["cache_read_tokens"] += result.cache_read_tokens or 0
+        phases[phase_name]["cache_creation_tokens"] += result.cache_creation_tokens or 0
 
         self._recalculate_phase_percentages()
 
