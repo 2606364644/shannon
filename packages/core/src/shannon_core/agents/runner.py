@@ -95,6 +95,7 @@ class ClaudeRunResult:
     duration: int = 0
     turns: int = 0
     cost: float = 0.0
+    cost_currency: str = "USD"
     model: str | None = None
     structured_output: Any | None = None
     error: str | None = None

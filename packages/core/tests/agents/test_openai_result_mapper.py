@@ -117,3 +117,21 @@ def test_map_unknown_model_warning_dedup(caplog):
         map_run_result(rr, duration_ms=10, model="dedup-model-xyz", turns=1)
     assert sum(1 for r in caplog.records if "未在价目表" in r.getMessage()) == 1
 
+
+def test_usage_from_input_excludes_cached():
+    """OpenAI input_tokens 含 cached；归一后 input = raw - cached（spec §4.3）。"""
+    rr = _run_result("x", _usage(1000, 500, cached=300))
+    mapped = map_run_result(rr, duration_ms=10, model="glm-5.2", turns=1)
+    assert mapped.tokens.input_tokens == 700      # 1000 - 300
+    assert mapped.tokens.cache_read_input_tokens == 300
+
+
+def test_map_cost_carries_currency():
+    """compute_cost 透传 currency 到 ClaudeRunResult.cost_currency。"""
+    mapped = map_run_result(
+        _run_result("x", _usage(1_000_000, 0)),
+        duration_ms=10, model="glm-5.2", turns=1,
+    )
+    assert mapped.cost > 0
+    assert mapped.cost_currency == "CNY"
+
