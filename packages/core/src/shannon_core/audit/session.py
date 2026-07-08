@@ -87,8 +87,13 @@ class AuditSession:
                 attempt_number=result.attempt_number,
                 duration_ms=result.duration_ms,
                 cost_usd=result.cost_usd,
+                cost_currency=result.cost_currency,
                 success=result.success,
                 error=result.error,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cache_read_tokens=result.cache_read_tokens,
+                cache_creation_tokens=result.cache_creation_tokens,
             )
             await self._workflow_logger.log_agent(agent_name, "end", details)
 

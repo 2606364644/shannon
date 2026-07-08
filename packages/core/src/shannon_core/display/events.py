@@ -53,8 +53,13 @@ class AgentEvent(DisplayEvent):
     attempt: int
     duration_ms: int | None = None
     cost_usd: float | None = None
+    cost_currency: str = "USD"
     success: bool | None = None
     error: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -117,7 +122,12 @@ class AgentMetric:
     name: str
     duration_ms: int
     cost_usd: float | None = None
+    cost_currency: str = "USD"
     success: bool = True
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -125,8 +135,13 @@ class SummaryEvent(DisplayEvent):
     status: str
     total_duration_ms: int
     total_cost_usd: float
+    cost_currency: str = "USD"
     agents: list[AgentMetric] = field(default_factory=list)
     error: str | None = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_creation_tokens: int = 0
 
 
 @dataclass(frozen=True)

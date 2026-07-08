@@ -145,3 +145,40 @@ def test_info_event_warning_level():
     from shannon_core.display.events import InfoEvent
     e = InfoEvent(timestamp="t", category="INFO", message="careful", level="warning")
     assert e.level == "warning"
+
+
+def test_cost_currency_and_token_fields_on_events():
+    """cost 定价(spec 2026-07-09): AgentEvent/AgentMetric/SummaryEvent 带 cost_currency + token。
+
+    asdict 断言覆盖 StructuredEventRenderer→events.ndjson 的序列化路径（Web SSE 读它）。
+    """
+    from shannon_core.display.events import AgentMetric
+
+    ae = AgentEvent(timestamp="t", category="AGENT", agent_name="recon", event="end",
+                    attempt=1, cost_usd=0.5, cost_currency="CNY", input_tokens=1000,
+                    output_tokens=500, cache_read_tokens=100, cache_creation_tokens=0)
+    assert ae.cost_currency == "CNY"
+    assert ae.input_tokens == 1000
+    assert dataclasses.asdict(ae)["cost_currency"] == "CNY"
+
+    am = AgentMetric(name="recon", duration_ms=100, cost_usd=0.5, cost_currency="CNY",
+                     input_tokens=1000, cache_read_tokens=100)
+    assert am.cost_currency == "CNY"
+
+    se = SummaryEvent(timestamp="t", category="SUMMARY", status="completed",
+                      total_duration_ms=100, total_cost_usd=1.5, cost_currency="CNY",
+                      agents=[am], total_input_tokens=1000, total_cache_read_tokens=100)
+    assert se.cost_currency == "CNY"
+    assert se.total_input_tokens == 1000
+    sd = dataclasses.asdict(se)
+    assert sd["cost_currency"] == "CNY"
+    assert sd["agents"][0]["cost_currency"] == "CNY"
+
+
+def test_event_cost_currency_defaults_usd():
+    """未传 cost_currency → 默认 USD（向后兼容旧链路）。"""
+    ae = AgentEvent(timestamp="t", category="AGENT", agent_name="a", event="start", attempt=1)
+    assert ae.cost_currency == "USD"
+    se = SummaryEvent(timestamp="t", category="SUMMARY", status="completed",
+                      total_duration_ms=1, total_cost_usd=0.0, agents=[])
+    assert se.cost_currency == "USD"

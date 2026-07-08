@@ -162,7 +162,10 @@ class WorkflowLogger:
         await self._dispatcher.dispatch(AgentEvent(
             timestamp=format_log_time(), category="AGENT", agent_name=agent_name,
             event=event, attempt=d.attempt_number, duration_ms=d.duration_ms,
-            cost_usd=d.cost_usd, success=d.success, error=d.error))
+            cost_usd=d.cost_usd, cost_currency=d.cost_currency, success=d.success,
+            error=d.error,
+            input_tokens=d.input_tokens, output_tokens=d.output_tokens,
+            cache_read_tokens=d.cache_read_tokens, cache_creation_tokens=d.cache_creation_tokens))
 
     async def log_tool_start(self, agent_name: str, tool_name: str, parameters: Any) -> None:
         if self._dispatcher is None:
@@ -251,13 +254,21 @@ class WorkflowLogger:
         # summary are assumed to have succeeded. If per-agent failure state is needed
         # later, thread a success flag through AgentMetricsSummary first.
         agents = [
-            AgentMetric(name=n, duration_ms=m.duration_ms, cost_usd=m.cost_usd, success=True)
+            AgentMetric(name=n, duration_ms=m.duration_ms, cost_usd=m.cost_usd,
+                        cost_currency=m.cost_currency, success=True,
+                        input_tokens=m.input_tokens, output_tokens=m.output_tokens,
+                        cache_read_tokens=m.cache_read_tokens,
+                        cache_creation_tokens=m.cache_creation_tokens)
             for n, m in summary.agent_metrics.items()
         ]
         await self._dispatcher.dispatch(SummaryEvent(
             timestamp=format_log_time(), category="SUMMARY", status=summary.status,
             total_duration_ms=summary.total_duration_ms, total_cost_usd=summary.total_cost_usd,
-            agents=agents, error=summary.error))
+            cost_currency=summary.cost_currency, agents=agents, error=summary.error,
+            total_input_tokens=summary.total_input_tokens,
+            total_output_tokens=summary.total_output_tokens,
+            total_cache_read_tokens=summary.total_cache_read_tokens,
+            total_cache_creation_tokens=summary.total_cache_creation_tokens))
 
     async def log_resume_header(self, resume_info: ResumeInfo) -> None:
         if self._dispatcher is None:
