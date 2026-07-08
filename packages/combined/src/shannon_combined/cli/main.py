@@ -5,7 +5,9 @@ import asyncio
 import click
 from shannon_core.config.env_loader import load_env
 from shannon_core.config.profile_validator import validate_active_profile
+from shannon_core.logging import configure_logging
 from shannon_core.services.temporal_infra import ensure_infra
+from shannon_core.utils.paths import resolve_workspaces_dir
 
 
 @click.group()
@@ -33,6 +35,8 @@ def scan(repo, url, config_path, pipeline_testing, temporal_address):
     click.echo(f"  Target URL: {url}")
 
     asyncio.run(ensure_infra(address=temporal_address))
+    # spec 组件 5：统一日志入口（诊断日志落 workspaces/logs/diagnostic.log）。
+    configure_logging(log_dir=resolve_workspaces_dir(repo_path) / "logs")
     result = asyncio.run(run_combined_scan(
         repo_path=repo_path,
         url=url,

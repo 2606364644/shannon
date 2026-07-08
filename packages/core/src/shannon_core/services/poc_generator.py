@@ -14,8 +14,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from shannon_core.agents.runner import run_claude_prompt  # 模块级名称，便于测试 monkeypatch
-from shannon_core.display.formatters import format_duration, format_log_time, tag
-from shannon_core.display.symbols import AGENT_START, STEP_DONE, STEP_FAIL, STEP_PENDING
+from shannon_core.audit.session_registry import get_audit_session
+from shannon_core.display.formatters import format_duration
 from shannon_core.models.queue_schemas import VulnerabilityQueue
 
 
@@ -529,14 +529,15 @@ _POC_CLASS_TAG: dict[str, str] = {
 }
 
 
-def _poc_emit(body: str) -> None:
-    """对齐 display 层行格式 [timestamp] [POC  ] body。
+async def _poc_progress(body: str) -> None:
+    """PoC 进度经 audit_session.log_info 发 InfoEvent（取代裸 print）。
 
-    PoC 在 activity 层跑、无 audit_session/display 渲染器上下文，走裸 print；但行格式
-    （timestamp + 等宽标签 tag('POC') + 状态符号）与 file_renderer 的 AGENT/STEP 行一致，
-    视觉上融入扫描日志流。复用 display.formatters/symbols，不重复字面量。
+    spec 组件 3：activity 内能拿 get_audit_session()，log_info 是官方取代裸 logging 的
+    通道（session.py docstring："Replaces bare logger.warning/info in workflow threads"），
+    渲染对齐 [INFO ]。无 session 上下文（测试/standalone）时 NullAuditSession.log_info no-op
+    安全。body 为进度正文（renderer 已含 INFO 标签，不重复符号）。
     """
-    print(f"[{format_log_time()}] [{tag('POC')}] {body}", flush=True)
+    await get_audit_session().log_info(body)
 
 
 class PoCGenerator:
@@ -555,7 +556,7 @@ class PoCGenerator:
         # 报告增强本就非关键路径，token 紧张或暂不需要 PoC 时设 1 秒过，不阻塞主报告。
         if os.getenv("SHANNON_SKIP_POC_REPORT", "0") == "1":
             logger.info("poc: SHANNON_SKIP_POC_REPORT=1, 跳过 PoC 生成")
-            _poc_emit(f"{STEP_PENDING} SHANNON_SKIP_POC_REPORT=1, 跳过 PoC 生成")
+            await _poc_progress("SHANNON_SKIP_POC_REPORT=1, 跳过 PoC 生成")
             return None
 
         host = resolve_host(target_url)
@@ -584,7 +585,7 @@ class PoCGenerator:
 
         total = len(items)
         track_cn = "白盒" if track == "whitebox" else "黑盒"
-        _poc_emit(f"{AGENT_START} {track_cn} PoC: {total} 个 externally_exploitable 漏洞")
+        await _poc_progress(f"{track_cn} PoC: {total} 个 externally_exploitable 漏洞")
 
         entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
         for i, (vc, v, accepted) in enumerate(items, 1):
@@ -598,19 +599,19 @@ class PoCGenerator:
                 dt_ms = int((time.monotonic() - t0) * 1000)
                 if spec is not None:
                     entries.append((vc, v, spec))
-                    _poc_emit(f"{STEP_DONE} {label}  {format_duration(dt_ms)}")
+                    await _poc_progress(f"{label}  {format_duration(dt_ms)}")
                 else:
-                    _poc_emit(f"{STEP_PENDING} {label}  skip {format_duration(dt_ms)}")
+                    await _poc_progress(f"{label}  skip {format_duration(dt_ms)}")
             except Exception as exc:  # 单条失败不阻塞其余
                 dt_ms = int((time.monotonic() - t0) * 1000)
                 logger.warning("poc: build failed for %s: %s", vid, exc)
-                _poc_emit(f"{STEP_FAIL} {label}  — {exc} ({format_duration(dt_ms)})")
+                await _poc_progress(f"{label}  — {exc} ({format_duration(dt_ms)})")
 
         # placeholder 块总是显示：即便 host 真实，需登录的 PoC 仍含 <AUTH_TOKEN>/<SESSION_COOKIE> 占位符，operator 需替换指引。
         md = render_poc_md(entries, host, track) if entries else empty_poc_md(track)
         out = deliverables_dir / _POC_FILENAME
         out.write_text(md, encoding="utf-8")
-        _poc_emit(f"{STEP_DONE} PoC 完成: {len(entries)}/{total} 写入 {out.name}")
+        await _poc_progress(f"PoC 完成: {len(entries)}/{total} 写入 {out.name}")
         return out
 
     @staticmethod

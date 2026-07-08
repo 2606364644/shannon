@@ -88,6 +88,36 @@ def test_start_calls_ensure_infra():
     mock_ensure.assert_called_once()
 
 
+def test_start_configures_logging_with_workspace_log_dir(tmp_path, monkeypatch):
+    """spec 组件 5：start 启动时调 configure_logging(log_dir=workspaces/<session>/logs)。
+
+    patch 掉 env/profile 校验层（不在本组件范围），专注断言 configure_logging 接入。
+    """
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_ensure(*a, **kw):
+        pass
+
+    async def fake_run_scan(input, temporal_address, use_rich=False):
+        return {"status": "completed", "workspace_name": "ws-test"}
+
+    with (
+        patch("shannon_whitebox.cli.main.load_env"),
+        patch("shannon_whitebox.cli.main.validate_active_profile"),
+        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("shannon_whitebox.cli.main.configure_logging") as mock_cfg,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["start", "--repo", str(tmp_path), "--workspace", "ws-test"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    mock_cfg.assert_called_once()
+    log_dir = mock_cfg.call_args.kwargs.get("log_dir") or mock_cfg.call_args.args[0]
+    assert "workspaces" in str(log_dir), log_dir
+
+
 def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
     """Completion output should show workspace name, deliverables path, and next-step commands."""
     monkeypatch.chdir(tmp_path)
@@ -280,6 +310,25 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
     result = runner.invoke(cli, ["logs", "test-ws"])
     assert result.exit_code == 0
     assert "hello from log" in result.output
+
+
+def test_logs_command_diagnostic_flag_reads_diagnostic_log(tmp_path, monkeypatch):
+    """spec 组件 6：--diagnostic 读 logs/diagnostic.log 而非 workflow.log。"""
+    runner = CliRunner()
+    ws = tmp_path / "workspaces" / "test-ws"
+    logs_dir = ws / "logs"
+    logs_dir.mkdir(parents=True)
+    # 两份日志都存在，验证 --diagnostic 选的是 diagnostic.log
+    (ws / "workflow.log").write_text("this is workflow progress\n")
+    (logs_dir / "diagnostic.log").write_text("this is diagnostic WARNING\n")
+    monkeypatch.chdir(tmp_path)
+    with patch("shannon_whitebox.cli.main.load_env"), patch(
+        "shannon_whitebox.cli.main.validate_active_profile"
+    ):
+        result = runner.invoke(cli, ["logs", "test-ws", "--diagnostic"])
+    assert result.exit_code == 0, result.output
+    assert "this is diagnostic WARNING" in result.output
+    assert "this is workflow progress" not in result.output  # 读的是 diagnostic 不是 workflow
 
 
 def test_workspace_delete(tmp_path, monkeypatch):

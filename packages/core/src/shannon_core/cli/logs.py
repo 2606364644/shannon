@@ -37,23 +37,41 @@ class LogFileHandler(FileSystemEventHandler):
                 raise SystemExit(0)
 
 
-def tail_workflow_log(workspace_id: str, workspaces_dir: str = "workspaces") -> None:
-    """Tail a workflow.log in real-time, like tail -f. Auto-exits on Workflow COMPLETED/FAILED."""
+def tail_workflow_log(
+    workspace_id: str,
+    workspaces_dir: str = "workspaces",
+    log_filename: str = "workflow.log",
+) -> None:
+    """Tail a log file in real-time, like tail -f. Auto-exits on Workflow COMPLETED/FAILED.
+
+    log_filename 默认 workflow.log（display 流产物）；--diagnostic 时传 diagnostic.log
+    （diagnostic.log 在 <workspace>/logs/ 子目录，workflow.log 在 <workspace>/ 直属）。
+    """
     base = Path(workspaces_dir)
 
-    # 1. Direct match
-    log_path = base / workspace_id / "workflow.log"
-    if not log_path.exists():
+    def _resolve(name: str) -> Path | None:
+        # workflow.log 在 workspace 直属；diagnostic.log 在 workspace/logs/ 子目录。
+        sub = "logs" if name == "diagnostic.log" else ""
+        ws_root = base / workspace_id / sub
+        path = ws_root / name
+        if path.exists():
+            return path
         # 2. Try stripping resume suffix
         stripped = re.sub(r"_resume_\d+$", "", workspace_id)
         if stripped != workspace_id:
-            log_path = base / stripped / "workflow.log"
-        if not log_path.exists():
-            print(f"ERROR: Workflow log not found for: {workspace_id}", file=sys.stderr)
-            sys.exit(1)
+            ws_root = base / stripped / sub
+            path = ws_root / name
+            if path.exists():
+                return path
+        return None
+
+    log_path = _resolve(log_filename)
+    if log_path is None:
+        print(f"ERROR: Log file not found for: {workspace_id} ({log_filename})", file=sys.stderr)
+        sys.exit(1)
 
     handler = LogFileHandler(log_path)
-    print(f"Tailing workflow log: {log_path}")
+    print(f"Tailing {log_filename}: {log_path}")
 
     # Output existing content
     if handler.flush():

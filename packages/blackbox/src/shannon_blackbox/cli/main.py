@@ -8,6 +8,7 @@ import click
 from shannon_core.config.concurrency import get_max_concurrent
 from shannon_core.config.env_loader import load_env
 from shannon_core.config.profile_validator import validate_active_profile
+from shannon_core.logging import configure_logging
 
 from shannon_core.models.agents import ALL_VULN_CLASSES
 from shannon_core.services.temporal_infra import (
@@ -129,6 +130,10 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
     asyncio.run(ensure_infra(address=temporal_address))
     from shannon_core.runtime.prerequisites import ensure_browser_engine
     ensure_browser_engine(input.config_path, profile="blackbox")
+    # spec 组件 5：统一日志入口（诊断日志落 workspaces/<session>/logs/diagnostic.log）。
+    configure_logging(
+        log_dir=Path(input.workspaces_root) / (input.workspace_name or "default") / "logs"
+    )
     import sys
     use_rich = sys.stdout.isatty() and not plain
     try:
@@ -165,20 +170,26 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
 @cli.command()
 @click.argument("workspace_name")
 @click.option("--follow", is_flag=True, help="Tail the log in real-time (auto-exits on completion)")
-def logs(workspace_name, follow):
+@click.option(
+    "--diagnostic", is_flag=True,
+    help="Read diagnostic.log (logging WARNING/ERROR) instead of workflow.log",
+)
+def logs(workspace_name, follow, diagnostic):
     """View workspace execution logs."""
     workspaces_dir = Path("workspaces")
     ws = workspaces_dir / workspace_name
     if not ws.exists():
         click.echo(f"Workspace not found: {workspace_name}")
         raise SystemExit(1)
-    log_file = ws / "workflow.log"
+    # spec 组件 6：--diagnostic 读 logs/diagnostic.log，否则 workflow.log。
+    log_filename = "diagnostic.log" if diagnostic else "workflow.log"
+    log_file = ws / ("logs" if diagnostic else "") / log_filename
     if not log_file.exists():
         click.echo("No logs found")
         return
     if follow:
         from shannon_core.cli.logs import tail_workflow_log
-        tail_workflow_log(workspace_name)
+        tail_workflow_log(workspace_name, log_filename=log_filename)
     else:
         click.echo(log_file.read_text())
 

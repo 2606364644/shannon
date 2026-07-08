@@ -367,6 +367,40 @@ async def test_generate_writes_poc_md_and_filters(tmp_path):
     assert "curl -i" in md
 
 
+async def test_generate_emits_progress_via_audit_session(tmp_path, monkeypatch, capsys):
+    """spec 组件 3：PoC 进度经 get_audit_session().log_info 发 InfoEvent，不再裸 print。
+
+    注入 mock session，断言：开始行 + 逐条 (i/N) 进度行 + 完成行 都经 log_info；
+    且改走 session 后无裸 print 残留到 stdout（capsys 应无进度行）。
+    NullAuditSession（无 session 时）no-op，未注入 session 的现有测试不受影响。
+    """
+    d = _wb_queue(tmp_path)
+    info_calls: list[str] = []
+
+    class _RecordingSession:
+        async def log_info(self, message, level="info"):
+            info_calls.append(message)
+
+    monkeypatch.setattr(
+        "shannon_core.services.poc_generator.get_audit_session",
+        lambda: _RecordingSession(),
+    )
+
+    out = await PoCGenerator.generate(
+        deliverables_dir=d, vuln_classes=["injection"],
+        target_url="https://t.example.com", track="whitebox",
+    )
+    messages = info_calls
+    assert any("1 个 externally_exploitable" in m for m in messages), messages  # 开始行
+    assert any("(1/1)" in m and "INJ-1" in m for m in messages), messages       # 逐条进度
+    assert any("PoC 完成" in m for m in messages), messages                    # 完成行
+    assert out is not None
+    # 改走 session 后，进度行不应再裸 print 到 stdout
+    captured = capsys.readouterr().out
+    assert "externally_exploitable" not in captured
+    assert "(1/1)" not in captured
+
+
 async def test_generate_empty_when_all_filtered(tmp_path):
     d = _wb_queue(tmp_path)
     # 全部改成不可达

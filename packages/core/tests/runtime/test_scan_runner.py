@@ -68,6 +68,40 @@ class TestShutdownController:
         await asyncio.wait_for(ctrl.wait(), timeout=1.0)  # 立即返回
 
 
+class TestShutdownMessagesUsePrintLine:
+    """spec 组件 4：取消消息经 print_line，格式对齐 [timestamp] [SCAN/CANCEL] symbol body。"""
+
+    def test_graceful_message_has_tagged_format(self, capsys):
+        ctrl = ShutdownController()
+        ctrl._loop = MagicMock()
+        ctrl._on_signal(signal.SIGINT)  # 触发 _trigger_graceful
+        out = capsys.readouterr().out
+        # 不再是裸 "正在优雅取消…"，而是 [timestamp] [SCAN  ] ... 带等宽标签
+        assert "[SCAN" in out and "] 正在优雅取消" in out, out
+
+    def test_sigterm_graceful_message_tagged(self, capsys):
+        ctrl = ShutdownController()
+        ctrl._loop = MagicMock()
+        ctrl._on_signal(signal.SIGTERM)
+        out = capsys.readouterr().out
+        assert "[SCAN" in out and "正在优雅取消" in out, out
+
+    @pytest.mark.asyncio
+    async def test_do_cancel_message_tagged(self, capsys):
+        """_do_cancel 的 '正在取消 Temporal workflow…' 经 print_line 带标签。"""
+        from shannon_core.runtime.scan_runner import _do_cancel
+        result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不自然完成
+        try:
+            fake_handle = MagicMock()
+            fake_handle.cancel = AsyncMock()
+            # _do_cancel 内部吞 TimeoutError（spec 设计：超时放弃等待不 escalate）
+            await _do_cancel(fake_handle, result_task, cancel_grace_seconds=0.01)
+        finally:
+            result_task.cancel()
+        out = capsys.readouterr().out
+        assert "[CANCEL" in out and "正在取消 Temporal workflow" in out, out
+
+
 class TestPollProgress:
     @pytest.mark.asyncio
     async def test_queries_and_prints_one_iteration(self, capsys):

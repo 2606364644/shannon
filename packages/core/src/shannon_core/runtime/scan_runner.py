@@ -13,6 +13,7 @@ from typing import Any
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from shannon_core.logging import print_line
 from shannon_core.services.temporal_infra import generate_task_queue
 
 
@@ -52,11 +53,13 @@ class ShutdownController:
 
     def _trigger_graceful(self) -> None:
         if not self._event.is_set():
-            print("\n正在优雅取消…（再按一次 Ctrl+C 立即退出）", flush=True)
+            print()  # 视觉分隔：和正在输出的进度行/仪表盘分开
+            print_line("SCAN", "", "正在优雅取消…（再按一次 Ctrl+C 立即退出）")
             self._event.set()
 
     def _force_exit(self) -> None:
-        print("\n强制退出", flush=True)
+        print()
+        print_line("SCAN", "", "强制退出")
         os._exit(130)
 
     def is_set(self) -> bool:
@@ -193,18 +196,18 @@ async def run_scan_graceful(
 
 async def _do_cancel(handle, result_task, cancel_grace_seconds: float) -> None:
     """发协作式 cancel，并在 grace 期内等待结果；超时放弃等待（不 escalate）。"""
-    print("正在取消 Temporal workflow…", flush=True)
+    print_line("CANCEL", "", "正在取消 Temporal workflow…")
     try:
         await handle.cancel()
     except Exception as exc:
-        print(f"cancel 请求失败（忽略）: {exc}", flush=True)
+        print_line("CANCEL", "", f"cancel 请求失败（忽略）: {exc}")
     try:
         await asyncio.wait_for(result_task, timeout=cancel_grace_seconds)
     except asyncio.TimeoutError:
-        print(
+        print_line(
+            "CANCEL", "",
             f"{cancel_grace_seconds}s 内 workflow 未响应取消，放弃等待"
             f"（server 端 cancel 仍生效）",
-            flush=True,
         )
     except Exception:
         # result_task 因 cancel 抛出的异常属预期，吞掉
