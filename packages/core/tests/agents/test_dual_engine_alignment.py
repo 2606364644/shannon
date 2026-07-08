@@ -43,6 +43,7 @@ def test_max_turns_alignment_both_engines_marked_failed():
     rr.final_output = "partial"
     rr.context_wrapper.usage.input_tokens = 0
     rr.context_wrapper.usage.output_tokens = 0
+    rr.context_wrapper.usage.input_tokens_details = None
     res = map_run_result(rr, duration_ms=10, model="m", turns=200, stop_reason="max_turns")
     assert res.success is False
     assert res.error_code == "ExecutionLimitError"
@@ -78,6 +79,7 @@ def test_structured_output_openai_produces_nonNone():
     rr.final_output = '{"verdict": "pass"}'
     rr.context_wrapper.usage.input_tokens = 1
     rr.context_wrapper.usage.output_tokens = 1
+    rr.context_wrapper.usage.input_tokens_details = None
     res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
     assert res.structured_output == {"verdict": "pass"}
 
@@ -90,6 +92,7 @@ def test_structured_output_dict_final_path():
     rr.final_output = {"verdict": "pass"}  # dict（RawJsonSchemaOutputSchema.validate_json 返回）
     rr.context_wrapper.usage.input_tokens = 1
     rr.context_wrapper.usage.output_tokens = 1
+    rr.context_wrapper.usage.input_tokens_details = None
     res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
     assert res.structured_output == {"verdict": "pass"}
     assert isinstance(res.text, str)  # dict → json.dumps 成 str
@@ -103,3 +106,36 @@ def test_build_agent_openai_wires_output_type():
     provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
     agent = provider.build_agent("m", output_format={"type": "object"})
     assert isinstance(agent.output_type, RawJsonSchemaOutputSchema)
+
+
+def test_both_engines_same_cost_for_same_usage():
+    """cost 定价(spec 2026-07-09): 两引擎对相同 model+token 经 compute_cost 算出相同 CostAmount。
+
+    claude _extract_cost 自算(不再读 SDK total_cost_usd)、openai map_run_result 用 compute_cost,
+    两者同输入同输出 → 锁定双引擎 cost 路径对齐。
+    """
+    from unittest.mock import MagicMock
+    from claude_agent_sdk import ResultMessage
+    from shannon_core.agents.providers_anthropic import AnthropicProvider
+    from shannon_core.agents.openai_result_mapper import map_run_result
+    from shannon_core.agents.runner import ProviderConfig
+
+    # claude 侧：total_cost_usd=999 必须被忽略（自算）
+    anthropic = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+    rm_usage = MagicMock(input_tokens=1_000_000, output_tokens=500_000,
+                         cache_creation_input_tokens=0, cache_read_input_tokens=0)
+    rm = ResultMessage(subtype="result", duration_ms=10, duration_api_ms=5,
+                       is_error=False, num_turns=1, session_id="s",
+                       total_cost_usd=999.0, usage=rm_usage, result="ok")
+    claude_res = anthropic._extract_result(rm, duration=10, model="glm-5.2")
+
+    # openai 侧（input_tokens_details=None → 无 cache 命中, billable=raw）
+    o_usage = MagicMock(input_tokens=1_000_000, output_tokens=500_000, input_tokens_details=None)
+    rr = MagicMock()
+    rr.final_output = "ok"
+    rr.context_wrapper.usage = o_usage
+    openai_res = map_run_result(rr, duration_ms=10, model="glm-5.2", turns=1)
+
+    assert claude_res.cost == openai_res.cost
+    assert claude_res.cost_currency == openai_res.cost_currency == "CNY"
+    assert claude_res.cost > 0
