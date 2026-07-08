@@ -1,12 +1,18 @@
-"""openai 引擎 GLM 成本换算（¥→$）——纯函数，无副作用。
+"""LLM 成本换算——纯函数，无副作用。
 
-openai-agents SDK 不像 claude-agent-sdk 给 total_cost_usd，GLM 端点也不返回成本，
-故按内置 GLM 价目表 + token 用量自算。未知模型回落 0.0（守「不假估算」，
-spec §4.3/§4.5）。spending-cap 文本检测对 cost>0 引擎失效是已接受的不变量
-（spec §4.6）——真正限额检测靠结构化错误码（executor.api_error_status），不靠 cost 猜。
+双引擎统一自算（spec §4.5）：claude / openai 引擎都经本模块按 token 用量 × 价目表算 cost，
+消除「claude 读 SDK total_cost_usd、openai 自算」的不对称。价目表来源：内置
+``GLM_PRICING_CNY``（默认 CNY）∪ ``SHANNON_PRICING_OVERRIDE`` 指向的 JSON 文件
+（per-profile，经 env_loader override=True 天然 per-profile）。override 支持新 schema
+(``{"currency","models"}``) 与旧 flat schema（``{model:{...}}``，币种回落 CNY）。
 
-usage 参数 duck-typed：只读 .input_tokens / .output_tokens / .cache_read_input_tokens
-（通常是 shannon_core.agents.runner.TokenUsage）。
+返回 ``CostAmount{cost, currency}``：cost 是 ``currency`` 币种的金额（单 session 本币直达，
+不再 ÷ 汇率）；未知模型回落 ``CostAmount(0.0, currency)``（守「不假估算」）。
+
+usage 参数 duck-typed：只读 .input_tokens / .output_tokens / .cache_read_input_tokens /
+.cache_creation_input_tokens（通常是 shannon_core.agents.runner.TokenUsage）。
+**input_tokens 须已归一为「不含 cache 命中」**（openai mapper 负责，spec §4.3）——
+本模块不再做 input-cached 扣减。
 """
 from __future__ import annotations
 
@@ -14,28 +20,47 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 
 _log = logging.getLogger(__name__)
 
-# 单位：¥ / 百万 token。示例数值——执行时按智谱官网核对调整（spec §8）。
-# 测试动态引用本常量断言，故数值变化不会让测试失效。
+# 单位：本币（CNY）/ 百万 token。示例数值——执行时按智谱官网核对调整（spec §8）。
+# cache_creation 对 GLM/openai 协议恒 0（无此概念）；claude 引擎走 override 配置。
 GLM_PRICING_CNY: dict[str, dict[str, float]] = {
-    "glm-4.6": {"input": 50.0, "output": 50.0, "cache_read": 12.5},
-    "glm-5.2": {"input": 50.0, "output": 50.0, "cache_read": 12.5},
+    "glm-4.6": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
+    "glm-5.2": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
 }
 
-# 默认 ¥→$ 汇率；可经 SHANNON_USD_CNY_RATE 覆盖。
+# 默认 ¥→$ 汇率；单 session 不再使用（本币直达），仅保留供未来跨 session/跨币种聚合。
 USD_CNY_RATE: float = 7.2
 
-# 模型名后缀归一化：去 [xxx] / -YYYYMMDD / --xxx 等。
+_CURRENCY_SYMBOLS = {"CNY": "¥", "USD": "$"}
+
+# 去后缀：[1m] / -YYYYMMDD / --xxx；并折叠 claude 日期快照后缀。
 _MODEL_SUFFIX_RE = re.compile(r"\[.*?\]|-\d{8}.*$|--.*$", re.IGNORECASE)
 
-# 别名 → 归一化 key（实现时按需补）。
+# 别名 → 归一化 key（按需补充）。
 _MODEL_ALIASES: dict[str, str] = {}
 
 
+@dataclass(frozen=True)
+class CostAmount:
+    """成本 + 币种（cost 是 currency 币种的金额）。"""
+
+    cost: float
+    currency: str
+
+
+def currency_symbol(currency: str) -> str:
+    """币种 → 显示符号（CNY→¥，USD→$，未知→$）。"""
+    return _CURRENCY_SYMBOLS.get(currency, "$")
+
+
 def normalize_model(name: str) -> str:
-    """模型名归一化：小写 + 去后缀 + 别名映射（GLM-5.2[1m] → glm-5.2）。"""
+    """模型名归一化：小写 + 去后缀 + 别名映射。
+
+    GLM-5.2[1m] → glm-5.2；claude-sonnet-4-5-20251022 → claude-sonnet-4-5。
+    """
     if not name:
         return ""
     key = name.strip().lower()
@@ -44,6 +69,7 @@ def normalize_model(name: str) -> str:
 
 
 def _rate() -> float:
+    """汇率（单 session 不再使用；保留供未来跨币种聚合）。"""
     raw = os.environ.get("SHANNON_USD_CNY_RATE")
     if raw:
         try:
@@ -70,38 +96,62 @@ def _load_override() -> dict:
     return {}
 
 
+def _pricing() -> tuple[dict, str]:
+    """合并内置表 + override，返回 (价目表, 币种)。
+
+    override 新 schema: {"currency": "CNY"|"USD", "models": {model: {4 档}}}
+    override 旧 flat schema: {model: {input,output,cache_read}}  → 币种回落 CNY
+    """
+    override = _load_override()
+    table = dict(GLM_PRICING_CNY)
+    if isinstance(override.get("models"), dict):
+        currency = override.get("currency", "CNY")
+        table.update(override["models"])
+    elif override:
+        currency = "CNY"
+        table.update(override)
+    else:
+        currency = "CNY"
+    return table, currency
+
+
 def _price_table() -> dict:
-    merged = dict(GLM_PRICING_CNY)
-    merged.update(_load_override())  # override 同 key 覆盖内置（spec §5）
-    return merged
+    """向后兼容：仅返回价目表（is_model_priced 用）。"""
+    return _pricing()[0]
 
 
 def is_model_priced(model: str) -> bool:
     return normalize_model(model) in _price_table()
 
 
-def compute_cost_usd(model: str, usage) -> float:
-    """按 GLM 价目表 + token 用量算 cost（¥→$）。未知模型或无用量 → 0.0。
+def compute_cost(model: str, usage) -> CostAmount:
+    """按价目表 + token 用量算成本。未知模型 → CostAmount(0.0, currency)。
 
-    计费公式（spec §4.1）：
-        billable_input = input_tokens - cached_tokens   # 按 input 价
-        cache_hit      = cached_tokens                  # 按 cache_read 折价
-        output         = output_tokens                 # 按 output 价
-        cost_cny = (billable_input*P_in + cache_hit*P_cache + output*P_out) / 1_000_000
-    reasoning_tokens 已包含在 output_tokens 内（OpenAI 语义），不重复计费。
+    计费公式（spec §4.4，input_tokens 已归一为不含 cache 命中）::
+
+        cost = ( input*P_in + cache_creation*P_cc + cache_read*P_cr + output*P_out ) / 1e6
     """
     key = normalize_model(model)
-    table = _price_table()
+    table, currency = _pricing()
     if key not in table:
-        return 0.0
+        return CostAmount(0.0, currency)
     p = table[key]
     inp = getattr(usage, "input_tokens", 0) or 0
     out = getattr(usage, "output_tokens", 0) or 0
-    cached = getattr(usage, "cache_read_input_tokens", 0) or 0
-    billable_input = max(inp - cached, 0)
-    cost_cny = (
-        billable_input * p["input"]
-        + cached * p["cache_read"]
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cost = (
+        inp * p["input"]
+        + cache_creation * p.get("cache_creation", 0.0)
+        + cache_read * p["cache_read"]
         + out * p["output"]
     ) / 1_000_000
-    return cost_cny / _rate()
+    return CostAmount(cost, currency)
+
+
+def compute_cost_usd(model: str, usage) -> float:
+    """过渡兼容 wrapper：返回 compute_cost().cost（本币值，不再 ÷ 汇率）。
+
+    新代码请用 ``compute_cost`` 拿 (cost, currency)。mapper / provider 切换后本函数可移除。
+    """
+    return compute_cost(model, usage).cost

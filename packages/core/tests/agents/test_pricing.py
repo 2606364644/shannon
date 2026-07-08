@@ -1,36 +1,83 @@
-import json
-
 import pytest
 
 from shannon_core.agents.runner import TokenUsage
 from shannon_core.agents.pricing import (
     GLM_PRICING_CNY,
-    USD_CNY_RATE,
+    CostAmount,
+    compute_cost,
     compute_cost_usd,
+    currency_symbol,
     is_model_priced,
     normalize_model,
 )
 
 
+# ---- compute_cost 返回 CostAmount（本币直达，不除汇率）----
+
+
+def test_compute_cost_returns_costamount_with_currency():
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=0)
+    r = compute_cost("glm-5.2", usage)
+    assert isinstance(r, CostAmount)
+    assert r.currency == "CNY"  # 内置表默认 CNY
+    assert r.cost == 50.0  # 1M input × 50 / 1M
+
+
 def test_compute_cost_known_model_no_cache():
-    """已知模型、无 cache：按 input/output 价直接算 ¥→$。"""
+    """已知模型、无 cache：input/output 价直接算本币（不除汇率）。"""
     p = GLM_PRICING_CNY["glm-4.6"]
     usage = TokenUsage(input_tokens=1_000_000, output_tokens=500_000)
-    expected = (1_000_000 * p["input"] + 500_000 * p["output"]) / 1_000_000 / USD_CNY_RATE
-    assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
+    expected = (1_000_000 * p["input"] + 500_000 * p["output"]) / 1_000_000
+    r = compute_cost("glm-4.6", usage)
+    assert r.cost == pytest.approx(expected)
+    assert r.currency == "CNY"
 
 
-def test_compute_cost_cache_discount():
-    """cache 拆分：input_tokens 含 cached_tokens 子集，命中部分按 cache_read 折价（更便宜）。"""
+def test_compute_cost_four_tiers_cache_creation():
+    """四档计费：input + cache_creation + cache_read + output（claude 场景）。
+
+    input_tokens 已归一为不含 cache 命中（归一由 mapper 负责）；cache_read/cache_creation
+    独立计费、不与 input 互相扣减。
+    """
+    usage = TokenUsage(
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_creation_input_tokens=500_000,
+        cache_read_input_tokens=500_000,
+    )
+    r = compute_cost("glm-5.2", usage)
+    # 内置 GLM 表 cache_creation=0：input 1M×50 + cc 0.5M×0 + cr 0.5M×12.5 + out 1M×50, /1M
+    expected = 50.0 + 0.0 + 6.25 + 50.0
+    assert r.cost == pytest.approx(expected)
+    assert r.currency == "CNY"
+
+
+def test_compute_cost_input_and_cache_independent():
+    """compute_cost 不做 input-cached 减法（归一移至 mapper）。
+
+    input_tokens 即 billable，cache_read 独立折价——模拟 mapper 归一后传入。
+    """
     p = GLM_PRICING_CNY["glm-4.6"]
-    usage = TokenUsage(input_tokens=1_000_000, output_tokens=0, cache_read_input_tokens=400_000)
-    cost = compute_cost_usd("glm-4.6", usage)
-    # billable_input = 1M - 400k = 600k；cache_hit = 400k
-    expected = (600_000 * p["input"] + 400_000 * p["cache_read"]) / 1_000_000 / USD_CNY_RATE
-    assert cost == pytest.approx(expected)
-    # 折价验证：含 cache 的成本 < 全按 input 价的成本
-    no_cache = compute_cost_usd("glm-4.6", TokenUsage(input_tokens=1_000_000))
-    assert cost < no_cache
+    usage = TokenUsage(input_tokens=600_000, output_tokens=0, cache_read_input_tokens=400_000)
+    r = compute_cost("glm-4.6", usage)
+    expected = (600_000 * p["input"] + 400_000 * p["cache_read"]) / 1_000_000
+    assert r.cost == pytest.approx(expected)
+
+
+def test_compute_cost_unknown_model_zero_with_table_currency():
+    """未知模型 → cost 0.0，但仍带表币种（便于上层显示）。"""
+    r = compute_cost("unknown-model", TokenUsage(input_tokens=100))
+    assert r.cost == 0.0
+    assert r.currency == "CNY"
+
+
+def test_unknown_model_zero_cost():
+    assert compute_cost_usd("some-unknown-model", TokenUsage(input_tokens=1000)) == 0.0
+    assert is_model_priced("some-unknown-model") is False
+    assert is_model_priced("glm-4.6") is True
+
+
+# ---- normalize_model ----
 
 
 def test_normalize_model_variants():
@@ -40,44 +87,76 @@ def test_normalize_model_variants():
     assert normalize_model("") == ""
 
 
+def test_normalize_model_claude_and_deepseek():
+    assert normalize_model("claude-sonnet-4-5") == "claude-sonnet-4-5"
+    assert normalize_model("Claude-Sonnet-4-5-20251022") == "claude-sonnet-4-5"
+    assert normalize_model("deepseek-chat") == "deepseek-chat"
+    assert normalize_model("GLM-5.2[1m]") == "glm-5.2"
+
+
 def test_compute_cost_normalizes_model():
     """GLM-5.2[1m] 归一化到 glm-5.2 → 命中价目表，cost 与 glm-5.2 一致。"""
     usage = TokenUsage(input_tokens=100, output_tokens=50)
-    assert compute_cost_usd("GLM-5.2[1m]", usage) == compute_cost_usd("glm-5.2", usage)
+    assert compute_cost("GLM-5.2[1m]", usage) == compute_cost("glm-5.2", usage)
 
 
-def test_unknown_model_zero_cost():
-    assert compute_cost_usd("some-unknown-model", TokenUsage(input_tokens=1000)) == 0.0
-    assert is_model_priced("some-unknown-model") is False
-    assert is_model_priced("glm-4.6") is True
+# ---- currency_symbol ----
 
 
-def test_env_rate_override(monkeypatch):
+def test_currency_symbol():
+    assert currency_symbol("CNY") == "¥"
+    assert currency_symbol("USD") == "$"
+    assert currency_symbol("EUR") == "$"  # 未知回落 $
+
+
+# ---- compute_cost_usd wrapper（过渡兼容，返回本币 .cost）----
+
+
+def test_compute_cost_usd_wrapper_returns_cost():
+    """过渡 wrapper：返回 compute_cost().cost（本币，不再 /汇率）。"""
+    assert compute_cost_usd("glm-5.2", TokenUsage(input_tokens=1_000_000)) == 50.0
+
+
+# ---- 汇率不再影响单 session cost ----
+
+
+def test_compute_cost_ignores_usd_cny_rate(monkeypatch):
+    """单 session cost 本币直达，SHANNON_USD_CNY_RATE 不再参与计算（spec §4.4）。"""
     monkeypatch.setenv("SHANNON_USD_CNY_RATE", "10.0")
     p = GLM_PRICING_CNY["glm-4.6"]
     usage = TokenUsage(input_tokens=1_000_000)
-    expected = (1_000_000 * p["input"]) / 1_000_000 / 10.0
+    expected = (1_000_000 * p["input"]) / 1_000_000  # = 50.0，不除汇率
     assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
+    assert compute_cost("glm-4.6", usage).currency == "CNY"
 
 
-def test_invalid_rate_falls_back(monkeypatch):
-    """汇率非法（非数）→ 落回默认常量，不崩（spec §4.5）。"""
-    monkeypatch.setenv("SHANNON_USD_CNY_RATE", "not-a-number")
-    p = GLM_PRICING_CNY["glm-4.6"]
-    usage = TokenUsage(input_tokens=1_000_000)
-    expected = (1_000_000 * p["input"]) / 1_000_000 / USD_CNY_RATE
-    assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
+# ---- override ----
 
 
-def test_pricing_override_merge(tmp_path, monkeypatch):
-    """SHANNON_PRICING_OVERRIDE 同 key 覆盖内置（spec §5）。"""
-    override = {"glm-4.6": {"input": 100.0, "output": 100.0, "cache_read": 25.0}}
-    f = tmp_path / "pricing.json"
-    f.write_text(json.dumps(override))
+def test_override_new_schema_with_currency(tmp_path, monkeypatch):
+    """新 schema: {"currency","models"} → 按其币种直达计费。"""
+    f = tmp_path / "p.json"
+    f.write_text(
+        '{"currency":"USD","models":{"glm-5.2":{"input":10,"output":30,"cache_read":2,"cache_creation":4}}}',
+        encoding="utf-8",
+    )
     monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
-    usage = TokenUsage(input_tokens=1_000_000)
-    expected = (1_000_000 * 100.0) / 1_000_000 / USD_CNY_RATE
-    assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
+    r = compute_cost("glm-5.2", TokenUsage(input_tokens=1_000_000, output_tokens=0))
+    assert r.currency == "USD"
+    assert r.cost == 10.0  # USD 直达，不除汇率
+
+
+def test_override_old_flat_schema_defaults_cny(tmp_path, monkeypatch):
+    """旧 flat schema: {model:{...}}（无 currency/models 包裹）→ 币种回落 CNY。"""
+    f = tmp_path / "p.json"
+    f.write_text(
+        '{"glm-4.6":{"input":100.0,"output":100.0,"cache_read":25.0}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
+    r = compute_cost("glm-4.6", TokenUsage(input_tokens=1_000_000))
+    assert r.currency == "CNY"
+    assert r.cost == pytest.approx(100.0)  # override 同 key 覆盖内置
 
 
 def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
@@ -87,15 +166,5 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
     monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
     p = GLM_PRICING_CNY["glm-4.6"]
     usage = TokenUsage(input_tokens=1_000_000)
-    expected = (1_000_000 * p["input"]) / 1_000_000 / USD_CNY_RATE
+    expected = (1_000_000 * p["input"]) / 1_000_000
     assert compute_cost_usd("glm-4.6", usage) == pytest.approx(expected)
-
-
-def test_compute_cost_clamps_negative_billable():
-    """cached > input 时 billable_input clamp 到 0（防御性，spec §4.1 max 守卫）。"""
-    p = GLM_PRICING_CNY["glm-4.6"]
-    usage = TokenUsage(input_tokens=100, output_tokens=0, cache_read_input_tokens=500)
-    cost = compute_cost_usd("glm-4.6", usage)
-    # billable_input = max(100 - 500, 0) = 0；cache_hit = 500
-    expected = (0 * p["input"] + 500 * p["cache_read"]) / 1_000_000 / USD_CNY_RATE
-    assert cost == pytest.approx(expected)
