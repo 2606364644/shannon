@@ -194,3 +194,14 @@ class AuditSession:
         if self._metrics_tracker:
             return self._metrics_tracker.get_metrics()
         return {}
+
+    @property
+    def dispatcher(self):
+        """Expose the workflow logger's dispatcher for log_bus.attach.
+
+        统一日志总线（2026-07-08）：LogBus.attach 拿这个引用起 drain task，把散落
+        logging 汇入 dispatcher。None before initialize() / after close()。
+        """
+        if self._workflow_logger is None:
+            return None
+        return self._workflow_logger._dispatcher

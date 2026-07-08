@@ -1,0 +1,47 @@
+"""全局 autouse fixture：防 logging 单例跨测试泄漏。
+
+某些测试用真实 run_with_display（如 test_live_ghost_frames），其 workflow_logger
+会安装 temporalio.activity handler；LogBus.attach 也会留状态。若无 teardown 清理，
+这些会泄漏到后续测试——例如 test_temporalio_log_redirect 的幂等断言会检测到上一个
+测试残留的 handler（曾表现为 ``/tmp/ghost-probe/.../activity_failures.log`` handler
+堆叠），误判安装不幂等。
+
+模块级 snapshot/restore fixture（test_logging_setup / test_temporalio_log_redirect /
+test_log_bus*）优先处理各自单例；本 conftest 做基线强制清理兜底，保证每个测试结束后
+logging 单例回到干净状态。
+"""
+from __future__ import annotations
+
+import logging
+import queue as _queue
+
+import pytest
+
+_TEMPORALIO_LOGGER = "temporalio.activity"
+
+
+@pytest.fixture(autouse=True)
+def _clean_logging_singletons():
+    yield
+    # 强制重置到干净基线（非 snapshot restore），清掉任何测试安装的 handler/状态。
+    tio = logging.getLogger(_TEMPORALIO_LOGGER)
+    for h in list(tio.handlers):
+        tio.removeHandler(h)
+        h.close()
+    tio.propagate = True
+    # LogBus 模块级单例
+    try:
+        from shannon_core.logging import LogBus
+        LogBus._dispatcher = None
+        LogBus._attached = False
+        LogBus._drain_task = None
+        if LogBus._diagnostic is not None:
+            LogBus._diagnostic.close()
+            LogBus._diagnostic = None
+        while True:
+            try:
+                LogBus.queue.get_nowait()
+            except _queue.Empty:
+                break
+    except Exception:  # pragma: no cover - LogBus 未导入的极端情况
+        pass

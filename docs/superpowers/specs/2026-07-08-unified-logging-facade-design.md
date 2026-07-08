@@ -1,7 +1,7 @@
 # 统一日志门面设计 — 分工 + 统一格式/入口（方案 A 最小收编）
 
 - **日期**：2026-07-08
-- **状态**：design（brainstorming 已确认范围/方向/路径，待 writing-plans）
+- **状态**：implemented（方案 A 最小收编已落地；2026-07-08 演进为「统一日志总线」见 §10/§11 演进注记 + plan `2026-07-08-unified-log-bus.md`）
 - **相关**：`2026-06-22-log-format-redesign-design.md`（symbols/formatters 单一来源）、`2026-07-01-gitnexus-llm-progress-logging-design.md`（InfoEvent 取代裸 logging 先例）、`docs/superpowers/specs/2026-07-02-exploitable-poc-generation-design.md`
 
 ## 1. 背景
@@ -123,10 +123,14 @@ stdout                              stderr + workspaces/<session>/diagnostic.log
 - 不改 ~20 处 `logging.getLogger` 调用点为门面（C 档，YAGNI）。
 - 不给诊断 logging 套扫描符号（B 档，语义混淆）。
 - 不合并 display 流与 logging 为一套（同步 vs 异步语义冲突，分工更清晰）。
+
+> **演进注记（2026-07-08，统一日志总线）**：本条否决的是「同一 handler 同步写 console + 文件」。后续 plan（`docs/superpowers/plans/2026-07-08-unified-log-bus.md`）用 `QueueHandler(同步生产) + event-loop drain(异步消费)` 桥接——生产线程只 `queue.put_nowait`（同步、不碰 console/stderr/rich），event-loop drain task 批量 `dispatch` 到 renderer（异步、与 PHASE/STEP 同 `asyncio.Lock` 序列化）。语义冲突被「生产同步 / 消费异步」的队列桥化解，两流在 dispatcher 同一序列化点汇合，未引入第三个碰 console 的线程（仍是 event-loop 线程做所有 console.print）。本方案 A 的 `setup.py` stderr/file handler 被替换为 `LogBusHandler`，散落 ~20 处 `getLogger` 零改动即汇入总线。
 - 不动 `temporalio_redirect` / `activity_logger`。
 
 ## 11. 风险
 
 - **dictConfig 与现有 `basicConfig` 残留冲突**：项目当前无显式 `basicConfig`（grep 确认 src 无），`configure_logging` 是首个 root 配置，无冲突。幂等防重。
 - **stderr handler 与 Rich Live footer 冲突**：display 流走 dispatcher（`redirect_stderr=False`），诊断 logging 走 stderr。Rich Live 默认不重定向 stderr 时，诊断行可能和 Live footer 交错。**缓解**：诊断日志主去向是文件，stderr 是附带；若实测交错明显，给 stderr handler 套 Rich 的 `Console(file=sys.stderr)` 或降为 `WARNING` 级（只 ERROR 上终端）。spec 标注为"真机冒烟确认项"。
+
+> **演进注记（2026-07-08，统一日志总线）**：此风险已从根消除，不再需要 stderr handler。`configure_logging` 不再加 `StreamHandler(stderr)`（也不加 `FileHandler`），散落 logging 经 `LogBusHandler.emit` 分流——session 活跃 → `queue.put_nowait(LogEvent)` → event-loop drain → `dispatcher.dispatch` → RichConsoleRenderer 上屏 + DiagnosticLogRenderer 落盘；无 session → `DiagnosticLog.write_sync` fallback。生产线程 emit 不碰真实 TTY，footer 交错/鬼影根因消失；`emit` try/except 兜底永不抛 → record 永远 handled → `logging.lastResort`（硬编码 stderr）不触发。15+ 测试锁定（`test_logging_never_writes_stderr` / `test_lastresort_never_engages` / `test_logbus_handler_emit_does_not_touch_console_or_stderr`）。真机冒烟仍待验（footer 无鬼影横线堆积、散落 logging 干净滚动、worker 不崩）。
 - **测试套件副作用**：`configure_logging` 改全局 root logger，可能影响其他测试的 logging 断言。**缓解**：测试里用 fixture 调 `configure_logging` + teardown 还原（或测试专用 `NullHandler`）。

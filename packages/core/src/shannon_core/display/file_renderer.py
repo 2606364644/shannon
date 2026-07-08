@@ -10,7 +10,7 @@ from shannon_core.display.formatters import (
     agent_body, agent_title, format_duration, format_error_block,
     gitnexus_body, humanize_tool_call, phase_body, step_body, tag,
 )
-
+from shannon_core.logging.diagnostic_log import format_diagnostic_line
 from shannon_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
 
 
@@ -154,3 +154,28 @@ class FileLogRenderer:
             f"  Checkpoint:           {e.checkpoint_hash}\n"
             f"  Completed Agents:     {', '.join(e.completed_agents)}\n\n"
         )
+
+
+class DiagnosticLogRenderer:
+    """Routes LogEvent → diagnostic.log via the shared DiagnosticLog handle.
+
+    diagnostic.log is the logging-stream sink (clean-separated from workflow.log,
+    which FileLogRenderer owns). Mounted at runtime via dispatcher.add() once a
+    session attaches, so diagnostic logging persists alongside the scan. Level is
+    right-aligned to 5 columns to match ``setup._FORMAT``'s ``[%(levelname)5s]``,
+    keeping diagnostic.log output identical to the legacy logging FileHandler.
+    """
+
+    def __init__(self, diagnostic_log) -> None:
+        self._diag = diagnostic_log
+
+    async def render(self, event) -> None:
+        from shannon_core.display.events import LogEvent
+        match event:
+            case LogEvent():
+                self._diag.write_sync(format_diagnostic_line(event))
+
+    async def close(self) -> None:
+        # DiagnosticLog 生命周期由 LogBus 单例管理（configure_diagnostic/detach）；
+        # renderer 不持有所有权，close 为 no-op 占位以匹配 dispatcher close 协议。
+        return None

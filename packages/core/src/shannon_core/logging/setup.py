@@ -1,25 +1,29 @@
-"""统一日志入口：dictConfig 配置 root logger，散落 getLogger 自动套格式。
+"""统一日志入口：root logger 挂 LogBusHandler，散落 getLogger 自动汇入日志总线。
 
 spec: docs/superpowers/specs/2026-07-08-unified-logging-facade-design.md (组件 1)
+plan: docs/superpowers/plans/2026-07-08-unified-log-bus.md
 
-分工 + 统一格式/入口（方案 A 最小收编）：
-- display 流（AuditSession.log_info/log_step -> display renderer）管用户进度（stdout）；
-- logging 流（散落 getLogger(__name__)）管诊断排障，经此 dictConfig 统一 Formatter
-  （[timestamp] [LEVEL5] name: msg，对齐 display 的 format_log_time + 等宽标签列），
-  去 stderr + workspaces/<session>/diagnostic.log。
-- 散落 ~20 处 getLogger 调用点零改动（propagate 走 root 自动套格式）- A 档核心收益。
-- temporalio.activity logger 由 temporalio_redirect 独立管（propagate=False），
-  此处跳过它（不 addHandler、不改 propagate），避免双重输出。
+改挂 LogBusHandler（替代 StreamHandler(stderr)+FileHandler）——散落 getLogger 的
+record 经 LogBusHandler.emit 分流（session 活跃→queue/event-loop drain；无 session
+→diagnostic.log fallback），不再直写 stderr，根除 Rich Live footer 鬼影。
+
+- 散落 ~20 处 getLogger 调用点零改动（propagate 走 root 自动进 LogBusHandler）；
+- diagnostic.log 由 LogBus 单例的 DiagnosticLog 管（非 logging.FileHandler）；
+- temporalio.activity logger 由 temporalio_redirect 独立管（propagate=False），此处
+  跳过它（不 addHandler、不改 propagate），避免双重输出；
+- _FORMAT/_DATEFMT 常量保留供 format_diagnostic_line 对齐（不再挂 Formatter）。
 """
 from __future__ import annotations
 
 import logging
 import os
-import sys
 from pathlib import Path
 
+from .log_bus import LogBus, LogBusHandler
+
 _DIAGNOSTIC_FILENAME = "diagnostic.log"
-# 对齐 display.formatters.LABEL_WIDTH=5：INFO /WARN /ERROR 占 5 列等宽
+# 对齐 display.formatters.LABEL_WIDTH=5：[%(levelname)5s] 右对齐 5 列。
+# format_diagnostic_line 用 {level:>5} 等价实现（handler/renderer 不再挂 Formatter）。
 _FORMAT = "[%(asctime)s] [%(levelname)5s] %(name)s: %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"  # 对齐 display.formatters.format_log_time
 
@@ -29,11 +33,11 @@ _configured_log_dir: Path | None = None
 
 
 def configure_logging(log_dir: Path | str | None = None, *, level: str | None = None) -> None:
-    """配置 root logger：stderr + diagnostic.log 双 handler，等宽 LEVEL 列 Formatter。
+    """配置 root logger：挂单个 LogBusHandler（汇入日志总线）+ 配置 diagnostic.log。
 
-    幂等：同 log_dir 重复调用 no-op；不同 log_dir 替换 FileHandler 不堆叠。
+    幂等：同 log_dir 重复调用 no-op；不同 log_dir 替换 handler + diagnostic 不堆叠。
     跳过 temporalio.activity（独立 redirect，propagate=False）。
-    log_dir=None 时只配 stderr（无文件），供无 session 上下文（测试/standalone）用。
+    log_dir=None 时无 diagnostic.log（fallback 丢弃），供无 session 上下文用。
 
     Args:
         log_dir: diagnostic.log 所在目录；不存在自动创建。None 则不写文件。
@@ -56,18 +60,14 @@ def configure_logging(log_dir: Path | str | None = None, *, level: str | None = 
             root.removeHandler(h)
             h.close()
 
-    formatter = logging.Formatter(_FORMAT, datefmt=_DATEFMT)
+    # 挂单个 LogBusHandler（替代 StreamHandler(stderr)+FileHandler）。
+    handler = LogBusHandler()
+    handler._shannon_configured = True  # type: ignore[attr-defined]
+    root.addHandler(handler)
 
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setFormatter(formatter)
-    stderr_handler._shannon_configured = True  # type: ignore[attr-defined]
-    root.addHandler(stderr_handler)
-
+    # 配置 diagnostic.log（LogBus 单例的 DiagnosticLog 句柄）。
     if resolved is not None:
-        file_handler = logging.FileHandler(resolved / _DIAGNOSTIC_FILENAME, encoding="utf-8")
-        file_handler.setFormatter(formatter)
-        file_handler._shannon_configured = True  # type: ignore[attr-defined]
-        root.addHandler(file_handler)
+        LogBus.configure_diagnostic(resolved / _DIAGNOSTIC_FILENAME)
         _configured_log_dir = resolved
     else:
         _configured_log_dir = None
@@ -81,6 +81,3 @@ def configure_logging(log_dir: Path | str | None = None, *, level: str | None = 
         logging.getLogger(name).setLevel(logging.WARNING)
 
     # temporalio.activity 由 temporalio_redirect 独立管：不动其 handlers/propagate。
-    # 此处显式什么都不做 -- 仅以注释表明"已知且有意跳过"。
-
-    # stderr handler 级别跟 root（不单独限）；file handler 同。

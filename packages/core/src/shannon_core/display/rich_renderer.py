@@ -38,7 +38,8 @@ class RichConsoleRenderer:
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
-            AgentEvent, ErrorEvent, GitnexusLlmEvent, InfoEvent, LlmTurnEvent,
+            AgentEvent, ErrorEvent, GitnexusLlmEvent, InfoEvent, LogEvent,
+            LlmTurnEvent,
             PhaseEvent, ResumeEvent, StepEvent, SummaryEvent, ToolCallEvent,
             WorkflowHeader,
         )
@@ -57,6 +58,7 @@ class RichConsoleRenderer:
             case LlmTurnEvent(): self._render_llm(event)
             case GitnexusLlmEvent(): self._render_gitnexus(event)
             case InfoEvent(): self._render_info(event)
+            case LogEvent(): self._render_log(event)
             case ErrorEvent(): self._render_error(event)
             case SummaryEvent(): self._render_summary(event)
             case ResumeEvent(): self._render_resume(event)
@@ -98,6 +100,25 @@ class RichConsoleRenderer:
                 f"[{e.timestamp}] [cyan]{tag('INFO')}[/]  {e.message}",
                 highlight=False,
             )
+
+    @staticmethod
+    def _log_color(level: str) -> str:
+        # spec §4：诊断 logging 用级别配色，不套扫描符号。
+        if level in ("ERROR", "CRITICAL"):
+            return "bold red"
+        if level == "WARNING":
+            return "yellow"
+        if level == "INFO":
+            return "cyan"
+        return "dim"  # DEBUG / 未知级别降级
+
+    def _render_log(self, e) -> None:
+        # spec §4：诊断 logging 行 = [ts] [LEVEL5] logger_name: msg，无扫描符号。
+        color = self._log_color(e.level)
+        line = f"[{e.timestamp}] [{color}]{tag(e.level)}[/] {e.logger_name}: {e.message}"
+        if e.exc_txt:
+            line += f"\n{e.exc_txt}"
+        self._console.print(line, highlight=False)
 
     def _render_phase(self, e) -> None:
         body = pad_rule(phase_body(e))

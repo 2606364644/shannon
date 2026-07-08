@@ -33,13 +33,16 @@ async def test_status_line_shows_phase_counts_cost_and_running_agent():
     assert "Injection" in out                # running agent 行用短前缀（全名在滚动区 AGENT 行）
 
 
-async def test_separator_spans_full_console_width():
+async def test_no_full_width_separator_in_footer():
+    """footer 不含满宽 ─ 分隔线（鬼影根因之一：满宽横线每 tick 叠画不擦）。
+
+    视觉兜底：rows 直接从状态行起，不再有顶部分隔线。"""
     console, buf = _console(width=80)
     r = LiveDashboardRenderer(console)
     await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
     console.print(r)
     out = buf.getvalue()
-    assert out.count("─") == 80              # rule width tracks options.max_width, not hardcoded
+    assert "─" * 80 not in out  # 无满宽分隔线
 
 
 async def test_done_agent_increments_count_and_leaves_status_line():

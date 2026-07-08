@@ -65,7 +65,9 @@ class LiveDashboardRenderer:
         row1 = Table.grid()
         row1.add_row(*cells)
 
-        rows = [Text("─" * options.max_width, style="dim"), row1]
+        # 统一日志总线（2026-07-08）：删去满宽 ─ 分隔线——它是 Rich Live footer 鬼影的
+        # 根因之一（footer 每 tick 重绘，满宽横线叠画不擦）。rows 直接从状态行起。
+        rows = [row1]
         if running:
             # 每个 running agent 一行；label 优先 step intent，否则 agent 短前缀；
             # action 优先当前工具，其次 turn 文本，再次 "running..."。

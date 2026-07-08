@@ -96,6 +96,23 @@ class ErrorEvent(DisplayEvent):
 
 
 @dataclass(frozen=True)
+class LogEvent(DisplayEvent):
+    """A diagnostic log line routed from the unified logging bus (散落 getLogger).
+
+    Carries the full logging record — 5 levels + logger name + exception text —
+    distinct from InfoEvent (workflow user messages, only info/warning). Routed
+    through the dispatcher so diagnostic logging scrolls above the Live footer
+    (no stderr/footer collision) and is persisted to diagnostic.log, but NOT to
+    workflow.log (clean separation). ``category`` holds the LEVELNAME for parity
+    with ErrorEvent's WARNING/ERROR category semantics.
+    """
+    logger_name: str
+    level: str
+    message: str
+    exc_txt: str | None = None
+
+
+@dataclass(frozen=True)
 class AgentMetric:
     name: str
     duration_ms: int

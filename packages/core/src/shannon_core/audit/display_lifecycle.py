@@ -1,5 +1,10 @@
 """Display lifecycle: construct AuditSession + shared Console/Live and yield
-the session inside an active Live context (rich mode) or plain (non-rich)."""
+the session inside an active Live context (rich mode) or plain (non-rich).
+
+统一日志总线（2026-07-08）：session.initialize 后 LogBus.attach(session.dispatcher)，
+把散落 logging 汇入 dispatcher（与 PHASE/STEP 同 asyncio.Lock 序列化，根除 Rich Live
+footer 鬼影）；退出时 drain_and_detach final flush + cancel drain（在 session.close 前）。
+"""
 from __future__ import annotations
 
 import os
@@ -7,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from shannon_core.models.metrics import SessionMetadata
+from shannon_core.logging.log_bus import LogBus
 
 from .session import AuditSession
 
@@ -27,6 +33,8 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
         dashboard = LiveDashboardRenderer(console)
         session = AuditSession(meta, use_rich=True, console=console, dashboard=dashboard)
         await session.initialize(workflow_id=meta.id)
+        # 统一日志总线：attach 把散落 logging 汇入 dispatcher（起 drain task）。
+        await LogBus.attach(session.dispatcher)
         # redirect_stderr=False: this process also hosts the Temporal worker, whose
         # workflow sandbox logs activation errors via logging lastResort -> sys.stderr.
         # Rich's default redirect turns sys.stderr into a FileProxy whose console.print
@@ -45,13 +53,18 @@ async def run_with_display(meta: SessionMetadata, use_rich: bool = False) -> Asy
             with live:
                 yield session
         finally:
+            await LogBus.drain_and_detach()
             await session.close()
     else:
         from rich.console import Console
         console = Console()  # auto-detects non-TTY in pipes -> plain text per event
         session = AuditSession(meta, use_rich=False, console=console)
         await session.initialize(workflow_id=meta.id)
+        # 统一日志总线：non-rich 分支同样 attach（dispatcher 已有 FileLogRenderer +
+        # RichConsoleRenderer；LogBus.attach 自动补 DiagnosticLogRenderer）。
+        await LogBus.attach(session.dispatcher)
         try:
             yield session
         finally:
+            await LogBus.drain_and_detach()
             await session.close()
