@@ -23,6 +23,16 @@ def test_agent_metrics_full():
     assert m.cost_usd == 0.05
     assert m.model == "claude-sonnet-4-6"
 
+
+def test_agent_metrics_has_cost_currency():
+    m = AgentMetrics(duration_ms=10, cost_usd=1.5, cost_currency="CNY")
+    assert m.cost_currency == "CNY"
+
+
+def test_agent_metrics_cost_currency_defaults_usd():
+    m = AgentMetrics(duration_ms=10)
+    assert m.cost_currency == "USD"
+
 def test_session_metadata():
     s = SessionMetadata(id="test-123", web_url="https://example.com")
     assert s.id == "test-123"

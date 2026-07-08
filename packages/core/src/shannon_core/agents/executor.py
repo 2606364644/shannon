@@ -161,6 +161,7 @@ class AgentExecutor:
         return AgentMetrics(
             duration_ms=duration_ms,
             cost_usd=result.cost,
+            cost_currency=result.cost_currency,
             num_turns=result.turns,
             model=result.model,
             structured_output=result.structured_output,

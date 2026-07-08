@@ -7,6 +7,7 @@ class AgentMetrics(BaseModel):
     cache_read_tokens: int | None = None
     cache_creation_tokens: int | None = None
     cost_usd: float | None = None
+    cost_currency: str = "USD"
     num_turns: int | None = None
     model: str | None = None
     structured_output: dict | None = None
