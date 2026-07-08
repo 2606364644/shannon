@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
+import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { WorkspaceListPage } from "./WorkspaceListPage";
 import type { Workspace } from "../api/types";
 
@@ -19,6 +20,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en,LanguageDetector 会把 i18n 切到 en;迁移后断言依赖中文渲染,逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -49,8 +52,8 @@ describe("WorkspaceListPage (DataTable)", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
     // Radix Select 不响应 fireEvent.change：开 trigger → 点 option
-    fireEvent.click(screen.getByLabelText(/status/i));
-    await waitFor(async () => fireEvent.click(await screen.findByRole("option", { name: /failed/i })));
+    fireEvent.click(screen.getByLabelText(/状态筛选/));
+    await waitFor(async () => fireEvent.click(await screen.findByRole("option", { name: /失败/ })));
     expect(screen.queryByText("ws-a")).not.toBeInTheDocument();
     expect(screen.getByText("ws-failed")).toBeInTheDocument();
   });
@@ -81,8 +84,8 @@ describe("WorkspaceListPage (DataTable)", () => {
     await waitFor(() => expect(screen.getByText("ws-failed")).toBeInTheDocument());
     // 多个非 running 行 → 多个 "删除" 按钮，取第一个（ws-failed，DOM 顺序）
     fireEvent.click(screen.getAllByRole("button", { name: /删除/ })[0]);
-    // Dialog 标题 "删除 workspace"，用 heading role 避免匹配描述
-    expect(await screen.findByRole("heading", { name: /删除 workspace/ })).toBeInTheDocument();
+    // Dialog 标题（zh="删除工作区"），用 heading role 避免匹配描述
+    expect(await screen.findByRole("heading", { name: /删除工作区/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /确认/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -90,7 +93,7 @@ describe("WorkspaceListPage (DataTable)", () => {
   it("空列表 → Empty 空态", async () => {
     server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
     renderPage();
-    expect(await screen.findByText(/no workspaces/i)).toBeInTheDocument();
+    expect(await screen.findByText(/暂无工作区/)).toBeInTheDocument();
   });
 
   it("loading → Skeleton 行；上次刷新时间显示", async () => {
@@ -105,5 +108,34 @@ describe("WorkspaceListPage (DataTable)", () => {
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
     expect(container.querySelector(".status-bar")).toBeNull();
     expect(container.querySelector('[class*="bg-cyan"]')).not.toBeNull();
+  });
+});
+
+describe("WorkspaceListPage i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("zh 渲染中文表头 + 中文搜索框", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // 表头（中文）
+    expect(screen.getByText("工作区", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("漏洞数")).toBeInTheDocument();
+    expect(screen.getByText("操作")).toBeInTheDocument();
+    // 搜索框 placeholder 中文
+    expect(screen.getByPlaceholderText(/搜索工作区/)).toBeInTheDocument();
+    // 新建扫描按钮中文
+    expect(screen.getByRole("button", { name: /新建扫描/ })).toBeInTheDocument();
+  });
+
+  it("切英文后表头变英文 Workspace/Vulns/Actions", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(screen.getByText("Workspace", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Vulns")).toBeInTheDocument();
+    expect(screen.getByText("Actions")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search workspaces/i)).toBeInTheDocument();
   });
 });

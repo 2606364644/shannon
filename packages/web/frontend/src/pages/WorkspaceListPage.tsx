@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { fmtCost } from "@/utils/currency";
 import { Link } from "react-router-dom";
 import {
@@ -36,6 +37,7 @@ function fmtTime(unix?: number): string {
 }
 
 export function WorkspaceListPage() {
+  const { t } = useTranslation();
   const { data, loading, lastUpdated, error, refresh } = useWorkspaces();
   const [globalFilter, setGlobalFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -63,13 +65,13 @@ export function WorkspaceListPage() {
       header: () => "",
       cell: ({ row }) =>
         row.original.is_correlation ? (
-          <button aria-label="展开" onClick={row.getToggleExpandedHandler()} className="text-muted-foreground">
+          <button aria-label={t("workspaces.expandAria")} onClick={row.getToggleExpandedHandler()} className="text-muted-foreground">
             {row.getIsExpanded() ? "▼" : "▶"}
           </button>
         ) : null,
     }),
     helper.accessor("name", {
-      header: "workspace", cell: (info) => (
+      header: () => t("workspaces.table.name"), cell: (info) => (
         <span className="flex items-center gap-2">
           <span className={`inline-block w-0.5 self-stretch rounded ${statusColor(info.row.original.status)}`} />
           <Link to={`/p/${info.getValue()}`} className="font-mono hover:text-primary">{info.getValue()}</Link>
@@ -78,30 +80,30 @@ export function WorkspaceListPage() {
       ),
     }),
     helper.accessor("status", {
-      header: "status", cell: (info) => (
+      header: () => t("workspaces.table.status"), cell: (info) => (
         <StatusBadge status={info.getValue()} correlation={!!info.row.original.is_correlation} />
       ),
     }),
-    helper.accessor("scan_type", { header: "type" }),
-    helper.accessor("vuln_count", { header: "vulns", cell: (info) => info.getValue() ?? "—" }),
+    helper.accessor("scan_type", { header: () => t("workspaces.table.type"), cell: (info) => t(`workspaces.filter.${info.getValue()}`) }),
+    helper.accessor("vuln_count", { header: () => t("workspaces.table.vulns"), cell: (info) => info.getValue() ?? "—" }),
     helper.accessor("total_cost_usd", {
-      header: "cost", cell: (info) => {
+      header: () => t("workspaces.table.cost"), cell: (info) => {
         const v = info.getValue();
         return v != null ? fmtCost(v, info.row.original.cost_currency) : "—";
       },
     }),
-    helper.accessor("created_at", { header: "time", cell: (info) => fmtTime(info.getValue()) }),
+    helper.accessor("created_at", { header: () => t("workspaces.table.time"), cell: (info) => fmtTime(info.getValue()) }),
     helper.display({
-      id: "actions", header: "操作", cell: (info) => {
+      id: "actions", header: () => t("workspaces.table.actions"), cell: (info) => {
         const w = info.row.original;
         return w.status === "running" ? (
-          <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>取消</Button>
+          <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>{t("common.cancel")}</Button>
         ) : (
-          <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>删除</Button>
+          <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>{t("common.delete")}</Button>
         );
       },
     }),
-  ], []);
+  ], [t]);
 
   const table = useReactTable({
     data: filtered, columns,
@@ -134,36 +136,36 @@ export function WorkspaceListPage() {
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-3">
         <Input
-          placeholder="搜索 workspace..."
+          placeholder={t("workspaces.searchPlaceholder")}
           value={globalFilter}
           onChange={(e) => setGlobalFilter(e.target.value)}
           className="max-w-xs"
         />
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger aria-label="status 筛选" className="w-32"><SelectValue placeholder="status" /></SelectTrigger>
+          <SelectTrigger aria-label={t("workspaces.statusFilterAria")} className="w-32"><SelectValue placeholder={t("workspaces.table.status")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">all status</SelectItem>
-            <SelectItem value="running">running</SelectItem>
-            <SelectItem value="completed">completed</SelectItem>
-            <SelectItem value="failed">failed</SelectItem>
-            <SelectItem value="killed">killed</SelectItem>
-            <SelectItem value="crashed">crashed</SelectItem>
-            <SelectItem value="interrupted">interrupted</SelectItem>
+            <SelectItem value="all">{t("workspaces.filter.allStatus")}</SelectItem>
+            <SelectItem value="running">{t("workspaces.status.running")}</SelectItem>
+            <SelectItem value="completed">{t("workspaces.status.completed")}</SelectItem>
+            <SelectItem value="failed">{t("workspaces.status.failed")}</SelectItem>
+            <SelectItem value="killed">{t("workspaces.status.killed")}</SelectItem>
+            <SelectItem value="crashed">{t("workspaces.status.crashed")}</SelectItem>
+            <SelectItem value="interrupted">{t("workspaces.status.interrupted")}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger aria-label="type 筛选" className="w-32"><SelectValue placeholder="type" /></SelectTrigger>
+          <SelectTrigger aria-label={t("workspaces.typeFilterAria")} className="w-32"><SelectValue placeholder={t("workspaces.table.type")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">all type</SelectItem>
-            <SelectItem value="whitebox">whitebox</SelectItem>
-            <SelectItem value="blackbox">blackbox</SelectItem>
-            <SelectItem value="correlation">correlation</SelectItem>
+            <SelectItem value="all">{t("workspaces.filter.allType")}</SelectItem>
+            <SelectItem value="whitebox">{t("workspaces.filter.whitebox")}</SelectItem>
+            <SelectItem value="blackbox">{t("workspaces.filter.blackbox")}</SelectItem>
+            <SelectItem value="correlation">{t("workspaces.filter.correlation")}</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" onClick={() => refresh()}>+ 新建扫描</Button>
+        <Button variant="outline" size="sm" onClick={() => refresh()}>{t("workspaces.newScan")}</Button>
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">上次刷新 {lastUpdatedStr}</span>
-          <Button variant="ghost" size="icon" aria-label="手动刷新" onClick={() => refresh()}>↻</Button>
+          <span className="text-xs text-muted-foreground">{t("workspaces.lastRefresh", { time: lastUpdatedStr })}</span>
+          <Button variant="ghost" size="icon" aria-label={t("workspaces.refreshAria")} onClick={() => refresh()}>↻</Button>
         </div>
       </div>
 
@@ -175,8 +177,8 @@ export function WorkspaceListPage() {
           {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
         </div>
       ) : data.length === 0 ? (
-        <Empty title="no workspaces" hint="新建一个扫描开始">
-          <Button onClick={() => refresh()}>+ 新建扫描</Button>
+        <Empty title={t("workspaces.empty.title")} hint={t("workspaces.empty.hint")}>
+          <Button onClick={() => refresh()}>{t("workspaces.newScan")}</Button>
         </Empty>
       ) : (
         <Table>
@@ -204,7 +206,7 @@ export function WorkspaceListPage() {
                     <TableCell colSpan={row.getVisibleCells().length} className="bg-muted/30">
                       <div className="flex flex-col gap-1 pl-6 text-sm">
                         {(row.original.links?.child_workspaces ?? []).length === 0 ? (
-                          <span className="text-muted-foreground">无子白盒</span>
+                          <span className="text-muted-foreground">{t("workspaces.noChild")}</span>
                         ) : (
                           (row.original.links?.child_workspaces ?? []).map((c) => (
                             <Link key={c} to={`/p/${c}`} className="font-mono hover:text-primary">└─ {c}</Link>
@@ -224,16 +226,16 @@ export function WorkspaceListPage() {
       <Dialog open={!!pendingAction} onOpenChange={(o) => !o && setPendingAction(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{pendingAction?.kind === "cancel" ? "取消扫描" : "删除 workspace"}</DialogTitle>
+            <DialogTitle>{pendingAction?.kind === "cancel" ? t("workspaces.deleteDialog.cancelTitle") : t("workspaces.deleteDialog.deleteTitle")}</DialogTitle>
             <DialogDescription>
               {pendingAction?.kind === "cancel"
-                ? `取消扫描 ${pendingAction?.ws}？进度会丢失。`
-                : `删除 workspace ${pendingAction?.ws}？目录和产物永久删除。`}
+                ? t("workspaces.deleteDialog.cancelDesc", { ws: pendingAction?.ws })
+                : t("workspaces.deleteDialog.deleteDesc", { ws: pendingAction?.ws })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setPendingAction(null)}>取消</Button>
-            <Button variant="destructive" disabled={busy} onClick={doAction}>确认</Button>
+            <Button variant="ghost" onClick={() => setPendingAction(null)}>{t("common.cancel")}</Button>
+            <Button variant="destructive" disabled={busy} onClick={doAction}>{t("common.confirm")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -69,6 +69,40 @@
       "failed": "失败",
       "killed": "已终止",
       "crashed": "已崩溃"
+    },
+    "table": {
+      "name": "工作区",
+      "status": "状态",
+      "type": "类型",
+      "vulns": "漏洞数",
+      "cost": "花费",
+      "time": "时间",
+      "actions": "操作"
+    },
+    "expandAria": "展开",
+    "searchPlaceholder": "搜索工作区…",
+    "statusFilterAria": "状态筛选",
+    "typeFilterAria": "类型筛选",
+    "filter": {
+      "allStatus": "全部状态",
+      "allType": "全部类型",
+      "whitebox": "白盒",
+      "blackbox": "黑盒",
+      "correlation": "关联"
+    },
+    "newScan": "+ 新建扫描",
+    "lastRefresh": "上次刷新 {{time}}",
+    "refreshAria": "手动刷新",
+    "empty": {
+      "title": "暂无工作区",
+      "hint": "新建一个扫描开始"
+    },
+    "noChild": "无子白盒",
+    "deleteDialog": {
+      "cancelTitle": "取消扫描",
+      "cancelDesc": "取消扫描 {{ws}}？进度会丢失。",
+      "deleteTitle": "删除工作区",
+      "deleteDesc": "删除工作区 {{ws}}？目录和产物将永久删除。"
     }
   }
 }

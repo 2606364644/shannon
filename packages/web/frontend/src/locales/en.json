@@ -69,6 +69,40 @@
       "failed": "Failed",
       "killed": "Killed",
       "crashed": "Crashed"
+    },
+    "table": {
+      "name": "Workspace",
+      "status": "Status",
+      "type": "Type",
+      "vulns": "Vulns",
+      "cost": "Cost",
+      "time": "Time",
+      "actions": "Actions"
+    },
+    "expandAria": "Expand",
+    "searchPlaceholder": "Search workspaces…",
+    "statusFilterAria": "Status filter",
+    "typeFilterAria": "Type filter",
+    "filter": {
+      "allStatus": "All status",
+      "allType": "All type",
+      "whitebox": "whitebox",
+      "blackbox": "blackbox",
+      "correlation": "correlation"
+    },
+    "newScan": "+ New scan",
+    "lastRefresh": "Last updated {{time}}",
+    "refreshAria": "Manual refresh",
+    "empty": {
+      "title": "No workspaces",
+      "hint": "Create a scan to start"
+    },
+    "noChild": "No child whiteboxes",
+    "deleteDialog": {
+      "cancelTitle": "Cancel scan",
+      "cancelDesc": "Cancel scan {{ws}}? Progress will be lost.",
+      "deleteTitle": "Delete workspace",
+      "deleteDesc": "Delete workspace {{ws}}? Directory and deliverables will be permanently removed."
     }
   }
 }
