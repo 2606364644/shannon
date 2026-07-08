@@ -412,7 +412,9 @@ class TestAnthropicProvider:
         assert result.text == "Test response"
         assert result.tokens.input_tokens == 100
         assert result.tokens.output_tokens == 50
-        assert result.cost == 0.001
+        # claude-sonnet-4-6（medium tier 默认）不在 GLM 价表 → 自算回落 0.0（不假估算，spec §4.5）
+        assert result.cost == 0.0
+        assert result.cost_currency == "CNY"
 
 
 class TestAnthropicProviderBuildOptions:
@@ -591,7 +593,7 @@ class TestOpenAIProvider:
         fake_result = MagicMock()
         fake_result.final_output = "done"
         fake_result.context_wrapper = MagicMock()
-        fake_result.context_wrapper.usage = MagicMock(input_tokens=3, output_tokens=2)
+        fake_result.context_wrapper.usage = MagicMock(input_tokens=3, output_tokens=2, input_tokens_details=None)
         fake_result.stream_events = _empty
 
         monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
@@ -1717,6 +1719,32 @@ class TestExtractResultStructuredOutputFallback:
             output_format={"type": "object"},
         )
         assert result.structured_output is None
+
+
+class TestExtractCostSelfComputed:
+    """claude 引擎自算 cost（spec §4.5）：_extract_cost 用 tokens×价表，不读 SDK total_cost_usd。"""
+
+    def test_extract_cost_ignores_sdk_total_cost_usd(self):
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        mock_usage = MagicMock()
+        mock_usage.input_tokens = 1_000_000
+        mock_usage.output_tokens = 0
+        mock_usage.cache_creation_input_tokens = 0
+        mock_usage.cache_read_input_tokens = 0
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=10,
+            duration_api_ms=5,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            total_cost_usd=999.0,  # SDK 假高值，必须被忽略
+            usage=mock_usage,
+            result="ok",
+        )
+        result = provider._extract_result(msg, duration=10, model="glm-5.2")
+        assert result.cost == 50.0  # 1M input × 50 / 1M（CNY 本币），不是 999
+        assert result.cost_currency == "CNY"
 
 
 class TestClassifyResultFailure:

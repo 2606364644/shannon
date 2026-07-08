@@ -20,6 +20,7 @@ from shannon_core.models.errors import classify_error_for_temporal
 
 from .narration import narration_directive
 from .openai_output_schema import _extract_json_payload
+from .pricing import compute_cost
 from .providers import BaseProvider
 from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
@@ -354,8 +355,8 @@ class AnthropicProvider(BaseProvider):
         # 提取 token 统计
         tokens = self._extract_tokens(result_message)
 
-        # 提取成本
-        cost = self._extract_cost(result_message)
+        # 提取成本（自算：tokens × 价目表，spec §4.5）
+        cost_amount = self._extract_cost(result_message, model)
 
         # 提取结构化输出
         structured_output = None
@@ -389,7 +390,8 @@ class AnthropicProvider(BaseProvider):
             success=success,
             duration=duration,
             turns=turn_count,
-            cost=cost,
+            cost=cost_amount.cost,
+            cost_currency=cost_amount.currency,
             model=model,
             structured_output=structured_output,
             stop_reason=stop_reason,
@@ -412,11 +414,10 @@ class AnthropicProvider(BaseProvider):
             cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0),
         )
 
-    def _extract_cost(self, result_message: ResultMessage) -> float:
-        """从 ResultMessage 提取成本"""
-        if hasattr(result_message, "total_cost_usd"):
-            return result_message.total_cost_usd or 0.0
-        return 0.0
+    def _extract_cost(self, result_message: ResultMessage, model: str):
+        """自算成本（spec §4.5）：tokens × 价目表，不再读 SDK total_cost_usd。"""
+        tokens = self._extract_tokens(result_message)
+        return compute_cost(model, tokens)
 
     def _classify_result_failure(
         self,
