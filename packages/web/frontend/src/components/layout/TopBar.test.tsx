@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TopBar } from "./TopBar";
+import i18n from "@/i18n";
 
 function renderAt(path: string) {
   return render(
@@ -43,5 +44,39 @@ describe("TopBar", () => {
   it("含主题切换入口", () => {
     renderAt("/");
     expect(screen.getByRole("button", { name: /切换主题/ })).toBeInTheDocument();
+  });
+});
+
+describe("TopBar i18n", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("中文渲染导航「仓库」", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("仓库")).toBeInTheDocument();
+  });
+
+  it("切英文后导航变 Repositories", async () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(screen.getByText("Repositories")).toBeInTheDocument();
+  });
+
+  it("渲染语言切换器", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    expect(screen.getByLabelText("切换语言")).toBeInTheDocument();
   });
 });

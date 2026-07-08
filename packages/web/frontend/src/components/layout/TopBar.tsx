@@ -1,24 +1,26 @@
 import { Link, NavLink } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface NavItem {
-  label: string;
+  labelKey: string;
   to: string;
   disabled?: boolean;
   end?: boolean;
 }
 
-// 顶层导航:Dashboard / Workspaces / 仓库 / Scan / Settings(子项目5 全启用)
 const NAV: NavItem[] = [
-  { label: "Dashboard", to: "/", end: true },
-  { label: "Workspaces", to: "/workspaces", end: true },
-  { label: "仓库", to: "/repos", end: true },
-  { label: "Scan", to: "/scan/new" },
-  { label: "Settings", to: "/settings" },
+  { labelKey: "nav.dashboard", to: "/", end: true },
+  { labelKey: "nav.workspaces", to: "/workspaces", end: true },
+  { labelKey: "nav.repos", to: "/repos", end: true },
+  { labelKey: "nav.scan", to: "/scan/new" },
+  { labelKey: "nav.settings", to: "/settings" },
 ];
 
 export function TopBar() {
+  const { t } = useTranslation();
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
@@ -26,18 +28,18 @@ export function TopBar() {
           <span className="text-cyan">⬡</span>
           <span>Shannon</span>
         </Link>
-        <nav className="flex items-center gap-1" aria-label="主导航">
+        <nav className="flex items-center gap-1" aria-label={t("nav.mainAria")}>
           {NAV.map((n) =>
             n.disabled ? (
               <span
-                key={n.label}
+                key={n.labelKey}
                 aria-disabled="true"
                 className="cursor-not-allowed border-b-2 border-transparent px-3 py-1.5 text-sm text-muted-foreground/50"
               >
-                {n.label}
+                {t(n.labelKey)}
               </span>
             ) : (
-              <NavLink key={n.label} to={n.to} end={n.end} className="inline-flex">
+              <NavLink key={n.labelKey} to={n.to} end={n.end} className="inline-flex">
                 {({ isActive }) => (
                   <span
                     data-active={isActive}
@@ -48,7 +50,7 @@ export function TopBar() {
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    {n.label}
+                    {t(n.labelKey)}
                   </span>
                 )}
               </NavLink>
@@ -57,6 +59,7 @@ export function TopBar() {
         </nav>
         <div className="ml-auto flex items-center gap-1">
           {/* 运行中扫描指示器 slot（子项目 5 接 SSE） */}
+          <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </div>
