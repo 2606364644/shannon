@@ -8,7 +8,12 @@
 #   ./scripts/up.sh logs web     # 看日志（任意 docker compose 子命令透传）
 #
 # 逻辑：
-#   检测宿主 7233 端口是否被占用（通常意味着已有外部 temporal 在跑）：
+#   先预清理 compose 项目内失败/空壳容器（Created/Exited/Dead 态）——
+#   专治"曾直接 docker compose up 失败，留下 shannon-py-{temporal,web} 空壳"在模式切换/端口检测时捣乱。
+#   安全（双重，绝不误删外部 shannon-temporal）：
+#     - docker compose ps 只列本项目(shannon-py)容器，物理上排除外部 shannon-temporal；
+#     - 且只删非运行态，running 的容器（含外部 temporal）一律不动。
+#   再检测宿主 7233 端口是否被占用（通常意味着已有外部 temporal 在跑）：
 #     - 已占用 → 复用模式：-f 加载 external-temporal override，不起 compose 的 temporal
 #     - 未占用 → 自建模式：裸 docker compose up（主 compose 默认就自建 temporal）
 #
@@ -39,6 +44,24 @@ port_in_use() {
   fi
 }
 
+# 清理 compose 项目内失败/空壳容器（Created/Exited/Dead 等非运行态）。
+# 专治：曾直接 `docker compose up` 失败，留下 shannon-py-{temporal,web} 的 Created 态空壳，
+#       这些空壳在后续模式切换 / 端口检测 / up 时捣乱。
+# 安全保证（双重，绝不误删外部 shannon-temporal）：
+#   1. docker compose ps 只列本项目(shannon-py)管辖的容器，物理上排除外部 shannon-temporal；
+#   2. 只删 state ∈ {created, exited, dead}，running / restarting / paused 一律保留。
+cleanup_stale_containers() {
+  local stale
+  stale=$(docker compose ps -a --format '{{.Name}}\t{{.State}}' 2>/dev/null \
+          | awk -F'\t' '$2 == "created" || $2 == "exited" || $2 == "dead" {print $1}' \
+          || true)
+  if [ -n "$stale" ]; then
+    echo ">> 清理 compose 项目内失败/空壳容器（非运行态；外部 shannon-temporal 不受影响）："
+    printf '%s\n' "$stale" | sed 's/^/   - /'
+    printf '%s\n' "$stale" | xargs -r docker rm -f >/dev/null
+  fi
+}
+
 # 如果本地存在 docker-compose.override.yml，警告（会干扰自动判断）
 if [ -f docker-compose.override.yml ] && [ "$ACTION" != "down" ]; then
   echo "⚠️  检测到本地 docker-compose.override.yml（已被 .gitignore 排除）。" >&2
@@ -50,6 +73,7 @@ fi
 OVERRIDE_FILE="docker-compose.override.external-temporal.yml"
 
 if [ "$ACTION" = "up" ]; then
+  cleanup_stale_containers
   if port_in_use; then
     echo ">> 检测到 7233 已被占用 → 复用外部 temporal 模式"
     if [ ! -f "$OVERRIDE_FILE" ]; then

@@ -179,6 +179,30 @@ docker compose up --build
 
 compose 起两个服务：`temporal`（workflow 引擎，:7233 gRPC / :8233 Web UI）与 `web`（前端 + API，:7878）。
 
+> **本机 7233 已被占用？** 若已有独立 temporal 容器在跑（常见于多项目共用一台机器），上面的命令会报
+> `Bind for 127.0.0.1:7233 failed: port is already allocated`。改用下方 [复用本机已有的 temporal](#复用本机已有的-temporal) 即可。
+
+### 复用本机已有的 temporal
+
+`scripts/up.sh` 自动检测 `7233` 是否被占：被占则复用外部 temporal（不抢端口），空闲则自建——等价 `up -d --build web`。
+
+```bash
+./scripts/up.sh        # 自动判断复用 / 自建
+./scripts/up.sh down   # 停掉 web（不影响外部 temporal）
+```
+
+若不走脚本、手动复用，等价命令：
+
+```bash
+docker compose -f docker-compose.yml \
+               -f docker-compose.override.external-temporal.yml \
+               up -d --build web
+```
+
+机制：override 把 compose 自带的 `temporal` 用 `profiles: ["disabled"]` 隐藏，`web` 改直连外部 temporal（经 `shannon-net` 网络用容器名解析，绕开 `127.0.0.1` 容器够不到的限制）。前提是外部 temporal 容器名为 `shannon-temporal` 且存在 `shannon-net` 网络，两处不同就改 override 文件。
+
+> 若曾直接跑 `docker compose up` 失败、留有 `shannon-py-temporal` / `shannon-py-web`（`Created` 态空壳），直接跑 `./scripts/up.sh` 即可——它会在启动前自动清理本项目内非运行态的空壳容器。双重保险：仅限 compose 管辖的 `shannon-py-*`（`docker compose ps` 不列外部容器）、且只删 `created`/`exited`/`dead` 态，运行中的外部 `shannon-temporal` 不受影响。
+
 ### 本地开发（热更新）
 
 前后端分离跑，前端走 Vite 热更新：
