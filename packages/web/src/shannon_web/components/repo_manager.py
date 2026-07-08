@@ -108,7 +108,11 @@ class RepoManager:
         for sub in sorted(self._dir.iterdir()):
             if not sub.is_dir() or sub.name.startswith("."):
                 continue
-            if _is_repo(sub):
+            # 顶层仓库: 必须有 .git（clone 产物）。仅 .shannon-repo.json 不算——
+            # 旧版 migrate_legacy 会给分组目录误写 meta，若以 meta 判会把分组目录
+            # 当仓库返回并 continue，跳过第二层子仓库扫描（2026-07-08 /repos 把
+            # backend/frontend/20260615 当仓库、65 个真仓库全被吞的 bug）。
+            if (sub / ".git").exists():
                 try:
                     out.append(self._repo_view(sub.name))
                 except ValueError:
@@ -366,6 +370,37 @@ class RepoManager:
             return None
 
     # ---- 旧目录迁移 ----
+    def _cleanup_miswritten_group_meta(self) -> int:
+        """清理被旧版误写到分组目录的 .shannon-repo.json。
+
+        旧版 migrate_legacy 会给顶层每个目录补 meta，导致分组目录（下面有真仓库）也被
+        写入 meta，使 _is_repo 误判其为仓库（list_repos 把分组目录当仓库返回、pull 对
+        其执行 git pull 失败）。新版不再误写，但已存在的脏 meta 须清理：顶层目录有 meta、
+        无 .git、且下面有子仓库（含 .git）-> 判定为分组目录，删 meta。
+
+        单个删除失败（PermissionError 等）不影响整体--lifespan 启动期调用。
+        """
+        if not self._dir.is_dir():
+            return 0
+        n = 0
+        for sub in self._dir.iterdir():
+            if not sub.is_dir() or sub.name.startswith("."):
+                continue
+            meta = sub / ".shannon-repo.json"
+            if not meta.exists() or (sub / ".git").exists():
+                continue
+            has_child_repo = any(
+                c.is_dir() and not c.name.startswith(".") and (c / ".git").exists()
+                for c in sub.iterdir()
+            )
+            if has_child_repo:
+                try:
+                    meta.unlink()
+                    n += 1
+                except OSError:
+                    pass
+        return n
+
     def migrate_legacy(self) -> int:
         """把已 clone 但未纳入管理的旧仓库（有 .git 无 .shannon-repo.json）补写 meta。
 
@@ -377,6 +412,7 @@ class RepoManager:
         """
         if not self._dir.is_dir():
             return 0
+        self._cleanup_miswritten_group_meta()
         n = 0
         for sub in self._dir.iterdir():
             if not sub.is_dir() or sub.name.startswith("."):

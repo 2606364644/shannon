@@ -163,3 +163,33 @@ def test_validate_repo_name_allows_group():
     for evil in ("a/b/c", "../evil", "a//b", "/a", "a/", "a/../b", ".", "..", "a\\b"):
         with pytest.raises(ValueError, match="非法"):
             _validate_repo_name(evil)
+
+
+def test_list_repos_treats_group_dir_with_stale_meta_as_group(tmp_path, monkeypatch):
+    """分组目录有残留 .shannon-repo.json（旧版误写）时，list_repos 仍当分组深入一层，
+    不把分组目录本身当仓库（回归 2026-07-08 /repos 把分组目录当仓库、真仓库全被吞的 bug）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    (base / "frontend" / "foo").mkdir(parents=True)
+    (base / "frontend" / "foo" / ".git").mkdir()  # 子仓库
+    # 旧版误写到分组目录的脏 meta（kind=unknown，非 clone 产物）
+    (base / "frontend" / ".shannon-repo.json").write_text(
+        json.dumps({"name": "frontend", "source": {"kind": "unknown"}, "state": "ready"}))
+    views = {r["name"]: r for r in rm.list_repos()}
+    assert set(views) == {"frontend/foo"}
+    assert "frontend" not in views  # 分组目录（即使有脏 meta）不入列
+    assert views["frontend/foo"]["group"] == "frontend"
+
+
+def test_migrate_legacy_cleans_miswritten_group_meta(tmp_path, monkeypatch):
+    """migrate_legacy 清理被旧版误写到分组目录的脏 meta（有 meta、无 .git、且含子仓库）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    (base / "backend" / "honor").mkdir(parents=True)
+    (base / "backend" / "honor" / ".git").mkdir()  # 子仓库
+    stale = base / "backend" / ".shannon-repo.json"
+    stale.write_text(json.dumps({"name": "backend", "source": {"kind": "unknown"}, "state": "ready"}))
+    rm.migrate_legacy()
+    assert not stale.exists()  # 脏 meta 被清
+    # 子仓库被正常 migrate（补 meta）
+    assert (base / "backend" / "honor" / ".shannon-repo.json").exists()
