@@ -1,0 +1,18 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "update": "Update",
+    "loading": "Loading…",
+    "langSwitchAria": "Switch language"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "workspaces": "Workspaces",
+    "repos": "Repositories",
+    "scan": "Scan",
+    "settings": "Settings",
+    "mainAria": "Main navigation"
+  }
+}

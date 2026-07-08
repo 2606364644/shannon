@@ -1,0 +1,18 @@
+{
+  "common": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "update": "更新",
+    "loading": "加载中…",
+    "langSwitchAria": "切换语言"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "workspaces": "Workspaces",
+    "repos": "仓库",
+    "scan": "Scan",
+    "settings": "Settings",
+    "mainAria": "主导航"
+  }
+}

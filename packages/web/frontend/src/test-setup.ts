@@ -1,3 +1,4 @@
+import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 
 // jsdom 缺 matchMedia，主题库 / 减少动效检测依赖它
