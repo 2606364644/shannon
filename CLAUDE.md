@@ -52,4 +52,4 @@ shannon-py 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 - **架构总览**：`docs/architecture.md`、`docs/whitebox-refactoring-assessment.md`、`docs/gap/`（gap 分析）。
 - **测试陷阱**：全套 pytest 有预存挂起 / 失败（见各 package 的 test 说明）——只跑改动相关测试文件，勿广跑全套。
 - **分支**：`feat/fork-py`（本地多项改动未 push；动代码前先看 `git log` 与 memory 了解在途工作）。
-- **预存问题**：pre-recon 的 `run_code_index`(GitNexus) 对大仓易 >10min 超时（见相关 spec）；GitNexus 不可用会影响所有确定性轨。
+- **预存问题（真根因 2026-07-08 已修）**：pre-recon 的 `run_code_index`(GitNexus) 曾卡死（step 0 数十分钟、$0 LLM 成本）。**真根因不是"大仓索引慢 >10min 超时"（那是叠加症状），而是 `GitNexusEngine.ensure_indexed()` 漏调 `gitnexus index` 注册进全局 registry（`~/.gitnexus/registry.json`）**：`.gitnexus/` 已存在就被 skip analyze、永不补注册 → `gitnexus mcp` 从 registry 发现 0 个仓（不读仓内 `.gitnexus/`）→ 查询解析不到 repo → readline 死锁。GitNexus 1.6.8 是两步式：`analyze` 建仓内 `.gitnexus/`、`index` 注册全局 registry。修复：`ensure_indexed` analyze/skip 后幂等调 `gitnexus index <repo>`，index 失败→`success=False` 走 `PentestError` fail-fast 不再死等（TDD，15 测试绿，feat/fork-py 本地未 push）。现场止血：`gitnexus index <repo>`（秒级，不重新分析）。GitNexus 真不可用（CLI 没装 / 索引坏）仍会影响所有确定性轨。

@@ -51,10 +51,19 @@ class GitNexusEngine:
         return shutil.which("gitnexus") is not None
 
     def ensure_indexed(self, force: bool = False) -> IndexResult:
-        """Run gitnexus analyze if not already indexed.
+        """Run gitnexus analyze if needed, then register the repo into the
+        global registry (~/.gitnexus/registry.json) via ``gitnexus index``.
 
         Creates .gitnexus/ directory with the knowledge graph.
-        Skips if .gitnexus/ already exists (unless force=True).
+        Skips analyze if .gitnexus/ already exists (unless force=True).
+
+        Why register: ``gitnexus mcp`` discovers indexed repos from the global
+        registry, NOT from the in-repo .gitnexus/ directory. ``gitnexus analyze``
+        builds .gitnexus/ but does not reliably register the repo (1.6.8); a
+        repo whose .gitnexus/ is present but absent from the registry leaves
+        ``gitnexus mcp`` discovering 0 repos and deadlocking on every query
+        (pre-recon step 0 hangs forever, $0 LLM cost). ``gitnexus index`` is
+        idempotent and cheap, so we always run it after ensuring .gitnexus/.
 
         Args:
             force: If True, run analyze even when index already exists.
@@ -64,18 +73,26 @@ class GitNexusEngine:
         """
         if not force and self.gitnexus_dir.exists():
             logger.debug("GitNexus index already exists at %s", self.gitnexus_dir)
-            return IndexResult(success=True, is_stale=False)
+        else:
+            args = ["analyze", str(self.repo_root)]
+            if force:
+                args.append("--force")
+            try:
+                logger.info("Running gitnexus analyze on %s", self.repo_root)
+                self._run_cli(*args)
+                logger.info("GitNexus indexing complete")
+            except GitNexusError as exc:
+                return IndexResult(success=False, error_message=str(exc))
 
-        args = ["analyze", str(self.repo_root)]
-        if force:
-            args.append("--force")
-
+        # Idempotently register the repo into the global registry. Without this
+        # the MCP channel deadlocks even though .gitnexus/ is present and fresh.
         try:
-            logger.info("Running gitnexus analyze on %s", self.repo_root)
-            self._run_cli(*args)
-            logger.info("GitNexus indexing complete")
+            self._run_cli("index", str(self.repo_root))
         except GitNexusError as exc:
-            return IndexResult(success=False, error_message=str(exc))
+            return IndexResult(
+                success=False,
+                error_message=f"failed to register repo in global registry: {exc}",
+            )
 
         return IndexResult(success=True)
 
