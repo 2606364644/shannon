@@ -61,9 +61,14 @@ def _normalize_agent(a: dict) -> dict:
     out: dict = {
         "duration_ms": duration_ms,
         "cost_usd": cost_usd,
+        "cost_currency": _pick(a, last, "cost_currency", None, "cost_currency", "USD"),
         "success": success,
         "attempt_number": attempt_number,
         "model": model,
+        "input_tokens": _pick(a, last, "input_tokens", None, "input_tokens", 0),
+        "output_tokens": _pick(a, last, "output_tokens", None, "output_tokens", 0),
+        "cache_read_tokens": _pick(a, last, "cache_read_tokens", None, "cache_read_tokens", 0),
+        "cache_creation_tokens": _pick(a, last, "cache_creation_tokens", None, "cache_creation_tokens", 0),
     }
     err = a.get("error") or (last.get("error") if last else None)
     if err:
@@ -79,6 +84,11 @@ def normalize_metrics(metrics: dict) -> dict:
     if not metrics:
         return metrics
     out = dict(metrics)
+    # 顶层 cost_currency + token 汇总：新 schema 透传，旧 schema 缺失 → 默认(USD/0)
+    out["cost_currency"] = metrics.get("cost_currency", "USD")
+    for _tok in ("total_input_tokens", "total_output_tokens",
+                 "total_cache_read_tokens", "total_cache_creation_tokens"):
+        out[_tok] = metrics.get(_tok, 0)
     agents = metrics.get("agents")
     if isinstance(agents, dict):
         out["agents"] = {name: _normalize_agent(a) for name, a in agents.items()}

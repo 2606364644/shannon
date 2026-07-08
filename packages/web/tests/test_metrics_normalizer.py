@@ -14,12 +14,14 @@ from shannon_web.components.metrics_normalizer import _normalize_agent, normaliz
 # === 新格式(NodeGoat,当前 metrics_tracker 产出)===
 
 def test_new_format_passthrough():
-    """新格式 agent(duration_ms/cost_usd/success/attempt_number/model)→ 字段值原样。"""
-    a = {"duration_ms": 805974, "cost_usd": 3.74, "success": True,
-         "attempt_number": 1, "model": "GLM-5.2[1m]"}
+    """新格式 agent(duration_ms/cost_usd/cost_currency/success/token...)→ 字段值原样。"""
+    a = {"duration_ms": 805974, "cost_usd": 3.74, "cost_currency": "CNY", "success": True,
+         "attempt_number": 1, "model": "GLM-5.2[1m]",
+         "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 100, "cache_creation_tokens": 0}
     out = _normalize_agent(a)
-    assert out == {"duration_ms": 805974, "cost_usd": 3.74, "success": True,
-                   "attempt_number": 1, "model": "GLM-5.2[1m]"}
+    assert out == {"duration_ms": 805974, "cost_usd": 3.74, "cost_currency": "CNY", "success": True,
+                   "attempt_number": 1, "model": "GLM-5.2[1m]",
+                   "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 100, "cache_creation_tokens": 0}
 
 
 def test_new_format_with_error_preserved():
@@ -115,10 +117,11 @@ def test_mixed_new_key_present_but_null_falls_back():
 
 
 def test_totally_empty_agent():
-    """完全空的 agent dict → 全默认值,不崩(防御)。"""
+    """完全空的 agent dict → 全默认值(cost_currency=USD, token=0),不崩(防御)。"""
     out = _normalize_agent({})
-    assert out == {"duration_ms": 0, "cost_usd": 0.0, "success": True,
-                   "attempt_number": 1, "model": ""}
+    assert out == {"duration_ms": 0, "cost_usd": 0.0, "cost_currency": "USD", "success": True,
+                   "attempt_number": 1, "model": "",
+                   "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_creation_tokens": 0}
 
 
 # === normalize_metrics 整体 ===
@@ -146,8 +149,26 @@ def test_normalize_metrics_agents_dict():
     assert "final_duration_ms" not in out["agents"]["legacy-agent"]
 
 
+def test_normalize_metrics_top_level_currency_and_tokens():
+    """顶层 cost_currency + token 汇总:新 schema 透传,旧 schema 缺失 → 默认(USD/0)。"""
+    metrics = {"total_cost_usd": 0.0886, "cost_currency": "CNY",
+               "total_input_tokens": 1000, "total_output_tokens": 500,
+               "total_cache_read_tokens": 100, "total_cache_creation_tokens": 0,
+               "agents": {}}
+    out = normalize_metrics(metrics)
+    assert out["cost_currency"] == "CNY"
+    assert out["total_input_tokens"] == 1000
+    assert out["total_cache_read_tokens"] == 100
+    # 旧 schema(无 cost_currency/token)→ 默认
+    out2 = normalize_metrics({"total_cost_usd": 0.5, "agents": {}})
+    assert out2["cost_currency"] == "USD"
+    assert out2["total_input_tokens"] == 0
+
+
 def test_normalize_metrics_empty_or_missing_agents():
-    """空 metrics / 无 agents → 不崩,原样返回。"""
+    """空 metrics → 原样返回;非空无 agents → 补默认 cost_currency/token,不崩。"""
     assert normalize_metrics({}) == {}
-    assert normalize_metrics({"total_cost_usd": 0}) == {"total_cost_usd": 0}
+    out = normalize_metrics({"total_cost_usd": 0})
+    assert out["total_cost_usd"] == 0
+    assert out["cost_currency"] == "USD"  # 缺失 → 默认
     assert normalize_metrics({"agents": {}})["agents"] == {}
