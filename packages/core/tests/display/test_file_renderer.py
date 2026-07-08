@@ -142,6 +142,23 @@ async def test_summary_completed_has_completion_marker():
     assert "✓ xss-vuln" in out
 
 
+async def test_summary_cost_uses_currency_symbol_cny():
+    """cost 定价(spec 2026-07-09): Total Cost + agent breakdown 按 cost_currency 显示 ¥。"""
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=100, total_cost_usd=0.0886, cost_currency="CNY",
+        agents=[AgentMetric(name="recon", duration_ms=50, cost_usd=0.0443, cost_currency="CNY")]))
+    out = renderer._writer.text
+    assert "Total Cost:  ¥0.0886" in out
+    assert "¥0.0443" in out  # agent breakdown 也按币种
+    # 默认(USD)仍 $
+    await renderer.render(SummaryEvent(
+        timestamp="t", category="SUMMARY", status="completed",
+        total_duration_ms=1, total_cost_usd=0.0123, cost_currency="USD", agents=[]))
+    assert "Total Cost:  $0.0123" in renderer._writer.text
+
+
 async def test_summary_failed_has_failure_marker():
     renderer = FileLogRenderer(FakeWriter())
     await renderer.render(SummaryEvent(

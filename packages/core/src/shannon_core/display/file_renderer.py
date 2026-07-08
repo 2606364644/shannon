@@ -12,6 +12,7 @@ from shannon_core.display.formatters import (
 )
 from shannon_core.logging.diagnostic_log import format_diagnostic_line
 from shannon_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
+from shannon_core.agents.pricing import currency_symbol
 
 
 _SEP = "=" * 80
@@ -130,14 +131,14 @@ class FileLogRenderer:
             "─" * 40,
             f"Status:      {e.status}",
             f"Duration:    {format_duration(e.total_duration_ms)}",
-            f"Total Cost:  ${e.total_cost_usd:.4f}",
+            f"Total Cost:  {currency_symbol(e.cost_currency)}{e.total_cost_usd:.4f}",
             f"Agents:      {len(e.agents)} completed",
             "",
             "Agent Breakdown:",
         ]
         for m in e.agents:
             mark = SUMMARY_OK if m.success else SUMMARY_FAIL
-            cost = f", ${m.cost_usd:.4f}" if m.cost_usd is not None else ""
+            cost = f", {currency_symbol(m.cost_currency)}{m.cost_usd:.4f}" if m.cost_usd is not None else ""
             lines.append(f"  {mark} {m.name} ({format_duration(m.duration_ms)}{cost})")
         if e.error:
             lines.append("")

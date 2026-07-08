@@ -14,6 +14,7 @@ from shannon_core.display.formatters import (
     pad_rule, phase_body, step_body, tag,
 )
 
+from shannon_core.agents.pricing import currency_symbol
 from shannon_core.display.symbols import (
     AUDIT_COMPLETE_FAIL, AUDIT_COMPLETE_OK, SUMMARY_OK, SUMMARY_FAIL,
 )
@@ -185,7 +186,7 @@ class RichConsoleRenderer:
         self._console.print(Panel.fit(
             f"{prefix}Workflow [bold]{status}[/]\n"
             f"Duration: {format_duration(e.total_duration_ms)}    "
-            f"Total Cost: ${e.total_cost_usd:.4f}",
+            f"Total Cost: {currency_symbol(e.cost_currency)}{e.total_cost_usd:.4f}",
             border_style="green" if ok else "red",
         ))
         if e.agents:
@@ -194,10 +195,12 @@ class RichConsoleRenderer:
             table.add_column("Agent")
             table.add_column("Duration")
             table.add_column("Cost")
+            table.add_column("Tokens")
             for m in e.agents:
                 mark = SUMMARY_OK if m.success else SUMMARY_FAIL
-                cost = f"${m.cost_usd:.4f}" if m.cost_usd is not None else "—"
-                table.add_row(mark, m.name, format_duration(m.duration_ms), cost)
+                cost = f"{currency_symbol(m.cost_currency)}{m.cost_usd:.4f}" if m.cost_usd is not None else "—"
+                tokens = f"{m.input_tokens or 0}/{m.output_tokens or 0}"
+                table.add_row(mark, m.name, format_duration(m.duration_ms), cost, tokens)
             self._console.print(table)
         if e.error:
             self._console.print(f"[red]{format_error_block(e.error)}[/]", highlight=False)
