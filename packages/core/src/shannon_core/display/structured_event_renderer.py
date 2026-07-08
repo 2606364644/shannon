@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 
 import aiofiles
@@ -60,3 +62,24 @@ class StructuredEventRenderer:
                 await self._fh.flush()
                 await self._fh.close()
                 self._fh = None
+
+
+def wire_web_event_file(workspaces_dir: Path, workspace_name: str | None) -> None:
+    """若 SHANNON_WEB_EVENT_FILE 未设,默认指向 <workspaces_dir>/<workspace>/events.ndjson。
+
+    让 CLI(uv run shannon-whitebox start,无 -w)启动的扫描也能在 shannon-web 实时页
+    (LiveTab 经 SSE tail events.ndjson)可见:
+    - WEB 启动时 scan_manager 已注入该 env → setdefault 不覆盖,行为零变化;
+    - CLI 启动 env 未设 → 这里补上 → WorkflowLogger.initialize 挂载 StructuredEventRenderer
+      → events.ndjson 持续写入 → SSE 有数据 → 实时页可见。
+
+    由各 track 的 worker 在 workspace 名回填后、Client.connect 前调用(此时 temporal Worker
+    尚未构造,后续 activity 在同进程读 env 拿到该值)。workspace_name 为空时不注入(防御:
+    调用方此刻应已回填 name)。
+    """
+    if not workspace_name:
+        return
+    os.environ.setdefault(
+        "SHANNON_WEB_EVENT_FILE",
+        str(Path(workspaces_dir) / workspace_name / "events.ndjson"),
+    )

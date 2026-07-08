@@ -30,6 +30,7 @@ from shannon_core.services.temporal_infra import generate_task_queue
 from shannon_core.models.metrics import SessionMetadata
 from shannon_core.models.audit import AgentMetricsSummary, WorkflowSummary
 from shannon_core.audit.display_lifecycle import run_with_display
+from shannon_core.display.structured_event_renderer import wire_web_event_file
 from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
 from shannon_core.runtime.scan_runner import (
     ScanCancelled,
@@ -79,6 +80,10 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             scan_type="blackbox",
         )
         input.workspace_name = ws_path.name
+
+    # CLI(uv run)启动的扫描默认把 events.ndjson 落到本 workspace,使 shannon-web 实时页
+    # (SSE tail events.ndjson)可见。setdefault:WEB 启动时 scan_manager 已注入该 env → 不覆盖。
+    wire_web_event_file(resolve_workspaces_dir(input.repo_path), input.workspace_name)
 
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)

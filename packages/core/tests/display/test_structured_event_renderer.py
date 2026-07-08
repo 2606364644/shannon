@@ -1,6 +1,7 @@
 # packages/core/tests/display/test_structured_event_renderer.py
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from shannon_core.display.events import (
     SummaryEvent,
     ToolCallEvent,
 )
-from shannon_core.display.structured_event_renderer import StructuredEventRenderer
+from shannon_core.display.structured_event_renderer import StructuredEventRenderer, wire_web_event_file
 
 
 def _lines(path: Path) -> list[dict]:
@@ -94,3 +95,29 @@ async def test_concurrent_renders_no_interleaving(tmp_path: Path):
     assert len(rows) == 50
     for row in rows:
         assert row["type"] == "InfoEvent"  # 每行完整可 parse = 无交错断行
+
+
+# --- wire_web_event_file: CLI 启动的扫描默认注入 events.ndjson 路径 ----------
+# 目的：让 `uv run shannon-whitebox start`（无 SHANNON_WEB_EVENT_FILE）跑出的扫描，
+# 在 shannon-web 实时页（LiveTab，SSE tail events.ndjson）也可见。setdefault 语义：
+# WEB 启动时 scan_manager 已注入该 env → 不覆盖；CLI 启动 env 未设 → 这里补上。
+
+def test_wire_sets_default_when_unset(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SHANNON_WEB_EVENT_FILE", raising=False)
+    wire_web_event_file(tmp_path, "NodeGoat_20260708-153045")
+    assert os.environ["SHANNON_WEB_EVENT_FILE"] == str(
+        tmp_path / "NodeGoat_20260708-153045" / "events.ndjson"
+    )
+
+
+def test_wire_does_not_override_existing(monkeypatch):
+    monkeypatch.setenv("SHANNON_WEB_EVENT_FILE", "/preset/by/web/events.ndjson")
+    wire_web_event_file(Path("/anywhere"), "ws")
+    # WEB 启动注入的值原样保留，不被 CLI 的默认路径覆盖
+    assert os.environ["SHANNON_WEB_EVENT_FILE"] == "/preset/by/web/events.ndjson"
+
+
+def test_wire_noop_without_workspace_name(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SHANNON_WEB_EVENT_FILE", raising=False)
+    wire_web_event_file(tmp_path, None)
+    assert "SHANNON_WEB_EVENT_FILE" not in os.environ

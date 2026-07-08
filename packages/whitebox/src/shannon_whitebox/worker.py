@@ -8,6 +8,7 @@ from pathlib import Path
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from shannon_core.display.structured_event_renderer import wire_web_event_file
 from shannon_core.models.audit import WorkflowSummary, AgentMetricsSummary
 
 from .pipeline.activities import (
@@ -88,6 +89,10 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         name=input.workspace_name,
     )
     input.workspace_name = ws_path.name
+
+    # CLI(uv run)启动的扫描默认把 events.ndjson 落到本 workspace,使 shannon-web 实时页
+    # (SSE tail events.ndjson)可见。setdefault:WEB 启动时 scan_manager 已注入该 env → 不覆盖。
+    wire_web_event_file(workspaces_dir, input.workspace_name)
 
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
