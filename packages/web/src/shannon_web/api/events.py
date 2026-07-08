@@ -19,6 +19,14 @@ async def stream_events(ws: str, request: Request):
         raise HTTPException(404, "workspace not found")
     ndjson = ws_dir / "events.ndjson"
 
+    # 惰性对账：孤儿 scan（worker 已不存活、无 scan_end）补写 scan_end，让 SSE 立即
+    # 有关流信号 + 失败原因，而非空等 idle_timeout(300s) 后关流再被前端重连死循环。
+    idx = request.app.state.indexer
+    idx.sync_active(request.app.state.scan_manager.active_pids())
+    if not idx.is_running(ws):
+        from shannon_web.components.orphan_reconciler import reconcile_orphaned
+        await reconcile_orphaned(ws_dir, False)
+
     last = request.headers.get("last-event-id")
     last_offset = int(last) if last else None
 

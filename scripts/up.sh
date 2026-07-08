@@ -2,8 +2,7 @@
 # scripts/up.sh —— 一键启动 web,自动判断 temporal 复用还是自建。
 #
 # 用法：
-#   ./scripts/up.sh              # 启动（自动判断复用/自建），等价 up -d --build web
-#   ./scripts/up.sh --build      # 显式带 build（透传给 compose）
+#   ./scripts/up.sh              # 启动（自动判断复用/自建）；up 分支已硬编码 --build，无需显式传
 #   ./scripts/up.sh down         # 停掉
 #   ./scripts/up.sh logs web     # 看日志（任意 docker compose 子命令透传）
 #

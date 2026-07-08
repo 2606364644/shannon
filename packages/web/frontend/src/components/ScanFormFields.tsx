@@ -97,9 +97,14 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
         <fieldset className="space-y-3">
           <legend className="text-sm font-medium">扫描目标 + 命名</legend>
           <div className="space-y-2">
-            <Label htmlFor="url">目标 URL</Label>
+            <Label htmlFor="url">
+              目标 URL{type === "whitebox" && <span className="text-muted-foreground font-normal">（可选）</span>}
+            </Label>
             <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder="http://example.com" />
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
+            {type === "whitebox" && !f.url && (
+              <div className="text-xs text-muted-foreground">可选；填了便于黑盒 --latest 按 URL 匹配本次白盒</div>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="wsName">workspace 名</Label>

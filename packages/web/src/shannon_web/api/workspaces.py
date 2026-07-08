@@ -37,7 +37,7 @@ async def get_workspace(ws: str, request: Request):
         "web_url": mgr.get_web_url(p),
         "repo_path": data.get("repo_path"),
         "scan_type": mgr.get_scan_type(p),
-        "status": idx._status_of(ws, mgr.get_status(p)),
+        "status": idx._status_of(p, mgr.get_status(p)),
         "created_at": _to_unix(mgr.get_created_at(p)),
         "completed_at": _to_unix(mgr.get_completed_at(p)),
         "links": data.get("links", {}),

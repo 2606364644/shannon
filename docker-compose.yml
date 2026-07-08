@@ -35,6 +35,10 @@ services:
       - ./repos:/app/repos
       - ./configs:/app/configs
       - ./.env:/app/.env:ro
+      # .env.profiles 含 SHANNON_PROFILE 对应的引擎密钥（glm-anthropic.env 等），
+      # 是 load_env() 启动扫描的硬依赖；不挂载则新扫描启动即崩 "profile 文件不存在"。
+      # 同 .env 走 bind mount（宿主 gitignore 排除，随改随生效免重建）。
+      - ./.env.profiles:/app/.env.profiles:ro
     env_file:
       - .env
     environment:

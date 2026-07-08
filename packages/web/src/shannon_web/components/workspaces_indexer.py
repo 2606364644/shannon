@@ -7,6 +7,8 @@ from pathlib import Path
 from shannon_core.session import SessionManager
 from shannon_core.workspace import get_workspace_vuln_counts
 
+from .scan_liveness import is_scan_recently_active
+
 
 def _to_unix(v) -> float | None:
     """归一 created_at/completed_at 为 unix float|None:float|int 直用、ISO str 解析、None/异常→None。
@@ -62,17 +64,19 @@ class WorkspacesIndexer:
         pid = self._active_pids.get(ws)
         return pid is not None and self._pid_alive(pid)
 
-    def _status_of(self, ws_name: str, session_status: str | None) -> str:
+    def _status_of(self, ws_path: Path, session_status: str | None) -> str:
         if session_status == "completed":
             return "completed"
         if session_status == "failed":
             return "failed"
-        alive = self.is_running(ws_name)
-        if alive:
+        if self.is_running(ws_path.name):
+            return "running"  # web 托管且 pid 存活
+        # web 未托管（无 alive pid）但文件近期被写 → host CLI 起的 scan 仍存活，显 running
+        # 而非 interrupted（容器非 host PID namespace 看不到 host pid；见 scan_liveness）。
+        # 回归：kol_mapping_service_20260708-193139 列表/详情被误标 interrupted 即缺此门。
+        if is_scan_recently_active(ws_path):
             return "running"
-        if session_status == "running":
-            return "running" if alive else "interrupted"
-        return "interrupted"  # 无 scan_end 且 pid 不在 = 未正常结束
+        return "interrupted"  # 无 scan_end + 长时间无写入 = 未正常结束
 
     def list_workspaces(self) -> list[dict]:
         mgr = SessionManager(self._dir)
@@ -84,7 +88,7 @@ class WorkspacesIndexer:
             except Exception:
                 continue
             scan_type = mgr.get_scan_type(ws_path)
-            status = self._status_of(name, mgr.get_status(ws_path))
+            status = self._status_of(ws_path, mgr.get_status(ws_path))
             try:
                 vuln = get_workspace_vuln_counts(ws_path)
             except Exception:

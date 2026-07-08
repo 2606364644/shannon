@@ -82,6 +82,11 @@ class ScanManager:
 
         argv = self._build_argv(req, target, ws, yaml_path)
         env = {**os.environ, "SHANNON_WEB_EVENT_FILE": str(event_file)}
+        # web 启动的扫描是非交互子进程（无 TTY），ensure_prerequisite 的交互式
+        # 安装/降级确认 click.confirm 会因 EOF 直接 Aborted。显式跳过前置检查：
+        # 扫描以降级模式跑（gitnexus 等缺失则确定性轨退化，LLM 轨照跑），而非启动即崩。
+        # 完整确定性覆盖需把 gitnexus 装进镜像（见 follow-up），此开关仅解除非交互死锁。
+        env.setdefault("SHANNON_SKIP_PREREQUISITES", "1")
         # 在子进程拉起前登记，确保 active_repo_sources() 能看到在途请求（即便
         # proc 尚未赋值回 _procs）。
         self._active_reqs[ws] = req
@@ -111,17 +116,29 @@ class ScanManager:
         return True
 
     # ---- 钩子（可 monkeypatch）----
+    def _temporal_address(self) -> str:
+        """SHANNON_TEMPORAL_HOST:PORT（默认 localhost:7233）。
+
+        web 容器内 temporal 在 compose 服务名 `temporal` 上（非 localhost），
+        必须显式传给子进程 CLI 的 --temporal-address，否则 CLI 用默认 localhost:7233
+        探活失败 -> ensure_infra 退化到 docker 自建 -> 容器内无 docker -> 扫描启动即崩。
+        """
+        host = os.environ.get("SHANNON_TEMPORAL_HOST", "localhost")
+        port = int(os.environ.get("SHANNON_TEMPORAL_PORT", "7233"))
+        return f"{host}:{port}"
+
     def _build_argv(self, req: ScanRequest, target: str | None,
                     ws: str, yaml_path: Path | None = None) -> list[str]:
+        ta = ["--temporal-address", self._temporal_address()]
         if req.type == "whitebox":
-            return ["shannon-whitebox", "start", "-r", target or "", "--url", req.url or "", "-w", ws]
+            return ["shannon-whitebox", "start", "-r", target or "", "--url", req.url or "", "-w", ws, *ta]
         if req.type == "blackbox":
-            cmd = ["shannon-blackbox", "start", "--url", req.url or "", "--repo", target or "", "-w", ws]
+            cmd = ["shannon-blackbox", "start", "--url", req.url or "", "--repo", target or "", "-w", ws, *ta]
             if req.reuse_latest:
                 cmd.append("--latest")
             return cmd
         if req.type == "correlation":
-            return ["shannon-multi", "start", "-c", str(yaml_path)]
+            return ["shannon-multi", "start", "-c", str(yaml_path), *ta]
         raise ValueError(f"unknown scan type: {req.type}")
 
     async def _check_temporal(self) -> None:

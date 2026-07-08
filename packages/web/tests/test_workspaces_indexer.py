@@ -46,8 +46,27 @@ def test_running_when_pid_alive(tmp_workspaces):
 
 def test_interrupted_when_no_pid_no_status(tmp_workspaces):
     _make_ws(tmp_workspaces, "Dead_w", status=None)
+    # 模型「死掉的孤儿」：session.json 远古（scan 早已停写），否则 mtime 门会当活 scan
+    import time
+    old = time.time() - 3600
+    os.utime(tmp_workspaces / "Dead_w" / "session.json", (old, old))
     idx = WorkspacesIndexer(tmp_workspaces)
     assert idx.list_workspaces()[0]["status"] == "interrupted"
+
+
+def test_running_when_recently_active_no_pid(tmp_workspaces):
+    """回归：host CLI 起的活 scan，web 看不到其 pid（容器非 host PID namespace），但
+    workflow.log 近期被写 → _status_of 显 running 而非 interrupted
+    （kol_mapping_service_20260708-193139 列表/详情被误标 interrupted 即此 bug）。
+    """
+    import time
+    _make_ws(tmp_workspaces, "HostAlive", status=None)
+    ws = tmp_workspaces / "HostAlive"
+    old = time.time() - 3600
+    os.utime(ws / "session.json", (old, old))  # session.json 远古，避免它单独触发 active
+    (ws / "workflow.log").write_text("scan running\n")  # fresh → scan 仍存活
+    idx = WorkspacesIndexer(tmp_workspaces)
+    assert idx.list_workspaces()[0]["status"] == "running"
 
 
 def test_correlation_marked(tmp_workspaces):

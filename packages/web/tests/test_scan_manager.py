@@ -44,6 +44,33 @@ def _patch_ok(monkeypatch, mgr):
     monkeypatch.setattr(mgr, "_check_temporal", _ok)
 
 
+def test_build_argv_passes_temporal_address_from_env(tmp_path, monkeypatch):
+    """容器内 temporal 在 compose 服务名上（非 localhost），必须显式传 --temporal-address，
+    否则 CLI 默认 localhost:7233 探活失败 -> ensure_infra 退化到 docker 自建 -> 容器内无 docker -> 崩。"""
+    monkeypatch.setenv("SHANNON_TEMPORAL_HOST", "temporal")
+    monkeypatch.setenv("SHANNON_TEMPORAL_PORT", "7233")
+    mgr = ScanManager(tmp_path, tmp_path / "repos", None)
+    expected = ["--temporal-address", "temporal:7233"]
+
+    wb = mgr._build_argv(ScanRequest(type="whitebox"), "/r", "ws")
+    assert expected == wb[-2:]
+
+    bb = mgr._build_argv(ScanRequest(type="blackbox", url="u"), "/r", "ws")
+    assert expected == bb[-2:]
+
+    from pathlib import Path
+    cb = mgr._build_argv(ScanRequest(type="correlation", config_name="c"), None, "ws", Path("c.yaml"))
+    assert expected == cb[-2:]
+
+
+def test_build_argv_temporal_address_defaults_localhost(tmp_path, monkeypatch):
+    monkeypatch.delenv("SHANNON_TEMPORAL_HOST", raising=False)
+    monkeypatch.delenv("SHANNON_TEMPORAL_PORT", raising=False)
+    mgr = ScanManager(tmp_path, tmp_path / "repos", None)
+    wb = mgr._build_argv(ScanRequest(type="whitebox"), "/r", "ws")
+    assert ["--temporal-address", "localhost:7233"] == wb[-2:]
+
+
 @pytest.mark.asyncio
 async def test_start_writes_event_file_and_scan_end(tmp_workspaces, fake_ok, monkeypatch):
     mgr = ScanManager(tmp_workspaces, tmp_workspaces / "repos", None, max_concurrent=2)

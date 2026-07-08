@@ -346,4 +346,23 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(screen.getByText(/broken —/)).toBeInTheDocument());
     expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
+
+  it("白盒 URL 可选：不填 url + path 填齐 → 可提交", async () => {
+    renderPage();
+    await selectOption(/已下载仓库/, "本地路径");
+    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+    // 白盒扫本地代码，url 仅作黑盒 --latest 匹配锚点 → 不填也能提交
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+  });
+
+  it("黑盒 URL 必填：不填 url → disabled；填齐 → enabled", async () => {
+    renderPage();
+    clickTab("黑盒");
+    await selectOption(/已下载仓库/, "本地路径");
+    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+    // 黑盒扫运行中服务 → url 必填，不填时提交 disabled
+    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+  });
 });

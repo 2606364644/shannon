@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
-import { apiGet } from "@/api/client";
+import { apiGet, ApiError } from "@/api/client";
 import type { SessionData } from "@/api/types";
 
 const TABS = [
@@ -23,16 +23,40 @@ export default function WorkspaceDetail() {
   const current = pathname.split("/").pop() ?? "overview";
   const [meta, setMeta] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!workspace) return;
     setLoading(true);
+    setNotFound(false);
     apiGet<SessionData>(`/workspaces/${workspace}`)
       .then((s) => { setMeta(s); setLoading(false); })
-      .catch(() => { setMeta(null); setLoading(false); });
+      .catch((e) => {
+        setMeta(null);
+        setLoading(false);
+        // 404 = 工作区不存在/已删：显明确错误态，不降级成 running 误导。
+        // 其余错误（500 等）保持现降级（显名 + tabs + 默认 running），不阻塞浏览。
+        setNotFound(e instanceof ApiError && e.status === 404);
+      });
   }, [workspace]);
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
+
+  if (notFound) {
+    return (
+      <div className="space-y-4">
+        <Link to="/workspaces" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
+          <ArrowLeft className="size-3.5" /> 返回列表
+        </Link>
+        <div className="rounded-md border border-yellow/40 bg-card p-6 text-sm">
+          <h2 className="font-mono text-xl mb-2">{workspace}</h2>
+          <p className="text-muted-foreground">
+            工作区不存在或已被删除，无法显示实时进度。可能扫描已被清理或服务重启后丢失。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

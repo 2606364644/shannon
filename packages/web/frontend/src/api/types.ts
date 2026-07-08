@@ -71,7 +71,9 @@ export type NdjsonEvent =
   | GitnexusLlmEvent | ScanEndEvent | CorrelationProgressEvent;
 
 // === API 响应类型（对齐 backend-design.md）===
-export type WorkspaceStatus = "running" | "completed" | "failed" | "killed" | "crashed";
+export type WorkspaceStatus =
+  | "running" | "in-progress" | "interrupted"
+  | "completed" | "failed" | "killed" | "crashed";
 
 export interface Workspace {
   name: string;

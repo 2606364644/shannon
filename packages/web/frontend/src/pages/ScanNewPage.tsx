@@ -29,7 +29,8 @@ function buildBody(type: ScanType, f: FormState): ScanRequest {
   const source = f.sourceKind === "repo"
     ? { kind: "repo" as const, value: f.selectedRepo }
     : { kind: "path" as const, value: f.sourceValue };
-  const body: ScanRequest = { type, source, url: f.url, workspace_name: f.wsName || undefined };
+  // 白盒 url 可选 -> 空时不带 url 字段（后端 Optional，CLI --url optional）。
+  const body: ScanRequest = { type, source, url: f.url || undefined, workspace_name: f.wsName || undefined };
   if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
   return body;
 }
@@ -53,7 +54,13 @@ function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: 
   return /^(\/|[A-Za-z]:[\\/])/.test(pathValue) ? null : "本地路径需为绝对路径（如 /root/code/foo）";
 }
 
-function validateUrl(v: string): string | null {
+function validateUrl(v: string, type: ScanType): string | null {
+  // 白盒扫本地代码，url 仅作黑盒 --latest 匹配锚点（CLI --url optional），可空；
+  // 黑盒扫运行中服务，url 必填。correlation 无 url 概念。
+  if (type !== "blackbox") {
+    if (!v.trim()) return null;
+    return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
+  }
   if (!v.trim()) return "目标 URL 不能为空";
   return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
 }
@@ -117,7 +124,7 @@ export function ScanNewPage() {
   }, [f.wsName]);
 
   const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue);
-  const urlErr = validateUrl(f.url);
+  const urlErr = validateUrl(f.url, type);
   const isCorrelation = type === "correlation";
   const isValid =
     !sourceErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);

@@ -155,6 +155,25 @@ def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
     assert "is_correlation" not in d
 
 
+def test_get_workspace_recently_active_not_500(app_with_ws, tmp_workspaces):
+    """回归：get_workspace 对 host CLI 起的活 scan（web 看不到 pid，但 workflow.log 近期被写）
+    必须返 200 + status=running，不得 500。曾因 _status_of 改签名收 Path 但此端点仍传 str，
+    触发 `'str' object has no attribute 'name'`（completed/failed 态在首行 return 不触发，
+    故仅 running 态暴露）。
+    """
+    import os as _os
+    import time as _time
+    _ws(tmp_workspaces, "HostAlive", status=None,
+        created_at=_time.time(), completed_at=None)
+    ws = tmp_workspaces / "HostAlive"
+    old = _time.time() - 3600
+    _os.utime(ws / "session.json", (old, old))      # session.json 远古
+    (ws / "workflow.log").write_text("scan running\n")  # fresh → scan 存活
+    r = TestClient(app_with_ws).get("/api/workspaces/HostAlive")
+    assert r.status_code == 200
+    assert r.json()["status"] == "running"
+
+
 def test_get_workspace_normalizes_legacy_agents(app_with_ws, tmp_workspaces):
     """get_workspace 归一化旧格式 metrics.agents(juice-shop_whitebox-* 实例)。
     回归:旧格式 final_duration_ms/total_cost_usd/status/attempts[] 直接透传时,

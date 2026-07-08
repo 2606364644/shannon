@@ -49,6 +49,24 @@ describe("LiveTab", () => {
     expect(screen.getByRole("button", { name: /查看报告/ })).toBeInTheDocument();
   });
 
+  it("scan_end=interrupted 显失败原因、不显查看报告", () => {
+    eventsState.events = [
+      { type: "scan_end", status: "interrupted", stderr_tail: "扫描因服务重启被中断", ts: "2026-01-01T00:00:00Z", category: "CONTROL" },
+    ];
+    eventsState.status = "closed";
+    renderLive();
+    expect(screen.getByText(/扫描已中断/)).toBeInTheDocument();
+    expect(screen.getByText(/扫描因服务重启被中断/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看报告/ })).not.toBeInTheDocument();
+  });
+
+  it("error + 空 events 显重连/无进度提示", () => {
+    eventsState.events = [];
+    eventsState.status = "error";
+    renderLive();
+    expect(screen.getByText(/正在重连实时通道|暂无进度数据/)).toBeInTheDocument();
+  });
+
   it("elapsed 从 PhaseEvent(start) ts 推导（≥ 5s，显示 MM:SS）", async () => {
     const pastTs = new Date(Date.now() - 5000).toISOString();
     eventsState.events = [

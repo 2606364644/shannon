@@ -13,8 +13,34 @@ from .config import get_config
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.repo_manager.migrate_legacy()  # 旧 repos 目录纳入管理
+    await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
     yield
     # shutdown（任务 9 接入 ScanManager 取消在途扫描后填充）
+
+
+async def _reconcile_orphaned_scans(app: FastAPI) -> None:
+    """启动时遍历 workspaces，对孤儿 scan（session running 但 worker 已不存活、
+    且无 scan_end）补写 scan_end(interrupted) + 失败原因。
+
+    容器重启会杀掉 scan_manager._watch 协程，导致在途 scan 永不写 scan_end、
+    session 卡 running、live SSE 空等。此处一次性兜底，使重开 live 页能正常显
+    「已中断」+ 原因。单 ws 异常不阻塞启动。
+    """
+    from .components.orphan_reconciler import reconcile_orphaned
+    cfg = app.state.config
+    indexer = app.state.indexer
+    # 启动时 scan_manager._procs 为空，active_pids()={} -> is_running 对所有 ws=False，
+    # 故所有 session running 的 ws 都会被判孤儿并补 scan_end（这正是重启后的真实情况）。
+    indexer.sync_active(app.state.scan_manager.active_pids())
+    if not cfg.workspaces_dir.is_dir():
+        return
+    for ws_dir in cfg.workspaces_dir.iterdir():
+        if not ws_dir.is_dir():
+            continue
+        try:
+            await reconcile_orphaned(ws_dir, indexer.is_running(ws_dir.name))
+        except Exception:
+            continue
 
 
 def _mount_frontend(app: FastAPI, cfg) -> None:
