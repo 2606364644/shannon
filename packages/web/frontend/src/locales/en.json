@@ -58,5 +58,17 @@
       "cloning": "Cloning…",
       "cloningProgress": "Cloning… {{progress}}%"
     }
+  },
+  "workspaces": {
+    "status": {
+      "running": "Running",
+      "in-progress": "In Progress",
+      "interrupted": "Interrupted",
+      "completed": "Completed",
+      "done": "Completed",
+      "failed": "Failed",
+      "killed": "Killed",
+      "crashed": "Crashed"
+    }
   }
 }

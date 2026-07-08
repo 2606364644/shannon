@@ -30,13 +30,13 @@ describe("WorkspaceDetail header", () => {
         HttpResponse.json({ status: "completed", scan_type: "whitebox", repo_path: "/root/nodegoat" }),
       ),
     );
-    renderAt("/p/ws1/report");
+    const { container } = renderAt("/p/ws1/report");
     expect(screen.getByText("返回列表")).toBeInTheDocument();
     expect(screen.getByText("ws1")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("whitebox")).toBeInTheDocument());
     expect(screen.getByText("/root/nodegoat")).toBeInTheDocument();
-    // StatusBadge 兜底显 completed
-    expect(screen.getByText("completed")).toBeInTheDocument();
+    // StatusBadge 兜底显 completed(title 属性保留原 status,不受 i18n 标签本地化影响)
+    expect(container.querySelector("[title='completed']")).toBeInTheDocument();
   });
 
   it("fetch 失败不阻塞 tab（降级显 workspace 名 + 默认 running）", async () => {

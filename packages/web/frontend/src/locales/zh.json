@@ -58,5 +58,17 @@
       "cloning": "clone 中…",
       "cloningProgress": "clone 中… {{progress}}%"
     }
+  },
+  "workspaces": {
+    "status": {
+      "running": "运行中",
+      "in-progress": "进行中",
+      "interrupted": "已中断",
+      "completed": "已完成",
+      "done": "已完成",
+      "failed": "失败",
+      "killed": "已终止",
+      "crashed": "已崩溃"
+    }
   }
 }
