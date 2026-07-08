@@ -21,7 +21,15 @@ def _walk(node):
 
 
 class PhpParser(BaseParser):
+    _FUNC_NODE_TYPES = ("function_definition", "method_declaration")
+
+    def _normalize_name(self, raw: str) -> str:
+        # PHP source names may carry a leading '$' (e.g. variable-named funcs);
+        # FuncBlock stores them stripped, so strip before indexing/matching.
+        return raw.lstrip("$")
+
     def __init__(self):
+        super().__init__()
         self._parser = Parser(PHP_LANGUAGE)
 
     def parse_file(self, file_path: Path, repo_root: Path) -> list[FuncBlock]:
@@ -176,17 +184,7 @@ class PhpParser(BaseParser):
         return None
 
     def iter_calls(self, block: FuncBlock, source: bytes):
-        tree = self._parser.parse(source)
-        for node in _walk(tree.root_node):
-            if node.type in ("function_definition", "method_declaration"):
-                name_node = node.child_by_field_name("name")
-                if name_node:
-                    name_text = name_node.text.decode("utf-8").lstrip("$")
-                    if name_text == block.function_name:
-                        if node.start_point[0] + 1 == block.start_line:
-                            for call_node in self._iter_call_nodes(node):
-                                yield call_node
-                            break
+        yield from self._iter_calls_cached(block, source)
 
     def _iter_call_nodes(self, func_node):
         call_types = (

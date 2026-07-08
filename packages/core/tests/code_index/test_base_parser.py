@@ -97,3 +97,45 @@ def test_concrete_parser_with_new_methods_instantiates():
 
     p = FullParser()
     assert p is not None
+
+
+def test_iter_calls_cached_parses_each_source_once():
+    """BaseParser._iter_calls_cached caches per source.
+
+    detect_sinks calls iter_calls once per function block; without caching an
+    M-function file is parsed M times (O(M*file_size)) — the 2026-07-08 Go-repo
+    pre-recon deadlock (worker stuck in iter_calls, CPU 1.5h, MCP idle). Each
+    distinct source must parse exactly once, every block in it reuses the index.
+    """
+    from shannon_core.code_index.parsers.python_parser import PythonParser
+
+    fixtures = Path(__file__).parent / "fixtures"
+    flask = fixtures / "python" / "flask_app.py"
+
+    parser = PythonParser()
+    source = flask.read_bytes()
+    blocks = parser.parse_file(flask, flask.parent.parent.parent)
+    assert len(blocks) >= 2, "fixture should have multiple functions"
+
+    class _Counter:
+        def __init__(self, real):
+            self._real = real
+            self.count = 0
+
+        def parse(self, *args, **kwargs):
+            self.count += 1
+            return self._real.parse(*args, **kwargs)
+
+    counter = _Counter(parser._parser)
+    parser._parser = counter
+
+    for block in blocks:
+        list(parser.iter_calls(block, source))
+    assert counter.count == 1, (
+        f"同一 source 应只 parse 1 次, 实际 {counter.count} 次 "
+        f"(对 {len(blocks)} 个 block 各 re-parse 整个文件)"
+    )
+
+    source2 = flask.read_bytes()  # 新 bytes 对象 → 新 id → 重新 parse
+    list(parser.iter_calls(blocks[0], source2))
+    assert counter.count == 2, "不同 source 应各 parse 一次"

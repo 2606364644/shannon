@@ -21,7 +21,10 @@ def _walk(node):
 
 
 class TypeScriptParser(BaseParser):
+    _FUNC_NODE_TYPES = ("function_declaration", "method_definition")
+
     def __init__(self):
+        super().__init__()
         self._parser = Parser(TS_LANGUAGE)
 
     def parse_file(self, file_path: Path, repo_root: Path) -> list[FuncBlock]:
@@ -155,15 +158,7 @@ class TypeScriptParser(BaseParser):
         return None
 
     def iter_calls(self, block: FuncBlock, source: bytes):
-        tree = self._parser.parse(source)
-        for node in _walk(tree.root_node):
-            if node.type in ("function_declaration", "method_definition"):
-                name_node = node.child_by_field_name("name")
-                if name_node and name_node.text.decode("utf-8") == block.function_name:
-                    if node.start_point[0] + 1 == block.start_line:
-                        for call_node in self._iter_call_nodes(node):
-                            yield call_node
-                        break
+        yield from self._iter_calls_cached(block, source)
 
     def _iter_call_nodes(self, func_node):
         for node in _walk(func_node):

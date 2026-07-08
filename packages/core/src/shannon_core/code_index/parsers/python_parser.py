@@ -21,7 +21,10 @@ def _walk(node):
 
 
 class PythonParser(BaseParser):
+    _FUNC_NODE_TYPES = ("function_definition", "async_function_definition")
+
     def __init__(self):
+        super().__init__()
         self._parser = Parser(PY_LANGUAGE)
 
     def parse_file(self, file_path: Path, repo_root: Path) -> list[FuncBlock]:
@@ -137,15 +140,7 @@ class PythonParser(BaseParser):
 
     def iter_calls(self, block: FuncBlock, source: bytes):
         """Yield CallNode for every `call` node inside this function."""
-        tree = self._parser.parse(source)
-        for node in _walk(tree.root_node):
-            if node.type in ("function_definition", "async_function_definition"):
-                name_node = node.child_by_field_name("name")
-                if name_node and name_node.text.decode("utf-8") == block.function_name:
-                    if node.start_point[0] + 1 == block.start_line:
-                        for call_node in self._iter_call_nodes(node):
-                            yield call_node
-                        break
+        yield from self._iter_calls_cached(block, source)
 
     def _iter_call_nodes(self, func_node):
         """Walk function body and yield CallNode for each `call`."""
