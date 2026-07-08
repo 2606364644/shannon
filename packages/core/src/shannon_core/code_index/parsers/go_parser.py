@@ -20,8 +20,15 @@ def _walk(node):
 
 
 class GoParser(BaseParser):
+    _FUNC_NODE_TYPES = ("function_declaration", "method_declaration")
+
     def __init__(self):
         self._parser = Parser(GO_LANGUAGE)
+        # id(source) -> {(function_name, start_line): [CallNode]}. iter_calls is
+        # invoked once per function block by detect_sinks; without this cache every
+        # call re-parses the whole file (O(M*file_size) per file). See
+        # TestGoParserIterCallsCaching / the 2026-07-08 pre-recon deadlock.
+        self._call_index_cache: dict[int, dict[tuple[str, int], list[CallNode]]] = {}
 
     def parse_file(self, file_path: Path, repo_root: Path) -> list[FuncBlock]:
         source = file_path.read_bytes()
@@ -154,15 +161,34 @@ class GoParser(BaseParser):
         return None
 
     def iter_calls(self, block: FuncBlock, source: bytes):
+        # Parse + walk each source exactly once, then reuse the index for every
+        # block in it. (Was: re-parse + re-walk per block = O(M*file_size)/file.)
+        index = self._call_index(source)
+        yield from index.get((block.function_name, block.start_line), [])
+
+    def _call_index(self, source: bytes) -> dict[tuple[str, int], list[CallNode]]:
+        """Build and cache (by id(source)) {(func_name, start_line): [CallNode]}.
+
+        detect_sinks calls iter_calls once per function block in a file; without
+        caching, an M-function file was parsed M times (O(M * file_size)) — on a
+        1207-file Go repo this pegged a CPU core for 1.5h and deadlocked
+        pre-recon step 0 (py-spy showed the worker stuck here, MCP idle).
+        """
+        key = id(source)
+        cached = self._call_index_cache.get(key)
+        if cached is not None:
+            return cached
         tree = self._parser.parse(source)
+        index: dict[tuple[str, int], list[CallNode]] = {}
         for node in _walk(tree.root_node):
-            if node.type in ("function_declaration", "method_declaration"):
+            if node.type in self._FUNC_NODE_TYPES:
                 name_node = node.child_by_field_name("name")
-                if name_node and name_node.text.decode("utf-8") == block.function_name:
-                    if node.start_point[0] + 1 == block.start_line:
-                        for call_node in self._iter_call_nodes(node):
-                            yield call_node
-                        break
+                if name_node:
+                    name = name_node.text.decode("utf-8")
+                    line = node.start_point[0] + 1
+                    index[(name, line)] = list(self._iter_call_nodes(node))
+        self._call_index_cache[key] = index
+        return index
 
     def _iter_call_nodes(self, func_node):
         for node in _walk(func_node):
