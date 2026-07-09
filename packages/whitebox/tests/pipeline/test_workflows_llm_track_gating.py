@@ -208,3 +208,32 @@ def test_recon_skip_logs_info():
                for m in else_msgs), (
         "关轨(else)分支必须含 log_info_activity 提示 'recon ... skipped', "
         f"实际 else 消息: {else_msgs}")
+
+
+# --- GitNexus 轨防回退: 误关塌双轨 (characterization, 锁既有正确行为) ---
+
+def test_vuln_agent_only_in_llm_on_body():
+    """vuln agent (run_vuln_agent) 维持现状: 只在开轨 body."""
+    calls = _llm_track_branch_activity_calls(_src())
+    branches = {b for attr, _, b in calls if attr == "run_vuln_agent"}
+    assert branches == {"body"}, (
+        f"run_vuln_agent 应只在 body(开轨), 实际: {branches}")
+
+
+def test_gitnexus_judges_outside_llm_gate():
+    """3 个 GitNexus judge 是确定性轨, 绝不能被 enable_llm_track gate(误关塌双轨)."""
+    calls = _llm_track_branch_activity_calls(_src())
+    gated = {attr for attr, _, b in calls}
+    for judge in ("run_auth_gitnexus_judge",
+                  "run_authz_gitnexus_judge",
+                  "run_gitnexus_chain_verdict"):
+        assert judge not in gated, (
+            f"{judge} 是 GitNexus 确定性轨, 不得在 enable_llm_track gate 内(会塌双轨)")
+
+
+def test_merge_dual_track_outside_llm_gate():
+    """merge 是纯合并(容忍空轨), 不受 gate 控制."""
+    calls = _llm_track_branch_activity_calls(_src())
+    gated = {attr for attr, _, b in calls}
+    assert "run_merge_dual_track_queues" not in gated, (
+        "run_merge_dual_track_queues 不得在 enable_llm_track gate 内")
