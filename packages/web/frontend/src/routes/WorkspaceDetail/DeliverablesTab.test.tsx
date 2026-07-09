@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { DeliverablesTab } from "./DeliverablesTab";
 
 // 三种 merge_source + injection 无 queue + 空 files 的合并 fixture
@@ -22,6 +23,8 @@ function makeSummary(overrides: Partial<{
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -329,5 +332,53 @@ describe("DeliverablesTab", () => {
     expect(screen.getAllByRole("alert").length).toBeGreaterThanOrEqual(1);
     // 守卫：左侧 vuln grid 标题仍可见（页面主体未崩）
     expect(screen.getByText(/漏洞聚合/)).toBeInTheDocument();
+  });
+});
+
+describe("DeliverablesTab i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("切英文后聚合标题变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
+    );
+    renderAt("/p/ws/deliverables");
+    await screen.findByText(/漏洞聚合/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText(/Vulnerability aggregation/)).toBeInTheDocument();
+  });
+
+  it("切英文后空态标题变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
+    );
+    renderAt("/p/ws/deliverables");
+    await screen.findByText(/暂无聚合漏洞/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("No aggregated vulnerabilities")).toBeInTheDocument();
+  });
+
+  it("切英文后 injection 类 badge 变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", () =>
+        HttpResponse.json(makeSummary({ notes: { injection_has_no_queue: true } })),
+      ),
+    );
+    renderAt("/p/ws/deliverables");
+    await screen.findByText(/injection 类/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText(/injection class/)).toBeInTheDocument();
+  });
+
+  it("切英文后产物加载失败变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/deliverables", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+    renderAt("/p/ws/deliverables");
+    await screen.findByText(/产物加载失败/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText(/Deliverables load failed/)).toBeInTheDocument();
   });
 });

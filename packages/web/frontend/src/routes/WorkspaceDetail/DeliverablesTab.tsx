@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { apiGet, apiGetText } from "../../api/client";
 import type { DeliverablesSummary, DeliverablesFile } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
@@ -11,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function DeliverablesTab() {
+  const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
   const [data, setData] = useState<DeliverablesSummary | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function DeliverablesTab() {
   }, [workspace]);
 
   // 三态早返回（同 Task 9 模式）：err → ErrorState；loading → Skeleton；data → 主布局
-  if (err) return <ErrorState message={`产物加载失败：${err}`} />;
+  if (err) return <ErrorState message={t("workspaceDetail.deliverables.loadError", { error: err })} />;
   if (loading) {
     return (
       <div className="space-y-2">
@@ -42,7 +44,7 @@ export function DeliverablesTab() {
     <div className="grid grid-cols-[1fr_360px] items-start gap-5">
       <div className="space-y-2">
         <h3 className="mb-2 font-semibold tracking-tight text-base">
-          漏洞聚合 · {data.aggregated_vulnerabilities.length}
+          {t("workspaceDetail.deliverables.aggTitle")} · {data.aggregated_vulnerabilities.length}
         </h3>
         {data.notes?.injection_has_no_queue && (
           /*
@@ -54,14 +56,14 @@ export function DeliverablesTab() {
             <Badge
               variant="outline"
               className="text-muted-foreground"
-              title="injection 走 GitNexus 轨候选，不产独立 exploitation queue"
+              title={t("workspaceDetail.deliverables.injectionHint")}
             >
-              💡 injection 类
+              {t("workspaceDetail.deliverables.injectionBadge")}
             </Badge>
           </div>
         )}
         {data.aggregated_vulnerabilities.length === 0 && (
-          <Empty title="暂无聚合漏洞" hint="扫描未完成或无 vuln 命中" />
+          <Empty title={t("workspaceDetail.deliverables.emptyTitle")} hint={t("workspaceDetail.deliverables.emptyHint")} />
         )}
         {data.aggregated_vulnerabilities.map((v) => <VulnCard key={v.ID} v={v} />)}
       </div>
@@ -74,6 +76,7 @@ export function DeliverablesTab() {
 }
 
 function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
+  const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -86,15 +89,15 @@ function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
     }
   }, [ws, file.path]);
   // 文件预览失败：局部 ErrorState（不整页崩，左侧 vuln grid 仍可用）
-  if (err) return <ErrorState message={`文件加载失败：${err}`} />;
-  if (file.kind === "empty_json") return <div className="text-sm text-muted-foreground">无数据（常态空）</div>;
+  if (err) return <ErrorState message={t("workspaceDetail.deliverables.fileLoadError", { error: err })} />;
+  if (file.kind === "empty_json") return <div className="text-sm text-muted-foreground">{t("workspaceDetail.deliverables.emptyJson")}</div>;
   if (file.kind === "big_json")
     // apiGetText 无 range/limit 支持，大 JSON 全量拉取代价高且卡 UI。
     // 改为诚实的『文件过大』提示 + 字节数，引导用户去产物目录/日志查看，
     // 不渲染永远为空的 <pre>（content 未 fetch，旧实现是死预览）。
     return (
       <div className="text-sm text-yellow">
-        ⚠ 文件过大（{file.size} 字节），请在产物目录查看
+        {t("workspaceDetail.deliverables.bigJson", { size: file.size })}
       </div>
     );
   if (file.kind === "md") return <MarkdownViewLazy content={content} />;
@@ -102,5 +105,6 @@ function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
 }
 
 function MarkdownViewLazy({ content }: { content: string }) {
-  return content ? <MarkdownView markdown={content} /> : <div className="text-sm text-muted-foreground">加载…</div>;
+  const { t } = useTranslation();
+  return content ? <MarkdownView markdown={content} /> : <div className="text-sm text-muted-foreground">{t("workspaceDetail.deliverables.loadingPreview")}</div>;
 }

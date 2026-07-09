@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { OverviewTab } from "./OverviewTab";
 
 const session = {
@@ -18,6 +19,8 @@ const session = {
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -88,5 +91,31 @@ describe("OverviewTab", () => {
     );
     renderAt("/p/ws/overview");
     await waitFor(() => expect(screen.getByText(/等待扫描/)).toBeInTheDocument());
+  });
+});
+
+describe("OverviewTab i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("切英文后空态标题/hint 变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws", () =>
+        HttpResponse.json({ ...session, metrics: undefined }),
+      ),
+    );
+    renderAt("/p/ws/overview");
+    await screen.findByText(/等待扫描/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("Waiting for scan")).toBeInTheDocument();
+    expect(screen.getByText(/will appear after the pre-recon phase/)).toBeInTheDocument();
+  });
+
+  it("切英文后阶段瀑布/agent 账本标题变英文", async () => {
+    server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json(session)));
+    renderAt("/p/ws/overview");
+    await waitFor(() => expect(screen.getByText(/pre-recon/)).toBeInTheDocument());
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("Phase waterfall")).toBeInTheDocument();
+    expect(screen.getByText("Agent ledger")).toBeInTheDocument();
   });
 });

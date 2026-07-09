@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { FixedSizeList } from "react-window";
 import { apiGet } from "../../api/client";
 import { ErrorState } from "../../components/ErrorState";
@@ -46,6 +47,7 @@ function VirtualLines({ lines, height }: { lines: string[]; height: number }) {
 }
 
 export function LogsTab() {
+  const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
   const [files, setFiles] = useState<string[]>([]);
   const [filesErr, setFilesErr] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export function LogsTab() {
     setFilesErr(null);
     apiGet<{ files: string[] }>(`/workspaces/${workspace}/logs`)
       .then((r) => setFiles(r.files))
-      .catch((e: unknown) => setFilesErr(e instanceof Error ? e.message : "加载日志文件列表失败"))
+      .catch((e: unknown) => setFilesErr(e instanceof Error ? e.message : t("workspaceDetail.logs.listLoadError")))
       .finally(() => setFilesLoading(false));
   }, [workspace]);
 
@@ -82,7 +84,7 @@ export function LogsTab() {
     setContentErr(null);
     apiGet<{ content: string }>(`/workspaces/${workspace}/logs?file=${encodeURIComponent(sel)}`)
       .then((r) => setContent(r.content ?? ""))
-      .catch((e: unknown) => setContentErr(e instanceof Error ? e.message : "加载日志内容失败"));
+      .catch((e: unknown) => setContentErr(e instanceof Error ? e.message : t("workspaceDetail.logs.contentLoadError")));
   }, [workspace, sel]);
 
   const isJsonl = sel?.endsWith(".log") && !sel.endsWith("workflow.log") && !sel.endsWith("activity_failures.log");
@@ -95,7 +97,7 @@ export function LogsTab() {
         {filesLoading && <Skeleton className="h-4 w-full" />}
         {filesErr && <ErrorState message={filesErr} />}
         {!filesLoading && !filesErr && files.length === 0 && (
-          <Empty icon="∅" title="暂无日志文件" hint="扫描启动后会生成 workflow.log 等" />
+          <Empty icon="∅" title={t("workspaceDetail.logs.emptyTitle")} hint={t("workspaceDetail.logs.emptyHint")} />
         )}
         {files.map((f) => (
           <button
@@ -110,11 +112,11 @@ export function LogsTab() {
         ))}
       </div>
       <div ref={viewportRef} className="overflow-auto h-full">
-        {!sel && <div className="text-sm text-muted-foreground">选择左侧日志文件</div>}
+        {!sel && <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.selectHint")}</div>}
         {sel && contentErr && <ErrorState message={contentErr} />}
         {sel && !contentErr && isJsonl && big ? (
           <>
-            <div className="text-sm text-muted-foreground">⚠ 大文件（{lines.length} 行），虚拟滚动渲染</div>
+            <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.bigFileHint", { count: lines.length })}</div>
             <VirtualLines lines={lines} height={viewportH} />
           </>
         ) : sel && !contentErr && isJsonl ? (

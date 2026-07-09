@@ -228,5 +228,54 @@
     "errors": {
       "loadFailed": "Status load failed: {{error}}"
     }
+  },
+  "workspaceDetail": {
+    "overview": {
+      "loadError": "Overview load failed: {{error}}",
+      "waitTitle": "Waiting for scan",
+      "waitHint": "metrics will appear after the pre-recon phase",
+      "statusConflict": "⚠ top-level {{topLevel}} vs session.{{sessionLevel}}",
+      "phaseWaterfall": "Phase waterfall",
+      "agentLedger": "Agent ledger"
+    },
+    "report": {
+      "loadError": "Report load failed: {{error}}",
+      "emptyTitle": "Report not generated yet",
+      "emptyHint": "Will appear here once the scan completes"
+    },
+    "deliverables": {
+      "loadError": "Deliverables load failed: {{error}}",
+      "aggTitle": "Vulnerability aggregation",
+      "injectionHint": "injection uses GitNexus track candidates; no standalone exploitation queue",
+      "injectionBadge": "💡 injection class",
+      "emptyTitle": "No aggregated vulnerabilities",
+      "emptyHint": "Scan incomplete or no vuln hits",
+      "fileLoadError": "File load failed: {{error}}",
+      "emptyJson": "No data (normal empty)",
+      "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
+      "loadingPreview": "Loading…"
+    },
+    "logs": {
+      "listLoadError": "Failed to load log file list",
+      "contentLoadError": "Failed to load log content",
+      "emptyTitle": "No log files",
+      "emptyHint": "workflow.log etc. will be generated once the scan starts",
+      "selectHint": "Select a log file on the left",
+      "bigFileHint": "⚠ Large file ({{count}} lines), virtual scroll rendering"
+    },
+    "live": {
+      "statusOpen": "Connected",
+      "statusError": "Reconnecting",
+      "statusClosed": "Ended",
+      "endFailed": "Scan failed",
+      "endInterrupted": "Scan interrupted",
+      "endKilled": "Scan killed",
+      "endCrashed": "Scan crashed",
+      "endIncomplete": "Scan incomplete",
+      "stalledHint": "Reconnecting to the live channel, or the scan has no progress data yet. If there's no update for a long time, the scan may have been interrupted due to a service restart or process exit.",
+      "endedTitle": "Scan ended",
+      "endedHint": "View the full report",
+      "viewReport": "View report"
+    }
   }
 }

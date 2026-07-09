@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { LogsTab } from "./LogsTab";
 
 // LogsTab 用 apiGet<{content:string}> 取文件（JSON 解析），故 ?file= 响应须返 {content}。
@@ -10,6 +11,8 @@ import { LogsTab } from "./LogsTab";
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -140,5 +143,48 @@ describe("LogsTab", () => {
     );
     renderAt("/p/ws/logs");
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
+});
+
+describe("LogsTab i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("切英文后空态标题变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/logs", () => HttpResponse.json({ files: [] })),
+    );
+    renderAt("/p/ws/logs");
+    await screen.findByText(/暂无日志文件/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("No log files")).toBeInTheDocument();
+    expect(screen.getByText(/will be generated once the scan starts/)).toBeInTheDocument();
+  });
+
+  it("切英文后『选择左侧日志文件』变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/logs", () => HttpResponse.json({ files: ["workflow.log"] })),
+    );
+    renderAt("/p/ws/logs");
+    await screen.findByText("workflow.log");
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("Select a log file on the left")).toBeInTheDocument();
+  });
+
+  it("日志行内容不随语言变化（数据不动）", async () => {
+    const logLine = JSON.stringify({ ts: "t1", type: "AgentEvent", message: "hello" });
+    server.use(
+      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("file")) return HttpResponse.json({ content: logLine });
+        return HttpResponse.json({ files: ["recon.log"] });
+      }),
+    );
+    renderAt("/p/ws/logs");
+    await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("recon.log"));
+    await waitFor(() => expect(screen.getByText(/hello/)).toBeInTheDocument());
+    await i18n.changeLanguage("en");
+    // 日志内容仍是原始数据（不受语言切换影响）
+    expect(screen.getByText(/hello/)).toBeInTheDocument();
   });
 });

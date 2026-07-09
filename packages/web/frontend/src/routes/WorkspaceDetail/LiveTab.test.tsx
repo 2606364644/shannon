@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import i18n from "@/i18n";
 import LiveTab from "./LiveTab";
 
 // mock useEventSource 返回受控 events（module-level mutable，每 test 改写）
@@ -16,6 +17,9 @@ function renderLive() {
     </MemoryRouter>,
   );
 }
+
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 
 describe("LiveTab", () => {
   it("渲染 DashboardPanel + LogStream 容器（aria-live）", () => {
@@ -98,5 +102,42 @@ describe("LiveTab", () => {
       const matches = screen.getAllByText(/vulnerability-analysis/);
       expect(matches.some((el) => el.classList.contains("font-bold"))).toBe(true);
     });
+  });
+});
+
+describe("LiveTab i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("切英文后连接态徽章变 Connected", async () => {
+    eventsState.events = [];
+    eventsState.status = "open";
+    renderLive();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+  });
+
+  it("切英文后 scan_end completed 显示 View report 按钮", async () => {
+    eventsState.events = [
+      { type: "scan_end", status: "completed", ts: "2026-01-01T00:00:00Z", category: "CONTROL" },
+    ];
+    eventsState.status = "closed";
+    renderLive();
+    expect(screen.getByRole("button", { name: /查看报告/ })).toBeInTheDocument();
+    await i18n.changeLanguage("en");
+    expect(await screen.findByRole("button", { name: /View report/ })).toBeInTheDocument();
+  });
+
+  it("切英文后 scan_end interrupted 显示 Scan interrupted", async () => {
+    eventsState.events = [
+      { type: "scan_end", status: "interrupted", stderr_tail: "扫描因服务重启被中断", ts: "2026-01-01T00:00:00Z", category: "CONTROL" },
+    ];
+    eventsState.status = "closed";
+    renderLive();
+    expect(screen.getByText(/扫描已中断/)).toBeInTheDocument();
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText(/Scan interrupted/)).toBeInTheDocument();
+    // stderr_tail 是事件流数据，不随语言变化
+    expect(screen.getByText(/扫描因服务重启被中断/)).toBeInTheDocument();
   });
 });

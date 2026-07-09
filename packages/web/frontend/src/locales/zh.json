@@ -228,5 +228,54 @@
     "errors": {
       "loadFailed": "状态加载失败：{{error}}"
     }
+  },
+  "workspaceDetail": {
+    "overview": {
+      "loadError": "概览加载失败：{{error}}",
+      "waitTitle": "等待扫描",
+      "waitHint": "metrics 将在 pre-recon 阶段后出现",
+      "statusConflict": "⚠ 顶层 {{topLevel}} vs session.{{sessionLevel}}",
+      "phaseWaterfall": "阶段瀑布",
+      "agentLedger": "agent 账本"
+    },
+    "report": {
+      "loadError": "报告加载失败：{{error}}",
+      "emptyTitle": "报告尚未生成",
+      "emptyHint": "扫描完成后将在此呈现"
+    },
+    "deliverables": {
+      "loadError": "产物加载失败：{{error}}",
+      "aggTitle": "漏洞聚合",
+      "injectionHint": "injection 走 GitNexus 轨候选，不产独立 exploitation queue",
+      "injectionBadge": "💡 injection 类",
+      "emptyTitle": "暂无聚合漏洞",
+      "emptyHint": "扫描未完成或无 vuln 命中",
+      "fileLoadError": "文件加载失败：{{error}}",
+      "emptyJson": "无数据（常态空）",
+      "bigJson": "⚠ 文件过大（{{size}} 字节），请在产物目录查看",
+      "loadingPreview": "加载…"
+    },
+    "logs": {
+      "listLoadError": "加载日志文件列表失败",
+      "contentLoadError": "加载日志内容失败",
+      "emptyTitle": "暂无日志文件",
+      "emptyHint": "扫描启动后会生成 workflow.log 等",
+      "selectHint": "选择左侧日志文件",
+      "bigFileHint": "⚠ 大文件（{{count}} 行），虚拟滚动渲染"
+    },
+    "live": {
+      "statusOpen": "已连接",
+      "statusError": "重连中",
+      "statusClosed": "已结束",
+      "endFailed": "扫描失败",
+      "endInterrupted": "扫描已中断",
+      "endKilled": "扫描被终止",
+      "endCrashed": "扫描崩溃",
+      "endIncomplete": "扫描未完成",
+      "stalledHint": "正在重连实时通道，或扫描暂无进度数据。若长时间无更新，扫描可能已因服务重启或进程退出被中断。",
+      "endedTitle": "扫描结束",
+      "endedHint": "可查看完整报告",
+      "viewReport": "查看报告"
+    }
   }
 }

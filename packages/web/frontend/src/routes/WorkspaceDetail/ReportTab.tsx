@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { apiGetText } from "../../api/client";
 import { MarkdownView } from "../../components/MarkdownView";
 import { ErrorState } from "../../components/ErrorState";
@@ -7,6 +8,7 @@ import { Empty } from "../../components/Empty";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function ReportTab() {
+  const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
   const [md, setMd] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -17,10 +19,10 @@ export function ReportTab() {
     setErr(null);
     setMd("");
     apiGetText(`/workspaces/${workspace}/report`)
-      .then((t) => { setMd(t); setLoading(false); })
+      .then((txt) => { setMd(txt); setLoading(false); })
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
   }, [workspace]);
-  if (err) return <ErrorState message={`报告加载失败：${err}`} />;
+  if (err) return <ErrorState message={t("workspaceDetail.report.loadError", { error: err })} />;
   if (loading) {
     return (
       <div className="space-y-2">
@@ -28,7 +30,7 @@ export function ReportTab() {
       </div>
     );
   }
-  if (!md) return <Empty title="报告尚未生成" hint="扫描完成后将在此呈现" />;
+  if (!md) return <Empty title={t("workspaceDetail.report.emptyTitle")} hint={t("workspaceDetail.report.emptyHint")} />;
   return (
     <div className="rounded-md border border-border bg-card p-4">
       <MarkdownView markdown={md} />

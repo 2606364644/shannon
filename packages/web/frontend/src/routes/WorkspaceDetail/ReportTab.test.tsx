@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { ReportTab } from "./ReportTab";
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -76,5 +79,37 @@ describe("ReportTab", () => {
     await waitFor(() => expect(screen.getByText(/报告尚未生成/)).toBeInTheDocument());
     // 守卫：不渲染 Skeleton 加载态
     expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportTab i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("切英文后空态标题变英文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/report", () =>
+        new HttpResponse("", { headers: { "content-type": "text/plain" } }),
+      ),
+    );
+    renderAt("/p/ws/report");
+    await screen.findByText(/报告尚未生成/);
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("Report not generated yet")).toBeInTheDocument();
+    expect(screen.getByText(/Will appear here once the scan completes/)).toBeInTheDocument();
+  });
+
+  it("报告正文 Markdown 内容不随语言变化（数据不动）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/report", () =>
+        new HttpResponse(MD, { headers: { "content-type": "text/plain" } }),
+      ),
+    );
+    renderAt("/p/ws/report");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument(),
+    );
+    await i18n.changeLanguage("en");
+    // 报告正文仍是中文（LLM 生成的数据，不受语言切换影响）
+    expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import type { SessionData, SessionMetrics } from "../../api/types";
 import { fmtCost } from "../../utils/currency";
 import { apiGet } from "../../api/client";
@@ -19,6 +20,7 @@ function fmtMs(ms: number): string {
 }
 
 export function OverviewTab() {
+  const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
   const [s, setS] = useState<SessionData | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export function OverviewTab() {
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
   }, [workspace]);
 
-  if (err) return <ErrorState message={`概览加载失败：${err}`} />;
+  if (err) return <ErrorState message={t("workspaceDetail.overview.loadError", { error: err })} />;
   if (loading) {
     return (
       <div className="space-y-2">
@@ -40,7 +42,7 @@ export function OverviewTab() {
     );
   }
   if (!s?.metrics) {
-    return <Empty title="等待扫描" hint="metrics 将在 pre-recon 阶段后出现" />;
+    return <Empty title={t("workspaceDetail.overview.waitTitle")} hint={t("workspaceDetail.overview.waitHint")} />;
   }
 
   const m = s.metrics;
@@ -60,7 +62,7 @@ export function OverviewTab() {
           */}
           {statusConflict && (
             <Badge variant="outline" className="border-yellow/40 text-yellow">
-              ⚠ 顶层 {s.status} vs session.{s.session!.status}
+              {t("workspaceDetail.overview.statusConflict", { topLevel: s.status, sessionLevel: s.session!.status })}
             </Badge>
           )}
         </div>
@@ -91,10 +93,11 @@ export function OverviewTab() {
 }
 
 function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt: (ms: number) => string }) {
+  const { t } = useTranslation();
   const entries = Object.entries(phases);
   return (
     <Card className="p-4">
-      <CardTitle className="mb-2 font-semibold tracking-tight text-base">阶段瀑布</CardTitle>
+      <CardTitle className="mb-2 font-semibold tracking-tight text-base">{t("workspaceDetail.overview.phaseWaterfall")}</CardTitle>
       <div className="flex items-end gap-0.5 h-20">
         {entries.map(([name, p]) => (
           <div
@@ -115,9 +118,10 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
 }
 
 function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (ms: number) => string }) {
+  const { t } = useTranslation();
   return (
     <Card className="p-4">
-      <CardTitle className="mb-2 font-semibold tracking-tight text-base">agent 账本</CardTitle>
+      <CardTitle className="mb-2 font-semibold tracking-tight text-base">{t("workspaceDetail.overview.agentLedger")}</CardTitle>
       <Table>
         <TableHeader>
           <TableRow>
