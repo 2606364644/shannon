@@ -75,17 +75,23 @@ def test_no_llm_track_prompt_has_forbidden_placeholders():
 
 
 def test_fusion_guarded_by_enable_llm_track():
-    """反方向 fusion（run_merge_sink_reports / run_entry_point_fusion）必须受
-    enable_llm_track 显式守卫——用 AST 确认每个 fusion Call 节点有
-    input.enable_llm_track 的 If 祖先（不是靠 PRE_RECON 不产出文件间接降级）。
+    """反方向 fusion run_merge_sink_reports 必须受 enable_llm_track 显式守卫——
+    用 AST 确认它的 Call 节点有 input.enable_llm_track 的 If 祖先（不是靠
+    PRE_RECON 不产出文件间接降级）。
 
-    CLAUDE.md §1 / Task 5: 这两个 fusion activity 把 LLM pre-recon 产出的
-    sink/entry-point 与确定性层合并，语义上依赖 LLM 轨产物，应在 LLM 轨关闭时
-    显式跳过整个 activity，而非靠文件不存在间接降级。
+    CLAUDE.md §1 / Task 5: 它把 LLM pre-recon 产出的 sink 与确定性层合并，语义上
+    依赖 LLM 轨产物，应在 LLM 轨关闭时显式跳过整个 activity，而非靠文件不存在
+    间接降级。
+
+    G6 例外（commit eb60763d, 2026-07-02）：run_entry_point_fusion 不在此列——它有
+    确定性 OpenAPI schema 源，关 LLM 轨时也要跑（融合 schema 入口兜底，LLM 源靠
+    deliverable 不存在内部 skip），故移出 enable_llm_track 守卫。该"必须在守卫外"
+    由白盒侧 test_workflows_safety.py::test_entry_point_fusion_not_gated_by_llm_track
+    锁定，此处不重复断言。
 
     注：workflows.py 另有 `if input.enable_llm_track:` 守卫（vuln-agent 块，预存），
     朴素 grep 该字符串会 assert-nothing（守卫在、fusion 不在守卫内也绿）。AST 遍历
-    锁定每个 fusion Call 节点的 If 祖先 test 必须是 input.enable_llm_track。"""
+    锁定 fusion Call 节点的 If 祖先 test 必须是 input.enable_llm_track。"""
     import ast
 
     tree = ast.parse(WORKFLOWS_PY.read_text())
@@ -94,7 +100,10 @@ def test_fusion_guarded_by_enable_llm_track():
         for child in ast.iter_child_nodes(parent):
             parents[child] = parent
 
-    FUSION_ATTRS = ("run_merge_sink_reports", "run_entry_point_fusion")
+    # 仅守 run_merge_sink_reports（语义依赖 LLM sink deliverable，关 LLM 轨该停）。
+    # run_entry_point_fusion 因 G6 有确定性 schema 源、移出守卫，见上面 docstring
+    # 与白盒侧 test_entry_point_fusion_not_gated_by_llm_track。
+    FUSION_ATTRS = ("run_merge_sink_reports",)
 
     # fusion activity 作为 execute_activity(activities.<name>, ...) 的首参传入
     # （不是 node.func）；扫每个 Call 的 args / keywords 里出现的 Attribute 引用。
