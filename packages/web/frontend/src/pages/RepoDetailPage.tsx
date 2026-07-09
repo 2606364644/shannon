@@ -71,7 +71,7 @@ export function RepoDetailPage() {
         <Link to="/repos" className="text-sm text-muted-foreground hover:underline">{t("repoDetail.backToRepos")}</Link>
         <h1 className="font-semibold tracking-tight text-lg">{repo.name}</h1>
         <span className={repo.state === "ready" ? "text-green text-sm" : repo.state === "failed" ? "text-destructive text-sm" : "text-muted-foreground text-sm"}>
-          {repo.state}
+          {t(`repos.states.${repo.state}`, { defaultValue: repo.state })}
         </span>
       </div>
 

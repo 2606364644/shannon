@@ -64,7 +64,7 @@ describe("RepoDetailPage", () => {
   it("stale 状态 -> 显示未完成提示", async () => {
     server.use(http.get("/api/repos/:name", () => HttpResponse.json({ ...repoBody, state: "stale" })));
     renderPage();
-    await waitFor(() => expect(screen.getByText(/未完成/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/上次 clone 未完成/)).toBeInTheDocument());
   });
 });
 
@@ -101,5 +101,39 @@ describe("RepoDetailPage i18n", () => {
     });
     expect(await screen.findByText(/Repository failed to load/i)).toBeInTheDocument();
     expect(screen.getByText(/Back to repositories/i)).toBeInTheDocument();
+  });
+});
+
+describe("RepoDetailPage repo.state 映射", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("已知状态 ready -> 中文映射 ✓ 就绪", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("✓ 就绪")).toBeInTheDocument());
+  });
+
+  it("切英文后 ready -> ✓ Ready", async () => {
+    renderPage();
+    await screen.findByText("foo");
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(await screen.findByText("✓ Ready")).toBeInTheDocument();
+  });
+
+  it("未知状态 fallback 原值(zh)", async () => {
+    server.use(http.get("/api/repos/:name", () => HttpResponse.json({ ...repoBody, state: "some-new-state" })));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("some-new-state")).toBeInTheDocument());
+  });
+
+  it("未知状态 fallback 原值(en)", async () => {
+    server.use(http.get("/api/repos/:name", () => HttpResponse.json({ ...repoBody, state: "some-new-state" })));
+    renderPage();
+    await screen.findByText("some-new-state");
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(screen.getByText("some-new-state")).toBeInTheDocument();
   });
 });
