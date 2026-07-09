@@ -172,3 +172,107 @@ class TestAgentBrowserEngineAvailability:
         engine = AgentBrowserEngine()
         result = engine.check_available()
         assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Process lifecycle – cleanup_processes
+# ---------------------------------------------------------------------------
+
+
+class TestAgentBrowserEngineCleanupProcesses:
+    """cleanup_processes: 优雅 close 先于 pkill 兜底,失败吞掉,session 精准隔离。
+
+    用 monkeypatch 替换模块级 subprocess(raising=False),让 RED 阶段(方法尚
+    不存在)干净失败在 AttributeError,而非 subprocess 属性缺失。
+    """
+
+    def test_returns_summary_dict_shape(self, monkeypatch):
+        """返回 dict 含 closed/killed/errors 三键。"""
+        engine = AgentBrowserEngine()
+        _record_subprocess(monkeypatch, returncodes=[0])
+        result = engine.cleanup_processes(session_ids=["s1"])
+        assert set(result.keys()) >= {"closed", "killed", "errors"}
+
+    def test_graceful_close_called_before_pkill(self, monkeypatch):
+        """对每个 session 先跑 agent-browser close;close 成功(rc=0)时不 pkill。"""
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[0])
+        engine.cleanup_processes(session_ids=["agent1"])
+        joined = " ".join(cmds)
+        assert "agent-browser" in joined and "close" in joined  # close 被调
+        assert "pkill" not in joined  # close 成功 -> 不 pkill
+
+    def test_pkill_fallback_when_close_fails(self, monkeypatch):
+        """close 返回非零 -> 触发 pkill 兜底,匹配 profile 路径(精准隔离)。"""
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[1])
+        engine.cleanup_processes(session_ids=["agent1"])
+        joined = " ".join(cmds)
+        assert "pkill" in joined
+        assert "profiles/agent1" in joined  # 带 profile 路径,不误杀并发扫描
+
+    def test_none_session_ids_uses_close_all(self, monkeypatch):
+        """session_ids=None(强退路径)走 close --all。"""
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[0])
+        engine.cleanup_processes(session_ids=None)
+        joined = " ".join(cmds)
+        assert "close --all" in joined
+
+    def test_errors_swallowed_never_raises(self, monkeypatch):
+        """subprocess 抛异常时 cleanup_processes 必须吞掉、填 errors、不 raise。"""
+        engine = AgentBrowserEngine()
+        _raising_subprocess(monkeypatch)
+        result = engine.cleanup_processes(session_ids=["agent1"])
+        assert result["errors"]  # 非空错误列表
+
+    def test_only_targeted_sessions_not_others(self, monkeypatch):
+        """session_ids=['agent1'] 时 pkill 匹配串不含 agent2。"""
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[1])
+        engine.cleanup_processes(session_ids=["agent1"])
+        joined = " ".join(cmds)
+        assert "profiles/agent1" in joined
+        assert "profiles/agent2" not in joined
+
+
+def _record_subprocess(monkeypatch, returncodes):
+    """记录 subprocess.run 收到的命令,可控 returncode。raising=False 让 RED 干净。"""
+    from shannon_core.services.engines import agent_browser_engine as mod
+
+    cmds = []
+
+    class _R:
+        def __init__(self, rc):
+            self.returncode = rc
+
+    it = iter(returncodes)
+
+    class _FakeSub:
+        DEVNULL = -3  # 占位,匹配 subprocess.DEVNULL 用法
+
+        @staticmethod
+        def run(cmd, *a, **kw):
+            cmds.append(" ".join(str(c) for c in cmd))
+            try:
+                rc = next(it)
+            except StopIteration:
+                rc = 0
+            return _R(rc)
+
+    monkeypatch.setattr(mod, "subprocess", _FakeSub, raising=False)
+    return cmds
+
+
+def _raising_subprocess(monkeypatch):
+    """subprocess.run 抛异常的 fake(测 errors 吞掉路径)。"""
+    from shannon_core.services.engines import agent_browser_engine as mod
+
+    class _FakeSub:
+        DEVNULL = -3  # 占位,匹配 subprocess.DEVNULL 用法
+
+        @staticmethod
+        def run(cmd, *a, **kw):
+            raise FileNotFoundError("agent-browser vanished")
+
+    monkeypatch.setattr(mod, "subprocess", _FakeSub, raising=False)
