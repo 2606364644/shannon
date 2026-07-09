@@ -24,11 +24,12 @@ from dataclasses import dataclass
 
 _log = logging.getLogger(__name__)
 
-# 单位：本币（CNY）/ 百万 token。示例数值——执行时按智谱官网核对调整（spec §8）。
-# cache_creation 对 GLM/openai 协议恒 0（无此概念）；claude 引擎走 override 配置。
+# 单位：本币（CNY）/ 百万 token。2026-07-09 已按智谱官网核对（bigmodel.cn/pricing）。
+# glm-4.5-air 取代表档（输入<32K / 输出≥0.2K / 缓存命中 0.16）——pricing 单一档位近似，
+# 阶梯精确计费需扩展 pricing.py。cache_creation 对 GLM/openai 协议恒 0（无此概念）。
 GLM_PRICING_CNY: dict[str, dict[str, float]] = {
-    "glm-4.6": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
-    "glm-5.2": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
+    "glm-5.2": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
+    "glm-4.5-air": {"input": 0.8, "output": 6.0, "cache_read": 0.16, "cache_creation": 0.0},
 }
 
 # 默认 ¥→$ 汇率；单 session 不再使用（本币直达），仅保留供未来跨 session/跨币种聚合。

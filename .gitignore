@@ -15,7 +15,9 @@ workspaces/
 uv.lock
 .turbo/
 .env
-.env.profiles/
+# .env.profiles/ 下的 .env 含真实 token/key 不入库；但 *.pricing.json 只有价格数值（无 secret），入库供团队共享
+.env.profiles/*
+!.env.profiles/*.pricing.json
 .env.bak
 .env.bak.*
 configs/moomoo.yaml

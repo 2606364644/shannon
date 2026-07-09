@@ -1,8 +1,0 @@
-{
-  "currency": "CNY",
-  "models": {
-    "glm-5.2": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
-    "glm-4.6": {"input": 50.0, "output": 50.0, "cache_read": 12.5, "cache_creation": 0.0},
-    "glm-4.5-air": {"input": 0.5, "output": 0.5, "cache_read": 0.125, "cache_creation": 0.0}
-  }
-}
