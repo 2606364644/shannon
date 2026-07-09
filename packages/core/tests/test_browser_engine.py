@@ -46,6 +46,9 @@ class _StubEngine:
     def cleanup_config(self, source_dir: str, session_id: str | None = None) -> None:
         pass
 
+    def cleanup_processes(self, source_dir=None, session_ids=None) -> dict:
+        return {"closed": [], "killed": [], "errors": []}
+
     def check_available(self) -> bool:
         return True
 
@@ -290,3 +293,50 @@ class TestRegisteredEngines:
     def test_agent_browser_cli_binary(self):
         from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
         assert AgentBrowserEngine().cli_binary == "agent-browser"
+
+
+# ---------------------------------------------------------------------------
+# cleanup_processes protocol
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupProcessesProtocol:
+    def test_protocol_declares_cleanup_processes(self):
+        """BrowserEngine Protocol 必须声明 cleanup_processes 方法。"""
+        assert hasattr(BrowserEngine, "cleanup_processes")
+
+    def test_engine_without_cleanup_processes_fails_protocol(self):
+        """runtime_checkable 真的检查 cleanup_processes:缺它的对象不满足 Protocol。"""
+
+        class _NoCleanup:
+            @property
+            def name(self) -> str:  # pragma: no cover
+                return "nocleanup"
+
+            @property
+            def cli_binary(self) -> str:  # pragma: no cover
+                return "nocleanup-cli"
+
+            def session_flag(self, session_id: str) -> str:
+                return f"--nocleanup {session_id}"
+
+            def commands_reference(self) -> str:
+                return ""
+
+            def auth_save_command(self, session_id: str, path: str) -> str:
+                return ""
+
+            def auth_load_command(self, session_id: str, path: str) -> str:
+                return ""
+
+            def write_config(self, source_dir, session_id=None) -> dict:
+                return {}
+
+            def cleanup_config(self, source_dir, session_id=None) -> None:
+                pass
+
+            def check_available(self) -> bool:
+                return True
+            # 故意不实现 cleanup_processes
+
+        assert not isinstance(_NoCleanup(), BrowserEngine)

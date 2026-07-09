@@ -79,6 +79,24 @@ class BrowserEngine(Protocol):
         """
         ...
 
+    def cleanup_processes(
+        self,
+        source_dir: str | None = None,
+        session_ids: list[str] | None = None,
+    ) -> dict:
+        """Best-effort 回收 engine 拉起的浏览器进程。
+
+        优先优雅关闭(engine CLI 的 close 命令),失败/残留再 pkill 兜底。
+        清理失败一律 log + 吞(不反过来崩扫描)。
+
+        - session_ids 非空:只清理这些 session(精准隔离,不误杀并发扫描)。
+        - session_ids 为 None:清理 source_dir profile 下全部 session
+          (_force_exit 强退路径用,粗粒度兜底)。
+
+        返回 ``{"closed": [...], "killed": [...], "errors": [...]}`` 摘要。
+        """
+        ...
+
     def check_available(self) -> bool:
         """Check whether the engine CLI is installed and usable."""
         ...
