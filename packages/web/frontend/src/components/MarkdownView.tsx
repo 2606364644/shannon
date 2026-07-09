@@ -346,7 +346,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       {showHero && (
         <div
           data-testid="exec-summary-hero"
-          className="rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4"
+          className="rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4 shadow-[var(--shadow-card)]"
         >
           <div className="mb-2 flex items-center justify-between font-semibold tracking-tight text-base">
             <span>{t("markdown.topRisksTitle")}</span>

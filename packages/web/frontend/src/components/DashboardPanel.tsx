@@ -19,7 +19,7 @@ export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; el
   const { t } = useTranslation();
   const running = Object.values(state.agents).filter((a) => a.status === "running");
   return (
-    <div className="rounded-md border border-border bg-card p-3">
+    <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sm">
         <span className="font-bold text-cyan">{state.current_phase ?? "—"}</span>
         <span className="text-muted-foreground">step {state.completed_units}/{state.total_units}</span>

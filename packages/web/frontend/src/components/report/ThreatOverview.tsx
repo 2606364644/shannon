@@ -16,7 +16,7 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
     <section
       data-testid="threat-overview"
       aria-label={t("report.ariaLabel")}
-      className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card md:grid-cols-[200px_1fr_280px]"
+      className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)] md:grid-cols-[200px_1fr_280px]"
     >
       {/* 左：总数 */}
       <div className="flex flex-col justify-center border-border p-4 md:border-r">

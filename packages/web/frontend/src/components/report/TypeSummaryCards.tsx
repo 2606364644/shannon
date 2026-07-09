@@ -20,7 +20,7 @@ export function TypeSummaryCards({ typeAggs }: { typeAggs: TypeAgg[] }) {
           key={t.prefix}
           data-testid="type-card"
           data-prefix={t.prefix}
-          className="relative overflow-hidden rounded-md border border-border bg-card p-3.5"
+          className="relative overflow-hidden rounded-md border border-border bg-card p-3.5 shadow-[var(--shadow-card)]"
         >
           <div
             data-testid="type-card-stripe"
