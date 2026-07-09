@@ -68,7 +68,7 @@ describe("ThreatOverview", () => {
     i18n.changeLanguage("en");
     const { container } = render(<ThreatOverview stats={makeStats()} />);
     expect(container.textContent).toContain("Confirmed vulns");
-    expect(container.textContent).toContain("1 types");
+    expect(container.textContent).toContain("1 type");
     expect(container.textContent).toContain("Public reachable");
     expect(container.textContent).toContain("By severity distribution");
     expect(container.textContent).toContain("Priority fixes");

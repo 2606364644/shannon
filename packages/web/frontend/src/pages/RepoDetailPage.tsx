@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import i18n from "@/i18n";
 import { getRepo, pullRepo, checkoutRepo, ApiError } from "@/api/client";
 import type { RepoDetail } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -22,9 +23,9 @@ export function RepoDetailPage() {
     let cancelled = false;
     getRepo(name)
       .then((res) => { if (!cancelled) setRepo(res); })
-      .catch(() => { if (!cancelled) { setError(true); toast.error(t("repoDetail.errors.loadFailed")); } });
+      .catch(() => { if (!cancelled) { setError(true); toast.error(i18n.t("repoDetail.errors.loadFailed")); } });
     return () => { cancelled = true; };
-  }, [name, t]);
+  }, [name]);
 
   async function doCheckout() {
     if (!branch.trim()) return;
@@ -70,7 +71,7 @@ export function RepoDetailPage() {
       <div className="flex items-center gap-3">
         <Link to="/repos" className="text-sm text-muted-foreground hover:underline">{t("repoDetail.backToRepos")}</Link>
         <h1 className="font-semibold tracking-tight text-lg">{repo.name}</h1>
-        <span className={repo.state === "ready" ? "text-green text-sm" : repo.state === "failed" ? "text-destructive text-sm" : "text-muted-foreground text-sm"}>
+        <span title={repo.state} className={repo.state === "ready" ? "text-green text-sm" : repo.state === "failed" ? "text-destructive text-sm" : "text-muted-foreground text-sm"}>
           {t(`repos.states.${repo.state}`, { defaultValue: repo.state })}
         </span>
       </div>

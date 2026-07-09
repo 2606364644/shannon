@@ -192,7 +192,7 @@
       "running": "运行中",
       "completedToday": "今日完成",
       "totalVulns": "累计漏洞",
-      "totalCost": "累计 cost"
+      "totalCost": "累计成本"
     },
     "runningTitle": "正在运行",
     "viewLive": "查看实时 →",
@@ -249,7 +249,8 @@
       "bigCost": "总花费",
       "bigDuration": "时长",
       "bigAgents": "代理数",
-      "phaseAgents": "{{count}} 个代理",
+      "phaseAgents_one": "{{count}} 个代理",
+      "phaseAgents_other": "{{count}} 个代理",
       "agentTable": {
         "agent": "代理",
         "duration": "时长",
@@ -281,7 +282,8 @@
       "emptyTitle": "暂无日志文件",
       "emptyHint": "扫描启动后会生成 workflow.log 等",
       "selectHint": "选择左侧日志文件",
-      "bigFileHint": "⚠ 大文件（{{count}} 行），虚拟滚动渲染"
+      "bigFileHint_one": "⚠ 大文件（{{count}} 行），虚拟滚动渲染",
+      "bigFileHint_other": "⚠ 大文件（{{count}} 行），虚拟滚动渲染"
     },
     "live": {
       "statusOpen": "已连接",
@@ -333,7 +335,8 @@
   },
   "report": {
     "ariaLabel": "威胁概览",
-    "confirmedVulns": "已确认漏洞 · {{count}} 类",
+    "confirmedVulns_one": "已确认漏洞 · {{count}} 类",
+    "confirmedVulns_other": "已确认漏洞 · {{count}} 类",
     "publicReachable": "公网可达",
     "bySeverity": "按 severity 分布",
     "priorityTop": "⚡ 建议优先处置",
