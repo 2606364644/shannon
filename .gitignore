@@ -35,3 +35,4 @@ configs/*.yaml
 
 # agent 工作目录
 /.claude/plans/
+.vscode/settings.json
