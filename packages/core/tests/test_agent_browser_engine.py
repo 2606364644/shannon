@@ -235,6 +235,92 @@ class TestAgentBrowserEngineCleanupProcesses:
         assert "profiles/agent1" in joined
         assert "profiles/agent2" not in joined
 
+    # -- Bug 修复(真机验证发现) -------------------------------------------
+
+    def test_pkill_pattern_has_trailing_space_to_isolate_prefix(self, monkeypatch):
+        """Bug1: Chrome pkill pattern 必须尾随空格,隔离 agent-auth vs agent-authz 前缀。
+
+        真实 session ID 见 AGENT_SESSION_MAPPING:agent-auth 是 agent-authz 的前缀。
+        无尾空格时 pkill 'profiles/agent-auth' 会连杀并发 'agent-authz' 的 Chrome。
+        Chrome cmdline 里 profiles/{sid} 后跟一个空格
+        (--user-data-dir=...profiles/{sid} --window-size=...),故 pattern
+        'headless.*profiles/agent-auth ' 精准隔离。真机已复现。
+        """
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[1])
+        engine.cleanup_processes(session_ids=["agent-auth"])
+        chrome_pkill = [c for c in cmds if c.startswith("pkill") and "headless" in c]
+        assert chrome_pkill, "close 失败应触发 Chrome pkill 兜底"
+        assert any(
+            c.endswith("profiles/agent-auth ") for c in chrome_pkill
+        ), f"Chrome pkill pattern 缺尾随空格(会误杀 agent-authz): {chrome_pkill!r}"
+
+    def test_no_dead_agent_browser_profile_pattern(self, monkeypatch):
+        """Bug2: 删除死代码 pattern1 'agent-browser.*profiles/{sid}'。
+
+        daemon(agent-browser-linux-x64)daemon 化后 cmdline 裸(零参数),
+        pattern1 永远匹配 0 个进程——是死代码。删之。
+        """
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[1])
+        engine.cleanup_processes(session_ids=["agent-auth"])
+        joined = " ".join(cmds)
+        assert "agent-browser.*" not in joined, (
+            f"死代码 pattern1 'agent-browser.*profiles/...' 仍存在: {joined!r}"
+        )
+
+    def test_close_failure_kills_daemon_via_ppid(self, monkeypatch):
+        """Bug2: close 失败时沿残留 Chrome PPID 链杀 per-session daemon。
+
+        daemon cmdline 裸,pkill -f 匹配不到;改用 pgrep 拿残留 Chrome PID →
+        ps -o ppid= 找父 → 父 comm 以 agent-browser 开头则 kill
+        (per-session 不误并发,每个 session 有独立 daemon + 独立 profile 路径的 Chrome)。
+        """
+        from shannon_core.services.engines import agent_browser_engine as mod
+
+        engine = AgentBrowserEngine()
+        cmds = []
+
+        class _R:
+            def __init__(self, rc, stdout=""):
+                self.returncode = rc
+                self.stdout = stdout
+
+        def _fake_run(cmd, *a, **kw):
+            joined = " ".join(str(c) for c in cmd)
+            cmds.append(joined)
+            # 优雅 close 失败
+            if joined.startswith("agent-browser") and "close" in joined:
+                return _R(1)
+            # pgrep 残留 Chrome → 返回 PID 12345
+            if cmd[0] == "pgrep":
+                return _R(0, "12345\n")
+            # ps -o ppid= → 父 999
+            if cmd[0] == "ps" and "ppid=" in joined:
+                return _R(0, "999\n")
+            # ps -o comm= → daemon 二进制名
+            if cmd[0] == "ps" and "comm=" in joined:
+                return _R(0, "agent-browser-linux-x64")
+            # kill 父(daemon)
+            if cmd[0] == "kill":
+                return _R(0)
+            return _R(0)
+
+        class _FakeSub:
+            DEVNULL = -3
+            PIPE = -4
+
+            run = staticmethod(_fake_run)
+
+        monkeypatch.setattr(mod, "subprocess", _FakeSub, raising=False)
+        result = engine.cleanup_processes(session_ids=["agent-auth"])
+        joined = " ".join(cmds)
+        assert "pgrep" in joined and "headless.*profiles/agent-auth " in joined
+        assert "ppid=" in joined  # PPID 查找
+        assert "comm=" in joined  # 父进程名确认(避免误杀非 daemon 父)
+        assert "kill" in joined  # 杀 daemon
+        assert result.get("killed_daemons"), f"未记录被杀 daemon: {result}"
+
 
 def _record_subprocess(monkeypatch, returncodes):
     """记录 subprocess.run 收到的命令,可控 returncode。raising=False 让 RED 干净。"""

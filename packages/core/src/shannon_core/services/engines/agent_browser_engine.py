@@ -204,17 +204,34 @@ class AgentBrowserEngine:
         source_dir: str | None = None,
         session_ids: list[str] | None = None,
     ) -> dict:
-        """Best-effort 回收 agent-browser + Chrome 子进程。
+        """Best-effort 回收 agent-browser daemon + Chrome 子进程。
 
-        优先优雅 ``agent-browser close``(按 session / --all),失败/残留再
-        ``pkill -f`` 兜底(匹配 profile 路径以精准隔离,不误杀并发扫描)。
+        优先优雅 ``agent-browser close``(按 session / --all),失败/残留再兜底。
         全程 try/except,绝不 raise(清理不能反过来崩扫描/阻塞退出)。
+
+        兜底策略(close 失败时):
+
+        - **Chrome** : ``pkill -f "headless.*profiles/{sid} "`` —— **尾随空格**
+          是关键:真实 session ID 里 ``agent-auth`` 是 ``agent-authz`` 的前缀
+          (见 ``AGENT_SESSION_MAPPING``),无尾空格的 ``profiles/agent-auth`` 会
+          连杀并发 ``agent-authz`` 的 Chrome。Chrome cmdline 里 ``profiles/{sid}``
+          后跟一个空格(``--user-data-dir=...profiles/{sid} --window-size=...``),
+          故尾随空格精准隔离。
+        - **daemon** : agent-browser 的 daemon(``agent-browser-linux-x64``)
+          daemon 化后 cmdline 裸(零参数),``pkill -f`` 无法按 profile 匹配(旧
+          ``agent-browser.*profiles/{sid}`` pattern 是死代码,已删)。per-session
+          杀 daemon 改沿残留 Chrome 的 PPID 链:``pgrep`` 拿 Chrome PID →
+          ``ps -o ppid=`` 找父 → 父 ``comm`` 以 ``agent-browser`` 开头则 kill
+          (per-session 不误并发,每 session 有独立 daemon + 独立 profile 路径的
+          Chrome)。pgrep/ps/kill 任一不可用则安全跳过(边缘泄漏由强退路径
+          ``close --all`` 兜底清所有 daemon)。
         """
         import logging
 
         log = logging.getLogger(__name__)
         closed: list[str] = []
         killed: list[str] = []
+        killed_daemons: list[str] = []
         errors: list[str] = []
 
         def _run(cmd: list[str], timeout: float = 5.0) -> int:
@@ -231,6 +248,54 @@ class AgentBrowserEngine:
                 errors.append(f"{' '.join(cmd)}: {exc}")
                 return -1
 
+        def _run_capture(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
+            """跑命令返回 (returncode, stdout);异常吞掉返回 (-1, '')。"""
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    timeout=timeout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                return proc.returncode, proc.stdout or ""
+            except Exception as exc:  # noqa: BLE001 - best-effort,绝不抛
+                errors.append(f"{' '.join(cmd)}: {exc}")
+                return -1, ""
+
+        def _kill_daemon_via_ppid(sid: str) -> None:
+            """沿残留 Chrome 的 PPID 链杀 per-session daemon(close 失败兜底)。
+
+            daemon cmdline 裸,pkill -f 匹配不到;改用 pgrep 残留 Chrome → ps 父
+            → 父 comm 以 agent-browser 开头则 kill。pgrep 的 pattern 同样带尾随
+            空格隔离前缀(agent-auth vs agent-authz)。
+            """
+            rc, out = _run_capture(
+                ["pgrep", "-f", f"headless.*profiles/{sid} "], timeout=5.0
+            )
+            if rc != 0 or not out:
+                return
+            for token in out.split():
+                try:
+                    chrome_pid = int(token)
+                except ValueError:
+                    continue
+                # 查父进程 PID
+                prc, ppid_out = _run_capture(
+                    ["ps", "-o", "ppid=", "-p", str(chrome_pid)], timeout=3.0
+                )
+                ppid_s = ppid_out.strip()
+                if prc != 0 or not ppid_s:
+                    continue
+                # 确认父进程是 agent-browser daemon(避免误杀非 daemon 父,如 init)
+                crc, comm_out = _run_capture(
+                    ["ps", "-o", "comm=", "-p", ppid_s], timeout=3.0
+                )
+                if crc != 0 or not comm_out.strip().startswith("agent-browser"):
+                    continue
+                _run(["kill", ppid_s], timeout=3.0)
+                killed_daemons.append(ppid_s)
+
         targets = session_ids if session_ids is not None else [None]
 
         for sid in targets:
@@ -246,19 +311,28 @@ class AgentBrowserEngine:
                 closed.append(close_tag)
                 continue  # close 成功 -> 不 pkill 该 session
 
-            # 2. pkill 兜底(匹配 profile 路径以精准隔离)
+            # 2. close 失败兜底
             if sid is None:
+                # 强退路径:粗粒度清所有 daemon + Chrome(close --all 已尝试过)
                 _run(["pkill", "-f", "agent-browser"], timeout=5.0)
+                _run(["pkill", "-f", "headless.*agent-browser"], timeout=5.0)
             else:
-                profile = f".agent-browser/profiles/{sid}"
-                _run(["pkill", "-f", f"agent-browser.*{profile}"], timeout=5.0)
+                # Chrome 子进程:尾随空格隔离前缀(agent-auth vs agent-authz)
+                _run(
+                    ["pkill", "-f", f"headless.*profiles/{sid} "],
+                    timeout=5.0,
+                )
                 killed.append(close_tag)
-            # Chrome 子进程(headless chrome 带 profile user-data-dir)
-            chrome_profile = "agent-browser" if sid is None else f"profiles/{sid}"
-            _run(["pkill", "-f", f"headless.*{chrome_profile}"], timeout=5.0)
+                # daemon:cmdline 裸,pkill 匹配不到;沿 PPID 链精准杀 per-session daemon
+                _kill_daemon_via_ppid(sid)
 
         log.debug(
-            "agent-browser cleanup: closed=%s killed=%s errors=%s",
-            closed, killed, errors,
+            "agent-browser cleanup: closed=%s killed=%s killed_daemons=%s errors=%s",
+            closed, killed, killed_daemons, errors,
         )
-        return {"closed": closed, "killed": killed, "errors": errors}
+        return {
+            "closed": closed,
+            "killed": killed,
+            "killed_daemons": killed_daemons,
+            "errors": errors,
+        }
