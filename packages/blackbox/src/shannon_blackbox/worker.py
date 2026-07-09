@@ -41,6 +41,41 @@ from shannon_core.runtime.scan_runner import (
 TASK_QUEUE_PREFIX = "shannon-py-bb"
 
 
+def _resolve_engine_name(config_path: str | None) -> str | None:
+    """从 config 解析 engine_name(无 config / 解析失败返回 None)。"""
+    if not config_path:
+        return None
+    try:
+        from shannon_core.config.parser import parse_config
+
+        cfg = parse_config(config_path)
+        return cfg.browser_engine
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def build_browser_cleanup_callback(repo_path: str, engine_name: str | None):
+    """构造同步 cleanup 函数,供 ShutdownController 在 os._exit 前调用(强退路径)。
+
+    engine_name 为 None(无 config)时返回 no-op;否则 get_engine + cleanup_processes。
+    全程不抛(强退路径绝不崩)。
+    """
+    if not engine_name:
+        return lambda session_ids=None: None
+
+    def _cleanup(session_ids=None) -> None:
+        try:
+            import shannon_core.services.engines  # noqa: F401 – registers engines
+            from shannon_core.services.browser_engine import BrowserEngineFactory
+
+            engine = BrowserEngineFactory.get_engine(engine_name)
+            engine.cleanup_processes(repo_path, session_ids=session_ids)
+        except Exception:  # noqa: BLE001 - best-effort
+            pass
+
+    return _cleanup
+
+
 def _to_workflow_summary(result: BlackboxPipelineState, total_duration_ms: int) -> WorkflowSummary:
     status = result.status if result.status in ("completed", "failed", "cancelled") else "failed"
     return WorkflowSummary(
@@ -131,7 +166,11 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         workflow_id = workflow_id_base
 
     ctrl = ShutdownController()
-    ctrl.install(asyncio.get_running_loop())
+    engine_name = _resolve_engine_name(input.config_path)
+    ctrl.install(
+        asyncio.get_running_loop(),
+        cleanup_callback=build_browser_cleanup_callback(input.repo_path, engine_name),
+    )
     try:
         async with worker:
             async with run_with_display(meta, use_rich=use_rich) as session:
