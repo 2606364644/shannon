@@ -735,45 +735,6 @@ async def run_credential_check(input: ActivityInput) -> None:
 
 
 @activity.defn
-async def run_auth_validation(input: ActivityInput) -> None:
-    from shannon_whitebox.audit.session_registry import get_audit_session
-    try:
-        async with get_audit_session().track_step("setup", "auth-validation", intent=intent_for("auth-validation")):
-            from shannon_core.services.validate_authentication import validate_authentication
-            from shannon_core.prompts.manager import PromptManager
-            from shannon_core.agents.executor import AgentExecutor
-
-            prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
-            prompt_manager = PromptManager(prompts_dir)
-            executor = AgentExecutor(prompt_manager)
-
-            repo, deliverables, _ = _get_paths(input)
-            result = await validate_authentication(
-                web_url=input.web_url,
-                config_path=input.config_path,
-                prompt_manager=prompt_manager,
-                executor=executor,
-                repo_path=input.repo_path,
-                deliverables_path=str(deliverables),
-                api_key=input.api_key,
-                workspace_path=input.workspace_path or "",
-                audit_logger=create_activity_logger(),
-            )
-            if not result.success:
-                raise PentestError(
-                    f"Authentication validation failed: {result.failure_detail or 'unknown'}",
-                    category="preflight",
-                    retryable=False,
-                    error_code=ErrorCode.AUTH_LOGIN_FAILED,
-                )
-    except PentestError as e:
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
-    except Exception as e:
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
-
-@activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:

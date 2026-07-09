@@ -20,8 +20,6 @@ def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from shannon_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
-    from shannon_core.services.browser_engine import BrowserEngineFactory
-    import shannon_core.services.engines  # noqa: F401 – registers engines
     from shannon_core.services.validate_authentication import cleanup_auth_state_sync
     from shannon_core.models.retry import retry_for
     from shannon_core.models.errors import classify_error_for_temporal
@@ -92,12 +90,6 @@ class WhiteboxScanWorkflow:
             retry_policy=retry_for("preflight"),
         )
 
-        # Auth validation
-        await workflow.execute_activity(
-            activities.run_auth_validation, act_input,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=retry_for("auth-validation"),
-        )
         await workflow.execute_activity(
             activities.log_phase_complete_activity,
             ActivityInput(**{**act_input.__dict__, "phase": "setup"}),
@@ -105,31 +97,9 @@ class WhiteboxScanWorkflow:
             retry_policy=retry_for("log"),
         )
 
-        # Resolve browser engine (cfg 已在 run() 开头解析)
-        engine = None
-        engine_name = cfg.browser_engine if cfg else "playwright"
-        try:
-            engine = BrowserEngineFactory.get_engine(engine_name)
-        except KeyError as e:
-            raise PentestError(
-                f"No browser engine registered as '{engine_name}'.",
-                "browser",
-                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
-            ) from e
-        if not engine.check_available():
-            raise PentestError(
-                f"Browser engine '{engine.name}' is not available. "
-                f"Install it with: npm install -g {engine.name} && {engine.name} install",
-                "browser",
-                error_code=ErrorCode.BROWSER_ENGINE_UNAVAILABLE,
-            )
-
         # Write code path deny rules (S6)
         if cfg and cfg.rules and cfg.rules.avoid:
             sync_code_path_deny_rules(cfg.rules.avoid)
-
-        # Write browser engine config (S5)
-        engine.write_config(input.repo_path)
 
         try:
             # === Parallel: Code Index (deterministic) ∥ PRE_RECON (LLM) ===
@@ -599,8 +569,6 @@ class WhiteboxScanWorkflow:
             return self._state
         finally:
             cleanup_settings()
-            if engine:
-                engine.cleanup_config(input.repo_path)
             cleanup_auth_state_sync(workspace_path)
 
     @workflow.query(name="PipelineProgress")
