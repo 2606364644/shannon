@@ -119,7 +119,6 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 - **Task Agent (Code Analysis):** Your primary tool. Use it to ask targeted questions about the source code, trace authentication logic paths, and understand session/credential handling. MANDATORY for all source code analysis.
 
 - **Bash tool:** Use for creating directories, copying files, and other shell commands as needed.
-- **Browser Automation:** {{BROWSER_COMMANDS}} Always pass `{{BROWSER_SESSION_FLAG}}` to every command for session isolation.
 - **TodoWrite Tool:** Use this to create and manage your analysis task list. Create a todo item for each endpoint/flow that needs analysis. Mark items as "in_progress" when working on them and "completed" when done.
 </cli_tools>
 

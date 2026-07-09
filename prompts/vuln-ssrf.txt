@@ -20,7 +20,6 @@ Success criterion: A complete source-to-sink trace for every identified SSRF vul
 </rules>
 
 @include(shared/_code-path-rules.txt)
-@include(shared/_shared-session.txt)
 
 <login_instructions>
 {{LOGIN_INSTRUCTIONS}}
@@ -92,7 +91,6 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 - **Task Agent (Code Analysis):** Your primary tool. Use it to ask targeted questions about the source code, trace data flows, and understand HTTP client usage. MANDATORY for all source code analysis.
 
 - **Bash tool:** Use for creating directories, copying files, and other shell commands as needed.
-- **Browser Automation:** {{BROWSER_COMMANDS}} Always pass `{{BROWSER_SESSION_FLAG}}` to every command for session isolation.
 - **TodoWrite Tool:** Use this to create and manage your analysis task list. Create a todo item for each SSRF sink that needs analysis. Mark items as "in_progress" when working on them and "completed" when done.
 </cli_tools>
 

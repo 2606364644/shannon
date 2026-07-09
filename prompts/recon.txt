@@ -33,7 +33,6 @@ Areas to Focus On:
 </rules>
 
 @include(shared/_code-path-rules.txt)
-@include(shared/_shared-session.txt)
 
 <login_instructions>
 {{LOGIN_INSTRUCTIONS}}
@@ -75,7 +74,6 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
 <cli_tools>
 Please use these tools for the following use cases:
 - Task tool: **MANDATORY for ALL source code analysis.** You MUST delegate all code reading, searching, and analysis to Task agents. DO NOT use Read, Glob, or Grep tools for source code.
-- **Browser Automation:** {{BROWSER_COMMANDS}} Always pass `{{BROWSER_SESSION_FLAG}}` to every command for session isolation.
 
 - **Bash tool:** Use for creating directories, copying files, and other shell commands as needed.
 
@@ -133,7 +131,6 @@ You must follow this methodical four-step process:
     - In your thoughts, create a preliminary list of known technologies and key code modules.
 
 2.  **Interactive Application Exploration:**
-    - Use your browser automation tool with `{{BROWSER_SESSION_FLAG}}` to navigate to the target.
     - Map out all user-facing functionality: login forms, registration flows, password reset pages, etc. Document the multi-step processes.
     - Observe the network requests to identify primary API calls.
 
