@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
+import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { SettingsPage } from "./SettingsPage";
 
 const okBody = {
@@ -17,6 +18,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -63,5 +66,29 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     // 主题 Card 仍在(不受 status 失败影响)
     expect(screen.getByText("主题")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("中文渲染页标题与三张 Card 标题", async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByText("设置")).toBeInTheDocument();
+    expect(screen.getByText("主题")).toBeInTheDocument();
+    expect(screen.getByText("系统状态")).toBeInTheDocument();
+    expect(screen.getByText("关于")).toBeInTheDocument();
+  });
+
+  it("切英文后页标题变 Settings + Card 标题变 Theme/System status/About", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("设置");
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(await screen.findByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByText("System status")).toBeInTheDocument();
+    expect(screen.getByText("About")).toBeInTheDocument();
   });
 });

@@ -155,5 +155,52 @@
       "urlScheme": "Target URL must start with http(s)://",
       "urlEmpty": "Target URL cannot be empty"
     }
+  },
+  "dashboard": {
+    "newScan": "+ New scan",
+    "summaryAria": "Summary",
+    "stats": {
+      "running": "Running",
+      "completedToday": "Completed today",
+      "totalVulns": "Total vulns",
+      "totalCost": "Total cost"
+    },
+    "runningTitle": "Running",
+    "viewLive": "View live →",
+    "noRunning": "No running scans",
+    "recentTitle": "Recent scans",
+    "viewAll": "View all →",
+    "empty": {
+      "title": "No scans yet",
+      "hint": "Create a scan to start"
+    },
+    "errors": {
+      "loadFailed": "Dashboard load failed: {{error}}"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "themeTitle": "Theme",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "themeSwitchAria": "Toggle light/dark theme",
+    "statusTitle": "System status",
+    "aboutTitle": "About",
+    "aboutDesc": "shannon-py security scanning platform web console. See the system status panel above for version info.",
+    "fields": {
+      "aiProvider": "AI engine",
+      "browserEngine": "Browser engine",
+      "gitBinary": "git binary",
+      "gitCredentials": "GitLab credentials",
+      "version": "Version"
+    },
+    "gitBinary": { "installed": "Installed", "missing": "Missing" },
+    "gitCredentials": {
+      "configured": "Configured",
+      "notConfigured": "Not configured (only needed for git URL mode; local path mode does not require it)"
+    },
+    "errors": {
+      "loadFailed": "Status load failed: {{error}}"
+    }
   }
 }

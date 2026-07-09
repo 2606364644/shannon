@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -38,10 +39,11 @@ function fmtTime(unix?: number | null): string {
 }
 
 export function DashboardPage() {
+  const { t } = useTranslation();
   const { data, loading, error, refresh } = useWorkspaces();
 
   if (error && data.length === 0) {
-    return <ErrorState message={`Dashboard 加载失败:${error}`} onRetry={refresh} />;
+    return <ErrorState message={t("dashboard.errors.loadFailed", { error })} onRetry={refresh} />;
   }
   if (loading && data.length === 0) {
     return (
@@ -52,8 +54,8 @@ export function DashboardPage() {
   }
   if (data.length === 0) {
     return (
-      <Empty title="还没有扫描" hint="新建一个扫描开始">
-        <Link to="/scan/new"><Button>+ 新建扫描</Button></Link>
+      <Empty title={t("dashboard.empty.title")} hint={t("dashboard.empty.hint")}>
+        <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
       </Empty>
     );
   }
@@ -73,31 +75,31 @@ export function DashboardPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold tracking-tight text-2xl">Shannon</h1>
-        <Link to="/scan/new"><Button>+ 新建扫描</Button></Link>
+        <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4" role="group" aria-label="汇总">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4" role="group" aria-label={t("dashboard.summaryAria")}>
         <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">运行中</div>
+          <div className="text-xs text-muted-foreground">{t("dashboard.stats.running")}</div>
           <div className="font-mono text-2xl text-cyan">{running.length}</div>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">今日完成</div>
+          <div className="text-xs text-muted-foreground">{t("dashboard.stats.completedToday")}</div>
           <div className="font-mono text-2xl text-green">{completedToday.length}</div>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">累计漏洞</div>
+          <div className="text-xs text-muted-foreground">{t("dashboard.stats.totalVulns")}</div>
           <div className="font-mono text-2xl">{totalVulns}</div>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">累计 cost</div>
+          <div className="text-xs text-muted-foreground">{t("dashboard.stats.totalCost")}</div>
           <div className="font-mono text-2xl">{fmtCost(totalCost, data[0]?.cost_currency)}</div>
         </CardContent></Card>
       </div>
 
       {running.length > 0 ? (
         <section className="space-y-2">
-          <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">正在运行</h2>
+          <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">{t("dashboard.runningTitle")}</h2>
           <div className="grid gap-3 md:grid-cols-2">
             {running.map((w) => (
               <Link key={w.name} to={`/p/${w.name}/live`} className="block">
@@ -112,7 +114,7 @@ export function DashboardPage() {
                       {w.total_cost_usd != null ? fmtCost(w.total_cost_usd, w.cost_currency) : "—"}{" · "}
                       {w.total_duration_ms ? fmtMs(w.total_duration_ms) : "—"}
                     </div>
-                    <div className="text-xs text-primary">查看实时 →</div>
+                    <div className="text-xs text-primary">{t("dashboard.viewLive")}</div>
                   </CardContent>
                 </Card>
               </Link>
@@ -120,14 +122,14 @@ export function DashboardPage() {
           </div>
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">当前无运行中扫描</p>
+        <p className="text-sm text-muted-foreground">{t("dashboard.noRunning")}</p>
       )}
 
       {recent.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">最近扫描</h2>
-            <Link to="/workspaces" className="text-sm text-primary hover:underline">查看全部 →</Link>
+            <h2 className="font-semibold tracking-tight text-lg text-muted-foreground">{t("dashboard.recentTitle")}</h2>
+            <Link to="/workspaces" className="text-sm text-primary hover:underline">{t("dashboard.viewAll")}</Link>
           </div>
           <Card>
             <CardContent className="divide-y divide-border p-0">

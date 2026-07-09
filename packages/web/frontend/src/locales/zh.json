@@ -155,5 +155,52 @@
       "urlScheme": "目标 URL 需以 http(s):// 开头",
       "urlEmpty": "目标 URL 不能为空"
     }
+  },
+  "dashboard": {
+    "newScan": "+ 新建扫描",
+    "summaryAria": "汇总",
+    "stats": {
+      "running": "运行中",
+      "completedToday": "今日完成",
+      "totalVulns": "累计漏洞",
+      "totalCost": "累计 cost"
+    },
+    "runningTitle": "正在运行",
+    "viewLive": "查看实时 →",
+    "noRunning": "当前无运行中扫描",
+    "recentTitle": "最近扫描",
+    "viewAll": "查看全部 →",
+    "empty": {
+      "title": "还没有扫描",
+      "hint": "新建一个扫描开始"
+    },
+    "errors": {
+      "loadFailed": "Dashboard 加载失败：{{error}}"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "themeTitle": "主题",
+    "themeDark": "深色",
+    "themeLight": "浅色",
+    "themeSwitchAria": "切换深浅主题",
+    "statusTitle": "系统状态",
+    "aboutTitle": "关于",
+    "aboutDesc": "shannon-py 安全扫描平台 web 控制台。版本信息见上方系统状态面板。",
+    "fields": {
+      "aiProvider": "AI 引擎",
+      "browserEngine": "浏览器引擎",
+      "gitBinary": "git 二进制",
+      "gitCredentials": "GitLab 凭据",
+      "version": "版本"
+    },
+    "gitBinary": { "installed": "已装", "missing": "缺失" },
+    "gitCredentials": {
+      "configured": "已配置",
+      "notConfigured": "未配置(仅 git URL 模式需要,本地路径模式无需)"
+    },
+    "errors": {
+      "loadFailed": "状态加载失败：{{error}}"
+    }
   }
 }

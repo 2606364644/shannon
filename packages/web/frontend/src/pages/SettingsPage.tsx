@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,43 +10,44 @@ import { useSystemStatus } from "@/api/systemStatus";
 import { applyTheme, getInitialTheme, type Theme } from "@/lib/theme";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const initial = typeof window !== "undefined" ? getInitialTheme() : "dark";
   const [theme, setThemeState] = useState<Theme>(initial);
   const { data, loading, error, refresh } = useSystemStatus();
 
-  function setTheme(t: Theme) {
-    setThemeState(t);
-    applyTheme(t);
+  function setTheme(next: Theme) {
+    setThemeState(next);
+    applyTheme(next);
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="font-semibold tracking-tight text-2xl">设置</h1>
+      <h1 className="font-semibold tracking-tight text-2xl">{t("settings.title")}</h1>
 
       <Card>
-        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">主题</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("settings.themeTitle")}</CardTitle></CardHeader>
         <CardContent className="flex items-center gap-3 text-sm">
-          <Label htmlFor="theme-switch">深色</Label>
+          <Label htmlFor="theme-switch">{t("settings.themeDark")}</Label>
           <Switch
             id="theme-switch"
             checked={theme === "light"}
             onCheckedChange={(c) => setTheme(c ? "light" : "dark")}
-            aria-label="切换深浅主题"
+            aria-label={t("settings.themeSwitchAria")}
           />
-          <Label htmlFor="theme-switch">浅色</Label>
+          <Label htmlFor="theme-switch">{t("settings.themeLight")}</Label>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">系统状态</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("settings.statusTitle")}</CardTitle></CardHeader>
         <CardContent>
           {loading && <Skeleton className="h-20 w-full" />}
-          {error && <ErrorState message={`状态加载失败:${error}`} onRetry={refresh} />}
+          {error && <ErrorState message={t("settings.errors.loadFailed", { error })} onRetry={refresh} />}
           {data && (
             <dl className="grid grid-cols-[140px_1fr] gap-y-2 font-mono text-sm">
-              <dt className="text-muted-foreground">AI 引擎</dt>
+              <dt className="text-muted-foreground">{t("settings.fields.aiProvider")}</dt>
               <dd>{data.ai_provider}</dd>
-              <dt className="text-muted-foreground">浏览器引擎</dt>
+              <dt className="text-muted-foreground">{t("settings.fields.browserEngine")}</dt>
               <dd>{data.browser_engine}</dd>
               <dt className="text-muted-foreground">Temporal</dt>
               <dd className="flex items-center gap-2">
@@ -54,11 +56,11 @@ export function SettingsPage() {
                   {data.temporal.last_status}
                 </Badge>
               </dd>
-              <dt className="text-muted-foreground">git 二进制</dt>
-              <dd>{data.git.binary_available ? "已装" : "缺失"}</dd>
-              <dt className="text-muted-foreground">GitLab 凭据</dt>
-              <dd>{data.git.credentials_configured ? "已配置" : "未配置(仅 git URL 模式需要,本地路径模式无需)"}</dd>
-              <dt className="text-muted-foreground">版本</dt>
+              <dt className="text-muted-foreground">{t("settings.fields.gitBinary")}</dt>
+              <dd>{data.git.binary_available ? t("settings.gitBinary.installed") : t("settings.gitBinary.missing")}</dd>
+              <dt className="text-muted-foreground">{t("settings.fields.gitCredentials")}</dt>
+              <dd>{data.git.credentials_configured ? t("settings.gitCredentials.configured") : t("settings.gitCredentials.notConfigured")}</dd>
+              <dt className="text-muted-foreground">{t("settings.fields.version")}</dt>
               <dd>{data.version}</dd>
             </dl>
           )}
@@ -66,9 +68,9 @@ export function SettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">关于</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("settings.aboutTitle")}</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          <div>shannon-py 安全扫描平台 web 控制台。版本信息见上方系统状态面板。</div>
+          <div>{t("settings.aboutDesc")}</div>
         </CardContent>
       </Card>
     </div>

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
 import type { Workspace } from "../api/types";
 
@@ -21,6 +22,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -94,5 +97,28 @@ describe("DashboardPage 骨架 + 汇总", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-done")).toBeInTheDocument());
     expect(screen.getByText(/当前无运行中扫描/)).toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage i18n", () => {
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("中文渲染汇总标签与最近扫描区标题", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
+    expect(screen.getByText("今日完成")).toBeInTheDocument();
+    expect(screen.getByText("累计漏洞")).toBeInTheDocument();
+    expect(screen.getByText("最近扫描")).toBeInTheDocument();
+  });
+
+  it("切英文后汇总标签变 Completed today 等", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(await screen.findByText("Completed today")).toBeInTheDocument();
+    expect(screen.getByText("Total vulns")).toBeInTheDocument();
+    expect(screen.getByText("Recent scans")).toBeInTheDocument();
   });
 });
