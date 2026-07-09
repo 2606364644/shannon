@@ -236,7 +236,18 @@
       "waitHint": "metrics 将在 pre-recon 阶段后出现",
       "statusConflict": "⚠ 顶层 {{topLevel}} vs session.{{sessionLevel}}",
       "phaseWaterfall": "阶段瀑布",
-      "agentLedger": "agent 账本"
+      "agentLedger": "代理账本",
+      "bigCost": "总花费",
+      "bigDuration": "时长",
+      "bigAgents": "代理数",
+      "phaseAgents": "{{count}} 个代理",
+      "agentTable": {
+        "agent": "代理",
+        "duration": "时长",
+        "cost": "花费",
+        "attempt": "尝试",
+        "model": "模型"
+      }
     },
     "report": {
       "loadError": "报告加载失败：{{error}}",

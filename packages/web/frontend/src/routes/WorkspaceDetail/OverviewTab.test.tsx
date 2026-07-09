@@ -118,4 +118,19 @@ describe("OverviewTab i18n", () => {
     expect(await screen.findByText("Phase waterfall")).toBeInTheDocument();
     expect(screen.getByText("Agent ledger")).toBeInTheDocument();
   });
+
+  it("大数字标签 + agent 表头随语言切换(zh 中文 / en 英文)", async () => {
+    server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json(session)));
+    renderAt("/p/ws/overview");
+    await waitFor(() => expect(screen.getByText(/pre-recon/)).toBeInTheDocument());
+    // zh: 大数字卡片标签为中文 + agent 表头为中文
+    expect(screen.getByText("代理数")).toBeInTheDocument();
+    expect(screen.getByText("尝试")).toBeInTheDocument();
+    expect(screen.getByText("模型")).toBeInTheDocument();
+    // 切英文: 同一标签位变英文
+    await i18n.changeLanguage("en");
+    expect(await screen.findByText("agents")).toBeInTheDocument();
+    expect(screen.getByText("attempt")).toBeInTheDocument();
+    expect(screen.getByText("model")).toBeInTheDocument();
+  });
 });

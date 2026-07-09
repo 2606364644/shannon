@@ -73,15 +73,15 @@ export function OverviewTab() {
         <div className="grid grid-cols-3 gap-6 font-mono">
           <div>
             <div className="text-2xl font-bold text-foreground">{fmtCost(m.total_cost_usd, m.cost_currency)}</div>
-            <div className="text-xs text-muted-foreground">total cost</div>
+            <div className="text-xs text-muted-foreground">{t("workspaceDetail.overview.bigCost")}</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-foreground">{fmtMs(m.total_duration_ms)}</div>
-            <div className="text-xs text-muted-foreground">duration</div>
+            <div className="text-xs text-muted-foreground">{t("workspaceDetail.overview.bigDuration")}</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-foreground">{Object.keys(m.agents).length}</div>
-            <div className="text-xs text-muted-foreground">agents</div>
+            <div className="text-xs text-muted-foreground">{t("workspaceDetail.overview.bigAgents")}</div>
           </div>
         </div>
       </Card>
@@ -108,7 +108,7 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
           >
             <div className="text-xs font-bold truncate">{name}</div>
             <div className="text-[0.7rem] opacity-85 font-mono">
-              {p.duration_percentage}% · {fmt(p.duration_ms)} · {fmtCost(p.cost_usd, p.cost_currency)} · {p.agent_count}a
+              {p.duration_percentage}% · {fmt(p.duration_ms)} · {fmtCost(p.cost_usd, p.cost_currency)} · {t("workspaceDetail.overview.phaseAgents", { count: p.agent_count })}
             </div>
           </div>
         ))}
@@ -125,11 +125,11 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>agent</TableHead>
-            <TableHead>duration</TableHead>
-            <TableHead>cost</TableHead>
-            <TableHead>attempt</TableHead>
-            <TableHead>model</TableHead>
+            <TableHead>{t("workspaceDetail.overview.agentTable.agent")}</TableHead>
+            <TableHead>{t("workspaceDetail.overview.agentTable.duration")}</TableHead>
+            <TableHead>{t("workspaceDetail.overview.agentTable.cost")}</TableHead>
+            <TableHead>{t("workspaceDetail.overview.agentTable.attempt")}</TableHead>
+            <TableHead>{t("workspaceDetail.overview.agentTable.model")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

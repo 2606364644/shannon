@@ -236,7 +236,18 @@
       "waitHint": "metrics will appear after the pre-recon phase",
       "statusConflict": "⚠ top-level {{topLevel}} vs session.{{sessionLevel}}",
       "phaseWaterfall": "Phase waterfall",
-      "agentLedger": "Agent ledger"
+      "agentLedger": "Agent ledger",
+      "bigCost": "total cost",
+      "bigDuration": "duration",
+      "bigAgents": "agents",
+      "phaseAgents": "{{count}} agents",
+      "agentTable": {
+        "agent": "agent",
+        "duration": "duration",
+        "cost": "cost",
+        "attempt": "attempt",
+        "model": "model"
+      }
     },
     "report": {
       "loadError": "Report load failed: {{error}}",
