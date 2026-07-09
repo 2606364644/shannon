@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, ApiError } from "./client";
+import i18n from "@/i18n";
 
 export interface TemporalStatus {
   enabled: boolean;
@@ -34,7 +35,11 @@ export function useSystemStatus(): UseSystemStatusResult {
       setData(d);
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiError ? `加载失败(${e.status})` : "加载失败");
+      setError(
+        e instanceof ApiError
+          ? i18n.t("common.loadFailedStatus", { status: e.status })
+          : i18n.t("common.loadFailed"),
+      );
     } finally {
       setLoading(false);
     }

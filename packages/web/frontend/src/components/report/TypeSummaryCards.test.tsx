@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import i18n from "@/i18n";
 import { TypeSummaryCards } from "./TypeSummaryCards";
 import type { TypeAgg } from "@/lib/report-stats";
 
@@ -56,5 +57,21 @@ describe("TypeSummaryCards", () => {
     expect(withF.querySelector('[data-testid="type-card"]')?.textContent).toContain("3 条 RCE");
     const { container: noF } = render(<TypeSummaryCards typeAggs={[makeAgg()]} />);
     expect(noF.querySelector('[data-testid="type-card"]')?.textContent).not.toContain("3 条 RCE");
+  });
+
+  describe("i18n", () => {
+    afterEach(() => i18n.changeLanguage("zh"));
+
+    it("中文 aria-label", () => {
+      i18n.changeLanguage("zh");
+      const { container } = render(<TypeSummaryCards typeAggs={[makeAgg()]} />);
+      expect(container.querySelector('[data-testid="type-summary-cards"]')).toHaveAttribute("aria-label", "按漏洞类型汇总");
+    });
+
+    it("切英文 aria-label", () => {
+      i18n.changeLanguage("en");
+      const { container } = render(<TypeSummaryCards typeAggs={[makeAgg()]} />);
+      expect(container.querySelector('[data-testid="type-summary-cards"]')).toHaveAttribute("aria-label", "Summary by vulnerability type");
+    });
   });
 });

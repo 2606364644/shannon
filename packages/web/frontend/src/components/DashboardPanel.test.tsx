@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import i18n from "@/i18n";
 import { DashboardPanel } from "./DashboardPanel";
 import { emptyState } from "../state/dashboardReducer";
 import type { DashboardState } from "../state/dashboardReducer";
@@ -65,5 +66,21 @@ describe("DashboardPanel", () => {
     // 精确断言：顶栏的 agents 计数 span "agents 3/0"
     // (completed_count=3, agents={} → 0 total；伴随字段无 3 不会假阳性)
     expect(screen.getByText(/agents\s+3\/0/)).toBeInTheDocument();
+  });
+
+  describe("i18n: 无运行中 agent 文案", () => {
+    afterEach(() => i18n.changeLanguage("zh"));
+
+    it("中文", () => {
+      i18n.changeLanguage("zh");
+      render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
+      expect(screen.getByText(/无运行中 agent/)).toBeInTheDocument();
+    });
+
+    it("切英文", () => {
+      i18n.changeLanguage("en");
+      render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
+      expect(screen.getByText(/No running agents/)).toBeInTheDocument();
+    });
   });
 });

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@/i18n";
 import { FileTree } from "./FileTree";
 import type { DeliverablesFile } from "../api/types";
 
@@ -10,6 +11,8 @@ const files: DeliverablesFile[] = [
 ];
 
 describe("FileTree", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  afterEach(() => i18n.changeLanguage("zh"));
   it("渲染嵌套目录 + 文件", () => {
     render(<FileTree files={files} onSelect={() => {}} />);
     expect(screen.getByText("whitebox")).toBeInTheDocument();
@@ -119,5 +122,38 @@ describe("FileTree", () => {
     render(<FileTree files={[{ path: "f.json", size: 1, kind: "other_json" }]} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /f\.json/ }));
     expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it("big_json 标记『大』（结构断言：行内含『大』badge）", () => {
+    const { container } = render(
+      <FileTree files={[{ path: "whitebox/big.json", size: 999999, kind: "big_json" }]} onSelect={() => {}} />,
+    );
+    const row = Array.from(container.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("big.json"),
+    );
+    expect(row).toBeDefined();
+    expect(row!.textContent).toContain("大");
+  });
+
+  describe("i18n", () => {
+    afterEach(() => i18n.changeLanguage("zh"));
+
+    it("切英文 empty/big 标记为 (empty)/(large)", () => {
+      i18n.changeLanguage("en");
+      const { container } = render(
+        <FileTree
+          files={[
+            { path: "a/empty.json", size: 2, kind: "empty_json" },
+            { path: "a/big.json", size: 999999, kind: "big_json" },
+          ]}
+          onSelect={() => {}}
+        />,
+      );
+      // a 在 depth 0 默认展开，子文件直接可见
+      expect(container.textContent).toContain("(empty)");
+      expect(container.textContent).toContain("(large)");
+      expect(container.textContent).not.toContain("（空）");
+      expect(container.textContent).not.toContain("（大）");
+    });
   });
 });

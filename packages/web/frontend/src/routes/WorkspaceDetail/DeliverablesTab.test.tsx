@@ -85,8 +85,8 @@ describe("DeliverablesTab", () => {
     );
     renderAt("/p/ws/deliverables");
     await waitFor(() => expect(screen.getByText("A-01")).toBeInTheDocument());
-    expect(screen.getByText(/LLM轨/)).toBeInTheDocument();
-    expect(screen.getByText(/GN轨/)).toBeInTheDocument();
+    expect(screen.getByText(/LLM 轨/)).toBeInTheDocument();
+    expect(screen.getByText(/GN 轨/)).toBeInTheDocument();
     expect(screen.getByText(/双轨确认/)).toBeInTheDocument();
   });
 
@@ -107,8 +107,8 @@ describe("DeliverablesTab", () => {
     // 未知值走 trace badge 显示原值
     expect(screen.getByText("weird-value")).toBeInTheDocument();
     // 三种已知徽章都不应出现
-    expect(screen.queryByText(/LLM轨/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/GN轨/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/LLM 轨/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/GN 轨/)).not.toBeInTheDocument();
     expect(screen.queryByText(/双轨确认/)).not.toBeInTheDocument();
   });
 
@@ -126,7 +126,7 @@ describe("DeliverablesTab", () => {
     );
     renderAt("/p/ws/deliverables");
     await waitFor(() => expect(screen.getByText("N-01")).toBeInTheDocument());
-    expect(screen.queryByText(/LLM轨/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/LLM 轨/)).not.toBeInTheDocument();
     expect(screen.queryByText(/双轨确认/)).not.toBeInTheDocument();
   });
 

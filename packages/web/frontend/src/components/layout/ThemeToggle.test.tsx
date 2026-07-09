@@ -1,13 +1,16 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@/i18n";
 import { ThemeToggle } from "./ThemeToggle";
 import { THEME_KEY } from "@/lib/theme";
 
 describe("ThemeToggle", () => {
   beforeEach(() => {
+    i18n.changeLanguage("zh");
     localStorage.clear();
     document.documentElement.classList.remove("dark", "light");
   });
+  afterEach(() => i18n.changeLanguage("zh"));
 
   it("渲染按钮 + a11y label", () => {
     render(<ThemeToggle />);
@@ -44,5 +47,15 @@ describe("ThemeToggle", () => {
     // 含 svg（lucide 渲染 svg），不含 ☀️/🌙 emoji
     expect(container.querySelector("svg")).not.toBeNull();
     expect(container.textContent ?? "").not.toMatch(/[☀️🌙]/);
+  });
+
+  it("i18n: 切英文 a11y label/title 为英文", () => {
+    i18n.changeLanguage("en");
+    localStorage.setItem(THEME_KEY, "dark");
+    document.documentElement.classList.add("dark");
+    render(<ThemeToggle />);
+    expect(screen.getByRole("button", { name: /Toggle theme/i })).toBeInTheDocument();
+    // dark 状态下 title 提示切到浅色
+    expect(screen.getByRole("button")).toHaveAttribute("title", "Switch to light");
   });
 });

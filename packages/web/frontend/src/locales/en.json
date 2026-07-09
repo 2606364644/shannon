@@ -5,6 +5,9 @@
     "delete": "Delete",
     "update": "Update",
     "loading": "Loading…",
+    "retry": "Retry",
+    "loadFailed": "Failed to load",
+    "loadFailedStatus": "Failed to load ({{status}})",
     "langSwitchAria": "Switch language"
   },
   "nav": {
@@ -194,6 +197,7 @@
     "runningTitle": "Running",
     "viewLive": "View live →",
     "noRunning": "No running scans",
+    "noRunningAgents": "No running agents",
     "recentTitle": "Recent scans",
     "viewAll": "View all →",
     "empty": {
@@ -230,6 +234,11 @@
     }
   },
   "workspaceDetail": {
+    "backToList": "Back to list",
+    "tabs": { "overview": "Overview", "report": "Report", "deliverables": "Deliverables", "logs": "Logs", "live": "Live" },
+    "notFound": {
+      "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
+    },
     "overview": {
       "loadError": "Overview load failed: {{error}}",
       "waitTitle": "Waiting for scan",
@@ -296,6 +305,10 @@
     "authRequired": "🔐 auth",
     "confidenceLabel": "conf",
     "inferred": "inferred",
+    "llmTrack": "LLM track",
+    "gnTrack": "GN track",
+    "dualConfirmed": "Dual-track confirmed",
+    "reachable": "Reachable",
     "severity": { "Critical": "Critical", "High": "High", "Medium": "Medium", "Low": "Low" },
     "severityTooltip": "Inferred via type/exposure/auth/confidence heuristics; not an authoritative rating",
     "pocWitness": "PoC / witness"
@@ -308,5 +321,31 @@
     "tocAria": "Table of contents",
     "toggleHeroAria": "Toggle summary",
     "copy": "Copy"
+  },
+  "fileSystemPicker": {
+    "titleDefault": "Select code directory",
+    "requestFailed": "Request failed",
+    "errorStatus": "Error ({{status}})",
+    "refreshAria": "Refresh",
+    "recent": "Recent:",
+    "emptyDir": "Empty directory",
+    "selectThisDir": "Select this directory"
+  },
+  "report": {
+    "ariaLabel": "Threat overview",
+    "confirmedVulns": "Confirmed vulns · {{count}} types",
+    "publicReachable": "Public reachable",
+    "bySeverity": "By severity distribution",
+    "priorityTop": "⚡ Priority fixes",
+    "typeSummaryAria": "Summary by vulnerability type"
+  },
+  "theme": {
+    "toggleAria": "Toggle theme",
+    "toLight": "Switch to light",
+    "toDark": "Switch to dark"
+  },
+  "fileTree": {
+    "empty": "(empty)",
+    "large": "(large)"
   }
 }

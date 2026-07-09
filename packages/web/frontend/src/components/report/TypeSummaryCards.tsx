@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { SEVERITY_BG, SEVERITY_TEXT, type TypeAgg } from "@/lib/report-stats";
 
 /**
@@ -6,11 +7,12 @@ import { SEVERITY_BG, SEVERITY_TEXT, type TypeAgg } from "@/lib/report-stats";
  * severity range 文字着色 + findings（可选）。
  */
 export function TypeSummaryCards({ typeAggs }: { typeAggs: TypeAgg[] }) {
+  const { t } = useTranslation();
   if (typeAggs.length === 0) return null;
   return (
     <section
       data-testid="type-summary-cards"
-      aria-label="按漏洞类型汇总"
+      aria-label={t("report.typeSummaryAria")}
       className="grid grid-cols-2 gap-3 md:grid-cols-5"
     >
       {typeAggs.map((t) => (

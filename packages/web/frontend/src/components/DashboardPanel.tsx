@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { DashboardState } from "../state/dashboardReducer";
 import { fmtCost } from "../utils/currency";
 
@@ -15,6 +16,7 @@ const UNIT_STATUS_CLS: Record<string, string> = {
 };
 
 export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; elapsedMs: number }) {
+  const { t } = useTranslation();
   const running = Object.values(state.agents).filter((a) => a.status === "running");
   return (
     <div className="rounded-md border border-border bg-card p-3">
@@ -51,7 +53,7 @@ export function DashboardPanel({ state, elapsedMs }: { state: DashboardState; el
             {a.last_action_detail ?? a.last_action ?? ""}
           </div>
         ))}
-        {running.length === 0 && <div className="text-xs text-muted-foreground">无运行中 agent</div>}
+        {running.length === 0 && <div className="text-xs text-muted-foreground">{t("dashboard.noRunningAgents")}</div>}
       </div>
     </div>
   );

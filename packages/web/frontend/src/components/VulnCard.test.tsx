@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@/i18n";
 import { VulnCard, MergeSourceBadge } from "./VulnCard";
 import type { Vulnerability } from "../api/types";
 
@@ -10,13 +11,16 @@ const base: Vulnerability = {
 };
 
 describe("MergeSourceBadge", () => {
-  it("llm-only → 💭 LLM轨", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("llm-only → 💭 LLM 轨", () => {
     render(<MergeSourceBadge src="llm-only" />);
-    expect(screen.getByText(/LLM轨/)).toBeInTheDocument();
+    expect(screen.getByText(/LLM 轨/)).toBeInTheDocument();
   });
-  it("gitnexus-only → 🔍 GN轨", () => {
+  it("gitnexus-only → 🔍 GN 轨", () => {
     render(<MergeSourceBadge src="gitnexus-only" />);
-    expect(screen.getByText(/GN轨/)).toBeInTheDocument();
+    expect(screen.getByText(/GN 轨/)).toBeInTheDocument();
   });
   it("both → ✓ 双轨确认", () => {
     render(<MergeSourceBadge src="both" />);
@@ -25,16 +29,29 @@ describe("MergeSourceBadge", () => {
   it("未知字符串 → outline badge 透传原值（literal-guard）", () => {
     render(<MergeSourceBadge src="unexpected" />);
     expect(screen.getByText("unexpected")).toBeInTheDocument();
-    expect(screen.queryByText(/LLM轨/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/LLM 轨/)).not.toBeInTheDocument();
   });
   it("undefined → null（不渲染）", () => {
     const { container } = render(<MergeSourceBadge src={undefined} />);
     // Badge 渲染为 div；断言无 Badge 子节点
     expect(container.querySelector("[class*='border']")).toBeNull();
   });
+
+  it("i18n: 切英文徽章文案", () => {
+    i18n.changeLanguage("en");
+    const { rerender } = render(<MergeSourceBadge src="llm-only" />);
+    expect(screen.getByText(/LLM track/)).toBeInTheDocument();
+    rerender(<MergeSourceBadge src="gitnexus-only" />);
+    expect(screen.getByText(/GN track/)).toBeInTheDocument();
+    rerender(<MergeSourceBadge src="both" />);
+    expect(screen.getByText(/Dual-track confirmed/)).toBeInTheDocument();
+  });
 });
 
 describe("VulnCard", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  afterEach(() => i18n.changeLanguage("zh"));
+
   it("header 显示 ID + vulnerability_type", () => {
     render(<VulnCard v={base} />);
     expect(screen.getByText("SSRF-01")).toBeInTheDocument();
@@ -88,5 +105,11 @@ describe("VulnCard", () => {
     render(<VulnCard v={{ ID: "X", vulnerability_type: "t", externally_exploitable: true }} />);
     // 可达徽章
     expect(screen.getByText(/可达/)).toBeInTheDocument();
+  });
+
+  it("i18n: 切英文可达徽章为 Reachable", () => {
+    i18n.changeLanguage("en");
+    render(<VulnCard v={{ ID: "X", vulnerability_type: "t", externally_exploitable: true }} />);
+    expect(screen.getByText(/Reachable/)).toBeInTheDocument();
   });
 });

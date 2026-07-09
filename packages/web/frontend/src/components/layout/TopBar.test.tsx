@@ -15,6 +15,8 @@ function renderAt(path: string) {
 }
 
 describe("TopBar", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
   it("品牌字标 Shannon + 主导航", () => {
     renderAt("/");
     expect(screen.getByText(/Shannon/)).toBeInTheDocument();

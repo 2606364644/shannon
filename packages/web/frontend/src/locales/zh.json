@@ -5,6 +5,9 @@
     "delete": "删除",
     "update": "更新",
     "loading": "加载中…",
+    "retry": "重试",
+    "loadFailed": "加载失败",
+    "loadFailedStatus": "加载失败（{{status}}）",
     "langSwitchAria": "切换语言"
   },
   "nav": {
@@ -194,6 +197,7 @@
     "runningTitle": "正在运行",
     "viewLive": "查看实时 →",
     "noRunning": "当前无运行中扫描",
+    "noRunningAgents": "无运行中 agent",
     "recentTitle": "最近扫描",
     "viewAll": "查看全部 →",
     "empty": {
@@ -230,6 +234,11 @@
     }
   },
   "workspaceDetail": {
+    "backToList": "返回列表",
+    "tabs": { "overview": "概览", "report": "报告", "deliverables": "产物", "logs": "日志", "live": "实时" },
+    "notFound": {
+      "message": "工作区不存在或已被删除，无法显示实时进度。可能扫描已被清理或服务重启后丢失。"
+    },
     "overview": {
       "loadError": "概览加载失败：{{error}}",
       "waitTitle": "等待扫描",
@@ -296,6 +305,10 @@
     "authRequired": "🔐 需认证",
     "confidenceLabel": "置信度",
     "inferred": "推断",
+    "llmTrack": "LLM 轨",
+    "gnTrack": "GN 轨",
+    "dualConfirmed": "双轨确认",
+    "reachable": "可达",
     "severity": { "Critical": "严重", "High": "高危", "Medium": "中危", "Low": "低危" },
     "severityTooltip": "依据类型/公网/认证/置信度启发式推断，非权威评级",
     "pocWitness": "PoC / 见证"
@@ -308,5 +321,31 @@
     "tocAria": "目录",
     "toggleHeroAria": "切换摘要折叠",
     "copy": "复制"
+  },
+  "fileSystemPicker": {
+    "titleDefault": "选择代码目录",
+    "requestFailed": "请求失败",
+    "errorStatus": "错误（{{status}}）",
+    "refreshAria": "刷新",
+    "recent": "最近：",
+    "emptyDir": "空目录",
+    "selectThisDir": "选择此目录"
+  },
+  "report": {
+    "ariaLabel": "威胁概览",
+    "confirmedVulns": "已确认漏洞 · {{count}} 类",
+    "publicReachable": "公网可达",
+    "bySeverity": "按 severity 分布",
+    "priorityTop": "⚡ 建议优先处置",
+    "typeSummaryAria": "按漏洞类型汇总"
+  },
+  "theme": {
+    "toggleAria": "切换主题",
+    "toLight": "切换到浅色",
+    "toDark": "切换到深色"
+  },
+  "fileTree": {
+    "empty": "（空）",
+    "large": "（大）"
   }
 }

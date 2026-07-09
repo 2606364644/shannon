@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +32,10 @@ function pushRecent(path: string): string[] {
   return next;
 }
 
-export function FileSystemPicker({ value, onChange, title = "选择代码目录", triggerLabel = "📁 浏览" }: FileSystemPickerProps) {
+export function FileSystemPicker({ value, onChange, title, triggerLabel }: FileSystemPickerProps) {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t("fileSystemPicker.titleDefault");
+  const resolvedTriggerLabel = triggerLabel ?? t("scan.fields.browse");
   const [open, setOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState(value || "/");
   const [entries, setEntries] = useState<FsEntry[]>([]);
@@ -53,9 +57,9 @@ export function FileSystemPicker({ value, onChange, title = "选择代码目录"
     } catch (e) {
       if (e instanceof ApiError) {
         const detail = (e.body as { detail?: string })?.detail;
-        setError(detail ?? `错误（${e.status}）`);
+        setError(detail ?? t("fileSystemPicker.errorStatus", { status: e.status }));
       } else {
-        setError("请求失败");
+        setError(t("fileSystemPicker.requestFailed"));
       }
     }
   }
@@ -79,24 +83,24 @@ export function FileSystemPicker({ value, onChange, title = "选择代码目录"
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{triggerLabel}</Button>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{resolvedTriggerLabel}</Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
+            <DialogTitle>{resolvedTitle}</DialogTitle>
           </DialogHeader>
 
           {/* 面包屑 + home + 刷新 */}
           <div className="flex items-center gap-2 text-sm">
             <Button variant="ghost" size="sm" onClick={() => load("~")}>🏠</Button>
             <span className="font-mono text-muted-foreground truncate">{currentPath}</span>
-            <Button variant="ghost" size="icon" aria-label="刷新" onClick={() => load(currentPath)}>↻</Button>
+            <Button variant="ghost" size="icon" aria-label={t("fileSystemPicker.refreshAria")} onClick={() => load(currentPath)}>↻</Button>
           </div>
 
           {/* 最近书签 */}
           {recent.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 text-xs">
-              <span className="text-muted-foreground">最近：</span>
+              <span className="text-muted-foreground">{t("fileSystemPicker.recent")}</span>
               {recent.map((p) => (
                 <button key={p} className="rounded border border-border px-2 py-0.5 hover:bg-accent" onClick={() => load(p)}>
                   {p.split("/").pop() || p}
@@ -110,7 +114,7 @@ export function FileSystemPicker({ value, onChange, title = "选择代码目录"
             {error ? (
               <div className="p-3 text-sm text-red">⚠ {error}</div>
             ) : entries.length === 0 ? (
-              <div className="p-3 text-sm text-muted-foreground">空目录</div>
+              <div className="p-3 text-sm text-muted-foreground">{t("fileSystemPicker.emptyDir")}</div>
             ) : (
               <ul>
                 {entries.map((e) => {
@@ -147,8 +151,8 @@ export function FileSystemPicker({ value, onChange, title = "选择代码目录"
           />
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>取消</Button>
-            <Button onClick={confirm} disabled={!selectedIsDir}>选择此目录</Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
+            <Button onClick={confirm} disabled={!selectedIsDir}>{t("fileSystemPicker.selectThisDir")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

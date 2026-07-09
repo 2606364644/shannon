@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { useSystemStatus } from "./systemStatus";
 
 const okBody = {
@@ -17,7 +18,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => server.resetHandlers());
+beforeEach(() => i18n.changeLanguage("zh"));
+afterEach(() => { server.resetHandlers(); i18n.changeLanguage("zh"); });
 afterAll(() => server.close());
 
 describe("useSystemStatus", () => {
@@ -37,6 +39,21 @@ describe("useSystemStatus", () => {
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.data).toBeNull();
     expect(result.current.loading).toBe(false);
+  });
+
+  it("fetch 失败 → error 文案经 i18n 本地化（中文）", async () => {
+    server.use(http.get("/api/system-status", () => HttpResponse.json({}, { status: 500 })));
+    const { result } = renderHook(() => useSystemStatus());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("加载失败（500）");
+  });
+
+  it("fetch 失败 → 切英文 error 文案为英文", async () => {
+    i18n.changeLanguage("en");
+    server.use(http.get("/api/system-status", () => HttpResponse.json({}, { status: 500 })));
+    const { result } = renderHook(() => useSystemStatus());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("Failed to load (500)");
   });
 
   it("refresh 重新拉取", async () => {

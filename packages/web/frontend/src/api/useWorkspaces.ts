@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, ApiError } from "./client";
+import i18n from "@/i18n";
 import type { Workspace } from "./types";
 
 export interface UseWorkspacesResult {
@@ -23,7 +24,11 @@ export function useWorkspaces(intervalMs = 5000): UseWorkspacesResult {
       setData(rows);
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiError ? `加载失败（${e.status}）` : "加载失败");
+      setError(
+        e instanceof ApiError
+          ? i18n.t("common.loadFailedStatus", { status: e.status })
+          : i18n.t("common.loadFailed"),
+      );
     } finally {
       setLastUpdated(new Date());
       setLoading(false);

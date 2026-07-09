@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { Severity } from "@/api/types";
 import { SEVERITY_BG, type ReportStats } from "@/lib/report-stats";
 
@@ -8,12 +9,13 @@ const SEV_ORDER: Severity[] = ["Critical", "High", "Medium", "Low"];
  * 三列：总数大数字 | severity 堆叠条 + 4 色图例 | 建议优先处置 Top3。
  */
 export function ThreatOverview({ stats }: { stats: ReportStats }) {
+  const { t } = useTranslation();
   const nonZero = SEV_ORDER.filter((s) => stats.severityDist[s] > 0);
 
   return (
     <section
       data-testid="threat-overview"
-      aria-label="威胁概览"
+      aria-label={t("report.ariaLabel")}
       className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card md:grid-cols-[200px_1fr_280px]"
     >
       {/* 左：总数 */}
@@ -22,10 +24,10 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
           {stats.total}
         </div>
         <div className="mt-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          已确认漏洞 · {stats.typeAggs.length} 类
+          {t("report.confirmedVulns", { count: stats.typeAggs.length })}
         </div>
         <div className="mt-2.5 text-xs">
-          公网可达 <b className="font-mono text-primary">{stats.publicCount}</b> · pre-auth{" "}
+          {t("report.publicReachable")} <b className="font-mono text-primary">{stats.publicCount}</b> · pre-auth{" "}
           <b className="font-mono text-primary">{stats.preAuthCount}</b>
         </div>
       </div>
@@ -34,7 +36,7 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
       <div className="flex flex-col justify-center p-4">
         <div className="mb-2.5 flex items-baseline justify-between">
           <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-            按 severity 分布
+            {t("report.bySeverity")}
           </span>
           <span className="font-mono text-[11px] text-muted-foreground">{stats.total} total</span>
         </div>
@@ -74,7 +76,7 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
       {/* 右：优先处置 Top3 */}
       <div className="flex flex-col gap-1.5 border-border p-4 md:border-l">
         <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-wide text-red">
-          ⚡ 建议优先处置
+          {t("report.priorityTop")}
         </div>
         {stats.topRisks.map((r) => (
           <div

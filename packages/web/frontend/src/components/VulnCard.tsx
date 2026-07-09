@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { Vulnerability, MergeSource } from "../api/types";
@@ -9,22 +10,24 @@ function toBadgeTag(src: string): BadgeTag {
 }
 
 export function MergeSourceBadge({ src }: { src?: MergeSource }) {
+  const { t } = useTranslation();
   if (!src) return null;
   const tag = toBadgeTag(src);
-  const map: Record<Exclude<BadgeTag, "other">, { label: string; cls: string }> = {
-    "llm-only": { label: "💭 LLM轨", cls: "border-magenta/40 text-magenta" },
-    "gitnexus-only": { label: "🔍 GN轨", cls: "border-cyan/40 text-cyan" },
-    "both": { label: "✓ 双轨确认", cls: "border-green/40 text-green" },
+  const map: Record<Exclude<BadgeTag, "other">, { glyph: string; key: string; cls: string }> = {
+    "llm-only": { glyph: "💭", key: "vuln.llmTrack", cls: "border-magenta/40 text-magenta" },
+    "gitnexus-only": { glyph: "🔍", key: "vuln.gnTrack", cls: "border-cyan/40 text-cyan" },
+    "both": { glyph: "✓", key: "vuln.dualConfirmed", cls: "border-green/40 text-green" },
   };
   const m = map[tag as Exclude<BadgeTag, "other">];
   return m ? (
-    <Badge variant="outline" className={`gap-1 ${m.cls}`}>{m.label}</Badge>
+    <Badge variant="outline" className={`gap-1 ${m.cls}`}>{m.glyph} {t(m.key)}</Badge>
   ) : (
     <Badge variant="outline" className="text-muted-foreground">{src}</Badge>
   );
 }
 
 export function VulnCard({ v }: { v: Vulnerability }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((o) => !o);
   return (
@@ -45,7 +48,7 @@ export function VulnCard({ v }: { v: Vulnerability }) {
         <span className="font-bold text-red">{v.ID}</span>
         <span>{v.vulnerability_type}</span>
         {v.externally_exploitable && (
-          <Badge variant="outline" className="border-red/40 text-red">● 可达</Badge>
+          <Badge variant="outline" className="border-red/40 text-red">● {t("vuln.reachable")}</Badge>
         )}
         <MergeSourceBadge src={v.merge_source} />
         {v.confidence && <Badge variant="outline" className="text-muted-foreground">{v.confidence}</Badge>}

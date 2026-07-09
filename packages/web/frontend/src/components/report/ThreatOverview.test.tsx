@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import i18n from "@/i18n";
 import { ThreatOverview } from "./ThreatOverview";
 import type { ReportStats } from "@/lib/report-stats";
 
@@ -22,6 +23,9 @@ function makeStats(over: Partial<ReportStats> = {}): ReportStats {
 }
 
 describe("ThreatOverview", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  afterEach(() => i18n.changeLanguage("zh"));
+
   it("渲染 total 大数字 + 类型数 + 公网/pre-auth", () => {
     const { container } = render(<ThreatOverview stats={makeStats()} />);
     expect(container.textContent).toContain("36");
@@ -58,5 +62,17 @@ describe("ThreatOverview", () => {
     const top = container.querySelector('[data-testid="threat-toprisk"]');
     expect(top?.textContent).toContain("INJ-VULN-01");
     expect(top?.textContent).toContain("服务端 RCE");
+  });
+
+  it("i18n: 切英文 chrome 文案为英文", () => {
+    i18n.changeLanguage("en");
+    const { container } = render(<ThreatOverview stats={makeStats()} />);
+    expect(container.textContent).toContain("Confirmed vulns");
+    expect(container.textContent).toContain("1 types");
+    expect(container.textContent).toContain("Public reachable");
+    expect(container.textContent).toContain("By severity distribution");
+    expect(container.textContent).toContain("Priority fixes");
+    // section aria-label 英文
+    expect(container.querySelector('[data-testid="threat-overview"]')).toHaveAttribute("aria-label", "Threat overview");
   });
 });

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { FileSystemPicker } from "./FileSystemPicker";
 
 const ROOT = "/tmp/test-root";
@@ -30,10 +31,12 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => {
   server.resetHandlers();
   localStorage.clear();
   cleanup();
+  i18n.changeLanguage("zh");
 });
 afterAll(() => server.close());
 
@@ -93,5 +96,21 @@ describe("FileSystemPicker", () => {
     await waitFor(() => expect(screen.getByText(/not found|不存在/)).toBeInTheDocument());
     // Dialog 仍在
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("i18n: 切英文 dialog chrome 文案为英文", async () => {
+    i18n.changeLanguage("en");
+    renderPicker({ value: ROOT });
+    fireEvent.click(screen.getByRole("button", { name: /Browse/ }));
+    await waitFor(() => expect(screen.getByText("sub")).toBeInTheDocument());
+    // title / 按钮 / 空目录提示
+    expect(screen.getByText("Select code directory")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Select this directory/ })).toBeDisabled();
+    // 进入空子目录验 "Empty directory"
+    fireEvent.doubleClick(screen.getByText("sub"));
+    await waitFor(() => expect(screen.getByText("Empty directory")).toBeInTheDocument());
+    // 刷新按钮 aria-label
+    expect(screen.getByLabelText("Refresh")).toBeInTheDocument();
   });
 });

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { renderHook, act, cleanup, waitFor } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import { useWorkspaces } from "./useWorkspaces";
 
 const server = setupServer(
@@ -11,7 +12,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => { server.resetHandlers(); cleanup(); if (vi.isFakeTimers()) vi.useRealTimers(); });
+beforeEach(() => i18n.changeLanguage("zh"));
+afterEach(() => { server.resetHandlers(); cleanup(); i18n.changeLanguage("zh"); if (vi.isFakeTimers()) vi.useRealTimers(); });
 afterAll(() => server.close());
 
 describe("useWorkspaces", () => {
@@ -49,5 +51,20 @@ describe("useWorkspaces", () => {
     const { result } = renderHook(() => useWorkspaces());
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).not.toBeNull();
+  });
+
+  it("fetch 错误 → error 文案经 i18n 本地化（中文含 status）", async () => {
+    server.use(http.get("/api/workspaces", () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("加载失败（500）");
+  });
+
+  it("fetch 错误 → 切英文 error 文案为英文", async () => {
+    i18n.changeLanguage("en");
+    server.use(http.get("/api/workspaces", () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+    const { result } = renderHook(() => useWorkspaces());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("Failed to load (500)");
   });
 });

@@ -1,14 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
 import WorkspaceDetail from "./index";
 
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => { server.resetHandlers(); cleanup(); });
+// jsdom navigator.language 默认 en；现有断言依赖中文渲染，逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
+afterEach(() => { server.resetHandlers(); cleanup(); i18n.changeLanguage("zh"); });
 afterAll(() => server.close());
 
 function renderAt(path: string) {

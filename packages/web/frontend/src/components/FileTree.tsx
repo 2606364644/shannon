@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { DeliverablesFile } from "../api/types";
 
 interface TreeNode {
@@ -50,6 +51,7 @@ function NodeView({
   onSelect: (f: DeliverablesFile) => void;
 }) {
   const [open, setOpen] = useState(depth < 1);
+  const { t } = useTranslation();
   const isDir = node.children.size > 0;
   return (
     <li>
@@ -71,8 +73,8 @@ function NodeView({
           >
             <span aria-hidden>📄</span>
             <span>{node.name}</span>
-            {node.file?.kind === "empty_json" && <span className="text-xs text-muted-foreground">（空）</span>}
-            {node.file?.kind === "big_json" && <span className="text-xs text-muted-foreground">（大）</span>}
+            {node.file?.kind === "empty_json" && <span className="text-xs text-muted-foreground">{t("fileTree.empty")}</span>}
+            {node.file?.kind === "big_json" && <span className="text-xs text-muted-foreground">{t("fileTree.large")}</span>}
           </button>
         )}
       </div>
