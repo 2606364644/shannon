@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@/i18n";
 import { MarkdownVulnCard } from "./MarkdownVulnCard";
 import type { ParsedVulnBlock } from "../api/types";
 
@@ -19,6 +20,10 @@ function makeBlock(overrides: Partial<ParsedVulnBlock> = {}): ParsedVulnBlock {
     ...overrides,
   };
 }
+
+// jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
+// 现有断言依赖中文渲染,逐测试钉回 zh(同 StatusBadge.test 模式)。
+beforeEach(() => i18n.changeLanguage("zh"));
 
 describe("MarkdownVulnCard · severity 着色", () => {
   it("Critical → 红边框 + data-severity", () => {
@@ -78,14 +83,14 @@ describe("MarkdownVulnCard · 头部信号", () => {
     expect(screen.getByText(/公网/)).toBeInTheDocument();
   });
 
-  it("authRequired=false → pre-auth 标记", () => {
+  it("authRequired=false → 未认证 标记", () => {
     render(<MarkdownVulnCard block={makeBlock({ authRequired: false })} severity="High" />);
-    expect(screen.getByText(/pre-auth/)).toBeInTheDocument();
+    expect(screen.getByText(/未认证/)).toBeInTheDocument();
   });
 
-  it("authRequired=true → auth 标记", () => {
+  it("authRequired=true → 需认证 标记", () => {
     render(<MarkdownVulnCard block={makeBlock({ authRequired: true })} severity="Medium" />);
-    expect(screen.getByText(/auth/)).toBeInTheDocument();
+    expect(screen.getByText(/需认证/)).toBeInTheDocument();
   });
 
   it("confidence 显示", () => {
@@ -158,5 +163,54 @@ describe("MarkdownVulnCard · PoC 折叠（a11y）", () => {
   it("无 witnessPayload → 不渲染 PoC toggle", () => {
     render(<MarkdownVulnCard block={makeBlock()} severity="Low" />);
     expect(screen.queryByTestId("poc-toggle")).not.toBeInTheDocument();
+  });
+});
+
+describe("MarkdownVulnCard i18n", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("zh 渲染中文徽章 + 推断 chrome", () => {
+    render(
+      <MarkdownVulnCard
+        block={makeBlock({
+          starred: true,
+          externallyExploitable: true,
+          authRequired: false,
+          witnessPayload: "alert(1)",
+        })}
+        severity="Critical"
+      />,
+    );
+    expect(screen.getByText(/首要/)).toBeInTheDocument();
+    expect(screen.getByText(/公网/)).toBeInTheDocument();
+    expect(screen.getByText(/未认证/)).toBeInTheDocument();
+    // PoC toggle 中文 chrome
+    expect(screen.getByTestId("poc-toggle")).toHaveTextContent("见证");
+    // severity 数据值保留(Critical);推断 chrome 中文
+    const badge = screen.getByTestId("severity-badge");
+    expect(badge).toHaveTextContent("Critical");
+    expect(badge).toHaveTextContent("推断");
+  });
+
+  it("切英文渲染英文徽章 + inferred", () => {
+    i18n.changeLanguage("en");
+    render(
+      <MarkdownVulnCard
+        block={makeBlock({
+          starred: true,
+          externallyExploitable: true,
+          authRequired: false,
+          witnessPayload: "alert(1)",
+        })}
+        severity="Critical"
+      />,
+    );
+    expect(screen.getByText(/primary/)).toBeInTheDocument();
+    expect(screen.getByText(/public/)).toBeInTheDocument();
+    expect(screen.getByText(/pre-auth/)).toBeInTheDocument();
+    expect(screen.getByTestId("poc-toggle")).toHaveTextContent("witness");
+    const badge = screen.getByTestId("severity-badge");
+    expect(badge).toHaveTextContent("Critical");
+    expect(badge).toHaveTextContent("inferred");
   });
 });

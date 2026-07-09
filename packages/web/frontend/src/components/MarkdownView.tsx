@@ -1,4 +1,6 @@
 import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import GithubSlugger from "github-slugger";
@@ -161,8 +163,11 @@ function flatten(node: ReactNode): string {
   return "";
 }
 
-/** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / pre 复制按钮）。 */
-const PROSE_COMPONENTS = {
+/** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / pre 复制按钮）。
+ *  工厂接收 t：复制按钮文案随语言切换（react-markdown 的 components 项不订阅 i18n，
+ *  靠外层 MarkdownView 的 useTranslation 触发重渲染、传入最新 t）。 */
+function makeProseComponents(t: TFunction) {
+  return {
   // KV 行（冒号守卫：`- **key:** value` → kv-row；编号列表 `1. **RCE**…` 不匹配）
   li: ({ children, ...props }: { children?: ReactNode; [k: string]: unknown }) => {
     const kids = Array.isArray(children) ? children : [children];
@@ -233,13 +238,14 @@ const PROSE_COMPONENTS = {
             e.currentTarget.textContent = "✓";
           }}
         >
-          复制
+          {t("markdown.copy")}
         </Button>
         {children}
       </pre>
     );
   },
-};
+  };
+}
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -264,7 +270,9 @@ function groupSegments(segments: Segment[]): VulnGroup[] {
 }
 
 export function MarkdownView({ markdown }: { markdown: string }) {
+  const { t } = useTranslation();
   const [heroCollapsed, setHeroCollapsed] = useState(false);
+  const proseComponents = useMemo(() => makeProseComponents(t), [t]);
   const { headings, topRisks, typeSummaries } = useMemo(() => parseStructure(markdown), [markdown]);
   const execH2 = headings.find((h) => h.text.includes("执行摘要"));
   const showHero = !!execH2 && topRisks.length > 0;
@@ -341,7 +349,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
           className="rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4"
         >
           <div className="mb-2 flex items-center justify-between font-semibold tracking-tight text-base">
-            <span>最高风险发现（按业务影响排序）</span>
+            <span>{t("markdown.topRisksTitle")}</span>
             <Button
               size="sm"
               variant="ghost"
@@ -349,7 +357,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               aria-label="toggle hero"
             >
               {heroCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
-              <span className="sr-only">{heroCollapsed ? "展开" : "折叠"}</span>
+              <span className="sr-only">{heroCollapsed ? t("markdown.expand") : t("markdown.collapse")}</span>
             </Button>
           </div>
           {!heroCollapsed && (
@@ -376,9 +384,9 @@ export function MarkdownView({ markdown }: { markdown: string }) {
 
       <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
         {twoCol && (
-          <nav data-testid="toc" aria-label="目录" className="sticky top-4 self-start">
+          <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-4 self-start">
             <div className="mb-2 px-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              目录
+              {t("markdown.toc")}
             </div>
             <ul className="space-y-0.5">
               {tocItems.map((h, i) => {
@@ -419,7 +427,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 <ReactMarkdown
                   remarkPlugins={REMARK_PLUGINS}
                   rehypePlugins={[makeSegmentSlugPlugin(i), rehypeHighlight] as never}
-                  components={PROSE_COMPONENTS as never}
+                  components={proseComponents as never}
                 >
                   {g.md}
                 </ReactMarkdown>

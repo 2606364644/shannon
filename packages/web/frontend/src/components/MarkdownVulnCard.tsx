@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { ParsedVulnBlock, Severity } from "../api/types";
 
 /** severity → 卡片边框 + 底色（走 --c-* alpha，深/浅主题自动重算）。
@@ -46,6 +47,7 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
  * PoC 折叠复用 VulnCard 的手写模式（useState + role=button + aria-expanded + Enter/Space）。
  */
 export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; severity: Severity }) {
+  const { t } = useTranslation();
   const [pocOpen, setPocOpen] = useState(false);
   const togglePoc = () => setPocOpen((o) => !o);
 
@@ -66,7 +68,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
             {block.id}
           </span>
           {block.starred && (
-            <span className="px-1 py-0.5 rounded-sm border border-red/40 bg-red/10 text-red">★ 首要</span>
+            <span className="px-1 py-0.5 rounded-sm border border-red/40 bg-red/10 text-red">{t("vuln.starred")}</span>
           )}
           {block.vulnType && (
             <span className="px-1 py-0.5 rounded-sm border border-border bg-muted text-muted-foreground">
@@ -74,23 +76,23 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
             </span>
           )}
           {block.externallyExploitable === true && (
-            <span className="text-cyan">🌐 公网</span>
+            <span className="text-cyan">{t("vuln.publicNet")}</span>
           )}
           {block.authRequired === false && (
-            <span className="text-cyan">🔓 pre-auth</span>
+            <span className="text-cyan">{t("vuln.preAuth")}</span>
           )}
           {block.authRequired === true && (
-            <span className="text-muted-foreground">🔐 auth</span>
+            <span className="text-muted-foreground">{t("vuln.authRequired")}</span>
           )}
           {block.confidence && (
-            <span className="text-muted-foreground">conf {block.confidence}</span>
+            <span className="text-muted-foreground">{t("vuln.confidenceLabel")} {block.confidence}</span>
           )}
           <span
             data-testid="severity-badge"
             className={`ml-auto px-2 py-0.5 rounded-full border ${SEVERITY_CHIP[severity]}`}
-            title="依据类型/公网/认证/置信度启发式推断，非权威评级"
+            title={t("vuln.severityTooltip")}
           >
-            {severity} <span className="opacity-60">推断</span>
+            {severity} <span className="opacity-60">{t("vuln.inferred")}</span>
           </span>
         </header>
 
@@ -125,7 +127,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
               }}
               className="inline-flex cursor-pointer items-center gap-1 rounded-sm border border-dashed border-border px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground hover:text-foreground"
             >
-              <span aria-hidden="true">{pocOpen ? "▾" : "▸"}</span> PoC / witness
+              <span aria-hidden="true">{pocOpen ? "▾" : "▸"}</span> {t("vuln.pocWitness")}
             </div>
             {pocOpen && (
               <pre

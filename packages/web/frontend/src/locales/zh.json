@@ -288,5 +288,23 @@
       "endedHint": "可查看完整报告",
       "viewReport": "查看报告"
     }
+  },
+  "vuln": {
+    "starred": "★ 首要",
+    "publicNet": "🌐 公网",
+    "preAuth": "🔓 未认证",
+    "authRequired": "🔐 需认证",
+    "confidenceLabel": "置信度",
+    "inferred": "推断",
+    "severityTooltip": "依据类型/公网/认证/置信度启发式推断，非权威评级",
+    "pocWitness": "PoC / 见证"
+  },
+  "markdown": {
+    "topRisksTitle": "最高风险发现（按业务影响排序）",
+    "expand": "展开",
+    "collapse": "折叠",
+    "toc": "目录",
+    "tocAria": "目录",
+    "copy": "复制"
   }
 }

@@ -288,5 +288,23 @@
       "endedHint": "View the full report",
       "viewReport": "View report"
     }
+  },
+  "vuln": {
+    "starred": "★ primary",
+    "publicNet": "🌐 public",
+    "preAuth": "🔓 pre-auth",
+    "authRequired": "🔐 auth",
+    "confidenceLabel": "conf",
+    "inferred": "inferred",
+    "severityTooltip": "Inferred via type/exposure/auth/confidence heuristics; not an authoritative rating",
+    "pocWitness": "PoC / witness"
+  },
+  "markdown": {
+    "topRisksTitle": "Top risk findings (sorted by business impact)",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "toc": "Contents",
+    "tocAria": "Table of contents",
+    "copy": "Copy"
   }
 }

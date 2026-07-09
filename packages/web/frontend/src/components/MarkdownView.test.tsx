@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@/i18n";
 import { MarkdownView } from "./MarkdownView";
 
 // 真实报告结构镜像（参考 NodeGoat comprehensive_security_assessment_report.md）：
@@ -40,6 +41,10 @@ Count: 4
   preTax=res.send(...)
   \`\`\`
 `;
+
+// jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
+// chrome 断言依赖中文渲染,逐测试钉回 zh(同 StatusBadge.test 模式)。
+beforeEach(() => i18n.changeLanguage("zh"));
 
 describe("MarkdownView", () => {
   it("渲染 H1/H2 标题；vuln 块进卡片（INJ-VULN-01 不再是 heading）", () => {
@@ -233,5 +238,41 @@ describe("MarkdownView", () => {
     expect(container.querySelector("table")).not.toBeNull();
     expect(container.querySelectorAll("th").length).toBeGreaterThanOrEqual(2);
     expect(container.querySelectorAll("td").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("MarkdownView i18n", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("zh 渲染中文 chrome(目录 / 最高风险 / 复制)", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    // TOC 标签 + aria
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc?.textContent).toContain("目录");
+    expect(toc?.getAttribute("aria-label")).toBe("目录");
+    // hero 标题 chrome(非报告正文)
+    expect(container.querySelector('[data-testid="exec-summary-hero"]')?.textContent).toContain("最高风险发现");
+    // prose block code 复制按钮
+    const { container: c2 } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
+    expect(c2.querySelector(".copy-btn")?.textContent).toBe("复制");
+  });
+
+  it("切英文渲染英文 chrome(Contents / Top risk findings / Copy)", () => {
+    i18n.changeLanguage("en");
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc?.textContent).toContain("Contents");
+    expect(toc?.getAttribute("aria-label")).toBe("Table of contents");
+    expect(container.querySelector('[data-testid="exec-summary-hero"]')?.textContent).toContain("Top risk findings");
+    const { container: c2 } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
+    expect(c2.querySelector(".copy-btn")?.textContent).toBe("Copy");
+  });
+
+  it("报告 Markdown 正文不随语言切换(仍是中文 fixture)", () => {
+    i18n.changeLanguage("en");
+    render(<MarkdownView markdown={MD} />);
+    // 渲染的报告标题/执行摘要仍是 fixture 中文(LLM 数据,不翻译)
+    expect(screen.getByRole("heading", { level: 1, name: "安全评估报告" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "执行摘要" })).toBeInTheDocument();
   });
 });
