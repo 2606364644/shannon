@@ -151,24 +151,42 @@ class WhiteboxScanWorkflow:
                 self._state.current_phase = "pre-recon"
                 self._state.current_agent = AgentName.PRE_RECON.value
 
-                # Fail-fast: if either fails, cancel the other and propagate.
-                code_index_result, pre_recon_metrics = await asyncio.gather(
-                    workflow.execute_activity(
+                if input.enable_llm_track:
+                    # Fail-fast: if either fails, cancel the other and propagate.
+                    code_index_result, pre_recon_metrics = await asyncio.gather(
+                        workflow.execute_activity(
+                            activities.run_code_index, act_input,
+                            start_to_close_timeout=timedelta(minutes=10),
+                            retry_policy=retry_for("code-index"),
+                        ),
+                        workflow.execute_activity(
+                            activities.run_agent,
+                            ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.PRE_RECON.value}),
+                            start_to_close_timeout=timedelta(hours=2),
+                            retry_policy=retry_for("standard"),
+                        ),
+                    )
+                    self._state.completed_agents.append(AgentName.PRE_RECON.value)
+                    self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
+                else:
+                    # LLM 轨关闭: pre-recon LLM agent 跳过, 只跑 code_index (GitNexus 确定性兜底).
+                    # 不 append PRE_RECON (resume 语义: 开轨重跑会补); entry_point_fusion 内部
+                    # 靠 deliverable 存在性 skip LLM 源 (G6 解耦), 故 pre_recon_deliverable.md 缺失安全.
+                    code_index_result = await workflow.execute_activity(
                         activities.run_code_index, act_input,
                         start_to_close_timeout=timedelta(minutes=10),
                         retry_policy=retry_for("code-index"),
-                    ),
-                    workflow.execute_activity(
-                        activities.run_agent,
-                        ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.PRE_RECON.value}),
-                        start_to_close_timeout=timedelta(hours=2),
-                        retry_policy=retry_for("standard"),
-                    ),
-                )
+                    )
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        ActivityInput(**{**act_input.__dict__,
+                           "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0): pre-recon LLM agent skipped; code_index (GitNexus) still runs; entry points degrade to deterministic schema source only",
+                           "info_level": "info"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
 
                 self._state.code_index_stats = code_index_result
-                self._state.completed_agents.append(AgentName.PRE_RECON.value)
-                self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
 
                 if input.enable_llm_track:
                     # Merge deterministic sinks with LLM-discovered sinks (needs LLM deliverable)
