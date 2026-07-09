@@ -104,5 +104,56 @@
       "deleteTitle": "删除工作区",
       "deleteDesc": "删除工作区 {{ws}}？目录和产物将永久删除。"
     }
+  },
+  "scan": {
+    "tabs": { "whitebox": "白盒", "blackbox": "黑盒", "correlation": "联动" },
+    "cardTitle": { "whitebox": "白盒扫描", "blackbox": "黑盒扫描", "correlation": "联动扫描" },
+    "fields": {
+      "selectRepo": "选择仓库",
+      "targetName": "扫描目标 + 命名",
+      "reuse": "复用",
+      "urlLabel": "目标 URL",
+      "urlOptionalSuffix": "（可选）",
+      "urlHint": "可选；填了便于黑盒 --latest 按 URL 匹配本次白盒",
+      "wsNameLabel": "workspace 名",
+      "wsNamePlaceholder": "空=自动 {repo}_{timestamp}",
+      "reuseLatest": "复用最新白盒结果",
+      "reuseHint": "--latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone",
+      "pathPlaceholder": "/root/code/foo",
+      "urlPlaceholder": "http://example.com",
+      "browse": "📁 浏览",
+      "previewName": "预览名：{{name}}（预览，实际由后端生成）",
+      "checkingConflict": "检测重名中…",
+      "yamlValid": "yaml 合法",
+      "yamlInvalid": "⚠ {{error}}"
+    },
+    "options": { "downloadedRepo": "已下载仓库", "localPath": "本地路径" },
+    "repo": {
+      "selectPlaceholder": "选择仓库",
+      "addBtn": "+ 添加新仓库",
+      "notReady": "仓库未就绪（{{state}}）",
+      "ungrouped": "未分组"
+    },
+    "submit": "开始扫描 ▶",
+    "submitHint": "→ 202 → 跳 /p/{ws}/live · 错误：400(Temporal)/409(并发)/422(yaml)",
+    "resume": {
+      "title": "断点续扫确认",
+      "desc": "workspace「{{name}}」已存在。CLI -w 语义=存在则恢复，将断点续扫（恢复已有进度）。",
+      "cancel": "取消（清空名）",
+      "confirm": "确认续扫"
+    },
+    "errors": {
+      "yamlRuntimeError": "yaml 有错，无法运行",
+      "temporal": "Temporal 未就绪（localhost:7233）。先启动：docker-compose up temporal",
+      "concurrent": "并发扫描超限，请等当前扫描完成或取消一个",
+      "yamlInvalid": "yaml 校验失败",
+      "yamlInvalidWithMsg": "yaml 校验失败：{{msg}}",
+      "submitFailed": "提交失败（{{status}}）",
+      "selectRepo": "请选择仓库",
+      "sourceEmpty": "代码来源不能为空",
+      "absolutePath": "本地路径需为绝对路径（如 /root/code/foo）",
+      "urlScheme": "目标 URL 需以 http(s):// 开头",
+      "urlEmpty": "目标 URL 不能为空"
+    }
   }
 }

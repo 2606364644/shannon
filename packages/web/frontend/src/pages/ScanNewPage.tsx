@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
@@ -35,34 +37,34 @@ function buildBody(type: ScanType, f: FormState): ScanRequest {
   return body;
 }
 
-function renderError(e: ApiError): string {
-  if (e.status === 400) return "Temporal 未就绪（localhost:7233）。先启动：docker-compose up temporal";
-  if (e.status === 409) return "并发扫描超限，请等当前扫描完成或取消一个";
+function renderError(e: ApiError, t: TFunction): string {
+  if (e.status === 400) return t("scan.errors.temporal");
+  if (e.status === 409) return t("scan.errors.concurrent");
   if (e.status === 422) {
     // FastAPI 校验错误体：{detail:[{loc,msg,type},...]}。提取首条 msg 友好展示，
     // 不把整个 JSON 数组（含 loc/type 内部字段）丢给用户。无 detail → 回退纯标签。
     const detail = (e.body as { detail?: { msg?: string }[] })?.detail;
     const msg = Array.isArray(detail) && detail.length > 0 ? detail[0]?.msg : undefined;
-    return "yaml 校验失败" + (msg ? "：" + msg : "");
+    return msg ? t("scan.errors.yamlInvalidWithMsg", { msg }) : t("scan.errors.yamlInvalid");
   }
-  return `提交失败（${e.status}）`;
+  return t("scan.errors.submitFailed", { status: e.status });
 }
 
-function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: string): string | null {
-  if (kind === "repo") return selectedRepo ? null : "请选择仓库";
-  if (!pathValue.trim()) return "代码来源不能为空";
-  return /^(\/|[A-Za-z]:[\\/])/.test(pathValue) ? null : "本地路径需为绝对路径（如 /root/code/foo）";
+function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: string, t: TFunction): string | null {
+  if (kind === "repo") return selectedRepo ? null : t("scan.errors.selectRepo");
+  if (!pathValue.trim()) return t("scan.errors.sourceEmpty");
+  return /^(\/|[A-Za-z]:[\\/])/.test(pathValue) ? null : t("scan.errors.absolutePath");
 }
 
-function validateUrl(v: string, type: ScanType): string | null {
+function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
   // 白盒扫本地代码，url 仅作黑盒 --latest 匹配锚点（CLI --url optional），可空；
   // 黑盒扫运行中服务，url 必填。correlation 无 url 概念。
   if (type !== "blackbox") {
     if (!v.trim()) return null;
-    return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
+    return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
   }
-  if (!v.trim()) return "目标 URL 不能为空";
-  return /^https?:\/\//.test(v) ? null : "目标 URL 需以 http(s):// 开头";
+  if (!v.trim()) return t("scan.errors.urlEmpty");
+  return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
 // 前端推算 workspace 名预览（basename + _YYYYMMDD-HHMMSS），与后端实际生成可能略有出入，
@@ -80,6 +82,7 @@ function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: stri
 }
 
 export function ScanNewPage() {
+  const { t } = useTranslation();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const presetRepo = params.get("repo");
@@ -123,8 +126,8 @@ export function ScanNewPage() {
     return () => clearTimeout(t);
   }, [f.wsName]);
 
-  const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue);
-  const urlErr = validateUrl(f.url, type);
+  const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue, t);
+  const urlErr = validateUrl(f.url, type, t);
   const isCorrelation = type === "correlation";
   const isValid =
     !sourceErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
@@ -136,7 +139,7 @@ export function ScanNewPage() {
 
   async function doSubmit() {
     if (type === "correlation" && yamlErr) {
-      toast.error("yaml 有错，无法运行");
+      toast.error(t("scan.errors.yamlRuntimeError"));
       return;
     }
     try {
@@ -144,7 +147,7 @@ export function ScanNewPage() {
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f));
       nav(`/p/${r.workspace}/live`);
     } catch (e) {
-      if (e instanceof ApiError) toast.error(renderError(e));
+      if (e instanceof ApiError) toast.error(renderError(e, t));
     } finally {
       setSubmitting(false);
     }
@@ -167,9 +170,9 @@ export function ScanNewPage() {
         className="w-full"
       >
         <TabsList>
-          <TabsTrigger value="whitebox">白盒</TabsTrigger>
-          <TabsTrigger value="blackbox">黑盒</TabsTrigger>
-          <TabsTrigger value="correlation">联动</TabsTrigger>
+          <TabsTrigger value="whitebox">{t("scan.tabs.whitebox")}</TabsTrigger>
+          <TabsTrigger value="blackbox">{t("scan.tabs.blackbox")}</TabsTrigger>
+          <TabsTrigger value="correlation">{t("scan.tabs.correlation")}</TabsTrigger>
         </TabsList>
         {/* Radix Tabs 仅 mount 激活 tab 的 TabsContent；type 由 onValueChange 驱动。
             白盒/黑盒共享 <ScanFormFields>，靠 type prop 决定 reuse 块是否渲染。 */}
@@ -197,7 +200,7 @@ export function ScanNewPage() {
         </TabsContent>
         <TabsContent value="correlation">
           <Card>
-            <CardHeader><CardTitle>联动扫描</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t("scan.cardTitle.correlation")}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <YamlEditor
                 value={f.yaml}
@@ -205,7 +208,7 @@ export function ScanNewPage() {
                 onError={(m) => setYamlErr(m)}
               />
               <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
-                {yamlErr ? `⚠ ${yamlErr}` : "yaml 合法"}
+                {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
               </div>
             </CardContent>
           </Card>
@@ -213,24 +216,24 @@ export function ScanNewPage() {
       </Tabs>
 
       <Button size="lg" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
-        开始扫描 ▶
+        {t("scan.submit")}
       </Button>
-      <div className="text-xs text-muted-foreground">→ 202 → 跳 /p/{"{ws}"}/live · 错误：400(Temporal)/409(并发)/422(yaml)</div>
+      <div className="text-xs text-muted-foreground">{t("scan.submitHint")}</div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>断点续扫确认</DialogTitle>
+            <DialogTitle>{t("scan.resume.title")}</DialogTitle>
             <DialogDescription>
-              workspace「{conflict ?? ""}」已存在。CLI -w 语义=存在则恢复，将断点续扫（恢复已有进度）。
+              {t("scan.resume.desc", { name: conflict ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => { set({ wsName: "" }); setConfirmOpen(false); }}>
-              取消（清空名）
+              {t("scan.resume.cancel")}
             </Button>
             <Button onClick={() => { setConfirmOpen(false); void doSubmit(); }}>
-              确认续扫
+              {t("scan.resume.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
+import i18n from "@/i18n";
 import { ScanNewPage } from "./ScanNewPage";
 
 // Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
@@ -24,6 +25,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en,LanguageDetector 会把 i18n 切到 en;迁移后断言依赖中文渲染,逐测试钉回 zh。
+beforeEach(() => i18n.changeLanguage("zh"));
 afterEach(() => {
   server.resetHandlers();
   vi.restoreAllMocks();

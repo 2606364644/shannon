@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,11 +14,10 @@ import { listRepos } from "@/api/client";
 import type { Repo } from "@/api/types";
 import type { FormState } from "../pages/ScanNewPage";
 
-const UNGROUPED_LABEL = "未分组";
-function groupRepos(repos: Repo[]): { name: string; repos: Repo[] }[] {
+function groupRepos(repos: Repo[], t: TFunction): { name: string; repos: Repo[] }[] {
   const map = new Map<string, Repo[]>();
   for (const r of repos) {
-    const g = r.group ?? UNGROUPED_LABEL;
+    const g = r.group ?? t("scan.repo.ungrouped");
     let arr = map.get(g);
     if (!arr) { arr = []; map.set(g, arr); }
     arr.push(r);
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflict, derivedName }: Props) {
+  const { t } = useTranslation();
   const [repos, setRepos] = useState<Repo[]>([]);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -44,24 +46,24 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
 
   return (
     <Card>
-      <CardHeader><CardTitle>{type === "blackbox" ? "黑盒扫描" : "白盒扫描"}</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t(`scan.cardTitle.${type}`)}</CardTitle></CardHeader>
       <CardContent className="space-y-6">
         <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">选择仓库</legend>
+          <legend className="text-sm font-medium">{t("scan.fields.selectRepo")}</legend>
           <Select value={f.sourceKind} onValueChange={(v) => set({ sourceKind: v as "repo" | "path" })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="repo">已下载仓库</SelectItem>
-              <SelectItem value="path">本地路径</SelectItem>
+              <SelectItem value="repo">{t("scan.options.downloadedRepo")}</SelectItem>
+              <SelectItem value="path">{t("scan.options.localPath")}</SelectItem>
             </SelectContent>
           </Select>
 
           {f.sourceKind === "repo" ? (
             <div className="space-y-2">
               <Select value={f.selectedRepo} onValueChange={(v) => set({ selectedRepo: v })}>
-                <SelectTrigger><SelectValue placeholder="选择仓库" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t("scan.repo.selectPlaceholder")} /></SelectTrigger>
                 <SelectContent>
-                  {groupRepos(repos).map((g) => (
+                  {groupRepos(repos, t).map((g) => (
                     <SelectGroup key={g.name}>
                       <SelectLabel>{g.name}</SelectLabel>
                       {g.repos.map((r) => (
@@ -73,11 +75,11 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>+ 添加新仓库</Button>
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>{t("scan.repo.addBtn")}</Button>
               {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (
                 selectedRepoState === "cloning" || selectedRepoState === "pulling"
                   ? <CloneProgress name={f.selectedRepo} />
-                  : <div className="text-xs text-destructive">仓库未就绪（{selectedRepoState}）</div>
+                  : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: selectedRepoState })}</div>
               )}
               <AddRepoDialog open={addOpen} onOpenChange={setAddOpen}
                 onCreated={(name) => set({ selectedRepo: name })} />
@@ -86,8 +88,8 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
             <div className="space-y-2">
               <div className="flex gap-2">
                 <Input value={f.sourceValue} onChange={(e) => set({ sourceValue: e.target.value })}
-                  placeholder="/root/code/foo" />
-                <FileSystemPicker value={f.sourceValue} onChange={(v) => set({ sourceValue: v })} triggerLabel="📁 浏览" />
+                  placeholder={t("scan.fields.pathPlaceholder")} />
+                <FileSystemPicker value={f.sourceValue} onChange={(v) => set({ sourceValue: v })} triggerLabel={t("scan.fields.browse")} />
               </div>
             </div>
           )}
@@ -95,33 +97,33 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
         </fieldset>
 
         <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">扫描目标 + 命名</legend>
+          <legend className="text-sm font-medium">{t("scan.fields.targetName")}</legend>
           <div className="space-y-2">
             <Label htmlFor="url">
-              目标 URL{type === "whitebox" && <span className="text-muted-foreground font-normal">（可选）</span>}
+              {t("scan.fields.urlLabel")}{type === "whitebox" && <span className="text-muted-foreground font-normal">{t("scan.fields.urlOptionalSuffix")}</span>}
             </Label>
-            <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder="http://example.com" />
+            <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder={t("scan.fields.urlPlaceholder")} />
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
             {type === "whitebox" && !f.url && (
-              <div className="text-xs text-muted-foreground">可选；填了便于黑盒 --latest 按 URL 匹配本次白盒</div>
+              <div className="text-xs text-muted-foreground">{t("scan.fields.urlHint")}</div>
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="wsName">workspace 名</Label>
-            <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder="空=自动 {repo}_{timestamp}" />
-            {loadingConflict && <div className="text-xs text-yellow">检测重名中…</div>}
-            {!f.wsName && derivedName && <div className="text-xs text-muted-foreground">预览名：{derivedName}（预览，实际由后端生成）</div>}
+            <Label htmlFor="wsName">{t("scan.fields.wsNameLabel")}</Label>
+            <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder={t("scan.fields.wsNamePlaceholder")} />
+            {loadingConflict && <div className="text-xs text-yellow">{t("scan.fields.checkingConflict")}</div>}
+            {!f.wsName && derivedName && <div className="text-xs text-muted-foreground">{t("scan.fields.previewName", { name: derivedName })}</div>}
           </div>
         </fieldset>
 
         {type === "blackbox" && (
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">复用</legend>
+            <legend className="text-sm font-medium">{t("scan.fields.reuse")}</legend>
             <div className="flex items-center gap-2">
               <Checkbox id="reuseLatest" checked={f.reuseLatest} onCheckedChange={(v) => set({ reuseLatest: !!v })} />
-              <Label htmlFor="reuseLatest">复用最新白盒结果</Label>
+              <Label htmlFor="reuseLatest">{t("scan.fields.reuseLatest")}</Label>
             </div>
-            <div className="text-xs text-muted-foreground">--latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone</div>
+            <div className="text-xs text-muted-foreground">{t("scan.fields.reuseHint")}</div>
           </fieldset>
         )}
       </CardContent>
