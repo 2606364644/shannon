@@ -5,10 +5,17 @@ import { http, HttpResponse } from "msw";
 import { router } from "./router";
 import App from "./App";
 import { Toaster } from "@/components/ui/sonner";
+import i18n from "@/i18n";
 
 // jsdom 默认 location.pathname = "/"，createBrowserRouter 读 History API → 落地根路由。
 const server = setupServer(http.get("/api/workspaces", () => HttpResponse.json([])));
-beforeAll(() => server.listen()); afterAll(() => server.close());
+beforeAll(() => {
+  server.listen();
+  // jsdom navigator.language 默认 en-US → LanguageDetector 渲染英文，本测试断言中文文案，
+  // 故钉死 zh 使断言确定（test-setup.ts 已在 import 期初始化 i18n 单例，此处复用并切语言）。
+  void i18n.changeLanguage("zh");
+});
+afterAll(() => server.close());
 
 describe("App 集成冒烟", () => {
   it("根路由渲染 DashboardPage（main 内含空态提示；子项目5 Task3 改根路由）", async () => {
