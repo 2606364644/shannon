@@ -618,6 +618,12 @@ async def cleanup_engine_configs(repo_path: str, engine_name: str) -> None:
     import shannon_core.services.engines  # noqa: F401 – registers engines
 
     engine = BrowserEngineFactory.get_engine(engine_name)
-    for session_id in set(AGENT_SESSION_MAPPING.values()):
+    session_ids = list(set(AGENT_SESSION_MAPPING.values()))
+    # 进程清理先于 config 清理(config 删 profile 目录不影响杀进程匹配)
+    try:
+        engine.cleanup_processes(repo_path, session_ids=session_ids)
+    except Exception:  # noqa: BLE001 - best-effort
+        pass
+    for session_id in session_ids:
         engine.cleanup_config(repo_path, session_id=session_id)
     engine.cleanup_config(repo_path)
