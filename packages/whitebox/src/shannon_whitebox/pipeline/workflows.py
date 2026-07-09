@@ -241,33 +241,47 @@ class WhiteboxScanWorkflow:
                 )
 
             if AgentName.RECON.value not in self._state.completed_agents:
-                await workflow.execute_activity(
-                    activities.log_phase_start_activity,
-                    args=[
+                if input.enable_llm_track:
+                    await workflow.execute_activity(
+                        activities.log_phase_start_activity,
+                        args=[
+                            ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
+                            list(step_names("recon")),
+                            list(step_intents("recon")),
+                        ],
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
+                    self._state.current_phase = "recon"
+                    self._state.current_agent = AgentName.RECON.value
+                    metrics = await workflow.execute_activity(
+                        activities.run_agent,
+                        ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.RECON.value}),
+                        start_to_close_timeout=timedelta(hours=2),
+                        retry_policy=retry_for("standard"),
+                    )
+                    self._state.completed_agents.append(AgentName.RECON.value)
+                    self._state.agent_metrics[AgentName.RECON.value] = metrics
+                    self._state.current_agent = None
+                    await workflow.execute_activity(
+                        activities.log_phase_complete_activity,
                         ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
-                        list(step_names("recon")),
-                        list(step_intents("recon")),
-                    ],
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
-                )
-                self._state.current_phase = "recon"
-                self._state.current_agent = AgentName.RECON.value
-                metrics = await workflow.execute_activity(
-                    activities.run_agent,
-                    ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.RECON.value}),
-                    start_to_close_timeout=timedelta(hours=2),
-                    retry_policy=retry_for("standard"),
-                )
-                self._state.completed_agents.append(AgentName.RECON.value)
-                self._state.agent_metrics[AgentName.RECON.value] = metrics
-                self._state.current_agent = None
-                await workflow.execute_activity(
-                    activities.log_phase_complete_activity,
-                    ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
-                )
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
+                else:
+                    # LLM 轨关闭: recon LLM agent 跳过. 不进 recon phase, 不 append RECON
+                    # (resume 语义). GitNexus 轨不依赖 recon_deliverable.md (chain_verdict
+                    # 只吃 parameter_graph.json), 故缺失安全; 下游 vuln/attack_chain/PoC 靠
+                    # exists() 守卫降级 (spec §1.3 零硬依赖崩).
+                    await workflow.execute_activity(
+                        activities.log_info_activity,
+                        ActivityInput(**{**act_input.__dict__,
+                           "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0): recon LLM agent skipped; GitNexus track continues independently",
+                           "info_level": "info"}),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=retry_for("log"),
+                    )
 
             # Risk scoring — produce tiered audit plan
             await workflow.execute_activity(

@@ -178,3 +178,33 @@ def test_pre_recon_skip_logs_info():
     assert any("pre-recon" in m and "skipped" in m for m in else_msgs), (
         "关轨(else)分支必须含 log_info_activity 提示 'pre-recon ... skipped', "
         f"实际 else 消息: {else_msgs}")
+
+
+# --- recon agent: 只在开轨(body)调度 ---
+
+def test_recon_agent_only_in_llm_on_body():
+    calls = _llm_track_branch_activity_calls(_src())
+    branches = {b for attr, agent, b in calls
+                if attr == "run_agent" and agent == "RECON"}
+    assert branches == {"body"}, (
+        "RECON agent 必须只在 enable_llm_track body(开轨)调度, "
+        f"实际出现在分支: {branches}")
+
+
+def test_recon_completion_only_in_body():
+    """resume 语义: 关轨 skip 时不标 RECON completed."""
+    appends = _completed_appends_by_branch(_src())
+    branches = {b for m, b in appends if m == "RECON"}
+    assert branches == {"body"}, (
+        "completed_agents.append(RECON) 必须只在 body(关轨不标 completed), "
+        f"实际: {branches}")
+
+
+def test_recon_skip_logs_info():
+    """关轨 else 分支必须打 log_info_activity, 消息含 'recon ... skipped' (非 pre-recon)."""
+    msgs = _info_messages_by_branch(_src())
+    else_msgs = {m for m, b in msgs if b == "else" and m}
+    assert any("recon" in m and "skipped" in m and "pre-recon" not in m
+               for m in else_msgs), (
+        "关轨(else)分支必须含 log_info_activity 提示 'recon ... skipped', "
+        f"实际 else 消息: {else_msgs}")
