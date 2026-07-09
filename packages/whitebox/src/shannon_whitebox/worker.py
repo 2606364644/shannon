@@ -42,6 +42,7 @@ from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
 from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_core.services.temporal_infra import generate_task_queue
+from shannon_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset
 from shannon_core.runtime.scan_runner import (
     ScanCancelled,
     ShutdownController,
@@ -127,6 +128,8 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
     # CLI(uv run)启动的扫描默认把 events.ndjson 落到本 workspace,使 shannon-web 实时页
     # (SSE tail events.ndjson)可见。setdefault:WEB 启动时 scan_manager 已注入该 env → 不覆盖。
     wire_web_event_file(workspaces_dir, input.workspace_name)
+    # CLI 起 owner=host(web 起时 scan_manager 已写 owner=web,mark_owner_if_unset 不覆盖)。
+    mark_owner_if_unset(ws_path, "host")
 
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
@@ -273,7 +276,12 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         asyncio.get_running_loop(),
         cleanup_callback=build_browser_cleanup_callback(input.repo_path, engine_name),
     )
+    # 进程级心跳:周期写 heartbeat(web 据其 mtime 判活)+ 监听 cancel.requested(web Cancel
+    # 宿主 scan 时协作式自退 → ctrl._trigger_graceful 复用 SIGINT 的 graceful 取消)。独立于
+    # Temporal workflow/activity 调度——worker 活就跳、死就停(spec §4.1/§4.5)。
+    heartbeat = HeartbeatManager(ws_path, on_cancel=ctrl._trigger_graceful)
     try:
+        await heartbeat.__aenter__()
         async with worker:
             async with run_with_display(meta, use_rich=use_rich) as session:
                 from shannon_whitebox.audit.session_registry import (
@@ -333,6 +341,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 )
                 return result_dict
     finally:
+        await heartbeat.__aexit__(None, None, None)
         ctrl.uninstall()
 
 

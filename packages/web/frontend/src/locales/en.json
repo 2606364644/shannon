@@ -132,7 +132,10 @@
       "cancelDesc": "Cancel scan {{ws}}? Progress will be lost.",
       "deleteTitle": "Delete workspace",
       "deleteDesc": "Delete workspace {{ws}}? Directory and deliverables will be permanently removed."
-    }
+    },
+    "cancelViaSignal": "Stop signal sent; host process exits within 30s",
+    "cancelWasDead": "Scan no longer running; marked cancelled",
+    "actionFailed": "Action failed: {{error}}"
   },
   "scan": {
     "tabs": { "whitebox": "whitebox", "blackbox": "blackbox", "correlation": "correlation" },

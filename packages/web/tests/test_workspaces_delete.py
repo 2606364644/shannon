@@ -29,11 +29,23 @@ def test_delete_not_exist_404(app_with_ws):
 
 
 def test_delete_running_rejected_409(app_with_ws, tmp_workspaces):
+    """活跃判定改用 _status_of==running:heartbeat fresh(非 pid)→ running → 409。"""
+    import time
     _make_ws(tmp_workspaces, "running-ws", status="running")
-    # 注入一个 alive pid（当前进程）使 indexer 判运行中
-    import os
-    app_with_ws.state.indexer.set_active_pid("running-ws", os.getpid())
+    (tmp_workspaces / "running-ws" / "heartbeat").write_text(f"{time.time()}\n")  # fresh → running
     client = TestClient(app_with_ws)
     r = client.delete("/api/workspaces/running-ws")
     assert r.status_code == 409
     assert (tmp_workspaces / "running-ws").exists()  # 未删
+
+
+def test_delete_after_cancel_allowed(app_with_ws, tmp_workspaces):
+    """cancel 标 cancelled(终态优先于 heartbeat)后 _status_of≠running → 立即可删(spec §4.7)。"""
+    import time
+    _make_ws(tmp_workspaces, "cancelled-ws", status="cancelled")
+    # heartbeat 仍 fresh,但终态优先 → cancelled(非 running)→ 可删
+    (tmp_workspaces / "cancelled-ws" / "heartbeat").write_text(f"{time.time()}\n")
+    client = TestClient(app_with_ws)
+    r = client.delete("/api/workspaces/cancelled-ws")
+    assert r.status_code == 200
+    assert not (tmp_workspaces / "cancelled-ws").exists()

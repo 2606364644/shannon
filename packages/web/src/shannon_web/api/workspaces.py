@@ -52,11 +52,12 @@ async def get_workspace(ws: str, request: Request):
 async def delete_workspace(ws: str, request: Request):
     p = _workspace_path(request, ws)  # 404 if 不存在
     idx = request.app.state.indexer
-    # indexer 的 _active_pids 已由 GET /api/workspaces(及单 ws GET)端点的 sync_active
-    # 从 scan_manager 同步过来；DELETE 不再重复 sync（替换式 sync 会 wipe 测试直接
-    # set_active_pid 注入或跨请求留存的 pid），直接用公开 is_running 访问器判定，
-    # 避免 reach into _active_pids / _pid_alive，并消除原 dual-source "either alive" 逻辑。
-    if idx.is_running(ws):
+    # 活跃判定改用 _status_of==running(终态优先 + heartbeat,spec §4.7)。cancel 标
+    # cancelled(终态)后 _status_of≠running → 立即可删;heartbeat fresh(在跑)→ running
+    # → 409 先 cancel。不再依赖 pid 表(容器非 host PID namespace 看不到 host pid)。
+    from shannon_core.session import SessionManager
+    mgr = SessionManager(request.app.state.config.workspaces_dir)
+    if idx._status_of(p, mgr.get_status(p)) == "running":
         raise HTTPException(status_code=409, detail="workspace running, cancel scan first")
     shutil.rmtree(p)
     idx.set_active_pid(ws, None)

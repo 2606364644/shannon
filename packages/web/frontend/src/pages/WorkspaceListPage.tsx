@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { fmtCost } from "@/utils/currency";
 import { Link } from "react-router-dom";
 import {
@@ -96,10 +97,14 @@ export function WorkspaceListPage() {
     helper.display({
       id: "actions", header: () => t("workspaces.table.actions"), cell: (info) => {
         const w = info.row.original;
-        return w.status === "running" ? (
-          <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>{t("common.cancel")}</Button>
-        ) : (
-          <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>{t("common.delete")}</Button>
+        // Delete 始终可见;running 额外显 Cancel(spec §4.7,去掉原 running XOR)。
+        return (
+          <div className="flex items-center gap-1">
+            {w.status === "running" && (
+              <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>{t("common.cancel")}</Button>
+            )}
+            <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>{t("common.delete")}</Button>
+          </div>
         );
       },
     }),
@@ -120,10 +125,19 @@ export function WorkspaceListPage() {
     if (!pendingAction) return;
     setBusy(true);
     try {
-      if (pendingAction.kind === "cancel") await cancelScan(pendingAction.ws);
-      else await deleteWorkspace(pendingAction.ws);
+      if (pendingAction.kind === "cancel") {
+        const res = await cancelScan(pendingAction.ws);
+        // 协作式取消语义提示(宿主 scan:已发信号 ≤30s 退;已死:直接标记)。
+        if (res?.via === "signal") toast.info(t("workspaces.cancelViaSignal"));
+        else if (res?.was_dead) toast.info(t("workspaces.cancelWasDead"));
+      } else {
+        await deleteWorkspace(pendingAction.ws);
+      }
       await refresh();
       setPendingAction(null);
+    } catch (e) {
+      // API 失败:toast 错误 + 复位 busy(finally)+ 弹窗保留(用户可重试或取消,不卡死)。
+      toast.error(t("workspaces.actionFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }

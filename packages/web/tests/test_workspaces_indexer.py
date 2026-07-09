@@ -37,36 +37,44 @@ def test_nested_legacy_session_format(tmp_workspaces):
     assert rows[0]["scan_type"] == "whitebox"
 
 
-def test_running_when_pid_alive(tmp_workspaces):
+def test_interrupted_when_pid_alive_but_no_heartbeat(tmp_workspaces):
+    """pid 表不再参与判活(spec §4.3):注入 alive pid 但无 heartbeat → interrupted。
+    pid 表只服务 cancel(web 自起 SIGINT),不服务判活——避免「容器非 host PID namespace
+    看不到 host pid 就判死」的误判(回归铁律:判活统一靠 heartbeat)。"""
     _make_ws(tmp_workspaces, "Run_z", status=None)
     idx = WorkspacesIndexer(tmp_workspaces)
-    idx.set_active_pid("Run_z", os.getpid())
-    assert idx.list_workspaces()[0]["status"] == "running"
+    idx.set_active_pid("Run_z", os.getpid())  # alive pid,但不参与判活
+    assert idx.list_workspaces()[0]["status"] == "interrupted"
 
 
 def test_interrupted_when_no_pid_no_status(tmp_workspaces):
     _make_ws(tmp_workspaces, "Dead_w", status=None)
-    # 模型「死掉的孤儿」：session.json 远古（scan 早已停写），否则 mtime 门会当活 scan
-    import time
-    old = time.time() - 3600
-    os.utime(tmp_workspaces / "Dead_w" / "session.json", (old, old))
+    # 无 heartbeat(死掉的孤儿,scan 早已停写)→ interrupted
     idx = WorkspacesIndexer(tmp_workspaces)
     assert idx.list_workspaces()[0]["status"] == "interrupted"
 
 
-def test_running_when_recently_active_no_pid(tmp_workspaces):
-    """回归：host CLI 起的活 scan，web 看不到其 pid（容器非 host PID namespace），但
-    workflow.log 近期被写 → _status_of 显 running 而非 interrupted
-    （kol_mapping_service_20260708-193139 列表/详情被误标 interrupted 即此 bug）。
-    """
+def test_running_when_heartbeat_fresh(tmp_workspaces):
+    """回归:host CLI 起的活 scan,web 看不到其 pid(容器非 host PID namespace),但
+    HeartbeatManager 持续写 heartbeat → _status_of 显 running 而非 interrupted
+    (kol_mapping_service_20260708-193139 列表/详情被误标 interrupted 即此 bug)。
+    判活信号源已从 workflow.log 换成 heartbeat(进程级、不受 LLM 卡顿影响)。"""
     import time
     _make_ws(tmp_workspaces, "HostAlive", status=None)
     ws = tmp_workspaces / "HostAlive"
-    old = time.time() - 3600
-    os.utime(ws / "session.json", (old, old))  # session.json 远古，避免它单独触发 active
-    (ws / "workflow.log").write_text("scan running\n")  # fresh → scan 仍存活
+    (ws / "heartbeat").write_text(f"{time.time()}\n")  # fresh heartbeat → scan 仍存活
     idx = WorkspacesIndexer(tmp_workspaces)
     assert idx.list_workspaces()[0]["status"] == "running"
+
+
+def test_terminal_status_passed_through(tmp_workspaces):
+    """显式终态集合(completed/failed/interrupted/cancelled/killed/crashed)→ 该终态
+    (强信号,立即定;spec §4.3)。取代旧「只认 completed/failed + 兜底推断 interrupted」。"""
+    for st in ("completed", "failed", "interrupted", "cancelled", "killed", "crashed"):
+        _make_ws(tmp_workspaces, f"S_{st}", status=st)
+    rows = {r["name"]: r["status"] for r in WorkspacesIndexer(tmp_workspaces).list_workspaces()}
+    for st in ("completed", "failed", "interrupted", "cancelled", "killed", "crashed"):
+        assert rows[f"S_{st}"] == st
 
 
 def test_correlation_marked(tmp_workspaces):

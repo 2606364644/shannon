@@ -156,19 +156,16 @@ def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
 
 
 def test_get_workspace_recently_active_not_500(app_with_ws, tmp_workspaces):
-    """回归：get_workspace 对 host CLI 起的活 scan（web 看不到 pid，但 workflow.log 近期被写）
-    必须返 200 + status=running，不得 500。曾因 _status_of 改签名收 Path 但此端点仍传 str，
-    触发 `'str' object has no attribute 'name'`（completed/failed 态在首行 return 不触发，
-    故仅 running 态暴露）。
+    """回归:get_workspace 对 host CLI 起的活 scan(web 看不到 pid,但 heartbeat fresh)
+    必须返 200 + status=running,不得 500。曾因 _status_of 改签名收 Path 但此端点仍传 str,
+    触发 `'str' object has no attribute 'name'`(completed/failed 态在首行 return 不触发,
+    故仅 running 态暴露)。判活信号源已从 workflow.log 换成 heartbeat。
     """
-    import os as _os
     import time as _time
     _ws(tmp_workspaces, "HostAlive", status=None,
         created_at=_time.time(), completed_at=None)
     ws = tmp_workspaces / "HostAlive"
-    old = _time.time() - 3600
-    _os.utime(ws / "session.json", (old, old))      # session.json 远古
-    (ws / "workflow.log").write_text("scan running\n")  # fresh → scan 存活
+    (ws / "heartbeat").write_text(f"{_time.time()}\n")  # fresh heartbeat → scan 存活
     r = TestClient(app_with_ws).get("/api/workspaces/HostAlive")
     assert r.status_code == 200
     assert r.json()["status"] == "running"

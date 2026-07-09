@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, cleanup, act, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
+import { Toaster } from "@/components/ui/sonner";
 import { WorkspaceListPage } from "./WorkspaceListPage";
 import type { Workspace } from "../api/types";
 
@@ -26,7 +27,7 @@ afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 function renderPage() {
-  return render(<MemoryRouter><WorkspaceListPage /></MemoryRouter>);
+  return render(<MemoryRouter><WorkspaceListPage /><Toaster /></MemoryRouter>);
 }
 
 describe("WorkspaceListPage (DataTable)", () => {
@@ -79,15 +80,43 @@ describe("WorkspaceListPage (DataTable)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
-  it("非 running 行有'删除'按钮；点击 → Dialog 确认 → deleteWorkspace", async () => {
+  it("failed 行有'删除'按钮；点击 → Dialog 确认 → deleteWorkspace", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-failed")).toBeInTheDocument());
-    // 多个非 running 行 → 多个 "删除" 按钮，取第一个（ws-failed，DOM 顺序）
-    fireEvent.click(screen.getAllByRole("button", { name: /删除/ })[0]);
-    // Dialog 标题（zh="删除工作区"），用 heading role 避免匹配描述
+    // 精确定位 ws-failed 行的删除按钮(Delete 始终可见,running 行也有删除)
+    const row = screen.getByText("ws-failed").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /删除/ }));
     expect(await screen.findByRole("heading", { name: /删除工作区/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /确认/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("running 行同时有'取消'和'删除'按钮(Delete 始终可见,spec §4.7)", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    const row = screen.getByText("ws-a").closest("tr")!;
+    expect(within(row).getByRole("button", { name: /取消/ })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /删除/ })).toBeInTheDocument();
+  });
+
+  it("cancel 返 via:signal → toast 语义提示「已发停止信号」", async () => {
+    server.use(http.delete("/api/scan/:ws", () => HttpResponse.json({ cancelled: "ws-a", via: "signal" })));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /取消/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /确认/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/停止信号/)).toBeInTheDocument());
+  });
+
+  it("delete API 失败 → toast 错误 + 不卡弹窗(spec §4.7)", async () => {
+    server.use(http.delete("/api/workspaces/:ws", () => new HttpResponse(null, { status: 500 })));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-failed")).toBeInTheDocument());
+    const row = screen.getByText("ws-failed").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /删除/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /确认/ }));
+    await waitFor(() => expect(screen.getByText(/操作失败/)).toBeInTheDocument());
   });
 
   it("空列表 → Empty 空态", async () => {

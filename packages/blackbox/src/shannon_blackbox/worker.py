@@ -32,6 +32,7 @@ from shannon_core.models.audit import AgentMetricsSummary, WorkflowSummary
 from shannon_core.audit.display_lifecycle import run_with_display
 from shannon_core.display.structured_event_renderer import wire_web_event_file
 from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
+from shannon_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset
 from shannon_core.runtime.scan_runner import (
     ScanCancelled,
     ShutdownController,
@@ -119,6 +120,9 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
     # CLI(uv run)启动的扫描默认把 events.ndjson 落到本 workspace,使 shannon-web 实时页
     # (SSE tail events.ndjson)可见。setdefault:WEB 启动时 scan_manager 已注入该 env → 不覆盖。
     wire_web_event_file(resolve_workspaces_dir(input.repo_path), input.workspace_name)
+    ws_dir = resolve_workspaces_dir(input.repo_path) / input.workspace_name
+    # CLI 起 owner=host(web 起时 scan_manager 已写 owner=web,mark_owner_if_unset 不覆盖)。
+    mark_owner_if_unset(ws_dir, "host")
 
     client = await Client.connect(temporal_address)
     task_queue = generate_task_queue(TASK_QUEUE_PREFIX)
@@ -171,7 +175,11 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         asyncio.get_running_loop(),
         cleanup_callback=build_browser_cleanup_callback(input.repo_path, engine_name),
     )
+    # 进程级心跳:周期写 heartbeat(web 据其 mtime 判活)+ 监听 cancel.requested(web Cancel
+    # 宿主 scan 时协作式自退 → ctrl._trigger_graceful)。独立于 Temporal 调度:worker 活就跳、死就停。
+    heartbeat = HeartbeatManager(ws_dir, on_cancel=ctrl._trigger_graceful)
     try:
+        await heartbeat.__aenter__()
         async with worker:
             async with run_with_display(meta, use_rich=use_rich) as session:
                 set_audit_session(session)
@@ -206,6 +214,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
                 await session.log_workflow_complete(_to_workflow_summary(result, total_duration_ms))
                 return result
     finally:
+        await heartbeat.__aexit__(None, None, None)
         ctrl.uninstall()
 
 

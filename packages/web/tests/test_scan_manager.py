@@ -1,6 +1,9 @@
 import asyncio
+import json
+import os
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -137,8 +140,8 @@ async def test_cancel_sends_sigint_then_killed_scan_end(tmp_workspaces, fake_lon
     ws = await mgr.start(ScanRequest(type="whitebox",
                                      source=PathSource(kind="path", value="/x"),
                                      url="u", workspace="WL"))
-    ok = await mgr.cancel(ws)
-    assert ok is True
+    result = await mgr.cancel(ws)
+    assert result == {"cancelled": "WL"}
     await asyncio.sleep(0.6)
     text = (tmp_workspaces / "WL" / "events.ndjson").read_text()
     assert '"killed"' in text
@@ -258,3 +261,60 @@ def test_active_repo_sources_tracks_running_then_clears(tmp_workspaces):
     assert "foo" in mgr.active_repo_sources()  # 在途引用可见
     mgr._active_reqs.pop("ws1", None)  # 模拟 _watch finally 清理
     assert mgr.active_repo_sources() == set()  # scan 结束后消失
+
+
+@pytest.mark.asyncio
+async def test_cancel_host_running_writes_signal_and_marks_cancelled(tmp_workspaces):
+    """② owner=host(heartbeat fresh,web 看不到 pid)→ 写 cancel.requested + 标 cancelled + via:signal。"""
+    ws = "HOST1"
+    ws_dir = tmp_workspaces / ws
+    ws_dir.mkdir()
+    (ws_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh → host 在跑
+    (ws_dir / "session.json").write_text(json.dumps({"status": "running"}))
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None)
+    result = await mgr.cancel(ws)
+    assert result == {"cancelled": ws, "via": "signal"}
+    assert (ws_dir / "cancel.requested").exists()  # 宿主 HeartbeatManager 据此自退
+    sess = json.loads((ws_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+    assert sess["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_dead_marks_cancelled_was_dead(tmp_workspaces):
+    """③ heartbeat stale(已死)→ 标 cancelled + was_dead:true(不写 cancel.requested)。"""
+    ws = "DEAD1"
+    ws_dir = tmp_workspaces / ws
+    ws_dir.mkdir()
+    (ws_dir / "heartbeat").write_text("x\n")
+    old = time.time() - 3600
+    os.utime(ws_dir / "heartbeat", (old, old))  # stale → 已死
+    (ws_dir / "session.json").write_text(json.dumps({"status": "running"}))
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None)
+    result = await mgr.cancel(ws)
+    assert result == {"cancelled": ws, "was_dead": True}
+    assert not (ws_dir / "cancel.requested").exists()  # 已死无需协作式信号
+    sess = json.loads((ws_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_unknown_workspace_returns_none(tmp_workspaces):
+    """workspace 不存在 → None(唯一 404 情况;spec §4.6)。"""
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None)
+    assert await mgr.cancel("nope") is None
+
+
+@pytest.mark.asyncio
+async def test_start_marks_owner_web(tmp_workspaces, fake_ok, monkeypatch):
+    """web 自起 scan → scan_manager.start 标 session.json owner=web(spec §4.2)。"""
+    mgr = ScanManager(tmp_workspaces, tmp_workspaces / "r", None, max_concurrent=2)
+    _patch_ok(monkeypatch, mgr)
+    monkeypatch.setattr(mgr, "_build_argv",
+                        lambda req, t, ws, yaml=None: [sys.executable, str(fake_ok)])
+    ws = await mgr.start(ScanRequest(type="whitebox",
+                                     source=PathSource(kind="path", value="/x"),
+                                     url="u", workspace="WOWN"))
+    await asyncio.sleep(0.3)
+    sess = json.loads((tmp_workspaces / "WOWN" / "session.json").read_text())
+    assert sess.get("owner") == "web"

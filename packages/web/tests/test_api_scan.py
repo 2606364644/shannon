@@ -54,3 +54,31 @@ def test_delete_scan():
     fake = FakeSM()
     client = TestClient(create_app(overrides={"scan_manager": fake}))
     assert client.delete("/api/scan/WSX").status_code == 200
+
+
+def test_cancel_passes_through_via_signal():
+    """cancel 对 owner=host scan 返 via:signal 时,api 透传给前端(语义提示)。"""
+    class HostSM:
+        async def cancel(self, ws):
+            return {"cancelled": ws, "via": "signal"}
+
+        def active_pids(self):
+            return {}
+
+    client = TestClient(create_app(overrides={"scan_manager": HostSM()}))
+    r = client.delete("/api/scan/WSX")
+    assert r.status_code == 200
+    assert r.json() == {"cancelled": "WSX", "via": "signal"}
+
+
+def test_cancel_404_when_workspace_missing():
+    """workspace 不存在(scan_manager.cancel 返 None)→ 唯一 404(spec §4.6)。"""
+    class NoScanSM:
+        async def cancel(self, ws):
+            return None
+
+        def active_pids(self):
+            return {}
+
+    client = TestClient(create_app(overrides={"scan_manager": NoScanSM()}))
+    assert client.delete("/api/scan/WSX").status_code == 404

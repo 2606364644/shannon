@@ -32,6 +32,11 @@ def _created_at_key(row: dict) -> float:
     return _to_unix(row.get("created_at")) or 0.0
 
 
+_TERMINAL_STATUSES = frozenset(
+    {"completed", "failed", "interrupted", "cancelled", "killed", "crashed"}
+)
+
+
 class WorkspacesIndexer:
     def __init__(self, workspaces_dir: Path) -> None:
         self._dir = Path(workspaces_dir)
@@ -65,18 +70,17 @@ class WorkspacesIndexer:
         return pid is not None and self._pid_alive(pid)
 
     def _status_of(self, ws_path: Path, session_status: str | None) -> str:
-        if session_status == "completed":
-            return "completed"
-        if session_status == "failed":
-            return "failed"
-        if self.is_running(ws_path.name):
-            return "running"  # web 托管且 pid 存活
-        # web 未托管（无 alive pid）但文件近期被写 → host CLI 起的 scan 仍存活，显 running
-        # 而非 interrupted（容器非 host PID namespace 看不到 host pid；见 scan_liveness）。
-        # 回归：kol_mapping_service_20260708-193139 列表/详情被误标 interrupted 即缺此门。
+        # 终态优先(强信号,立即定):session.json 显式标了终态 → 该终态。取代旧「只认
+        # completed/failed + 兜底推断 interrupted」的混乱(spec §4.3)。
+        if session_status in _TERMINAL_STATUSES:
+            return session_status
+        # 判活靠 heartbeat mtime(pid 表不参与判活,只服务 cancel)。heartbeat fresh
+        # → scan worker 进程仍存活(即便 web 看不到 host pid 也判活)→ running。
+        # 回归:kol_mapping_service_20260708-193139 被误标 interrupted 即缺此判活信号源。
         if is_scan_recently_active(ws_path):
             return "running"
-        return "interrupted"  # 无 scan_end + 长时间无写入 = 未正常结束
+        # 无终态 + 无 fresh heartbeat = 未正常结束(死掉的孤儿/容器重启后子进程同死)。
+        return "interrupted"
 
     def list_workspaces(self) -> list[dict]:
         mgr = SessionManager(self._dir)

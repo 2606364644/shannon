@@ -12,9 +12,8 @@ from shannon_web.components.orphan_reconciler import reconcile_orphaned, _has_sc
 
 
 def _make_ws(tmp_path, status="running", scan_end_status=None, with_activity_log=False):
-    """构造一个**死掉的孤儿** ws（scan 早已停写）：写完所有文件后把 mtime 设远古，
-    避免被 scan_liveness 的 mtime 门当成活 scan 跳过。活 scan 场景另建 fresh workflow.log。
-    """
+    """构造一个**死掉的孤儿** ws(无 fresh heartbeat):写完所有文件后把 mtime 设远古
+    (历史遗留;新判活只看 heartbeat,故无 heartbeat 即死)。活 scan 场景另建 fresh heartbeat。"""
     ws_dir = tmp_path / "workspaces" / "ws1"
     ws_dir.mkdir(parents=True)
     session = {
@@ -103,13 +102,13 @@ async def test_orphan_no_session_skip(tmp_path):
 
 @pytest.mark.asyncio
 async def test_orphan_recently_active_skip(tmp_path):
-    """回归：host CLI 起的活 scan，web 的 scan_manager 看不到其 pid（容器非 host PID
-    namespace），但 workflow.log 仍被持续写入。reconcile_orphaned 不得据「无 pid」就写
-    假 scan_end（kol_mapping_service_20260708-193139 被误显 interrupted 即此 bug）。
-    """
+    """回归:heartbeat fresh(host CLI 起的活 scan,web 的 scan_manager 看不到其 pid)→
+    reconcile_orphaned 不得据「无 pid」就写假 scan_end
+    (kol_mapping_service_20260708-193139 被误显 interrupted 即此 bug)。
+    判活信号源已从 workflow.log 换成 heartbeat(进程级、不受 LLM 卡顿影响)。"""
     ws_dir = _make_ws(tmp_path, status="running")  # session.json 已被设远古 mtime
-    # scan 进程仍存活：刚写了 workflow.log（mtime=now）
-    (ws_dir / "workflow.log").write_text("[2026-07-08 20:53:09] scan running\n", encoding="utf-8")
+    # scan 进程仍存活:HeartbeatManager 刚写了 heartbeat(mtime=now)
+    (ws_dir / "heartbeat").write_text(f"{time.time()}\n", encoding="utf-8")
     wrote = await reconcile_orphaned(ws_dir, is_running=False)  # web 看不到 host pid
     assert wrote is False
     assert not _has_scan_end(ws_dir / "events.ndjson")  # 没写假 scan_end

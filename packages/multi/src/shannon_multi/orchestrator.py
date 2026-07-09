@@ -44,6 +44,7 @@ from shannon_core.correlation.schemas import (  # noqa: E402
 from shannon_core.correlation.queue_merge import merge_exploitation_queues  # noqa: E402
 from shannon_core.correlation.drift import detect_drift  # noqa: E402
 from shannon_core.utils.paths import WHITEBOX_SUBDIR  # noqa: E402
+from shannon_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,13 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                                   name=config.correlation.out_workspace,
                                   scan_type="correlation")
     out_dlv = deliverables_dir_for_workspace(out_ws)
+    mark_owner_if_unset(out_ws, "host")  # CLI 起 owner=host(web 起 scan_manager 已写 web)
+    # 进程级心跳 + 协作式取消(multi 无 ShutdownController:on_cancel 取消本协程主 task,
+    # 让 gather/await 抛 CancelledError 退出;异常/取消路径靠进程退出 + heartbeat stale 兜底,
+    # 正常路径 return 前 __aexit__ 清理)。spec §4.5/§8。
+    main_task = asyncio.current_task()
+    heartbeat = HeartbeatManager(out_ws, on_cancel=main_task.cancel)
+    await heartbeat.__aenter__()
 
     # 3. per-edge 关联 Agent(asyncio.Semaphore 限并发, B5)
     role_map = {s: spec.role for s, spec in config.repos.items()}
@@ -240,6 +248,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
     write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues, report_md)
 
     await corr_writer.scan_end("failed" if overall_failed else "completed")
+    await heartbeat.__aexit__(None, None, None)
 
     return {"out_workspace": config.correlation.out_workspace,
             "deliverables_path": str(out_dlv),

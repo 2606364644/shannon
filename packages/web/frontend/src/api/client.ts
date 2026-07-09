@@ -28,8 +28,9 @@ export const browseFs = (path: string) =>
   apiGet<FsBrowseResult>(`/fs/browse?path=${encodeURIComponent(path)}`);
 export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
+export type CancelResult = { cancelled: string; via?: string; was_dead?: boolean };
 export const cancelScan = (ws: string) =>
-  apiDelete<{ cancelled: string }>(`/scan/${encodeURIComponent(ws)}`);
+  apiDelete<CancelResult>(`/scan/${encodeURIComponent(ws)}`);
 
 /** 仓库名（可为 group/repo）按段 encode：保留 `/` 作路径分隔，每段安全转义。
  *  /repos/frontend/foo 直接命中后端 {name:path}，含空格等特殊字符的段也安全。 */

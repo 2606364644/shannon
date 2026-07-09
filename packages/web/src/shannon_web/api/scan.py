@@ -30,7 +30,7 @@ async def create_scan(req: ScanRequest, request: Request):
 
 @router.delete("/{ws}")
 async def cancel_scan(ws: str, request: Request):
-    ok = await request.app.state.scan_manager.cancel(ws)
-    if not ok:
+    result = await request.app.state.scan_manager.cancel(ws)
+    if result is None:
         raise HTTPException(404, "scan not found")
-    return {"cancelled": ws}
+    return result

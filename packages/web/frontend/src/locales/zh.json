@@ -132,7 +132,10 @@
       "cancelDesc": "取消扫描 {{ws}}？进度会丢失。",
       "deleteTitle": "删除工作区",
       "deleteDesc": "删除工作区 {{ws}}？目录和产物将永久删除。"
-    }
+    },
+    "cancelViaSignal": "已发停止信号，宿主进程 ≤30s 退出",
+    "cancelWasDead": "该 scan 已不在运行，已标记取消",
+    "actionFailed": "操作失败：{{error}}"
   },
   "scan": {
     "tabs": { "whitebox": "白盒", "blackbox": "黑盒", "correlation": "联动" },

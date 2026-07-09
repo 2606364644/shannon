@@ -13,6 +13,7 @@ import aiofiles
 
 from shannon_web.models import ScanRequest
 from .repo_manager import _resolve_repo_dir
+from .scan_liveness import is_scan_recently_active
 
 
 class TemporalUnavailable(Exception):
@@ -78,6 +79,8 @@ class ScanManager:
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
+        # 标 owner=web(诊断 + cancel 分轨;宿主 CLI 起的 owner=host 由 worker 写)
+        self._mark_owner(ws_dir, "web")
         event_file = ws_dir / "events.ndjson"
 
         argv = self._build_argv(req, target, ws, yaml_path)
@@ -105,15 +108,59 @@ class ScanManager:
         self._tasks[ws] = asyncio.create_task(self._watch(ws, proc, event_file))
         return ws
 
-    async def cancel(self, ws: str) -> bool:
+    async def cancel(self, ws: str) -> dict | None:
+        """取消 scan 三轨(返回 dict=成功,None=workspace 不存在→唯一 404)。
+
+        ① _procs 有且存活 → SIGINT(容器内直杀 web 自起 scan)。
+        ② heartbeat fresh(owner=host 在跑)→ 写 cancel.requested(宿主 HeartbeatManager
+           ≤一个心跳周期内检测并自退)+ 标 cancelled + via:"signal"。
+        ③ heartbeat stale(已死,含 owner=web 但 web 重启后 _procs 空)→ 标 cancelled + was_dead:true。
+        web 侧立即返回(不等宿主真退)→ 状态立即翻转 → Delete 立即可用。
+        """
+        ws_dir = self._workspaces_dir / ws
+        if not ws_dir.exists():
+            return None  # 唯一 404 情况
+        # ① web 自起:在 _procs 且存活 → SIGINT
         proc = self._procs.get(ws)
-        if proc is None:
-            return False
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            return {"cancelled": ws}
+        # ②/③ owner=host 或已死:标 cancelled(③ 不写协作式信号)
+        if is_scan_recently_active(ws_dir):
+            (ws_dir / "cancel.requested").write_text("", encoding="utf-8")
+            await self._mark_cancelled(ws_dir)
+            return {"cancelled": ws, "via": "signal"}
+        await self._mark_cancelled(ws_dir)
+        return {"cancelled": ws, "was_dead": True}
+
+    def _mark_owner(self, ws_dir: Path, owner: str) -> None:
+        """标 session.json owner(web/host)。best-effort:子进程 MetricsTracker 用
+        dict(existing) 浅拷贝保留 top-level key。owner 只服务 cancel 分轨诊断。"""
+        session_file = ws_dir / "session.json"
         try:
-            proc.send_signal(signal.SIGINT)
-        except ProcessLookupError:
+            data = json.loads(session_file.read_text("utf-8")) if session_file.exists() else {}
+            if not isinstance(data, dict):
+                data = {}
+            data["owner"] = owner
+            session_file.write_text(json.dumps(data), encoding="utf-8")
+        except (OSError, ValueError):
             pass
-        return True
+
+    async def _mark_cancelled(self, ws_dir: Path) -> None:
+        """标 session.status=cancelled + completed_at + 写 scan_end(若无)。让 _status_of
+        因终态优先立即返 cancelled(列表/详情翻转,Delete 立即可用)。"""
+        event_file = ws_dir / "events.ndjson"
+        if not self._has_scan_end(event_file):
+            await self._write_scan_end(event_file, "cancelled", -1, "用户取消(web Cancel)")
+        try:
+            from shannon_core.session import SessionManager
+            SessionManager(self._workspaces_dir).update_session(
+                ws_dir, {"status": "cancelled", "completed_at": time.time()})
+        except Exception:  # noqa: BLE001 - 标记是 best-effort,不阻塞 cancel
+            pass
 
     # ---- 钩子（可 monkeypatch）----
     def _temporal_address(self) -> str:
