@@ -33,10 +33,20 @@ class ShutdownController:
         self._event = asyncio.Event()
         self._count = 0
         self._loop = None
+        self._cleanup_callback = None
 
-    def install(self, loop: asyncio.AbstractEventLoop) -> None:
-        """在给定 event loop 上注册信号 handler（仅 Unix）。"""
+    def install(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        cleanup_callback: "callable | None" = None,
+    ) -> None:
+        """在给定 event loop 上注册信号 handler（仅 Unix）。
+
+        cleanup_callback(session_ids=None) 在 _force_exit 的 os._exit 前同步调用,
+        用于回收 browser 子进程(强退路径,不能 await)。
+        """
         self._loop = loop
+        self._cleanup_callback = cleanup_callback
         loop.add_signal_handler(signal.SIGINT, self._on_signal, signal.SIGINT)
         loop.add_signal_handler(signal.SIGTERM, self._on_signal, signal.SIGTERM)
 
@@ -60,10 +70,20 @@ class ShutdownController:
     def _force_exit(self) -> None:
         print()
         print_line("SCAN", "", "强制退出")
+        if self._cleanup_callback is not None:
+            try:
+                self._cleanup_callback(session_ids=None)
+            except Exception:  # noqa: BLE001 - 清理绝不阻塞退出
+                pass
         os._exit(130)
 
     def is_set(self) -> bool:
         return self._event.is_set()
+
+    @property
+    def cleanup_callback(self) -> "callable | None":
+        """暴露 _force_exit/_do_cancel 用的清理回调(供 await_workflow_with_shutdown 传递)。"""
+        return self._cleanup_callback
 
     async def wait(self) -> None:
         await self._event.wait()
@@ -128,7 +148,10 @@ async def await_workflow_with_shutdown(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if ctrl.is_set():
-            await _do_cancel(handle, result_task, cancel_grace_seconds)
+            await _do_cancel(
+                handle, result_task, cancel_grace_seconds,
+                cleanup_callback=ctrl.cleanup_callback,
+            )
             raise ScanCancelled()
         return result_task.result()
     finally:
@@ -194,7 +217,7 @@ async def run_scan_graceful(
             ctrl.uninstall()
 
 
-async def _do_cancel(handle, result_task, cancel_grace_seconds: float) -> None:
+async def _do_cancel(handle, result_task, cancel_grace_seconds: float, cleanup_callback: "callable | None" = None) -> None:
     """发协作式 cancel，并在 grace 期内等待结果；超时放弃等待（不 escalate）。"""
     print_line("CANCEL", "", "正在取消 Temporal workflow…")
     try:
@@ -209,6 +232,11 @@ async def _do_cancel(handle, result_task, cancel_grace_seconds: float) -> None:
             f"{cancel_grace_seconds}s 内 workflow 未响应取消，放弃等待"
             f"（server 端 cancel 仍生效）",
         )
+        if cleanup_callback is not None:
+            try:
+                cleanup_callback(session_ids=None)
+            except Exception:  # noqa: BLE001 - best-effort
+                pass
     except Exception:
         # result_task 因 cancel 抛出的异常属预期，吞掉
         pass

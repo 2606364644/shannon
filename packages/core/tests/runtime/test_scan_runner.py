@@ -202,6 +202,37 @@ class TestAwaitWorkflowWithShutdown:
 
         fake_handle.cancel.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_passes_ctrl_cleanup_callback_to_do_cancel(self):
+        """路径② 接通: await_workflow_with_shutdown 把 ctrl.cleanup_callback 传给 _do_cancel。"""
+        fake_handle = AsyncMock()
+        # result 永不自然完成 -> 必须靠取消路径
+        fake_handle.result = MagicMock(
+            return_value=asyncio.get_running_loop().create_future()
+        )
+        fake_handle.cancel = AsyncMock()
+
+        triggered = ShutdownController()
+        triggered._event.set()  # 预置：中断已发生
+
+        def cleanup(session_ids=None):
+            pass
+
+        triggered.install(MagicMock(), cleanup_callback=cleanup)
+
+        captured = {}
+
+        async def fake_do_cancel(handle, result_task, grace, *, cleanup_callback=None):
+            captured["cb"] = cleanup_callback
+
+        with patch("shannon_core.runtime.scan_runner._do_cancel", fake_do_cancel):
+            with pytest.raises(ScanCancelled):
+                await await_workflow_with_shutdown(
+                    fake_handle, triggered, cancel_grace_seconds=0.01
+                )
+
+        assert captured["cb"] is cleanup  # ctrl 的 callback 被传给 _do_cancel
+
 
 class TestRunScanGracefulNormal:
     @pytest.mark.asyncio
@@ -323,3 +354,69 @@ class TestRunScanGracefulCancel:
                     progress_type=MagicMock(),
                     cancel_grace_seconds=0.01,
                 )
+
+
+class TestShutdownCleanup:
+    """路径③: _force_exit 前 os._exit 必有同步进程清理。"""
+
+    def test_force_exit_calls_cleanup_before_os_exit(self):
+        """第 2 次 SIGINT -> _force_exit -> 先调 cleanup_callback 再 os._exit(130)。"""
+        ctrl = ShutdownController()
+        called = []
+
+        def cleanup(session_ids=None):
+            called.append(session_ids)
+
+        ctrl._loop = MagicMock()
+        ctrl.install(MagicMock(), cleanup_callback=cleanup)
+        ctrl._on_signal(signal.SIGINT)  # 第 1 次: graceful
+        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+            ctrl._on_signal(signal.SIGINT)  # 第 2 次: force
+        mock_exit.assert_called_once_with(130)
+        assert called == [None]  # cleanup 在 os._exit 前被调一次,session_ids=None
+
+    def test_force_exit_without_callback_still_exits(self):
+        """未提供 cleanup_callback 时 _force_exit 仍正常 os._exit(不崩)。"""
+        ctrl = ShutdownController()
+        ctrl._loop = MagicMock()
+        ctrl.install(MagicMock())  # 无 cleanup_callback
+        ctrl._on_signal(signal.SIGINT)
+        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+            ctrl._on_signal(signal.SIGINT)
+        mock_exit.assert_called_once_with(130)
+
+    def test_cleanup_exception_does_not_block_exit(self):
+        """cleanup_callback 抛异常时仍必须 os._exit(清理绝不阻塞退出)。"""
+        ctrl = ShutdownController()
+
+        def boom(session_ids=None):
+            raise RuntimeError("cleanup blew up")
+
+        ctrl._loop = MagicMock()
+        ctrl.install(MagicMock(), cleanup_callback=boom)
+        ctrl._on_signal(signal.SIGINT)
+        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+            ctrl._on_signal(signal.SIGINT)
+        mock_exit.assert_called_once_with(130)
+
+    async def test_do_cancel_calls_cleanup_on_timeout(self):
+        """路径②: _do_cancel grace 超时后调 cleanup_callback。"""
+        from shannon_core.runtime.scan_runner import _do_cancel
+
+        called = []
+
+        def cleanup(session_ids=None):
+            called.append(session_ids)
+
+        fake_handle = MagicMock()
+        fake_handle.cancel = AsyncMock()
+        result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成 -> 超时
+        try:
+            await _do_cancel(
+                fake_handle, result_task, cancel_grace_seconds=0.01,
+                cleanup_callback=cleanup,
+            )
+        except Exception:
+            pass
+        assert called == [None]
+        result_task.cancel()
