@@ -17,9 +17,9 @@ function renderAt(path: string) {
 describe("TopBar", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("品牌字标 Shannon + 主导航", () => {
+  it("品牌字标 ft-shannon + 主导航", () => {
     renderAt("/");
-    expect(screen.getByText(/Shannon/)).toBeInTheDocument();
+    expect(screen.getByText(/ft-shannon/i)).toBeInTheDocument();
     expect(screen.getByText("工作区")).toBeInTheDocument();
     expect(screen.getByText("扫描")).toBeInTheDocument();
   });

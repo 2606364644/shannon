@@ -219,7 +219,7 @@
     "themeSwitchAria": "切换深浅主题",
     "statusTitle": "系统状态",
     "aboutTitle": "关于",
-    "aboutDesc": "shannon-py 安全扫描平台 web 控制台。版本信息见上方系统状态面板。",
+    "aboutDesc": "ft-shannon 安全扫描平台 web 控制台。版本信息见上方系统状态面板。",
     "fields": {
       "aiProvider": "AI 引擎",
       "browserEngine": "浏览器引擎",

@@ -219,7 +219,7 @@
     "themeSwitchAria": "Toggle light/dark theme",
     "statusTitle": "System status",
     "aboutTitle": "About",
-    "aboutDesc": "shannon-py security scanning platform web console. See the system status panel above for version info.",
+    "aboutDesc": "ft-shannon security scanning platform web console. See the system status panel above for version info.",
     "fields": {
       "aiProvider": "AI engine",
       "browserEngine": "Browser engine",

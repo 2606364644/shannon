@@ -14,7 +14,7 @@ describe("AppShell", () => {
         </Routes>
       </MemoryRouter>
     );
-    expect(screen.getByText(/Shannon/)).toBeInTheDocument();
+    expect(screen.getByText(/ft-shannon/i)).toBeInTheDocument();
     expect(screen.getByText("page-content")).toBeInTheDocument();
   });
 });

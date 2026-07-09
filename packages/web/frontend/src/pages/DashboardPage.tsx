@@ -74,7 +74,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="font-semibold tracking-tight text-2xl">Shannon</h1>
+        <h1 className="font-semibold tracking-tight text-2xl">ft-shannon</h1>
         <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
       </div>
 
