@@ -296,6 +296,7 @@
     "authRequired": "🔐 需认证",
     "confidenceLabel": "置信度",
     "inferred": "推断",
+    "severity": { "Critical": "严重", "High": "高危", "Medium": "中危", "Low": "低危" },
     "severityTooltip": "依据类型/公网/认证/置信度启发式推断，非权威评级",
     "pocWitness": "PoC / 见证"
   },
@@ -305,6 +306,7 @@
     "collapse": "折叠",
     "toc": "目录",
     "tocAria": "目录",
+    "toggleHeroAria": "切换摘要折叠",
     "copy": "复制"
   }
 }

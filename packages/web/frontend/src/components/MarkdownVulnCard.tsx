@@ -92,7 +92,7 @@ export function MarkdownVulnCard({ block, severity }: { block: ParsedVulnBlock; 
             className={`ml-auto px-2 py-0.5 rounded-full border ${SEVERITY_CHIP[severity]}`}
             title={t("vuln.severityTooltip")}
           >
-            {severity} <span className="opacity-60">{t("vuln.inferred")}</span>
+            {t(`vuln.severity.${severity}`, { defaultValue: severity })} <span className="opacity-60">{t("vuln.inferred")}</span>
           </span>
         </header>
 

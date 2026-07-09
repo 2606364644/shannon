@@ -296,6 +296,7 @@
     "authRequired": "🔐 auth",
     "confidenceLabel": "conf",
     "inferred": "inferred",
+    "severity": { "Critical": "Critical", "High": "High", "Medium": "Medium", "Low": "Low" },
     "severityTooltip": "Inferred via type/exposure/auth/confidence heuristics; not an authoritative rating",
     "pocWitness": "PoC / witness"
   },
@@ -305,6 +306,7 @@
     "collapse": "Collapse",
     "toc": "Contents",
     "tocAria": "Table of contents",
+    "toggleHeroAria": "Toggle summary",
     "copy": "Copy"
   }
 }

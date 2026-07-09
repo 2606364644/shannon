@@ -354,7 +354,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               size="sm"
               variant="ghost"
               onClick={() => setHeroCollapsed((c) => !c)}
-              aria-label="toggle hero"
+              aria-label={t("markdown.toggleHeroAria")}
             >
               {heroCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
               <span className="sr-only">{heroCollapsed ? t("markdown.expand") : t("markdown.collapse")}</span>

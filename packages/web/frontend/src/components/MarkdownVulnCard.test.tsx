@@ -58,10 +58,12 @@ describe("MarkdownVulnCard · severity 着色", () => {
     expect(container.querySelector(".bg-muted-foreground")).not.toBeNull();
   });
 
-  it("severity 角标显示等级 + 推断", () => {
+  it("severity 角标显示等级(zh 本地化) + 推断", () => {
     render(<MarkdownVulnCard block={makeBlock()} severity="Critical" />);
     const badge = screen.getByTestId("severity-badge");
-    expect(badge).toHaveTextContent("Critical");
+    // 闭集枚举 severity 走 i18n 本地化(zh:严重),非原始英文
+    expect(badge).toHaveTextContent("严重");
+    expect(badge).not.toHaveTextContent("Critical");
     expect(badge).toHaveTextContent("推断");
   });
 });
@@ -186,9 +188,10 @@ describe("MarkdownVulnCard i18n", () => {
     expect(screen.getByText(/未认证/)).toBeInTheDocument();
     // PoC toggle 中文 chrome
     expect(screen.getByTestId("poc-toggle")).toHaveTextContent("见证");
-    // severity 数据值保留(Critical);推断 chrome 中文
+    // severity 闭集枚举 zh 本地化(严重);推断 chrome 中文
     const badge = screen.getByTestId("severity-badge");
-    expect(badge).toHaveTextContent("Critical");
+    expect(badge).toHaveTextContent("严重");
+    expect(badge).not.toHaveTextContent("Critical");
     expect(badge).toHaveTextContent("推断");
   });
 
@@ -210,6 +213,7 @@ describe("MarkdownVulnCard i18n", () => {
     expect(screen.getByText(/pre-auth/)).toBeInTheDocument();
     expect(screen.getByTestId("poc-toggle")).toHaveTextContent("witness");
     const badge = screen.getByTestId("severity-badge");
+    // severity 闭集枚举 en 本地化(英文 form=Critical,与 zh 的 严重 对应)
     expect(badge).toHaveTextContent("Critical");
     expect(badge).toHaveTextContent("inferred");
   });
