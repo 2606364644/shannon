@@ -40,3 +40,46 @@ def test_every_execute_activity_has_retry_policy():
         f"(会落 Temporal 默认≈无限重试):\n"
         + "\n---\n".join(str(m) for m in missing)
     )
+
+
+def _retry_for_category(call) -> str | None:
+    """从 retry_policy=retry_for("xxx") 提取 category 字符串;非该形式返回 None。"""
+    retry_kws = [kw for kw in call.keywords if kw.arg == "retry_policy"]
+    if not retry_kws:
+        return None
+    rpc = retry_kws[0].value
+    if (
+        isinstance(rpc, ast.Call)
+        and isinstance(rpc.func, ast.Name)
+        and rpc.func.id == "retry_for"
+        and rpc.args
+        and isinstance(rpc.args[0], ast.Constant)
+    ):
+        return rpc.args[0].value
+    return None
+
+
+def test_generate_poc_report_uses_bounded_poc_retry():
+    """generate_poc_report 必须 retry_for('poc'),不能用共享的 'standard' 变量。
+
+    'standard' = PRODUCTION_RETRY(max 50) 会把 PoC 串行 LLM 调用的
+    start_to_close_timeout(幂等)放大成数小时卡死(2026-07-10 NodeGoat 实测:
+    5 个 externally_exploitable 串行 llm_fill_gap 各 max_turns=50,5min timeout
+    反复重入"白盒 PoC: 5 个" 1h43m+)。PoC 是报告增强、非关键路径(activity 内
+    吞异常),用短重试。AST 锚点防止改回共享 'standard' 变量。
+    """
+    source = WORKFLOW_FILE.read_text()
+    calls = _execute_activity_calls(source)
+    poc_calls = [
+        c for c in calls
+        if c.args
+        and isinstance(c.args[0], ast.Attribute)
+        and c.args[0].attr == "generate_poc_report"
+    ]
+    assert poc_calls, "generate_poc_report 的 execute_activity 未找到 — 锚点接线坏了"
+    for call in poc_calls:
+        category = _retry_for_category(call)
+        assert category == "poc", (
+            f"generate_poc_report 必须 retry_for('poc'),当前是 {category!r}"
+            f"(PRODUCTION_RETRY max 50 会放大超时)"
+        )

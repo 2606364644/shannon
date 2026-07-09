@@ -410,8 +410,8 @@ class BlackboxScanWorkflow:
             # === 报告增强：生成 PoC md（失败由 activity 吞掉） ===
             await workflow.execute_activity(
                 activities.generate_poc_report, act_input,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=retry_policy,
+                start_to_close_timeout=timedelta(minutes=20),
+                retry_policy=retry_for("poc"),
             )
 
             # Set final status based on failure tracking

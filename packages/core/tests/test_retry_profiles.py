@@ -88,6 +88,18 @@ class TestRetryFor:
         assert policy is not PRODUCTION_RETRY
         assert policy.maximum_attempts <= 3
 
+    def test_poc_category_uses_bounded_retry(self):
+        """PoC 报告增强是非关键路径(activity 内 try/except 吞异常),失败来源
+        只有 start_to_close_timeout;超时幂等(同输入再跑照样超时),PRODUCTION_RETRY
+        (max 50) 会放大成数小时卡死(2026-07-10 NodeGoat 实测:5 个
+        externally_exploitable 串行 llm_fill_gap 各 max_turns=50,5min timeout
+        反复重入"白盒 PoC: 5 个" 1h43m+,与 code_index 同构坑)。短重试给
+        transient 几次机会即可。
+        """
+        policy = retry_for("poc")
+        assert policy is not PRODUCTION_RETRY
+        assert policy.maximum_attempts <= 3
+
     def test_unknown_category_raises(self):
         import pytest
         with pytest.raises(ValueError):

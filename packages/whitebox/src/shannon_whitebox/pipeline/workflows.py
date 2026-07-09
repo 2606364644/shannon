@@ -542,8 +542,8 @@ class WhiteboxScanWorkflow:
             self._state.current_agent = "generate-poc-report"
             await workflow.execute_activity(
                 activities.generate_poc_report, act_input,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=retry_for("standard"),
+                start_to_close_timeout=timedelta(minutes=20),
+                retry_policy=retry_for("poc"),
             )
             self._state.current_agent = None
             await workflow.execute_activity(

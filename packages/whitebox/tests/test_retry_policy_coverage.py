@@ -82,3 +82,29 @@ def test_run_code_index_uses_bounded_code_index_retry():
             f"run_code_index 必须 retry_for('code-index'),当前是 {category!r}"
             f"(PRODUCTION_RETRY max 50 会放大超时)"
         )
+
+
+def test_generate_poc_report_uses_bounded_poc_retry():
+    """generate_poc_report 必须 retry_for('poc'),不能用 'standard'。
+
+    'standard' = PRODUCTION_RETRY(max 50) 会把 PoC 串行 LLM 调用的
+    start_to_close_timeout(幂等)放大成数小时卡死(2026-07-10 NodeGoat 实测:
+    5 个 externally_exploitable 串行 llm_fill_gap 各 max_turns=50,5min timeout
+    反复重入"白盒 PoC: 5 个" 1h43m+)。PoC 是报告增强、非关键路径(activity 内
+    吞异常),用短重试。AST 锚点防止改回 'standard'。
+    """
+    source = WORKFLOW_FILE.read_text()
+    calls = _execute_activity_calls(source)
+    poc_calls = [
+        c for c in calls
+        if c.args
+        and isinstance(c.args[0], ast.Attribute)
+        and c.args[0].attr == "generate_poc_report"
+    ]
+    assert poc_calls, "generate_poc_report 的 execute_activity 未找到 — 锚点接线坏了"
+    for call in poc_calls:
+        category = _retry_for_category(call)
+        assert category == "poc", (
+            f"generate_poc_report 必须 retry_for('poc'),当前是 {category!r}"
+            f"(PRODUCTION_RETRY max 50 会放大超时)"
+        )

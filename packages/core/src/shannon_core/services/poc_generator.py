@@ -354,7 +354,7 @@ async def llm_fill_gap(
     try:
         # PoC 是"输出 JSON"的单次结构化任务，不需要 200-turn 完整 agent
         # （默认背着 CLAUDE_MAX_TURNS/SHANNON_OPENAI_MAX_TURNS=200 跑，单条 PoC 可能
-        # 多轮空转拖慢总时长，N 条串行 = 体感"卡住无输出"）。限 50 轮兜底，
+        # 多轮空转拖慢总时长，N 条串行 = 体感"卡住无输出"）。限 10 轮兜底，
         # JSON-only prompt 正常 1-2 轮即返回。env SHANNON_POC_MAX_TURNS 可调。
         result = await run_claude_prompt(
             prompt=prompt,
@@ -362,7 +362,10 @@ async def llm_fill_gap(
             model_tier=model_tier,
             structured_output_schema=LLM_REQUEST_SCHEMA,
             api_key=api_key,
-            max_turns=int(os.getenv("SHANNON_POC_MAX_TURNS", "50")),
+            # 默认 10:原 50 让单 PoC 跑满 4-5min（GLM 对 HTTP schema 结构化输出
+            # 反复不合规），N 个串行易超 start_to_close_timeout 被 retry 放大
+            # （2026-07-10 NodeGoat 实测）。JSON-only 正常 1-2 轮即返回，10 足容错。
+            max_turns=int(os.getenv("SHANNON_POC_MAX_TURNS", "10")),
         )
     except Exception:
         return None
