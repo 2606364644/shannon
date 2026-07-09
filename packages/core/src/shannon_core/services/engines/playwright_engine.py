@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from shannon_core.services.browser_engine import BrowserEngine
@@ -200,3 +201,60 @@ class PlaywrightEngine:
     def check_available(self) -> bool:
         """Check whether ``playwright-cli`` is installed and reachable on PATH."""
         return shutil.which("playwright-cli") is not None
+
+    # -- Process lifecycle ---------------------------------------------------
+
+    def cleanup_processes(
+        self,
+        source_dir: str | None = None,
+        session_ids: list[str] | None = None,
+    ) -> dict:
+        """Best-effort 回收 playwright-cli + Chrome 子进程。
+
+        对称于 AgentBrowserEngine.cleanup_processes:优雅 close 先于 pkill 兜底,
+        全程 try/except 绝不 raise。playwright-cli 无 --all,session_ids=None 时
+        直接走粗粒度 pkill(强退路径)。
+        """
+        import logging
+
+        log = logging.getLogger(__name__)
+        closed: list[str] = []
+        killed: list[str] = []
+        errors: list[str] = []
+
+        def _run(cmd: list[str], timeout: float = 5.0) -> int:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    timeout=timeout,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return proc.returncode
+            except Exception as exc:  # noqa: BLE001 - best-effort,绝不抛
+                errors.append(f"{' '.join(cmd)}: {exc}")
+                return -1
+
+        targets = session_ids if session_ids is not None else [None]
+
+        for sid in targets:
+            if sid is not None:
+                close_cmd = ["playwright-cli", f"-s={sid}", "close"]
+                tag = sid
+                rc = _run(close_cmd, timeout=5.0)
+                if rc == 0:
+                    closed.append(tag)
+                    continue
+                _run(["pkill", "-f", f"playwright-cli.*{sid}"], timeout=5.0)
+                killed.append(tag)
+            else:
+                # 粗粒度(强退路径)
+                _run(["pkill", "-f", "playwright-cli"], timeout=5.0)
+                _run(["pkill", "-f", "headless.*playwright"], timeout=5.0)
+                killed.append("all")
+
+        log.debug(
+            "playwright cleanup: closed=%s killed=%s errors=%s",
+            closed, killed, errors,
+        )
+        return {"closed": closed, "killed": killed, "errors": errors}
