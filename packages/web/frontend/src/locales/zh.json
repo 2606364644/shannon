@@ -11,11 +11,11 @@
     "langSwitchAria": "切换语言"
   },
   "nav": {
-    "dashboard": "Dashboard",
-    "workspaces": "Workspaces",
+    "dashboard": "概览",
+    "workspaces": "工作区",
     "repos": "仓库",
-    "scan": "Scan",
-    "settings": "Settings",
+    "scan": "扫描",
+    "settings": "设置",
     "mainAria": "主导航"
   },
   "repos": {

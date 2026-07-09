@@ -25,4 +25,16 @@ describe("locale 完整性", () => {
       expect(get(en as Obj, k), `en.${k} 缺值`).toBeTruthy();
     }
   });
+
+  // 防回退：zh 导航项必须翻译为中文。原 bug 是 nav.dashboard/workspaces/scan/settings
+  // 在 zh.json 里值直接写成了英文（key 存在故不触发 fallback，测试只校验 key 集合也漏过），
+  // 表现为中文模式下导航栏仅"仓库"是中文，其余 4 项仍是英文。
+  it("zh 导航项必须含汉字（防 nav 值漏翻成英文）", () => {
+    const cjk = /[一-鿿]/;
+    for (const k of ["dashboard", "workspaces", "repos", "scan", "settings"]) {
+      const v = get(zh as Obj, `nav.${k}`);
+      expect(v, `zh.nav.${k} 缺值`).toBeTruthy();
+      expect(cjk.test(String(v)), `zh.nav.${k} 应含汉字，当前为 "${v}"`).toBe(true);
+    }
+  });
 });
