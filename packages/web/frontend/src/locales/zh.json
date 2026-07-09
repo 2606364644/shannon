@@ -59,6 +59,32 @@
       "cloningProgress": "clone 中… {{progress}}%"
     }
   },
+  "repoDetail": {
+    "backToRepos": "← 仓库",
+    "backToList": "← 返回仓库列表",
+    "scanBtn": "发起扫描",
+    "pullBtn": "更新 pull",
+    "checkoutBtn": "checkout",
+    "branchPlaceholder": "切换分支",
+    "staleHint": "⚠ 上次 clone 未完成，建议重新添加或更新。",
+    "loadErrorState": "仓库加载失败，可能不存在或已被删除。",
+    "checkoutSuccess": "已切换到 {{branch}}",
+    "pullStarted": "更新中",
+    "cloneHistoryTitle": "clone 历史（最近）",
+    "meta": {
+      "sourceRow": "来源：{{value}}",
+      "branchRow": "分支：{{branch}} {{commit}}",
+      "clonedRow": "clone 于：{{clonedAt}} · 最后更新：{{lastUpdate}}",
+      "errorRow": "错误：{{error}}"
+    },
+    "errors": {
+      "loadFailed": "加载失败",
+      "branchNotFound": "分支不存在",
+      "checkoutFailed": "切换失败（{{status}}）",
+      "checkoutNetwork": "切换失败（网络错误）",
+      "updateNetwork": "更新失败（网络错误）"
+    }
+  },
   "workspaces": {
     "status": {
       "running": "运行中",

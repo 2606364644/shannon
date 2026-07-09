@@ -59,6 +59,32 @@
       "cloningProgress": "Cloning… {{progress}}%"
     }
   },
+  "repoDetail": {
+    "backToRepos": "← Repositories",
+    "backToList": "← Back to repositories",
+    "scanBtn": "Start scan",
+    "pullBtn": "Pull updates",
+    "checkoutBtn": "checkout",
+    "branchPlaceholder": "Switch branch",
+    "staleHint": "⚠ Last clone was incomplete; consider re-adding or updating.",
+    "loadErrorState": "Repository failed to load; it may not exist or has been deleted.",
+    "checkoutSuccess": "Switched to {{branch}}",
+    "pullStarted": "Updating",
+    "cloneHistoryTitle": "Clone history (recent)",
+    "meta": {
+      "sourceRow": "Source: {{value}}",
+      "branchRow": "Branch: {{branch}} {{commit}}",
+      "clonedRow": "Cloned at: {{clonedAt}} · Last update: {{lastUpdate}}",
+      "errorRow": "Error: {{error}}"
+    },
+    "errors": {
+      "loadFailed": "Failed to load",
+      "branchNotFound": "Branch not found",
+      "checkoutFailed": "Checkout failed ({{status}})",
+      "checkoutNetwork": "Checkout failed (network error)",
+      "updateNetwork": "Update failed (network error)"
+    }
+  },
   "workspaces": {
     "status": {
       "running": "Running",
