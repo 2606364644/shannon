@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiofiles
 
-from .git_fetcher import GitFetcher
+from .git_fetcher import GitFetcher, strip_credentials
 
 _PROGRESS_RE = re.compile(r"(?:Receiving objects|Resolving deltas|Compressing objects|Counting objects):\s+(\d+)%")
 
@@ -148,6 +148,11 @@ class RepoManager:
             state = "stale"
         group = name.split("/", 1)[0] if "/" in name else None
         view = {"name": name, "group": group, **meta, "state": state}
+        # 出站兜底：source.url 剥离 userinfo，防止历史/手动写入的带凭据 URL 泄露给前端
+        # （get_repo + list_repos 的共同出口）。
+        src = view.get("source")
+        if isinstance(src, dict) and src.get("url"):
+            view["source"] = {**src, "url": strip_credentials(src["url"])}
         if self.is_busy(name):
             view["progress"] = self._last_progress(name)
         return view
@@ -212,7 +217,7 @@ class RepoManager:
         if len(self._jobs) >= self._max_concurrent:
             raise TooManyClones(self._max_concurrent)
         target.mkdir(parents=True, exist_ok=False)
-        self._write_meta(final_name, source={"kind": "git", "url": url, "branch": branch, "commit": commit},
+        self._write_meta(final_name, source={"kind": "git", "url": strip_credentials(url), "branch": branch, "commit": commit},
                          cloned_at=_now_iso(), state="cloning", last_error=None)
         task = asyncio.create_task(self._clone_task(final_name, url, branch, commit, target))
         self._jobs[final_name] = task
@@ -434,6 +439,7 @@ class RepoManager:
             return 0
         try:
             url, branch = self._infer_from_git(repo)
+            url = strip_credentials(url)
             self._write_meta(name,
                 source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
                 cloned_at=datetime.fromtimestamp(repo.stat().st_mtime, timezone.utc).isoformat(),

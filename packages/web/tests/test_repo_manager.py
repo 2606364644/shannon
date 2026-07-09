@@ -193,3 +193,97 @@ def test_migrate_legacy_cleans_miswritten_group_meta(tmp_path, monkeypatch):
     assert not stale.exists()  # 脏 meta 被清
     # 子仓库被正常 migrate（补 meta）
     assert (base / "backend" / "honor" / ".shannon-repo.json").exists()
+
+
+# ---- source.url 凭据脱敏（GitLab token 泄露安全修复）----
+# 泄露路径：带凭据的 clone URL（https://oauth2:TOKEN@host 或 _inject_auth 注入的
+# USER:TOKEN@）会原样落盘 .shannon-repo.json 的 source.url，并经 _repo_view 透传给
+# /api/repos 返回前端。这些测试锁定：落盘前 + 出站前都必须剥离 userinfo。
+
+def test_strip_credentials():
+    """strip_credentials 剥离 URL userinfo（username/password），保留 host/port/path/query。"""
+    from shannon_web.components.git_fetcher import strip_credentials
+    # 标准带凭据 https
+    assert strip_credentials("https://oauth2:glpat-xyz@gitlab.example/foo.git") == \
+        "https://gitlab.example/foo.git"
+    # 带 port + query + fragment
+    assert strip_credentials("https://u:p@host:8080/a/b?x=1#frag") == "https://host:8080/a/b?x=1#frag"
+    # 仅 username 无 password
+    assert strip_credentials("https://u@host/p") == "https://host/p"
+    # 无凭据原样返回（不重建、不改动）
+    assert strip_credentials("https://gitlab.example/foo.git") == "https://gitlab.example/foo.git"
+    # 非 http(s) 不动（SSH git@host:path 等）
+    assert strip_credentials("git@gitlab.example:foo.git") == "git@gitlab.example:foo.git"
+    # 空值
+    assert strip_credentials(None) is None
+    assert strip_credentials("") == ""
+
+
+@pytest.mark.asyncio
+async def test_clone_strips_credentials_from_source_url(tmp_path, monkeypatch, fake_clone_ok):
+    """clone 带凭据的 URL：落盘 meta 与 get_repo 出站的 source.url 都须剥离 token。"""
+    rm = _rm(tmp_path, monkeypatch)
+    monkeypatch.setattr(rm, "_build_clone_argv",
+                        lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
+    secret = "https://oauth2:glpat-LEAK-TOKEN@gitlab.example/foo.git"
+    await rm.clone(secret, None, None, None)
+    await asyncio.sleep(0.3)
+    # 落盘 meta 不含 token
+    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    assert "glpat-LEAK-TOKEN" not in json.dumps(meta)
+    assert meta["source"]["url"] == "https://gitlab.example/foo.git"
+    # 出站（get_repo）也不含 token
+    view = rm.get_repo("foo")
+    assert "glpat-LEAK-TOKEN" not in json.dumps(view)
+    assert view["source"]["url"] == "https://gitlab.example/foo.git"
+
+
+def test_get_repo_redacts_credentials_in_legacy_meta(tmp_path, monkeypatch):
+    """旧 meta 已含带凭据的 source.url（历史/手动写入）：get_repo 出站兜底仍须剥离。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    d = base / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    (d / ".shannon-repo.json").write_text(json.dumps({
+        "name": "foo",
+        "source": {"kind": "git", "url": "https://oauth2:glpat-LEGACY-LEAK@gitlab.example/foo.git"},
+        "state": "ready",
+    }))
+    view = rm.get_repo("foo")
+    assert "glpat-LEGACY-LEAK" not in json.dumps(view)
+    assert view["source"]["url"] == "https://gitlab.example/foo.git"
+
+
+def test_list_repos_redacts_credentials(tmp_path, monkeypatch):
+    """list_repos 出站清洗带凭据的 source.url（_repo_view 是共同出口）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    d = base / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    (d / ".shannon-repo.json").write_text(json.dumps({
+        "name": "foo",
+        "source": {"kind": "git", "url": "https://oauth2:glpat-LIST-LEAK@gitlab.example/foo.git"},
+        "state": "ready",
+    }))
+    blob = json.dumps(rm.list_repos())
+    assert "glpat-LIST-LEAK" not in blob
+
+
+def test_migrate_strips_credentials_from_git_config(tmp_path, monkeypatch):
+    """migrate_legacy 从 .git/config 读回带凭据 url（_inject_auth 注入污染）：落盘须剥离。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    d = base / "foo"
+    d.mkdir(parents=True)
+    gitcfg = d / ".git"
+    gitcfg.mkdir()
+    # _inject_auth 注入后 git 写入 config 的带凭据 url
+    (gitcfg / "config").write_text(
+        '[remote "origin"]\n\turl = https://u:glpat-MIGRATE-LEAK@gitlab.example/foo.git\n')
+    (gitcfg / "HEAD").write_text("ref: refs/heads/main\n")
+    rm.migrate_legacy()
+    meta = json.loads((d / ".shannon-repo.json").read_text())
+    assert "glpat-MIGRATE-LEAK" not in json.dumps(meta)
+    assert meta["source"]["url"] == "https://gitlab.example/foo.git"

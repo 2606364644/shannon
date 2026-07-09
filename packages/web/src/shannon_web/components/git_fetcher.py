@@ -4,8 +4,31 @@ import asyncio
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 _TOKEN_RE = re.compile(r"https?://[^/]+:[^@]+@")
+
+
+def strip_credentials(url: str | None) -> str | None:
+    """剥离 URL 中的 userinfo（username/password），保留 scheme/host/port/path/query/fragment。
+
+    用于 source.url：clone 时用户提交的、_infer_from_git 从 .git/config 读回的 URL 都可能
+    带 ``https://USER:TOKEN@host`` 形式的凭据（后者来自 _inject_auth 注入后 git 写入 config），
+    绝不能原样落盘 .shannon-repo.json 或经 /api/repos 返回前端。无 userinfo / 非 http(s)
+    URL 原样返回（SSH ``git@host:path`` 等不受影响）。
+    """
+    if not url:
+        return url
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return url
+    if p.scheme not in ("http", "https") or not (p.username or p.password):
+        return url
+    netloc = p.hostname or ""
+    if p.port:
+        netloc += f":{p.port}"
+    return urlunparse(p._replace(netloc=netloc))
 
 
 class GitFetcher:
