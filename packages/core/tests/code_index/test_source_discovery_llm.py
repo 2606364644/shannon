@@ -84,9 +84,9 @@ def test_discover_sources_llm_reports_progress_and_hits():
 
 
 def test_discover_sources_llm_skip_emits_note_via_progress_cb():
-    """per-handler 超时 → emitter.note 经 progress_cb 上报(走 dispatcher, 非裸 warning)。
+    """文件级: 不同文件 chunk, 一个超时 → emitter.note 经 progress_cb 上报(走 dispatcher)。
 
-    on_skip 注入: 超时 handler 名经 idx 映射进 note detail。
+    on_skip 注入: 超时 chunk 的 file_path 经 idx 映射进 note detail(文件级)。
     """
     from shannon_core.code_index.progress import ProgressSample
 
@@ -111,7 +111,7 @@ def test_discover_sources_llm_skip_emits_note_via_progress_cb():
     notes = [s for s in samples if s.note]
     assert notes, f"超时应经 note 上报: {samples}"
     assert "timed out" in notes[0].note
-    assert "f" in notes[0].note  # block.function_name 经 idx 映射
+    assert "f.js" in notes[0].note  # file_path 经 idx 映射(文件级)
 
 
 def test_discover_sources_llm_progress_cb_none_ok():
@@ -220,3 +220,160 @@ def test_discover_sources_llm_degrades_when_unavailable():
     soft, gaps = asyncio.run(discover_sources_llm(cands, None))
     assert soft == []
     assert gaps == []
+
+
+# ===== spec 2026-07-10: source 补召回 per-function → 文件级聚合 + chunking =====
+
+
+async def test_discover_sources_file_level_groups_same_file_into_one_call():
+    """同文件多候选函数 → 1 次 LLM 调用(文件级聚合, spec §3.1)。"""
+    b1 = _block("app.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("app.js", "g", 10, 'function g(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+
+    n_calls = 0
+
+    async def fake_llm(prompt):
+        nonlocal n_calls
+        n_calls += 1
+        return '[]'
+
+    await discover_sources_llm(cands, fake_llm)
+    assert n_calls == 1, f"同文件应 1 次调用, 实际 {n_calls}"
+
+
+async def test_discover_sources_file_level_prompt_lists_all_functions():
+    """文件级 prompt 含该文件所有候选函数源码。"""
+    b1 = _block("app.js", "get_user", 1,
+                'function get_user(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("app.js", "del_user", 10,
+                'function del_user(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+    seen: list[str] = []
+
+    async def fake_llm(prompt):
+        seen.append(prompt)
+        return '[]'
+
+    await discover_sources_llm(cands, fake_llm)
+    assert len(seen) == 1
+    assert "get_user" in seen[0] and "del_user" in seen[0]
+
+
+async def test_discover_sources_file_level_routes_verdict_to_correct_block():
+    """关键(spec §3.1): 文件级 verdict.line(文件绝对行)反查所属 block → SourcePoint
+    归位到正确函数。b1=f 覆盖 [1,6]; b2=g 覆盖 [10,15]; verdict line=12 落 g →
+    entry_point_id=g 的 block。
+    """
+    b1 = _block("svc.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("svc.js", "g", 10, 'function g(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+
+    async def fake_llm(prompt):
+        return ('[{"field":"b","source_type":"body","expression":"req.body","line":12,'
+                '"is_source":true,"rationale":"r"}]')
+
+    soft, _ = await discover_sources_llm(cands, fake_llm)
+    assert len(soft) == 1
+    assert soft[0].entry_point_id == b2.id  # line 12 ∈ [10,15] → g
+    assert soft[0].line == 12
+
+
+async def test_discover_sources_per_call_timeout_defaults_to_120(monkeypatch):
+    """文件级 prompt 更重 → discover_sources_llm 不传 per_call_timeout 时默认 120s(spec §3.2)。"""
+    from shannon_core.code_index import source_discovery_llm as mod
+
+    captured: list = []
+
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+        captured.append(per_call_timeout)
+        return []
+
+    monkeypatch.setattr(mod, "map_llm_with_bounds", fake_map)
+    b = _block("h.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    cands = collect_source_candidates([b], {b.id},
+                                      source_provider=lambda x: b.source_code.encode())
+
+    async def dummy(prompt):
+        return "[]"
+
+    await discover_sources_llm(cands, dummy)
+    assert captured[-1] == 120.0, f"默认应 120s, 实际 {captured[-1]}"
+
+    await discover_sources_llm(cands, dummy, per_call_timeout=5)
+    assert captured[-1] == 5, f"显式传值应优先, 实际 {captured[-1]}"
+
+
+async def test_discover_sources_large_file_chunks_into_multiple_calls():
+    """大文件(源码 token 超 token_threshold)→ 按函数拆 chunk → 多次调用(防爆 context)。"""
+    big = 'function big(req){ const {a}=req.body;\n' + "  a;\n" * 200 + '}\n'  # ~300 tokens
+    b1 = _block("big.js", "A", 1, big)
+    b2 = _block("big.js", "B", 1, big)
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+
+    n_calls = 0
+
+    async def fake_llm(prompt):
+        nonlocal n_calls
+        n_calls += 1
+        return '[]'
+
+    await discover_sources_llm(cands, fake_llm, token_threshold=100)
+    assert n_calls == 2, f"大文件应按函数拆 2 chunk(2 次调用), 实际 {n_calls}"
+
+
+async def test_discover_sources_per_call_timeout_honors_env_override(monkeypatch):
+    """spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 须能覆盖 source 的 per-call 上限。
+
+    文件级默认 120s(下限), 但运营设 env=200 必须生效 —— 不能被硬编码 120 绕过
+    (旧版 effective_timeout 恒 120 → env 失效, 违反 spec §3.2「均可经 env 覆盖」)。
+    """
+    from shannon_core.code_index import source_discovery_llm as mod
+
+    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "200")
+
+    captured: list = []
+
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+        captured.append(per_call_timeout)
+        return []
+
+    monkeypatch.setattr(mod, "map_llm_with_bounds", fake_map)
+    b = _block("h.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    cands = collect_source_candidates([b], {b.id},
+                                      source_provider=lambda x: b.source_code.encode())
+
+    async def dummy(prompt):
+        return "[]"
+
+    await discover_sources_llm(cands, dummy)
+    assert captured[-1] == 200.0, f"env=200 应生效, 实际 {captured[-1]}"
+
+
+async def test_discover_sources_skips_malformed_field_keeps_other_sources():
+    """文件级回归锚点: 一条 source field malformed(line=null)只跳过该 source,
+    不丢整文件 chunk。
+
+    _to_soft_source 的 int(field.get("line")) 在 line=null 时 int(None) 崩; 文件级
+    聚合后若无 per-item 防护, 整 chunk 被 map 标 _Skip → 该文件所有 source 丢
+    (含已 valid 的)。spec §3.1 verdict 归位须容错。
+    """
+    b1 = _block("svc.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("svc.js", "g", 10, 'function g(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda x: x.source_code.encode())
+
+    async def fake_llm(prompt):
+        # good line=1 正常; bad line=null → int(None) 旧版崩
+        return ('[{"field":"good","source_type":"body","expression":"req.body","line":1,'
+                '"is_source":true,"rationale":"g"},'
+                '{"field":"bad","source_type":"body","expression":"req.body","line":null,'
+                '"is_source":true,"rationale":"b"}]')
+
+    soft, _ = await discover_sources_llm(cands, fake_llm)
+    assert any(s.param_name == "good" for s in soft), \
+        f"malformed line 不应丢整 chunk, good 应保留: {soft}"

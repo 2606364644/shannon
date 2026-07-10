@@ -121,15 +121,16 @@ def test_case_sensitivity_by_language():
         [py], _FakeParser([("text", "session", ["uid"], 1)]), source_provider=lambda b: b"src")) == 1
 
 
-def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid"):
+def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid",
+                file="app.py", name="handler", source="def handler(): pass"):
     from shannon_core.code_index.models import FuncBlock
     block = FuncBlock(
-        id=f"app.py:handler:{line}", file_path="app.py", function_name="handler",
-        start_line=1, end_line=10, source_code="def handler(): pass",
+        id=f"{file}:{name}:{line}", file_path=file, function_name=name,
+        start_line=line, end_line=line + 10, source_code=source,
         parameters=["uid"], language="python",
     )
     return SuspiciousCall(block=block, callee=callee, receiver=receiver,
-                          arg_exprs=[arg], file_path="app.py", line=line, column=0)
+                          arg_exprs=[arg], file_path=file, line=line, column=0)
 
 
 async def test_discover_produces_soft_sink(monkeypatch):
@@ -300,24 +301,23 @@ async def test_soft_sink_does_not_break_injection_whitelist():
 
 
 async def test_discover_partial_failure_keeps_successful_sinks():
-    """并发改造(治本2):部分函数 LLM 挂死(超时)→ 被跳过,成功函数仍产 soft sink。
+    """并发(治本2) + 文件级: 不同文件 chunk, 一个挂死超时被跳过, 另一个成功产 soft sink。
 
-    两个不同 block 的 suspicious(raw_query + exec_one),并发跑;raw_query 函数
-    正常返回,exec_one 函数挂死 → per_call_timeout 砍掉它。成功的 raw_query
-    soft sink 必须保留(不被并发的失败项带垮)。
+    文件级后诊断单位是文件 chunk: a.py 正常产 sink, b.py 挂死 → b.py chunk 被
+    per_call_timeout 砍掉; a.py 的 soft sink 必须保留(不被并发的失败 chunk 带垮)。
     """
     import asyncio
     calls = [
-        _suspicious(line=1, callee="raw_query"),
-        _suspicious(line=2, callee="exec_one"),
+        _suspicious(file="a.py", name="f", line=1, callee="raw_query"),
+        _suspicious(file="b.py", name="g", line=1, callee="exec_one"),
     ]
 
     async def client(prompt, **kw):
-        if "raw_query:1" in prompt:
+        if "a.py" in prompt:  # a.py chunk 正常
             return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
                                 "category": "sql", "slot": "sql_value",
                                 "arg_index": 0, "rationale": "x"}])
-        await asyncio.sleep(10)  # exec_one 挂死
+        await asyncio.sleep(10)  # b.py chunk 挂死
 
     soft, _ = await discover_sinks_llm(
         calls, client, concurrency=2, per_call_timeout=0.2)
@@ -326,18 +326,24 @@ async def test_discover_partial_failure_keeps_successful_sinks():
 
 
 async def test_discover_sinks_llm_reports_progress_and_hits():
-    """progress_cb: 每个 function 一次 tick(命中带 detail) + 末尾 finalize 汇总。"""
+    """progress_cb: 每个 chunk(文件)一次 tick(命中带 detail) + 末尾 finalize 汇总。
+
+    文件级后 total/done = chunk 数(= 文件数, spec §3.1)。两个不同文件 → 2 chunk 2 tick。
+    """
     from shannon_core.code_index.progress import ProgressSample
 
-    # 两个不同 block(line=1/2 → block.id 不同), 第一个判 sink, 第二个判非 sink。
-    calls = [_suspicious(line=1), _suspicious(line=2)]
+    # 两个不同文件 → 2 chunk; a.py 判 sink, b.py 判非 sink。
+    calls = [
+        _suspicious(file="a.py", name="f", line=1, callee="raw_query"),
+        _suspicious(file="b.py", name="g", line=2, callee="other_q"),
+    ]
 
     async def client(prompt, **kw):
-        if "raw_query:1" in prompt:
+        if "a.py" in prompt:
             return json.dumps([{"call_ref": "raw_query:1", "is_sink": True,
                                 "category": "sql", "slot": "sql_value",
                                 "arg_index": 0, "rationale": "x"}])
-        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+        return json.dumps([{"call_ref": "other_q:2", "is_sink": False}])
 
     samples: list[ProgressSample] = []
 
@@ -345,16 +351,16 @@ async def test_discover_sinks_llm_reports_progress_and_hits():
         samples.append(s)
 
     soft, _ = await discover_sinks_llm(calls, client, progress_cb=cb)
-    assert len(soft) == 1  # 只有第一个判 sink
+    assert len(soft) == 1  # 只有 a.py 判 sink
 
     # 至少有一条 tick 带 hit detail(命中行) —— detail 非 None 标识命中。
     hit_ticks = [s for s in samples if not s.final and s.detail]
     assert hit_ticks, f"no hit-detail tick emitted: {samples}"
     assert "raw_query" in hit_ticks[0].detail  # detail 提到命中的 callee
 
-    # 最后一条是 finalize 汇总, final=True, done == 唯一 function 数(2 个 block)。
+    # 最后一条是 finalize 汇总, final=True, done == chunk 数(文件数 = 2)。
     assert samples[-1].final is True
-    assert samples[-1].done == len({sc.block.id for sc in calls})
+    assert samples[-1].done == 2
 
 
 async def test_discover_sinks_llm_progress_cb_none_ok():
@@ -369,20 +375,24 @@ async def test_discover_sinks_llm_progress_cb_none_ok():
 
 
 async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
-    """per-function 超时 → emitter.note 经 progress_cb 上报(走 dispatcher, 非裸 warning)。
+    """文件级: 不同文件 chunk, 一个超时 → emitter.note 经 progress_cb 上报(走 dispatcher)。
 
-    on_skip 注入: 超时函数名经 idx 映射进 note detail, 取代撞 Rich Live footer 的
-    裸 logger.warning(redirect_stderr=False 硬约束)。
+    on_skip 注入: 超时 chunk 的 file_path 经 idx 映射进 note detail(文件级后诊断
+    单位是文件 chunk, 取代撞 Rich Live footer 的裸 logger.warning)。
     """
     import asyncio
     from shannon_core.code_index.progress import ProgressSample
 
-    calls = [_suspicious(line=1), _suspicious(line=2)]  # 2 个不同 block.id
+    # 两个不同文件 → 2 chunk; slow.py 挂死, fast.py 正常 → 部分失败触发 on_skip。
+    calls = [
+        _suspicious(file="slow.py", name="f", line=1, callee="raw_query"),
+        _suspicious(file="fast.py", name="g", line=2, callee="other_q"),
+    ]
 
     async def client(prompt, **kw):
-        if "raw_query:1" in prompt:
-            await asyncio.sleep(10)  # 第一个函数挂死 → 超时
-        return json.dumps([{"call_ref": "raw_query:2", "is_sink": False}])
+        if "slow.py" in prompt:
+            await asyncio.sleep(10)  # slow.py chunk 挂死 → 超时
+        return json.dumps([{"call_ref": "other_q:2", "is_sink": False}])
 
     samples: list[ProgressSample] = []
 
@@ -395,4 +405,188 @@ async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
     notes = [s for s in samples if s.note]
     assert notes, f"超时应经 note 上报: {samples}"
     assert "timed out" in notes[0].note
-    assert "handler" in notes[0].note  # block.function_name 经 idx 映射
+    assert "slow.py" in notes[0].note  # file_path 经 idx 映射(文件级)
+
+
+# ===== spec 2026-07-10: sink 补召回 per-function → 文件级聚合 + chunking =====
+
+
+async def test_discover_file_level_groups_same_file_into_one_call():
+    """同文件多函数多可疑 call → 1 次 LLM 调用(文件级聚合, spec §3.1 核心)。
+
+    回归锚点: per-function 时这会是 2 次调用(每函数一次); 文件级后同文件合并成 1 次。
+    """
+    calls = [
+        _suspicious(file="app.py", name="f", line=1, callee="a"),
+        _suspicious(file="app.py", name="g", line=2, callee="b"),
+    ]
+    n_calls = 0
+
+    async def client(prompt, **kw):
+        nonlocal n_calls
+        n_calls += 1
+        return json.dumps([
+            {"call_ref": "a:1", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "x"},
+            {"call_ref": "b:2", "is_sink": True, "category": "command",
+             "slot": "cmd_argument", "arg_index": 0, "rationale": "y"},
+        ])
+
+    soft, _ = await discover_sinks_llm(calls, client)
+    assert n_calls == 1, f"同文件应 1 次调用(文件级), 实际 {n_calls}"
+    assert len(soft) == 2
+    assert sorted(s.callee_name for s in soft) == ["a", "b"]
+
+
+async def test_discover_file_level_prompt_lists_all_functions_and_calls():
+    """文件级 prompt 含该文件所有可疑函数源码 + 全文件可疑 call 列表(spec §3.1)。"""
+    calls = [
+        _suspicious(file="app.py", name="get_user", line=1, callee="raw_query"),
+        _suspicious(file="app.py", name="delete_user", line=2, callee="exec_cmd"),
+    ]
+    seen: list[str] = []
+
+    async def client(prompt, **kw):
+        seen.append(prompt)
+        return "[]"
+
+    await discover_sinks_llm(calls, client)
+    assert len(seen) == 1  # 同文件 1 次
+    p = seen[0]
+    assert "get_user" in p and "delete_user" in p   # 两个函数源码都在
+    assert "raw_query:1" in p and "exec_cmd:2" in p  # 两个 call_ref 都在
+
+
+async def test_discover_file_level_verdict_routes_multiple_sinks():
+    """文件级一次调用返回多 verdict → 按 call_ref 归位多个软 sink(文件内 line 唯一)。"""
+    calls = [
+        _suspicious(file="svc.py", name="f", line=10, callee="sink_a"),
+        _suspicious(file="svc.py", name="g", line=20, callee="sink_b"),
+        _suspicious(file="svc.py", name="h", line=30, callee="safe_call"),
+    ]
+
+    async def client(prompt, **kw):
+        return json.dumps([
+            {"call_ref": "sink_a:10", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "a"},
+            {"call_ref": "sink_b:20", "is_sink": True, "category": "ssrf",
+             "slot": "url", "arg_index": 0, "rationale": "b"},
+            {"call_ref": "safe_call:30", "is_sink": False},
+        ])
+
+    soft, _ = await discover_sinks_llm(calls, client)
+    assert len(soft) == 2  # sink_a + sink_b; safe_call 被否决
+    assert sorted(f"{s.callee_name}:{s.line}" for s in soft) == ["sink_a:10", "sink_b:20"]
+
+
+async def test_discover_separate_files_are_separate_calls():
+    """不同文件 → 不同 chunk → 多次调用(绝不合并跨文件)。"""
+    calls = [
+        _suspicious(file="a.py", name="f", line=1, callee="x"),
+        _suspicious(file="b.py", name="g", line=1, callee="y"),
+    ]
+    n_calls = 0
+
+    async def client(prompt, **kw):
+        nonlocal n_calls
+        n_calls += 1
+        return "[]"
+
+    await discover_sinks_llm(calls, client)
+    assert n_calls == 2, f"不同文件应 2 次调用, 实际 {n_calls}"
+
+
+async def test_discover_per_call_timeout_defaults_to_120(monkeypatch):
+    """文件级 prompt 更重 → discover_sinks_llm 不传 per_call_timeout 时默认 120s
+    (局部覆盖, 不动 concurrency 全局 60s; spec §3.2)。显式传值优先。"""
+    from shannon_core.code_index import sink_discovery_llm as mod
+
+    captured: list = []
+
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+        captured.append(per_call_timeout)
+        return []
+
+    monkeypatch.setattr(mod, "map_llm_with_bounds", fake_map)
+
+    async def dummy_client(prompt, **kw):
+        return "[]"
+
+    await discover_sinks_llm([_suspicious()], dummy_client)  # 不传 → 默认 120
+    assert captured[-1] == 120.0, f"默认应 120s, 实际 {captured[-1]}"
+
+    await discover_sinks_llm([_suspicious()], dummy_client, per_call_timeout=5)
+    assert captured[-1] == 5, f"显式传值应优先, 实际 {captured[-1]}"
+
+
+async def test_discover_large_file_chunks_into_multiple_calls():
+    """大文件(源码 token 超 token_threshold)→ 按函数拆 chunk → 多次调用(防爆 context)。"""
+    calls = [
+        _suspicious(file="big.go", name="A", line=1, callee="ra",
+                    source="x = 1\n" * 200),  # ~300 tokens
+        _suspicious(file="big.go", name="B", line=2, callee="rb",
+                    source="x = 1\n" * 200),
+    ]
+    n_calls = 0
+
+    async def client(prompt, **kw):
+        nonlocal n_calls
+        n_calls += 1
+        return "[]"
+
+    await discover_sinks_llm(calls, client, token_threshold=100)
+    assert n_calls == 2, f"大文件应按函数拆 2 chunk(2 次调用), 实际 {n_calls}"
+
+
+async def test_discover_per_call_timeout_honors_env_override(monkeypatch):
+    """spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 须能覆盖 sink 的 per-call 上限。
+
+    文件级默认 120s(下限, prompt 更重), 但运营设 env=200 给慢模型必须生效 ——
+    不能被硬编码 120 绕过(旧版 effective_timeout 恒 120 → env 失效, 违反
+    spec §3.2「均可经 env 覆盖」+ concurrency.py docstring)。回归锚点。
+    """
+    from shannon_core.code_index import sink_discovery_llm as mod
+
+    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "200")
+
+    captured: list = []
+
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+        captured.append(per_call_timeout)
+        return []
+
+    monkeypatch.setattr(mod, "map_llm_with_bounds", fake_map)
+
+    async def dummy_client(prompt, **kw):
+        return "[]"
+
+    await discover_sinks_llm([_suspicious()], dummy_client)  # 不传 per_call_timeout
+    assert captured[-1] == 200.0, f"env=200 应生效, 实际 {captured[-1]}"
+
+
+async def test_discover_skips_malformed_verdict_field_keeps_other_sinks():
+    """文件级回归锚点: 一条 verdict 字段 malformed(arg_index=null) 只跳过该 sink,
+    不丢整文件 chunk。
+
+    旧 per-function 只丢一个函数; 文件级聚合后若 _to_soft_sink 的 int() 无 per-item
+    防护, null 字段会崩 _discover_one → map 标整 chunk _Skip → 该文件所有 sink 丢
+    (含已 valid 的), 影响面被放大。spec §3.1 verdict 归位须容错。
+    """
+    calls = [
+        _suspicious(file="svc.py", name="f", line=10, callee="good_sink"),
+        _suspicious(file="svc.py", name="g", line=20, callee="bad_sink"),
+    ]
+
+    async def client(prompt, **kw):
+        # bad_sink 的 arg_index=null → int(None) 旧版崩; good_sink 正常
+        return json.dumps([
+            {"call_ref": "good_sink:10", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "g"},
+            {"call_ref": "bad_sink:20", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": None, "rationale": "b"},
+        ])
+
+    soft, _ = await discover_sinks_llm(calls, client)
+    # good_sink 必须保留(bad_sink 的 malformed 字段只跳过它自己, 不带垮整 chunk)
+    assert any(s.callee_name == "good_sink" for s in soft), \
+        f"malformed arg_index 不应丢整 chunk, good_sink 应保留: {soft}"

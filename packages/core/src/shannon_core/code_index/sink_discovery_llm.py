@@ -7,7 +7,6 @@ parser.iter_calls / destructure_call / extract_arg_expressions, 接受双遍历
 """
 import json
 import logging
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Awaitable
 
@@ -24,9 +23,14 @@ from shannon_core.code_index.sink_detector import (
     is_entry_hint,
 )
 from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
-from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
+from shannon_core.code_index.llm_concurrency import (
+    CHUNK_TOKEN_THRESHOLD,
+    FileChunk,
+    chunk_items_by_file,
+    map_llm_with_bounds,
+)
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
-from shannon_core.config.concurrency import get_max_concurrent
+from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -35,6 +39,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LLMClient = Callable[..., Awaitable[str]]
+
+# 文件级 prompt 更重(per-function → 文件级聚合后单次 prompt 含多函数), 单次响应更慢
+# → 默认 120s(局部覆盖, 不动 concurrency 全局 60s; taint 仍 60s 够; spec §3.2)。
+DEFAULT_DISCOVERY_PER_CALL_TIMEOUT = 120.0
 
 
 @dataclass(frozen=True)
@@ -165,18 +173,15 @@ class RuleGap:
 
 
 _DISCOVERY_PROMPT_TMPL = """You are a security sink classifier for the GitNexus track.
-Given ONE function and its suspicious call list (callee/receiver that look sink-ish
-but were NOT matched by the deterministic rule library), judge whether each is a
-real security sink.
+Given a FILE with one or more functions and their suspicious calls (callee/receiver
+that look sink-ish but were NOT matched by the deterministic rule library), judge
+whether each suspicious call is a real security sink.
 
-## Function
-{func_name} ({file}:{line})
-Parameters: {params}
+## File
+{file_path}
 
-## Source
-```
-{source}
-```
+## Functions
+{functions_repr}
 
 ## Suspicious calls (judge each by call_ref)
 {suspicious_repr}
@@ -187,15 +192,27 @@ For EACH call above, return a JSON array. One object per call:
 Return ONLY the JSON array, no prose."""
 
 
-def _build_discovery_prompt(block, calls: list[SuspiciousCall]) -> str:
-    lines = []
-    for sc in calls:
+def _build_discovery_prompt(chunk: FileChunk) -> str:
+    """文件级 prompt: 该 chunk 所有可疑函数源码(去重) + 全部可疑 call 列表(spec §3.1)。
+
+    chunk.blocks 已按 block.id 去重保序(同 block 多 call 只列一次源码); chunk.items
+    是这些函数的全部可疑 call, 按 call_ref 归位。
+    """
+    func_parts: list[str] = []
+    for b in chunk.blocks:
+        func_parts.append(
+            f"### {b.function_name} ({b.file_path}:{b.start_line})\n"
+            f"Parameters: {list(b.parameters)}\n"
+            f"```\n{b.source_code}\n```"
+        )
+    call_lines: list[str] = []
+    for sc in chunk.items:
         target = sc.callee if sc.receiver is None else f"{sc.receiver}.{sc.callee}"
-        lines.append(f"- call_ref: {sc.callee}:{sc.line}  call: {target}  args: {sc.arg_exprs}")
+        call_lines.append(f"- call_ref: {sc.callee}:{sc.line}  call: {target}  args: {sc.arg_exprs}")
     return _DISCOVERY_PROMPT_TMPL.format(
-        func_name=block.function_name, file=block.file_path, line=block.start_line,
-        params=list(block.parameters), source=block.source_code,
-        suspicious_repr="\n".join(lines),
+        file_path=chunk.file_path,
+        functions_repr="\n\n".join(func_parts),
+        suspicious_repr="\n".join(call_lines),
     )
 
 
@@ -281,39 +298,53 @@ async def discover_sinks_llm(
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
+    token_threshold: int | None = None,
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
     """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
-    LLM 不可用(None / raise / 超时 / 不可解析)→ 该函数跳过, 返回空(降级, spec §3.5)。
-    调用粒度 = function 级(去重分组, 一函数一次 LLM 调用)。
-    并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
-    单次调用超过 per_call_timeout(默认 None → 读 SHANNON_LLM_PER_CALL_TIMEOUT, 未设 60s)
-    → 该函数降级跳过。大仓 N 个函数并发跑,防串行累加拖垮 activity 的 start_to_close_timeout(治本 2)。
+    调用粒度 = **文件级**(spec 2026-07-10 §3.1): 同文件所有可疑 call → 一个 chunk →
+    一次 LLM 调用(大幅减调用次数: N 函数 → 文件 chunk 数)。大文件按 token 贪心拆 chunk
+    (token_threshold, 默认 CHUNK_TOKEN_THRESHOLD)防 prompt 爆 LLM context。
 
-    progress_cb: best-effort 进度上报(每 function 一 tick + 一次 finalize 汇总);
+    LLM 不可用(None / raise / 超时 / 不可解析)→ 该 chunk 跳过, 返回空(降级, spec §3.4)。
+    并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
+    单次调用超过 per_call_timeout(默认 DEFAULT_DISCOVERY_PER_CALL_TIMEOUT=120s, 文件级
+    prompt 更重; 显式传值优先)→ 该 chunk 降级跳过。大仓 N chunk 并发跑, 防串行累加
+    拖垮 activity 的 start_to_close_timeout。
+
+    progress_cb: best-effort 进度上报(每 chunk 一 tick + 一次 finalize 汇总);
     cb=None 全程 no-op。
     """
     if llm_client is None or not suspicious:
         return [], []
-    by_func: dict[str, list[SuspiciousCall]] = defaultdict(list)
-    for sc in suspicious:
-        by_func[sc.block.id].append(sc)
+    chunks: list[FileChunk] = chunk_items_by_file(
+        suspicious,
+        block_of=lambda sc: sc.block,
+        token_threshold=(token_threshold if token_threshold is not None
+                         else CHUNK_TOKEN_THRESHOLD),
+    )
 
-    emitter = ProgressEmitter("sink-discovery", len(by_func), progress_cb)
+    emitter = ProgressEmitter("sink-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(item: tuple[str, list[SuspiciousCall]]) -> list[SinkCallSite]:
-        _, calls = item
-        block = calls[0].block
-        prompt = _build_discovery_prompt(block, calls)
+    async def _discover_one(chunk: FileChunk) -> list[SinkCallSite]:
+        prompt = _build_discovery_prompt(chunk)
         raw = await llm_client(prompt)
         verdicts = _parse_verdicts(raw)
         vmap = {str(v.get("call_ref")): v for v in verdicts}
         out: list[SinkCallSite] = []
-        for sc in calls:
+        for sc in chunk.items:
             v = vmap.get(f"{sc.callee}:{sc.line}")
             if v is None or not v.get("is_sink"):
                 continue
-            out.append(_to_soft_sink(sc, v))
+            # per-item 防护: 单条 verdict 字段 malformed(arg_index=null 等)只跳过该
+            # sink, 不让 int()/解析异常带垮整文件 chunk(spec §3.1 文件级容错, 防影响面
+            # 从「丢一个函数」放大到「丢整文件」)。
+            try:
+                out.append(_to_soft_sink(sc, v))
+            except Exception:
+                logger.debug("discover_sinks_llm: skip malformed verdict %s:%s",
+                             sc.callee, sc.line, exc_info=True)
+                continue
         detail = None
         if out:
             s0 = out[0]
@@ -324,21 +355,25 @@ async def discover_sinks_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    items = list(by_func.items())
+    # spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 可覆盖; 文件级 prompt 更重故取
+    # max(env, 120) —— env 未设(60)→120、env=200→200, 显式传值仍优先。旧版恒 120
+    # 绕过 env(违反 spec「均可经 env 覆盖」+ concurrency.py docstring), 已修。
+    effective_timeout = (per_call_timeout if per_call_timeout is not None
+                         else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
 
     async def _on_skip(idx, message):
-        # idx → 函数名: 让用户看到有意义的标识, 而非内部 enumerate 序号; 经 emitter.note
-        # 走 progress_cb → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
-        block = items[idx][1][0].block
-        await emitter.note(f"{block.function_name}: {message}")
+        # idx → 文件路径: 文件级聚合后诊断单位是文件 chunk; 经 emitter.note 走 progress_cb
+        # → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
+        chunk = chunks[idx]
+        await emitter.note(f"{chunk.file_path}: {message}")
 
-    per_func = await map_llm_with_bounds(
-        items, _discover_one,
-        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sinks_llm",
+    per_chunk = await map_llm_with_bounds(
+        chunks, _discover_one,
+        concurrency=conc, per_call_timeout=effective_timeout, label="discover_sinks_llm",
         on_skip=_on_skip,
     )
-    soft_sinks: list[SinkCallSite] = [s for func_sinks in per_func for s in func_sinks]
-    skipped = len(by_func) - len(per_func)   # 超时/失败被 map_llm_with_bounds 丢弃
+    soft_sinks: list[SinkCallSite] = [s for chunk_sinks in per_chunk for s in chunk_sinks]
+    skipped = len(chunks) - len(per_chunk)   # 超时/失败被 map_llm_with_bounds 丢弃
     await emitter.finalize(
         f"{len(soft_sinks)} soft sinks · {len(_aggregate_gaps(soft_sinks))} rule gaps"
         f" · {skipped} timeouts")

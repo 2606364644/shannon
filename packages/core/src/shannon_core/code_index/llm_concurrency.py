@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Awaitable, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 from shannon_core.config.concurrency import get_per_call_timeout
+
+if TYPE_CHECKING:
+    from shannon_core.code_index.models import FuncBlock
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,76 @@ R = TypeVar("R")
 # 运行期实际值由 get_per_call_timeout() 读 SHANNON_LLM_PER_CALL_TIMEOUT(env)决定,
 # 未设 = 此值(60s);analyze_taint_llm 内部 retry 超此时长会被 cancel(有意,防累加)。
 DEFAULT_PER_CALL_TIMEOUT = 60.0
+
+
+# === 文件级聚合 chunking (spec 2026-07-10 sink/source 补召回 per-func → 文件级) =====
+# 大仓下 per-function LLM 调用累加耗时远超 activity start_to_close_timeout(真机
+# kol_mapping_service 569 函数 ~95min 撞 10min timeout)。改文件级聚合(同文件多函数 →
+# 一次调用)大幅减次数; 大文件按 token 贪心拆 chunk 防 prompt 爆 LLM context。
+
+# 单 chunk prompt token 上限(留 response 余量; ~12K)。源码字符数 // 4 粗估 token。
+CHUNK_TOKEN_THRESHOLD = 12_000
+
+
+def _estimate_tokens(text: str) -> int:
+    """源码字符数粗估 token(英文 ~4 chars/token; 粗估用于 chunk 装箱, 非精确计费)。"""
+    return len(text) // 4
+
+
+@dataclass(frozen=True)
+class FileChunk:
+    """LLM 文件级聚合的一个 chunk —— 一组函数(按 token 贪心装箱)。
+
+    小文件 = 1 chunk(全文件聚合, 减调用次数); 大文件 = 多 chunk(按函数拆, 防爆 context)。
+    blocks 去重保序(同 block 多 item 只列一次); items 是这些函数对应的 calls/candidates。
+    """
+    file_path: str
+    blocks: tuple[FuncBlock, ...]
+    items: tuple[Any, ...]
+
+
+def chunk_items_by_file(
+    items: list[Any],
+    *,
+    block_of: Callable[[Any], FuncBlock],
+    token_threshold: int = CHUNK_TOKEN_THRESHOLD,
+) -> list[FileChunk]:
+    """按 file_path 分组 + 按 token 贪心装箱 → FileChunk 列表。
+
+    同一文件的 items 先按 block.id 去重保序分组, 再按各 block 源码 token 贪心装箱:
+    累加 block token, 超 token_threshold 开新 chunk。单 block 自身超阈值 → 独立成 chunk
+    (chunk 单位是函数, 无法再拆)。保证: 同 block 的 items 不被拆散、不同文件不混。
+    """
+    by_file: dict[str, list[Any]] = defaultdict(list)
+    for it in items:
+        by_file[block_of(it).file_path].append(it)
+
+    chunks: list[FileChunk] = []
+    for file_path, file_items in by_file.items():
+        # 按 block.id 去重保序分组
+        ordered_blocks: dict[str, FuncBlock] = {}
+        items_by_block: dict[str, list[Any]] = defaultdict(list)
+        for it in file_items:
+            b = block_of(it)
+            if b.id not in ordered_blocks:
+                ordered_blocks[b.id] = b
+            items_by_block[b.id].append(it)
+        # 贪心装箱: 累加 block token, 超阈值开新 chunk
+        cur_blocks: list[FuncBlock] = []
+        cur_items: list[Any] = []
+        cur_tokens = 0
+        for block in ordered_blocks.values():
+            btok = _estimate_tokens(block.source_code)
+            if cur_blocks and cur_tokens + btok > token_threshold:
+                chunks.append(FileChunk(
+                    file_path, tuple(cur_blocks), tuple(cur_items)))
+                cur_blocks, cur_items, cur_tokens = [], [], 0
+            cur_blocks.append(block)
+            cur_items.extend(items_by_block[block.id])
+            cur_tokens += btok
+        if cur_blocks:
+            chunks.append(FileChunk(file_path, tuple(cur_blocks), tuple(cur_items)))
+    return chunks
 
 
 @dataclass

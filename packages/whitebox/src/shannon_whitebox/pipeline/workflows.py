@@ -13,6 +13,11 @@ from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgres
 from .step_intents import step_names, step_intents
 
 
+# run_code_index activity timeout: 文件级聚合后 sink+source+taint 三阶段累加仍偏紧,
+# 10min 容不下大仓(真机 kol_mapping_service 撞 timeout)→ 提至 20min(spec 2026-07-10 §3.2)。
+CODE_INDEX_ACTIVITY_TIMEOUT = timedelta(minutes=20)
+
+
 def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
     return tuple(f"{vt}-vuln" for vt in vuln_classes)
 
@@ -126,7 +131,7 @@ class WhiteboxScanWorkflow:
                     code_index_result, pre_recon_metrics = await asyncio.gather(
                         workflow.execute_activity(
                             activities.run_code_index, act_input,
-                            start_to_close_timeout=timedelta(minutes=10),
+                            start_to_close_timeout=CODE_INDEX_ACTIVITY_TIMEOUT,
                             retry_policy=retry_for("code-index"),
                         ),
                         workflow.execute_activity(
@@ -144,7 +149,7 @@ class WhiteboxScanWorkflow:
                     # 靠 deliverable 存在性 skip LLM 源 (G6 解耦), 故 pre_recon_deliverable.md 缺失安全.
                     code_index_result = await workflow.execute_activity(
                         activities.run_code_index, act_input,
-                        start_to_close_timeout=timedelta(minutes=10),
+                        start_to_close_timeout=CODE_INDEX_ACTIVITY_TIMEOUT,
                         retry_policy=retry_for("code-index"),
                     )
                     await workflow.execute_activity(

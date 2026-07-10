@@ -8,7 +8,6 @@
 import json
 import logging
 import re
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -17,9 +16,14 @@ from shannon_core.code_index.parameter_models import SourcePoint
 from shannon_core.code_index.source_detector import (
     DEFAULT_SOURCE_RULES, _dedup, _detect_validation, _line_of,
 )
-from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
+from shannon_core.code_index.llm_concurrency import (
+    CHUNK_TOKEN_THRESHOLD,
+    FileChunk,
+    chunk_items_by_file,
+    map_llm_with_bounds,
+)
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
-from shannon_core.config.concurrency import get_max_concurrent
+from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -27,6 +31,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LLMClient = Callable[..., Awaitable[str]]
+
+# 文件级 prompt 更重(per-function → 文件级聚合后单次 prompt 含多函数), 单次响应更慢
+# → 默认 120s(局部覆盖, 不动 concurrency 全局 60s; spec 2026-07-10 §3.2)。
+DEFAULT_DISCOVERY_PER_CALL_TIMEOUT = 120.0
 
 
 @dataclass(frozen=True)
@@ -129,30 +137,35 @@ def collect_source_candidates(
 
 
 _PROMPT_TMPL = """You are a user-input source classifier for the GitNexus track.
-Given ONE entry handler function, identify ALL user-controllable input fields and
-their HTTP source type. Rule-based detection already covered common frameworks
-(Express/Django/...); you handle the unconventional ones.
+Given a FILE with one or more entry handler functions, identify ALL user-controllable
+input fields and their HTTP source type. Rule-based detection already covered common
+frameworks (Express/Django/...); you handle the unconventional ones.
 
-## Function
-{func_name} ({file}:{line})
-Parameters: {params}
+## File
+{file_path}
 
-## Source
-```
-{source}
-```
+## Functions
+{functions_repr}
 
 ## Task
 Return a JSON array. One object per user-controllable field:
 {{"field":"<param_name>","source_type":"query|path|body|form|header|cookie|file","expression":"<source-code expr>","line":<int>,"is_source":true|false,"rationale":"<one line>"}}
-Return ONLY the JSON array, no prose. Omit fields that are NOT user-controllable (is_source=false)."""
+Return ONLY the JSON array, no prose. Omit fields that are NOT user-controllable (is_source=false).
+`line` is the FILE-absolute line number of the field."""
 
 
-def _build_prompt(block) -> str:
+def _build_prompt(chunk: FileChunk) -> str:
+    """文件级 prompt: 该 chunk 所有候选函数源码(去重)。chunk.blocks 已去重保序。"""
+    func_parts: list[str] = []
+    for b in chunk.blocks:
+        func_parts.append(
+            f"### {b.function_name} ({b.file_path}:{b.start_line})\n"
+            f"Parameters: {list(b.parameters)}\n"
+            f"```\n{b.source_code}\n```"
+        )
     return _PROMPT_TMPL.format(
-        func_name=block.function_name, file=block.file_path,
-        line=block.start_line, params=list(block.parameters),
-        source=block.source_code,
+        file_path=chunk.file_path,
+        functions_repr="\n\n".join(func_parts),
     )
 
 
@@ -191,6 +204,23 @@ def _to_soft_source(block, field: dict) -> SourcePoint:
         rule_id="llm-discovered-source",
         needs_review=True,
     )
+
+
+def _resolve_block_for_line(chunk: FileChunk, field: dict) -> "FuncBlock":
+    """文件级归位(spec §3.1): verdict.line(文件绝对行)反查所属 block(∈ [start_line, end_line])。
+
+    单函数(per-func)时 SourcePoint 直接用唯一 block; 文件级后一个 chunk 含多函数, verdict
+    的 line 是文件绝对行, 须定位到具体函数才能正确填 entry_point_id/file_path。line 缺失/
+    越界 → 回退 chunk 首个 block(保守, needs_review 仍会过下游复核)。
+    """
+    try:
+        line = int(field.get("line", 0))
+    except (TypeError, ValueError):
+        return chunk.blocks[0]
+    for b in chunk.blocks:
+        if b.start_line <= line <= b.end_line:
+            return b
+    return chunk.blocks[0]
 
 
 @dataclass(frozen=True)
@@ -234,31 +264,47 @@ async def discover_sources_llm(
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
+    token_threshold: int | None = None,
 ) -> tuple[list[SourcePoint], list[SourceGap]]:
     """对候选(含 sink 函数中规则未命中的)并发调 LLM → 软 SourcePoint + SourceGap。
+
+    调用粒度 = **文件级**(spec 2026-07-10 §3.1): 同文件所有候选函数 → 一个 chunk →
+    一次 LLM 调用。大文件按 token 贪心拆 chunk(token_threshold, 默认 CHUNK_TOKEN_THRESHOLD)
+    防 prompt 爆 LLM context。verdict.line 反查所属 block 归位(见 _resolve_block_for_line)。
 
     LLM 不可用(None / 超时 / 不可解析)→ 返回 ([], [])(降级,守"GitNexus 轨确定性兜底")。
     软 source rule_id="llm-discovered-source" needs_review=True(下游 intra-first/verdict 复核)。
 
-    progress_cb: best-effort 进度上报(每 handler 一 tick + 一次 finalize 汇总);
+    progress_cb: best-effort 进度上报(每 chunk 一 tick + 一次 finalize 汇总);
     cb=None 全程 no-op。
     """
     if llm_client is None or not candidates:
         return [], []
-    by_func: dict[str, list[SourceCandidate]] = defaultdict(list)
-    for c in candidates:
-        by_func[c.block.id].append(c)
+    chunks: list[FileChunk] = chunk_items_by_file(
+        candidates,
+        block_of=lambda c: c.block,
+        token_threshold=(token_threshold if token_threshold is not None
+                         else CHUNK_TOKEN_THRESHOLD),
+    )
 
-    emitter = ProgressEmitter("source-discovery", len(by_func), progress_cb)
+    emitter = ProgressEmitter("source-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(item):
-        _, cands = item
-        block = cands[0].block
-        prompt = _build_prompt(block)
+    async def _discover_one(chunk: FileChunk):
+        prompt = _build_prompt(chunk)
         raw = await llm_client(prompt)
         fields = _parse_fields(raw)
-        out = [_to_soft_source(block, f) for f in fields
-               if f.get("is_source") is True]
+        out: list[SourcePoint] = []
+        for f in fields:
+            if f.get("is_source") is not True:
+                continue
+            # per-item 防护: 单条 field malformed(line=null 等)只跳过该 source,
+            # 不让 int()/解析异常带垮整文件 chunk(同 sink_discovery_llm, spec §3.1)。
+            try:
+                block = _resolve_block_for_line(chunk, f)
+                out.append(_to_soft_source(block, f))
+            except Exception:
+                logger.debug("discover_sources_llm: skip malformed field", exc_info=True)
+                continue
         detail = None
         if out:
             s0 = out[0]
@@ -268,20 +314,24 @@ async def discover_sources_llm(
         return out
 
     conc = concurrency if concurrency is not None else get_max_concurrent()
-    items = list(by_func.items())
+    # spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 可覆盖; 文件级 prompt 更重故取
+    # max(env, 120) —— env 未设(60)→120、env=200→200, 显式传值仍优先。旧版恒 120
+    # 绕过 env(违反 spec「均可经 env 覆盖」+ concurrency.py docstring), 已修。
+    effective_timeout = (per_call_timeout if per_call_timeout is not None
+                         else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
 
     async def _on_skip(idx, message):
-        # idx → 函数名(同 sink_discovery_llm): per-handler 超时/错误诊断走 dispatcher 通道。
-        block = items[idx][1][0].block
-        await emitter.note(f"{block.function_name}: {message}")
+        # idx → 文件路径(同 sink_discovery_llm): 文件级后诊断单位是文件 chunk。
+        chunk = chunks[idx]
+        await emitter.note(f"{chunk.file_path}: {message}")
 
-    per_func = await map_llm_with_bounds(
-        items, _discover_one,
-        concurrency=conc, per_call_timeout=per_call_timeout, label="discover_sources_llm",
+    per_chunk = await map_llm_with_bounds(
+        chunks, _discover_one,
+        concurrency=conc, per_call_timeout=effective_timeout, label="discover_sources_llm",
         on_skip=_on_skip,
     )
-    all_sources = [s for func_sources in per_func for s in func_sources]
-    skipped = len(by_func) - len(per_func)
+    all_sources = [s for chunk_sources in per_chunk for s in chunk_sources]
+    skipped = len(chunks) - len(per_chunk)
     gaps = _aggregate_source_gaps(all_sources)
     await emitter.finalize(
         f"{len(all_sources)} sources · {len(gaps)} source gaps · {skipped} timeouts")
