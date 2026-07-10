@@ -789,6 +789,17 @@ async def run_code_index(input: ActivityInput) -> dict:
                 )
 
             try:
+                # resolve medium-tier model 名(spec 2026-07-10): 传给 discovery 做 chunk
+                # threshold 派生(按模型 context 自适应)。不裸读 SHANNON_MODEL(=large tier,
+                # 与 gitnexus 轨实际用的 medium tier 错配会估大 context 致爆)。resolve 失败
+                # -> None -> discovery 走默认 context, 不阻断。
+                from shannon_core.agents.providers import build_provider_config, resolve_tier_model
+                try:
+                    _pcfg = build_provider_config(api_key=input.api_key or None)
+                    _medium_model = resolve_tier_model(_pcfg, "medium")
+                except Exception:
+                    _medium_model = None
+
                 async with GitNexusMCPClient(Path(repo)) as mcp:
                     index, rule_gaps, source_gaps = await build_code_index_with_gitnexus(
                         str(repo),
@@ -796,6 +807,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                         llm_client=_llm_taint_client,
                         auto_index=False,
                         progress_cb=_make_gitnexus_progress_cb(get_audit_session()),
+                        model=_medium_model,
                     )
             except PentestError:
                 raise

@@ -96,3 +96,54 @@ async def test_build_code_index_offloads_parse_to_thread():
             auto_index=False, progress_cb=None,
         )
     mock_parse.assert_called_once()  # 解析段确实经 to_thread 调用了 helper
+
+
+@pytest.mark.asyncio
+async def test_build_code_index_passes_model_to_discovery(monkeypatch):
+    """build_code_index_with_gitnexus 的 model 参数透传到 discover_sinks/sources_llm(spec §3 模块3)。"""
+    import shannon_core.code_index as ci
+
+    captured = {}
+
+    async def fake_discover_sinks(suspicious, llm_client, *, model=None, **kw):
+        captured["sinks_model"] = model
+        return [], []
+
+    async def fake_discover_sources(candidates, llm_client, *, model=None, **kw):
+        captured["sources_model"] = model
+        return [], []
+
+    monkeypatch.setattr(ci, "discover_sinks_llm", fake_discover_sinks)
+    monkeypatch.setattr(ci, "discover_sources_llm", fake_discover_sources)
+
+    repo = _make_repo(_SRC_WITH_SINK)
+    fake_llm = AsyncMock(return_value="[]")
+    await build_code_index_with_gitnexus(
+        repo, mcp_client=_fake_mcp(), llm_client=fake_llm,
+        auto_index=False, progress_cb=None, model="glm-5.2",
+    )
+    assert captured.get("sinks_model") == "glm-5.2"
+    assert captured.get("sources_model") == "glm-5.2"
+
+
+@pytest.mark.asyncio
+async def test_build_code_index_model_defaults_none(monkeypatch):
+    """不传 model -> 默认 None 透传(discovery 走默认 context, 不阻断)。"""
+    import shannon_core.code_index as ci
+
+    captured = {}
+
+    async def fake_discover_sinks(suspicious, llm_client, *, model=None, **kw):
+        captured["sinks_model"] = model
+        return [], []
+
+    monkeypatch.setattr(ci, "discover_sinks_llm", fake_discover_sinks)
+    monkeypatch.setattr(ci, "discover_sources_llm", fake_discover_sinks)
+
+    repo = _make_repo(_SRC_WITH_SINK)
+    fake_llm = AsyncMock(return_value="[]")
+    await build_code_index_with_gitnexus(
+        repo, mcp_client=_fake_mcp(), llm_client=fake_llm,
+        auto_index=False, progress_cb=None,  # 不传 model
+    )
+    assert captured.get("sinks_model") is None

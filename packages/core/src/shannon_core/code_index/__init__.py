@@ -114,6 +114,7 @@ async def build_code_index_with_gitnexus(
     llm_client,
     auto_index: bool = False,
     progress_cb=None,
+    model: str | None = None,
 ) -> tuple[CodeIndex, list[RuleGap], list[SourceGap]]:
     """Build code index with GitNexus call graph + LLM taint analysis.
 
@@ -196,7 +197,7 @@ async def build_code_index_with_gitnexus(
 
     # ③b LLM sink 补召回 (spec §3.1): 规则未命中的可疑 call → 软 SinkCallSite
     soft_sinks, rule_gaps = await discover_sinks_llm(
-        suspicious, llm_client, progress_cb=progress_cb)
+        suspicious, llm_client, progress_cb=progress_cb, model=model)
     if soft_sinks:
         sink_call_sites = sink_call_sites + soft_sinks
         logger.info("LLM sink discovery added %d soft sinks (%d rule gaps)",
@@ -311,7 +312,7 @@ async def build_code_index_with_gitnexus(
         all_blocks, sink_func_ids, source_provider=_provide_source,
     )
     soft_sources, source_gaps = await discover_sources_llm(
-        source_candidates, llm_client, progress_cb=progress_cb)
+        source_candidates, llm_client, progress_cb=progress_cb, model=model)
     # 合并去重(按 entry_point_id + param_name + source_type);entry 主路径优先。
     source_points = _dedup_source_points(
         source_points + rule_extra_sources + soft_sources)
