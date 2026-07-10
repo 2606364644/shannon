@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
@@ -36,10 +38,18 @@ DEFAULT_PER_CALL_TIMEOUT = 60.0
 # 单 chunk prompt token 上限(留 response 余量; ~12K)。源码字符数 // 4 粗估 token。
 CHUNK_TOKEN_THRESHOLD = 12_000
 
+# CJK 字符范围: 中文/日文/韩文。BPE 下常 1~2 token/char, 取 1.5 中位偏保守防低估。
+_CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
+
 
 def _estimate_tokens(text: str) -> int:
-    """源码字符数粗估 token(英文 ~4 chars/token; 粗估用于 chunk 装箱, 非精确计费)。"""
-    return len(text) // 4
+    """源码 token 估算: CJK × 1.5 + 其余 / 4, 向上取整(spec 2026-07-10)。
+
+    比旧 len//4 准 2-3x(中文注释不再被严重低估 4-8x), 偏保守防 prompt 爆 context。
+    仅用于 chunk 装箱, 不进 pricing 计费(计费走真实 usage)。
+    """
+    cjk = len(_CJK_RE.findall(text))
+    return math.ceil(cjk * 1.5 + (len(text) - cjk) / 4)
 
 
 @dataclass(frozen=True)

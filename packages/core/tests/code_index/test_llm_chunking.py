@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from shannon_core.code_index.llm_concurrency import (
     CHUNK_TOKEN_THRESHOLD,
     FileChunk,
+    _estimate_tokens,
     chunk_items_by_file,
 )
 from shannon_core.code_index.models import FuncBlock
@@ -109,3 +110,44 @@ def test_file_chunk_is_frozen():
         assert False, "FileChunk 应 frozen, 不可赋值"
     except (AttributeError, Exception):
         pass
+
+
+# === token 估算 CJK 加权(spec 2026-07-10) ===
+
+def test_estimate_tokens_ascii_approx_len_div_4():
+    """纯 ASCII: ~4 char/token(与旧 len//4 行为一致)。"""
+    text = "def f():\n    return 1\n"  # 22 chars
+    assert _estimate_tokens(text) == 6  # ceil(0*1.5 + 22/4) = ceil(5.5) = 6
+
+
+def test_estimate_tokens_chinese_not_underestimated():
+    """纯中文: ~1.5 token/char(不再被 len//4 低估成 0.25 token/char)。"""
+    text = "中" * 100  # 100 chars 全 CJK
+    assert _estimate_tokens(text) == 150  # ceil(100*1.5 + 0/4)
+
+
+def test_estimate_tokens_mixed_cjk_and_ascii():
+    """混合: CJK 按 1.5, 其余按 /4。"""
+    cjk = "你好世界"  # 4 CJK chars
+    ascii_part = "x" * 40  # 40 ascii
+    text = cjk + ascii_part  # len=44, cjk=4
+    expected = 4 * 1.5 + 40 / 4  # 6 + 10 = 16
+    assert _estimate_tokens(text) == 16  # ceil(16.0)=16
+
+
+def test_estimate_tokens_japanese_korean_counted_as_cjk():
+    """日文/韩文也按 CJK 高权重(防低估)。"""
+    jp = "こんにちは" * 10  # 50 CJK chars
+    kr = "안녕하세요" * 10  # 50 CJK chars
+    text = jp + kr  # 100 CJK
+    assert _estimate_tokens(text) == 150
+
+
+def test_estimate_tokens_empty():
+    assert _estimate_tokens("") == 0
+
+
+def test_estimate_tokens_never_underestimates_pure_cjk_vs_len_div_4():
+    """核心不变量: 对纯中文, CJK 加权 > len//4(防 context 爆)。"""
+    text = "代码注释中文" * 50  # 300 CJK chars
+    assert _estimate_tokens(text) > len(text) // 4  # 450 > 75
