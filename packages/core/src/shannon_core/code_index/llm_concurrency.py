@@ -35,9 +35,6 @@ DEFAULT_PER_CALL_TIMEOUT = 60.0
 # kol_mapping_service 569 函数 ~95min 撞 10min timeout)。改文件级聚合(同文件多函数 →
 # 一次调用)大幅减次数; 大文件按 token 贪心拆 chunk 防 prompt 爆 LLM context。
 
-# 单 chunk prompt token 上限(留 response 余量; ~12K)。源码字符数 // 4 粗估 token。
-CHUNK_TOKEN_THRESHOLD = 12_000
-
 # CJK 字符范围: 中文/日文/韩文。BPE 下常 1~2 token/char, 取 1.5 中位偏保守防低估。
 _CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
 
@@ -68,7 +65,7 @@ def chunk_items_by_file(
     items: list[Any],
     *,
     block_of: Callable[[Any], FuncBlock],
-    token_threshold: int = CHUNK_TOKEN_THRESHOLD,
+    token_threshold: int,
 ) -> list[FileChunk]:
     """按 file_path 分组 + 按 token 贪心装箱 → FileChunk 列表。
 

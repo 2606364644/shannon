@@ -7,7 +7,6 @@
 from dataclasses import dataclass
 
 from shannon_core.code_index.llm_concurrency import (
-    CHUNK_TOKEN_THRESHOLD,
     FileChunk,
     _estimate_tokens,
     chunk_items_by_file,
@@ -30,7 +29,7 @@ def _blk(file, name, line, source="def f(): pass\n", language="python"):
 
 
 def test_chunk_empty_returns_empty():
-    assert chunk_items_by_file([], block_of=lambda it: it.block) == []
+    assert chunk_items_by_file([], block_of=lambda it: it.block, token_threshold=12_000) == []
 
 
 def test_chunk_small_file_single_chunk():
@@ -38,7 +37,7 @@ def test_chunk_small_file_single_chunk():
     b1 = _blk("app.py", "f", 1)
     b2 = _blk("app.py", "g", 10)
     items = [_Item(b1), _Item(b1), _Item(b2)]  # b1 两个 item, b2 一个
-    chunks = chunk_items_by_file(items, block_of=lambda it: it.block)
+    chunks = chunk_items_by_file(items, block_of=lambda it: it.block, token_threshold=12_000)
     assert len(chunks) == 1
     assert chunks[0].file_path == "app.py"
     assert len(chunks[0].items) == 3
@@ -48,7 +47,7 @@ def test_chunk_small_file_single_chunk():
 def test_chunk_separates_different_files():
     """不同文件的 item → 不同 chunk(绝不混文件,分组键 = file_path)。"""
     items = [_Item(_blk("a.py", "f", 1)), _Item(_blk("b.py", "g", 1))]
-    chunks = chunk_items_by_file(items, block_of=lambda it: it.block)
+    chunks = chunk_items_by_file(items, block_of=lambda it: it.block, token_threshold=12_000)
     assert sorted(c.file_path for c in chunks) == ["a.py", "b.py"]
 
 
@@ -66,7 +65,7 @@ def test_chunk_keeps_same_block_items_together():
     """同 block 的多个 item 必须落在同一 chunk(不被拆散,chunk 单位 = 函数)。"""
     b1 = _blk("app.py", "f", 1)
     chunks = chunk_items_by_file(
-        [_Item(b1), _Item(b1), _Item(b1)], block_of=lambda it: it.block)
+        [_Item(b1), _Item(b1), _Item(b1)], block_of=lambda it: it.block, token_threshold=12_000)
     assert len(chunks) == 1
     assert len(chunks[0].items) == 3
 
@@ -94,16 +93,19 @@ def test_chunk_fills_until_threshold_then_splits():
     assert sum(len(c.items) for c in chunks) == 5
 
 
-def test_chunk_default_threshold_is_set():
-    """CHUNK_TOKEN_THRESHOLD 有合理默认(~12K, 留 response 余量), 非零。"""
-    assert isinstance(CHUNK_TOKEN_THRESHOLD, int)
-    assert CHUNK_TOKEN_THRESHOLD >= 8000
+def test_chunk_token_threshold_is_required():
+    """token_threshold 现为必填(无默认), 防误用旧 12K 硬编码(spec §3 模块3)。"""
+    import pytest
+    b = _blk("app.py", "f", 1)
+    with pytest.raises(TypeError):
+        chunk_items_by_file([_Item(b)], block_of=lambda it: it.block)  # 缺 token_threshold
 
 
 def test_file_chunk_is_frozen():
     """FileChunk frozen=True: chunk 是不可变分组结果,防误改。"""
     b = _blk("app.py", "f", 1)
-    chunk = chunk_items_by_file([_Item(b)], block_of=lambda it: it.block)[0]
+    chunk = chunk_items_by_file(
+        [_Item(b)], block_of=lambda it: it.block, token_threshold=12_000)[0]
     assert isinstance(chunk, FileChunk)
     try:
         chunk.file_path = "other.py"  # type: ignore[misc]
