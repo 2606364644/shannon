@@ -45,7 +45,7 @@ async def test_run_code_index_logs_chains_warning_when_empty(tmp_path):
          patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
          patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
          patch("shannon_core.code_index.build_code_index_with_gitnexus",
-               new=AsyncMock(return_value=(fake_index, []))), \
+               new=AsyncMock(return_value=(fake_index, [], []))), \
          patch("shannon_core.code_index.write_index_files",
                return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
         cm = mock_sess.return_value.track_step.return_value
@@ -80,7 +80,7 @@ async def test_run_code_index_logs_info_when_chains_present(tmp_path):
          patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
          patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
          patch("shannon_core.code_index.build_code_index_with_gitnexus",
-               new=AsyncMock(return_value=(fake_index, []))), \
+               new=AsyncMock(return_value=(fake_index, [], []))), \
          patch("shannon_core.code_index.write_index_files",
                return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
         cm = mock_sess.return_value.track_step.return_value

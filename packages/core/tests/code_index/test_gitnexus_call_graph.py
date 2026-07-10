@@ -269,7 +269,7 @@ class TestPipelineAutoIndexing:
                                 # pipeline 已切 backward(B3):patch target 须跟到
                                 # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
                                 with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
-                                    index, rule_gaps = await build_code_index_with_gitnexus(
+                                    index, rule_gaps, _source_gaps = await build_code_index_with_gitnexus(
                                         str(tmp_path),
                                         mcp_client=FakeImpactMCPClient(responses={}),
                                         llm_client=AsyncMock(return_value="{}"),
@@ -310,7 +310,7 @@ class TestPipelineAutoIndexing:
                                 # pipeline 已切 backward(B3):patch target 须跟到
                                 # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
                                 with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
-                                    index, _ = await build_code_index_with_gitnexus(
+                                    index, _rg, _sg = await build_code_index_with_gitnexus(
                                         str(tmp_path), mcp_client=FakeImpactMCPClient(responses={}),
                                         llm_client=AsyncMock(return_value="{}"),
                                     )

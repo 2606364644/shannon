@@ -152,7 +152,7 @@ def test_build_code_index_populates_source_points():
         fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
         fake_llm = AsyncMock(return_value="[]")  # LLM soft 无产出
 
-        index, rule_gaps = asyncio.run(build_code_index_with_gitnexus(
+        index, _rule_gaps, _source_gaps = asyncio.run(build_code_index_with_gitnexus(
             repo, mcp_client=fake_mcp, llm_client=fake_llm,
         ))
         # entry handler 的 req.params.userId / req.query.threshold 应被识别

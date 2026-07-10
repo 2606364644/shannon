@@ -59,6 +59,27 @@ def test_taint_flow_legacy_fields_still_present():
     assert flow.notes == ""
 
 
+def test_taint_flow_has_needs_review_field():
+    """spec 2026-07-10 §3.2: TaintFlow.needs_review(跟 SinkCallSite/SourcePoint 对称)。
+
+    intra-first 产的 flow,source 是 llm-discovered-source 时标 needs_review=True,
+    下游 chain_verdict 复核。默认 False(向后兼容)。
+    """
+    flow = TaintFlow(
+        entry_point_id="a.py:f:1",
+        source_param="x",
+        source_type=ParameterSource.QUERY_PARAM,
+        needs_review=True,
+    )
+    assert flow.needs_review is True
+    default_flow = TaintFlow(
+        entry_point_id="a.py:f:1",
+        source_param="x",
+        source_type=ParameterSource.QUERY_PARAM,
+    )
+    assert default_flow.needs_review is False
+
+
 def test_parameter_propagation_graph_has_coverage_fields():
     pgraph = ParameterPropagationGraph(
         taint_flows=[],

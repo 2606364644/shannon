@@ -124,7 +124,7 @@ def test_pipeline_uses_backward_for_taint_flows():
         fake_mcp = AsyncMock()
         fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
         fake_llm = AsyncMock(return_value="[]")
-        index, _ = asyncio.run(build_code_index_with_gitnexus(
+        index, _rg, _sg = asyncio.run(build_code_index_with_gitnexus(
             repo, mcp_client=fake_mcp, llm_client=fake_llm))
         # 至少有 source_point(req.query.x);若 sink 被 sink_detector 规则命中,
         # backward 应产 TaintFlow(具体取决于规则覆盖;此测试验证不崩 + source_points 非空)

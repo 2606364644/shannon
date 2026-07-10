@@ -46,7 +46,7 @@ async def test_build_code_index_progress_cb_none_path_no_crash():
     """progress_cb=None 全程 no-op，不爆（默认参数路径）。"""
     repo = _make_repo(_SRC_WITH_SINK)
     fake_llm = AsyncMock(return_value="[]")
-    index, rule_gaps = await build_code_index_with_gitnexus(
+    index, _rule_gaps, _source_gaps = await build_code_index_with_gitnexus(
         repo, mcp_client=_fake_mcp(), llm_client=fake_llm,
         auto_index=False, progress_cb=None,
     )

@@ -76,6 +76,7 @@ class TaintFlow(BaseModel):
     confidence: float = 1.0
     has_sanitizer_hint: bool = False
     notes: str = ""
+    needs_review: bool = False     # spec 2026-07-10 §3.2: source=llm-discovered-source 的 flow 标 True(下游 chain_verdict 复核)
 
     # 遗留：保留默认值供旧测试 / 旧 json 反序列化
     sink_func_id: str = ""

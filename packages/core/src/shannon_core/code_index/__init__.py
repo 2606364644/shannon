@@ -17,6 +17,8 @@ from shannon_core.code_index.models import DegradationLevel, FileManifest
 from shannon_core.code_index.gitnexus_call_graph import build_call_graph_from_gitnexus
 from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
 from shannon_core.code_index.chain_propagator import (
+    merge_taint_flows,
+    produce_intra_first_taint_flows,
     propagate_across_chains,
     propagate_backward_across_chains,
 )
@@ -28,8 +30,11 @@ from shannon_core.code_index.sink_discovery_llm import (
     discover_sinks_llm,
 )
 from shannon_core.code_index.source_detector import detect_sources
+from shannon_core.code_index.source_detector import _dedup as _dedup_source_points
 from shannon_core.code_index.source_discovery_llm import (
+    SourceGap,
     collect_source_candidates,
+    discover_sources_by_rules,
     discover_sources_llm,
 )
 
@@ -69,7 +74,7 @@ async def build_code_index_with_gitnexus(
     llm_client,
     auto_index: bool = False,
     progress_cb=None,
-) -> tuple[CodeIndex, list[RuleGap]]:
+) -> tuple[CodeIndex, list[RuleGap], list[SourceGap]]:
     """Build code index with GitNexus call graph + LLM taint analysis.
 
     Pipeline:
@@ -262,43 +267,67 @@ async def build_code_index_with_gitnexus(
         len(all_entry_points), len(process_entries), len(gitnexus_entry_points),
     )
 
-    # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink）
+    # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink；主路径扫 entry_point）
     entry_point_ids = {ep.func_block_id for ep in gitnexus_entry_points}
     source_points = detect_sources(
         all_blocks, parser, entry_point_ids, source_provider=_provide_source,
     )
-    logger.info("Detected %d rule-based source points", len(source_points))
+    n_entry_sources = len(source_points)
+    logger.info("Detected %d rule-based source points (entry_point scan)",
+                n_entry_sources)
 
-    # ⑧b-LLM source 补召回：规则未命中的 entry handler → 软 SourcePoint
-    source_candidates = collect_source_candidates(
-        all_blocks, entry_point_ids, source_provider=_provide_source,
+    # ⑧b' source 补召回(spec 2026-07-10 §3.1):对**含 sink 函数**补 source ——
+    #    NodeGoat handler 不在 entry_point(detect_entry_points 把路由归 index.js),
+    #    source_detector 主路径漏扫 → 这里对含 sink 函数补回 req.body.preTax 等。
+    #    规则路径(扩范围到含 sink 函数)+ LLM 补解构;主路径不变(守"source 不被 sink 驱动")。
+    sink_func_ids = set(sinks_by_func.keys())
+    rule_extra_sources = discover_sources_by_rules(
+        all_blocks, sink_func_ids, source_provider=_provide_source,
     )
-    soft_sources = await discover_sources_llm(
+    source_candidates = collect_source_candidates(
+        all_blocks, sink_func_ids, source_provider=_provide_source,
+    )
+    soft_sources, source_gaps = await discover_sources_llm(
         source_candidates, llm_client, progress_cb=progress_cb)
-    if soft_sources:
-        source_points = source_points + soft_sources
-        logger.info("LLM source discovery added %d soft sources", len(soft_sources))
+    # 合并去重(按 entry_point_id + param_name + source_type);entry 主路径优先。
+    source_points = _dedup_source_points(
+        source_points + rule_extra_sources + soft_sources)
+    logger.info(
+        "source recall: %d entry + %d sink-func rule + %d soft → %d unique "
+        "(%d source gaps)",
+        n_entry_sources, len(rule_extra_sources), len(soft_sources),
+        len(source_points), len(source_gaps),
+    )
 
-    # ⑥' propagation（Phase B：inject/xss/ssrf 改 backward Sink→Source）
-    #    双向锚定：起点 SinkCallSite + 终点 SourcePoint。
-    #    forward propagate_across_chains 保留（过渡）：供 authz _source_reaches_sink
-    #    复用底层 _map_call_site_params + 回归测试。
-    #    注：必须在 ⑧b source detect 之后（backward 消费 source_points 锚定终点）。
-    taint_flows = propagate_backward_across_chains(
+    # ⑥' propagation:
+    #   - intra-first(spec 2026-07-10 §3.2):不依赖 chain,对每个含 sink 函数直接产 flow
+    #     (覆盖 handler 不在 chain → backward 丢弃 intra 结果的根因,§2)。
+    #   - backward(Sink→Source):沿 chain 反向,终点 SourcePoint 锚定(跨函数)。
+    #   合并去重(intra-first 同函数优先,backward 补跨函数)。
+    #   注:必须在 ⑧b source detect 之后(消费 source_points 锚定终点)。
+    backward_flows = propagate_backward_across_chains(
         chains=call_graph.chains,
         blocks=all_blocks,
         intra_results=intra_results,
         sink_call_sites=sink_call_sites,
         source_points=source_points,
     )
+    intra_first_flows = produce_intra_first_taint_flows(
+        sink_call_sites=sink_call_sites,
+        intra_results=intra_results,
+        source_points=source_points,
+        blocks=all_blocks,
+    )
+    taint_flows = merge_taint_flows(intra_first_flows, backward_flows)
     pgraph = ParameterPropagationGraph(
         taint_flows=taint_flows,
         language_coverage=[language],
     )
     logger.info(
-        "propagate_backward: %d sinks → %d anchored taint_flows "
-        "(source_points=%d, dropped unanchored)",
-        len(sink_call_sites), len(pgraph.taint_flows), len(source_points),
+        "propagation: %d intra-first + %d backward → %d taint_flows "
+        "(source_points=%d, sinks=%d)",
+        len(intra_first_flows), len(backward_flows), len(pgraph.taint_flows),
+        len(source_points), len(sink_call_sites),
     )
 
     # ⑨ Assemble CodeIndex
@@ -320,6 +349,7 @@ async def build_code_index_with_gitnexus(
             parameter_graph=pgraph,
         ),
         rule_gaps,
+        source_gaps,
     )
 
 
@@ -328,9 +358,10 @@ def write_index_files(
     output_dir: str,
     *,
     rule_gaps: list | None = None,
+    source_gaps: list | None = None,
 ) -> tuple[Path, Path]:
     """Write code_index.json, code_index_summary.md, parameter_graph.json,
-    and (if any) rule_gap_report.json."""
+    and (if any) rule_gap_report.json / source_gap_report.json."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -356,6 +387,17 @@ def write_index_files(
         ))
     elif gap_path.exists():
         gap_path.unlink()
+
+    # 旁路: source 规则缺口报告(spec 2026-07-10 §3.1, 反哺 source_rules.yml)
+    src_gap_path = out / "source_gap_report.json"
+    if source_gaps:
+        import json as _json
+        src_gap_path.write_text(_json.dumps(
+            [g if isinstance(g, dict) else g.__dict__ for g in source_gaps],
+            indent=2, ensure_ascii=False,
+        ))
+    elif src_gap_path.exists():
+        src_gap_path.unlink()
 
     return json_path, summary_path
 

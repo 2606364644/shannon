@@ -65,7 +65,7 @@ async def test_progress_cb_threaded_to_discover_sinks_and_sources(monkeypatch):
 
     async def _fake_discover_sources(candidates, llm_client, **kw):
         captured["source_cb"] = kw.get("progress_cb")
-        return []
+        return [], []
 
     async def _fake_taint(*a, **kw):
         return IntraResult(tainted_params=set(), hits={}, local_steps=[])
@@ -123,7 +123,7 @@ async def test_taint_emitter_built_with_cb_and_ticks(monkeypatch):
     async def _fake_discover_sinks(suspicious, llm_client, **kw):
         return [], []
     async def _fake_discover_sources(candidates, llm_client, **kw):
-        return []
+        return [], []
     async def _fake_taint(*a, **kw):
         return IntraResult(tainted_params={"req"}, hits={"q": 0.9}, local_steps=[])
 
@@ -212,7 +212,7 @@ async def test_taint_skip_emits_note_via_emitter_note(monkeypatch):
     async def _fake_discover_sinks(suspicious, llm_client, **kw):
         return [], []
     async def _fake_discover_sources(candidates, llm_client, **kw):
-        return []
+        return [], []
     async def _fake_taint(*a, **kw):
         block = kw.get("block")
         if block is not None and block.function_name == "handler2":

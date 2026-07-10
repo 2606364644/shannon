@@ -485,3 +485,85 @@ def propagate_backward_across_chains(
                         notes="backward-anchored",
                     ))
     return flows
+
+
+def produce_intra_first_taint_flows(
+    sink_call_sites: list["SinkCallSite"],
+    intra_results: dict[str, IntraResult],
+    source_points: list["SourcePoint"],
+    blocks: list[FuncBlock],
+) -> list[TaintFlow]:
+    """intra-first(spec 2026-07-10 §3.2):不依赖 chain,对每个含 sink 函数直接产 TaintFlow。
+
+    核心洞察:intra 已把同函数 source→sink 算好存进 ``local_steps``,source 也由补召回识别
+    (SourcePoint.entry_point_id = 该函数 id),只差一条不经 chain 的直接产 TaintFlow 路径。
+
+    对每个含 sink 函数:取 ``intra.local_steps`` + ``tainted_params``,
+    ``_source_points_matching`` 推广到 sink 所在函数(当前 backward 只在 chain entry i==0
+    调)→ 匹配 SourcePoint 直接产 TaintFlow(单步 intra,不经 chain)。覆盖 handler 不在
+    chain → backward 丢弃 intra 结果 → taint_flows=0 的根因(spec §2)。
+
+    source 是 ``llm-discovered-source`` → ``needs_review=True``(下游 chain_verdict 复核)。
+    sink_slot / tainted_arg_index 透传(防 _route_for 拒 inj/ssrf,同 backward 契约)。
+    """
+    sinks_by_caller: dict[str, list["SinkCallSite"]] = defaultdict(list)
+    for s in sink_call_sites:
+        sinks_by_caller[s.caller_id].append(s)
+
+    flows: list[TaintFlow] = []
+    for func_id, sinks in sinks_by_caller.items():
+        intra = intra_results.get(func_id)
+        if intra is None:
+            continue
+        # _source_points_matching 推广到 sink 所在函数:source 补召回产的 SourcePoint
+        # entry_point_id = 该函数 id,故 substring 匹配能命中。
+        matching = _source_points_matching(func_id, intra.tainted_params, source_points)
+        if not matching:
+            continue
+        for sp in matching:
+            for sink in sinks:
+                if sink.id not in intra.hits:
+                    continue  # intra 没判定该 sink 命中 → 跳过
+                steps = [s for s in intra.local_steps if s.to_param == sink.id]
+                primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
+                flows.append(TaintFlow(
+                    flow_id=f"{sp.entry_point_id}->{sink.id}",
+                    entry_point_id=sp.entry_point_id,
+                    source_param=sp.param_name,
+                    source_type=sp.source_type,
+                    propagation_steps=steps,
+                    sink_call_site_id=sink.id,
+                    sink_slot=primary.slot if primary else SlotContext.GENERIC,
+                    tainted_arg_index=primary.arg_index if primary else -1,
+                    confidence=intra.hits.get(sink.id, 0.9),
+                    needs_review=(sp.rule_id == "llm-discovered-source"),
+                    notes="intra-first",
+                ))
+    return flows
+
+
+def merge_taint_flows(
+    intra_first: list[TaintFlow],
+    backward: list[TaintFlow],
+) -> list[TaintFlow]:
+    """合并 intra-first + backward,按 ``(entry_point_id, source_param, sink.id)`` 去重;
+    intra-first 优先(同函数超集),backward 补跨函数的(spec §3.2)。
+
+    intra-first 产同函数的(source 在 sink 所在函数),backward 产跨函数的(source 在
+    chain entry);同函数场景两者重叠 → intra-first 优先,backward 的去重掉。
+    """
+    seen: set[tuple] = set()
+    out: list[TaintFlow] = []
+    for f in intra_first:
+        key = (f.entry_point_id, f.source_param, f.sink_call_site_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    for f in backward:
+        key = (f.entry_point_id, f.source_param, f.sink_call_site_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
