@@ -3,6 +3,7 @@
 import logging
 
 from shannon_core.config.concurrency import (
+    get_chunk_max_calls,
     get_max_concurrent,
     get_per_call_timeout,
     is_gitnexus_llm_enabled,
@@ -97,3 +98,40 @@ def test_per_call_timeout_negative_falls_back(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert get_per_call_timeout() == 60.0
     assert "must be >0" in caplog.text
+
+
+# --- SHANNON_CHUNK_MAX_CALLS (chunk 内 suspicious/source call 数上限, spec 2026-07-10) ---
+
+def test_chunk_max_calls_default_when_unset(monkeypatch):
+    """未设 → 默认 100(spec §3 模块2: 默认 100, 海量小文件聚合的下限保护)。"""
+    monkeypatch.delenv("SHANNON_CHUNK_MAX_CALLS", raising=False)
+    assert get_chunk_max_calls() == 100
+
+
+def test_chunk_max_calls_valid(monkeypatch):
+    """合法 int → 直接用(运营可调, 如收紧到 50 减单 chunk 失败粒度)。"""
+    monkeypatch.setenv("SHANNON_CHUNK_MAX_CALLS", "50")
+    assert get_chunk_max_calls() == 50
+
+
+def test_chunk_max_calls_non_int_falls_back(monkeypatch, caplog):
+    """非 int → 回落 100 + warning, 不崩 scan(对齐 get_max_concurrent 容错契约)。"""
+    monkeypatch.setenv("SHANNON_CHUNK_MAX_CALLS", "abc")
+    with caplog.at_level(logging.WARNING):
+        assert get_chunk_max_calls() == 100
+    assert "not an int" in caplog.text
+
+
+def test_chunk_max_calls_zero_falls_back(monkeypatch, caplog):
+    """<=0 → 回落 100 + warning(call 上限必须 >=1, 否则每个 call 都触发拆分无意义)。"""
+    monkeypatch.setenv("SHANNON_CHUNK_MAX_CALLS", "0")
+    with caplog.at_level(logging.WARNING):
+        assert get_chunk_max_calls() == 100
+    assert "must be >=1" in caplog.text
+
+
+def test_chunk_max_calls_negative_falls_back(monkeypatch, caplog):
+    monkeypatch.setenv("SHANNON_CHUNK_MAX_CALLS", "-5")
+    with caplog.at_level(logging.WARNING):
+        assert get_chunk_max_calls() == 100
+    assert "must be >=1" in caplog.text

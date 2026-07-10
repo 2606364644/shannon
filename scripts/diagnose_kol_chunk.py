@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""诊断 kol sink-discovery chunk 构成: 为什么 threshold 提升后 chunk 数仍 259?
+"""诊断 kol sink-discovery chunk 构成: 跨文件贪心合并后 chunk 数下降多少?
 
-假设: 259 = 有 suspicious call 的文件数, 每个文件源码 < 12K token -> 早就是 1 文件 1 chunk,
-threshold 12K->750K 对「已聚合到文件下限」的情况无效。
+历史(spec 2026-07-10): 旧版 chunk_items_by_file 按 file_path 分组绝不跨文件, kol 259 个
+小文件 = 259 chunk = 259 次独立 LLM 调用; threshold 提升无效(瓶颈是文件数不是单文件大小)。
+本 spec 改「文件作装箱单位 + 跨文件贪心合并 + 双上限(token + max_calls)」, 预期 259 → ~7。
 
-打印: suspicious 总数 / 文件数 / 各 threshold(12K|96K|750K) 下 chunk 数 / 每文件 token 分布。
+打印: suspicious 总数 / 文件数 / 每文件 token 分布 / 各 threshold×max_calls 下 chunk 数。
 """
 import sys
 from pathlib import Path
@@ -41,27 +42,26 @@ def main():
         by_file_count[b.file_path] += 1
     file_count = len(by_file_tokens)
     print(f"=== 有 suspicious call 的文件数: {file_count} ===")
-    print(f"=== 259 == 文件数? {file_count == 259} ===")
 
     tokens = sorted(by_file_tokens.values())
+    total_tokens = sum(tokens)
     print(f"\n=== 每文件 token 分布 ===")
     print(f"  min={tokens[0]}  max={tokens[-1]}  avg={sum(tokens)//len(tokens)}")
     # 分位
     import statistics
     print(f"  median={statistics.median(tokens)}  p90={tokens[int(len(tokens)*0.9)]}")
-    # 多少文件 < 12K token(若全部 -> threshold 提升无效)
-    under_12k = sum(1 for t in tokens if t < 12_000)
-    under_96k = sum(1 for t in tokens if t < 96_000)
-    print(f"  <12K token 的文件: {under_12k}/{file_count}")
-    print(f"  <96K token 的文件: {under_96k}/{file_count}")
+    print(f"  总 token: {total_tokens:,}  (跨文件合并后理论上限 ~ 总token / threshold)")
 
-    print(f"\n=== 各 threshold 下 chunk 数 ===")
+    print(f"\n=== 各 threshold × max_calls 下 chunk 数(跨文件贪心合并, spec 2026-07-10) ===")
     for thr in (12_000, 96_000, 750_000):
-        chunks = chunk_items_by_file(
-            suspicious, block_of=lambda sc: sc.block, token_threshold=thr)
-        print(f"  threshold={thr:>7,}: {len(chunks)} chunks")
-    print(f"\n结论: 若三档 chunk 数都=259=文件数 -> 瓶颈是文件数, 不是 threshold。")
-    print(f"      真正瓶颈 = {file_count} 次跨文件 LLM 调用(每文件 1 次独立 CLI 子进程)。")
+        for max_calls in (100,):
+            chunks = chunk_items_by_file(
+                suspicious, block_of=lambda sc: sc.block,
+                token_threshold=thr, max_calls=max_calls)
+            print(f"  threshold={thr:>7,}  max_calls={max_calls}: {len(chunks)} chunks"
+                  f"  (旧版绝不跨文件时 = {file_count})")
+    print(f"\n结论: 跨文件贪心合并后 chunk 数 << 文件数; 259 文件预期 → ~7 chunk,")
+    print(f"      调用数 259 → ~7(降 ~37x), ~75min → ~3-4min, 不再撞 20min activity timeout。")
 
 
 if __name__ == "__main__":

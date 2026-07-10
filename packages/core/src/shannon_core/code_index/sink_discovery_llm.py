@@ -30,7 +30,11 @@ from shannon_core.code_index.llm_concurrency import (
 )
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.agents.model_caps import get_chunk_token_threshold
-from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
+from shannon_core.config.concurrency import (
+    get_chunk_max_calls,
+    get_max_concurrent,
+    get_per_call_timeout,
+)
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -177,8 +181,8 @@ Given a FILE with one or more functions and their suspicious calls (callee/recei
 that look sink-ish but were NOT matched by the deterministic rule library), judge
 whether each suspicious call is a real security sink.
 
-## File
-{file_path}
+## File(s)
+{file_paths}
 
 ## Functions
 {functions_repr}
@@ -195,6 +199,8 @@ Return ONLY the JSON array, no prose."""
 def _build_discovery_prompt(chunk: FileChunk) -> str:
     """文件级 prompt: 该 chunk 所有可疑函数源码(去重) + 全部可疑 call 列表(spec §3.1)。
 
+    跨文件合并后(spec 2026-07-10)一个 chunk 可含多文件: {file_paths} join 全部文件
+    (如 "a.go, b.go"); 各函数仍 per-block 标注 (file_path:line), 判定语义不变。
     chunk.blocks 已按 block.id 去重保序(同 block 多 call 只列一次源码); chunk.items
     是这些函数的全部可疑 call, 按 call_ref 归位。
     """
@@ -210,7 +216,7 @@ def _build_discovery_prompt(chunk: FileChunk) -> str:
         target = sc.callee if sc.receiver is None else f"{sc.receiver}.{sc.callee}"
         call_lines.append(f"- call_ref: {sc.callee}:{sc.line}  call: {target}  args: {sc.arg_exprs}")
     return _DISCOVERY_PROMPT_TMPL.format(
-        file_path=chunk.file_path,
+        file_paths=", ".join(chunk.file_paths),
         functions_repr="\n\n".join(func_parts),
         suspicious_repr="\n".join(call_lines),
     )
@@ -300,6 +306,7 @@ async def discover_sinks_llm(
     progress_cb: ProgressCb = None,
     token_threshold: int | None = None,
     model: str | None = None,
+    max_calls: int | None = None,
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
     """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
@@ -321,10 +328,13 @@ async def discover_sinks_llm(
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
+    effective_max_calls = (max_calls if max_calls is not None
+                           else get_chunk_max_calls())
     chunks: list[FileChunk] = chunk_items_by_file(
         suspicious,
         block_of=lambda sc: sc.block,
         token_threshold=effective_threshold,
+        max_calls=effective_max_calls,
     )
 
     emitter = ProgressEmitter("sink-discovery", len(chunks), progress_cb)
@@ -365,10 +375,11 @@ async def discover_sinks_llm(
                          else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
 
     async def _on_skip(idx, message):
-        # idx → 文件路径: 文件级聚合后诊断单位是文件 chunk; 经 emitter.note 走 progress_cb
-        # → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行。
+        # idx → 文件路径: 跨文件合并后诊断单位是 chunk(可多文件); file_paths join 标注。
+        # 经 emitter.note 走 progress_cb → GitnexusLlmEvent note 行 → dispatcher →
+        # Rich Live 协调正确换行。
         chunk = chunks[idx]
-        await emitter.note(f"{chunk.file_path}: {message}")
+        await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
         chunks, _discover_one,

@@ -320,7 +320,7 @@ async def test_discover_partial_failure_keeps_successful_sinks():
         await asyncio.sleep(10)  # b.py chunk 挂死
 
     soft, _ = await discover_sinks_llm(
-        calls, client, concurrency=2, per_call_timeout=0.2)
+        calls, client, concurrency=2, per_call_timeout=0.2, max_calls=1)
     assert len(soft) == 1
     assert soft[0].callee_name == "raw_query"
 
@@ -350,7 +350,7 @@ async def test_discover_sinks_llm_reports_progress_and_hits():
     async def cb(s: ProgressSample):
         samples.append(s)
 
-    soft, _ = await discover_sinks_llm(calls, client, progress_cb=cb)
+    soft, _ = await discover_sinks_llm(calls, client, progress_cb=cb, max_calls=1)
     assert len(soft) == 1  # 只有 a.py 判 sink
 
     # 至少有一条 tick 带 hit detail(命中行) —— detail 非 None 标识命中。
@@ -400,7 +400,7 @@ async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
         samples.append(s)
 
     await discover_sinks_llm(
-        calls, client, progress_cb=cb, concurrency=2, per_call_timeout=0.2)
+        calls, client, progress_cb=cb, concurrency=2, per_call_timeout=0.2, max_calls=1)
 
     notes = [s for s in samples if s.note]
     assert notes, f"超时应经 note 上报: {samples}"
@@ -480,7 +480,11 @@ async def test_discover_file_level_verdict_routes_multiple_sinks():
 
 
 async def test_discover_separate_files_are_separate_calls():
-    """不同文件 → 不同 chunk → 多次调用(绝不合并跨文件)。"""
+    """max_calls 上限(spec §3 模块2): max_calls=1 → 两文件(各 1 call)拆成 2 次调用。
+
+    旧版「绝不跨文件」时默认就分离; 跨文件合并后默认会合并, 故此处显式 max_calls=1
+    验证 call 数上限仍能强制分离(失败粒度可控)。
+    """
     calls = [
         _suspicious(file="a.py", name="f", line=1, callee="x"),
         _suspicious(file="b.py", name="g", line=1, callee="y"),
@@ -492,8 +496,29 @@ async def test_discover_separate_files_are_separate_calls():
         n_calls += 1
         return "[]"
 
+    await discover_sinks_llm(calls, client, max_calls=1)
+    assert n_calls == 2, f"max_calls=1 应拆 2 次, 实际 {n_calls}"
+
+
+async def test_discover_cross_file_merges_small_files_into_one_call():
+    """跨文件贪心合并(spec §3 模块1): 两个小文件, 默认 max_calls(=100) → 合并成 1 次调用。
+
+    prompt 的 {file_paths} 含两文件 join(如 "a.py, b.py"), 而非只一个文件。
+    这是本 spec 的核心收益(kol 259 文件 → ~7 chunk)。
+    """
+    calls = [
+        _suspicious(file="a.py", name="f", line=1, callee="x"),
+        _suspicious(file="b.py", name="g", line=1, callee="y"),
+    ]
+    seen: list[str] = []
+
+    async def client(prompt, **kw):
+        seen.append(prompt)
+        return "[]"
+
     await discover_sinks_llm(calls, client)
-    assert n_calls == 2, f"不同文件应 2 次调用, 实际 {n_calls}"
+    assert len(seen) == 1, f"跨文件应合并成 1 次调用, 实际 {len(seen)}"
+    assert "a.py, b.py" in seen[0]  # {file_paths} join 多文件(spec §3 模块3)
 
 
 async def test_discover_per_call_timeout_defaults_to_120(monkeypatch):

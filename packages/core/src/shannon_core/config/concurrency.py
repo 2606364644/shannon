@@ -5,6 +5,7 @@ import os
 
 _DEFAULT = 3
 _PER_CALL_TIMEOUT_DEFAULT = 60.0
+_CHUNK_MAX_CALLS_DEFAULT = 100
 _log = logging.getLogger(__name__)
 
 
@@ -46,6 +47,32 @@ def is_gitnexus_llm_enabled() -> bool:
     (discover_sinks_llm / analyze_taint_llm / chain_verdict). 默认开.
     关闭 → llm_client 走 raise → 各处降级到纯规则 + is_entry_hint(spec §3.3 边界)."""
     return _is_truthy_env("SHANNON_GITNEXUS_LLM_ENABLED", default=True)
+
+
+def get_chunk_max_calls() -> int:
+    """Read SHANNON_CHUNK_MAX_CALLS (chunk 内 suspicious/source call 数上限, spec 2026-07-10).
+
+    跨文件贪心合并后, 一个 chunk 可含多文件多 call; 此值是 call 数软上限 —— 任一 chunk
+    超 token_threshold 或 call 数 > 此值即开新 chunk(双上限: token 防 context 爆, call 数
+    防 LLM 疲劳漏判 + 失败粒度)。默认 100(kol 631 calls → ~7 chunk 的量级)。
+
+    返回 env 值(int>=1); 未设 / 畸形 / <=0 回退默认(100)并 warning。
+    畸形值绝不崩 scan(对齐 get_max_concurrent / get_per_call_timeout 的容错契约)。
+    """
+    raw = os.environ.get("SHANNON_CHUNK_MAX_CALLS")
+    if raw is None:
+        return _CHUNK_MAX_CALLS_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SHANNON_CHUNK_MAX_CALLS=%r not an int; falling back to %d",
+                     raw, _CHUNK_MAX_CALLS_DEFAULT)
+        return _CHUNK_MAX_CALLS_DEFAULT
+    if val < 1:
+        _log.warning("SHANNON_CHUNK_MAX_CALLS=%d must be >=1; falling back to %d",
+                     val, _CHUNK_MAX_CALLS_DEFAULT)
+        return _CHUNK_MAX_CALLS_DEFAULT
+    return val
 
 
 def get_per_call_timeout() -> float:

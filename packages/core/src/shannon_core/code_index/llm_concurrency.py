@@ -51,12 +51,13 @@ def _estimate_tokens(text: str) -> int:
 
 @dataclass(frozen=True)
 class FileChunk:
-    """LLM 文件级聚合的一个 chunk —— 一组函数(按 token 贪心装箱)。
+    """LLM 跨文件聚合的一个 chunk —— 文件作装箱单位 + 跨文件贪心合并(spec 2026-07-10)。
 
-    小文件 = 1 chunk(全文件聚合, 减调用次数); 大文件 = 多 chunk(按函数拆, 防爆 context)。
-    blocks 去重保序(同 block 多 item 只列一次); items 是这些函数对应的 calls/candidates。
+    多个小文件包合并进一个 chunk(减调用次数, kol 259 文件 → ~7 chunk); 单文件超双上限
+    (token / call 数)时退化按 block 拆。blocks 去重保序; items 是这些函数对应的 calls/candidates。
+    file_paths: 该 chunk 涉及的全部文件(跨文件合并后可多文件, 字典序)。
     """
-    file_path: str
+    file_paths: tuple[str, ...]
     blocks: tuple[FuncBlock, ...]
     items: tuple[Any, ...]
 
@@ -66,19 +67,40 @@ def chunk_items_by_file(
     *,
     block_of: Callable[[Any], FuncBlock],
     token_threshold: int,
+    max_calls: int,
 ) -> list[FileChunk]:
-    """按 file_path 分组 + 按 token 贪心装箱 → FileChunk 列表。
+    """文件作装箱单位 + 跨文件贪心合并 + 双上限(spec 2026-07-10)。
 
-    同一文件的 items 先按 block.id 去重保序分组, 再按各 block 源码 token 贪心装箱:
-    累加 block token, 超 token_threshold 开新 chunk。单 block 自身超阈值 → 独立成 chunk
-    (chunk 单位是函数, 无法再拆)。保证: 同 block 的 items 不被拆散、不同文件不混。
+    1. 按 file_path 分组 → 每文件一个「文件包」(ordered blocks + items + total_tokens +
+       call_count)。同文件 block 不拆(保留 intra-file 优先语义)。
+    2. 按 file_path 字典序遍历文件包, 跨文件贪心装箱: 整包累加到当前 chunk; 加入后超
+       token_threshold 或 call_count > max_calls → 开新 chunk(双上限)。
+    3. 单文件包自身超任一上限 → 文件内按 block 退化拆分(同文件 block 连续, 保序)。
+    保证: 同文件 block 不被拆到不同 chunk(除非单文件超限退化); 不同文件可合并。
     """
     by_file: dict[str, list[Any]] = defaultdict(list)
     for it in items:
         by_file[block_of(it).file_path].append(it)
 
     chunks: list[FileChunk] = []
-    for file_path, file_items in by_file.items():
+    # 跨文件贪心装箱的当前 chunk 累加状态
+    cur_files: list[str] = []
+    cur_blocks: list[FuncBlock] = []
+    cur_items: list[Any] = []
+    cur_tokens = 0
+    cur_calls = 0
+
+    def _flush() -> None:
+        nonlocal cur_files, cur_blocks, cur_items, cur_tokens, cur_calls
+        if cur_blocks:
+            chunks.append(FileChunk(
+                tuple(cur_files), tuple(cur_blocks), tuple(cur_items)))
+        cur_files, cur_blocks, cur_items = [], [], []
+        cur_tokens, cur_calls = 0, 0
+
+    # 字典序遍历文件包(稳定可重现; 同文件 block 因分组天然连续)
+    for file_path in sorted(by_file):
+        file_items = by_file[file_path]
         # 按 block.id 去重保序分组
         ordered_blocks: dict[str, FuncBlock] = {}
         items_by_block: dict[str, list[Any]] = defaultdict(list)
@@ -87,21 +109,45 @@ def chunk_items_by_file(
             if b.id not in ordered_blocks:
                 ordered_blocks[b.id] = b
             items_by_block[b.id].append(it)
-        # 贪心装箱: 累加 block token, 超阈值开新 chunk
-        cur_blocks: list[FuncBlock] = []
-        cur_items: list[Any] = []
-        cur_tokens = 0
-        for block in ordered_blocks.values():
-            btok = _estimate_tokens(block.source_code)
-            if cur_blocks and cur_tokens + btok > token_threshold:
+        blocks = list(ordered_blocks.values())
+        pkg_tokens = sum(_estimate_tokens(b.source_code) for b in blocks)
+        pkg_calls = len(file_items)
+
+        # 退化: 单文件包自身超任一上限 → 文件内按 block 拆(不与跨文件 chunk 混)
+        if pkg_tokens > token_threshold or pkg_calls > max_calls:
+            _flush()
+            sub_blocks: list[FuncBlock] = []
+            sub_items: list[Any] = []
+            sub_tokens = 0
+            sub_calls = 0
+            for block in blocks:
+                btok = _estimate_tokens(block.source_code)
+                bcalls = len(items_by_block[block.id])
+                if sub_blocks and (sub_tokens + btok > token_threshold
+                                   or sub_calls + bcalls > max_calls):
+                    chunks.append(FileChunk(
+                        (file_path,), tuple(sub_blocks), tuple(sub_items)))
+                    sub_blocks, sub_items, sub_tokens, sub_calls = [], [], 0, 0
+                sub_blocks.append(block)
+                sub_items.extend(items_by_block[block.id])
+                sub_tokens += btok
+                sub_calls += bcalls
+            if sub_blocks:
                 chunks.append(FileChunk(
-                    file_path, tuple(cur_blocks), tuple(cur_items)))
-                cur_blocks, cur_items, cur_tokens = [], [], 0
-            cur_blocks.append(block)
-            cur_items.extend(items_by_block[block.id])
-            cur_tokens += btok
-        if cur_blocks:
-            chunks.append(FileChunk(file_path, tuple(cur_blocks), tuple(cur_items)))
+                    (file_path,), tuple(sub_blocks), tuple(sub_items)))
+            continue
+
+        # 正常: 整包加入当前跨文件 chunk; 加入后超双上限则先 flush 开新 chunk
+        if cur_blocks and (cur_tokens + pkg_tokens > token_threshold
+                           or cur_calls + pkg_calls > max_calls):
+            _flush()
+        cur_files.append(file_path)
+        cur_blocks.extend(blocks)
+        cur_items.extend(file_items)
+        cur_tokens += pkg_tokens
+        cur_calls += pkg_calls
+
+    _flush()
     return chunks
 
 

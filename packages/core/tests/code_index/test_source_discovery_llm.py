@@ -69,7 +69,7 @@ def test_discover_sources_llm_reports_progress_and_hits():
     async def cb(s: ProgressSample):
         samples.append(s)
 
-    out = asyncio.run(discover_sources_llm(cands, fake_llm, progress_cb=cb))
+    out = asyncio.run(discover_sources_llm(cands, fake_llm, progress_cb=cb, max_calls=1))
     soft, _gaps = out
     assert len(soft) == 2  # 两个 source
 
@@ -106,7 +106,7 @@ def test_discover_sources_llm_skip_emits_note_via_progress_cb():
         samples.append(s)
 
     asyncio.run(discover_sources_llm(cands, fake_llm, progress_cb=cb,
-                                     concurrency=2, per_call_timeout=0.2))
+                                     concurrency=2, per_call_timeout=0.2, max_calls=1))
 
     notes = [s for s in samples if s.note]
     assert notes, f"超时应经 note 上报: {samples}"
@@ -241,6 +241,42 @@ async def test_discover_sources_file_level_groups_same_file_into_one_call():
 
     await discover_sources_llm(cands, fake_llm)
     assert n_calls == 1, f"同文件应 1 次调用, 实际 {n_calls}"
+
+
+async def test_discover_sources_cross_file_merges_into_one_call():
+    """跨文件贪心合并(spec 2026-07-10 §3 模块1): 两个小文件, 默认 max_calls → 1 次调用,
+    prompt 的 {file_paths} 含两文件 join(如 "a.js, b.js")。
+    """
+    b1 = _block("a.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("b.js", "g", 1, 'function g(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+    seen: list[str] = []
+
+    async def fake_llm(prompt):
+        seen.append(prompt)
+        return '[]'
+
+    await discover_sources_llm(cands, fake_llm)
+    assert len(seen) == 1, f"跨文件应合并 1 次, 实际 {len(seen)}"
+    assert "a.js, b.js" in seen[0]  # {file_paths} join 多文件
+
+
+async def test_discover_sources_max_calls_cap_separates_files():
+    """max_calls 上限(spec §3 模块2): max_calls=1 → 两文件(各 1 call)拆成 2 次调用。"""
+    b1 = _block("a.js", "f", 1, 'function f(req){ const {a}=req.body; eval(a); }\n')
+    b2 = _block("b.js", "g", 1, 'function g(req){ const {b}=req.body; eval(b); }\n')
+    cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
+                                      source_provider=lambda b: b.source_code.encode())
+    n_calls = 0
+
+    async def fake_llm(prompt):
+        nonlocal n_calls
+        n_calls += 1
+        return '[]'
+
+    await discover_sources_llm(cands, fake_llm, max_calls=1)
+    assert n_calls == 2, f"max_calls=1 应拆 2 次, 实际 {n_calls}"
 
 
 async def test_discover_sources_file_level_prompt_lists_all_functions():

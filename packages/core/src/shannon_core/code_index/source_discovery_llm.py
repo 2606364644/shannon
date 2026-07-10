@@ -23,7 +23,11 @@ from shannon_core.code_index.llm_concurrency import (
 )
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.agents.model_caps import get_chunk_token_threshold
-from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
+from shannon_core.config.concurrency import (
+    get_chunk_max_calls,
+    get_max_concurrent,
+    get_per_call_timeout,
+)
 
 if TYPE_CHECKING:
     from shannon_core.code_index.models import FuncBlock
@@ -141,8 +145,8 @@ Given a FILE with one or more entry handler functions, identify ALL user-control
 input fields and their HTTP source type. Rule-based detection already covered common
 frameworks (Express/Django/...); you handle the unconventional ones.
 
-## File
-{file_path}
+## File(s)
+{file_paths}
 
 ## Functions
 {functions_repr}
@@ -155,7 +159,11 @@ Return ONLY the JSON array, no prose. Omit fields that are NOT user-controllable
 
 
 def _build_prompt(chunk: FileChunk) -> str:
-    """文件级 prompt: 该 chunk 所有候选函数源码(去重)。chunk.blocks 已去重保序。"""
+    """文件级 prompt: 该 chunk 所有候选函数源码(去重)。chunk.blocks 已去重保序。
+
+    跨文件合并后(spec 2026-07-10)一个 chunk 可含多文件: {file_paths} join 全部文件;
+    各函数仍 per-block 标注 (file_path:line), 判定语义不变。
+    """
     func_parts: list[str] = []
     for b in chunk.blocks:
         func_parts.append(
@@ -164,7 +172,7 @@ def _build_prompt(chunk: FileChunk) -> str:
             f"```\n{b.source_code}\n```"
         )
     return _PROMPT_TMPL.format(
-        file_path=chunk.file_path,
+        file_paths=", ".join(chunk.file_paths),
         functions_repr="\n\n".join(func_parts),
     )
 
@@ -266,6 +274,7 @@ async def discover_sources_llm(
     progress_cb: ProgressCb = None,
     token_threshold: int | None = None,
     model: str | None = None,
+    max_calls: int | None = None,
 ) -> tuple[list[SourcePoint], list[SourceGap]]:
     """对候选(含 sink 函数中规则未命中的)并发调 LLM → 软 SourcePoint + SourceGap。
 
@@ -283,10 +292,13 @@ async def discover_sources_llm(
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
+    effective_max_calls = (max_calls if max_calls is not None
+                           else get_chunk_max_calls())
     chunks: list[FileChunk] = chunk_items_by_file(
         candidates,
         block_of=lambda c: c.block,
         token_threshold=effective_threshold,
+        max_calls=effective_max_calls,
     )
 
     emitter = ProgressEmitter("source-discovery", len(chunks), progress_cb)
@@ -323,9 +335,10 @@ async def discover_sources_llm(
                          else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
 
     async def _on_skip(idx, message):
-        # idx → 文件路径(同 sink_discovery_llm): 文件级后诊断单位是文件 chunk。
+        # idx → 文件路径(同 sink_discovery_llm): 跨文件合并后诊断单位是 chunk(可多文件),
+        # file_paths join 标注。
         chunk = chunks[idx]
-        await emitter.note(f"{chunk.file_path}: {message}")
+        await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
         chunks, _discover_one,

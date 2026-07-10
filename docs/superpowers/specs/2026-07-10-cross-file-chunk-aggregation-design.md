@@ -1,6 +1,6 @@
 # 跨文件 chunk 聚合 — 设计
 
-> spec 2026-07-10。状态：设计稿（待 writing-plans）。
+> spec 2026-07-10。状态：TDD 已实现（feat/fork-py，未 commit；122 测试绿含双轨解耦守卫；待 kol 真机冒烟）。
 > 关联：[[chunk-threshold-per-model-context]] 的直接后续——threshold 自适应已实现但对 kol 无效，本 spec 解决真正的瓶颈（文件数）。
 
 ## 1. 背景与问题
