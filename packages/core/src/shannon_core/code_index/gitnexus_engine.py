@@ -5,6 +5,8 @@ This is the CLI channel of the dual-channel GitNexus integration.
 The MCP channel is in gitnexus_mcp.py.
 """
 
+import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -96,6 +98,37 @@ class GitNexusEngine:
 
         return IndexResult(success=True)
 
+    async def ensure_indexed_async(self, force: bool = False) -> IndexResult:
+        """async 版 ensure_indexed：与同步版逻辑逐行镜像，唯一差别用 _run_cli_async。
+
+        供 run_code_index 等 async activity 调用，避免阻塞 Temporal worker event loop
+        （见 _run_cli_async）——这是 Ctrl+C 取消不可达的根因。
+        """
+        if not force and self.gitnexus_dir.exists():
+            logger.debug("GitNexus index already exists at %s", self.gitnexus_dir)
+        else:
+            args = ["analyze", str(self.repo_root)]
+            if force:
+                args.append("--force")
+            try:
+                logger.info("Running gitnexus analyze on %s", self.repo_root)
+                await self._run_cli_async(*args)
+                logger.info("GitNexus indexing complete")
+            except GitNexusError as exc:
+                return IndexResult(success=False, error_message=str(exc))
+
+        # Idempotently register the repo into the global registry. Without this
+        # the MCP channel deadlocks even though .gitnexus/ is present and fresh.
+        try:
+            await self._run_cli_async("index", str(self.repo_root))
+        except GitNexusError as exc:
+            return IndexResult(
+                success=False,
+                error_message=f"failed to register repo in global registry: {exc}",
+            )
+
+        return IndexResult(success=True)
+
     def check_stale(self) -> bool:
         """Check if the index is stale (older than latest commit).
 
@@ -173,3 +206,52 @@ class GitNexusEngine:
             )
 
         return result.stdout
+
+    async def _run_cli_async(self, command: str, *args: str) -> str:
+        """async 版 _run_cli：用 asyncio.create_subprocess_exec，cancel 时 kill 子进程。
+
+        与 _run_cli 行为等价（超时 / 非零退出 / 找不到命令的错误语义对齐）。async 化是为
+        了让 run_code_index activity 不阻塞 Temporal worker event loop——cancel 能在此处的
+        await 点注入，进而 proc.kill() 杀掉 gitnexus 子进程，消除 300s 阻塞导致的取消卡死。
+        """
+        cmd = ["gitnexus", command, *args]
+        logger.debug("Running (async): %s", " ".join(cmd))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            raise GitNexusError(
+                "gitnexus command not found. Install GitNexus first."
+            ) from exc
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            await self._kill_proc(proc)
+            raise GitNexusError(
+                f"gitnexus {command} timed out after {self.timeout}s"
+            )
+        except asyncio.CancelledError:
+            # 协作式取消：kill 子进程后向上传播，让 activity 在 await 点快速退出
+            await self._kill_proc(proc)
+            raise
+
+        if proc.returncode != 0:
+            err = stderr.decode().strip() if isinstance(stderr, (bytes, bytearray)) else str(stderr).strip()
+            raise GitNexusError(
+                f"gitnexus {command} failed (exit {proc.returncode}): {err}"
+            )
+        return stdout.decode() if isinstance(stdout, (bytes, bytearray)) else str(stdout)
+
+    @staticmethod
+    async def _kill_proc(proc) -> None:
+        """best-effort kill + reap 子进程（cancel / 超时路径）。"""
+        with contextlib.suppress(Exception):  # noqa: BLE001
+            proc.kill()
+        with contextlib.suppress(Exception):  # noqa: BLE001
+            await proc.wait()

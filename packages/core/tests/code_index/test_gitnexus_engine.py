@@ -1,13 +1,27 @@
+import asyncio
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from shannon_core.code_index.gitnexus_engine import GitNexusEngine, GitNexusError
 
 
 def _subcommands(mock_run):
     """提取所有 gitnexus 子调用中的子命令名 (cmd[1], 如 'analyze'/'index')。"""
     return [c[0][0][1] for c in mock_run.call_args_list]
+
+
+def _fake_proc(*, communicate_return=(b"{}", b""), returncode=0, communicate_side_effect=None):
+    """构造 _run_cli_async 期望的 fake subprocess proc（asyncio.create_subprocess_exec 返回值）。"""
+    proc = MagicMock()
+    proc.returncode = returncode
+    if communicate_side_effect is not None:
+        proc.communicate = AsyncMock(side_effect=communicate_side_effect)
+    else:
+        proc.communicate = AsyncMock(return_value=communicate_return)
+    proc.kill = MagicMock()
+    proc.wait = AsyncMock()
+    return proc
 
 
 class TestGitNexusEngineCLI:
@@ -170,3 +184,72 @@ class TestGitNexusEngineCLI:
             )
             result = engine.check_stale()
             assert result is True
+
+
+class TestGitNexusEngineAsyncCLI:
+    """async 版 (_run_cli_async / ensure_indexed_async): cancel 时能 kill 子进程，
+    消除 run_code_index 阻塞 event loop 导致 Ctrl+C 不可取消的根因。"""
+
+    @pytest.mark.asyncio
+    async def test_ensure_indexed_async_runs_analyze(self, tmp_path):
+        engine = GitNexusEngine(tmp_path)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_fake_proc())) as mock_exec:
+            result = await engine.ensure_indexed_async()
+        assert result.success is True
+        cmds = [c.args[1] for c in mock_exec.call_args_list]
+        assert "analyze" in cmds and "index" in cmds
+
+    @pytest.mark.asyncio
+    async def test_ensure_indexed_async_skips_analyze_but_registers(self, tmp_path):
+        (tmp_path / ".gitnexus").mkdir()
+        engine = GitNexusEngine(tmp_path)
+        with patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=_fake_proc(communicate_return=(b"", b""))),
+        ) as mock_exec:
+            await engine.ensure_indexed_async()
+        cmds = [c.args[1] for c in mock_exec.call_args_list]
+        assert "analyze" not in cmds
+        assert "index" in cmds
+
+    @pytest.mark.asyncio
+    async def test_run_cli_async_nonzero_returncode_raises(self, tmp_path):
+        engine = GitNexusEngine(tmp_path)
+        proc = _fake_proc(communicate_return=(b"", b"error msg"), returncode=1)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(GitNexusError) as ei:
+                await engine._run_cli_async("analyze", str(tmp_path))
+        assert "error msg" in str(ei.value)
+
+    @pytest.mark.asyncio
+    async def test_run_cli_async_timeout_kills_proc(self, tmp_path):
+        async def hang():
+            await asyncio.sleep(10)
+            return (b"", b"")
+
+        engine = GitNexusEngine(tmp_path, timeout=0.01)
+        proc = _fake_proc(communicate_side_effect=hang)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(GitNexusError) as ei:
+                await engine._run_cli_async("analyze", str(tmp_path))
+        assert "timed out" in str(ei.value)
+        proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_cli_async_cancel_kills_proc(self, tmp_path):
+        """核心：cancel 必杀子进程（消除 300s event loop 阻塞，让 Ctrl+C 可取消）。"""
+        engine = GitNexusEngine(tmp_path)
+        proc = _fake_proc(communicate_side_effect=asyncio.CancelledError)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(asyncio.CancelledError):
+                await engine._run_cli_async("analyze", str(tmp_path))
+        proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_cli_async_file_not_found_raises(self, tmp_path):
+        engine = GitNexusEngine(tmp_path)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError)):
+            with pytest.raises(GitNexusError) as ei:
+                await engine._run_cli_async("analyze", str(tmp_path))
+        msg = str(ei.value).lower()
+        assert "not found" in msg or "install" in msg

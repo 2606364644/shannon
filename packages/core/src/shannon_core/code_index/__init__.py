@@ -1,4 +1,5 @@
 """Code index and call graph construction for Shannon's whitebox pipeline."""
+import asyncio
 import logging
 from pathlib import Path
 
@@ -67,6 +68,45 @@ def _build_typed_params_by_block(index: CodeIndex) -> dict[str, list[TypedParame
     return result
 
 
+def _parse_and_detect_sync(repo, language, parser):
+    """同步 tree-sitter 解析 + sink/source 候选检测（CPU/FS bound 重活）。
+
+    从 build_code_index_with_gitnexus 抽出，供 asyncio.to_thread 移出 event loop：给
+    cancel 一个 await 注入点，避免大仓全量解析阻塞 worker loop 导致 Ctrl+C 不可取消
+    （与 run_code_index 的 ensure_indexed_async 同一治本方向）。返回下游 await 段所需
+    的 (file_sources, all_blocks, sink_call_sites, suspicious)。
+    """
+    from shannon_core.models.errors import ErrorCode, PentestError
+
+    source_files = discover_source_files(repo, language)
+    if not source_files:
+        raise PentestError(
+            f"No source files found for language '{language}' in {repo}",
+            category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
+        )
+
+    file_sources: dict[str, bytes] = {}
+    all_blocks = []
+    for file_path in source_files:
+        try:
+            source = file_path.read_bytes()
+            rel = str(file_path.relative_to(repo))
+            file_sources[rel] = source
+            blocks = parser.parse_file(file_path, repo)
+            all_blocks.extend(blocks)
+        except Exception as exc:
+            logger.warning("Failed to index %s: %s", file_path, exc)
+            continue
+
+    def _provide_source(block):
+        return file_sources.get(block.file_path)
+
+    sink_call_sites = detect_sinks(all_blocks, parser, source_provider=_provide_source)
+    logger.info("Detected %d rule-based sink call sites", len(sink_call_sites))
+    suspicious = collect_suspicious_calls(all_blocks, parser, source_provider=_provide_source)
+    return file_sources, all_blocks, sink_call_sites, suspicious
+
+
 async def build_code_index_with_gitnexus(
     repo_path: str,
     *,
@@ -112,7 +152,7 @@ async def build_code_index_with_gitnexus(
                 "Install with: npm install -g gitnexus",
                 category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
             )
-        index_result = engine.ensure_indexed()
+        index_result = await engine.ensure_indexed_async()
         if not index_result.success:
             raise PentestError(
                 f"GitNexus indexing failed: {index_result.error_message}. "
@@ -121,21 +161,16 @@ async def build_code_index_with_gitnexus(
             )
 
     # ① Tree-sitter parse → FuncBlock[]
+    # detect_language / get_parser 留 loop 上（快、早期 PentestError 更清晰）；重 CPU 的
+    # 全量解析+检测移进 _parse_and_detect_sync 经 asyncio.to_thread 跑，不阻塞 event loop
+    # （给 cancel 一个 await 注入点，治本 Ctrl+C 不可取消）。parser 留作用域供后续 detect_sources 用。
     try:
         language = detect_language(repo)
     except ValueError as exc:
         raise PentestError(
             str(exc), category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
         ) from exc
-
     logger.info("Detected language: %s", language)
-
-    source_files = discover_source_files(repo, language)
-    if not source_files:
-        raise PentestError(
-            f"No source files found for language '{language}' in {repo}",
-            category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
-        )
 
     parser = get_parser(language)
     if parser is None:
@@ -144,18 +179,13 @@ async def build_code_index_with_gitnexus(
             category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
         )
 
-    file_sources: dict[str, bytes] = {}
-    all_blocks = []
-    for file_path in source_files:
-        try:
-            source = file_path.read_bytes()
-            rel = str(file_path.relative_to(repo))
-            file_sources[rel] = source
-            blocks = parser.parse_file(file_path, repo)
-            all_blocks.extend(blocks)
-        except Exception as exc:
-            logger.warning("Failed to index %s: %s", file_path, exc)
-            continue
+    file_sources, all_blocks, sink_call_sites, suspicious = await asyncio.to_thread(
+        _parse_and_detect_sync, repo, language, parser,
+    )
+
+    # 重建 _provide_source 闭包（引用 to_thread 返回的 file_sources，供后续 source 检测用）
+    def _provide_source(block):
+        return file_sources.get(block.file_path)
 
     # ② GitNexus MCP → precise call graph
     call_graph = await build_call_graph_from_gitnexus(
@@ -164,14 +194,7 @@ async def build_code_index_with_gitnexus(
         blocks=all_blocks,
     )
 
-    # ③ sink detection (规则)
-    def _provide_source(block):
-        return file_sources.get(block.file_path)
-    sink_call_sites = detect_sinks(all_blocks, parser, source_provider=_provide_source)
-    logger.info("Detected %d rule-based sink call sites", len(sink_call_sites))
-
     # ③b LLM sink 补召回 (spec §3.1): 规则未命中的可疑 call → 软 SinkCallSite
-    suspicious = collect_suspicious_calls(all_blocks, parser, source_provider=_provide_source)
     soft_sinks, rule_gaps = await discover_sinks_llm(
         suspicious, llm_client, progress_cb=progress_cb)
     if soft_sinks:

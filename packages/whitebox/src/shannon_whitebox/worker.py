@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from temporalio.client import Client
@@ -154,6 +154,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,
         ],
+        graceful_shutdown_timeout=timedelta(seconds=10),
     )
 
     loop = asyncio.get_running_loop()

@@ -55,7 +55,7 @@ async def test_run_code_index_logs_chains_warning_when_empty(tmp_path):
         mock_sess.return_value.log_info = AsyncMock()
         mock_engine = MagicMock()
         mock_engine.is_available.return_value = True
-        mock_engine.ensure_indexed.return_value = MagicMock(success=True)
+        mock_engine.ensure_indexed_async = AsyncMock(return_value=MagicMock(success=True))
         mock_engine_cls.return_value = mock_engine
         mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
 
@@ -90,7 +90,7 @@ async def test_run_code_index_logs_info_when_chains_present(tmp_path):
         mock_sess.return_value.log_info = AsyncMock()
         mock_engine = MagicMock()
         mock_engine.is_available.return_value = True
-        mock_engine.ensure_indexed.return_value = MagicMock(success=True)
+        mock_engine.ensure_indexed_async = AsyncMock(return_value=MagicMock(success=True))
         mock_engine_cls.return_value = mock_engine
         mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
 

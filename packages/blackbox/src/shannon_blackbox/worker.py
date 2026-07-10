@@ -1,5 +1,6 @@
 import asyncio
 import time
+from datetime import timedelta
 
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -142,6 +143,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             resolve_blackbox_engine, detect_whitebox_results, write_engine_config_for_session,
             cleanup_engine_configs,
         ],
+        graceful_shutdown_timeout=timedelta(seconds=10),
     )
 
     meta = SessionMetadata(

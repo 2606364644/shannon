@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import os
 import signal
+from datetime import timedelta
 from typing import Any
 
 from temporalio.client import Client
@@ -156,7 +157,8 @@ async def await_workflow_with_shutdown(
         return result_task.result()
     finally:
         # result_task 不在此取消：正常路径已由 result_task.result() 消费，
-        # 取消路径由 _do_cancel 的 wait_for 消费（wait_for 超时也会取消 result_task）。
+        # 取消路径由 _do_cancel 兜底(give-up 时显式 cancel; _do_cancel 用
+        # asyncio.wait 不自动取消, 故 give-up 显式 cancel result_task)。
         for task in (poll_task, shutdown_wait_task):
             if task is None:
                 continue
@@ -189,6 +191,7 @@ async def run_scan_graceful(
         task_queue=task_queue,
         workflows=[workflow_cls],
         activities=activities,
+        graceful_shutdown_timeout=timedelta(seconds=10),
     )
 
     ctrl = ShutdownController()
@@ -217,26 +220,68 @@ async def run_scan_graceful(
             ctrl.uninstall()
 
 
-async def _do_cancel(handle, result_task, cancel_grace_seconds: float, cleanup_callback: "callable | None" = None) -> None:
-    """发协作式 cancel，并在 grace 期内等待结果；超时放弃等待（不 escalate）。"""
+async def _do_cancel(
+    handle,
+    result_task,
+    cancel_grace_seconds: float,
+    cleanup_callback: "callable | None" = None,
+    terminate_settle_seconds: float = 5.0,
+) -> None:
+    """发协作式 cancel，grace 期内等结果；超时升级 terminate 强制收尾。
+
+    取消链路：协作式 cancel（handle.cancel）→ 等 grace → 仍无响应则升级 terminate。
+    terminate 兜住"activity 同步阻塞 event loop 导致 cancel 注入不进"的场景：
+    server 直接置 workflow Terminated，result_task 随之 resolve，client 不再干等。
+    """
     print_line("CANCEL", "", "正在取消 Temporal workflow…")
     try:
         await handle.cancel()
     except Exception as exc:
         print_line("CANCEL", "", f"cancel 请求失败（忽略）: {exc}")
+
+    # grace 期内协作取消。用 asyncio.wait 而非 wait_for：超时不取消 result_task，
+    # 保留给 escalate 后的 settle 继续观察（wait_for 超时会 cancel task，使后续无法再等）。
+    done, _ = await asyncio.wait({result_task}, timeout=cancel_grace_seconds)
+    if result_task in done:
+        # 完成了（正常返回或抛 temporalio cancel 异常）——吞异常视为已结束
+        with contextlib.suppress(Exception):
+            result_task.result()
+        return
+
+    # grace 超时：升级 terminate（兜底，覆盖不可中断的同步 activity）
+    print_line(
+        "CANCEL", "",
+        f"{cancel_grace_seconds}s 内 workflow 未响应取消，升级 terminate…",
+    )
     try:
-        await asyncio.wait_for(result_task, timeout=cancel_grace_seconds)
-    except asyncio.TimeoutError:
+        await handle.terminate(
+            reason=f"client cancel grace timeout ({cancel_grace_seconds}s): "
+            f"workflow unresponsive, escalating from cooperative cancel to terminate"
+        )
+    except Exception as exc:
+        print_line("CANCEL", "", f"terminate 失败（忽略）: {exc}")
+
+    # terminate 后给 result_task 一个 settle 窗口（terminate 让 result() raise TerminatedError）
+    done, _ = await asyncio.wait({result_task}, timeout=terminate_settle_seconds)
+    if result_task in done:
+        # terminate 后完成 → retrieve 异常防 "Task exception was never retrieved"
+        with contextlib.suppress(Exception):
+            result_task.result()
+    else:
         print_line(
             "CANCEL", "",
-            f"{cancel_grace_seconds}s 内 workflow 未响应取消，放弃等待"
-            f"（server 端 cancel 仍生效）",
+            f"terminate 后 {terminate_settle_seconds}s 仍未结束，放弃等待",
         )
-        if cleanup_callback is not None:
-            try:
-                cleanup_callback(session_ids=None)
-            except Exception:  # noqa: BLE001 - best-effort
-                pass
-    except Exception:
-        # result_task 因 cancel 抛出的异常属预期，吞掉
-        pass
+        # give-up: cancel result_task 防 orphan(持 gRPC stream); 旧版从 wait_for 改
+        # asyncio.wait 后漏了这步 → terminate 双超时路径 result_task 泄漏。
+        result_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await result_task
+
+    # client 即将退出：best-effort 回收子进程（browser 等），无论 settle 与否
+    if cleanup_callback is not None:
+        try:
+            cleanup_callback(session_ids=None)
+        except Exception:  # noqa: BLE001 - best-effort
+            pass
+

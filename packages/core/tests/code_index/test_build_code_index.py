@@ -9,7 +9,7 @@ import os
 import tempfile
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from shannon_core.code_index import build_code_index_with_gitnexus
 from shannon_core.code_index.progress import ProgressSample
@@ -81,3 +81,18 @@ async def test_build_code_index_threads_progress_cb_callable():
     assert "taint-analysis" in phases, f"缺 taint-analysis sample, got {phases}"
     # 至少有一个 final 汇总行
     assert any(s.final for s in samples), "无 final 汇总 sample"
+
+
+@pytest.mark.asyncio
+async def test_build_code_index_offloads_parse_to_thread():
+    """tree-sitter 解析+检测段经 _parse_and_detect_sync（由 asyncio.to_thread 调用）移出
+    event loop（cancel 可注入）。治本：原本同步全量解析占死 worker loop → Ctrl+C 不可达。"""
+    repo = _make_repo(_SRC_WITH_SINK)
+    fake_llm = AsyncMock(return_value="[]")
+    with patch("shannon_core.code_index._parse_and_detect_sync") as mock_parse:
+        mock_parse.return_value = ({}, [], [], [])  # (file_sources, all_blocks, sinks, suspicious)
+        await build_code_index_with_gitnexus(
+            repo, mcp_client=_fake_mcp(), llm_client=fake_llm,
+            auto_index=False, progress_cb=None,
+        )
+    mock_parse.assert_called_once()  # 解析段确实经 to_thread 调用了 helper

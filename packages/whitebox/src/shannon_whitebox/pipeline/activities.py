@@ -780,7 +780,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                     "Install with: npm install -g gitnexus",
                     category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
                 )
-            result = engine.ensure_indexed()
+            result = await engine.ensure_indexed_async()
             if not result.success:
                 raise PentestError(
                     f"GitNexus indexing failed: {result.error_message}. "

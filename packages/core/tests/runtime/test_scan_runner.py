@@ -2,6 +2,7 @@
 
 import asyncio
 import signal
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -94,12 +95,119 @@ class TestShutdownMessagesUsePrintLine:
         try:
             fake_handle = MagicMock()
             fake_handle.cancel = AsyncMock()
-            # _do_cancel 内部吞 TimeoutError（spec 设计：超时放弃等待不 escalate）
-            await _do_cancel(fake_handle, result_task, cancel_grace_seconds=0.01)
+            fake_handle.terminate = AsyncMock()  # grace 超时会升级 terminate
+            await _do_cancel(
+                fake_handle, result_task, cancel_grace_seconds=0.01,
+                terminate_settle_seconds=0.01,
+            )
         finally:
             result_task.cancel()
         out = capsys.readouterr().out
         assert "[CANCEL" in out and "正在取消 Temporal workflow" in out, out
+
+
+class TestDoCancelEscalateTerminate:
+    """_do_cancel grace 超时后升级 terminate（兜底）；正常取消不 escalate。"""
+
+    @pytest.mark.asyncio
+    async def test_escalates_to_terminate_on_grace_timeout(self, capsys):
+        from shannon_core.runtime.scan_runner import _do_cancel
+        result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成
+        try:
+            fake_handle = MagicMock()
+            fake_handle.cancel = AsyncMock()
+            fake_handle.terminate = AsyncMock()
+            await _do_cancel(
+                fake_handle, result_task, cancel_grace_seconds=0.01,
+                terminate_settle_seconds=0.01,
+            )
+        finally:
+            result_task.cancel()
+        fake_handle.terminate.assert_awaited_once()
+        reason = fake_handle.terminate.await_args.kwargs.get("reason", "")
+        assert "grace timeout" in reason and "escalating" in reason, reason
+        out = capsys.readouterr().out
+        assert "升级 terminate" in out, out
+
+    @pytest.mark.asyncio
+    async def test_terminate_swallows_exception(self, capsys):
+        """terminate 抛异常（workflow 已结束等）不向上抛，仍走 give-up cleanup。"""
+        from shannon_core.runtime.scan_runner import _do_cancel
+        called = []
+
+        def cleanup(session_ids=None):
+            called.append(session_ids)
+
+        result_task = asyncio.ensure_future(asyncio.sleep(100))
+        try:
+            fake_handle = MagicMock()
+            fake_handle.cancel = AsyncMock()
+            fake_handle.terminate = AsyncMock(side_effect=RuntimeError("already ended"))
+            await _do_cancel(
+                fake_handle, result_task, cancel_grace_seconds=0.01,
+                cleanup_callback=cleanup, terminate_settle_seconds=0.01,
+            )
+        finally:
+            result_task.cancel()
+        out = capsys.readouterr().out
+        assert "terminate 失败（忽略）" in out, out
+        assert called == [None]  # give-up 仍调 cleanup
+
+    @pytest.mark.asyncio
+    async def test_cancels_result_task_on_terminate_give_up(self, capsys):
+        """回归锚点: terminate settle 超时(give-up)后 _do_cancel 须 cancel result_task,
+        不留 orphan 持 gRPC stream。
+
+        旧版 _do_cancel 从 wait_for 改 asyncio.wait 后(不取消 task 保留给 escalate
+        observe), terminate 双超时 give-up 路径漏了清理 result_task → orphan 泄漏。
+        """
+        from shannon_core.runtime.scan_runner import _do_cancel
+        result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成 → give-up
+        fake_handle = MagicMock()
+        fake_handle.cancel = AsyncMock()
+        fake_handle.terminate = AsyncMock()
+        await _do_cancel(
+            fake_handle, result_task, cancel_grace_seconds=0.01,
+            terminate_settle_seconds=0.01,
+        )
+        # give-up 后 _do_cancel 须自己清理 result_task(本测不补救, 验它自清理)
+        assert result_task.done(), "result_task 应被 _do_cancel 清理, 不留 orphan"
+        assert result_task.cancelled(), "give-up 路径应 cancel result_task"
+
+    @pytest.mark.asyncio
+    async def test_no_terminate_when_grace_resolves(self):
+        """grace 期内 result_task 完成（协作取消成功）→ 不升级 terminate。"""
+        from shannon_core.runtime.scan_runner import _do_cancel
+        result_task = asyncio.ensure_future(asyncio.sleep(0))  # 立即完成
+        await asyncio.sleep(0.01)  # 让它完成
+        fake_handle = MagicMock()
+        fake_handle.cancel = AsyncMock()
+        fake_handle.terminate = AsyncMock()
+        await _do_cancel(
+            fake_handle, result_task, cancel_grace_seconds=0.05,
+            terminate_settle_seconds=0.05,
+        )
+        fake_handle.terminate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_terminate_when_result_task_raises(self):
+        """result_task 抛 Exception（temporalio CancelledError/TerminatedError 属此）
+        → 视作已结束，不升级 terminate。注：asyncio.CancelledError 是 BaseException
+        不属此路径，会向上传播（外层 cancel 语义）。"""
+        from shannon_core.runtime.scan_runner import _do_cancel
+
+        async def raise_exc():
+            raise RuntimeError("workflow cancelled")
+
+        result_task = asyncio.ensure_future(raise_exc())
+        fake_handle = MagicMock()
+        fake_handle.cancel = AsyncMock()
+        fake_handle.terminate = AsyncMock()
+        await _do_cancel(
+            fake_handle, result_task, cancel_grace_seconds=0.05,
+            terminate_settle_seconds=0.05,
+        )
+        fake_handle.terminate.assert_not_awaited()
 
 
 class TestPollProgress:
@@ -252,7 +360,7 @@ class TestRunScanGracefulNormal:
             AsyncMock(return_value=fake_client),
         ), patch(
             "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
-        ), patch(
+        ) as mock_worker_cls, patch(
             "shannon_core.runtime.scan_runner.generate_task_queue",
             return_value="tq-test",
         ), patch.object(ShutdownController, "install"), patch.object(
@@ -269,6 +377,10 @@ class TestRunScanGracefulNormal:
 
         assert result == {"status": "completed", "vulns": 3}
         fake_handle.cancel.assert_not_awaited()  # 正常完成不取消
+        # Part D: Worker 配 graceful_shutdown_timeout，避免退出时卡在残留 activity
+        assert mock_worker_cls.call_args.kwargs.get("graceful_shutdown_timeout") == timedelta(
+            seconds=10
+        )
 
 
 class TestRunScanGracefulCancel:
@@ -399,8 +511,9 @@ class TestShutdownCleanup:
             ctrl._on_signal(signal.SIGINT)
         mock_exit.assert_called_once_with(130)
 
+    @pytest.mark.asyncio
     async def test_do_cancel_calls_cleanup_on_timeout(self):
-        """路径②: _do_cancel grace 超时后调 cleanup_callback。"""
+        """路径②: _do_cancel grace 超时→升级 terminate→settle 仍超时→调 cleanup_callback。"""
         from shannon_core.runtime.scan_runner import _do_cancel
 
         called = []
@@ -410,11 +523,12 @@ class TestShutdownCleanup:
 
         fake_handle = MagicMock()
         fake_handle.cancel = AsyncMock()
+        fake_handle.terminate = AsyncMock()
         result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成 -> 超时
         try:
             await _do_cancel(
                 fake_handle, result_task, cancel_grace_seconds=0.01,
-                cleanup_callback=cleanup,
+                cleanup_callback=cleanup, terminate_settle_seconds=0.01,
             )
         except Exception:
             pass
