@@ -22,7 +22,7 @@ from .narration import narration_directive
 from .openai_output_schema import _extract_json_payload
 from .pricing import compute_cost
 from .providers import BaseProvider
-from .runner import DEFAULT_MODELS, ClaudeRunResult, ProviderConfig, TokenUsage
+from .runner import ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
 
 logger = logging.getLogger(__name__)
@@ -50,33 +50,12 @@ class AnthropicProvider(BaseProvider):
         super().__init__(config)
 
     def _get_model(self, model_tier: str) -> str:
-        """根据 tier 获取模型名称
+        """根据 tier 获取模型名称(委托模块级 resolve_tier_model)。
 
         优先级: tier-specific override > global model > DEFAULT_MODELS
         """
-        # 1. Tier-specific override (最高优先级)
-        tier_models = {
-            "small": self.config.small_model,
-            "medium": self.config.medium_model,
-            "large": self.config.large_model,
-        }
-        tier_model = tier_models.get(model_tier)
-        if tier_model:
-            return tier_model
-
-        # 2. Global model fallback
-        if self.config.model:
-            return self.config.model
-
-        # 3. DEFAULT_MODELS (最低优先级)
-        provider_key = "anthropic_api"
-        if self.type == "bedrock":
-            provider_key = "bedrock"
-        elif self.type == "vertex":
-            provider_key = "vertex"
-
-        models = DEFAULT_MODELS.get(provider_key, DEFAULT_MODELS["anthropic_api"])
-        return models.get(model_tier, models.get("medium", "claude-sonnet-4-6"))
+        from .providers import resolve_tier_model
+        return resolve_tier_model(self.config, model_tier)
 
     async def call(
         self,

@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 
 from shannon_core.config.provider_settings import PROVIDER_SETTINGS, present
 
-from .runner import ClaudeRunResult, ProviderConfig
+from .runner import ClaudeRunResult, DEFAULT_MODELS, ProviderConfig
 from .tool_audit_logger import ToolAuditLogger
 
 
@@ -107,6 +107,43 @@ class BaseProvider(ABC):
 # ============================================================================
 # Provider 工厂函数
 # ============================================================================
+
+def resolve_tier_model(config: ProviderConfig, model_tier: str) -> str:
+    """根据 tier 解析模型名(模块级公共函数, 供两引擎 _get_model 复用 + activity 层用)。
+
+    优先级(对齐两引擎 _get_model): tier-specific config > global config.model > DEFAULT_MODELS。
+    provider_key 由 config.type 决定(anthropic_api/bedrock/vertex/openai_compatible/litellm_router)。
+    未知 tier -> 回落 medium(DEFAULT_MODELS 兜底, 防 None)。
+    """
+    # 1. Tier-specific override
+    tier_models = {
+        "small": config.small_model,
+        "medium": config.medium_model,
+        "large": config.large_model,
+    }
+    tier_model = tier_models.get(model_tier)
+    if tier_model:
+        return tier_model
+
+    # 2. Global model fallback
+    if config.model:
+        return config.model
+
+    # 3. DEFAULT_MODELS
+    ptype = config.type or "anthropic_api"
+    if ptype == "bedrock":
+        provider_key = "bedrock"
+    elif ptype == "vertex":
+        provider_key = "vertex"
+    elif ptype == "litellm_router":
+        provider_key = "litellm_router"
+    elif ptype == "openai_compatible":
+        provider_key = "openai_compatible"
+    else:
+        provider_key = "anthropic_api"
+    models = DEFAULT_MODELS.get(provider_key, DEFAULT_MODELS["anthropic_api"])
+    return models.get(model_tier, models.get("medium", "claude-sonnet-4-6"))
+
 
 def create_provider(config: ProviderConfig) -> BaseProvider:
     """

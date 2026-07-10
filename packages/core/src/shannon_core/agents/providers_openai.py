@@ -30,7 +30,7 @@ from shannon_core.models.errors import ErrorCode
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
 from .providers import BaseProvider, ProviderConfig
-from .runner import DEFAULT_MODELS, ClaudeRunResult, TokenUsage
+from .runner import ClaudeRunResult, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
 from .tools_openai import ToolContext, build_tools
 
@@ -50,18 +50,8 @@ class OpenAIProvider(BaseProvider):
 
     # —— 模型解析（沿用现有语义）——
     def _get_model(self, model_tier: str) -> str:
-        tier_models = {
-            "small": self.config.small_model,
-            "medium": self.config.medium_model,
-            "large": self.config.large_model,
-        }
-        if tier_models.get(model_tier):
-            return tier_models[model_tier]
-        if self.config.model:
-            return self.config.model
-        key = "litellm_router" if self.type == "litellm_router" else "openai_compatible"
-        models = DEFAULT_MODELS.get(key, DEFAULT_MODELS["openai_compatible"])
-        return models.get(model_tier, models.get("medium", "gpt-4o"))
+        from .providers import resolve_tier_model
+        return resolve_tier_model(self.config, model_tier)
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
