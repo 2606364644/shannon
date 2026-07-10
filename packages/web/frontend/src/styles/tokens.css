@@ -1,41 +1,43 @@
-/* DSF tokens — 三层：shadcn token（A）+ 语义色（B）+ 字体/圆角（C）。
+/* DSF tokens - 三层：shadcn token（A）+ 语义色（B）+ 字体/圆角（C）。
    深色 = :root 默认；浅色 = .light。HSL channel 写法供 hsl(var(--x)) 消费。
    语义色用 --c- 前缀（c=channel）避开 events.css 同名 hex 变量（--cyan #22D3EE 等）。
    hex 真值来源见 spec §1.2，AA 校验以 dev 预览页为准。
 
-   配色取向（2026-07-09 暖色系双主题：浅=暖白亲和 / 深=暖黑质感）：
-   - 深：旧冷靛紫黑(hue250)「太死黑」→ 暖炭黑(hue28)，温润不冷峻；卡片靠 lightness 差 + 暖灰亮边勾勒。
-   - 浅：暖米画布 + 纯白浮起卡 + 暖棕阴影 + 深暖墨边勾勒（破「性冷淡」+ 强层次）。
-   - primary 双主题统一 indigo(243)（避开紫主色）；severity 暖梯度 red/orange/yellow。
-   - radius 8px；暖棕/暖黑阴影浮起卡片做层次。 */
+   配色取向（2026-07-10 Claude 风重做：双主题统一暖纸张感 + coral 主色）：
+   - Claude 风核心 = 低饱和暖底（非高饱和深色）+ 浮起靠 hairline 边框 + 柔阴影（不靠大亮度差）。
+   - 深：暖炭黑（hue30 暖深，非冷灰黑）+ coral 点缀；surface 靠 lightness 差 + 暖灰亮边勾勒。
+   - 浅：淡暖画布（sat12% 够暖不发黄）+ 极淡暖白卡 + 暖灰 hairline + 柔暖棕阴影。
+   - primary 双主题统一 coral(15°)（Claude 灵魂色 #D97757，橙红非紫，不违反避紫约束）；
+     severity 暖梯度 red/orange/yellow（与 coral 同暖色系，统一感更强）。
+   - radius 10px（从 8 提到 10，更 Claude 圆润但克制）；暖棕/暖黑柔阴影浮起卡片。 */
 
 :root {
-  /* 层 A · shadcn token（深 · 暖黑；hue28 暖炭替代旧 hue250 冷靛紫，与浅色暖白配对） */
-  --background: 28 16% 8%;
-  --foreground: 40 14% 88%;
-  --card: 30 13% 11%;
-  --card-foreground: 40 14% 88%;
-  --popover: 30 13% 11%;
-  --popover-foreground: 40 14% 88%;
-  --primary: 243 75% 65%;
-  --primary-foreground: 28 16% 8%;
-  --secondary: 30 12% 15%;
-  --secondary-foreground: 40 14% 88%;
-  --muted: 30 12% 14%;
-  --muted-foreground: 36 8% 62%;
-  --accent: 30 12% 17%;
-  --accent-foreground: 40 14% 88%;
-  --destructive: 0 72% 62%;
-  --destructive-foreground: 28 16% 8%;
-  --border: 32 14% 22%;
-  --input: 32 14% 22%;
-  --ring: 243 75% 65%;
+  /* 层 A · shadcn token（深 · Claude 暖深；hue30 暖炭非冷灰黑，配 coral 主色） */
+  --background: 30 10% 11%;
+  --foreground: 40 14% 90%;
+  --card: 30 8% 14%;
+  --card-foreground: 40 14% 90%;
+  --popover: 30 8% 14%;
+  --popover-foreground: 40 14% 90%;
+  --primary: 15 70% 62%;
+  --primary-foreground: 30 10% 11%;
+  --secondary: 30 8% 17%;
+  --secondary-foreground: 40 14% 90%;
+  --muted: 30 8% 17%;
+  --muted-foreground: 40 7% 60%;
+  --accent: 30 8% 20%;
+  --accent-foreground: 40 14% 90%;
+  --destructive: 5 70% 58%;
+  --destructive-foreground: 30 10% 11%;
+  --border: 30 8% 22%;
+  --input: 30 8% 22%;
+  --ring: 15 70% 62%;
 
   /* 层 B · 语义色（深，HSL channel；--c- 前缀避 events.css hex --cyan 等同名冲突） */
   --c-cyan: 192 90% 56%;
   --c-magenta: 285 90% 76%;
   --c-green: 140 60% 52%;
-  --c-red: 0 78% 68%;
+  --c-red: 5 70% 62%;
   --c-orange: 24 92% 60%;
   --c-yellow: 40 92% 58%;
 
@@ -43,50 +45,53 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", Georgia, serif;
-  --radius: 8px;
+  --radius: 10px;
 
-  /* 层 E · elevation（深 · 暖黑阴影浮起；hue28 与背景同系） */
-  --shadow-card: 0 2px 8px -2px hsl(28 45% 2% / 0.55), 0 1px 2px hsl(28 45% 2% / 0.4);
+  /* 层 E · elevation（深 · 暖黑柔阴影浮起；hue30 与背景同系） */
+  --shadow-card: 0 2px 8px hsl(30 30% 2% / 0.5), 0 1px 2px hsl(30 30% 2% / 0.4);
 
-  /* 层 D · @tailwindcss/typography prose 主题（深 · 暖黑） */
-  --prose-body: 40 14% 88%;
+  /* 层 D · @tailwindcss/typography prose 主题（深 · 暖黑；links 用 coral） */
+  --prose-body: 40 14% 90%;
   --prose-headings: 40 16% 94%;
-  --prose-links: 243 75% 68%;
+  --prose-links: 15 70% 65%;
   --prose-bold: 40 16% 94%;
   --prose-code: 192 90% 60%;
-  --prose-code-bg: 30 12% 15%;
-  --prose-quotes: 36 8% 62%;
-  --prose-bullets: 36 8% 62%;
-  --prose-hr: 32 14% 22%;
+  --prose-code-bg: 30 8% 17%;
+  --prose-quotes: 40 7% 60%;
+  --prose-bullets: 40 7% 60%;
+  --prose-hr: 30 8% 22%;
 }
 
 .light {
-  /* 层 A · shadcn token（浅 · 暖白亲和 + 强层次，2026-07-09）
-     破「性冷淡」并强化层次：暖米画布 + 纯白浮起卡 + 暖棕阴影，守 indigo primary（非紫）。
-     层次 = surface 亮度阶梯拉大：background 暖米(94%) ◁ card 纯白(100% 浮起最亮)
-     ◁ muted(89% 内嵌面) ◁ accent(86% 激活)，bg↔card 差 6%（首版仅 3% 太平，故加深画布）。
-     阴影 alpha 翻倍 + 远近两段，白卡在暖米画布上明显漂起。 */
-  --background: 35 44% 94%;
-  --foreground: 30 12% 14%;
-  --card: 0 0% 100%;
-  --card-foreground: 30 12% 14%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 30 12% 14%;
-  --primary: 243 75% 59%;
+  /* 层 A · shadcn token（浅 · Claude 暖纸张感；2026-07-10 重做）
+     两版失败复盘：(v1) sat20% 暖白画布 + 纯白卡 -> 色温跳变「贴白纸」发黄突兀；
+     (v2) sat24%/L91% 把背景压太深 -> 吃光对比「啥都看不到」。
+     Claude 真实做法 = 低饱和暖底（sat12% 够暖不发黄）+ 浮起靠 hairline 边框 + 柔阴影（不靠大亮度差）。
+     修正 B（用户拍板）：背景 sat12%/L95% 淡暖画布 + 卡片 sat8%/L99% 极淡暖白（同色温），
+     暖灰 hairline 勾勒 + 暖棕柔阴影分层 -> 通透纸张感 + 浮起清晰。
+     亮度阶梯：card(99% 浮起最亮) ◁ background(95% 淡暖画布) ◁ secondary(93%) ◁ muted(93% 内嵌) ◁ accent(89% 激活)。
+     守 coral primary（非紫）；border L84 暖灰 hairline；阴影 alpha 压低防脏。 */
+  --background: 40 12% 95%;
+  --foreground: 30 13% 13%;
+  --card: 40 8% 99%;
+  --card-foreground: 30 13% 13%;
+  --popover: 40 8% 99%;
+  --popover-foreground: 30 13% 13%;
+  --primary: 15 63% 55%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 36 40% 90%;
-  --secondary-foreground: 30 12% 14%;
-  --muted: 36 40% 89%;
-  --muted-foreground: 36 12% 40%;
-  --accent: 36 44% 86%;
-  --accent-foreground: 30 12% 14%;
+  --secondary: 40 10% 93%;
+  --secondary-foreground: 30 13% 13%;
+  --muted: 40 10% 93%;
+  --muted-foreground: 30 7% 42%;
+  --accent: 40 14% 89%;
+  --accent-foreground: 30 13% 13%;
   --destructive: 5 61% 46%;
   --destructive-foreground: 0 0% 100%;
-  --border: 33 18% 68%;
-  --input: 33 18% 68%;
-  --ring: 243 75% 59%;
+  --border: 40 11% 84%;
+  --input: 40 11% 84%;
+  --ring: 15 63% 55%;
 
-  /* 层 B · 语义色（浅 · 暖白档：severity 走暖化琥珀梯度，柔和不刺眼） */
+  /* 层 B · 语义色（浅 · Claude 暖档：severity 暖化琥珀梯度，与 coral 同暖色系） */
   --c-cyan: 189 80% 27%;
   --c-magenta: 276 60% 49%;
   --c-green: 142 44% 33%;
@@ -94,17 +99,17 @@
   --c-orange: 28 77% 44%;
   --c-yellow: 39 79% 34%;
 
-  /* 层 D · prose 主题（浅 · 暖白；code 用 c-cyan 与 VulnCard 代码定位一致） */
+  /* 层 D · prose 主题（浅 · Claude 暖；links 用 coral；code 用 c-cyan 与 VulnCard 一致） */
   --prose-body: 30 12% 14%;
   --prose-headings: 30 16% 11%;
-  --prose-links: 243 75% 45%;
+  --prose-links: 15 63% 45%;
   --prose-bold: 30 12% 14%;
   --prose-code: 189 80% 27%;
-  --prose-code-bg: 36 40% 89%;
-  --prose-quotes: 36 12% 40%;
-  --prose-bullets: 36 12% 40%;
-  --prose-hr: 36 28% 84%;
+  --prose-code-bg: 40 16% 89%;
+  --prose-quotes: 30 8% 40%;
+  --prose-bullets: 30 8% 40%;
+  --prose-hr: 40 14% 84%;
 
-  /* 层 E · elevation（浅 · 暖棕阴影加重；深暖棕 hue36/L28，近段锐利 + 远段扩散浮起） */
-  --shadow-card: 0 1px 3px hsl(36 30% 28% / 0.14), 0 10px 28px hsl(36 30% 28% / 0.10);
+  /* 层 E · elevation（浅 · 暖棕柔阴影；hairline 边框撑层次，不靠大亮度差，alpha 压低防脏） */
+  --shadow-card: 0 1px 2px hsl(28 30% 25% / 0.09), 0 6px 18px hsl(28 30% 25% / 0.06);
 }

@@ -26,7 +26,7 @@ export function TopBar() {
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
         <Link to="/" className="flex items-center gap-1.5 font-semibold tracking-tight text-base">
-          <BrandMark className="h-[1.15em] w-[1.15em] text-cyan" />
+          <BrandMark className="h-[1.15em] w-[1.15em] text-foreground" />
           <span>ft-shannon</span>
         </Link>
         <nav className="flex items-center gap-1" aria-label={t("nav.mainAria")}>
