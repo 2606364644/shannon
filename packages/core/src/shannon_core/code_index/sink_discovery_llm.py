@@ -24,12 +24,12 @@ from shannon_core.code_index.sink_detector import (
 )
 from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
 from shannon_core.code_index.llm_concurrency import (
-    CHUNK_TOKEN_THRESHOLD,
     FileChunk,
     chunk_items_by_file,
     map_llm_with_bounds,
 )
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
+from shannon_core.agents.model_caps import get_chunk_token_threshold
 from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
 
 if TYPE_CHECKING:
@@ -299,12 +299,14 @@ async def discover_sinks_llm(
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
     token_threshold: int | None = None,
+    model: str | None = None,
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
     """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
     调用粒度 = **文件级**(spec 2026-07-10 §3.1): 同文件所有可疑 call → 一个 chunk →
     一次 LLM 调用(大幅减调用次数: N 函数 → 文件 chunk 数)。大文件按 token 贪心拆 chunk
-    (token_threshold, 默认 CHUNK_TOKEN_THRESHOLD)防 prompt 爆 LLM context。
+    (token_threshold, 默认由 get_chunk_token_threshold(model) 派生: 按当前模型 context
+    自适应, glm-5.2 走 750K / 默认 96K)防 prompt 爆 LLM context。
 
     LLM 不可用(None / raise / 超时 / 不可解析)→ 该 chunk 跳过, 返回空(降级, spec §3.4)。
     并发由 concurrency(Semaphore)限, 默认 get_max_concurrent()(SHANNON_MAX_CONCURRENT);
@@ -317,11 +319,12 @@ async def discover_sinks_llm(
     """
     if llm_client is None or not suspicious:
         return [], []
+    effective_threshold = (token_threshold if token_threshold is not None
+                           else get_chunk_token_threshold(model))
     chunks: list[FileChunk] = chunk_items_by_file(
         suspicious,
         block_of=lambda sc: sc.block,
-        token_threshold=(token_threshold if token_threshold is not None
-                         else CHUNK_TOKEN_THRESHOLD),
+        token_threshold=effective_threshold,
     )
 
     emitter = ProgressEmitter("sink-discovery", len(chunks), progress_cb)

@@ -590,3 +590,57 @@ async def test_discover_skips_malformed_verdict_field_keeps_other_sinks():
     # good_sink 必须保留(bad_sink 的 malformed 字段只跳过它自己, 不带垮整 chunk)
     assert any(s.callee_name == "good_sink" for s in soft), \
         f"malformed arg_index 不应丢整 chunk, good_sink 应保留: {soft}"
+
+
+async def test_discover_sinks_threshold_derives_from_model():
+    """model='glm-5.2' -> token_threshold 派生 750K, 大函数进 1 chunk(spec §3 模块3)。
+
+    glm-5.2 context 1M × 0.75 = 750K; big_src ~100K tokens < 750K -> 1 chunk(1 次 LLM 调用)。
+    """
+    import asyncio
+    from shannon_core.code_index.models import FuncBlock
+
+    big_src = "x = 1\n" * 100_000  # ~500K chars -> ~125K tokens(ascii)
+    block = FuncBlock(
+        id="app.py:f:1", file_path="app.py", function_name="f",
+        start_line=1, end_line=5, source_code=big_src,
+        parameters=["uid"], language="python",
+    )
+    sc = SuspiciousCall(block=block, callee="exec", receiver=None,
+                        arg_exprs=["uid"], file_path="app.py", line=1, column=0)
+    calls = []
+
+    async def fake_client(prompt):
+        calls.append(prompt)
+        return "[]"  # 空 verdict
+
+    sinks, gaps = await discover_sinks_llm([sc], fake_client, model="glm-5.2")
+    assert len(calls) == 1  # 整个大函数进 1 chunk(750K 容得下 125K)
+    assert sinks == [] and gaps == []
+
+
+async def test_discover_sinks_threshold_default_model(monkeypatch):
+    """model=None -> 走默认 128K context -> threshold 96K。
+
+    big_src ~125K tokens > 96K, 但单 block 超 threshold 独立成 1 chunk(无法再拆)。
+    """
+    from shannon_core.code_index.models import FuncBlock
+
+    big_src = "x = 1\n" * 100_000  # ~125K tokens
+    block = FuncBlock(
+        id="app.py:f:1", file_path="app.py", function_name="f",
+        start_line=1, end_line=5, source_code=big_src,
+        parameters=["uid"], language="python",
+    )
+    sc = SuspiciousCall(block=block, callee="exec", receiver=None,
+                        arg_exprs=["uid"], file_path="app.py", line=1, column=0)
+    calls = []
+
+    async def fake_client(prompt):
+        calls.append(prompt)
+        return "[]"
+
+    # model=None -> 96K threshold; 125K tokens > 96K 但单 block 独立成 1 chunk
+    sinks, gaps = await discover_sinks_llm([sc], fake_client, model=None)
+    assert len(calls) == 1  # 单 block 超阈值独立成 chunk
+

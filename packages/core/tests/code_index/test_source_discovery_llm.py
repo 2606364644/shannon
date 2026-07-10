@@ -377,3 +377,47 @@ async def test_discover_sources_skips_malformed_field_keeps_other_sources():
     soft, _ = await discover_sources_llm(cands, fake_llm)
     assert any(s.param_name == "good" for s in soft), \
         f"malformed line 不应丢整 chunk, good 应保留: {soft}"
+
+
+def test_discover_sources_threshold_derives_from_model():
+    """model='glm-5.2' -> token_threshold 派生 750K, 大函数进 1 chunk(spec §3 模块3)。
+
+    glm-5.2 context 1M × 0.75 = 750K; big_src ~125K tokens < 750K -> 1 chunk(1 次 LLM 调用)。
+    """
+    import asyncio
+    from shannon_core.code_index.source_discovery_llm import SourceCandidate
+
+    big_src = "x = 1\n" * 100_000  # ~500K chars -> ~125K tokens(ascii)
+    block = _block("app.js", "f", 1, big_src)
+    cands = [SourceCandidate(block=block)]
+    calls = []
+
+    async def fake_llm(prompt):
+        calls.append(prompt)
+        return "[]"  # 空 verdict
+
+    soft, gaps = asyncio.run(discover_sources_llm(cands, fake_llm, model="glm-5.2"))
+    assert len(calls) == 1  # 整个大函数进 1 chunk(750K 容得下 125K)
+    assert soft == [] and gaps == []
+
+
+def test_discover_sources_threshold_default_model():
+    """model=None -> 走默认 128K context -> threshold 96K。
+
+    big_src ~125K tokens > 96K, 但单 block 超 threshold 独立成 1 chunk(无法再拆)。
+    """
+    import asyncio
+    from shannon_core.code_index.source_discovery_llm import SourceCandidate
+
+    big_src = "x = 1\n" * 100_000  # ~125K tokens
+    block = _block("app.js", "f", 1, big_src)
+    cands = [SourceCandidate(block=block)]
+    calls = []
+
+    async def fake_llm(prompt):
+        calls.append(prompt)
+        return "[]"
+
+    soft, gaps = asyncio.run(discover_sources_llm(cands, fake_llm, model=None))
+    assert len(calls) == 1  # 单 block 超阈值独立成 chunk
+

@@ -17,12 +17,12 @@ from shannon_core.code_index.source_detector import (
     DEFAULT_SOURCE_RULES, _dedup, _detect_validation, _line_of,
 )
 from shannon_core.code_index.llm_concurrency import (
-    CHUNK_TOKEN_THRESHOLD,
     FileChunk,
     chunk_items_by_file,
     map_llm_with_bounds,
 )
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
+from shannon_core.agents.model_caps import get_chunk_token_threshold
 from shannon_core.config.concurrency import get_max_concurrent, get_per_call_timeout
 
 if TYPE_CHECKING:
@@ -265,12 +265,13 @@ async def discover_sources_llm(
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
     token_threshold: int | None = None,
+    model: str | None = None,
 ) -> tuple[list[SourcePoint], list[SourceGap]]:
     """对候选(含 sink 函数中规则未命中的)并发调 LLM → 软 SourcePoint + SourceGap。
 
     调用粒度 = **文件级**(spec 2026-07-10 §3.1): 同文件所有候选函数 → 一个 chunk →
-    一次 LLM 调用。大文件按 token 贪心拆 chunk(token_threshold, 默认 CHUNK_TOKEN_THRESHOLD)
-    防 prompt 爆 LLM context。verdict.line 反查所属 block 归位(见 _resolve_block_for_line)。
+    一次 LLM 调用。大文件按 token 贪心拆 chunk(token_threshold, 默认由
+    get_chunk_token_threshold(model) 派生: 按当前模型 context 自适应)防 prompt 爆 LLM context。verdict.line 反查所属 block 归位(见 _resolve_block_for_line)。
 
     LLM 不可用(None / 超时 / 不可解析)→ 返回 ([], [])(降级,守"GitNexus 轨确定性兜底")。
     软 source rule_id="llm-discovered-source" needs_review=True(下游 intra-first/verdict 复核)。
@@ -280,11 +281,12 @@ async def discover_sources_llm(
     """
     if llm_client is None or not candidates:
         return [], []
+    effective_threshold = (token_threshold if token_threshold is not None
+                           else get_chunk_token_threshold(model))
     chunks: list[FileChunk] = chunk_items_by_file(
         candidates,
         block_of=lambda c: c.block,
-        token_threshold=(token_threshold if token_threshold is not None
-                         else CHUNK_TOKEN_THRESHOLD),
+        token_threshold=effective_threshold,
     )
 
     emitter = ProgressEmitter("source-discovery", len(chunks), progress_cb)
