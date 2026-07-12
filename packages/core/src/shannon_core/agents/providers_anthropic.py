@@ -28,6 +28,19 @@ from .tool_audit_logger import ToolAuditLogger
 logger = logging.getLogger(__name__)
 
 
+# L2 诊断：non-end_turn stop_reason 的语义提示（按值分支，替换原笼统的
+# "may indicate budget/refusal" 说法）。stop_sequence 等 CLI/协议层透传值
+# 通常是良性的；只有 refusal / 未知值才倾向真问题。
+_STOP_REASON_HINTS = {
+    "stop_sequence": "CLI/protocol-level sentinel (typically harmless; not a budget cap or refusal)",
+    "refusal": "likely a content refusal",
+    "max_tokens": "output hit the token limit",
+    "max_duration": "hit the duration cap (not a spending cap)",
+    "max_turns": "hit the turn limit",
+}
+_STOP_REASON_HINT_DEFAULT = "unexpected stop_reason; may indicate budget/refusal or an upstream issue"
+
+
 def _on_claude_stderr(line: str) -> None:
     """转发 Claude Code 子进程的真实 stderr，避免 SDK 吞掉错误。
 
@@ -109,8 +122,9 @@ class AnthropicProvider(BaseProvider):
             # L2 diagnostics: surface early-stops and permission denials
             if result.stop_reason and result.stop_reason != "end_turn":
                 logger.warning(
-                    "Agent stopped early (stop_reason=%s); may indicate budget/refusal",
+                    "Agent stopped early (stop_reason=%s); %s",
                     result.stop_reason,
+                    _STOP_REASON_HINTS.get(result.stop_reason, _STOP_REASON_HINT_DEFAULT),
                 )
             permission_denials = getattr(result_message, "permission_denials", None)
             if permission_denials:

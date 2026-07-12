@@ -1855,6 +1855,24 @@ class TestCallResultFailureLayer:
                    for r in caplog.records)
 
     @pytest.mark.asyncio
+    async def test_logs_stop_sequence_as_benign(self, caplog):
+        # stop_sequence 来自 CLI/协议层透传（项目不配置），属良性诊断：
+        # 文案应点名 "typically harmless"，且 success 仍为 True（不触发失败/重试）。
+        provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+        msg = ResultMessage(
+            subtype="result",
+            duration_ms=100, duration_api_ms=50,
+            is_error=False, num_turns=1, session_id="t",
+            stop_reason="stop_sequence",
+        )
+        with caplog.at_level(logging.WARNING, logger="shannon_core.agents.providers_anthropic"):
+            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+                result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
+        assert result.success is True
+        assert any("stop_sequence" in r.getMessage() and "typically harmless" in r.getMessage()
+                   for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_logs_permission_denials(self, caplog):
         provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
         msg = ResultMessage(
