@@ -392,7 +392,13 @@ class AnthropicProvider(BaseProvider):
         )
 
     def _extract_tokens(self, result_message: ResultMessage) -> TokenUsage:
-        """从 ResultMessage 提取 token 统计"""
+        """从 ResultMessage 提取 token 统计。
+
+        claude-agent-sdk 的 ``ResultMessage.usage`` 是 ``dict[str, Any]``（SDK
+        types.py:1156），不是带属性的对象——必须用 ``dict.get()`` 访问；
+        ``getattr(dict, key)`` 会静默返回默认值（曾致 claude 引擎全 profile
+        cost=0，含智谱：CLI 给非零 usage dict 也被读成 0）。保留对象形态兼容。
+        """
         usage = getattr(result_message, "usage", None)
         if usage is None:
             usage = getattr(result_message, "model_usage", None)
@@ -400,11 +406,16 @@ class AnthropicProvider(BaseProvider):
         if usage is None:
             return TokenUsage()
 
+        def _get(key: str) -> int:
+            if isinstance(usage, dict):
+                return usage.get(key, 0) or 0
+            return getattr(usage, key, 0) or 0
+
         return TokenUsage(
-            input_tokens=getattr(usage, "input_tokens", 0),
-            output_tokens=getattr(usage, "output_tokens", 0),
-            cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0),
-            cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0),
+            input_tokens=_get("input_tokens"),
+            output_tokens=_get("output_tokens"),
+            cache_creation_input_tokens=_get("cache_creation_input_tokens"),
+            cache_read_input_tokens=_get("cache_read_input_tokens"),
         )
 
     def _extract_cost(self, result_message: ResultMessage, model: str):

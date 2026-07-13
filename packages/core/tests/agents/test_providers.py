@@ -416,6 +416,37 @@ class TestAnthropicProvider:
         assert result.cost == 0.0
         assert result.cost_currency == "CNY"
 
+    def test_extract_tokens_from_dict_usage(self):
+        """回归守护：claude-agent-sdk ResultMessage.usage 是 dict（非对象）。
+
+        getattr(dict, key) 永远返回默认值——曾致 claude 引擎全 profile cost=0
+        （含智谱 glm-anthropic：CLI 给非零 usage dict 也被读成 0）。dict 必须用
+        .get() 访问。智谱 glm-4.5-air 实测值（input=31567/output=108/cache_read=1984）。
+        """
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+
+        result = ResultMessage(
+            subtype="result",
+            duration_ms=1000,
+            duration_api_ms=500,
+            is_error=False,
+            num_turns=1,
+            session_id="test",
+            usage={
+                "input_tokens": 31567,
+                "output_tokens": 108,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 1984,
+            },
+        )
+
+        tokens = provider._extract_tokens(result)
+        assert tokens.input_tokens == 31567
+        assert tokens.output_tokens == 108
+        assert tokens.cache_read_input_tokens == 1984
+        assert tokens.cache_creation_input_tokens == 0
+
 
 class TestAnthropicProviderBuildOptions:
     """测试 AnthropicProvider._build_options 的零配置行为"""
