@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +10,12 @@ from typing import Any
 
 import aiofiles
 
+from temporalio.client import Client
+
+from shannon_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
+from shannon_core.session import SessionManager
+from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from shannon_whitebox.pipeline.shared import PipelineInput
 from shannon_web.models import ScanRequest
 from .repo_manager import _resolve_repo_dir
 from .scan_liveness import is_scan_recently_active
@@ -31,6 +36,13 @@ def _now_iso() -> str:
 
 
 class ScanManager:
+    """C1 Phase B: web 提交端改为 temporal workflow 提交者(不再 fork CLI 子进程).
+
+    start → Client.connect + start_workflow(提交到固定 queue shannon-py-wb-web, worker
+    容器消费); _watch → tail events.ndjson 直到 scan_end; cancel → handle.cancel(temporal
+    原生). active_pids 返空(无本机 pid, 判活靠 heartbeat mtime). 黑盒/correlation C1 化留 Phase C.
+    """
+
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
                  max_concurrent: int = 1, scan_timeout: float = 0.0) -> None:
         self._workspaces_dir = Path(workspaces_dir)
@@ -38,14 +50,17 @@ class ScanManager:
         self._config_store = config_store
         self._max_concurrent = max(1, max_concurrent)
         self._scan_timeout = scan_timeout
-        self._procs: dict[str, asyncio.subprocess.Process] = {}
+        # C1: _procs(子进程) → _handles(temporal WorkflowHandle). cancel 用 handle.cancel().
+        self._handles: dict[str, Any] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         # 进行中的 scan 请求快照（ws -> ScanRequest），供 active_repo_sources() 判引用
         self._active_reqs: dict[str, ScanRequest] = {}
 
     # ---- 公共 API ----
     def active_pids(self) -> dict[str, int]:
-        return {ws: p.pid for ws, p in self._procs.items() if p.returncode is None}
+        # C1: web 无本机 pid(扫描跑在 worker 容器). 判活完全靠 scan_liveness.is_scan_recently_active
+        # (heartbeat mtime). orphan_reconciler 的 is_scan_recently_active 门兜底(不误杀活 workflow).
+        return {}
 
     def active_repo_sources(self) -> set[str]:
         """当前正在跑的 scan 引用的 repo 名集合（DELETE /repos 判引用用）。"""
@@ -56,21 +71,16 @@ class ScanManager:
         return out
 
     async def reap_zombies(self) -> None:
-        """lifespan 启动时扫无主子进程（本会话 _procs 外的）。v1: 无操作占位，
-        真正无主 ws 由 WorkspacesIndexer 判 interrupted 呈现。"""
+        """lifespan 启动时扫无主子进程。C1 后 web 无子进程 → no-op."""
         return None
 
     async def start(self, req: ScanRequest) -> str:
         await self._check_temporal()
-        if len(self._procs) >= self._max_concurrent:
+        if len(self._handles) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
 
         if req.type == "correlation":
-            # correlation 子进程（shannon-multi start -c）忽略 ws 参数，orchestrator
-            # 把 correlation_progress/scan_end 写到
-            # resolve_workspaces_dir()/config.correlation.out_workspace/events.ndjson。
-            # 故 event_file 必须用 yaml 里的 out_workspace，否则 SSE 收不到联动进度
-            # 且 _has_scan_end 查错文件（final-review Finding 1）。
+            # correlation 解析仍需 yaml(out_workspace), 但 C1 提交留 Phase C.
             target, yaml_path = await self._resolve_inputs(req)
             ws = self._resolve_out_workspace(yaml_path)
         else:
@@ -79,54 +89,85 @@ class ScanManager:
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
-        # 标 owner=web(诊断 + cancel 分轨;宿主 CLI 起的 owner=host 由 worker 写)
+        # C1: web 端做 session 创建 + owner(原 run_scan:121-135 迁来; CLI 那套不再走).
+        SessionManager(self._workspaces_dir).create_workspace(
+            web_url=req.url or "", repo_path=target or "", name=ws)
         self._mark_owner(ws_dir, "web")
         event_file = ws_dir / "events.ndjson"
-
-        argv = self._build_argv(req, target, ws, yaml_path)
-        env = {**os.environ, "SHANNON_WEB_EVENT_FILE": str(event_file)}
-        # web 启动的扫描是非交互子进程（无 TTY），ensure_prerequisite 的交互式
-        # 安装/降级确认 click.confirm 会因 EOF 直接 Aborted。显式跳过前置检查：
-        # 扫描以降级模式跑（gitnexus 等缺失则确定性轨退化，LLM 轨照跑），而非启动即崩。
-        # 完整确定性覆盖需把 gitnexus 装进镜像（见 follow-up），此开关仅解除非交互死锁。
-        env.setdefault("SHANNON_SKIP_PREREQUISITES", "1")
-        # 在子进程拉起前登记，确保 active_repo_sources() 能看到在途请求（即便
-        # proc 尚未赋值回 _procs）。
         self._active_reqs[ws] = req
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv, env=env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
+            if req.type == "whitebox":
+                handle = await self._submit_whitebox(target, ws, event_file, req)
+            elif req.type == "blackbox":
+                raise NotImplementedError("blackbox C1 化留 Phase C(本 plan 白盒聚焦)")
+            else:
+                raise ValueError(f"correlation 暂未 C1 化: {req.type}")
         except BaseException:
-            # spawn 失败（FileNotFoundError on the binary / fork-exec failure 等）：
-            # _watch 不会被调度，必须在此清理 _active_reqs，否则 active_repo_sources()
-            # 会持续误报引用 → DELETE /repos 误判 409 直到重启。
+            # 提交失败: _watch 不会被调度, 必须在此清理 _active_reqs, 否则
+            # active_repo_sources() 持续误报引用 → DELETE /repos 误判 409.
             self._active_reqs.pop(ws, None)
             raise
-        self._procs[ws] = proc
-        self._tasks[ws] = asyncio.create_task(self._watch(ws, proc, event_file))
+        self._handles[ws] = handle
+        self._tasks[ws] = asyncio.create_task(self._watch(ws, event_file))
         return ws
 
-    async def cancel(self, ws: str) -> dict | None:
-        """取消 scan 三轨(返回 dict=成功,None=workspace 不存在→唯一 404)。
+    async def _submit_whitebox(self, target: str | None, ws: str,
+                               event_file: Path, req: ScanRequest) -> Any:
+        """算 workflow_id(读 resumeAttempts) + Client.connect + start_workflow 到固定 queue.
 
-        ① _procs 有且存活 → SIGINT(容器内直杀 web 自起 scan)。
-        ② heartbeat fresh(owner=host 在跑)→ 写 cancel.requested(宿主 HeartbeatManager
-           ≤一个心跳周期内检测并自退)+ 标 cancelled + via:"signal"。
-        ③ heartbeat stale(已死,含 owner=web 但 web 重启后 _procs 空)→ 标 cancelled + was_dead:true。
-        web 侧立即返回(不等宿主真退)→ 状态立即翻转 → Delete 立即可用。
+        event_file 塞进 PipelineInput(worker 容器 setup_display 据此挂 StructuredEventRenderer).
+        workflow_id 在提交时定(activity 不能改自己的 workflow_id).
+        """
+        client = await Client.connect(self._temporal_address())
+        workflow_id = self._resolve_workflow_id(ws)
+        inp = PipelineInput(
+            repo_path=target or "",
+            web_url=req.url or "",
+            workspace_name=ws,
+            event_file=str(event_file),
+        )
+        handle = await client.start_workflow(
+            WhiteboxScanWorkflow.run, inp, id=workflow_id,
+            task_queue=WEB_TASK_QUEUE_WHITEBOX,
+        )
+        return handle
+
+    def _resolve_workflow_id(self, ws: str) -> str:
+        """读 session.json top-level resumeAttempts, 算 -resume-N 后缀(workflow_id 提交时定).
+
+        复用 worker.py resolve_workflow_id 语义(resume_attempt>0 加 -resume-N); web 端
+        读 session.json 算 n(等价 run_scan:209-224 的读法).
+        """
+        session_file = self._workspaces_dir / ws / "session.json"
+        n = 0
+        if session_file.exists():
+            try:
+                data = json.loads(session_file.read_text("utf-8"))
+                attempts = data.get("resumeAttempts") or []
+                if isinstance(attempts, list):
+                    n = len(attempts)
+            except (json.JSONDecodeError, OSError):
+                n = 0
+        return f"{ws}-resume-{n}" if n > 0 else ws
+
+    async def cancel(self, ws: str) -> dict | None:
+        """取消 scan 三轨(C1 后):
+        ① _handles 有(web 自起) → handle.cancel()(temporal 原生, 传播到 workflow + heartbeat activity).
+        ② heartbeat fresh(owner=host 在跑) → 写 cancel.requested(协作式兜底, 兼容 host CLI).
+        ③ heartbeat stale(已死) → 标 cancelled + was_dead.
+        web 侧立即返回(不等 worker 真退)→ 状态立即翻转 → Delete 立即可用.
         """
         ws_dir = self._workspaces_dir / ws
         if not ws_dir.exists():
             return None  # 唯一 404 情况
-        # ① web 自起:在 _procs 且存活 → SIGINT
-        proc = self._procs.get(ws)
-        if proc is not None and proc.returncode is None:
+        # ① web 自起: handle.cancel(temporal 原生)
+        handle = self._handles.get(ws)
+        if handle is not None:
             try:
-                proc.send_signal(signal.SIGINT)
-            except ProcessLookupError:
-                pass
+                await handle.cancel()
+            except Exception:
+                pass  # best-effort; temporal 侧 workflow cancel
             return {"cancelled": ws}
         # ②/③ owner=host 或已死:标 cancelled(③ 不写协作式信号)
         if is_scan_recently_active(ws_dir):
@@ -156,7 +197,6 @@ class ScanManager:
         if not self._has_scan_end(event_file):
             await self._write_scan_end(event_file, "cancelled", -1, "用户取消(web Cancel)")
         try:
-            from shannon_core.session import SessionManager
             SessionManager(self._workspaces_dir).update_session(
                 ws_dir, {"status": "cancelled", "completed_at": time.time()})
         except Exception:  # noqa: BLE001 - 标记是 best-effort,不阻塞 cancel
@@ -164,29 +204,11 @@ class ScanManager:
 
     # ---- 钩子（可 monkeypatch）----
     def _temporal_address(self) -> str:
-        """SHANNON_TEMPORAL_HOST:PORT（默认 localhost:7233）。
-
-        web 容器内 temporal 在 compose 服务名 `temporal` 上（非 localhost），
-        必须显式传给子进程 CLI 的 --temporal-address，否则 CLI 用默认 localhost:7233
-        探活失败 -> ensure_infra 退化到 docker 自建 -> 容器内无 docker -> 扫描启动即崩。
-        """
+        """SHANNON_TEMPORAL_HOST:PORT（默认 localhost:7233）。web 容器内 temporal 在
+        compose 服务名 `temporal` 上(非 localhost), Client.connect 必须用它."""
         host = os.environ.get("SHANNON_TEMPORAL_HOST", "localhost")
         port = int(os.environ.get("SHANNON_TEMPORAL_PORT", "7233"))
         return f"{host}:{port}"
-
-    def _build_argv(self, req: ScanRequest, target: str | None,
-                    ws: str, yaml_path: Path | None = None) -> list[str]:
-        ta = ["--temporal-address", self._temporal_address()]
-        if req.type == "whitebox":
-            return ["shannon-whitebox", "start", "-r", target or "", "--url", req.url or "", "-w", ws, *ta]
-        if req.type == "blackbox":
-            cmd = ["shannon-blackbox", "start", "--url", req.url or "", "--repo", target or "", "-w", ws, *ta]
-            if req.reuse_latest:
-                cmd.append("--latest")
-            return cmd
-        if req.type == "correlation":
-            return ["shannon-multi", "start", "-c", str(yaml_path), *ta]
-        raise ValueError(f"unknown scan type: {req.type}")
 
     async def _check_temporal(self) -> None:
         import socket
@@ -219,13 +241,7 @@ class ScanManager:
         return target, yaml_path
 
     def _resolve_repo_path(self, name: str) -> str:
-        """将 repo 名（可为 group/repo）解析为 repos_dir 内绝对路径，并校验 state==ready。
-
-        - 非法名（含 '..' / 多层 '/' / 首尾 '/' 等）→ ValueError（_resolve_repo_dir 双重防线）
-        - 目录不存在 → ValueError（前端 4xx 语义）
-        - 元数据缺失或 JSON 损坏 → 视为 ready，不阻塞扫描
-        - state 非 ready（cloning/error 等）→ ValueError，提示去 /repos 完成 clone
-        """
+        """将 repo 名（可为 group/repo）解析为 repos_dir 内绝对路径，并校验 state==ready。"""
         repo_dir = _resolve_repo_dir(self._repos_dir, name)
         if not repo_dir.is_dir():
             raise ValueError(f"仓库不存在：{name}")
@@ -241,12 +257,7 @@ class ScanManager:
         return str(repo_dir)
 
     def _resolve_out_workspace(self, yaml_path: Path | None) -> str:
-        """从 correlation yaml 解析 out_workspace，作为 event_file 所在 ws。
-
-        orchestrator 写 correlation_progress/scan_end 到
-        resolve_workspaces_dir()/out_workspace/events.ndjson；ScanManager 的
-        event_file 必须与之同 ws，否则 SSE 收不到联动进度（final-review Finding 1）。
-        """
+        """从 correlation yaml 解析 out_workspace，作为 event_file 所在 ws。"""
         from shannon_core.config.parser import parse_multi_repo_config
         if yaml_path is None or not Path(yaml_path).exists():
             raise ValueError("correlation 扫描需可解析的 yaml 以取 out_workspace")
@@ -256,9 +267,8 @@ class ScanManager:
     async def _resolve_correlation_yaml(self, req: ScanRequest) -> Path:
         assert self._config_store is not None, "correlation 需 config_store"
         if req.config_name:
-            # 走 store 的校验路径（复用 _path 的遍历校验：禁止 "/" / ".." / 空），
-            # 不能直接拼 web-multi-{name}.yaml 否则 config_name="../evil" 路径遍历
-            # 绕过 store 校验（final-review Finding 3）。
+            # 走 store 的校验路径(禁止 "/" / ".." / 空), 不能直接拼 web-multi-{name}.yaml
+            # 否则 config_name="../evil" 路径遍历绕过 store 校验.
             return self._config_store.path_for(req.config_name)
         if req.config_content:
             if req.save_as:
@@ -274,45 +284,29 @@ class ScanManager:
             base = req.config_name
         return f"{base}_{int(time.time())}"
 
-    async def _watch(self, ws: str, proc: asyncio.subprocess.Process, event_file: Path) -> None:
-        stderr_tail = bytearray()
+    async def _watch(self, ws: str, event_file: Path) -> None:
+        """C1: tail events.ndjson 直到 scan_end(worker finalize_summary 写)或超时.
 
-        def stderr_sink(line: bytes) -> None:
-            stderr_tail.extend(line)
-            if len(stderr_tail) > 2048:
-                del stderr_tail[:len(stderr_tail) - 2048]
-
-        async def drain(stream, sink=None):
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                if sink is not None:
-                    sink(line)
-
-        s_out = asyncio.create_task(drain(proc.stdout))
-        s_err = asyncio.create_task(drain(proc.stderr, stderr_sink))
+        无子进程 stdout 可 drain; scan_end 由 worker 容器 StructuredEventRenderer 在
+        SummaryEvent 时写. _watch 见 scan_end 即收尾; 超时(scan_timeout)或文件长期无
+        scan_end 则兜底写一条 + 标 timeout/crashed.
+        """
         try:
-            try:
-                if self._scan_timeout > 0:
-                    try:
-                        rc = await asyncio.wait_for(proc.wait(), self._scan_timeout)
-                    except asyncio.TimeoutError:
-                        proc.send_signal(signal.SIGINT)
-                        rc = await proc.wait()
-                else:
-                    rc = await proc.wait()
-            finally:
-                await asyncio.gather(s_out, s_err, return_exceptions=True)
-
-            if not self._has_scan_end(event_file):
-                status = "killed" if (rc is not None and rc < 0) else "crashed"
-                tail_text = bytes(stderr_tail[-2048:]).decode("utf-8", "replace")
-                await self._write_scan_end(event_file, status, rc if rc is not None else -1, tail_text)
+            deadline = (time.monotonic() + self._scan_timeout) if self._scan_timeout > 0 else None
+            while not self._has_scan_end(event_file):
+                if deadline is not None and time.monotonic() > deadline:
+                    # 超时: 兜底 scan_end(worker 仍可继续, 但 web 侧判超时收尾)
+                    if not self._has_scan_end(event_file):
+                        await self._write_scan_end(event_file, "timeout", -1, "web 超时收尾")
+                    break
+                await asyncio.sleep(0.5)
         finally:
-            # 清理清理型登记必须兜底：即便 _write_scan_end / proc.wait 抛出，
-            # _procs/_tasks/_active_reqs 也得释放，否则 active_repo_sources() 误报引用。
-            self._procs.pop(ws, None)
+            # 兜底: 若 worker 未写 scan_end(异常/crash), 补一条
+            if not self._has_scan_end(event_file):
+                await self._write_scan_end(event_file, "crashed", -1, "worker 未写 scan_end")
+            # 清理登记必须兜底: 即便 _write_scan_end 抛出, _handles/_tasks/_active_reqs 也得释放,
+            # 否则 active_repo_sources() 误报引用.
+            self._handles.pop(ws, None)
             self._tasks.pop(ws, None)
             self._active_reqs.pop(ws, None)
 
