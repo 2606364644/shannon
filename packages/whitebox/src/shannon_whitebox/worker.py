@@ -37,6 +37,9 @@ from .pipeline.activities import (
     log_phase_start_activity,
     log_phase_complete_activity,
     log_info_activity,
+    setup_display,
+    run_heartbeat,
+    finalize_summary,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput
@@ -153,6 +156,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             generate_poc_report,
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,
+            setup_display, run_heartbeat, finalize_summary,
         ],
         graceful_shutdown_timeout=timedelta(seconds=10),
     )

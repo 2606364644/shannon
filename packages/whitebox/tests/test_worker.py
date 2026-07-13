@@ -528,7 +528,7 @@ async def test_resume_attempts_survive_metrics_tracker_initialize(tmp_path):
 def test_all_activities_registered():
     """护栏：worker.py 必须注册 pipeline/activities.py 里所有 @activity.defn。
 
-    whitebox 当前 23/23 全齐，本测试作为防未来漏注册的保护（无行为变更）。
+    whitebox 当前 26/26 全齐，本测试作为防未来漏注册的保护（无行为变更）。
     """
     from shannon_core.testing.activity_registration import assert_all_activities_registered
     from shannon_whitebox import worker

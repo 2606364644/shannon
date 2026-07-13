@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -9,6 +10,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
 from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
+from shannon_core.models.audit import WorkflowSummary
 from shannon_core.models.errors import (
     ErrorCode,
     PentestError,
@@ -17,6 +19,7 @@ from shannon_core.models.errors import (
 )
 from shannon_core.models.metrics import AgentMetrics
 from shannon_core.models.retry import agent_retry_category, retry_for
+from shannon_core.runtime.heartbeat import HeartbeatManager
 from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
@@ -1707,3 +1710,88 @@ async def run_attack_chain_assembly_v2(input: ActivityInput) -> dict:
         raise ApplicationFailure(
             str(e), type=error_type, non_retryable=not retryable
         ) from e
+
+
+# ── C1 worker-container-path 迁移 activity ──────────────────────────────
+# 这 3 个 activity 仅 worker 容器路径调用（Task 4 workflow 接入）；CLI run_scan 不调用
+# （CLI 自行 inline AuditSession/HeartbeatManager，零改动）。setup_display 注入进程全局
+# AuditSession 使后续 activity 的 get_audit_session() 可用；run_heartbeat 长驻写 heartbeat
+# 供 web 判活；finalize_summary 写 scan_end 事件 + 清理全局 session。
+
+@activity.defn
+async def setup_display(input: ActivityInput) -> None:
+    """C1 前导 activity: 构造 headless AuditSession(event_file 来自 input) + set_audit_session。
+
+    worker 容器无 TTY，用 use_rich=False + Console()（自动检测非 TTY → 纯文本）。
+    AuditSession 构造逻辑复用 run_with_display(display_lifecycle.py) 的 headless 分支：
+    构造 AuditSession + initialize(workflow_id, event_file=input.event_file)。
+    event_file 透传到 WorkflowLogger.initialize → 挂 StructuredEventRenderer 写 events.ndjson。
+
+    SessionMetadata.output_path 取 workspace_path 的父目录（workspaces dir），id 取
+    workspace_name，使 generate_audit_path = workspaces/<session> = workspace_path（与 CLI
+    run_scan 的 meta 语义一致：audit 产物落 session 目录下）。
+    """
+    from rich.console import Console
+    from shannon_core.models.metrics import SessionMetadata
+    from shannon_whitebox.audit.session import AuditSession
+    from shannon_whitebox.audit.session_registry import set_audit_session
+
+    if input.workspace_path:
+        ws_path = Path(input.workspace_path)
+    else:
+        ws_path = (
+            Path(input.repo_path).parent / "workspaces"
+            / (input.workspace_name or "scan"))
+    meta = SessionMetadata(
+        id=input.workspace_name or ws_path.name,
+        web_url=input.web_url,
+        repo_path=input.repo_path,
+        output_path=str(ws_path.parent),
+    )
+    console = Console()  # auto-detects non-TTY in pipes -> plain text per event
+    session = AuditSession(meta, use_rich=False, console=console)
+    await session.initialize(workflow_id=meta.id, event_file=input.event_file)
+    set_audit_session(session)
+
+
+@activity.defn
+async def run_heartbeat(input: ActivityInput) -> None:
+    """C1 并行 long-running activity: 周期写 heartbeat(web 据其 mtime 判活)。
+
+    on_cancel=None: C1 取消靠 temporal 原生 handle.cancel() 传播到 workflow + activity，
+    不再用 cancel.requested 文件触发 ShutdownController（web 端 cancel 兜底用文件 +
+    temporal 双轨）。永阻塞(asyncio.Event().wait())，靠 activity cancel(CancelledError)
+    退出 → HeartbeatManager.__aexit__ 清理（cancel 心跳 task + best-effort 删 heartbeat）。
+    """
+    ws_dir = (
+        Path(input.workspace_path) if input.workspace_path
+        else Path(input.repo_path))
+    mgr = HeartbeatManager(ws_dir, on_cancel=None)
+    async with mgr:
+        await asyncio.Event().wait()  # 永不 set; activity cancel 时 CancelledError 传出
+
+
+@activity.defn
+async def finalize_summary(input: ActivityInput, summary: dict) -> None:
+    """C1 后置 activity: log_workflow_complete(触发 StructuredEventRenderer 写 scan_end) + 清 AuditSession。
+
+    summary 由 workflow 从 self._state 构建（等价 run_scan worker.py:312-328 的逻辑，
+    移进 workflow）。log_workflow_complete 内部调 workflow_logger.close()（关 LogStream +
+    StructuredEventRenderer 句柄），故无需额外 close。clear_audit_session 清进程全局。
+    """
+    from shannon_whitebox.audit.session_registry import (
+        clear_audit_session, get_audit_session,
+    )
+
+    session = get_audit_session()
+    if session is not None:
+        ws = WorkflowSummary(
+            status=summary.get("status", "failed"),
+            total_duration_ms=summary.get("total_duration_ms", 0),
+            total_cost_usd=summary.get("total_cost_usd", 0.0),
+            completed_agents=summary.get("completed_agents", []),
+            agent_metrics=summary.get("agent_metrics", {}),
+            error=summary.get("error"),
+        )
+        await session.log_workflow_complete(ws)
+    clear_audit_session()

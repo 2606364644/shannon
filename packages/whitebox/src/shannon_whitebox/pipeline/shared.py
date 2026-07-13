@@ -52,6 +52,7 @@ class ActivityInput:
     info_message: str | None = None   # log_info_activity 用户提示（替代 workflow.logger.info→stderr 抢行）
     info_level: str = "info"          # "info" | "warning"
     vuln_classes: list[str] | None = None   # assemble_report 用（默认 ALL，由 workflow 传 selected）
+    event_file: str | None = None     # C1: setup_display 透传到 AuditSession.initialize→WorkflowLogger（挂 StructuredEventRenderer）；CLI 为 None 走 env 兜底
 
 
 @dataclass

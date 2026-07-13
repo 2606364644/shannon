@@ -32,13 +32,19 @@ class AuditSession:
         self._metrics_tracker: MetricsTracker | None = None
         self._lock = asyncio.Lock()
 
-    async def initialize(self, workflow_id: str | None = None) -> None:
-        """Create directory structure and initialize all components."""
+    async def initialize(self, workflow_id: str | None = None, *,
+                         event_file: str | None = None) -> None:
+        """Create directory structure and initialize all components.
+
+        event_file (C1): 透传到 WorkflowLogger.initialize → 挂 StructuredEventRenderer
+        写 events.ndjson。None 时 WorkflowLogger 回落 env SHANNON_WEB_EVENT_FILE（CLI 路径）。
+        向后兼容: 现有调用方只传 workflow_id，event_file 默认 None 行为零变化。
+        """
         initialize_audit_structure(self._meta)
         self._workflow_logger = WorkflowLogger(
             self._meta, use_rich=self._use_rich,
             console=self._console, dashboard=self._dashboard)
-        await self._workflow_logger.initialize(workflow_id)
+        await self._workflow_logger.initialize(workflow_id, event_file=event_file)
         self._metrics_tracker = MetricsTracker(self._meta)
         await self._metrics_tracker.initialize(workflow_id)
 
