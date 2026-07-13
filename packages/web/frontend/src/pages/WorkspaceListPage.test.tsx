@@ -148,6 +148,17 @@ describe("WorkspaceListPage (DataTable)", () => {
     const delBtn = screen.getAllByRole("button", { name: /删除/ })[0];
     expect(delBtn.closest("div")?.className).toMatch(/justify-center/);
   });
+
+  it("可排序列表头显手型、不可排序的「操作」列表头不显（避免点击无反应的误导）", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // name 列可排序 → cursor-pointer
+    const nameTh = screen.getByText("工作区", { exact: true }).closest("th");
+    expect(nameTh?.className).toMatch(/cursor-pointer/);
+    // actions 列 display 不可排序 → 无 cursor-pointer
+    const actionsTh = screen.getByText("操作").closest("th");
+    expect(actionsTh?.className).not.toMatch(/cursor-pointer/);
+  });
 });
 
 describe("WorkspaceListPage i18n", () => {

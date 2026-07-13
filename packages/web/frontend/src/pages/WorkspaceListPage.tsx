@@ -200,7 +200,11 @@ export function WorkspaceListPage() {
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
                 {hg.headers.map((h) => (
-                  <TableHead key={h.id} onClick={h.column.getToggleSortingHandler()} className="cursor-pointer">
+                  <TableHead
+                    key={h.id}
+                    onClick={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}
+                    className={h.column.getCanSort() ? "cursor-pointer" : undefined}
+                  >
                     {flexRender(h.column.columnDef.header, h.getContext())}
                   </TableHead>
                 ))}
