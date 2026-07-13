@@ -59,7 +59,8 @@ class WorkflowLogger:
         # (Part A / Task 5) during initialize(). None => detail_path=None.
         self._activity_failure_log_path: str | None = None
 
-    async def initialize(self, workflow_id: str | None = None) -> None:
+    async def initialize(self, workflow_id: str | None = None, *,
+                         event_file: str | None = None) -> None:
         self._workflow_id = workflow_id
         path = generate_workflow_log_path(self._meta)
         self._stream = LogStream(path)
@@ -85,7 +86,9 @@ class WorkflowLogger:
         # 【新增】Web 事件落盘 renderer（env 启用，未设=零影响）。
         # 挂载独立的 StructuredEventRenderer，把原子 DisplayEvent 序列化成 ndjson 行，
         # 供 shannon-web 后端 SSE 通道 tail/重放。env 未设时整段跳过，行为零变化。
-        web_event_file = os.environ.get("SHANNON_WEB_EVENT_FILE")
+        # C1: event_file 参数优先(来自 PipelineInput.event_file, web 提交端塞);
+        # None 时回落 env SHANNON_WEB_EVENT_FILE(CLI run_scan 经 wire_web_event_file 设 env, 零改动)。
+        web_event_file = event_file or os.environ.get("SHANNON_WEB_EVENT_FILE")
         if web_event_file:
             from shannon_core.display.structured_event_renderer import StructuredEventRenderer
             renderers.append(StructuredEventRenderer(web_event_file))
