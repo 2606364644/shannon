@@ -419,3 +419,68 @@ describe("extractTableVulns", () => {
     expect(segs[0].type).toBe("prose");
   });
 });
+
+describe("GitNexus 轨 ID 兼容（双轨隔离设计，-GN- 须保留，不统一为 -VULN-）", () => {
+  // 背景：GitNexus 轨产 PREFIX-GN-N / PREFIX-GN-EXPLORE-N / PREFIX-GN-LOGIC-N（PREFIX=类前缀，
+  // GN=GitNexus 缩写，EXPLORE/LOGIC=深度 agent 子类型）；LLM 轨产 PREFIX-VULN-N。两套 ID 是有意的
+  // 双轨隔离（防并集 ID 碰撞，来源另有 source_track/merge_source 字段承载）。原 VULN_HEADING_RE /
+  // VULN_ID_RE 只认 -VULN-，是 2026-07-06 为 LLM 单轨报告写的、没跟上双轨 → GitNexus 漏洞进报告后
+  // 前端数 0（回归 hr_20260713-104726）。放宽正则兼容 -GN- 系列，且保留原始 id 不变形。
+
+  it("VULN_HEADING_RE 匹配 ### PREFIX-GN-... 标题", () => {
+    expect(VULN_HEADING_RE.test("### AUTH-GN-EXPLORE-01 — appSecret 签名绕过")).toBe(true);
+    expect(VULN_HEADING_RE.test("### AUTH-GN-LOGIC-01 — session 固定")).toBe(true);
+    expect(VULN_HEADING_RE.test("### INJ-GN-02 — eval RCE")).toBe(true);
+    expect(VULN_HEADING_RE.test("### AUTHZ-GN-01 — IDOR")).toBe(true);
+    expect(VULN_HEADING_RE.test("### SSRF-GN-03 — url fetch")).toBe(true);
+  });
+
+  it("VULN_ID_RE 匹配 PREFIX-GN-... id；不匹配 attack chain（llm-chain-N 小写，非漏洞）", () => {
+    expect(VULN_ID_RE.test("AUTH-GN-EXPLORE-01")).toBe(true);
+    expect(VULN_ID_RE.test("AUTH-GN-LOGIC-01")).toBe(true);
+    expect(VULN_ID_RE.test("INJ-GN-02")).toBe(true);
+    expect(VULN_ID_RE.test("AUTHZ-GN-01")).toBe(true);
+    expect(VULN_ID_RE.test("llm-chain-1")).toBe(false);
+  });
+
+  it("parseVulnBlock 保留原始 GN id（不变形为 -VULN-）+ prefix 取类前缀", () => {
+    const b = parseVulnBlock(
+      "### AUTH-GN-EXPLORE-01: appSecret 签名校验绕过\n- **vulnerability_type:** Token_Management_Issue",
+    );
+    expect(b.id).toBe("AUTH-GN-EXPLORE-01"); // 原样：inferSeverity 用 topRiskIds.has(id) 联动，变形会失效
+    expect(b.prefix).toBe("AUTH");
+    expect(b.title).toBe("appSecret 签名校验绕过");
+  });
+
+  it("splitByVulnBlocks 切出 GN 漏洞段（回归 hr_20260713-104726 报告页 0 漏洞）", () => {
+    const md = [
+      "# 安全评估报告",
+      "",
+      "## Authentication Vulnerabilities",
+      "",
+      "### AUTH-GN-EXPLORE-01: appSecret 签名校验绕过",
+      "- **vulnerability_type:** Token_Management_Issue",
+      "",
+      "### AUTH-GN-EXPLORE-02: CSRF 全局关闭",
+      "- **vulnerability_type:** CSRF",
+    ].join("\n");
+    const segs = splitByVulnBlocks(md);
+    const vulns = segs.filter((s) => s.type === "vuln");
+    expect(vulns.length).toBe(2);
+    if (vulns[0].type === "vuln") {
+      expect(vulns[0].block.id).toBe("AUTH-GN-EXPLORE-01");
+      expect(vulns[0].block.prefix).toBe("AUTH");
+    }
+  });
+
+  it("isVulnTable 识别 GN id 首列", () => {
+    expect(isVulnTable("ID", "AUTH-GN-EXPLORE-01")).toBe(true);
+    expect(isVulnTable("ID", "INJ-GN-02")).toBe(true);
+  });
+
+  it("parseTableRowToBlock: GN id → prefix 取类前缀、id 保留", () => {
+    const b = parseTableRowToBlock(["ID", "类型"], ["AUTH-GN-EXPLORE-01", "Token_Management_Issue"]);
+    expect(b.id).toBe("AUTH-GN-EXPLORE-01");
+    expect(b.prefix).toBe("AUTH");
+  });
+});

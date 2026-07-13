@@ -78,11 +78,12 @@ export function inferSeverity(block: ParsedVulnBlock, topRiskIds?: Set<string>):
 
 // ── markdown 块切分 + 解析 ──────────────────────────────────────────
 
-/** 识别漏洞条目标题行：`### PREFIX-VULN-NUM`（PREFIX 全大写字母）。 */
-export const VULN_HEADING_RE = /^### ([A-Z]+)-VULN-(\d+)\b/;
+/** 识别漏洞条目标题行：`### <类前缀>(-<中段>)*-序号`。兼容双轨——LLM 轨 `-VULN-` 与
+ * GitNexus 轨 `-GN-`/`-GN-EXPLORE-`/`-GN-LOGIC-`（双轨 ID 隔离防并集碰撞，来源另有字段承载）。 */
+export const VULN_HEADING_RE = /^### ([A-Z]+)(?:-[A-Z]+)+-(\d+)\b/;
 
-/** 识别漏洞 ID（表格首列、执行摘要引用等）：`PREFIX-VULN-NUM`。 */
-export const VULN_ID_RE = /^[A-Z]+-VULN-\d+$/;
+/** 识别漏洞 ID（表格首列、执行摘要引用等）：`<类前缀>(-<中段>)*-序号`，兼容双轨 -VULN-/-GN- 系列。 */
+export const VULN_ID_RE = /^[A-Z]+(?:-[A-Z]+)+-\d+$/;
 
 /** 切分产物：prose 段（原样喂 react-markdown）或 vuln 段（解析后的块）。 */
 export type Segment =
@@ -105,13 +106,14 @@ export function parseVulnBlock(raw: string): ParsedVulnBlock {
   const lines = raw.split(/\r?\n/);
   const firstLine = lines[0] ?? "";
 
-  // heading：### PREFIX-VULN-NUM [sep] title ★ ...
-  const hm = /^### ([A-Z]+)-VULN-(\d+)\s*[—:：-]?\s*(.*)$/.exec(firstLine);
-  const prefix = hm?.[1] ?? "";
-  const num = hm?.[2] ?? "";
+  // heading：### <完整ID> [sep] title ★ ...  ID = 大写类前缀(-大写中段)*-序号，兼容双轨
+  // -VULN-（LLM 轨）与 -GN-/-GN-EXPLORE-/-GN-LOGIC-（GitNexus 轨）。保留原始 id 不变形——
+  // inferSeverity 用 topRiskIds.has(id) 联动执行摘要，变形会断链（回归 hr_20260713-104726）。
+  const hm = /^### ([A-Z]+(?:-[A-Z]+)+-\d+)\s*[—:：-]?\s*(.*)$/.exec(firstLine);
   const fallbackTitle = firstLine.replace(/^###\s+/, "");
-  const id = prefix && num ? `${prefix}-VULN-${num}` : fallbackTitle;
-  let title = hm?.[3] ?? fallbackTitle;
+  const id = hm?.[1] ?? fallbackTitle;
+  const prefix = id === fallbackTitle ? "" : (/^([A-Z]+)-/.exec(id)?.[1] ?? "");
+  let title = hm?.[2] ?? fallbackTitle;
   const starred = /★/.test(title);
   title = title.replace(/★.*$/, "").trim();
 
@@ -192,7 +194,7 @@ export function parseTableRowToBlock(headers: string[], row: string[]): ParsedVu
   });
 
   const id = colMap["id"] || "";
-  const prefix = /^([A-Z]+)-VULN-/.exec(id)?.[1] ?? "";
+  const prefix = /^([A-Z]+)-/.exec(id)?.[1] ?? "";
   const vulnType =
     colMap["类型"] ?? colMap["type"] ?? colMap["vulnerability_type"] ?? "";
 
