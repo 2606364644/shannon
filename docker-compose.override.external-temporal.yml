@@ -47,6 +47,17 @@ services:
       - default          # 保留 shannon-py-net（compose 内部通信）
       - shannon-net      # 接入外部 temporal 所在网络
 
+  worker:
+    # 镜像 web 块：清空 depends_on（temporal 不在 compose 管辖）+
+    # 直连外部 shannon-temporal + 接入 shannon-net。
+    depends_on: !reset []
+    environment:
+      - SHANNON_TEMPORAL_HOST=shannon-temporal
+      - SHANNON_TEMPORAL_PORT=7233
+    networks:
+      - default          # 保留 shannon-py-net（compose 内部通信）
+      - shannon-net      # 接入外部 temporal 所在网络
+
 networks:
   shannon-net:
     external: true       # 复用已存在的 shannon-net，不新建
