@@ -50,5 +50,35 @@ services:
       temporal:
         condition: service_healthy
 
+  worker:
+    # C1 Phase A：常驻 worker 容器，消费 WEB 固定 task queue（白盒 shannon-py-wb-web / 黑盒 shannon-py-bb-web）。
+    # 装齐 gitnexus+agent-browser+chrome（共用镜像）；web 容器保持瘦。
+    # Plan 1 阶段 web 仍 fork（仍 broken），worker 起着暂无提交者——Plan 2 scan_manager 改 start_workflow 后才消费。
+    build:
+      context: .
+      dockerfile: packages/worker/Dockerfile
+    container_name: shannon-py-worker
+    volumes:
+      - ./workspaces:/app/workspaces
+      - ./repos:/app/repos
+      - ./configs:/app/configs
+      - ./.env:/app/.env:ro
+      - ./.env.profiles:/app/.env.profiles:ro
+    env_file:
+      - .env
+    environment:
+      - SHANNON_TEMPORAL_HOST=temporal
+      - SHANNON_TEMPORAL_PORT=7233
+      - SHANNON_TEMPORALIO_LOG_LEVEL=${SHANNON_TEMPORALIO_LOG_LEVEL:-WARNING}
+    depends_on:
+      temporal:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '${SHANNON_WORKER_CPUS:-2}'
+          memory: '${SHANNON_WORKER_MEMORY:-4g}'
+    restart: unless-stopped
+
 volumes:
   temporal-data:
