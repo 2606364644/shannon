@@ -53,6 +53,20 @@ describe("ReposPage", () => {
     expect(cell.closest("td")?.className).toMatch(/whitespace-nowrap/);
   });
 
+  it("State 列内容单行不换行（英文「⚠ Incomplete」等长状态值不断行）", async () => {
+    server.use(
+      http.get("/api/repos", () => HttpResponse.json([
+        { name: "foo", state: "stale", source: { kind: "git" } },
+      ])),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+    await act(async () => { await i18n.changeLanguage("en"); });
+    // stale 英文 = "⚠ Incomplete"（11 字符，最长 state 值）；锚定 state 单元格 nowrap 防断行
+    const cell = await screen.findByText(/Incomplete/);
+    expect(cell.closest("td")?.className).toMatch(/whitespace-nowrap/);
+  });
+
   it("操作列表头与按钮组居中对齐（text-center：表头恒在按钮组中心正上方，无论 1 或 2 个按钮）", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());

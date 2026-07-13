@@ -175,7 +175,7 @@ export function ReposPage() {
                           <TableHead className="py-2 px-3 text-muted-foreground">{t("repos.table.source")}</TableHead>
                           <TableHead className="w-32 py-2 px-3 text-muted-foreground">{t("repos.table.branch")}</TableHead>
                           <TableHead className="w-24 whitespace-nowrap py-2 px-3 text-right text-muted-foreground">{t("repos.table.size")}</TableHead>
-                          <TableHead className="w-24 py-2 px-3 text-muted-foreground">{t("repos.table.state")}</TableHead>
+                          <TableHead className="w-36 whitespace-nowrap py-2 px-3 text-muted-foreground">{t("repos.table.state")}</TableHead>
                           <TableHead className="w-36 whitespace-nowrap py-2 px-3 text-center text-muted-foreground">{t("repos.table.actions")}</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -228,7 +228,7 @@ export function ReposPage() {
                               <TableCell className="whitespace-nowrap py-2 px-3 text-right tabular-nums text-muted-foreground">
                                 {fmtSize(r.size_bytes)}
                               </TableCell>
-                              <TableCell className="py-2 px-3">
+                              <TableCell className="whitespace-nowrap py-2 px-3">
                                 <StateCell repo={r} />
                               </TableCell>
                               <TableCell className="whitespace-nowrap py-2 px-3 text-center">
