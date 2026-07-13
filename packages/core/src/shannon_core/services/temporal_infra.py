@@ -27,6 +27,14 @@ def generate_task_queue(prefix: str) -> str:
     return f"{prefix}-{suffix}"
 
 
+# WEB 固定 task queue：web 提交端（scan_manager）与 worker 容器消费端共用单一来源。
+# CLI 路径仍用 generate_task_queue(prefix) 生成唯一随机 queue（self-contained，零改动）；
+# WEB 路径用固定 queue，worker 容器常驻注册消费。前缀同（shannon-py-wb/bb）但值不同
+# （-web 后缀 vs 8hex 后缀），temporal queue 精确匹配 → CLI 与 WEB 互不消费、互不干扰。
+WEB_TASK_QUEUE_WHITEBOX = "shannon-py-wb-web"
+WEB_TASK_QUEUE_BLACKBOX = "shannon-py-bb-web"
+
+
 def _shannon_container_exists() -> bool:
     """Check if the original shannon-temporal container exists (running or stopped)."""
     try:
