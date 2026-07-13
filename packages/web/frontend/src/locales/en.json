@@ -346,6 +346,7 @@
     "confirmedVulns_other": "Confirmed vulns · {{count}} types",
     "singleVulns": "Single-point vulns",
     "attackChains": "Attack chains",
+    "attackChainHint": "Attack chain: single-point vulns chained into a multi-step exploit path. Click to view.",
     "publicReachable": "Public reachable",
     "bySeverity": "By severity distribution",
     "priorityTop": "⚡ Priority fixes",

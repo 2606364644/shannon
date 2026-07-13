@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
+import { Workflow, ChevronRight } from "lucide-react";
 import type { Severity } from "@/api/types";
 import { SEVERITY_BG, type ReportStats } from "@/lib/report-stats";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const SEV_ORDER: Severity[] = ["Critical", "High", "Medium", "Low"];
 
@@ -27,15 +29,35 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
           {t("report.singleVulns")}
         </div>
         {stats.attackChainCount > 0 && (
-          <div
-            data-testid="threat-attack-chain"
-            className="mt-2 flex items-center justify-between rounded-sm border border-border bg-muted/40 px-2 py-1"
-          >
-            <span className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
-              {t("report.attackChains")}
-            </span>
-            <b className="font-mono text-sm font-semibold text-foreground">{stats.attackChainCount}</b>
-          </div>
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="threat-attack-chain"
+                  onClick={() =>
+                    document
+                      .getElementById("attack-chain-section")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
+                  className="group mt-3 flex cursor-pointer items-baseline gap-2"
+                >
+                  <Workflow className="size-5 self-center text-orange" aria-hidden="true" />
+                  <span className="text-2xl font-bold leading-none text-orange">
+                    {stats.attackChainCount}
+                  </span>
+                  <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground group-hover:text-orange">
+                    {t("report.attackChains")}
+                  </span>
+                  <ChevronRight
+                    className="size-3.5 self-center text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100"
+                    aria-hidden="true"
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("report.attackChainHint")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         <div className="mt-2.5 text-xs">
           {t("report.publicReachable")} <b className="font-mono text-primary">{stats.publicCount}</b> · pre-auth{" "}

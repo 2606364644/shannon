@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, fireEvent, waitFor, screen } from "@testing-library/react";
 import i18n from "@/i18n";
 import { ThreatOverview } from "./ThreatOverview";
 import type { ReportStats } from "@/lib/report-stats";
@@ -65,10 +65,35 @@ describe("ThreatOverview", () => {
     expect(top?.textContent).toContain("服务端 RCE");
   });
 
-  it("attackChainCount > 0 时显示攻击链计数", () => {
-    const { container } = render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
-    expect(container.textContent).toContain("13");
-    expect(container.textContent).toContain("攻击链");
+  it("attackChainCount > 0 时渲染可点 button + 图标 + 数字 + 攻击链 label", () => {
+    const { getByRole } = render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
+    const btn = getByRole("button", { name: /攻击链/ });
+    expect(btn).toBeInTheDocument();
+    // 图标（lucide 渲染为 svg）
+    expect(btn.querySelector("svg")).not.toBeNull();
+    // 数字
+    expect(btn.textContent).toContain("13");
+  });
+
+  it("攻击链 button 点击滚动到 attack-chain-section", () => {
+    const scrollIntoView = vi.fn();
+    const fakeTarget = { scrollIntoView } as unknown as HTMLElement;
+    const spy = vi.spyOn(document, "getElementById").mockReturnValue(fakeTarget);
+    const { getByRole } = render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
+    fireEvent.click(getByRole("button", { name: /攻击链/ }));
+    expect(scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth", block: "start" }),
+    );
+    spy.mockRestore();
+  });
+
+  it("攻击链 button hover 显示 tooltip hint", async () => {
+    render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
+    const btn = screen.getByRole("button", { name: /攻击链/ });
+    fireEvent.focus(btn);
+    await waitFor(() => {
+      expect(screen.getAllByText(/多个单点漏洞串联成多步利用路径/).length).toBeGreaterThan(0);
+    });
   });
 
   it("attackChainCount = 0 时隐藏攻击链部分（无「攻击链」字样）", () => {

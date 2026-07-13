@@ -346,6 +346,7 @@
     "confirmedVulns_other": "已确认漏洞 · {{count}} 类",
     "singleVulns": "单点漏洞",
     "attackChains": "攻击链",
+    "attackChainHint": "攻击链：多个单点漏洞串联成多步利用路径。点击查看完整路径。",
     "publicReachable": "公网可达",
     "bySeverity": "按 severity 分布",
     "priorityTop": "⚡ 建议优先处置",

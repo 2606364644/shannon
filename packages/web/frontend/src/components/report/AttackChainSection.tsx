@@ -15,6 +15,7 @@ export function AttackChainSection({ md, count }: { md: string; count: number })
   const { t } = useTranslation();
   return (
     <section
+      id="attack-chain-section"
       data-testid="attack-chain-section"
       aria-label={t("report.attackChains")}
       className="mt-6 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
