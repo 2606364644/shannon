@@ -131,19 +131,19 @@ function parseStructure(md: string): {
 
     if (inTypeSummarySection && currentType) {
       const t = line.trim();
-      const cm = /^Count:\s*(\d+)/i.exec(t);
+      const cm = /^(?:-\s*\*\*)?Count[:：]\s*\*\*\s*(\d+)/i.exec(t);
       if (cm) {
         currentType.count = parseInt(cm[1], 10);
-        const pm = /（([A-Z]+)-VULN-/.exec(t);
+        const pm = /（([A-Z]+)-(?:VULN|GN)/.exec(t);
         if (pm) currentType.prefix = pm[1];
         continue;
       }
-      const sm = /^Severity range:\s*(.+)$/i.exec(t);
+      const sm = /^(?:-\s*\*\*)?Severity range[:：]\s*\*\*\s*(.+)$/i.exec(t);
       if (sm) {
         currentType.severityRangeRaw = sm[1].trim();
         continue;
       }
-      const fm = /^Key findings:\s*(.+)$/i.exec(t);
+      const fm = /^(?:-\s*\*\*)?Key findings[:：]\s*\*\*\s*(.+)$/i.exec(t);
       if (fm) {
         currentType.findingsText = fm[1].trim();
         continue;

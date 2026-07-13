@@ -1120,7 +1120,8 @@ async def assemble_report(input: ActivityInput) -> None:
 
     ReportAssembler 已实现 evidence → findings → analysis_deliverable 三级回退,
     天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
-    加执行摘要并清理。
+    加执行摘要并清理。拼接完成后追加攻击链独立章节（attack_chains.json →
+    ## 攻击链），失败不阻塞主报告。
     """
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
@@ -1133,6 +1134,16 @@ async def assemble_report(input: ActivityInput) -> None:
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
             await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+
+        # 追加攻击链独立章节（非 fatal）
+        try:
+            chains_md = await ReportAssembler.render_attack_chains(deliverables)
+            if chains_md:
+                from shannon_core.utils.file_io import async_read_file, async_write_file
+                content = await async_read_file(report_path)
+                await async_write_file(report_path, content + chains_md)
+        except Exception:
+            pass  # 攻击链渲染失败不阻塞主报告
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

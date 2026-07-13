@@ -127,6 +127,26 @@ export function computeStats(
       };
     });
 
+  // 4. 补全 typeSummaries 中有但 blocks 中无的零计数类型（显示全部被测类型）
+  if (typeSummaries) {
+    const existing = new Set(byPrefix.keys());
+    for (const ts of typeSummaries) {
+      if (ts.prefix && !existing.has(ts.prefix)) {
+        typeAggs.push({
+          prefix: ts.prefix,
+          displayName: TYPE_DISPLAY[ts.prefix] ?? ts.displayName ?? ts.prefix,
+          count: 0,
+          severityRange: { min: "Low" as Severity, max: "Low" as Severity },
+          severityRangeLabel: "N/A",
+          severityCounts: emptyDist(),
+          findingsText: ts.findingsText,
+        });
+      }
+    }
+    // 重新排序确保零计数类型也在正确位置
+    typeAggs.sort((a, b) => prefixOrder(a.prefix) - prefixOrder(b.prefix) || a.prefix.localeCompare(b.prefix));
+  }
+
   return {
     total: blocks.length,
     typeAggs,
