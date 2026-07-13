@@ -53,17 +53,17 @@ def test_logevent_render_includes_logger_level_message():
     assert "queue unreadable: boom" in out
 
 
-# --- 各 level 着色（markup 断言）---
+# --- 诊断行 dim 降级 + 保留级别色（markup 断言）---
 
 @pytest.mark.parametrize("level,color", [
     ("ERROR", "bold red"),
     ("CRITICAL", "bold red"),
     ("WARNING", "yellow"),
     ("INFO", "cyan"),
-    ("DEBUG", "dim"),
+    ("DEBUG", ""),
 ])
 def test_logevent_level_color_markup(level, color):
-    """每个 level 选对颜色 markup：ERROR/CRITICAL=bold red、WARNING=yellow、INFO=cyan、DEBUG=dim。"""
+    """诊断 log 行 dim 降级，且保留级别色调：dim cyan / dim yellow / dim bold red / 纯 dim(DEBUG)。"""
     buf = StringIO()
     console = Console(file=buf, width=200, color_system=None)
     r = RichConsoleRenderer(console)
@@ -77,8 +77,10 @@ def test_logevent_level_color_markup(level, color):
 
     console.print = spy
     r._render_log(_evt(level=level))
-    assert any(f"[{color}]" in c for c in captured), (
-        f"level={level} 应使用 markup [{color}]，实际 printed={captured}")
+    joined = " ".join(captured)
+    assert "dim" in joined, f"level={level} 诊断行应 dim 降级，实际 printed={captured}"
+    if color:
+        assert color in joined, f"level={level} 应保留级别色 {color}，实际 printed={captured}"
 
 
 def test_logevent_exc_text_appended():
@@ -97,3 +99,49 @@ async def test_logevent_not_written_to_workflow_log():
     r = FileLogRenderer(writer)
     await r.render(_evt(level="ERROR"))
     writer.write.assert_not_awaited()
+
+
+# --- 续行缩进 + InfoEvent 不受 dim 影响（spec 2026-07-14 模块2/3）---
+
+def test_logevent_long_message_continuation_indented():
+    """长诊断消息续行缩进到 LOG_INDENT 列，不再 Rich 硬换行顶格。"""
+    from shannon_core.display.formatters import LOG_INDENT
+    buf = StringIO()
+    r = RichConsoleRenderer(Console(file=buf, width=60, color_system=None))
+    long_msg = "Discovered 34 security files: " + ("config=10, " * 20)
+    r._render_log(_evt(level="INFO", message=long_msg))
+    lines = buf.getvalue().splitlines()
+    assert len(lines) > 1  # 触发换行
+    assert lines[1].startswith(" " * LOG_INDENT), f"续行应缩进 {LOG_INDENT} 列: {lines[1]!r}"
+
+
+async def test_info_event_render_not_dim_keeps_bright():
+    """InfoEvent(显式用户消息)保持亮色，不受诊断 LogEvent 的 dim 降级影响。"""
+    from unittest.mock import MagicMock
+    from shannon_core.display.events import InfoEvent
+    console = MagicMock()
+    await RichConsoleRenderer(console=console).render(
+        InfoEvent(timestamp="t", category="INFO", message="hi", level="info"))
+    printed = console.print.call_args.args[0]
+    assert "dim" not in printed
+    assert "cyan" in printed
+
+
+# --- verbose 开关（spec 2026-07-14 §模块4）---
+
+def test_logevent_verbose_0_suppresses_terminal_output(monkeypatch):
+    """SHANNON_LOG_VERBOSE=0：诊断 LogEvent 不上终端（仍落 diagnostic.log，独立 renderer）。"""
+    monkeypatch.setenv("SHANNON_LOG_VERBOSE", "0")
+    buf = StringIO()
+    r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
+    r._render_log(_evt(level="WARNING"))
+    assert buf.getvalue() == "", f"verbose=0 时终端应无诊断输出: {buf.getvalue()!r}"
+
+
+def test_logevent_verbose_default_shows_on_terminal(monkeypatch):
+    """SHANNON_LOG_VERBOSE 未设(默认 1)：诊断 LogEvent 正常 dim 渲染到终端。"""
+    monkeypatch.delenv("SHANNON_LOG_VERBOSE", raising=False)
+    buf = StringIO()
+    r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
+    r._render_log(_evt(level="WARNING"))
+    assert "queue unreadable" in buf.getvalue()

@@ -210,6 +210,8 @@ def pad_rule(text: str, col: int = PHASE_RULE_WIDTH) -> str:
 
 LABEL_WIDTH = 5  # PHASE/AGENT=5，STEP 补齐到 5，让标签列等宽
 
+LOG_INDENT = 27  # 续行缩进列 = [ts]19 + " "1 + LABEL_WIDTH5 + "  "2 = body 起点
+
 
 def tag(label: str, width: int = LABEL_WIDTH) -> str:
     """补齐到固定宽度的标签内容：tag("STEP") -> "STEP "。
@@ -296,3 +298,65 @@ def gitnexus_body(e) -> str:
     if e.kind == "note":
         return f"{e.phase}  ⚠ {e.detail}"
     return f"{e.phase}  {e.done}/{e.total}  · {e.hits} {gitnexus_hits_noun(e.phase)}"
+
+
+def wrap_body(body: str, width: int, indent: int = LOG_INDENT) -> list[str]:
+    """按显示宽度换行 body；首行原样，续行 pad(indent) 对齐到标签列后。
+
+    renderer 各 _render_* 把长消息交给它，避免 Rich 硬换行续行顶格（长路径/长消息
+    被切成多段且第二行从第 0 列起）。纯文本（不含 markup）——markup 由 _emit 在外层
+    包裹。用 cell_len 按显示宽度换行（中文算 2），而非 textwrap 的 len（中文 1）——
+    否则中文段实际显示宽超 avail 被 Rich 二次硬换行顶格。avail 向下兜底到 1 不死循环。
+    """
+    if not body:
+        return [""]
+    avail = max(1, width - indent)
+    flat = body.replace("\n", " ").replace("\r", " ")
+    lines: list[str] = []
+    cur = ""
+    cur_w = 0
+    for word in flat.split(" "):
+        if not word:
+            continue
+        ww = cell_len(word)
+        if not cur:
+            if ww > avail:  # 词本身超宽（长路径/无空格串）：逐字符拆
+                for ch in word:
+                    cw = cell_len(ch)
+                    if cur and cur_w + cw > avail:
+                        lines.append(cur)
+                        cur = ch
+                        cur_w = cw
+                    else:
+                        cur += ch
+                        cur_w += cw
+            else:
+                cur, cur_w = word, ww
+        elif cur_w + 1 + ww > avail:
+            lines.append(cur)
+            cur, cur_w = word, ww
+        else:
+            cur += " " + word
+            cur_w += 1 + ww
+    if cur:
+        lines.append(cur)
+    if not lines:
+        return [""]
+    pad = " " * indent
+    return [lines[0]] + [pad + ln for ln in lines[1:]]
+
+
+def truncate_action(action: str, max_width: int = 60) -> str:
+    """超长 spinner action 按显示宽度截断 + …（cell_len，中文算 2）。不超则原样。"""
+    if cell_len(action) <= max_width:
+        return action
+    keep = max_width - 1  # 留 1 显示宽给 …
+    out: list[str] = []
+    w = 0
+    for ch in action:
+        cw = cell_len(ch)
+        if w + cw > keep:
+            break
+        out.append(ch)
+        w += cw
+    return "".join(out) + "…"

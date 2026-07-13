@@ -27,7 +27,7 @@ _DIAGNOSTIC_FILENAME = "diagnostic.log"
 _FORMAT = "[%(asctime)s] [%(levelname)5s] %(name)s: %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"  # 对齐 display.formatters.format_log_time
 
-_NOISE_LOGGERS = ("httpx", "urllib3", "httpcore", "asyncio")
+_NOISE_LOGGERS = ("httpx", "urllib3", "httpcore", "asyncio", "claude_agent_sdk")
 
 _configured_log_dir: Path | None = None
 
@@ -44,6 +44,10 @@ def configure_logging(log_dir: Path | str | None = None, *, level: str | None = 
         level: root logger level；默认读 SHANNON_LOG_LEVEL，再默认 INFO。
     """
     global _configured_log_dir
+
+    # spec 2026-07-14 §模块1：默认压 temporalio Rust core tracing 到 error（去掉良性
+    # Activity-not-found WARN 刷屏，保留 error 级）。用户可在 .env 用 RUST_LOG 覆盖。
+    os.environ.setdefault("RUST_LOG", "temporalio_sdk_core=error")
 
     root = logging.getLogger()
     resolved = Path(log_dir) if log_dir is not None else None

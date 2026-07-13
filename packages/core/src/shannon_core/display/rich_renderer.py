@@ -5,13 +5,16 @@ a category->style map for consistent color semantics.
 """
 from __future__ import annotations
 
+import os
+
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
 from shannon_core.display.formatters import (
     agent_body, agent_prefix, format_duration,
     format_error_block, gitnexus_body, humanize_tool_call, first_nonempty_line,
-    pad_rule, phase_body, step_body, tag,
+    pad_rule, phase_body, step_body, tag, wrap_body,
 )
 
 from shannon_core.agents.pricing import currency_symbol
@@ -36,6 +39,9 @@ class RichConsoleRenderer:
         self._show_phase = show_phase
         self._show_steps = show_steps
         self._show_tools = show_tools
+        # spec 2026-07-14 §模块4：SHANNON_LOG_VERBOSE=0 时诊断 LogEvent 不上终端
+        # （仍落 diagnostic.log，DiagnosticLogRenderer 独立不受影响）。默认开（全量整洁）。
+        self._verbose = os.getenv("SHANNON_LOG_VERBOSE", "1") != "0"
 
     async def render(self, event) -> None:
         from shannon_core.display.events import (
@@ -90,17 +96,35 @@ class RichConsoleRenderer:
         self._console.print(
             f"[{e.timestamp}] [cyan]{tag('STEP')}[/]  {step_body(e)}", highlight=False)
 
+    def _width(self) -> int:
+        """终端宽度（MagicMock console / 异常时兜底 80，永不出错）。"""
+        w = self._console.width
+        return w if isinstance(w, int) else 80
+
+    def _emit(self, first_prefix: str, body: str, cont_style: str | None = None) -> None:
+        """统一换行+续行缩进打印（spec 2026-07-14 §模块3）。
+
+        用 Text.from_markup 量 first_prefix 的真实显示宽度（含 ts 方括号/tag/logger，
+        不含 markup）作 prefix_w：avail=width-1-prefix_w（-1 safety 防 Rich 边界重换行），
+        续行 pad(prefix_w) 对齐到 body 起点。cont_style 给续行裹 markup（如诊断 dim）。
+        短消息不换行时输出与单行 print 一致。body 须纯文本。
+        """
+        width = self._width()
+        prefix_w = Text.from_markup(first_prefix).cell_len
+        parts = wrap_body(body, max(1, width - 1), indent=prefix_w)
+        self._console.print(f"{first_prefix}{parts[0]}", highlight=False)
+        if len(parts) > 1:
+            for cont in parts[1:]:
+                if cont_style:
+                    self._console.print(f"[{cont_style}]{cont}[/]", highlight=False)
+                else:
+                    self._console.print(cont, highlight=False)
+
     def _render_info(self, e) -> None:
         if e.level == "warning":
-            self._console.print(
-                f"[{e.timestamp}] [yellow]{tag('WARNING')}[/]  {e.message}",
-                highlight=False,
-            )
+            self._emit(f"[{e.timestamp}] [yellow]{tag('WARNING')}[/]  ", e.message)
         else:
-            self._console.print(
-                f"[{e.timestamp}] [cyan]{tag('INFO')}[/]  {e.message}",
-                highlight=False,
-            )
+            self._emit(f"[{e.timestamp}] [cyan]{tag('INFO')}[/]  ", e.message)
 
     @staticmethod
     def _log_color(level: str) -> str:
@@ -111,15 +135,24 @@ class RichConsoleRenderer:
             return "yellow"
         if level == "INFO":
             return "cyan"
-        return "dim"  # DEBUG / 未知级别降级
+        return ""  # DEBUG / 未知级别：纯 dim（由 _render_log 外层叠加）
 
     def _render_log(self, e) -> None:
-        # spec §4：诊断 logging 行 = [ts] [LEVEL5] logger_name: msg，无扫描符号。
+        if not self._verbose:
+            return  # spec 2026-07-14 §模块4：verbose=0 时诊断 LogEvent 不上终端
+        # spec 2026-07-14 §模块2：诊断 logging 行 dim 降级（背景化）+ 保留级别色调；
+        # 长消息经 _emit 续行缩进到 body 起点列（Text.from_markup 量 prefix_w），不再 Rich 硬换行顶格。
         color = self._log_color(e.level)
-        line = f"[{e.timestamp}] [{color}]{tag(e.level)}[/] {e.logger_name}: {e.message}"
+        style = f"dim {color}".strip()  # INFO→dim cyan / WARNING→dim yellow / DEBUG→dim
+        first_prefix = f"[{e.timestamp}] [{style}]{tag(e.level)}[/] {e.logger_name}: "
+        self._emit(first_prefix, e.message, cont_style=style)
         if e.exc_txt:
-            line += f"\n{e.exc_txt}"
-        self._console.print(line, highlight=False)
+            prefix_w = Text.from_markup(first_prefix).cell_len
+            pad = " " * prefix_w
+            parts = wrap_body(e.exc_txt, max(1, self._width() - 1), indent=prefix_w)
+            self._console.print(f"[{style}]{pad}{parts[0]}[/]", highlight=False)
+            for ln in parts[1:]:
+                self._console.print(f"[{style}]{ln}[/]", highlight=False)
 
     def _render_phase(self, e) -> None:
         body = pad_rule(phase_body(e))

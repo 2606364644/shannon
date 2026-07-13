@@ -341,3 +341,51 @@ def test_gitnexus_body_summary_shows_done_arrow_detail():
 def test_gitnexus_body_note_shows_warn_and_detail():
     e = _gn_evt("note", detail="src/api/users.py: timed out (>60s), skipped")
     assert gitnexus_body(e) == "sink-discovery  ⚠ src/api/users.py: timed out (>60s), skipped"
+
+
+from shannon_core.display.formatters import wrap_body, truncate_action, LOG_INDENT
+
+
+def test_log_indent_constant_is_label_column_offset():
+    # [YYYY-MM-DD HH:MM:SS]=19 + " "=1 + LABEL_WIDTH=5 + "  "=2 -> body 起点 27
+    assert LOG_INDENT == 27
+
+
+def test_wrap_body_short_returns_single_line_unchanged():
+    assert wrap_body("hi", 80) == ["hi"]
+
+
+def test_wrap_body_long_wraps_with_indented_continuation():
+    parts = wrap_body("a" * 100, 80)
+    assert parts[0] == "a" * 53                       # avail = width - LOG_INDENT = 80 - 27
+    assert len(parts) > 1
+    assert all(p.startswith(" " * LOG_INDENT) for p in parts[1:])  # 续行缩进到标签列后
+
+
+def test_wrap_body_width_le_indent_floors_avail_no_loop():
+    # width(20) < indent(27) -> avail floor at 1，逐字符换行不死循环
+    parts = wrap_body("abc", 20)
+    assert isinstance(parts, list)
+    assert parts and parts[0].startswith("a")
+
+
+def test_wrap_body_empty_returns_single_empty_line():
+    assert wrap_body("", 80) == [""]
+
+
+def test_truncate_action_short_unchanged():
+    assert truncate_action("running...") == "running..."
+
+
+def test_truncate_action_long_truncated_with_ellipsis_within_width():
+    from rich.cells import cell_len
+    result = truncate_action("x" * 100, max_width=60)
+    assert result.endswith("…")
+    assert cell_len(result) <= 60
+
+
+def test_truncate_action_cjk_counts_double_display_width():
+    from rich.cells import cell_len
+    result = truncate_action("预" * 40, max_width=60)   # 显示宽 80 > 60
+    assert result.endswith("…")
+    assert cell_len(result) <= 60

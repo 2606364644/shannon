@@ -8,6 +8,7 @@ configure_logging 挂 LogBusHandler（替代 stderr+FileHandler），散落 getL
 from __future__ import annotations
 
 import logging
+import os
 import queue as _queue
 from pathlib import Path
 
@@ -196,3 +197,25 @@ def test_third_party_noise_libraries_capped_at_warning(tmp_path):
     configure_logging(log_dir=tmp_path)
     for noisy in ("httpx", "urllib3", "httpcore", "asyncio"):
         assert logging.getLogger(noisy).level == logging.WARNING, f"{noisy} 应被限到 WARNING"
+
+
+# --- RED 7: claude_agent_sdk 噪声 + temporalio Rust core 降级（spec 2026-07-14 §模块1）---
+
+def test_claude_agent_sdk_capped_at_warning(tmp_path):
+    """claude_agent_sdk 的 INFO(Using bundled Claude Code CLI) 限到 WARNING，不刷屏。"""
+    configure_logging(log_dir=tmp_path)
+    assert logging.getLogger("claude_agent_sdk").level == logging.WARNING
+
+
+def test_rust_log_setdefault_when_unset(tmp_path, monkeypatch):
+    """RUST_LOG 未设时 configure_logging 默认压 temporalio Rust core 到 error。"""
+    monkeypatch.delenv("RUST_LOG", raising=False)
+    configure_logging(log_dir=tmp_path)
+    assert os.environ.get("RUST_LOG") == "temporalio_sdk_core=error"
+
+
+def test_rust_log_not_overwritten_when_user_set(tmp_path, monkeypatch):
+    """用户已设 RUST_LOG 时 configure_logging 不覆盖（setdefault 语义）。"""
+    monkeypatch.setenv("RUST_LOG", "temporalio_sdk_core=debug")
+    configure_logging(log_dir=tmp_path)
+    assert os.environ["RUST_LOG"] == "temporalio_sdk_core=debug"
