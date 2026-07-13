@@ -34,7 +34,9 @@ export function TypeSummaryCards({ typeAggs }: { typeAggs: TypeAgg[] }) {
             {t.count}
           </div>
           <div className="mb-2 mt-1 font-mono text-[10.5px]">
-            {t.severityRange.min === t.severityRange.max ? (
+            {t.count === 0 ? (
+              <span className="text-muted-foreground">{t.severityRangeLabel}</span>
+            ) : t.severityRange.min === t.severityRange.max ? (
               <span className={SEVERITY_TEXT[t.severityRange.max]}>{t.severityRange.max}</span>
             ) : (
               <>

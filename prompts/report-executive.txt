@@ -93,6 +93,7 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
      NOTE: these sections will contain vulnerability lists with IDs matching pattern `### [TYPE]-VULN-[NUMBER]`
      * `# [Type] {{REPORT_VULN_HEADING}}`
      * `## {{REPORT_VULN_SUBHEADING}}`
+     * `## 攻击链（多步利用路径）` — deterministically rendered from attack_chains.json; preserve as-is, do NOT clean or modify
 {{REPORT_FILTER_RULES}}
    - REMOVE ANY OTHER SECTIONS (even if they contain vulnerability IDs), such as:
      * `## Potential Vulnerabilities (Validation Blocked)` (All agents)
