@@ -144,7 +144,10 @@ class RichConsoleRenderer:
         # 长消息经 _emit 续行缩进到 body 起点列（Text.from_markup 量 prefix_w），不再 Rich 硬换行顶格。
         color = self._log_color(e.level)
         style = f"dim {color}".strip()  # INFO→dim cyan / WARNING→dim yellow / DEBUG→dim
-        first_prefix = f"[{e.timestamp}] [{style}]{tag(e.level)}[/] {e.logger_name}: "
+        # tag 后用 2 空格分隔（与 PHASE/STEP/AGENT/InfoEvent 的 '[/]  {body}' 一致），
+        # 让 dim 诊断行的 logger_name 起点列对齐到亮色 structured event 的 body 起点列
+        # （22 [ts] + 5 tag + 2 分隔 = 29），不再整体左移 1 列。
+        first_prefix = f"[{e.timestamp}] [{style}]{tag(e.level)}[/]  {e.logger_name}: "
         self._emit(first_prefix, e.message, cont_style=style)
         if e.exc_txt:
             prefix_w = Text.from_markup(first_prefix).cell_len

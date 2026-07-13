@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock
 import pytest
 from rich.console import Console
 
-from shannon_core.display.events import LogEvent
+import re
+
+from shannon_core.display.events import LogEvent, StepEvent
 from shannon_core.display.file_renderer import FileLogRenderer
 from shannon_core.display.rich_renderer import RichConsoleRenderer
 
@@ -145,3 +147,46 @@ def test_logevent_verbose_default_shows_on_terminal(monkeypatch):
     r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
     r._render_log(_evt(level="WARNING"))
     assert "queue unreadable" in buf.getvalue()
+
+
+# --- dim 诊断行与亮色 structured event 首列对齐（2026-07-14 缩进修复）---
+
+def _body_start_col(render_fn) -> int:
+    """渲染一行（color_system=None → markup 剥离为纯文本），返回标签后正文起点列。
+
+    '[ts] ' 公共前缀 = 22 列；其后 '标签 + 分隔空格'，再后是正文/logger_name。
+    用 re.match(r'\\S+\\s+', tail) 量出 '标签区+分隔' 宽度，22 + 其 end 即正文起点。
+    """
+    buf = StringIO()
+    r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
+    render_fn(r)
+    line = buf.getvalue().splitlines()[0]
+    tail = line[22:]  # 去掉 '[2026-07-08 10:00:00] '
+    m = re.match(r"\S+\s+", tail)
+    assert m, f"未匹配到标签区: {tail!r}"
+    return 22 + m.end()
+
+
+def test_log_dim_column_aligns_with_bright_step_body():
+    """dim 诊断 LogEvent 的 logger_name 起点列 == 亮色 STEP body 起点列。
+
+    修复 '浅色(dim)行整体左移 1 列'：LogEvent 前缀 tag 后曾用 1 空格分隔 logger_name，
+    而 PHASE/STEP/AGENT/InfoEvent 统一用 2 空格分隔 body → dim 行少 1 列。
+    """
+    log_col = _body_start_col(lambda r: r._render_log(_evt(level="INFO")))
+    step_col = _body_start_col(lambda r: r._render_step(StepEvent(
+        timestamp="2026-07-08 10:00:00", category="STEP",
+        name="precheck", phase="setup", event="start")))
+    assert log_col == step_col, (
+        f"dim LogEvent logger_name 起点({log_col}) 应 == 亮色 STEP body 起点({step_col})")
+
+
+def test_log_dim_warning_column_aligns_with_bright_info_warning():
+    """dim WARNING LogEvent 也与亮色 InfoEvent WARNING 对齐（标签 7 字符同宽场景）。"""
+    from shannon_core.display.events import InfoEvent
+    log_col = _body_start_col(lambda r: r._render_log(_evt(level="WARNING")))
+    info_col = _body_start_col(lambda r: r._render_info(InfoEvent(
+        timestamp="2026-07-08 10:00:00", category="INFO",
+        message="hi", level="warning")))
+    assert log_col == info_col, (
+        f"dim WARNING 起点({log_col}) 应 == 亮色 InfoEvent WARNING 起点({info_col})")
