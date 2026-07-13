@@ -105,6 +105,7 @@ class WorkspacesIndexer:
                 "vuln_counts": vuln,
                 "vuln_count": sum(vuln.values()) if vuln else 0,
                 "total_cost_usd": metrics.get("total_cost_usd"),
+                "cost_currency": metrics.get("cost_currency"),
                 "total_duration_ms": metrics.get("total_duration_ms"),
                 "links": data.get("links", {}) if isinstance(data, dict) else {},
                 "created_at": _to_unix(mgr.get_created_at(ws_path)),

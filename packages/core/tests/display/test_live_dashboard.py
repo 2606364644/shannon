@@ -160,3 +160,49 @@ async def test_agent_row_prefers_current_tool_over_turn_text():
     out = buf.getvalue()
     assert "rg -n eval" in out    # humanize 后的当前工具
     assert "t4" in out            # turn 号
+
+
+async def test_status_line_cost_symbol_follows_agent_currency():
+    """footer cost 符号按 session 币种(首个 agent end 的 cost_currency),不再硬编码 $。
+
+    GLM profile 是 CNY:agent end 带 cost_currency=CNY → footer 显示 ¥;修 live_dashboard:63
+    硬编码 $ 致 CNY 金额也显示 $(与 rich_renderer/file_renderer 按 cost_currency 选符号不一致)。"""
+    console, buf = _console()
+    r = LiveDashboardRenderer(console)
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
+    await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="recon", event="end",
+                              attempt=1, cost_usd=2.5, cost_currency="CNY", success=True))
+    console.print(r)
+    out = buf.getvalue()
+    assert "¥2.5000" in out
+
+
+async def test_status_line_cost_symbol_defaults_to_usd_without_currency():
+    """无 agent end 带币种(未到 end / 老事件) → 回落 $ (currency_symbol 默认)。"""
+    console, buf = _console()
+    r = LiveDashboardRenderer(console)
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
+    await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="recon", event="start", attempt=1))
+    console.print(r)
+    out = buf.getvalue()
+    assert "$0.0000" in out
+
+
+async def test_spinner_action_truncated_no_internal_path_leak():
+    """spinner action 超长(如长 file_path)截断到 60 显示宽，不泄露内部全路径。
+
+    spec 2026-07-14 §模块5：原 action 直接显示 last_action_detail（humanize 后仍可达 80
+    字符），把 /Users/.../memory... 全路径甩到状态栏。truncate_action 截到 60 + …。
+    """
+    from shannon_core.display.events import ToolCallEvent
+    console, buf = _console(width=100)
+    r = LiveDashboardRenderer(console)
+    await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))
+    await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="recon", event="start", attempt=1))
+    long_path = "/Users/mango/.claude/projects/x/" + "segment/" * 30 + "memory.md"
+    await r.render(ToolCallEvent(timestamp="t", category="TOOL", agent_name="recon",
+                                 tool_name="Read", parameters={"file_path": long_path}))
+    console.print(r)
+    out = buf.getvalue()
+    assert "…" in out, f"超长 action 应被 truncate_action 截断加 …: {out!r}"
+    assert long_path not in out, "内部全路径不应泄露到状态栏"

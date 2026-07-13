@@ -93,6 +93,9 @@ async def test_finalize_summary_logs_complete_and_clears_session(tmp_path):
     inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
     mock_session = MagicMock()
     mock_session.log_workflow_complete = AsyncMock()
+    mock_session.get_metrics = AsyncMock(return_value={
+        "total_cost_usd": 0.0, "cost_currency": "USD",
+    })
     summary = {
         "status": "completed",
         "total_duration_ms": 100,
@@ -112,3 +115,33 @@ async def test_finalize_summary_logs_complete_and_clears_session(tmp_path):
         assert ws.completed_agents == ["recon"]
         assert ws.total_duration_ms == 100
         mock_clear.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_summary_reads_cost_from_session_metrics(tmp_path):
+    """finalize_summary cost/currency 从 session.get_metrics() 读(完整),非 summary dict。
+
+    summary dict 的 total_cost 来自 PipelineState.agent_metrics(workflow self._state 构建),
+    LLM 轨关闭时残缺→0(与 NodeGoat CLI ``Total Cost: $0.0000`` 回归同源)。对齐 CLI 路径
+    (worker._build_final_summary):两条路径 cost 数据源一致 = MetricsTracker。"""
+    from shannon_whitebox.pipeline.activities import finalize_summary
+    from shannon_whitebox.pipeline.shared import ActivityInput
+    from shannon_core.models.audit import WorkflowSummary
+
+    inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
+    mock_session = MagicMock()
+    mock_session.log_workflow_complete = AsyncMock()
+    mock_session.get_metrics = AsyncMock(return_value={
+        "total_cost_usd": 6.49, "cost_currency": "CNY",
+    })
+    # summary dict 的 total_cost_usd 残缺为 0(LLM 轨关),应被 session metrics 覆盖
+    summary = {"status": "completed", "total_duration_ms": 100, "total_cost_usd": 0.0,
+               "completed_agents": [], "agent_metrics": {}, "error": None}
+    with patch("shannon_whitebox.audit.session_registry.get_audit_session", return_value=mock_session), \
+         patch("shannon_whitebox.audit.session_registry.clear_audit_session"):
+        await finalize_summary(inp, summary)
+
+    ws = mock_session.log_workflow_complete.call_args[0][0]
+    assert isinstance(ws, WorkflowSummary)
+    assert ws.total_cost_usd == pytest.approx(6.49)   # 非 summary dict 的 0
+    assert ws.cost_currency == "CNY"

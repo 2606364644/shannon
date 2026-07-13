@@ -48,4 +48,19 @@ def load_env(
         )
 
     load_dotenv(profile_path, override=True)
+
+    # 自动 wire per-profile 定价 override（spec 2026-07-09 §4.5）。
+    # 约定：.env.profiles/<profile>.pricing.json，或去掉引擎后缀的 <base>.pricing.json
+    # （glm-anthropic / glm-openai 共用 glm.pricing.json；deepseek → deepseek.pricing.json）。
+    # 仅当用户未显式设 SHANNON_PRICING_OVERRIDE 时 wire（setdefault 语义），定价回落内置表。
+    if "SHANNON_PRICING_OVERRIDE" not in os.environ:
+        base_profile = profile.rsplit("-", 1)[0] if "-" in profile else profile
+        for candidate in (
+            Path(profiles_dir) / f"{profile}.pricing.json",
+            Path(profiles_dir) / f"{base_profile}.pricing.json",
+        ):
+            if candidate.exists():
+                os.environ["SHANNON_PRICING_OVERRIDE"] = str(candidate)
+                break
+
     return profile

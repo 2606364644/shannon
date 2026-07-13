@@ -15,8 +15,6 @@ from .pipeline.activities import (
     render_findings,
     assemble_report,
     run_agent,
-    run_auth_config_scan,
-    run_auth_gitnexus_judge,
     run_authz_gitnexus_judge,
     run_code_index,
     run_credential_check,
@@ -106,6 +104,51 @@ def resolve_workflow_id(
     return workspace_name or f"whitebox-{int(epoch)}"
 
 
+async def _build_final_summary(result, session, scan_start: float) -> WorkflowSummary:
+    """构建最终 WorkflowSummary(cost 取 session metrics,非 PipelineState.agent_metrics)。
+
+    cost / cost_currency 取 ``session.get_metrics()`` —— MetricsTracker 是 single source
+    of truth,累积了**所有**经 run_agent 的 agent(含 attack-chain/report/auth-gitnexus 等)+
+    所有 attempt。**不**从 ``PipelineState.agent_metrics`` 算:后者只在 workflows.py 三处
+    (pre-recon/recon/vuln)赋值,LLM 轨关闭时为空 → 旧 ``sum(agent_metrics.cost_usd)`` 在
+    LLM 轨关时 = 0(回归 NodeGoat CLI 最终 ``Total Cost: $0.0000``,而真实 cost 躺在
+    session.json)。
+
+    duration 取 wall-clock(``scan_start`` 到 now,扫描总耗时,含 agent 间隙/并行),非
+    MetricsTracker 的 agent 累计时长(那是另一语义,前端 OverviewTab 单独读 session.json)。
+    """
+    status = (
+        result.status
+        if isinstance(result.status, str) and result.status in ("completed", "failed", "cancelled")
+        else "failed"
+    )
+    final_metrics = await session.get_metrics() or {}
+    cost_currency = final_metrics.get("cost_currency") or "USD"
+    raw_agents = final_metrics.get("agents") or {}
+    agent_metrics_summary = {
+        name: AgentMetricsSummary(
+            duration_ms=int(a.get("duration_ms", 0) or 0),
+            cost_usd=a.get("cost_usd"),
+            cost_currency=a.get("cost_currency") or cost_currency,
+            input_tokens=a.get("input_tokens"),
+            output_tokens=a.get("output_tokens"),
+            cache_read_tokens=a.get("cache_read_tokens"),
+            cache_creation_tokens=a.get("cache_creation_tokens"),
+        )
+        for name, a in raw_agents.items()
+        if isinstance(a, dict)
+    }
+    return WorkflowSummary(
+        status=status,
+        total_duration_ms=int((time.monotonic() - scan_start) * 1000),
+        total_cost_usd=final_metrics.get("total_cost_usd") or 0.0,
+        cost_currency=cost_currency,
+        completed_agents=list(result.completed_agents or []),
+        agent_metrics=agent_metrics_summary,
+        error=(result.errors[0] if result.errors else None),
+    )
+
+
 async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233",
                    use_rich: bool = False) -> dict:
     from shannon_core.session import SessionManager
@@ -143,7 +186,6 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
         workflows=[WhiteboxScanWorkflow],
         activities=[
             render_findings, assemble_report, run_agent,
-            run_auth_config_scan, run_auth_gitnexus_judge,
             run_authz_gitnexus_judge, run_code_index,
             run_credential_check, run_merge_dual_track_queues,
             run_merge_sink_reports, run_entry_point_fusion,
@@ -312,23 +354,9 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                     clear_audit_session()
 
                 # Emit the final summary so the Rich summary table / dashboard
-                # finalization fires. Build it from the PipelineState result.
-                status = result.status if isinstance(result.status, str) and result.status in ("completed", "failed", "cancelled") else "failed"
-                agent_metrics_summary = {
-                    name: AgentMetricsSummary(
-                        duration_ms=int(m.get("duration_ms", 0) or 0),
-                        cost_usd=m.get("cost_usd"),
-                    )
-                    for name, m in (result.agent_metrics or {}).items()
-                }
-                summary = WorkflowSummary(
-                    status=status,
-                    total_duration_ms=int((time.monotonic() - scan_start) * 1000),
-                    total_cost_usd=sum((am.cost_usd or 0.0) for am in agent_metrics_summary.values()),
-                    completed_agents=list(result.completed_agents or []),
-                    agent_metrics=agent_metrics_summary,
-                    error=(result.errors[0] if result.errors else None),
-                )
+                # finalization fires. cost/currency 取 session metrics(MetricsTracker 累积
+                # 所有 agent,完整),非 PipelineState.agent_metrics(LLM 轨关时残缺→0)。
+                summary = await _build_final_summary(result, session, scan_start)
                 await session.log_workflow_complete(summary)
 
                 result_dict = asdict(result) if not isinstance(result, dict) else dict(result)

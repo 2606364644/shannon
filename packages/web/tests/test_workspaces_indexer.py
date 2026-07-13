@@ -151,7 +151,26 @@ def test_list_missing_metrics_returns_none(tmp_workspaces):
     row = next(r for r in WorkspacesIndexer(tmp_workspaces).list_workspaces() if r["name"] == "bare-ws")
     assert row["total_cost_usd"] is None
     assert row["total_duration_ms"] is None
+    assert row["cost_currency"] is None
     assert row["links"] == {}
+
+
+def test_list_exposes_cost_currency(tmp_workspaces):
+    """row 补 cost_currency(前端 fmtCost 据此选 ¥/$,修首页 $ vs 详情页 ¥ 不一致)。
+
+    前端 Workspace.cost_currency 字段早已声明、DashboardPage/WorkspaceListPage 早已读
+    w.cost_currency;此前纯后端 workspaces_indexer 漏传 → undefined → 默认 $。"""
+    import json
+    ws = tmp_workspaces / "cur-ws"
+    ws.mkdir()
+    (ws / "session.json").write_text(json.dumps({
+        "status": "completed", "scan_type": "whitebox", "created_at": 1,
+        "metrics": {"total_cost_usd": 6.49, "cost_currency": "CNY"},
+    }))
+    from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+    row = next(r for r in WorkspacesIndexer(tmp_workspaces).list_workspaces() if r["name"] == "cur-ws")
+    assert row["cost_currency"] == "CNY"
+    assert row["total_cost_usd"] == 6.49
 
 
 def test_sort_mixed_created_at_types(tmp_workspaces):

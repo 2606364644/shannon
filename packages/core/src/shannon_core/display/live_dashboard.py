@@ -30,7 +30,8 @@ from rich.text import Text
 
 from shannon_core.display.dashboard_state import DashboardState
 from shannon_core.display.events import DisplayEvent
-from shannon_core.display.formatters import agent_prefix, format_duration
+from shannon_core.display.formatters import agent_prefix, format_duration, truncate_action
+from shannon_core.agents.pricing import currency_symbol
 
 
 class LiveDashboardRenderer:
@@ -60,7 +61,7 @@ class LiveDashboardRenderer:
         else:
             cells.append(Text(f" · {snap.completed_count} done", style="green"))
         cells.append(Text(f" · {elapsed}"))
-        cells.append(Text(f" · ${snap.total_cost:.4f}", style="yellow"))
+        cells.append(Text(f" · {currency_symbol(snap.cost_currency)}{snap.total_cost:.4f}", style="yellow"))
 
         row1 = Table.grid()
         row1.add_row(*cells)
@@ -75,7 +76,8 @@ class LiveDashboardRenderer:
             for a in running:
                 intent = snap.unit_intent.get(a.name)
                 label = intent or agent_prefix(a.name)
-                action = a.last_action_detail or a.last_turn_text or "running..."
+                # spec 2026-07-14 §模块5：action 截断到 60 显示宽，不泄露内部全路径
+                action = truncate_action(a.last_action_detail or a.last_turn_text or "running...")
                 grid = Table.grid()
                 grid.add_row(Spinner("dots"),
                              Text(f" {label} t{a.turn}  {action}", style="blue"))

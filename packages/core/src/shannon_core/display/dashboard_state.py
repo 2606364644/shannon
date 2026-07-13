@@ -39,6 +39,7 @@ class DashboardState:
     phase_units: tuple[str, ...] = ()
     unit_status: dict[str, str] = field(default_factory=dict)
     unit_intent: dict[str, str] = field(default_factory=dict)
+    cost_currency: str | None = None
 
     @property
     def completed_count(self) -> int:
@@ -107,6 +108,10 @@ class DashboardState:
                     cost_usd=event.cost_usd if event.cost_usd is not None else cur.cost_usd,
                     error=event.error)
                 next_state = self._set_unit(event.agent_name, status)
+                # session 内 cost 币种一致:首个带 cost_currency 的 agent end 锁定,
+                # 供 live footer 选符号(修 live_dashboard 硬编码 $)。
+                if event.cost_currency and not self.cost_currency:
+                    next_state = replace(next_state, cost_currency=event.cost_currency)
             return replace(next_state, agents=agents)
 
         if isinstance(event, ToolCallEvent):

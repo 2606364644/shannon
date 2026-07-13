@@ -160,6 +160,7 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
         ):
             sess = MagicMock()
             sess.log_workflow_complete = AsyncMock()
+            sess.get_metrics = AsyncMock(return_value={})
 
             def fake_display(meta, *args, **kwargs):
                 class _Ctx:
@@ -375,6 +376,7 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
                     metas.append(meta)
                     sess = MagicMock()
                     sess.log_workflow_complete = AsyncMock()
+                    sess.get_metrics = AsyncMock(return_value={})
 
                     class _Ctx:
                         async def __aenter__(self_inner):
@@ -445,6 +447,7 @@ async def test_run_scan_fresh_mode_skips_resume(tmp_path, monkeypatch):
              patch("shannon_whitebox.worker.ShutdownController.uninstall"):
             sess = MagicMock()
             sess.log_workflow_complete = AsyncMock()
+            sess.get_metrics = AsyncMock(return_value={})
 
             def fake_display(meta, *args, **kwargs):
                 class _Ctx:

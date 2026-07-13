@@ -1790,10 +1790,16 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
 
     session = get_audit_session()
     if not isinstance(session, NullAuditSession):
+        # cost / cost_currency 取 session.get_metrics()(MetricsTracker 累积所有 agent,完整),
+        # 非 summary dict(其 total_cost 来自 workflow self._state.agent_metrics,LLM 轨关时
+        # 残缺→0)。对齐 CLI 路径 worker._build_final_summary 同源修复:两条路径 cost 数据源
+        # 一致 = MetricsTracker(回归 NodeGoat ``Total Cost: $0.0000``)。
+        final_metrics = await session.get_metrics() or {}
         ws = WorkflowSummary(
             status=summary.get("status", "failed"),
             total_duration_ms=summary.get("total_duration_ms", 0),
-            total_cost_usd=summary.get("total_cost_usd", 0.0),
+            total_cost_usd=final_metrics.get("total_cost_usd") or 0.0,
+            cost_currency=final_metrics.get("cost_currency") or "USD",
             completed_agents=summary.get("completed_agents", []),
             agent_metrics=summary.get("agent_metrics", {}),
             error=summary.get("error"),

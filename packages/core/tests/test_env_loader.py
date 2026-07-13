@@ -1,4 +1,5 @@
 """env_loader: 共享 .env + 当前 profile 文件加载。"""
+import json
 import os
 from pathlib import Path
 
@@ -6,6 +7,15 @@ import pytest
 
 from shannon_core.config.env_loader import load_env
 from shannon_core.models.errors import ErrorCode, PentestError
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pricing_override(monkeypatch):
+    """SHANNON_PRICING_OVERRIDE 是进程级 env,load_env 会 setdefault 写入。
+    每个测试前后强制清理,避免跨测试泄漏(尤其污染 test_pricing 的 override 读取)。"""
+    monkeypatch.delenv("SHANNON_PRICING_OVERRIDE", raising=False)
+    yield
+    monkeypatch.delenv("SHANNON_PRICING_OVERRIDE", raising=False)
 
 
 def _write(path: Path, lines: dict[str, str]) -> None:
@@ -58,3 +68,55 @@ def test_missing_profile_file_raises(tmp_path, monkeypatch):
 
     assert exc.value.error_code == ErrorCode.CONFIG_VALIDATION_FAILED
     assert "nope" in exc.value.message
+
+
+def test_wires_pricing_override_from_base_pricing_json(tmp_path, monkeypatch):
+    """profile=<base>-<engine>(glm-anthropic) → fallback 到 <base>.pricing.json(glm.pricing.json)。
+
+    glm-anthropic / glm-openai 共用 glm.pricing.json(去掉引擎后缀)。spec 2026-07-09
+    per-profile 定价 override: env_loader 自动 wire,无需用户手设 SHANNON_PRICING_OVERRIDE。
+    """
+    monkeypatch.delenv("SHANNON_PRICING_OVERRIDE", raising=False)
+    _write(tmp_path / ".env", {"SHANNON_PROFILE": "glm-anthropic"})
+    _write(tmp_path / ".env.profiles" / "glm-anthropic.env", {"SHANNON_AI_PROVIDER": "anthropic_api"})
+    (tmp_path / ".env.profiles" / "glm.pricing.json").write_text(
+        json.dumps({"currency": "CNY", "models": {}}))
+
+    load_env(base_path=tmp_path / ".env", profiles_dir=tmp_path / ".env.profiles")
+
+    assert os.environ["SHANNON_PRICING_OVERRIDE"].endswith("glm.pricing.json")
+
+
+def test_wires_exact_profile_pricing_json_first(tmp_path, monkeypatch):
+    """<profile>.pricing.json 优先于 <base>.pricing.json(deepseek 无引擎后缀 → deepseek.pricing.json)。"""
+    monkeypatch.delenv("SHANNON_PRICING_OVERRIDE", raising=False)
+    _write(tmp_path / ".env", {"SHANNON_PROFILE": "deepseek"})
+    _write(tmp_path / ".env.profiles" / "deepseek.env", {})
+    (tmp_path / ".env.profiles" / "deepseek.pricing.json").write_text("{}")
+
+    load_env(base_path=tmp_path / ".env", profiles_dir=tmp_path / ".env.profiles")
+
+    assert os.environ["SHANNON_PRICING_OVERRIDE"].endswith("deepseek.pricing.json")
+
+
+def test_does_not_override_explicit_pricing_override(tmp_path, monkeypatch):
+    """用户已显式设 SHANNON_PRICING_OVERRIDE → setdefault 不覆盖。"""
+    monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", "/custom/pricing.json")
+    _write(tmp_path / ".env", {"SHANNON_PROFILE": "glm-anthropic"})
+    _write(tmp_path / ".env.profiles" / "glm-anthropic.env", {})
+    (tmp_path / ".env.profiles" / "glm.pricing.json").write_text("{}")
+
+    load_env(base_path=tmp_path / ".env", profiles_dir=tmp_path / ".env.profiles")
+
+    assert os.environ["SHANNON_PRICING_OVERRIDE"] == "/custom/pricing.json"
+
+
+def test_no_pricing_json_leaves_override_unset(tmp_path, monkeypatch):
+    """profile 无对应 pricing.json → 不设 SHANNON_PRICING_OVERRIDE(回落内置 GLM_PRICING_CNY)。"""
+    monkeypatch.delenv("SHANNON_PRICING_OVERRIDE", raising=False)
+    _write(tmp_path / ".env", {"SHANNON_PROFILE": "glm-anthropic"})
+    _write(tmp_path / ".env.profiles" / "glm-anthropic.env", {})
+
+    load_env(base_path=tmp_path / ".env", profiles_dir=tmp_path / ".env.profiles")
+
+    assert "SHANNON_PRICING_OVERRIDE" not in os.environ
