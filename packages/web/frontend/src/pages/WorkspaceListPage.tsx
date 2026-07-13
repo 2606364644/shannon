@@ -9,6 +9,7 @@ import {
   SortingState, useReactTable,
 } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -73,9 +74,15 @@ export function WorkspaceListPage() {
     }),
     helper.accessor("name", {
       header: () => t("workspaces.table.name"), cell: (info) => (
-        <span className="flex items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2">
           <span className={`inline-block w-0.5 self-stretch rounded ${statusColor(info.row.original.status)}`} />
-          <Link to={`/p/${info.getValue()}`} className="font-mono hover:text-primary">{info.getValue()}</Link>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* 长名截断（hostname_YYYYMMDD-HHMMSS 可达 30+ 字符），hover tooltip 看全名，防撑宽列表 */}
+              <Link to={`/p/${info.getValue()}`} className="block max-w-[28ch] truncate font-mono hover:text-primary">{info.getValue()}</Link>
+            </TooltipTrigger>
+            <TooltipContent>{info.getValue()}</TooltipContent>
+          </Tooltip>
           {info.row.original.is_correlation ? " 🔗" : ""}
         </span>
       ),
@@ -146,6 +153,7 @@ export function WorkspaceListPage() {
   const lastUpdatedStr = lastUpdated ? lastUpdated.toLocaleTimeString() : "—";
 
   return (
+    <TooltipProvider>
     <div className="space-y-4">
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-3">
@@ -258,5 +266,6 @@ export function WorkspaceListPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

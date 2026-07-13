@@ -60,6 +60,16 @@ describe("OverviewTab", () => {
     expect(container.textContent).toContain("⚠");
   });
 
+  it("model 列长模型名单行不换行 + attempt 列 error 文本不换行（whitespace-nowrap）", async () => {
+    server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json(session)));
+    renderAt("/p/ws/overview");
+    await waitFor(() => expect(screen.getByText(/injection-vuln/)).toBeInTheDocument());
+    expect(screen.getByText("GLM-5.2[1m]").closest("td")?.className).toMatch(/whitespace-nowrap/);
+    // attempt 列含 error 文本（⚠ 2(api_error_status=429)），也防换行
+    const attemptCell = screen.getByText(/⚠ 2\(/).closest("td");
+    expect(attemptCell?.className).toMatch(/whitespace-nowrap/);
+  });
+
   it("fetch 失败渲染 ErrorState（role=alert）不永久 loading", async () => {
     server.use(
       http.get("/api/workspaces/:ws", () => HttpResponse.json({ detail: "boom" }, { status: 500 })),

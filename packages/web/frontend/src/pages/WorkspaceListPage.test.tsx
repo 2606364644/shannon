@@ -159,6 +159,17 @@ describe("WorkspaceListPage (DataTable)", () => {
     const actionsTh = screen.getByText("操作").closest("th");
     expect(actionsTh?.className).not.toMatch(/cursor-pointer/);
   });
+
+  it("workspace 名超长时截断 + tooltip 看全名（防撑宽列表，对齐 repos 名称列）", async () => {
+    server.use(
+      http.get("/api/workspaces", () => HttpResponse.json([
+        { name: "very-long-hostname_20260714-120000-extra", scan_type: "whitebox", status: "completed", created_at: 1780000000, is_correlation: false },
+      ])),
+    );
+    renderPage();
+    const link = await screen.findByRole("link", { name: /very-long-hostname/ });
+    expect(link.className).toMatch(/truncate/);
+  });
 });
 
 describe("WorkspaceListPage i18n", () => {

@@ -145,8 +145,8 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
                 <TableCell className="font-mono">{name}</TableCell>
                 <TableCell className="font-mono">{fmt(a.duration_ms)}</TableCell>
                 <TableCell className="font-mono">{fmtCost(a.cost_usd, a.cost_currency)}</TableCell>
-                <TableCell className={`font-mono ${attemptCls}`}>{attemptText}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{a.model}</TableCell>
+                <TableCell className={`whitespace-nowrap font-mono ${attemptCls}`}>{attemptText}</TableCell>
+                <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{a.model}</TableCell>
               </TableRow>
             );
           })}
