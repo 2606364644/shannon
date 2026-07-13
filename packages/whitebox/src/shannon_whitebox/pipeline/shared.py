@@ -18,6 +18,7 @@ class PipelineInput(BasePipelineInput):
     resume_completed_agents: list[str] = field(default_factory=list)  # resume 预填
     max_concurrent: int = 3                    # SHANNON_MAX_CONCURRENT 注入;vuln agents 并发上限
     enable_llm_track: bool = True              # SHANNON_LLM_TRACK_ENABLED 注入;False=只跑 GitNexus 轨
+    event_file: str | None = None              # C1: web 提交端塞 events.ndjson 路径(env 不跨容器); CLI 为 None 走 env 兜底
 
 
 @dataclass
