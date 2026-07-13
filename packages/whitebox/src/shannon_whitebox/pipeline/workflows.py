@@ -4,6 +4,7 @@ from pathlib import Path
 
 from temporalio import workflow
 from temporalio.exceptions import CancelledError
+from temporalio.common import RetryPolicy
 
 from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
 from shannon_core.models.errors import ErrorCode, PentestError
@@ -41,6 +42,13 @@ class WhiteboxScanWorkflow:
             self._state.completed_agents = list(input.resume_completed_agents)
         self._state.start_time = workflow.time_ns() / 1e9
 
+        # C1 Phase B: worker 容器路径门控. event_file 非 None = web 提交(worker 路径),
+        # 调迁移 activity(setup_display/heartbeat/finalize); None = CLI 路径, run_scan 外层
+        # 已 set_audit_session/heartbeat/log_workflow_complete, workflow 内不重复(守 "CLI
+        # 零改动" + 消除 R1 双重 scan_end/heartbeat/set_audit_session).
+        is_worker_path = input.event_file is not None
+        heartbeat_handle = None
+
         # Resolve config (YAML) early so vuln-class selection can consult cfg.vuln_classes.
         cfg = None
         if input.config_path:
@@ -70,7 +78,21 @@ class WhiteboxScanWorkflow:
             api_key=input.api_key,
             prompt_override=input.prompt_override,
             workspace_path=workspace_path,
+            event_file=input.event_file,
         )
+        # C1 Phase B: worker 路径前导 setup_display(注入 AuditSession + event_file) + 并行
+        # run_heartbeat(长驻写 heartbeat). CLI 路径跳过(外层 run_scan 已做).
+        if is_worker_path:
+            await workflow.execute_activity(
+                activities.setup_display, act_input,
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=retry_for("standard"),
+            )
+            heartbeat_handle = workflow.execute_activity(
+                activities.run_heartbeat, act_input,
+                start_to_close_timeout=timedelta(hours=24),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
         await workflow.execute_activity(
             activities.log_phase_start_activity,
             args=[
@@ -300,55 +322,6 @@ class WhiteboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
             self._state.current_phase = "vulnerability-analysis"
-            # Deterministic auth-config scan (spec §5.8 GitNexus track for vuln-auth).
-            # Runs BEFORE the vuln agents so auth_config_scan.json is ready for
-            # the vuln-auth LLM to read. Pure additive: zero findings -> empty
-            # files, merger degrades to llm-only. Only runs when auth is in scope.
-            if "auth" in [str(vt) for vt in selected_classes]:
-                try:
-                    _auth_scan = await workflow.execute_activity(
-                        activities.run_auth_config_scan, act_input,
-                        start_to_close_timeout=timedelta(minutes=3),
-                        retry_policy=retry_for("standard"),
-                    )
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        ActivityInput(**{**act_input.__dict__,
-                           "info_message": f"Auth config scan ok: {_auth_scan.get('total_findings', 0)} findings",
-                           "info_level": "info"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
-                except Exception as exc:
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        ActivityInput(**{**act_input.__dict__,
-                           "info_message": f"Auth config scan failed (non-fatal, auth track degrades to LLM-only): {exc}",
-                           "info_level": "warning"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
-                # === Auth GitNexus-track logic-class judge (spec-2b T6) ===
-                # config_scan 先产 auth_gitnexus_queue.json 的 config 类条目
-                # (cookie/HSTS/CORS/JWT/限流)；auth_judge 追加逻辑类 verdict
-                # (session 固定/明文密码/OAuth state 缺失/弱随机 token)，读现有 +
-                # 合并非覆盖。Graceful：失败时 queue 保留 config_scan 产出，不阻塞
-                # LLM 轨。多轮 agent 窗口（候选>0 深判 / 候选=0 自主探索）。
-                try:
-                    await workflow.execute_activity(
-                        activities.run_auth_gitnexus_judge, act_input,
-                        start_to_close_timeout=timedelta(minutes=30),
-                        retry_policy=retry_for("gitnexus-verdict"),
-                    )
-                except Exception as exc:
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        ActivityInput(**{**act_input.__dict__,
-                           "info_message": f"Auth GitNexus judge failed (non-fatal, config-scan queue preserved, LLM-only track continues): {exc}",
-                           "info_level": "warning"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
             if input.enable_llm_track:
                 vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
                 for vt in selected_classes:
@@ -566,13 +539,51 @@ class WhiteboxScanWorkflow:
                 self._state.error_code = error_type
             else:
                 self._state.status = "completed"
+            # C1 Phase B: worker 路径后置 finalize_summary(写 scan_end + 清 AuditSession) +
+            # 停 heartbeat. CLI 路径跳过(外层 run_scan 已 log_workflow_complete).
+            if is_worker_path:
+                if heartbeat_handle is not None:
+                    try:
+                        heartbeat_handle.cancel()
+                    except Exception:
+                        pass
+                from shannon_core.models.audit import AgentMetricsSummary
+                summary = {
+                    "status": self._state.status,
+                    "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+                    "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
+                    "completed_agents": list(self._state.completed_agents),
+                    "agent_metrics": {
+                        name: AgentMetricsSummary(
+                            duration_ms=int(m.get("duration_ms", 0) or 0),
+                            cost_usd=m.get("cost_usd"),
+                        )
+                        for name, m in self._state.agent_metrics.items()
+                    },
+                    "error": (self._state.errors[0] if self._state.errors else None),
+                }
+                await workflow.execute_activity(
+                    activities.finalize_summary, args=[act_input, summary],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=retry_for("standard"),
+                )
             self._state.current_phase = None
             return self._state
         except CancelledError:
             self._state.status = "cancelled"
+            if heartbeat_handle is not None:
+                try:
+                    heartbeat_handle.cancel()
+                except Exception:
+                    pass
             self._state.current_phase = None
             return self._state
         finally:
+            if heartbeat_handle is not None:
+                try:
+                    heartbeat_handle.cancel()
+                except Exception:
+                    pass
             cleanup_settings()
             cleanup_auth_state_sync(workspace_path)
 
