@@ -24,6 +24,7 @@ from shannon_core.utils.atomic_write import atomic_write_json
 from shannon_core.utils.paths import resolve_deliverables_path
 from shannon_core.utils.credential_validator import validate_credentials
 from shannon_core.logging import create_activity_logger
+from shannon_core.logging.log_bus import LogBus
 from shannon_core.agents.executor import AgentExecutor
 from shannon_core.agents.runner import run_claude_prompt
 from shannon_core.agents.recon_context_summarizer import summarize_recon_context
@@ -1751,6 +1752,10 @@ async def setup_display(input: ActivityInput) -> None:
     console = Console()  # auto-detects non-TTY in pipes -> plain text per event
     session = AuditSession(meta, use_rich=False, console=console)
     await session.initialize(workflow_id=meta.id, event_file=input.event_file)
+    # 统一日志总线：attach 把散落 getLogger 诊断汇入 dispatcher（起 drain task），对齐
+    # display_lifecycle.run_with_display headless 分支（非 rich 同样 attach）。
+    # 不 attach 则 activity 内裸 getLogger 诊断不进 dispatcher → 漏 workflow.log/events.ndjson。
+    await LogBus.attach(session.dispatcher)
     set_audit_session(session)
 
 
@@ -1780,11 +1785,11 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
     StructuredEventRenderer 句柄），故无需额外 close。clear_audit_session 清进程全局。
     """
     from shannon_whitebox.audit.session_registry import (
-        clear_audit_session, get_audit_session,
+        NullAuditSession, clear_audit_session, get_audit_session,
     )
 
     session = get_audit_session()
-    if session is not None:
+    if not isinstance(session, NullAuditSession):
         ws = WorkflowSummary(
             status=summary.get("status", "failed"),
             total_duration_ms=summary.get("total_duration_ms", 0),
@@ -1793,5 +1798,9 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
             agent_metrics=summary.get("agent_metrics", {}),
             error=summary.get("error"),
         )
+        # 统一日志总线：final flush（dispatch 余下 LogEvent 到 workflow.log/events.ndjson）
+        # 在 log_workflow_complete 关闭 workflow_logger 之前，对齐 display_lifecycle
+        # finally 顺序（drain_and_detach → session.close）。
+        await LogBus.drain_and_detach()
         await session.log_workflow_complete(ws)
     clear_audit_session()

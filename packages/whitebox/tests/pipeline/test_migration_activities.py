@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from shannon_core.logging.log_bus import LogBus
+
 
 @pytest.mark.asyncio
 async def test_setup_display_injects_audit_session_with_event_file(tmp_path):
@@ -35,6 +37,7 @@ async def test_setup_display_injects_audit_session_with_event_file(tmp_path):
         assert session is not None  # AuditSession 真构造了
         # event_file 透传: StructuredEventRenderer 挂载后 WorkflowHeader 落 ndjson
         assert Path(event_file).exists()
+        await LogBus.drain_and_detach()  # cleanup: final flush + cancel drain task (paired with attach)
         await session.close()  # cleanup: 关 LogStream + StructuredEventRenderer 句柄
 
 
@@ -61,6 +64,7 @@ async def test_setup_display_none_event_file_does_not_mount_renderer(tmp_path):
             session = mock_set.call_args[0][0]
             assert session is not None
             assert not Path(event_file).exists()  # event_file=None + env 未设 → 无 ndjson
+            await LogBus.drain_and_detach()  # cleanup: final flush + cancel drain task (paired with attach)
             await session.close()
 
 
