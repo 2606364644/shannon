@@ -20,13 +20,14 @@ from shannon_core.services.temporal_infra import (
 from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from shannon_whitebox.pipeline.activities import (
     render_findings, assemble_report, run_agent,
-    run_auth_config_scan, run_auth_gitnexus_judge, run_authz_gitnexus_judge,
+    run_authz_gitnexus_judge,
     run_code_index, run_credential_check, run_merge_dual_track_queues,
     run_merge_sink_reports, run_entry_point_fusion, run_preflight, run_risk_scoring,
     run_save_adjudication, run_vuln_agent, run_attack_chain_llm_agent,
     run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
     run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
+    setup_display, run_heartbeat, finalize_summary,
 )
 from shannon_blackbox.pipeline.workflows import BlackboxScanWorkflow
 from shannon_blackbox.pipeline.activities import (
@@ -54,14 +55,19 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
         workflows=[WhiteboxScanWorkflow],
         activities=[
             render_findings, assemble_report, run_agent,
-            run_auth_config_scan, run_auth_gitnexus_judge, run_authz_gitnexus_judge,
+            run_authz_gitnexus_judge,
             run_code_index, run_credential_check, run_merge_dual_track_queues,
             run_merge_sink_reports, run_entry_point_fusion, run_preflight, run_risk_scoring,
             run_save_adjudication, run_vuln_agent, run_attack_chain_llm_agent,
             run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
             run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
+            setup_display, run_heartbeat, finalize_summary,
         ],
+        # AuditSession 是进程全局 _current 单例(session_registry.py), events.ndjson 经它写.
+        # worker 容器并发多白盒扫描会冲突 → 白盒 Worker 并发=1. 解锁需把 AuditSession 改
+        # contextvar(更大重构, 留 follow-up, 不在本 plan).
+        max_concurrent_workflow_tasks=1,
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
     )
     bb_worker = Worker(
