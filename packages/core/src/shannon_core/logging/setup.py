@@ -9,8 +9,8 @@ record 经 LogBusHandler.emit 分流（session 活跃→queue/event-loop drain�
 
 - 散落 ~20 处 getLogger 调用点零改动（propagate 走 root 自动进 LogBusHandler）；
 - diagnostic.log 由 LogBus 单例的 DiagnosticLog 管（非 logging.FileHandler）；
-- temporalio.activity logger 由 temporalio_redirect 独立管（propagate=False），此处
-  跳过它（不 addHandler、不改 propagate），避免双重输出；
+- temporalio.activity + temporalio.worker 子树 logger 由 temporalio_redirect 独立管
+  (propagate=False), 此处跳过它们(不 addHandler、不改 propagate), 避免双重输出;
 - _FORMAT/_DATEFMT 常量保留供 format_diagnostic_line 对齐（不再挂 Formatter）。
 """
 from __future__ import annotations
@@ -80,4 +80,5 @@ def configure_logging(log_dir: Path | str | None = None, *, level: str | None = 
     for name in _NOISE_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
 
-    # temporalio.activity 由 temporalio_redirect 独立管：不动其 handlers/propagate。
+    # temporalio.activity + temporalio.worker 子树由 temporalio_redirect 独立管:
+    # 不动其 handlers/propagate(redirect 覆盖两者, propagate=False 截断到本 LogBus)。

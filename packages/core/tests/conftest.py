@@ -17,18 +17,22 @@ import queue as _queue
 
 import pytest
 
-_TEMPORALIO_LOGGER = "temporalio.activity"
+# redirect(temporalio_redirect.py)管理的 logger: temporalio.activity(failure trace)
+# + temporalio.worker 子树(_activity :315/:521 执行边界 DEBUG)。两者都可能被测试
+# 安装 handler + propagate=False,必须都清,否则跨测试泄漏(propagate=False 残留尤甚)。
+_TEMPORALIO_LOGGERS = ("temporalio.activity", "temporalio.worker")
 
 
 @pytest.fixture(autouse=True)
 def _clean_logging_singletons():
     yield
     # 强制重置到干净基线（非 snapshot restore），清掉任何测试安装的 handler/状态。
-    tio = logging.getLogger(_TEMPORALIO_LOGGER)
-    for h in list(tio.handlers):
-        tio.removeHandler(h)
-        h.close()
-    tio.propagate = True
+    for _tio_name in _TEMPORALIO_LOGGERS:
+        tio = logging.getLogger(_tio_name)
+        for h in list(tio.handlers):
+            tio.removeHandler(h)
+            h.close()
+        tio.propagate = True
     # LogBus 模块级单例
     try:
         from shannon_core.logging import LogBus

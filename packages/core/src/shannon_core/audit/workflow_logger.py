@@ -64,9 +64,11 @@ class WorkflowLogger:
         path = generate_workflow_log_path(self._meta)
         self._stream = LogStream(path)
         await self._stream.open()
-        # Divert temporalio's verbose activity-failure tracebacks to a sibling
-        # file (same dir as workflow.log) BEFORE renderers consume any events,
-        # so the first ERROR can already point at detail_path. Degrades silently.
+        # Divert temporalio worker/activity logging to a sibling file (same dir
+        # as workflow.log) BEFORE renderers consume any events, so the first
+        # ERROR can already point at detail_path. Degrades silently. 默认(WARNING)
+        # 只收 activity failure tracebacks; SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG 时也收
+        # worker 执行边界日志(Running/Completing activity), 排 10min 无日志空窗之用。
         self._install_failure_redirect()
 
         renderers: list = [FileLogRenderer(self._stream)]
@@ -102,13 +104,16 @@ class WorkflowLogger:
         ))
 
     def _install_failure_redirect(self) -> None:
-        """Install the temporalio.activity -> file redirect; set the detail_path hint.
+        """Install the temporalio worker/activity -> file redirect; set detail_path hint.
 
-        The redirect target is the same-source sibling of workflow.log
-        (``<audit_dir>/activity_failures.log``), so the live display's ERROR
-        line can hint at where the full traceback lives. On any install failure
-        we degrade silently (tracebacks may appear on terminal) — never break
-        the scan. ``log_error`` then emits with ``detail_path=None``.
+        Redirect target is the same-source sibling of workflow.log
+        (``<audit_dir>/activity_failures.log``), so the live display's ERROR line
+        can hint at where the full traceback lives. The file also captures worker
+        execution-boundary logs (``Running/Completing activity``) when
+        ``SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG``; the default WARNING keeps only
+        failure tracebacks (zero-regression). On any install failure we degrade
+        silently (tracebacks may appear on terminal) — never break the scan.
+        ``log_error`` then emits with ``detail_path=None``.
         """
         try:
             failure_path: Path = generate_workflow_log_path(self._meta).with_name(

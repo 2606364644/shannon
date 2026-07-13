@@ -122,7 +122,7 @@ temporalio **不打 poller 循环本身**的日志（`PollActivityTaskQueue` 调
 
 3. **级别 env 控制**：新增 `SHANNON_TEMPORALIO_LOG_LEVEL`，默认 `WARNING`（= 现状，只收 failure trace）；排错时设 `DEBUG` → 收 `Running activity` / `Completing` / heartbeat / workflow worker 调度。沿用现有 redirect 的"logger=DEBUG 不丢记录、handler 按 env 决定"模式。
 
-4. **合并到 per-workspace 文件**：写到 `<audit_dir>/temporalio-activity.log`（由现有 `activity_failures.log` 演进/改名，反映不再只是 failure），一处看全 failure trace + 执行边界。
+4. **合并到 per-workspace 文件**：写到现有 `<audit_dir>/activity_failures.log`（**不改名**，理由见 §5 第 2 项），一处看全 failure trace + worker 执行边界日志。
 
 ### 4.3 铁不变量（默认零回归）
 
@@ -136,7 +136,7 @@ temporalio **不打 poller 循环本身**的日志（`PollActivityTaskQueue` 调
 
 ### 4.4 复现验证预期
 
-设 `SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG` 重跑 `hr` 扫描，`<audit_dir>/temporalio-activity.log` 应出现：
+设 `SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG` 重跑 `hr` 扫描，`<audit_dir>/activity_failures.log` 应出现：
 
 ```
 ... DEBUG temporalio.worker._activity: Running activity run_framework_analysis (token ...)
@@ -156,10 +156,15 @@ temporalio **不打 poller 循环本身**的日志（`PollActivityTaskQueue` 调
    - 所有被管 logger `propagate=False`。
    - 函数名 `install_temporalio_log_redirect` **保持不变**（调用点零改动），仅内部扩展被管 logger 集合 + handler 级别来源改读 env；保持幂等。
 
-2. **`packages/core/src/shannon_core/audit/workflow_logger.py:114-116`**（调用点）：
-   - 文件名 `activity_failures.log` → `temporalio-activity.log`。
-   - 同步更新 live display ERROR 行的 `detail_path` hint（`_activity_failure_log_path` 用途）。
-   - `_install_failure_redirect` 方法名/注释语义微调（不再只针对 failure）。
+2. **`packages/core/src/shannon_core/audit/workflow_logger.py`**（调用点，**仅注释，不改文件名**）：
+   - **保持文件名 `activity_failures.log` 不变**。grep 发现该名深度耦合：web
+     `orphan_reconciler` 读其尾部作为失败原因上送 live 页、前端 `LogsTab.tsx`
+     hardcode 该名、`cli/error_render.py` 独立写入同名文件、6+ 测试断言。改名会撕裂
+     成两个 activity 日志文件 + 断裂 web live 页失败原因显示，**破坏面远超清晰性收益**
+     （YAGNI；落地与原 spec 草稿的"改名"建议有意分歧，已据此修订）。
+   - 仅更新 `_install_failure_redirect` docstring + `initialize` 处注释，说明该文件在
+     `SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG` 时也含 worker 执行边界日志（名字保留
+     "failures" 语义虽不完美，但改动成本过高）。
 
 3. **`packages/core/src/shannon_core/logging/setup.py`**：注释更新（redirect 现管整个 `temporalio.worker` 子树，不止 `temporalio.activity`）。
 
@@ -174,10 +179,10 @@ temporalio worker 打 DEBUG (:315 Running / :521 Completing / workflow worker �
   → logger temporalio.worker._activity / temporalio.worker._workflow / ...
   → propagate=False (截断,不进 root LogBus → display 流保持干净)
   → 独立 FileHandler (级别 = SHANNON_TEMPORALIO_LOG_LEVEL)
-  → <audit_dir>/temporalio-activity.log
+  → <audit_dir>/activity_failures.log
 
 排错姿势:  SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG uv run shannon-whitebox start -r <repo>
-          扫描中/后 tail <workspace>/.../temporalio-activity.log
+          扫描中/后 tail <workspace>/.../activity_failures.log
 
 默认 (env 未设):  handler=WARNING → DEBUG 被滤 → 文件只剩 failure trace = 现状
 ```
@@ -210,7 +215,7 @@ temporalio worker 打 DEBUG (:315 Running / :521 Completing / workflow worker �
 
 ### 8.3 集成（可选 / 视 plan）
 
-- 跑一个 mini workflow（已注册 activity），env=DEBUG 下断言 `<audit_dir>/temporalio-activity.log` 含 `Running activity` 行；env 未设下不含。
+- 跑一个 mini workflow（已注册 activity），env=DEBUG 下断言 `<audit_dir>/activity_failures.log` 含 `Running activity` 行；env 未设下不含。
 
 ---
 
