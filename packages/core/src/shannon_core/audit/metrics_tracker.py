@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 
 from shannon_core.models.metrics import SessionMetadata
@@ -8,6 +9,11 @@ from .utils import (
     format_timestamp,
     generate_session_json_path,
 )
+
+
+# 终态集合:与 WorkflowSummary.status Literal["completed","failed","cancelled"] 对齐。
+# update_session_status 收到这些值时同时落顶层 completed_at;非终态(如 in-progress/paused)不落。
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 class MetricsTracker:
@@ -162,8 +168,18 @@ class MetricsTracker:
             )
 
     async def update_session_status(self, status: str) -> None:
-        """Update the session status field."""
+        """Update the session status — both top-level and nested.
+
+        顶层 status 是 web 显示/孤儿对账的权威来源(SessionManager.get_status 顶层优先,
+        WorkspacesIndexer._status_of 据此判终态)。历史只写内层 session.status → 顶层永留
+        create_workspace 的 "running" → 扫描完成后 _status_of 兜底成 interrupted → web 显示
+        "已中断"(回归 hr_20260713-104726)。终态同时落 completed_at,与
+        SessionManager.mark_completed / scan_manager._mark_cancelled 同源。
+        """
+        self._data["status"] = status
         self._data["session"]["status"] = status
+        if status in _TERMINAL_STATUSES:
+            self._data["completed_at"] = time.time()
         await self._atomic_write()
 
     async def add_resume_attempt(self, workflow_id: str, terminated: list[str], checkpoint: str | None = None) -> None:

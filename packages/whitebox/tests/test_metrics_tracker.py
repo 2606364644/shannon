@@ -122,7 +122,26 @@ async def test_update_session_status(tmp_path: Path):
     await tracker.initialize()
     await tracker.update_session_status("completed")
     data = _read_session_json(tmp_path)
+    # 内层(向后兼容)
     assert data["session"]["status"] == "completed"
+    # 回归测试(hr_20260713-104726):顶层 status 必须同步。历史只写内层 → 顶层永留
+    # create_workspace 的 "running" → SessionManager.get_status(顶层优先)读 running
+    # → _status_of 非终态+心跳 stale 兜底成 interrupted → 扫描完成后 web 显示"已中断"。
+    assert data["status"] == "completed"
+    # 终态必须落 completed_at(与 SessionManager.mark_completed/_mark_cancelled 同源)
+    assert data["completed_at"] is not None
+
+
+async def test_update_session_status_non_terminal_keeps_completed_at_null(tmp_path: Path):
+    """非终态(如 paused)镜像顶层 status 但不写 completed_at。"""
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    await tracker.update_session_status("paused")
+    data = _read_session_json(tmp_path)
+    assert data["session"]["status"] == "paused"
+    assert data["status"] == "paused"
+    assert data.get("completed_at") is None
 
 
 async def test_add_resume_attempt(tmp_path: Path):
