@@ -47,6 +47,14 @@ _SIDE_EFFECT_SINK_RE = re.compile(
     r")"
 )
 
+# IDOR-flavor user-controlled source reference: req.params / req.body / req.query
+# (group 2 = the property name, e.g. userId in req.params.userId; optional because
+# destructuring writes `const { userId } = req.params`). The injection-flavored
+# SourcePoint detection (query/body) misses IDOR-flavor req.params.userId — this
+# pattern closes that gap so a handler that takes the resource id from req.params
+# is recognized as having a user-controlled source (spec §5.7, NodeGoat A4).
+_REQ_REF_RE = re.compile(r"req\.(params|body|query)(?:\.(\w+))?")
+
 
 @dataclass(frozen=True)
 class IDORCandidateChain:
@@ -92,6 +100,92 @@ def _segment_has_ownership_guard(segment_ids: list[str], blocks_by_id: dict[str,
         if b is not None and OWNERSHIP_PREDICATE_RE.search(b.source_code):
             return True
     return False
+
+
+def _is_route_registration_block(blk: FuncBlock, hr_count_for_fb: int) -> bool:
+    """True if blk is an Express-style route-registration/wiring block (NOT a real
+    handler). NodeGoat collapses 22 http_route entries onto one `index.js:index:11`
+    wiring block — anchoring the IDOR judgement there breaks source propagation.
+
+    Two signals (either): ① source has ≥2 route registrations
+    (`(app|router).(get|post|…)(...)`, reuses entry_points._EXPRESS_ROUTE_PATTERN);
+    ② the block's func_block_id is the collapse target of ≥3 http_route entries.
+    """
+    from shannon_core.code_index.entry_points import _EXPRESS_ROUTE_PATTERN
+    route_count = len(_EXPRESS_ROUTE_PATTERN.findall(blk.source_code))
+    return route_count >= 2 or hr_count_for_fb >= 3
+
+
+def _resolve_real_handler(
+    chain, blocks_by_id: dict[str, FuncBlock], is_reg: bool,
+) -> tuple[int | None, FuncBlock | None]:
+    """Re-anchor a chain to its real handler, returning (anchor_step, real_handler).
+
+    Non-registration block → (0, head): the entry block IS the real handler.
+    Registration block → first node in path[1:] that is resolvable, NOT a
+    side-effect sink, and NOT itself a registration block (the real callback
+    GitNexus already traced, e.g. chain path[1] = ProfileHandler:8). Returns
+    (None, None) if no such node exists → caller skips the chain.
+    """
+    path = chain.path
+    if not is_reg:
+        head = blocks_by_id.get(path[0])
+        return (0, head) if head is not None else (None, None)
+    for step in range(1, len(path)):
+        blk = blocks_by_id.get(path[step])
+        if blk is None:
+            continue
+        if _is_side_effect_sink(blk):
+            continue
+        if _is_route_registration_block(blk, 0):
+            continue
+        return (step, blk)
+    return (None, None)
+
+
+def _idor_reaches_sink(
+    real_handler: FuncBlock,
+    ep_sources: list,
+    segment_ids: list[str],
+    blocks_by_id: dict[str, FuncBlock],
+) -> bool:
+    """IDOR-flavor forward reachability from the re-anchored real handler to the
+    segment's terminal sink. Lenient (宁过报): a missing intermediate callee (a
+    class node without a line number, e.g. AllocationsDAO) does NOT kill
+    propagation — we keep the tainted set and continue.
+
+    Seed = entry SourcePoint expressions ∪ req.params/body/query property refs
+    extracted from the real handler's source. The req.* extraction closes the
+    IDOR-flavor blind spot: a handler taking the resource id from req.params is
+    user-controlled even when no injection-flavored SourcePoint was recorded.
+    """
+    from shannon_core.code_index.chain_propagator import _map_call_site_params
+
+    seed: set[str] = {
+        sp.expression or sp.param_name for sp in ep_sources if sp.expression or sp.param_name
+    }
+    for m in _REQ_REF_RE.finditer(real_handler.source_code):
+        seed.add(m.group(0))           # e.g. req.params.userId
+        if m.group(2):
+            seed.add(m.group(2))       # e.g. userId (bare, matches destructured use)
+    if not seed:
+        return False
+    if len(segment_ids) == 1:
+        blk = blocks_by_id.get(segment_ids[0])
+        if blk is None:
+            return False
+        return any(token and token in blk.source_code for token in seed)
+    current_tainted: set[str] = set(seed)
+    for i in range(len(segment_ids) - 1):
+        caller = blocks_by_id.get(segment_ids[i])
+        callee = blocks_by_id.get(segment_ids[i + 1])
+        if caller is None or callee is None:
+            continue  # lenient: missing intermediate → keep propagating
+        current_tainted = _map_call_site_params(
+            caller_block=caller, caller_tainted=current_tainted, callee_block=callee)
+        if not current_tainted:
+            return False
+    return bool(current_tainted)
 
 
 # authz 判定的 entry 类型白名单（spec §4.8 改1）。gitnexus_process 放宽 route 守卫。
@@ -147,13 +241,17 @@ def find_unguarded_sink_paths(
 ) -> list[IDORCandidateChain]:
     """Find handler→sink paths lacking an ownership guard (IDOR candidates).
 
-    三重过滤（Phase C，source-anchored）：
-      ① entry 接收用户可控输入（有至少一个 SourcePoint）——无 SourcePoint 的
-         entry 跳过（降过报：内部入口无外部 source 通常非 IDOR）。
-      ② 参数实际正向流到 side-effect sink（`_source_reaches_sink`，复用 forward 工具）。
-      ③ entry→sink_step 段（含两端）无 ownership 谓词（决策6）。
-    另：sink 扫全链任意步 side-effect（决策7）；handler 自身含 ownership 谓词 → 短路
-    （dominance，既有逻辑保留）。命中时收集 source_point_ids 作为 source 证据。
+    三重过滤（Phase C，source-anchored + 注册块 re-anchor）：
+      ① entry 接收用户可控输入：有至少一个 SourcePoint，**或** re-anchor 后的真实
+         handler 引 req.params/body/query（IDOR 风味源，补注入风味的 SourcePoint 检测
+         盲区 —— NodeGoat A4：`const { userId } = req.params`）。无任一 → 跳过。
+      ② 参数实际正向流到 side-effect sink（`_idor_reaches_sink`，req.* seed + 宽松容忍
+         缺失中间块，宁过报）。
+      ③ anchor→sink_step 段（含两端）无 ownership 谓词（决策6）。
+    注册块（Express `(app|router).(get|…)` wiring 块，或 ≥3 http_route 塌缩目标）→
+    re-anchor 到 GitNexus 已追的 chain path[1] 真实 handler；非注册块 → anchor 在 head。
+    sink 扫 anchor 之后全链任意步 side-effect（决策7）；真实 handler 自身含 ownership
+    谓词 → 短路（dominance）。命中时收集 source_point_ids 作为 source 证据。
 
     Dedup by (endpoint_id, sink_id). Capped per endpoint to bound the
     judge-LLM cost.
@@ -171,49 +269,58 @@ def find_unguarded_sink_paths(
         and (ep.entry_type == "gitnexus_process" or ep.route is not None)
     ]
 
+    # http_route entry 数 per func_block_id —— 注册块塌缩信号（NodeGoat 22 路由
+    # 全指 index:11 wiring 块）。用于判该 entry 是否注册块（需 re-anchor）。
+    hr_count_by_fb: dict[str, int] = defaultdict(int)
+    for ep in entry_eps:
+        if ep.entry_type == "http_route":
+            hr_count_by_fb[ep.func_block_id] += 1
+
     candidates: list[IDORCandidateChain] = []
     seen: set[tuple[str, str]] = set()  # (endpoint_id, sink_id)
 
     for ep in entry_eps:
         ep_sources = sources_by_ep.get(ep.func_block_id, [])
-        if not ep_sources:                       # ① 无 SourcePoint → 跳过（降过报）
-            continue
-        handler = blocks_by_id.get(ep.func_block_id)
-        if handler is None:
-            continue  # unresolved handler — Plan 6 surfaces "unknown"; skip here
-        # Dominance short-circuit: if the handler itself has an ownership
-        # predicate, it dominates the sink for all paths through it — no IDOR
-        # candidate from this handler (guard present at the entry).
-        if _handler_has_ownership_guard(handler):
-            continue
+        ep_block = blocks_by_id.get(ep.func_block_id)
+        is_reg = ep_block is not None and _is_route_registration_block(
+            ep_block, hr_count_by_fb.get(ep.func_block_id, 0))
         count_for_ep = 0
         for chain in index.chains:
             if chain.entry_point_id != ep.func_block_id or not chain.path:
                 continue
-            # 改2: 扫全链找 side-effect sink（替 path[-1]，决策7）。
-            # 跳过 step_idx==0（entry/handler 自身节点）：sink 必须是被调用的 callee，
-            # handler 自身源码里的 side-effect 不算"到达 sink"（path handler→handler 退化）。
-            for step_idx, sid in enumerate(chain.path):
-                if step_idx == 0:
-                    continue
+            # re-anchor：注册块 → path[1:] 真实 handler；非注册块 → head。
+            anchor_step, real_handler = _resolve_real_handler(chain, blocks_by_id, is_reg)
+            if real_handler is None:
+                continue  # 无可 anchor 的真实 handler（注册块但 path[1:] 全缺失/是 sink）
+            # ① IDOR 源门：entry 有 SourcePoint，或真实 handler 引 req.params/body/query
+            #    （IDOR 风味源不被注入风味的 SourcePoint 检测识别，这里补认 —— NodeGoat A4）。
+            if not (ep_sources or _REQ_REF_RE.search(real_handler.source_code)):
+                continue
+            # dominance 短路：判真实 handler（非注册块）的 ownership 谓词。
+            if _handler_has_ownership_guard(real_handler):
+                continue
+            # 改2: 扫 anchor 之后全链找 side-effect sink（决策7）。sink 必须在 anchor 之后
+            # （被调用的 callee），anchor 自身源码里的 side-effect 不算"到达 sink"。
+            for step_idx in range(anchor_step + 1, len(chain.path)):
+                sid = chain.path[step_idx]
                 if not _is_side_effect_sink(blocks_by_id.get(sid)):
                     continue
                 key = (ep.func_block_id, sid)
                 if key in seen:
                     continue
-                segment = chain.path[: step_idx + 1]
-                # 改3: ownership 扫 entry→sink_step 段（含两端，决策6）
+                # segment 从 anchor 起（剔除注册块）：entry→sink_step 段 ownership 扫描（决策6）。
+                segment = list(chain.path[anchor_step: step_idx + 1])
                 if _segment_has_ownership_guard(segment, blocks_by_id):
                     continue
-                # ② 参数实际流到 sink（forward 传播）
-                if not _source_reaches_sink(ep_sources, segment, blocks_by_id):
+                # ② IDOR 风味正向可达（req.* seed，宽松容忍缺失中间块）。
+                if not _idor_reaches_sink(real_handler, ep_sources, segment, blocks_by_id):
                     continue
                 # ③ 已通过 ownership 检查；收集命中的 SourcePoint 作为 source 证据
                 hit_sp_ids = tuple(sp.id for sp in ep_sources)
                 seen.add(key)
                 candidates.append(IDORCandidateChain(
                     endpoint_id=ep.func_block_id,
-                    handler_id=ep.func_block_id,
+                    handler_id=real_handler.id,   # re-anchored 真实 handler（非注册块）
                     sink_id=sid,
                     sink_step_idx=step_idx,
                     path=tuple(chain.path),

@@ -1,5 +1,7 @@
 # 侦察层 LLM 纳入 SHANNON_LLM_TRACK_ENABLED 开关 — 实现计划
 
+> ⚠️ **本 plan 已部分回退（2026-07-14，plan smooth-wandering-dolphin）。** 「关掉 pre-recon/recon」的前提「GitNexus 兜底 recon」对 authz 证伪 —— authz Vertical/Context 依赖 recon 的角色模型（§7）/ 多步工作流（§8.3），GitNexus 完全不产这些语义。故 pre-recon / recon / merge_sink_reports 重新移出 `SHANNON_LLM_TRACK_ENABLED` 门控（始终跑），开关收窄为「只关 inj/xss/ssrf vuln agent」（`DEGRADABLE_VULN_CLASSES`）；authz/auth vuln agent 也保留。下文「关掉 pre-recon/recon」的 task 均已过时，保留作历史记录。详见 plan smooth-wandering-dolphin + spec 顶部标注。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 `SHANNON_LLM_TRACK_ENABLED=0` 除关 vuln agent 外,也关掉 pre-recon / recon 两个纯 LLM 侦察 agent,使「关 LLM 轨靠 GitNexus 确定性轨兜底」名副其实。

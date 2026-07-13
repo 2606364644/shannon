@@ -35,8 +35,9 @@ Output JSON only:
 </output>
 
 <conservative_policy>
-Be conservative: if uncertain, judge as non-vulnerable. ALL explore-discovered
-findings MUST be tagged `confidence=low` and `notes` containing "explore-discovered"
-— these are soft candidates that have NOT passed deterministic dominance
-validation and require human review.
+Align with the global "宁过报不漏报" (over-report, never miss) policy: if uncertain,
+judge as vulnerable with `confidence=low` and `notes` containing "explore-discovered".
+ALL explore-discovered findings carry these tags — they are soft candidates that
+have NOT passed deterministic dominance validation and require human review. Do
+NOT default uncertain cases to non-vulnerable; that systematically under-reports.
 </conservative_policy>

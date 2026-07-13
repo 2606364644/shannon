@@ -6,7 +6,12 @@ from temporalio import workflow
 from temporalio.exceptions import CancelledError
 from temporalio.common import RetryPolicy
 
-from shannon_core.models.agents import AgentName, ALL_VULN_CLASSES, VulnType
+from shannon_core.models.agents import (
+    ALL_VULN_CLASSES,
+    DEGRADABLE_VULN_CLASSES,
+    AgentName,
+    VulnType,
+)
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.config.vuln_selection import select_vuln_classes
 
@@ -148,50 +153,35 @@ class WhiteboxScanWorkflow:
                 self._state.current_phase = "pre-recon"
                 self._state.current_agent = AgentName.PRE_RECON.value
 
-                if input.enable_llm_track:
-                    # Fail-fast: if either fails, cancel the other and propagate.
-                    code_index_result, pre_recon_metrics = await asyncio.gather(
-                        workflow.execute_activity(
-                            activities.run_code_index, act_input,
-                            start_to_close_timeout=CODE_INDEX_ACTIVITY_TIMEOUT,
-                            retry_policy=retry_for("code-index"),
-                        ),
-                        workflow.execute_activity(
-                            activities.run_agent,
-                            ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.PRE_RECON.value}),
-                            start_to_close_timeout=timedelta(hours=2),
-                            retry_policy=retry_for("standard"),
-                        ),
-                    )
-                    self._state.completed_agents.append(AgentName.PRE_RECON.value)
-                    self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
-                else:
-                    # LLM 轨关闭: pre-recon LLM agent 跳过, 只跑 code_index (GitNexus 确定性兜底).
-                    # 不 append PRE_RECON (resume 语义: 开轨重跑会补); entry_point_fusion 内部
-                    # 靠 deliverable 存在性 skip LLM 源 (G6 解耦), 故 pre_recon_deliverable.md 缺失安全.
-                    code_index_result = await workflow.execute_activity(
+                # pre-recon LLM 始终跑(不再受 enable_llm_track 门控): recon 链是 authz
+                # Vertical/Context 的输入(角色模型 §7 / 工作流 §8.3), GitNexus 完全不产 ——
+                # 关 LLM 轨也必须跑, 否则 authz 巧妇难为无米之炊(plan smooth-wandering-dolphin)。
+                # Fail-fast: if either fails, cancel the other and propagate.
+                code_index_result, pre_recon_metrics = await asyncio.gather(
+                    workflow.execute_activity(
                         activities.run_code_index, act_input,
                         start_to_close_timeout=CODE_INDEX_ACTIVITY_TIMEOUT,
                         retry_policy=retry_for("code-index"),
-                    )
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        ActivityInput(**{**act_input.__dict__,
-                           "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0): pre-recon LLM agent skipped; code_index (GitNexus) still runs; entry points degrade to deterministic schema source only",
-                           "info_level": "info"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
+                    ),
+                    workflow.execute_activity(
+                        activities.run_agent,
+                        ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.PRE_RECON.value}),
+                        start_to_close_timeout=timedelta(hours=2),
+                        retry_policy=retry_for("standard"),
+                    ),
+                )
+                self._state.completed_agents.append(AgentName.PRE_RECON.value)
+                self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
 
                 self._state.code_index_stats = code_index_result
 
-                if input.enable_llm_track:
-                    # Merge deterministic sinks with LLM-discovered sinks (needs LLM deliverable)
-                    await workflow.execute_activity(
-                        activities.run_merge_sink_reports, act_input,
-                        start_to_close_timeout=timedelta(minutes=2),
-                        retry_policy=retry_for("standard"),
-                    )
+                # merge_sink_reports 始终跑(不再门控): 依赖 pre-recon deliverable,
+                # 保 pre-recon(上)则保它。合并确定性 sinks + LLM-discovered sinks。
+                await workflow.execute_activity(
+                    activities.run_merge_sink_reports, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
+                )
 
                 # Entry point fusion: schema/convention 无条件跑（纯确定性 + LLM 源靠
                 # deliverable 存在性内部 skip）；G6 解耦——不再被 enable_llm_track 门控，
@@ -238,47 +228,35 @@ class WhiteboxScanWorkflow:
                 )
 
             if AgentName.RECON.value not in self._state.completed_agents:
-                if input.enable_llm_track:
-                    await workflow.execute_activity(
-                        activities.log_phase_start_activity,
-                        args=[
-                            ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
-                            list(step_names("recon")),
-                            list(step_intents("recon")),
-                        ],
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
-                    self._state.current_phase = "recon"
-                    self._state.current_agent = AgentName.RECON.value
-                    metrics = await workflow.execute_activity(
-                        activities.run_agent,
-                        ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.RECON.value}),
-                        start_to_close_timeout=timedelta(hours=2),
-                        retry_policy=retry_for("standard"),
-                    )
-                    self._state.completed_agents.append(AgentName.RECON.value)
-                    self._state.agent_metrics[AgentName.RECON.value] = metrics
-                    self._state.current_agent = None
-                    await workflow.execute_activity(
-                        activities.log_phase_complete_activity,
+                # recon LLM 始终跑(不再门控): authz Vertical/Context 的输入
+                # (角色模型 §7 / 工作流 §8.3 / 端点安全上下文 §4.2), GitNexus 完全不产。
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    args=[
                         ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
-                else:
-                    # LLM 轨关闭: recon LLM agent 跳过. 不进 recon phase, 不 append RECON
-                    # (resume 语义). GitNexus 轨不依赖 recon_deliverable.md (chain_verdict
-                    # 只吃 parameter_graph.json), 故缺失安全; 下游 vuln/attack_chain/PoC 靠
-                    # exists() 守卫降级 (spec §1.3 零硬依赖崩).
-                    await workflow.execute_activity(
-                        activities.log_info_activity,
-                        ActivityInput(**{**act_input.__dict__,
-                           "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0): recon LLM agent skipped; GitNexus track continues independently",
-                           "info_level": "info"}),
-                        start_to_close_timeout=timedelta(seconds=10),
-                        retry_policy=retry_for("log"),
-                    )
+                        list(step_names("recon")),
+                        list(step_intents("recon")),
+                    ],
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
+                self._state.current_phase = "recon"
+                self._state.current_agent = AgentName.RECON.value
+                metrics = await workflow.execute_activity(
+                    activities.run_agent,
+                    ActivityInput(**{**act_input.__dict__, "agent_name": AgentName.RECON.value}),
+                    start_to_close_timeout=timedelta(hours=2),
+                    retry_policy=retry_for("standard"),
+                )
+                self._state.completed_agents.append(AgentName.RECON.value)
+                self._state.agent_metrics[AgentName.RECON.value] = metrics
+                self._state.current_agent = None
+                await workflow.execute_activity(
+                    activities.log_phase_complete_activity,
+                    ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
 
             # Risk scoring — produce tiered audit plan
             await workflow.execute_activity(
@@ -306,24 +284,33 @@ class WhiteboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
 
+            # phase start 的 step/intent 列表对齐实际调度的 vuln agent: 关 LLM 轨时只
+            # authz/auth-vuln 跑(inj/xss/ssrf 靠 GitNexus chain_verdict, 在本 phase 后段,
+            # 非 vuln agent, 不在此 step 列表), 避免显示 inj-vuln 等不跑的 agent 误导。
+            if input.enable_llm_track:
+                vuln_display = list(selected_classes)
+            else:
+                vuln_display = [vt for vt in selected_classes
+                                if vt not in DEGRADABLE_VULN_CLASSES]
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 args=[
                     ActivityInput(**{**act_input.__dict__, "phase": "vulnerability-analysis"}),
-                    list(vuln_phase_steps([str(vt) for vt in selected_classes])),
+                    list(vuln_phase_steps([str(vt) for vt in vuln_display])),
                     # 必须补齐第 3 参数(intents)，使 args 数量(3)== log_phase_start_activity
                     # 参数数(3)。否则 temporalio worker 检测到数量不匹配会把整个 arg_types
                     # 置 None，input 被反序列化成 dict 而非 ActivityInput → input.phase 崩。
                     # vuln steps 是动态 agent(vuln_classes 决定)，无静态 step_intents，故按
                     # 每个 vuln class 现造平行 intent 文案。
-                    [f"分析 {vt} 漏洞" for vt in selected_classes],
+                    [f"分析 {vt} 漏洞" for vt in vuln_display],
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
             self._state.current_phase = "vulnerability-analysis"
+            vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
             if input.enable_llm_track:
-                vuln_tasks: list[tuple[VulnType, AgentName, object]] = []
+                # 开轨: 全部 selected_classes 跑(双轨: LLM vuln agent + GitNexus 轨 OR)
                 for vt in selected_classes:
                     agent_name = AgentName(f"{vt}-vuln")
                     if agent_name.value not in self._state.completed_agents:
@@ -336,16 +323,30 @@ class WhiteboxScanWorkflow:
                         )
                         vuln_tasks.append((vt, agent_name, coro))
             else:
-                # LLM 轨关闭: 只跑 GitNexus 轨, merge 只消费 *_gitnexus_queue.json
+                # 关 LLM 轨: 只关 inj/xss/ssrf(taint, GitNexus chain_verdict 主干兜底);
+                # authz/auth 必须保留(GitNexus 只做 IDOR 不覆盖 Vertical/Context, auth 无确定性轨)。
+                # recon/pre-recon LLM 已在上游始终跑(本 gate 之外), 保证 authz 有输入不降级。
+                for vt in selected_classes:
+                    if vt in DEGRADABLE_VULN_CLASSES:
+                        continue
+                    agent_name = AgentName(f"{vt}-vuln")
+                    if agent_name.value not in self._state.completed_agents:
+                        self._state.current_agent = agent_name.value
+                        coro = workflow.execute_activity(
+                            activities.run_vuln_agent,
+                            ActivityInput(**{**act_input.__dict__, "agent_name": agent_name.value}),
+                            start_to_close_timeout=timedelta(hours=2),
+                            retry_policy=retry_for("vuln"),
+                        )
+                        vuln_tasks.append((vt, agent_name, coro))
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0); running GitNexus track only",
+                       "info_message": "llm_track=disabled (SHANNON_LLM_TRACK_ENABLED=0): inj/xss/ssrf vuln agents skipped (GitNexus chain_verdict fallback); authz/auth vuln agents + recon/pre-recon LLM retained",
                        "info_level": "info"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
                 )
-                vuln_tasks = []
 
             if vuln_tasks:
                 semaphore = asyncio.Semaphore(input.max_concurrent)

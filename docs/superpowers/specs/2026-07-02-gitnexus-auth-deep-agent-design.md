@@ -1,3 +1,5 @@
+> ⚠️ auth 部分已回退 2026-07-14（对齐原始 shannon：`auth_config_scanner` 踩 §1 铁律「确定性产物不喂 LLM 轨 prompt」+ CORS 越界被裁的 misconfig；authz GitNexus 轨保留。详见 plan zazzy-roaming-shamir / memory auth-gitnexus-track-reverted）
+
 # auth GitNexus 轨深度 agent（spec-2b） 设计
 
 > 日期：2026-07-02（spec 定稿）/ 2026-07-02 框架草案　分支：`feat/fork-py`　所属 epic：`2026-07-02-gitnexus-deep-agent-auth-authz-design.md`（子项目 2b）

@@ -178,3 +178,20 @@ def test_pre_recon_prompt_does_not_reference_deterministic_code_index():
     assert "code_index.json" not in pre_recon, (
         "pre-recon prompt 仍引用确定性 code_index.json（语义耦合，违背 LLM 轨自给）"
     )
+
+
+def test_no_llm_track_prompt_references_auth_config_scan():
+    """CLAUDE.md §1: LLM 轨 vuln-*.txt 不得引用 auth_config_scan(确定性 config 扫描产物)。
+
+    2026-07-14 删除 auth GitNexus 轨(auth_config_scanner)后锁定——auth 回纯 LLM 轨,
+    不得重建"确定性 config 扫描 → 喂 LLM 轨 lead"的桥(scanner lead 曾踩 §1 铁律:
+    确定性产物喂 LLM 轨 prompt)。对标 test_pre_recon_prompt_does_not_reference_
+    deterministic_code_index(语义耦合层守卫,非仅 {{}} 占位符)。"""
+    offenders = sorted(
+        str(p.relative_to(PROMPTS_DIR))
+        for p in PROMPTS_DIR.glob("vuln-*.txt")
+        if "auth_config_scan" in p.read_text()
+    )
+    assert not offenders, (
+        f"CLAUDE.md §1: LLM 轨 vuln-*.txt 引用 auth_config_scan(确定性产物, 踩铁律): {offenders}"
+    )

@@ -88,7 +88,7 @@ SHANNON_SMALL_MODEL=GLM-4.5-Air
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `SHANNON_LLM_TRACK_ENABLED` | `1`（开） | 是否跑 LLM 轨。`0` = token 紧张时只跑 GitNexus 确定性轨兜底 |
+| `SHANNON_LLM_TRACK_ENABLED` | `1`（开） | 关 LLM 轨开关。`0` = 只关 inj/xss/ssrf 的 vuln agent（taint，GitNexus chain_verdict 兜底）；pre-recon / recon / authz / auth 的 LLM 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果） |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal Server 地址 |
 
 配置文件加载与 profile 自洽校验细节见 [配置指南](docs/configuration.md)。
@@ -224,7 +224,7 @@ cd packages/web/frontend && npm install && npm run dev
 shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
 
 - **双引擎**：业务流程（白盒/黑盒）不感知底层用哪个 SDK；同一份 vuln prompt 在两引擎下行为对齐、可互换。切引擎 = 改 profile 里的 `SHANNON_AI_PROVIDER`。
-- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（确定性代码索引 → 候选链 → 轻量 LLM 判定）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SHANNON_LLM_TRACK_ENABLED=0` 关闭 LLM 轨，仅靠 GitNexus 轨兜底。
+- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（确定性代码索引 → 候选链 → 轻量 LLM 判定）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SHANNON_LLM_TRACK_ENABLED=0` **只关 inj/xss/ssrf 的 vuln agent**（靠 GitNexus 轨兜底）；authz / auth 的 LLM agent 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果）。
 
 深入设计见 [GitNexus 轨生命周期分析](docs/gitnexus-track-analysis.md) 与 [系统架构](docs/architecture.md)。架构不变量与开发约定见根目录 `CLAUDE.md`。
 

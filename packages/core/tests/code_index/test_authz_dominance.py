@@ -181,3 +181,138 @@ def test_ownership_guard_on_segment_blocks_candidate():
     index = _idx([entry, middle], [], [chain], [_ep(entry.id, "/api/x")])
     # entry 源码含 ownership 谓词 → handler_has_ownership_guard 短路（既有逻辑）→ 无候选
     assert find_unguarded_sink_paths(index) == []
+
+
+# ---------------------------------------------------------------------------
+# 注册块 re-anchor + IDOR 源补召回（velvety-wibbling-candy）。
+# Express 注册式路由让 entry 塌缩到注册块（含 ≥2 条 app/router.(get|post|…) 注册），
+# 破坏 (1) source 传播 (2) SourcePoint 锚定 (3) IDOR 风味源识别。修复：复用 GitNexus
+# 已追的 chain path[1] 真实 handler，把判定 anchor 从注册块下移到真实 handler，并补
+# IDOR 风味源 req.params/body/query。
+# ---------------------------------------------------------------------------
+
+# 注册块源码：含 3 条 Express 路由注册（≥2 即判注册块）。
+_REG_BLOCK_SRC = (
+    "(app, db) => {\n"
+    '  app.get("/api/a", aHandler);\n'
+    '  app.post("/api/b", bHandler);\n'
+    '  app.delete("/api/c", cHandler);\n'
+    "}\n"
+)
+
+
+def test_registration_block_reanchors_to_real_handler():
+    """注册块 head（≥2 路由注册）+ path[1] 真实 handler 引 req.params →
+    anchor 下移到真实 handler：候选 handler_id=真实 handler（非注册块）。"""
+    reg = _block("app/routes/index.js:index:11", _REG_BLOCK_SRC)
+    real_handler = _block(
+        "app/routes/alloc.js:AllocHandler:6",
+        "function AllocHandler(db){ this.display=(req,res)=>{ dao.get(req.params.id); }; }",
+    )
+    sink = _block("app/data/dao.js:get:4", "function get(id){ db.user.update(); }", params=["id"])
+    chain = CallChain(
+        entry_point_id=reg.id, path=[reg.id, real_handler.id, sink.id],
+        depth=2, has_unresolved=False,
+    )
+    # 注册块无 SourcePoint；真实 handler 引 req.params → has_idor_source 经 req.* 成立
+    index = _idx([reg, real_handler, sink], [], [chain], [_ep(reg.id, "/api/a")])
+    cands = find_unguarded_sink_paths(index)
+    assert len(cands) == 1
+    assert cands[0].handler_id == real_handler.id   # re-anchored，非注册块
+    assert cands[0].endpoint_id == reg.id
+    assert cands[0].sink_id == sink.id
+
+
+def test_registration_block_without_resolvable_handler_skipped():
+    """注册块 head + path[1] 不可解析（缺失）+ path[2] 是 sink →
+    无可 anchor 的真实 handler → 0 候选，不崩。注册块带 SourcePoint 迫使 re-anchor
+    逻辑运行（否则被 ① 无 source 丢弃，测不到 re-anchor）。"""
+    reg = _block("app/routes/index.js:index:11", _REG_BLOCK_SRC)
+    sink = _block("app/data/dao.js:get:4", "function get(id){ db.user.update(); }", params=["id"])
+    chain = CallChain(
+        entry_point_id=reg.id,
+        path=[reg.id, "app/data/missing.js:DAO:1", sink.id],   # path[1] 缺失中间块
+        depth=2, has_unresolved=False,
+    )
+    sp = _sp(reg.id, "req.query.url", "url")
+    index = _idx([reg, sink], [], [chain], [_ep(reg.id, "/api/a")], source_points=[sp])
+    assert find_unguarded_sink_paths(index) == []
+
+
+def test_gitnexus_process_entry_seeds_idor_source_from_req_params():
+    """gitnexus_process entry + req.params.userId + 无 SourcePoint → 候选。
+    回归 A4：IDOR 风味源 req.params 不被 source 检测识别（只认注入风味 query/body），
+    旧逻辑 ① 无 SourcePoint 即丢弃 → 0 候选。修复后认 req.* 为 IDOR 源。"""
+    handler = _block(
+        "app/routes/alloc.js:AllocHandler:6",
+        "function AllocHandler(db){ this.display=(req,res)=>{ dao.get(req.params.userId); }; }",
+    )
+    sink = _block("app/data/user-dao.js:get:4", "function get(uid){ db.user.insert(); }", params=["uid"])
+    chain = CallChain(
+        entry_point_id=handler.id, path=[handler.id, sink.id],
+        depth=1, has_unresolved=False,
+    )
+    # _proc_ep（route=None）+ 无 SourcePoint
+    index = _idx([handler, sink], [], [chain], [_proc_ep(handler.id)])
+    cands = find_unguarded_sink_paths(index)
+    assert len(cands) == 1
+    assert cands[0].handler_id == handler.id
+    assert cands[0].source_point_ids == ()   # 无 SourcePoint 命中
+
+
+def test_idor_reaches_sink_tolerates_missing_intermediate():
+    """path=[handler, MISSING_DAO, sink] → 缺失中间块不杀传播，保守继续（宁过报）。
+    模拟 NodeGoat chain[6]：AllocationsHandler→AllocationsDAO(类节点无行号)→UserDAO。"""
+    handler = _block(
+        "app/routes/alloc.js:AllocHandler:6",
+        "function AllocHandler(db){ this.display=(req,res)=>{ dao.exec(req.params.id); }; }",
+    )
+    sink = _block("app/data/user-dao.js:exec:4", "function exec(x){ db.user.update(); }", params=["x"])
+    chain = CallChain(
+        entry_point_id=handler.id,
+        path=[handler.id, "app/data/missing.js:DAO:1", sink.id],   # 中间缺失
+        depth=2, has_unresolved=False,
+    )
+    sp = _sp(handler.id, "req.params.id", "id")
+    index = _idx([handler, sink], [], [chain], [_ep(handler.id, "/api/alloc/:id")],
+                 source_points=[sp])
+    cands = find_unguarded_sink_paths(index)
+    assert len(cands) == 1
+    assert cands[0].sink_id == sink.id
+
+
+def test_real_handler_with_ownership_guard_still_blocked():
+    """re-anchor 到真实 handler 后，真实 handler 含 ownership 谓词 → 仍阻断。
+    回归保护：re-anchor 下移 anchor 不破坏 dominance 守卫。注册块带 SourcePoint
+    迫使 re-anchor 逻辑运行。"""
+    reg = _block("app/routes/index.js:index:11", _REG_BLOCK_SRC)
+    guarded = _block(
+        "app/routes/x.js:XHandler:8",
+        "function XHandler(db){ const r = db.findFirst({where:{userId:req.user.id}}); return render(r); }",
+    )
+    sink = _block("app/data/dao.js:save:4", "function save(r){ db.user.update(); }", params=["r"])
+    chain = CallChain(
+        entry_point_id=reg.id, path=[reg.id, guarded.id, sink.id],
+        depth=2, has_unresolved=False,
+    )
+    sp = _sp(reg.id, "req.query.url", "url")
+    index = _idx([reg, guarded, sink], [], [chain], [_ep(reg.id, "/api/a")], source_points=[sp])
+    assert find_unguarded_sink_paths(index) == []
+
+
+def test_session_chain_with_ownership_still_blocked():
+    """注册块 head + path[1]=SessionHandler 含 ownership（findByUserId，session-sourced）
+    → 0 候选。回归保护：session 系（handler 自带 ownership）不被 re-anchor 破坏守卫。"""
+    reg = _block("app/routes/index.js:index:11", _REG_BLOCK_SRC)
+    session = _block(
+        "app/routes/session.js:SessionHandler:8",
+        "function SessionHandler(db){ const u = userDAO.findByUserId(req.session.userId); return u; }",
+    )
+    sink = _block("app/data/user-dao.js:get:4", "function get(uid){ db.user.update(); }", params=["uid"])
+    chain = CallChain(
+        entry_point_id=reg.id, path=[reg.id, session.id, sink.id],
+        depth=2, has_unresolved=False,
+    )
+    sp = _sp(reg.id, "req.query.url", "url")
+    index = _idx([reg, session, sink], [], [chain], [_ep(reg.id, "/api/session")], source_points=[sp])
+    assert find_unguarded_sink_paths(index) == []

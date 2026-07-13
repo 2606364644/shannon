@@ -1,3 +1,5 @@
+> ⚠️ auth 部分已回退 2026-07-14（对齐原始 shannon：`auth_config_scanner` 踩 §1 铁律「确定性产物不喂 LLM 轨 prompt」+ CORS 越界被裁的 misconfig；authz GitNexus 轨保留。详见 plan zazzy-roaming-shamir / memory auth-gitnexus-track-reverted）
+
 # auth GitNexus 轨深度 agent（spec-2b） Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.

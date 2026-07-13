@@ -1,5 +1,7 @@
 # 侦察层 LLM 纳入 SHANNON_LLM_TRACK_ENABLED 开关设计
 
+> ⚠️ **本 spec 已部分回退（2026-07-14，plan smooth-wandering-dolphin）。** 把 pre-recon / recon 纳入关 LLM 轨的前提「GitNexus 兜底 recon」对 authz 证伪 —— authz Vertical/Context 依赖 recon 的角色模型（§7）/ 多步工作流（§8.3），GitNexus 完全不产这些语义。故 pre-recon / recon / merge_sink_reports 重新移出 `SHANNON_LLM_TRACK_ENABLED` 门控（始终跑），开关收窄为「只关 inj/xss/ssrf vuln agent」（`DEGRADABLE_VULN_CLASSES`）；authz/auth vuln agent 也保留（GitNexus 只做 IDOR 不覆盖 Vertical/Context + auth 无轨）。下文 §4.1 矩阵 / §5 语义扩展句 / §4.6 skip message 均已过时，保留作历史记录。
+
 ## 0. 一句话结论
 
 `SHANNON_LLM_TRACK_ENABLED=0` 当前只 gate 了 vuln agent,侦察层的 pre-recon / recon 两个纯 LLM agent 不受控、始终烧 token。本设计把这两个 agent 纳入同一开关,让「关 LLM 轨靠 GitNexus 确定性轨兜底」名副其实;改动集中在 `workflows.py` 内联 gate(复用 `is_llm_track_enabled()`),零新开关、零新抽象。

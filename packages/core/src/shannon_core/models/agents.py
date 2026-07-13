@@ -5,6 +5,13 @@ from pydantic import BaseModel, ConfigDict
 
 VulnType = Literal["injection", "xss", "auth", "ssrf", "authz"]
 
+# 关 LLM 轨(SHANNON_LLM_TRACK_ENABLED=0)时关闭的 vuln 类: taint 类, GitNexus
+# chain_verdict 是主干兜底(memory dual-track-gitnexus-is-main-track)。authz/auth
+# 隐式「不可降级」: GitNexus 只做 IDOR(不覆盖 Vertical/Context), auth 无确定性轨。
+# recon/pre-recon LLM 也不在此(它们是 authz Vertical/Context 的输入链, GitNexus 不产)。
+# 详见 plan smooth-wandering-dolphin + test_workflows_llm_track_gating.py。
+DEGRADABLE_VULN_CLASSES: tuple[VulnType, ...] = ("injection", "xss", "ssrf")
+
 class AgentName(str, Enum):
     PRE_RECON = "pre-recon"
     RECON = "recon"

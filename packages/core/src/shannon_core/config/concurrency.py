@@ -38,7 +38,13 @@ def _is_truthy_env(name: str, default: bool) -> bool:
 
 
 def is_llm_track_enabled() -> bool:
-    """SHANNON_LLM_TRACK_ENABLED: 是否跑 LLM 轨(重型 vuln agent). 默认开(True)."""
+    """SHANNON_LLM_TRACK_ENABLED: 关 LLM 轨开关(默认开 True)。
+
+    =0 时只关 inj/xss/ssrf vuln agent(DEGRADABLE_VULN_CLASSES, taint GitNexus
+    chain_verdict 主干兜底); pre-recon/recon/authz/auth 的 LLM 全保留(GitNexus
+    做不了 authz Vertical/Context + recon 角色模型/工作流, 关了会降安全效果).
+    详见 plan smooth-wandering-dolphin + CLAUDE.md §1.
+    """
     return _is_truthy_env("SHANNON_LLM_TRACK_ENABLED", default=True)
 
 

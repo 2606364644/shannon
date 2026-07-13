@@ -13,11 +13,3 @@ def test_gitnexus_chain_verdict_registered_in_worker():
     assert src.count("run_gitnexus_chain_verdict") >= 2, (
         "run_gitnexus_chain_verdict must be imported AND listed in worker.py activities"
     )
-
-
-def test_auth_config_scan_registered_in_worker():
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
-    src = worker.read_text()
-    assert src.count("run_auth_config_scan") >= 2, (
-        "run_auth_config_scan must be imported AND listed in worker.py activities"
-    )

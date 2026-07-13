@@ -1,0 +1,1017 @@
+{
+  "repository": "/Users/mango/project/vuln-range/NodeGoat",
+  "language": "typescript",
+  "total_blocks": 24,
+  "total_entry_points": 23,
+  "total_chains": 8,
+  "blocks": [
+    {
+      "id": "app/data/allocations-dao.js:searchCriteria:60",
+      "file_path": "app/data/allocations-dao.js",
+      "function_name": "searchCriteria",
+      "start_line": 60,
+      "end_line": 84,
+      "source_code": "() => {\n\n            if (threshold) {\n                /*\n                // Fix for A1 - 2 NoSQL Injection - escape the threshold parameter properly\n                // Fix this NoSQL Injection which doesn't sanitze the input parameter 'threshold' and allows attackers\n                // to inject arbitrary javascript code into the NoSQL query:\n                // 1. 0';while(true){}'\n                // 2. 1'; return 1 == '1\n                // Also implement fix in allocations.html for UX.                             \n                const parsedThreshold = parseInt(threshold, 10);\n                \n                if (parsedThreshold >= 0 && parsedThreshold <= 99) {\n                    return {$where: `this.userId == ${parsedUserId} && this.stocks > ${parsedThreshold}`};\n                }\n                throw `The user supplied threshold: ${parsedThreshold} was not valid.`;\n                */\n                return {\n                    $where: `this.userId == ${parsedUserId} && this.stocks > '${threshold}'`\n                };\n            }\n            return {\n                userId: parsedUserId\n            };\n        }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/benefits-dao.js:BenefitsDAO:2",
+      "file_path": "app/data/benefits-dao.js",
+      "function_name": "BenefitsDAO",
+      "start_line": 2,
+      "end_line": 41,
+      "source_code": "function BenefitsDAO(db) {\n\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof BenefitsDAO)) {\n        console.log(\"Warning: BenefitsDAO constructor called without 'new' operator\");\n        return new BenefitsDAO(db);\n    }\n\n    const usersCol = db.collection(\"users\");\n\n    this.getAllNonAdminUsers = callback => {\n        usersCol.find({\n            \"isAdmin\": {\n                $ne: true\n            }\n        }).toArray((err, users) => callback(null, users));\n    };\n\n    this.updateBenefits = (userId, startDate, callback) => {\n        usersCol.update({\n                _id: parseInt(userId)\n            }, {\n                $set: {\n                    benefitStartDate: startDate\n                }\n            },\n            (err, result) => {\n                if (!err) {\n                    console.log(\"Updated benefits\");\n                    return callback(null, result);\n                }\n\n                return callback(err, null);\n            }\n        );\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/contributions-dao.js:ContributionsDAO:4",
+      "file_path": "app/data/contributions-dao.js",
+      "function_name": "ContributionsDAO",
+      "start_line": 4,
+      "end_line": 84,
+      "source_code": "function ContributionsDAO(db) {\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof ContributionsDAO)) {\n        console.log(\"Warning: ContributionsDAO constructor called without 'new' operator\");\n        return new ContributionsDAO(db);\n    }\n\n    const contributionsDB = db.collection(\"contributions\");\n    const userDAO = new UserDAO(db);\n\n    this.update = (userId, preTax, afterTax, roth, callback) => {\n        const parsedUserId = parseInt(userId);\n\n        // Create contributions document\n        const contributions = {\n            userId: parsedUserId,\n            preTax: preTax,\n            afterTax: afterTax,\n            roth: roth\n        };\n\n        contributionsDB.update({\n            userId\n            },\n            contributions, {\n                upsert: true\n            },\n            err => {\n                if (!err) {\n                    console.log(\"Updated contributions\");\n                    // add user details\n                    userDAO.getUserById(parsedUserId, (err, user) => {\n\n                        if (err) return callback(err, null);\n\n                        contributions.userName = user.userName;\n                        contributions.firstName = user.firstName;\n                        contributions.lastName = user.lastName;\n                        contributions.userId = userId;\n\n                        return callback(null, contributions);\n                    });\n                } else {\n                    return callback(err, null);\n                }\n            }\n        );\n    };\n\n    this.getByUserId = (userId, callback) => {\n        contributionsDB.findOne({\n                userId: userId\n            },\n            (err, contributions) => {\n                if (err) return callback(err, null);\n\n                // Set defualt contributions if not set\n                contributions = contributions || {\n                    preTax: 2,\n                    afterTax: 2,\n                    roth: 2\n                };\n\n                // add user details\n                userDAO.getUserById(userId, (err, user) => {\n\n                    if (err) return callback(err, null);\n                    contributions.userName = user.userName;\n                    contributions.firstName = user.firstName;\n                    contributions.lastName = user.lastName;\n                    contributions.userId = userId;\n\n                    callback(null, contributions);\n                });\n            }\n        );\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/memos-dao.js:MemosDAO:2",
+      "file_path": "app/data/memos-dao.js",
+      "function_name": "MemosDAO",
+      "start_line": 2,
+      "end_line": 37,
+      "source_code": "function MemosDAO(db) {\n\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof MemosDAO)) {\n        console.log(\"Warning: MemosDAO constructor called without 'new' operator\");\n        return new MemosDAO(db);\n    }\n\n    const memosCol = db.collection(\"memos\");\n\n    this.insert = (memo, callback) => {\n\n        // Create allocations document\n        const memos = {\n            memo,\n            timestamp: new Date()\n        };\n\n        memosCol.insert(memos, (err, result) => !err ? callback(null, result) : callback(err, null));\n    };\n\n    this.getAllMemos = (callback) => {\n\n        memosCol.find({}).sort({\n            timestamp: -1\n        }).toArray((err, memos) => {\n            if (err) return callback(err, null);\n            if (!memos) return callback(\"ERROR: No memos found\", null);\n            callback(null, memos);\n        });\n    };\n\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/profile-dao.js:ProfileDAO:2",
+      "file_path": "app/data/profile-dao.js",
+      "function_name": "ProfileDAO",
+      "start_line": 2,
+      "end_line": 111,
+      "source_code": "function ProfileDAO(db) {\n\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof ProfileDAO)) {\n        console.log(\"Warning: ProfileDAO constructor called without 'new' operator\");\n        return new ProfileDAO(db);\n    }\n\n    const users = db.collection(\"users\");\n\n    /* Fix for A6 - Sensitive Data Exposure\n\n    // Use crypto module to save sensitive data such as ssn, dob in encrypted format\n    const crypto = require(\"crypto\");\n    const config = require(\"../../config/config\");\n\n    /// Helper method create initialization vector\n    // By default the initialization vector is not secure enough, so we create our own\n    const createIV = () => {\n        // create a random salt for the PBKDF2 function - 16 bytes is the minimum length according to NIST\n        const salt = crypto.randomBytes(16);\n        return crypto.pbkdf2Sync(config.cryptoKey, salt, 100000, 512, \"sha512\");\n    };\n\n    // Helper methods to encryt / decrypt\n    const encrypt = (toEncrypt) => {\n        config.iv = createIV();\n        const cipher = crypto.createCipheriv(config.cryptoAlgo, config.cryptoKey, config.iv);\n        return `${cipher.update(toEncrypt, \"utf8\", \"hex\")} ${cipher.final(\"hex\")}`;\n    };\n\n    const decrypt = (toDecrypt) => {\n        const decipher = crypto.createDecipheriv(config.cryptoAlgo, config.cryptoKey, config.iv);\n        return `${decipher.update(toDecrypt, \"hex\", \"utf8\")} ${decipher.final(\"utf8\")}`;\n    };\n    */\n\n    this.updateUser = (userId, firstName, lastName, ssn, dob, address, bankAcc, bankRouting, callback) => {\n\n        // Create user document\n        const user = {};\n        if (firstName) {\n            user.firstName = firstName;\n        }\n        if (lastName) {\n            user.lastName = lastName;\n        }\n        if (address) {\n            user.address = address;\n        }\n        if (bankAcc) {\n            user.bankAcc = bankAcc;\n        }\n        if (bankRouting) {\n            user.bankRouting = bankRouting;\n        }\n        if (ssn) {\n            user.ssn = ssn;\n        }\n        if (dob) {\n            user.dob = dob;\n        }\n        /*\n        // Fix for A7 - Sensitive Data Exposure\n        // Store encrypted ssn and DOB\n        if(ssn) {\n            user.ssn = encrypt(ssn);\n        }\n        if(dob) {\n            user.dob = encrypt(dob);\n        }\n        */\n\n        users.update({\n                _id: parseInt(userId)\n            }, {\n                $set: user\n            },\n            err => {\n                if (!err) {\n                    console.log(\"Updated user profile\");\n                    return callback(null, user);\n                }\n\n                return callback(err, null);\n            }\n        );\n    };\n\n    this.getByUserId = (userId, callback) => {\n        users.findOne({\n                _id: parseInt(userId)\n            },\n            (err, user) => {\n                if (err) return callback(err, null);\n                /*\n                // Fix for A6 - Sensitive Data Exposure\n                // Decrypt ssn and DOB values to display to user\n                user.ssn = user.ssn ? decrypt(user.ssn) : \"\";\n                user.dob = user.dob ? decrypt(user.dob) : \"\";\n                */\n\n                callback(null, user);\n            }\n        );\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/research-dao.js:ResearchDAO:2",
+      "file_path": "app/data/research-dao.js",
+      "function_name": "ResearchDAO",
+      "start_line": 2,
+      "end_line": 25,
+      "source_code": "function ResearchDAO(db) {\n\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof ResearchDAO)) {\n        console.log(\"Warning: ResearchDAO constructor called without 'new' operator\");\n        return new ResearchDAO(db);\n    }\n\n    this.getBySymbol = (symbol, callback) => {\n\n        const searchCriteria = () => {\n\n            if (symbol) {\n                console.log(\"in if symbol\");\n                return {\n                    symbol\n                };\n            }\n        };\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/research-dao.js:searchCriteria:15",
+      "file_path": "app/data/research-dao.js",
+      "function_name": "searchCriteria",
+      "start_line": 15,
+      "end_line": 23,
+      "source_code": "() => {\n\n            if (symbol) {\n                console.log(\"in if symbol\");\n                return {\n                    symbol\n                };\n            }\n        }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/user-dao.js:UserDAO:4",
+      "file_path": "app/data/user-dao.js",
+      "function_name": "UserDAO",
+      "start_line": 4,
+      "end_line": 121,
+      "source_code": "function UserDAO(db) {\n\n    \"use strict\";\n\n    /* If this constructor is called without the \"new\" operator, \"this\" points\n     * to the global object. Log a warning and call it correctly. */\n    if (false === (this instanceof UserDAO)) {\n        console.log(\"Warning: UserDAO constructor called without 'new' operator\");\n        return new UserDAO(db);\n    }\n\n    const usersCol = db.collection(\"users\");\n\n    this.addUser = (userName, firstName, lastName, password, email, callback) => {\n\n        // Create user document\n        const user = {\n            userName,\n            firstName,\n            lastName,\n            benefitStartDate: this.getRandomFutureDate(),\n            password //received from request param\n            /*\n            // Fix for A2-1 - Broken Auth\n            // Stores password  in a safer way using one way encryption and salt hashing\n            password: bcrypt.hashSync(password, bcrypt.genSaltSync())\n            */\n        };\n\n        // Add email if set\n        if (email) {\n            user.email = email;\n        }\n\n        this.getNextSequence(\"userId\", (err, id) => {\n            if (err) {\n                return callback(err, null);\n            }\n            console.log(typeof(id));\n\n            user._id = id;\n            usersCol.insert(user, (err, result) => !err ? callback(null, result.ops[0]) : callback(err, null));\n        });\n    };\n\n    this.getRandomFutureDate = () => {\n        const today = new Date();\n        const day = (Math.floor(Math.random() * 10) + today.getDay()) % 29;\n        const month = (Math.floor(Math.random() * 10) + today.getMonth()) % 12;\n        const year = Math.ceil(Math.random() * 30) + today.getFullYear();\n        return `${year}-${(\"0\" + month).slice(-2)}-${(\"0\" + day).slice(-2)}`;\n    };\n\n    this.validateLogin = (userName, password, callback) => {\n\n        // Helper function to compare passwords\n        const comparePassword = (fromDB, fromUser) => {\n            return fromDB === fromUser;\n            /*\n            // Fix for A2-Broken Auth\n            // compares decrypted password stored in this.addUser()\n            return bcrypt.compareSync(fromDB, fromUser);\n            */\n        };\n\n        // Callback to pass to MongoDB that validates a user document\n        const validateUserDoc = (err, user) => {\n\n            if (err) return callback(err, null);\n\n            if (user) {\n                if (comparePassword(password, user.password)) {\n                    callback(null, user);\n                } else {\n                    const invalidPasswordError = new Error(\"Invalid password\");\n                    // Set an extra field so we can distinguish this from a db error\n                    invalidPasswordError.invalidPassword = true;\n                    callback(invalidPasswordError, null);\n                }\n            } else {\n                const noSuchUserError = new Error(\"User: \" + user + \" does not exist\");\n                // Set an extra field so we can distinguish this from a db error\n                noSuchUserError.noSuchUser = true;\n                callback(noSuchUserError, null);\n            }\n        };\n\n        usersCol.findOne({\n            userName: userName\n        }, validateUserDoc);\n    };\n\n    // This is the good one, see the next function\n    this.getUserById = (userId, callback) => {\n        usersCol.findOne({\n            _id: parseInt(userId)\n        }, callback);\n    };\n\n    this.getUserByUserName = (userName, callback) => {\n        usersCol.findOne({\n            userName: userName\n        }, callback);\n    };\n\n    this.getNextSequence = (name, callback) => {\n        db.collection(\"counters\").findAndModify({\n                _id: name\n            }, [], {\n                $inc: {\n                    seq: 1\n                }\n            }, {\n                new: true\n            },\n            (err, data) =>  err ? callback(err, null) : callback(null, data.value.seq));\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/user-dao.js:comparePassword:60",
+      "file_path": "app/data/user-dao.js",
+      "function_name": "comparePassword",
+      "start_line": 60,
+      "end_line": 67,
+      "source_code": "(fromDB, fromUser) => {\n            return fromDB === fromUser;\n            /*\n            // Fix for A2-Broken Auth\n            // compares decrypted password stored in this.addUser()\n            return bcrypt.compareSync(fromDB, fromUser);\n            */\n        }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/data/user-dao.js:validateUserDoc:70",
+      "file_path": "app/data/user-dao.js",
+      "function_name": "validateUserDoc",
+      "start_line": 70,
+      "end_line": 89,
+      "source_code": "(err, user) => {\n\n            if (err) return callback(err, null);\n\n            if (user) {\n                if (comparePassword(password, user.password)) {\n                    callback(null, user);\n                } else {\n                    const invalidPasswordError = new Error(\"Invalid password\");\n                    // Set an extra field so we can distinguish this from a db error\n                    invalidPasswordError.invalidPassword = true;\n                    callback(invalidPasswordError, null);\n                }\n            } else {\n                const noSuchUserError = new Error(\"User: \" + user + \" does not exist\");\n                // Set an extra field so we can distinguish this from a db error\n                noSuchUserError.noSuchUser = true;\n                callback(noSuchUserError, null);\n            }\n        }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/allocations.js:AllocationsHandler:6",
+      "file_path": "app/routes/allocations.js",
+      "function_name": "AllocationsHandler",
+      "start_line": 6,
+      "end_line": 32,
+      "source_code": "function AllocationsHandler(db) {\n    \"use strict\";\n\n    const allocationsDAO = new AllocationsDAO(db);\n\n    this.displayAllocations = (req, res, next) => {\n        /*\n        // Fix for A4 Insecure DOR -  take user id from session instead of from URL param\n        const { userId } = req.session;\n        */\n        const {\n            userId\n        } = req.params;\n        const {\n            threshold\n        } = req.query;\n\n        allocationsDAO.getByUserIdAndThreshold(userId, threshold, (err, allocations) => {\n            if (err) return next(err);\n            return res.render(\"allocations\", {\n                userId,\n                allocations,\n                environmentalScripts\n            });\n        });\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/benefits.js:BenefitsHandler:8",
+      "file_path": "app/routes/benefits.js",
+      "function_name": "BenefitsHandler",
+      "start_line": 8,
+      "end_line": 55,
+      "source_code": "function BenefitsHandler(db) {\n    \"use strict\";\n\n    const benefitsDAO = new BenefitsDAO(db);\n\n    this.displayBenefits = (req, res, next) => {\n\n        benefitsDAO.getAllNonAdminUsers((error, users) => {\n\n            if (error) return next(error);\n\n            return res.render(\"benefits\", {\n                users,\n                user: {\n                    isAdmin: true\n                },\n                environmentalScripts\n            });\n        });\n    };\n\n    this.updateBenefits = (req, res, next) => {\n        const {\n            userId,\n            benefitStartDate\n        } = req.body;\n\n        benefitsDAO.updateBenefits(userId, benefitStartDate, (error) => {\n\n            if (error) return next(error);\n\n            benefitsDAO.getAllNonAdminUsers((error, users) => {\n                if (error) return next(error);\n\n                const data = {\n                    users,\n                    user: {\n                        isAdmin: true\n                    },\n                    updateSuccess: true,\n                    environmentalScripts\n                };\n\n                return res.render(\"benefits\", data);\n            });\n        });\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:7",
+      "file_path": "app/routes/contributions.js",
+      "function_name": "ContributionsHandler",
+      "start_line": 7,
+      "end_line": 78,
+      "source_code": "function ContributionsHandler(db) {\n    \"use strict\";\n\n    const contributionsDAO = new ContributionsDAO(db);\n\n    this.displayContributions = (req, res, next) => {\n        const {\n            userId\n        } = req.session;\n\n        contributionsDAO.getByUserId(userId, (error, contrib) => {\n            if (error) return next(error);\n\n            contrib.userId = userId; //set for nav menu items\n            return res.render(\"contributions\", {\n                ...contrib,\n                environmentalScripts\n            });\n        });\n    };\n\n    this.handleContributionsUpdate = (req, res, next) => {\n\n        /*jslint evil: true */\n        // Insecure use of eval() to parse inputs\n        const preTax = eval(req.body.preTax);\n        const afterTax = eval(req.body.afterTax);\n        const roth = eval(req.body.roth);\n\n        /*\n        //Fix for A1 -1 SSJS Injection attacks - uses alternate method to eval\n        const preTax = parseInt(req.body.preTax);\n        const afterTax = parseInt(req.body.afterTax);\n        const roth = parseInt(req.body.roth);\n        */\n        const {\n            userId\n        } = req.session;\n\n        //validate contributions\n        const validations = [isNaN(preTax), isNaN(afterTax), isNaN(roth), preTax < 0, afterTax < 0, roth < 0];\n        const isInvalid = validations.some(validation => validation);\n        if (isInvalid) {\n            return res.render(\"contributions\", {\n                updateError: \"Invalid contribution percentages\",\n                userId,\n                environmentalScripts\n            });\n        }\n        // Prevent more than 30% contributions\n        if (preTax + afterTax + roth > 30) {\n            return res.render(\"contributions\", {\n                updateError: \"Contribution percentages cannot exceed 30 %\",\n                userId,\n                environmentalScripts\n            });\n        }\n\n        contributionsDAO.update(userId, preTax, afterTax, roth, (err, contributions) => {\n\n            if (err) return next(err);\n\n            contributions.updateSuccess = true;\n            return res.render(\"contributions\", {\n                ...contributions,\n                environmentalScripts\n            });\n        });\n\n    };\n\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/error.js:errorHandler:3",
+      "file_path": "app/routes/error.js",
+      "function_name": "errorHandler",
+      "start_line": 3,
+      "end_line": 13,
+      "source_code": "(err, req, res,next) => {\n\n    \"use strict\";\n\n    console.error(err.message);\n    console.error(err.stack);\n    res.status(500);\n    res.render(\"error-template\", {\n        error: err\n    });\n}",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/index.js:index:11",
+      "file_path": "app/routes/index.js",
+      "function_name": "index",
+      "start_line": 11,
+      "end_line": 83,
+      "source_code": "(app, db) => {\n\n    \"use strict\";\n\n    const sessionHandler = new SessionHandler(db);\n    const profileHandler = new ProfileHandler(db);\n    const benefitsHandler = new BenefitsHandler(db);\n    const contributionsHandler = new ContributionsHandler(db);\n    const allocationsHandler = new AllocationsHandler(db);\n    const memosHandler = new MemosHandler(db);\n    const researchHandler = new ResearchHandler(db);\n\n    // Middleware to check if a user is logged in\n    const isLoggedIn = sessionHandler.isLoggedInMiddleware;\n\n    //Middleware to check if user has admin rights\n    const isAdmin = sessionHandler.isAdminUserMiddleware;\n\n    // The main page of the app\n    app.get(\"/\", sessionHandler.displayWelcomePage);\n\n    // Login form\n    app.get(\"/login\", sessionHandler.displayLoginPage);\n    app.post(\"/login\", sessionHandler.handleLoginRequest);\n\n    // Signup form\n    app.get(\"/signup\", sessionHandler.displaySignupPage);\n    app.post(\"/signup\", sessionHandler.handleSignup);\n\n    // Logout page\n    app.get(\"/logout\", sessionHandler.displayLogoutPage);\n\n    // The main page of the app\n    app.get(\"/dashboard\", isLoggedIn, sessionHandler.displayWelcomePage);\n\n    // Profile page\n    app.get(\"/profile\", isLoggedIn, profileHandler.displayProfile);\n    app.post(\"/profile\", isLoggedIn, profileHandler.handleProfileUpdate);\n\n    // Contributions Page\n    app.get(\"/contributions\", isLoggedIn, contributionsHandler.displayContributions);\n    app.post(\"/contributions\", isLoggedIn, contributionsHandler.handleContributionsUpdate);\n\n    // Benefits Page\n    app.get(\"/benefits\", isLoggedIn, benefitsHandler.displayBenefits);\n    app.post(\"/benefits\", isLoggedIn, benefitsHandler.updateBenefits);\n    /* Fix for A7 - checks user role to implement  Function Level Access Control\n     app.get(\"/benefits\", isLoggedIn, isAdmin, benefitsHandler.displayBenefits);\n     app.post(\"/benefits\", isLoggedIn, isAdmin, benefitsHandler.updateBenefits);\n     */\n\n    // Allocations Page\n    app.get(\"/allocations/:userId\", isLoggedIn, allocationsHandler.displayAllocations);\n\n    // Memos Page\n    app.get(\"/memos\", isLoggedIn, memosHandler.displayMemos);\n    app.post(\"/memos\", isLoggedIn, memosHandler.addMemos);\n\n    // Handle redirect for learning resources link\n    app.get(\"/learn\", isLoggedIn, (req, res) => {\n        // Insecure way to handle redirects by taking redirect url from query string\n        return res.redirect(req.query.url);\n    });\n\n    // Research Page\n    app.get(\"/research\", isLoggedIn, researchHandler.displayResearch);\n\n    // Mount tutorial router\n    app.use(\"/tutorial\", tutorialRouter);\n\n    // Error handling middleware\n    app.use(ErrorHandler);\n}",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/memos.js:MemosHandler:6",
+      "file_path": "app/routes/memos.js",
+      "function_name": "MemosHandler",
+      "start_line": 6,
+      "end_line": 35,
+      "source_code": "function MemosHandler(db) {\n    \"use strict\";\n\n    const memosDAO = new MemosDAO(db);\n\n    this.addMemos = (req, res, next) => {\n\n        memosDAO.insert(req.body.memo, (err, docs) => {\n            if (err) return next(err);\n            this.displayMemos(req, res, next);\n        });\n    };\n\n    this.displayMemos = (req, res, next) => {\n\n        const {\n            userId\n        } = req.session;\n\n        memosDAO.getAllMemos((err, docs) => {\n            if (err) return next(err);\n            return res.render(\"memos\", {\n                memosList: docs,\n                userId: userId,\n                environmentalScripts\n            });\n        });\n    };\n\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/profile.js:ProfileHandler:8",
+      "file_path": "app/routes/profile.js",
+      "function_name": "ProfileHandler",
+      "start_line": 8,
+      "end_line": 109,
+      "source_code": "function ProfileHandler(db) {\n    \"use strict\";\n\n    const profile = new ProfileDAO(db);\n\n    this.displayProfile = (req, res, next) => {\n        const {\n            userId\n        } = req.session;\n\n\n\n        profile.getByUserId(parseInt(userId), (err, doc) => {\n            if (err) return next(err);\n            doc.userId = userId;\n\n            // @TODO @FIXME\n            // while the developer intentions were correct in encoding the user supplied input so it\n            // doesn't end up as an XSS attack, the context is incorrect as it is encoding the firstname for HTML\n            // while this same variable is also used in the context of a URL link element\n            doc.website = ESAPI.encoder().encodeForHTML(doc.website);\n            // fix it by replacing the above with another template variable that is used for \n            // the context of a URL in a link header\n            // doc.website = ESAPI.encoder().encodeForURL(doc.website)\n\n            return res.render(\"profile\", {\n                ...doc,\n                environmentalScripts\n            });\n        });\n    };\n\n    this.handleProfileUpdate = (req, res, next) => {\n\n        const {\n            firstName,\n            lastName,\n            ssn,\n            dob,\n            address,\n            bankAcc,\n            bankRouting\n        } = req.body;\n\n        // Fix for Section: ReDoS attack\n        // The following regexPattern that is used to validate the bankRouting number is insecure and vulnerable to\n        // catastrophic backtracking which means that specific type of input may cause it to consume all CPU resources\n        // with an exponential time until it completes\n        // --\n        // The Fix: Instead of using greedy quantifiers the same regex will work if we omit the second quantifier +\n        // const regexPattern = /([0-9]+)\\#/;\n        const regexPattern = /([0-9]+)+\\#/;\n        // Allow only numbers with a suffix of the letter #, for example: 'XXXXXX#'\n        const testComplyWithRequirements = regexPattern.test(bankRouting);\n        // if the regex test fails we do not allow saving\n        if (testComplyWithRequirements !== true) {\n            const firstNameSafeString = firstName;\n            return res.render(\"profile\", {\n                updateError: \"Bank Routing number does not comply with requirements for format specified\",\n                firstNameSafeString,\n                lastName,\n                ssn,\n                dob,\n                address,\n                bankAcc,\n                bankRouting,\n                environmentalScripts\n            });\n        }\n\n        const {\n            userId\n        } = req.session;\n\n        profile.updateUser(\n            parseInt(userId),\n            firstName,\n            lastName,\n            ssn,\n            dob,\n            address,\n            bankAcc,\n            bankRouting,\n            (err, user) => {\n\n                if (err) return next(err);\n\n                // WARN: Applying any sting specific methods here w/o checking type of inputs could lead to DoS by HPP\n                //firstName = firstName.trim();\n                user.updateSuccess = true;\n                user.userId = userId;\n\n                return res.render(\"profile\", {\n                    ...user,\n                    environmentalScripts\n                });\n            }\n        );\n\n    };\n\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/research.js:ResearchHandler:7",
+      "file_path": "app/routes/research.js",
+      "function_name": "ResearchHandler",
+      "start_line": 7,
+      "end_line": 36,
+      "source_code": "function ResearchHandler(db) {\n    \"use strict\";\n\n    const researchDAO = new ResearchDAO(db);\n\n    this.displayResearch = (req, res) => {\n\n        if (req.query.symbol) {\n            const url = req.query.url + req.query.symbol;\n            return needle.get(url, (error, newResponse, body) => {\n                if (!error && newResponse.statusCode === 200) {\n                    res.writeHead(200, {\n                        \"Content-Type\": \"text/html\"\n                    });\n                }\n                res.write(\"<h1>The following is the stock information you requested.</h1>\\n\\n\");\n                res.write(\"\\n\\n\");\n                if (body) {\n                    res.write(body);\n                }\n                return res.end();\n            });\n        }\n\n        return res.render(\"research\", {\n            environmentalScripts\n        });\n    };\n\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/session.js:SessionHandler:8",
+      "file_path": "app/routes/session.js",
+      "function_name": "SessionHandler",
+      "start_line": 8,
+      "end_line": 275,
+      "source_code": "function SessionHandler(db) {\n    \"use strict\";\n\n    const userDAO = new UserDAO(db);\n    const allocationsDAO = new AllocationsDAO(db);\n\n    const prepareUserData = (user, next) => {\n        // Generate random allocations\n        const stocks = Math.floor((Math.random() * 40) + 1);\n        const funds = Math.floor((Math.random() * 40) + 1);\n        const bonds = 100 - (stocks + funds);\n\n        allocationsDAO.update(user._id, stocks, funds, bonds, (err) => {\n            if (err) return next(err);\n        });\n    };\n\n    this.isAdminUserMiddleware = (req, res, next) => {\n        if (req.session.userId) {\n            return userDAO.getUserById(req.session.userId, (err, user) => {\n               return user && user.isAdmin ? next() : res.redirect(\"/login\");\n            });\n        }\n        console.log(\"redirecting to login\");\n        return res.redirect(\"/login\");\n\n    };\n\n    this.isLoggedInMiddleware = (req, res, next) => {\n        if (req.session.userId) {\n            return next();\n        }\n        console.log(\"redirecting to login\");\n        return res.redirect(\"/login\");\n    };\n\n    this.displayLoginPage = (req, res, next) => {\n        return res.render(\"login\", {\n            userName: \"\",\n            password: \"\",\n            loginError: \"\",\n            environmentalScripts\n        });\n    };\n\n    this.handleLoginRequest = (req, res, next) => {\n        const {\n            userName,\n            password\n        } = req.body;\n        userDAO.validateLogin(userName, password, (err, user) => {\n            const errorMessage = \"Invalid username and/or password\";\n            const invalidUserNameErrorMessage = \"Invalid username\";\n            const invalidPasswordErrorMessage = \"Invalid password\";\n            if (err) {\n                if (err.noSuchUser) {\n                    console.log(\"Error: attempt to login with invalid user: \", userName);\n\n                    // Fix for A1 - 3 Log Injection - encode/sanitize input for CRLF Injection\n                    // that could result in log forging:\n                    // - Step 1: Require a module that supports encoding\n                    // const ESAPI = require('node-esapi');\n                    // - Step 2: Encode the user input that will be logged in the correct context\n                    // following are a few examples:\n                    // console.log('Error: attempt to login with invalid user: %s',\n                    //     ESAPI.encoder().encodeForHTML(userName));\n                    // console.log('Error: attempt to login with invalid user: %s',\n                    //     ESAPI.encoder().encodeForJavaScript(userName));\n                    // console.log('Error: attempt to login with invalid user: %s',\n                    //     ESAPI.encoder().encodeForURL(userName));\n                    // or if you know that this is a CRLF vulnerability you can target this specifically as follows:\n                    // console.log('Error: attempt to login with invalid user: %s',\n                    //     userName.replace(/(\\r\\n|\\r|\\n)/g, '_'));\n\n                    return res.render(\"login\", {\n                        userName: userName,\n                        password: \"\",\n                        loginError: invalidUserNameErrorMessage,\n                        //Fix for A2-2 Broken Auth - Uses identical error for both username, password error\n                        // loginError: errorMessage\n                        environmentalScripts\n                    });\n                } else if (err.invalidPassword) {\n                    return res.render(\"login\", {\n                        userName: userName,\n                        password: \"\",\n                        loginError: invalidPasswordErrorMessage,\n                        //Fix for A2-2 Broken Auth - Uses identical error for both username, password error\n                        // loginError: errorMessage\n                        environmentalScripts\n                    });\n                } else {\n                    return next(err);\n                }\n            }\n\n            // A2-Broken Authentication and Session Management\n            // Upon login, a security best practice with regards to cookies session management\n            // would be to regenerate the session id so that if an id was already created for\n            // a user on an insecure medium (i.e: non-HTTPS website or otherwise), or if an\n            // attacker was able to get their hands on the cookie id before the user logged-in,\n            // then the old session id will render useless as the logged-in user with new privileges\n            // holds a new session id now.\n\n            // Fix the problem by regenerating a session in each login\n            // by wrapping the below code as a function callback for the method req.session.regenerate()\n            // i.e:\n            // `req.session.regenerate(() => {})`\n            req.session.userId = user._id;\n            return res.redirect(user.isAdmin ? \"/benefits\" : \"/dashboard\");\n        });\n    };\n\n    this.displayLogoutPage = (req, res) => {\n        req.session.destroy(() => res.redirect(\"/\"));\n    };\n\n    this.displaySignupPage = (req, res) => {\n        res.render(\"signup\", {\n            userName: \"\",\n            password: \"\",\n            passwordError: \"\",\n            email: \"\",\n            userNameError: \"\",\n            emailError: \"\",\n            verifyError: \"\",\n            environmentalScripts\n        });\n    };\n\n    const validateSignup = (userName, firstName, lastName, password, verify, email, errors) => {\n\n        const USER_RE = /^.{1,20}$/;\n        const FNAME_RE = /^.{1,100}$/;\n        const LNAME_RE = /^.{1,100}$/;\n        const EMAIL_RE = /^[\\S]+@[\\S]+\\.[\\S]+$/;\n        const PASS_RE = /^.{1,20}$/;\n        /*\n        //Fix for A2-2 - Broken Authentication -  requires stronger password\n        //(at least 8 characters with numbers and both lowercase and uppercase letters.)\n        const PASS_RE =/^(?=.*\\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/;\n        */\n\n        errors.userNameError = \"\";\n        errors.firstNameError = \"\";\n        errors.lastNameError = \"\";\n\n        errors.passwordError = \"\";\n        errors.verifyError = \"\";\n        errors.emailError = \"\";\n\n        if (!USER_RE.test(userName)) {\n            errors.userNameError = \"Invalid user name.\";\n            return false;\n        }\n        if (!FNAME_RE.test(firstName)) {\n            errors.firstNameError = \"Invalid first name.\";\n            return false;\n        }\n        if (!LNAME_RE.test(lastName)) {\n            errors.lastNameError = \"Invalid last name.\";\n            return false;\n        }\n        if (!PASS_RE.test(password)) {\n            errors.passwordError = \"Password must be 8 to 18 characters\" +\n                \" including numbers, lowercase and uppercase letters.\";\n            return false;\n        }\n        if (password !== verify) {\n            errors.verifyError = \"Password must match\";\n            return false;\n        }\n        if (email !== \"\") {\n            if (!EMAIL_RE.test(email)) {\n                errors.emailError = \"Invalid email address\";\n                return false;\n            }\n        }\n        return true;\n    };\n\n    this.handleSignup = (req, res, next) => {\n\n        const {\n            email,\n            userName,\n            firstName,\n            lastName,\n            password,\n            verify\n        } = req.body;\n\n        // set these up in case we have an error case\n        const errors = {\n            \"userName\": userName,\n            \"email\": email\n        };\n\n        if (validateSignup(userName, firstName, lastName, password, verify, email, errors)) {\n\n            userDAO.getUserByUserName(userName, (err, user) => {\n\n                if (err) return next(err);\n\n                if (user) {\n                    errors.userNameError = \"User name already in use. Please choose another\";\n                    return res.render(\"signup\", {\n                        ...errors,\n                        environmentalScripts\n                    });\n                }\n\n                userDAO.addUser(userName, firstName, lastName, password, email, (err, user) => {\n\n                    if (err) return next(err);\n\n                    //prepare data for the user\n                    prepareUserData(user, next);\n                    /*\n                    sessionDAO.startSession(user._id, (err, sessionId) => {\n                        if (err) return next(err);\n                        res.cookie(\"session\", sessionId);\n                        req.session.userId = user._id;\n                        return res.render(\"dashboard\", { ...user, environmentalScripts });\n                    });\n                    */\n                    req.session.regenerate(() => {\n                        req.session.userId = user._id;\n                        // Set userId property. Required for left nav menu links\n                        user.userId = user._id;\n\n                        return res.render(\"dashboard\", {\n                            ...user,\n                            environmentalScripts\n                        });\n                    });\n\n                });\n            });\n        } else {\n            console.log(\"user did not validate\");\n            return res.render(\"signup\", {\n                ...errors,\n                environmentalScripts\n            });\n        }\n    };\n\n    this.displayWelcomePage = (req, res, next) => {\n        let userId;\n\n        if (!req.session.userId) {\n            console.log(\"welcome: Unable to identify user...redirecting to login\");\n            return res.redirect(\"/login\");\n        }\n\n        userId = req.session.userId;\n\n        userDAO.getUserById(userId, (err, doc) => {\n            if (err) return next(err);\n            doc.userId = userId;\n            return res.render(\"dashboard\", {\n                ...doc,\n                environmentalScripts\n            });\n        });\n    };\n}",
+      "parameters": [
+        "db"
+      ],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/session.js:prepareUserData:14",
+      "file_path": "app/routes/session.js",
+      "function_name": "prepareUserData",
+      "start_line": 14,
+      "end_line": 23,
+      "source_code": "(user, next) => {\n        // Generate random allocations\n        const stocks = Math.floor((Math.random() * 40) + 1);\n        const funds = Math.floor((Math.random() * 40) + 1);\n        const bonds = 100 - (stocks + funds);\n\n        allocationsDAO.update(user._id, stocks, funds, bonds, (err) => {\n            if (err) return next(err);\n        });\n    }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "app/routes/session.js:validateSignup:138",
+      "file_path": "app/routes/session.js",
+      "function_name": "validateSignup",
+      "start_line": 138,
+      "end_line": 187,
+      "source_code": "(userName, firstName, lastName, password, verify, email, errors) => {\n\n        const USER_RE = /^.{1,20}$/;\n        const FNAME_RE = /^.{1,100}$/;\n        const LNAME_RE = /^.{1,100}$/;\n        const EMAIL_RE = /^[\\S]+@[\\S]+\\.[\\S]+$/;\n        const PASS_RE = /^.{1,20}$/;\n        /*\n        //Fix for A2-2 - Broken Authentication -  requires stronger password\n        //(at least 8 characters with numbers and both lowercase and uppercase letters.)\n        const PASS_RE =/^(?=.*\\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/;\n        */\n\n        errors.userNameError = \"\";\n        errors.firstNameError = \"\";\n        errors.lastNameError = \"\";\n\n        errors.passwordError = \"\";\n        errors.verifyError = \"\";\n        errors.emailError = \"\";\n\n        if (!USER_RE.test(userName)) {\n            errors.userNameError = \"Invalid user name.\";\n            return false;\n        }\n        if (!FNAME_RE.test(firstName)) {\n            errors.firstNameError = \"Invalid first name.\";\n            return false;\n        }\n        if (!LNAME_RE.test(lastName)) {\n            errors.lastNameError = \"Invalid last name.\";\n            return false;\n        }\n        if (!PASS_RE.test(password)) {\n            errors.passwordError = \"Password must be 8 to 18 characters\" +\n                \" including numbers, lowercase and uppercase letters.\";\n            return false;\n        }\n        if (password !== verify) {\n            errors.verifyError = \"Password must match\";\n            return false;\n        }\n        if (email !== \"\") {\n            if (!EMAIL_RE.test(email)) {\n                errors.emailError = \"Invalid email address\";\n                return false;\n            }\n        }\n        return true;\n    }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "artifacts/db-reset.js:tryDropCollection:39",
+      "file_path": "artifacts/db-reset.js",
+      "function_name": "tryDropCollection",
+      "start_line": 39,
+      "end_line": 48,
+      "source_code": "(db, name) => {\n    return new Promise((resolve, reject) => {\n        db.dropCollection(name, (err, data) => {\n            if (!err) {\n                console.log(`Dropped collection: ${name}`);\n            }\n            resolve(undefined);\n        });\n    });\n}",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "artifacts/db-reset.js:parseResponse:50",
+      "file_path": "artifacts/db-reset.js",
+      "function_name": "parseResponse",
+      "start_line": 50,
+      "end_line": 59,
+      "source_code": "(err, res, comm) => {\n    if (err) {\n        console.log(\"ERROR:\");\n        console.log(comm);\n        console.log(JSON.stringify(err));\n        process.exit(1);\n    }\n    console.log(comm);\n    console.log(JSON.stringify(res));\n}",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    },
+    {
+      "id": "test/security/profile-test.js:status:226",
+      "file_path": "test/security/profile-test.js",
+      "function_name": "status",
+      "start_line": 226,
+      "end_line": 244,
+      "source_code": "function status() {\n                            zaproxy.ascan.status(scanId, function(err, resp) {\n                                if (resp) statusValue = resp.status;\n                                if (err) zapError = (err.code === \"ECONNREFUSED\") ? err : \"\";\n                                zaproxy.core.numberOfAlerts(zapTargetAppAndRoute, function(err, resp) {\n                                    if (resp) numberOfAlerts = resp.numberOfAlerts;\n                                    //else console.log(err);\n                                    console.log(\n                                        \"Scan \" +\n                                        scanId +\n                                        \" is \" +\n                                        statusValue +\n                                        \"% complete with \" +\n                                        numberOfAlerts +\n                                        \" alerts.\"\n                                    );\n                                });\n                            });\n                        }",
+      "parameters": [],
+      "class_name": null,
+      "decorators": [],
+      "language": "typescript"
+    }
+  ],
+  "edges": [],
+  "entry_points": [
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/login",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/login')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/login",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/login')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/signup",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/signup')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/signup",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/signup')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/logout",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/logout')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/dashboard",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/dashboard')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/profile",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/profile')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/profile",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/profile')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/contributions",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/contributions')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/contributions",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/contributions')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/benefits",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/benefits')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/benefits",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/benefits')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/benefits",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/benefits')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/benefits",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/benefits')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/allocations/:userId",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/allocations/:userId')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/memos",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/memos')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/memos",
+      "http_method": "POST",
+      "confidence": 0.9,
+      "evidence": "Express route: app.post('/memos')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/learn",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/learn')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/research",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express route: app.get('/research')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/index.js:index:11",
+      "entry_type": "http_route",
+      "route": "/tutorial",
+      "http_method": "MIDDLEWARE",
+      "confidence": 0.8,
+      "evidence": "Express route: app.use('/tutorial')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/tutorial.js::0",
+      "entry_type": "http_route",
+      "route": "/",
+      "http_method": "GET",
+      "confidence": 0.9,
+      "evidence": "Express top-level route: router.get('/')",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "code_index"
+    },
+    {
+      "func_block_id": "app/routes/allocations.js:AllocationsHandler:6",
+      "entry_type": "gitnexus_process",
+      "route": null,
+      "http_method": null,
+      "confidence": 0.9,
+      "evidence": "GitNexus process entry: AllocationsHandler",
+      "needs_llm_review": false,
+      "authentication": null,
+      "source": "gitnexus"
+    }
+  ],
+  "chains": [
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/session.js:SessionHandler:8",
+        "app/data/allocations-dao.js:AllocationsDAO",
+        "app/data/user-dao.js:UserDAO:4"
+      ],
+      "depth": 3,
+      "has_unresolved": true
+    },
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/session.js:SessionHandler:8",
+        "app/data/allocations-dao.js:AllocationsDAO",
+        "app/data/allocations-dao.js:searchCriteria:60"
+      ],
+      "depth": 3,
+      "has_unresolved": true
+    },
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/session.js:SessionHandler:8",
+        "app/routes/session.js:validateSignup:138"
+      ],
+      "depth": 2,
+      "has_unresolved": false
+    },
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/session.js:SessionHandler:8",
+        "app/routes/session.js:prepareUserData:14"
+      ],
+      "depth": 2,
+      "has_unresolved": false
+    },
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/profile.js:ProfileHandler:8",
+        "app/data/profile-dao.js:ProfileDAO:2"
+      ],
+      "depth": 2,
+      "has_unresolved": false
+    },
+    {
+      "entry_point_id": "app/routes/index.js:index:11",
+      "path": [
+        "app/routes/index.js:index:11",
+        "app/routes/benefits.js:BenefitsHandler:8",
+        "app/data/benefits-dao.js:BenefitsDAO:2"
+      ],
+      "depth": 2,
+      "has_unresolved": false
+    },
+    {
+      "entry_point_id": "app/routes/allocations.js:AllocationsHandler:6",
+      "path": [
+        "app/routes/allocations.js:AllocationsHandler:6",
+        "app/data/allocations-dao.js:AllocationsDAO",
+        "app/data/user-dao.js:UserDAO:4"
+      ],
+      "depth": 2,
+      "has_unresolved": true
+    },
+    {
+      "entry_point_id": "app/routes/allocations.js:AllocationsHandler:6",
+      "path": [
+        "app/routes/allocations.js:AllocationsHandler:6",
+        "app/data/allocations-dao.js:AllocationsDAO",
+        "app/data/allocations-dao.js:searchCriteria:60"
+      ],
+      "depth": 2,
+      "has_unresolved": true
+    }
+  ],
+  "file_manifest": {
+    "entries": [
+      {
+        "file_path": "nodemon.json",
+        "file_type": "config",
+        "size_bytes": 213
+      },
+      {
+        "file_path": "cypress.json",
+        "file_type": "config",
+        "size_bytes": 332
+      },
+      {
+        "file_path": "app.json",
+        "file_type": "config",
+        "size_bytes": 894
+      },
+      {
+        "file_path": "package-lock.json",
+        "file_type": "config",
+        "size_bytes": 888024
+      },
+      {
+        "file_path": "package.json",
+        "file_type": "config",
+        "size_bytes": 1979
+      },
+      {
+        "file_path": "docker-compose.yml",
+        "file_type": "config",
+        "size_bytes": 387
+      },
+      {
+        "file_path": "test/e2e/tsconfig.json",
+        "file_type": "config",
+        "size_bytes": 177
+      },
+      {
+        "file_path": "test/e2e/fixtures/users/user.json",
+        "file_type": "config",
+        "size_bytes": 48
+      },
+      {
+        "file_path": "test/e2e/fixtures/users/new_user.json",
+        "file_type": "config",
+        "size_bytes": 94
+      },
+      {
+        "file_path": "test/e2e/fixtures/users/admin.json",
+        "file_type": "config",
+        "size_bytes": 48
+      },
+      {
+        "file_path": "app/views/profile.html",
+        "file_type": "template",
+        "size_bytes": 4149
+      },
+      {
+        "file_path": "app/views/contributions.html",
+        "file_type": "template",
+        "size_bytes": 5114
+      },
+      {
+        "file_path": "app/views/layout.html",
+        "file_type": "template",
+        "size_bytes": 5535
+      },
+      {
+        "file_path": "app/views/research.html",
+        "file_type": "template",
+        "size_bytes": 986
+      },
+      {
+        "file_path": "app/views/login.html",
+        "file_type": "template",
+        "size_bytes": 7489
+      },
+      {
+        "file_path": "app/views/dashboard.html",
+        "file_type": "template",
+        "size_bytes": 4264
+      },
+      {
+        "file_path": "app/views/error-template.html",
+        "file_type": "template",
+        "size_bytes": 127
+      },
+      {
+        "file_path": "app/views/allocations.html",
+        "file_type": "template",
+        "size_bytes": 2185
+      },
+      {
+        "file_path": "app/views/memos.html",
+        "file_type": "template",
+        "size_bytes": 1068
+      },
+      {
+        "file_path": "app/views/benefits.html",
+        "file_type": "template",
+        "size_bytes": 2673
+      },
+      {
+        "file_path": "app/views/signup.html",
+        "file_type": "template",
+        "size_bytes": 5115
+      },
+      {
+        "file_path": "app/views/tutorial/ssrf.html",
+        "file_type": "template",
+        "size_bytes": 3193
+      },
+      {
+        "file_path": "app/views/tutorial/redos.html",
+        "file_type": "template",
+        "size_bytes": 3567
+      },
+      {
+        "file_path": "app/views/tutorial/a1.html",
+        "file_type": "template",
+        "size_bytes": 23077
+      },
+      {
+        "file_path": "app/views/tutorial/layout.html",
+        "file_type": "template",
+        "size_bytes": 4045
+      },
+      {
+        "file_path": "app/views/tutorial/a6.html",
+        "file_type": "template",
+        "size_bytes": 5603
+      },
+      {
+        "file_path": "app/views/tutorial/a7.html",
+        "file_type": "template",
+        "size_bytes": 4509
+      },
+      {
+        "file_path": "app/views/tutorial/a10.html",
+        "file_type": "template",
+        "size_bytes": 3449
+      },
+      {
+        "file_path": "app/views/tutorial/a8.html",
+        "file_type": "template",
+        "size_bytes": 5887
+      },
+      {
+        "file_path": "app/views/tutorial/a4.html",
+        "file_type": "template",
+        "size_bytes": 4505
+      },
+      {
+        "file_path": "app/views/tutorial/a5.html",
+        "file_type": "template",
+        "size_bytes": 7219
+      },
+      {
+        "file_path": "app/views/tutorial/a9.html",
+        "file_type": "template",
+        "size_bytes": 9547
+      },
+      {
+        "file_path": "app/views/tutorial/a2.html",
+        "file_type": "template",
+        "size_bytes": 17410
+      },
+      {
+        "file_path": "app/views/tutorial/a3.html",
+        "file_type": "template",
+        "size_bytes": 13039
+      }
+    ]
+  },
+  "degradation_level": "full",
+  "sink_call_sites": [
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:eval:32:23",
+      "caller_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "callee_name": "eval",
+      "callee_receiver": null,
+      "category": "command",
+      "sink_subtype": "js_eval",
+      "file_path": "app/routes/contributions.js",
+      "line": 32,
+      "column": 23,
+      "dangerous_slots": [
+        {
+          "arg_index": 0,
+          "slot": "generic",
+          "expression": "req.body.preTax",
+          "is_entry_hint": true
+        }
+      ],
+      "rule_id": "ts-eval",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:eval:33:25",
+      "caller_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "callee_name": "eval",
+      "callee_receiver": null,
+      "category": "command",
+      "sink_subtype": "js_eval",
+      "file_path": "app/routes/contributions.js",
+      "line": 33,
+      "column": 25,
+      "dangerous_slots": [
+        {
+          "arg_index": 0,
+          "slot": "generic",
+          "expression": "req.body.afterTax",
+          "is_entry_hint": true
+        }
+      ],
+      "rule_id": "ts-eval",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:eval:34:21",
+      "caller_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "callee_name": "eval",
+      "callee_receiver": null,
+      "category": "command",
+      "sink_subtype": "js_eval",
+      "file_path": "app/routes/contributions.js",
+      "line": 34,
+      "column": 21,
+      "dangerous_slots": [
+        {
+          "arg_index": 0,
+          "slot": "generic",
+          "expression": "req.body.roth",
+          "is_entry_hint": true
+        }
+      ],
+      "rule_id": "ts-eval",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/research.js:ResearchHandler:get:16:19",
+      "caller_id": "app/routes/research.js:ResearchHandler:7",
+      "callee_name": "get",
+      "callee_receiver": "needle",
+      "category": "ssrf",
+      "sink_subtype": "ssrf_needle",
+      "file_path": "app/routes/research.js",
+      "line": 16,
+      "column": 19,
+      "dangerous_slots": [
+        {
+          "arg_index": 0,
+          "slot": "url",
+          "expression": "url",
+          "is_entry_hint": false
+        }
+      ],
+      "rule_id": "ts-needle-get",
+      "needs_review": true
+    }
+  ],
+  "source_points": [
+    {
+      "id": "app/routes/index.js:index:11::url::82",
+      "entry_point_id": "app/routes/index.js:index:11",
+      "param_name": "url",
+      "source_type": "query",
+      "expression": "req.query.url",
+      "file_path": "app/routes/index.js",
+      "line": 82,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-query",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:7::preTax::38",
+      "entry_point_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "param_name": "preTax",
+      "source_type": "body",
+      "expression": "req.body.preTax",
+      "file_path": "app/routes/contributions.js",
+      "line": 38,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-body",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:7::afterTax::39",
+      "entry_point_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "param_name": "afterTax",
+      "source_type": "body",
+      "expression": "req.body.afterTax",
+      "file_path": "app/routes/contributions.js",
+      "line": 39,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-body",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/contributions.js:ContributionsHandler:7::roth::40",
+      "entry_point_id": "app/routes/contributions.js:ContributionsHandler:7",
+      "param_name": "roth",
+      "source_type": "body",
+      "expression": "req.body.roth",
+      "file_path": "app/routes/contributions.js",
+      "line": 40,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-body",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/research.js:ResearchHandler:7::symbol::20",
+      "entry_point_id": "app/routes/research.js:ResearchHandler:7",
+      "param_name": "symbol",
+      "source_type": "query",
+      "expression": "req.query.symbol",
+      "file_path": "app/routes/research.js",
+      "line": 20,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-query",
+      "needs_review": false
+    },
+    {
+      "id": "app/routes/research.js:ResearchHandler:7::url::21",
+      "entry_point_id": "app/routes/research.js:ResearchHandler:7",
+      "param_name": "url",
+      "source_type": "query",
+      "expression": "req.query.url",
+      "file_path": "app/routes/research.js",
+      "line": 21,
+      "column": 0,
+      "validation": "NONE",
+      "confidence": 0.9,
+      "rule_id": "ts-express-query",
+      "needs_review": false
+    }
+  ],
+  "parameter_graph": {
+    "taint_flows": [],
+    "language_coverage": [
+      "typescript"
+    ],
+    "skipped_languages": []
+  }
+}
