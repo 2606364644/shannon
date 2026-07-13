@@ -11,6 +11,7 @@ members = [
     "shannon-py",
     "shannon-web",
     "shannon-whitebox",
+    "shannon-worker",
 ]
 
 [[package]]
@@ -1330,6 +1331,25 @@ requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "shannon-core", editable = "packages/core" },
     { name = "temporalio", specifier = ">=1.0" },
+]
+
+[[package]]
+name = "shannon-worker"
+version = "0.1.0"
+source = { editable = "packages/worker" }
+dependencies = [
+    { name = "shannon-blackbox" },
+    { name = "shannon-core" },
+    { name = "shannon-whitebox" },
+    { name = "temporalio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "shannon-blackbox", editable = "packages/blackbox" },
+    { name = "shannon-core", editable = "packages/core" },
+    { name = "shannon-whitebox", editable = "packages/whitebox" },
+    { name = "temporalio", specifier = ">=1.7" },
 ]
 
 [[package]]
