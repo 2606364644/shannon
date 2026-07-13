@@ -41,6 +41,28 @@ describe("ReposPage", () => {
     expect(screen.queryByRole("button", { name: /复制 bar/ })).toBeNull();
   });
 
+  it("大小列内容单行不换行（whitespace-nowrap，防「132.1 MB」在窄列里断行）", async () => {
+    server.use(
+      http.get("/api/repos", () => HttpResponse.json([
+        { name: "foo", state: "ready", source: { kind: "git", url: "https://x/foo.git", branch: "main" }, size_bytes: 132_074_317 },
+      ])),
+    );
+    renderPage();
+    const cell = await screen.findByText("132.1 MB");
+    // 窄列 + 无 nowrap 时「132.1 MB」会在空格处断成两行；锚定 size 单元格带 whitespace-nowrap 防回退
+    expect(cell.closest("td")?.className).toMatch(/whitespace-nowrap/);
+  });
+
+  it("操作列表头与按钮组居中对齐（text-center：表头恒在按钮组中心正上方，无论 1 或 2 个按钮）", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+    // 表头 th 居中
+    expect(screen.getByText("操作").closest("th")?.className).toMatch(/text-center/);
+    // 删除按钮所在 td 居中（按钮组 inline-flex 受 text-align:center 居中）
+    const delBtn = screen.getAllByRole("button", { name: /删除/ })[0];
+    expect(delBtn.closest("td")?.className).toMatch(/text-center/);
+  });
+
   it("删除确认 Dialog", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     renderPage();

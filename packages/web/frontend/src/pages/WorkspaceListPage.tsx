@@ -95,11 +95,11 @@ export function WorkspaceListPage() {
     }),
     helper.accessor("created_at", { header: () => t("workspaces.table.time"), cell: (info) => fmtTime(info.getValue()) }),
     helper.display({
-      id: "actions", header: () => t("workspaces.table.actions"), cell: (info) => {
+      id: "actions", header: () => <div className="text-center">{t("workspaces.table.actions")}</div>, cell: (info) => {
         const w = info.row.original;
         // Delete 始终可见;running 额外显 Cancel(spec §4.7,去掉原 running XOR)。
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             {w.status === "running" && (
               <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>{t("common.cancel")}</Button>
             )}

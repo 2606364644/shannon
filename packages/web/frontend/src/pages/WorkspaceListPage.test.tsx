@@ -138,6 +138,16 @@ describe("WorkspaceListPage (DataTable)", () => {
     expect(container.querySelector(".status-bar")).toBeNull();
     expect(container.querySelector('[class*="bg-cyan"]')).not.toBeNull();
   });
+
+  it("操作列表头与按钮组居中对齐（表头恒在按钮组中心正上方，删除/取消+删除皆然）", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // 表头「操作」居中（header 渲染为 .text-center 容器）
+    expect(screen.getByText("操作").className).toMatch(/text-center/);
+    // 按钮组容器 justify-center → 按钮组在单元格内居中
+    const delBtn = screen.getAllByRole("button", { name: /删除/ })[0];
+    expect(delBtn.closest("div")?.className).toMatch(/justify-center/);
+  });
 });
 
 describe("WorkspaceListPage i18n", () => {
