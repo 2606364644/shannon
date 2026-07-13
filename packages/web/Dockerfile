@@ -16,6 +16,10 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
     && apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# repos 是 WEB(容器 root) 与宿主 CLI(shannon-user) 共享的扫描目标，.git 属主可能非 root
+# （CLI clone 或宿主 chown）。信任 /app/repos/* 避免 git dubious ownership(exit 128) 卡 WEB 扫描。
+RUN git config --global --add safe.directory '/app/repos/*'
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/

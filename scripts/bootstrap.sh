@@ -8,6 +8,14 @@ PROFILE="${1:-all}"
 AUTO_YES=false
 [[ "${2:-}" == "--yes" ]] && AUTO_YES=true
 
+# ── 确保项目用户 shannon-user + 系统级 uv 就绪（幂等）──────────────
+# 让「宿主 CLI 直跑扫描」可用 shannon-user（容器内身份不动，由 Dockerfile 决定）。
+# 仅 root 生效；非 root 跑 bootstrap 时跳过（不阻断后续依赖安装）。
+if [ "$(id -u)" -eq 0 ]; then
+    bash "$(dirname "${BASH_SOURCE[0]}")/ensure-shannon-user.sh" \
+        || echo "  ⚠ ensure-shannon-user 失败（非致命，继续）" >&2
+fi
+
 # ── Colors ──────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
