@@ -18,14 +18,25 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
       aria-label={t("report.ariaLabel")}
       className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)] md:grid-cols-[200px_1fr_280px]"
     >
-      {/* 左：总数 */}
+      {/* 左：单点漏洞总数（+ 攻击链计数，M>0 时） */}
       <div className="flex flex-col justify-center border-border p-4 md:border-r">
         <div className="text-[52px] font-bold leading-none tracking-tight">
           {stats.total}
         </div>
         <div className="mt-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          {t("report.confirmedVulns", { count: stats.typeAggs.length })}
+          {t("report.singleVulns")}
         </div>
+        {stats.attackChainCount > 0 && (
+          <div
+            data-testid="threat-attack-chain"
+            className="mt-2 flex items-center justify-between rounded-sm border border-border bg-muted/40 px-2 py-1"
+          >
+            <span className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+              {t("report.attackChains")}
+            </span>
+            <b className="font-mono text-sm font-semibold text-foreground">{stats.attackChainCount}</b>
+          </div>
+        )}
         <div className="mt-2.5 text-xs">
           {t("report.publicReachable")} <b className="font-mono text-primary">{stats.publicCount}</b> · pre-auth{" "}
           <b className="font-mono text-primary">{stats.preAuthCount}</b>

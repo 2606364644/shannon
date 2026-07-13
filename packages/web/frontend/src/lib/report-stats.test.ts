@@ -110,4 +110,9 @@ describe("computeStats", () => {
     const typeSummaries = [{ prefix: "XSS", displayName: "XSS", count: 1, severityRangeRaw: "", findingsText: "3 pre-auth 反射" }];
     expect(computeStats(blocks, new Set(), [], typeSummaries).typeAggs[0].findingsText).toBe("3 pre-auth 反射");
   });
+
+  it("返回 attackChainCount 默认 0（computeStats 不算攻击链；实际值由 MarkdownView 覆盖）", () => {
+    const blocks = [makeBlock({ id: "INJ-VULN-01", prefix: "INJ" })];
+    expect(computeStats(blocks, new Set(), [], []).attackChainCount).toBe(0);
+  });
 });

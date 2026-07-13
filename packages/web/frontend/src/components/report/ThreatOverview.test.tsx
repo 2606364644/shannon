@@ -7,6 +7,7 @@ import type { ReportStats } from "@/lib/report-stats";
 function makeStats(over: Partial<ReportStats> = {}): ReportStats {
   return {
     total: 36,
+    attackChainCount: 0,
     typeAggs: [
       {
         prefix: "INJ", displayName: "Injection", count: 4,
@@ -26,10 +27,10 @@ describe("ThreatOverview", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
   afterEach(() => i18n.changeLanguage("zh"));
 
-  it("渲染 total 大数字 + 类型数 + 公网/pre-auth", () => {
+  it("渲染 total 大数字 + 单点漏洞 label + 公网/pre-auth", () => {
     const { container } = render(<ThreatOverview stats={makeStats()} />);
     expect(container.textContent).toContain("36");
-    expect(container.textContent).toContain("1 类");
+    expect(container.textContent).toContain("单点漏洞");
     expect(container.textContent).toContain("34");
     expect(container.textContent).toContain("8");
   });
@@ -64,11 +65,24 @@ describe("ThreatOverview", () => {
     expect(top?.textContent).toContain("服务端 RCE");
   });
 
+  it("attackChainCount > 0 时显示攻击链计数", () => {
+    const { container } = render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
+    expect(container.textContent).toContain("13");
+    expect(container.textContent).toContain("攻击链");
+  });
+
+  it("attackChainCount = 0 时隐藏攻击链部分（无「攻击链」字样）", () => {
+    const { container } = render(<ThreatOverview stats={makeStats({ attackChainCount: 0 })} />);
+    // 单点漏洞数仍在
+    expect(container.textContent).toContain("36");
+    // 不渲染攻击链计数/标签
+    expect(container.textContent).not.toContain("攻击链");
+  });
+
   it("i18n: 切英文 chrome 文案为英文", () => {
     i18n.changeLanguage("en");
     const { container } = render(<ThreatOverview stats={makeStats()} />);
-    expect(container.textContent).toContain("Confirmed vulns");
-    expect(container.textContent).toContain("1 type");
+    expect(container.textContent).toContain("Single-point vulns");
     expect(container.textContent).toContain("Public reachable");
     expect(container.textContent).toContain("By severity distribution");
     expect(container.textContent).toContain("Priority fixes");

@@ -344,6 +344,8 @@
     "ariaLabel": "威胁概览",
     "confirmedVulns_one": "已确认漏洞 · {{count}} 类",
     "confirmedVulns_other": "已确认漏洞 · {{count}} 类",
+    "singleVulns": "单点漏洞",
+    "attackChains": "攻击链",
     "publicReachable": "公网可达",
     "bySeverity": "按 severity 分布",
     "priorityTop": "⚡ 建议优先处置",

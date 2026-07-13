@@ -10,9 +10,11 @@ import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { MarkdownVulnCard } from "./MarkdownVulnCard";
+import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
 import { splitByVulnBlocks, inferSeverity, type Segment } from "@/lib/vuln-block";
+import { splitAttackChainSection } from "@/lib/report-sections";
 import {
   computeStats,
   type ParsedTypeSummary,
@@ -281,10 +283,16 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     for (const r of topRisks) for (const id of r.vulnIds) s.add(id);
     return s;
   }, [topRisks]);
-  const segments = useMemo(() => splitByVulnBlocks(markdown), [markdown]);
+  // 攻击链章节独立切出（架构语义：攻击链 ≠ 单点漏洞，分开渲染/计数，见 spec §2/§5）。
+  // splitByVulnBlocks 只对「去掉攻击链章节后的 md」切单点漏洞，避免攻击链内容进 vuln 切分。
+  const attackChainSplit = useMemo(() => splitAttackChainSection(markdown), [markdown]);
+  const singleVulnMd = attackChainSplit
+    ? attackChainSplit.before + attackChainSplit.after
+    : markdown;
+  const segments = useMemo(() => splitByVulnBlocks(singleVulnMd), [singleVulnMd]);
   const stats = useMemo(
-    () =>
-      computeStats(
+    () => ({
+      ...computeStats(
         segments
           .filter((s): s is Extract<Segment, { type: "vuln" }> => s.type === "vuln")
           .map((s) => s.block),
@@ -292,7 +300,9 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         topRisks,
         typeSummaries,
       ),
-    [segments, topRiskIds, topRisks, typeSummaries],
+      attackChainCount: attackChainSplit?.count ?? 0,
+    }),
+    [segments, topRiskIds, topRisks, typeSummaries, attackChainSplit],
   );
   const groups = useMemo(() => groupSegments(segments), [segments]);
 
@@ -447,6 +457,9 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 ))}
               </div>
             ),
+          )}
+          {attackChainSplit && (
+            <AttackChainSection md={attackChainSplit.sectionMd} count={attackChainSplit.count} />
           )}
         </div>
       </div>

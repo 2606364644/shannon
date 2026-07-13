@@ -57,6 +57,9 @@ export interface TypeAgg {
 /** 报告级统计，驱动 ThreatOverview + TypeSummaryCards。 */
 export interface ReportStats {
   total: number;
+  /** 攻击链条目数（attack-chain agent 产的 llm-chain-N）。computeStats 不算它（默认 0），
+   *  实际值由 MarkdownView 用 splitAttackChainSection 的 count 覆盖。攻击链不进单点漏洞统计。 */
+  attackChainCount: number;
   typeAggs: TypeAgg[];
   severityDist: Record<Severity, number>;
   publicCount: number;
@@ -149,6 +152,8 @@ export function computeStats(
 
   return {
     total: blocks.length,
+    // computeStats 只管单点漏洞，不知道攻击链 → 默认 0；MarkdownView 用实际值覆盖。
+    attackChainCount: 0,
     typeAggs,
     severityDist,
     publicCount: blocks.filter((b) => b.externallyExploitable === true).length,

@@ -344,6 +344,8 @@
     "ariaLabel": "Threat overview",
     "confirmedVulns_one": "Confirmed vulns · {{count}} type",
     "confirmedVulns_other": "Confirmed vulns · {{count}} types",
+    "singleVulns": "Single-point vulns",
+    "attackChains": "Attack chains",
     "publicReachable": "Public reachable",
     "bySeverity": "By severity distribution",
     "priorityTop": "⚡ Priority fixes",

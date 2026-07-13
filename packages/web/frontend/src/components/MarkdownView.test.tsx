@@ -241,6 +241,55 @@ describe("MarkdownView", () => {
   });
 });
 
+describe("MarkdownView 攻击链独立章节", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("攻击链章节独立渲染：单点漏洞进卡片，攻击链进独立 section + 计数分开", () => {
+    const md = [
+      "# 安全评估报告",
+      "",
+      "## 执行摘要",
+      "",
+      "1. **RCE**（INJ-VULN-01）：eval",
+      "",
+      "## 攻击链（多步利用路径）",
+      "",
+      "### llm-chain-1: XSS -> 劫持",
+      "- **类型:** xss",
+      "",
+      "### llm-chain-2: SSRF",
+      "- **类型:** ssrf",
+      "",
+      "## Injection",
+      "",
+      "### INJ-VULN-01: eval RCE",
+      "- **vulnerability_type:** CommandInjection",
+    ].join("\n");
+    render(<MarkdownView markdown={md} />);
+    // 单点漏洞卡片（INJ-VULN-01）
+    const card = screen.getByTestId("vuln-card");
+    expect(card).toHaveTextContent("INJ-VULN-01");
+    // 攻击链独立 section + 计数
+    const acSection = screen.getByTestId("attack-chain-section");
+    expect(acSection).toHaveTextContent("llm-chain-1");
+    expect(acSection).toHaveTextContent("llm-chain-2");
+    expect(screen.getByTestId("attack-chain-count").textContent).toContain("2");
+    // llm-chain 不当 vuln：攻击链内容不进单漏洞卡片
+    expect(card).not.toHaveTextContent("llm-chain");
+    // ThreatOverview 计数分开：单点漏洞 1 + 攻击链 2
+    const overview = screen.getByTestId("threat-overview");
+    expect(overview.textContent).toContain("单点漏洞");
+    expect(overview.textContent).toContain("攻击链");
+  });
+
+  it("无攻击链章节时不渲染攻击链 section（老报告兼容）", () => {
+    render(<MarkdownView markdown={MD} />);
+    expect(screen.queryByTestId("attack-chain-section")).toBeNull();
+    // ThreatOverview 不显示攻击链计数
+    expect(screen.getByTestId("threat-overview").textContent).not.toContain("攻击链");
+  });
+});
+
 describe("MarkdownView i18n", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
