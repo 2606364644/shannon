@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AddRepoDialog } from "@/components/AddRepoDialog";
 import { CloneProgress } from "@/components/CloneProgress";
+import { CopyButton } from "@/components/CopyButton";
 
 const PULL_REFRESH_DELAY_MS = 1500;
 
@@ -58,17 +59,7 @@ function StateCell({ repo }: { repo: Repo }) {
   return <Badge variant="outline" className={cn("gap-1 font-mono", m.cls)}>{t(m.key)}</Badge>;
 }
 
-/** 截断长文本 + hover tooltip 显示完整值（修 URL/仓库名撑爆行、换行错乱的根因）。 */
-function Ellipsis({ value, className }: { value: string; className?: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn("block truncate", className)}>{value}</span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-md break-all">{value}</TooltipContent>
-    </Tooltip>
-  );
-}
+
 
 export function ReposPage() {
   const { t } = useTranslation();
@@ -207,10 +198,24 @@ export function ReposPage() {
                                   <TooltipContent>{r.name}</TooltipContent>
                                 </Tooltip>
                               </TableCell>
-                              {/* 来源：URL 截断 + tooltip；无 URL 显 kind/- */}
+                              {/* 来源：URL 截断 + tooltip + 复制按钮；长 URL 被右侧渐变蒙层 + 按钮覆盖，不挤压右侧列 */}
                               <TableCell className="py-2 px-3">
                                 {url ? (
-                                  <Ellipsis value={url} className="font-mono text-xs text-muted-foreground" />
+                                  <div className="relative flex items-center">
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="block w-full truncate font-mono text-xs text-muted-foreground">{url}</span>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-md break-all">{url}</TooltipContent>
+                                    </Tooltip>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end bg-gradient-to-l from-card via-card to-transparent pl-8">
+                                      <CopyButton
+                                        value={url}
+                                        ariaLabel={t("repos.copyUrlAria", { name: r.name })}
+                                        className="pointer-events-auto"
+                                      />
+                                    </div>
+                                  </div>
                                 ) : (
                                   <span className="text-muted-foreground">{r.source?.kind ?? "-"}</span>
                                 )}

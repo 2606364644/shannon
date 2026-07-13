@@ -32,6 +32,15 @@ describe("ReposPage", () => {
     expect(screen.getByText("✗ 失败")).toBeInTheDocument();
   });
 
+  it("有来源 URL 的行渲染复制按钮，无 URL 行不渲染", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+    // foo 有 url → CopyButton（aria-label 含仓库名）
+    expect(screen.getByRole("button", { name: "复制 foo 的来源 URL" })).toBeInTheDocument();
+    // bar 无 url → 不渲染复制按钮
+    expect(screen.queryByRole("button", { name: /复制 bar/ })).toBeNull();
+  });
+
   it("删除确认 Dialog", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     renderPage();

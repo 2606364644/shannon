@@ -1,5 +1,8 @@
 {
   "common": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copy failed",
     "cancel": "Cancel",
     "confirm": "Confirm",
     "delete": "Delete",
@@ -31,6 +34,7 @@
     "updating": "Updating {{name}}",
     "updateAria": "Update {{name}}",
     "deleteAria": "Delete {{name}}",
+    "copyUrlAria": "Copy source URL of {{name}}",
     "table": { "name": "Name", "source": "Source", "branch": "Branch", "size": "Size", "state": "State", "actions": "Actions" },
     "states": { "ready": "✓ Ready", "failed": "✗ Failed", "stale": "⚠ Incomplete", "cloning": "Cloning", "pulling": "Pulling" },
     "deleteDialog": { "title": "Delete repository", "desc": "Delete repository {{name}}? The code directory will be permanently removed." },

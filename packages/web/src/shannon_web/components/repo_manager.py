@@ -141,6 +141,7 @@ class RepoManager:
         return view
 
     def _repo_view(self, name: str) -> dict:
+        self._ensure_meta(name)  # 读时自愈：运行期拷入的仓库补 meta
         meta = self._read_meta(name)
         state = meta.get("state", "ready")
         # stale：磁盘 cloning/pulling 但内存无 job → 重启后未完成
@@ -165,6 +166,18 @@ class RepoManager:
             return json.loads(f.read_text("utf-8", errors="replace"))
         except json.JSONDecodeError:
             return {"name": name, "source": {"kind": "unknown"}, "state": "ready"}
+
+    def _ensure_meta(self, name: str) -> None:
+        """读时自愈：仓库有 .git 但无 .shannon-repo.json（运行期文件系统拷入、未走 clone
+        流程）→ 补写 meta（含 size_bytes）。幂等：meta 已存在或非 git 仓库则跳过；补写失败
+        （_migrate_one 内部 try/except）不抛，仍由 _read_meta 兜底返回。
+
+        刷新 /repos 即恢复来源/分支/大小三列数据，无需重启或手动扫描。
+        """
+        repo = self._repo_dir(name)
+        if (repo / ".shannon-repo.json").exists() or not (repo / ".git").exists():
+            return
+        self._migrate_one(repo, name)
 
     def _write_meta(self, name: str, **patch) -> None:
         f = self._repo_dir(name) / ".shannon-repo.json"
@@ -443,6 +456,7 @@ class RepoManager:
             self._write_meta(name,
                 source={"kind": "git" if url else "unknown", "url": url, "branch": branch},
                 cloned_at=datetime.fromtimestamp(repo.stat().st_mtime, timezone.utc).isoformat(),
+                size_bytes=_dir_size(repo),
                 state="ready", last_error=None)
         except Exception:
             # 单个坏仓库不应阻断迁移或启动；跳过即可（目录仍在，下次启动可重试）

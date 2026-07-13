@@ -3,6 +3,7 @@ import json
 import sys
 import textwrap
 import pytest
+from pathlib import Path
 from shannon_web.components.repo_manager import RepoManager, TooManyClones
 
 
@@ -193,6 +194,48 @@ def test_migrate_legacy_cleans_miswritten_group_meta(tmp_path, monkeypatch):
     assert not stale.exists()  # 脏 meta 被清
     # 子仓库被正常 migrate（补 meta）
     assert (base / "backend" / "honor" / ".shannon-repo.json").exists()
+
+
+def _make_bare_git(repo: Path, url: str, branch: str) -> None:
+    """构造一个"已 clone"仓库目录：含 .git/config(url) + .git/HEAD(ref) 但无 .shannon-repo.json。
+
+    模拟用户在服务运行期间把已 clone 的仓库直接拷进 repos_dir（未走 clone 流程）——
+    list_repos 凭 .git 能扫到，但 _read_meta 找不到 meta 返回兜底（无 url/branch/size）。
+    """
+    g = repo / ".git"
+    g.mkdir(parents=True)
+    (g / "config").write_text(f'[remote "origin"]\n\turl = {url}\n')
+    (g / "HEAD").write_text(f"ref: refs/heads/{branch}\n")
+
+
+def test_list_repos_self_heals_runtime_copied_repo(tmp_path, monkeypatch):
+    """运行期拷入的仓库（有 .git 无 .shannon-repo.json）经 list_repos 自愈补 meta：
+    来源/分支从 .git 推断、size_bytes 落盘，刷新页面即恢复三列数据（回归 2026-07-13
+    /repos 的 vuln-range 下拷入仓库三列全空的 bug）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    _make_bare_git(base / "vuln-range" / "NodeGoat", "https://x/NodeGoat.git", "main")
+    views = {r["name"]: r for r in rm.list_repos()}
+    v = views["vuln-range/NodeGoat"]
+    assert v["source"]["url"] == "https://x/NodeGoat.git"
+    assert v["source"]["branch"] == "main"
+    assert isinstance(v["size_bytes"], int)
+    # 自愈落盘 meta（后续刷新不再重算）
+    assert (base / "vuln-range" / "NodeGoat" / ".shannon-repo.json").exists()
+
+
+def test_migrate_legacy_writes_size_bytes(tmp_path, monkeypatch):
+    """migrate_legacy 补 meta 时计算 size_bytes（迁移入库的旧仓库大小列不再恒空）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = tmp_path / "repos"
+    repo = base / "solo"
+    _make_bare_git(repo, "https://x/solo.git", "dev")
+    (repo / "README.md").write_text("hello")  # 占位文件让 size > 0
+    rm.migrate_legacy()
+    meta = json.loads((repo / ".shannon-repo.json").read_text())
+    assert meta["source"]["url"] == "https://x/solo.git"
+    assert meta["source"]["branch"] == "dev"
+    assert isinstance(meta["size_bytes"], int) and meta["size_bytes"] > 0
 
 
 # ---- source.url 凭据脱敏（GitLab token 泄露安全修复）----

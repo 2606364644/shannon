@@ -1,5 +1,8 @@
 {
   "common": {
+    "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "复制失败",
     "cancel": "取消",
     "confirm": "确认",
     "delete": "删除",
@@ -31,6 +34,7 @@
     "updating": "正在更新 {{name}}",
     "updateAria": "更新 {{name}}",
     "deleteAria": "删除 {{name}}",
+    "copyUrlAria": "复制 {{name}} 的来源 URL",
     "table": { "name": "名称", "source": "来源", "branch": "分支", "size": "大小", "state": "状态", "actions": "操作" },
     "states": { "ready": "✓ 就绪", "failed": "✗ 失败", "stale": "⚠ 未完成", "cloning": "clone 中", "pulling": "pull 中" },
     "deleteDialog": { "title": "删除仓库", "desc": "删除仓库 {{name}}？代码目录永久删除。" },
