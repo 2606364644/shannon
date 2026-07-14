@@ -959,8 +959,8 @@ async def assemble_report(input: ActivityInput) -> None:
 
     ReportAssembler 已实现 evidence → findings → analysis_deliverable 三级回退,
     天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
-    加执行摘要并清理。拼接完成后追加攻击链独立章节（attack_chains.json →
-    ## 攻击链），失败不阻塞主报告。
+    加执行摘要并清理。攻击链章节由后续 inject_attack_chains activity 注入
+    （report-executive 之后），避免被覆盖。
     """
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
@@ -973,22 +973,43 @@ async def assemble_report(input: ActivityInput) -> None:
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
             await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
-
-        # 追加攻击链独立章节（非 fatal）
-        try:
-            chains_md = await ReportAssembler.render_attack_chains(deliverables)
-            if chains_md:
-                from shannon_core.utils.file_io import async_read_file, async_write_file
-                content = await async_read_file(report_path)
-                await async_write_file(report_path, content + chains_md)
-        except Exception:
-            pass  # 攻击链渲染失败不阻塞主报告
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def inject_attack_chains(input: ActivityInput) -> None:
+    """报告阶段最后注入：attack_chains.json → ## 攻击链 章节追加到最终报告。
+
+    必须在 run-report-agent 之后运行——report-executive agent 重写
+    comprehensive_security_assessment_report.md（同 deliverable_filename）,
+    若在此之前追加攻击链章节会被覆盖丢失（回归 hr_20260713-104726）。
+    放最后注入,确保攻击链章节留存。幂等（标题已存在则跳过）。失败不阻塞。
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from shannon_core.services.report_assembler import ReportAssembler
+        from shannon_core.utils.file_io import (
+            async_path_exists, async_read_file, async_write_file,
+        )
+
+        _, deliverables, _ = _get_paths(input)
+        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        if not await async_path_exists(report_path):
+            return  # 主报告不存在,无处追加
+        chains_md = await ReportAssembler.render_attack_chains(deliverables)
+        if not chains_md:
+            return  # 无攻击链 / 渲染为空
+        content = await async_read_file(report_path)
+        if "## 攻击链（多步利用路径）" in content:
+            return  # 幂等：已注入（resume/重跑）
+        await async_write_file(report_path, content + chains_md)
+    except Exception as exc:  # noqa: BLE001 — 攻击链注入失败不阻塞主报告
+        log.warning("inject_attack_chains failed (non-blocking): %s", exc)
 
 
 @activity.defn
