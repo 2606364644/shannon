@@ -219,6 +219,20 @@ cd packages/web/frontend && npm install && npm run dev
 
 > 生产（单容器）与开发（分离）共用同一份后端代码：后端 serve 静态由 `SHANNON_WEB_FRONTEND_DIR` 控制，开发时不设此变量即跳过。详见 [设计 spec](docs/superpowers/specs/2026-07-03-web-single-container-deploy-design.md)。
 
+### 清理运行残留
+
+`scripts/cleanup-shannon-py.sh` 清理 shannon-py 的运行残留——前端 vite/esbuild 进程、宿主直跑的后端、Docker 容器，可重复执行。**铁律：绝不触碰 `/root/shannon`（原始 TS 项目）与 gitnexus 等共享组件**——进程匹配用绝对路径锁死、容器按 compose `project=shannon-py` 精确过滤。
+
+```bash
+bash scripts/cleanup-shannon-py.sh --dry-run   # 预览将要清理的内容
+bash scripts/cleanup-shannon-py.sh             # stop 容器 + 杀前端/宿主后端进程
+bash scripts/cleanup-shannon-py.sh --rm        # 连容器实例一起删
+```
+
+与 `./scripts/up.sh down` 的区别：`down` 只停 compose 服务；本脚本额外杀掉**开发模式**（前后端分离跑）遗留的宿主进程——这类进程只有本脚本清得掉。
+
+两个脚本的完整用法、选项、安全保证与排障见 [Web 平台部署与运维脚本](docs/web-deployment.md)。
+
 ## 架构概览
 
 shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
@@ -238,6 +252,7 @@ shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
 - [配置指南](docs/configuration.md)
 - [GitNexus 轨生命周期分析](docs/gitnexus-track-analysis.md)
 - [白盒→黑盒交接运行手册](docs/whitebox-blackbox-handoff.md)
+- [Web 平台部署与运维脚本](docs/web-deployment.md)
 
 ## 项目结构
 
