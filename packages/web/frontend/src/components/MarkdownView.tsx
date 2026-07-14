@@ -133,7 +133,7 @@ function parseStructure(md: string): {
 
     if (inTypeSummarySection && currentType) {
       const t = line.trim();
-      const cm = /^(?:-\s*\*\*)?Count[:：]\s*\*\*\s*(\d+)/i.exec(t);
+      const cm = /^(?:-\s*\*\*)?(?:Count|数量)[:：]\s*\*?\*?\s*(\d+)/i.exec(t);
       if (cm) {
         currentType.count = parseInt(cm[1], 10);
         const pm = /（([A-Z]+)-(?:VULN|GN)/.exec(t);

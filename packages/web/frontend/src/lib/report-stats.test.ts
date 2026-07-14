@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeStats } from "./report-stats";
+import { computeStats, type ParsedTypeSummary } from "./report-stats";
 import type { ParsedVulnBlock } from "../api/types";
 
 function makeBlock(overrides: Partial<ParsedVulnBlock> = {}): ParsedVulnBlock {
@@ -114,5 +114,28 @@ describe("computeStats", () => {
   it("返回 attackChainCount 默认 0（computeStats 不算攻击链；实际值由 MarkdownView 覆盖）", () => {
     const blocks = [makeBlock({ id: "INJ-VULN-01", prefix: "INJ" })];
     expect(computeStats(blocks, new Set(), [], []).attackChainCount).toBe(0);
+  });
+
+  it("typeSummaries 空 prefix 时按 displayName 反查补全（中文报告场景）", () => {
+    // 中文「按类型汇总」只给 displayName(Injection/XSS/...)，prefix 空 → 须反查 INJ/XSS
+    // 5 个 AUTH 单点卡片驱动 AUTH count=5（对齐 hr_20260713-104726 现场场景：
+    // 「单点漏洞数 5」全来自 AUTH 卡片，其它类型零召回）
+    const blocks: ParsedVulnBlock[] = [
+      makeBlock({ id: "AUTH-VULN-01", prefix: "AUTH" }),
+      makeBlock({ id: "AUTH-VULN-02", prefix: "AUTH" }),
+      makeBlock({ id: "AUTH-VULN-03", prefix: "AUTH" }),
+      makeBlock({ id: "AUTH-VULN-04", prefix: "AUTH" }),
+      makeBlock({ id: "AUTH-VULN-05", prefix: "AUTH" }),
+    ];
+    const typeSummaries: ParsedTypeSummary[] = [
+      { prefix: "", displayName: "Injection", count: 0, severityRangeRaw: "" },
+      { prefix: "", displayName: "XSS", count: 0, severityRangeRaw: "" },
+      { prefix: "", displayName: "Auth", count: 5, severityRangeRaw: "" },
+      { prefix: "", displayName: "Authz", count: 0, severityRangeRaw: "" },
+      { prefix: "", displayName: "SSRF", count: 0, severityRangeRaw: "" },
+    ];
+    const aggs = computeStats(blocks, new Set(), [], typeSummaries).typeAggs;
+    const byPrefix = Object.fromEntries(aggs.map((a) => [a.prefix, a.count]));
+    expect(byPrefix).toEqual({ AUTH: 5, INJ: 0, XSS: 0, AUTHZ: 0, SSRF: 0 });
   });
 });

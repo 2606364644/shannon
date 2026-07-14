@@ -28,6 +28,13 @@ export const TYPE_DISPLAY: Record<string, string> = {
   SSRF: "SSRF",
 };
 
+/** 反向映射：规范显示名(lowercase) → prefix。
+ *  中文「数量:」类型汇总只给 displayName（Injection/XSS/...），prefix 缺失时反查补全，
+ *  让零计数补全（`if (ts.prefix && …)`）能命中 → 全 5 类卡片正常渲染。 */
+export const DISPLAY_TO_PREFIX: Record<string, string> = Object.fromEntries(
+  Object.entries(TYPE_DISPLAY).map(([prefix, display]) => [display.toLowerCase(), prefix]),
+);
+
 /** 执行摘要「最高风险发现」单条。 */
 export interface TopRiskItem {
   text: string;
@@ -85,6 +92,12 @@ export function computeStats(
   topRisks: TopRiskItem[],
   typeSummaries?: ParsedTypeSummary[],
 ): ReportStats {
+  // 0. 给 typeSummaries 里 prefix 为空的项用 displayName 反查补全
+  //    （中文「数量:」类型汇总只给 displayName，prefix 缺失 → 补全后零计数卡才能渲染）
+  const summaries = typeSummaries?.map((ts) =>
+    ts.prefix ? ts : { ...ts, prefix: DISPLAY_TO_PREFIX[ts.displayName.toLowerCase()] ?? "" },
+  );
+
   // 1. 每个 block 的 severity
   const sevOf = new Map<string, Severity>();
   for (const b of blocks) sevOf.set(b.id, inferSeverity(b, topRiskIds));
@@ -102,7 +115,7 @@ export function computeStats(
   }
 
   // 排序：按 typeSummaries 的 markdown 出现顺序；缺省按 prefix 字母序
-  const order = typeSummaries?.map((t) => t.prefix) ?? [];
+  const order = summaries?.map((t) => t.prefix) ?? [];
   const prefixOrder = (p: string) => {
     const idx = order.indexOf(p);
     return idx === -1 ? 999 : idx;
@@ -118,7 +131,7 @@ export function computeStats(
       const min = SEV_BY_RANK[Math.min(...ranks) - 1];
       const severityCounts = emptyDist();
       for (const s of sevs) severityCounts[s]++;
-      const ts = typeSummaries?.find((t) => t.prefix === prefix);
+      const ts = summaries?.find((t) => t.prefix === prefix);
       return {
         prefix,
         displayName: TYPE_DISPLAY[prefix] ?? ts?.displayName ?? prefix,
@@ -131,9 +144,9 @@ export function computeStats(
     });
 
   // 4. 补全 typeSummaries 中有但 blocks 中无的零计数类型（显示全部被测类型）
-  if (typeSummaries) {
+  if (summaries) {
     const existing = new Set(byPrefix.keys());
-    for (const ts of typeSummaries) {
+    for (const ts of summaries) {
       if (ts.prefix && !existing.has(ts.prefix)) {
         typeAggs.push({
           prefix: ts.prefix,

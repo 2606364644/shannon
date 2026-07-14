@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import i18n from "@/i18n";
 import { MarkdownView } from "./MarkdownView";
 
@@ -287,6 +287,46 @@ describe("MarkdownView 攻击链独立章节", () => {
     expect(screen.queryByTestId("attack-chain-section")).toBeNull();
     // ThreatOverview 不显示攻击链计数
     expect(screen.getByTestId("threat-overview").textContent).not.toContain("攻击链");
+  });
+});
+
+describe("MarkdownView 中文「数量:」类型汇总", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("中文「数量:」类型汇总 → TypeSummaryCards 渲染全 5 类（含 0 计数卡）", () => {
+    // 重现 hr_20260713-104726 现场现象：report-executive 中文 narration 把类型汇总写成
+    // 「### Injection / - 数量: N 个」→ 旧 Count 正则不认「数量」→ typeSummaries 全 prefix=""
+    // → 零计数补全跳过 → TypeSummaryCards 只剩由单点 blocks 驱动的 Auth 一张。
+    // 修法：Count 正则兼容中文 + computeStats 用 displayName 反查补 prefix。
+    const md = [
+      "# 安全评估报告",
+      "## 执行摘要",
+      "## 按漏洞类型汇总",
+      "### Injection",
+      "- 数量: 2 个",
+      "### XSS",
+      "- 数量: 1 个",
+      "### Auth",
+      "- 数量: 5 个",
+      "### Authz",
+      "- 数量: 11 个",
+      "### SSRF",
+      "- 数量: 1 个",
+      "## Authentication Vulnerabilities",
+      "### AUTH-VULN-01: 弱密码",
+      "### AUTH-VULN-02: 无 MFA",
+      "### AUTH-VULN-03: 默认凭据",
+      "### AUTH-VULN-04: 会话固定",
+      "### AUTH-VULN-05: 注销失效",
+    ].join("\n");
+    render(<MarkdownView markdown={md} />);
+    const cards = screen.getAllByTestId("type-card");
+    expect(cards).toHaveLength(5);
+    expect(within(cards[0]).getByText("Injection")).toBeInTheDocument();
+    // 数量来自 blocks（5 个 AUTH 卡片），非 prose「数量:」（口径由 P1 保证 prose 不再虚高）
+    const authCard = cards.find((c) => c.getAttribute("data-prefix") === "AUTH")!;
+    expect(authCard).toBeDefined();
+    expect(within(authCard).getByText("5")).toBeInTheDocument();
   });
 });
 
