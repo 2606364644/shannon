@@ -25,7 +25,7 @@ from shannon_whitebox.pipeline.activities import (
     run_merge_sink_reports, run_entry_point_fusion, run_preflight, run_risk_scoring,
     run_save_adjudication, run_vuln_agent, run_attack_chain_llm_agent,
     run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
-    run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report,
+    run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report, inject_attack_chains,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
     setup_display, run_heartbeat, finalize_summary,
 )
@@ -60,7 +60,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             run_merge_sink_reports, run_entry_point_fusion, run_preflight, run_risk_scoring,
             run_save_adjudication, run_vuln_agent, run_attack_chain_llm_agent,
             run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
-            run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report,
+            run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report, inject_attack_chains,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, run_heartbeat, finalize_summary,
         ],

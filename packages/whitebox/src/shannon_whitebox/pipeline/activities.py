@@ -389,7 +389,6 @@ async def log_info_activity(input: ActivityInput) -> None:
         pass  # best-effort: 显示侧通道失败绝不影响扫描（尤其 except 块里调，避免替换原异常）
 
 
-@activity.defn
 def _parse_gitnexus_verdict_output(raw, id_prefix):
     """补缺 ID 的 GitNexus 轨 verdict/explore 输出 → parse_lenient → (vulns, warnings)。
 
@@ -417,6 +416,7 @@ def _parse_gitnexus_verdict_output(raw, id_prefix):
     return list(parsed.queue.vulnerabilities), parsed.warnings
 
 
+@activity.defn
 async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
     """GitNexus track LLM chain-judgement pass for authz (spec §5.7).
 
