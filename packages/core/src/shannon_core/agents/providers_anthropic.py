@@ -222,6 +222,15 @@ class AnthropicProvider(BaseProvider):
                 if val:
                     sdk_env[var] = val
 
+        # IS_SANDBOX=1 绕过 claude CLI 的 root 守卫(permission_mode=bypassPermissions + getuid()==0
+        # → exit(1) "--dangerously-skip-permissions cannot be used with root/sudo"). 仅 root 时设:
+        # worker 容器(root)跑 LLM agent 必需; host shannon-user(非根 getuid()!=0)不触发该守卫故不设
+        # (保持 host 路径零改动, 两路互不干扰). 语义"本进程已在沙箱内", bypassPermissions 本就是扫描
+        # worker 的意图(C1 worker 为 root 设计: 无 USER/--global safe.directory/repos root 友好).
+        # 2026-07-14 bug#4.
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            sdk_env["IS_SANDBOX"] = "1"
+
         return sdk_env
 
     def _build_options(

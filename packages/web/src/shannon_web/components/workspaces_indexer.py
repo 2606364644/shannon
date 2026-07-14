@@ -7,7 +7,7 @@ from pathlib import Path
 from shannon_core.session import SessionManager
 from shannon_core.workspace import get_workspace_vuln_counts
 
-from .scan_liveness import is_scan_recently_active
+from .scan_liveness import is_scan_alive
 
 
 def _to_unix(v) -> float | None:
@@ -74,10 +74,11 @@ class WorkspacesIndexer:
         # completed/failed + 兜底推断 interrupted」的混乱(spec §4.3)。
         if session_status in _TERMINAL_STATUSES:
             return session_status
-        # 判活靠 heartbeat mtime(pid 表不参与判活,只服务 cancel)。heartbeat fresh
-        # → scan worker 进程仍存活(即便 web 看不到 host pid 也判活)→ running。
-        # 回归:kol_mapping_service_20260708-193139 被误标 interrupted 即缺此判活信号源。
-        if is_scan_recently_active(ws_path):
+        # 判活:heartbeat fresh(worker 在跑)OR 提交宽限内(workflow 刚提交、worker 还没写首个
+        # heartbeat 的冷启动窗口)。pid 表不参与判活(只服务 cancel)。回归:
+        # kol_mapping_service_20260708-193139(host CLI 活 scan)被误标 interrupted 即缺 heartbeat 门;
+        # hr_1784014329(提交后 1s 误杀)即缺提交宽限门。
+        if is_scan_alive(ws_path):
             return "running"
         # 无终态 + 无 fresh heartbeat = 未正常结束(死掉的孤儿/容器重启后子进程同死)。
         return "interrupted"

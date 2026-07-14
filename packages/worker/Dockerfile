@@ -49,6 +49,10 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages ./packages
+# prompts(agent prompt 模板, 如 pre-recon-code.txt / recon.txt / vuln-*.txt): 扫描 activity
+# 从 /app/prompts 读; 缺则 pre-recon 等 agent "Prompt file not found" → 扫描 FAIL
+# (2026-07-14 端到端验证暴露: worker 容器跑 WEB 扫描, 非像 CLI 在 host 读 repo 根 prompts/).
+COPY prompts ./prompts
 
 # --all-packages：强制装全部 workspace 成员（含 shannon-worker，root deps 不含它）。
 # 不用 --frozen：让 uv 走阿里源下载（与 web Dockerfile 同策略）。lockfile 仍锁版本。

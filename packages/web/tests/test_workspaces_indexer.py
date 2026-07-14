@@ -67,6 +67,22 @@ def test_running_when_heartbeat_fresh(tmp_workspaces):
     assert idx.list_workspaces()[0]["status"] == "running"
 
 
+def test_status_running_within_submit_grace(tmp_workspaces):
+    """_status_of 在提交宽限内(无 heartbeat)→ running 而非 interrupted(防冷启动误杀).
+
+    回归 hr_1784014329:提交后 1s 内 worker 还没写首个 heartbeat, _status_of 仅看 heartbeat 会
+    判 interrupted, 且终态优先致后续 worker 写 heartbeat 也翻不回。宽限门据 submitted_at 判 running.
+    """
+    import time
+    _make_ws(tmp_workspaces, "Cold", status=None)
+    ws = tmp_workspaces / "Cold"
+    (ws / "session.json").write_text(json.dumps({
+        "status": "running", "scan_type": "whitebox", "submitted_at": time.time(),
+    }))
+    idx = WorkspacesIndexer(tmp_workspaces)
+    assert idx.list_workspaces()[0]["status"] == "running"
+
+
 def test_terminal_status_passed_through(tmp_workspaces):
     """显式终态集合(completed/failed/interrupted/cancelled/killed/crashed)→ 该终态
     (强信号,立即定;spec §4.3)。取代旧「只认 completed/failed + 兜底推断 interrupted」。"""

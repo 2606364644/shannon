@@ -16,7 +16,7 @@ import aiofiles
 
 from shannon_core.session import SessionManager
 
-from .scan_liveness import is_scan_recently_active
+from .scan_liveness import is_scan_alive
 
 # activity_failures.log 尾部截断长度（与 scan_manager.stderr_tail 对齐）
 _TAIL_BYTES = 2048
@@ -69,11 +69,11 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
         if is_running:
             return False  # web 托管且仍存活，绝不干预
 
-        # 跨 host/容器边界存活信号：host CLI 起的 scan 不在 web scan_manager 的 pid 表里
-        # （容器非 host PID namespace，看不到 host pid），但仍持续写 workflow.log。
-        # mtime 近 → 扫描仍存活，绝不写假 scan_end（否则 live 页误显 interrupted）。
-        # 回归：kol_mapping_service_20260708-193139 被误判即缺此门。
-        if is_scan_recently_active(ws_dir):
+        # 跨 host/容器边界存活信号:heartbeat fresh(worker 在跑)OR 提交宽限内(workflow 刚提交、
+        # worker 还没写首个 heartbeat 的冷启动窗口)。后者防「提交后 1s 内前端首次 poll /events 即
+        # 触发 reconcile 误判 interrupted」(hr_1784014329 即此, _status_of 终态优先致误杀不可逆)。
+        # 回归:kol_mapping_service_20260708-193139(host CLI 起的活 scan)被误判即缺 heartbeat 门。
+        if is_scan_alive(ws_dir):
             return False
 
         mgr = SessionManager(ws_dir.parent)
@@ -85,7 +85,9 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
         if _has_scan_end(event_file):
             return False  # 幂等：已有 scan_end（_watch 或 StructuredEventRenderer 已收尾）
 
-        reason = "扫描因服务重启被中断（worker 进程未存活）"
+        reason = ("扫描未检测到 worker 心跳——worker 容器可能未启动或已退出"
+                  "（worker 应在扫描提交后数秒内写首个 heartbeat；持续无心跳请检查"
+                  " worker 容器是否运行，如 ./scripts/up.sh 是否已带起 worker）")
         tail = _failure_tail(ws_dir)
         if tail:
             reason = reason + "；activity 失败日志尾部：\n" + tail

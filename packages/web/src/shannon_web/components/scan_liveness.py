@@ -17,6 +17,7 @@ reconciler(orphan_reconciler)与状态判定(workspaces_indexer._status_of)据�
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -46,3 +47,62 @@ def is_scan_recently_active(
     except OSError:
         return False
     return False
+
+
+# ---- 提交宽限门(C1 Phase B: worker 冷启动窗口防误杀) ----
+# 根因:web 提交 workflow 后,worker 容器 poll 到 task + 写首个 heartbeat 前有数秒冷启动窗口。
+# 此前 reconcile/_status_of 仅看 heartbeat → 提交后 1s 内前端首次 poll /events 即误判 interrupted,
+# 且 _status_of 终态优先致误杀不可逆。is_scan_alive = heartbeat fresh OR 提交宽限内。
+
+# 提交宽限默认秒数:覆盖 temporal workflow task 调度 + worker long-poll(~1s) + 首个 heartbeat。
+# worker 常驻已起时该窗口通常数秒;留足 120s 容 worker 首启抖动。env 可调。
+SUBMIT_GRACE_DEFAULT_SECONDS = 120
+
+
+def _submit_grace_seconds() -> float:
+    """提交宽限窗口从 env 函数内读(非 import 时求值),使 monkeypatch env / per-profile 生效。"""
+    return float(os.environ.get("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS",
+                                str(SUBMIT_GRACE_DEFAULT_SECONDS)))
+
+
+def _ws_submitted_at(ws_dir: Path) -> float | None:
+    """读 session.json 的提交时间锚点:submitted_at(web 提交端写)优先,缺失回退 created_at
+    (历史 session 兼容)。返 unix float;无/异常 → None。
+
+    用于「提交宽限」门:web 提交 workflow 后、worker 写首个 heartbeat 前的冷启动窗口,
+    据此判 scan 仍活跃(避免误判 interrupted)。submitted_at 每次 start_workflow 提交刷新,
+    resume 场景也准确(resume 时 created_at 是老的,不能用)。
+    """
+    session_file = Path(ws_dir) / "session.json"
+    try:
+        data = json.loads(session_file.read_text("utf-8"))
+        if isinstance(data, dict):
+            for key in ("submitted_at", "created_at"):
+                v = data.get(key)
+                # bool 是 int 子类,排除(与 workspaces_indexer._to_unix 同口径)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    return float(v)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def is_scan_within_submit_grace(ws_dir: Path) -> bool:
+    """scan 是否在提交宽限窗口内(submitted_at/created_at 距今 <= grace)。
+
+    True = workflow 刚提交不久,worker 可能仍在冷启动(尚未写首个 heartbeat)。
+    False = 提交已久/无锚点 → 退回 heartbeat 判活(底层 is_scan_recently_active)。
+    """
+    anchor = _ws_submitted_at(ws_dir)
+    if anchor is None:
+        return False
+    return (time.time() - anchor) <= _submit_grace_seconds()
+
+
+def is_scan_alive(ws_dir: Path) -> bool:
+    """scan 是否活跃:heartbeat fresh OR 提交宽限内(冷启动窗口)。
+
+    高层判活;reconcile_orphaned / workspaces_indexer._status_of 据此避免误杀刚提交的 scan。
+    is_scan_recently_active 保留纯 heartbeat 语义,scan_manager.cancel(host 协作式)等仍用底层。
+    """
+    return is_scan_recently_active(ws_dir) or is_scan_within_submit_grace(ws_dir)

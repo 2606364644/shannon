@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# 默认等价 docker compose up -d --build web
+# 默认等价 docker compose up -d --build web worker（C1: worker 常驻消费 WEB 固定 task queue）
 ACTION="${1:-up}"
 shift || true  # 剩余参数透传给 docker compose
 
@@ -79,10 +79,10 @@ if [ "$ACTION" = "up" ]; then
       echo "❌ 缺少 $OVERRIDE_FILE（复用模式依赖它）。请检查仓库。" >&2
       exit 1
     fi
-    docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d --build "$@" web
+    docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d --build "$@" web worker
   else
     echo ">> 7233 空闲 → 自建 temporal 模式（主 compose 默认）"
-    docker compose up -d --build "$@" web
+    docker compose up -d --build "$@" web worker
   fi
 else
   # down / logs / ps / restart 等子命令透传。

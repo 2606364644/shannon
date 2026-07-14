@@ -561,6 +561,25 @@ class TestAnthropicProviderBuildOptions:
             )
         assert options.max_turns == 200
 
+    def test_build_sdk_env_sets_is_sandbox_when_root(self, monkeypatch):
+        """root(getuid==0) 下 options.env 设 IS_SANDBOX=1, 绕过 claude CLI root 守卫
+        (bypassPermissions + root → exit(1) "cannot be used with root/sudo"). worker
+        容器 root 跑 LLM agent 必需(2026-07-14 bug#4)."""
+        monkeypatch.setattr("os.getuid", lambda: 0)
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        options = provider._build_options(cwd="/tmp", model="claude-sonnet-4-6")
+        assert options.env.get("IS_SANDBOX") == "1"
+
+    def test_build_sdk_env_no_is_sandbox_when_non_root(self, monkeypatch):
+        """非 root(getuid!=0) 不设 IS_SANDBOX: host shannon-user 跑 claude CLI 不触发 root
+        守卫(getuid!=0), 不污染 host 路径(保持 host 与 worker 两路互不干扰)."""
+        monkeypatch.setattr("os.getuid", lambda: 1000)
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        options = provider._build_options(cwd="/tmp", model="claude-sonnet-4-6")
+        assert "IS_SANDBOX" not in (options.env or {})
+
 
 class TestOpenAIProvider:
     def test_get_model_resolves_tier(self):

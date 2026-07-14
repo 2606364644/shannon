@@ -77,6 +77,26 @@ async def test_start_marks_owner_web(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_writes_submitted_at(tmp_path, monkeypatch):
+    """start 提交 workflow 成功后写 session.json submitted_at(提交宽限门锚点,防冷启动误杀).
+
+    submitted_at 每次 start_workflow 提交刷新 → resume 场景也准确(resume 时 created_at 是老的).
+    提交失败(start_workflow 抛)不写此字段(start 已抛, 不到此分支).
+    """
+    mgr = ScanManager(tmp_path, tmp_path / "repos", None, max_concurrent=2)
+    _patch_temporal_ok(monkeypatch, mgr)
+    _patch_client(monkeypatch)
+    before = time.time()
+    await mgr.start(ScanRequest(type="whitebox",
+                                source=PathSource(kind="path", value="/x"),
+                                url="u", workspace="WSUB"))
+    after = time.time()
+    sess = json.loads((tmp_path / "WSUB" / "session.json").read_text())
+    assert "submitted_at" in sess
+    assert before <= sess["submitted_at"] <= after
+
+
+@pytest.mark.asyncio
 async def test_start_cleanup_active_reqs_on_submit_failure(tmp_path, monkeypatch):
     """提交失败(start_workflow 抛)→ _active_reqs 必须清理, 否则 active_repo_sources 误报."""
     mgr = ScanManager(tmp_path, tmp_path / "repos", None, max_concurrent=2)

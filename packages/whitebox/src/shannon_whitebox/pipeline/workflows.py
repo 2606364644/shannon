@@ -67,8 +67,15 @@ class WhiteboxScanWorkflow:
             cfg.vuln_classes if cfg else None,
         )
 
-        # Compute workspace_path so activities know where to write auth-state.json
-        if input.workspace_name:
+        # Compute workspace_path so activities know where to write 产物(heartbeat/deliverables/
+        # activity_failures/agents/workflow.log/session). WEB 路径(event_file 非 None): 用 event_file
+        # 同目录(web scan_manager 创建的 /app/workspaces/<ws>), 与 web 判活(is_scan_alive 看
+        # <ws>/heartbeat)/报告读取(get_workspace_vuln_counts)对齐。CLI 路径(无 event_file): 走
+        # repo_path.parent/workspaces(CLI 习惯, run_scan 外层建)。修路径分歧(2026-07-14 端到端暴露:
+        # worker 产物原落 /app/repos/.../workspaces/<ws>, web 找不到 heartbeat → 判活失效 + 报告空).
+        if input.event_file:
+            workspace_path = str(Path(input.event_file).parent)
+        elif input.workspace_name:
             workspace_path = str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
         else:
             workspace_path = input.repo_path
@@ -93,11 +100,16 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=retry_for("standard"),
             )
-            heartbeat_handle = workflow.execute_activity(
+            # run_heartbeat 是并行 long-running activity(永阻塞, 靠 cancel 退出). 必须
+            # asyncio.create_task 包起才会实际调度执行——裸 workflow.execute_activity(...) 仅
+            # 产 coroutine, 不 await/create_task 则 activity 永不执行 → heartbeat 永不写 →
+            # web 判活在 120s 提交宽限后误判 interrupted(2026-07-14 端到端验证暴露). 返回 Task
+            # 供下方 finally 的 heartbeat_handle.cancel() 终止(Task.cancel 有效; coroutine 无).
+            heartbeat_handle = asyncio.create_task(workflow.execute_activity(
                 activities.run_heartbeat, act_input,
                 start_to_close_timeout=timedelta(hours=24),
                 retry_policy=RetryPolicy(maximum_attempts=1),
-            )
+            ))
         await workflow.execute_activity(
             activities.log_phase_start_activity,
             args=[

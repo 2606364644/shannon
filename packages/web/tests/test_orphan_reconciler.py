@@ -115,3 +115,42 @@ async def test_orphan_recently_active_skip(tmp_path):
     # session 也不应被改成 interrupted
     sess = json.loads((ws_dir / "session.json").read_text(encoding="utf-8"))
     assert sess["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_within_submit_grace(tmp_path):
+    """提交宽限内(刚 start_workflow, worker 还没写首个 heartbeat)→ 不写假 scan_end.
+
+    覆盖冷启动窗口:此前提交后 1s 内前端首次 poll /events 即触发 reconcile, 那时 worker 连首个
+    heartbeat 都没写 → 误判 interrupted, 且 _status_of 终态优先致误杀不可逆(hr_1784014329 即此).
+    """
+    ws_dir = tmp_path / "workspaces" / "ws1"
+    ws_dir.mkdir(parents=True)
+    (ws_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": time.time(),
+    }), encoding="utf-8")
+    # 无 heartbeat + 无 scan_end + 非终态 + submitted_at 新 → 宽限内 → 不干预
+    wrote = await reconcile_orphaned(ws_dir, is_running=False)
+    assert wrote is False
+    assert not (ws_dir / "events.ndjson").exists()
+    sess = json.loads((ws_dir / "session.json").read_text(encoding="utf-8"))
+    assert sess["status"] == "running"  # 未被改 interrupted
+
+
+@pytest.mark.asyncio
+async def test_reconcile_reason_mentions_worker_not_started(tmp_path):
+    """超宽限 + 无 heartbeat 真孤儿 → scan_end.stderr_tail 指向「worker 容器可能未启动」.
+
+    取代笼统「扫描因服务重启被中断」——后者误导(非服务重启, 是 worker 没起/已退出),
+    直接指向最常见根因, 便于用户定位(本 bug 即 worker 容器从未被 up.sh 启动).
+    """
+    ws_dir = tmp_path / "workspaces" / "ws1"
+    ws_dir.mkdir(parents=True)
+    old = time.time() - 3600
+    (ws_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": old,  # 提交已久 → 超宽限
+    }), encoding="utf-8")
+    wrote = await reconcile_orphaned(ws_dir, is_running=False)
+    assert wrote is True
+    line = json.loads((ws_dir / "events.ndjson").read_text(encoding="utf-8").strip())
+    assert "worker 容器可能未启动" in line["stderr_tail"]

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -56,3 +57,44 @@ def test_default_window_is_90(monkeypatch, tmp_path):
     old = time.time() - 95  # >90s → 死
     os.utime(hb, (old, old))
     assert is_scan_recently_active(tmp_path) is False
+
+
+# ---- 提交宽限门(C1 Phase B: worker 冷启动窗口防误杀) ----
+# 根因:web 提交 workflow 后,worker 容器 poll 到 task + 写首个 heartbeat 前有几秒冷启动窗口。
+# 此前 reconcile/_status_of 仅看 heartbeat → 提交后 1s 内前端 poll 即误判 interrupted(不可逆)。
+# is_scan_alive = heartbeat fresh OR 提交宽限内(读 session.json submitted_at,回退 created_at)。
+
+def test_submitted_at_within_grace_judged_alive(tmp_path, monkeypatch):
+    """无 heartbeat + submitted_at 新(提交宽限内)→ is_scan_alive True。
+    覆盖冷启动窗口:workflow 刚提交、worker 还没写首个 heartbeat。"""
+    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    (tmp_path / "session.json").write_text(json.dumps({"submitted_at": time.time()}))
+    from shannon_web.components.scan_liveness import is_scan_alive
+    assert is_scan_alive(tmp_path) is True
+
+
+def test_created_at_fallback_when_no_submitted_at(tmp_path, monkeypatch):
+    """老 session 无 submitted_at → 回退 created_at 判宽限(向后兼容历史 session)。"""
+    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    (tmp_path / "session.json").write_text(json.dumps({"created_at": time.time()}))
+    from shannon_web.components.scan_liveness import (
+        is_scan_alive, is_scan_within_submit_grace,
+    )
+    assert is_scan_within_submit_grace(tmp_path) is True
+    assert is_scan_alive(tmp_path) is True
+
+
+def test_is_scan_alive_heartbeat_or_grace(tmp_path):
+    """is_scan_alive = heartbeat fresh OR 提交宽限内(任一 True)。heartbeat fresh 即可。"""
+    from shannon_web.components.scan_liveness import is_scan_alive
+    (tmp_path / "heartbeat").write_text(f"{time.time()}\n")
+    assert is_scan_alive(tmp_path) is True
+
+
+def test_submit_grace_expired_not_alive(tmp_path, monkeypatch):
+    """提交超宽限 + 无 heartbeat → is_scan_alive False(真孤儿:worker 没起/已退出)。"""
+    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    old = time.time() - 3600
+    (tmp_path / "session.json").write_text(json.dumps({"submitted_at": old}))
+    from shannon_web.components.scan_liveness import is_scan_alive
+    assert is_scan_alive(tmp_path) is False

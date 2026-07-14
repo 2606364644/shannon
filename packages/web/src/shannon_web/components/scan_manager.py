@@ -131,6 +131,9 @@ class ScanManager:
             WhiteboxScanWorkflow.run, inp, id=workflow_id,
             task_queue=WEB_TASK_QUEUE_WHITEBOX,
         )
+        # 提交成功后锚定 submitted_at(scan_liveness 提交宽限门据此判冷启动窗口, 防误杀).
+        # 失败分支(start_workflow 抛)不会到达此处 → 提交失败不写 submitted_at.
+        self._mark_submitted_at(self._workspaces_dir / ws)
         return handle
 
     def _resolve_workflow_id(self, ws: str) -> str:
@@ -186,6 +189,23 @@ class ScanManager:
             if not isinstance(data, dict):
                 data = {}
             data["owner"] = owner
+            session_file.write_text(json.dumps(data), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+    def _mark_submitted_at(self, ws_dir: Path) -> None:
+        """提交成功后写 session.json submitted_at(scan_liveness 提交宽限门锚点, 防冷启动误杀).
+
+        best-effort read-modify-write(与 _mark_owner 同模式); 仅 _submit_whitebox 提交成功后调.
+        每次 start_workflow 提交刷新 → resume 场景也准确(resume 时 created_at 是原始建仓时间,
+        不能用作「最近提交」锚点).
+        """
+        session_file = ws_dir / "session.json"
+        try:
+            data = json.loads(session_file.read_text("utf-8")) if session_file.exists() else {}
+            if not isinstance(data, dict):
+                data = {}
+            data["submitted_at"] = time.time()
             session_file.write_text(json.dumps(data), encoding="utf-8")
         except (OSError, ValueError):
             pass
