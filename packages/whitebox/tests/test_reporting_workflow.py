@@ -45,3 +45,22 @@ def test_reporting_phase_has_inject_attack_chains_after_run_report_agent() -> No
     steps = step_names("reporting")
     assert "inject-attack-chains" in steps
     assert steps.index("inject-attack-chains") > steps.index("run-report-agent")
+
+
+def test_reporting_phase_inject_attack_chains_after_report_agent_in_workflow() -> None:
+    """源码级硬约束：workflows.py 里 inject_attack_chains 必须在 run-report-agent 之后调用（防覆盖回归）。
+
+    step_intents 注册表只保证 *意图* 顺序；若有人删掉 workflows.py 里
+    `await workflow.execute_activity(activities.inject_attack_chains, …)` 调用但保留
+    step_intents 条目，上面的注册表测试仍会通过，覆盖回归会再次发生。本测试直接
+    扫源码，镜像 sibling `test_reporting_phase_order_assemble_before_report` 的
+    `_workflow_src()` + `.find()` 链式模式，锚定可执行代码字面量。
+    """
+    src = _workflow_src()
+    # 锚定 run-report-agent 对应的 execute_activity 调用（agent_name="report" 字面量，
+    # 与 sibling 测试同款锚点；不匹配注释里的 "report" 字样）。
+    i_report = src.find('"agent_name": "report"')
+    assert i_report != -1, "找不到 run-report-agent 调用（agent_name=report 字面量）"
+    assert src.find("activities.inject_attack_chains", i_report) != -1, (
+        "inject_attack_chains 必须在 run-report-agent 之后执行（防 report-executive 覆盖攻击链章节）"
+    )
