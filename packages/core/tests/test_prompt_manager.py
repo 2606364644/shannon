@@ -684,3 +684,16 @@ def test_shared_session_stripped_even_with_auth_state_file(prompts_dir):
     assert "state load" not in result  # load command 随 block 被 strip
     assert "Before" in result and "After" in result
 
+
+def test_vuln_summary_subsections_counts_only_single_point_cards() -> None:
+    """类型汇总模板须明确：只数 ### 单点卡片，攻击链(llm-chain)不计入。"""
+    mgr = PromptManager(Path("/nonexistent"))  # 只调方法，不读文件
+    out = mgr._build_vuln_summary_subsections(["injection", "xss"])
+    # 含单点卡片口径限定
+    assert "PREFIX-VULN-NN" in out or "PREFIX-GN-NN" in out or "单点" in out
+    # 含「攻击链不计入」类限定
+    assert "攻击链" in out or "llm-chain" in out or "不计入" in out
+    # 仍为每个 class 生成子节
+    assert "### Injection" in out
+    assert "### Xss" in out
+

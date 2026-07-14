@@ -65,7 +65,7 @@ MODIFY the existing file `{{DELIVERABLES_PATH}}/comprehensive_security_assessmen
 
 ## 按漏洞类型汇总
 
-{For each vulnerability type below, examine the comprehensive_security_assessment_report.md sections and provide a summary. If no section exists for that type or no vulnerabilities are listed, explicitly state that none were found.}
+{For each vulnerability type below, count ONLY standalone single-point vulnerability cards in the report body — headings matching `### PREFIX-VULN-NN` or `### PREFIX-GN-NN`. DO NOT count defects that appear only inside the `## 攻击链` section (llm-chain-N); those are multi-step chain findings, counted separately in their own section, NOT as single-point vulns. If a type has zero single-point cards, write Count: 0 and note that any findings for that type live in the 攻击链 section.}
 
 {{VULN_SUMMARY_SUBSECTIONS}}
 

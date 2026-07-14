@@ -242,15 +242,23 @@ class PromptManager:
         return "\n".join(lines)
 
     def _build_vuln_summary_subsections(self, vuln_classes: list[str]) -> str:
-        """Generate per-class summary subsection templates."""
+        """Generate per-class summary subsection templates.
+
+        口径（2026-07-14，修 hr_20260713-104726 口径脱节）：Count 只数报告正文里的
+        ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN / PREFIX-GN-NN）。攻击链
+        （## 攻击链 章节 / llm-chain-N）里发现的缺陷【不计入】此处——它们在攻击链
+        章节单独体现，避免「单点漏洞总数」与「类型汇总」口径脱节。
+        """
         lines = []
         for vc in vuln_classes:
             label = vc.replace("-", " ").title()
             lines.append(
                 f"### {label}\n"
-                f"Count: {{number of confirmed {vc} vulnerabilities}}\n"
-                f"Severity range: {{range}}\n"
-                f"Key findings: {{1-2 sentence summary}}"
+                f"Count: {{只数本报告正文 ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN 或 PREFIX-GN-NN，属于 {label} 类）的数量。"
+                f"攻击链（## 攻击链 / llm-chain-N）里发现的缺陷【不计入】此处——它们单独成章。"
+                f"若该类无单点卡片，写 0}}\n"
+                f"Severity range: {{仅基于上述单点卡片的 range；无单点卡片则 N/A}}\n"
+                f"Key findings: {{1-2 句，仅概述单点卡片；勿混入攻击链内容}}"
             )
         return "\n\n".join(lines)
 
