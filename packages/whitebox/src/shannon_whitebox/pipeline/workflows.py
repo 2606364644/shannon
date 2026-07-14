@@ -516,6 +516,13 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=15),
                 retry_policy=retry_for("standard"),
             )
+            # 攻击链章节最后注入（report-executive 之后），避免被 agent 重写覆盖丢失
+            self._state.current_agent = "inject-attack-chains"
+            await workflow.execute_activity(
+                activities.inject_attack_chains, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
+            )
             self._state.current_agent = None
             # === 报告增强：生成 PoC md（失败由 activity 内部吞掉，不影响主报告） ===
             self._state.current_agent = "generate-poc-report"

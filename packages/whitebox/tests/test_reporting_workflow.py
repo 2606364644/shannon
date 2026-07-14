@@ -37,3 +37,11 @@ def test_reporting_phase_order_assemble_before_report():
     assert src.find('"agent_name": "report"', i_assemble) != -1, (
         "run_agent(agent_name=report) 必须在 assemble_report 之后"
     )
+
+
+def test_reporting_phase_has_inject_attack_chains_after_run_report_agent() -> None:
+    """攻击链注入必须在 run-report-agent 之后（顺序硬约束，防覆盖回归）。"""
+    from shannon_whitebox.pipeline.step_intents import step_names
+    steps = step_names("reporting")
+    assert "inject-attack-chains" in steps
+    assert steps.index("inject-attack-chains") > steps.index("run-report-agent")
