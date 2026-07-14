@@ -390,6 +390,33 @@ async def log_info_activity(input: ActivityInput) -> None:
 
 
 @activity.defn
+def _parse_gitnexus_verdict_output(raw, id_prefix):
+    """补缺 ID 的 GitNexus 轨 verdict/explore 输出 → parse_lenient → (vulns, warnings)。
+
+    探索/判定 agent 产出的候选可能缺 ID(authz_gitnexus_explore prompt schema 无 ID
+    字段),而 BaseVulnerability.ID 必填 → parse_lenient 校验丢弃 → 静默落地 0
+    (回归 hr_20260713:agent 找到 4 个候选,authz_gitnexus_queue.json 落地 0)。
+    这里在 parse 前给缺 ID 的条目补序列化 ID(如 AUTHZ-GN-EXPLORE-01),防静默丢数据。
+
+    warnings 由 parse_lenient 产出(dropped 计数等);callers MUST 打日志
+    (守 queue_schemas.parse_lenient docstring 的 "callers MUST surface, never silent")。
+    """
+    from shannon_core.models.queue_schemas import VulnerabilityQueue
+    raw_str = raw if isinstance(raw, str) else (json.dumps(raw) if raw is not None else "{}")
+    try:
+        data = json.loads(raw_str)
+        vulns = data.get("vulnerabilities") if isinstance(data, dict) else None
+        if isinstance(vulns, list):
+            for idx, v in enumerate(vulns):
+                if isinstance(v, dict) and not v.get("ID"):
+                    v["ID"] = f"{id_prefix}{idx + 1:02d}"
+            raw_str = json.dumps(data)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass  # raw 非 JSON → parse_lenient 以 invalid_json 形式兜底
+    parsed = VulnerabilityQueue.parse_lenient(raw_str)
+    return list(parsed.queue.vulnerabilities), parsed.warnings
+
+
 async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
     """GitNexus track LLM chain-judgement pass for authz (spec §5.7).
 
@@ -466,16 +493,22 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 )
                 raw = result.structured_output
                 if raw is None and result.text:
-                    raw = result.text  # fallback to text; parse_lenient handles
-                parsed = VulnerabilityQueue.parse_lenient(
-                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
-                )
-                for v in parsed.queue.vulnerabilities:
+                    raw = result.text
+                gn_vulns, gn_warnings = _parse_gitnexus_verdict_output(raw, "AUTHZ-GN-")
+                for v in gn_vulns:
                     data = v.model_dump()
                     data["source_track"] = "gitnexus"
                     if not data.get("evidence_chain"):
                         data["evidence_chain"] = "gitnexus track candidate (dominance/framework)"
                     vulnerabilities.append(data)
+                if gn_warnings:
+                    try:
+                        await get_audit_session().log_info(
+                            f"authz GitNexus 轨：parse warnings (candidate>0): {gn_warnings}",
+                            "warning",
+                        )
+                    except Exception:
+                        pass
 
                 try:
                     await get_audit_session().log_info(
@@ -509,17 +542,23 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 )
                 raw = result.structured_output
                 if raw is None and result.text:
-                    raw = result.text  # fallback to text; parse_lenient handles
-                parsed = VulnerabilityQueue.parse_lenient(
-                    raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else "{}"
-                )
-                for v in parsed.queue.vulnerabilities:
+                    raw = result.text
+                gn_vulns, gn_warnings = _parse_gitnexus_verdict_output(raw, "AUTHZ-GN-EXPLORE-")
+                for v in gn_vulns:
                     data = v.model_dump()
                     data["source_track"] = "gitnexus"
                     data["needs_review"] = True  # 探索发现，软候选（未经确定性 dominance 验证）
                     if not data.get("evidence_chain"):
                         data["evidence_chain"] = "gitnexus explore-discovered (0 deterministic candidates)"
                     vulnerabilities.append(data)
+                if gn_warnings:
+                    try:
+                        await get_audit_session().log_info(
+                            f"authz GitNexus 轨（探索）：parse warnings: {gn_warnings}",
+                            "warning",
+                        )
+                    except Exception:
+                        pass
 
                 try:
                     await get_audit_session().log_info(

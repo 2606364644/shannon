@@ -242,6 +242,79 @@ async def test_judge_logs_info_when_candidates(tmp_path):
     assert any("verdict" in m for m in msgs)  # 判定后那条
 
 
+@pytest.mark.asyncio
+async def test_judge_explore_fills_missing_id_not_drops(tmp_path):
+    """回归 hr_20260713:0 候选探索 agent 返回**缺 ID** 的候选,应补 ID 后落地,
+    而非被 parse_lenient 静默丢弃(BaseVulnerability.ID 必填 → 全丢 → queue 落地 0)。
+
+    真机:authz 探索 agent 找到 4 个候选(authz_gitnexus_explore prompt 产出的
+    schema 无 ID 字段),authz_gitnexus_queue.json 落地 0。
+    """
+    dlv = tmp_path / "whitebox"
+    dlv.mkdir(parents=True, exist_ok=True)
+    (dlv / "code_index.json").write_text(json.dumps({
+        "repository": "r", "language": "typescript", "total_blocks": 0,
+        "total_entry_points": 0, "total_chains": 0, "blocks": [], "edges": [],
+        "entry_points": [], "chains": [],
+    }))
+
+    async def fake_run(prompt, **kwargs):
+        # 探索 agent 产出**缺 ID**(模拟 authz_gitnexus_explore prompt schema)
+        return type("R", (), {
+            "success": True,
+            "structured_output": {"vulnerabilities": [
+                {"endpoint": "GET /api/a/:id", "vulnerability_type": "Horizontal",
+                 "externally_exploitable": False, "vulnerable_code_location": "a.ts:1",
+                 "reason": "no ownership", "minimal_witness": "x", "confidence": "low"},
+                {"endpoint": "GET /api/b/:id", "vulnerability_type": "Horizontal",
+                 "externally_exploitable": False, "vulnerable_code_location": "b.ts:1",
+                 "reason": "no ownership", "minimal_witness": "y", "confidence": "low"},
+            ]},
+            "text": "",
+        })()
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
+        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+                inst = gs.return_value
+                inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
+                await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
+    assert len(data["vulnerabilities"]) == 2  # BUG 时此处为 0(parse_lenient 丢缺 ID)
+    assert all(v.get("ID") for v in data["vulnerabilities"])  # 补了 ID
+    assert all(v.get("needs_review") is True for v in data["vulnerabilities"])  # 探索软候选
+
+
+def test_parse_gitnexus_verdict_output_fills_missing_id():
+    """缺 ID 的候选 parse 前补序列化 ID(不被 parse_lenient 丢弃);已有 ID 保留不变。
+
+    覆盖 candidate>0 判定分支与探索分支共用的 helper:真机 hr_20260713 的 4→0
+    根因即缺 ID 被丢,这里钉死补 ID 行为 + 已有 ID 不被覆写。
+    """
+    from shannon_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
+    raw = {"vulnerabilities": [
+        {"endpoint": "/a", "vulnerability_type": "Horizontal",
+         "externally_exploitable": False, "confidence": "low"},               # 缺 ID
+        {"ID": "AUTHZ-GN-99", "endpoint": "/b", "vulnerability_type": "Horizontal",
+         "externally_exploitable": True, "confidence": "high"},               # 已有 ID
+        {"endpoint": "/c", "vulnerability_type": "Horizontal",
+         "externally_exploitable": False, "confidence": "low"},               # 缺 ID
+    ]}
+    vulns, _warnings = _parse_gitnexus_verdict_output(raw, "AUTHZ-GN-EXPLORE-")
+    assert len(vulns) == 3
+    assert [v.ID for v in vulns] == ["AUTHZ-GN-EXPLORE-01", "AUTHZ-GN-99", "AUTHZ-GN-EXPLORE-03"]
+
+
+def test_parse_gitnexus_verdict_output_invalid_raw_no_crash():
+    """非 JSON / 空 raw → ([], warnings),不崩(守 parse_lenient 容错 + never silent)。"""
+    from shannon_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
+    vulns, warnings = _parse_gitnexus_verdict_output("not json", "AUTHZ-GN-")
+    assert vulns == []
+    assert warnings  # invalid json → parse_lenient 产 warning,caller 应打日志
+
+
 def _noop_cm_factory():
     class _CM:
         async def __aenter__(self):
