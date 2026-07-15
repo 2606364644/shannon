@@ -9,7 +9,7 @@ COPY packages/web/frontend/ ./
 RUN npm run build            # → /fe/dist
 
 # ---- stage 2: python backend + 拷前端 dist ----
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # GitFetcher 需要 git；ca-certificates for https clone
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
