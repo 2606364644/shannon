@@ -57,6 +57,14 @@ export interface AgentExecutionInput {
   providerConfig?: import('../types/config.js').ProviderConfig | undefined;
   promptOverride?: string | undefined;
   mcpServers?: Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>;
+  /**
+   * Optional hook invoked after output validation passes but BEFORE the
+   * success commit. Collector-based agents (pre-recon/recon/vuln/exploit) use
+   * it to render their analysis markdown so the rendered file lands in the
+   * checkpoint commit instead of being left as an untracked file that
+   * `git clean` deletes on resume.
+   */
+  renderDeliverables?: ((deliverablesPath: string) => Promise<void>) | undefined;
 }
 
 interface FailAgentOpts {
@@ -243,7 +251,15 @@ export class AgentExecutionService {
       });
     }
 
-    // 10. Success - commit deliverables, then capture checkpoint hash
+    // 10. Render collector-based deliverables BEFORE the success commit so they
+    // land in the checkpoint. Rendered after the commit, they would be untracked
+    // files that `git clean -fd` strips on resume — losing the deliverable even
+    // though the agent succeeded (the authz analysis doc disappears this way).
+    if (input.renderDeliverables) {
+      await input.renderDeliverables(deliverablesPath);
+    }
+
+    // 11. Success - commit deliverables, then capture checkpoint hash
     await commitGitSuccess(deliverablesPath, agentName, logger);
     const commitHash = await getGitCommitHash(deliverablesPath);
 

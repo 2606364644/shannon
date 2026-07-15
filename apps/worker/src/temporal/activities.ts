@@ -145,6 +145,7 @@ async function runAgentActivity(
   agentName: AgentName,
   input: ActivityInput,
   mcpServers?: Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>,
+  renderDeliverables?: (deliverablesPath: string) => Promise<void>,
 ): Promise<AgentMetrics> {
   const { repoPath, configPath, pipelineTestingMode = false, workflowId, webUrl } = input;
 
@@ -201,6 +202,7 @@ async function runAgentActivity(
         ...(input.configYAML !== undefined && { configYAML: input.configYAML }),
         ...(input.promptOverride !== undefined && { promptOverride: input.promptOverride }),
         ...(mcpServers && { mcpServers }),
+        ...(renderDeliverables && { renderDeliverables }),
       },
       auditSession,
       logger,
@@ -264,28 +266,39 @@ export async function runPreReconAgent(input: ActivityInput): Promise<AgentMetri
   const { renderPreRecon } = await import('../services/pre-recon-renderer.js');
 
   const collector = createPreReconCollectorServer();
-  const metrics = await runAgentActivity('pre-recon', input, { 'pre-recon-collector': collector.server });
 
-  // On resume, the agent is skipped and the collector is never populated.
-  // The cached deliverable from the prior run is the source of truth.
+  // Render the pre-recon markdown BEFORE the success commit so it lands in the
+  // checkpoint (see runVulnAgentWithCollector for the rationale).
+  const renderDeliverables = async (deliverablesPath: string): Promise<void> => {
+    const logger = createActivityLogger();
+    // Skipped tools surface as renderer placeholders, not as activity failures.
+    const callStatus = collector.getCallStatus();
+    logger.info('Pre-recon tool call status', { callStatus });
+
+    const collected = collector.getAll();
+    const markdown = renderPreRecon(collected);
+    const mdPath = path.join(deliverablesPath, 'pre_recon_deliverable.md');
+    await atomicWrite(mdPath, markdown);
+    logger.info(`Wrote pre_recon_deliverable.md from structured data (${markdown.length} bytes)`);
+  };
+
+  const metrics = await runAgentActivity(
+    'pre-recon',
+    input,
+    { 'pre-recon-collector': collector.server },
+    renderDeliverables,
+  );
+
+  // On resume, the agent is skipped and shared-knowledge side effects are not re-derived.
   if (metrics.skipped) {
     return metrics;
   }
 
   const logger = createActivityLogger();
-  const dir = deliverablesDir(input.repoPath, input.deliverablesSubdir);
 
-  // Skipped tools surface as renderer placeholders, not as activity failures.
-  const callStatus = collector.getCallStatus();
-  logger.info('Pre-recon tool call status', { callStatus });
-
-  const collected = collector.getAll();
-  const markdown = renderPreRecon(collected);
-  const mdPath = path.join(dir, 'pre_recon_deliverable.md');
-  await atomicWrite(mdPath, markdown);
-  logger.info(`Wrote pre_recon_deliverable.md from structured data (${markdown.length} bytes)`);
-
-  // Save framework analysis to shared knowledge (non-fatal)
+  // Save framework analysis to shared knowledge (non-fatal). This is a side
+  // effect on shared knowledge, not a deliverable file, so it stays outside the
+  // commit-time render hook.
   try {
     const sessionMetadata = buildSessionMetadata(input);
     const frameworkAnalysis = await analyzeFrameworks(input.repoPath, logger);
@@ -314,35 +327,39 @@ export async function runReconAgent(input: ActivityInput): Promise<AgentMetrics>
   const { renderRecon } = await import('../services/recon-renderer.js');
 
   const collector = createReconCollectorServer();
-  const metrics = await runAgentActivity('recon', input, { 'recon-collector': collector.server });
 
-  // On resume, the agent is skipped and the collector is never populated.
-  // The cached deliverable from the prior run is the source of truth.
+  // Render the recon markdown + endpoint catalog BEFORE the success commit so
+  // they land in the checkpoint (see runVulnAgentWithCollector for the rationale).
+  const renderDeliverables = async (deliverablesPath: string): Promise<void> => {
+    const logger = createActivityLogger();
+    // Skipped tools surface as renderer placeholders, not as activity failures.
+    const callStatus = collector.getCallStatus();
+    logger.info('Recon tool call status', { callStatus });
+
+    const collected = collector.getAll();
+    const markdown = renderRecon(collected);
+    const mdPath = path.join(deliverablesPath, 'recon_deliverable.md');
+    await atomicWrite(mdPath, markdown);
+    logger.info(`Wrote recon_deliverable.md from structured data (${markdown.length} bytes)`);
+
+    // Persist the structured endpoint catalog so downstream authz coverage
+    // reconciliation can mechanically diff USER endpoints against the queue
+    // without re-parsing markdown. Advisory input only — never blocks the pipeline.
+    const reconEndpoints = collected.endpoints ?? [];
+    await atomicWrite(path.join(deliverablesPath, 'recon_endpoints.json'), reconEndpoints);
+    logger.info(`Wrote recon_endpoints.json (${reconEndpoints.length} endpoints)`);
+  };
+
+  const metrics = await runAgentActivity('recon', input, { 'recon-collector': collector.server }, renderDeliverables);
+
+  // On resume, the agent is skipped and shared-knowledge side effects are not re-derived.
   if (metrics.skipped) {
     return metrics;
   }
 
   const logger = createActivityLogger();
-  const dir = deliverablesDir(input.repoPath, input.deliverablesSubdir);
-
-  // Skipped tools surface as renderer placeholders, not as activity failures.
-  const callStatus = collector.getCallStatus();
-  logger.info('Recon tool call status', { callStatus });
-
-  const collected = collector.getAll();
-  const markdown = renderRecon(collected);
-  const mdPath = path.join(dir, 'recon_deliverable.md');
-  await atomicWrite(mdPath, markdown);
-  logger.info(`Wrote recon_deliverable.md from structured data (${markdown.length} bytes)`);
-
-  // Persist the structured endpoint catalog so downstream authz coverage
-  // reconciliation can mechanically diff USER endpoints against the queue
-  // without re-parsing markdown. Advisory input only — never blocks the pipeline.
-  const reconEndpoints = collected.endpoints ?? [];
-  await atomicWrite(path.join(dir, 'recon_endpoints.json'), reconEndpoints);
-  logger.info(`Wrote recon_endpoints.json (${reconEndpoints.length} endpoints)`);
-
-  // Save frontend route analysis to shared knowledge (non-fatal)
+  // Save frontend route analysis to shared knowledge (non-fatal). Side effect
+  // on shared knowledge, not a deliverable file — stays outside the render hook.
   try {
     const sessionMetadata = buildSessionMetadata(input);
     const frontendAnalysis = await mapFrontendRoutes(input.repoPath, logger);
@@ -373,36 +390,33 @@ async function runVulnAgentWithCollector(
   const { renderVulnDeliverable } = await import('../services/vuln-renderer.js');
 
   const collector = createVulnCollector(vulnClass);
-  const metrics = await runAgentActivity(agentName, input, { 'vuln-collector': collector.server });
 
-  // On resume, the agent is skipped and the collector is never populated.
-  // The cached deliverable from the prior run is the source of truth.
-  if (metrics.skipped) {
-    return metrics;
-  }
+  // Render the analysis markdown BEFORE the success commit (via the
+  // renderDeliverables hook) so it lands in the checkpoint. Rendered after the
+  // commit it would be an untracked file that `git clean -fd` strips on resume,
+  // losing the deliverable even though the agent succeeded.
+  const renderDeliverables = async (deliverablesPath: string): Promise<void> => {
+    const logger = createActivityLogger();
+    // Skipped tools surface as renderer placeholders, not as activity failures.
+    const callStatus = collector.getCallStatus();
+    logger.info(`${vulnClass} vuln tool call status`, { callStatus });
 
-  const logger = createActivityLogger();
-  const dir = deliverablesDir(input.repoPath, input.deliverablesSubdir);
+    const collected = collector.getAll();
+    const markdown = renderVulnDeliverable(vulnClass, collected);
+    const mdPath = path.join(deliverablesPath, `${vulnClass}_analysis_deliverable.md`);
+    await atomicWrite(mdPath, markdown);
+    logger.info(`Wrote ${vulnClass}_analysis_deliverable.md from structured data (${markdown.length} bytes)`);
 
-  // Skipped tools surface as renderer placeholders, not as activity failures.
-  const callStatus = collector.getCallStatus();
-  logger.info(`${vulnClass} vuln tool call status`, { callStatus });
+    // For authz, persist the endpoint subjects judged safe so the deterministic
+    // coverage check can distinguish "judged safe" endpoints from genuine gaps.
+    if (vulnClass === 'authz') {
+      const safeEndpoints = (collected.safe_vectors?.vectors ?? []).map((v) => v.subject);
+      await atomicWrite(path.join(deliverablesPath, 'authz_safe_vectors.json'), safeEndpoints);
+      logger.info(`Wrote authz_safe_vectors.json (${safeEndpoints.length} safe endpoints)`);
+    }
+  };
 
-  const collected = collector.getAll();
-  const markdown = renderVulnDeliverable(vulnClass, collected);
-  const mdPath = path.join(dir, `${vulnClass}_analysis_deliverable.md`);
-  await atomicWrite(mdPath, markdown);
-  logger.info(`Wrote ${vulnClass}_analysis_deliverable.md from structured data (${markdown.length} bytes)`);
-
-  // For authz, persist the endpoint subjects judged safe so the deterministic
-  // coverage check can distinguish "judged safe" endpoints from genuine gaps.
-  if (vulnClass === 'authz') {
-    const safeEndpoints = (collected.safe_vectors?.vectors ?? []).map((v) => v.subject);
-    await atomicWrite(path.join(dir, 'authz_safe_vectors.json'), safeEndpoints);
-    logger.info(`Wrote authz_safe_vectors.json (${safeEndpoints.length} safe endpoints)`);
-  }
-
-  return metrics;
+  return runAgentActivity(agentName, input, { 'vuln-collector': collector.server }, renderDeliverables);
 }
 
 export async function runInjectionVulnAgent(input: ActivityInput): Promise<AgentMetrics> {
@@ -490,34 +504,31 @@ async function runExploitAgentWithCollector(
   const { validIds, idToType } = await readExploitQueue(queuePath);
 
   const collector = createExploitCollector({ vulnClass, validIds });
-  const metrics = await runAgentActivity(agentName, input, { 'exploit-collector': collector.server });
 
-  // On resume, the agent is skipped and the collector is never populated.
-  // The cached deliverable from the prior run is the source of truth.
-  if (metrics.skipped) {
-    return metrics;
-  }
+  // Render the exploitation evidence BEFORE the success commit so it lands in
+  // the checkpoint (see runVulnAgentWithCollector for the rationale).
+  const renderDeliverables = async (deliverablesPath: string): Promise<void> => {
+    const logger = createActivityLogger();
+    const collected = collector.getAll();
+    const emittedIds = new Set(collected.map((e) => e.vulnerability_id));
+    const missingIds = [...validIds].filter((id) => !emittedIds.has(id));
+    const exploitedCount = collected.filter((e) => e.status === 'exploited').length;
+    const blockedCount = collected.filter((e) => e.status === 'blocked').length;
 
-  const logger = createActivityLogger();
-  const collected = collector.getAll();
-  const emittedIds = new Set(collected.map((e) => e.vulnerability_id));
-  const missingIds = [...validIds].filter((id) => !emittedIds.has(id));
-  const exploitedCount = collected.filter((e) => e.status === 'exploited').length;
-  const blockedCount = collected.filter((e) => e.status === 'blocked').length;
+    logger.info(`${vulnClass} exploit tool call metrics`, {
+      queueSize: validIds.size,
+      exploited: exploitedCount,
+      blocked: blockedCount,
+      missing: missingIds.length,
+    });
 
-  logger.info(`${vulnClass} exploit tool call metrics`, {
-    queueSize: validIds.size,
-    exploited: exploitedCount,
-    blocked: blockedCount,
-    missing: missingIds.length,
-  });
+    const markdown = renderExploitDeliverable(vulnClass, collected, idToType);
+    const mdPath = path.join(deliverablesPath, `${vulnClass}_exploitation_evidence.md`);
+    await atomicWrite(mdPath, markdown);
+    logger.info(`Wrote ${vulnClass}_exploitation_evidence.md from structured data (${markdown.length} bytes)`);
+  };
 
-  const markdown = renderExploitDeliverable(vulnClass, collected, idToType);
-  const mdPath = path.join(dir, `${vulnClass}_exploitation_evidence.md`);
-  await atomicWrite(mdPath, markdown);
-  logger.info(`Wrote ${vulnClass}_exploitation_evidence.md from structured data (${markdown.length} bytes)`);
-
-  return metrics;
+  return runAgentActivity(agentName, input, { 'exploit-collector': collector.server }, renderDeliverables);
 }
 
 export async function runInjectionExploitAgent(input: ActivityInput): Promise<AgentMetrics> {
