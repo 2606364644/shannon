@@ -6,6 +6,7 @@ import i18n from "@/i18n";
 import { getRepo, pullRepo, checkoutRepo, ApiError } from "@/api/client";
 import type { RepoDetail } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CloneProgress } from "@/components/CloneProgress";
 
@@ -54,7 +55,7 @@ export function RepoDetailPage() {
     if (error) {
       return (
         <div className="space-y-4">
-          <div className="border border-destructive bg-card p-4 text-sm text-destructive">
+          <div className="border border-destructive p-4 text-sm text-destructive">
             {t("repoDetail.loadErrorState")}
           </div>
           <Link to="/repos" className="text-sm text-muted-foreground hover:underline">{t("repoDetail.backToList")}</Link>
@@ -70,7 +71,7 @@ export function RepoDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link to="/repos" className="text-sm text-muted-foreground hover:underline">{t("repoDetail.backToRepos")}</Link>
-        <h1 className="font-semibold tracking-tight text-lg">{repo.name}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{repo.name}</h1>
         <span title={repo.state} className={repo.state === "ready" ? "text-green text-sm" : repo.state === "failed" ? "text-destructive text-sm" : "text-muted-foreground text-sm"}>
           {t(`repos.states.${repo.state}`, { defaultValue: repo.state })}
         </span>
@@ -87,15 +88,17 @@ export function RepoDetailPage() {
 
       {busy && <CloneProgress name={name} />}
       {repo.state === "stale" && (
-        <div className="border border-border bg-card p-3 text-sm text-yellow">{t("repoDetail.staleHint")}</div>
+        <div className="border border-border p-3 text-sm text-yellow">{t("repoDetail.staleHint")}</div>
       )}
 
-      <div className="border border-border bg-card p-4 space-y-1 text-sm">
+      <Card>
+        <CardContent className="p-4 space-y-1 text-sm">
         <div>{t("repoDetail.meta.sourceRow", { value: repo.source?.url ?? repo.source?.kind ?? "-" })}</div>
         <div>{t("repoDetail.meta.branchRow", { branch: repo.source?.branch ?? "-", commit: repo.source?.commit ? `@ ${repo.source.commit.slice(0, 8)}` : "" })}</div>
         <div>{t("repoDetail.meta.clonedRow", { clonedAt: repo.cloned_at ?? "-", lastUpdate: repo.last_pull_at ?? "-" })}</div>
         {repo.last_error && <div className="text-destructive">{t("repoDetail.meta.errorRow", { error: repo.last_error })}</div>}
-      </div>
+        </CardContent>
+      </Card>
 
       <div className="flex gap-2">
         <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={t("repoDetail.branchPlaceholder")} />
@@ -103,14 +106,16 @@ export function RepoDetailPage() {
       </div>
 
       {repo.recent_events && repo.recent_events.length > 0 && (
-        <div className="border border-border bg-card p-4">
+        <Card>
+          <CardContent className="p-4">
           <div className="mb-2 text-sm font-medium">{t("repoDetail.cloneHistoryTitle")}</div>
-          <ul className="space-y-1 text-xs text-muted-foreground">
+          <ul className="space-y-1 text-sm text-muted-foreground">
             {repo.recent_events.slice(-10).map((e, i) => (
               <li key={(e as { ts?: string }).ts ?? `evt-${i}`}>{JSON.stringify(e)}</li>
             ))}
           </ul>
-        </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

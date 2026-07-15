@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -131,7 +130,7 @@ export function ReposPage() {
     <TooltipProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-semibold tracking-tight text-lg">{t("repos.title")}</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t("repos.title")}</h1>
           <div className="flex items-center gap-2">
             <Input
               value={query}
@@ -155,7 +154,7 @@ export function ReposPage() {
             {groups.map((g) => {
               const isCollapsed = collapsed.has(g.name);
               return (
-                <Card key={g.name} className="overflow-hidden">
+                <div key={g.name}>
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.name)}
@@ -163,20 +162,20 @@ export function ReposPage() {
                     className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-muted/30"
                   >
                     <span className="font-medium">
-                      {g.name} <span className="text-xs text-muted-foreground">({g.repos.length})</span>
+                      {g.name} <span className="text-sm text-muted-foreground">({g.repos.length})</span>
                     </span>
-                    <span className="text-xs text-muted-foreground">{isCollapsed ? t("repos.expand") : t("repos.collapse")}</span>
+                    <span className="text-sm text-muted-foreground">{isCollapsed ? t("repos.expand") : t("repos.collapse")}</span>
                   </button>
                   {!isCollapsed && (
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-t border-border hover:bg-transparent">
-                          <TableHead className="w-56 py-2 pl-4 pr-3 text-muted-foreground">{t("repos.table.name")}</TableHead>
-                          <TableHead className="py-2 px-3 text-muted-foreground">{t("repos.table.source")}</TableHead>
-                          <TableHead className="w-32 py-2 px-3 text-muted-foreground">{t("repos.table.branch")}</TableHead>
-                          <TableHead className="w-24 whitespace-nowrap py-2 px-3 text-right text-muted-foreground">{t("repos.table.size")}</TableHead>
-                          <TableHead className="w-36 whitespace-nowrap py-2 px-3 text-muted-foreground">{t("repos.table.state")}</TableHead>
-                          <TableHead className="w-36 whitespace-nowrap py-2 px-3 text-center text-muted-foreground">{t("repos.table.actions")}</TableHead>
+                          <TableHead className="w-56 py-2 pl-4 pr-3">{t("repos.table.name")}</TableHead>
+                          <TableHead className="py-2 px-3">{t("repos.table.source")}</TableHead>
+                          <TableHead className="w-32 py-2 px-3">{t("repos.table.branch")}</TableHead>
+                          <TableHead className="w-24 whitespace-nowrap py-2 px-3 text-right">{t("repos.table.size")}</TableHead>
+                          <TableHead className="w-36 whitespace-nowrap py-2 px-3">{t("repos.table.state")}</TableHead>
+                          <TableHead className="w-36 whitespace-nowrap py-2 px-3 text-center">{t("repos.table.actions")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -204,11 +203,11 @@ export function ReposPage() {
                                   <div className="relative flex items-center">
                                     <Tooltip>
                                       <TooltipTrigger asChild>
-                                        <span className="block w-full truncate font-mono text-xs text-muted-foreground">{url}</span>
+                                        <span className="block w-full truncate font-mono text-sm">{url}</span>
                                       </TooltipTrigger>
                                       <TooltipContent className="max-w-md break-all">{url}</TooltipContent>
                                     </Tooltip>
-                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end bg-gradient-to-l from-card via-card to-transparent pl-8">
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end bg-gradient-to-l from-background via-background to-transparent pl-8">
                                       <CopyButton
                                         value={url}
                                         ariaLabel={t("repos.copyUrlAria", { name: r.name })}
@@ -221,11 +220,11 @@ export function ReposPage() {
                                 )}
                               </TableCell>
                               <TableCell className="py-2 px-3">
-                                <span className="block truncate font-mono text-xs text-muted-foreground">
+                                <span className="block truncate font-mono text-sm">
                                   {r.source?.branch ?? "-"}
                                 </span>
                               </TableCell>
-                              <TableCell className="whitespace-nowrap py-2 px-3 text-right tabular-nums text-muted-foreground">
+                              <TableCell className="whitespace-nowrap py-2 px-3 text-right tabular-nums">
                                 {fmtSize(r.size_bytes)}
                               </TableCell>
                               <TableCell className="whitespace-nowrap py-2 px-3">
@@ -258,7 +257,7 @@ export function ReposPage() {
                       </TableBody>
                     </Table>
                   )}
-                </Card>
+                </div>
               );
             })}
           </div>

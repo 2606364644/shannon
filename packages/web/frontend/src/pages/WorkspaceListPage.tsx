@@ -184,7 +184,9 @@ export function WorkspaceListPage() {
             <SelectItem value="correlation">{t("workspaces.filter.correlation")}</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" onClick={() => refresh()}>{t("workspaces.newScan")}</Button>
+        <Link to="/scan/new">
+          <Button variant="outline" size="sm">{t("workspaces.newScan")}</Button>
+        </Link>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{t("workspaces.lastRefresh", { time: lastUpdatedStr })}</span>
           <Button variant="ghost" size="icon" aria-label={t("workspaces.refreshAria")} onClick={() => refresh()}>↻</Button>
@@ -200,13 +202,13 @@ export function WorkspaceListPage() {
         </div>
       ) : data.length === 0 ? (
         <Empty title={t("workspaces.empty.title")} hint={t("workspaces.empty.hint")}>
-          <Button onClick={() => refresh()}>{t("workspaces.newScan")}</Button>
+          <Link to="/scan/new"><Button>{t("workspaces.newScan")}</Button></Link>
         </Empty>
       ) : (
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id}>
+              <TableRow key={hg.id} className="hover:bg-transparent">
                 {hg.headers.map((h) => (
                   <TableHead
                     key={h.id}

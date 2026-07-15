@@ -11,6 +11,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* shadcn/ui 标准全局 border 颜色：所有 border 默认使用 --border token（hairline），
+   避免回退到 currentColor（高对比度）。各组件可显式覆盖（border-destructive 等）。 */
+@layer base {
+  * {
+    @apply border-border;
+  }
+}
+
 /* prose 覆盖层：把 @tailwindcss/typography 的 --tw-prose-* 接到双主题 --prose-* channel */
 .prose {
   --tw-prose-body: hsl(var(--prose-body));
