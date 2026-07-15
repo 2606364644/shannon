@@ -1,5 +1,6 @@
 """run_worker：连接 temporal，起两个常驻 Worker（白盒/黑盒固定 queue），注册对应 workflow+activities。"""
-from unittest.mock import AsyncMock, MagicMock, patch
+import os
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -92,3 +93,30 @@ async def test_run_worker_whitebox_concurrency_one_and_migration_activities():
     assert "finalize_summary" in activity_names, "白盒 Worker 须注册 finalize_summary"
     # auth GitNexus 轨已删(plan zazzy-roaming-shamir, 2026-07-14):
     # run_auth_config_scan/run_auth_gitnexus_judge 不再存在, 不注册.
+
+
+def test_main_loads_profile_env_before_starting_worker():
+    """main() 启动时先 load_env()——锁住「worker 入口必须加载 profile 凭证」不变量。
+
+    根因(2026-07-15 真机 trip_1784107863): worker runner.main() 漏调 load_env(),
+    profile 的 SHANNON_AI_PROVIDER / SHANNON_OPENAI_* 不进进程环境 → 引擎回落
+    anthropic_api(claude CLI)→ deepseek-openai profile 无 ANTHROPIC 凭证 →
+    claude CLI 子进程 "Not logged in · Please run /login" → pre-recon 失败 →
+    扫描卡死、WEB 各页全空。对齐 CLI 入口(whitebox/blackbox/combined main.py
+    均首行 load_env())。
+    """
+    from shannon_worker import runner
+
+    # 同一 parent Mock 记录调用顺序，验证 load_env 先于 asyncio.run。
+    # patch run_worker 避免真起 temporal 连接 + 不留未 await coroutine。
+    parent = MagicMock()
+    with patch.object(runner, "load_env", parent.load_env), \
+         patch.object(runner, "asyncio", parent.asyncio), \
+         patch.object(runner, "run_worker", return_value="worker-coroutine"), \
+         patch.dict(os.environ, {"SHANNON_TEMPORAL_HOST": "th", "SHANNON_TEMPORAL_PORT": "tp"}):
+        runner.main()
+
+    # load_env 必须在起 worker 之前调用（profile 凭证先于 provider 配置加载）
+    parent.assert_has_calls([call.load_env(), call.asyncio.run(ANY)])
+    parent.load_env.assert_called_once()
+    parent.asyncio.run.assert_called_once()

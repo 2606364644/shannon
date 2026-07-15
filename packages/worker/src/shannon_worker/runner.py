@@ -13,6 +13,7 @@ from datetime import timedelta
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from shannon_core.config.env_loader import load_env
 from shannon_core.services.temporal_infra import (
     WEB_TASK_QUEUE_WHITEBOX,
     WEB_TASK_QUEUE_BLACKBOX,
@@ -89,6 +90,13 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
 
 
 def main() -> None:
+    # 加载共享 .env + 当前 profile 凭证(SHANNON_AI_PROVIDER / SHANNON_OPENAI_* 等)。
+    # worker 容器化时漏了这一步:不调 load_env,profile 凭证不进进程环境 → 引擎回落
+    # 默认 anthropic_api(claude CLI)→ deepseek-openai 等 openai profile 无 ANTHROPIC
+    # 凭证 → claude CLI 子进程 "Not logged in · Please run /login" → pre-recon 失败、
+    # 扫描卡死、WEB 各页全空(真机 trip_1784107863)。对齐 CLI 入口(whitebox/
+    # blackbox/combined main.py 均首行 load_env)。
+    load_env()
     import os
     host = os.environ.get("SHANNON_TEMPORAL_HOST", "localhost")
     port = os.environ.get("SHANNON_TEMPORAL_PORT", "7233")
