@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -124,3 +125,35 @@ async def test_creates_ws_dir_if_missing(tmp_path):
     async with HeartbeatManager(ws_dir, interval=30):
         assert ws_dir.exists()
         assert (ws_dir / "heartbeat").exists()
+
+
+async def test_heartbeat_writes_while_event_loop_blocked(tmp_path):
+    """核心不变量:event loop 被同步 CPU 密集段阻塞期间,heartbeat 仍被周期写入。
+
+    根因(2026-07-15 trip_1784116216):心跳曾用 asyncio.sleep(依赖 event loop 调度),
+    run_code_index 内 GitNexus taint/sink/source 分析的同步 CPU 密集段阻塞 worker
+    event loop ~161s,期间心跳 task 得不到调度 → heartbeat mtime 超 90s freshness
+    阈值 → web 端 reconcile(is_scan_alive=False)误判 interrupted(终态不可逆),
+    而 worker 实际从未崩溃。线程化后:daemon 线程 time.sleep,脱离 event loop,
+    阻塞期间照写,真正兑现「worker 活着就跳」的进程级独立承诺。
+
+    用 time.sleep(同步阻塞 event loop)复现 code-index 阻塞段,断言 heartbeat
+    在阻塞期间仍被更新(旧 asyncio 实现此测试失败)。
+    """
+    hb = tmp_path / "heartbeat"
+    async with HeartbeatManager(tmp_path, interval=0.1):
+        await asyncio.sleep(0.05)  # 让初始 heartbeat 落盘
+        mtime_before = hb.stat().st_mtime_ns
+        # 同步阻塞 event loop 1.0s(>> interval 0.1):event loop 完全停转,
+        # asyncio.sleep 驱动的心跳 task 不可能在此期间被调度。
+        time.sleep(1.0)
+        mtime_after = hb.stat().st_mtime_ns
+        # 线程化实现:daemon 线程在阻塞期间多次写 heartbeat → mtime 变新。
+        # 旧 asyncio 实现:阻塞期间 task 不调度,heartbeat 不写 → mtime 不变。
+        assert mtime_after > mtime_before, (
+            "event loop 阻塞 1.0s 期间 heartbeat 未被更新 → 心跳仍依赖 event loop 调度,"
+            "会被 code-index 等 CPU 密集 activity 阻塞致误判 interrupted"
+        )
+        # 且最后一次写距现在不远(线程在阻塞末尾仍活跃,非阻塞前的陈旧值)
+        age = time.time() - hb.stat().st_mtime
+        assert age < 0.5, f"heartbeat age={age:.2f}s 过大,疑似阻塞期间未持续写"
