@@ -35,10 +35,31 @@
     "updateAria": "更新 {{name}}",
     "deleteAria": "删除 {{name}}",
     "copyUrlAria": "复制 {{name}} 的来源 URL",
-    "table": { "name": "名称", "source": "来源", "branch": "分支", "size": "大小", "state": "状态", "actions": "操作" },
-    "states": { "ready": "✓ 就绪", "failed": "✗ 失败", "stale": "⚠ 未完成", "cloning": "clone 中", "pulling": "pull 中" },
-    "deleteDialog": { "title": "删除仓库", "desc": "删除仓库 {{name}}？代码目录永久删除。" },
-    "errors": { "loadFailed": "加载仓库列表失败", "inUse": "仓库正被使用", "deleteFailed": "删除失败（{{status}}）", "updateFailed": "更新失败（{{status}}）" },
+    "table": {
+      "name": "名称",
+      "source": "来源",
+      "branch": "分支",
+      "size": "大小",
+      "state": "状态",
+      "actions": "操作"
+    },
+    "states": {
+      "ready": "✓ 就绪",
+      "failed": "✗ 失败",
+      "stale": "⚠ 未完成",
+      "cloning": "clone 中",
+      "pulling": "pull 中"
+    },
+    "deleteDialog": {
+      "title": "删除仓库",
+      "desc": "删除仓库 {{name}}？代码目录永久删除。"
+    },
+    "errors": {
+      "loadFailed": "加载仓库列表失败",
+      "inUse": "仓库正被使用",
+      "deleteFailed": "删除失败（{{status}}）",
+      "updateFailed": "更新失败（{{status}}）"
+    },
     "addDialog": {
       "title": "添加仓库",
       "desc": "clone git 仓库到本地，之后可反复扫描。",
@@ -142,8 +163,16 @@
     "actionFailed": "操作失败：{{error}}"
   },
   "scan": {
-    "tabs": { "whitebox": "白盒", "blackbox": "黑盒", "correlation": "联动" },
-    "cardTitle": { "whitebox": "白盒扫描", "blackbox": "黑盒扫描", "correlation": "联动扫描" },
+    "tabs": {
+      "whitebox": "白盒",
+      "blackbox": "黑盒",
+      "correlation": "联动"
+    },
+    "cardTitle": {
+      "whitebox": "白盒扫描",
+      "blackbox": "黑盒扫描",
+      "correlation": "联动扫描"
+    },
     "fields": {
       "selectRepo": "选择仓库",
       "targetName": "扫描目标 + 命名",
@@ -161,9 +190,14 @@
       "previewName": "预览名：{{name}}（预览，实际由后端生成）",
       "checkingConflict": "检测重名中…",
       "yamlValid": "yaml 合法",
-      "yamlInvalid": "⚠ {{error}}"
+      "yamlInvalid": "⚠ {{error}}",
+      "optional": "可选",
+      "blackboxUrlHint": "运行中的 Web 服务地址，必须以 http:// 或 https:// 开头"
     },
-    "options": { "downloadedRepo": "已下载仓库", "localPath": "本地路径" },
+    "options": {
+      "downloadedRepo": "已下载仓库",
+      "localPath": "本地路径"
+    },
     "repo": {
       "selectPlaceholder": "选择仓库",
       "addBtn": "+ 添加新仓库",
@@ -192,6 +226,37 @@
       "absolutePath": "本地路径需为绝对路径（如 /root/code/foo）",
       "urlScheme": "目标 URL 需以 http(s):// 开头",
       "urlEmpty": "目标 URL 不能为空"
+    },
+    "title": "新建扫描",
+    "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
+    "subtitleBlackbox": "对运行中的目标服务发起黑盒渗透测试",
+    "subtitleCorrelation": "合并多份扫描结果，生成关联分析报告",
+    "submitBlackbox": "开始渗透 ▶",
+    "footerHintWhitebox": "⌘+Enter 快速提交",
+    "footerHintBlackbox": "确认目标 URL 正确后提交",
+    "sidebar": {
+      "whiteboxTitle": "审计范围",
+      "blackboxTitle": "渗透范围",
+      "scanType": "扫描类型",
+      "checks": "检查项",
+      "surface": "攻击面",
+      "method": "分析方式",
+      "blackboxWarning": "⚠️ 注意",
+      "blackboxWarningDesc": "黑盒渗透会对目标发送真实请求，请确保你有授权",
+      "whiteboxHint": "💡 提示",
+      "whiteboxHintDesc": "扫描在后台异步运行，可关闭页面稍后查看结果"
+    },
+    "steps": {
+      "source": "代码源",
+      "target": "目标信息",
+      "targetService": "目标服务",
+      "codeContext": "代码上下文",
+      "workspace": "工作区"
+    },
+    "tags": {
+      "localAudit": "本地审计",
+      "required": "必填",
+      "auxiliary": "辅助分析"
     }
   },
   "dashboard": {
@@ -233,7 +298,10 @@
       "gitCredentials": "GitLab 凭据",
       "version": "版本"
     },
-    "gitBinary": { "installed": "已装", "missing": "缺失" },
+    "gitBinary": {
+      "installed": "已装",
+      "missing": "缺失"
+    },
     "gitCredentials": {
       "configured": "已配置",
       "notConfigured": "未配置(仅 git URL 模式需要,本地路径模式无需)"
@@ -244,7 +312,13 @@
   },
   "workspaceDetail": {
     "backToList": "返回列表",
-    "tabs": { "overview": "概览", "report": "报告", "deliverables": "产物", "logs": "日志", "live": "实时" },
+    "tabs": {
+      "overview": "概览",
+      "report": "报告",
+      "deliverables": "产物",
+      "logs": "日志",
+      "live": "实时"
+    },
     "notFound": {
       "message": "工作区不存在或已被删除，无法显示实时进度。可能扫描已被清理或服务重启后丢失。"
     },
@@ -320,7 +394,12 @@
     "gnTrack": "GN 轨",
     "dualConfirmed": "双轨确认",
     "reachable": "可达",
-    "severity": { "Critical": "严重", "High": "高危", "Medium": "中危", "Low": "低危" },
+    "severity": {
+      "Critical": "严重",
+      "High": "高危",
+      "Medium": "中危",
+      "Low": "低危"
+    },
     "severityTooltip": "依据类型/公网/认证/置信度启发式推断，非权威评级",
     "pocWitness": "PoC / 见证"
   },

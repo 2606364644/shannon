@@ -42,11 +42,9 @@ function renderPage(initialPath = "/scan/new") {
   );
 }
 
-// Radix Tabs 的 TabsTrigger 在 onMouseDown（button===0）里调 onValueChange 激活，
-// 而 fireEvent.click 在 jsdom 里不发 mousedown 事件——故切 tab 用 mouseDown
-// 模拟真实激活手势（不是 click）。
+// 自定义 tab 按钮用 onClick（非 Radix 的 onMouseDown），故用 fireEvent.click。
 function clickTab(name: string) {
-  fireEvent.mouseDown(screen.getByRole("tab", { name }));
+  fireEvent.click(screen.getByRole("tab", { name }));
 }
 
 // Radix Select Trigger 在 jsdom 里走 fireEvent.click 打开下拉（与 WorkspaceListPage
@@ -60,12 +58,13 @@ function selectOption(triggerText: RegExp | string, optionName: RegExp | string)
   });
 }
 
-// repo 模式下 selectedRepo SelectTrigger 在「选择仓库」fieldset 内（该 fieldset 还含
-// sourceKind Select，故取 fieldset 内最后一个 combobox 稳定命中 selectedRepo）。
-// 用 selector: "legend" 避开 SelectValue placeholder=「选择仓库」的同名文本匹配。
+// repo 模式下 selectedRepo 的 Combobox 在「代码源」StepGroup 内。
+// StepGroup 内有两个 combobox（sourceKind Select + repo Combobox），取最后一个 = repo。
 function selectRepoOption(optionName: RegExp | string) {
-  const fieldset = screen.getByText("选择仓库", { selector: "legend" }).closest("fieldset")!;
-  const trigger = within(fieldset).getAllByRole("combobox").at(-1)!;
+  // class 选择器不走 closest 标签名重载（标签名精确返回 HTMLFieldSetElement 等 HTMLElement
+  // 子类，class/复合选择器回落 Element），故显式 <HTMLElement> 收窄给 within()。
+  const step = screen.getByText("代码源").closest<HTMLElement>(".rounded-lg")!;
+  const trigger = within(step).getAllByRole("combobox").at(-1)!;
   fireEvent.click(trigger);
   return screen.findByRole("option", { name: optionName }).then((opt) => {
     fireEvent.click(opt);
@@ -369,9 +368,9 @@ describe("ScanNewPage", () => {
     clickTab("黑盒");
     await selectOption(/已下载仓库/, "本地路径");
     fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
-    // 黑盒扫运行中服务 → url 必填，不填时提交 disabled
-    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
+    // 黑盒扫运行中服务 → url 必填，不填时提交 disabled（黑盒按钮文案为"开始渗透"）
+    expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
   });
 });

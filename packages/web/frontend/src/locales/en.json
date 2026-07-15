@@ -35,10 +35,31 @@
     "updateAria": "Update {{name}}",
     "deleteAria": "Delete {{name}}",
     "copyUrlAria": "Copy source URL of {{name}}",
-    "table": { "name": "Name", "source": "Source", "branch": "Branch", "size": "Size", "state": "State", "actions": "Actions" },
-    "states": { "ready": "✓ Ready", "failed": "✗ Failed", "stale": "⚠ Incomplete", "cloning": "Cloning", "pulling": "Pulling" },
-    "deleteDialog": { "title": "Delete repository", "desc": "Delete repository {{name}}? The code directory will be permanently removed." },
-    "errors": { "loadFailed": "Failed to load repository list", "inUse": "Repository is in use", "deleteFailed": "Delete failed ({{status}})", "updateFailed": "Update failed ({{status}})" },
+    "table": {
+      "name": "Name",
+      "source": "Source",
+      "branch": "Branch",
+      "size": "Size",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "states": {
+      "ready": "✓ Ready",
+      "failed": "✗ Failed",
+      "stale": "⚠ Incomplete",
+      "cloning": "Cloning",
+      "pulling": "Pulling"
+    },
+    "deleteDialog": {
+      "title": "Delete repository",
+      "desc": "Delete repository {{name}}? The code directory will be permanently removed."
+    },
+    "errors": {
+      "loadFailed": "Failed to load repository list",
+      "inUse": "Repository is in use",
+      "deleteFailed": "Delete failed ({{status}})",
+      "updateFailed": "Update failed ({{status}})"
+    },
     "addDialog": {
       "title": "Add repository",
       "desc": "Clone a git repository locally; you can scan it repeatedly afterwards.",
@@ -142,8 +163,16 @@
     "actionFailed": "Action failed: {{error}}"
   },
   "scan": {
-    "tabs": { "whitebox": "whitebox", "blackbox": "blackbox", "correlation": "correlation" },
-    "cardTitle": { "whitebox": "Whitebox scan", "blackbox": "Blackbox scan", "correlation": "Correlation scan" },
+    "tabs": {
+      "whitebox": "whitebox",
+      "blackbox": "blackbox",
+      "correlation": "correlation"
+    },
+    "cardTitle": {
+      "whitebox": "Whitebox scan",
+      "blackbox": "Blackbox scan",
+      "correlation": "Correlation scan"
+    },
     "fields": {
       "selectRepo": "Select repository",
       "targetName": "Target + naming",
@@ -161,9 +190,14 @@
       "previewName": "Preview name: {{name}} (preview; backend generates the actual name)",
       "checkingConflict": "Checking name conflict…",
       "yamlValid": "yaml valid",
-      "yamlInvalid": "⚠ {{error}}"
+      "yamlInvalid": "⚠ {{error}}",
+      "optional": "Optional",
+      "blackboxUrlHint": "Running web service URL, must start with http:// or https://"
     },
-    "options": { "downloadedRepo": "Downloaded repository", "localPath": "Local path" },
+    "options": {
+      "downloadedRepo": "Downloaded repository",
+      "localPath": "Local path"
+    },
     "repo": {
       "selectPlaceholder": "Select a repository",
       "addBtn": "+ Add new repository",
@@ -192,6 +226,37 @@
       "absolutePath": "Local path must be absolute (e.g. /root/code/foo)",
       "urlScheme": "Target URL must start with http(s)://",
       "urlEmpty": "Target URL cannot be empty"
+    },
+    "title": "New Scan",
+    "subtitleWhitebox": "Select a code source to start a whitebox security audit",
+    "subtitleBlackbox": "Launch a blackbox penetration test against a running target",
+    "subtitleCorrelation": "Merge multiple scan results into a correlation report",
+    "submitBlackbox": "Start Pentest ▶",
+    "footerHintWhitebox": "⌘+Enter to submit",
+    "footerHintBlackbox": "Verify the target URL before submitting",
+    "sidebar": {
+      "whiteboxTitle": "Audit Scope",
+      "blackboxTitle": "Pentest Scope",
+      "scanType": "Scan Type",
+      "checks": "Checks",
+      "surface": "Attack Surface",
+      "method": "Method",
+      "blackboxWarning": "⚠️ Warning",
+      "blackboxWarningDesc": "Blackbox pentest sends real requests to the target. Ensure you have authorization.",
+      "whiteboxHint": "💡 Tip",
+      "whiteboxHintDesc": "Scan runs asynchronously in the background. You can close this page and check back later."
+    },
+    "steps": {
+      "source": "Code Source",
+      "target": "Target Info",
+      "targetService": "Target Service",
+      "codeContext": "Code Context",
+      "workspace": "Workspace"
+    },
+    "tags": {
+      "localAudit": "Local Audit",
+      "required": "Required",
+      "auxiliary": "Auxiliary"
     }
   },
   "dashboard": {
@@ -233,7 +298,10 @@
       "gitCredentials": "GitLab credentials",
       "version": "Version"
     },
-    "gitBinary": { "installed": "Installed", "missing": "Missing" },
+    "gitBinary": {
+      "installed": "Installed",
+      "missing": "Missing"
+    },
     "gitCredentials": {
       "configured": "Configured",
       "notConfigured": "Not configured (only needed for git URL mode; local path mode does not require it)"
@@ -244,7 +312,13 @@
   },
   "workspaceDetail": {
     "backToList": "Back to list",
-    "tabs": { "overview": "Overview", "report": "Report", "deliverables": "Deliverables", "logs": "Logs", "live": "Live" },
+    "tabs": {
+      "overview": "Overview",
+      "report": "Report",
+      "deliverables": "Deliverables",
+      "logs": "Logs",
+      "live": "Live"
+    },
     "notFound": {
       "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
     },
@@ -320,7 +394,12 @@
     "gnTrack": "GN track",
     "dualConfirmed": "Dual-track confirmed",
     "reachable": "Reachable",
-    "severity": { "Critical": "Critical", "High": "High", "Medium": "Medium", "Low": "Low" },
+    "severity": {
+      "Critical": "Critical",
+      "High": "High",
+      "Medium": "Medium",
+      "Low": "Low"
+    },
     "severityTooltip": "Inferred via type/exposure/auth/confidence heuristics; not an authoritative rating",
     "pocWitness": "PoC / witness"
   },

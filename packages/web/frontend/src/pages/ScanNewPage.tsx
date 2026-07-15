@@ -7,19 +7,18 @@ import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
 export interface FormState {
   sourceKind: "repo" | "path";
-  selectedRepo: string;       // repo kind 用
-  sourceValue: string;        // path kind 用
+  selectedRepo: string;
+  sourceValue: string;
   url: string;
   wsName: string;
   reuseLatest: boolean;
@@ -31,7 +30,6 @@ function buildBody(type: ScanType, f: FormState): ScanRequest {
   const source = f.sourceKind === "repo"
     ? { kind: "repo" as const, value: f.selectedRepo }
     : { kind: "path" as const, value: f.sourceValue };
-  // 白盒 url 可选 -> 空时不带 url 字段（后端 Optional，CLI --url optional）。
   const body: ScanRequest = { type, source, url: f.url || undefined, workspace_name: f.wsName || undefined };
   if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
   return body;
@@ -41,8 +39,6 @@ function renderError(e: ApiError, t: TFunction): string {
   if (e.status === 400) return t("scan.errors.temporal");
   if (e.status === 409) return t("scan.errors.concurrent");
   if (e.status === 422) {
-    // FastAPI 校验错误体：{detail:[{loc,msg,type},...]}。提取首条 msg 友好展示，
-    // 不把整个 JSON 数组（含 loc/type 内部字段）丢给用户。无 detail → 回退纯标签。
     const detail = (e.body as { detail?: { msg?: string }[] })?.detail;
     const msg = Array.isArray(detail) && detail.length > 0 ? detail[0]?.msg : undefined;
     return msg ? t("scan.errors.yamlInvalidWithMsg", { msg }) : t("scan.errors.yamlInvalid");
@@ -57,8 +53,6 @@ function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: 
 }
 
 function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
-  // 白盒扫本地代码，url 仅作黑盒 --latest 匹配锚点（CLI --url optional），可空；
-  // 黑盒扫运行中服务，url 必填。correlation 无 url 概念。
   if (type !== "blackbox") {
     if (!v.trim()) return null;
     return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
@@ -67,10 +61,7 @@ function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
   return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
-// 前端推算 workspace 名预览（basename + _YYYYMMDD-HHMMSS），与后端实际生成可能略有出入，
-// 仅作输入辅助提示。repo→仓库名末段；path→basename（末段）。
 function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: string): string {
-  // selectedRepo 可为 group/repo，取末段作 ws 名 base（与后端 _gen_ws_name Path(value).stem 对齐）
   const base = kind === "repo"
     ? (selectedRepo.split("/").pop() ?? "")
     : (pathValue.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
@@ -79,6 +70,13 @@ function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: stri
   const pad = (n: number) => String(n).padStart(2, "0");
   const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   return `${base}_${ts}`;
+}
+
+/** 侧栏信息卡片数据 */
+interface SidebarItem {
+  title: string;
+  content: React.ReactNode;
+  accent?: boolean;
 }
 
 export function ScanNewPage() {
@@ -103,7 +101,6 @@ export function ScanNewPage() {
   const [yamlErr, setYamlErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
 
-  // URL ?repo=<name>（来自 RepoDetailPage「发起扫描」按钮）预选仓库 + 切到 repo kind。
   useEffect(() => {
     if (presetRepo) set({ sourceKind: "repo", selectedRepo: presetRepo });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,7 +151,6 @@ export function ScanNewPage() {
   }
 
   function onSubmit() {
-    // 冲突（wsName 重名）→ 不 disable 提交，而是点提交时弹续扫确认 Dialog。
     if (conflict) {
       setConfirmOpen(true);
       return;
@@ -162,64 +158,151 @@ export function ScanNewPage() {
     void doSubmit();
   }
 
+  // —— 侧栏内容（按扫描类型差异化） ——
+  const sidebarItems: SidebarItem[] = type === "correlation" ? [] : type === "whitebox" ? [
+    {
+      title: t("scan.sidebar.scanType"),
+      content: <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold bg-cyan/10 text-cyan">{t("scan.tabs.whitebox")}</span>,
+    },
+    {
+      title: t("scan.sidebar.checks"),
+      content: <div className="text-xs leading-relaxed">SQL 注入 · XSS · SSRF · 认证/授权</div>,
+    },
+    {
+      title: t("scan.sidebar.method"),
+      content: <div className="text-[11.5px] leading-relaxed">📖 静态代码分析<br />🔗 数据流追踪<br />🤖 AI 辅助判定</div>,
+    },
+  ] : [
+    {
+      title: t("scan.sidebar.scanType"),
+      content: <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold bg-orange/10 text-orange">{t("scan.tabs.blackbox")}</span>,
+      accent: true,
+    },
+    {
+      title: t("scan.sidebar.surface"),
+      content: <div className="text-[11.5px] leading-relaxed">浏览器自动化探索<br />表单 / API 端点发现<br />认证绕过尝试<br />注入 / XSS / SSRF 探测</div>,
+    },
+    {
+      title: t("scan.sidebar.method"),
+      content: <div className="text-[11.5px] leading-relaxed">🌐 浏览器交互<br />🕵️ 动态探针注入<br />🤖 AI 攻击链生成</div>,
+    },
+  ];
+
+  const subtitleKey = type === "whitebox" ? "scan.subtitleWhitebox" : type === "blackbox" ? "scan.subtitleBlackbox" : "scan.subtitleCorrelation";
+  const submitLabel = type === "blackbox" ? t("scan.submitBlackbox") : t("scan.submit");
+  const footerHint = type === "blackbox" ? t("scan.footerHintBlackbox") : t("scan.footerHintWhitebox");
+
   return (
     <div className="space-y-4">
-      <Tabs
-        defaultValue="whitebox"
-        onValueChange={(v) => setType(v as ScanType)}
-        className="w-full"
-      >
-        <TabsList>
-          <TabsTrigger value="whitebox">{t("scan.tabs.whitebox")}</TabsTrigger>
-          <TabsTrigger value="blackbox">{t("scan.tabs.blackbox")}</TabsTrigger>
-          <TabsTrigger value="correlation">{t("scan.tabs.correlation")}</TabsTrigger>
-        </TabsList>
-        {/* Radix Tabs 仅 mount 激活 tab 的 TabsContent；type 由 onValueChange 驱动。
-            白盒/黑盒共享 <ScanFormFields>，靠 type prop 决定 reuse 块是否渲染。 */}
-        <TabsContent value="whitebox">
-          <ScanFormFields
-            type="whitebox"
-            f={f}
-            set={set}
-            sourceErr={sourceErr}
-            urlErr={urlErr}
-            loadingConflict={loadingConflict}
-            derivedName={derivedName}
-          />
-        </TabsContent>
-        <TabsContent value="blackbox">
-          <ScanFormFields
-            type="blackbox"
-            f={f}
-            set={set}
-            sourceErr={sourceErr}
-            urlErr={urlErr}
-            loadingConflict={loadingConflict}
-            derivedName={derivedName}
-          />
-        </TabsContent>
-        <TabsContent value="correlation">
-          <Card>
-            <CardHeader><CardTitle>{t("scan.cardTitle.correlation")}</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <YamlEditor
-                value={f.yaml}
-                onChange={(v) => set({ yaml: v })}
-                onError={(m) => setYamlErr(m)}
-              />
-              <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
-                {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
+      {/* 页面标题 */}
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">{t("scan.title")}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">{t(subtitleKey)}</p>
+      </div>
+
+      {/* 整张卡片：Tabs + 双栏 + 底部操作 */}
+      <Card className="overflow-hidden">
+        {/* 自定义 Tabs 条（替换 shadcn Tabs，融入卡片） */}
+        <div className="flex border-b border-border bg-secondary">
+          {(["whitebox", "blackbox", "correlation"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={type === v}
+              onClick={() => setType(v)}
+              className={`px-5 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+                type === v
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t(`scan.tabs.${v}`)}
+            </button>
+          ))}
+        </div>
+
+        {/* 双栏：表单 + 侧栏（correlation 除外，单栏铺满） */}
+        <div className={type === "correlation" ? "" : "grid grid-cols-[1fr_260px]"}>
+          {/* 左栏：表单 */}
+          <div className="p-5">
+            {type === "correlation" ? (
+              <div className="space-y-3">
+                <YamlEditor
+                  value={f.yaml}
+                  onChange={(v) => set({ yaml: v })}
+                  onError={(m) => setYamlErr(m)}
+                />
+                <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
+                  {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            ) : (
+              <ScanFormFields
+                type={type}
+                f={f}
+                set={set}
+                sourceErr={sourceErr}
+                urlErr={urlErr}
+                loadingConflict={loadingConflict}
+                derivedName={derivedName}
+              />
+            )}
+          </div>
 
-      <Button size="lg" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
-        {t("scan.submit")}
-      </Button>
-      <div className="text-xs text-muted-foreground">{t("scan.submitHint")}</div>
+          {/* 右栏：信息侧栏 */}
+          {type !== "correlation" && (
+            <div className="p-5 border-l border-border bg-secondary/50 flex flex-col gap-2.5">
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-0.5">
+                {type === "whitebox" ? t("scan.sidebar.whiteboxTitle") : t("scan.sidebar.blackboxTitle")}
+              </div>
+              {sidebarItems.map((item, i) => (
+                <div
+                  key={i}
+                  className={`rounded-lg border bg-card p-3 ${item.accent ? "border-orange/30" : "border-border"}`}
+                >
+                  <div className="text-[11px] text-muted-foreground mb-1">{item.title}</div>
+                  {item.content}
+                </div>
+              ))}
+              {type === "blackbox" && (
+                <div className="rounded-lg border border-orange/20 bg-orange/[0.06] p-2.5 mt-0.5">
+                  <div className="text-[11px] text-orange font-medium mb-0.5">{t("scan.sidebar.blackboxWarning")}</div>
+                  <div className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.sidebar.blackboxWarningDesc")}</div>
+                </div>
+              )}
+              {type === "whitebox" && (
+                <div className="rounded-lg border border-yellow/15 bg-yellow/[0.06] p-2.5 mt-0.5">
+                  <div className="text-[11px] text-yellow font-medium mb-0.5">{t("scan.sidebar.whiteboxHint")}</div>
+                  <div className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.sidebar.whiteboxHintDesc")}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
+        {/* 底部操作栏 */}
+        {type !== "correlation" && (
+          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-secondary">
+            <span className="text-xs text-muted-foreground">{footerHint}</span>
+            <Button size="lg" onClick={onSubmit} disabled={!isValid || submitting}>
+              {submitLabel}
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {/* correlation 提交按钮（不在卡片底部栏内，因为无侧栏） */}
+      {type === "correlation" && (
+        <>
+          <Button size="lg" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
+            {submitLabel}
+          </Button>
+          <div className="text-xs text-muted-foreground text-center">{t("scan.submitHint")}</div>
+        </>
+      )}
+
+      {/* 续扫确认 Dialog */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
