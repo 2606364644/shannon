@@ -19,3 +19,7 @@ apps/worker/configs/ent-ft-futuie.yaml
 apps/worker/configs/test-perks-futuoa.yaml
 apps/worker/configs/futunn-session.yaml
 apps/worker/configs/futuhk.yaml
+apps/worker/configs/course-session.yaml
+apps/worker/configs/m-match.yaml
+scripts/blackbox*
+workspaces.zip
