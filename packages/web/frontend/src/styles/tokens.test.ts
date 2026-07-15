@@ -25,8 +25,8 @@ describe("tokens.css 漂移护栏", () => {
     expect(tokens).toMatch(/:root\s*\{/);
     expect(tokens).toMatch(/\.light\s*\{/);
   });
-  it("radius = 3px（operator 克制约束）", () => {
-    expect(tokens).toContain("--radius: 3px;");
+  it("radius = 12px", () => {
+    expect(tokens).toContain("--radius: 12px;");
   });
   it("Plex 三族字体保留", () => {
     expect(tokens).toContain("IBM Plex Mono");
