@@ -53,10 +53,17 @@ services:
   worker:
     # C1 Phase A：常驻 worker 容器，消费 WEB 固定 task queue（白盒 shannon-py-wb-web / 黑盒 shannon-py-bb-web）。
     # 装齐 gitnexus+agent-browser+chrome（共用镜像）；web 容器保持瘦。
-    # Plan 1 阶段 web 仍 fork（仍 broken），worker 起着暂无提交者——Plan 2 scan_manager 改 start_workflow 后才消费。
+    # scan_manager 已 C1 化（Phase B）：web 端 start_workflow 提交到本 worker 消费的 queue，不再 fork CLI。
+    #
+    # platform: linux/amd64 —— tree-sitter（gitnexus 依赖的代码语法解析 native 模块，含 11 个语言 binding）
+    # 无 linux-arm64 预编译、容器又无编译工具链 → arm64 镜像下 `gitnexus mcp` 启动即崩（"closed connection"，
+    # stderr 被 GitNexusMCPClient 接到 DEVNULL 故 workflow.log 里看不到 native build 报错）。强制 amd64 用现成
+    # linux-x64 prebuild；chromium apt 包 amd64 也有，黑盒不受影响。代价：arm64 宿主经 qemu 模拟有性能损失
+    # （扫描瓶颈在 LLM 调用，gitnexus 占比小，可接受）。
     build:
       context: .
       dockerfile: packages/worker/Dockerfile
+    platform: linux/amd64
     container_name: shannon-py-worker
     volumes:
       - ./workspaces:/app/workspaces
