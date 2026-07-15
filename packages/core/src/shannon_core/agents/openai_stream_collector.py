@@ -10,6 +10,7 @@ raw_response_event 的 text delta 累积为当前 turn 的文本，在该 turn �
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from openai.types.responses import ResponseTextDeltaEvent
@@ -87,4 +88,14 @@ def _item_tool_name(item: Any) -> str:
 
 def _item_tool_args(item: Any) -> Any:
     raw = getattr(item, "raw_item", None)
-    return getattr(raw, "arguments", None) or getattr(raw, "input", None) or {}
+    args = getattr(raw, "arguments", None) or getattr(raw, "input", None) or {}
+    # openai Responses API 的 arguments 是 JSON 字符串(str, OpenAI 标准), 下游
+    # humanize_tool_call / file_renderer._tool 要求 dict(isinstance dict else {}),
+    # 未解析会被当非 dict → workflow.log [TOOL] 行参数空(claude 侧 block.input 已是
+    # dict 不受影响)。解析失败/空 → {} 兜底, 对齐 dict 语义。
+    if isinstance(args, str):
+        try:
+            return json.loads(args)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return args

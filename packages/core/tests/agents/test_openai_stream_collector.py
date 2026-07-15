@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from openai.types.responses import ResponseTextDeltaEvent
 
-from shannon_core.agents.openai_stream_collector import StreamCollector
+from shannon_core.agents.openai_stream_collector import StreamCollector, _item_tool_args
 
 
 def _text_event(delta: str):
@@ -90,3 +90,57 @@ async def test_close_flushes_trailing_text():
     await collector.close()
     assert collector.turns == 0  # 无 run item
     audit.log_assistant_turn.assert_awaited_once_with(1, "only text, no item")
+
+
+# ---- _item_tool_args: openai Responses API arguments(JSON str)→ dict ----
+# 根因(2026-07-15 deepseek-openai 真机): ResponseFunctionToolCall.arguments 注解为
+# str(JSON 字符串, OpenAI 标准), 但下游 humanize_tool_call / file_renderer._tool 要求
+# dict(isinstance(e.parameters, dict) else {}), str 被当非 dict → workflow.log [TOOL] 行
+# 参数空。claude 侧 block.input 已是 dict 不受影响。修复: _item_tool_args 解析 JSON str。
+
+def _tool_call_item(arguments):
+    """openai tool_call_item: raw_item.arguments 是 JSON str(Responses API 标准)。"""
+    item = MagicMock()
+    item.type = "tool_call_item"
+    item.raw_item = MagicMock()
+    item.raw_item.arguments = arguments
+    return item
+
+
+def test_item_tool_args_parses_json_string_to_dict():
+    """arguments 是 JSON str → 解析成 dict(对齐 claude block.input 的 dict 语义)。"""
+    item = _tool_call_item('{"command": "ls -la", "description": "list files"}')
+    assert _item_tool_args(item) == {"command": "ls -la", "description": "list files"}
+
+
+def test_item_tool_args_invalid_json_returns_empty_dict():
+    """arguments 非法 JSON → {}(不抛错, 兜底对齐 dict 语义)。"""
+    assert _item_tool_args(_tool_call_item("not valid json")) == {}
+
+
+def test_item_tool_args_none_returns_empty_dict():
+    """arguments 缺失/None/input 均空 → {}。"""
+    item = MagicMock()
+    item.raw_item = MagicMock()
+    item.raw_item.arguments = None
+    item.raw_item.input = None
+    assert _item_tool_args(item) == {}
+
+
+@pytest.mark.asyncio
+async def test_tool_call_passes_parsed_dict_to_audit():
+    """collector 把 JSON str arguments 解析成 dict 传给 audit(render/humanize 只认 dict)。
+
+    回归: 修复前传的是 str → file_renderer._tool 的 isinstance(dict) 失败 → [TOOL] 行空。
+    """
+    audit = AsyncMock()
+    collector = StreamCollector(audit)
+    item = _tool_call_item('{"command": "grep foo bar.py"}')
+    ev = MagicMock()
+    ev.type = "run_item_stream_event"
+    ev.name = "tool_called"
+    ev.item = item
+    await collector.on_event(ev)
+    audit.log_tool_start.assert_awaited_once()
+    _, params = audit.log_tool_start.await_args.args
+    assert params == {"command": "grep foo bar.py"}  # dict, 非 JSON str
