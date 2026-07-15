@@ -25,18 +25,18 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 # ── gitnexus@1.6.8 + ladybugdb native binding（白盒确定性轨）──
 # --ignore-scripts 跳 onnxruntime post-install（HTTP 302 坑）；补 @ladybugdb/core/install.js 拷 lbugjs.node。
 # 走 npmjs 官方源：npmmirror 最新仅 1.6.6（缺 1.6.8/1.6.9），brief 原 npmmirror 装不到 1.6.8。
-# --mount=cache：层失效时复用 npm 下载缓存（gitnexus 走官方源较慢）。
-RUN --mount=type=cache,target=/root/.npm \
-    npm install -g --prefix=/usr --ignore-scripts --registry=https://registry.npmjs.org gitnexus@1.6.8 \
+# 不用 --mount=cache：那是 BuildKit 专有语法，legacy builder（如本机 compose 退回 legacy 时）
+# 报 "the --mount option requires BuildKit" 直接构建失败。去 --mount 后 legacy/buildkit 通吃，
+# 跨机器零 BuildKit 依赖；npm 下载缓存退化为 docker 层缓存（本层不变即命中）。
+RUN npm install -g --prefix=/usr --ignore-scripts --registry=https://registry.npmjs.org gitnexus@1.6.8 \
     && node "$(npm root -g --prefix=/usr)/gitnexus/node_modules/@ladybugdb/core/install.js" \
     && gitnexus --version
 
 # ── agent-browser（黑盒默认 browser 引擎）──
 # 不跑 agent-browser install：它下载 Chrome for Testing，无 linux/arm64 build → ARM64 必失败。
 # 改用上方 apt 装的系统 chromium，运行时经 AGENT_BROWSER_EXECUTABLE_PATH env 指定（见下 ENV）。
-# npmmirror 有 agent-browser（latest 0.31.1），用 CN 镜像加速；--mount=cache 复用下载缓存。
-RUN --mount=type=cache,target=/root/.npm \
-    npm config set registry https://registry.npmmirror.com \
+# npmmirror 有 agent-browser（latest 0.31.1），用 CN 镜像加速。（同样去 --mount，通吃 legacy/buildkit，见上。）
+RUN npm config set registry https://registry.npmmirror.com \
     && npm install -g agent-browser@latest \
     && agent-browser --version
 

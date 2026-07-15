@@ -72,6 +72,9 @@ fi
 OVERRIDE_FILE="docker-compose.override.external-temporal.yml"
 
 if [ "$ACTION" = "up" ]; then
+  # 确保 docker 环境：buildx 就位 compose 才走 BuildKit（跨平台 Linux/WSL2/Mac）。
+  # 失败（runtime 缺等）→ set -e 中止，不带着坏环境硬 build。down/logs 不 build 不调。
+  bash "$SCRIPT_DIR/ensure-docker.sh"
   cleanup_stale_containers
   if port_in_use; then
     echo ">> 检测到 7233 已被占用 → 复用外部 temporal 模式"
