@@ -12,7 +12,7 @@ RUN npm run build            # → /fe/dist
 FROM python:3.12-slim-bookworm
 
 # GitFetcher 需要 git；ca-certificates for https clone
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
