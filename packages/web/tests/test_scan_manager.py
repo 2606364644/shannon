@@ -183,6 +183,36 @@ async def test_cancel_web_started_scan_calls_handle_cancel(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_cancel_web_started_scan_marks_cancelled_and_writes_scan_end(tmp_path):
+    """① web 自起 scan 取消后必须标终态 + 写 scan_end(根因修复):
+
+    轨 ① 只调 handle.cancel(temporal 原生) 不够——worker 的 workflow except CancelledError
+    分支不写 scan_end / 不更新 session(只有 try 正常完成分支调 finalize_summary)。若 web 端
+    不兜底标记: ① session 卡 running → heartbeat stale 后误显 interrupted(非 cancelled);
+    ② _watch 等不到 scan_end 永不退出 → _handles[ws] 占死 → max_concurrent 槽位泄漏,
+    新扫描再也起不来。故轨 ① 须像 ②/③ 一样调 _mark_cancelled(写 session.status=cancelled
+    + scan_end) → _status_of 终态优先显 cancelled + _watch 见 scan_end 退出释放槽位。
+    """
+    ws = "WEB1"
+    ws_dir = tmp_path / ws
+    ws_dir.mkdir()
+    (ws_dir / "session.json").write_text(json.dumps({"status": "running", "owner": "web"}))
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mgr._handles[ws] = mock_handle
+
+    result = await mgr.cancel(ws)
+
+    mock_handle.cancel.assert_awaited_once()
+    assert result == {"cancelled": ws}
+    sess = json.loads((ws_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+    assert sess.get("completed_at") is not None
+    event_text = (ws_dir / "events.ndjson").read_text()
+    assert '"scan_end"' in event_text and '"cancelled"' in event_text
+
+
+@pytest.mark.asyncio
 async def test_cancel_host_running_writes_signal_and_marks_cancelled(tmp_path):
     """② owner=host(heartbeat fresh, web 无 handle)→ 写 cancel.requested + 标 cancelled + via:signal."""
     ws = "HOST1"

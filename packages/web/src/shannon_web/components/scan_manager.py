@@ -164,13 +164,19 @@ class ScanManager:
         ws_dir = self._workspaces_dir / ws
         if not ws_dir.exists():
             return None  # 唯一 404 情况
-        # ① web 自起: handle.cancel(temporal 原生)
+        # ① web 自起: handle.cancel(temporal 原生) + _mark_cancelled 兜底标记.
+        # 必须兜底: worker 的 workflow except CancelledError 分支不写 scan_end / 不更新
+        # session(仅 try 正常完成分支调 finalize_summary)。web 不标 → session 卡 running
+        # (heartbeat stale 后误显 interrupted, 非 cancelled) + _watch 等不到 scan_end 永不
+        # 退出 → _handles[ws] 占死 → max_concurrent 槽位泄漏、新扫描起不来。标终态则
+        # _status_of 终态优先显 cancelled + _watch 见 scan_end 退出释放槽位(对齐 ②/③ 轨).
         handle = self._handles.get(ws)
         if handle is not None:
             try:
                 await handle.cancel()
             except Exception:
                 pass  # best-effort; temporal 侧 workflow cancel
+            await self._mark_cancelled(ws_dir)
             return {"cancelled": ws}
         # ②/③ owner=host 或已死:标 cancelled(③ 不写协作式信号)
         if is_scan_recently_active(ws_dir):
