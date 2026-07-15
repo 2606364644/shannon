@@ -282,8 +282,10 @@ describe("ScanNewPage", () => {
       }),
     );
     renderPage("/scan/new?repo=foo");
-    // 等 repo 列表加载 + preset 生效
-    await waitFor(() => expect(screen.getByText(/foo —/)).toBeInTheDocument());
+    // 等 repo 列表加载 + preset 生效（仓库 Combobox 触发器=fieldset 内最后一个 combobox，显示选中短名 foo）
+    await waitFor(() =>
+      expect(screen.getAllByRole("combobox").at(-1)).toHaveTextContent("foo"),
+    );
     // 填 url 提交
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
       target: { value: "http://example.com" },
@@ -332,7 +334,9 @@ describe("ScanNewPage", () => {
       http.get("/api/repos/wip/events", () => new HttpResponse("", { headers: { "Content-Type": "text/event-stream" } })),
     );
     renderPage("/scan/new?repo=wip");
-    await waitFor(() => expect(screen.getByText(/wip —/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByRole("combobox").at(-1)).toHaveTextContent("wip"),
+    );
     // 状态=cloning → CloneProgress 渲染"clone 中"
     await waitFor(() => expect(screen.getByText(/clone 中/)).toBeInTheDocument());
   });
@@ -346,7 +350,9 @@ describe("ScanNewPage", () => {
       ),
     );
     renderPage("/scan/new?repo=broken");
-    await waitFor(() => expect(screen.getByText(/broken —/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByRole("combobox").at(-1)).toHaveTextContent("broken"),
+    );
     expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
 

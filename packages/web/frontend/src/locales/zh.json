@@ -168,7 +168,9 @@
       "selectPlaceholder": "选择仓库",
       "addBtn": "+ 添加新仓库",
       "notReady": "仓库未就绪（{{state}}）",
-      "ungrouped": "未分组"
+      "ungrouped": "未分组",
+      "searchPlaceholder": "搜索仓库…",
+      "noMatch": "无匹配仓库"
     },
     "submit": "开始扫描 ▶",
     "submitHint": "→ 202 → 跳 /p/{ws}/live · 错误：400(Temporal)/409(并发)/422(yaml)",

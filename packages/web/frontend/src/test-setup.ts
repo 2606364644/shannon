@@ -24,3 +24,13 @@ if (!window.matchMedia) {
 if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = () => {};
 }
+
+// jsdom 未实现 ResizeObserver；cmdk（仓库 Combobox 列表）依赖它做高度/滚动检测，缺则抛错导致展开渲染中断
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserver as unknown as typeof globalThis.ResizeObserver;
+}

@@ -1,29 +1,18 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from "@/components/ui/select";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { FileSystemPicker } from "./FileSystemPicker";
+import { RepoCombobox } from "./RepoCombobox";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos } from "@/api/client";
 import type { Repo } from "@/api/types";
 import type { FormState } from "../pages/ScanNewPage";
-
-function groupRepos(repos: Repo[], t: TFunction): { name: string; repos: Repo[] }[] {
-  const map = new Map<string, Repo[]>();
-  for (const r of repos) {
-    const g = r.group ?? t("scan.repo.ungrouped");
-    let arr = map.get(g);
-    if (!arr) { arr = []; map.set(g, arr); }
-    arr.push(r);
-  }
-  return Array.from(map, ([name, rs]) => ({ name, repos: rs }));
-}
 
 interface Props {
   type: "whitebox" | "blackbox";
@@ -60,21 +49,15 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
 
           {f.sourceKind === "repo" ? (
             <div className="space-y-2">
-              <Select value={f.selectedRepo} onValueChange={(v) => set({ selectedRepo: v })}>
-                <SelectTrigger><SelectValue placeholder={t("scan.repo.selectPlaceholder")} /></SelectTrigger>
-                <SelectContent>
-                  {groupRepos(repos, t).map((g) => (
-                    <SelectGroup key={g.name}>
-                      <SelectLabel>{g.name}</SelectLabel>
-                      {g.repos.map((r) => (
-                        <SelectItem key={r.name} value={r.name}>
-                          {r.name.split("/").pop() ?? r.name} — {r.source?.url ?? r.state}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
+              <RepoCombobox
+                repos={repos}
+                value={f.selectedRepo || null}
+                onChange={(v) => set({ selectedRepo: v })}
+                placeholder={t("scan.repo.selectPlaceholder")}
+                searchPlaceholder={t("scan.repo.searchPlaceholder")}
+                emptyText={t("scan.repo.noMatch")}
+                ungroupedLabel={t("scan.repo.ungrouped")}
+              />
               <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>{t("scan.repo.addBtn")}</Button>
               {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (
                 selectedRepoState === "cloning" || selectedRepoState === "pulling"

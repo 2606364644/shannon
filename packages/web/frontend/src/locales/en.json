@@ -168,7 +168,9 @@
       "selectPlaceholder": "Select a repository",
       "addBtn": "+ Add new repository",
       "notReady": "Repository not ready ({{state}})",
-      "ungrouped": "Ungrouped"
+      "ungrouped": "Ungrouped",
+      "searchPlaceholder": "Search repositories...",
+      "noMatch": "No matching repositories"
     },
     "submit": "Start scan ▶",
     "submitHint": "→ 202 → redirect /p/{ws}/live · errors: 400(Temporal)/409(concurrent)/422(yaml)",
