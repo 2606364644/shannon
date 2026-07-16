@@ -239,7 +239,11 @@ git commit -m "fix(worker): bb_worker 并发=1 对齐 wb_worker — AuditSession
     expect(rowText(container, "ev-warn")).toMatch(/mod\.a: careful/);
     expect(rowText(container, "ev-error")).toMatch(/\[ERROR\]/);
     expect(rowText(container, "ev-error")).toMatch(/mod\.b: boom/);
-    const infoRow = container.querySelector(".text-muted-foreground");
+    // 注意：必须用 div.text-muted-foreground——LogStream.tsx 每行的时间戳/type <span>
+    // 都带 text-muted-foreground class；裸 .text-muted-foreground 会命中首个 span 而非
+    // INFO 行 div。INFO 行的 rowClass 返回 "text-muted-foreground"（div class），加 div
+    // 限定只匹配该行 div。
+    const infoRow = container.querySelector("div.text-muted-foreground");
     expect(infoRow?.textContent ?? "").toMatch(/\[INFO\]/);
     expect(infoRow?.textContent ?? "").toMatch(/mod\.c: hi/);
   });
@@ -305,10 +309,34 @@ function rowClass(e: NdjsonEvent): string {
 }
 ```
 
+- [ ] **Step 3c: 更新现有 default 分支测试（避免被新 `case "LogEvent"` 破坏）**
+
+`LogStream.test.tsx` 末尾现有「未知 event type 走 default 不崩，显示 type 名」测试（:262）用
+`type: "LogEvent"` 当"未知类型"样本，断言走 default 分支 + `ev-info` class。Task 3b 加了
+`case "LogEvent"` 后：summarize 不再返回 type 名、rowClass 从 `ev-info` 变 `text-muted-foreground`
+→ `rowText(container, "ev-info")` 抛 `missing .ev-info row` → 该测试 FAIL。把它换成真正未知
+的 type，保留 default 分支测试意图：
+
+把 `LogStream.test.tsx` 末尾该测试（`// ── LogEvent（Python 侧有...）走 default 分支不崩 ──`
+那个 `it(...)` 整段）替换为：
+
+```tsx
+  // ── 真正未知 event type 走 default 不崩，显示 type 名 ──
+  it("未知 event type 走 default 不崩，显示 type 名", () => {
+    const ev = {
+      ts: "2026-07-02T10:08:00.000Z", category: "INFO", type: "FutureEvent",
+      foo: "bar",
+    } as unknown as NdjsonEvent;
+    const { container } = render(<LogStream events={[ev]} />);
+    const txt = rowText(container, "ev-info");  // category=INFO → CAT_CLASS → ev-info
+    expect(txt).toContain("FutureEvent");
+  });
+```
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd /root/shannon-py/packages/web/frontend && pnpm vitest run src/components/LogStream.test.tsx`
-Expected: PASS（含原有测试 + 新 LogEvent 测试）。
+Expected: PASS（含原有测试 - 1 个被 Step 3c 改写 + 新 LogEvent 测试）。
 
 - [ ] **Step 5: tsc 类型检查**
 
@@ -340,9 +368,6 @@ git commit -m "feat(web): LogStream 渲染 LogEvent — 按 level 着色(ERROR/W
 在 `packages/core/tests/test_cli_logs.py` 末尾追加：
 
 ```python
-from types import SimpleNamespace
-
-
 def test_render_event_line_logevent_uses_diagnostic_format():
     from shannon_core.cli.logs import render_event_line
     line = render_event_line({
@@ -406,7 +431,6 @@ Expected: FAIL（`ImportError: cannot import name 'render_event_line'`）。
 
 ```python
 import json
-from types import SimpleNamespace
 
 from shannon_core.display.formatters import (
     agent_body, format_duration, gitnexus_body, humanize_tool_call,
@@ -414,15 +438,30 @@ from shannon_core.display.formatters import (
 )
 
 
+class _Ns:
+    """dict-backed namespace：formatters 访问的可选字段缺失时返回 None。
+
+    events.ndjson 各 type 字段集不同（StepEvent 可无 error、AgentEvent 可无 cost_usd…），
+    直接 SimpleNamespace(**data) 访问缺失属性会 AttributeError 让 logs --full 整体崩。
+    本类 __getattr__ 兜底 → formatters 纯函数（按 dataclass 设计、对 None 容忍）安全。
+    """
+
+    def __init__(self, d: dict) -> None:
+        self._d = d
+
+    def __getattr__(self, k: str):  # 缺失键 → None，不抛 AttributeError
+        return self._d.get(k)
+
+
 def render_event_line(data: dict) -> str:
     """渲染一条 events.ndjson JSON 行为文本（logs --full 用）。
 
-    DisplayEvent 复用 display/formatters 纯函数（传 SimpleNamespace）；LogEvent 用
+    DisplayEvent 复用 display/formatters 纯函数（传 _Ns）；LogEvent 用
     diagnostic 格式 [LEVEL] logger: msg（对齐 logging/diagnostic_log）。同步、无 ANSI。
     """
     ts = data.get("ts", "")
     etype = data.get("type", "")
-    e = SimpleNamespace(**data)
+    e = _Ns(data)
     if etype == "LogEvent":
         level = data.get("level", "INFO")
         return f"[{ts}] [{level:>5}] {data.get('logger_name', '')}: {data.get('message', '')}"
@@ -675,3 +714,18 @@ git commit -m "feat(whitebox-cli): logs --full — events.ndjson 全量文本视
 - `JsonLogHandler.flush() -> bool`（Task 4）↔ 测试 `done = handler.flush()` 一致 ✅
 
 **4. 风险已标注**：Task 1 测试 root logger 快照/还原；Task 3 level 着色绕过 CAT_CLASS；Task 4 复用 formatters 不污染 FileLogRenderer。
+
+**5. 代码事实核对（2026-07-16 对照当前 `feat/fork-py` 代码 self-review，修正 3 处会让 TDD FAIL 的失真）：**
+
+逐文件核对结论（plan 原假设成立的不再列）：
+- `setup_display`（activities.py:1518）确实未调 `configure_logging` ✅；`ActivityInput`（shared.py:40-55）`repo_path/workspace_path/workspace_name/event_file` 字段齐全 ✅；`configure_logging`（setup.py:35）幂等（:58）✅。
+- `clear_audit_session` 定义在 **core** `audit/session_registry.py:79`（whitebox 是 re-export shim）→ Task 1 测试 `from shannon_core.audit.session_registry import clear_audit_session` **正确** ✅。
+- bb_worker（runner.py:74-87）确无 `max_concurrent_workflow_tasks`；wb_worker（:71）已有=1 ✅；`bb_call`（test_runner.py:40）存在、KeyError 期望准确 ✅。
+- `format_duration(430238)` = `"7m 10s"`（含 `"7m "`）→ Task 4 测试 or 分支命中 ✅；`formatters.py` 七个函数全在（:21/180/216/224/238/255/286）✅。
+- `main.py` logs（:197-220）确无 `--full`；`resolve_workspaces_dir`（paths.py:25）返回 Path ✅；`test_cli.py` 已 import CliRunner/cli ✅。
+- `test_logevent_not_written_to_workflow_log`（test_logevent_render.py:99）存在 ✅。
+
+**修正的 3 处失真（已就地改入上文）：**
+1. **Task 3 Step 1 INFO 行 selector**：`.text-muted-foreground` → `div.text-muted-foreground`。原因：每行 `<span>` 时间戳/type 都带该 class，裸 selector 命中首个 span 而非 INFO 行 div。
+2. **Task 3 新增 Step 3c**：`LogStream.test.tsx:262` 现有「default 分支」测试用 `type:"LogEvent"` 当未知样本，被新 `case "LogEvent"` 破坏（rowClass 从 ev-info 变 text-muted-foreground）→ 换成 `type:"FutureEvent"`。
+3. **Task 4 `render_event_line`**：`SimpleNamespace(**data)` → 自定义 `_Ns`（`__getattr__` 兜底 None）。原因：`step_body` 访问 `e.error`，但测试 data / 生产 ndjson 行可能缺该键 → AttributeError。同时删测试多余 `from types import SimpleNamespace`。
