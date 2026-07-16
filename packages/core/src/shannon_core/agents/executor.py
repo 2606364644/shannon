@@ -106,9 +106,9 @@ class AgentExecutor:
 
         await GitManager.create_checkpoint(deliverables, agent_name)
 
-        # host-rendered deliverables:pre-recon(Plan 1)用声明式 collector 接 set_*
-        # 工具调用 → host renderer 确定性渲染 md,对齐 TS pre-recon-renderer.ts。
-        # make_collector 对非 pre-recon agent 返 None(无 collector 通道,不改行为)。
+        # host-rendered deliverables:pre-recon(Plan 1)+ 5 vuln agent(Plan 3)用声明式
+        # collector 接 set_* → host renderer 确定性渲染 md(对齐 TS)。其余 agent
+        # make_collector 返 None(无 collector 通道,走 self-Write,不改行为)。
         collector = make_collector(agent_name)
 
         start_time = time.monotonic()
