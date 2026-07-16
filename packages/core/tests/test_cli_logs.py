@@ -77,4 +77,56 @@ def test_tail_workflow_log_missing_workspace(tmp_path, capsys):
         mock_exit.assert_called_once_with(1)
 
     captured = capsys.readouterr()
-    assert "Workflow log not found" in captured.err
+    assert "Log file not found" in captured.err
+
+
+def test_render_event_line_logevent_uses_diagnostic_format():
+    from shannon_core.cli.logs import render_event_line
+    line = render_event_line({
+        "ts": "2026-07-16 02:00:00", "category": "WARNING", "type": "LogEvent",
+        "logger_name": "mod.x", "level": "WARNING", "message": "careful",
+    })
+    assert "[WARNING]" in line
+    assert "mod.x: careful" in line
+
+
+def test_render_event_line_step_reuses_formatters():
+    from shannon_core.cli.logs import render_event_line
+    line = render_event_line({
+        "ts": "2026-07-16 02:00:00", "category": "STEP", "type": "StepEvent",
+        "name": "code-index", "phase": "pre-recon", "event": "complete",
+        "duration_ms": 430238, "intent": "构建调用图",
+    })
+    assert "[STEP" in line
+    assert "构建调用图" in line
+    assert "430238ms" in line or "7m " in line  # format_duration
+
+
+def test_render_event_line_scan_end():
+    from shannon_core.cli.logs import render_event_line
+    line = render_event_line({
+        "ts": "2026-07-16 02:00:00", "category": "CONTROL",
+        "type": "scan_end", "status": "completed",
+    })
+    assert "scan_end" in line
+    assert "completed" in line
+
+
+def test_tail_events_ndjson_renders_and_exits_on_scan_end(tmp_path, capsys):
+    """一次性 flush 全量 + 遇 scan_end 立即返回（不等 watchdog）。"""
+    import shannon_core.cli.logs as L
+    ws = tmp_path / "ws1"
+    ws.mkdir()
+    ndjson = ws / "events.ndjson"
+    ndjson.write_text(
+        '{"ts":"2026-07-16 02:00:00","category":"STEP","type":"StepEvent","name":"x","phase":"p","event":"complete","duration_ms":12,"intent":"i"}\n'
+        '{"ts":"2026-07-16 02:00:01","category":"CONTROL","type":"scan_end","status":"completed"}\n',
+        encoding="utf-8",
+    )
+    # 直接驱动 JsonLogHandler.flush 验证渲染 + scan_end 退出（不启 watchdog，避免阻塞）
+    handler = L.JsonLogHandler(ndjson)
+    done = handler.flush()
+    out = capsys.readouterr().out
+    assert "[STEP" in out
+    assert "scan_end" in out
+    assert done is True
