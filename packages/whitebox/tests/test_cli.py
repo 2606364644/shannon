@@ -307,7 +307,12 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
     ws.mkdir(parents=True)
     (ws / "workflow.log").write_text("hello from log\n")
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(cli, ["logs", "test-ws"])
+    # cli group 回调调 validate_active_profile（chdir 后 cwd 无 .env.profiles → 抛错），
+    # patch 掉以聚焦 logs 命令体行为（对齐 test_logs_command_diagnostic_flag）。
+    with patch("shannon_whitebox.cli.main.load_env"), patch(
+        "shannon_whitebox.cli.main.validate_active_profile"
+    ):
+        result = runner.invoke(cli, ["logs", "test-ws"])
     assert result.exit_code == 0
     assert "hello from log" in result.output
 
@@ -564,3 +569,21 @@ def test_start_vuln_classes_invalid_raises_usage_error(monkeypatch, tmp_path):
     assert "foo" in result.output
     # run_scan 不应被调用（解析在构造 PipelineInput 前就失败）
     assert "vuln_classes" not in captured
+
+
+def test_logs_full_flag_renders_events_ndjson(tmp_path, monkeypatch):
+    """logs --full 读 ws/events.ndjson 全量渲染（非 follow）。"""
+    from click.testing import CliRunner
+    from shannon_whitebox.cli.main import cli
+    ws = tmp_path / "ws1"
+    ws.mkdir()
+    (ws / "events.ndjson").write_text(
+        '{"ts":"2026-07-16 02:00:00","category":"WARNING","type":"LogEvent","logger_name":"m","level":"WARNING","message":"hi"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "shannon_whitebox.cli.main.resolve_workspaces_dir", lambda: tmp_path)
+    res = CliRunner().invoke(cli, ["logs", "ws1", "--full"])
+    assert res.exit_code == 0, res.output
+    assert "[WARNING]" in res.output
+    assert "m: hi" in res.output

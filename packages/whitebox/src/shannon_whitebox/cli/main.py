@@ -200,13 +200,37 @@ def status():
     "--diagnostic", is_flag=True,
     help="Read diagnostic.log (logging WARNING/ERROR) instead of workflow.log",
 )
-def logs(workspace_name, follow, diagnostic):
+@click.option(
+    "--full", is_flag=True,
+    help="Read events.ndjson (full stream incl. LogEvent diagnostic lines)",
+)
+def logs(workspace_name, follow, diagnostic, full):
     """View workspace execution logs."""
+    import json as _json
     workspaces_dir = resolve_workspaces_dir()
     ws = workspaces_dir / workspace_name
     if not ws.exists():
         click.echo(f"Workspace not found: {workspace_name}")
         raise SystemExit(1)
+    if full:
+        events_file = ws / "events.ndjson"
+        if not events_file.exists():
+            click.echo("No events.ndjson found")
+            return
+        if follow:
+            from shannon_core.cli.logs import tail_events_ndjson
+            tail_events_ndjson(workspace_name)
+        else:
+            from shannon_core.cli.logs import render_event_line
+            for line in events_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    click.echo(render_event_line(_json.loads(line)))
+                except _json.JSONDecodeError:
+                    continue
+        return
     # spec 组件 6：--diagnostic 读 logs/diagnostic.log，否则 workflow.log（display 流产物）。
     log_filename = "diagnostic.log" if diagnostic else "workflow.log"
     log_file = ws / ("logs" if diagnostic else "") / log_filename
