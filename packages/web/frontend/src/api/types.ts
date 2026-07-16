@@ -62,6 +62,16 @@ export interface GitnexusLlmEvent extends CommonFields {
   // 字段随 events.py GitnexusLlmEvent；前端按需透传
   [k: string]: unknown;
 }
+export interface LogEventEvent {
+  ts: string;
+  // category=levelname 动态值(INFO/WARNING/ERROR/DEBUG), 非 EventCategory 枚举(只有 WARN 无 WARNING)
+  category: string;
+  type: "LogEvent";
+  logger_name: string;
+  level: string;       // "INFO" | "WARNING" | "ERROR" | "DEBUG" | "NOTSET"
+  message: string;
+  exc_txt?: string;
+}
 export interface ScanEndEvent extends CommonFields {
   type: "scan_end"; status: "completed" | "failed" | "killed" | "crashed";
   returncode?: number; stderr_tail?: string;
@@ -74,7 +84,7 @@ export interface CorrelationProgressEvent extends CommonFields {
 export type NdjsonEvent =
   | WorkflowHeaderEvent | PhaseEvent | StepEvent | AgentEvent | ToolCallEvent
   | LlmTurnEvent | InfoEvent | ErrorEvent | SummaryEvent | ResumeEvent
-  | GitnexusLlmEvent | ScanEndEvent | CorrelationProgressEvent;
+  | GitnexusLlmEvent | ScanEndEvent | CorrelationProgressEvent | LogEventEvent;
 
 // === API 响应类型（对齐 backend-design.md）===
 export type WorkspaceStatus =

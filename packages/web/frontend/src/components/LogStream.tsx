@@ -130,6 +130,10 @@ function summarize(e: NdjsonEvent): string {
       return parts.join("  ");
     }
 
+    case "LogEvent": {
+      const line = `[${e.level}] ${e.logger_name}: ${e.message}`;
+      return e.exc_txt ? `${line}\n${e.exc_txt}` : line;
+    }
     case "ResumeEvent":
       return `resume ← ${e.previous_workflow_id}`;
     case "InfoEvent":
@@ -141,6 +145,11 @@ function summarize(e: NdjsonEvent): string {
 
 /** 单行 CSS class：base category class + Agent end 成功/失败追加色。 */
 function rowClass(e: NdjsonEvent): string {
+  if (e.type === "LogEvent") {
+    if (e.level === "ERROR") return "ev-error";
+    if (e.level === "WARNING") return "ev-warn";
+    return "text-muted-foreground";  // INFO/DEBUG/NOTSET 灰显
+  }
   const base = CAT_CLASS[e.category] ?? "text-muted-foreground";
   if (e.type === "AgentEvent" && e.event === "end") {
     if (e.success === false) return `${base} ev-agent-fail`;

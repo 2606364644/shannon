@@ -258,15 +258,35 @@ describe("LogStream", () => {
     expect(() => render(<LogStream events={bigger} />)).not.toThrow();
   });
 
-  // ── LogEvent（Python 侧有，TS 未定义专用 type）走 default 分支不崩 ──
+  // ── 真正未知 event type 走 default 不崩，显示 type 名 ──
   it("未知 event type 走 default 不崩，显示 type 名", () => {
     const ev = {
-      ts: "2026-07-02T10:08:00.000Z", category: "INFO", type: "LogEvent",
-      logger_name: "test", level: "DEBUG", message: "diagnostic",
+      ts: "2026-07-02T10:08:00.000Z", category: "INFO", type: "FutureEvent",
+      foo: "bar",
     } as unknown as NdjsonEvent;
     const { container } = render(<LogStream events={[ev]} />);
-    // 走 default 分支：显示 type 名（行 class 是 ev-info 因为 category=INFO）
-    const txt = rowText(container, "ev-info");
-    expect(txt).toContain("LogEvent");
+    const txt = rowText(container, "ev-info");  // category=INFO → CAT_CLASS → ev-info
+    expect(txt).toContain("FutureEvent");
+  });
+
+  it("LogEvent 渲染 [LEVEL] logger: msg 且按 level 着色", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-07-16T02:00:00.000Z", category: "WARNING", type: "LogEvent", logger_name: "mod.a", level: "WARNING", message: "careful" } as NdjsonEvent,
+      { ts: "2026-07-16T02:00:01.000Z", category: "ERROR", type: "LogEvent", logger_name: "mod.b", level: "ERROR", message: "boom" } as NdjsonEvent,
+      { ts: "2026-07-16T02:00:02.000Z", category: "INFO", type: "LogEvent", logger_name: "mod.c", level: "INFO", message: "hi" } as NdjsonEvent,
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    // WARNING → ev-warn, ERROR → ev-error, INFO → 灰显(text-muted-foreground)
+    expect(rowText(container, "ev-warn")).toMatch(/\[WARNING\]/);
+    expect(rowText(container, "ev-warn")).toMatch(/mod\.a: careful/);
+    expect(rowText(container, "ev-error")).toMatch(/\[ERROR\]/);
+    expect(rowText(container, "ev-error")).toMatch(/mod\.b: boom/);
+    // 注意：必须用 div.text-muted-foreground——LogStream.tsx 每行的时间戳/type <span>
+    // 都带 text-muted-foreground class；裸 .text-muted-foreground 会命中首个 span 而非
+    // INFO 行 div。INFO 行的 rowClass 返回 "text-muted-foreground"（div class），加 div
+    // 限定只匹配该行 div。
+    const infoRow = container.querySelector("div.text-muted-foreground");
+    expect(infoRow?.textContent ?? "").toMatch(/\[INFO\]/);
+    expect(infoRow?.textContent ?? "").toMatch(/mod\.c: hi/);
   });
 });
