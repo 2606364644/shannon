@@ -1529,6 +1529,7 @@ async def setup_display(input: ActivityInput) -> None:
     """
     from rich.console import Console
     from shannon_core.models.metrics import SessionMetadata
+    from shannon_core.logging import configure_logging
     from shannon_whitebox.audit.session import AuditSession
     from shannon_whitebox.audit.session_registry import set_audit_session
 
@@ -1544,6 +1545,10 @@ async def setup_display(input: ActivityInput) -> None:
         repo_path=input.repo_path,
         output_path=str(ws_path.parent),
     )
+    # 裂痕四修复: worker 容器入口挂 LogBusHandler + per-scan diagnostic.log。
+    # CLI 路径 main.py 已配；worker 路径此前漏配 → LogEvent 走 lastResort stderr,
+    # live 页/events.ndjson 无诊断行、不产 diagnostic.log。幂等(setup.py:57-65)。
+    configure_logging(log_dir=ws_path / "logs")
     console = Console()  # auto-detects non-TTY in pipes -> plain text per event
     session = AuditSession(meta, use_rich=False, console=console)
     await session.initialize(workflow_id=meta.id, event_file=input.event_file)

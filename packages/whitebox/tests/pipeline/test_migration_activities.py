@@ -145,3 +145,41 @@ async def test_finalize_summary_reads_cost_from_session_metrics(tmp_path):
     assert isinstance(ws, WorkflowSummary)
     assert ws.total_cost_usd == pytest.approx(6.49)   # 非 summary dict 的 0
     assert ws.cost_currency == "CNY"
+
+
+@pytest.mark.asyncio
+async def test_setup_display_mounts_logbus_handler_so_logevent_reaches_files(tmp_path):
+    """裂痕四修复: setup_display 调 configure_logging 挂 LogBusHandler, 之后散落
+    getLogger 的 LogEvent 经 LogBus→dispatcher 进 events.ndjson + diagnostic.log。
+    （修前: worker 路径 root 无 LogBusHandler → LogEvent 走 lastResort stderr, 两文件皆空。）"""
+    import asyncio, logging
+    from shannon_whitebox.pipeline.activities import setup_display
+    from shannon_whitebox.pipeline.shared import ActivityInput
+    from shannon_core.audit.session_registry import clear_audit_session
+    from shannon_core.logging.log_bus import LogBus
+
+    # 快照 + 还原 root logger（configure_logging 是进程级）
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+
+    event_file = str(tmp_path / "events.ndjson")
+    inp = ActivityInput(
+        repo_path=str(tmp_path),
+        workspace_path=str(tmp_path),
+        workspace_name=tmp_path.name,
+        event_file=event_file,
+    )
+    try:
+        await setup_display(inp)
+        logging.getLogger("shannon_test_diag").warning("diag-from-activity")
+        await asyncio.sleep(0.3)  # 让 LogBus drain task 把 LogEvent dispatch 落盘
+    finally:
+        await LogBus.drain_and_detach()
+        clear_audit_session()
+        root.handlers = saved_handlers  # 还原，避免泄漏到其它测试
+
+    ndjson = (tmp_path / "events.ndjson").read_text("utf-8")
+    assert '"type": "LogEvent"' in ndjson, ndjson
+    assert "diag-from-activity" in ndjson
+    diag = (tmp_path / "logs" / "diagnostic.log").read_text("utf-8")
+    assert "diag-from-activity" in diag, diag
