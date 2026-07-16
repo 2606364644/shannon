@@ -47,6 +47,10 @@ async def test_run_worker_connects_and_registers_two_workers():
     assert BlackboxScanWorkflow in bb_call.kwargs["workflows"]
     assert len(bb_call.kwargs["activities"]) >= 10  # 黑盒 ~16 activities
 
+    # bb_worker 并发=1：LogBus 单例 + AuditSession 全局单例多 scan 并发会串台/冲突，
+    # 对齐 wb_worker(max_concurrent_workflow_tasks=1)。
+    assert bb_call.kwargs["max_concurrent_workflow_tasks"] == 1
+
     # 两个 worker 都 run（并行 gather）
     wb_worker.run.assert_awaited_once()
     bb_worker.run.assert_awaited_once()

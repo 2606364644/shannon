@@ -83,6 +83,9 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             load_correlation_context, resolve_blackbox_engine, detect_whitebox_results,
             write_engine_config_for_session, cleanup_engine_configs,
         ],
+        # 对齐 wb_worker: AuditSession 全局单例 + LogBus 单例多 scan 并发会冲突/串台
+        # (runner.py:68-71 注释同因)。黑盒 web 扫描 C1 化(Plan B)前先就位。
+        max_concurrent_workflow_tasks=1,
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
     )
 
