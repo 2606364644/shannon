@@ -113,6 +113,42 @@ def test_self_write_instructions_gone():
         ), f"{name}: synthesize-into-Markdown-write-it-yourself pattern still present"
 
 
+def test_deliverable_markdown_template_gone():
+    """The reframing header + Section 1-5 Markdown template MUST be absent.
+
+    Plan 3 review fix: the template between </deliverable_tools> and
+    </deliverable_instructions> contradicted the MANDATORY host-rendered
+    instruction (competing "MUST use this structure" signal) and acted as
+    copy-paste bait for fabricated findings (esp. authz "Critical Finding"
+    bullets). Host renderer (renderers/vuln.py) already defines the section
+    structure; the prompt must not duplicate it. Aligns 1:1 with TS upstream
+    (which has no such template).
+    """
+    forbidden_header_patterns = (
+        "MUST use the following structure precisely",
+        "Your delivered Markdown (rendered by the host from your `set_*` calls)",
+        # Chinese template section headers
+        "# 注入分析报告(SQLi 与命令注入)",
+        "# XSS 分析报告(跨站脚本)",
+        "# 认证分析报告",
+        "# SSRF 分析报告",
+        "# 授权分析报告",
+        # Template section markers (## 一、执行摘要 .. ## 五、分析约束与盲区)
+        "## 一、执行摘要",
+        "## 二、主要漏洞模式",
+        "## 三、利用情报",
+        "## 四、已分析并确认安全的向量",
+        "## 四、安全设计:已验证组件",
+        "## 五、分析约束与盲区",
+    )
+    for name, _, _ in VULN_PROMPTS:
+        text = _read(name)
+        for pat in forbidden_header_patterns:
+            assert pat not in text, (
+                f"{name}: deliverable Markdown template/header leaked: {pat!r}"
+            )
+
+
 def test_safe_vector_reference_points_to_set_safe_vectors():
     """Safe-vector references should point to `set_safe_vectors`, not 'Markdown report'."""
     for name, vuln_class, _ in VULN_PROMPTS:

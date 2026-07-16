@@ -347,60 +347,6 @@ The harness injects each tool's complete description and per-field guidance into
 **Relationship to the exploitation queue:** The exploitation queue (`injection_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
 </deliverable_tools>
 
-Your delivered Markdown (rendered by the host from your `set_*` calls) MUST use the following structure precisely:
-
----
-# 注入分析报告(SQLi 与命令注入)
-
-## 一、执行摘要
-
-- **Analysis Status:** Complete  
-- **Key Outcome:** Several high-confidence SQL injection injection vulnerabilities (both SQLi and Command Injection) were identified. All findings have been passed to the exploitation phase.  
-- **Purpose of this Document:** This report provides the strategic context, dominant patterns, and environmental intelligence necessary to effectively exploit the vulnerabilities listed in the queue. It is intended to be read alongside the JSON deliverable.  
-
-
-## 二、主要漏洞模式
--**Description:** descirption of the pattern found in the codebase
--**Implication:** implication of the pattern 
--**representative:** ID of a vulnerbaility that exhibits this pattern
-
-
-## 三、利用情报
-
-- **Defensive Evasion (WAF Analysis):**  
-  - A Web Application Firewall is active and blocks common payloads containing boolean logic (`' OR '1'='1`) and `UNION SELECT`.  
-  - **Critical Bypass:** The WAF failed to block **time-based blind injection** payloads (e.g., `pg_sleep()`). It also does not inspect the structure of complex, nested queries.  
-  - **Recommendation:** Start with **time-based techniques** for exploitation.  
-
-- **Error-Based Injection Potential:**  
-  - The `/api/products` endpoint returns verbose PostgreSQL error messages to the client.  
-  - **Recommendation:** This endpoint is a prime target for **error-based exploitation** to rapidly extract schema and data.  
-
-- **Confirmed Database Technology:**  
-  - Database is **PostgreSQL**, confirmed via error syntax and function calls (`pg_sleep`).  
-  - All payloads should be PostgreSQL-specific.  
-
-## 四、已分析并确认安全的向量
-
-These input vectors were traced and confirmed to have robust, context-appropriate defenses. They are **low-priority** for further testing.
-
-| **Source (Parameter/Key)** | **Endpoint/File Location**      | **Defense Mechanism Implemented**         | **Verdict** |
-|-----------------------------|--------------------------------|-------------------------------------------|-------------|
-| `username`                  | `/api/login`                  | Prepared Statement (Parameter Binding)     | SAFE        |
-| `user_id`                   | `/api/users/{user_id}`        | Input correctly cast to an Integer         | SAFE        |
-| `status`                    | `/api/orders`                 | Strict Whitelist Validation                | SAFE        |
-
-## 五、分析约束与盲区
-
-- **Untraced Asynchronous Flows:**  
-  Analysis of a background job triggered by file uploads was inconclusive. The data flow passes through **RabbitMQ**, and static analysis could not confirm whether tainted data reaches a DB sink. This remains a blind spot.  
-
-- **Limited Visibility into Stored Procedures:**  
-  The application calls a stored procedure: `sp_calculate_report`. Source code for this procedure was not available. While inputs appear correctly typed, injection inside the procedure cannot be ruled out.  
-
----
-
-
 </deliverable_instructions>
 
 

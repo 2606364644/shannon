@@ -232,41 +232,6 @@ The harness injects each tool's complete description and per-field guidance into
 **Relationship to the exploitation queue:** The exploitation queue (`auth_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
 </deliverable_tools>
 
-Your delivered Markdown (rendered by the host from your `set_*` calls) MUST use the following structure precisely:
-
----
-# 认证分析报告
-
-## 一、执行摘要
-- **Analysis Status:** Complete
-- **Key Outcome:** Critical authentication flaws were identified, primarily related to weak session management and insufficient transport security.
-- **Purpose of this Document:** This report provides the strategic context on the application's authentication mechanisms, dominant flaw patterns, and key architectural details necessary to effectively exploit the vulnerabilities listed in the exploitation queue.
-
-## 二、主要漏洞模式
-
-### Pattern 1: Weak Session Management
-- **Description:** A recurring and critical pattern was observed where session cookies lack proper security flags and session identifiers are not rotated after successful authentication.
-- **Implication:** Attackers can hijack user sessions through various vectors including network interception and session fixation attacks.
-- **Representative Findings:** `AUTH-VULN-01`, `AUTH-VULN-02`.
-
-### Pattern 2: Insufficient Rate Limiting on Authentication Endpoints
-- **Description:** Authentication endpoints such as login, password reset, and registration lack proper rate limiting mechanisms.
-- **Implication:** Attackers can perform brute force attacks, credential stuffing, and password spraying without being throttled.
-- **Representative Finding:** `AUTH-VULN-03`.
-
-## 三、利用情报
-- **Authentication Method:** The system uses JWT-based authentication with tokens stored in cookies.
-- **Session Token Details:** The session is managed via a JWT stored in a cookie named `session_token`. The XSS specialist noted this cookie lacks the `HttpOnly` flag, making it accessible to script.
-- **Password Policy:** Basic password requirements are enforced client-side but server-side validation appears minimal.
-
-## 四、安全设计:已验证组件
-These components were analyzed and found to have robust defenses. They are low-priority for further testing.
-| Component/Flow | Endpoint/File Location | Defense Mechanism Implemented | Verdict |
-|---|---|---|---|
-| Password Hashing | `/controllers/authController.js` | Uses `bcrypt.compare` for constant-time password check. | SAFE |
-| Reset Token Generation | `/services/tokenService.js` | Generates high-entropy cryptographic reset tokens. | SAFE |
----
-
 </deliverable_instructions>
 
 

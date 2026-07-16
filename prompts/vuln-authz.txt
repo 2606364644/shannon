@@ -348,66 +348,6 @@ The harness injects each tool's complete description and per-field guidance into
 **Relationship to the exploitation queue:** The exploitation queue (`authz_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
 </deliverable_tools>
 
-Your delivered Markdown (rendered by the host from your `set_*` calls) MUST use the following structure precisely:
-
----
-# 授权分析报告
-
-## 一、执行摘要
-
-- **Analysis Status:** Complete  
-- **Key Outcome:** ONLY high-confidence authorization vulnerabilities (horizontal, vertical, and context/workflow) were recorded. All findings have been passed to the exploitation phase via the machine-readable exploitation queue.  
-- **Purpose of this Document:** This report provides the strategic context, dominant patterns, and architectural intelligence necessary to effectively exploit the vulnerabilities listed in the queue. It is intended to be read alongside the JSON deliverable.  
-
-## 二、主要漏洞模式
-
-### Pattern 1: Missing Ownership Validation (Horizontal | Vertical | Context)
-- **Description:** Multiple endpoints accept resource IDs without verifying the requesting user owns or has access to that resource
-- **Implication:** Users can access and modify other users' private data by manipulating ID parameters
-- **Representative:** AUTHZ-VULN-01, AUTHZ-VULN-03, AUTHZ-VULN-07
-
-etc...
-
-## 三、利用情报
-examples:
-- **Session Management Architecture:**  
-  - Sessions use JWT tokens stored in cookies with `httpOnly` flag  
-  - User ID is extracted from token but not consistently validated against resource ownership  
-  - **Critical Finding:** The application trusts the user ID from the token without additional checks  
-
-- **Role/Permission Model:**  
-  - Three roles identified: `user`, `moderator`, `admin`  
-  - Role is stored in JWT token and database  
-  - **Critical Finding:** Role checks are inconsistently applied; many admin routes only check for authentication  
-
-- **Resource Access Patterns:**  
-  - Most endpoints use path parameters for resource IDs (e.g., `/api/users/{id}`)  
-  - **Critical Finding:** ID parameters are directly passed to database queries without ownership validation  
-
-- **Workflow Implementation:**  
-  - Multi-step processes use status fields in database  
-  - **Critical Finding:** Status transitions don't verify prior state completion  
-
-## 四、已分析并确认安全的向量
-
-These authorization checks were traced and confirmed to have robust, properly-placed guards. They are **low-priority** for further testing.
-
-| **Endpoint** | **Guard Location** | **Defense Mechanism** | **Verdict** |
-|--------------|-------------------|----------------------|-------------|
-| `POST /api/auth/logout` | middleware/auth.js:45 | Session validation only (appropriate for logout) | SAFE |
-| `GET /api/public/*` | routes/public.js:12 | Public endpoints, no auth required by design | SAFE |
-| `GET /api/users/me` | controllers/user.js:89 | Uses session user ID, no parameter manipulation possible | SAFE |
-
-## 五、分析约束与盲区
-examples: 
-- **Untraced Microservice Calls:**  
-  Some endpoints make calls to internal microservices. Authorization checks within these services could not be analyzed without their source code.
-
-- **Dynamic Permission System:**  
-  The application appears to have a dynamic permission system loaded from database. Runtime permission checks could not be fully validated through static analysis.
-
----
-
 </deliverable_instructions>
 
 

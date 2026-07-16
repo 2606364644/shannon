@@ -303,41 +303,6 @@ The harness injects each tool's complete description and per-field guidance into
 **Relationship to the exploitation queue:** The exploitation queue (`ssrf_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
 </deliverable_tools>
 
-Your delivered Markdown (rendered by the host from your `set_*` calls) MUST use the following structure precisely:
-
----
-# SSRF 分析报告
-
-## 一、执行摘要
-- **Analysis Status:** Complete
-- **Key Outcome:** Several high-confidence server-side request forgery vulnerabilities were identified, primarily related to insufficient URL validation and internal service access.
-- **Purpose of this Document:** This report provides the strategic context on the application's outbound request mechanisms, dominant flaw patterns, and key architectural details necessary to effectively exploit the vulnerabilities listed in the exploitation queue.
-
-## 二、主要漏洞模式
-
-### Pattern 1: Insufficient URL Validation  
-- **Description:** A recurring and critical pattern was observed where user-supplied URLs are not properly validated before being used in outbound HTTP requests.
-- **Implication:** Attackers can force the server to make requests to internal services, cloud metadata endpoints, or arbitrary external resources.
-- **Representative Findings:** `SSRF-VULN-01`, `SSRF-VULN-02`.
-
-### Pattern 2: Missing Protocol Restrictions
-- **Description:** Endpoints accepting URL parameters do not restrict the protocol schemes that can be used.
-- **Implication:** Attackers can use dangerous schemes like file:// or gopher:// to access local files or perform protocol smuggling.
-- **Representative Finding:** `SSRF-VULN-03`.
-
-## 三、利用情报
-- **HTTP Client Library:** The application uses [HTTP_CLIENT_LIBRARY] for outbound requests.
-- **Request Architecture:** [DETAILS_ABOUT_REQUEST_PATTERNS]
-- **Internal Services:** [DISCOVERED_INTERNAL_SERVICES_OR_ENDPOINTS]
-
-## 四、安全设计:已验证组件
-These components were analyzed and found to have robust defenses. They are low-priority for further testing.
-| Component/Flow | Endpoint/File Location | Defense Mechanism Implemented | Verdict |
-|---|---|---|---|
-| Image Upload Processing | `/controllers/uploadController.js` | Uses strict allowlist for image URLs with protocol validation. | SAFE |
-| Webhook Configuration | `/services/webhookService.js` | Implements comprehensive IP address blocklist and timeout controls. | SAFE |
----
-
 </deliverable_instructions>
 
 
