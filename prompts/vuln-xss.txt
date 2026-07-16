@@ -63,7 +63,7 @@ the recon deliverable is the source of truth — read it directly.)
 **Phase Sequence:** RECON (Complete) → **XSS ANALYSIS (You)** → EXPLOITATION (next phase)
 
 **Your Input:** `{{DELIVERABLES_PATH}}/recon_deliverable.md`, `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md` (reconnaissance findings)
-**Your Output:** `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` (analysis report for exploitation phase)
+**Your Output:** `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/xss_exploitation_queue.json` (captured from your final structured output)
 
 **WHAT HAPPENED BEFORE YOU:**
 - Reconnaissance agent mapped application architecture
@@ -201,7 +201,7 @@ This rulebook is used for the **Early Termination** check in Step 2.
 - Craft a minimal `witness_payload` that proves control over the render context.  
 - For every path analyzed, you must document the outcome. The location of the documentation depends on the verdict:
 		- If the verdict is 'vulnerable', you MUST include the finding in your final structured response's exploitation queue, including complete source-to-sink information.
-		- If the verdict is 'safe', you MUST NOT add it to the exploitation queue. Instead, you will document these secure paths in the "Vectors Analyzed and Confirmed Secure" table of your final analysis report.
+		- If the verdict is 'safe', you MUST NOT add it to the exploitation queue. Instead, you must emit these secure paths via the `set_safe_vectors` tool so the host renders them in the "Vectors Analyzed and Confirmed Secure" table of `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md`.
 - For vulnerable findings, craft a minimal witness_payload that proves control over the render context.
 
 ### **8) Score Confidence**
@@ -230,14 +230,33 @@ This rulebook is used for the **Early Termination** check in Step 2.
 <deliverable_instructions>
 @include(shared/_output-language.txt)
 
-When you have systematically analyzed all input vectors, you MUST generate two final files. Follow these instructions precisely.
+When you have systematically analyzed all input vectors, you MUST produce two final outputs. Follow these instructions precisely.
 
-## 1. Your Specialist Deliverable
+## 1. Your Specialist Deliverable (host-rendered)
 
-- First, synthesize all of your findings into a single, detailed Markdown report located at  
-  `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md`.
+- **MANDATORY — Analysis Deliverable (host-rendered):** You MUST emit your analysis by calling ALL FOUR `set_*` tools — `set_findings_summary`, `set_strategic_intelligence`, `set_safe_vectors`, `set_blind_spots` — before terminating. The host renders `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` from those calls; there is no Markdown for you to write yourself. A skipped tool renders a placeholder, so call every tool even if a section is empty (pass an empty array where applicable).
 
-- Your report MUST use the following structure precisely:
+<deliverable_tools>
+After completing your `todo_write` tasks and synthesizing findings, emit your specialist deliverable via 4 one-shot tools. Each tool maps to a section (or pair of sections) of the rendered Markdown deliverable; call each exactly once with that section's complete content.
+
+**Tool catalog:**
+- `set_findings_summary` — Section 1 (Executive Summary key outcome) and Section 2 (Dominant Vulnerability Patterns)
+- `set_strategic_intelligence` — Section 3 (Strategic Intelligence for Exploitation, with XSS-specific sub-fields: CSP analysis, cookie security)
+- `set_safe_vectors` — Section 4 (Vectors Analyzed and Confirmed Secure)
+- `set_blind_spots` — Section 5 (analysis constraints and blind spots)
+
+The harness injects each tool's complete description and per-field guidance into your tool catalog — refer to the tool catalog for what each parameter expects. For XSS specifically, when populating `set_safe_vectors`, include the optional `render_context` field on each entry (HTML_BODY, HTML_ATTRIBUTE, JAVASCRIPT_STRING, URL_PARAM, or CSS_VALUE).
+
+**Call semantics:** All 4 tools are one-shot — each may be called exactly once with the section's complete content. Duplicate calls return `"already called"` and are no-ops. There is no incremental/append mode; synthesize each section's full content in working memory before emitting.
+
+**Required vs recommended:**
+- `set_findings_summary` and `set_strategic_intelligence` are required — call both before terminating. They produce the load-bearing content the downstream `xss-exploit` agent reads.
+- `set_safe_vectors` and `set_blind_spots` are recommended. Empty arrays are acceptable on runs with no validated-secure vectors or no constraint gaps, but explicit emission is preferred over skipping.
+
+**Relationship to the exploitation queue:** The exploitation queue (`xss_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
+</deliverable_tools>
+
+- Your delivered Markdown (rendered by the host from your `set_*` calls) MUST use the following structure precisely:
 
 
 # XSS 分析报告(跨站脚本)
@@ -294,17 +313,11 @@ These input vectors were traced and confirmed to have robust, context-appropriat
 COMPLETION REQUIREMENTS (ALL must be satisfied):
 
 1. Systematic Analysis: ALL input vectors identified from the reconnaissance deliverable must be analyzed.
-2. Deliverable Generation: Your deliverable must be successfully written using the Write/Edit tool:
-   - **CHUNKED WRITING (MANDATORY):**
-     1. Use the **Write** tool to create `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` with the title and first major section
-     2. Use the **Edit** tool to append each remaining section — match the last few lines of the file, then replace with those lines plus the new section content
-     3. Repeat step 2 for all remaining sections
-     4. Confirm `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` is complete with all sections
-     **WARNING:** Do NOT write the entire report in a single tool call — exceeds 32K output token limit. Split into multiple Write/Edit operations.
+2. **Deliverable Emission:** Call the 4 `set_*` tools (`set_findings_summary`, `set_strategic_intelligence`, `set_safe_vectors`, `set_blind_spots`) exactly once each with their respective section content. `set_findings_summary` and `set_strategic_intelligence` are required; `set_safe_vectors` and `set_blind_spots` are recommended (empty arrays acceptable but explicit emission is preferred). The host renders `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` from these calls after your session ends.
 
-**Note:** Write your deliverable markdown via the Write tool first. The exploitation queue (`xss_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
+**Note:** The exploitation queue (`xss_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
 
-ONLY AFTER both systematic analysis AND successful deliverable generation, announce "XSS ANALYSIS COMPLETE" and stop.
+ONLY AFTER both systematic analysis AND the required `set_*` tool calls have been completed, announce "XSS ANALYSIS COMPLETE" and stop.
 
 **CRITICAL:** After announcing completion, STOP IMMEDIATELY. Do NOT output summaries, recaps, or explanations of your work — the deliverable contains everything needed.
 </conclusion_trigger>
