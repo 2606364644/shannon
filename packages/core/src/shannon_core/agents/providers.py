@@ -11,11 +11,15 @@ Provider 抽象层 - 支持多种 AI Provider
 
 import os
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from shannon_core.config.provider_settings import PROVIDER_SETTINGS, present
 
 from .runner import ClaudeRunResult, DEFAULT_MODELS, ProviderConfig
 from .tool_audit_logger import ToolAuditLogger
+
+if TYPE_CHECKING:
+    from shannon_core.collectors.base import CollectorBase
 
 
 # ============================================================================
@@ -73,6 +77,7 @@ class BaseProvider(ABC):
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
+        collector: "CollectorBase | None" = None,
     ) -> ClaudeRunResult:
         """
         调用 AI 模型执行 prompt
@@ -85,6 +90,9 @@ class BaseProvider(ABC):
             deliverables_subdir: 产物子目录
             audit_logger: provider 无关的逐轮审计日志记录器（可选）
             max_turns: agent 最大轮数（None=引擎默认 200）；>1 启用多轮 agent
+            collector: 可选的结构化工具收集器（CollectorBase），注入 set_* 工具
+                给 agent（host 渲染产物架构）；provider 各自经 bridge 构造本引擎
+                原生工具（claude→MCP server、openai→extra tools）
 
         Returns:
             ClaudeRunResult: 执行结果（字段语义不变量见 runner.ClaudeRunResult docstring）

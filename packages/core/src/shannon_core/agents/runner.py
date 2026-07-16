@@ -6,6 +6,7 @@ from shannon_core.models.errors import classify_error_for_temporal
 if TYPE_CHECKING:
     from shannon_core.logging.activity_logger import ActivityLogger
     from shannon_core.agents.tool_audit_logger import ToolAuditLogger
+    from shannon_core.collectors.base import CollectorBase
 
 
 @dataclass
@@ -116,6 +117,7 @@ async def run_claude_prompt(
     audit_logger: "ActivityLogger | None" = None,
     tool_audit_logger: "ToolAuditLogger | None" = None,
     max_turns: int | None = None,
+    collector: "CollectorBase | None" = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -170,6 +172,7 @@ async def run_claude_prompt(
             deliverables_subdir=deliverables_subdir,
             audit_logger=active_tool_logger,
             max_turns=max_turns,
+            collector=collector,
         )
 
         # 5. 检查花费上限行为

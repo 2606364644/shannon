@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import time
+from typing import TYPE_CHECKING
 
 from agents import (
     Agent,
@@ -34,6 +35,9 @@ from .providers import BaseProvider, ProviderConfig
 from .runner import ClaudeRunResult, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
 from .tools_openai import ToolContext, build_tools
+
+if TYPE_CHECKING:
+    from shannon_core.collectors.base import CollectorBase
 
 _tracing_disabled = False
 
@@ -100,7 +104,7 @@ class OpenAIProvider(BaseProvider):
         """
         return narration_directive()
 
-    def build_agent(self, model: str, output_format: dict | None) -> Agent:
+    def build_agent(self, model: str, output_format: dict | None, extra_tools: list | None = None) -> Agent:
         client = self._get_client()
         chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
         # B2: output_format 非空时强制结构化输出（对齐 Claude options.output_format）
@@ -108,7 +112,7 @@ class OpenAIProvider(BaseProvider):
         return Agent(
             name="shannon-openai-agent",
             instructions=self._instructions(),  # None when disabled
-            tools=build_tools(),
+            tools=build_tools() + (extra_tools or []),
             model=chat_model,
             model_settings=ModelSettings(include_usage=True),
             output_type=output_type,
@@ -194,12 +198,21 @@ class OpenAIProvider(BaseProvider):
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
+        collector: "CollectorBase | None" = None,
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
         try:
-            agent = self.build_agent(model, output_format)
-            collector = StreamCollector(audit_logger)
+            # collector → 本引擎原生工具（FunctionTool list，经 bridge 构造）。
+            # engine-agnostic：caller 只传 CollectorBase，provider 各自经 bridge 构造。
+            extra_tools = None
+            if collector is not None:
+                from shannon_core.collectors.bridge import build_openai_tools
+                extra_tools = build_openai_tools(collector)
+            agent = self.build_agent(model, output_format, extra_tools=extra_tools)
+            # stream_collector 收 openai stream events（与 CollectorBase 无关，避免与
+            # 上面的 collector 参数命名冲突）。
+            stream_collector = StreamCollector(audit_logger)
             stop_reason: str | None = None
             try:
                 result = Runner.run_streamed(
@@ -211,25 +224,25 @@ class OpenAIProvider(BaseProvider):
 
                 async def _consume_stream() -> None:
                     async for event in result.stream_events():
-                        await collector.on_event(event)
+                        await stream_collector.on_event(event)
 
                 # wall-clock 兜底：openai 引擎 in-process，缺 claude CLI 子进程的 HTTP 超时
                 # 兜底；deepseek 流式 stall / SDK 内部 await 卡住时 stream_events 永久 await、
                 # worker 静默 hang（2026-07-16 trip_1784167551）。超时 raise asyncio.TimeoutError
                 # → 外层 except → _classify_error 判 retryable → activity 重试，不再静默卡死。
                 await asyncio.wait_for(_consume_stream(), timeout=self._call_timeout())
-                await collector.close()
+                await stream_collector.close()
                 run_result = result
             except MaxTurnsExceeded:
-                await collector.close()
+                await stream_collector.close()
                 # 无可用 RunResult，构造一个最小结果对象
-                run_result = _MaxTurnsStub(collector.text)
+                run_result = _MaxTurnsStub(stream_collector.text)
                 stop_reason = "max_turns"
             except StructuredOutputParseError:
                 # L1：L0 容错失败 → 轻量重输，模拟 Claude SDK 单次内部重试。
                 # 失败（None）→ re-raise → 外层 except Exception → _handle_error → L2。
-                await collector.close()
-                reparsed = await self._lightweight_reparse(collector.text, output_format, model)
+                await stream_collector.close()
+                reparsed = await self._lightweight_reparse(stream_collector.text, output_format, model)
                 if reparsed is None:
                     raise
                 run_result = reparsed
@@ -239,7 +252,7 @@ class OpenAIProvider(BaseProvider):
                 run_result,
                 duration_ms=duration,
                 model=model,
-                turns=max(collector.turns, 1),
+                turns=max(stream_collector.turns, 1),
                 stop_reason=stop_reason,
                 output_format=output_format,
             )

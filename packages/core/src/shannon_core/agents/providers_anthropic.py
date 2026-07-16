@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import time
+from typing import TYPE_CHECKING
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
@@ -24,6 +25,9 @@ from .pricing import compute_cost
 from .providers import BaseProvider
 from .runner import ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
+
+if TYPE_CHECKING:
+    from shannon_core.collectors.base import CollectorBase
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,7 @@ class AnthropicProvider(BaseProvider):
         deliverables_subdir: str | None = None,
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
+        collector: "CollectorBase | None" = None,
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -89,6 +94,8 @@ class AnthropicProvider(BaseProvider):
             model_tier: 模型层级
             output_format: 结构化输出格式 (JSON Schema)
             deliverables_subdir: 产物子目录
+            collector: 可选的结构化工具收集器；非空时经 bridge 构造 in-process
+                MCP server（set_* 工具）+ allowed_tools 注入 ClaudeAgentOptions。
 
         Returns:
             ClaudeRunResult: 执行结果
@@ -97,8 +104,22 @@ class AnthropicProvider(BaseProvider):
         model = self._get_model(model_tier)
 
         try:
+            # collector → 本引擎原生工具（in-process MCP server + allowed_tools 白名单）。
+            # engine-agnostic：caller 只传 CollectorBase，provider 各自经 bridge 构造。
+            mcp_server = None
+            allowed_tools = None
+            if collector is not None:
+                from shannon_core.collectors.bridge import build_claude_mcp_server
+                mcp_server = build_claude_mcp_server(collector)
+                allowed_tools = collector.tool_names()
+
             # 构建 SDK 配置
-            options = self._build_options(cwd, model, output_format, max_turns_override=max_turns)
+            options = self._build_options(
+                cwd, model, output_format,
+                max_turns_override=max_turns,
+                mcp_server=mcp_server,
+                allowed_tools=allowed_tools,
+            )
 
             # 执行调用
             result_message = await self._execute_query(prompt, options, audit_logger=audit_logger)
@@ -239,6 +260,8 @@ class AnthropicProvider(BaseProvider):
         model: str,
         output_format: dict | None = None,
         max_turns_override: int | None = None,
+        mcp_server=None,
+        allowed_tools: list[str] | None = None,
     ) -> ClaudeAgentOptions:
         """构建 ClaudeAgentOptions"""
         options = ClaudeAgentOptions(
@@ -285,6 +308,14 @@ class AnthropicProvider(BaseProvider):
                 "preset": "claude_code",
                 "append": directive,
             }
+
+        # collector → in-process MCP server（set_* 工具，经 bridge 构造）+ allowed_tools
+        # 白名单（collector.tool_names()；不指定 allowed_tools 时 CLI 默认全放行，会
+        # 漏调 set_*）。engine-agnostic：collector 是 CollectorBase，bridge 翻译成 SdkMcpTool。
+        if mcp_server is not None:
+            options.mcp_servers = {"shannon-collector": mcp_server}
+        if allowed_tools:
+            options.allowed_tools = list(allowed_tools)
 
         return options
 
