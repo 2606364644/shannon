@@ -36,3 +36,6 @@ configs/*.yaml
 # agent 工作目录
 /.claude/plans/
 .vscode/settings.json
+
+# superpowers brainstorm 本地设计协作 mockups（不入库）
+.superpowers/

@@ -22,7 +22,7 @@ afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 function renderPage() {
-  render(<MemoryRouter><ReposPage /><Toaster /></MemoryRouter>);
+  return render(<MemoryRouter><ReposPage /><Toaster /></MemoryRouter>);
 }
 
 describe("ReposPage", () => {
@@ -48,9 +48,10 @@ describe("ReposPage", () => {
       ])),
     );
     renderPage();
-    const cell = await screen.findByText("132.1 MB");
-    // 窄列 + 无 nowrap 时「132.1 MB」会在空格处断成两行；锚定 size 单元格带 whitespace-nowrap 防回退
-    expect(cell.closest("td")?.className).toMatch(/whitespace-nowrap/);
+    // 概览条「总大小」也显示同一值 → 取表格里的 td（概览条值在 div.tabular-nums，无 td 祖先）
+    const cells = await screen.findAllByText("132.1 MB");
+    const cell = cells.find((c) => c.closest("td"));
+    expect(cell?.closest("td")?.className).toMatch(/whitespace-nowrap/);
   });
 
   it("State 列内容单行不换行（英文「⚠ Incomplete」等长状态值不断行）", async () => {
@@ -121,6 +122,36 @@ describe("ReposPage", () => {
     const honorLinks = screen.getAllByRole("link", { name: /honor/ });
     expect(honorLinks).toHaveLength(2);
   });
+
+  it("精修：渲染副标题", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+    expect(screen.getByText(/已纳管/)).toBeInTheDocument();
+  });
+
+  it("精修：概览条聚合 仓库数/就绪/克隆中", async () => {
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+    const statValue = (label: string) =>
+      Array.from(container.querySelectorAll(".uppercase"))
+        .find((n) => n.textContent === label)?.nextElementSibling?.textContent ?? "";
+    // foo ready + bar failed → 仓库 2 / 就绪 1 / 克隆中 0
+    expect(statValue("仓库")).toBe("2");
+    expect(statValue("就绪")).toBe("1");
+    expect(statValue("克隆中")).toBe("0");
+  });
+
+  it("精修：分组 header 带边框（section 化）", async () => {
+    server.use(
+      http.get("/api/repos", () => HttpResponse.json([
+        { name: "a/x", group: "g1", state: "ready", source: { kind: "git" } },
+      ])),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("a/x")).toBeInTheDocument());
+    const grpBtn = screen.getByRole("button", { name: /g1/ });
+    expect(grpBtn.className).toMatch(/border/);
+  });
 });
 
 describe("ReposPage i18n", () => {
@@ -129,17 +160,18 @@ describe("ReposPage i18n", () => {
   it("中文显示标题与空状态", async () => {
     server.use(http.get("/api/repos", () => HttpResponse.json([])));
     renderPage();
-    expect(await screen.findByText("仓库")).toBeInTheDocument();
+    // 标题用 heading role 定位（概览条 label「仓库」与 h1 同文本）
+    expect(await screen.findByRole("heading", { name: "仓库" })).toBeInTheDocument();
     expect(screen.getByText(/暂无仓库/)).toBeInTheDocument();
   });
 
   it("切英文后标题变 Repositories", async () => {
     server.use(http.get("/api/repos", () => HttpResponse.json([])));
     renderPage();
-    await screen.findByText("仓库");
+    await screen.findByRole("heading", { name: "仓库" });
     await act(async () => {
       await i18n.changeLanguage("en");
     });
-    expect(await screen.findByText("Repositories")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Repositories" })).toBeInTheDocument();
   });
 });

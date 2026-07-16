@@ -374,3 +374,29 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
   });
 });
+
+describe("ScanNewPage 配色 A 暖焦点", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("侧栏标题用 coral 焦点（text-primary），不再 muted", () => {
+    renderPage();
+    const cap = screen.getByText("审计范围");
+    expect(cap.className).toMatch(/text-primary/);
+    expect(cap.className).not.toMatch(/text-muted-foreground/);
+  });
+
+  it("侧栏信息卡用 coral 轻底（border-primary + bg-primary），不再用 orange accent", () => {
+    renderPage();
+    const card = screen.getByText("分析方式").closest(".rounded-lg");
+    expect(card?.className).toMatch(/border-primary/);
+    expect(card?.className).toMatch(/bg-primary/);
+    expect(card?.className).not.toMatch(/border-orange/);
+  });
+
+  it("底部操作栏用 bg-card（去 secondary 灰堆叠）", () => {
+    renderPage();
+    const footer = screen.getByRole("button", { name: /开始扫描/ }).parentElement;
+    expect(footer?.className).not.toMatch(/bg-secondary/);
+    expect(footer?.className).toMatch(/bg-card/);
+  });
+});

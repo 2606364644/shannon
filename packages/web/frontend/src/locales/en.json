@@ -23,6 +23,13 @@
   },
   "repos": {
     "title": "Repositories",
+    "subtitle": "Managed scan target repositories",
+    "stats": {
+      "total": "Repos",
+      "size": "Total Size",
+      "ready": "Ready",
+      "cloning": "Cloning"
+    },
     "addRepo": "+ Add repository",
     "searchPlaceholder": "Search repositories",
     "loading": "Loading…",
@@ -114,6 +121,14 @@
     }
   },
   "workspaces": {
+    "title": "Workspaces",
+    "subtitle": "All scan tasks and deliverables",
+    "stats": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "totalCost": "Total Cost"
+    },
     "status": {
       "running": "Running",
       "in-progress": "In Progress",

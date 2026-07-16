@@ -23,6 +23,13 @@
   },
   "repos": {
     "title": "仓库",
+    "subtitle": "已纳管的扫描目标代码库",
+    "stats": {
+      "total": "仓库",
+      "size": "总大小",
+      "ready": "就绪",
+      "cloning": "克隆中"
+    },
     "addRepo": "+ 添加仓库",
     "searchPlaceholder": "搜索仓库名",
     "loading": "加载中…",
@@ -114,6 +121,14 @@
     }
   },
   "workspaces": {
+    "title": "工作区",
+    "subtitle": "所有扫描任务与产物",
+    "stats": {
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "totalCost": "总成本"
+    },
     "status": {
       "running": "运行中",
       "in-progress": "进行中",

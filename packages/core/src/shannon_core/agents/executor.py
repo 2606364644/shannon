@@ -154,7 +154,17 @@ class AgentExecutor:
             atomic_write_json(queue_path, result.structured_output)
 
         if not skip_artifact_postprocess:
-            await validate_deliverable(deliverables, agent_name)
+            try:
+                await validate_deliverable(deliverables, agent_name)
+            except PentestError as e:
+                # 诊断不改行为(systematic-debugging 2026-07-17):agent success 但
+                # deliverable 缺失时,补充 agent 实际产出信息再 re-raise。根因=GLM 长任务
+                # +子代理委派后失忆,end_turn 但没执行 Write(pre-recon Phase 3 才写文件)。
+                # 不改 error_code/retryable(仍 OUTPUT_VALIDATION_FAILED,retry cap=3 不变)。
+                if e.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED:
+                    raise _enrich_missing_deliverable_error(
+                        e, deliverables, defn, result) from e
+                raise
 
         await GitManager.commit(deliverables, agent_name)
 
@@ -171,3 +181,52 @@ class AgentExecutor:
             cache_read_tokens=result.tokens.cache_read_input_tokens if result.tokens else None,
             cache_creation_tokens=result.tokens.cache_creation_input_tokens if result.tokens else None,
         )
+
+
+def _enrich_missing_deliverable_error(
+    error: PentestError, deliverables: Path, defn, result,
+) -> PentestError:
+    """诊断不改行为:agent success 但 deliverable 缺失时,把 agent 实际产出信息
+    注入 error 后返回新 PentestError(调用方 raise ... from 原 error)。
+
+    根因(systematic-debugging 2026-07-17 定位):GLM 长任务 + 子代理委派后失忆,
+    agent end_turn(success=True)但没执行 Write 步骤(pre-recon prompt Phase 3 才
+    写文件,日志 Turn 147「仍在等待子代理」后正常结束却没写 md)。validate_deliverable
+    只检查文件存在性;这里补全诊断,经 session.log_error → workflow.log [ERROR] 行 +
+    activity_failures.log 可见,便于区分「完全没写」(listing 空)vs「写错文件」
+    (listing 有别的)vs「final text 是等待语」(text_len>0 但无实质)。
+
+    不改 error_code / retryable / category → classify_error_for_temporal 与 retry
+    cap 行为完全不变(仍 OUTPUT_VALIDATION_FAILED → retryable=True → cap=3)。
+    所有 .md 产物 agent 共性(pre-recon/recon/vuln-analysis/exploit-evidence/report);
+    vuln 的 exploitation_queue 缺失(同 OUTPUT_VALIDATION_FAILED)也经此 enrich,
+    has_structured_output 字段对它尤其有用。
+    """
+    try:
+        listing = sorted(p.name for p in deliverables.iterdir()) if deliverables.exists() else []
+    except OSError:
+        listing = []
+    text = (getattr(result, "text", "") or "").strip()
+    turns = getattr(result, "turns", None)
+    stop_reason = getattr(result, "stop_reason", None)
+    has_structured = getattr(result, "structured_output", None) is not None
+    diagnostics = {
+        "expected_deliverable": defn.deliverable_filename,
+        "deliverables_listing": listing,
+        "final_text_len": len(text),
+        "final_text_preview": text[:300],
+        "final_turns": turns,
+        "stop_reason": stop_reason,
+        "has_structured_output": has_structured,
+    }
+    summary = (
+        f"diagnostics: dir_has={listing}, text_len={len(text)}, turns={turns}, "
+        f"stop_reason={stop_reason}, has_structured_output={has_structured}"
+    )
+    return PentestError(
+        f"{error.message} | {summary}",
+        error.category,
+        retryable=error.retryable,
+        error_code=error.error_code,
+        context={**error.context, **diagnostics},
+    )

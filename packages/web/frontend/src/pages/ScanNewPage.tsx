@@ -76,7 +76,6 @@ function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: stri
 interface SidebarItem {
   title: string;
   content: React.ReactNode;
-  accent?: boolean;
 }
 
 export function ScanNewPage() {
@@ -176,7 +175,6 @@ export function ScanNewPage() {
     {
       title: t("scan.sidebar.scanType"),
       content: <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold bg-orange/10 text-orange">{t("scan.tabs.blackbox")}</span>,
-      accent: true,
     },
     {
       title: t("scan.sidebar.surface"),
@@ -252,14 +250,14 @@ export function ScanNewPage() {
 
           {/* 右栏：信息侧栏 */}
           {type !== "correlation" && (
-            <div className="p-5 border-l border-border bg-secondary/50 flex flex-col gap-2.5">
-              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-0.5">
+            <div className="p-5 border-l border-border bg-card flex flex-col gap-2.5">
+              <div className="text-[11px] font-semibold text-primary uppercase tracking-wider mb-0.5">
                 {type === "whitebox" ? t("scan.sidebar.whiteboxTitle") : t("scan.sidebar.blackboxTitle")}
               </div>
               {sidebarItems.map((item, i) => (
                 <div
                   key={i}
-                  className={`rounded-lg border bg-card p-3 ${item.accent ? "border-orange/30" : "border-border"}`}
+                  className="rounded-lg border border-primary/25 bg-primary/[0.06] p-3"
                 >
                   <div className="text-[11px] text-muted-foreground mb-1">{item.title}</div>
                   {item.content}
@@ -283,7 +281,7 @@ export function ScanNewPage() {
 
         {/* 底部操作栏 */}
         {type !== "correlation" && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-secondary">
+          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
             <span className="text-xs text-muted-foreground">{footerHint}</span>
             <Button size="lg" onClick={onSubmit} disabled={!isValid || submitting}>
               {submitLabel}

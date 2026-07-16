@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/PageHeader";
+import { StatRow, type StatItem } from "@/components/StatRow";
+import { ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AddRepoDialog } from "@/components/AddRepoDialog";
@@ -126,11 +130,23 @@ export function ReposPage() {
 
   const groups = groupRepos(filtered, t("repos.ungrouped"));
 
+  // 概览条：客户端聚合 repos（不动后端契约）
+  const stats: StatItem[] = useMemo(() => {
+    const totalSize = repos.reduce((s, r) => s + (r.size_bytes ?? 0), 0);
+    return [
+      { label: t("repos.stats.total"), value: repos.length },
+      { label: t("repos.stats.size"), value: fmtSize(totalSize) },
+      { label: t("repos.stats.ready"), value: repos.filter((r) => r.state === "ready").length, tone: "green" },
+      { label: t("repos.stats.cloning"), value: repos.filter((r) => r.state === "cloning" || r.state === "pulling").length, tone: "cyan" },
+    ];
+  }, [repos, t]);
+
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">{t("repos.title")}</h1>
+        <PageHeader title={t("repos.title")} subtitle={t("repos.subtitle")} />
+        <StatRow stats={stats} />
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex items-center gap-2">
             <Input
               value={query}
@@ -159,14 +175,14 @@ export function ReposPage() {
                     type="button"
                     onClick={() => toggleGroup(g.name)}
                     aria-expanded={!isCollapsed}
-                    className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-muted/30"
+                    className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-left"
                   >
-                    <span className="font-medium">
-                      {g.name} <span className="text-sm text-muted-foreground">({g.repos.length})</span>
-                    </span>
-                    <span className="text-sm text-muted-foreground">{isCollapsed ? t("repos.expand") : t("repos.collapse")}</span>
+                    <span className="font-medium">{g.name}</span>
+                    <span className="text-sm text-muted-foreground">({g.repos.length})</span>
+                    <ChevronDown className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", isCollapsed && "-rotate-90")} />
                   </button>
                   {!isCollapsed && (
+                    <Card className="mt-2 overflow-hidden p-0">
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-t border-border hover:bg-transparent">
@@ -256,6 +272,7 @@ export function ReposPage() {
                         })}
                       </TableBody>
                     </Table>
+                    </Card>
                   )}
                 </div>
               );

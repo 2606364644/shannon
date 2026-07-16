@@ -153,8 +153,8 @@ describe("WorkspaceListPage (DataTable)", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
     // name 列可排序 → cursor-pointer
-    const nameTh = screen.getByText("工作区", { exact: true }).closest("th");
-    expect(nameTh?.className).toMatch(/cursor-pointer/);
+    const nameTh = screen.getByRole("columnheader", { name: "工作区" });
+    expect(nameTh.className).toMatch(/cursor-pointer/);
     // actions 列 display 不可排序 → 无 cursor-pointer
     const actionsTh = screen.getByText("操作").closest("th");
     expect(actionsTh?.className).not.toMatch(/cursor-pointer/);
@@ -170,6 +170,26 @@ describe("WorkspaceListPage (DataTable)", () => {
     const link = await screen.findByRole("link", { name: /very-long-hostname/ });
     expect(link.className).toMatch(/truncate/);
   });
+
+  it("精修：渲染页面标题（h1）+ 副标题", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    expect(screen.getByRole("heading", { level: 1, name: "工作区" })).toBeInTheDocument();
+    expect(screen.getByText(/所有扫描任务/)).toBeInTheDocument();
+  });
+
+  it("精修：概览条聚合 运行中/已完成/失败 计数 + 总成本", async () => {
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    const statValue = (label: string) =>
+      Array.from(container.querySelectorAll(".uppercase"))
+        .find((n) => n.textContent === label)?.nextElementSibling?.textContent ?? "";
+    // ws-a running / ws-corr completed / ws-failed failed；成本 2.34+0.5=2.84
+    expect(statValue("运行中")).toBe("1");
+    expect(statValue("已完成")).toBe("1");
+    expect(statValue("失败")).toBe("1");
+    expect(statValue("总成本")).toMatch(/2\.84/);
+  });
 });
 
 describe("WorkspaceListPage i18n", () => {
@@ -178,8 +198,8 @@ describe("WorkspaceListPage i18n", () => {
   it("zh 渲染中文表头 + 中文搜索框", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
-    // 表头（中文）
-    expect(screen.getByText("工作区", { exact: true })).toBeInTheDocument();
+    // 表头（中文）—— 用 columnheader role 定位，避免与页面标题 h1「工作区」撞文本
+    expect(screen.getByRole("columnheader", { name: "工作区" })).toBeInTheDocument();
     expect(screen.getByText("漏洞数")).toBeInTheDocument();
     expect(screen.getByText("操作")).toBeInTheDocument();
     // 搜索框 placeholder 中文
