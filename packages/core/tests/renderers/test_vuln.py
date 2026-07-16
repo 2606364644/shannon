@@ -43,3 +43,24 @@ def test_helpers_render_table_escapes_pipe_and_drops_empty_rows():
     assert md.startswith("| h1 | h2 |")
     assert "---" in md
     assert "p\\|q" in md  # pipe escaped
+
+
+def test_strategic_intel_schema_keys_match_renderer_subheaders():
+    """跨层不变量:collector strategic_intel schema 字段 == renderer §3 subheader 字段。
+
+    防单边改名致 renderer 静默 drop §3 子段(配合 _strategic_intel 的 skip-missing
+    行为,drift 会让字段悄悄消失——brief 担心的 silent drop 风险)。用公共 API,
+    不依赖私有名。(final-review M1 follow-up 落地)
+    """
+    from shannon_core.collectors.vuln import VULN_CLASSES, make_vuln_sections
+    from shannon_core.renderers.vuln import STRATEGIC_INTEL_SUBHEADERS
+
+    for vc in VULN_CLASSES:
+        sections = make_vuln_sections(vc)
+        intel = next(s for s in sections if s.tool_name == "set_strategic_intelligence")
+        schema_fields = set(intel.json_schema["properties"].keys())
+        renderer_fields = {f for f, _ in STRATEGIC_INTEL_SUBHEADERS[vc]}
+        assert schema_fields == renderer_fields, (
+            f"{vc}: collector schema {schema_fields} ↔ renderer subheaders "
+            f"{renderer_fields} drift"
+        )
