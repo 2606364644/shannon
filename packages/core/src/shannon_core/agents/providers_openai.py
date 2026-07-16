@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -74,6 +75,19 @@ class OpenAIProvider(BaseProvider):
         # + 只读工具集 [read_file, glob, grep]），调大无递归风险，仅增单次 token。
         # B2: 20→40,锚定更复杂的追链子任务。
         return int(os.getenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "40"))
+
+    def _call_timeout(self) -> float:
+        """call() stream 消费的 wall-clock 超时（秒）—— openai 引擎自补的超时兜底。
+
+        claude 引擎经 CLI 子进程，子进程内置 HTTP 超时/retry + 崩溃即退出（activity 感知）；
+        openai 引擎是 in-process SDK，缺这层运行时（CLAUDE.md §2「CLI 运行时 vs 纯框架」）。
+        deepseek 流式响应 stall（服务端/网络断流，TCP 未断）或 SDK 内部 await 卡住时，
+        stream_events 永久 await、worker 静默 hang（2026-07-16 trip_1784167551：pre-recon
+        卡死 50min，2h activity timeout 未到，live 页无日志更新）。超时 → asyncio.TimeoutError
+        → 外层 except → _classify_error 判 retryable → activity 重试。默认 1800s（30min，
+        覆盖 pre-recon 等长 agent 的正常时长，仅兜底永久 hang，不误杀慢但正常的 run）。
+        """
+        return float(os.getenv("SHANNON_OPENAI_CALL_TIMEOUT", "1800"))
 
     def _instructions(self) -> str | None:
         """Part B: narration-language directive as the parent Agent's system message.
@@ -194,8 +208,16 @@ class OpenAIProvider(BaseProvider):
                     context=ToolContext(cwd=cwd, subagent_run=self._make_subagent_runner(model, cwd)),
                     max_turns=max_turns or self._max_turns(),
                 )
-                async for event in result.stream_events():
-                    await collector.on_event(event)
+
+                async def _consume_stream() -> None:
+                    async for event in result.stream_events():
+                        await collector.on_event(event)
+
+                # wall-clock 兜底：openai 引擎 in-process，缺 claude CLI 子进程的 HTTP 超时
+                # 兜底；deepseek 流式 stall / SDK 内部 await 卡住时 stream_events 永久 await、
+                # worker 静默 hang（2026-07-16 trip_1784167551）。超时 raise asyncio.TimeoutError
+                # → 外层 except → _classify_error 判 retryable → activity 重试，不再静默卡死。
+                await asyncio.wait_for(_consume_stream(), timeout=self._call_timeout())
                 await collector.close()
                 run_result = result
             except MaxTurnsExceeded:
