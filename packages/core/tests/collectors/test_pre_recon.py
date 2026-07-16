@@ -65,6 +65,9 @@ def test_ssrf_sinks_schema_has_thirteen_sink_arrays():
     for k in expected:
         assert props[k]["type"] == "array"
     assert len(expected) == 13
+    # Lockstep guard (final-review Finding 1):required 必须恰好是 applicable + 这 13 个
+    # sink key(顺序也锁定),防 properties/required 双源漂移。
+    assert s.json_schema["required"] == ["applicable"] + expected
 
 
 def test_critical_file_paths_has_nine_categories():

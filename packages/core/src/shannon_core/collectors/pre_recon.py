@@ -134,26 +134,27 @@ XSS_SINKS = _obj(
     ["applicable", "html_body", "html_attribute", "javascript", "css", "url"],
 )
 
-_SSRF_KEYS = [
-    "http_clients", "raw_sockets", "url_openers", "redirect_handlers",
-    "headless_browsers", "media_processors", "link_preview", "webhook_testers",
-    "sso_oidc_discovery", "importers", "package_installers",
-    "monitoring_and_health", "cloud_metadata",
-]
+# Single source of truth for SSRF sink categories (key → description).
+# `properties` (minus `applicable`) 与 `required` 都从这里派生,加第 14 类只改这一处,
+# 避免 required/properties lockstep 编辑漂移(final-review Finding 1)。
+_SSRF_SINKS: dict[str, str] = {
+    "http_clients": "HTTP client sinks.",
+    "raw_sockets": "Raw socket sinks.",
+    "url_openers": "URL opener sinks.",
+    "redirect_handlers": "Redirect handler sinks.",
+    "headless_browsers": "Headless browser sinks.",
+    "media_processors": "Media processor sinks.",
+    "link_preview": "Link preview sinks.",
+    "webhook_testers": "Webhook tester sinks.",
+    "sso_oidc_discovery": "SSO/OIDC discovery sinks.",
+    "importers": "Importer sinks.",
+    "package_installers": "Package installer sinks.",
+    "monitoring_and_health": "Monitoring/health sinks.",
+    "cloud_metadata": "Cloud metadata sinks.",
+}
 SSRF_SINKS = _obj(
-    {
-        "applicable": {"type": "boolean"},
-        **{k: _sink_array(v) for k, v in {
-            "http_clients": "HTTP client sinks.", "raw_sockets": "Raw socket sinks.",
-            "url_openers": "URL opener sinks.", "redirect_handlers": "Redirect handler sinks.",
-            "headless_browsers": "Headless browser sinks.", "media_processors": "Media processor sinks.",
-            "link_preview": "Link preview sinks.", "webhook_testers": "Webhook tester sinks.",
-            "sso_oidc_discovery": "SSO/OIDC discovery sinks.", "importers": "Importer sinks.",
-            "package_installers": "Package installer sinks.", "monitoring_and_health": "Monitoring/health sinks.",
-            "cloud_metadata": "Cloud metadata sinks.",
-        }.items()},
-    },
-    ["applicable"] + _SSRF_KEYS,
+    {"applicable": {"type": "boolean"}, **{k: _sink_array(v) for k, v in _SSRF_SINKS.items()}},
+    ["applicable"] + list(_SSRF_SINKS),
 )
 
 

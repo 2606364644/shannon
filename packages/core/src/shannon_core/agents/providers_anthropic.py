@@ -310,8 +310,13 @@ class AnthropicProvider(BaseProvider):
             }
 
         # collector → in-process MCP server（set_* 工具，经 bridge 构造）+ allowed_tools
-        # 白名单（collector.tool_names()；不指定 allowed_tools 时 CLI 默认全放行，会
-        # 漏调 set_*）。engine-agnostic：collector 是 CollectorBase，bridge 翻译成 SdkMcpTool。
+        # 白名单（collector.tool_names()）。allowed_tools 的作用是让 SDK MCP server 注册的
+        # set_* 工具被发现/可调用（不传则这些 collector 工具对 agent 不可见）。在
+        # bypassPermissions 模式下,内置工具(Bash/Read/Grep 等)不受 allowed_tools 限制、
+        # 仍可用 —— Task 6 真机探针(scripts/validate_glm_mcp_tool_probe.py)实测 GLM 同时
+        # 调 Bash/Read 与 7 个 set_* 工具,旧注释「不传 allowed_tools CLI 默认全放行会漏调
+        # set_*」的因果模型是错的。engine-agnostic:collector 是 CollectorBase,bridge 翻译
+        # 成 SdkMcpTool。
         if mcp_server is not None:
             options.mcp_servers = {"shannon-collector": mcp_server}
         if allowed_tools:

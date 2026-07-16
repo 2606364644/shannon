@@ -176,8 +176,10 @@ class AgentExecutor:
                 await validate_deliverable(deliverables, agent_name)
             except PentestError as e:
                 # 诊断不改行为(systematic-debugging 2026-07-17):agent success 但
-                # deliverable 缺失时,补充 agent 实际产出信息再 re-raise。根因=GLM 长任务
-                # +子代理委派后失忆,end_turn 但没执行 Write(pre-recon Phase 3 才写文件)。
+                # deliverable 缺失时,补充 agent 实际产出信息再 re-raise。当前适用范围=
+                # 仍走 self-Write 路径的 agent(recon/vuln/exploit):GLM 长任务 + 子代理
+                # 委派后失忆,end_turn 但没执行 Write。pre-recon 在 Plan 1 切到 host 渲染
+                # (collector→renderer→必渲染 md),不再走 self-Write,故不会进此分支。
                 # 不改 error_code/retryable(仍 OUTPUT_VALIDATION_FAILED,retry cap=3 不变)。
                 if e.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED:
                     raise _enrich_missing_deliverable_error(
@@ -208,15 +210,17 @@ def _enrich_missing_deliverable_error(
     注入 error 后返回新 PentestError(调用方 raise ... from 原 error)。
 
     根因(systematic-debugging 2026-07-17 定位):GLM 长任务 + 子代理委派后失忆,
-    agent end_turn(success=True)但没执行 Write 步骤(pre-recon prompt Phase 3 才
-    写文件,日志 Turn 147「仍在等待子代理」后正常结束却没写 md)。validate_deliverable
-    只检查文件存在性;这里补全诊断,经 session.log_error → workflow.log [ERROR] 行 +
-    activity_failures.log 可见,便于区分「完全没写」(listing 空)vs「写错文件」
-    (listing 有别的)vs「final text 是等待语」(text_len>0 但无实质)。
+    agent end_turn(success=True)但没执行 Write 步骤(最初观测于 pre-recon Turn 147
+    「仍在等待子代理」后正常结束却没写 md)。Plan 1 起 pre-recon 切到 host 渲染
+    (collector→renderer→必渲染 md),不再走 self-Write,故此分支当前只对仍 self-Write
+    的 agent(recon/vuln/exploit)可达。validate_deliverable 只检查文件存在性;这里
+    补全诊断,经 session.log_error → workflow.log [ERROR] 行 + activity_failures.log
+    可见,便于区分「完全没写」(listing 空)vs「写错文件」(listing 有别的)vs「final
+    text 是等待语」(text_len>0 但无实质)。
 
     不改 error_code / retryable / category → classify_error_for_temporal 与 retry
     cap 行为完全不变(仍 OUTPUT_VALIDATION_FAILED → retryable=True → cap=3)。
-    所有 .md 产物 agent 共性(pre-recon/recon/vuln-analysis/exploit-evidence/report);
+    所有 .md 产物 agent 共性(recon/vuln-analysis/exploit-evidence/report);
     vuln 的 exploitation_queue 缺失(同 OUTPUT_VALIDATION_FAILED)也经此 enrich,
     has_structured_output 字段对它尤其有用。
     """
