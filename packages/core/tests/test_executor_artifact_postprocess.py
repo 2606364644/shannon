@@ -22,6 +22,7 @@ def test_skip_postprocess_avoids_queue_write(tmp_path, monkeypatch):
         success = True
         turns = 1
         cost = 0.01
+        cost_currency = "USD"
         text = ""
         error = None
         retryable = True

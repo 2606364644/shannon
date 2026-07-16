@@ -12,8 +12,10 @@ from shannon_core.utils.billing import is_spending_cap_behavior
 
 from shannon_core.agents.runner import run_claude_prompt
 from shannon_core.agents.validators import get_queue_filename, validate_deliverable
+from shannon_core.collectors import make_collector
 from shannon_core.git_manager import GitManager
 from shannon_core.prompts.manager import PromptManager
+from shannon_core.renderers import render_deliverable
 from shannon_core.services.validate_authentication import auth_state_path
 
 if TYPE_CHECKING:
@@ -104,6 +106,11 @@ class AgentExecutor:
 
         await GitManager.create_checkpoint(deliverables, agent_name)
 
+        # host-rendered deliverables:pre-recon(Plan 1)用声明式 collector 接 set_*
+        # 工具调用 → host renderer 确定性渲染 md,对齐 TS pre-recon-renderer.ts。
+        # make_collector 对非 pre-recon agent 返 None(无 collector 通道,不改行为)。
+        collector = make_collector(agent_name)
+
         start_time = time.monotonic()
         result = await run_claude_prompt(
             prompt=prompt,
@@ -115,6 +122,7 @@ class AgentExecutor:
             audit_logger=audit_logger,
             tool_audit_logger=tool_audit_logger,
             max_turns=max_turns,
+            collector=collector,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -152,6 +160,16 @@ class AgentExecutor:
         ):
             queue_path = deliverables / queue_filename
             atomic_write_json(queue_path, result.structured_output)
+
+        # host 渲染写 md:有 collector 通道的 agent(Plan 1 = pre-recon)在 queue 写盘
+        # 之后、validate 之前,用 collector payload 确定性渲染 deliverable md。这样
+        # validate_deliverable 见文件即过(无需把 pre-recon validator 改 no-op)。对齐
+        # TS agent-execution.ts:295-297 writeDeliverable。render_deliverable 对无
+        # collector 的 agent 返 None → 跳过写盘(self-Write 路径不动)。
+        if not skip_artifact_postprocess and collector is not None:
+            md = render_deliverable(agent_name, collector.get_all())
+            if md is not None:
+                (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
 
         if not skip_artifact_postprocess:
             try:

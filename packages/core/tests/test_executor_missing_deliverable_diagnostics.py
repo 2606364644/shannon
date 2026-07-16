@@ -1,13 +1,16 @@
 """诊断不改行为:agent success 但 deliverable 缺失时,executor 在 re-raise 前补充诊断。
 
 根因(systematic-debugging 2026-07-17 定位):GLM 长任务 + 子代理委派后失忆,
-agent end_turn(success=True)但没执行 Write 步骤(pre-recon prompt 的 Phase 序,
-Phase 3 才写文件)。validate_deliverable 只检查文件存在性;此处补全诊断
-(final text / 目录实际产物 / turns / stop_reason),经 session.log_error →
-workflow.log [ERROR] 行 + activity_failures.log 可见,便于定位。
+agent end_turn(success=True)但没执行 Write 步骤。validate_deliverable 只检查文件
+存在性;此处补全诊断(final text / 目录实际产物 / turns / stop_reason),经
+session.log_error → workflow.log [ERROR] 行 + activity_failures.log 可见,便于定位。
 
 不改错误码 / retryable(行为不变,仍走 OUTPUT_VALIDATION retry cap=3)。
-所有 .md 产物 agent 共性(pre-recon 最易触发);vuln 的 queue 缺失同样适用。
+所有 .md 产物 agent 共性;vuln 的 queue 缺失同样适用。
+
+注(Plan 1 Task 7 后):pre-recon 已切到 host 渲染(collector→renderer→必渲染 md),
+不会再触发 missing-deliverable;故此诊断测试改用 RECON(self-Write 路径未变,
+RECON 仍可能漏 Write)。诊断函数本身对所有 self-Write agent 仍生效(recon/vuln/exploit)。
 """
 import asyncio
 
@@ -67,7 +70,7 @@ def _make_executor(tmp_path, monkeypatch, run_result):
 def test_missing_deliverable_enriches_diagnostics_without_changing_behavior(
     tmp_path, monkeypatch
 ):
-    """agent success 但 pre_recon_deliverable.md 缺失 → 抛 OUTPUT_VALIDATION_FAILED
+    """agent success 但 recon_deliverable.md 缺失 → 抛 OUTPUT_VALIDATION_FAILED
     且 error 携带诊断(final_text / turns / stop_reason / dir_listing / has_structured_output);
     错误码与原 retryable 不变(行为不变)。"""
     from shannon_core.models.errors import PentestError, ErrorCode
@@ -75,7 +78,7 @@ def test_missing_deliverable_enriches_diagnostics_without_changing_behavior(
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
-    # 不写 pre_recon_deliverable.md —— 模拟 GLM 失忆没 Write(对齐 2026-07-16 NodeGoat 现场)
+    # 不写 recon_deliverable.md —— 模拟 GLM 失忆没 Write(RECON 仍走 self-Write 路径)
 
     run_result = _stub_result(
         text="入口点映射代理已完成,仍在等待架构扫描和安全模式猎手两个代理完成,之后才能启动 Phase 2。",
@@ -85,7 +88,7 @@ def test_missing_deliverable_enriches_diagnostics_without_changing_behavior(
 
     with pytest.raises(PentestError) as exc_info:
         _run(ax.execute(
-            agent_name=AgentName.PRE_RECON,
+            agent_name=AgentName.RECON,
             repo_path=str(deliverables),
             deliverables_path=str(deliverables),
         ))
@@ -95,7 +98,7 @@ def test_missing_deliverable_enriches_diagnostics_without_changing_behavior(
     assert err.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED
 
     ctx = err.context
-    assert ctx["expected_deliverable"] == "pre_recon_deliverable.md"
+    assert ctx["expected_deliverable"] == "recon_deliverable.md"
     assert ctx["final_turns"] == 147
     assert ctx["stop_reason"] == "end_turn"
     assert ctx["has_structured_output"] is False
@@ -116,14 +119,14 @@ def test_missing_deliverable_listing_captures_other_files(tmp_path, monkeypatch)
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
-    # agent 写了 scratchpad 但漏了 pre_recon_deliverable.md
+    # agent 写了 scratchpad 但漏了 recon_deliverable.md
     (deliverables / "scratchpad.md").write_text("notes")
 
     ax = _make_executor(tmp_path, monkeypatch, _stub_result(text="x", turns=10))
 
     with pytest.raises(PentestError) as exc_info:
         _run(ax.execute(
-            agent_name=AgentName.PRE_RECON,
+            agent_name=AgentName.RECON,
             repo_path=str(deliverables),
             deliverables_path=str(deliverables),
         ))
@@ -137,12 +140,12 @@ def test_deliverable_present_does_not_inject_diagnostics(tmp_path, monkeypatch):
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
-    (deliverables / "pre_recon_deliverable.md").write_text("# Analysis")
+    (deliverables / "recon_deliverable.md").write_text("# Analysis")
 
     ax = _make_executor(tmp_path, monkeypatch, _stub_result(text="done", turns=5))
 
     metrics = _run(ax.execute(
-        agent_name=AgentName.PRE_RECON,
+        agent_name=AgentName.RECON,
         repo_path=str(deliverables),
         deliverables_path=str(deliverables),
     ))
