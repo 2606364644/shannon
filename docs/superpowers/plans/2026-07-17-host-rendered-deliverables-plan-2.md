@@ -2,19 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** Plan 1（`2026-07-17-host-rendered-deliverables-plan-1.md`）已完成——框架（`CollectorBase`/`SectionSpec`/`bridge`/registry/executor 接线/renderer helpers）已落地。本 plan 是增量：recon agent 接入 host 渲染。
+**Prerequisite:** Plan 1（`2026-07-17-host-rendered-deliverables-plan-1.md`）已完成——框架（`CollectorBase`/`SectionSchema`/`bridge`/registry/executor 接线/renderer helpers）已落地。本 plan 是增量：recon agent 接入 host 渲染。
 
 **Goal:** recon agent 调 8 个 `set_*` 结构化工具，host collector 收集 + 确定性 renderer 渲染 `recon_deliverable.md`（skipped→placeholder 不 fail），消除 recon 的「agent success 但没 Write md → Missing deliverable」风险。
 
-**Architecture:** 复用 Plan 1 框架：recon 的 8 个 section pydantic model → `PRE_RECON_SECTIONS` 同模式的 `RECON_SECTIONS` → renderer `render_recon` → registry 注册 `AgentName.RECON` → prompt 改 set_*。
+**Architecture:** 复用 Plan 1 框架：recon 的 8 个 section JSON Schema dict → `PRE_RECON_SECTIONS` 同模式的 `RECON_SECTIONS`（`list[SectionSchema]`）→ renderer `render_recon` → registry 注册 `AgentName.RECON`（`make_collector`/`render_deliverable` 加 `RECON` 分支）→ prompt 改 set_*。
 
-**Tech Stack:** pydantic、pytest（同 Plan 1）。
+**Tech Stack:** Python JSON Schema dict（`_obj`/`_str_field` 构造，无 pydantic，对齐 `vuln.py`/`pre_recon.py`）、pytest（同 Plan 1）。
 
 **Spec:** `docs/superpowers/specs/2026-07-17-host-rendered-deliverables-design.md`（§6 Plan 2 = recon）
 
 ## Global Constraints
 
-- **依赖 Plan 1 接口（已落地，勿改）**：`CollectorBase(known_sections)`、`SectionSpec(section_name, tool_name, model_cls, description)`、`bridge.build_claude_mcp_server`/`build_openai_tools`、`CollectorSpec(make_collector, sections, render)`、`get_collector_spec`、`renderers/_helpers.placeholder`、`executor.execute(collector_spec=...)`。
+- **依赖 Plan 1 接口（已落地，勿改）**：`CollectorBase(section_schemas)`、`SectionSchema(tool_name, section_key, description, json_schema, mode)`、`bridge.build_claude_mcp_server`/`build_openai_tools`（已支持 set+append 两 mode）、`make_collector(agent_name)`、`render_deliverable(agent_name, data)`、`renderers/_helpers.placeholder`/`render_table`、`executor.execute(collector=collector)`（executor 内部 `make_collector` → 注入工具 → run → `render_deliverable` 写 md）。
 - **§1 双轨独立**：renderer 纯函数，不引确定性层；recon 的 source 仅 LLM 自身分析（recon prompt 已是 LLM 自给自足，本 plan 只改产物落盘方式）。
 - **§2 双引擎**：复用 bridge，recon model 自动双引擎生效。
 - **TS 对齐**：collector section / renderer / prompt 1:1 移植 `upstream/main:apps/worker/`。
@@ -24,30 +24,31 @@
 
 ## File Structure
 
-- Create: `packages/core/src/shannon_core/collectors/recon.py`（8 section model + `RECON_SECTIONS` + `make_recon_collector`）
+- Create: `packages/core/src/shannon_core/collectors/recon.py`（8 section JSON Schema dict + `RECON_SECTIONS: list[SectionSchema]` + `make_recon_collector`）
 - Create: `packages/core/src/shannon_core/renderers/recon.py`（`render_recon`）
-- Modify: `packages/core/src/shannon_core/collectors/__init__.py`（`get_collector_spec` 加 `RECON` 分支）
-- Modify: `packages/core/src/shannon_core/renderers/_helpers.py`（加 `render_table` helper，recon 用）
+- Modify: `packages/core/src/shannon_core/collectors/__init__.py`（`make_collector` 加 `RECON` 分支）
+- (`render_table` 已在 `renderers/_helpers.py` 落地，Plan 1/3 共用；recon 直接 import，无需再加)
 - Modify: `prompts/recon.txt`、`prompts/recon-static.txt`（Write→set_*）
 
 ---
 
-### Task 1: recon 的 8 section pydantic model + sections 清单
+### Task 1: recon 的 8 section JSON Schema + sections 清单
 
 **Files:**
 - Create: `packages/core/src/shannon_core/collectors/recon.py`
 - Test: `packages/core/tests/collectors/test_recon_models.py`
 
 **Interfaces:**
-- Consumes: `CollectorBase`、`SectionSpec`（Plan 1）。
-- Produces: 8 个 pydantic model + `RECON_SECTIONS: list[SectionSpec]` + `make_recon_collector()`。
+- Consumes: `CollectorBase`、`SectionSchema`（Plan 1）。
+- Produces: 8 个 JSON Schema dict（`_obj`/`_str_field` 构造，对齐 `vuln.py`/`pre_recon.py`，无 pydantic）+ `RECON_SECTIONS: list[SectionSchema]` + `make_recon_collector() -> CollectorBase`。
 
 **TS 对照：** `upstream/main:apps/worker/src/collectors/recon-collector.ts`（`RECON_ONE_SHOT_TOOLS` line 576-584 + 各 `*InputSchema`）。
 
-**⚠️ add_endpoints 待确认：** TS renderer Section 4（API Endpoint Inventory）引用 `add_endpoints` 工具，但不在 `RECON_ONE_SHOT_TOOLS` 8 个里。执行 Step 1 前先查 TS recon-collector.ts 全文确认 `add_endpoints` 语义：
-- 若是 **append**（多次调用累积 endpoints）→ `CollectorBase` 加 `append_section(name, item)` 方法（Plan 1 的 write-once 不兼容），或 recon 用独立 endpoints list。
-- 若已并入 `set_network_map` → renderer Section 4 从 network_map payload 取 endpoints。
-- 默认假设（下方代码）：endpoints 并入 `set_network_map`（Section 4 = network_map 的一部分）。若 TS 实际是独立 append 工具，Task 1 加 `set_endpoints` + collector append 支持，并相应改 Task 2 renderer。
+**add_endpoints 语义（append 已内建）：** TS renderer Section 4（API Endpoint Inventory）引用 `add_endpoints` 工具（append 语义，多次调用累积 endpoints）。**Plan 1 正式版 `CollectorBase` 已内建 append**——`SectionSchema(mode="append")` + `append_section(tool_name, item)` + bridge append 分支都已落地（见 `base.py`/`bridge.py`），get_all() 对 append section 返 `list[dict]`，**无需改框架**。
+
+执行 Step 1 前先查 TS `recon-collector.ts` 全文确认 `add_endpoints` 是否独立工具：
+- **若 add_endpoints 是独立 append 工具** → Task 1 加 `set_endpoints` 用 `SectionSchema(mode="append")`，`RECON_SECTIONS` 多一个 section（9 个），renderer Section 4 从该 append section 的 `list[dict]` 渲染。
+- **若已并入 `set_network_map`** → renderer Section 4 从 network_map payload 的 `endpoints` 字段取（下方默认代码采此路）。
 
 - [ ] **Step 1: Write failing test**
 
@@ -67,12 +68,13 @@ def test_eight_sections_present():
 
 def test_make_collector_knows_eight_sections():
     c = make_recon_collector()
-    assert len(c.get_all()) == 8
+    assert len(c.section_schemas) == 8
+    assert len(c.tool_names()) == 8
 
 
-def test_section_names_distinct():
-    names = [s.section_name for s in RECON_SECTIONS]
-    assert len(names) == len(set(names))
+def test_section_keys_distinct():
+    keys = [s.section_key for s in RECON_SECTIONS]
+    assert len(keys) == len(set(keys))
 ```
 
 - [ ] **Step 2: Run — verify FAIL**
@@ -83,120 +85,133 @@ def test_section_names_distinct():
 
 ```python
 # packages/core/src/shannon_core/collectors/recon.py
-"""recon 的 8 section pydantic model + sections 清单。
+"""recon 的 8 section JSON Schema dict + sections 清单。
 
 移植 TS apps/worker/src/collectors/recon-collector.ts(RECON_ONE_SHOT_TOOLS + *InputSchema)。
-字段对照 TS;model_json_schema() 供 bridge 双引擎生成工具。
+字段对照 TS;JSON Schema dict 直接喂 bridge 双引擎生成工具(对齐 vuln.py/pre_recon.py,无 pydantic)。
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
-from .base import CollectorBase, SectionSpec
+from shannon_core.collectors.base import CollectorBase, SectionSchema
 
 
-# ── Section 1 ──────────────────────────────────────────────────────────
-class ReconExecutiveSummary(BaseModel):
-    text: str = Field(..., description="recon 概览,关键攻击面与优先级。Section 1。")
+def _str_field(desc: str, min_length: int = 1) -> dict:
+    return {"type": "string", "minLength": min_length, "description": desc}
 
 
-# ── Section 2 ──────────────────────────────────────────────────────────
-class _ServiceEntry(BaseModel):
-    name: str
-    type: str = Field(..., description="服务类型(db/cache/queue/api 等)")
-    location: str | None = None
+def _obj(props: dict, required: list[str], desc: str = "") -> dict:
+    schema: dict = {"type": "object", "properties": props, "required": required}
+    if desc:
+        schema["description"] = desc
+    return schema
 
 
-class ReconTechnologyStack(BaseModel):
-    """对照 TS TechnologyStackInputSchema(line 41)。完整字段移植 TS。"""
-    framework: str
-    language: str
-    services: list[_ServiceEntry] = Field(default_factory=list)
-    # 其余字段对照 TS TechnologyStackInputSchema 补齐
+# ── Section schemas(下方为骨架,执行时逐个对照 TS *InputSchema 补齐完整字段) ──
+
+EXECUTIVE_SUMMARY = _obj({"text": _str_field("recon 概览,关键攻击面与优先级。Section 1。")}, ["text"])
+
+TECHNOLOGY_STACK = _obj(
+    {
+        "framework": _str_field("Framework(对照 TS TechnologyStackInputSchema line 41)。"),
+        "language": _str_field("Language。"),
+        "services": {
+            "type": "array", "description": "服务清单(db/cache/queue/api 等)。",
+            "items": _obj(
+                {"name": _str_field("服务名"), "type": _str_field("服务类型"),
+                 "location": {"anyOf": [{"type": "string"}, {"type": "null"}]}},
+                ["name", "type"],
+            ),
+        },
+        # 其余字段对照 TS TechnologyStackInputSchema 补齐
+    },
+    ["framework", "language"],
+)
+
+AUTHENTICATION = _obj(
+    {
+        "role_assignment_process": _str_field("3.1 角色分配流程(对照 TS AuthenticationInputSchema line 56)。"),
+        "privilege_storage_and_validation": _str_field("3.2 权限存储与校验。"),
+        "role_switching_impersonation": _obj(
+            {"applicable": {"type": "boolean"},
+             "location": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                          "description": "实现文件/函数,null when applicable=false"}},
+            ["applicable"],
+        ),
+        # 其余字段(3.x 子节)对照 TS 补齐
+    },
+    ["role_assignment_process", "privilege_storage_and_validation", "role_switching_impersonation"],
+)
+
+INPUT_VECTORS = _obj(
+    {
+        "api_inputs": _str_field("API 输入(对照 TS InputVectorsInputSchema line 206)。"),
+        "file_uploads": _str_field("文件上传。"),
+        # 其余字段对照 TS 补齐
+    },
+    ["api_inputs", "file_uploads"],
+)
+
+NETWORK_MAP = _obj(
+    {
+        "entities": {"type": "array",
+                     "items": _obj({"name": _str_field("实体名"), "metadata": {"type": "object"}}, ["name"])},
+        "flows": {"type": "array",
+                  "items": _obj({"name": _str_field("流名"),
+                                 "description": {"anyOf": [{"type": "string"}, {"type": "null"}]}}, ["name"])},
+        "endpoints": {"type": "array", "description": "API endpoint 清单(Section 4)。对照 TS add_endpoints schema。",
+                      "items": {"type": "object"}},
+    },
+    [],  # 全可选(entities/flows/endpoints 可空)
+)
+
+ROLE_ARCHITECTURE = _obj(
+    {"role_hierarchy": _str_field("角色层级(对照 TS RoleArchitectureInputSchema line 412)。"),
+     "enforcement_points": _str_field("执行点。")},
+    ["role_hierarchy", "enforcement_points"],
+)
+
+AUTHZ_CANDIDATES = _obj(
+    {"candidates": {"type": "array", "description": "authz 候选(对照 TS AuthzCandidatesInputSchema line 484)。",
+                    "items": {"type": "object"}}},
+    [],
+)
+
+INJECTION_SOURCES = _obj(
+    {"sources": {"type": "array", "description": "注入源(对照 TS InjectionSourcesInputSchema line 500)。",
+                 "items": {"type": "object"}}},
+    [],
+)
 
 
-# ── Section 3 ──────────────────────────────────────────────────────────
-class _RoleSwitching(BaseModel):
-    applicable: bool
-    location: str | None = Field(None, description="实现文件/函数,null when applicable=false")
+def _section(tool_name: str, key: str, desc: str, schema: dict) -> SectionSchema:
+    return SectionSchema(tool_name=tool_name, section_key=key, description=desc, json_schema=schema)
 
 
-class ReconAuthentication(BaseModel):
-    """对照 TS AuthenticationInputSchema(line 56),含 3.1/3.2/3.3 子节。"""
-    role_assignment_process: str
-    privilege_storage_and_validation: str
-    role_switching_impersonation: _RoleSwitching
-    # 其余字段对照 TS 补齐
-
-
-# ── Section 5 ──────────────────────────────────────────────────────────
-class ReconInputVectors(BaseModel):
-    """对照 TS InputVectorsInputSchema(line 206)。多类输入向量。"""
-    api_inputs: str
-    file_uploads: str
-    # 其余字段对照 TS 补齐
-
-
-# ── Section 4(并入 network_map) / 6 ────────────────────────────────────
-class _Entity(BaseModel):
-    name: str
-    metadata: dict | None = None
-
-
-class _Flow(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class ReconNetworkMap(BaseModel):
-    """对照 TS NetworkMapInputSchema(line 333)。含 entities/flows 表格 + endpoints(Section 4)。"""
-    entities: list[_Entity] = Field(default_factory=list)
-    flows: list[_Flow] = Field(default_factory=list)
-    endpoints: list[dict] = Field(default_factory=list,
-        description="API endpoint 清单(Section 4)。对照 TS add_endpoints schema。")
-
-
-class ReconRoleArchitecture(BaseModel):
-    """对照 TS RoleArchitectureInputSchema(line 412)。"""
-    role_hierarchy: str
-    enforcement_points: str
-
-
-class ReconAuthzCandidates(BaseModel):
-    """对照 TS AuthzCandidatesInputSchema(line 484)。"""
-    candidates: list[dict] = Field(default_factory=list)
-
-
-class ReconInjectionSources(BaseModel):
-    """对照 TS InjectionSourcesInputSchema(line 500)。"""
-    sources: list[dict] = Field(default_factory=list)
-
-
-RECON_SECTIONS: list[SectionSpec] = [
-    SectionSpec("executive_summary", "set_executive_summary",
-                ReconExecutiveSummary, "recon 概览(Section 1)。"),
-    SectionSpec("technology_stack", "set_technology_stack",
-                ReconTechnologyStack, "技术栈与服务地图(Section 2)。"),
-    SectionSpec("authentication", "set_authentication",
-                ReconAuthentication, "认证/会话/角色(Section 3)。"),
-    SectionSpec("input_vectors", "set_input_vectors",
-                ReconInputVectors, "潜在输入向量(Section 5)。"),
-    SectionSpec("network_map", "set_network_map",
-                ReconNetworkMap, "网络地图/实体/流/endpoints(Section 4/6)。"),
-    SectionSpec("role_architecture", "set_role_architecture",
-                ReconRoleArchitecture, "角色架构(Section 7)。"),
-    SectionSpec("authz_candidates", "set_authz_candidates",
-                ReconAuthzCandidates, "authz 候选(Section 8)。"),
-    SectionSpec("injection_sources", "set_injection_sources",
-                ReconInjectionSources, "注入源(Section 9)。"),
+# 顺序对齐 TS RECON_ONE_SHOT_TOOLS
+RECON_SECTIONS: list[SectionSchema] = [
+    _section("set_executive_summary", "executive_summary", "recon 概览(Section 1)。", EXECUTIVE_SUMMARY),
+    _section("set_technology_stack", "technology_stack", "技术栈与服务地图(Section 2)。", TECHNOLOGY_STACK),
+    _section("set_authentication", "authentication", "认证/会话/角色(Section 3)。", AUTHENTICATION),
+    _section("set_input_vectors", "input_vectors", "潜在输入向量(Section 5)。", INPUT_VECTORS),
+    _section("set_network_map", "network_map", "网络地图/实体/流/endpoints(Section 4/6)。", NETWORK_MAP),
+    _section("set_role_architecture", "role_architecture", "角色架构(Section 7)。", ROLE_ARCHITECTURE),
+    _section("set_authz_candidates", "authz_candidates", "authz 候选(Section 8)。", AUTHZ_CANDIDATES),
+    _section("set_injection_sources", "injection_sources", "注入源(Section 9)。", INJECTION_SOURCES),
 ]
 
 
+class ReconCollector(CollectorBase):
+    """recon 的 8-section collector(无参构造,自带 RECON_SECTIONS,对齐 PreReconCollector)。"""
+
+    def __init__(self) -> None:
+        super().__init__(RECON_SECTIONS)
+
+
 def make_recon_collector() -> CollectorBase:
-    return CollectorBase(known_sections=[s.section_name for s in RECON_SECTIONS])
+    return ReconCollector()
 ```
 
-> **完整字段移植**：上面每个 model 只给了骨架字段。执行时逐个对照 TS `recon-collector.ts` 的对应 `*InputSchema`（行号已标注）补齐**所有**字段 + description（对齐 TS）。不要漏字段——下游 vuln agent 读 recon_deliverable.md 依赖这些。
+> **完整字段移植**：上面每个 schema 只给了骨架字段。执行时逐个对照 TS `recon-collector.ts` 的对应 `*InputSchema`（行号已标注）补齐**所有**字段 + description（对齐 TS）。不要漏字段——下游 vuln agent 读 recon_deliverable.md 依赖这些。
 
 - [ ] **Step 4: Run — verify PASS**
 
@@ -204,7 +219,7 @@ def make_recon_collector() -> CollectorBase:
 
 - [ ] **Step 5: Commit**
 
-`git add packages/core/src/shannon_core/collectors/recon.py packages/core/tests/collectors/test_recon_models.py && git commit -m "feat(collectors): recon 8 section pydantic models(移植 TS)"`
+`git add packages/core/src/shannon_core/collectors/recon.py packages/core/tests/collectors/test_recon_models.py && git commit -m "feat(collectors): recon 8 section JSON Schema(移植 TS)"`
 
 ---
 
