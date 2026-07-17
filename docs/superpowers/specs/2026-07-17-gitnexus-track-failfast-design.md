@@ -21,7 +21,7 @@ GitNexus 轨的判定环节(`run_gitnexus_chain_verdict` / `run_authz_gitnexus_j
 **目标:**
 - GitNexus 轨判定失败时 **fail-fast**(显式暴露),删跨轨降级兜底。
 - 开轨:该类 fail → 标红 + 其他类继续(LLM 轨补)。
-- 关轨:任一该类 fail → 终止扫描(不出假报告)。
+- 关轨:`DEGRADABLE`(inj/xss/ssrf)任一 fail → 终止扫描(这些类关轨无 LLM 兜底);**authz 永不终止**(authz-vuln LLM 关轨仍跑兜底)。
 - 区分「合法空结果」(跑通 0 findings)与「真失败」(流程断裂),不误伤。
 
 **非目标:**
@@ -82,8 +82,11 @@ workflow 在两 activity 返回后汇总写 `deliverables/gitnexus_track_status.
 ### 5.3 workflow 决策(`workflows.py`)
 
 读状态产物 + `is_llm_track_enabled()`(`concurrency.py:40`):
-- 关轨(`False`)且任一 `status=="failed"` → **raise**,Temporal workflow fail,**扫描终止**。
-- 开轨 → 继续(标红由 merger/report 读状态产物实现)。
+- **关轨(`False`)且 `DEGRADABLE_VULN_CLASSES`(inj/xss/ssrf,`agents.py:13`)中任一 `failed` → raise,扫描终止。** 这三类关轨后 LLM 轨也关,GitNexus fail = 真·无兜底。
+- **authz 的 GitNexus fail 永不终止**——authz-vuln LLM 轨**关轨时仍跑**(`authz ∉ DEGRADABLE`,做 GitNexus 做不了的 Vertical/Context),GitNexus authz fail 永远有 LLM 兜底 → 仅标红。
+- 开轨 → 所有 GitNexus fail 仅标红(LLM 轨补),由 merger/report 读状态产物呈现。
+
+> 不变量:终止判定 = 「GitNexus fail **且** 该类在当前模式下无 LLM 兜底」。inj/xss/ssrf 关轨时无兜底→可终止;authz 的 LLM 轨不可关→永不终止。
 
 ### 5.4 merger 适配(`dual_track_merger.py:65` / `run_merge_dual_track_queues` `activities.py:824`)
 
@@ -113,7 +116,7 @@ workflow 在两 activity 返回后汇总写 `deliverables/gitnexus_track_status.
 3. `authz` 返回值:业务 fail → `failed:True` 不 raise;系统异常 → `ApplicationFailure`。
 4. 状态产物:workflow 正确汇总写 4 类状态。
 5. 开轨:某类 `failed` → 其他类继续 + merger 退 llm-only + 报告标红。
-6. 关轨:任一 `failed` → workflow raise 终止。
+6. 关轨:`DEGRADABLE`(inj/xss/ssrf)任一 `failed` → workflow raise 终止;**authz `failed` → 不终止**(authz-vuln LLM 常驻兜底)。
 7. merger:区分 `failed`(标红退 llm-only)vs 合法空(正常合并)。
 8. 铁律:LLM 轨 prompt 不含/不读 fail 状态(AST/grep 锁定)。
 

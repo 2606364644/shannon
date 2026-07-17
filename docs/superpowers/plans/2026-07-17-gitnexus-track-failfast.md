@@ -4,7 +4,7 @@
 
 **Goal:** GitNexus 轨判定失败时 fail-fast 显式暴露(删跨轨降级兜底):开轨标红+其他类继续,关轨终止扫描;合法空结果(跑通 0 findings)不误伤。
 
-**Architecture:** 业务 fail(GitNexus 判定流程断裂)放 activity 返回值不 raise;workflow 读返回值汇总写 `gitnexus_track_status.json`,按 `is_llm_track_enabled()` 决策——关轨+有 fail→raise 终止;开轨→标红继续。merger/报告读状态产物呈现标红。系统 error 仍 raise `ApplicationFailure`。
+**Architecture:** 业务 fail(GitNexus 判定流程断裂)放 activity 返回值不 raise;workflow 读返回值汇总写 `gitnexus_track_status.json`,按 `is_llm_track_enabled()` 决策——**关轨 + `DEGRADABLE`(inj/xss/ssrf)fail → raise 终止**(这些类关轨无 LLM 兜底);**authz fail 永不终止**(authz-vuln LLM 关轨仍跑);开轨 → 标红继续。merger/报告读状态产物呈现标红。系统 error 仍 raise `ApplicationFailure`。
 
 **Tech Stack:** Python 3 / Temporalio(workflow+activity)/ pytest。改 `packages/whitebox`(activities/workflows)+ `packages/core`(merger + 新状态产物模块)。
 
@@ -348,7 +348,7 @@ git commit -m "feat(gitnexus): authz judge 返 failed(业务 fail 不 raise/探�
 
 **Interfaces:**
 - Consumes: Task 1 `write_track_status`、Task 2/3 返回值(`failed_classes`/`fail_reasons`、`failed`/`fail_reason`)、`is_llm_track_enabled()`(`concurrency.py:40`)。
-- Produces: workflow 在 GitNexus 两 activity 后写 `gitnexus_track_status.json`;关轨 + 任一 failed → `raise ApplicationFailure` 终止;开轨 → 继续。
+- Produces: workflow 在 GitNexus 两 activity 后写 `gitnexus_track_status.json`;**关轨 + `DEGRADABLE`(inj/xss/ssrf)任一 failed → raise 终止**(这些类关轨无 LLM 兜底);**authz GitNexus fail 永不终止**(authz-vuln LLM 关轨仍跑,做 Vertical/Context 兜底)→ 仅标红;开轨 → 继续。
 
 - [ ] **Step 1: Write failing test**
 
@@ -365,6 +365,13 @@ async def test_disabled_track_terminates_on_failure(...):
 @pytest.mark.asyncio
 async def test_enabled_track_continues_and_writes_status(...):
     # is_llm_track_enabled=True + 有 failed → 不 raise,继续 merger,且写 gitnexus_track_status.json
+    ...
+
+@pytest.mark.asyncio
+async def test_disabled_track_authz_failure_does_not_terminate(...):
+    # 关轨 + 仅 authz GitNexus failed(inj/xss/ssrf 全 ok)→ 不 raise!
+    # 因 authz-vuln LLM 轨关轨时仍跑(DEGRADABLE 只含 inj/xss/ssrf),authz 有 LLM 兜底。
+    # 扫描继续 merger,状态产物标 authz=failed 供报告标红。
     ...
 ```
 
@@ -412,13 +419,21 @@ Expected: FAIL(workflow 仍 try/except 吞异常,不写状态产物)
                 retry_policy=retry_for("log"),
             )
 
-            # 关轨 + 任一 failed → 终止扫描(fail-fast);开轨 → 标红继续(标红靠 merger/report 读状态产物)
-            if not is_llm_track_enabled() and any(s.get("status") == "failed" for s in _statuses.values()):
-                raise ApplicationFailure(
-                    f"GitNexus 轨 fail-fast(关轨模式):{[k for k,s in _statuses.items() if s.get('status')=='failed']} "
-                    f"判定失败,无 LLM 轨兜底 → 终止扫描。reasons={{k:s.get('reason') for k,s in _statuses.items() if s.get('status')=='failed'}}",
-                    type="GitNexusTrackFailure", non_retryable=True,
-                )
+            # 关轨终止:仅 DEGRADABLE(inj/xss/ssrf)的 GitNexus fail 是真·无 LLM 兜底 → 终止。
+            # authz 的 LLM 轨(authz-vuln)关轨时仍跑(DEGRADABLE 只含 inj/xss/ssrf,
+            # authz-vuln 做 GitNexus 做不了的 Vertical/Context),故 authz GitNexus fail 仅标红不终止。
+            if not is_llm_track_enabled():
+                _no_fallback_failed = [
+                    vc for vc in ("injection", "xss", "ssrf")  # = DEGRADABLE_VULN_CLASSES
+                    if _statuses.get(vc, {}).get("status") == "failed"
+                ]
+                if _no_fallback_failed:
+                    raise ApplicationFailure(
+                        f"GitNexus 轨 fail-fast(关轨模式):{_no_fallback_failed} 判定失败,"
+                        f"且这些类关轨后无 LLM 轨兜底 → 终止扫描。",
+                        type="GitNexusTrackFailure", non_retryable=True,
+                    )
+            # authz GitNexus fail(任何模式)+ 开轨的 inj/xss/ssrf fail → 标红继续(merger/report 读状态产物)
 ```
 
 加 import(文件顶部):`from temporalio.exceptions import ApplicationFailure`(若未 import)、`from shannon_core.config.concurrency import is_llm_track_enabled`。
@@ -663,4 +678,4 @@ git commit -m "test(decoupling): 锁定 gitnexus_track_status 不喂 LLM 轨(铁
 - **`workflows.py` 并行改动**:`workflows.py` 当前有其他终端的在途改动(source/sink 相关)。执行前先 `git log workflows.py` + Read 当前内容,本 task 改动聚焦 GitNexus 编排段(~382-430),避免冲突;merge 时按上下文适配行号。
 - **`ActivityInput` 扩展**:`write_track_status_activity` 传 `track_statuses`——若 `ActivityInput` 是严格 dataclass,加可选字段 `track_statuses: dict = field(default_factory=dict)`(全局约束:不改 LLM 轨路径,此字段仅 workflow→activity)。
 - **关轨行为变化(期望,非回归)**:关轨 + GitNexus 不稳 → 扫描会 fail-fast 终止(诚实暴露),需告知用户这是设计意图。
-- **真机冒烟**:全 7 task 绿后,`SHANNON_LLM_TRACK_ENABLED=0` 跑一个小仓(NodeGoat),验证 GitNexus fail 时扫描终止;`SHANNON_LLM_TRACK_ENABLED=1` 验证标红报告。
+- **真机冒烟**:全 7 task 绿后,`SHANNON_LLM_TRACK_ENABLED=0` 跑一个小仓(NodeGoat):验证 **inj/xss/ssrf GitNexus fail → 扫描终止**;验证 **authz GitNexus fail → 不终止**(标红,authz-vuln LLM 兜底)。`SHANNON_LLM_TRACK_ENABLED=1` 验证所有 GitNexus fail → 标红报告。
