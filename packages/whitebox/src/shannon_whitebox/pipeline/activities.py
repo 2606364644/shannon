@@ -869,9 +869,14 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
         from shannon_core.code_index.dual_track_merger import merge_dual_track_queues
+        from shannon_core.code_index.gitnexus_track_status import read_track_status
         from shannon_core.models.queue_schemas import VulnerabilityQueue
 
         _, deliverables, _ = _get_paths(input)
+        # GitNexus 轨 per-class 状态(Task 4 写,文件缺/损坏返 {} 容错)。
+        # 仅供 merger 标记 gitnexus_status + 报告标红;合并逻辑不读它(failed 类
+        # 自然 gitnexus_findings=[] -> llm-only 或 continue 跳过)。
+        track_status = read_track_status(deliverables)
 
         merged_classes: list[str] = []
         per_class_counts: dict[str, dict] = {}
@@ -918,6 +923,8 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 )
 
                 merged_classes.append(vuln_class)
+                _ts = track_status.get(vuln_class, {})
+                _gn_status = _ts.get("status", "absent")
                 per_class_counts[vuln_class] = {
                     "llm": len(llm_findings),
                     "gitnexus": len(gitnexus_findings),
@@ -928,7 +935,15 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                         1 for finding in merged if finding.merge_source == "gitnexus-only"
                     ),
                     "warnings": llm_warnings,
+                    # GitNexus 轨状态(ok/failed/absent)。failed 类合并退 llm-only
+                    # 或被跳过(双轨空);此处仅标红供报告,不影响合并产物。
+                    "gitnexus_status": _gn_status,
                 }
+                if _gn_status == "failed":
+                    per_class_counts[vuln_class]["gitnexus_fail_reason"] = _ts.get("reason")
+                    logger.info(
+                        "merge: vuln=%s GitNexus track failed (%s) - 标红供报告,合并退 llm-only",
+                        vuln_class, _ts.get("reason"))
                 gn_only = sum(1 for f in merged if f.merge_source == "gitnexus-only")
                 if gn_only:
                     logger.info(
