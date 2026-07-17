@@ -1086,9 +1086,17 @@ async def inject_attack_chains(input: ActivityInput) -> None:
     comprehensive_security_assessment_report.md（同 deliverable_filename）,
     若在此之前追加攻击链章节会被覆盖丢失（回归 hr_20260713-104726）。
     放最后注入,确保攻击链章节留存。幂等（标题已存在则跳过）。失败不阻塞。
+
+    附加职责(Task 6 fail-fast): 同一窗口注入 `## GitNexus 轨判定状态` banner
+    (读 gitnexus_track_status.json,failed 类列注记)。同样必须在 report-executive
+    之后注入--report-executive 的清理规则(prompts/report-executive.txt:106)会
+    删 "Any other meta-commentary sections without vulnerability IDs",banner
+    若在 assemble_report 阶段注入会被擦。幂等;无 attack_chains 时仍写 banner
+    (原 `if not chains_md: return` 早返会丢 banner,已重构)。
     """
     log = logging.getLogger(__name__)
     try:
+        from shannon_core.code_index.gitnexus_track_status import read_track_status
         from shannon_core.services.report_assembler import ReportAssembler
         from shannon_core.utils.file_io import (
             async_path_exists, async_read_file, async_write_file,
@@ -1098,13 +1106,29 @@ async def inject_attack_chains(input: ActivityInput) -> None:
         report_path = deliverables / "comprehensive_security_assessment_report.md"
         if not await async_path_exists(report_path):
             return  # 主报告不存在,无处追加
-        chains_md = await ReportAssembler.render_attack_chains(deliverables)
-        if not chains_md:
-            return  # 无攻击链 / 渲染为空
         content = await async_read_file(report_path)
-        if "## 攻击链（多步利用路径）" in content:
-            return  # 幂等：已注入（resume/重跑）
-        await async_write_file(report_path, content + chains_md)
+        changed = False
+
+        # 1) GitNexus 轨判定状态 banner (fail-fast 报告标红)
+        _BANNER_HEADER = "## GitNexus 轨判定状态"
+        track_status = read_track_status(deliverables)
+        failed_notes = [
+            f"- {vc}: GitNexus 轨判定失败（{s.get('reason', 'unknown')}），结果由 LLM 轨提供"
+            for vc, s in track_status.items() if s.get("status") == "failed"
+        ]
+        if failed_notes and _BANNER_HEADER not in content:
+            banner = f"\n{_BANNER_HEADER}\n\n" + "\n".join(failed_notes) + "\n"
+            content = content + banner
+            changed = True
+
+        # 2) 攻击链章节(原有行为,幂等)
+        chains_md = await ReportAssembler.render_attack_chains(deliverables)
+        if chains_md and "## 攻击链（多步利用路径）" not in content:
+            content = content + chains_md
+            changed = True
+
+        if changed:
+            await async_write_file(report_path, content)
     except Exception as exc:  # noqa: BLE001 — 攻击链注入失败不阻塞主报告
         log.warning("inject_attack_chains failed (non-blocking): %s", exc)
 
