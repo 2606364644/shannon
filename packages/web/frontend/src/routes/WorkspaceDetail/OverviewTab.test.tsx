@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -102,10 +102,26 @@ describe("OverviewTab", () => {
     renderAt("/p/ws/overview");
     await waitFor(() => expect(screen.getByText(/等待扫描/)).toBeInTheDocument());
   });
+
+  it("刚建扫描 metrics={agents:{}} 缺 phases 不崩 + 显空态（真实初始态回归）", async () => {
+    // 复刻 session.py create_workspace 写入的真实初始 metrics:只有空 agents、无 phases。
+    // 修复前:Object.entries(undefined) 抛 TypeError → 整树崩溃 → 永远找不到空态文案。
+    server.use(
+      http.get("/api/workspaces/:ws", () =>
+        HttpResponse.json({ ...session, metrics: { agents: {} } }),
+      ),
+    );
+    renderAt("/p/ws/overview");
+    await waitFor(() => expect(screen.getByText(/等待扫描/)).toBeInTheDocument());
+    // 守卫:无实质数据不应进入富视图(富视图 KPI 标签「代理数/agents」不渲染)
+    expect(screen.queryByText(/代理数|agents/)).not.toBeInTheDocument();
+  });
 });
 
 describe("OverviewTab i18n", () => {
-  afterEach(() => i18n.changeLanguage("zh"));
+  afterEach(async () => {
+    await act(async () => { await i18n.changeLanguage("zh"); });
+  });
 
   it("切英文后空态标题/hint 变英文", async () => {
     server.use(
@@ -115,7 +131,7 @@ describe("OverviewTab i18n", () => {
     );
     renderAt("/p/ws/overview");
     await screen.findByText(/等待扫描/);
-    await i18n.changeLanguage("en");
+    await act(async () => { await i18n.changeLanguage("en"); });
     expect(await screen.findByText("Waiting for scan")).toBeInTheDocument();
     expect(screen.getByText(/will appear after the pre-recon phase/)).toBeInTheDocument();
   });
@@ -124,7 +140,7 @@ describe("OverviewTab i18n", () => {
     server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json(session)));
     renderAt("/p/ws/overview");
     await waitFor(() => expect(screen.getByText(/pre-recon/)).toBeInTheDocument());
-    await i18n.changeLanguage("en");
+    await act(async () => { await i18n.changeLanguage("en"); });
     expect(await screen.findByText("Phase waterfall")).toBeInTheDocument();
     expect(screen.getByText("Agent ledger")).toBeInTheDocument();
   });
@@ -138,7 +154,7 @@ describe("OverviewTab i18n", () => {
     expect(screen.getByText("尝试")).toBeInTheDocument();
     expect(screen.getByText("模型")).toBeInTheDocument();
     // 切英文: 同一标签位变英文
-    await i18n.changeLanguage("en");
+    await act(async () => { await i18n.changeLanguage("en"); });
     expect(await screen.findByText("agents")).toBeInTheDocument();
     expect(screen.getByText("attempt")).toBeInTheDocument();
     expect(screen.getByText("model")).toBeInTheDocument();

@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { apiGet, ApiError } from "@/api/client";
 import type { SessionData } from "@/api/types";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const TABS = [
   { value: "overview", labelKey: "workspaceDetail.tabs.overview" },
@@ -93,7 +94,7 @@ export default function WorkspaceDetail() {
           ))}
         </TabsList>
       </Tabs>
-      <div><Outlet /></div>
+      <div><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
     </div>
   );
 }

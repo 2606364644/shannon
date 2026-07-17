@@ -106,18 +106,21 @@ export interface Workspace {
 }
 
 export interface SessionMetrics {
-  total_duration_ms: number;
-  total_cost_usd: number;
+  // 以下字段运行时可能缺失:session.py create_workspace 初始仅写 {"agents":{}},
+  // normalize_metrics 不补 phases/totals(phases 透传不动);pre-recon 产出后才齐。
+  // 故全可选,消费方(OverviewTab)须 null-safe —— Object.entries/keys(x ?? {})。
+  total_duration_ms?: number;
+  total_cost_usd?: number;
   cost_currency?: string;
   total_input_tokens?: number; total_output_tokens?: number;
   total_cache_read_tokens?: number; total_cache_creation_tokens?: number;
   // 阶段集动态（NodeGoat: pre-recon/recon/vulnerability-analysis/reporting）
-  phases: Record<string, {
+  phases?: Record<string, {
     duration_ms: number; duration_percentage: number; cost_usd: number; agent_count: number;
     cost_currency?: string;
     input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;
   }>;
-  agents: Record<string, {
+  agents?: Record<string, {
     duration_ms: number; cost_usd: number; cost_currency?: string; success: boolean;
     attempt_number: number; model: string; error?: string;
     input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;

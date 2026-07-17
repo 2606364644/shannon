@@ -14,7 +14,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 
-function fmtMs(ms: number): string {
+function fmtMs(ms: number | null | undefined): string {
+  if (ms == null || Number.isNaN(ms)) return "—";
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
@@ -44,8 +45,15 @@ export function OverviewTab() {
   if (!s?.metrics) {
     return <Empty title={t("workspaceDetail.overview.waitTitle")} hint={t("workspaceDetail.overview.waitHint")} />;
   }
-
   const m = s.metrics;
+  // 初始态守卫:session.py create_workspace 写 {"agents":{}}(truthy 空对象)会绕过上层 !s.metrics;
+  // phases 缺失 + agents 空 = pre-recon 未完成 → 显「等待扫描」空态而非渲染崩溃。
+  const hasRealData =
+    Object.keys(m.phases ?? {}).length > 0 || Object.keys(m.agents ?? {}).length > 0;
+  if (!hasRealData) {
+    return <Empty title={t("workspaceDetail.overview.waitTitle")} hint={t("workspaceDetail.overview.waitHint")} />;
+  }
+
   const statusConflict = !!(s.status && s.session?.status && s.status !== s.session.status);
 
   return (
@@ -80,7 +88,7 @@ export function OverviewTab() {
             <div className="text-xs text-muted-foreground">{t("workspaceDetail.overview.bigDuration")}</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-foreground">{Object.keys(m.agents).length}</div>
+            <div className="text-2xl font-bold text-foreground">{Object.keys(m.agents ?? {}).length}</div>
             <div className="text-xs text-muted-foreground">{t("workspaceDetail.overview.bigAgents")}</div>
           </div>
         </div>
@@ -94,7 +102,7 @@ export function OverviewTab() {
 
 function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt: (ms: number) => string }) {
   const { t } = useTranslation();
-  const entries = Object.entries(phases);
+  const entries = Object.entries(phases ?? {});
   return (
     <Card className="p-4">
       <CardTitle className="mb-2 font-semibold tracking-tight text-base">{t("workspaceDetail.overview.phaseWaterfall")}</CardTitle>
@@ -133,7 +141,7 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
           </TableRow>
         </TableHeader>
         <TableBody>
-          {Object.entries(agents).map(([name, a]) => {
+          {Object.entries(agents ?? {}).map(([name, a]) => {
             const warned = a.attempt_number > 1 || !!a.error;
             // 失败红、重试/出错黄（语义化颜色，不再用 .ev-* 事件类）
             const attemptCls = a.success === false ? "text-red" : warned ? "text-yellow" : "";

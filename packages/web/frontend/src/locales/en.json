@@ -337,6 +337,10 @@
     "notFound": {
       "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
     },
+    "errorBoundary": {
+      "title": "This section failed to load",
+      "hint": "You can retry, switch to another tab, or go back."
+    },
     "overview": {
       "loadError": "Overview load failed: {{error}}",
       "waitTitle": "Waiting for scan",
