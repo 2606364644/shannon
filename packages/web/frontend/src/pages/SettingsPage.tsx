@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ErrorState";
+import { PageHeader } from "@/components/PageHeader";
 import { useSystemStatus } from "@/api/systemStatus";
 import { applyTheme, getInitialTheme, type Theme } from "@/lib/theme";
 
@@ -21,8 +22,8 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="font-semibold tracking-tight text-2xl">{t("settings.title")}</h1>
+    <div className="space-y-4">
+      <PageHeader title={t("settings.title")} />
 
       <Card>
         <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("settings.themeTitle")}</CardTitle></CardHeader>
