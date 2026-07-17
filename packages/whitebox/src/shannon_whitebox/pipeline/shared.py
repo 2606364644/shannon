@@ -53,6 +53,7 @@ class ActivityInput:
     info_level: str = "info"          # "info" | "warning"
     vuln_classes: list[str] | None = None   # assemble_report 用（默认 ALL，由 workflow 传 selected）
     event_file: str | None = None     # C1: setup_display 透传到 AuditSession.initialize→WorkflowLogger（挂 StructuredEventRenderer）；CLI 为 None 走 env 兜底
+    track_statuses: dict = field(default_factory=dict)   # fail-fast: GitNexus 轨 per-class 状态(workflow->write_track_status_activity)
 
 
 @dataclass

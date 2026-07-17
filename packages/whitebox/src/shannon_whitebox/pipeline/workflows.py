@@ -3,7 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from temporalio import workflow
-from temporalio.exceptions import CancelledError
+from temporalio.exceptions import ApplicationError as ApplicationFailure, CancelledError
 from temporalio.common import RetryPolicy
 
 from shannon_core.models.agents import (
@@ -14,6 +14,8 @@ from shannon_core.models.agents import (
 )
 from shannon_core.models.errors import ErrorCode, PentestError
 from shannon_core.config.vuln_selection import select_vuln_classes
+# is_llm_track_enabled() 在 CLI 入口(main.py:77)读 env 一次注入 input.enable_llm_track,
+# workflow 用 input.enable_llm_track 判定(守 Temporal 确定性: workflow code 不直接读 env).
 
 from .shared import ActivityInput, PipelineInput, PipelineState, PipelineProgress
 from .step_intents import step_names, step_intents
@@ -27,6 +29,27 @@ CODE_INDEX_ACTIVITY_TIMEOUT = timedelta(minutes=45)
 
 def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
     return tuple(f"{vt}-vuln" for vt in vuln_classes)
+
+
+def _decide_gitnexus_failfast(statuses: dict, llm_track_enabled: bool) -> list[str]:
+    """Task 4 fail-fast 决策(纯函数, 单测可达, 无 Temporal 依赖).
+
+    返回需终止的 DEGRADABLE(inj/xss/ssrf)类列表(-> workflow raise ApplicationFailure).
+    空 list = 继续. 三场景:
+      - 关轨 + DEGRADABLE 任一 failed -> 返回该类(无 LLM 兜底, 终止).
+      - 关轨 + 仅 authz failed -> [] 不终止(authz-vuln LLM 关轨仍跑, 做 GitNexus
+        做不了的 Vertical/Context; authz 不在 DEGRADABLE_VULN_CLASSES).
+      - 开轨 + 任何 fail -> [] 继续(LLM 轨兜底, merger/report 读状态产物标红).
+
+    抽成纯函数: workflow 内联逻辑难以 Temporal 真机测(需 mock 整条链),
+    抽出来后单测覆盖三场景 + 边界(状态缺失/多 fail), workflow 只调它 + raise.
+    """
+    if llm_track_enabled:
+        return []
+    return [
+        vc for vc in DEGRADABLE_VULN_CLASSES
+        if statuses.get(vc, {}).get("status") == "failed"
+    ]
 
 
 with workflow.unsafe.imports_passed_through():
@@ -382,50 +405,57 @@ class WhiteboxScanWorkflow:
             # === Authz GitNexus track: judge IDOR candidates (spec §5.7) ===
             # Runs after vuln agents (LLM track queues ready) and before the
             # dual-track merge (Plan 3) so authz_gitnexus_queue.json exists
-            # when merge reads it. Graceful: empty candidates → empty queue.
-            try:
-                await workflow.execute_activity(
-                    activities.run_authz_gitnexus_judge, act_input,
-                    start_to_close_timeout=timedelta(minutes=30),  # 原 10；多轮 agent 窗口（spec-0）
-                    retry_policy=retry_for("gitnexus-verdict"),  # 原 standard；spec-1a 切（多轮 agent，max 3）
-                )
-            except Exception as exc:
-                await workflow.execute_activity(
-                    activities.log_info_activity,
-                    ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"Authz GitNexus judge failed (non-fatal, LLM-only track continues): {exc}",
-                       "info_level": "warning"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
-                )
+            # when merge reads it. Graceful: empty candidates -> empty queue.
+            # Task 4 fail-fast: 删 try/except 吞异常; activity 返 failed=True 经
+            # 状态产物标红, 不再走"LLM 兜底"降级(authz-vuln LLM 轨在关轨时仍跑,
+            # 由 _decide_gitnexus_failfast 判定, authz fail 永不终止).
+            _authz_gn = await workflow.execute_activity(
+                activities.run_authz_gitnexus_judge, act_input,
+                start_to_close_timeout=timedelta(minutes=30),  # 原 10；多轮 agent 窗口（spec-0）
+                retry_policy=retry_for("gitnexus-verdict"),  # 原 standard；spec-1a 切（多轮 agent，max 3）
+            )
             # === GitNexus-track chain verdict: inj/xss/ssrf (spec §5.4-5.6) ===
             # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
-            # Runs before run_merge_dual_track_queues (which reads those queues).
-            # Non-fatal: failure degrades to LLM-only (merger tolerates absent
-            # gitnexus queues). No parameter_graph.json (empty taint graph) ->
-            # empty, degrades to LLM-only.
-            try:
-                _gn_verdict = await workflow.execute_activity(
-                    activities.run_gitnexus_chain_verdict, act_input,
-                    start_to_close_timeout=timedelta(minutes=15),  # 原 5；多轮 agent 窗口（spec-0）
-                    retry_policy=retry_for("standard"),
-                )
-                await workflow.execute_activity(
-                    activities.log_info_activity,
-                    ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"GitNexus chain verdict ok: {_gn_verdict.get('per_class', {})}",
-                       "info_level": "info"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
-                )
-            except Exception as exc:
-                await workflow.execute_activity(
-                    activities.log_info_activity,
-                    ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"GitNexus chain verdict failed (non-fatal, LLM-only track continues): {exc}",
-                       "info_level": "warning"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
+            # Task 4 fail-fast: 删 try/except; activity 返 failed_classes/fail_reasons,
+            # workflow 据返回值判 fail-fast(关轨 + DEGRADABLE fail -> 终止).
+            _gn_verdict = await workflow.execute_activity(
+                activities.run_gitnexus_chain_verdict, act_input,
+                start_to_close_timeout=timedelta(minutes=15),  # 原 5；多轮 agent 窗口（spec-0）
+                retry_policy=retry_for("standard"),
+            )
+
+            # === fail-fast 编排:汇总两轨状态,写 gitnexus_track_status.json ===
+            # 状态产物供 merger/report 读(开轨标红); 关轨 + DEGRADABLE fail 由
+            # _decide_gitnexus_failfast 判定后 raise 终止(无 LLM 兜底).
+            _statuses: dict = {}
+            for _vc, _n in (_gn_verdict or {}).get("per_class", {}).items():
+                _statuses[_vc] = {"status": "ok", "findings": _n}
+            for _vc in (_gn_verdict or {}).get("failed_classes", []):
+                _statuses[_vc] = {"status": "failed",
+                                  "reason": (_gn_verdict or {}).get("fail_reasons", {}).get(_vc, "unknown")}
+            if _authz_gn is not None:
+                if _authz_gn.get("failed"):
+                    _statuses["authz"] = {"status": "failed", "reason": _authz_gn.get("fail_reason", "unknown")}
+                else:
+                    _statuses["authz"] = {"status": "ok", "findings": _authz_gn.get("verdict_count", 0)}
+            await workflow.execute_activity(
+                activities.write_track_status_activity,
+                ActivityInput(**{**act_input.__dict__, "track_statuses": _statuses}),
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
+            )
+
+            # 关轨终止:仅 DEGRADABLE(inj/xss/ssrf)的 GitNexus fail 是真·无 LLM 兜底 -> 终止。
+            # authz GitNexus fail(任何模式)+ 开轨的 inj/xss/ssrf fail -> 标红继续(merger/report 读状态产物)
+            # 关轨判定用 input.enable_llm_track(已在 workflow 入口由 CLI 从 is_llm_track_enabled()
+            # 读 env 一次注入), 守 Temporal 确定性(workflow code 不应直接读 env).
+            if _no_fallback_failed := _decide_gitnexus_failfast(
+                _statuses, llm_track_enabled=input.enable_llm_track
+            ):
+                raise ApplicationFailure(
+                    f"GitNexus 轨 fail-fast(关轨模式):{_no_fallback_failed} 判定失败,"
+                    f"且这些类关轨后无 LLM 轨兜底 -> 终止扫描。",
+                    type="GitNexusTrackFailure", non_retryable=True,
                 )
             await workflow.execute_activity(
                 activities.run_merge_dual_track_queues,

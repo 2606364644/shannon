@@ -389,6 +389,24 @@ async def log_info_activity(input: ActivityInput) -> None:
         pass  # best-effort: 显示侧通道失败绝不影响扫描（尤其 except 块里调，避免替换原异常）
 
 
+@activity.defn
+async def write_track_status_activity(input: ActivityInput) -> dict:
+    """Task 4 fail-fast: 写 gitnexus_track_status.json(workflow->activity->helper).
+
+    Task 1 helper 的薄 activity 包装: workflow 在两 GitNexus activity(authz_judge /
+    chain_verdict)执行后, 汇总 per-class 状态(inj/xss/ssrf + authz), 经本 activity
+    落盘 gitnexus_track_status.json. merger/report 读它做开轨标红; workflow 读
+    返回值决定关轨终止(关轨 + DEGRADABLE fail).
+
+    铁律 (CLAUDE.md §1): 状态产物只给 workflow/merger/report 编排用, 绝不喂 LLM 轨 prompt.
+    activity 不直接写文件 -- 调 Task 1 的 write_track_status helper (守「不假估算」).
+    """
+    from shannon_core.code_index.gitnexus_track_status import write_track_status
+    _, deliverables, _ = _get_paths(input)
+    write_track_status(deliverables, getattr(input, "track_statuses", {}))
+    return {"written": True}
+
+
 def _parse_gitnexus_verdict_output(raw, id_prefix):
     """补缺 ID 的 GitNexus 轨 verdict/explore 输出 → parse_lenient → (vulns, warnings)。
 
