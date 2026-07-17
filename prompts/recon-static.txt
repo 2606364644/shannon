@@ -84,7 +84,31 @@ checklist in `shared/_enumeration-completeness.txt` (EC-A through EC-F). Do NOT 
 </methodology>
 
 <output_format>
-Write your findings to `{{DELIVERABLES_PATH}}/recon_deliverable.md` with these sections:
+**MANDATORY — Recon Deliverable (host-rendered):** You MUST emit your complete analysis by calling all nine `set_*` tools listed in `<deliverable_tools>` before terminating — eight one-shot `set_*` tools (each renders one or more sections) plus `set_endpoints` (append; call once per network-accessible endpoint to build Section 4). The host renders `{{DELIVERABLES_PATH}}/recon_deliverable.md` from those calls — there is no Markdown for you to write yourself. A skipped one-shot tool renders a placeholder, so call every tool even if a section is empty (pass an empty array / `applicable=false` / sentinel row where applicable).
+
+<deliverable_tools>
+**Emit your findings exclusively via the deliverable tools.** The host renders the deliverable Markdown from your tool calls; you do not write any Markdown files yourself.
+
+You must call all nine of the following tools before terminating. Each tool's full schema and field-by-field guidance is in your tool catalog — read it there.
+
+- `set_executive_summary` — application's purpose, core technology stack, and primary user-facing components (Section 1).
+- `set_technology_stack` — frontend, backend, and infrastructure (Section 2).
+- `set_authentication` — session flow, role assignment, privilege storage, and role switching/impersonation (Sections 3, 3.1, 3.2, 3.3). Set `role_switching_impersonation.applicable=false` (other fields null) if no such features exist.
+- `set_endpoints` — **append**: call once per network-accessible API endpoint to build Section 4 (API Endpoint Inventory). Multiple calls accumulate endpoints; the renderer sorts by (path, method) before rendering, so emission order does not affect output. Exclude development/debug endpoints, local-only utilities, build tools, or any endpoints not reachable via network requests to the deployed application.
+- `set_input_vectors` — URL parameters, POST body fields, HTTP headers, and cookie values (Section 5). Drives downstream vulnerability analysis.
+- `set_network_map` — entities, flows, and guards (Sections 6.1, 6.2, 6.3, 6.4). The renderer splits the entities array into the 6.1 and 6.2 tables and sorts each array deterministically.
+- `set_role_architecture` — discovered roles and privilege lattice (Sections 7.1, 7.2, 7.3, 7.4). The renderer splits the roles array into the per-section tables.
+- `set_authz_candidates` — horizontal, vertical, and context-based authorization candidates (Sections 8.1, 8.2, 8.3). The renderer assigns stable `AUTHZ-CAND-NN` IDs across the three sub-arrays in horizontal → vertical → context order, which vuln-authz reads as its todo list.
+- `set_injection_sources` — applicable flag + 6 sink arrays (command/SQL/LFI-RFI/path-traversal/SSTI/deserialization) (Section 9). Drives the vuln-injection agent's todos downstream. Set `applicable=false` only if the application has no network-accessible code paths to dangerous sinks at all; otherwise populate each category array (empty arrays mean "scanned this category, no sources found").
+
+**Call semantics — two distinct modes:**
+- **Eight `set_*` tools are one-shot** (`set_executive_summary`, `set_technology_stack`, `set_authentication`, `set_input_vectors`, `set_network_map`, `set_role_architecture`, `set_authz_candidates`, `set_injection_sources`). Each may be called exactly once with that section's complete content. Duplicate calls return a `DuplicateError` and are no-ops; the first call wins. Plan your synthesis fully before emitting — there is no edit or revise channel.
+- **`set_endpoints` is append** — call it multiple times, once per endpoint. Each call adds one endpoint row to Section 4. There is no `DuplicateError` for `set_endpoints`; emission order is irrelevant (the renderer sorts by path, method).
+
+**Relationship to the enumeration reconciliation:** The `shared/_enumeration-completeness.txt` checklist (EC-A through EC-F) and the Section 4.3 Enumeration Reconciliation table still apply — they gate **what endpoints you emit via `set_endpoints`**, not a separate Write step. Resolve every `true-miss` by emitting the missing endpoint via `set_endpoints` before announcing completion.
+</deliverable_tools>
+
+The host renders `recon_deliverable.md` with the following section structure. Organize each `set_*` tool's payload content to match — the renderer reproduces this structure 1:1 from your tool calls.
 
 ## 0) HOW TO READ
 Static source-code reconnaissance — no live requests. Downstream vuln agents consume §4 (endpoint inventory + §4.2 security context), §5 (input vectors), §8 (authz candidates), §9 (injection sources).
