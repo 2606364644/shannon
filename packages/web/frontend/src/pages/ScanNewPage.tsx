@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
@@ -193,10 +194,7 @@ export function ScanNewPage() {
   return (
     <div className="space-y-4">
       {/* 页面标题 */}
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("scan.title")}</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">{t(subtitleKey)}</p>
-      </div>
+      <PageHeader title={t("scan.title")} subtitle={t(subtitleKey)} />
 
       {/* 整张卡片：Tabs + 双栏 + 底部操作 */}
       <Card className="overflow-hidden">
@@ -282,10 +280,10 @@ export function ScanNewPage() {
         {/* 底部操作栏 */}
         {type !== "correlation" && (
           <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
-            <span className="text-xs text-muted-foreground">{footerHint}</span>
             <Button size="lg" onClick={onSubmit} disabled={!isValid || submitting}>
               {submitLabel}
             </Button>
+            <span className="text-xs text-muted-foreground">{footerHint}</span>
           </div>
         )}
       </Card>
