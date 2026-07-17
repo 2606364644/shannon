@@ -167,7 +167,7 @@ class AgentExecutor:
         # TS agent-execution.ts:295-297 writeDeliverable。render_deliverable 对无
         # collector 的 agent 返 None → 跳过写盘(self-Write 路径不动)。
         if not skip_artifact_postprocess and collector is not None:
-            md = render_deliverable(agent_name, collector.get_all())
+            md = render_deliverable(agent_name, collector.get_all(), deliverables)
             if md is not None:
                 (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
 

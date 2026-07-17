@@ -122,18 +122,19 @@ def test_render_deliverable_pre_recon_branch_intact():
     assert md is not None and isinstance(md, str)
 
 
-# ── 回归：非 vuln 也非 pre-recon 的 agent（如 REPORT）仍 None（兜底分支不动） ───
+# ── 回归：非 vuln 也非 pre-recon/exploit 的 agent（如 REPORT）仍 None（兜底分支不动） ───
 def test_make_collector_unwired_agents_still_return_none():
     from shannon_core.models.agents import AgentName as A
 
     assert make_collector(A.REPORT) is None
     assert make_collector(A.ATTACK_CHAIN) is None
-    # exploit agent 也走 None（exploit 是 Plan 4 的活，不走 vuln collector）
-    assert make_collector(A.INJECTION_EXPLOIT) is None
+    # exploit agent 走 append collector（Plan 4 Task 3 已接，不再 None）
+    assert make_collector(A.INJECTION_EXPLOIT) is not None
 
 
 def test_render_deliverable_unwired_agents_still_return_none():
     from shannon_core.models.agents import AgentName as A
 
     assert render_deliverable(A.REPORT, {}) is None
-    assert render_deliverable(A.INJECTION_EXPLOIT, {}) is None
+    # exploit agent 有 renderer（Plan 4 Task 3 已接，不再 None）
+    assert render_deliverable(A.INJECTION_EXPLOIT, {}) is not None

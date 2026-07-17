@@ -13,6 +13,7 @@ def make_collector(agent_name) -> "CollectorBase | None":
     - Plan 1: pre-recon 走 PreReconCollector。
     - Plan 2: recon 走 ReconCollector/render_recon。
     - Plan 3: 5 个 vuln agent（``<vc>-vuln``）共用 vuln collector，按 vc branching。
+    - Plan 4: 5 个 exploit agent（``<vc>-exploit``）共用 append collector（mode='append'）。
     - 其余 agent 返 None（无 collector 通道，走 self-Write 路径）。
 
     vc 派生用 ``AgentName.XXX_VULN.value == "<vc>-vuln"`` 的不变量：
@@ -34,4 +35,9 @@ def make_collector(agent_name) -> "CollectorBase | None":
         from shannon_core.collectors.vuln import make_vuln_collector
 
         return make_vuln_collector(vc)
+    if isinstance(agent_name, AgentName) and agent_name.value.endswith("-exploit"):
+        vc = agent_name.value.removesuffix("-exploit")
+        from shannon_core.collectors.exploit import make_exploit_collector
+
+        return make_exploit_collector(vc)
     return None
