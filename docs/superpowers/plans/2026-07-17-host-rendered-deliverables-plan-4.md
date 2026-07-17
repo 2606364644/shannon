@@ -2,102 +2,107 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** Plan 1（collector 框架 + 双引擎桥 + pre-recon 端到端）+ Plan 3（5 vuln class）已落地。
+**Prerequisite:** Plan 1（collector 框架 + 双引擎桥 + pre-recon 端到端）+ Plan 3（5 vuln class）+ **a5be2b71（CollectorBase append 语义 + recon set_endpoints）** 已落地。
 
-**Goal:** 5 个 exploit agent（injection/xss/auth/ssrf/authz）调 `add_exploit`（**append** 语义）结构化工具，core 收集 + `validate_exploit_verdicts`（4 档）+ `render_exploit` 渲染 `{vt}_exploitation_evidence.md`（5 section：Exploited / Blocked / Other / Unverified-rejected / Unprocessed）。**本质=把 exploit 从 blackbox structured-output→`ExploitEvidenceRenderer` 通道迁移到 core append-collector 通道**。
+**Goal:** 5 个 exploit agent（injection/xss/auth/ssrf/authz）调 `add_exploit`（**append** 语义，复用 a5be2b71 的 `CollectorBase` `mode="append"`）结构化工具，core 收集 + `validate_exploit_verdicts`（4 档）+ `render_exploit` 渲染 `{vt}_exploitation_evidence.md`（5 section：Exploited / Blocked / Other / Unverified-rejected / Unprocessed）。**本质=把 exploit 从 blackbox structured-output→`ExploitEvidenceRenderer` 通道迁移到 core append-collector 通道**。
 
-**Architecture:** exploit 与 Plan 1/3 的 set_*（write-once section bag）**本质不同**：exploit 产物是 verdict list（`ExploitVerdictBatch.verdicts: list`，对齐 TS `getAll(): AddExploitInput[]`），用**独立 `ExploitCollector`（append，`get_all()->list[dict]`）+ 独立 `build_exploit_*` 桥 + provider `isinstance` 分支 + `render_deliverable` 扩签名读 queue**。不复用 `CollectorBase`（write-once + `get_all()->dict` 语义冲突）。接点裁定见父 spec §6（commit c84cc8c9）。
+**Architecture:** exploit 产物是 verdict list（`ExploitVerdictBatch.verdicts: list`，对齐 TS `getAll(): AddExploitInput[]`），用 **a5be2b71 已落地的 `CollectorBase` `mode="append"` 机制**——一个 `add_exploit` append section（`SectionSchema(mode="append")`），复用 generic mode-aware `build_openai_tools`/`build_claude_mcp_server` + `make_collector`/`render_deliverable` 现有分发器。**不新建独立 collector 类、不新建独立 bridge 函数、不改 provider**（collector 仍是 `CollectorBase`，provider 无感）。renderer 双输入（entries + queue 的 id_to_type）经 `render_deliverable` 扩 `deliverables_path` 参数读 queue。与 recon 的 `set_endpoints`（a5be2b71）完全同构。
 
 **Tech Stack:** pydantic、pytest、claude-agent-sdk、openai-agents。
 
-**Spec:** `docs/superpowers/specs/2026-07-17-host-rendered-deliverables-design.md`（§6 Plan 4 裁定注记）。
+**Spec:** `docs/superpowers/specs/2026-07-17-host-rendered-deliverables-design.md`（§6 Plan 4 裁定注记，commit c84cc8c9）。
 
 ## Global Constraints
 
-- **append ≠ set**：`ExploitCollector` 独立类（`add(entry)->None` append、`get_all()->list[dict]`），**不继承 `CollectorBase`**、不暴露 `section_schemas`/`tool_names()`（append 无 section 概念）；generic `build_openai_tools`/`build_claude_mcp_server` 不处理它（由专用 `build_exploit_*` 处理）。
-- **4 档对齐现有**：verdict status ∈ {`exploited`/`blocked_by_security`/`out_of_scope_internal`/`false_positive`}，**复用 `packages/core/src/shannon_core/models/exploit_verdict_schemas.py` 的 4 个 Verdict 类**（ExploitedVerdict/BlockedVerdict/OutOfScopeVerdict/FalsePositiveVerdict）——**不新建 entry model**（避免字段漂移；原 plan 4 的 2 档 ExploitEntry/BlockedEntry 已废弃）。
-- **queue 是 vuln 的，只读不改**：`{vt}_exploitation_queue.json` 由 vuln agent 产（structured_output 落盘）。结构 `{"vulnerabilities":[{"ID":"...","vulnerability_type":"...",...}]}`。exploit renderer 只读取 `valid_ids`/`id_to_type`，**不写**。
+- **append 复用 CollectorBase mode=append（a5be2b71）**：exploit 用 `SectionSchema(tool_name="add_exploit", section_key="verdicts", mode="append", json_schema=<单条 verdict union>)` + `make_exploit_collector(vc) -> CollectorBase`（同 `make_vuln_collector`/`ReconCollector` 模式）。**不新建独立 collector 类、不新建 `build_exploit_*` 桥、不改 provider**——generic `build_openai_tools`/`build_claude_mcp_server`（a5be2b71 已 mode-aware）自动生成 append 工具，`make_collector`/`render_deliverable` 现有分发器加 `-exploit` 分支即可。`get_all()` 返 `{"verdicts": [...]}`（dict，append section value 是 list[dict]）。
+- **4 档对齐现有**：verdict status ∈ {`exploited`/`blocked_by_security`/`out_of_scope_internal`/`false_positive`}，**复用 `packages/core/src/shannon_core/models/exploit_verdict_schemas.py` 的 4 个 Verdict 类**——**不新建 entry model**（避免字段漂移）。
+- **queue 是 vuln 的，只读不改**：`{vt}_exploitation_queue.json` 由 vuln agent 产。结构 `{"vulnerabilities":[{"ID":"...","vulnerability_type":"...",...}]}`（`parse_lenient`，每 entry 有 `.ID`）。exploit renderer 只读取 `valid_ids`/`id_to_type`，**不写**。
 - **单通道**：exploit agent 只产 `{vt}_exploitation_evidence.md`（不产 queue）。迁移后 **blackbox 不再传 `structured_output_schema=ExploitVerdictBatch`**（verdicts 改由 add_exploit 采集）。
 - **全迁移保留验证**：`validate_exploit_verdicts`（L0 normalize / L1 schema / L2 queue-ID 防幻觉 / L3 去重）从 blackbox 迁 core；renderer 渲 **5 section**（Exploited/Blocked/Other/Unverified-rejected/Unprocessed），Rejected 与 Unprocessed 正交（rejected=调了 add_exploit 但验证失败；unprocessed=没调）。
-- **§1 双轨独立 / §2 双引擎**：renderer 读 queue 是读 LLM 产物（vuln queue），不引 GitNexus 确定性层；`build_exploit_openai_tools`+`build_exploit_claude_mcp_server` 双引擎对称，provider isinstance 分支双引擎一致。
-- **TS 对齐 1:1**：`add_exploit` schema（discriminated union on status）、renderer section 标题、prompt 文案移植 TS `exploit-collector.ts`/`exploit-renderer.ts`（TS 字段以 `exploit_verdict_schemas.py` 4 档为准，二者已对齐）。
-- **诊断暂不移除**：`_enrich_missing_deliverable_error`（executor.py）保留到 Plan 5。blackbox `ExploitEvidenceRenderer`（旧 3-section renderer）迁移后留死代码，**Plan 5 删**（对齐父 spec §4.5 节奏）。
+- **§1 双轨独立 / §2 双引擎**：renderer 读 queue 是读 LLM 产物（vuln queue），不引 GitNexus 确定性层；generic mode-aware bridge 双引擎对称（a5be2b71 已验证）。
+- **TS 对齐 1:1**：`add_exploit` schema（discriminated union on status）、renderer section、prompt 文案移植 TS `exploit-collector.ts`/`exploit-renderer.ts`（TS 字段以 `exploit_verdict_schemas.py` 4 档为准）。
+- **诊断暂不移除**：`_enrich_missing_deliverable_error`（executor.py）保留到 Plan 5。blackbox `ExploitEvidenceRenderer`（旧 3-section renderer）迁移后留死代码，**Plan 5 删**。
 - **TDD + 测试陷阱**（CLAUDE.md §3）：每 task 先失败测试；只跑改动子集，勿广跑全套（预存挂起/失败）。
 - **分支** `feat/fork-py`；每 task 末 commit。
 
 ## 现有接口事实（controller 已核查，implementer 直接用）
 
+- **a5be2b71 `collectors/base.py`**：`SectionSchema` 加 `mode: str = "set"`（`"set"` write-once / `"append"` 累积）；`CollectorBase.append_section(tool_name, item)`（累积进 `_appends[section_key]`，不抛 DuplicateCallError）；`set_section` 对 append section 抛 TypeError（反之亦然，误用保护）；`get_all()` 返 dict——set section 是 dict、append section 是 `list[dict]`（空则不含键，与 skipped 同语义）。
+- **a5be2b71 `collectors/bridge.py`**：`build_openai_tools`/`build_claude_mcp_server` **按 `schema.mode` 分支**——append 闭包调 `collector.append_section`、返 `"{tool}: recorded (N total)"`、不抛 DuplicateError；set 闭包不变（write-once）。**generic 桥已 mode-aware，exploit append 工具自动生成，无需新桥。**
+- **a5be2b71 `collectors/recon.py`**：`set_endpoints` section = `SectionSchema(tool_name="set_endpoints", section_key="endpoints", json_schema=ENDPOINTS, mode="append")`，追加进 `RECON_SECTIONS`；`ReconCollector(CollectorBase)` 无参构造 `super().__init__(RECON_SECTIONS)`。**这是 exploit add_exploit section 的精确模板。**
 - **`models/agents.py`**：5 个 exploit 成员存在（`INJECTION_EXPLOIT="injection-exploit"` 等，对称 `-vuln`）；`deliverable_filename` = `{vt}_exploitation_evidence.md`；`prompt_template` = `{vt}-exploit`。
-- **`collectors/__init__.py::make_collector(agent_name)`**：当前认 PRE_RECON + `endswith("-vuln")`，对 `-exploit` 返 None。
-- **`collectors/bridge.py`**：generic `build_openai_tools(collector)`/`build_claude_mcp_server(collector, server_name="shannon-collector")`，按 `collector.section_schemas` 循环生成 set_* 工具（write-once，DuplicateCallError）。
-- **`agents/executor.py`**：L112 `collector = make_collector(agent_name)`；L115-126 透传 `collector=collector`；L169-172 `if not skip_artifact_postprocess and collector is not None: md = render_deliverable(agent_name, collector.get_all()); write_text(md)`；L174 `if not skip_artifact_postprocess: validate_deliverable`。
-- **`agents/runner.py::run_claude_prompt(..., collector=None)`**：kwarg 透传 `provider.call(collector=...)`。
-- **`agents/providers_anthropic.py`**：L109-114 `if collector is not None: build_claude_mcp_server(collector); allowed_tools = collector.tool_names()`；L320-323 注入 options。
-- **`agents/providers_openai.py`**：L201/208-212 `if collector is not None: build_openai_tools(collector)` → `build_agent(..., extra_tools=)`。
-- **`renderers/__init__.py::render_deliverable(agent_name, data)`**：当前认 PRE_RECON + `-vuln`，对 `-exploit` 返 None。单输入。
-- **`models/exploit_verdict_schemas.py`**：4 档 discriminated union；`ExploitVerdictBatch.model_json_schema()["properties"]["verdicts"]["items"]` = **单条 union schema**（`oneOf:[4 个 $ref] + discriminator mapping`，`$defs` 含 4 verdict 字段）——这是 add_exploit input_schema 来源。
+- **`collectors/__init__.py::make_collector(agent_name)`**：当前认 PRE_RECON + `endswith("-vuln")`，对 `-exploit` 返 None。`-vuln` 分支模式：`vc = agent_name.value.removesuffix("-vuln"); from .vuln import make_vuln_collector; return make_vuln_collector(vc)`。
+- **`agents/executor.py`**：L112 `collector = make_collector(agent_name)`；L169-172 `if not skip_artifact_postprocess and collector is not None: md = render_deliverable(agent_name, collector.get_all()); write_text(md)`。
+- **`agents/runner.py`/`providers_*`**：collector 透传 + provider 调 generic `build_*`——**exploit 用 CollectorBase，provider 无感，不改。**
+- **`renderers/__init__.py::render_deliverable(agent_name, data)`**：当前认 PRE_RECON + `-vuln`，对 `-exploit` 返 None。单输入（需扩 `deliverables_path`）。
+- **`models/exploit_verdict_schemas.py`**：4 档 discriminated union；`ExploitVerdictBatch.model_json_schema()["properties"]["verdicts"]["items"]` = **单条 union schema**（`oneOf:[4 个 $ref] + discriminator mapping`，`$defs` 含 4 verdict 字段）——这是 add_exploit section 的 `json_schema` 来源。
 - **blackbox `agents/exploit_executor.py`**：L40-49 读 queue → `valid_ids={v.ID for v in parsed.queue.vulnerabilities}`；L62-75 调 executor 传 `structured_output_schema=ExploitVerdictBatch` + `skip_artifact_postprocess=True`；L78-101 structured_output 兜底 + validate + render + write_verdicts_json。
-- **blackbox `services/exploit_verdict_validator.py`**：`validate_exploit_verdicts(raw: list[dict], valid_ids: set[str]) -> VerdictValidation`（accepted/rejected）。消费者：exploit_executor.py + 2 个 blackbox 测试（test_exploit_verdict_validator.py + test_exploit_evidence_renderer.py）。
+- **blackbox `services/exploit_verdict_validator.py`**：`validate_exploit_verdicts(raw: list[dict], valid_ids: set[str]) -> VerdictValidation`。消费者：exploit_executor.py + 2 个 blackbox 测试。
 - **`models/queue_schemas.py::VulnerabilityQueue.parse_lenient(content: str) -> LenientParseResult`**（`.queue.vulnerabilities` list，每 entry 有 `.ID`；`.warnings`）。
 
 ## File Structure
 
-- Create: `packages/core/src/shannon_core/collectors/exploit.py`（`ExploitCollector` append + `make_exploit_collector()`）
+- Create: `packages/core/src/shannon_core/collectors/exploit.py`（`EXPLOIT_VERDICTS_SECTION`（mode="append"）+ `make_exploit_collector(vc) -> CollectorBase` + 迁入的 `validate_exploit_verdicts`/`VerdictValidation`）
 - Create: `packages/core/src/shannon_core/renderers/exploit.py`（`render_exploit` 5 section）
-- Modify: `packages/core/src/shannon_core/collectors/bridge.py`（加 `build_exploit_openai_tools` / `build_exploit_claude_mcp_server`）
 - Modify: `packages/core/src/shannon_core/collectors/__init__.py`（make_collector 加 `-exploit` 分支）
-- Modify: `packages/core/src/shannon_core/renderers/__init__.py`（render_deliverable 扩签名 + `-exploit` 分支）
-- Modify: `packages/core/src/shannon_core/agents/executor.py`（L169 多传 `deliverables`）
-- Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py` + `providers_openai.py`（isinstance 分支）
-- Migrate: `validate_exploit_verdicts` + `VerdictValidation` 从 blackbox `services/exploit_verdict_validator.py` → core（放 `packages/core/src/shannon_core/collectors/exploit.py` 内同模块，渲染依赖紧密）；blackbox 改 import core
+- Modify: `packages/core/src/shannon_core/renderers/__init__.py`（render_deliverable 扩 `deliverables_path=None` + `-exploit` 分支读 queue）
+- Migrate: `validate_exploit_verdicts` + `VerdictValidation` 从 blackbox → core（放 `collectors/exploit.py`）；blackbox 改 re-export
 - Modify: `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`（迁移接线）
-- Modify: `packages/blackbox/tests/test_exploit_verdict_validator.py` + `test_exploit_evidence_renderer.py`（改 import core）
+- Modify: `packages/blackbox/tests/test_exploit_verdict_validator.py`（改 import core）
 - Modify: `prompts/exploit-{injection,xss,auth,ssrf,authz}.txt`
+- **不改**：`collectors/bridge.py`（generic mode-aware 已支持）、`agents/providers_*.py`、`agents/runner.py`、`agents/executor.py`（L169 已是 `render_deliverable(agent_name, collector.get_all())`，仅需 render_deliverable 扩签名——executor 调用点多传 `deliverables`）
 
 ---
 
-### Task 1: `ExploitCollector`（append）+ validator 迁移到 core
+### Task 1: exploit append section + `make_exploit_collector` + validator 迁移到 core
 
 **Files:**
 - Create: `packages/core/src/shannon_core/collectors/exploit.py`
-- Migrate: `validate_exploit_verdicts` + `VerdictValidation`（从 `packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py` 移入 exploit.py）
-- Modify: `packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py`（改为 re-export from core，保旧 import 路径兼容）
+- Migrate: `validate_exploit_verdicts` + `VerdictValidation`（从 blackbox `services/exploit_verdict_validator.py` 移入 exploit.py）
+- Modify: `packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py`（re-export from core）
+- Modify: `packages/blackbox/tests/test_exploit_verdict_validator.py`（import core）
 - Test: `packages/core/tests/collectors/test_exploit_collector.py`
 
 **Interfaces:**
-- Consumes: `shannon_core.models.exploit_verdict_schemas.ExploitVerdict`（4 档 union，discriminated on status）。
-- Produces: `ExploitCollector`（`add(entry: dict)->None` append、`get_all()->list[dict]`）、`make_exploit_collector()->ExploitCollector`、`validate_exploit_verdicts(raw, valid_ids)->VerdictValidation`、`VerdictValidation`（accepted: list[ExploitVerdict], rejected: list[tuple[dict,str]]）。
+- Consumes: `shannon_core.collectors.base.CollectorBase`/`SectionSchema`（a5be2b71）、`shannon_core.models.exploit_verdict_schemas.ExploitVerdictBatch`（取单条 union schema）、`ExploitVerdict`。
+- Produces: `EXPLOIT_VERDICTS_SECTION`（`SectionSchema(mode="append")`）、`make_exploit_collector(vc) -> CollectorBase`、`validate_exploit_verdicts(raw, valid_ids)->VerdictValidation`、`VerdictValidation`。
 
 - [ ] **Step 1: Write failing test**
 
 ```python
 # packages/core/tests/collectors/test_exploit_collector.py
+from shannon_core.collectors.base import CollectorBase
 from shannon_core.collectors.exploit import (
-    ExploitCollector, make_exploit_collector,
+    EXPLOIT_VERDICTS_SECTION, make_exploit_collector,
     validate_exploit_verdicts, VerdictValidation,
 )
 
 
-def test_append_accumulates_list_in_order():
-    c = ExploitCollector()
-    c.add({"vulnerability_id": "INJ-1", "status": "exploited", "severity": "high",
-           "impact": "i", "exploitation_steps": ["s1"], "proof_of_impact": "p"})
-    c.add({"vulnerability_id": "INJ-2", "status": "blocked_by_security", "confidence": "high",
-           "current_blocker": "b", "what_we_tried": "t",
-           "evidence_of_vulnerability": "e", "expected_impact": "ei"})
-    entries = c.get_all()
-    assert len(entries) == 2
-    assert entries[0]["vulnerability_id"] == "INJ-1"
-    assert entries[1]["status"] == "blocked_by_security"
+def test_exploit_collector_is_append_mode_collectorbase():
+    c = make_exploit_collector("injection")
+    assert isinstance(c, CollectorBase)  # 复用 CollectorBase，非独立类
+    assert EXPLOIT_VERDICTS_SECTION.mode == "append"
+    assert EXPLOIT_VERDICTS_SECTION.tool_name == "add_exploit"
+    assert EXPLOIT_VERDICTS_SECTION.section_key == "verdicts"
+    # 工具名暴露给 provider allowed_tools
+    assert c.tool_names() == ["add_exploit"]
 
 
-def test_get_all_returns_copy_and_empty_default():
-    c = ExploitCollector()
-    assert c.get_all() == []
-    c.add({"vulnerability_id": "X-1", "status": "false_positive", "reason": "r", "evidence": "e"})
-    got = c.get_all()
-    got.clear()
-    assert c.get_all()  # 内部 list 不受外部 mutate 影响
+def test_append_section_accumulates_into_verdicts_list():
+    c = make_exploit_collector("injection")
+    c.append_section("add_exploit", {"vulnerability_id": "INJ-1", "status": "exploited",
+        "severity": "high", "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"})
+    c.append_section("add_exploit", {"vulnerability_id": "INJ-2", "status": "blocked_by_security",
+        "confidence": "high", "current_blocker": "b", "what_we_tried": "t",
+        "evidence_of_vulnerability": "e", "expected_impact": "ei"})
+    data = c.get_all()
+    assert list(data.keys()) == ["verdicts"]
+    assert len(data["verdicts"]) == 2
+    assert data["verdicts"][0]["vulnerability_id"] == "INJ-1"
+
+
+def test_get_all_empty_when_no_append():
+    assert make_exploit_collector("injection").get_all() == {}  # append section 空则不含键
 
 
 def test_validate_accepts_4_tiers_and_rejects_phantom_id():
@@ -116,18 +121,19 @@ def test_validate_accepts_4_tiers_and_rejects_phantom_id():
 
 - [ ] **Step 2: Run — verify FAIL**
 
-`cd packages/core && uv run pytest tests/collectors/test_exploit_collector.py -q` → FAIL（ImportError: cannot import ExploitCollector）。
+`cd packages/core && uv run pytest tests/collectors/test_exploit_collector.py -q` → FAIL（ImportError）。
 
 - [ ] **Step 3: Implement**
 
-创建 `packages/core/src/shannon_core/collectors/exploit.py`。**把 blackbox `exploit_verdict_validator.py` 的 `VerdictValidation` + `_SEVERITY_MAP` + `_normalize_verdict` + `validate_exploit_verdicts` 整体迁入**（逐字搬，只改 import 来源：`from shannon_core.models.exploit_verdict_schemas import ExploitVerdict` 不变；pydantic ValidationError import 不变）。再加 ExploitCollector：
+创建 `packages/core/src/shannon_core/collectors/exploit.py`：
 
 ```python
 # packages/core/src/shannon_core/collectors/exploit.py
-"""exploit append collector + verdict 校验（L0-L3）。
+"""exploit append collector（mode="append" SectionSchema）+ verdict 校验（L0-L3）。
 
-append 语义：agent 多次调 add_exploit 累积 verdict list（对齐 TS getAll(): AddExploitInput[]）。
-与 CollectorBase(write-once set_* section bag)本质不同——不继承、不复用。
+复用 a5be2b71 的 CollectorBase mode="append" 机制（同 recon set_endpoints）：
+add_exploit 是 append 工具，多次调累积 verdict 进 get_all()["verdicts"]（list[dict]）。
+不新建独立 collector 类、不新建 bridge（generic mode-aware 桥自动生成）。
 validate_exploit_verdicts 2026-07-17 从 blackbox 迁入 core（blackbox 改 re-export）。
 4 档 verdict 复用 models/exploit_verdict_schemas.py 的 discriminated union。
 """
@@ -138,7 +144,36 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from shannon_core.models.exploit_verdict_schemas import ExploitVerdict
+from shannon_core.collectors.base import CollectorBase, SectionSchema
+from shannon_core.models.exploit_verdict_schemas import ExploitVerdict, ExploitVerdictBatch
+
+
+# ── add_exploit append section（对齐 recon set_endpoints 的 SectionSchema 模式）──
+# 单条 verdict union schema（ExploitVerdictBatch.verdicts.items = oneOf + discriminator + $defs）。
+_SINGLE_VERDICT_SCHEMA = ExploitVerdictBatch.model_json_schema()["properties"]["verdicts"]["items"]
+
+EXPLOIT_VERDICTS_SECTION = SectionSchema(
+    tool_name="add_exploit",
+    section_key="verdicts",
+    description=(
+        "Record one exploitation verdict for a single vulnerability (call ONCE per queue ID; "
+        "call multiple times to record all verdicts). status ∈ {exploited, "
+        "blocked_by_security, out_of_scope_internal, false_positive} selects the field set. "
+        "vulnerability_id MUST be one of the IDs from your input queue. The host renders the "
+        "exploitation evidence deliverable from your calls — there is no Markdown to write."
+    ),
+    json_schema=_SINGLE_VERDICT_SCHEMA,
+    mode="append",
+)
+
+
+def make_exploit_collector(vuln_class: str) -> CollectorBase:
+    """5 个 exploit agent（``<vc>-exploit``）共用的 append collector。
+
+    单个 add_exploit append section。vc 参数保留对称（make_vuln_collector(vc) 模式），
+    当前 schema 跨 class 一致（per-class 只差 queue filename / renderer title）。
+    """
+    return CollectorBase([EXPLOIT_VERDICTS_SECTION])
 
 
 # ── verdict 校验（从 blackbox services/exploit_verdict_validator.py 逐字迁入）──
@@ -199,31 +234,9 @@ def validate_exploit_verdicts(
         seen.add(v.vulnerability_id)
         accepted.append(v)
     return VerdictValidation(accepted=accepted, rejected=rejected)
-
-
-# ── append collector ──────────────────────────────────────────────────────────
-class ExploitCollector:
-    """per-agent-run 的 verdict append 收集器（非全局，对齐 TS per-agent collector）。
-
-    append 语义：多次 add 累积 list（get_all()->list[dict]），无 DuplicateCallError。
-    不继承 CollectorBase（write-once section bag 语义冲突）。
-    """
-
-    def __init__(self) -> None:
-        self._entries: list[dict] = []
-
-    def add(self, entry: dict) -> None:
-        self._entries.append(dict(entry))
-
-    def get_all(self) -> list[dict]:
-        return [dict(e) for e in self._entries]
-
-
-def make_exploit_collector() -> ExploitCollector:
-    return ExploitCollector()
 ```
 
-blackbox `packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py` 改为 re-export（保旧 import 路径 `from shannon_blackbox.services.exploit_verdict_validator import ...` 兼容）：
+blackbox `packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py` 改 re-export：
 
 ```python
 # packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py
@@ -234,7 +247,7 @@ from shannon_core.collectors.exploit import (  # noqa: F401
 )
 ```
 
-blackbox 测试改 import core（`packages/blackbox/tests/test_exploit_verdict_validator.py`）：
+blackbox `packages/blackbox/tests/test_exploit_verdict_validator.py` import 改 core：
 
 ```python
 # 旧：from shannon_blackbox.services.exploit_verdict_validator import VerdictValidation, validate_exploit_verdicts
@@ -244,12 +257,12 @@ from shannon_core.collectors.exploit import VerdictValidation, validate_exploit_
 
 - [ ] **Step 4: Run — verify PASS**
 
-`cd packages/core && uv run pytest tests/collectors/test_exploit_collector.py -q` → 3 passed。
-`cd packages/blackbox && uv run pytest tests/test_exploit_verdict_validator.py -q` → 仍 PASS（re-export 兼容 + 测试改 import）。
+`cd packages/core && uv run pytest tests/collectors/test_exploit_collector.py -q` → 4 passed。
+`cd packages/blackbox && uv run pytest tests/test_exploit_verdict_validator.py -q` → 仍 PASS。
 
 - [ ] **Step 5: Commit**
 
-`git add packages/core/src/shannon_core/collectors/exploit.py packages/core/tests/collectors/test_exploit_collector.py packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py packages/blackbox/tests/test_exploit_verdict_validator.py && git commit -m "feat(collectors): ExploitCollector(append)+validate_exploit_verdicts 迁 core(blackbox re-export)"`
+`git add packages/core/src/shannon_core/collectors/exploit.py packages/core/tests/collectors/test_exploit_collector.py packages/blackbox/src/shannon_blackbox/services/exploit_verdict_validator.py packages/blackbox/tests/test_exploit_verdict_validator.py && git commit -m "feat(collectors): exploit add_exploit append section(mode=append)+validate_exploit_verdicts 迁 core(blackbox re-export)"`
 
 ---
 
@@ -311,7 +324,6 @@ def test_exploited_sorted_by_severity_desc():
 
 
 def test_unprocessed_surfaces_queue_ids_never_attempted():
-    # INJ-9 在 queue(id_to_type) 但 accepted/rejected 都没有 → Unprocessed
     md = render_exploit("injection", VerdictValidation(accepted=[], rejected=[]),
                         {"INJ-9": "injection"})
     assert "## Unprocessed Vulnerabilities" in md and "INJ-9" in md
@@ -434,54 +446,21 @@ def render_exploit(vuln_class: str, validation: VerdictValidation,
 
 ---
 
-### Task 3: bridge append 工具 + make_collector 分支 + render_deliverable 扩签名 + provider isinstance 分支 + executor 多传 deliverables
+### Task 3: make_collector `-exploit` 分支 + render_deliverable 扩签名读 queue
 
 **Files:**
-- Modify: `packages/core/src/shannon_core/collectors/bridge.py`（加 `build_exploit_openai_tools` / `build_exploit_claude_mcp_server`）
 - Modify: `packages/core/src/shannon_core/collectors/__init__.py`（make_collector 加 `-exploit` 分支）
 - Modify: `packages/core/src/shannon_core/renderers/__init__.py`（render_deliverable 扩 `deliverables_path=None` + `-exploit` 分支读 queue）
-- Modify: `packages/core/src/shannon_core/agents/executor.py:169`（多传 `deliverables`）
-- Modify: `packages/core/src/shannon_core/agents/providers_anthropic.py`（isinstance 分支）
-- Modify: `packages/core/src/shannon_core/agents/providers_openai.py`（isinstance 分支）
-- Test: `packages/core/tests/collectors/test_bridge_exploit.py`、`packages/core/tests/renderers/test_render_deliverable_exploit.py`
+- Modify: `packages/core/src/shannon_core/agents/executor.py:170`（render_deliverable 调用点多传 `deliverables`）
+- Test: `packages/core/tests/renderers/test_render_deliverable_exploit.py`
 
 **Interfaces:**
-- Consumes: `ExploitCollector`、`make_exploit_collector`、`render_exploit`、`validate_exploit_verdicts`（Task 1/2）。
-- Produces: `build_exploit_openai_tools(collector)->list[FunctionTool]`、`build_exploit_claude_mcp_server(collector, server_name="exploit")`、`render_deliverable(agent_name, data, deliverables_path=None)`。
+- Consumes: `make_exploit_collector`、`render_exploit`、`validate_exploit_verdicts`（Task 1/2）。
+- Produces: `render_deliverable(agent_name, data, deliverables_path=None)`、make_collector 对 `-exploit` 返 CollectorBase。
 
-- [ ] **Step 1: Write failing tests**
+> **不改 bridge/providers/runner**——exploit 用 `mode="append"` 的 CollectorBase，generic mode-aware 桥（a5be2b71）自动生成 add_exploit 工具，provider 调 generic `build_*`，无感。
 
-```python
-# packages/core/tests/collectors/test_bridge_exploit.py
-import asyncio
-import json
-
-from shannon_core.collectors.bridge import (
-    build_exploit_openai_tools, build_exploit_claude_mcp_server,
-)
-from shannon_core.collectors.exploit import ExploitCollector
-
-
-def test_openai_add_exploit_appends_each_call():
-    c = ExploitCollector()
-    tools = build_exploit_openai_tools(c)
-    assert len(tools) == 1 and tools[0].name == "add_exploit"
-    payload = {"vulnerability_id": "X-1", "status": "exploited", "severity": "high",
-               "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"}
-    # on_invoke_tool 是 async —— 必须 await（正确驱动）
-    ret1 = asyncio.run(tools[0].on_invoke_tool(None, json.dumps(payload)))
-    ret2 = asyncio.run(tools[0].on_invoke_tool(None, json.dumps({**payload, "vulnerability_id": "X-2"})))
-    entries = c.get_all()
-    assert len(entries) == 2  # append：两次调用都生效（无 write-once DuplicateError）
-    assert entries[0]["vulnerability_id"] == "X-1" and entries[1]["vulnerability_id"] == "X-2"
-    assert "added exploit" in ret1 and "X-1" in ret1
-
-
-def test_claude_exploit_server_has_single_add_exploit_tool():
-    c = ExploitCollector()
-    server = build_exploit_claude_mcp_server(c)
-    assert server is not None
-```
+- [ ] **Step 1: Write failing test**
 
 ```python
 # packages/core/tests/renderers/test_render_deliverable_exploit.py
@@ -496,97 +475,55 @@ def test_render_deliverable_exploit_reads_queue_and_renders(tmp_path):
     (tmp_path / "injection_exploitation_queue.json").write_text(json.dumps(
         {"vulnerabilities": [{"ID": "INJ-1", "vulnerability_type": "SQLi"},
                              {"ID": "INJ-9", "vulnerability_type": "SQLi"}]}))
-    # collector entries（add_exploit 产）：只 attempt 了 INJ-1
-    entries = [{"vulnerability_id": "INJ-1", "status": "exploited", "severity": "critical",
-                "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"}]
-    md = render_deliverable(AgentName.INJECTION_EXPLOIT, entries, deliverables_path=tmp_path)
+    # collector.get_all() 形态：{"verdicts": [...]}（append section）
+    data = {"verdicts": [{"vulnerability_id": "INJ-1", "status": "exploited", "severity": "critical",
+                          "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"}]}
+    md = render_deliverable(AgentName.INJECTION_EXPLOIT, data, deliverables_path=tmp_path)
     assert md is not None
     assert "## Successfully Exploited" in md and "INJ-1" in md
     assert "## Unprocessed Vulnerabilities" in md and "INJ-9" in md
 
 
+def test_render_deliverable_exploit_handles_missing_queue(tmp_path):
+    # queue 不存在：valid_ids 空 → 所有 verdict 因 L2 进 rejected（id不在queue）
+    data = {"verdicts": [{"vulnerability_id": "X-1", "status": "exploited", "severity": "low",
+                          "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"}]}
+    md = render_deliverable(AgentName.INJECTION_EXPLOIT, data, deliverables_path=tmp_path)
+    assert md is not None  # 不崩，X-1 落 Unverified
+
+
 def test_render_deliverable_vuln_ignores_deliverables_path(tmp_path):
     # vuln renderer 单输入，deliverables_path 多传不影响（向后兼容）
     md = render_deliverable(AgentName.INJECTION_VULN, {}, deliverables_path=tmp_path)
-    # render_vuln 对空 data 仍渲染（含 placeholder），不报错
-    assert md is not None
+    assert md is not None  # render_vuln 对空 data 渲 placeholder
+
+
+def test_make_collector_returns_append_collectorbase_for_exploit():
+    from shannon_core.collectors import make_collector
+    from shannon_core.collectors.base import CollectorBase
+    c = make_collector(AgentName.INJECTION_EXPLOIT)
+    assert isinstance(c, CollectorBase)
+    assert c.tool_names() == ["add_exploit"]
 ```
 
 - [ ] **Step 2: Run — verify FAIL**
 
-`cd packages/core && uv run pytest tests/collectors/test_bridge_exploit.py tests/renderers/test_render_deliverable_exploit.py -q` → FAIL（ImportError: build_exploit_*）。
+`cd packages/core && uv run pytest tests/renderers/test_render_deliverable_exploit.py -q` → FAIL（render_deliverable 不认 -exploit / 无 deliverables_path 参数）。
 
 - [ ] **Step 3: Implement**
 
-**(a) bridge.py 追加 append 工具桥**（generic set_* 桥不动）：
+**(a) collectors/__init__.py make_collector 加 `-exploit` 分支**（在 `-vuln` 分支后、`return None` 前）：
 
 ```python
-# 追加到 packages/core/src/shannon_core/collectors/bridge.py 末尾
-def build_exploit_openai_tools(collector):
-    """exploit append collector → 单个 add_exploit openai FunctionTool。
-
-    append 语义：每次调用 append（无 write-once DuplicateError），对齐 TS getAll(): list。
-    """
-    from agents import FunctionTool
-    from shannon_core.models.exploit_verdict_schemas import ExploitVerdictBatch
-
-    # 单条 union schema（ExploitVerdictBatch.verdicts.items = oneOf + discriminator + $defs）
-    single_schema = ExploitVerdictBatch.model_json_schema()["properties"]["verdicts"]["items"]
-
-    async def _on_invoke(ctx, input_json: str) -> str:
-        try:
-            payload = json.loads(input_json) if input_json else {}
-        except json.JSONDecodeError:
-            payload = {}
-        collector.add(payload)
-        return f"added exploit {payload.get('vulnerability_id', '')}"
-
-    return [FunctionTool(
-        name="add_exploit",
-        description="Record one exploitation verdict (call ONCE per vulnerability in your queue). "
-                    "status ∈ {exploited, blocked_by_security, out_of_scope_internal, false_positive}.",
-        params_json_schema=single_schema,
-        on_invoke_tool=_on_invoke,
-        strict_json_schema=False,
-    )]
-
-
-def build_exploit_claude_mcp_server(collector, server_name: str = "exploit"):
-    """exploit append collector → 单个 add_exploit SdkMcpTool，in-process MCP server。"""
-    from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
-    from shannon_core.models.exploit_verdict_schemas import ExploitVerdictBatch
-
-    single_schema = ExploitVerdictBatch.model_json_schema()["properties"]["verdicts"]["items"]
-
-    async def _handler(args: dict) -> dict:
-        args = args or {}
-        collector.add(args)
-        return {"content": [{"type": "text",
-                             "text": f"added exploit {args.get('vulnerability_id', '')}"}]}
-
-    tool = SdkMcpTool(
-        name="add_exploit",
-        description="Record one exploitation verdict (call ONCE per vulnerability in your queue). "
-                    "status ∈ {exploited, blocked_by_security, out_of_scope_internal, false_positive}.",
-        input_schema=single_schema,
-        handler=_handler,
-    )
-    return create_sdk_mcp_server(name=server_name, tools=[tool])
-```
-
-**(b) collectors/__init__.py make_collector 加 `-exploit` 分支**：
-
-```python
-# packages/core/src/shannon_core/collectors/__init__.py
-# 在 -vuln 分支后、return None 前追加：
     if isinstance(agent_name, AgentName) and agent_name.value.endswith("-exploit"):
+        vc = agent_name.value.removesuffix("-exploit")
         from shannon_core.collectors.exploit import make_exploit_collector
-        return make_exploit_collector()
+        return make_exploit_collector(vc)
     return None
 ```
-（docstring 同步更新：加 "Plan 4: 5 个 exploit agent（`<vc>-exploit`）共用 append collector"。）
+（docstring 同步加："Plan 4: 5 个 exploit agent（`<vc>-exploit`）共用 append collector（mode='append'）。"）
 
-**(c) renderers/__init__.py render_deliverable 扩签名 + `-exploit` 分支**：
+**(b) renderers/__init__.py render_deliverable 扩签名 + `-exploit` 分支**：
 
 ```python
 # packages/core/src/shannon_core/renderers/__init__.py
@@ -598,11 +535,11 @@ __all__ = ["render_pre_recon", "render_deliverable"]
 def render_deliverable(agent_name, data, deliverables_path=None):
     """按 agent 分发 renderer。
 
-    - Plan 1: pre-recon / Plan 3: 5 vuln agent（``<vc>-vuln``）：data = collector.get_all()（dict bag）。
-    - Plan 4: 5 exploit agent（``<vc>-exploit``）：data = collector.get_all()（list[dict]），
-      需 deliverables_path 读 ``{vt}_exploitation_queue.json`` 取 valid_ids + id_to_type，
-      跑 validate_exploit_verdicts → render_exploit。
-    deliverables_path 对 set_* renderer 无意义（默认 None，向后兼容）。
+    - Plan 1: pre-recon / Plan 3: 5 vuln agent（``<vc>-vuln``）：data = collector.get_all()（dict bag，
+      set section）。deliverables_path 不用（向后兼容，默认 None）。
+    - Plan 4: 5 exploit agent（``<vc>-exploit``）：data = collector.get_all()（含 "verdicts" list，
+      append section）。需 deliverables_path 读 ``{vt}_exploitation_queue.json`` 取 valid_ids +
+      id_to_type，跑 validate_exploit_verdicts → render_exploit。
     """
     from shannon_core.models.agents import AgentName
 
@@ -618,7 +555,7 @@ def render_deliverable(agent_name, data, deliverables_path=None):
     return None
 
 
-def _render_exploit_deliverable(vc, entries, deliverables_path):
+def _render_exploit_deliverable(vc, data, deliverables_path):
     import json
     from pathlib import Path
     from shannon_core.collectors.exploit import validate_exploit_verdicts
@@ -639,11 +576,12 @@ def _render_exploit_deliverable(vc, entries, deliverables_path):
                         id_to_type[vid] = getattr(v, "vulnerability_type", vc)
             except (json.JSONDecodeError, OSError):
                 pass
-    validation = validate_exploit_verdicts(entries or [], valid_ids)
+    entries = (data or {}).get("verdicts", []) if isinstance(data, dict) else (data or [])
+    validation = validate_exploit_verdicts(entries, valid_ids)
     return render_exploit(vc, validation, id_to_type)
 ```
 
-**(d) executor.py L169 多传 deliverables**：
+**(c) executor.py L170 render_deliverable 调用点多传 deliverables**：
 
 ```python
 # executor.py（原 L169-172）
@@ -653,46 +591,13 @@ def _render_exploit_deliverable(vc, entries, deliverables_path):
                 (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
 ```
 
-**(e) providers_anthropic.py isinstance 分支**（原 L109-114 块改造）：
-
-```python
-            mcp_server = None
-            allowed_tools = None
-            if collector is not None:
-                from shannon_core.collectors.exploit import ExploitCollector
-                if isinstance(collector, ExploitCollector):
-                    from shannon_core.collectors.bridge import build_exploit_claude_mcp_server
-                    mcp_server = build_exploit_claude_mcp_server(collector)
-                    allowed_tools = ["add_exploit"]
-                else:
-                    from shannon_core.collectors.bridge import build_claude_mcp_server
-                    mcp_server = build_claude_mcp_server(collector)
-                    allowed_tools = collector.tool_names()
-```
-
-**(f) providers_openai.py isinstance 分支**（原 L208-212 块改造）：
-
-```python
-        extra_tools = None
-        if collector is not None:
-            from shannon_core.collectors.exploit import ExploitCollector
-            if isinstance(collector, ExploitCollector):
-                from shannon_core.collectors.bridge import build_exploit_openai_tools
-                extra_tools = build_exploit_openai_tools(collector)
-            else:
-                from shannon_core.collectors.bridge import build_openai_tools
-                extra_tools = build_openai_tools(collector)
-        agent = self.build_agent(model, output_format, extra_tools=extra_tools)
-```
-
 - [ ] **Step 4: Run — verify PASS**
 
-`cd packages/core && uv run pytest tests/collectors/test_bridge_exploit.py tests/renderers/test_render_deliverable_exploit.py -q` → passed。
-回归 set_* 路径无漂移：`uv run pytest tests/collectors/ tests/renderers/ -q`（改动子集，应全绿；若遇预存挂起，记 progress ledger）。
+`cd packages/core && uv run pytest tests/renderers/test_render_deliverable_exploit.py tests/renderers/ tests/collectors/ -q` → passed（含 set_* renderer 回归无漂移：render_deliverable 对 vuln/pre_recon 多传 deliverables_path 但不用，向后兼容）。
 
 - [ ] **Step 5: Commit**
 
-`git add packages/core/src/shannon_core/collectors/bridge.py packages/core/src/shannon_core/collectors/__init__.py packages/core/src/shannon_core/renderers/__init__.py packages/core/src/shannon_core/agents/executor.py packages/core/src/shannon_core/agents/providers_anthropic.py packages/core/src/shannon_core/agents/providers_openai.py packages/core/tests/collectors/test_bridge_exploit.py packages/core/tests/renderers/test_render_deliverable_exploit.py && git commit -m "feat(exploit): append bridge+make_collector/render_deliverable 分支+provider isinstance+executor 传 deliverables"`
+`git add packages/core/src/shannon_core/collectors/__init__.py packages/core/src/shannon_core/renderers/__init__.py packages/core/src/shannon_core/agents/executor.py packages/core/tests/renderers/test_render_deliverable_exploit.py && git commit -m "feat(exploit): make_collector -exploit 分支+render_deliverable 扩 deliverables_path 读 queue+executor 传 deliverables"`
 
 ---
 
@@ -701,7 +606,7 @@ def _render_exploit_deliverable(vc, entries, deliverables_path):
 **Files:**
 - Modify: `prompts/exploit-injection.txt`、`exploit-xss.txt`、`exploit-auth.txt`、`exploit-ssrf.txt`、`exploit-authz.txt`
 
-**前提核查：** 5 个 prompt 现已是 structured verdicts JSON 通道（`<system_architecture>` 的 "Your Output: structured verdicts — ... JSON object of shape `{"verdicts":[...]}`"）+ 已禁 Write（"Do NOT write a free-text markdown file"）+ 已读 queue（`{{DELIVERABLES_PATH}}/{vt}_exploitation_queue.json`）。本 task 只把 verdict **产出方式**从 "emit JSON" 改为 "call add_exploit per ID"，4 档字段说明保留。
+**前提核查：** 5 个 prompt 现已是 structured verdicts JSON 通道（`<system_architecture>` 的 "Your Output: structured verdicts — ... JSON object of shape `{"verdicts":[...]}`"）+ 已禁 Write（"Do NOT write a free-text markdown file"）+ 已读 queue。本 task 只把 verdict **产出方式**从 "emit JSON" 改为 "call add_exploit per ID"，4 档字段说明保留。
 
 - [ ] **Step 1: 改 5 个 prompt**
 
@@ -733,14 +638,14 @@ def _render_exploit_deliverable(vc, entries, deliverables_path):
 
 **(2) `<deliverable_instructions>` 的 "emit your structured verdicts"**——把 "You MUST emit your structured verdicts (see **Your Output** above); the system renders the evidence file from them." 改为 "You MUST call the `add_exploit` tool once per queue ID (see **Your Output** above); the host renders the evidence deliverable from your calls."
 
-**保留不动**：queue 读取（`{{DELIVERABLES_PATH}}/{vt}_exploitation_queue.json`）、TodoWrite 指示、severity 排序指示（"Order exploited verdicts by severity"）、4 档字段语义说明（`<methodology_and_domain_expertise>` 内的 verdict 分类解释）。
+**保留不动**：queue 读取（`{{DELIVERABLES_PATH}}/{vt}_exploitation_queue.json`）、TodoWrite 指示、severity 排序指示、4 档字段语义说明。
 
-**per-class 差异**：只有 `{vt}` 占位不同（queue filename `injection_exploitation_queue.json` 等），prompt 主体 5 个一致。
+**per-class 差异**：只有 `{vt}` 占位不同（queue filename `injection_exploitation_queue.json` 等）。
 
 - [ ] **Step 2: 校验 + Commit**
 
-校验插值 + 无残留 `{"verdicts"` JSON shape 指示（保留 `add_exploit`）：
-`cd packages/core && uv run pytest tests/prompts/ -q -k "exploit or interpolation" `（若无 exploit 专用插值测试，跑全 prompts 插值子集；断言 5 个 exploit prompt 仍可插值 + 含 `add_exploit` + 不含 `Produce a JSON object of shape`）。
+校验插值 + 无残留 `Produce a JSON object of shape`：
+`cd packages/core && uv run pytest tests/prompts/ -q`（断言 5 个 exploit prompt 仍可插值 + 含 `add_exploit` + 不含 `Produce a JSON object of shape`；若无 exploit 专用插值测试，跑全 prompts 插值子集 + grep 校验）。
 
 `git add prompts/exploit-injection.txt prompts/exploit-xss.txt prompts/exploit-auth.txt prompts/exploit-ssrf.txt prompts/exploit-authz.txt && git commit -m "feat(prompts): 5 exploit prompt 改 add_exploit(4档 append),删 emit JSON verdicts 指示"`
 
@@ -750,20 +655,20 @@ def _render_exploit_deliverable(vc, entries, deliverables_path):
 
 **Files:**
 - Modify: `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`（迁移接线）
-- Modify: `packages/blackbox/tests/test_exploit_evidence_renderer.py`（改 import core 的 VerdictValidation，若 Task 1 未覆盖）
+- Modify: `packages/blackbox/tests/test_exploit_evidence_renderer.py`（VerdictValidation import 改 core，若 Task 1 未覆盖）
 
 **迁移要点：** blackbox `ExploitExecutor` 当前传 `structured_output_schema=ExploitVerdictBatch` + `skip_artifact_postprocess=True` + L78-101 兜底/validate/render/write_verdicts_json。迁移后 verdicts 由 `add_exploit` 采集、core renderer 渲染，blackbox 这套接线删除/改 false。
 
 - [ ] **Step 1: 改 ExploitExecutor.execute**
 
 `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`：
-- L62-75 调 `self._executor.execute(...)` 时：**删 `structured_output_schema=ExploitVerdictBatch.model_json_schema()`**、**改 `skip_artifact_postprocess=False`**（让 core renderer 落盘 `{vt}_exploitation_evidence.md`）。保留 `prompt_variables`（含 queue `vulnerability_entries`）、agent_name、deliverables_path 等。
-- **删 L77-101**（structured_output 兜底 + validate_exploit_verdicts + ExploitEvidenceRenderer.render + write_verdicts_json + blackbox_dir 写 evidence.md）——这些迁到 core renderer（Task 2-3 已实现：core 读 queue + validate + render）。
-- 保留 queue 读取（L40-49）注入 `prompt_variables["vulnerability_entries"]`（agent 需读 queue 决定 attempt 哪些 ID）。
-- 删顶部 `ExploitEvidenceRenderer` / `validate_exploit_verdicts` import（不再用）；`ExploitVerdictBatch` import 删（不再传 schema）。
+- L62-75 调 `self._executor.execute(...)` 时：**删 `structured_output_schema=ExploitVerdictBatch.model_json_schema()`**、**改 `skip_artifact_postprocess=False`**（让 core renderer 读 queue + validate + 渲 `{vt}_exploitation_evidence.md`）。保留 `prompt_variables`（含 queue `vulnerability_entries`）、agent_name、deliverables_path 等。
+- **删 L77-101**（structured_output 兜底 + validate_exploit_verdicts + ExploitEvidenceRenderer.render + write_verdicts_json + blackbox_dir 写 evidence.md）。
+- 保留 queue 读取（L40-49）注入 `prompt_variables["vulnerability_entries"]`。
+- 删顶部 `ExploitEvidenceRenderer` / `validate_exploit_verdicts` / `ExploitVerdictBatch` import。
 - `return metrics` 保留。
 
-迁移后 execute 大致：
+迁移后 execute：
 
 ```python
 async def execute(self, agent_name, vuln_type, workspace_path, deliverables_path,
@@ -781,8 +686,8 @@ async def execute(self, agent_name, vuln_type, workspace_path, deliverables_path
             correlation_context.get("boundaries", []), ensure_ascii=False)
     prompt_variables["browser_session_id"] = get_session_id(agent_name.value)
 
-    # verdicts 改由 add_exploit 工具采集（core ExploitCollector）；core renderer 读 queue
-    # + validate + 渲 {vt}_exploitation_evidence.md（skip_artifact_postprocess=False 触发）。
+    # verdicts 改由 add_exploit 工具采集（core CollectorBase mode=append）；core renderer
+    # 读 queue + validate + 渲 {vt}_exploitation_evidence.md（skip_artifact_postprocess=False 触发）。
     metrics = await self._executor.execute(
         agent_name=agent_name,
         repo_path=str(deliverables_path),
@@ -801,11 +706,11 @@ async def execute(self, agent_name, vuln_type, workspace_path, deliverables_path
 
 - [ ] **Step 2: 改 blackbox 测试**
 
-`packages/blackbox/tests/test_exploit_evidence_renderer.py`：`VerdictValidation` import 改 `from shannon_core.collectors.exploit import VerdictValidation`（Task 1 已让 blackbox re-export 兼容，但测试直接 import core 更清晰）。`ExploitEvidenceRenderer` import 保留（测的是旧 renderer 死代码——Plan 5 删前仍要绿，确保未误删）。
+`packages/blackbox/tests/test_exploit_evidence_renderer.py`：`VerdictValidation` import 改 `from shannon_core.collectors.exploit import VerdictValidation`。`ExploitEvidenceRenderer` import 保留（测旧 renderer 死代码，Plan 5 删前仍绿）。
 
 - [ ] **Step 3: 跑 blackbox exploit 测试子集**
 
-`cd packages/blackbox && uv run pytest tests/test_exploit_evidence_renderer.py tests/test_exploit_verdict_validator.py -q` → PASS（renderer 死代码仍可测 + validator re-export 兼容）。
+`cd packages/blackbox && uv run pytest tests/test_exploit_evidence_renderer.py tests/test_exploit_verdict_validator.py -q` → PASS。
 
 - [ ] **Step 4: Commit**
 
@@ -815,36 +720,40 @@ async def execute(self, agent_name, vuln_type, workspace_path, deliverables_path
 
 跑一个 exploit agent（如 injection-exploit，前提 injection-vuln 已产 `injection_exploitation_queue.json`），确认：
 - `injection_exploitation_evidence.md` 由 **core host 渲染**（5 section：Successfully Exploited / Potential Blocked / Other / Unverified / Unprocessed）
-- agent 多次调 `add_exploit`（append，非 write-once）—— 工具审计日志可见多次调用
+- agent 多次调 `add_exploit`（append，工具返 "add_exploit: recorded (N total)"）
 - Unprocessed section 正确反映 queue 里没 attempt 的 ID
 - workflow.log 无 `Missing deliverable: injection_exploitation_evidence.md`
-- verdicts 不丢（invite_code_center 回归点）：exploited/blocked 都落对应 section
+- verdicts 不丢（invite_code_center 回归点）
 
 - [ ] **Step 6: 记 memory**
 
-记录 Plan 4 落地（exploit append collector + 全迁移 blackbox→core + 5-section renderer）到 memory `[[pre-recon-md-deliverable-glm-forget-write]]`，并新建/更新 `[[blackbox-exploit-verdict-drop-fix]]`（verdicts 采集通道从 structured_output 迁到 add_exploit）。
+记录 Plan 4 落地（exploit 复用 a5be2b71 CollectorBase mode=append + 全迁移 blackbox→core + 5-section renderer）到 memory `[[pre-recon-md-deliverable-glm-forget-write]]`，更新 `[[blackbox-exploit-verdict-drop-fix]]`。
 
 ---
 
 ## Self-Review
 
 **Spec coverage:** 父 spec §6 Plan 4 裁定注记 → Task 1-5 ✓。
-- append collector（非 write-once）：Task 1 ✓
-- 独立 `build_exploit_*` 桥：Task 3 ✓
-- provider isinstance 分支：Task 3 ✓
-- render_deliverable 扩签名读 queue：Task 3 ✓
+- append（非 write-once set_*）：Task 1（复用 a5be2b71 mode=append）✓
+- 复用 generic mode-aware bridge：Task 1（EXPLOIT_VERDICTS_SECTION mode=append，generic 桥自动生成）✓ —— **不改 bridge/providers**
+- make_collector/render_deliverable `-exploit` 分支：Task 3 ✓
 - 4 档对齐 exploit_verdict_schemas：Task 1/2 ✓
 - validator 迁 core：Task 1 ✓
-- 5 section renderer（含 Rejected + Unprocessed）：Task 2 ✓
+- 5 section renderer（Rejected + Unprocessed 正交）：Task 2 ✓
 - blackbox ExploitExecutor 迁移（skip=False、删 structured_output/兜底/render）：Task 5 ✓
 - 5 prompt 改 add_exploit：Task 4 ✓
-- blackbox ExploitEvidenceRenderer 留死代码 Plan 5 删：Task 5 注明 ✓
 
-**Placeholder scan:** Task 4 prompt 改造给了完整 before/after 文案；Task 5 ExploitExecutor 给了迁移后完整 execute；validator 迁移给逐字搬指令。无 TBD。Task 4 校验断言明确（含 `add_exploit` + 不含 `Produce a JSON object of shape`）。
+**Placeholder scan:** Task 4 prompt 给完整 before/after；Task 5 给迁移后完整 execute；validator 逐字搬。无 TBD。
 
-**Type consistency:** `ExploitCollector.add/get_all`（Task 1）→ bridge `build_exploit_*`（Task 3）→ executor `make_collector`（Task 3）→ `render_deliverable`（Task 3，多传 deliverables）→ `render_exploit`（Task 2）签名一致；`validate_exploit_verdicts(raw, valid_ids)->VerdictValidation` 跨 Task 1/3 一致；`render_exploit(vc, validation, id_to_type)` 跨 Task 2/3 一致。
+**Type consistency:** `EXPLOIT_VERDICTS_SECTION`(mode=append) → `make_exploit_collector(vc)->CollectorBase`（Task 1）→ `make_collector -exploit` 分支（Task 3）→ `get_all()["verdicts"]` list → `render_deliverable` exploit 分支取 `data["verdicts"]`（Task 3）→ `validate_exploit_verdicts(entries, valid_ids)->VerdictValidation` → `render_exploit(vc, validation, id_to_type)`（Task 2/3）签名一致。
+
+**a5be2b71 对齐核验：**
+- exploit add_exploit section 与 recon set_endpoints 同构（`SectionSchema(mode="append")` + `_obj`/json_schema + tool_name/section_key）✓
+- 不碰 bridge.py（a5be2b71 已 mode-aware，generic `build_openai_tools`/`build_claude_mcp_server` 自动给 append section 生成 append 闭包）✓
+- 不碰 providers_anthropic.py / providers_openai.py（collector 是 CollectorBase，provider 调 generic build_* 无感）✓
+- `get_all()` exploit 形态 = `{"verdicts": [...]}`（append section 累积成 list value，空则不含键）✓
 
 **已知执行期风险：**
-- `add_exploit` discriminated union schema 在 GLM/双引擎接受度 → Task 3 bridge 测试（asyncio.run 正确驱动）+ Task 5 probe 验证。schema 已是 discriminated（oneOf + discriminator + $defs，非裸 oneOf），比原 plan 假设的裸 oneOf 更稳。
-- Task 3 回归 set_* 路径：providers isinstance 分支须不破坏 CollectorBase 路径（测试覆盖 + executor 端到端）。
-- Task 5 blackbox 迁移回归：structured_output 兜底是 invite_code_center bug 修的——迁移后 verdicts 改由 add_exploit 采集 + core validate 兜底，Task 5 真机冒烟验证不丢。
+- `add_exploit` discriminated union schema（oneOf + discriminator + $defs）在 GLM/双引擎接受度 → Task 5 probe 验证。schema 已是 discriminated（非裸 oneOf），比裸 oneOf 稳。
+- a5be2b71 回归：exploit 用 mode=append 不破坏 set_* agent（pre_recon/vuln）——Task 1/3 测试覆盖 append 路径 + Task 3 回归 set_* renderer。
+- Task 5 blackbox 迁移回归：verdicts 改由 add_exploit 采集 + core validate 兜底，真机冒烟验证不丢（invite_code_center 回归点）。
