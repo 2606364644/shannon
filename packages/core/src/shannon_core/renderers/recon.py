@@ -131,6 +131,8 @@ def _render_endpoints(data: dict) -> str:
          e.get("description_code_pointer", "")]
         for e in endpoints
     ]
+    # deterministic output (对齐 prompt 承诺 "sorts by (path, method)"): r[1]=path, r[0]=method
+    rows.sort(key=lambda r: (r[1], r[0]))
     return _section(4, "API Endpoint Inventory", render_table(headers, rows))
 
 
@@ -166,6 +168,8 @@ def _render_entities(nm: dict) -> str:
          ", ".join(e.get("data") or []), e.get("notes", "")]
         for e in entities
     ]
+    # deterministic output (对齐 prompt 承诺 "sorts each array deterministically"): r[0]=title
+    rows.sort(key=lambda r: r[0])
     return _sub("6.1", "Entities", render_table(headers, rows))
 
 
@@ -180,6 +184,8 @@ def _render_entity_metadata(nm: dict) -> str:
         rows.append([e.get("title", ""), meta_str])
     if not rows:
         return _sub("6.2", "Entity Metadata", "*None identified.*")
+    # deterministic output: r[0]=title
+    rows.sort(key=lambda r: r[0])
     return _sub("6.2", "Entity Metadata", render_table(["Title", "Metadata"], rows))
 
 
@@ -194,6 +200,8 @@ def _render_flows(nm: dict) -> str:
          ", ".join(f.get("touches") or [])]
         for f in flows
     ]
+    # deterministic output: r[0]="from → to" string
+    rows.sort(key=lambda r: r[0])
     return _sub("6.3", "Flows (Connections)", render_table(headers, rows))
 
 
@@ -231,6 +239,8 @@ def _render_discovered_roles(ra: dict) -> str:
          r.get("code_implementation", "")]
         for r in roles
     ]
+    # deterministic output: r[0]=role name
+    rows.sort(key=lambda r: r[0])
     return _sub("7.1", "Discovered Roles", render_table(headers, rows))
 
 
@@ -266,6 +276,8 @@ def _render_role_entry_points(ra: dict) -> str:
          r.get("authentication_method", "")]
         for r in roles
     ]
+    # deterministic output: r[0]=role
+    rows.sort(key=lambda r: r[0])
     return _sub("7.3", "Role Entry Points", render_table(headers, rows))
 
 
@@ -279,6 +291,8 @@ def _render_role_to_code(ra: dict) -> str:
          r.get("permission_checks", ""), r.get("storage_location", "")]
         for r in roles
     ]
+    # deterministic output: r[0]=role
+    rows.sort(key=lambda r: r[0])
     return _sub("7.4", "Role-to-Code Mapping", render_table(headers, rows))
 
 
@@ -307,6 +321,8 @@ def _render_horizontal(ac: dict) -> str:
          h.get("data_type", ""), h.get("sensitivity", "")]
         for h in items
     ]
+    # deterministic output: r[0]=priority
+    rows.sort(key=lambda r: r[0])
     return _sub("8.1", "Horizontal Privilege Escalation Candidates", render_table(headers, rows))
 
 
@@ -320,6 +336,8 @@ def _render_vertical(ac: dict) -> str:
          v.get("risk_level", "")]
         for v in items
     ]
+    # deterministic output: r[0]=target_role
+    rows.sort(key=lambda r: r[0])
     return _sub("8.2", "Vertical Privilege Escalation Candidates", render_table(headers, rows))
 
 
@@ -333,6 +351,8 @@ def _render_context(ac: dict) -> str:
          c.get("bypass_potential", "")]
         for c in items
     ]
+    # deterministic output: r[0]=workflow
+    rows.sort(key=lambda r: r[0])
     return _sub("8.3", "Context-Based Authorization Candidates", render_table(headers, rows))
 
 

@@ -110,5 +110,7 @@ def test_render_deliverable_dispatches_pre_recon():
     assert md is not None and "## 1. Executive Summary" in md
 
 
-def test_render_deliverable_returns_none_for_non_pre_recon():
-    assert render_deliverable(AgentName.RECON, {}) is None
+def test_render_deliverable_returns_none_for_non_rendered_agent():
+    # RECON 现已接 host-render（Plan 2 Task C）；用 REPORT 验证无 renderer 通道的
+    # agent 仍返 None（对齐 collector 侧 test_pre_recon.py:106 的 RECON→REPORT 修法）。
+    assert render_deliverable(AgentName.REPORT, {}) is None

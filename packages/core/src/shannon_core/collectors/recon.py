@@ -515,7 +515,7 @@ AUTHZ_CANDIDATES = _obj(
             "items": _HORIZONTAL_CANDIDATE,
             "description": (
                 "Endpoints with object identifiers that could allow horizontal access to other users' "
-                "resources. Becomes Section 8.1. The renderer assigns stable AUTHZ-CAND-NN IDs."
+                "resources. Becomes Section 8.1."
             ),
         },
         "vertical": {
@@ -643,9 +643,7 @@ RECON_SECTIONS: list[SectionSchema] = [
         "authz_candidates",
         "Record authorization vulnerability candidates: horizontal escalation, vertical escalation, and "
         "context-based candidates. Call exactly once before terminating. Becomes Sections 8.1, 8.2, and "
-        "8.3 of the rendered deliverable. The renderer assigns stable AUTHZ-CAND-NN IDs across the three "
-        "sub-arrays in horizontal → vertical → context order, which vuln-authz reads as its todo list. "
-        "Duplicate calls are rejected.",
+        "8.3 of the rendered deliverable. Duplicate calls are rejected.",
         AUTHZ_CANDIDATES,
     ),
     _section(

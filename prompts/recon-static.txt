@@ -98,7 +98,7 @@ You must call all nine of the following tools before terminating. Each tool's fu
 - `set_input_vectors` — URL parameters, POST body fields, HTTP headers, and cookie values (Section 5). Drives downstream vulnerability analysis.
 - `set_network_map` — entities, flows, and guards (Sections 6.1, 6.2, 6.3, 6.4). The renderer splits the entities array into the 6.1 and 6.2 tables and sorts each array deterministically.
 - `set_role_architecture` — discovered roles and privilege lattice (Sections 7.1, 7.2, 7.3, 7.4). The renderer splits the roles array into the per-section tables.
-- `set_authz_candidates` — horizontal, vertical, and context-based authorization candidates (Sections 8.1, 8.2, 8.3). The renderer assigns stable `AUTHZ-CAND-NN` IDs across the three sub-arrays in horizontal → vertical → context order, which vuln-authz reads as its todo list.
+- `set_authz_candidates` — horizontal, vertical, and context-based authorization candidates (Sections 8.1, 8.2, 8.3).
 - `set_injection_sources` — applicable flag + 6 sink arrays (command/SQL/LFI-RFI/path-traversal/SSTI/deserialization) (Section 9). Drives the vuln-injection agent's todos downstream. Set `applicable=false` only if the application has no network-accessible code paths to dangerous sinks at all; otherwise populate each category array (empty arrays mean "scanned this category, no sources found").
 
 **Call semantics — two distinct modes:**
@@ -110,7 +110,7 @@ You must call all nine of the following tools before terminating. Each tool's fu
 
 The host renders `recon_deliverable.md` with the following section structure. Organize each `set_*` tool's payload content to match — the renderer reproduces this structure 1:1 from your tool calls.
 
-## 0) HOW TO READ
+## 0) HOW TO READ THIS
 Static source-code reconnaissance — no live requests. Downstream vuln agents consume §4 (endpoint inventory + §4.2 security context), §5 (input vectors), §8 (authz candidates), §9 (injection sources).
 
 ## 1. Executive Summary
@@ -124,6 +124,8 @@ Static source-code reconnaissance — no live requests. Downstream vuln agents c
 
 ## 4. API Endpoint Inventory
 | Method | Endpoint Path | Required Role | Object ID Parameters | Authorization Mechanism | Description & Code Pointer |
+
+**Note on §4.1/4.2/4.3:** These subsections (Shared Controller Route Groups, Endpoint Security Context, Enumeration Reconciliation) are agent-side analysis guidance for organizing your endpoint discovery — they are NOT rendered as separate sections. Fold their findings into the §4 main table's `description_code_pointer` / `authorization_mechanism` / `object_id_parameters` columns via `set_endpoints`. The §4.3 Enumeration Reconciliation table gates which endpoints you emit (resolve every `true-miss` via `set_endpoints`), not a separate output.
 
 ### 4.1 Shared Controller Route Groups
 Per the shared/_cross-route-enumeration.txt checklist: every route sharing a handler
