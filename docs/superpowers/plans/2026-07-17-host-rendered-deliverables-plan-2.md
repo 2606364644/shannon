@@ -223,10 +223,10 @@ def make_recon_collector() -> CollectorBase:
 
 ---
 
-### Task 2: `render_recon` + 表格 helper
+### Task 2: `render_recon`（`render_table` 已在 `_helpers.py` 落地,直接 import）
 
 **Files:**
-- Modify: `packages/core/src/shannon_core/renderers/_helpers.py`（加 `render_table`）
+- (_helpers.py 的 `render_table`/`placeholder` 已落地,本 task 只 import,不改 _helpers.py)
 - Create: `packages/core/src/shannon_core/renderers/recon.py`
 - Test: `packages/core/tests/renderers/test_recon.py`
 
@@ -276,19 +276,7 @@ def test_authentication_role_switching_subsection():
 
 - [ ] **Step 3: Implement**
 
-`_helpers.py` 追加表格 helper：
-
-```python
-# 追加到 packages/core/src/shannon_core/renderers/_helpers.py
-def render_table(headers: list[str], rows: list[list[str]]) -> str:
-    """对齐 TS recon-renderer.ts renderTable。空表→空串(由调用方决定 placeholder)。"""
-    if not rows:
-        return ""
-    line0 = "| " + " | ".join(headers) + " |"
-    line1 = "| " + " | ".join(["---"] * len(headers)) + " |"
-    body = ["| " + " | ".join(r) + " |" for r in rows]
-    return "\n".join([line0, line1] + body)
-```
+> `render_table` 已在 `renderers/_helpers.py` 落地（带 `_escape_cell`，Plan 1/3 共用）。本 task **只创建 `renderers/recon.py`**，`from ._helpers import placeholder, render_table` 即可，不再追加 helper。
 
 `renderers/recon.py`：
 
@@ -411,46 +399,52 @@ def render_recon(data: dict) -> str:
 ### Task 3: registry 注册 recon
 
 **Files:**
-- Modify: `packages/core/src/shannon_core/collectors/__init__.py`（`get_collector_spec` 加 `RECON` 分支）
+- Modify: `packages/core/src/shannon_core/collectors/__init__.py`（`make_collector` 加 `RECON` 分支）+ `renderers/__init__.py`（`render_deliverable` 加 `RECON` 分支）
 - Test: `packages/core/tests/collectors/test_registry.py`
 
 **Interfaces:**
-- Produces: `get_collector_spec(AgentName.RECON)` 返回 `CollectorSpec(make_recon_collector, RECON_SECTIONS, render_recon)`。
+- Produces: `make_collector(AgentName.RECON) -> CollectorBase`（返 `ReconCollector()`）；`render_deliverable(AgentName.RECON, data)` 分发到 `render_recon(data)`。
 
 - [ ] **Step 1: Write failing test**
 
 ```python
 # packages/core/tests/collectors/test_registry.py
-from shannon_core.collectors import get_collector_spec
+from shannon_core.collectors import make_collector
 from shannon_core.models.agents import AgentName
 
 
 def test_recon_registered():
-    spec = get_collector_spec(AgentName.RECON)
-    assert spec is not None
-    assert len(spec.sections) == 8
-    data = spec.make_collector().get_all()
-    assert len(data) == 8
+    c = make_collector(AgentName.RECON)
+    assert c is not None
+    assert len(c.section_schemas) == 8
+    assert len(c.tool_names()) == 8
 
 
 def test_unmapped_agent_returns_none():
     from shannon_core.models.agents import AgentName as A
-    assert get_collector_spec(A.VALIDATE_AUTH) is None
+    assert make_collector(A.VALIDATE_AUTH) is None
 ```
 
 - [ ] **Step 2: Run — verify FAIL**
 
-`cd packages/core && uv run pytest tests/collectors/test_registry.py -q` → FAIL（`get_collector_spec(RECON)` 返 None）。
+`cd packages/core && uv run pytest tests/collectors/test_registry.py -q` → FAIL（`make_collector(RECON)` 返 None）。
 
 - [ ] **Step 3: Implement**
 
-`collectors/__init__.py` 的 `get_collector_spec` 加分支（在 PRE_RECON 分支后）：
+`collectors/__init__.py::make_collector` 加分支（在 PRE_RECON 分支后）：
 
 ```python
-    if agent_name == A.RECON:
-        from .recon import RECON_SECTIONS, make_recon_collector
-        from ..renderers.recon import render_recon
-        return CollectorSpec(make_recon_collector, RECON_SECTIONS, render_recon)
+    if agent_name == AgentName.RECON:
+        from shannon_core.collectors.recon import make_recon_collector
+        return make_recon_collector()
+```
+
+并在 `renderers/__init__.py::render_deliverable` 对应加 RECON 分支（在 PRE_RECON 分支后）：
+
+```python
+    if agent_name == AgentName.RECON:
+        from shannon_core.renderers.recon import render_recon
+        return render_recon(data)
 ```
 
 - [ ] **Step 4: Run — verify PASS**
@@ -479,7 +473,7 @@ def test_unmapped_agent_returns_none():
 - **MANDATORY:** You MUST emit your complete analysis by calling all eight `set_*` tools listed in `<deliverable_tools>` before terminating. The host renders the deliverable Markdown from those calls — there is no Markdown for you to write yourself.
 ```
 
-末尾加 `<deliverable_tools>` 块，列 8 个工具：`set_executive_summary` / `set_technology_stack` / `set_authentication` / `set_input_vectors` / `set_network_map` / `set_role_architecture` / `set_authz_candidates` / `set_injection_sources`，每个标 Section 号 + 引用工具目录字段指引（字段已在 collector pydantic Field description）。
+末尾加 `<deliverable_tools>` 块，列 8 个工具：`set_executive_summary` / `set_technology_stack` / `set_authentication` / `set_input_vectors` / `set_network_map` / `set_role_architecture` / `set_authz_candidates` / `set_injection_sources`，每个标 Section 号 + 引用工具目录字段指引（字段已在 collector JSON Schema description）。
 
 删 `{{DELIVERABLES_PATH}}/recon_deliverable.md` 的 Write 指示；`{{DELIVERABLES_PATH}}` 仍保留（schemas 目录等仍用，对齐 TS）。
 
@@ -508,13 +502,11 @@ def test_unmapped_agent_returns_none():
 # packages/core/tests/test_executor_recon_render.py
 import asyncio
 from shannon_core.agents import executor as exec_mod
-from shannon_core.collectors import get_collector_spec
 from shannon_core.models.agents import AgentName
 
 
 def test_executor_renders_recon_md_from_collector(tmp_path, monkeypatch):
     deliverables = tmp_path / "deliverables"; deliverables.mkdir()
-    spec = get_collector_spec(AgentName.RECON)
 
     class _R:
         success = True; turns = 1; cost = 0.0; cost_currency = "USD"
@@ -525,6 +517,7 @@ def test_executor_renders_recon_md_from_collector(tmp_path, monkeypatch):
     _R.text = "done"
 
     async def fake_run(**kw):
+        # execute 内部 make_collector(RECON) 并把 collector 透传给 run_claude_prompt
         kw["collector"].set_section("executive_summary", {"text": "recon overview"})
         return _R()
     monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
@@ -539,7 +532,7 @@ def test_executor_renders_recon_md_from_collector(tmp_path, monkeypatch):
 
     asyncio.run(ax.execute(
         agent_name=AgentName.RECON, repo_path=str(deliverables),
-        deliverables_path=str(deliverables), collector_spec=spec))
+        deliverables_path=str(deliverables)))  # execute 内部 make_collector,不传 collector_spec
     md = (deliverables / "recon_deliverable.md").read_text()
     assert "## 1. Executive Summary" in md and "recon overview" in md
     assert "Section 3" in md  # skipped → placeholder
@@ -570,9 +563,9 @@ def test_executor_renders_recon_md_from_collector(tmp_path, monkeypatch):
 
 **Placeholder scan:** Task 1/2 的 model 字段与 renderer 完整移植标注了 TS 行号（明确移植指令，非 TODO）；HOW_TO_READ_THIS 同。`add_endpoints` 语义在 Task 1 ⚠️ 标注待查 + 默认假设 + 备选方案。
 
-**Type consistency:** `RECON_SECTIONS`/`make_recon_collector`/`render_recon` 与 Plan 1 的 `PRE_RECON_SECTIONS`/`make_pre_recon_collector`/`render_pre_recon` 模式一致；`SectionSpec`/`CollectorSpec` 复用 Plan 1 定义。
+**Type consistency:** `RECON_SECTIONS`/`make_recon_collector`/`render_recon` 与 Plan 1 的 `PRE_RECON_SECTIONS`/`PreReconCollector`/`render_pre_recon` 模式一致；`SectionSchema` 复用 Plan 1 定义（无 `CollectorSpec`——collector/render 经 `make_collector`/`render_deliverable` 分发）。
 
-**Plan 1 依赖：** 本 plan 假设 Plan 1 已落地（框架 + executor collector_spec 接线 + registry）。若 Plan 1 接口有调整，Task 3 的 registry 分支与 Task 5 的端到端按实际接口适配。
+**Plan 1 依赖：** 本 plan 假设 Plan 1 已落地（框架 + executor collector 接线 + registry）。若 Plan 1 接口有调整，Task 3 的 registry 分支与 Task 5 的端到端按实际接口适配。
 
 **已知执行期风险：**
 - TS `add_endpoints` 语义（append vs 并入 network_map）→ Task 1 ⚠️ 已标注。
