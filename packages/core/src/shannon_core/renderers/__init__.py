@@ -7,6 +7,7 @@ def render_deliverable(agent_name, data: dict) -> "str | None":
     """按 agent 分发 renderer。
 
     - Plan 1: pre-recon 走 render_pre_recon。
+    - Plan 2: recon 走 ReconCollector/render_recon。
     - Plan 3: 5 个 vuln agent（``<vc>-vuln``）共用 vuln renderer，按 vc branching。
     - 其余 agent 返 None（无 collector 通道，走 self-Write 路径）。
 
@@ -17,6 +18,10 @@ def render_deliverable(agent_name, data: dict) -> "str | None":
 
     if agent_name == AgentName.PRE_RECON:
         return render_pre_recon(data)
+    if agent_name == AgentName.RECON:
+        from shannon_core.renderers.recon import render_recon
+
+        return render_recon(data)
     if isinstance(agent_name, AgentName) and agent_name.value.endswith("-vuln"):
         vc = agent_name.value.removesuffix("-vuln")
         from shannon_core.renderers.vuln import render_vuln

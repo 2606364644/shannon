@@ -102,4 +102,5 @@ def test_make_collector_dispatches_pre_recon_and_returns_none_for_others():
     assert isinstance(pre, PreReconCollector)
     assert pre.tool_names() == EXPECTED_TOOLS
 
-    assert make_collector(AgentName.RECON) is None
+    # RECON 现已接 collector（Plan 2 Task 3）；用 REPORT 验证非 collector 通道 agent 仍 None
+    assert make_collector(AgentName.REPORT) is None
