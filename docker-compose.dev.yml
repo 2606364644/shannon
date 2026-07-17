@@ -1,0 +1,41 @@
+# docker-compose.dev.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# 【开发 override · 入库共享】bind mount 源码进容器，改 Python 代码免 rebuild。
+# 只在 ./scripts/up.sh --dev 时由 -f 叠加；裸 up.sh 跑的是干净镜像（生产式）。
+# 不入库的本地私有 override 叫 docker-compose.override.yml（被 .gitignore 排除、
+# 且会干扰 up.sh 的 temporal 自动判断）；本文件特意换名避开那个坑。
+#
+# 为什么有用：
+#   uv 对所有 workspace 包是 editable 安装——.venv 里 _editable_impl_shannon_*.pth
+#   指向 /app/packages 源码目录。但主 docker-compose.yml 里 packages 是 build 时
+#   COPY 进镜像的静态副本，editable 指向那个死副本，所以改宿主代码要 --build 才能更新。
+#   本 override 用 bind mount 把宿主实时源码覆盖到 /app/packages，editable 即指向
+#   实时代码——改 Python 重启进程即生效，免 rebuild。
+#
+# volumes 合并语义：compose 对 list 型 volumes 是「追加」（非替换），故 base 里
+#   workspaces/repos/configs/.env 等挂载全部保留，本文件只追加 packages/prompts。
+#
+# 什么仍需 --build（bind mount 同步不到、烧在镜像里的东西）：
+#   - pyproject.toml / uv.lock —— 依赖变了要重跑 uv sync，.venv 在镜像里不在 packages 下
+#   - packages/web/frontend/ —— 前端 npm run build 产 dist 进镜像，非 editable
+#   - Dockerfile 本身
+#
+# dev ↔ 生产 切换（compose 检测到 volumes 变化会自动 recreate 容器，无需手动 down）：
+#   ./scripts/up.sh --dev          进开发（bind mount 源码）
+#   ./scripts/up.sh                回生产（去掉 bind mount，跑镜像里的干净代码）
+#   dev 下改了 Python 代码         ./scripts/up.sh restart web worker  （重启进程即可，不 build）
+#   dev 改完要把代码带进生产       先 ./scripts/up.sh --build 打进镜像，再 ./scripts/up.sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  web:
+    volumes:
+      # Python 后端 + 各 workspace 包源码；editable install 指向这里，改 .py 实时可见
+      - ./packages:/app/packages
+
+  worker:
+    volumes:
+      - ./packages:/app/packages        # 同上（worker 是扫描主力，改 shannon_worker/whitebox/core 都靠它）
+      # agent prompt 模板（pre-recon/recon/vuln-*.txt）：worker build 时 COPY 进镜像，
+      # dev 下挂宿主实时——改 prompt 不用 rebuild
+      - ./prompts:/app/prompts

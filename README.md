@@ -184,12 +184,33 @@ compose 起两个服务：`temporal`（workflow 引擎，:7233 gRPC / :8233 Web 
 
 ### 复用本机已有的 temporal
 
-`scripts/up.sh` 自动检测 `7233` 是否被占：被占则复用外部 temporal（不抢端口），空闲则自建——等价 `up -d --build web`。
+`scripts/up.sh` 自动检测 `7233` 是否被占：被占则复用外部 temporal（不抢端口），空闲则自建。默认**复用现有镜像不重建**（秒起）；改了代码要重建加 `--build`，开发迭代可加 `--dev`（见下节）。
 
 ```bash
-./scripts/up.sh        # 自动判断复用 / 自建
-./scripts/up.sh down   # 停掉 web（不影响外部 temporal）
+./scripts/up.sh          # 自动判断复用 / 自建，复用现有镜像（不重建）
+./scripts/up.sh --build  # 改了 packages/ 源码后强制重建镜像
+./scripts/up.sh down     # 停掉（不影响外部 temporal）
 ```
+
+### 开发模式（容器内迭代，`--dev`）
+
+改 `packages/` 下 Python 代码默认要 `--build` 才生效（源码是 COPY 进镜像的静态副本）。`--dev` 叠加 `docker-compose.dev.yml`，把源码 bind mount 进容器——配合 uv 的 editable 安装（`.venv` 里 `_editable_impl_shannon_*.pth` 指向 `/app/packages`），**改 Python 重启进程即生效，免 rebuild**。
+
+```bash
+./scripts/up.sh --dev              # 进开发模式（bind mount 源码）
+./scripts/up.sh restart web worker # 改了 Python 后重启进程加载新代码（秒级，不 build）
+./scripts/up.sh                    # 回生产模式（去掉 bind mount，跑镜像干净代码）
+```
+
+| 改了什么 | 怎么生效 |
+|---|---|
+| Python 源码（`packages/**/*.py`） | `./scripts/up.sh restart web worker`（免 build） |
+| 依赖（`pyproject.toml`/`uv.lock`）、前端、Dockerfile | `./scripts/up.sh --build` |
+| `.env` / `configs` / `repos` | 直接生效（本就 bind mount） |
+
+dev ↔ 生产切换由 compose 检测到 volumes 变化自动 recreate 容器完成，无需手动 `down`。dev 改完要把代码带进生产：先 `--build` 打进镜像，再 `./scripts/up.sh`。
+
+> 与下方「本地开发（热更新）」的区别：`--dev` 在**容器内**跑（和生产同环境，适合迭代后端 / worker）；「本地开发（热更新）」在**宿主**前后端分离跑（适合纯前端 Vite HMR）。
 
 若不走脚本、手动复用，等价命令：
 
@@ -271,6 +292,7 @@ shannon-py/
 ├── scripts/                     # 验证 / 调试脚本（如 validate_*_task_probe.py）
 ├── docs/                        # 项目文档
 ├── docker-compose.yml           # temporal + web 单容器部署
+├── docker-compose.dev.yml       # 开发 override：bind mount 源码，--dev 叠加
 ├── .env.example                 # 共享配置模板
 ├── .env.profiles.example/       # 各 profile 的引擎/账号模板
 └── pyproject.toml               # uv workspace 配置

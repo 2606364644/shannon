@@ -2,9 +2,14 @@
 # scripts/up.sh —— 一键启动 web,自动判断 temporal 复用还是自建。
 #
 # 用法：
-#   ./scripts/up.sh              # 启动（自动判断复用/自建）；up 分支已硬编码 --build，无需显式传
+#   ./scripts/up.sh              # 启动（自动判断复用/自建），复用现有镜像不重建（秒起，生产式）
+#   ./scripts/up.sh --dev        # 叠加 docker-compose.dev.yml：bind mount 源码，改 Python 免 rebuild（开发式）
+#   ./scripts/up.sh --build      # 启动并强制重建镜像（改了依赖/前端/Dockerfile 后用）
+#   ./scripts/up.sh restart web  # 重启进程（dev 下改了 Python 后让它加载新代码，免 rebuild）
 #   ./scripts/up.sh down         # 停掉
 #   ./scripts/up.sh logs web     # 看日志（任意 docker compose 子命令透传）
+#
+# --dev 与 --build 正交、可组合（./scripts/up.sh --dev --build）。
 #
 # 逻辑：
 #   先预清理 compose 项目内失败/空壳容器（Created/Exited/Dead 态）——
@@ -27,9 +32,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# 默认等价 docker compose up -d --build web worker（C1: worker 常驻消费 WEB 固定 task queue）
-ACTION="${1:-up}"
-shift || true  # 剩余参数透传给 docker compose
+# C1: worker 常驻消费 WEB 固定 task queue，故 up 一并拉起 web worker。
+#
+# 参数解析：第一个非 flag 参数 = compose 子命令（默认 up）；--build / --dev 各自提取为
+# up 专属标志（强制重建镜像 / 叠加开发 override），不透传给 docker compose；其余原样透传。
+# 这样 `up.sh --build`、`up.sh --dev`、`up.sh --dev --build` 都能工作（flag 可放任意位置），
+# 而裸 `up.sh` 复用现有镜像——适合只改了 workspaces/repos/.env 等挂载内容、没动 packages/ 源码的场景。
+# 首次启动（镜像不存在）时 docker compose up 会自动构建（compose 有 build: 配置），无需显式 --build。
+ACTION="up"
+PASSTHROUGH=()
+WANT_BUILD=0
+WANT_DEV=0
+_ACTION_SET=0
+for _arg in "$@"; do
+  if [ "$_arg" = "--build" ]; then
+    WANT_BUILD=1
+  elif [ "$_arg" = "--dev" ]; then
+    WANT_DEV=1
+  elif [ "$_ACTION_SET" = "0" ] && [[ ! "$_arg" =~ ^- ]]; then
+    ACTION="$_arg"; _ACTION_SET=1
+  else
+    PASSTHROUGH+=("$_arg")
+  fi
+done
+unset _arg _ACTION_SET
+BUILD_FLAG=""
+if [ "$WANT_BUILD" = "1" ]; then
+  BUILD_FLAG="--build"
+fi
 
 # 检测 7233 端口是否被监听（docker-proxy / temporal 进程都会占）
 port_in_use() {
@@ -70,27 +100,50 @@ if [ -f docker-compose.override.yml ] && [ "$ACTION" != "down" ]; then
 fi
 
 OVERRIDE_FILE="docker-compose.override.external-temporal.yml"
+DEV_FILE="docker-compose.dev.yml"
 
 if [ "$ACTION" = "up" ]; then
   # 确保 docker 环境：buildx 就位 compose 才走 BuildKit（跨平台 Linux/WSL2/Mac）。
   # 失败（runtime 缺等）→ set -e 中止，不带着坏环境硬 build。down/logs 不 build 不调。
   bash "$SCRIPT_DIR/ensure-docker.sh"
   cleanup_stale_containers
+  if [ "$WANT_BUILD" = "1" ]; then
+    echo ">> --build：重建 web/worker 镜像（COPY 进镜像的 packages/ 源码会重新打入）"
+  else
+    echo ">> 复用现有镜像（未传 --build）。dev 下改 Python 用 restart；改依赖/前端再加 --build。"
+  fi
+
+  # 组装 compose 文件列表：base + temporal 模式（互斥）+ dev override（正交，可叠加）。
+  # 用数组而非两条分支，便于 dev override 独立于 temporal 模式叠加在任一之上。
+  COMPOSE_FILES=(-f docker-compose.yml)
   if port_in_use; then
     echo ">> 检测到 7233 已被占用 → 复用外部 temporal 模式"
     if [ ! -f "$OVERRIDE_FILE" ]; then
       echo "❌ 缺少 $OVERRIDE_FILE（复用模式依赖它）。请检查仓库。" >&2
       exit 1
     fi
-    docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d --build "$@" web worker
+    COMPOSE_FILES+=(-f "$OVERRIDE_FILE")
   else
     echo ">> 7233 空闲 → 自建 temporal 模式（主 compose 默认）"
-    docker compose up -d --build "$@" web worker
   fi
+  if [ "$WANT_DEV" = "1" ]; then
+    if [ ! -f "$DEV_FILE" ]; then
+      echo "❌ 缺少 $DEV_FILE（--dev 依赖它）。请检查仓库。" >&2
+      exit 1
+    fi
+    echo ">> --dev：叠加 $DEV_FILE，bind mount packages/prompts 源码（改 Python restart 即生效，免 rebuild）"
+    COMPOSE_FILES+=(-f "$DEV_FILE")
+  fi
+
+  # BUILD_FLAG 为空时需展开为无（不加引号是有意为之），故关闭 SC2086：
+  # shellcheck disable=SC2086
+  docker compose "${COMPOSE_FILES[@]}" up -d $BUILD_FLAG "${PASSTHROUGH[@]}" web worker
 else
   # down / logs / ps / restart 等子命令透传。
   # 注意：复用模式下若 web 接入了 shannon-net，down 只停 compose 管辖的服务，
   # 不影响外部 temporal 容器。
-  echo ">> 透传子命令: $ACTION $*"
-  docker compose "$ACTION" "$@"
+  # 用 PASSTHROUGH 而非 $@：参数解析已把 ACTION/--build/--dev 提取掉，$@ 仍是原始全部
+  # 参数，直接用会把 ACTION 重复传一次（如 `down` → `docker compose down down`）。
+  echo ">> 透传子命令: $ACTION ${PASSTHROUGH[*]}"
+  docker compose "$ACTION" "${PASSTHROUGH[@]}"
 fi
