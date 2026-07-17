@@ -4,6 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PageHeader } from "@/components/PageHeader";
+import { StatRow } from "@/components/StatRow";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ErrorState";
 import { Empty } from "@/components/Empty";
@@ -72,29 +74,16 @@ export function DashboardPage() {
     .slice(0, 8);
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="font-semibold tracking-tight text-2xl">ft-shannon</h1>
+    <div className="space-y-4">
+      <PageHeader title={t("dashboard.title")} subtitle={t("dashboard.subtitle")} />
+      <StatRow stats={[
+        { label: t("dashboard.stats.running"), value: running.length, tone: "cyan" },
+        { label: t("dashboard.stats.completedToday"), value: completedToday.length, tone: "green" },
+        { label: t("dashboard.stats.totalVulns"), value: totalVulns },
+        { label: t("dashboard.stats.totalCost"), value: fmtCost(totalCost, data[0]?.cost_currency) },
+      ]} />
+      <div className="flex items-center gap-3">
         <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4" role="group" aria-label={t("dashboard.summaryAria")}>
-        <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">{t("dashboard.stats.running")}</div>
-          <div className="font-mono text-2xl text-cyan">{running.length}</div>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">{t("dashboard.stats.completedToday")}</div>
-          <div className="font-mono text-2xl text-green">{completedToday.length}</div>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">{t("dashboard.stats.totalVulns")}</div>
-          <div className="font-mono text-2xl">{totalVulns}</div>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="text-xs text-muted-foreground">{t("dashboard.stats.totalCost")}</div>
-          <div className="font-mono text-2xl">{fmtCost(totalCost, data[0]?.cost_currency)}</div>
-        </CardContent></Card>
       </div>
 
       {running.length > 0 ? (

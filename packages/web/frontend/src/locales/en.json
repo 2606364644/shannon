@@ -275,6 +275,8 @@
     }
   },
   "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Scan overview and recent activity",
     "newScan": "+ New scan",
     "summaryAria": "Summary",
     "stats": {

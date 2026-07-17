@@ -275,6 +275,8 @@
     }
   },
   "dashboard": {
+    "title": "仪表盘",
+    "subtitle": "扫描概览与最近活动",
     "newScan": "+ 新建扫描",
     "summaryAria": "汇总",
     "stats": {

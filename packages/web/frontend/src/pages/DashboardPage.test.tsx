@@ -98,6 +98,12 @@ describe("DashboardPage 骨架 + 汇总", () => {
     await waitFor(() => expect(screen.getByText("ws-done")).toBeInTheDocument());
     expect(screen.getByText(/当前无运行中扫描/)).toBeInTheDocument();
   });
+
+  it("标题区统一为 PageHeader：显「仪表盘」+ 副标题", async () => {
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "仪表盘" })).toBeInTheDocument();
+    expect(screen.getByText("扫描概览与最近活动")).toBeInTheDocument();
+  });
 });
 
 describe("DashboardPage i18n", () => {
