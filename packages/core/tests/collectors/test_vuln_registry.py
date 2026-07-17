@@ -112,24 +112,14 @@ def test_strategic_intel_schema_differs_per_class_via_registry():
     assert inj_intel.json_schema is not az_intel.json_schema
 
 
-# ── 回归：PRE_RECON 分支不动；RECON 仍 None（Plan 2 的活，不是这里的缺陷） ─────
 def test_make_collector_pre_recon_branch_intact():
     pre = make_collector(AgentName.PRE_RECON)
     assert isinstance(pre, PreReconCollector)
 
 
-def test_make_collector_recon_still_returns_none():
-    """Plan 2/recon 未落地的回归护栏：本 task 不接 RECON。"""
-    assert make_collector(AgentName.RECON) is None
-
-
 def test_render_deliverable_pre_recon_branch_intact():
     md = render_deliverable(AgentName.PRE_RECON, {"executive_summary": {"text": "x"}})
     assert md is not None and isinstance(md, str)
-
-
-def test_render_deliverable_recon_still_returns_none():
-    assert render_deliverable(AgentName.RECON, {}) is None
 
 
 # ── 回归：非 vuln 也非 pre-recon 的 agent（如 REPORT）仍 None（兜底分支不动） ───
