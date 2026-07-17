@@ -1,14 +1,12 @@
-"""recon 的 8 个 set_* section schema（对齐 TS recon-collector.ts）。
+"""recon 的 9 个 set_* section schema（对齐 TS recon-collector.ts）。
 
 字段名/类型/必填/描述全部逐字段移植 TS TypeBox 定义；JSON Schema dict 直接喂
 双引擎桥（openai params_json_schema / claude input_schema），与 pre_recon.py 同模式。
 
-⚠️ add_endpoints 未移植：TS recon-collector.ts 第 9 个工具 `add_endpoints` 是
-独立 append 工具（多次调累积 endpoints；getAll() 把 endpoints 作为独立顶层 key；
-getCallStatus() 单独追踪 calls/endpoints_seen），与本仓 CollectorBase write-once
-模型不兼容。Section 4 (API Endpoint Inventory) 的 host-render 策略由 Task 2
-renderer 决策（不在 Task 1 范畴）：可选合并进 set_network_map / 改 CollectorBase
-支持 append / 其他方案。本文件只移植 TS RECON_ONE_SHOT_TOOLS 8 个 set_*。
+9 个工具中 8 个是 write-once ``set_*``（mode="set"，对齐 TS RECON_ONE_SHOT_TOOLS），
+第 9 个 ``set_endpoints`` 是 append 工具（mode="append"，对齐 TS add_endpoints）——
+多次调累积 endpoint，渲染 §4 (API Endpoint Inventory) 表格。命名沿用本仓 ``set_*``
+风格，语义是 append（TS 叫 add_endpoints）。
 """
 from __future__ import annotations
 
@@ -176,6 +174,47 @@ AUTHENTICATION = _obj(
 )
 
 
+# ── Section 4 — API Endpoint Inventory（set_endpoints，append 语义） ──────
+# 对齐 prompts/recon.txt §4 表头 6 列 + TS recon-collector.ts EndpointSchema。
+# set_endpoints 是 append 工具（mode="append"）：每次调传一个 endpoint item，
+# 多次调累积成 endpoints list（renderer Task B 渲染成 §4 表格）。
+ENDPOINTS = _obj(
+    {
+        "method": _plain_str(
+            'HTTP method (e.g. "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"). '
+            'Use "WS" for WebSocket upgrade endpoints.'
+        ),
+        "path": _str_field(
+            'Endpoint path with parameter placeholders, e.g. "/api/users/{user_id}".'
+        ),
+        "required_role": _plain_str(
+            'Minimum role needed to access this endpoint (e.g. "anon", "user", "admin"). '
+            'Use "None" if no role is required.'
+        ),
+        "object_id_parameters": _plain_str(
+            'Parameters that identify specific objects (e.g. "user_id", "order_id"). '
+            'Multiple parameters comma-separated. Use "None" if no object ID parameters exist.'
+        ),
+        "authorization_mechanism": _plain_str(
+            'How access is controlled — middleware, decorator, inline check. '
+            'E.g. "Bearer Token + ownership check", "requireAuth() + requireAdmin()", "None".'
+        ),
+        "description_code_pointer": _str_field(
+            'Brief description of the endpoint\'s purpose + file path and (where possible) line '
+            'number of the handler. E.g. "Fetches user profile. See users.controller.ts:45".'
+        ),
+    },
+    [
+        "method",
+        "path",
+        "required_role",
+        "object_id_parameters",
+        "authorization_mechanism",
+        "description_code_pointer",
+    ],
+)
+
+
 # ── Section 5 — InputVectorsInputSchema ──────────────────────────────────
 INPUT_VECTORS = _obj(
     {
@@ -200,7 +239,7 @@ INPUT_VECTORS = _obj(
 
 
 # ── Section 6 — NetworkMapInputSchema（entities / flows / guards）────────
-# 不含 endpoints（TS 中 endpoints 是独立 append 工具 add_endpoints）
+# endpoints 是独立 append section（set_endpoints），不在 set_network_map payload
 _ENTITY_TYPE_VALUES = ["ExternAsset", "Service", "Identity", "DataStore", "AdminPlane", "ThirdParty"]
 _ENTITY_ZONE_VALUES = ["Internet", "Edge", "App", "Data", "Admin", "BuildCI", "ThirdParty"]
 _DATA_LABEL_VALUES = ["PII", "Tokens", "Payments", "Secrets", "Public"]
@@ -546,7 +585,7 @@ INJECTION_SOURCES = _obj(
 )
 
 
-# ── RECON_SECTIONS（顺序对齐 TS RECON_ONE_SHOT_TOOLS，不含 add_endpoints）─
+# ── RECON_SECTIONS（顺序对齐 TS RECON_ONE_SHOT_TOOLS 8 个 set_* + 末尾 set_endpoints）
 RECON_SECTIONS: list[SectionSchema] = [
     _section(
         "set_executive_summary",
@@ -619,15 +658,29 @@ RECON_SECTIONS: list[SectionSchema] = [
         "agent's todos downstream. Duplicate calls are rejected.",
         INJECTION_SOURCES,
     ),
+    SectionSchema(
+        tool_name="set_endpoints",
+        section_key="endpoints",
+        description=(
+            "Append one network-accessible API endpoint to the catalog. Call multiple times to build "
+            "the full inventory — each call adds one endpoint row. Becomes Section 4 (API Endpoint "
+            "Inventory) of the rendered deliverable; the renderer sorts by (path, method) before "
+            "rendering, so emission order does not affect output. Exclude development/debug endpoints, "
+            "local-only utilities, build tools, or any endpoints not reachable via network requests to "
+            "the deployed application."
+        ),
+        json_schema=ENDPOINTS,
+        mode="append",
+    ),
 ]
 
 
 class ReconCollector(CollectorBase):
-    """recon 的 8-section collector（无参构造，自带 RECON_SECTIONS）。
+    """recon 的 9-section collector（无参构造，自带 RECON_SECTIONS）。
 
-    注意：TS recon-collector.ts 另有第 9 个工具 ``add_endpoints``（append 语义，多次调
-    累积 endpoints），与本仓 ``CollectorBase`` write-once 模型不兼容——未在此移植。
-    Section 4 (API Endpoint Inventory) 的 host-render 策略由 Task 2 renderer 决策。
+    8 个 set_* 工具（mode="set"，write-once）+ 1 个 set_endpoints（mode="append"，
+    多次调累积 endpoint，对齐 TS add_endpoints）。set_endpoints 渲染 §4 (API Endpoint
+    Inventory)；其余 8 个分别渲染 §1/§2/§3/§5/§6/§7/§8/§9。
     """
 
     def __init__(self) -> None:

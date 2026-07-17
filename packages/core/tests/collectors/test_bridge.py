@@ -16,9 +16,25 @@ SCHEMA = SectionSchema(
     },
 )
 
+APPEND_SCHEMA = SectionSchema(
+    tool_name="set_eps",
+    section_key="eps",
+    description="append tool",
+    json_schema={
+        "type": "object",
+        "properties": {"x": {"type": "string", "minLength": 1}},
+        "required": ["x"],
+    },
+    mode="append",
+)
+
 
 def _collector():
     return CollectorBase([SCHEMA])
+
+
+def _append_collector():
+    return CollectorBase([APPEND_SCHEMA])
 
 
 # ---------- openai ----------
@@ -94,3 +110,40 @@ async def test_claude_sdk_tool_handler_duplicate_is_error_envelope():
     assert res.get("is_error") is True
     assert "DuplicateError" in res["content"][0]["text"]
     assert collector.get_all() == {"alpha": {"x": "first"}}
+
+
+# ---------- append mode (openai + claude symmetric) ----------
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_invocation_accumulates_and_reports_count():
+    from agents import RunContextWrapper
+
+    collector = _append_collector()
+    (tool,) = build_openai_tools(collector)
+    assert tool.name == "set_eps"
+    # 第一次 append
+    r1 = await tool.on_invoke_tool(RunContextWrapper(context=None), json.dumps({"x": "a"}))
+    assert "recorded" in str(r1)
+    assert "(1 total)" in str(r1)
+    # 第二次 append（不抛 DuplicateError）
+    r2 = await tool.on_invoke_tool(RunContextWrapper(context=None), json.dumps({"x": "b"}))
+    assert "(2 total)" in str(r2)
+    # 累积成 list
+    assert collector.get_all() == {"eps": [{"x": "a"}, {"x": "b"}]}
+    assert collector.get_call_status()["set_eps"] == "called"
+
+
+@pytest.mark.asyncio
+async def test_claude_append_tool_handler_accumulates_and_reports_count():
+    from shannon_core.collectors.bridge import _make_claude_sdk_tool
+
+    collector = _append_collector()
+    sdk_tool = _make_claude_sdk_tool(collector, APPEND_SCHEMA)
+    res1 = await sdk_tool.handler({"x": "a"})
+    assert res1["content"][0]["type"] == "text"
+    assert "(1 total)" in res1["content"][0]["text"]
+    assert res1.get("is_error") is not True
+    res2 = await sdk_tool.handler({"x": "b"})
+    assert "(2 total)" in res2["content"][0]["text"]
+    assert res2.get("is_error") is not True
+    assert collector.get_all() == {"eps": [{"x": "a"}, {"x": "b"}]}

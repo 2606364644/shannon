@@ -1,8 +1,8 @@
-"""Task 1 (Plan 2): recon 的 8 个 set_* section schema 移植自 TS recon-collector.ts。
+"""Task A (Plan 2): recon 的 9 个 set_* section schema 移植自 TS recon-collector.ts。
 
 对齐 test_pre_recon.py 风格：tool_name 顺序、section_key 派生、JSON Schema 合法性、
-关键 schema spot-check。不覆盖 add_endpoints（TS 是独立 append 工具，write-once
-CollectorBase 不兼容——Section 4 host-render 策略由 Task 2 renderer 决策）。
+关键 schema spot-check。set_endpoints 是第 9 个工具（append 语义，对齐 TS add_endpoints），
+多次调累积 endpoint，渲染 §4 (API Endpoint Inventory)。
 """
 from shannon_core.collectors.recon import RECON_SECTIONS, ReconCollector
 
@@ -15,6 +15,7 @@ EXPECTED_TOOLS = [
     "set_role_architecture",
     "set_authz_candidates",
     "set_injection_sources",
+    "set_endpoints",
 ]
 
 EXPECTED_SECTION_KEYS = [
@@ -26,20 +27,21 @@ EXPECTED_SECTION_KEYS = [
     "role_architecture",
     "authz_candidates",
     "injection_sources",
+    "endpoints",
 ]
 
 
-def test_eight_sections_present():
+def test_nine_sections_present():
     names = {s.tool_name for s in RECON_SECTIONS}
     assert names == {
         "set_executive_summary", "set_technology_stack", "set_authentication",
         "set_input_vectors", "set_network_map", "set_role_architecture",
-        "set_authz_candidates", "set_injection_sources",
+        "set_authz_candidates", "set_injection_sources", "set_endpoints",
     }
 
 
 def test_recon_sections_in_ts_order():
-    # 顺序对齐 TS RECON_ONE_SHOT_TOOLS（不含 add_endpoints）
+    # 顺序对齐 TS RECON_ONE_SHOT_TOOLS（8 个 set_*）+ 末尾 set_endpoints（append 工具）
     assert [s.tool_name for s in RECON_SECTIONS] == EXPECTED_TOOLS
 
 
@@ -59,9 +61,9 @@ def test_every_schema_is_valid_json_schema_object():
         assert "required" in s.json_schema
 
 
-def test_recon_collector_knows_eight_sections():
+def test_recon_collector_knows_nine_sections():
     c = ReconCollector()
-    assert len(c.section_schemas) == 8
+    assert len(c.section_schemas) == 9
     assert c.tool_names() == EXPECTED_TOOLS
     # 初始未调用：所有工具 skipped
     assert c.get_call_status() == {t: "skipped" for t in EXPECTED_TOOLS}
@@ -118,11 +120,11 @@ def test_input_vectors_has_four_string_arrays():
 
 
 def test_network_map_has_entities_flows_guards_no_endpoints():
-    # ★ add_endpoints 在 TS 是独立 append 工具，不在 set_network_map payload
+    # ★ endpoints 是独立 append section（set_endpoints），不在 set_network_map payload
     s = next(s for s in RECON_SECTIONS if s.tool_name == "set_network_map")
     props = s.json_schema["properties"]
     assert set(props) == {"entities", "flows", "guards"}
-    assert "endpoints" not in props  # 显式断言：endpoints 不在此（由 Task 2 决策）
+    assert "endpoints" not in props  # 显式断言：endpoints 不在此（独立 set_endpoints section）
     assert s.json_schema["required"] == ["entities", "flows", "guards"]
     # Entity 必填字段
     entity = props["entities"]["items"]
@@ -203,3 +205,68 @@ def test_sink_ref_items_reuse_pre_recon_sink_ref_shape():
     assert item["properties"]["location"] == SINK_REF["properties"]["location"]
     assert item["properties"]["sink_function"] == SINK_REF["properties"]["sink_function"]
     assert item["required"] == ["location", "sink_function"]
+
+
+# ── Section 4 — set_endpoints（append 语义，对齐 TS add_endpoints） ────────
+
+def test_endpoints_is_append_mode():
+    # set_endpoints 的 SectionSchema.mode == "append"（其余 8 个 == "set"）
+    endpoints = next(s for s in RECON_SECTIONS if s.tool_name == "set_endpoints")
+    assert endpoints.mode == "append"
+    assert endpoints.section_key == "endpoints"
+    others = [s for s in RECON_SECTIONS if s.tool_name != "set_endpoints"]
+    for s in others:
+        assert s.mode == "set", f"{s.tool_name} should be mode=set (default)"
+
+
+def test_endpoints_item_schema_six_columns():
+    # ENDPOINTS item schema 6 字段对齐 recon.txt §4 表头：
+    # Method | Endpoint Path | Required Role | Object ID Parameters |
+    # Authorization Mechanism | Description & Code Pointer
+    s = next(s for s in RECON_SECTIONS if s.tool_name == "set_endpoints")
+    props = s.json_schema["properties"]
+    assert set(props) == {
+        "method",
+        "path",
+        "required_role",
+        "object_id_parameters",
+        "authorization_mechanism",
+        "description_code_pointer",
+    }
+    # 全 6 字段都是 string type
+    for k in props:
+        assert props[k]["type"] == "string", f"{k} should be string"
+    # 全 6 字段 required（对齐 §4 表格每行都填）
+    assert set(s.json_schema["required"]) == set(props)
+
+
+def test_recon_collector_append_endpoints():
+    c = ReconCollector()
+    item1 = {
+        "method": "GET",
+        "path": "/api/users/{user_id}",
+        "required_role": "user",
+        "object_id_parameters": "user_id",
+        "authorization_mechanism": "Bearer Token + ownership check",
+        "description_code_pointer": "Fetches user profile. See users.controller.ts:45.",
+    }
+    item2 = {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "required_role": "anon",
+        "object_id_parameters": "None",
+        "authorization_mechanism": "None",
+        "description_code_pointer": "Handles login. See auth.controller.ts:12.",
+    }
+    c.append_section("set_endpoints", item1)
+    c.append_section("set_endpoints", item2)
+    out = c.get_all()
+    assert "endpoints" in out
+    assert len(out["endpoints"]) == 2
+    assert out["endpoints"][0]["method"] == "GET"
+    assert out["endpoints"][1]["method"] == "POST"
+    # get_call_status 报 called
+    assert c.get_call_status()["set_endpoints"] == "called"
+    # write-once set_* 工具仍可正常调（共存）
+    c.set_section("set_executive_summary", {"text": "hi"})
+    assert c.get_call_status()["set_executive_summary"] == "called"
