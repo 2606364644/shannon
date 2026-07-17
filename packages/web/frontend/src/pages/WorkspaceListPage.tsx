@@ -177,6 +177,9 @@ export function WorkspaceListPage() {
       <StatRow stats={stats} />
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-3">
+        <Link to="/scan/new">
+          <Button>{t("workspaces.newScan")}</Button>
+        </Link>
         <Input
           placeholder={t("workspaces.searchPlaceholder")}
           value={globalFilter}
@@ -204,9 +207,6 @@ export function WorkspaceListPage() {
             <SelectItem value="correlation">{t("workspaces.filter.correlation")}</SelectItem>
           </SelectContent>
         </Select>
-        <Link to="/scan/new">
-          <Button variant="outline" size="sm">{t("workspaces.newScan")}</Button>
-        </Link>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{t("workspaces.lastRefresh", { time: lastUpdatedStr })}</span>
           <Button variant="ghost" size="icon" aria-label={t("workspaces.refreshAria")} onClick={() => refresh()}>↻</Button>
