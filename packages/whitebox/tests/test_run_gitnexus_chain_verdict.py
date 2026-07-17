@@ -204,8 +204,8 @@ async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_summary_warns_when_all_classes_zero(tmp_path, monkeypatch):
-    """空壳 parameter_graph（taint_flows=[]）→ 3 类 0 findings → 汇总 warning（spec §3.4）。"""
+async def test_summary_info_when_all_classes_zero(tmp_path, monkeypatch):
+    """空壳 parameter_graph（taint_flows=[]）→ 3 类 0 findings → 汇总 info（spec §3.4）。"""
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [])
@@ -225,5 +225,5 @@ async def test_summary_warns_when_all_classes_zero(tmp_path, monkeypatch):
     assert result["per_class"] == {}
     levels = [lvl for (_msg, lvl) in session.info_calls]
     msgs = [msg for (msg, _lvl) in session.info_calls]
-    assert "warning" in levels
+    assert "info" in levels
     assert any("3 类 0 findings" in m and "taint_flows=0" in m for m in msgs)

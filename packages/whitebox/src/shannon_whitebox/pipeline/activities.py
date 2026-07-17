@@ -1208,28 +1208,46 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
         per_class: dict[str, int] = {}
+        failed_classes: list[str] = []
+        fail_reasons: dict[str, str] = {}
 
         pgraph_path = deliverables / "parameter_graph.json"
         if not pgraph_path.exists():
             try:
                 await get_audit_session().log_info(
-                    "GitNexus 注入轨：parameter_graph.json 缺失 → 跳过 3 类判定，靠 LLM 轨兜底。",
+                    "GitNexus 注入轨：parameter_graph.json 缺失 → 3 类判定失败（fail-fast，不降级）。",
                     "warning",
                 )
             except Exception:
                 pass
-            return {"per_class": {}, "skipped": "no parameter_graph.json"}
+            _reason = "parameter_graph.json missing"
+            for _vc in ("injection", "xss", "ssrf"):
+                failed_classes.append(_vc)
+                fail_reasons[_vc] = _reason
+            return {
+                "per_class": {},
+                "failed_classes": failed_classes,
+                "fail_reasons": fail_reasons,
+            }
         try:
             pgraph = ParameterPropagationGraph.model_validate_json(pgraph_path.read_text())
         except Exception:
             try:
                 await get_audit_session().log_info(
-                    "GitNexus 注入轨：parameter_graph.json 无效 → 跳过 3 类判定，靠 LLM 轨兜底。",
+                    "GitNexus 注入轨：parameter_graph.json 无效 → 3 类判定失败（fail-fast，不降级）。",
                     "warning",
                 )
             except Exception:
                 pass
-            return {"per_class": {}, "skipped": "invalid parameter_graph.json"}
+            _reason = "parameter_graph.json invalid"
+            for _vc in ("injection", "xss", "ssrf"):
+                failed_classes.append(_vc)
+                fail_reasons[_vc] = _reason
+            return {
+                "per_class": {},
+                "failed_classes": failed_classes,
+                "fail_reasons": fail_reasons,
+            }
 
         # XSS routes by SinkCallSite.category == XSS (SlotContext has no render
         # context), so read code_index.json for the sink call sites.
@@ -1260,6 +1278,8 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                                              progress_cb=_chain_cb)
                 except Exception as exc:
                     # one vuln class failing must not block the others
+                    failed_classes.append(vc)
+                    fail_reasons[vc] = f"builder raised: {exc}"
                     logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
                     continue
                 if findings:
@@ -1276,10 +1296,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 if not per_class:  # 3 类全 0 findings
                     await _sess.log_info(
                         f"GitNexus 注入轨：3 类 0 findings（taint_flows={taint_flows_count}，"
-                        f"sink_call_sites={sink_call_sites_count}）→ 靠 LLM 轨兜底。"
-                        f"常因 parameter_graph 空壳"
-                        f"（GitNexus 调用图未产出 taint / Plan 1 未落地）。",
-                        "warning",
+                        f"sink_call_sites={sink_call_sites_count}）— 合法结论"
+                        f"（流程跑通，本类无 taint）。下游按 fail-fast 策略编排。",
+                        "info",
                     )
                 else:
                     await _sess.log_info(
@@ -1291,7 +1310,11 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             except Exception:
                 pass
 
-        return {"per_class": per_class}
+        return {
+            "per_class": per_class,
+            "failed_classes": failed_classes,
+            "fail_reasons": fail_reasons,
+        }
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
