@@ -146,17 +146,15 @@ export function ReposPage() {
       <div className="space-y-4">
         <PageHeader title={t("repos.title")} subtitle={t("repos.subtitle")} />
         <StatRow stats={stats} />
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex items-center gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("repos.searchPlaceholder")}
-              className="w-56"
-              aria-label={t("repos.searchPlaceholder")}
-            />
-            <Button onClick={() => setAddOpen(true)}>{t("repos.addRepo")}</Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => setAddOpen(true)}>{t("repos.addRepo")}</Button>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("repos.searchPlaceholder")}
+            className="w-56"
+            aria-label={t("repos.searchPlaceholder")}
+          />
         </div>
 
         {loading ? (
