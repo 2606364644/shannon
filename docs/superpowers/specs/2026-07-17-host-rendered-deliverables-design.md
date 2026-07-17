@@ -105,7 +105,7 @@ activity.run_agent(agent_name):
 对标 `validate_glm_task_probe.py`（验证 GLM 驱动 Agent 子代理委派）。**probe 通过才铺开 13 agent**，消掉最大未知。
 
 ### 4.5 诊断去留
-治本后 host 一定渲染（不再 Missing deliverable），之前加的 `_enrich_missing_deliverable_error`（executor.py）诊断**移除**（治本后无意义、减噪音）。其 3 个测试随之移除/改造。
+治本后 host 一定渲染（不再 Missing deliverable），之前加的 `_enrich_missing_deliverable_error`（executor.py）诊断**已移除**（Plan 5 Task 3，2026-07-17：治本后无意义、减噪音）。`validate_deliverable` 还原为直接调用；其 3 个诊断测试随之删除。
 
 ## 5. 不变量（守 CLAUDE.md 铁律）
 
@@ -122,7 +122,7 @@ activity.run_agent(agent_name):
 - **Plan 2**：recon
 - **Plan 3**：5 vuln class（共用 vuln collector/renderer，branching on class）
 - **Plan 4**：5 exploit class。**执行期裁定（2026-07-17）**：exploit 不复用 Plan 1 的 `CollectorBase` write-once `set_*` section bag 模式——exploit 产物是 verdict list（`ExploitVerdictBatch.verdicts: list`，对齐 TS `getAll(): AddExploitInput[]`），用**独立 `ExploitCollector`（append 语义）**+ 独立 `build_exploit_*` 桥 + provider `isinstance` 分支 + `render_deliverable` 扩签名读 `{vt}_exploitation_queue.json`。verdict 4 档（对齐现有 `exploit_verdict_schemas.py`：exploited/blocked_by_security/out_of_scope_internal/false_positive）。`validate_exploit_verdicts`（L0-L3 防幻觉）从 blackbox 迁 core，renderer 渲 5 section（Exploited/Blocked/Other/Unverified-rejected/Unprocessed）。**本质=把 exploit 从 blackbox structured-output→ExploitEvidenceRenderer 通道迁移到 core append-collector 通道**（blackbox `ExploitExecutor` 改 `skip_artifact_postprocess=False`、删 structured_output_schema、删兜底/validate/render 接线；blackbox `ExploitEvidenceRenderer` 留死代码 Plan 5 删）。详见 plan 4（`2026-07-17-host-rendered-deliverables-plan-4.md`）。
-- **Plan 5**：report（findings-renderer）+ 移除诊断
+- **Plan 5**：report 加固（assemble 底稿容错，**不引入 collector**）+ 移除诊断。**执行期裁定（2026-07-17，查证推翻 spec 原假设）**：report 不需 collector 治本——PY report 机制是 `ReportAssembler.assemble`（host 拼接，三级回退 evidence→findings→analysis_deliverable，缺失 class 跳过、最后一定写盘）先产 `comprehensive_security_assessment_report.md` 底稿，report-executive agent 只覆写增强。即使 agent（GLM）失忆没覆写，底稿文件仍在 → `validate_deliverable` 查存在性即过 → **report 不触发 Missing deliverable**（与前 4 个 agent 的「agent Write 新建→失忆丢 Write→文件不存在」本质不同）。故 Plan 5 仅：(Task 1) assemble 容错回归测试（已容错，3 测试覆盖部分缺/三级回退/全空仍写盘）、(Task 2) 强化 report-executive prompt「Edit 优先、不破坏底稿」、(Task 3) 移除诊断。详见 plan 5（`2026-07-17-host-rendered-deliverables-plan-5.md`）。
 
 框架在 Plan 1 稳定后，Plan 2-5 每个 agent = 一份 section schema + renderer + prompt 改，增量低风险。
 
@@ -148,4 +148,4 @@ activity.run_agent(agent_name):
 - TS 代码：`upstream/main:apps/worker/src/collectors/pre-recon-collector.ts`、`services/pre-recon-renderer.ts`、`services/agent-execution.ts`
 - PY 现状：`packages/core/src/shannon_core/agents/executor.py`、`validators.py`、`models/agents.py`
 - SDK 能力：`claude_agent_sdk.create_sdk_mcp_server`（`__init__.py:311`）、`McpSdkServerConfig`（in-process）
-- 前置修复（已合）：executor 诊断 `_enrich_missing_deliverable_error`（治本后移除）
+- 前置修复（已合）：executor 诊断 `_enrich_missing_deliverable_error`（**Plan 5 Task 3 已移除**——治本后无用）
