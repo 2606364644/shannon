@@ -121,7 +121,7 @@ activity.run_agent(agent_name):
 - **Plan 1**（本 spec 的首个 plan）：collector 框架 + 双引擎工具桥 + GLM probe + **pre-recon 端到端**（7 section schema + renderer + prompt 改 + 落盘 + 测试）。验证整条链 + GLM 可靠性。
 - **Plan 2**：recon
 - **Plan 3**：5 vuln class（共用 vuln collector/renderer，branching on class）
-- **Plan 4**：5 exploit class
+- **Plan 4**：5 exploit class。**执行期裁定（2026-07-17）**：exploit 不复用 Plan 1 的 `CollectorBase` write-once `set_*` section bag 模式——exploit 产物是 verdict list（`ExploitVerdictBatch.verdicts: list`，对齐 TS `getAll(): AddExploitInput[]`），用**独立 `ExploitCollector`（append 语义）**+ 独立 `build_exploit_*` 桥 + provider `isinstance` 分支 + `render_deliverable` 扩签名读 `{vt}_exploitation_queue.json`。verdict 4 档（对齐现有 `exploit_verdict_schemas.py`：exploited/blocked_by_security/out_of_scope_internal/false_positive）。`validate_exploit_verdicts`（L0-L3 防幻觉）从 blackbox 迁 core，renderer 渲 5 section（Exploited/Blocked/Other/Unverified-rejected/Unprocessed）。**本质=把 exploit 从 blackbox structured-output→ExploitEvidenceRenderer 通道迁移到 core append-collector 通道**（blackbox `ExploitExecutor` 改 `skip_artifact_postprocess=False`、删 structured_output_schema、删兜底/validate/render 接线；blackbox `ExploitEvidenceRenderer` 留死代码 Plan 5 删）。详见 plan 4（`2026-07-17-host-rendered-deliverables-plan-4.md`）。
 - **Plan 5**：report（findings-renderer）+ 移除诊断
 
 框架在 Plan 1 稳定后，Plan 2-5 每个 agent = 一份 section schema + renderer + prompt 改，增量低风险。
