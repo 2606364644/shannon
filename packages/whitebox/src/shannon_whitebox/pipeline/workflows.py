@@ -20,8 +20,9 @@ from .step_intents import step_names, step_intents
 
 
 # run_code_index activity timeout: 文件级聚合后 sink+source+taint 三阶段累加仍偏紧,
-# 10min 容不下大仓(真机 kol_mapping_service 撞 timeout)→ 提至 20min(spec 2026-07-10 §3.2)。
-CODE_INDEX_ACTIVITY_TIMEOUT = timedelta(minutes=20)
+# 10min 容不下大仓(真机 kol_mapping_service 撞 timeout)→ 提至 45min(spec 2026-07-10 §3.2;
+# 2026-07-17 Koa+Sequelize 治本:sink/source/taint 串行最坏 30+min,45min 留余量)。
+CODE_INDEX_ACTIVITY_TIMEOUT = timedelta(minutes=45)
 
 
 def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
