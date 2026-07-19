@@ -566,6 +566,13 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry_for("standard"),
             )
+            # GitNexus 轨判定状态注记(report-executive 之后,防覆盖;fail-fast plan Task 6)
+            self._state.current_agent = "inject-gitnexus-track-status"
+            await workflow.execute_activity(
+                activities.inject_gitnexus_track_status, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
+            )
             self._state.current_agent = None
             # === 报告增强：生成 PoC md（失败由 activity 内部吞掉，不影响主报告） ===
             self._state.current_agent = "generate-poc-report"

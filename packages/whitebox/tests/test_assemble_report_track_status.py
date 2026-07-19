@@ -1,129 +1,158 @@
-"""Task 6: assemble_report 读 gitnexus_track_status.json 标红 failed 类。
+"""Task 6 (fix): inject_gitnexus_track_status activity — report-executive 之后注入。
 
-验证 `assemble_report` 在 ReportAssembler 写出综合报告后,读 Task 1 的
-`gitnexus_track_status.json`,若有 failed 类,在报告顶部注入注记章节
-`## GitNexus 轨判定状态`,逐条列出 failed 类 + reason。
+**Spec gap fix (coordinator-adjudicated):** 原 Task 6 把 banner 注入在
+assemble_report 里,但 workflow 顺序 assemble_report → run_agent("report")
+(report-executive 重写整个 comprehensive_security_assessment_report.md)
+→ inject_attack_chains,导致 banner 被 report-executive 覆盖丢失。对齐
+inject_attack_chains 模式,新 activity 在 report-executive 之后注入。
 
-铁律(CLAUDE.md §1):track_status 是 workflow/merger/report 编排产物,report 屨读合法。
+铁律(CLAUDE.md §1):track_status 是 workflow/merger/report 编排产物,report 层读合法。
 本测试只验 report 层渲染注记,不动合并逻辑、不喂 LLM 轨 prompt。
 """
 import json
-from contextlib import asynccontextmanager
 
-import shannon_whitebox.pipeline.activities as act
+from shannon_whitebox.pipeline import activities
 from shannon_whitebox.pipeline.shared import ActivityInput
-from shannon_whitebox.audit.session_registry import (
-    set_audit_session, clear_audit_session,
-)
 
 
-class _RecordingSession:
-    """最小 audit session stub — 仅满足 assemble_report 的 track_step 调用。"""
-
-    @asynccontextmanager
-    async def track_step(self, phase: str, name: str, intent: str | None = None):
-        yield
+def _write_report(deliverables, content: str) -> None:
+    """模拟 report-executive 之后的状态:综合报告已存在(无 banner)。"""
+    (deliverables / "comprehensive_security_assessment_report.md").write_text(
+        content, encoding="utf-8")
 
 
-def _setup(tmp_path, monkeypatch, deliverables):
-    deliverables.mkdir(parents=True)
-    monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))
-    set_audit_session(_RecordingSession())
-
-
-async def test_report_includes_gitnexus_failed_note(tmp_path, monkeypatch):
-    """GitNexus 轨 failed 的类(xss),在报告顶部加注记 + reason,结果由 LLM 轨提供。"""
-    deliverables = tmp_path / "deliverables" / "whitebox"
-    _setup(tmp_path, monkeypatch, deliverables)
-    # Task 1 产物:xss GitNexus 轨 failed
+def _write_track_status(deliverables, statuses: dict) -> None:
     (deliverables / "gitnexus_track_status.json").write_text(
-        json.dumps({"xss": {"status": "failed", "reason": "builder raised: KeyError"}}),
-        encoding="utf-8",
-    )
-    # xss 分析产物(让 ReportAssembler 有内容可拼)
-    (deliverables / "xss_analysis_deliverable.md").write_text(
-        "# XSS 分析报告\n\nXSS-VULN-01\n", encoding="utf-8")
+        json.dumps(statuses), encoding="utf-8")
 
-    try:
-        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
-    finally:
-        clear_audit_session()
+
+async def test_inject_gitnexus_track_status_failed_note(tmp_path, monkeypatch):
+    """failed 类(xss)+ 报告已存在 → 调 activity 后 banner 注入到报告顶部。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_track_status(deliverables, {
+        "xss": {"status": "failed", "reason": "builder raised: KeyError"}})
+    # 模拟 report-executive 之后:报告已被 agent 重写,banner 不在其中
+    _write_report(deliverables, "# 安全评估报告\n\n## 执行摘要\n\n正文...\n")
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
+
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
 
     report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
         encoding="utf-8")
     assert "GitNexus 轨判定失败" in report
     assert "xss" in report
     assert "builder raised: KeyError" in report
-    # 注记应位于报告顶部(failed 类汇总摘要,先于 vuln 章节)
-    assert report.index("GitNexus 轨判定失败") < report.index("XSS 分析报告")
+    assert "## GitNexus 轨判定状态" in report
+    # 原报告内容保留
+    assert "## 执行摘要" in report
+    # banner 位于报告顶部(在原 H1 之后,作为独立 H2 章节)
+    assert report.index("## GitNexus 轨判定状态") < report.index("## 执行摘要")
 
 
-async def test_report_includes_multiple_failed_classes(tmp_path, monkeypatch):
-    """多个 failed 类(injection + xss)都列出,每条一行。"""
-    deliverables = tmp_path / "deliverables" / "whitebox"
-    _setup(tmp_path, monkeypatch, deliverables)
-    (deliverables / "gitnexus_track_status.json").write_text(
-        json.dumps({
-            "injection": {"status": "failed", "reason": "builder raised: ValueError"},
-            "xss": {"status": "failed", "reason": "parameter_graph invalid"},
-            "ssrf": {"status": "ok", "findings": 0},
-        }),
-        encoding="utf-8",
-    )
-    (deliverables / "xss_analysis_deliverable.md").write_text(
-        "# XSS 分析报告\n", encoding="utf-8")
+async def test_inject_gitnexus_track_status_multiple_failed(tmp_path, monkeypatch):
+    """多个 failed 类(injection + xss)都列出,每条一行;ok 类(ssrf)不入注记。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_track_status(deliverables, {
+        "injection": {"status": "failed", "reason": "builder raised: ValueError"},
+        "xss": {"status": "failed", "reason": "parameter_graph invalid"},
+        "ssrf": {"status": "ok", "findings": 0},
+    })
+    _write_report(deliverables, "# 安全评估报告\n")
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
 
-    try:
-        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
-    finally:
-        clear_audit_session()
-
-    report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
-        encoding="utf-8")
-    assert "injection" in report and "xss" in report
-    assert "builder raised: ValueError" in report
-    assert "parameter_graph invalid" in report
-    # ssrf 是 ok,不应出现注记行
-    assert "ssrf" not in report.lower() or "ssrf" not in [
-        line.split(":")[0].strip("- ").strip() for line in report.splitlines()
-        if "GitNexus 轨判定失败" in line]
-
-
-async def test_report_no_note_when_all_ok(tmp_path, monkeypatch):
-    """GitNexus 轨全部 ok 时,报告不应有 failed 注记章节。"""
-    deliverables = tmp_path / "deliverables" / "whitebox"
-    _setup(tmp_path, monkeypatch, deliverables)
-    (deliverables / "gitnexus_track_status.json").write_text(
-        json.dumps({"xss": {"status": "ok", "findings": 2}}),
-        encoding="utf-8",
-    )
-    (deliverables / "xss_analysis_deliverable.md").write_text(
-        "# XSS 分析报告\n", encoding="utf-8")
-
-    try:
-        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
-    finally:
-        clear_audit_session()
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
 
     report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
         encoding="utf-8")
-    assert "GitNexus 轨判定失败" not in report
-    assert "GitNexus 轨判定状态" not in report
+    assert "- injection: GitNexus 轨判定失败(builder raised: ValueError)" in report
+    assert "- xss: GitNexus 轨判定失败(parameter_graph invalid)" in report
+    # ssrf 是 ok,不应出现在注记里
+    assert "ssrf" not in report
 
 
-async def test_report_no_note_when_track_status_missing(tmp_path, monkeypatch):
-    """gitnexus_track_status.json 缺失(read_track_status 返 {})-> 不注入注记,不抛。"""
-    deliverables = tmp_path / "deliverables" / "whitebox"
-    _setup(tmp_path, monkeypatch, deliverables)
+async def test_inject_gitnexus_track_status_no_failed_noop(tmp_path, monkeypatch):
+    """无 failed 类(全 ok)→ 不改报告。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_track_status(deliverables, {"xss": {"status": "ok", "findings": 2}})
+    original = "# 安全评估报告\n\n正文\n"
+    _write_report(deliverables, original)
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
+
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
+
+    report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
+        encoding="utf-8")
+    assert report == original
+
+
+async def test_inject_gitnexus_track_status_idempotent(tmp_path, monkeypatch):
+    """幂等:报告已含 banner 标题 → 再跑不重复注入。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_track_status(deliverables, {
+        "xss": {"status": "failed", "reason": "builder raised"}})
+    # 报告已含 banner(模拟 resume / 二次跑)
+    existing = (
+        "## GitNexus 轨判定状态\n\n"
+        "- xss: GitNexus 轨判定失败(builder raised),结果由 LLM 轨提供\n\n"
+        "---\n\n# 安全评估报告\n"
+    )
+    _write_report(deliverables, existing)
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
+
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))  # 二次跑
+
+    report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
+        encoding="utf-8")
+    assert report.count("## GitNexus 轨判定状态") == 1
+    assert report.count(
+        "- xss: GitNexus 轨判定失败(builder raised)") == 1
+
+
+async def test_inject_gitnexus_track_status_missing_report(tmp_path, monkeypatch):
+    """报告文件不存在 → 不抛(activity 直接 return)。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_track_status(deliverables, {
+        "xss": {"status": "failed", "reason": "x"}})
+    # 不写 comprehensive_security_assessment_report.md
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
+
+    # 不抛
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
+
+    # 也未创建报告文件
+    assert not (deliverables / "comprehensive_security_assessment_report.md").exists()
+
+
+async def test_inject_gitnexus_track_status_missing_status_file(tmp_path, monkeypatch):
+    """gitnexus_track_status.json 缺失(read_track_status 返 {})-> 不注入,不抛。"""
+    deliverables = tmp_path / "whitebox"
+    deliverables.mkdir(parents=True)
+    original = "# 安全评估报告\n"
+    _write_report(deliverables, original)
     # 不写 gitnexus_track_status.json
-    (deliverables / "xss_analysis_deliverable.md").write_text(
-        "# XSS 分析报告\n", encoding="utf-8")
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, deliverables, tmp_path))
 
-    try:
-        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
-    finally:
-        clear_audit_session()
+    await activities.inject_gitnexus_track_status(
+        ActivityInput(repo_path=str(tmp_path)))
 
     report = (deliverables / "comprehensive_security_assessment_report.md").read_text(
         encoding="utf-8")
-    assert "GitNexus 轨判定失败" not in report
+    assert report == original
