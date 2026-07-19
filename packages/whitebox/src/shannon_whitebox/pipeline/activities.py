@@ -1058,10 +1058,19 @@ async def assemble_report(input: ActivityInput) -> None:
     天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
     加执行摘要并清理。攻击链章节由后续 inject_attack_chains activity 注入
     （report-executive 之后），避免被覆盖。
+
+    GitNexus 轨 fail-fast(fail-fast plan Task 6,2026-07-19):ReportAssembler
+    写出后,读 Task 1 的 gitnexus_track_status.json;若有 failed 类,在报告
+    顶部注入「## GitNexus 轨判定状态」注记章节,逐条列出 failed 类 + reason
+    +「结果由 LLM 轨提供」。文件缺/无 failed -> 不改报告(幂等,不抛)。
     """
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
+        from shannon_core.code_index.gitnexus_track_status import read_track_status
         from shannon_core.services.report_assembler import ReportAssembler
+        from shannon_core.utils.file_io import (
+            async_path_exists, async_read_file, async_write_file,
+        )
 
         _, deliverables, _ = _get_paths(input)
         report_path = deliverables / "comprehensive_security_assessment_report.md"
@@ -1070,6 +1079,22 @@ async def assemble_report(input: ActivityInput) -> None:
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
             await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+            # GitNexus 轨判定状态注记(fail-fast plan Task 6)。ReportAssembler
+            # 重写报告始终覆盖,故每次 assemble 都重新评估注入(幂等)。
+            track_status = read_track_status(deliverables)
+            failed_notes = [
+                f"- {vc}: GitNexus 轨判定失败({s.get('reason', 'unknown')}),结果由 LLM 轨提供"
+                for vc, s in track_status.items()
+                if isinstance(s, dict) and s.get("status") == "failed"
+            ]
+            if failed_notes and await async_path_exists(report_path):
+                banner = (
+                    "## GitNexus 轨判定状态\n\n"
+                    + "\n".join(failed_notes)
+                    + "\n\n---\n\n"
+                )
+                content = await async_read_file(report_path)
+                await async_write_file(report_path, banner + content)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
