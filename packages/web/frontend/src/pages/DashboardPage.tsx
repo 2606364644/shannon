@@ -75,16 +75,17 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={t("dashboard.title")} subtitle={t("dashboard.subtitle")} />
+      <PageHeader
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.subtitle")}
+        action={<Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>}
+      />
       <StatRow stats={[
         { label: t("dashboard.stats.running"), value: running.length, tone: "cyan" },
         { label: t("dashboard.stats.completedToday"), value: completedToday.length, tone: "green" },
         { label: t("dashboard.stats.totalVulns"), value: totalVulns },
         { label: t("dashboard.stats.totalCost"), value: fmtCost(totalCost, data[0]?.cost_currency) },
       ]} />
-      <div className="flex items-center gap-3">
-        <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
-      </div>
 
       {running.length > 0 ? (
         <section className="space-y-2">
