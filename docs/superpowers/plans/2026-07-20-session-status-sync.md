@@ -443,7 +443,7 @@ def _make_handle(status) -> MagicMock:
 @pytest.mark.asyncio
 async def test_watch_marks_session_failed_on_workflow_failed(tmp_path):
     """describe() 返 FAILED → session.json status=failed + scan_end 写入 + _handles 清理."""
-    from temporalio.workflow import WorkflowExecutionStatus
+    from temporalio.client import WorkflowExecutionStatus
 
     workspaces = tmp_path / "ws"
     workspaces.mkdir()
@@ -474,7 +474,7 @@ async def test_watch_marks_session_failed_on_workflow_failed(tmp_path):
 @pytest.mark.asyncio
 async def test_watch_does_not_mark_failed_on_running(tmp_path):
     """describe() 返 RUNNING → 不触发 failed(继续 tail).用极短 scan_timeout 让循环退出."""
-    from temporalio.workflow import WorkflowExecutionStatus
+    from temporalio.client import WorkflowExecutionStatus
 
     workspaces = tmp_path / "ws"
     workspaces.mkdir()
@@ -562,7 +562,7 @@ Modify `packages/web/src/shannon_web/components/scan_manager.py`。
         TIMED_OUT / TERMINATED 时(worker 进程崩溃/容器死/被 terminate,workflow except
         跑不到)自行写 scan_end + session.status=failed.
         """
-        from temporalio.workflow import WorkflowExecutionStatus
+        from temporalio.client import WorkflowExecutionStatus
         # describe() 见到的终态集合 → 标 failed
         _FAILED_STATES = {
             WorkflowExecutionStatus.FAILED,
