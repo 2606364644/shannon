@@ -313,18 +313,43 @@ class ScanManager:
     async def _watch(self, ws: str, event_file: Path) -> None:
         """C1: tail events.ndjson 直到 scan_end(worker finalize_summary 写)或超时.
 
-        无子进程 stdout 可 drain; scan_end 由 worker 容器 StructuredEventRenderer 在
-        SummaryEvent 时写. _watch 见 scan_end 即收尾; 超时(scan_timeout)或文件长期无
-        scan_end 则兜底写一条 + 标 timeout/crashed.
+        session-status 同步:周期 handle.describe() 轮询 workflow 状态,发现 FAILED /
+        TIMED_OUT / TERMINATED 时(worker 进程崩溃/容器死/被 terminate,workflow except
+        跑不到)自行写 scan_end + session.status=failed.
         """
+        from temporalio.client import WorkflowExecutionStatus
+        # describe() 见到的终态集合 → 标 failed
+        _FAILED_STATES = {
+            WorkflowExecutionStatus.FAILED,
+            WorkflowExecutionStatus.TIMED_OUT,
+            WorkflowExecutionStatus.TERMINATED,
+        }
         try:
             deadline = (time.monotonic() + self._scan_timeout) if self._scan_timeout > 0 else None
+            describe_tick = 0
             while not self._has_scan_end(event_file):
                 if deadline is not None and time.monotonic() > deadline:
-                    # 超时: 兜底 scan_end(worker 仍可继续, 但 web 侧判超时收尾)
                     if not self._has_scan_end(event_file):
                         await self._write_scan_end(event_file, "timeout", -1, "web 超时收尾")
                     break
+                # 每 ~15s describe 一次(0.5s sleep × 30 = 15s)
+                describe_tick += 1
+                if describe_tick >= 30:
+                    describe_tick = 0
+                    handle = self._handles.get(ws)
+                    if handle is not None:
+                        try:
+                            desc = await handle.describe()
+                            if desc.status in _FAILED_STATES:
+                                await self._write_scan_end(
+                                    event_file, "failed", -1,
+                                    f"workflow {desc.status.name}",
+                                    session_status="failed", workspace_name=ws,
+                                    workspaces_dir=self._workspaces_dir,
+                                )
+                                break
+                        except Exception:
+                            pass  # temporal 断连等:忽略,下个 tick 重试
                 await asyncio.sleep(0.5)
         finally:
             # 兜底: 若 worker 未写 scan_end(异常/crash), 补一条
@@ -349,10 +374,20 @@ class ScanManager:
         return False
 
     async def _write_scan_end(self, event_file: Path, status: str,
-                              returncode: int, stderr_tail: str) -> None:
+                              returncode: int, stderr_tail: str,
+                              session_status: str | None = None,
+                              workspace_name: str | None = None,
+                              workspaces_dir: Path | None = None) -> None:
         payload = {
             "ts": _now_iso(), "category": "CONTROL", "type": "scan_end",
             "status": status, "returncode": returncode, "stderr_tail": stderr_tail,
         }
         async with aiofiles.open(event_file, "a") as fh:
             await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        # session-status 同步:workflow FAILED 兜底时同步落 session.json
+        if session_status and workspace_name and workspaces_dir is not None:
+            import time as _time
+            SessionManager(workspaces_dir).update_session(
+                workspaces_dir / workspace_name,
+                {"status": session_status, "completed_at": _time.time()},
+            )
