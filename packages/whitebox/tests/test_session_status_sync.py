@@ -89,8 +89,11 @@ def test_worker_scancancelled_logs_cancelled_summary():
 
 
 def test_worker_imports_pipeline_state():
-    """worker.py 必须能构造 PipelineState(failed/cancelled summary 需要它)."""
+    """worker.py 必须 import PipelineState(failed/cancelled summary 构造 state 需要它)."""
     worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
     src = worker.read_text()
-    assert "PipelineState" in src, (
-        "worker.py 必须引用 PipelineState(构造 failed/cancelled state 传给 _build_final_summary)")
+    # 检查真实 import 语句行(而非裸子串,避免 docstring 里的 PipelineState 字样误过)
+    assert any(
+        line.lstrip().startswith("from ") and "import" in line and "PipelineState" in line
+        for line in src.splitlines()
+    ), "worker.py 必须 import PipelineState(构造 failed/cancelled state 传给 _build_final_summary)"
