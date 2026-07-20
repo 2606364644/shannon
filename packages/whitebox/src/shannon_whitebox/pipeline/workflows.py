@@ -64,6 +64,29 @@ class WhiteboxScanWorkflow:
     def __init__(self):
         self._state = PipelineState()
 
+    def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
+        """构造 finalize_summary 用的 summary dict(success/failed 路径共用,DRY).
+
+        status 取 self._state.status(调用前调用方已设:success 路径=completed/failed,
+        except Exception 路径=failed);error 取已记录的首个 error,无则回落 error_fallback
+        (success=None, failed=str(e))。
+        """
+        from shannon_core.models.audit import AgentMetricsSummary
+        return {
+            "status": self._state.status,
+            "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+            "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
+            "completed_agents": list(self._state.completed_agents),
+            "agent_metrics": {
+                name: AgentMetricsSummary(
+                    duration_ms=int(m.get("duration_ms", 0) or 0),
+                    cost_usd=m.get("cost_usd"),
+                )
+                for name, m in self._state.agent_metrics.items()
+            },
+            "error": (self._state.errors[0] if self._state.errors else error_fallback),
+        }
+
     @workflow.run
     async def run(self, input: PipelineInput) -> PipelineState:
         # resume: 预填已完成 agent，激活下方 `if X not in completed_agents` 守卫
@@ -605,21 +628,7 @@ class WhiteboxScanWorkflow:
                         heartbeat_handle.cancel()
                     except Exception:
                         pass
-                from shannon_core.models.audit import AgentMetricsSummary
-                summary = {
-                    "status": self._state.status,
-                    "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
-                    "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
-                    "completed_agents": list(self._state.completed_agents),
-                    "agent_metrics": {
-                        name: AgentMetricsSummary(
-                            duration_ms=int(m.get("duration_ms", 0) or 0),
-                            cost_usd=m.get("cost_usd"),
-                        )
-                        for name, m in self._state.agent_metrics.items()
-                    },
-                    "error": (self._state.errors[0] if self._state.errors else None),
-                }
+                summary = self._build_finalize_summary(error_fallback=None)
                 await workflow.execute_activity(
                     activities.finalize_summary, args=[act_input, summary],
                     start_to_close_timeout=timedelta(seconds=30),
@@ -649,21 +658,7 @@ class WhiteboxScanWorkflow:
                         heartbeat_handle.cancel()
                     except Exception:
                         pass
-                from shannon_core.models.audit import AgentMetricsSummary
-                summary = {
-                    "status": "failed",
-                    "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
-                    "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
-                    "completed_agents": list(self._state.completed_agents),
-                    "agent_metrics": {
-                        name: AgentMetricsSummary(
-                            duration_ms=int(m.get("duration_ms", 0) or 0),
-                            cost_usd=m.get("cost_usd"),
-                        )
-                        for name, m in self._state.agent_metrics.items()
-                    },
-                    "error": (self._state.errors[0] if self._state.errors else str(e)),
-                }
+                summary = self._build_finalize_summary(error_fallback=str(e))
                 try:
                     await workflow.execute_activity(
                         activities.finalize_summary, args=[act_input, summary],
