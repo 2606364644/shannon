@@ -636,6 +636,44 @@ class WhiteboxScanWorkflow:
                     pass
             self._state.current_phase = None
             return self._state
+        except Exception as e:
+            # session-status 同步:workflow-level 失败(GitNexus fail-fast ApplicationFailure /
+            # activity retry 耗尽 / 任何未捕获异常)→ finalize_summary 写 session.status=failed +
+            # scan_end,再 raise 让 Temporal 标 FAILED(web _watch describe 兜底依赖此信号)。
+            self._state.status = "failed"
+            if not self._state.errors:
+                self._state.errors.append(f"{type(e).__name__}: {e}")
+            if is_worker_path:
+                if heartbeat_handle is not None:
+                    try:
+                        heartbeat_handle.cancel()
+                    except Exception:
+                        pass
+                from shannon_core.models.audit import AgentMetricsSummary
+                summary = {
+                    "status": "failed",
+                    "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+                    "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
+                    "completed_agents": list(self._state.completed_agents),
+                    "agent_metrics": {
+                        name: AgentMetricsSummary(
+                            duration_ms=int(m.get("duration_ms", 0) or 0),
+                            cost_usd=m.get("cost_usd"),
+                        )
+                        for name, m in self._state.agent_metrics.items()
+                    },
+                    "error": (self._state.errors[0] if self._state.errors else str(e)),
+                }
+                try:
+                    await workflow.execute_activity(
+                        activities.finalize_summary, args=[act_input, summary],
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=retry_for("standard"),
+                    )
+                except Exception:
+                    pass  # finalize 自身失败不掩盖原异常;workflow 仍 FAILED,web _watch describe 兜底
+            self._state.current_phase = None
+            raise
         finally:
             if heartbeat_handle is not None:
                 try:
