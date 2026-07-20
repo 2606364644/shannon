@@ -50,3 +50,47 @@ def test_workflow_except_exception_reraises():
     # 分支内必含裸 raise(重抛捕获的异常)
     assert "\n        raise\n" in branch or "\n            raise\n" in branch, (
         "except Exception 分支末尾必须裸 raise,让 workflow FAILED 供 web describe 兜底")
+
+
+def test_worker_has_except_exception_after_scancancelled():
+    """whitebox CLI worker.py 内层 try 必须有 except Exception 兜底(抄 blackbox worker.py:201-211)."""
+    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    src = worker.read_text()
+    sc = src.find("except ScanCancelled:")
+    assert sc != -1, "worker.py 须有 except ScanCancelled"
+    ee = src.find("except Exception as e:", sc)
+    assert ee != -1 and ee < src.find("finally:", sc), (
+        "except Exception 必须紧跟 except ScanCancelled 之后(在 finally 之前),抄 blackbox 兜底模式")
+
+
+def test_worker_except_branch_logs_failed_summary():
+    """except Exception 分支必须调 session.log_workflow_complete 写 failed summary."""
+    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    src = worker.read_text()
+    sc = src.find("except ScanCancelled:")
+    ee = src.find("except Exception as e:", sc)
+    fin = src.find("finally:", ee)
+    branch = src[ee:fin]
+    assert "log_workflow_complete" in branch, (
+        "except Exception 分支必须调 session.log_workflow_complete 落盘 failed 终态")
+    assert "_build_final_summary" in branch, (
+        "必须经 _build_final_summary 构造 summary(DRY,复用 cost/duration 数据源)")
+
+
+def test_worker_scancancelled_logs_cancelled_summary():
+    """except ScanCancelled 分支也必须落盘 cancelled(原版只 return,session 永远 running)."""
+    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    src = worker.read_text()
+    sc = src.find("except ScanCancelled:")
+    ee = src.find("except Exception as e:", sc)
+    branch = src[sc:ee]
+    assert "log_workflow_complete" in branch, (
+        "except ScanCancelled 必须调 session.log_workflow_complete 落盘 cancelled 终态")
+
+
+def test_worker_imports_pipeline_state():
+    """worker.py 必须能构造 PipelineState(failed/cancelled summary 需要它)."""
+    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    src = worker.read_text()
+    assert "PipelineState" in src, (
+        "worker.py 必须引用 PipelineState(构造 failed/cancelled state 传给 _build_final_summary)")

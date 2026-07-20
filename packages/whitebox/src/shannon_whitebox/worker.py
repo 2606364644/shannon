@@ -43,7 +43,7 @@ from .pipeline.activities import (
     finalize_summary,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
-from .pipeline.shared import PipelineInput
+from .pipeline.shared import PipelineInput, PipelineState
 from shannon_core.utils.paths import resolve_workspaces_dir
 from shannon_core.services.temporal_infra import generate_task_queue
 from shannon_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset
@@ -355,7 +355,20 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                             handle, ctrl, cancel_grace_seconds=15.0,
                         )
                     except ScanCancelled:
+                        # session-status 同步:cancelled 落盘(原版只 return → session 永远 running)。
+                        await session.log_workflow_complete(
+                            await _build_final_summary(
+                                PipelineState(status="cancelled"),
+                                session, scan_start))
                         return {"status": "cancelled"}
+                    except Exception as e:
+                        # session-status 同步:workflow FAILED 兜底(workflow except 没跑到的场景,
+                        # 如被 terminate / sandbox 崩)。抄 blackbox worker.py:201-211。
+                        await session.log_workflow_complete(
+                            await _build_final_summary(
+                                PipelineState(status="failed", errors=[str(e)]),
+                                session, scan_start))
+                        raise
                 finally:
                     clear_audit_session()
 
