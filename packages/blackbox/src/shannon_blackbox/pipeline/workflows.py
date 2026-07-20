@@ -429,9 +429,10 @@ class BlackboxScanWorkflow:
             self._state.current_phase = None
             return self._state
         except Exception as e:
-            # session-status 同步(对齐 whitebox):workflow-level 失败 → state.status=failed。
-            # 不调 finalize_activity(规避 finalize_report 签名依赖);session 落盘靠
-            # blackbox CLI worker.py:201-211 的 except Exception 兜底(已存在)。
+            # session-status 同步(对齐 whitebox):workflow-level 失败 → state.status=failed +
+            # return(不 raise,Temporal 标 COMPLETED)。不调 finalize_activity(规避
+            # finalize_report 签名依赖);session 落盘靠 blackbox CLI worker.py 正常路径
+            # (_to_workflow_summary 读 state.status=failed)或其 except Exception 兜底。
             self._state.status = "failed"
             if not self._state.errors:
                 self._state.errors.append(f"{type(e).__name__}: {e}")

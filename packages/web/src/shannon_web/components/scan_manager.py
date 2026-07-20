@@ -382,12 +382,14 @@ class ScanManager:
             "ts": _now_iso(), "category": "CONTROL", "type": "scan_end",
             "status": status, "returncode": returncode, "stderr_tail": stderr_tail,
         }
-        async with aiofiles.open(event_file, "a") as fh:
-            await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        # session-status 同步:workflow FAILED 兜底时同步落 session.json
+        # session-status 同步:先写 session.json 再写 events.ndjson —— 若 session 写失败,
+        # events 不写(_watch 下个 describe tick 重试);若 session 成功而 events 失败,
+        # session 已是终态(failed),finally 的 crashed 兜底补 events(scan_end)。
+        # (顺序反过来会让 events 有 scan_end 而 session 永远 running = 重现 ghost-scan)
         if session_status and workspace_name and workspaces_dir is not None:
-            import time as _time
             SessionManager(workspaces_dir).update_session(
                 workspaces_dir / workspace_name,
-                {"status": session_status, "completed_at": _time.time()},
+                {"status": session_status, "completed_at": time.time()},
             )
+        async with aiofiles.open(event_file, "a") as fh:
+            await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
