@@ -64,3 +64,27 @@ def test_strategic_intel_schema_keys_match_renderer_subheaders():
             f"{vc}: collector schema {schema_fields} ↔ renderer subheaders "
             f"{renderer_fields} drift"
         )
+
+
+# ── schema 违规止血(2026-07-20) ───────────────────────────────────────────
+def test_findings_summary_as_str_does_not_crash():
+    md = render_vuln("injection", {"findings_summary": "prose"})
+    assert "## 1. Executive Summary" in md
+
+
+def test_patterns_str_elements_skipped():
+    md = render_vuln("injection", {"findings_summary": {
+        "patterns": ["str instead of dict"]}})
+    assert "## 2. Dominant Vulnerability Patterns" in md
+    assert "No dominant patterns identified" in md
+
+
+def test_safe_vectors_str_elements_skipped():
+    md = render_vuln("xss", {"safe_vectors": {"vectors": ["str elem"]}})
+    assert "No vectors confirmed secure" in md
+    assert "str elem" not in md
+
+
+def test_blind_spots_as_str_does_not_crash():
+    md = render_vuln("auth", {"blind_spots": "prose"})
+    assert "## 5. Analysis Constraints and Blind Spots" in md

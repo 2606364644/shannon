@@ -2,11 +2,11 @@
 
 5 class(injection / xss / auth / ssrf / authz)共用 render_vuln,按 vuln_class branching。
 4 张 per-class 映射表 + 5 个 section 渲染函数。输入 data = collector.get_all() 子集
-(缺键 = skipped → placeholder,不 fail)。本模块不 import GitNexus / 确定性层(守 §1)。
+(缺键 = skipped -> placeholder,不 fail)。本模块不 import GitNexus / 确定性层(守 §1)。
 """
 from __future__ import annotations
 
-from ._helpers import placeholder, render_table
+from ._helpers import as_dict, as_dict_list, as_list, placeholder, render_table
 
 # ── per-class 映射表(对照 TS vuln-renderer.ts:26-110 逐字移植) ──────────
 TITLES: dict[str, str] = {
@@ -25,7 +25,7 @@ SECTION_FOUR_HEADING: dict[str, str] = {
     "authz": "4. Vectors Analyzed and Confirmed Secure",
 }
 
-# [field_name, friendly_header] per class —— field_name 与 collectors/vuln.py schema 一致
+# [field_name, friendly_header] per class -- field_name 与 collectors/vuln.py schema 一致
 STRATEGIC_INTEL_SUBHEADERS: dict[str, list[tuple[str, str]]] = {
     "injection": [
         ("defensive_evasion_waf", "Defensive Evasion (WAF Analysis)"),
@@ -71,21 +71,23 @@ SECTION_FOUR_COLUMNS: dict[str, dict] = {
 
 # ── section 渲染函数(5 个,纯函数) ─────────────────────────────────────
 def _executive_summary(summary: dict | None) -> str:
+    summary = as_dict(summary)
     if not summary:
         return f"## 1. Executive Summary\n\n{placeholder('Section 1', 'set_findings_summary')}"
     return f"## 1. Executive Summary\n\n{summary.get('key_outcome', '')}"
 
 
 def _dominant_patterns(summary: dict | None) -> str:
+    summary = as_dict(summary)
     head = "## 2. Dominant Vulnerability Patterns"
     if not summary:
         return f"{head}\n\n{placeholder('Section 2', 'set_findings_summary')}"
-    patterns = summary.get("patterns") or []
+    patterns = as_dict_list(summary.get("patterns"))
     if not patterns:
         return f"{head}\n\n*No dominant patterns identified.*"
     blocks = []
     for i, p in enumerate(patterns, 1):
-        ids = ", ".join(p.get("representative_finding_ids", []))
+        ids = ", ".join(str(x) for x in as_list(p.get("representative_finding_ids")))
         blocks.append("\n".join([
             f"### Pattern {i}: {p.get('name', '')}", "",
             p.get("description", ""), "",
@@ -96,6 +98,7 @@ def _dominant_patterns(summary: dict | None) -> str:
 
 
 def _strategic_intel(vuln_class: str, intel: dict | None) -> str:
+    intel = as_dict(intel)
     head = "## 3. Strategic Intelligence for Exploitation"
     if not intel:
         return f"{head}\n\n{placeholder('Section 3', 'set_strategic_intelligence')}"
@@ -111,11 +114,12 @@ def _strategic_intel(vuln_class: str, intel: dict | None) -> str:
 
 
 def _safe_vectors(vuln_class: str, data: dict | None) -> str:
+    data = as_dict(data)
     cols = SECTION_FOUR_COLUMNS[vuln_class]
     head = f"## {SECTION_FOUR_HEADING[vuln_class]}"
     if not data:
         return f"{head}\n\n{placeholder('Section 4', 'set_safe_vectors')}"
-    vectors = data.get("vectors") or []
+    vectors = as_dict_list(data.get("vectors"))
     if not vectors:
         return f"{head}\n\n*No vectors confirmed secure during analysis.*"
     headers = [cols["subject"], cols["location"], "Defense Mechanism"]
@@ -131,10 +135,11 @@ def _safe_vectors(vuln_class: str, data: dict | None) -> str:
 
 
 def _blind_spots(data: dict | None) -> str:
+    data = as_dict(data)
     head = "## 5. Analysis Constraints and Blind Spots"
     if not data:
         return f"{head}\n\n{placeholder('Section 5', 'set_blind_spots')}"
-    items = data.get("items") or []
+    items = as_dict_list(data.get("items"))
     if not items:
         return f"{head}\n\n*No analysis constraints or blind spots identified.*"
     blocks = [f"### {it.get('heading', '')}\n\n{it.get('description', '')}" for it in items]
@@ -143,7 +148,7 @@ def _blind_spots(data: dict | None) -> str:
 
 def render_vuln(vuln_class: str, data: dict) -> str:
     """渲染完整 vuln deliverable md:标题 + 5 section。data = collector.get_all() 子集。"""
-    summary = data.get("findings_summary")
+    summary = as_dict(data.get("findings_summary"))
     parts = [
         f"# {TITLES[vuln_class]}", "",
         _executive_summary(summary), "",

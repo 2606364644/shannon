@@ -361,6 +361,7 @@ class TestEdgeCases:
             "AuthenticationError", "AuthLoginFailedError", "PermissionError",
             "ConfigurationError", "InvalidRequestError", "RequestTooLargeError",
             "ExecutionLimitError", "InvalidTargetError", "GitError",
+            "SchemaMismatchError",
         }
         assert NON_RETRYABLE_TYPES == expected
 
@@ -428,3 +429,32 @@ def test_input_should_be_text_is_non_retryable():
     error_type, retryable = classify_error_for_temporal(err)
     assert retryable is False
     assert error_type == "OutputValidationError"
+
+
+# ============================================================================
+# classify_error_for_temporal — 确定性编程错误(AttributeError/TypeError/KeyError)
+# non-retryable(2026-07-20 sentinel_dashboard recon 崩溃止血)
+# ============================================================================
+class TestSchemaMismatchNonRetryable:
+    """renderer 对 str 调 .get 等(LLM 违规把 object 填成 str)是确定性失败:
+    同输入必同崩,重试只被 PRODUCTION_RETRY 放大成数小时卡死 -> non-retryable。"""
+
+    def test_attribute_error_non_retryable(self):
+        err = AttributeError("'str' object has no attribute 'get'")
+        assert classify_error_for_temporal(err) == ("SchemaMismatchError", False)
+
+    def test_type_error_non_retryable(self):
+        err = TypeError("'str' object is not subscriptable")
+        assert classify_error_for_temporal(err) == ("SchemaMismatchError", False)
+
+    def test_key_error_non_retryable(self):
+        err = KeyError("session_flow")
+        assert classify_error_for_temporal(err) == ("SchemaMismatchError", False)
+
+    def test_schema_mismatch_listed_non_retryable(self):
+        assert "SchemaMismatchError" in NON_RETRYABLE_TYPES
+
+    def test_with_retry_cap_keeps_non_retryable(self):
+        """classify_for_temporal_with_retry_cap 不改变 non-retryable 判定。"""
+        err = AttributeError("boom")
+        assert classify_for_temporal_with_retry_cap(err, attempt=1) == ("SchemaMismatchError", False)

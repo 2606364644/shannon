@@ -135,6 +135,13 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
         return ("UnknownError", error.retryable)
 
     # -- Level 2: String pattern fallback --------------------------------------
+    # 确定性编程错误优先判 non-retryable:renderer 对 str 调 .get / 对 str 迭代
+    # (LLM 违规把 object 填成 str)这类,同输入必同崩,重试只被放大成数小时卡死
+    # (2026-07-20 sentinel_dashboard recon attempt 1 'str' object has no
+    # attribute .get 被 PRODUCTION_RETRY 重试 50×6min)。fail-fast,不耗满重试上限。
+    if isinstance(error, (AttributeError, TypeError, KeyError)):
+        return ("SchemaMismatchError", False)
+
     text = str(error).lower()
 
     # Billing patterns
@@ -225,4 +232,5 @@ NON_RETRYABLE_TYPES = frozenset({
     "AuthenticationError", "AuthLoginFailedError", "PermissionError",
     "ConfigurationError", "InvalidRequestError", "RequestTooLargeError",
     "ExecutionLimitError", "InvalidTargetError", "GitError",
+    "SchemaMismatchError",
 })

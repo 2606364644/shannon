@@ -114,3 +114,28 @@ def test_render_deliverable_returns_none_for_non_rendered_agent():
     # RECON 现已接 host-render（Plan 2 Task C）；用 REPORT 验证无 renderer 通道的
     # agent 仍返 None（对齐 collector 侧 test_pre_recon.py:106 的 RECON→REPORT 修法）。
     assert render_deliverable(AgentName.REPORT, {}) is None
+
+
+# ── schema 违规止血(2026-07-20) ───────────────────────────────────────────
+def test_application_intelligence_as_str_does_not_crash():
+    md = render_pre_recon({"application_intelligence": "prose"})
+    assert "## 2. Architecture & Technology Stack" in md
+
+
+def test_auth_deep_dive_as_str_does_not_crash():
+    md = render_pre_recon({"auth_deep_dive": "prose"})
+    assert "## 3. Authentication & Authorization Deep Dive" in md
+
+
+def test_critical_file_paths_value_as_str_degrades():
+    # paths 字段应是 list,agent 填 str 时 as_list 兜底为空
+    md = render_pre_recon({"critical_file_paths": {"configuration": "should be list"}})
+    assert "## 8. Critical File Paths" in md
+    assert "*(none identified)*" in md
+
+
+def test_xss_sinks_sink_str_elements_skipped():
+    md = render_pre_recon({"xss_sinks": {
+        "html_body": [{"sink_function": "innerHTML", "location": "a.js:1"}, "str elem"]}})
+    assert "innerHTML" in md
+    assert "str elem" not in md

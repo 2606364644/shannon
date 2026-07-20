@@ -1,16 +1,15 @@
 """recon deliverable renderer（纯函数，移植 prompts/recon.txt §0-9）。
 
-输入 data = collector.get_all() 的子集（缺键 = skipped → placeholder，不 fail）。
+输入 data = collector.get_all() 的子集（缺键 = skipped -> placeholder，不 fail）。
 输出 md：标题 + §0 静态常量 + §1-9 数据驱动 section。9 个 set_* 工具的 payload
-各自渲染对应 section；skipped → placeholder("Section N","set_*")。不 import
+各自渲染对应 section；skipped -> placeholder("Section N","set_*")。不 import
 GitNexus / 确定性层（守 §1）。
 
 模式对齐 pre_recon.py / vuln.py：helper-per-section + ``"\n".join(parts).rstrip() + "\n"``。
 """
 from __future__ import annotations
 
-from ._helpers import placeholder, render_table
-
+from ._helpers import as_dict, as_dict_list, as_list, placeholder, render_table
 
 # ── §0 静态常量（移植 recon.txt line 164-175）──────────────────────────
 HOW_TO_READ_THIS = """## 0) HOW TO READ THIS
@@ -42,7 +41,7 @@ def _sub(num: str, title: str, body: str) -> str:
 
 # ── §1 Executive Summary ───────────────────────────────────────────────
 def _render_executive_summary(data: dict) -> str:
-    es = data.get("executive_summary")
+    es = as_dict(data.get("executive_summary"))
     if not es:
         return _section(1, "Executive Summary", placeholder("Section 1", "set_executive_summary"))
     text = (es.get("text") or "").strip()
@@ -51,7 +50,7 @@ def _render_executive_summary(data: dict) -> str:
 
 # ── §2 Technology & Service Map ────────────────────────────────────────
 def _render_technology_stack(data: dict) -> str:
-    ts = data.get("technology_stack")
+    ts = as_dict(data.get("technology_stack"))
     if not ts:
         return _section(2, "Technology & Service Map", placeholder("Section 2", "set_technology_stack"))
     body = "\n".join([
@@ -64,7 +63,7 @@ def _render_technology_stack(data: dict) -> str:
 
 # ── §3 Authentication & Session Management Flow ────────────────────────
 def _render_role_assignment(auth: dict) -> str:
-    ra = auth.get("role_assignment") or {}
+    ra = as_dict(auth.get("role_assignment"))
     body = "\n".join([
         _kv("Role Determination", ra.get("role_determination", "")),
         _kv("Default Role", ra.get("default_role", "")),
@@ -75,7 +74,7 @@ def _render_role_assignment(auth: dict) -> str:
 
 
 def _render_privilege_storage(auth: dict) -> str:
-    ps = auth.get("privilege_storage") or {}
+    ps = as_dict(auth.get("privilege_storage"))
     body = "\n".join([
         _kv("Storage Location", ps.get("storage_location", "")),
         _kv("Validation Points", ps.get("validation_points", "")),
@@ -86,7 +85,7 @@ def _render_privilege_storage(auth: dict) -> str:
 
 
 def _render_role_switching(auth: dict) -> str:
-    rsi = auth.get("role_switching_impersonation")
+    rsi = as_dict(auth.get("role_switching_impersonation"))
     if not rsi or rsi.get("applicable") is False:
         return _sub("3.3", "Role Switching & Impersonation", "[not applicable]")
     body = "\n".join([
@@ -99,11 +98,11 @@ def _render_role_switching(auth: dict) -> str:
 
 
 def _render_authentication(data: dict) -> str:
-    auth = data.get("authentication")
+    auth = as_dict(data.get("authentication"))
     if not auth:
         return _section(3, "Authentication & Session Management Flow",
                         placeholder("Section 3", "set_authentication"))
-    sf = auth.get("session_flow") or {}
+    sf = as_dict(auth.get("session_flow"))
     session_body = "\n".join([
         _kv("Entry Points", sf.get("entry_points", "")),
         _kv("Mechanism", sf.get("mechanism", "")),
@@ -120,7 +119,7 @@ def _render_authentication(data: dict) -> str:
 
 # ── §4 API Endpoint Inventory (set_endpoints append) ───────────────────
 def _render_endpoints(data: dict) -> str:
-    endpoints = data.get("endpoints")
+    endpoints = as_dict_list(data.get("endpoints"))
     if not endpoints:
         return _section(4, "API Endpoint Inventory", placeholder("Section 4", "set_endpoints"))
     headers = ["Method", "Endpoint Path", "Required Role", "Object ID Parameters",
@@ -138,12 +137,13 @@ def _render_endpoints(data: dict) -> str:
 
 # ── §5 Potential Input Vectors ─────────────────────────────────────────
 def _render_input_vectors(data: dict) -> str:
-    iv = data.get("input_vectors")
+    iv = as_dict(data.get("input_vectors"))
     if not iv:
         return _section(5, "Potential Input Vectors for Vulnerability Analysis",
                         placeholder("Section 5", "set_input_vectors"))
 
     def _bullets(items):
+        items = as_list(items)
         if not items:
             return "*(none identified)*"
         return "\n".join(f"  - {item}" for item in items)
@@ -159,13 +159,13 @@ def _render_input_vectors(data: dict) -> str:
 
 # ── §6 Network & Interaction Map ───────────────────────────────────────
 def _render_entities(nm: dict) -> str:
-    entities = nm.get("entities") or []
+    entities = as_dict_list(nm.get("entities"))
     if not entities:
         return _sub("6.1", "Entities", "*None identified.*")
     headers = ["Title", "Type", "Zone", "Tech", "Data", "Notes"]
     rows = [
         [e.get("title", ""), e.get("type", ""), e.get("zone", ""), e.get("tech", ""),
-         ", ".join(e.get("data") or []), e.get("notes", "")]
+         ", ".join(str(x) for x in as_list(e.get("data"))), e.get("notes", "")]
         for e in entities
     ]
     # deterministic output (对齐 prompt 承诺 "sorts each array deterministically"): r[0]=title
@@ -174,10 +174,10 @@ def _render_entities(nm: dict) -> str:
 
 
 def _render_entity_metadata(nm: dict) -> str:
-    entities = nm.get("entities") or []
+    entities = as_dict_list(nm.get("entities"))
     rows = []
     for e in entities:
-        meta = e.get("metadata") or []
+        meta = as_dict_list(e.get("metadata"))
         if not meta:
             continue
         meta_str = "; ".join(f"{m.get('key', '')}: {m.get('value', '')}" for m in meta)
@@ -190,14 +190,14 @@ def _render_entity_metadata(nm: dict) -> str:
 
 
 def _render_flows(nm: dict) -> str:
-    flows = nm.get("flows") or []
+    flows = as_dict_list(nm.get("flows"))
     if not flows:
         return _sub("6.3", "Flows (Connections)", "*None identified.*")
     headers = ["FROM → TO", "Channel", "Path/Port", "Guards", "Touches"]
     rows = [
         [f"{f.get('from', '')} → {f.get('to', '')}", f.get("channel", ""),
-         f.get("path_port", ""), ", ".join(f.get("guards") or []),
-         ", ".join(f.get("touches") or [])]
+         f.get("path_port", ""), ", ".join(str(x) for x in as_list(f.get("guards"))),
+         ", ".join(str(x) for x in as_list(f.get("touches")))]
         for f in flows
     ]
     # deterministic output: r[0]="from → to" string
@@ -206,7 +206,7 @@ def _render_flows(nm: dict) -> str:
 
 
 def _render_guards(nm: dict) -> str:
-    guards = nm.get("guards") or []
+    guards = as_dict_list(nm.get("guards"))
     if not guards:
         return _sub("6.4", "Guards Directory", "*None identified.*")
     headers = ["Guard Name", "Category", "Statement"]
@@ -215,7 +215,7 @@ def _render_guards(nm: dict) -> str:
 
 
 def _render_network_map(data: dict) -> str:
-    nm = data.get("network_map")
+    nm = as_dict(data.get("network_map"))
     if not nm:
         return _section(6, "Network & Interaction Map",
                         placeholder("Section 6", "set_network_map"))
@@ -230,7 +230,7 @@ def _render_network_map(data: dict) -> str:
 
 # ── §7 Role & Privilege Architecture ──────────────────────────────────
 def _render_discovered_roles(ra: dict) -> str:
-    roles = ra.get("roles") or []
+    roles = as_dict_list(ra.get("roles"))
     if not roles:
         return _sub("7.1", "Discovered Roles", "*None identified.*")
     headers = ["Role Name", "Privilege Level", "Scope/Domain", "Code Implementation"]
@@ -245,7 +245,7 @@ def _render_discovered_roles(ra: dict) -> str:
 
 
 def _render_privilege_lattice(ra: dict) -> str:
-    pl = ra.get("privilege_lattice") or {}
+    pl = as_dict(ra.get("privilege_lattice"))
     ordering = pl.get("ordering_diagram", "")
     parallel = pl.get("parallel_isolation_notes", "")
     switching = pl.get("role_switching_notes")
@@ -266,13 +266,13 @@ def _render_privilege_lattice(ra: dict) -> str:
 
 
 def _render_role_entry_points(ra: dict) -> str:
-    roles = ra.get("roles") or []
+    roles = as_dict_list(ra.get("roles"))
     if not roles:
         return _sub("7.3", "Role Entry Points", "*None identified.*")
     headers = ["Role", "Default Landing Page", "Accessible Route Patterns", "Authentication Method"]
     rows = [
         [r.get("name", ""), r.get("default_landing_page", ""),
-         ", ".join(r.get("accessible_route_patterns") or []),
+         ", ".join(str(x) for x in as_list(r.get("accessible_route_patterns"))),
          r.get("authentication_method", "")]
         for r in roles
     ]
@@ -282,7 +282,7 @@ def _render_role_entry_points(ra: dict) -> str:
 
 
 def _render_role_to_code(ra: dict) -> str:
-    roles = ra.get("roles") or []
+    roles = as_dict_list(ra.get("roles"))
     if not roles:
         return _sub("7.4", "Role-to-Code Mapping", "*None identified.*")
     headers = ["Role", "Middleware/Guards", "Permission Checks", "Storage Location"]
@@ -297,7 +297,7 @@ def _render_role_to_code(ra: dict) -> str:
 
 
 def _render_role_architecture(data: dict) -> str:
-    ra = data.get("role_architecture")
+    ra = as_dict(data.get("role_architecture"))
     if not ra:
         return _section(7, "Role & Privilege Architecture",
                         placeholder("Section 7", "set_role_architecture"))
@@ -312,7 +312,7 @@ def _render_role_architecture(data: dict) -> str:
 
 # ── §8 Authorization Vulnerability Candidates ──────────────────────────
 def _render_horizontal(ac: dict) -> str:
-    items = ac.get("horizontal") or []
+    items = as_dict_list(ac.get("horizontal"))
     if not items:
         return _sub("8.1", "Horizontal Privilege Escalation Candidates", "*None identified.*")
     headers = ["Priority", "Endpoint Pattern", "Object ID Parameter", "Data Type", "Sensitivity"]
@@ -327,7 +327,7 @@ def _render_horizontal(ac: dict) -> str:
 
 
 def _render_vertical(ac: dict) -> str:
-    items = ac.get("vertical") or []
+    items = as_dict_list(ac.get("vertical"))
     if not items:
         return _sub("8.2", "Vertical Privilege Escalation Candidates", "*None identified.*")
     headers = ["Target Role", "Endpoint Pattern", "Functionality", "Risk Level"]
@@ -342,7 +342,7 @@ def _render_vertical(ac: dict) -> str:
 
 
 def _render_context(ac: dict) -> str:
-    items = ac.get("context") or []
+    items = as_dict_list(ac.get("context"))
     if not items:
         return _sub("8.3", "Context-Based Authorization Candidates", "*None identified.*")
     headers = ["Workflow", "Endpoint", "Expected Prior State", "Bypass Potential"]
@@ -357,7 +357,7 @@ def _render_context(ac: dict) -> str:
 
 
 def _render_authz_candidates(data: dict) -> str:
-    ac = data.get("authz_candidates")
+    ac = as_dict(data.get("authz_candidates"))
     if not ac:
         return _section(8, "Authorization Vulnerability Candidates",
                         placeholder("Section 8", "set_authz_candidates"))
@@ -383,6 +383,7 @@ _INJECTION_LABELS = [
 
 
 def _render_sink_list(sinks) -> str:
+    sinks = as_dict_list(sinks)
     if not sinks:
         return "*(scanned, no sources of this kind found)*"
     return "\n".join(
@@ -393,7 +394,7 @@ def _render_sink_list(sinks) -> str:
 
 
 def _render_injection_sources(data: dict) -> str:
-    inj = data.get("injection_sources")
+    inj = as_dict(data.get("injection_sources"))
     if not inj:
         return _section(9, "Injection Sources", placeholder("Section 9", "set_injection_sources"))
     if inj.get("applicable") is False:

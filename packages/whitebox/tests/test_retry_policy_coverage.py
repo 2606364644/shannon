@@ -62,8 +62,8 @@ def _retry_for_category(call) -> str | None:
 def test_run_code_index_uses_bounded_code_index_retry():
     """run_code_index 必须 retry_for('code-index'),不能用 'standard'。
 
-    'standard' = PRODUCTION_RETRY(maximum_attempts=50) 会把大仓 LLM sink
-    discovery 的 10 分钟超时(幂等)放大成 50x ≈ 数小时的"卡死"(2026-06-30
+    'standard' = PRODUCTION_RETRY(maximum_attempts=8) 会把大仓 LLM sink
+    discovery 的 10 分钟超时(幂等)放大成 8x ≈ 数小时的"卡死"(2026-06-30
     juice-shop 实测:attempt 1/2/3 各 10m10s 超时,PRE_RECON 早已完成但 gather
     等代码索引重试耗尽)。AST 锚点防止有人把调用点改回 'standard'。
     """
@@ -80,14 +80,14 @@ def test_run_code_index_uses_bounded_code_index_retry():
         category = _retry_for_category(call)
         assert category == "code-index", (
             f"run_code_index 必须 retry_for('code-index'),当前是 {category!r}"
-            f"(PRODUCTION_RETRY max 50 会放大超时)"
+            f"(PRODUCTION_RETRY max 8 会放大超时)"
         )
 
 
 def test_generate_poc_report_uses_bounded_poc_retry():
     """generate_poc_report 必须 retry_for('poc'),不能用 'standard'。
 
-    'standard' = PRODUCTION_RETRY(max 50) 会把 PoC 串行 LLM 调用的
+    'standard' = PRODUCTION_RETRY(max 8) 会把 PoC 串行 LLM 调用的
     start_to_close_timeout(幂等)放大成数小时卡死(2026-07-10 NodeGoat 实测:
     5 个 externally_exploitable 串行 llm_fill_gap 各 max_turns=50,5min timeout
     反复重入"白盒 PoC: 5 个" 1h43m+)。PoC 是报告增强、非关键路径(activity 内
@@ -106,5 +106,5 @@ def test_generate_poc_report_uses_bounded_poc_retry():
         category = _retry_for_category(call)
         assert category == "poc", (
             f"generate_poc_report 必须 retry_for('poc'),当前是 {category!r}"
-            f"(PRODUCTION_RETRY max 50 会放大超时)"
+            f"(PRODUCTION_RETRY max 8 会放大超时)"
         )

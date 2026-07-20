@@ -351,3 +351,35 @@ def test_full_payload_byte_stability():
     assert md.endswith("\n")
     assert md.count("# Reconnaissance Deliverable:") == 1
     assert "OVERVIEW." in md
+
+
+# ── schema 违规止血:LLM 把 object 填成 str 时不崩(2026-07-20) ──────────────
+# 复现 sentinel_dashboard recon attempt 1 崩溃(AttributeError: 'str' object has
+# no attribute 'get'):collector set_section 不校验类型,renderer 兜底降级而非崩。
+def test_authentication_session_flow_as_str_does_not_crash():
+    md = render_recon({"authentication": {"session_flow": "prose instead of object"}})
+    assert "## 3. Authentication & Session Management Flow" in md
+
+
+def test_authentication_as_str_degrades_to_placeholder():
+    md = render_recon({"authentication": "whole section is prose"})
+    assert "## 3. Authentication & Session Management Flow" in md
+    assert "`set_authentication` was not called" in md  # 降级 placeholder
+
+
+def test_endpoints_str_elements_skipped():
+    md = render_recon({"endpoints": ["not a dict", {"method": "GET", "path": "/x"}]})
+    assert "/x" in md
+    assert "not a dict" not in md  # str 元素被 as_dict_list 跳过
+
+
+def test_network_map_as_str_does_not_crash():
+    md = render_recon({"network_map": "should be object"})
+    assert "## 6. Network & Interaction Map" in md
+
+
+def test_injection_sources_sink_str_elements_skipped():
+    md = render_recon({"injection_sources": {
+        "sql_injection": [{"sink_function": "eval", "location": "a:1"}, "str elem"]}})
+    assert "eval" in md
+    assert "str elem" not in md

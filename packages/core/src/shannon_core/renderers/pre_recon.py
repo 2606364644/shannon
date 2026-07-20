@@ -1,9 +1,11 @@
 """pre-recon deliverable renderer（纯函数，对齐 TS services/pre-recon-renderer.ts::renderPreRecon）。
 
-输入 data = collector.get_all() 的子集（缺键 = skipped → placeholder，不 fail）。
+输入 data = collector.get_all() 的子集（缺键 = skipped -> placeholder，不 fail）。
 输出 md：preamble + 10 section。application_intelligence 喂 section 2/4/5/6。
 """
 from __future__ import annotations
+
+from ._helpers import as_dict, as_dict_list, as_list
 
 SCOPE_AND_BOUNDARIES = """# Penetration Test Scope & Boundaries
 
@@ -27,7 +29,7 @@ A component is **out-of-scope** if it **cannot** be invoked through the running 
 
 
 def _placeholder(n: int, tool: str) -> str:
-    return f"_[Section {n}: not provided — `{tool}` was not called]_"
+    return f"_[Section {n}: not provided - `{tool}` was not called]_"
 
 
 def _kv(label: str, value: str) -> str:
@@ -39,7 +41,7 @@ def _section(n: int, title: str, body: str) -> str:
 
 
 def _render_executive_summary(data) -> str:
-    es = data.get("executive_summary")
+    es = as_dict(data.get("executive_summary"))
     if not es:
         return _section(1, "Executive Summary", _placeholder(1, "set_executive_summary"))
     return _section(1, "Executive Summary", es.get("text", "").strip() or _placeholder(1, "set_executive_summary"))
@@ -48,7 +50,7 @@ def _render_executive_summary(data) -> str:
 def _render_architecture(ai) -> str:
     if not ai:
         return _section(2, "Architecture & Technology Stack", _placeholder(2, "set_application_intelligence"))
-    a = ai.get("architecture", {})
+    a = as_dict(ai.get("architecture"))
     body = "\n".join([
         _kv("Framework & Language", a.get("framework_and_language", "")),
         _kv("Architectural Pattern", a.get("architectural_pattern", "")),
@@ -58,7 +60,7 @@ def _render_architecture(ai) -> str:
 
 
 def _render_auth(data) -> str:
-    ad = data.get("auth_deep_dive")
+    ad = as_dict(data.get("auth_deep_dive"))
     if not ad:
         return _section(3, "Authentication & Authorization Deep Dive", _placeholder(3, "set_auth_deep_dive"))
     sso = ad.get("sso_oauth_oidc")
@@ -75,7 +77,7 @@ def _render_auth(data) -> str:
 def _render_data_security(ai) -> str:
     if not ai:
         return _section(4, "Data Security & Storage", _placeholder(4, "set_application_intelligence"))
-    d = ai.get("data_security", {})
+    d = as_dict(ai.get("data_security"))
     body = "\n".join([
         _kv("Database Security", d.get("database_security", "")),
         _kv("Data Flow Security", d.get("data_flow_security", "")),
@@ -87,7 +89,7 @@ def _render_data_security(ai) -> str:
 def _render_attack_surface(ai) -> str:
     if not ai:
         return _section(5, "Attack Surface Analysis", _placeholder(5, "set_application_intelligence"))
-    a = ai.get("attack_surface", {})
+    a = as_dict(ai.get("attack_surface"))
     body = "\n".join([
         _kv("External Entry Points", a.get("external_entry_points", "")),
         _kv("Internal Service Communication", a.get("internal_service_communication", "")),
@@ -100,7 +102,7 @@ def _render_attack_surface(ai) -> str:
 def _render_infrastructure(ai) -> str:
     if not ai:
         return _section(6, "Infrastructure & Operational Security", _placeholder(6, "set_application_intelligence"))
-    i = ai.get("infrastructure", {})
+    i = as_dict(ai.get("infrastructure"))
     body = "\n".join([
         _kv("Secrets Management", i.get("secrets_management", "")),
         _kv("Configuration Security", i.get("configuration_security", "")),
@@ -111,7 +113,7 @@ def _render_infrastructure(ai) -> str:
 
 
 def _render_codebase_indexing(data) -> str:
-    ci = data.get("codebase_indexing")
+    ci = as_dict(data.get("codebase_indexing"))
     if not ci:
         return _section(7, "Overall Codebase Indexing", _placeholder(7, "set_codebase_indexing"))
     return _section(7, "Overall Codebase Indexing", ci.get("text", "").strip() or _placeholder(7, "set_codebase_indexing"))
@@ -131,12 +133,12 @@ _PATH_LABELS = [
 
 
 def _render_critical_file_paths(data) -> str:
-    cfp = data.get("critical_file_paths")
+    cfp = as_dict(data.get("critical_file_paths"))
     if not cfp:
         return _section(8, "Critical File Paths", _placeholder(8, "set_critical_file_paths"))
     lines = []
     for key, label in _PATH_LABELS:
-        paths = cfp.get(key, [])
+        paths = as_list(cfp.get(key))
         if paths:
             bullets = "\n".join(f"  - {p}" for p in paths)
             lines.append(f"- **{label}:**\n{bullets}")
@@ -146,6 +148,7 @@ def _render_critical_file_paths(data) -> str:
 
 
 def _render_sink_list(sinks) -> str:
+    sinks = as_dict_list(sinks)
     if not sinks:
         return "*(scanned, no sinks of this kind found)*"
     return "\n".join(
@@ -156,6 +159,7 @@ def _render_sink_list(sinks) -> str:
 
 
 def _render_sinks(n, title, tool, payload, labels, na_text) -> str:
+    payload = as_dict(payload)
     if not payload:
         return _section(n, title, _placeholder(n, tool))
     if payload.get("applicable") is False:
@@ -181,7 +185,7 @@ _SSRF_NA = "*(N/A — the application makes no outbound requests; SSRF sink anal
 
 def render_pre_recon(data: dict) -> str:
     """data = collector.get_all() 子集（缺键=skipped）。返回完整 md（preamble + 10 section）。"""
-    ai = data.get("application_intelligence")
+    ai = as_dict(data.get("application_intelligence"))
     sections = [
         SCOPE_AND_BOUNDARIES,
         "---",
