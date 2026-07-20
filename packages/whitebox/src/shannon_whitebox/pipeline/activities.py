@@ -1057,7 +1057,8 @@ async def assemble_report(input: ActivityInput) -> None:
     ReportAssembler 已实现 evidence → findings → analysis_deliverable 三级回退,
     天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
     加执行摘要并清理。攻击链章节由后续 inject_attack_chains activity 注入
-    （report-executive 之后），避免被覆盖。
+    （report-executive 之后），避免被覆盖。GitNexus 轨判定状态注记由后续
+    inject_gitnexus_track_status activity 注入（同样 report-executive 之后）。
     """
     from shannon_whitebox.audit.session_registry import get_audit_session
     try:
@@ -1086,17 +1087,9 @@ async def inject_attack_chains(input: ActivityInput) -> None:
     comprehensive_security_assessment_report.md（同 deliverable_filename）,
     若在此之前追加攻击链章节会被覆盖丢失（回归 hr_20260713-104726）。
     放最后注入,确保攻击链章节留存。幂等（标题已存在则跳过）。失败不阻塞。
-
-    附加职责(Task 6 fail-fast): 同一窗口注入 `## GitNexus 轨判定状态` banner
-    (读 gitnexus_track_status.json,failed 类列注记)。同样必须在 report-executive
-    之后注入--report-executive 的清理规则(prompts/report-executive.txt:106)会
-    删 "Any other meta-commentary sections without vulnerability IDs",banner
-    若在 assemble_report 阶段注入会被擦。幂等;无 attack_chains 时仍写 banner
-    (原 `if not chains_md: return` 早返会丢 banner,已重构)。
     """
     log = logging.getLogger(__name__)
     try:
-        from shannon_core.code_index.gitnexus_track_status import read_track_status
         from shannon_core.services.report_assembler import ReportAssembler
         from shannon_core.utils.file_io import (
             async_path_exists, async_read_file, async_write_file,
@@ -1106,31 +1099,75 @@ async def inject_attack_chains(input: ActivityInput) -> None:
         report_path = deliverables / "comprehensive_security_assessment_report.md"
         if not await async_path_exists(report_path):
             return  # 主报告不存在,无处追加
-        content = await async_read_file(report_path)
-        changed = False
-
-        # 1) GitNexus 轨判定状态 banner (fail-fast 报告标红)
-        _BANNER_HEADER = "## GitNexus 轨判定状态"
-        track_status = read_track_status(deliverables)
-        failed_notes = [
-            f"- {vc}: GitNexus 轨判定失败（{s.get('reason', 'unknown')}），结果由 LLM 轨提供"
-            for vc, s in track_status.items() if s.get("status") == "failed"
-        ]
-        if failed_notes and _BANNER_HEADER not in content:
-            banner = f"\n{_BANNER_HEADER}\n\n" + "\n".join(failed_notes) + "\n"
-            content = content + banner
-            changed = True
-
-        # 2) 攻击链章节(原有行为,幂等)
         chains_md = await ReportAssembler.render_attack_chains(deliverables)
-        if chains_md and "## 攻击链（多步利用路径）" not in content:
-            content = content + chains_md
-            changed = True
-
-        if changed:
-            await async_write_file(report_path, content)
+        if not chains_md:
+            return  # 无攻击链 / 渲染为空
+        content = await async_read_file(report_path)
+        if "## 攻击链（多步利用路径）" in content:
+            return  # 幂等：已注入（resume/重跑）
+        await async_write_file(report_path, content + chains_md)
     except Exception as exc:  # noqa: BLE001 — 攻击链注入失败不阻塞主报告
         log.warning("inject_attack_chains failed (non-blocking): %s", exc)
+
+
+@activity.defn
+async def inject_gitnexus_track_status(input: ActivityInput) -> None:
+    """GitNexus 轨 fail-fast 状态注记(report-executive 之后注入,防覆盖)。
+
+    必须在 run-report-agent 之后运行——report-executive agent 重写整个
+    comprehensive_security_assessment_report.md,若在此之前注入会被覆盖丢失
+    (对齐 inject_attack_chains 的模式,fail-fast plan Task 6 fix 2026-07-19)。
+    读 Task 1 的 gitnexus_track_status.json,若有 failed 类,在报告顶部(原 H1
+    之后)插入 ## GitNexus 轨判定状态 章节,逐条列出 failed 类 + reason +
+    「结果由 LLM 轨提供」。
+
+    幂等(标题已存在则跳过)。失败不阻塞主报告(吞异常 + warning)。
+    无 failed 类 / 主报告缺 → 直接 return。
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from shannon_core.code_index.gitnexus_track_status import read_track_status
+        from shannon_core.utils.file_io import (
+            async_path_exists, async_read_file, async_write_file,
+        )
+
+        _, deliverables, _ = _get_paths(input)
+        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        if not await async_path_exists(report_path):
+            return  # 主报告不存在,无处注入
+
+        track_status = read_track_status(deliverables)
+        failed_notes = [
+            f"- {vc}: GitNexus 轨判定失败({s.get('reason', 'unknown')}),结果由 LLM 轨提供"
+            for vc, s in track_status.items()
+            if isinstance(s, dict) and s.get("status") == "failed"
+        ]
+        if not failed_notes:
+            return  # 无 failed 类,不改报告
+
+        content = await async_read_file(report_path)
+        if "## GitNexus 轨判定状态" in content:
+            return  # 幂等:已注入(resume/重跑)
+
+        banner = (
+            "## GitNexus 轨判定状态\n\n"
+            + "\n".join(failed_notes)
+            + "\n\n---\n\n"
+        )
+        # 插在报告顶部;若首个非空行是 H1,插在 H1 之后更自然(避免 H2 先于 H1)
+        lines = content.split("\n")
+        i = 0
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        if i < len(lines) and lines[i].lstrip().startswith("# "):
+            head = "\n".join(lines[: i + 1])
+            tail = "\n".join(lines[i + 1 :]).lstrip("\n")
+            new_content = head + "\n\n" + banner + tail
+        else:
+            new_content = banner + content
+        await async_write_file(report_path, new_content)
+    except Exception as exc:  # noqa: BLE001 — 注记注入失败不阻塞主报告
+        log.warning("inject_gitnexus_track_status failed (non-blocking): %s", exc)
 
 
 @activity.defn

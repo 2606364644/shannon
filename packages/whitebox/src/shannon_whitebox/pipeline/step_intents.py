@@ -52,6 +52,7 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
         StepSpec("assemble-report",   "拼接各分项报告"),
         StepSpec("run-report-agent",  "撰写执行摘要并清理报告"),
         StepSpec("inject-attack-chains", "注入攻击链章节(report-executive 之后,防覆盖)"),
+        StepSpec("inject-gitnexus-track-status", "GitNexus 轨 fail-fast 状态注记(report-executive 之后,防覆盖)"),
     ),
 }
 

@@ -137,7 +137,10 @@ if [ "$ACTION" = "up" ]; then
 
   # BUILD_FLAG 为空时需展开为无（不加引号是有意为之），故关闭 SC2086：
   # shellcheck disable=SC2086
-  docker compose "${COMPOSE_FILES[@]}" up -d $BUILD_FLAG "${PASSTHROUGH[@]}" web worker
+  # PASSTHROUGH 可能为空数组：macOS 默认 /bin/bash 3.2 在 set -u 下展开空数组
+  # "${ARR[@]}" 会报 unbound variable（4.4+ 才修）。用 ${ARR[@]+"${ARR[@]}"} 惯用法：
+  # 空时展开为零参数，非空时正确分词（含空格元素），全 bash 版本兼容。
+  docker compose "${COMPOSE_FILES[@]}" up -d $BUILD_FLAG ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} web worker
 else
   # down / logs / ps / restart 等子命令透传。
   # 注意：复用模式下若 web 接入了 shannon-net，down 只停 compose 管辖的服务，
@@ -145,5 +148,5 @@ else
   # 用 PASSTHROUGH 而非 $@：参数解析已把 ACTION/--build/--dev 提取掉，$@ 仍是原始全部
   # 参数，直接用会把 ACTION 重复传一次（如 `down` → `docker compose down down`）。
   echo ">> 透传子命令: $ACTION ${PASSTHROUGH[*]}"
-  docker compose "$ACTION" "${PASSTHROUGH[@]}"
+  docker compose "$ACTION" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
 fi

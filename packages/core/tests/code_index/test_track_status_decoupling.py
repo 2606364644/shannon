@@ -1,6 +1,9 @@
-# packages/core/tests/code_index/test_track_status_decoupling.py
 """铁律:gitnexus_track_status 只给 workflow/merger/report 编排用,
-绝不喂 LLM 轨 prompt / 不被 vuln collector 或 LLM 轨 agent import(守 CLAUDE.md §1)。"""
+绝不喂 LLM 轨 prompt / 不被 vuln collector 或 LLM 轨 agent import(守 CLAUDE.md §1)。
+
+fail-fast plan Task 7(2026-07-19):锁定 track_status 产物不泄漏进 LLM 轨域。
+对齐 test_static_dataflow_hints_decoupling.py 风格——AST/grep 防回退锁。
+"""
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
@@ -12,8 +15,10 @@ LLM_TRACK_DOMAINS = [
 ALLOWED = {"pipeline/workflows.py", "pipeline/activities.py",
            "code_index/gitnexus_track_status.py", "code_index/dual_track_merger.py"}
 
+
 def _python_files(root: Path):
     return [p for p in root.rglob("*.py") if p.is_file()]
+
 
 def test_track_status_not_imported_in_llm_track():
     bad = []
@@ -29,6 +34,7 @@ def test_track_status_not_imported_in_llm_track():
             if "gitnexus_track_status" in txt or "track_statuses" in txt:
                 bad.append(rel)
     assert not bad, f"铁律违反:gitnexus_track_status 泄漏进 LLM 轨域 {bad}"
+
 
 def test_track_status_not_in_prompts():
     prompts_dir = REPO / "prompts"

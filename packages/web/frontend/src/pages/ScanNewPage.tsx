@@ -280,7 +280,7 @@ export function ScanNewPage() {
         {/* 底部操作栏 */}
         {type !== "correlation" && (
           <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
-            <Button size="lg" onClick={onSubmit} disabled={!isValid || submitting}>
+            <Button onClick={onSubmit} disabled={!isValid || submitting}>
               {submitLabel}
             </Button>
             <span className="text-xs text-muted-foreground">{footerHint}</span>
@@ -291,7 +291,7 @@ export function ScanNewPage() {
       {/* correlation 提交按钮（不在卡片底部栏内，因为无侧栏） */}
       {type === "correlation" && (
         <>
-          <Button size="lg" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
+          <Button className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
             {submitLabel}
           </Button>
           <div className="text-xs text-muted-foreground text-center">{t("scan.submitHint")}</div>

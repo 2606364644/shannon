@@ -25,3 +25,23 @@ def test_write_track_status_activity_registered_in_web_worker():
     assert src.count("write_track_status_activity") >= 2, (
         "write_track_status_activity must be imported AND listed in runner.py activities"
     )
+
+
+def test_inject_gitnexus_track_status_registered_in_cli_worker():
+    """inject_gitnexus_track_status (fail-fast plan Task 6,report-executive 之后
+    注入 GitNexus 轨判定状态 banner)同样须在 CLI worker.py define/call/register 3-point sync,
+    否则 workflow 编排到该步骤 -> 'activity not registered' -> ApplicationFailure -> FAILED。
+    """
+    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    src = worker.read_text()
+    assert src.count("inject_gitnexus_track_status") >= 2, (
+        "inject_gitnexus_track_status must be imported AND listed in worker.py activities"
+    )
+
+
+def test_inject_gitnexus_track_status_registered_in_web_worker():
+    runner = Path(__file__).resolve().parents[2] / "worker/src/shannon_worker/runner.py"
+    src = runner.read_text()
+    assert src.count("inject_gitnexus_track_status") >= 2, (
+        "inject_gitnexus_track_status must be imported AND listed in runner.py activities"
+    )
