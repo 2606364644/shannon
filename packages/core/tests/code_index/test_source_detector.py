@@ -159,3 +159,46 @@ def test_build_code_index_populates_source_points():
         names = {(s.param_name, s.source_type.value) for s in index.source_points}
         assert ("userId", "path") in names
         assert ("threshold", "query") in names
+
+
+# ===== Koa(ctx.*)source 规则(trip 等 Koa+Sequelize 项目治本,改动1)=====
+
+
+def test_koa_ctx_query_yields_query_source():
+    """Koa ctx.query.userId → ts-koa-query-direct 命中产 query source(改动1)。
+
+    回归锚点:trip 104/141 controller 用 ctx.*,原 Express-only(req.*)规则全漏 →
+    加 5 条 ts-koa-* 规则覆盖 ctx.request.body / ctx.query / ctx.params / ctx.headers。
+    """
+    src = (
+        "function getUser(ctx) {\n"
+        "  const userId = ctx.query.userId;\n"      # line 2
+        "  const name = ctx.request.body.name;\n"   # line 3
+        "}\n"
+    )
+    block = _block("user.ts", "getUser", 11, src, "typescript", ["ctx"])
+    out = detect_sources([block], parser=None, entry_point_ids={block.id},
+                         source_provider=_provider_from(block))
+    names = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+    assert ("userId", "query", "ts-koa-query-direct") in names
+    assert ("name", "body", "ts-koa-body") in names
+
+
+def test_koa_ctx_params_yields_path_source():
+    """Koa ctx.params.id → ts-koa-params 命中产 path source(改动1)。"""
+    src = "function f(ctx){ const id = ctx.params.id; }\n"
+    block = _block("r.ts", "f", 1, src, "typescript", ["ctx"])
+    out = detect_sources([block], parser=None, entry_point_ids={block.id},
+                         source_provider=_provider_from(block))
+    assert any(s.param_name == "id" and s.source_type.value == "path"
+               and s.rule_id == "ts-koa-params" for s in out)
+
+
+def test_koa_ctx_headers_yields_header_source():
+    """Koa ctx.headers.token → ts-koa-headers 命中产 header source(改动1)。"""
+    src = "function f(ctx){ const t = ctx.headers.token; }\n"
+    block = _block("r.ts", "f", 1, src, "typescript", ["ctx"])
+    out = detect_sources([block], parser=None, entry_point_ids={block.id},
+                         source_provider=_provider_from(block))
+    assert any(s.param_name == "token" and s.source_type.value == "header"
+               and s.rule_id == "ts-koa-headers" for s in out)

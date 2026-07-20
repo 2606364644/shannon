@@ -51,9 +51,10 @@ def discover_sources_by_rules(
     blocks: "list[FuncBlock]",
     sink_func_ids: "set[str]",
     *,
+    entry_point_ids: "set[str] | None" = None,
     source_provider: "Callable[[FuncBlock], bytes | None]",
 ) -> list[SourcePoint]:
-    """规则路径(spec §3.1):对**含 sink 函数**跑 DEFAULT_SOURCE_RULES(扩范围;
+    """规则路径(spec §3.1):对**含 sink 函数 + entry handler**跑 DEFAULT_SOURCE_RULES(扩范围;
     source_detector 只扫 entry_point)→ 命中产 SourcePoint(rule_id=正常规则 id,
     entry_point_id=该函数 id)。
 
@@ -62,9 +63,10 @@ def discover_sources_by_rules(
     也能补回 req.body.preTax 等(NodeGoat 根因 spec §2)。复用 source_detector 的
     _line_of/_detect_validation/_dedup,规则匹配口径与主路径一致。
     """
+    target_ids = sink_func_ids | (entry_point_ids or set())
     out: list[SourcePoint] = []
     for block in blocks:
-        if block.id not in sink_func_ids:
+        if block.id not in target_ids:
             continue
         source = source_provider(block)
         text = (source.decode("utf-8", errors="replace") if source
@@ -106,7 +108,7 @@ def _has_rule_hit(language: str, text: str) -> bool:
 # 点号取用(req.body.x)规则会命中 → 由 _has_rule_hit 拦截,不会误送 LLM。
 _SOURCE_CANDIDATE_HINT = re.compile(
     r"(input\.get|params\[|body\[|data\[['\"]|@RequestBody|@QueryParam|@PathVariable|"
-    r"ctx\.Request|c\.Query|c\.Param|"
+    r"ctx\.Request|ctx\.(?:request\.)?(?:body|query|params|headers)|c\.Query|c\.Param|"
     r"req\.(?:body|query|params|headers|cookies)|"
     r"request\.(?:GET|POST|data|args|form|json)|"
     r"\$_(?:GET|POST|REQUEST))",
@@ -118,17 +120,19 @@ def collect_source_candidates(
     blocks: "list[FuncBlock]",
     sink_func_ids: "set[str]",
     *,
+    entry_point_ids: "set[str] | None" = None,
     source_provider: "Callable[[FuncBlock], bytes | None]",
 ) -> list[SourceCandidate]:
-    """收集**含 sink 函数**中规则未命中的(候选送 LLM 判定,spec §3.1)。
+    """收集**含 sink 函数 + entry handler**中规则未命中的(候选送 LLM 判定,spec §3.1)。
 
     source_detector 主路径只扫 entry_point;本函数对含 sink 函数补召回 —— 函数体含
     对象级 / 非常规取用信号(解构 ``const {a} = req.body``、对象直传、括号取用、注解)
     但 detect_sources 规则未命中 → 候选。点号取用(``req.body.x``)规则会命中 → 不候选。
     """
+    target_ids = sink_func_ids | (entry_point_ids or set())
     out: list[SourceCandidate] = []
     for block in blocks:
-        if block.id not in sink_func_ids:
+        if block.id not in target_ids:
             continue
         source = source_provider(block)
         text = (source.decode("utf-8", errors="replace") if source

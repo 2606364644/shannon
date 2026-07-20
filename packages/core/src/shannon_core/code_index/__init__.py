@@ -307,9 +307,11 @@ async def build_code_index_with_gitnexus(
     sink_func_ids = set(sinks_by_func.keys())
     rule_extra_sources = discover_sources_by_rules(
         all_blocks, sink_func_ids, source_provider=_provide_source,
+        entry_point_ids=entry_point_ids,
     )
     source_candidates = collect_source_candidates(
         all_blocks, sink_func_ids, source_provider=_provide_source,
+        entry_point_ids=entry_point_ids,
     )
     soft_sources, source_gaps = await discover_sources_llm(
         source_candidates, llm_client, progress_cb=progress_cb, model=model)

@@ -457,3 +457,80 @@ def test_discover_sources_threshold_default_model():
     soft, gaps = asyncio.run(discover_sources_llm(cands, fake_llm, model=None))
     assert len(calls) == 1  # 单 block 超阈值独立成 chunk
 
+
+# ===== Koa(ctx.*)候选 hint + entry handler 范围(trip 等Koa+Sequelize项目治本)=====
+
+
+def test_collect_source_candidates_picks_koa_query_destructure():
+    """Koa 解构 const {x} = ctx.query → 候选送 LLM(点号规则不命中解构)。
+
+    改动3(a)锚点:hint 补 ctx\\.(?:request\\.)?(?:body|query|params|headers) 前,ctx.query
+    (不经 ctx.request)不被旧 ctx\\.Request 命中 → 解构 source 丢失(根因:trip 104/141
+    controller 用 ctx.* 但解构写法规则漏扫)。
+    """
+    src = 'function handler(ctx){ const {x} = ctx.query; eval(x); }\n'
+    block = _block("trip.ts", "handler", 1, src)
+    cands = collect_source_candidates([block], {block.id},
+                                      source_provider=lambda b: block.source_code.encode())
+    assert len(cands) == 1
+    assert cands[0].block.id == block.id
+
+
+def test_collect_source_candidates_picks_koa_params_direct_pass():
+    """Koa 对象直传 svc.findOne(ctx.params) → 候选(点号规则不命中直传)。"""
+    src = 'function handler(ctx){ return svc.findOne(ctx.params); }\n'
+    block = _block("trip.ts", "handler", 1, src)
+    cands = collect_source_candidates([block], {block.id},
+                                      source_provider=lambda b: block.source_code.encode())
+    assert len(cands) == 1
+
+
+def test_collect_source_candidates_picks_entry_handler_via_entry_point_ids():
+    """分层架构:controller(entry handler,有 source 无 sink)不在 sink_func_ids,经
+    entry_point_ids 纳入候选范围 → controller 的解构 source 能 LLM 补召回。
+
+    改动3(b)锚点:候选范围只扫 sink_func_ids 时,controller(source 无 sink)进不来;
+    扩到 entry_point_ids 后 controller 解构进候选(trip controller→service 分层)。
+    """
+    # controller:解构 ctx.query,无 sink(调 service.findOne,非 sink)→ 不在 sink_func_ids
+    ctrl = _block(
+        "trip.ts", "getUser", 1,
+        'function getUser(ctx){ const {id} = ctx.query; return svc.findOne(id); }\n')
+    cands = collect_source_candidates(
+        [ctrl], sink_func_ids=set(),  # controller 不含 sink
+        source_provider=lambda b: ctrl.source_code.encode(),
+        entry_point_ids={ctrl.id},
+    )
+    assert len(cands) == 1
+    assert cands[0].block.id == ctrl.id
+
+
+def test_discover_sources_by_rules_scans_entry_handler_dot_access():
+    """entry handler 的点号取用 ctx.query.userId → 经 entry_point_ids 纳入规则路径产 source。
+
+    改动3(b):discover_sources_by_rules 范围扩到 entry handler(controller 点号 source 兜底;
+    与主路径 detect_sources 重叠部分由 _dedup_source_points 吸收)。
+    """
+    src = 'function getUser(ctx){ const x = ctx.query.userId; return x; }\n'
+    block = _block("trip.ts", "getUser", 1, src)
+    out = discover_sources_by_rules(
+        [block], sink_func_ids=set(),  # 不含 sink
+        source_provider=lambda b: block.source_code.encode(),
+        entry_point_ids={block.id},
+    )
+    assert len(out) == 1
+    assert out[0].param_name == "userId"
+    assert out[0].rule_id == "ts-koa-query-direct"
+    assert out[0].entry_point_id == block.id
+
+
+def test_collect_source_candidates_entry_point_ids_none_backward_compatible():
+    """不传 entry_point_ids(默认 None)→ 只扫 sink_func_ids,行为不变(向后兼容)。"""
+    ctrl = _block("trip.ts", "getUser", 1,
+                  'function getUser(ctx){ const {id} = ctx.query; return id; }\n')
+    cands = collect_source_candidates(
+        [ctrl], sink_func_ids=set(),  # 空,且不传 entry_point_ids
+        source_provider=lambda b: ctrl.source_code.encode(),
+    )
+    assert cands == []  # 不在任何范围 → 不候选
+

@@ -239,7 +239,8 @@ class TestSinkRuleLibrary:
             "py-subprocess-checkoutput", "py-subprocess-popen", "py-subprocess-run",
             "py-urllib-urlopen", "py-yaml-load", "ts-axios-get",
             "ts-child-process-exec", "ts-db-query", "ts-document-write", "ts-eval",
-            "ts-fetch", "ts-innerhtml", "ts-knex-raw", "ts-res-redirect",
+            "ts-fetch", "ts-innerhtml", "ts-knex-raw", "ts-orm-model-query",
+            "ts-res-redirect",
             "ts-sequelize-query",
             # 补充(vuln-range 三项目反哺):RestTemplate SSRF / vm / Pug / Angular XSS / needle
             "java-resttemplate-exchange", "java-resttemplate-getforobject",
@@ -750,3 +751,70 @@ class TestSqlArgShapeIdentifier:
         assert val_slots and not ident_slots, \
             "bound ?-placeholder arg must stay SQL_VALUE"
         assert ex[0].needs_review is False
+
+
+# ===== Koa+Sequelize 治本(改动2): ts-orm-model-query 覆盖模型/实例 .query =====
+
+class TestOrmModelQuery:
+    """改动2 — ts-orm-model-query:Sequelize 模型/实例的 .query(trip: Trip.query /
+    dbConfig.trip.query)。原 ts-sequelize-query(receiver ^sequelize$) + ts-db-query(裸调用)
+    全漏 → receiver_pattern ".+" = 任意非空 receiver 兜底,needs_review_default=True
+    交 Spec C LLM 复核滤非 SQL 的 .query(静态精度不足)。"""
+
+    def test_ts_orm_model_query_rule_present(self):
+        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        rule = next((r for r in DEFAULT_RULES if r.rule_id == "ts-orm-model-query"), None)
+        assert rule is not None
+        assert rule.callee == "query"
+        assert rule.receiver_pattern.match("Trip")
+        assert rule.receiver_pattern.match("dbConfig.trip")
+        assert rule.receiver_pattern.match("sequelize")
+        assert not rule.receiver_pattern.match("")  # 空不匹配(裸调用归 ts-db-query)
+        assert rule.category == SinkCategory.SQL
+        assert rule.needs_review_default is True
+
+    def test_trip_query_hit(self):
+        """Trip.query(sql) receiver=Trip → 命中 ts-orm-model-query, needs_review=True。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = (
+            "function f(sql: string) {\n"
+            "    return Trip.query(sql);\n"
+            "}\n"
+        )
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "svc.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        orm = [s for s in sites if s.rule_id == "ts-orm-model-query"]
+        assert orm, "Trip.query(sql) 应命中 ts-orm-model-query"
+        assert orm[0].callee_name == "query"
+        assert orm[0].callee_receiver == "Trip"
+        assert orm[0].category == SinkCategory.SQL
+        assert orm[0].needs_review is True
+
+    def test_dbconfig_trip_query_chain_receiver_hit(self):
+        """dbConfig.trip.query(sql) receiver=整链 dbConfig.trip(typescript_parser
+        member_expression object=整链)→ .+ 匹配(改动2 关键:整链 receiver 覆盖,
+        非首段 dbConfig)。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = (
+            "function f(sql: string) {\n"
+            "    return dbConfig.trip.query(sql);\n"
+            "}\n"
+        )
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "svc.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        orm = [s for s in sites if s.rule_id == "ts-orm-model-query"]
+        assert orm, "dbConfig.trip.query(sql) 应命中 ts-orm-model-query"
+        assert orm[0].callee_receiver == "dbConfig.trip"  # 整链(非首段)
+        assert orm[0].needs_review is True

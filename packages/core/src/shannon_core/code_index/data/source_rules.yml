@@ -37,6 +37,32 @@ rules:
     pattern: "req\\.cookies\\.([A-Za-z_]\\w*)"
     source_type: cookie
 
+  # ===== Koa(ctx.*)——补 Express 规则盲区(trip 等Koa项目主力 source 写法)=====
+  - rule_id: ts-koa-body
+    languages: [typescript, javascript]
+    pattern: "ctx\\.request\\.body\\.([A-Za-z_]\\w*)"
+    source_type: body
+
+  - rule_id: ts-koa-query
+    languages: [typescript, javascript]
+    pattern: "ctx\\.request\\.query\\.([A-Za-z_]\\w*)"
+    source_type: query
+
+  - rule_id: ts-koa-query-direct
+    languages: [typescript, javascript]
+    pattern: "ctx\\.query\\.([A-Za-z_]\\w*)"
+    source_type: query
+
+  - rule_id: ts-koa-params
+    languages: [typescript, javascript]
+    pattern: "ctx\\.params\\.([A-Za-z_]\\w*)"
+    source_type: path
+
+  - rule_id: ts-koa-headers
+    languages: [typescript, javascript]
+    pattern: "ctx\\.(?:request\\.)?headers?\\.([A-Za-z_]\\w*)"
+    source_type: header
+
   # ===== Django / Flask(python)=====
   - rule_id: py-django-get
     languages: [python]

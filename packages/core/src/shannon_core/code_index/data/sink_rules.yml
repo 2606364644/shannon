@@ -117,6 +117,19 @@ rules:
     sink_subtype: sql_raw
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
+  # Sequelize 模型/实例的 .query(trip 等项目:Trip.query / dbConfig.trip.query)。
+  # ts-sequelize-query 只认 receiver=sequelize;ts-db-query 只认裸 query → 模型实例全漏。
+  # receiver ".+" = 任意非空 receiver(destructure_call 对 dbConfig.trip.query 返回整链 "dbConfig.trip");
+  # 静态精度不足,needs_review 交 Spec C LLM 复核滤非 SQL 的 .query。
+  - rule_id: ts-orm-model-query
+    languages: [typescript]
+    callee: query
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
   - rule_id: go-gorm-raw
     languages: [go]
     callee: Raw
