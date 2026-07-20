@@ -428,6 +428,15 @@ class BlackboxScanWorkflow:
             self._state.status = "cancelled"
             self._state.current_phase = None
             return self._state
+        except Exception as e:
+            # session-status 同步(对齐 whitebox):workflow-level 失败 → state.status=failed。
+            # 不调 finalize_activity(规避 finalize_report 签名依赖);session 落盘靠
+            # blackbox CLI worker.py:201-211 的 except Exception 兜底(已存在)。
+            self._state.status = "failed"
+            if not self._state.errors:
+                self._state.errors.append(f"{type(e).__name__}: {e}")
+            self._state.current_phase = None
+            return self._state
         finally:
             cleanup_settings()
             # engine 对象由 resolve_blackbox_engine activity 持有（workflow 侧不持有不可序列化
