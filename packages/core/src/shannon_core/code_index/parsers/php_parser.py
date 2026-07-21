@@ -160,13 +160,13 @@ class PhpParser(BaseParser):
             name_node = node.child_by_field_name("name")
             obj = node.child_by_field_name("object")
             callee = name_node.text.decode("utf-8").lstrip("$") if name_node else ""
-            receiver = obj.text.decode("utf-8") if obj else None
+            receiver = obj.text.decode("utf-8").lstrip("$") if obj else None   # 与 name 一致去 $
             return (callee, receiver)
         if node.type == "scoped_call_expression":
             name_node = node.child_by_field_name("name")
             scope = node.child_by_field_name("scope")
             callee = name_node.text.decode("utf-8").lstrip("$") if name_node else ""
-            receiver = scope.text.decode("utf-8") if scope else None
+            receiver = scope.text.decode("utf-8").lstrip("$") if scope else None   # 与 name 一致去 $
             return (callee, receiver)
         return ("", None)
 

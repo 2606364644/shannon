@@ -1033,3 +1033,53 @@ class TestExecuteDualSemantics:
         ssrf = [s for s in sites if s.rule_id == "java-httpclient-execute"]
         assert ssrf[0].category == SinkCategory.SSRF
         assert ssrf[0].callee_receiver == "httpClient"
+
+
+class TestOtherLangsReceiverFix:
+    """别语言 receiver 失配小修:php $ 前缀 / go-db-query / ts-child-process-exec。"""
+
+    def test_php_mysqli_query_dollar_receiver_hit(self):
+        """$mysqli->query($sql) receiver='$mysqli' → php_parser lstrip $ → 'mysqli' → 命中 php-mysqli-query。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.php_parser import PhpParser
+        import tempfile, pathlib
+        src = "<?php\nfunction f($sql) {\n  $mysqli->query($sql);\n}\n"
+        parser = PhpParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.php"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "php-mysqli-query"]
+        assert hit, "$mysqli->query($sql) 应命中 php-mysqli-query(receiver lstrip $ → mysqli)"
+        assert hit[0].callee_receiver == "mysqli"
+
+    def test_go_db_query_receiver_hit(self):
+        """db.Query(sql) → go-db-query(原 rp=null 不命中;改 .+ 后命中)。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.go_parser import GoParser
+        import tempfile, pathlib
+        src = "package main\nfunc q(db DB, sql string) {\n  db.Query(sql)\n}\n"
+        parser = GoParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.go"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "go-db-query"]
+        assert hit, "db.Query(sql) 应命中 go-db-query(rp .+ 后)"
+
+    def test_ts_child_process_exec_receiver_hit(self):
+        """child_process.exec(cmd) → ts-child-process-exec(原 rp=null 不命中;改 ^(child_process|cp)$ 后)。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = "import * as cp from 'child_process';\nfunction f(cmd: string) {\n  cp.exec(cmd);\n}\n"
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "ts-child-process-exec"]
+        assert hit, "cp.exec(cmd) 应命中 ts-child-process-exec(rp ^(child_process|cp)$)"

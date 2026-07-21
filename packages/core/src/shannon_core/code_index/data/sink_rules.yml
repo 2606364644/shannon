@@ -43,7 +43,7 @@ rules:
   - rule_id: go-db-query
     languages: [go]
     callee: Query
-    receiver_pattern: null
+    receiver_pattern: ".+"          # 原 null(只匹配裸 Query)→ .+ 覆盖 db.Query
     category: sql
     sink_subtype: sql_raw
     needs_review_default: true
@@ -262,7 +262,7 @@ rules:
   - rule_id: ts-child-process-exec
     languages: [typescript]
     callee: exec
-    receiver_pattern: null
+    receiver_pattern: "^(child_process|cp)$"   # 原 null;惯例 import 名 child_process/cp
     category: command
     sink_subtype: command_exec
     needs_review_default: true   # callee common; receiver check via 'child_process'
