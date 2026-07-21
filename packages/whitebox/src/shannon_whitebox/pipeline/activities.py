@@ -1388,6 +1388,35 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             llm = _make_verdict_llm_client(str(repo))
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
 
+            # Second-order storage-taint findings (子项⑤): compute once, group
+            # by vuln class, then merge into the per-class queue inside the
+            # builder loop. Guarded on ``index`` being defined (only set when
+            # code_index.json parsed successfully above) — absent/invalid
+            # code_index.json ⇒ no second-order findings, no crash.
+            second_order_by_vc: dict[str, list] = {}
+            try:
+                storage_writes = list(index.storage_write_points)
+                reads_by_id = {s.param_name: s for s in index.source_points
+                               if s.source_type.value == "storage"}
+                if storage_writes and reads_by_id:
+                    from shannon_core.code_index.vuln_chain_builders.second_order_builder import (
+                        build_second_order_findings,
+                    )
+                    second_order = await build_second_order_findings(
+                        storage_writes, pgraph, llm_client=llm,
+                        sink_call_sites=sink_call_sites, reads_by_id=reads_by_id,
+                        progress_cb=_chain_cb,
+                    )
+                    for f in second_order:
+                        vc2 = f.vulnerability_type.replace("second_order_", "")
+                        second_order_by_vc.setdefault(vc2, []).append(f)
+            except NameError:
+                # index undefined — code_index.json absent/failed to parse.
+                pass
+            except Exception as exc:
+                logger.warning(
+                    "gitnexus chain-verdict: second-order builder failed (%s)", exc)
+
             for vc, builder in (
                 ("injection", build_injection_findings),
                 ("xss", build_xss_findings),
@@ -1403,6 +1432,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                     fail_reasons[vc] = f"builder raised: {exc}"
                     logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
                     continue
+                # Merge second-order findings into this vc's queue so they
+                # get written + counted alongside the single-hop ones.
+                findings = list(findings or []) + second_order_by_vc.get(vc, [])
                 if findings:
                     atomic_write_json(
                         deliverables / f"{vc}_gitnexus_queue.json",
