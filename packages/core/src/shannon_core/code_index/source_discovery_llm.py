@@ -155,6 +155,11 @@ Given a FILE with one or more entry handler functions, identify ALL user-control
 input fields and their HTTP source type. Rule-based detection already covered common
 frameworks (Express/Django/...); you handle the unconventional ones.
 
+**Also identify IDOR vectors**: any input field used as an entity identifier
+(@PathVariable userId, req.params.id, getParam("resourceId")) that flows to a
+lookup-by-id. Tag these with source_type "path" or "query" as appropriate — they
+are the seeds for missing-ownership (IDOR) analysis downstream.
+
 ## File(s)
 {file_paths}
 

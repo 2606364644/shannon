@@ -583,3 +583,54 @@ def test_collect_source_candidates_catches_idor_flavor_generic_get_param():
     assert len(cands) == 1  # getParam("resourceId") 进候选
     assert cands[0].block.id == block.id
 
+
+# ===== spec 子项② prompt 侧: source 探测器 prompt 标 IDOR 风味(Task 5)=====
+
+
+async def test_discover_sources_llm_prompt_includes_idor_instruction():
+    """IDOR 风味 source 候选 → LLM prompt 含 IDOR 指示段 → 软 source 产 path-type entity-id。
+
+    回归锚点 + prompt 内容守卫: Task 5 在 _PROMPT_TMPL 补「Also identify IDOR vectors」
+    段, 要求 LLM 显式识别用作实体 id 的输入(path var / params.id / getParam("userId"))。
+
+    候选来源(Resolution #2): getParam("userId") 非注入 SourcePoint 规则模式 →
+    `_has_rule_hit`=False → 进候选; hint 子项② regex `getParam\\(\\s*['\"]\\w*[Ii]d['\"]\\)`
+    命中 → 送 LLM。**不用 Java @PathVariable**(被 java-path-variable 规则命中 → 跳过)。
+    """
+    src = (
+        'function handler(ctx) {\n'
+        '  const userId = getParam("userId");\n'
+        '  return db.user.findById(userId);\n'
+        '}\n'
+    )
+    block = _block("ctl.js", "handler", 1, src, language="javascript")
+    cands = collect_source_candidates(
+        [block], sink_func_ids=set(),
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(cands) == 1  # getParam("userId") 进候选(非规则命中)
+
+    captured_prompts: list[str] = []
+
+    async def fake_llm(prompt):
+        captured_prompts.append(prompt)
+        # IDOR 风味: userId 经 getParam 取出, 流入 findById(IDOR vector)
+        return ('[{"field":"userId","source_type":"path",'
+                '"expression":"getParam(\\"userId\\")","line":2,"is_source":true,'
+                '"rationale":"entity-id input used as lookup key (IDOR vector)"}]')
+
+    soft, _gaps = await discover_sources_llm(cands, fake_llm)
+
+    # 软 source 产出 + 标记
+    assert len(soft) == 1, f"应产 1 软 source, 实际 {soft}"
+    assert soft[0].param_name == "userId"
+    assert soft[0].rule_id == "llm-discovered-source"
+    assert soft[0].source_type == ParameterSource.PATH_PARAM
+
+    # Resolution #3: prompt 内容守卫(绑定本次 prompt 改动, 非仅回归锚点)
+    assert captured_prompts, "prompt 应被发送到 LLM"
+    assert "IDOR" in captured_prompts[0], (
+        f"prompt 须含 IDOR 指示(Task 5); 实际 prompt 片段: "
+        f"{captured_prompts[0][:300]!r}")
+
