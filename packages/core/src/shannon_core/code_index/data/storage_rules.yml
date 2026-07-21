@@ -1,0 +1,70 @@
+# Second-order storage transfer rules (spec §3.2).
+#
+# Token = regex group "tok" (literal). Dynamic/concatenated tokens are left
+# for the LLM track (Task 4 hunter) — they cannot be resolved statically.
+#
+# YAML backslash rule: in a YAML double-quoted string, `\\` denotes one literal
+# `\` (so `\\s` → `\s`, `\\(` → `\(`, `\\.` → `\.`, `\\"` → `"`). Brief's
+# original draft mixed `\\` and single `\s`; the single-backslash form is a
+# YAML syntax error (PyYAML rejects unknown escape `\s`), so all `\` in these
+# patterns are doubled.
+#
+# Field reference (mirrors StorageReadRule / StorageWriteRule in
+# storage_detector.py):
+#   rule_id      unique rule identifier
+#   languages    applicable languages
+#   medium       StorageMedium: db | config | cache | file
+#   pattern      regex string; group "tok" carries the literal storage token
+#                (table name / property key / cache key / file path).
+#   param_of     (reads only) group name from which the read var is derived;
+#                defaults to "tok". `java-orm-find` uses group(1) instead.
+#   written_arg  (writes only) 0-based index of the argument carrying the
+#                written expression (for taint bookkeeping).
+
+storage_reads:
+  - rule_id: java-orm-find
+    languages: [java]
+    medium: db
+    pattern: "\\.find(?:One|All)?By(\\w+)\\("
+    param_of: tok            # read var derived from the matched property
+
+  - rule_id: java-getproperty
+    languages: [java]
+    medium: config
+    pattern: "getProperty\\(\\s*[\"'](?P<tok>[^\"']+)[\"']\\s*\\)"
+
+  - rule_id: ts-cache-get
+    languages: [typescript, javascript]
+    medium: cache
+    pattern: "cache\\.get\\(\\s*[\"'](?P<tok>[^\"']+)[\"']\\s*\\)"
+
+  - rule_id: ts-readfile
+    languages: [typescript, javascript]
+    medium: file
+    pattern: "readFile(?:Sync)?\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+
+
+storage_writes:
+  - rule_id: java-orm-save
+    languages: [java]
+    medium: db
+    pattern: "(?:save|persist|merge)\\("
+    written_arg: 0
+
+  - rule_id: java-setproperty
+    languages: [java]
+    medium: config
+    pattern: "setProperty\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+    written_arg: 1
+
+  - rule_id: ts-cache-set
+    languages: [typescript, javascript]
+    medium: cache
+    pattern: "cache\\.set\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+    written_arg: 1
+
+  - rule_id: ts-writefile
+    languages: [typescript, javascript]
+    medium: file
+    pattern: "writeFile(?:Sync)?\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+    written_arg: 1
