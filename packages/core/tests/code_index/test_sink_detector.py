@@ -253,6 +253,9 @@ class TestSinkRuleLibrary:
             "java-resttemplate-exchange", "java-resttemplate-getforobject",
             "ts-pug-compile", "ts-vm-runincontext",
             "ts-bypass-security-trust-html", "ts-needle-get",
+            # sink 硬规则增强(Task 3):Java 全类别补齐(postForEntity/openConnection/sendRedirect)
+            "java-resttemplate-postforentity", "java-response-sendredirect",
+            "java-url-openconnection",
         }
         got = {r.rule_id for r in DEFAULT_RULES}
         assert got == expected, f"missing={expected-got} extra={got-expected}"
@@ -934,3 +937,61 @@ class TestJavaDeserSinksHardening:
         hit = [s for s in sites if s.rule_id == "java-objectinput-readobject"]
         assert hit, "ois.readObject(payload) 应命中 java-objectinput-readobject(receiver=ois)"
         assert hit[0].callee_receiver == "ois"
+
+
+class TestJavaSsrfCmdRedirectSinks:
+    """Java SSRF/Command/Redirect 规则:rp ^(类型名)$ 失配修复(Java receiver 是实例变量/整链)+ 补全。"""
+
+    def _java_sites(self, body: str):
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.java_parser import JavaParser
+        import tempfile, pathlib
+        src = f"class C {{\n  void q() {{\n{body}\n  }}\n}}\n"
+        parser = JavaParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "C.java"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_runtime_exec_chain_receiver_hit(self):
+        """Runtime.getRuntime().exec(cmd) receiver=整链 'Runtime.getRuntime()' → java-runtime-exec。
+        原 rp ^(Runtime|getRuntime)$ 不匹配整链;改 .+ 后命中。"""
+        sites = self._java_sites("    Runtime.getRuntime().exec(cmd);")
+        hit = [s for s in sites if s.rule_id == "java-runtime-exec"]
+        assert hit, "Runtime.getRuntime().exec(cmd) 应命中 java-runtime-exec(整链 receiver)"
+        assert hit[0].category == SinkCategory.COMMAND
+
+    def test_resttemplate_getforobject_hit(self):
+        """restTemplate.getForObject(url) → java-resttemplate-getforobject(原 rp 不匹配实例变量)。"""
+        sites = self._java_sites("    restTemplate.getForObject(url);")
+        hit = [s for s in sites if s.rule_id == "java-resttemplate-getforobject"]
+        assert hit
+        assert hit[0].category == SinkCategory.SSRF
+
+    def test_resttemplate_exchange_hit(self):
+        """restTemplate.exchange(url) → java-resttemplate-exchange。"""
+        sites = self._java_sites("    restTemplate.exchange(url);")
+        hit = [s for s in sites if s.rule_id == "java-resttemplate-exchange"]
+        assert hit
+
+    def test_resttemplate_postforentity_new_rule_hit(self):
+        """restTemplate.postForEntity(url, body) → java-resttemplate-postforentity(新增)。"""
+        sites = self._java_sites("    restTemplate.postForEntity(url, body);")
+        hit = [s for s in sites if s.rule_id == "java-resttemplate-postforentity"]
+        assert hit
+        assert hit[0].category == SinkCategory.SSRF
+
+    def test_url_openconnection_new_rule_hit(self):
+        """new URL(x).openConnection() → java-url-openconnection(新增)。"""
+        sites = self._java_sites("    new URL(x).openConnection();")
+        hit = [s for s in sites if s.rule_id == "java-url-openconnection"]
+        assert hit
+        assert hit[0].category == SinkCategory.SSRF
+
+    def test_response_sendredirect_new_rule_hit(self):
+        """response.sendRedirect(url) → java-response-sendredirect(新增)。"""
+        sites = self._java_sites("    response.sendRedirect(url);")
+        hit = [s for s in sites if s.rule_id == "java-response-sendredirect"]
+        assert hit
+        assert hit[0].category == SinkCategory.REDIRECT

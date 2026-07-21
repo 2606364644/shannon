@@ -279,7 +279,7 @@ rules:
   - rule_id: java-runtime-exec
     languages: [java]
     callee: exec
-    receiver_pattern: "^(Runtime|getRuntime)$"
+    receiver_pattern: ".+"          # 原 ^(Runtime|getRuntime)$ 不匹配整链 Runtime.getRuntime()
     category: command
     sink_subtype: command_exec
     needs_review_default: true   # receiver is an arbitrarily-named Runtime instance
@@ -457,9 +457,10 @@ rules:
   - rule_id: java-httpclient-send
     languages: [java]
     callee: send
-    receiver_pattern: "^(HttpURLConnection|OkHttpClient|HttpClient)$"
+    receiver_pattern: ".+"          # 原 ^(HttpURLConnection|OkHttpClient|HttpClient)$ → .+ 任意 receiver
     category: ssrf
     sink_subtype: ssrf_java_http
+    needs_review_default: true      # rp=.+ 精度不足,交 chain_verdict 复核(原精确类型名无 needs_review)
     dangerous_slots: [{arg_index: 0, slot: url}]
 
   - rule_id: php-curl-exec
@@ -566,7 +567,7 @@ rules:
   - rule_id: java-resttemplate-getforobject
     languages: [java]
     callee: getForObject
-    receiver_pattern: "^(restTemplate|RestTemplate|webClient|WebClient)$"
+    receiver_pattern: ".+"          # 原 ^(restTemplate|...)$ → .+ 任意 receiver(惯例实例变量多)
     category: ssrf
     sink_subtype: ssrf_resttemplate
     needs_review_default: true
@@ -575,7 +576,7 @@ rules:
   - rule_id: java-resttemplate-exchange
     languages: [java]
     callee: exchange
-    receiver_pattern: "^(restTemplate|RestTemplate|webClient|WebClient)$"
+    receiver_pattern: ".+"          # 原 ^(restTemplate|...)$ → .+
     category: ssrf
     sink_subtype: ssrf_resttemplate
     needs_review_default: true
@@ -620,5 +621,37 @@ rules:
     receiver_pattern: "^(needle)$"
     category: ssrf
     sink_subtype: ssrf_needle
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # ===== Java 全类别补齐(sink 硬规则增强:receiver_pattern 失配修复)=====
+
+  # Spring RestTemplate.postForEntity(SSRF)
+  - rule_id: java-resttemplate-postforentity
+    languages: [java]
+    callee: postForEntity
+    receiver_pattern: ".+"
+    category: ssrf
+    sink_subtype: ssrf_resttemplate
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # java.net.URL.openConnection(SSRF)
+  - rule_id: java-url-openconnection
+    languages: [java]
+    callee: openConnection
+    receiver_pattern: ".+"
+    category: ssrf
+    sink_subtype: ssrf_java_url
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # HttpServletResponse.sendRedirect(open redirect)
+  - rule_id: java-response-sendredirect
+    languages: [java]
+    callee: sendRedirect
+    receiver_pattern: ".+"
+    category: redirect
+    sink_subtype: open_redirect
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: url}]
