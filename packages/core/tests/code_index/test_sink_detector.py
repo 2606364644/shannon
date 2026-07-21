@@ -683,10 +683,10 @@ class TestOrmRawRules:
         assert r.receiver_pattern is None
         assert r.needs_review_default is True
 
-        # java-jpa-createnativequery: bare callee, needs_review_default=True
+        # java-jpa-createnativequery: rp=.+ (Task 1 receiver_pattern 失配修复,原 null), needs_review_default=True
         r = _rule("java-jpa-createnativequery")
         assert r.callee == "createNativeQuery"
-        assert r.receiver_pattern is None
+        assert r.receiver_pattern.match("em")   # Task 1: rp null→.+ 任意 receiver 命中
         assert r.needs_review_default is True
 
 
