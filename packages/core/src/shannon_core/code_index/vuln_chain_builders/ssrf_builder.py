@@ -14,6 +14,7 @@ from shannon_core.code_index.chain_verdict import (
     extract_candidate_chains,
     judge_chain_verdict,
 )
+from shannon_core.code_index.models import ParameterSource
 from shannon_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
 from shannon_core.code_index.progress import ProgressCb, ProgressEmitter
 from shannon_core.models.queue_schemas import SsrfVulnerability
@@ -31,6 +32,11 @@ async def build_ssrf_findings(
     candidates = extract_candidate_chains(
         pgraph, vuln_class="ssrf", sink_call_sites=sink_call_sites,
     )
+    # STORAGE-sourced chains are the second-order builder's domain (2ND-GN-*
+    # findings); single-hop builders must not also emit them (avoids duplicate
+    # findings + double LLM cost). Gap A fix.
+    candidates = [c for c in candidates
+                  if c.source_type != ParameterSource.STORAGE.value]
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[SsrfVulnerability] = []
     for i, chain in enumerate(candidates, start=1):

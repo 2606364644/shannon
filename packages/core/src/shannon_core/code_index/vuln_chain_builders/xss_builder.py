@@ -148,7 +148,14 @@ async def build_xss_findings(
     candidates = extract_candidate_chains(
         pgraph, vuln_class="xss", sink_call_sites=sink_call_sites,
     )
+    # STORAGE-sourced chains are the second-order builder's domain (2ND-GN-*
+    # findings); single-hop builders must not also emit them (avoids duplicate
+    # findings + "Reflected" mislabel + double LLM cost). Gap A fix.
+    candidates = [c for c in candidates
+                  if c.source_type != ParameterSource.STORAGE.value]
     # Append synthesized Stored candidates (DB read<->write cross-table fill).
+    # These are SEPARATE (INTERNAL-source read flows + user-input write flows),
+    # NOT the STORAGE flavor - preserved.
     for s in _find_stored_xss_synthesis(pgraph):
         candidates.append(_synthesize_stored_candidate(s))
 

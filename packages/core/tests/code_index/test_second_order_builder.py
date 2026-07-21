@@ -141,3 +141,58 @@ async def test_no_finding_when_read_side_safe():
         reads_by_id=reads_by_id,
     )
     assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
+    """Gap A regression: single-hop builders must NOT emit findings for
+    STORAGE-sourced chains - the second-order builder (2ND-GN-*) is the
+    authoritative path for stored data. Without this suppression, a
+    STORAGE-sourced XSS flow would emit BOTH XSS-GN-01 (mislabeled
+    "Reflected") AND 2ND-GN-01 (duplicate + double LLM cost).
+
+    Asserts the suppression end-to-end:
+      (a) ``build_xss_findings`` with a vulnerable stub LLM emits NO XSS-GN-*
+          finding for the STORAGE-sourced flow (single-hop suppressed).
+      (b) ``build_second_order_findings`` with the same stub DOES emit a
+          2ND-GN-* finding (second-order is authoritative).
+    """
+    from shannon_core.code_index.vuln_chain_builders.xss_builder import (
+        build_xss_findings,
+    )
+
+    writes = [_tainted_write()]
+    pgraph, reads_by_id, sink_call_sites = _build_xss_second_order_pgraph()
+
+    async def vuln_llm(prompt, **kw):
+        # Stub always-vulnerable: any candidate that reaches judge_chain_verdict
+        # would be marked vulnerable - so the ONLY way single-hop emits nothing
+        # is if STORAGE chains are filtered before judging.
+        return (
+            '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
+            '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
+            '"mismatch_reason":"stored value rendered without encoding",'
+            '"confidence":"high"}'
+        )
+
+    # (a) single-hop XSS builder must NOT emit XSS-GN-* for STORAGE chain
+    xss_findings = await build_xss_findings(
+        pgraph, llm_client=vuln_llm, sink_call_sites=sink_call_sites,
+    )
+    xss_ids = [f.ID for f in xss_findings]
+    assert not any(i.startswith("XSS-GN-") for i in xss_ids), (
+        f"single-hop xss builder must not emit for STORAGE-sourced chain, "
+        f"got xss_ids={xss_ids}"
+    )
+
+    # (b) second-order builder DOES emit 2ND-GN-* for the same fixture
+    second_order_findings = await build_second_order_findings(
+        writes, pgraph,
+        llm_client=vuln_llm, sink_call_sites=sink_call_sites,
+        reads_by_id=reads_by_id,
+    )
+    second_order_ids = [f.ID for f in second_order_findings]
+    assert any(i.startswith("2ND-GN-") for i in second_order_ids), (
+        f"second-order builder must emit 2ND-GN-* for STORAGE-sourced chain, "
+        f"got ids={second_order_ids}"
+    )
