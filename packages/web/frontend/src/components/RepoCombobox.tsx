@@ -58,7 +58,7 @@ export function RepoCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between font-normal"
+          className="w-full justify-between font-normal font-mono"
         >
           <span className={cn(!selected && "text-muted-foreground")}>
             {selectedLabel}

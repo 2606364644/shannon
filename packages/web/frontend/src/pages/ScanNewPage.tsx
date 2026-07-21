@@ -249,13 +249,13 @@ export function ScanNewPage() {
           {/* 右栏：信息侧栏 */}
           {type !== "correlation" && (
             <div className="p-5 border-l border-border bg-card flex flex-col gap-2.5">
-              <div className="text-[11px] font-semibold text-primary uppercase tracking-wider mb-0.5">
+              <div className="text-[11px] font-semibold text-muted-foreground mb-0.5">
                 {type === "whitebox" ? t("scan.sidebar.whiteboxTitle") : t("scan.sidebar.blackboxTitle")}
               </div>
               {sidebarItems.map((item, i) => (
                 <div
                   key={i}
-                  className="rounded-lg border border-primary/25 bg-primary/[0.06] p-3"
+                  className="rounded-lg border border-border bg-secondary p-3"
                 >
                   <div className="text-[11px] text-muted-foreground mb-1">{item.title}</div>
                   {item.content}

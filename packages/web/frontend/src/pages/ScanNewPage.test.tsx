@@ -375,22 +375,24 @@ describe("ScanNewPage", () => {
   });
 });
 
-describe("ScanNewPage 配色 A 暖焦点", () => {
+describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("侧栏标题用 coral 焦点（text-primary），不再 muted", () => {
+  it("侧栏标题中性化（muted），不铺 coral 块级底色", () => {
     renderPage();
     const cap = screen.getByText("审计范围");
-    expect(cap.className).toMatch(/text-primary/);
-    expect(cap.className).not.toMatch(/text-muted-foreground/);
+    expect(cap.className).toMatch(/text-muted-foreground/);
+    expect(cap.className).not.toMatch(/text-primary/);
   });
 
-  it("侧栏信息卡用 coral 轻底（border-primary + bg-primary），不再用 orange accent", () => {
+  it("侧栏信息卡中性浮起（bg-secondary + border-border），coral 不铺块级底色", () => {
     renderPage();
     const card = screen.getByText("分析方式").closest(".rounded-lg");
-    expect(card?.className).toMatch(/border-primary/);
-    expect(card?.className).toMatch(/bg-primary/);
-    expect(card?.className).not.toMatch(/border-orange/);
+    expect(card?.className).toMatch(/bg-secondary/);
+    expect(card?.className).toMatch(/border-border/);
+    // coral(primary) 仅作点缀：不铺侧栏卡块级底色/描边
+    expect(card?.className).not.toMatch(/bg-primary/);
+    expect(card?.className).not.toMatch(/border-primary/);
   });
 
   it("底部操作栏用 bg-card（去 secondary 灰堆叠）", () => {

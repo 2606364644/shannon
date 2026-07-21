@@ -92,7 +92,7 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
       ) : (
         <div className="flex gap-2">
           <Input value={f.sourceValue} onChange={(e) => set({ sourceValue: e.target.value })}
-            placeholder={t("scan.fields.pathPlaceholder")} />
+            placeholder={t("scan.fields.pathPlaceholder")} className="font-mono" />
           <FileSystemPicker value={f.sourceValue} onChange={(v) => set({ sourceValue: v })} triggerLabel={t("scan.fields.browse")} />
         </div>
       )}
@@ -107,9 +107,9 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
         {t("scan.fields.wsNameLabel")}
         <span className="font-normal text-muted-foreground"> — {t("scan.fields.optional")}</span>
       </Label>
-      <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder={t("scan.fields.wsNamePlaceholder")} />
+      <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder={t("scan.fields.wsNamePlaceholder")} className="font-mono" />
       {loadingConflict && <div className="text-xs text-yellow">{t("scan.fields.checkingConflict")}</div>}
-      {!f.wsName && derivedName && <div className="text-xs text-muted-foreground">{t("scan.fields.previewName", { name: derivedName })}</div>}
+      {!f.wsName && derivedName && <div className="text-xs text-muted-foreground font-mono">{t("scan.fields.previewName", { name: derivedName })}</div>}
     </div>
   );
 
@@ -117,7 +117,7 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
   if (type === "whitebox") {
     return (
       <div className="flex flex-col gap-3.5">
-        <StepGroup step={1} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-primary/10 text-primary">
+        <StepGroup step={1} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
           {sourceSelector}
         </StepGroup>
 
@@ -127,7 +127,7 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
               {t("scan.fields.urlLabel")}
               <span className="font-normal text-muted-foreground"> — {t("scan.fields.optional")}</span>
             </Label>
-            <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder={t("scan.fields.urlPlaceholder")} />
+            <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder={t("scan.fields.urlPlaceholder")} className="font-mono" />
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
             {!f.url && <div className="text-xs text-muted-foreground">{t("scan.fields.urlHint")}</div>}
           </div>
@@ -153,7 +153,7 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
             value={f.url}
             onChange={(e) => set({ url: e.target.value })}
             placeholder={t("scan.fields.urlPlaceholder")}
-            className="border-orange/30"
+            className="font-mono border-orange/30"
           />
           {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
           <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
