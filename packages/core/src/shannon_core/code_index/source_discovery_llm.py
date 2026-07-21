@@ -106,12 +106,18 @@ def _has_rule_hit(language: str, text: str) -> bool:
 # source 候选启发式:含 sink 函数中,规则未命中的"对象级取用 / 非常规写法"信号。
 # 覆盖解构(const {a} = req.body)、对象直传(f(req.body))、括号取用(body[)、注解。
 # 点号取用(req.body.x)规则会命中 → 由 _has_rule_hit 拦截,不会误送 LLM。
+# 子项② IDOR 风味(对象级实体 id 取用,补注入风味 SourcePoint 不识别的):
+#   - req\.params\.\w+Id 显式标注实体-id 风味(功能上被更广的 req\.(?:...params...) 覆盖,
+#     但保留为 IDOR 文档化信号,便于后续规则演进 / 阅读时识别意图)。
+#   - getParam("userId") 通用实体-id 取用(非 SourcePoint 规则模式)→ 候选送 LLM。
 _SOURCE_CANDIDATE_HINT = re.compile(
     r"(input\.get|params\[|body\[|data\[['\"]|@RequestBody|@QueryParam|@PathVariable|"
     r"ctx\.Request|ctx\.(?:request\.)?(?:body|query|params|headers)|c\.Query|c\.Param|"
     r"req\.(?:body|query|params|headers|cookies)|"
     r"request\.(?:GET|POST|data|args|form|json)|"
-    r"\$_(?:GET|POST|REQUEST))",
+    r"\$_(?:GET|POST|REQUEST)|"
+    r"req\.params\.\w+Id|"                     # Node req.params.userId(IDOR 风味)
+    r"getParam\(\s*['\"]\w*[Ii]d['\"]\))",     # Java/通用 getParam("userId")
     re.IGNORECASE,
 )
 

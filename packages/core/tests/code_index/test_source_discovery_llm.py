@@ -534,3 +534,52 @@ def test_collect_source_candidates_entry_point_ids_none_backward_compatible():
     )
     assert cands == []  # 不在任何范围 → 不候选
 
+
+# ===== spec 子项②: source 候选 hint 加 IDOR 风味(对象级实体 id)=====
+
+
+def test_collect_source_candidates_catches_idor_flavor_java_get_parameter():
+    """IDOR 风味: Java servlet `request.getParameter("userId")` 是对象级实体 id 取用。
+
+    回归锚点(非新 regex 的 RED→GREEN 验证):此 block 进候选是因现有 hint 的
+    `request\\.(?:GET|POST|...)` 带 `re.IGNORECASE` 命中 `request.get`(getParameter
+    的前 3 字符);ts-express-* / java-* 规则不命中(无 `@RequestParam` / `@PathVariable` /
+    点号 req.params.x)。文档化"Java IDOR 风味源不漏" —— 无论经新 regex 还是现有
+    broader hint,都应进候选送 LLM。
+    """
+    src = (
+        'public User getUser(HttpServletRequest req) {\n'
+        '  String userId = request.getParameter("userId");\n'
+        '  return userService.findById(userId);\n'
+        '}\n'
+    )
+    block = _block("Ctl.java", "getUser", 1, src, language="java")
+    cands = collect_source_candidates(
+        [block], sink_func_ids=set(),
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(cands) == 1  # request.getParameter("userId") 进候选(LLM 判)
+    assert cands[0].block.id == block.id
+
+
+def test_collect_source_candidates_catches_idor_flavor_generic_get_param():
+    """IDOR 风味: 通用 `getParam("resourceId")` 写法(部分框架/工具类)—— 非注入 SourcePoint
+    规则模式,且不含 `request.` / `req.` 前缀 → 现有 hint 不命中。子项② 新增 regex 项
+    `getParam\\(\\s*['\"]\\w*[Ii]d['\"]\\)` 的直接 RED→GREEN 锚点。
+    """
+    src = (
+        'function handler(ctx) {\n'
+        '  const resourceId = getParam("resourceId");\n'
+        '  return db.resource.findById(resourceId);\n'
+        '}\n'
+    )
+    block = _block("ctl.js", "handler", 1, src, language="javascript")
+    cands = collect_source_candidates(
+        [block], sink_func_ids=set(),
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(cands) == 1  # getParam("resourceId") 进候选
+    assert cands[0].block.id == block.id
+
