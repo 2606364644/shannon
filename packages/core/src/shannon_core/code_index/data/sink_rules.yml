@@ -61,9 +61,9 @@ rules:
   - rule_id: java-stmt-execute
     languages: [java]
     callee: execute
-    receiver_pattern: null
-    category: sql
-    sink_subtype: sql_raw
+    receiver_pattern: ".+"          # 原 null(只匹配裸调用)→ .+ ;execute 横跨 SQL+SSRF,
+    category: sql                   #   保留 sql 语义,SSRF 由 java-httpclient-execute 覆盖,
+    sink_subtype: sql_raw           #   双命中靠 chain_verdict 复核否决(不漏 DDL)
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
@@ -653,5 +653,16 @@ rules:
     receiver_pattern: ".+"
     category: redirect
     sink_subtype: open_redirect
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # Apache HttpClient.execute(SSRF)— execute 同名横跨 SQL(java-stmt-execute),
+  # 本规则标 ssrf 语义;双命中靠 chain_verdict 复核(receiver=httpClient + HttpGet 参数)否决 SQL 那条。
+  - rule_id: java-httpclient-execute
+    languages: [java]
+    callee: execute
+    receiver_pattern: ".+"
+    category: ssrf
+    sink_subtype: ssrf_java_http
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: url}]

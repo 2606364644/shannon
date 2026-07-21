@@ -253,9 +253,9 @@ class TestSinkRuleLibrary:
             "java-resttemplate-exchange", "java-resttemplate-getforobject",
             "ts-pug-compile", "ts-vm-runincontext",
             "ts-bypass-security-trust-html", "ts-needle-get",
-            # sink 硬规则增强(Task 3):Java 全类别补齐(postForEntity/openConnection/sendRedirect)
+            # sink 硬规则增强(Task 3+4):Java 全类别补齐 + execute 双语义
             "java-resttemplate-postforentity", "java-response-sendredirect",
-            "java-url-openconnection",
+            "java-url-openconnection", "java-httpclient-execute",
         }
         got = {r.rule_id for r in DEFAULT_RULES}
         assert got == expected, f"missing={expected-got} extra={got-expected}"
@@ -995,3 +995,41 @@ class TestJavaSsrfCmdRedirectSinks:
         hit = [s for s in sites if s.rule_id == "java-response-sendredirect"]
         assert hit
         assert hit[0].category == SinkCategory.REDIRECT
+
+
+class TestExecuteDualSemantics:
+    """execute 双语义:Statement.execute(SQL)+ httpClient.execute(SSRF),callee 同名无法消歧。
+
+    保留 java-stmt-execute(sql)+ 加 java-httpclient-execute(ssrf),双命中靠 chain_verdict
+    复核否决 SQL 那条(下游职责,本测试只验证 detect_sinks 产两个 SinkCallSite)。DDL 不漏。
+    """
+
+    def _java_sites(self, body: str):
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.java_parser import JavaParser
+        import tempfile, pathlib
+        src = f"class C {{\n  void q() {{\n{body}\n  }}\n}}\n"
+        parser = JavaParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "C.java"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_statement_execute_ddl_not_missed(self):
+        """stmt.execute('DROP TABLE') → java-stmt-execute(SQL)命中。DDL 场景只有 execute 覆盖,不能漏。"""
+        sites = self._java_sites('    stmt.execute("DROP TABLE x");')
+        sql = [s for s in sites if s.rule_id == "java-stmt-execute"]
+        assert sql, "stmt.execute(DDL) 应命中 java-stmt-execute(不漏 DDL)"
+        assert sql[0].category == SinkCategory.SQL
+
+    def test_httpclient_execute_dual_hit(self):
+        """httpClient.execute(request) → java-httpclient-execute(ssrf) + java-stmt-execute(sql)双命中。
+        callee=execute 同名;两条规则都 rp='.+' → 各产一个 SinkCallSite。chain_verdict 后续否决 SQL 那条。"""
+        sites = self._java_sites("    httpClient.execute(request);")
+        rule_ids = {s.rule_id for s in sites}
+        assert "java-httpclient-execute" in rule_ids, "httpClient.execute 应命中 java-httpclient-execute(ssrf)"
+        assert "java-stmt-execute" in rule_ids, "httpClient.execute 也命中 java-stmt-execute(sql,待 chain_verdict 否决)"
+        ssrf = [s for s in sites if s.rule_id == "java-httpclient-execute"]
+        assert ssrf[0].category == SinkCategory.SSRF
+        assert ssrf[0].callee_receiver == "httpClient"
