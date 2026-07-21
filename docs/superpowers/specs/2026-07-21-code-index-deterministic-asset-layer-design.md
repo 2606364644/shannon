@@ -221,3 +221,9 @@ SHANNON_LLM_TRACK_ENABLED=0 uv run shannon-whitebox start --repo /root/shannon-p
 ls -la workspaces/sentinel_dashboard_*/deliverables/whitebox/*gitnexus_queue.json
 ```
 预期:子项③ 补 3~4/20(fastjson RCE 级,spec §7);子项④ 让 authz GitNexus 轨产出 IDOR 兜底。**全 20 覆盖仍需开轨**(业务逻辑缺陷 + 跨服务二阶是确定性层结构外)。残余:patterns alt5 RHS 仍含裸 `ctx`,若真机现 Koa `ctx.request.body.userId` FP 再收窄。
+
+### 10.5 最终 review 补丁:hunter sink slot 路由修复(C1,2026-07-21)
+
+最终全分支 review(opus)发现 per-task review 全漏的 **Critical C1**:hunter prompt `_SINK_HUNTER_PROMPT_TMPL` 不向 LLM 索取 `slot` 字段 → `_to_hunter_sink` 恒 `SlotContext.GENERIC` → `extract_candidate_chains` 因 `generic∉_INJECTION_SLOTS`(chain_verdict.py:42-43)滤掉 → hunter sinks 进了 taint_flows 但**到不了 `<vuln>_gitnexus_queue.json`**,击穿子项③ 核心承诺。端到端复现:fastjson slot=GENERIC→0 chains,slot=deserialize→1 chain。
+
+修复(commit 22140602):(A) hunter prompt 加 `slot` 字段(对称 judge prompt `_DISCOVERY_PROMPT_TMPL` 的 8 值枚举)+(B) `_CATEGORY_TO_SLOT` 模块映射 + 优先级(LLM 非 generic slot 优先;否则按 category 派生;否则 GENERIC)——LLM 漏 slot 时 deserialization→DESERIALIZE_OBJ("deserialize"∈_INJECTION_SLOTS)过路由。加 e2e 回归测试 `test_hunter_sink_routes_to_injection_queue`(`discover_sinks_by_entry→pgraph→extract_candidate_chains` 穿过不丢)。教训:Task 3 编排测试只断言"hunter 在 taint 前跑且喂 taint",未覆盖"hunter sink 经路由到 queue"全路径——故 C1 漏网。e2e 测试现已锁该不变量。
