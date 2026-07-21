@@ -118,6 +118,37 @@ class SuspiciousCall:
     column: int
 
 
+@dataclass(frozen=True)
+class SinkHunterCandidate:
+    """entry handler 函数,待 LLM 探测器自由找 sink(对称 source 的 SourceCandidate)。
+
+    与 collect_suspicious_calls(候选表筛选→判定器)互补:本候选不依赖候选表,
+    LLM 在 entry handler 源码内自由识别框架特有 sink(fastjson.parseObject 等)。
+    """
+    block: "FuncBlock"
+
+
+def collect_entry_handler_blocks(
+    blocks: "list[FuncBlock]",
+    *,
+    entry_point_ids: "set[str]",
+    sink_func_ids: "set[str]",
+) -> list[SinkHunterCandidate]:
+    """收集 entry handler 中**已有 sink(规则+判定器软 sink)之外**的函数,送 LLM 探测器。
+
+    排除 sink_func_ids 中的函数(规则/判定器已覆盖,避免重复);只留 entry handler。
+    对称 collect_source_candidates 的收集职责,但目标是 sink 探测(整函数送 LLM)。
+    """
+    out: list[SinkHunterCandidate] = []
+    for block in blocks:
+        if block.id not in entry_point_ids:
+            continue
+        if block.id in sink_func_ids:
+            continue  # 已有 sink,规则路径覆盖
+        out.append(SinkHunterCandidate(block=block))
+    return out
+
+
 def _is_rule_hit(language: str, callee: str, receiver: str | None) -> bool:
     """该 call 是否已被 detect_sinks 规则库命中(避免与规则 sink 重复)。"""
     candidates = _RULE_INDEX.get((language, callee), [])
