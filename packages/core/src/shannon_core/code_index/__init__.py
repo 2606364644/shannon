@@ -27,7 +27,9 @@ from shannon_core.code_index.parameter_models import ParameterPropagationGraph
 from shannon_core.code_index.progress import ProgressEmitter
 from shannon_core.code_index.sink_discovery_llm import (
     RuleGap,
+    collect_entry_handler_blocks,
     collect_suspicious_calls,
+    discover_sinks_by_entry,
     discover_sinks_llm,
 )
 from shannon_core.code_index.source_detector import detect_sources
@@ -203,11 +205,54 @@ async def build_code_index_with_gitnexus(
         logger.info("LLM sink discovery added %d soft sinks (%d rule gaps)",
                     len(soft_sinks), len(rule_gaps))
 
+    # ⑦ entry 组装(spec 子项① 前置): detect_entry_points ∪ process entry（G2）。
+    #    **提前到 taint 之前**(原在 ⑤ 之后)—— sink 探测器(③c)消费 entry_point_ids,
+    #    故 entry_point_ids 必须在 ③c 之前算出; taint 仍自由引用 entry_point_ids。
+    #    process entry = call_graph.entry_points(path[0] FuncBlock) 中 detect 未识别的，
+    #    entry_type="gitnexus_process"(SRPC/RPC 业务入口,非 HTTP);同 id 时 detect 优先
+    #    (保留其 route/http_method)。替代旧的 detect ∩ gitnexus(intersect)。
+    all_entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
+    detected_ids = {ep.func_block_id for ep in all_entry_points}
+    process_entries: list[EntryPoint] = []
+    for ep_block in call_graph.entry_points:
+        if ep_block.id not in detected_ids:
+            process_entries.append(EntryPoint(
+                func_block_id=ep_block.id,
+                entry_type="gitnexus_process",
+                route=None,
+                http_method=None,
+                confidence=0.9,
+                evidence=f"GitNexus process entry: {ep_block.function_name}",
+                needs_llm_review=False,
+                source="gitnexus",
+            ))
+    gitnexus_entry_points = list(all_entry_points) + process_entries
+    logger.info(
+        "entry assembly: %d detect + %d gitnexus_process = %d total",
+        len(all_entry_points), len(process_entries), len(gitnexus_entry_points),
+    )
+    entry_point_ids = {ep.func_block_id for ep in gitnexus_entry_points}
+
     # ④ Group sinks by function (含软 sink)
     from collections import defaultdict
     sinks_by_func: dict[str, list] = defaultdict(list)
     for s in sink_call_sites:
         sinks_by_func[s.caller_id].append(s)
+
+    # ③c LLM sink 探测器(spec 子项③): entry handler 内 LLM 自由找 sink,
+    #     补判定器(候选表筛选)漏的框架特有 sink(fastjson.parseObject 等)。
+    #     必须在 ⑤ taint analysis 之前: taint 消费 sinks_by_func。
+    sink_func_ids_prelim = set(sinks_by_func.keys())  # 规则+判定器软 sink 的函数
+    entry_handler_cands = collect_entry_handler_blocks(
+        all_blocks, entry_point_ids=entry_point_ids,
+        sink_func_ids=sink_func_ids_prelim)
+    hunter_sinks, _hunter_gaps = await discover_sinks_by_entry(
+        entry_handler_cands, llm_client, progress_cb=progress_cb, model=model)
+    if hunter_sinks:
+        sink_call_sites = sink_call_sites + hunter_sinks
+        for s in hunter_sinks:
+            sinks_by_func[s.caller_id].append(s)
+        logger.info("LLM sink hunter (entry-driven) added %d soft sinks", len(hunter_sinks))
 
     # ⑤ LLM taint analysis (only for functions with sinks)
     blocks_by_id = {b.id: b for b in all_blocks}
@@ -266,33 +311,8 @@ async def build_code_index_with_gitnexus(
         f"{sum(_count_taint_flows(r) for _, r in taint_pairs)} taint_flows")
     intra_results = {func_id: result for func_id, result in taint_pairs}
 
-    # ⑦ entry 组装：detect_entry_points ∪ process entry（G2）
-    #    process entry = call_graph.entry_points(path[0] FuncBlock) 中 detect 未识别的，
-    #    entry_type="gitnexus_process"（SRPC/RPC 业务入口，非 HTTP）；同 id 时 detect 优先
-    #    （保留其 route/http_method）。替代旧的 detect ∩ gitnexus（intersect）。
-    all_entry_points = detect_entry_points(all_blocks, language, repo_path=str(repo))
-    detected_ids = {ep.func_block_id for ep in all_entry_points}
-    process_entries: list[EntryPoint] = []
-    for ep_block in call_graph.entry_points:
-        if ep_block.id not in detected_ids:
-            process_entries.append(EntryPoint(
-                func_block_id=ep_block.id,
-                entry_type="gitnexus_process",
-                route=None,
-                http_method=None,
-                confidence=0.9,
-                evidence=f"GitNexus process entry: {ep_block.function_name}",
-                needs_llm_review=False,
-                source="gitnexus",
-            ))
-    gitnexus_entry_points = list(all_entry_points) + process_entries
-    logger.info(
-        "entry assembly: %d detect + %d gitnexus_process = %d total",
-        len(all_entry_points), len(process_entries), len(gitnexus_entry_points),
-    )
-
     # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink；主路径扫 entry_point）
-    entry_point_ids = {ep.func_block_id for ep in gitnexus_entry_points}
+    #    entry_point_ids 已在 ⑦(③b 后)提前算出, 此处直接引用(原 :295 行删除, 解耦子项①)。
     source_points = detect_sources(
         all_blocks, parser, entry_point_ids, source_provider=_provide_source,
     )
