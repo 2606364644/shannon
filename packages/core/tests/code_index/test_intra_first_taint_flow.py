@@ -190,7 +190,7 @@ def test_pipeline_intra_first_rescues_handler_not_in_entry_point():
         fake_mcp = AsyncMock()
         fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
         with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
-            index, _rg, _sg = asyncio.run(build_code_index_with_gitnexus(
+            index, _rg, _sg, _sg2 = asyncio.run(build_code_index_with_gitnexus(
                 repo, mcp_client=fake_mcp, llm_client=None))  # 关 LLM → 确定性 fallback
 
         # source 补召回补回 req.body.preTax(handler 含 eval sink,但不在 entry_point)

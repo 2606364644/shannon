@@ -722,7 +722,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                     _medium_model = None
 
                 async with GitNexusMCPClient(Path(repo)) as mcp:
-                    index, rule_gaps, source_gaps = await build_code_index_with_gitnexus(
+                    index, rule_gaps, source_gaps, storage_gaps = await build_code_index_with_gitnexus(
                         str(repo),
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
@@ -740,7 +740,9 @@ async def run_code_index(input: ActivityInput) -> dict:
                 ) from exc
 
             json_path, summary_path = write_index_files(
-                index, str(deliverables), rule_gaps=rule_gaps, source_gaps=source_gaps,
+                index, str(deliverables),
+                rule_gaps=rule_gaps, source_gaps=source_gaps,
+                storage_gaps=storage_gaps,
             )
 
             # 可观测性：调用图统计。chains=0 是 GitNexus 轨空壳的核心信号

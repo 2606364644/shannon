@@ -40,6 +40,17 @@ from shannon_core.code_index.source_discovery_llm import (
     discover_sources_by_rules,
     discover_sources_llm,
 )
+from shannon_core.code_index.storage_detector import (
+    detect_storage_reads,
+    detect_storage_writes,
+)
+from shannon_core.code_index.storage_discovery_llm import (
+    StorageGap,
+    StorageReadCandidate,
+    StorageWriteCandidate,
+    discover_storage_reads_llm,
+    discover_storage_writes_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +128,7 @@ async def build_code_index_with_gitnexus(
     auto_index: bool = False,
     progress_cb=None,
     model: str | None = None,
-) -> tuple[CodeIndex, list[RuleGap], list[SourceGap]]:
+) -> tuple[CodeIndex, list[RuleGap], list[SourceGap], list[StorageGap]]:
     """Build code index with GitNexus call graph + LLM taint analysis.
 
     Pipeline:
@@ -320,6 +331,20 @@ async def build_code_index_with_gitnexus(
     logger.info("Detected %d rule-based source points (entry_point scan)",
                 n_entry_sources)
 
+    # ⑩ storage hard rules (spec 子项⑤ §3.2/§3.3, SYNC, 平行 detect_sources/detect_sinks):
+    #    - writes → StorageWritePoint(独立类型,不进 sink_call_sites;DB 写本身非漏洞)
+    #    - reads  → SourcePoint(source_type=STORAGE) 并入 source_points(双轨铁律 A:
+    #               复用单跳 chain_verdict,零新类型)
+    #    两路都扫 entry handler,token 须字面量(group "tok" / group(1));动态 token 留 LLM。
+    storage_writes = detect_storage_writes(
+        all_blocks, parser, entry_point_ids, source_provider=_provide_source,
+    )
+    storage_reads = detect_storage_reads(
+        all_blocks, parser, entry_point_ids, source_provider=_provide_source,
+    )
+    logger.info("Detected %d storage writes + %d storage reads (rule-based)",
+                len(storage_writes), len(storage_reads))
+
     # ⑧b' source 补召回(spec 2026-07-10 §3.1):对**含 sink 函数**补 source ——
     #    NodeGoat handler 不在 entry_point(detect_entry_points 把路由归 index.js),
     #    source_detector 主路径漏扫 → 这里对含 sink 函数补回 req.body.preTax 等。
@@ -335,13 +360,45 @@ async def build_code_index_with_gitnexus(
     )
     soft_sources, source_gaps = await discover_sources_llm(
         source_candidates, llm_client, progress_cb=progress_cb, model=model)
+
+    # ⑩' storage LLM hunters (spec 子项⑤ §3.3, ASYNC, 平行 discover_sources_llm):
+    #    候选 = entry handler blocks(对称 collect_entry_handler_blocks 的口径),用
+    #    StorageReadCandidate / StorageWriteCandidate 包装(都带 .block,chunk_items_by_file
+    #    按 block_of 提取)。LLM 不可用 → ([], []) 降级(守"GitNexus 轨确定性兜底")。
+    #    - read hunter  → 软 SourcePoint(STORAGE),并入 source_points 喂 chain_propagator
+    #    - write hunter → 软 StorageWritePoint,并入 storage_writes
+    storage_write_candidates = [
+        StorageWriteCandidate(block=b)
+        for b in all_blocks if b.id in entry_point_ids
+    ]
+    storage_read_candidates = [
+        StorageReadCandidate(block=b)
+        for b in all_blocks if b.id in entry_point_ids
+    ]
+    soft_storage_reads, storage_read_gaps = await discover_storage_reads_llm(
+        storage_read_candidates, llm_client,
+        progress_cb=progress_cb, model=model,
+    )
+    soft_storage_writes, storage_write_gaps = await discover_storage_writes_llm(
+        storage_write_candidates, llm_client,
+        progress_cb=progress_cb, model=model,
+    )
+    storage_writes = storage_writes + soft_storage_writes
+    storage_gaps = storage_read_gaps + storage_write_gaps
+
     # 合并去重(按 entry_point_id + param_name + source_type);entry 主路径优先。
+    # storage_reads(STORAGE-flavored SourcePoint)与 soft_storage_reads 一并并入
+    # source_points → chain_propagator 经 _source_points_matching substring 匹配
+    # 产 STORAGE taint_flows(spec 子项⑤ Task 2 锁定的零改动复用契约)。
     source_points = _dedup_source_points(
-        source_points + rule_extra_sources + soft_sources)
+        source_points + rule_extra_sources + soft_sources
+        + storage_reads + soft_storage_reads
+    )
     logger.info(
-        "source recall: %d entry + %d sink-func rule + %d soft → %d unique "
-        "(%d source gaps)",
+        "source recall: %d entry + %d sink-func rule + %d soft + %d storage-read "
+        "+ %d soft-storage-read → %d unique (%d source gaps)",
         n_entry_sources, len(rule_extra_sources), len(soft_sources),
+        len(storage_reads), len(soft_storage_reads),
         len(source_points), len(source_gaps),
     )
 
@@ -390,12 +447,14 @@ async def build_code_index_with_gitnexus(
             chains=call_graph.chains,
             sink_call_sites=sink_call_sites,
             source_points=source_points,
+            storage_write_points=storage_writes,
             file_manifest=file_manifest,
             degradation_level=DegradationLevel.FULL,
             parameter_graph=pgraph,
         ),
         rule_gaps,
         source_gaps,
+        storage_gaps,
     )
 
 
@@ -405,9 +464,11 @@ def write_index_files(
     *,
     rule_gaps: list | None = None,
     source_gaps: list | None = None,
+    storage_gaps: list | None = None,
 ) -> tuple[Path, Path]:
     """Write code_index.json, code_index_summary.md, parameter_graph.json,
-    and (if any) rule_gap_report.json / source_gap_report.json."""
+    and (if any) rule_gap_report.json / source_gap_report.json /
+    storage_gap_report.json."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -444,6 +505,18 @@ def write_index_files(
         ))
     elif src_gap_path.exists():
         src_gap_path.unlink()
+
+    # 旁路: storage 规则缺口报告(spec 子项⑤ §3.3, 反哺 storage_rules.yml)
+    # 内容 = LLM soft anchor(reads + writes)按 pattern/medium/kind 聚合的 StorageGap 列表
+    storage_gap_path = out / "storage_gap_report.json"
+    if storage_gaps:
+        import json as _json
+        storage_gap_path.write_text(_json.dumps(
+            [g if isinstance(g, dict) else g.__dict__ for g in storage_gaps],
+            indent=2, ensure_ascii=False,
+        ))
+    elif storage_gap_path.exists():
+        storage_gap_path.unlink()
 
     return json_path, summary_path
 
