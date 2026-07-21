@@ -443,7 +443,7 @@ HTTP execute, template engines, reflection.
 
 ## Task
 Return a JSON array. One object per sink found (omit functions with no sink):
-{{"sink":"<call expression>","category":"sql|command|file|template|deserialization|ssrf|xss|redirect|log","dangerous_arg":"<expression reaching the sink>","line":<int>,"is_sink":true,"rationale":"<one line>"}}
+{{"sink":"<call expression>","category":"sql|command|file|template|deserialization|ssrf|xss|redirect|log","slot":"sql_value|sql_identifier|cmd_argument|file_path|template_expr|url|deserialize|generic","dangerous_arg":"<expression reaching the sink>","line":<int>,"is_sink":true,"rationale":"<one line>"}}
 Return ONLY the JSON array, no prose. `line` is the FILE-absolute line number of the sink call."""
 
 
@@ -485,10 +485,32 @@ def _resolve_block_for_line(chunk: "FileChunk", line: int | None):
     return chunk.blocks[0]
 
 
+# category → slot 兜底映射(hunter 探测器 LLM 漏 slot 时按 category 派生, C1 修复 B)。
+# 对称 judge 路径:_to_soft_sink 直读 verdict.slot(判定器 prompt 必给 slot);
+# hunter LLM 可能漏 slot —— 此时按 category 派生保证路由正确(deserialization→deserialize
+# 过 _INJECTION_SLOTS, 否则恒 GENERIC 被 extract_candidate_chains 滤掉)。
+_CATEGORY_TO_SLOT: dict[str, "SlotContext"] = {
+    "sql": SlotContext.SQL_VALUE,
+    "command": SlotContext.CMD_ARGUMENT,
+    "file": SlotContext.FILE_PATH,
+    "template": SlotContext.TEMPLATE_EXPR,
+    "ssrf": SlotContext.URL,
+    "deserialization": SlotContext.DESERIALIZE_OBJ,
+}
+
+
 def _to_hunter_sink(block: "FuncBlock", field: dict) -> SinkCallSite:
     category = _to_category(field.get("category", "sql"))
     expr = field.get("dangerous_arg") or field.get("sink", "")
     line = int(field.get("line") or block.start_line)
+    # slot 解析优先级(C1 修复 B): LLM 显式给 slot(且非 generic)> category 派生 > GENERIC。
+    # 即便 LLM 漏 slot, fastjson.parseObject(category=deserialization)也能落到
+    # DESERIALIZE_OBJ("deserialize")→ 过 _INJECTION_SLOTS 路由进 injection queue。
+    raw_slot = field.get("slot")
+    if raw_slot and raw_slot != "generic":
+        slot = _to_slot(raw_slot)
+    else:
+        slot = _CATEGORY_TO_SLOT.get(category.value, SlotContext.GENERIC)
     return SinkCallSite(
         id=f"llm:{block.file_path}:{line}",
         caller_id=block.id,
@@ -500,7 +522,7 @@ def _to_hunter_sink(block: "FuncBlock", field: dict) -> SinkCallSite:
         line=line,
         column=0,
         dangerous_slots=[DangerousSlot(
-            arg_index=0, slot=_to_slot(field.get("slot", "generic")),
+            arg_index=0, slot=slot,
             expression=expr, is_entry_hint=is_entry_hint(expr, block),
         )],
         rule_id="llm-discovered-sink",
