@@ -170,8 +170,11 @@ async def test_xss_queue_contains_second_order_finding(tmp_path, monkeypatch):
     monkeypatch.setattr(
         activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path)
     )
+    # Patch the call-site factory so the stub is used regardless of the
+    # is_gitnexus_llm_enabled branch (default=True would otherwise build a
+    # real-LLM client and bypass the stub below). See Task 8 fix.
     monkeypatch.setattr(
-        activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False
+        activities, "_make_verdict_llm_client", lambda repo: fake_llm
     )
     set_audit_session(_RecordingSession())
     try:
