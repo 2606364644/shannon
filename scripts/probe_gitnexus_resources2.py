@@ -7,7 +7,7 @@ list 不列但直接 read 能读；③schema resource 能指导正确的 cypher 
 from __future__ import annotations
 import asyncio, json
 from pathlib import Path
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 NAME = "statement_template_svr"
 

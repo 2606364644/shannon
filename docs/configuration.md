@@ -1,6 +1,6 @@
 # 配置参考
 
-shannon-py 使用 YAML 配置文件定义扫描行为。配置文件通过 `parse_config` 函数加载并验证。
+supernova 使用 YAML 配置文件定义扫描行为。配置文件通过 `parse_config` 函数加载并验证。
 
 ## 最小配置
 

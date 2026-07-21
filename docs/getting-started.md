@@ -24,11 +24,11 @@
 
 ```bash
 git clone <repo-url>
-cd shannon-py
+cd supernova
 uv sync
 ```
 
-`uv sync` 会自动根据工作区配置安装 `shannon-core`、`shannon-whitebox` 和 `shannon-blackbox` 三个包及其全部依赖。
+`uv sync` 会自动根据工作区配置安装 `supernova-core`、`supernova-whitebox` 和 `supernova-blackbox` 三个包及其全部依赖。
 
 ## 3. 白盒扫描教程
 
@@ -41,7 +41,7 @@ uv sync
 ### 启动扫描
 
 ```bash
-uv run shannon-whitebox start --repo /path/to/target
+uv run supernova-whitebox start --repo /path/to/target
 ```
 
 可选参数：
@@ -57,7 +57,7 @@ uv run shannon-whitebox start --repo /path/to/target
 
 ### 查看产出物
 
-默认情况下，扫描产出物存放在目标仓库的 `<repo>/.shannon/deliverables/` 目录下。
+默认情况下，扫描产出物存放在目标仓库的 `<repo>/.supernova/deliverables/` 目录下。
 
 ## 4. 黑盒扫描教程
 
@@ -69,7 +69,7 @@ uv run shannon-whitebox start --repo /path/to/target
 ### 启动扫描（独立模式）
 
 ```bash
-uv run shannon-blackbox start --url https://example.com
+uv run supernova-blackbox start --url https://example.com
 ```
 
 ### 启动扫描（复用白盒结果）
@@ -77,7 +77,7 @@ uv run shannon-blackbox start --url https://example.com
 在白盒扫描完成后，黑盒可通过 `--repo` 复用白盒产出的漏洞队列，跳过侦察阶段：
 
 ```bash
-uv run shannon-blackbox start --url https://example.com --repo /path/to/target
+uv run supernova-blackbox start --url https://example.com --repo /path/to/target
 ```
 
 `--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，详见 [白盒→黑盒交接运行手册](whitebox-blackbox-handoff.md)。
@@ -99,13 +99,13 @@ uv run shannon-blackbox start --url https://example.com --repo /path/to/target
 ### 按漏洞类型过滤
 
 ```bash
-uv run shannon-blackbox start --url https://example.com --repo /path/to/target --vuln-classes injection --vuln-classes xss
+uv run supernova-blackbox start --url https://example.com --repo /path/to/target --vuln-classes injection --vuln-classes xss
 ```
 
 ### 仅检测不利用
 
 ```bash
-uv run shannon-blackbox start --url https://example.com --repo /path/to/target --no-exploit
+uv run supernova-blackbox start --url https://example.com --repo /path/to/target --no-exploit
 ```
 
 ### 查看报告
@@ -116,22 +116,22 @@ uv run shannon-blackbox start --url https://example.com --repo /path/to/target -
 
 > **⚠️ 注意：`run_claude_prompt()` 当前为桩函数，尚未集成 Claude Agent SDK。**
 >
-> 该函数位于 `packages/whitebox/src/shannon_whitebox/agents/runner.py`，调用时会直接抛出 `NotImplementedError`。这意味着目前无法运行完整的端到端扫描流程，直到 Claude Agent SDK 的 Python 集成完成。
+> 该函数位于 `packages/whitebox/src/supernova_whitebox/agents/runner.py`，调用时会直接抛出 `NotImplementedError`。这意味着目前无法运行完整的端到端扫描流程，直到 Claude Agent SDK 的 Python 集成完成。
 
 ## 6. 查看结果
 
 ### 白盒扫描
 
 ```bash
-uv run shannon-whitebox workspaces
-uv run shannon-whitebox logs <workspace_name>
+uv run supernova-whitebox workspaces
+uv run supernova-whitebox logs <workspace_name>
 ```
 
 ### 黑盒扫描
 
 ```bash
-uv run shannon-blackbox workspaces
-uv run shannon-blackbox logs <workspace_name>
+uv run supernova-blackbox workspaces
+uv run supernova-blackbox logs <workspace_name>
 ```
 
 ### 工作区目录结构

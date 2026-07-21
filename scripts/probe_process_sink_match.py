@@ -8,10 +8,10 @@ from __future__ import annotations
 import asyncio, re
 from pathlib import Path
 from collections import defaultdict
-from shannon_core.code_index.parser import detect_language, discover_source_files
-from shannon_core.code_index.parsers import get_parser
-from shannon_core.code_index.sink_detector import detect_sinks
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.parser import detect_language, discover_source_files
+from supernova_core.code_index.parsers import get_parser
+from supernova_core.code_index.sink_detector import detect_sinks
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 REPO = Path("/root/code/backend/statement_template_svr")
 NAME = "statement_template_svr"

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# scripts/bootstrap.sh — Install external dependencies for shannon-py.
+# scripts/bootstrap.sh — Install external dependencies for supernova.
 # Usage: bash scripts/bootstrap.sh [whitebox|blackbox|all] [--yes]
 
 PROFILE="${1:-all}"
 AUTO_YES=false
 [[ "${2:-}" == "--yes" ]] && AUTO_YES=true
 
-# ── 确保项目用户 shannon-user + 系统级 uv 就绪（幂等）──────────────
-# 让「宿主 CLI 直跑扫描」可用 shannon-user（容器内身份不动，由 Dockerfile 决定）。
+# ── 确保项目用户 supernova-user + 系统级 uv 就绪（幂等）──────────────
+# 让「宿主 CLI 直跑扫描」可用 supernova-user（容器内身份不动，由 Dockerfile 决定）。
 # 仅 root 生效；非 root 跑 bootstrap 时跳过（不阻断后续依赖安装）。
 if [ "$(id -u)" -eq 0 ]; then
-    bash "$(dirname "${BASH_SOURCE[0]}")/ensure-shannon-user.sh" \
-        || echo "  ⚠ ensure-shannon-user 失败（非致命，继续）" >&2
+    bash "$(dirname "${BASH_SOURCE[0]}")/ensure-supernova-user.sh" \
+        || echo "  ⚠ ensure-supernova-user 失败（非致命，继续）" >&2
 fi
 
 # ── Colors ──────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ check_docker() {
     if has docker; then
         ok "docker"
     else
-        warn "docker not found. Start infrastructure with: shannon-whitebox infra up"
+        warn "docker not found. Start infrastructure with: supernova-whitebox infra up"
     fi
 }
 

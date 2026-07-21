@@ -11,7 +11,7 @@ run_code_index 等 activity 共享 worker event loop;GitNexus taint/sink/source 
 (daemon thread + time.sleep),彻底脱离 event loop。
 
 验证标准:扫描全程(尤其 code-index 长任务那几分钟)heartbeat age 始终 < 阈值(默认 90s
-= SHANNON_SCAN_LIVENESS_SECONDS)。若出现 age>阈值 窗口(哪怕一次),说明修复未生效,
+= SUPERNOVA_SCAN_LIVENESS_SECONDS)。若出现 age>阈值 窗口(哪怕一次),说明修复未生效,
 或 worker 镜像未 rebuild / 容器未重启。
 """
 import os
@@ -26,7 +26,7 @@ def main() -> None:
         sys.exit(1)
     ws = Path(sys.argv[1])
     interval = float(sys.argv[2]) if len(sys.argv) > 2 else 5.0
-    liveness = float(os.environ.get("SHANNON_SCAN_LIVENESS_SECONDS", "90"))
+    liveness = float(os.environ.get("SUPERNOVA_SCAN_LIVENESS_SECONDS", "90"))
     hb = ws / "heartbeat"
 
     print(f"监控 {hb}")

@@ -13,9 +13,9 @@
 #
 # 逻辑：
 #   先预清理 compose 项目内失败/空壳容器（Created/Exited/Dead 态）——
-#   专治"曾直接 docker compose up 失败，留下 shannon-py-{temporal,web} 空壳"在模式切换/端口检测时捣乱。
+#   专治"曾直接 docker compose up 失败，留下 supernova-{temporal,web} 空壳"在模式切换/端口检测时捣乱。
 #   安全（双重，绝不误删外部 shannon-temporal）：
-#     - docker compose ps 只列本项目(shannon-py)容器，物理上排除外部 shannon-temporal；
+#     - docker compose ps 只列本项目(supernova)容器，物理上排除外部 shannon-temporal；
 #     - 且只删非运行态，running 的容器（含外部 temporal）一律不动。
 #   再检测宿主 7233 端口是否被占用（通常意味着已有外部 temporal 在跑）：
 #     - 已占用 → 复用模式：-f 加载 external-temporal override，不起 compose 的 temporal
@@ -74,10 +74,10 @@ port_in_use() {
 }
 
 # 清理 compose 项目内失败/空壳容器（Created/Exited/Dead 等非运行态）。
-# 专治：曾直接 `docker compose up` 失败，留下 shannon-py-{temporal,web} 的 Created 态空壳，
+# 专治：曾直接 `docker compose up` 失败，留下 supernova-{temporal,web} 的 Created 态空壳，
 #       这些空壳在后续模式切换 / 端口检测 / up 时捣乱。
 # 安全保证（双重，绝不误删外部 shannon-temporal）：
-#   1. docker compose ps 只列本项目(shannon-py)管辖的容器，物理上排除外部 shannon-temporal；
+#   1. docker compose ps 只列本项目(supernova)管辖的容器，物理上排除外部 shannon-temporal；
 #   2. 只删 state ∈ {created, exited, dead}，running / restarting / paused 一律保留。
 cleanup_stale_containers() {
   local stale

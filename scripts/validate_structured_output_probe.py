@@ -19,7 +19,7 @@ from pathlib import Path
 
 def load_env() -> None:
     # 本机 env 已有 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL（GLM anthropic 端点）
-    os.environ["SHANNON_AI_PROVIDER"] = "anthropic_api"
+    os.environ["SUPERNOVA_AI_PROVIDER"] = "anthropic_api"
     os.environ.setdefault("CLAUDE_MAX_TURNS", "15")
 
 
@@ -47,8 +47,8 @@ VULN_SCHEMA = {
 
 async def main() -> None:
     load_env()
-    from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
-    from shannon_core.agents.runner import run_claude_prompt
+    from supernova_core.agents.tool_audit_logger import NullToolAuditLogger
+    from supernova_core.agents.runner import run_claude_prompt
 
     target = Path(tempfile.mkdtemp(prefix="struct_probe_"))
     prompt = (

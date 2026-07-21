@@ -25,7 +25,7 @@ __pycache__/
 # ---- 运行时产物 / 日志 ----
 deliverables/
 workspaces/
-.shannon/
+.supernova/
 *.log
 *.tmp
 

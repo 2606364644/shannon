@@ -16,7 +16,7 @@ import json
 import shutil
 from pathlib import Path
 
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
 
 
 def _hr(t: str) -> None:

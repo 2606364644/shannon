@@ -46,7 +46,7 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
 fi
 
 # 配置（env 可覆盖；版本不设则运行时解析 latest stable，避免硬编码过时版本号）
-SHANNON_GH_BASE="${SHANNON_GH_BASE:-https://github.com}"
+SUPERNOVA_GH_BASE="${SUPERNOVA_GH_BASE:-https://github.com}"
 CLI_PLUGINS_DIR="${HOME}/.docker/cli-plugins"
 
 _log()  { printf '\033[0;32m✓\033[0m %s\n' "$*"; }
@@ -59,7 +59,7 @@ _has()  { command -v "$1" >/dev/null 2>&1; }
 _resolve_latest() {
     local repo="$1" tag
     tag="$(curl -s -o /dev/null -w '%{redirect_url}\n' \
-        "${SHANNON_GH_BASE}/${repo}/releases/latest" 2>/dev/null \
+        "${SUPERNOVA_GH_BASE}/${repo}/releases/latest" 2>/dev/null \
         | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$')" || tag=""
     echo "${tag#v}"
 }
@@ -74,13 +74,13 @@ _ensure_buildx() {
         return 0
     fi
     [ -n "$arch" ] || _die "不支持架构 $(uname -m)，无法下载 buildx（手动装到 $CLI_PLUGINS_DIR/docker-buildx）"
-    if [ -n "${SHANNON_BUILDX_VERSION:-}" ]; then
-        ver="$SHANNON_BUILDX_VERSION"
+    if [ -n "${SUPERNOVA_BUILDX_VERSION:-}" ]; then
+        ver="$SUPERNOVA_BUILDX_VERSION"
     else
         ver="$(_resolve_latest docker/buildx)"
     fi
-    [ -n "$ver" ] || _die "无法解析 buildx latest（github 不可达？设 SHANNON_BUILDX_VERSION=x.y.z 固定）"
-    url="$(_buildx_download_url "$SHANNON_GH_BASE" "$plat" "$arch" "$ver")"
+    [ -n "$ver" ] || _die "无法解析 buildx latest（github 不可达？设 SUPERNOVA_BUILDX_VERSION=x.y.z 固定）"
+    url="$(_buildx_download_url "$SUPERNOVA_GH_BASE" "$plat" "$arch" "$ver")"
     _log "装 buildx v${ver}（compose 走 BuildKit 的前提）"
     _log "  下 $url"
     mkdir -p "$CLI_PLUGINS_DIR"

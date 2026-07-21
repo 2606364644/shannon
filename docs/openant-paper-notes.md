@@ -5,7 +5,7 @@
 >
 > **论文信息（文章引用，未独立核验）：** *OpenAnt: LLM-Powered Vulnerability Discovery Through Code Decomposition, Adversarial Verification, and Dynamic Testing*，Nahum Korda / Gadi Evron，Knostic。arXiv: 2606.19149；代码 Apache 2.0：github.com/knostic/OpenAnt。
 >
-> **本文档性质：** 基于上述**二手速读文章**整理。写本笔记的目的是**提炼 OpenAnt 的流水线思路，对照 shannon-py GitNexus 轨现状，沉淀为后续优化项候选**（见 §6）。论文细节若要落地，请回到 arXiv 原文 / 官方仓库核验。
+> **本文档性质：** 基于上述**二手速读文章**整理。写本笔记的目的是**提炼 OpenAnt 的流水线思路，对照 supernova GitNexus 轨现状，沉淀为后续优化项候选**（见 §6）。论文细节若要落地，请回到 arXiv 原文 / 官方仓库核验。
 
 ---
 
@@ -86,18 +86,18 @@ OpenAnt 直击把 LLM 丢进真实大仓的三大痛点，也顺带回应了传�
 
 ---
 
-## 5. 与 shannon-py GitNexus 轨的对照
+## 5. 与 supernova GitNexus 轨的对照
 
-shannon-py 是**双轨**（GitNexus 轨 = 确定性层 + 轻量 LLM 判定；LLM 轨 = 纯 LLM 独立），两条轨各自独立、只在合并器 verdict OR 交汇。OpenAnt 是**单轨闭环**。下表把 OpenAnt 六阶段**逐段映射到 GitNexus 轨**（刻意不映射到 LLM 轨，原因见 §7）。
+supernova 是**双轨**（GitNexus 轨 = 确定性层 + 轻量 LLM 判定；LLM 轨 = 纯 LLM 独立），两条轨各自独立、只在合并器 verdict OR 交汇。OpenAnt 是**单轨闭环**。下表把 OpenAnt 六阶段**逐段映射到 GitNexus 轨**（刻意不映射到 LLM 轨，原因见 §7）。
 
-| OpenAnt 阶段 | shannon-py GitNexus 轨现状 | gap |
+| OpenAnt 阶段 | supernova GitNexus 轨现状 | gap |
 |---|---|---|
 | 1. 代码解析（AST + 双向调用图 + 统一 IR，6 语言） | `run_code_index`/`build_code_index()` 确定性 AST：提取函数块/调用边/候选入口，产 `parameter_graph.json`/`SinkCallSite` | **部分对齐**；多语言已支持（per-language sink 规则覆盖 py/ts/go/java/php），但"双向调用图 + 跨语言统一 IR"成熟度待核 |
 | 2. 分析单元 + **可达性过滤（BFS 从入口，砍 97%）** | `rebuild_call_chains`（从确认入口点建 CallChain）+ Spec B tiered sink | **缺系统性的"可达性砍面"**：当前是"检测所有 sink 再建链"，而非"先从入口 BFS 砍掉不可达函数再分析"。**与 `run_code_index` 对大仓 >10min 超时（见 memory `pre-recon-gitnexus-blockage`）直接相关** |
 | 3. 暴露分类（LLM 4 分类，砍 87%） | **无对应** | OpenAnt 独有的中间过滤层，GitNexus 轨 sink→builder→verdict 之间无此闸门 |
-| 4. 漏洞检测（Opus + 语言无关提示词，3 问题） | `chain_verdict.py`（`run_claude_prompt` 单次结构化判定） | **概念对齐**；OpenAnt 用更强模型 + 三问式语言无关 prompt，shannon-py 是轻量单次判定（成本/精度定位更低） |
+| 4. 漏洞检测（Opus + 语言无关提示词，3 问题） | `chain_verdict.py`（`run_claude_prompt` 单次结构化判定） | **概念对齐**；OpenAnt 用更强模型 + 三问式语言无关 prompt，supernova 是轻量单次判定（成本/精度定位更低） |
 | 5. 对抗性验证（攻击者模拟 + 多路径 + 受害者要求） | **无对应** | chain_verdict 是单次判定，非攻击者模拟。**这是 OpenAnt 降假阳性的核心利器（49.5% 排除率）** |
-| 6. 动态验证（自动 Dockerfile + PoC + 沙箱复现） | exploit 阶段是**黑盒 live exploit（针对 `web_url`）**，非源码层 PoC | **范式不同**：OpenAnt 在源码层自动生成 PoC + 容器复现；shannon-py 是部署后系统测试。属较大新增能力，超出 GitNexus 轨范畴 |
+| 6. 动态验证（自动 Dockerfile + PoC + 沙箱复现） | exploit 阶段是**黑盒 live exploit（针对 `web_url`）**，非源码层 PoC | **范式不同**：OpenAnt 在源码层自动生成 PoC + 容器复现；supernova 是部署后系统测试。属较大新增能力，超出 GitNexus 轨范畴 |
 
 ---
 
@@ -115,7 +115,7 @@ shannon-py 是**双轨**（GitNexus 轨 = 确定性层 + 轻量 LLM 判定；LLM
 ### 优化项 O-2：在 sink→verdict 之间加"暴露分类"过滤层（降 chain_verdict 调用量）— 中收益 / 低投入
 - **借鉴**：OpenAnt 阶段 3 在"漏洞检测"前用一次 LLM 把单元分 Exploitable/Internal/Control/Neutral，砍 87%，**也把最贵的探索放这里**（占成本 72.9%）。
 - **落点**：GitNexus 轨 `vuln_chain_builders` 候选链出来后、`chain_verdict` 之前，加一层"暴露/可达性分类"，把无外部暴露面的候选（纯内部 sink、不可达入口）先排除，减少昂贵的 verdict 调用。
-- **注意**：这层本质是把 `chain_verdict` 的职责拆成"先分类、再精判"。shannon-py 的 `externally_exploitable`（可达性标签）已是 finding 级标签（公网/内部或跨服务），与 OpenAnt 的"单元级暴露分类"不同物——**不可把后者塞进前者覆盖语义**（合并器 `externally_exploitable` 解耦见 injection-recall spec 改动 3′）。
+- **注意**：这层本质是把 `chain_verdict` 的职责拆成"先分类、再精判"。supernova 的 `externally_exploitable`（可达性标签）已是 finding 级标签（公网/内部或跨服务），与 OpenAnt 的"单元级暴露分类"不同物——**不可把后者塞进前者覆盖语义**（合并器 `externally_exploitable` 解耦见 injection-recall spec 改动 3′）。
 
 ### 优化项 O-3：把 `chain_verdict` 从单次判定升级为对抗性验证（降假阳性）— 高收益 / 高投入
 - **借鉴**：OpenAnt 阶段 5 扮演受限远程攻击者，**多路径探索 + 受害者要求**，评估里 49.5% 候选被排除。
@@ -125,19 +125,19 @@ shannon-py 是**双轨**（GitNexus 轨 = 确定性层 + 轻量 LLM 判定；LLM
 
 ### 优化项 O-4：源码层自动 PoC + 沙箱复现（范式扩展，超出 GitNexus 轨范畴）— 高收益 / 高投入 / 慎重
 - **借鉴**：OpenAnt 阶段 6 从零生成 Dockerfile + PoC，沙箱复现，输出 `CONFIRMED/NOT_REPRODUCED`。
-- **落点**：与 shannon-py 现有 exploit 阶段（黑盒 live exploit on `web_url`）是**不同范式**——OpenAnt 是源码层、可在上线前完成、不依赖部署环境。
+- **落点**：与 supernova 现有 exploit 阶段（黑盒 live exploit on `web_url`）是**不同范式**——OpenAnt 是源码层、可在上线前完成、不依赖部署环境。
 - **判断**：这不是 GitNexus 轨的小修，而是白盒→explopt 闭环的能力扩展。**建议单独立项评估**（是否值得引入源码层 PoC 生成、沙箱执行 infra、瞬时清理机制），不宜混入 GitNexus 轨优化。
 
 ---
 
 ## 7. 边界与约束（双轨消费模型）⚠️
 
-把 OpenAnt 单轨闭环思路映射进 shannon-py 时，**务必守住双轨铁律**（CLAUDE.md §1、memory `dual-track-consumption-model`）：
+把 OpenAnt 单轨闭环思路映射进 supernova 时，**务必守住双轨铁律**（CLAUDE.md §1、memory `dual-track-consumption-model`）：
 
 1. **可达性过滤 / 暴露分类 / 对抗验证，都只作用于 GitNexus 轨**（确定性层 + chain_verdict），**不得把任何产物经 hints/prompt 喂进 LLM 轨**。`static_dataflow_hints.md` → `_static-dataflow-hints.txt` → `@include` 的旧耦合已拆除（injection-recall spec 改动 4b），勿以"借鉴 OpenAnt"为由重建。
-2. **OpenAnt 的"可达性过滤" ≠ shannon-py 的 `externally_exploitable`**：前者是**分析面缩减**（砍掉不可达函数、降 LLM 阶段成本），后者是**finding 级可达性标签**（公网 true / 内部或跨服务 false，且不能被 verdict 覆写）。两者解决不同问题，不可互相替代或混用语义。
-3. **OpenAnt 不擅长"功能缺失/协议解析不一致/跨子系统逻辑错误"**——它瞄准"外部输入流向危险操作"的结构性漏洞（注入/路径穿越/SSRF/权限绕过/XSS）。shannon-py 的 auth/authz 属 missing-control，OpenAnt 的流水线不直接覆盖（shannon-py 走 authz 候选 + LLM 判定、auth config 扫描器，与 OpenAnt 思路不同源）。
-4. **OpenAnt 结论是"下界"**（未动态复现 ≠ 不存在）；shannon-py 若引入动态验证，同样只能给确认证据、不能因"未复现"否定 finding。
+2. **OpenAnt 的"可达性过滤" ≠ supernova 的 `externally_exploitable`**：前者是**分析面缩减**（砍掉不可达函数、降 LLM 阶段成本），后者是**finding 级可达性标签**（公网 true / 内部或跨服务 false，且不能被 verdict 覆写）。两者解决不同问题，不可互相替代或混用语义。
+3. **OpenAnt 不擅长"功能缺失/协议解析不一致/跨子系统逻辑错误"**——它瞄准"外部输入流向危险操作"的结构性漏洞（注入/路径穿越/SSRF/权限绕过/XSS）。supernova 的 auth/authz 属 missing-control，OpenAnt 的流水线不直接覆盖（supernova 走 authz 候选 + LLM 判定、auth config 扫描器，与 OpenAnt 思路不同源）。
+4. **OpenAnt 结论是"下界"**（未动态复现 ≠ 不存在）；supernova 若引入动态验证，同样只能给确认证据、不能因"未复现"否定 finding。
 
 ---
 

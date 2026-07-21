@@ -12,7 +12,7 @@
 from __future__ import annotations
 import asyncio, json
 from pathlib import Path
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 
 def _hr(t): print(f"\n{'='*4} {t} {'='*max(0,76-len(t))}")
@@ -119,7 +119,7 @@ async def main():
 
         _hr("判定")
         print("③ 若 process trace 含 entry→…→terminal 的有序步骤（函数序列）→")
-        print("   GitNexus 直接吐调用链路径，shannon-py 只消费、零 BFS（调用链层面）。")
+        print("   GitNexus 直接吐调用链路径，supernova 只消费、零 BFS（调用链层面）。")
         print("④ 若 process_symbols 带 step_index → query 也能重组路径。")
 
 

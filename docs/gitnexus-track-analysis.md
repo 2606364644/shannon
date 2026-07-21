@@ -1,6 +1,6 @@
 # GitNexus 轨分析（确定性层）
 
-> 本文档深入分析 shannon-py 双轨白盒架构中 **GitNexus 轨（确定性层）** 的内部机制：
+> 本文档深入分析 supernova 双轨白盒架构中 **GitNexus 轨（确定性层）** 的内部机制：
 > Source/Sink 识别、Call Graph 构建、参数污点分析、可达性判定，以及入口点识别的两套机制融合。
 >
 > 所有引用基于 `feat/fork-py` 分支实际代码核实（函数名稳定，行号随代码演进）。
@@ -28,7 +28,7 @@
 
 ## 1. 总数据流：`build_code_index_with_gitnexus` 七步管线
 
-入口：`packages/core/src/shannon_core/code_index/__init__.py` → `build_code_index_with_gitnexus(repo_path, *, mcp_client, llm_client, auto_index=False)`。
+入口：`packages/core/src/supernova_core/code_index/__init__.py` → `build_code_index_with_gitnexus(repo_path, *, mcp_client, llm_client, auto_index=False)`。
 
 ```
 ⓪ auto_index（可选）  ensure GitNexus 已索引仓库，失败 hard-fail（无 fallback）
@@ -65,8 +65,8 @@
 
 GitNexus 轨的 source = **EntryPoint**（网络可达的入口函数）。识别走两套机制融合：
 
-- **机制 A（GitNexus 判定，真值来源）**：`build_call_graph_from_gitnexus` 向 MCP 发 `query({query: "entry point"})`，GitNexus 用自身语义判哪些符号是入口，返回 `process_symbols / definitions`，shannon-py 把它们**匹配回** tree-sitter 的 FuncBlock。
-- **机制 B（shannon-py AST 判定，元信息增强）**：`detect_entry_points`（`entry_points.py:13`）按语言匹配装饰器/签名（Python `@app.route`、Go `gin.Context`、TS NestJS `@Get`/Express `app.get()`、Java Spring `@GetMapping`、PHP `#[]Route()`），**提取 route / http_method / entry_type**。
+- **机制 A（GitNexus 判定，真值来源）**：`build_call_graph_from_gitnexus` 向 MCP 发 `query({query: "entry point"})`，GitNexus 用自身语义判哪些符号是入口，返回 `process_symbols / definitions`，supernova 把它们**匹配回** tree-sitter 的 FuncBlock。
+- **机制 B（supernova AST 判定，元信息增强）**：`detect_entry_points`（`entry_points.py:13`）按语言匹配装饰器/签名（Python `@app.route`、Go `gin.Context`、TS NestJS `@Get`/Express `app.get()`、Java Spring `@GetMapping`、PHP `#[]Route()`），**提取 route / http_method / entry_type**。
 
 **融合结果（关键）**：最终入口集合 = GitNexus 判定集合（GitNexus 是守门人），机制 B 只负责给被认可的入口**补充 route/http_method 元信息**。详见 §5。
 
@@ -226,10 +226,10 @@ ParameterPropagationGraph
 
 ### 8.1 两套机制
 
-| | 机制 A（GitNexus 判定） | 机制 B（shannon-py AST 判定） |
+| | 机制 A（GitNexus 判定） | 机制 B（supernova AST 判定） |
 |---|---|---|
 | 实现 | `build_call_graph_from_gitnexus` 的 `query "entry point"` | `detect_entry_points`（`entry_points.py:13`） |
-| 谁判 | **GitNexus 外部服务**（逻辑不暴露） | shannon-py 自己（装饰器/签名正则） |
+| 谁判 | **GitNexus 外部服务**（逻辑不暴露） | supernova 自己（装饰器/签名正则） |
 | 产出 | FuncBlock id 集合 G | EntryPoint[]（带 route/http_method/entry_type） |
 | 元信息 | ❌ 不提供 route/http_method | ✅ 唯一提供者 |
 

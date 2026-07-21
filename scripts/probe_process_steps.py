@@ -7,7 +7,7 @@
 from __future__ import annotations
 import asyncio, json
 from pathlib import Path
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 
 async def _q(c, label, query, params=None):

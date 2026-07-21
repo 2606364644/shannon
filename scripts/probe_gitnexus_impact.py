@@ -17,7 +17,7 @@ import shutil
 import time
 from pathlib import Path
 
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 SINK_KEYWORDS = ["exec", "query", "eval", "execute", "command", "fetch", "render", "template", "unmarshal", "sql", "db"]
 ENTRY_KEYWORDS = ["handler", "route", "main", "entry", "serve", "api", "rpc"]

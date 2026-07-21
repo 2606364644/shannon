@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 _PROFILE_CANDIDATES = [
-    Path("/root/shannon-py/.env.profiles/glm-anthropic.env"),
+    Path("/root/supernova/.env.profiles/glm-anthropic.env"),
     Path(__file__).resolve().parent.parent / ".env.profiles" / "glm-anthropic.env",
 ]
 PROFILE = next((p for p in _PROFILE_CANDIDATES if p.exists()), _PROFILE_CANDIDATES[-1])
@@ -32,11 +32,11 @@ def load_profile() -> None:
                 continue
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
-    os.environ["SHANNON_AI_PROVIDER"] = "anthropic_api"   # claude 轨才走 SDK MCP
+    os.environ["SUPERNOVA_AI_PROVIDER"] = "anthropic_api"   # claude 轨才走 SDK MCP
     os.environ["CLAUDE_MAX_TURNS"] = "20"
 
 
-from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
+from supernova_core.agents.tool_audit_logger import NullToolAuditLogger
 
 
 class RecordingLogger(NullToolAuditLogger):
@@ -49,9 +49,9 @@ class RecordingLogger(NullToolAuditLogger):
 
 async def main() -> None:
     load_profile()
-    from shannon_core.collectors.pre_recon import PreReconCollector
-    from shannon_core.agents.runner import run_claude_prompt
-    from shannon_core.renderers.pre_recon import render_pre_recon
+    from supernova_core.collectors.pre_recon import PreReconCollector
+    from supernova_core.agents.runner import run_claude_prompt
+    from supernova_core.renderers.pre_recon import render_pre_recon
 
     target = Path(tempfile.mkdtemp(prefix="glm_mcp_probe_"))
     (target / "app.py").write_text(

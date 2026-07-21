@@ -11,13 +11,13 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-from shannon_core.code_index import _parse_and_detect_sync
-from shannon_core.code_index.file_discovery import discover_security_files
-from shannon_core.code_index.parser import detect_language
-from shannon_core.code_index.parsers import get_parser
-from shannon_core.code_index.llm_concurrency import chunk_items_by_file, _estimate_tokens
+from supernova_core.code_index import _parse_and_detect_sync
+from supernova_core.code_index.file_discovery import discover_security_files
+from supernova_core.code_index.parser import detect_language
+from supernova_core.code_index.parsers import get_parser
+from supernova_core.code_index.llm_concurrency import chunk_items_by_file, _estimate_tokens
 
-REPO = "/root/shannon-py/repos/backend/kol_mapping_service"
+REPO = "/root/supernova/repos/backend/kol_mapping_service"
 
 
 def main():

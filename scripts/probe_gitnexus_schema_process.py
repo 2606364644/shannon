@@ -9,7 +9,7 @@ URI 要用 process 的 label（"Init → GetOffset"）不是 id；query 返空�
 from __future__ import annotations
 import asyncio
 from pathlib import Path
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 NAME = "statement_template_svr"
 

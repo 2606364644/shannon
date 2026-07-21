@@ -22,9 +22,9 @@ import tempfile
 import time
 from pathlib import Path
 
-# 工作目录可能是 /root/shannon-py（CI/Linux）或本仓库根（macOS）。两种都支持。
+# 工作目录可能是 /root/supernova（CI/Linux）或本仓库根（macOS）。两种都支持。
 _PROFILE_CANDIDATES = [
-    Path("/root/shannon-py/.env.profiles/glm-openai.env"),
+    Path("/root/supernova/.env.profiles/glm-openai.env"),
     Path(__file__).resolve().parent.parent / ".env.profiles" / "glm-openai.env",
 ]
 PROFILE = next((p for p in _PROFILE_CANDIDATES if p.exists()), _PROFILE_CANDIDATES[-1])
@@ -39,11 +39,11 @@ def load_profile() -> None:
         os.environ.setdefault(k.strip(), v.strip())
     # 强制 openai 引擎（Task 5 新增 task function_tool 的引擎），覆盖任何默认。
     # glm-openai.env 本身已设 openai_compatible，此处显式 setenv 做防御性锁定。
-    os.environ["SHANNON_AI_PROVIDER"] = "openai_compatible"
+    os.environ["SUPERNOVA_AI_PROVIDER"] = "openai_compatible"
     os.environ["CLAUDE_MAX_TURNS"] = "15"  # 最小测试，有界（与 glm probe 对齐）
 
 
-from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
+from supernova_core.agents.tool_audit_logger import NullToolAuditLogger
 
 
 class RecordingLogger(NullToolAuditLogger):
@@ -77,7 +77,7 @@ async def main() -> None:
         "Task: Use the Task Agent to read app.py and determine whether get_user(name) has a SQL injection flaw. "
         "Report: verdict (vulnerable/safe), the sink line, and rationale."
     )
-    from shannon_core.agents.runner import run_claude_prompt
+    from supernova_core.agents.runner import run_claude_prompt
 
     logger = RecordingLogger()
     t0 = time.time()

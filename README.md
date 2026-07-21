@@ -1,4 +1,4 @@
-# shannon-py
+# supernova
 
 AI 驱动的自动化渗透测试框架，融合白盒源码分析与黑盒运行时验证。
 
@@ -22,7 +22,7 @@ AI 驱动的自动化渗透测试框架，融合白盒源码分析与黑盒运�
 ## 安装
 
 ```bash
-git clone <repo-url> && cd shannon-py
+git clone <repo-url> && cd supernova
 uv sync
 ```
 
@@ -34,7 +34,7 @@ temporal server start-dev
 
 ## 配置
 
-shannon-py 采用**两层环境配置**：共享配置放根目录 `.env`，引擎/账号配置放 `.env.profiles/<profile>.env`。
+supernova 采用**两层环境配置**：共享配置放根目录 `.env`，引擎/账号配置放 `.env.profiles/<profile>.env`。
 
 ### 1. 根 `.env`（共享配置）
 
@@ -45,9 +45,9 @@ cp .env.example .env
 编辑 `.env`，核心是选定当前 profile（对应 `.env.profiles/<name>.env`）：
 
 ```bash
-SHANNON_PROFILE=glm-anthropic        # 改这一行切换引擎/账号
-SHANNON_MAX_CONCURRENT=2             # 并发上限：白盒 vuln + 黑盒 exploit agents
-SHANNON_BROWSER_ENGINE=playwright    # playwright(默认) | agent-browser
+SUPERNOVA_PROFILE=glm-anthropic        # 改这一行切换引擎/账号
+SUPERNOVA_MAX_CONCURRENT=2             # 并发上限：白盒 vuln + 黑盒 exploit agents
+SUPERNOVA_BROWSER_ENGINE=playwright    # playwright(默认) | agent-browser
 # git URL 扫描模式凭据(表单来源选「git URL」时需要;选「本地路径」无需);仅 https + user:token,不支持 ssh
 GITLAB_USER=
 GITLAB_TOKEN=
@@ -62,24 +62,24 @@ GITLAB_TOKEN=
 cp .env.profiles.example/glm-anthropic.env.example .env.profiles/glm-anthropic.env
 ```
 
-profile 文件决定走哪个引擎和用哪个模型。**`SHANNON_AI_PROVIDER` 是双引擎的切换开关**：
+profile 文件决定走哪个引擎和用哪个模型。**`SUPERNOVA_AI_PROVIDER` 是双引擎的切换开关**：
 
-| `SHANNON_AI_PROVIDER` | 引擎 | 需配置 |
+| `SUPERNOVA_AI_PROVIDER` | 引擎 | 需配置 |
 |---|---|---|
 | `anthropic_api` | claude-agent-sdk（Claude Code CLI） | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` |
-| `openai_compatible` | openai-agents（OpenAI 兼容接口） | `SHANNON_OPENAI_BASE_URL` + `SHANNON_OPENAI_API_KEY` |
+| `openai_compatible` | openai-agents（OpenAI 兼容接口） | `SUPERNOVA_OPENAI_BASE_URL` + `SUPERNOVA_OPENAI_API_KEY` |
 
-> 注：`anthropic_api` 是 Claude Code CLI 的"第一方 API 部署模式"（与 `bedrock`/`vertex` 同组，三者都起 CLI 子进程，区别仅在 CLI 连哪个后端）。凭据与 `ANTHROPIC_BASE_URL` 经 SDK env 透传给 CLI 子进程，**不是 shannon-py 代码直连**；`ANTHROPIC_BASE_URL` 可指向任意 anthropic 兼容端点（如智谱 GLM，非官方）。
+> 注：`anthropic_api` 是 Claude Code CLI 的"第一方 API 部署模式"（与 `bedrock`/`vertex` 同组，三者都起 CLI 子进程，区别仅在 CLI 连哪个后端）。凭据与 `ANTHROPIC_BASE_URL` 经 SDK env 透传给 CLI 子进程，**不是 supernova 代码直连**；`ANTHROPIC_BASE_URL` 可指向任意 anthropic 兼容端点（如智谱 GLM，非官方）。
 
 每个 profile 还需指定三档模型（large / medium / small），例如：
 
 ```bash
-SHANNON_AI_PROVIDER=anthropic_api
+SUPERNOVA_AI_PROVIDER=anthropic_api
 ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
 ANTHROPIC_AUTH_TOKEN=your-token
-SHANNON_LARGE_MODEL=GLM-5.2[1m]
-SHANNON_MEDIUM_MODEL=GLM-5.2[1m]
-SHANNON_SMALL_MODEL=GLM-4.5-Air
+SUPERNOVA_LARGE_MODEL=GLM-5.2[1m]
+SUPERNOVA_MEDIUM_MODEL=GLM-5.2[1m]
+SUPERNOVA_SMALL_MODEL=GLM-4.5-Air
 ```
 
 > 仓库内置 `deepseek` / `glm-anthropic` / `glm-openai` 三个 profile 模板（见 `.env.profiles.example/`）。可仿照格式新建自己的 profile。
@@ -88,7 +88,7 @@ SHANNON_SMALL_MODEL=GLM-4.5-Air
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `SHANNON_LLM_TRACK_ENABLED` | `1`（开） | 关 LLM 轨开关。`0` = 只关 inj/xss/ssrf 的 vuln agent（taint，GitNexus chain_verdict 兜底）；pre-recon / recon / authz / auth 的 LLM 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果） |
+| `SUPERNOVA_LLM_TRACK_ENABLED` | `1`（开） | 关 LLM 轨开关。`0` = 只关 inj/xss/ssrf 的 vuln agent（taint，GitNexus chain_verdict 兜底）；pre-recon / recon / authz / auth 的 LLM 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果） |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal Server 地址 |
 
 配置文件加载与 profile 自洽校验细节见 [配置指南](docs/configuration.md)。
@@ -99,62 +99,62 @@ SHANNON_SMALL_MODEL=GLM-4.5-Air
 
 ```bash
 # 方式一：uv run（推荐）
-uv run shannon-whitebox start --repo /path/to/target-repo
+uv run supernova-whitebox start --repo /path/to/target-repo
 
 # 方式二：激活 venv
 source .venv/bin/activate
-shannon-whitebox start --repo /path/to/target-repo
+supernova-whitebox start --repo /path/to/target-repo
 ```
 
 ### 白盒扫描
 
 ```bash
 # 基础扫描
-uv run shannon-whitebox start --repo /path/to/target-repo
+uv run supernova-whitebox start --repo /path/to/target-repo
 
 # 指定输出目录、工作区与配置文件
-uv run shannon-whitebox start --repo /path/to/repo --output ./results --workspace my-scan --config scan.yaml
+uv run supernova-whitebox start --repo /path/to/repo --output ./results --workspace my-scan --config scan.yaml
 
 # --url 记录部署地址，黑盒可据此按 URL 自动复用白盒结果
-uv run shannon-whitebox start --repo /path/to/repo --workspace my-scan --url https://target.example.com
+uv run supernova-whitebox start --repo /path/to/repo --workspace my-scan --url https://target.example.com
 
 # 断点续扫：同名 workspace 存在时自动从断点恢复
-uv run shannon-whitebox start --repo /path/to/repo --workspace my-scan
+uv run supernova-whitebox start --repo /path/to/repo --workspace my-scan
 
 # --fresh 忽略已有进度全新扫描；--rewind <checkpoint> 回退到指定检查点重跑
-uv run shannon-whitebox start --repo /path/to/repo --workspace my-scan --fresh
+uv run supernova-whitebox start --repo /path/to/repo --workspace my-scan --fresh
 
 # CI/管道环境关闭 Rich 实时面板，每事件打印一行
-uv run shannon-whitebox start --repo /path/to/repo --plain
+uv run supernova-whitebox start --repo /path/to/repo --plain
 ```
 
 查看工作区和日志：
 
 ```bash
-uv run shannon-whitebox workspaces
-uv run shannon-whitebox logs my-scan          # --follow 实时跟踪
+uv run supernova-whitebox workspaces
+uv run supernova-whitebox logs my-scan          # --follow 实时跟踪
 ```
 
 ### 黑盒扫描
 
 ```bash
 # 独立模式（无白盒结果）
-uv run shannon-blackbox start --url https://target.example.com
+uv run supernova-blackbox start --url https://target.example.com
 
 # 复用白盒结果（推荐）—— 跳过侦察，直接对白盒发现的漏洞做运行时验证
-uv run shannon-blackbox start --url https://target.example.com --repo /path/to/target-repo
+uv run supernova-blackbox start --url https://target.example.com --repo /path/to/target-repo
 
 # --latest 直接复用最近一次白盒 workspace 的结果
-uv run shannon-blackbox start --url https://target.example.com --latest
+uv run supernova-blackbox start --url https://target.example.com --latest
 
 # 指定漏洞类别、跳过利用阶段
-uv run shannon-blackbox start --url https://target.example.com --repo /path/to/repo \
+uv run supernova-blackbox start --url https://target.example.com --repo /path/to/repo \
     --vuln-classes injection --vuln-classes xss --no-exploit
 
 # --rerun 归档旧 evidence，基于已有白盒结果强制重跑黑盒
-uv run shannon-blackbox start --url https://target.example.com --repo /path/to/repo --rerun
+uv run supernova-blackbox start --url https://target.example.com --repo /path/to/repo --rerun
 
-uv run shannon-blackbox start --url https://target.example.com --repo /path/to/repo --config scan.yaml --output ./results --workspace my-scan
+uv run supernova-blackbox start --url https://target.example.com --repo /path/to/repo --config scan.yaml --output ./results --workspace my-scan
 ```
 
 > **注意**：`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，黑盒才能读取白盒产出的漏洞队列。详见 [白盒→黑盒交接运行手册](docs/whitebox-blackbox-handoff.md)。
@@ -162,13 +162,13 @@ uv run shannon-blackbox start --url https://target.example.com --repo /path/to/r
 查看工作区和日志：
 
 ```bash
-uv run shannon-blackbox workspaces
-uv run shannon-blackbox logs my-scan          # --follow 实时跟踪
+uv run supernova-blackbox workspaces
+uv run supernova-blackbox logs my-scan          # --follow 实时跟踪
 ```
 
 ## Web 平台（可选）
 
-除 CLI 外，shannon-py 提供一个 Web 平台（`packages/web`）用于扫描调度与结果查看——前端 SPA（Vite + React）+ 后端 API（FastAPI），**单容器部署**：后端在 `:7878` 同时 serve 前端静态产物与 API，同源无 CORS。
+除 CLI 外，supernova 提供一个 Web 平台（`packages/web`）用于扫描调度与结果查看——前端 SPA（Vite + React）+ 后端 API（FastAPI），**单容器部署**：后端在 `:7878` 同时 serve 前端静态产物与 API，同源无 CORS。
 
 ### 一键部署（Docker）
 
@@ -222,7 +222,7 @@ docker compose -f docker-compose.yml \
 
 机制：override 把 compose 自带的 `temporal` 用 `profiles: ["disabled"]` 隐藏，`web` 改直连外部 temporal（经 `shannon-net` 网络用容器名解析，绕开 `127.0.0.1` 容器够不到的限制）。前提是外部 temporal 容器名为 `shannon-temporal` 且存在 `shannon-net` 网络，两处不同就改 override 文件。
 
-> 若曾直接跑 `docker compose up` 失败、留有 `shannon-py-temporal` / `shannon-py-web`（`Created` 态空壳），直接跑 `./scripts/up.sh` 即可——它会在启动前自动清理本项目内非运行态的空壳容器。双重保险：仅限 compose 管辖的 `shannon-py-*`（`docker compose ps` 不列外部容器）、且只删 `created`/`exited`/`dead` 态，运行中的外部 `shannon-temporal` 不受影响。
+> 若曾直接跑 `docker compose up` 失败、留有 `supernova-temporal` / `supernova-web`（`Created` 态空壳），直接跑 `./scripts/up.sh` 即可——它会在启动前自动清理本项目内非运行态的空壳容器。双重保险：仅限 compose 管辖的 `supernova-*`（`docker compose ps` 不列外部容器）、且只删 `created`/`exited`/`dead` 态，运行中的外部 `shannon-temporal` 不受影响。
 
 ### 本地开发（热更新）
 
@@ -230,7 +230,7 @@ docker compose -f docker-compose.yml \
 
 ```bash
 # 终端 1：后端
-uv run uvicorn shannon_web.app:app --port 7878
+uv run uvicorn supernova_web.app:app --port 7878
 
 # 终端 2：前端（:5173，proxy /api → 7878）
 cd packages/web/frontend && npm install && npm run dev
@@ -238,16 +238,16 @@ cd packages/web/frontend && npm install && npm run dev
 
 浏览器访问 `http://localhost:5173`。
 
-> 生产（单容器）与开发（分离）共用同一份后端代码：后端 serve 静态由 `SHANNON_WEB_FRONTEND_DIR` 控制，开发时不设此变量即跳过。详见 [设计 spec](docs/superpowers/specs/2026-07-03-web-single-container-deploy-design.md)。
+> 生产（单容器）与开发（分离）共用同一份后端代码：后端 serve 静态由 `SUPERNOVA_WEB_FRONTEND_DIR` 控制，开发时不设此变量即跳过。详见 [设计 spec](docs/superpowers/specs/2026-07-03-web-single-container-deploy-design.md)。
 
 ### 清理运行残留
 
-`scripts/cleanup-shannon-py.sh` 清理 shannon-py 的运行残留——前端 vite/esbuild 进程、宿主直跑的后端、Docker 容器，可重复执行。**铁律：绝不触碰 `/root/shannon`（原始 TS 项目）与 gitnexus 等共享组件**——进程匹配用绝对路径锁死、容器按 compose `project=shannon-py` 精确过滤。
+`scripts/cleanup-supernova.sh` 清理 supernova 的运行残留——前端 vite/esbuild 进程、宿主直跑的后端、Docker 容器，可重复执行。**铁律：绝不触碰 `/root/shannon`（原始 TS 项目）与 gitnexus 等共享组件**——进程匹配用绝对路径锁死、容器按 compose `project=supernova` 精确过滤。
 
 ```bash
-bash scripts/cleanup-shannon-py.sh --dry-run   # 预览将要清理的内容
-bash scripts/cleanup-shannon-py.sh             # stop 容器 + 杀前端/宿主后端进程
-bash scripts/cleanup-shannon-py.sh --rm        # 连容器实例一起删
+bash scripts/cleanup-supernova.sh --dry-run   # 预览将要清理的内容
+bash scripts/cleanup-supernova.sh             # stop 容器 + 杀前端/宿主后端进程
+bash scripts/cleanup-supernova.sh --rm        # 连容器实例一起删
 ```
 
 与 `./scripts/up.sh down` 的区别：`down` 只停 compose 服务；本脚本额外杀掉**开发模式**（前后端分离跑）遗留的宿主进程——这类进程只有本脚本清得掉。
@@ -256,10 +256,10 @@ bash scripts/cleanup-shannon-py.sh --rm        # 连容器实例一起删
 
 ## 架构概览
 
-shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
+supernova 有两个核心架构特性，理解它们有助于调参与排障：
 
-- **双引擎**：业务流程（白盒/黑盒）不感知底层用哪个 SDK；同一份 vuln prompt 在两引擎下行为对齐、可互换。切引擎 = 改 profile 里的 `SHANNON_AI_PROVIDER`。
-- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（确定性代码索引 → 候选链 → 轻量 LLM 判定）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SHANNON_LLM_TRACK_ENABLED=0` **只关 inj/xss/ssrf 的 vuln agent**（靠 GitNexus 轨兜底）；authz / auth 的 LLM agent 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果）。
+- **双引擎**：业务流程（白盒/黑盒）不感知底层用哪个 SDK；同一份 vuln prompt 在两引擎下行为对齐、可互换。切引擎 = 改 profile 里的 `SUPERNOVA_AI_PROVIDER`。
+- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（确定性代码索引 → 候选链 → 轻量 LLM 判定）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SUPERNOVA_LLM_TRACK_ENABLED=0` **只关 inj/xss/ssrf 的 vuln agent**（靠 GitNexus 轨兜底）；authz / auth 的 LLM agent 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果）。
 
 深入设计见 [GitNexus 轨生命周期分析](docs/gitnexus-track-analysis.md) 与 [系统架构](docs/architecture.md)。架构不变量与开发约定见根目录 `CLAUDE.md`。
 
@@ -278,7 +278,7 @@ shannon-py 有两个核心架构特性，理解它们有助于调参与排障：
 ## 项目结构
 
 ```
-shannon-py/
+supernova/
 ├── packages/
 │   ├── core/                    # 共享模型、配置解析、agent 集成层与工具函数
 │   ├── whitebox/                # 白盒源码漏洞分析扫描器

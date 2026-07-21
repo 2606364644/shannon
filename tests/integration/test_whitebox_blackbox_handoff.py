@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.session import SessionManager
-from shannon_core.utils.paths import (
+from supernova_core.session import SessionManager
+from supernova_core.utils.paths import (
     BLACKBOX_SUBDIR,
     WHITEBOX_SUBDIR,
     blackbox_dir,
@@ -21,8 +21,8 @@ from shannon_core.utils.paths import (
     resolve_track_deliverable,
     whitebox_dir,
 )
-from shannon_core.workspace import compute_deliverables_summary, find_workspaces_by_url
-from shannon_core.services.workspace_discovery import WorkspaceDiscovery
+from supernova_core.workspace import compute_deliverables_summary, find_workspaces_by_url
+from supernova_core.services.workspace_discovery import WorkspaceDiscovery
 
 # 与生产 whitebox/blackbox report 写侧同一名（见 models/deliverables.py DeliverableType.REPORT）。
 REPORT_FILENAME = "comprehensive_security_assessment_report.md"

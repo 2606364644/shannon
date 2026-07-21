@@ -35,7 +35,7 @@ services:
 
   worker:
     volumes:
-      - ./packages:/app/packages        # 同上（worker 是扫描主力，改 shannon_worker/whitebox/core 都靠它）
+      - ./packages:/app/packages        # 同上（worker 是扫描主力，改 supernova_worker/whitebox/core 都靠它）
       # agent prompt 模板（pre-recon/recon/vuln-*.txt）：worker build 时 COPY 进镜像，
       # dev 下挂宿主实时——改 prompt 不用 rebuild
       - ./prompts:/app/prompts

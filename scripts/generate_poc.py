@@ -16,8 +16,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 for pkg in (_REPO_ROOT / "packages" / "core" / "src",):
     sys.path.insert(0, str(pkg))
 
-from shannon_core.services.poc_generator import PoCGenerator  # noqa: E402
-from shannon_core.models.config import ALL_VULN_CLASSES  # noqa: E402
+from supernova_core.services.poc_generator import PoCGenerator  # noqa: E402
+from supernova_core.models.config import ALL_VULN_CLASSES  # noqa: E402
 
 
 def _track_dir(session_dir: Path, track: str) -> Path:

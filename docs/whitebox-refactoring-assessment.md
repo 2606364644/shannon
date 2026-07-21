@@ -449,18 +449,18 @@ pre-recon-code.txt 删除：
 
 ## 附录 B：prompt diff 证据索引（v8 更新）
 
-- `diff shannon/apps/worker/prompts/{vuln-xss,vuln-ssrf,vuln-authz}.txt shannon-py/prompts/...` —— 三 vuln prompt 一致删 `_cross-route-enumeration` + Cross-Route Verification 门控；vuln-authz 额外删 Section 0 + Framework Guidance。
+- `diff shannon/apps/worker/prompts/{vuln-xss,vuln-ssrf,vuln-authz}.txt supernova/prompts/...` —— 三 vuln prompt 一致删 `_cross-route-enumeration` + Cross-Route Verification 门控；vuln-authz 额外删 Section 0 + Framework Guidance。
 - `diff .../pre-recon-code.txt` —— 删 Entry Point Mapper schema 指令；v8 已恢复 Sink Hunter 两步模板流程 + 变体审计 + Coverage Audit 表；Phase 0 改为读取 `code_index.json`（已实现）。
 - `diff .../recon.txt` —— 删整段 4.1/4.2 + Route Mapper 分组指令 + Input Validator 字段枚举 + `_endpoint-security-context.txt`；新增 `<parameter_propagation_data>` + `<no_security_judgments>`。
 - 原始 `_cross-route-enumeration.txt`（3119 字节）/ `_endpoint-security-context.txt` 在重构版 `prompts/shared/` 不存在。
 - **v8 新增代码证据**：
-  - `packages/core/src/shannon_core/code_index/gitnexus_mcp.py` —— GitNexus MCP client 完整实现
-  - `packages/core/src/shannon_core/code_index/gitnexus_engine.py` —— GitNexus CLI engine 完整实现
-  - `packages/core/src/shannon_core/code_index/gitnexus_call_graph.py` —— GitNexus 精确调用图
-  - `packages/core/src/shannon_core/code_index/llm_taint_analyzer.py` —— LLM per-function taint 分析（替代旧 regex）
-  - `packages/core/src/shannon_core/code_index/chain_propagator.py` —— 确定性 cross-function 传播
-  - `packages/core/src/shannon_core/code_index/sink_merger.py` —— 确定性 + LLM sink 去重合并
-  - `packages/core/src/shannon_core/code_index/entry_point_fusion.py` —— 4 源入口融合（GitNexus/Schema/Convention/LLM）
-  - `packages/core/src/shannon_core/code_index/__init__.py:380-406` —— confidence 阈值裁定
-  - `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py:119-129` —— asyncio.gather 并行执行
-  - `packages/whitebox/src/shannon_whitebox/pipeline/activities.py:191-207` —— GitNexus pipeline 集成
+  - `packages/core/src/supernova_core/code_index/gitnexus_mcp.py` —— GitNexus MCP client 完整实现
+  - `packages/core/src/supernova_core/code_index/gitnexus_engine.py` —— GitNexus CLI engine 完整实现
+  - `packages/core/src/supernova_core/code_index/gitnexus_call_graph.py` —— GitNexus 精确调用图
+  - `packages/core/src/supernova_core/code_index/llm_taint_analyzer.py` —— LLM per-function taint 分析（替代旧 regex）
+  - `packages/core/src/supernova_core/code_index/chain_propagator.py` —— 确定性 cross-function 传播
+  - `packages/core/src/supernova_core/code_index/sink_merger.py` —— 确定性 + LLM sink 去重合并
+  - `packages/core/src/supernova_core/code_index/entry_point_fusion.py` —— 4 源入口融合（GitNexus/Schema/Convention/LLM）
+  - `packages/core/src/supernova_core/code_index/__init__.py:380-406` —— confidence 阈值裁定
+  - `packages/whitebox/src/supernova_whitebox/pipeline/workflows.py:119-129` —— asyncio.gather 并行执行
+  - `packages/whitebox/src/supernova_whitebox/pipeline/activities.py:191-207` —— GitNexus pipeline 集成

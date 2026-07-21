@@ -2,12 +2,12 @@
 
 根因：exploit_executor.py:75 只从 metrics.structured_output 取 verdicts，但
 GLM/claude-agent-sdk 引擎下 agent 用 Write 工具把 verdicts 写到
-deliverables/.shannon/deliverables/{vuln}_exploitation_verdicts.json（final
+deliverables/.supernova/deliverables/{vuln}_exploitation_verdicts.json（final
 message 是自然语言 → structured_output 为空），加 skip_artifact_postprocess=True
 断了文件提升兜底 → verdicts.json accepted_ids=[] → coverage_renderer 把
 evidence 全覆盖成 "Unverified" → 报告全 Unverified。
 
-救济：用 .shannon/deliverables/ 里 agent 写的真实 verdicts 重新渲染 evidence +
+救济：用 .supernova/deliverables/ 里 agent 写的真实 verdicts 重新渲染 evidence +
 verdicts.json，再重 assemble 报告。不耗 token、不重跑黑盒。跑完可删。
 """
 import asyncio
@@ -15,15 +15,15 @@ import json
 import shutil
 from pathlib import Path
 
-from shannon_blackbox.services.exploit_evidence_renderer import ExploitEvidenceRenderer
-from shannon_blackbox.services.exploit_verdict_validator import validate_exploit_verdicts
-from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
-from shannon_core.models.queue_schemas import VulnerabilityQueue
-from shannon_core.services.report_assembler import ReportAssembler
+from supernova_blackbox.services.exploit_evidence_renderer import ExploitEvidenceRenderer
+from supernova_blackbox.services.exploit_verdict_validator import validate_exploit_verdicts
+from supernova_blackbox.services.coverage_renderer import close_coverage_gaps
+from supernova_core.models.queue_schemas import VulnerabilityQueue
+from supernova_core.services.report_assembler import ReportAssembler
 
 WS = Path("workspaces/invite_code_center_20260629-134944")
 DELIV = WS / "deliverables"
-AGENT_OUT = DELIV / ".shannon/deliverables"
+AGENT_OUT = DELIV / ".supernova/deliverables"
 # 只重渲染有 agent verdict 落盘的 3 类；injection/auth 无 exploitation（走 analysis 回退）
 VULNS = ["xss", "ssrf", "authz"]
 ALL_CLASSES = ["injection", "xss", "auth", "authz", "ssrf"]

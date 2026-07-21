@@ -2,13 +2,13 @@
 
 ---
 
-## shannon-core
+## supernova-core
 
 ### 模型类 (Model Classes)
 
 #### `Config`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class Config(BaseModel)
@@ -31,7 +31,7 @@ class Config(BaseModel)
 
 #### `DistributedConfig`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class DistributedConfig(BaseModel)
@@ -54,7 +54,7 @@ class DistributedConfig(BaseModel)
 
 #### `AgentDefinition`
 
-文件路径: `packages/core/src/shannon_core/models/agents.py`
+文件路径: `packages/core/src/supernova_core/models/agents.py`
 
 ```python
 class AgentDefinition(BaseModel)
@@ -75,7 +75,7 @@ class AgentDefinition(BaseModel)
 
 #### `Rule`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class Rule(BaseModel)
@@ -93,7 +93,7 @@ class Rule(BaseModel)
 
 #### `Rules`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class Rules(BaseModel)
@@ -110,7 +110,7 @@ class Rules(BaseModel)
 
 #### `ReportConfig`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class ReportConfig(BaseModel)
@@ -128,7 +128,7 @@ class ReportConfig(BaseModel)
 
 #### `SuccessCondition`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class SuccessCondition(BaseModel)
@@ -145,7 +145,7 @@ class SuccessCondition(BaseModel)
 
 #### `Credentials`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class Credentials(BaseModel)
@@ -163,7 +163,7 @@ class Credentials(BaseModel)
 
 #### `Authentication`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class Authentication(BaseModel)
@@ -183,7 +183,7 @@ class Authentication(BaseModel)
 
 #### `PipelineConfig`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 class PipelineConfig(BaseModel)
@@ -200,7 +200,7 @@ class PipelineConfig(BaseModel)
 
 #### `AgentMetrics`
 
-文件路径: `packages/core/src/shannon_core/models/metrics.py`
+文件路径: `packages/core/src/supernova_core/models/metrics.py`
 
 ```python
 class AgentMetrics(BaseModel)
@@ -221,7 +221,7 @@ class AgentMetrics(BaseModel)
 
 #### `SessionMetadata`
 
-文件路径: `packages/core/src/shannon_core/models/metrics.py`
+文件路径: `packages/core/src/supernova_core/models/metrics.py`
 
 ```python
 class SessionMetadata(BaseModel)
@@ -240,7 +240,7 @@ class SessionMetadata(BaseModel)
 
 #### `BaseVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class BaseVulnerability(BaseModel)
@@ -260,7 +260,7 @@ class BaseVulnerability(BaseModel)
 
 #### `InjectionVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class InjectionVulnerability(BaseVulnerability)
@@ -287,7 +287,7 @@ class InjectionVulnerability(BaseVulnerability)
 
 #### `XssVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class XssVulnerability(BaseVulnerability)
@@ -313,7 +313,7 @@ class XssVulnerability(BaseVulnerability)
 
 #### `AuthVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class AuthVulnerability(BaseVulnerability)
@@ -335,7 +335,7 @@ class AuthVulnerability(BaseVulnerability)
 
 #### `SsrfVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class SsrfVulnerability(BaseVulnerability)
@@ -358,7 +358,7 @@ class SsrfVulnerability(BaseVulnerability)
 
 #### `AuthzVulnerability`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class AuthzVulnerability(BaseVulnerability)
@@ -382,7 +382,7 @@ class AuthzVulnerability(BaseVulnerability)
 
 #### `VulnerabilityQueue`
 
-文件路径: `packages/core/src/shannon_core/models/queue_schemas.py`
+文件路径: `packages/core/src/supernova_core/models/queue_schemas.py`
 
 ```python
 class VulnerabilityQueue(BaseModel)
@@ -402,7 +402,7 @@ Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerabilit
 
 #### `WhiteboxScanResult`
 
-文件路径: `packages/core/src/shannon_core/models/result.py`
+文件路径: `packages/core/src/supernova_core/models/result.py`
 
 ```python
 class WhiteboxScanResult(BaseModel)
@@ -422,7 +422,7 @@ class WhiteboxScanResult(BaseModel)
 
 #### `BlackboxScanResult`
 
-文件路径: `packages/core/src/shannon_core/models/result.py`
+文件路径: `packages/core/src/supernova_core/models/result.py`
 
 ```python
 class BlackboxScanResult(BaseModel)
@@ -443,7 +443,7 @@ class BlackboxScanResult(BaseModel)
 
 #### `PentestError`
 
-文件路径: `packages/core/src/shannon_core/models/errors.py`
+文件路径: `packages/core/src/supernova_core/models/errors.py`
 
 ```python
 class PentestError(Exception)
@@ -478,7 +478,7 @@ def __init__(
 
 #### `AgentName`
 
-文件路径: `packages/core/src/shannon_core/models/agents.py`
+文件路径: `packages/core/src/supernova_core/models/agents.py`
 
 ```python
 class AgentName(str, Enum)
@@ -507,7 +507,7 @@ class AgentName(str, Enum)
 
 #### `DeliverableType`
 
-文件路径: `packages/core/src/shannon_core/models/deliverables.py`
+文件路径: `packages/core/src/supernova_core/models/deliverables.py`
 
 ```python
 class DeliverableType(str, Enum)
@@ -535,7 +535,7 @@ class DeliverableType(str, Enum)
 
 #### `ErrorCode`
 
-文件路径: `packages/core/src/shannon_core/models/errors.py`
+文件路径: `packages/core/src/supernova_core/models/errors.py`
 
 ```python
 class ErrorCode(str, Enum)
@@ -567,13 +567,13 @@ class ErrorCode(str, Enum)
 
 ### 类型别名 (Type Aliases)
 
-文件路径: `packages/core/src/shannon_core/models/agents.py`
+文件路径: `packages/core/src/supernova_core/models/agents.py`
 
 ```python
 VulnType = Literal["injection", "xss", "auth", "ssrf", "authz"]
 ```
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 RuleType = Literal["url_path", "subdomain", "domain", "method", "header", "parameter", "code_path"]
@@ -588,7 +588,7 @@ Confidence = Literal["low", "medium", "high"]
 
 #### `parse_config`
 
-文件路径: `packages/core/src/shannon_core/config/parser.py`
+文件路径: `packages/core/src/supernova_core/config/parser.py`
 
 **签名：**
 
@@ -604,7 +604,7 @@ def parse_config(config_path: str) -> Config
 
 #### `distribute_config`
 
-文件路径: `packages/core/src/shannon_core/config/parser.py`
+文件路径: `packages/core/src/supernova_core/config/parser.py`
 
 **签名：**
 
@@ -620,7 +620,7 @@ def distribute_config(config: Config | None) -> DistributedConfig
 
 #### `is_spending_cap_behavior`
 
-文件路径: `packages/core/src/shannon_core/utils/billing.py`
+文件路径: `packages/core/src/supernova_core/utils/billing.py`
 
 **签名：**
 
@@ -636,7 +636,7 @@ def is_spending_cap_behavior(turns: int, cost: float, text: str) -> bool
 
 #### `run_with_concurrency_limit`
 
-文件路径: `packages/core/src/shannon_core/utils/concurrency.py`
+文件路径: `packages/core/src/supernova_core/utils/concurrency.py`
 
 **签名：**
 
@@ -655,7 +655,7 @@ async def run_with_concurrency_limit(
 
 #### `async_read_file`
 
-文件路径: `packages/core/src/shannon_core/utils/file_io.py`
+文件路径: `packages/core/src/supernova_core/utils/file_io.py`
 
 **签名：**
 
@@ -671,7 +671,7 @@ async def async_read_file(path: str | Path) -> str
 
 #### `async_write_file`
 
-文件路径: `packages/core/src/shannon_core/utils/file_io.py`
+文件路径: `packages/core/src/supernova_core/utils/file_io.py`
 
 **签名：**
 
@@ -687,7 +687,7 @@ async def async_write_file(path: str | Path, content: str) -> None
 
 #### `async_path_exists`
 
-文件路径: `packages/core/src/shannon_core/utils/file_io.py`
+文件路径: `packages/core/src/supernova_core/utils/file_io.py`
 
 **签名：**
 
@@ -703,7 +703,7 @@ async def async_path_exists(path: str | Path) -> bool
 
 #### `async_read_json`
 
-文件路径: `packages/core/src/shannon_core/utils/file_io.py`
+文件路径: `packages/core/src/supernova_core/utils/file_io.py`
 
 **签名：**
 
@@ -719,7 +719,7 @@ async def async_read_json(path: str | Path) -> dict | list
 
 #### `async_write_json`
 
-文件路径: `packages/core/src/shannon_core/utils/file_io.py`
+文件路径: `packages/core/src/supernova_core/utils/file_io.py`
 
 **签名：**
 
@@ -735,7 +735,7 @@ async def async_write_json(path: str | Path, data: dict | list, indent: int = 2)
 
 #### `format_timestamp`
 
-文件路径: `packages/core/src/shannon_core/utils/formatting.py`
+文件路径: `packages/core/src/supernova_core/utils/formatting.py`
 
 **签名：**
 
@@ -751,7 +751,7 @@ def format_timestamp() -> str
 
 #### `truncate_text`
 
-文件路径: `packages/core/src/shannon_core/utils/formatting.py`
+文件路径: `packages/core/src/supernova_core/utils/formatting.py`
 
 **签名：**
 
@@ -769,7 +769,7 @@ def truncate_text(text: str, max_length: int = 200) -> str
 
 #### `AGENTS`
 
-文件路径: `packages/core/src/shannon_core/models/agents.py`
+文件路径: `packages/core/src/supernova_core/models/agents.py`
 
 ```python
 AGENTS: dict[AgentName, AgentDefinition]
@@ -781,7 +781,7 @@ AGENTS: dict[AgentName, AgentDefinition]
 
 #### `DELIVERABLE_FILENAMES`
 
-文件路径: `packages/core/src/shannon_core/models/deliverables.py`
+文件路径: `packages/core/src/supernova_core/models/deliverables.py`
 
 ```python
 DELIVERABLE_FILENAMES: dict[DeliverableType, str]
@@ -809,7 +809,7 @@ DELIVERABLE_FILENAMES: dict[DeliverableType, str]
 
 #### `ALL_VULN_CLASSES`
 
-文件路径: `packages/core/src/shannon_core/models/config.py`
+文件路径: `packages/core/src/supernova_core/models/config.py`
 
 ```python
 ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"]
@@ -819,13 +819,13 @@ ALL_VULN_CLASSES: list[VulnClass] = ["injection", "xss", "auth", "authz", "ssrf"
 
 ---
 
-## shannon-whitebox
+## supernova-whitebox
 
 ### 类 (Classes)
 
 #### `AgentExecutor`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/executor.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/executor.py`
 
 **构造器签名：**
 
@@ -859,7 +859,7 @@ async def execute(
 
 #### `ClaudeRunResult`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/runner.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/runner.py`
 
 ```python
 @dataclass
@@ -884,7 +884,7 @@ LLM 调用的返回结果数据类。
 
 #### `PromptManager`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/prompts/manager.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/prompts/manager.py`
 
 **构造器签名：**
 
@@ -914,7 +914,7 @@ def load_sync(
 
 #### `SessionManager`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/session.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/session.py`
 
 **构造器签名：**
 
@@ -972,7 +972,7 @@ def is_agent_completed(self, workspace_path: Path, agent_name: AgentName) -> boo
 
 #### `GitManager`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/git_manager.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/git_manager.py`
 
 全部为静态方法，用于管理 Agent 执行过程中的 Git 状态。
 
@@ -1024,7 +1024,7 @@ def get_commit_hash(repo_path: Path) -> str | None
 
 #### `AuditSession`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/audit/session.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/audit/session.py`
 
 **构造器签名：**
 
@@ -1070,7 +1070,7 @@ async def save_session(self, session_data: dict) -> None
 
 #### `LogStream`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/audit/log_stream.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/audit/log_stream.py`
 
 **构造器签名：**
 
@@ -1098,7 +1098,7 @@ async def append_lines(self, lines: list[str]) -> None
 
 #### `WhiteboxScanWorkflow`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/workflows.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/workflows.py`
 
 ```python
 @workflow.defn
@@ -1120,7 +1120,7 @@ async def run(self, input: PipelineInput) -> PipelineState
 
 #### `PipelineInput`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1138,7 +1138,7 @@ class PipelineInput
 | `vuln_classes` | `list[VulnType] \| None` | `None` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".shannon/deliverables"` |
+| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
 
 白盒扫描流水线的输入数据。
 
@@ -1146,7 +1146,7 @@ class PipelineInput
 
 #### `PipelineState`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1167,7 +1167,7 @@ class PipelineState
 
 #### `ActivityInput`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/shared.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1180,7 +1180,7 @@ class ActivityInput
 | `web_url` | `str` | `""` |
 | `config_path` | `str \| None` | `None` |
 | `workspace_name` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".shannon/deliverables"` |
+| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
 
@@ -1192,7 +1192,7 @@ Temporal Activity 的输入数据。
 
 #### `run_claude_prompt`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/runner.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/runner.py`
 
 **签名：**
 
@@ -1216,7 +1216,7 @@ async def run_claude_prompt(
 
 #### `validate_deliverable`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/validators.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/validators.py`
 
 **签名：**
 
@@ -1232,7 +1232,7 @@ async def validate_deliverable(deliverables_path: Path, agent_name: AgentName) -
 
 #### `get_vuln_type`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/validators.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/validators.py`
 
 **签名：**
 
@@ -1248,7 +1248,7 @@ def get_vuln_type(agent_name: AgentName) -> str | None
 
 #### `get_queue_filename`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/agents/validators.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/agents/validators.py`
 
 **签名：**
 
@@ -1264,7 +1264,7 @@ def get_queue_filename(agent_name: AgentName) -> str | None
 
 #### `run_preflight`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/activities.py`
 
 **签名：**
 
@@ -1281,7 +1281,7 @@ async def run_preflight(input: ActivityInput) -> None
 
 #### `run_agent`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/activities.py`
 
 **签名：**
 
@@ -1298,7 +1298,7 @@ async def run_agent(input: ActivityInput) -> dict
 
 #### `run_vuln_agent`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/pipeline/activities.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/pipeline/activities.py`
 
 **签名：**
 
@@ -1315,7 +1315,7 @@ async def run_vuln_agent(input: ActivityInput) -> dict
 
 #### `run_scan`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/worker.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/worker.py`
 
 **签名：**
 
@@ -1331,7 +1331,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
 
 #### `main`
 
-文件路径: `packages/whitebox/src/shannon_whitebox/worker.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/worker.py`
 
 **签名：**
 
@@ -1345,7 +1345,7 @@ def main() -> None
 
 ### CLI 命令
 
-文件路径: `packages/whitebox/src/shannon_whitebox/cli/main.py`
+文件路径: `packages/whitebox/src/supernova_whitebox/cli/main.py`
 
 #### `cli`
 
@@ -1398,13 +1398,13 @@ def workspaces()
 
 ---
 
-## shannon-blackbox
+## supernova-blackbox
 
 ### 类 (Classes)
 
 #### `ReconExecutor`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/agents/recon_executor.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/agents/recon_executor.py`
 
 **构造器签名：**
 
@@ -1436,7 +1436,7 @@ async def execute(
 
 #### `ExploitExecutor`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/agents/exploit_executor.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/agents/exploit_executor.py`
 
 **构造器签名：**
 
@@ -1470,7 +1470,7 @@ async def execute(
 
 #### `ReportAssembler`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/services/report_assembler.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/services/report_assembler.py`
 
 **`assemble` 静态方法签名：**
 
@@ -1491,7 +1491,7 @@ async def assemble(
 
 #### `ExploitationChecker`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/services/exploitation_checker.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/services/exploitation_checker.py`
 
 **`should_exploit` 静态方法签名：**
 
@@ -1512,7 +1512,7 @@ async def should_exploit(
 
 #### `BlackboxScanWorkflow`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/workflows.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/workflows.py`
 
 ```python
 @workflow.defn
@@ -1534,7 +1534,7 @@ async def run(self, input: BlackboxPipelineInput) -> BlackboxPipelineState
 
 #### `BlackboxPipelineInput`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1553,7 +1553,7 @@ class BlackboxPipelineInput
 | `exploit` | `bool` | `True` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".shannon/deliverables"` |
+| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
 
 黑盒扫描流水线的输入数据。
 
@@ -1561,7 +1561,7 @@ class BlackboxPipelineInput
 
 #### `BlackboxPipelineState`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1584,7 +1584,7 @@ class BlackboxPipelineState
 
 #### `BlackboxActivityInput`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/shared.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/shared.py`
 
 ```python
 @dataclass
@@ -1597,7 +1597,7 @@ class BlackboxActivityInput
 | `repo_path` | `str \| None` | `None` |
 | `config_path` | `str \| None` | `None` |
 | `workspace_name` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".shannon/deliverables"` |
+| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
 | `agent_name` | `str \| None` | `None` |
@@ -1611,7 +1611,7 @@ class BlackboxActivityInput
 
 #### `run_blackbox_preflight`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/activities.py`
 
 **签名：**
 
@@ -1628,7 +1628,7 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None
 
 #### `run_recon`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/activities.py`
 
 **签名：**
 
@@ -1645,7 +1645,7 @@ async def run_recon(input: BlackboxActivityInput) -> dict
 
 #### `run_exploit_agent`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/activities.py`
 
 **签名：**
 
@@ -1662,7 +1662,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict
 
 #### `assemble_report`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/activities.py`
 
 **签名：**
 
@@ -1679,7 +1679,7 @@ async def assemble_report(input: BlackboxActivityInput) -> None
 
 #### `run_report_agent`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/pipeline/activities.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/pipeline/activities.py`
 
 **签名：**
 
@@ -1696,7 +1696,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict
 
 #### `run_scan`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/worker.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/worker.py`
 
 **签名：**
 
@@ -1712,7 +1712,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
 
 #### `main`
 
-文件路径: `packages/blackbox/src/shannon_blackbox/worker.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/worker.py`
 
 **签名：**
 
@@ -1726,7 +1726,7 @@ def main() -> None
 
 ### CLI 命令
 
-文件路径: `packages/blackbox/src/shannon_blackbox/cli/main.py`
+文件路径: `packages/blackbox/src/supernova_blackbox/cli/main.py`
 
 #### `cli`
 

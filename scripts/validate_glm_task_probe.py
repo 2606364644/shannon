@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-PROFILE = Path("/root/shannon-py/.env.profiles/glm-anthropic.env")
+PROFILE = Path("/root/supernova/.env.profiles/glm-anthropic.env")
 
 
 def load_profile() -> None:
@@ -24,11 +24,11 @@ def load_profile() -> None:
         k, v = line.split("=", 1)
         os.environ.setdefault(k.strip(), v.strip())
     # 强制 anthropic 引擎（CLI 原生有 Task），覆盖当前 active 的 glm-openai
-    os.environ["SHANNON_AI_PROVIDER"] = "anthropic_api"
+    os.environ["SUPERNOVA_AI_PROVIDER"] = "anthropic_api"
     os.environ["CLAUDE_MAX_TURNS"] = "15"  # 最小测试，有界
 
 
-from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
+from supernova_core.agents.tool_audit_logger import NullToolAuditLogger
 
 
 class RecordingLogger(NullToolAuditLogger):
@@ -61,7 +61,7 @@ async def main() -> None:
         "Task: Use the Task Agent to read app.py and determine whether get_user(name) has a SQL injection flaw. "
         "Report: verdict (vulnerable/safe), the sink line, and rationale."
     )
-    from shannon_core.agents.runner import run_claude_prompt
+    from supernova_core.agents.runner import run_claude_prompt
 
     logger = RecordingLogger()
     t0 = time.time()

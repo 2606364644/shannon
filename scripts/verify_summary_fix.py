@@ -3,20 +3,20 @@
 Verification script for CLI summary queue file path fix.
 
 This script verifies that the fix correctly reads queue files from:
-{repo}/.shannon/deliverables/{vc}_exploitation_queue.json
+{repo}/.supernova/deliverables/{vc}_exploitation_queue.json
 
 The bug was using summary_path.parent which would look in:
-{repo}/.shannon/{vc}_exploitation_queue.json (incorrect)
+{repo}/.supernova/{vc}_exploitation_queue.json (incorrect)
 
 The fix uses summary_path which correctly looks in:
-{repo}/.shannon/deliverables/{vc}_exploitation_queue.json (correct)
+{repo}/.supernova/deliverables/{vc}_exploitation_queue.json (correct)
 """
 from pathlib import Path
 import json
 
 def test_fixed_path_logic():
     """Test the fixed path logic with existing NodeGoat scan data."""
-    deliverables_path = "/Users/mango/project/vuln-range/NodeGoat/.shannon/deliverables"
+    deliverables_path = "/Users/mango/project/vuln-range/NodeGoat/.supernova/deliverables"
     summary_path = Path(deliverables_path)
 
     print("Testing FIXED path logic:")

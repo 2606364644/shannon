@@ -8,7 +8,7 @@ all four steps below.
 ### Step CR-1: Read Shared Controller Groups
 
 Read Section 4.1 (Shared Controller Route Groups) in
-`.shannon/deliverables/recon_deliverable.md`. If this section does not exist or is empty,
+`.supernova/deliverables/recon_deliverable.md`. If this section does not exist or is empty,
 skip to Step CR-4 and use single-route defaults.
 
 The section is organized as group subsections:

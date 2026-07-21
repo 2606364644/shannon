@@ -6,30 +6,30 @@ Shannon-Py 采用分层单体仓库架构，由三个独立的 Python 包组成�
 
 ```
 ┌─────────────────────────────────────┐
-│         shannon-blackbox            │
+│         supernova-blackbox            │
 │    (黑盒扫描 + 漏洞利用 + 报告)      │
 ├─────────────────────────────────────┤
-│         shannon-whitebox            │
+│         supernova-whitebox            │
 │    (白盒扫描 + Agent 执行 + Prompt)  │
 ├─────────────────────────────────────┤
-│          shannon-core               │
+│          supernova-core               │
 │  (共享模型 + 配置解析 + 工具函数)    │
 └─────────────────────────────────────┘
 ```
 
 **依赖方向：**
 
-- `shannon-blackbox` 依赖 `shannon-whitebox`（复用 `AgentExecutor`、`PromptManager`）
-- `shannon-whitebox` 依赖 `shannon-core`（使用共享模型、配置解析、错误定义）
-- `shannon-core` 不依赖任何上层包
+- `supernova-blackbox` 依赖 `supernova-whitebox`（复用 `AgentExecutor`、`PromptManager`）
+- `supernova-whitebox` 依赖 `supernova-core`（使用共享模型、配置解析、错误定义）
+- `supernova-core` 不依赖任何上层包
 
 **各层职责：**
 
 | 包 | 职责 |
 |---|---|
-| `shannon-core` | 定义共享数据模型（`AgentName`、`AgentDefinition`、`Config`、`DistributedConfig`）、配置解析（`parse_config`、`distribute_config`）、错误类型（`PentestError`、`ErrorCode`）、指标模型（`AgentMetrics`）|
-| `shannon-whitebox` | 实现白盒扫描 Temporal Workflow、Agent 执行器（`AgentExecutor`）、Prompt 管理（`PromptManager`）、Git 状态管理（`GitManager`）、会话管理（`SessionManager`）|
-| `shannon-blackbox` | 实现黑盒扫描 Temporal Workflow、漏洞利用执行器（`ExploitExecutor`）、侦察执行器（`ReconExecutor`）、报告组装（`ReportAssembler`）|
+| `supernova-core` | 定义共享数据模型（`AgentName`、`AgentDefinition`、`Config`、`DistributedConfig`）、配置解析（`parse_config`、`distribute_config`）、错误类型（`PentestError`、`ErrorCode`）、指标模型（`AgentMetrics`）|
+| `supernova-whitebox` | 实现白盒扫描 Temporal Workflow、Agent 执行器（`AgentExecutor`）、Prompt 管理（`PromptManager`）、Git 状态管理（`GitManager`）、会话管理（`SessionManager`）|
+| `supernova-blackbox` | 实现黑盒扫描 Temporal Workflow、漏洞利用执行器（`ExploitExecutor`）、侦察执行器（`ReconExecutor`）、报告组装（`ReportAssembler`）|
 
 ## 2. 完整数据流图
 
@@ -49,7 +49,7 @@ SessionManager.create_workspace()
     │
     ▼
 Temporal Workflow 启动 (WhiteboxScanWorkflow)
-    任务队列: "shannon-whitebox"
+    任务队列: "supernova-whitebox"
     │
     ▼
 run_preflight (验证仓库存在性)
@@ -103,7 +103,7 @@ CLI 输入 (web_url, config_path, exploit=True)
     │
     ▼
 Temporal Workflow 启动 (BlackboxScanWorkflow)
-    任务队列: "shannon-blackbox"
+    任务队列: "supernova-blackbox"
     │
     ▼
 run_blackbox_preflight (空操作)
@@ -144,7 +144,7 @@ BlackboxPipelineState 返回 (status="completed")
 
 ### Whitebox Workflow (WhiteboxScanWorkflow)
 
-**任务队列：** `shannon-whitebox`
+**任务队列：** `supernova-whitebox`
 
 **执行阶段：**
 
@@ -173,7 +173,7 @@ preflight → code_index → pre-recon → rebuild_call_chains → recon → [5x
 
 ### Blackbox Workflow (BlackboxScanWorkflow)
 
-**任务队列：** `shannon-blackbox`
+**任务队列：** `supernova-blackbox`
 
 **执行阶段：**
 
@@ -224,7 +224,7 @@ Agent 失败: GitManager.rollback(deliverables, reason)
 白盒和黑盒之间通过结构化 JSON 文件实现解耦通信：
 
 1. 白盒阶段的 Vuln Agent（如 `injection-vuln`）在完成分析后，将结构化的漏洞利用队列写入 `{vuln_type}_exploitation_queue.json`
-2. 该文件存储在 `.shannon/deliverables/` 目录下
+2. 该文件存储在 `.supernova/deliverables/` 目录下
 3. 黑盒阶段的 Exploit Agent（如 `injection-exploit`）通过 `ExploitExecutor` 读取对应的队列文件作为输入
 4. 桥接过程完全通过文件系统完成，无需额外的消息队列或 API 调用
 
@@ -254,7 +254,7 @@ Whitebox                        Blackbox
 
 每次扫描创建独立的 Workspace 目录，实现完整的会话隔离：
 
-- 每个 Workspace 包含独立的 `session.json`（元数据）、`workflow.log`（执行日志）、`agents/`（Agent 日志）、`prompts/`（归档 Prompt）、`.shannon/deliverables/`（输出文件）
+- 每个 Workspace 包含独立的 `session.json`（元数据）、`workflow.log`（执行日志）、`agents/`（Agent 日志）、`prompts/`（归档 Prompt）、`.supernova/deliverables/`（输出文件）
 - `SessionManager` 负责创建和管理 Workspace 生命周期
 - Workspace 命名格式：`{hostname}_shannon-{timestamp}`，确保全局唯一
 
@@ -293,7 +293,7 @@ workspaces/
       ssrf-exploit.txt
       authz-exploit.txt
       report-executive.txt
-    .shannon/
+    .supernova/
       deliverables/        # Agent 输出文件
         pre_recon_deliverable.md
         recon_deliverable.md

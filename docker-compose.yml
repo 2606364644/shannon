@@ -1,6 +1,12 @@
+# 项目名写死，与目录名解耦：无论 repo clone 到哪个目录（shannon / supernova / myfork …），
+# compose 项目名恒为 supernova —— 容器/网络/volume 的 label 才能始终一致，
+# scripts/up.sh 的 cleanup_stale_containers（按 project 过滤）也才能稳定看到自己的容器去清理。
+# 优先级：-p flag / COMPOSE_PROJECT_NAME env > 本 name: > 目录名（故目录名不再起作用）。
+name: supernova
+
 networks:
   default:
-    name: shannon-py-net
+    name: supernova-net
 
 services:
   temporal:
@@ -9,7 +15,7 @@ services:
     # 会给本服务加 profiles:[disabled] 让它不启动，并改 web 连外部 temporal。
     # ./scripts/up.sh 自动判断走哪条路。
     image: temporalio/temporal:latest
-    container_name: shannon-py-temporal
+    container_name: supernova-temporal
     command: ["server", "start-dev", "--db-filename", "/home/temporal/temporal.db", "--ip", "0.0.0.0"]
     ports:
       - "127.0.0.1:7233:7233"   # gRPC
@@ -27,31 +33,31 @@ services:
     build:
       context: .
       dockerfile: packages/web/Dockerfile
-    container_name: shannon-py-web
+    container_name: supernova-web
     ports:
-      - "${SHANNON_WEB_PORT:-7878}:7878"
+      - "${SUPERNOVA_WEB_PORT:-7878}:7878"
     volumes:
       - ./workspaces:/app/workspaces
       - ./repos:/app/repos
       - ./configs:/app/configs
       - ./.env:/app/.env:ro
-      # .env.profiles 含 SHANNON_PROFILE 对应的引擎密钥（glm-anthropic.env 等），
+      # .env.profiles 含 SUPERNOVA_PROFILE 对应的引擎密钥（glm-anthropic.env 等），
       # 是 load_env() 启动扫描的硬依赖；不挂载则新扫描启动即崩 "profile 文件不存在"。
       # 同 .env 走 bind mount（宿主 gitignore 排除，随改随生效免重建）。
       - ./.env.profiles:/app/.env.profiles:ro
     env_file:
       - .env
     environment:
-      - SHANNON_WEB_MAX_CONCURRENT=${SHANNON_WEB_MAX_CONCURRENT:-1}
-      - SHANNON_WEB_SCAN_TIMEOUT=${SHANNON_WEB_SCAN_TIMEOUT:-0}
-      - SHANNON_TEMPORAL_HOST=temporal
-      - SHANNON_TEMPORAL_PORT=7233
+      - SUPERNOVA_WEB_MAX_CONCURRENT=${SUPERNOVA_WEB_MAX_CONCURRENT:-1}
+      - SUPERNOVA_WEB_SCAN_TIMEOUT=${SUPERNOVA_WEB_SCAN_TIMEOUT:-0}
+      - SUPERNOVA_TEMPORAL_HOST=temporal
+      - SUPERNOVA_TEMPORAL_PORT=7233
     depends_on:
       temporal:
         condition: service_healthy
 
   worker:
-    # C1 Phase A：常驻 worker 容器，消费 WEB 固定 task queue（白盒 shannon-py-wb-web / 黑盒 shannon-py-bb-web）。
+    # C1 Phase A：常驻 worker 容器，消费 WEB 固定 task queue（白盒 supernova-wb-web / 黑盒 supernova-bb-web）。
     # 装齐 gitnexus+agent-browser+chrome（共用镜像）；web 容器保持瘦。
     # scan_manager 已 C1 化（Phase B）：web 端 start_workflow 提交到本 worker 消费的 queue，不再 fork CLI。
     #
@@ -64,7 +70,7 @@ services:
       context: .
       dockerfile: packages/worker/Dockerfile
     platform: linux/amd64
-    container_name: shannon-py-worker
+    container_name: supernova-worker
     volumes:
       - ./workspaces:/app/workspaces
       - ./repos:/app/repos
@@ -74,17 +80,17 @@ services:
     env_file:
       - .env
     environment:
-      - SHANNON_TEMPORAL_HOST=temporal
-      - SHANNON_TEMPORAL_PORT=7233
-      - SHANNON_TEMPORALIO_LOG_LEVEL=${SHANNON_TEMPORALIO_LOG_LEVEL:-WARNING}
+      - SUPERNOVA_TEMPORAL_HOST=temporal
+      - SUPERNOVA_TEMPORAL_PORT=7233
+      - SUPERNOVA_TEMPORALIO_LOG_LEVEL=${SUPERNOVA_TEMPORALIO_LOG_LEVEL:-WARNING}
     depends_on:
       temporal:
         condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: '${SHANNON_WORKER_CPUS:-2}'
-          memory: '${SHANNON_WORKER_MEMORY:-4g}'
+          cpus: '${SUPERNOVA_WORKER_CPUS:-2}'
+          memory: '${SUPERNOVA_WORKER_MEMORY:-4g}'
     restart: unless-stopped
 
 volumes:

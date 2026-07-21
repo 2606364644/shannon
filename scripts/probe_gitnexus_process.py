@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
 
 
 def _hr(t): print(f"\n{'='*4} {t} {'='*max(0,76-len(t))}")

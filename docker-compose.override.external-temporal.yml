@@ -26,7 +26,7 @@
 #   - web 改用容器名 shannon-temporal 直连，并接入 shannon-net 外部网络
 #
 # 前提：
-#   - 外部 temporal 容器在运行，容器名 = shannon-temporal（见 SHANNON_TEMPORAL_HOST）
+#   - 外部 temporal 容器在运行，容器名 = shannon-temporal（见 SUPERNOVA_TEMPORAL_HOST）
 #   - 存在 docker 网络名 shannon-net
 #   若你的容器名/网络名不同，改下方两处即可。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,25 +39,25 @@ services:
   web:
     depends_on: !reset []
     environment:
-      # 容器名直连：shannon-temporal 在 shannon-net 网络里可被 DNS 解析
+      # 容器名直连：shannon-py-temporal 在 shannon-py-net 网络里可被 DNS 解析
       # （绕开外部 temporal 绑 127.0.0.1 致容器够不到的限制）
-      - SHANNON_TEMPORAL_HOST=shannon-temporal
-      - SHANNON_TEMPORAL_PORT=7233
+      - SUPERNOVA_TEMPORAL_HOST=shannon-py-temporal
+      - SUPERNOVA_TEMPORAL_PORT=7233
     networks:
-      - default          # 保留 shannon-py-net（compose 内部通信）
-      - shannon-net      # 接入外部 temporal 所在网络
+      - default          # 保留 supernova-net（compose 内部通信）
+      - shannon-py-net   # 接入外部 temporal 所在网络
 
   worker:
     # 镜像 web 块：清空 depends_on（temporal 不在 compose 管辖）+
-    # 直连外部 shannon-temporal + 接入 shannon-net。
+    # 直连外部 shannon-py-temporal + 接入 shannon-py-net。
     depends_on: !reset []
     environment:
-      - SHANNON_TEMPORAL_HOST=shannon-temporal
-      - SHANNON_TEMPORAL_PORT=7233
+      - SUPERNOVA_TEMPORAL_HOST=shannon-py-temporal
+      - SUPERNOVA_TEMPORAL_PORT=7233
     networks:
-      - default          # 保留 shannon-py-net（compose 内部通信）
-      - shannon-net      # 接入外部 temporal 所在网络
+      - default          # 保留 supernova-net（compose 内部通信）
+      - shannon-py-net   # 接入外部 temporal 所在网络
 
 networks:
-  shannon-net:
-    external: true       # 复用已存在的 shannon-net，不新建
+  shannon-py-net:
+    external: true       # 复用已存在的 shannon-py-net，不新建

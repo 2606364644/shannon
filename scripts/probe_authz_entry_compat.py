@@ -1,4 +1,4 @@
-"""坐实 spec 两个硬模糊点（用 shannon-py 真规则，非 cypher 粗估）。
+"""坐实 spec 两个硬模糊点（用 supernova 真规则，非 cypher 粗估）。
 
 探针 1（authz 兼容性）：process trace 的 terminal(path[-1]) 是不是 side-effect sink？
   vs 扫全链找 side-effect —— 决定 authz「看终端」会不会召回归零、要不要改扫全链。
@@ -9,11 +9,11 @@ from __future__ import annotations
 import asyncio, re
 from pathlib import Path
 from collections import defaultdict, Counter
-from shannon_core.code_index.parser import detect_language, discover_source_files
-from shannon_core.code_index.parsers import get_parser
-from shannon_core.code_index.entry_points import detect_entry_points
-from shannon_core.code_index.authz_gitnexus_track import _is_side_effect_sink
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient
+from supernova_core.code_index.parser import detect_language, discover_source_files
+from supernova_core.code_index.parsers import get_parser
+from supernova_core.code_index.entry_points import detect_entry_points
+from supernova_core.code_index.authz_gitnexus_track import _is_side_effect_sink
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient
 
 REPO = Path("/root/code/backend/statement_template_svr")
 NAME = "statement_template_svr"

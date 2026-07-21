@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# cleanup-shannon-py.sh — 清理「重构项目 shannon-py」的运行残留,可重复执行。
+# cleanup-supernova.sh — 清理「重构项目 supernova」的运行残留,可重复执行。
 #
 # 铁律:本脚本绝不触碰 /root/shannon(原始 TS 项目)的任何进程,
 #       也绝不触碰 gitnexus 等共享组件。所有进程匹配一律用绝对路径锁死
-#       /root/shannon-py / shannon_web,不会误伤 TS 的 node ./shannon / runner.js /
-#       claude-agent-sdk 子进程。容器按 compose project=shannon-py 精确过滤。
+#       /root/supernova / supernova_web,不会误伤 TS 的 node ./shannon / runner.js /
+#       claude-agent-sdk 子进程。容器按 compose project=supernova 精确过滤。
 #
 # 用法见 usage()。
 set -uo pipefail
 
-REPO=/root/shannon-py
+REPO=/root/supernova
 FRONTEND="$REPO/packages/web/frontend"
 DRY_RUN=0
 REMOVE=0
 
 usage() {
   cat <<'EOF'
-cleanup-shannon-py.sh — 清理重构项目 shannon-py 的运行残留(绝不触碰 /root/shannon)
+cleanup-supernova.sh — 清理重构项目 supernova 的运行残留(绝不触碰 /root/shannon)
 
 用法:
-  bash scripts/cleanup-shannon-py.sh [选项]
+  bash scripts/cleanup-supernova.sh [选项]
 
 选项:
   -n, --dry-run   只打印将要清理的内容,不实际执行
@@ -27,9 +27,9 @@ cleanup-shannon-py.sh — 清理重构项目 shannon-py 的运行残留(绝不�
   -h, --help      显示本帮助
 
 例:
-  bash scripts/cleanup-shannon-py.sh --dry-run   # 先预览清单
-  bash scripts/cleanup-shannon-py.sh             # 清理(stop 容器 + 杀前端进程)
-  bash scripts/cleanup-shannon-py.sh --rm        # 连容器实例一起删
+  bash scripts/cleanup-supernova.sh --dry-run   # 先预览清单
+  bash scripts/cleanup-supernova.sh             # 清理(stop 容器 + 杀前端进程)
+  bash scripts/cleanup-supernova.sh --rm        # 连容器实例一起删
 
 注意:
   - 请用 `bash <file>` 或 `./<file>` 执行,不要 `bash -c "$(cat <file>)"`
@@ -58,11 +58,11 @@ safe_pids() {
 }
 
 echo "=================================================="
-echo " shannon-py 残留清理   (dry_run=$DRY_RUN, rm=$REMOVE)"
+echo " supernova 残留清理   (dry_run=$DRY_RUN, rm=$REMOVE)"
 echo " 铁律:绝不触碰 /root/shannon(原始 TS),不碰 gitnexus"
 echo "=================================================="
 
-# ---- 1) 前端 vite + esbuild(路径锁死 /root/shannon-py/packages/web/frontend)----
+# ---- 1) 前端 vite + esbuild(路径锁死 /root/supernova/packages/web/frontend)----
 echo "[1/4] 前端进程 vite / esbuild"
 for pat in \
   "$FRONTEND/node_modules/.bin/vite" \
@@ -76,9 +76,9 @@ for pat in \
   fi
 done
 
-# ---- 2) 宿主直跑的 shannon_web 后端(docker 容器内的不受影响,这里只杀宿主直跑)----
-echo "[2/4] 宿主直跑的 shannon_web 后端(非容器)"
-pids=$(safe_pids 'shannon_web\.app:app')
+# ---- 2) 宿主直跑的 supernova_web 后端(docker 容器内的不受影响,这里只杀宿主直跑)----
+echo "[2/4] 宿主直跑的 supernova_web 后端(非容器)"
+pids=$(safe_pids 'supernova_web\.app:app')
 if [[ -n "$pids" ]]; then
   echo "  -> kill  (PID: $(echo $pids | tr '\n' ' '))"
   for p in $pids; do run kill "$p" 2>/dev/null || true; done
@@ -86,9 +86,9 @@ else
   echo "  -- 无宿主直跑后端(若用 docker 跑 web 则正常)"
 fi
 
-# ---- 3) Docker 容器(按 compose project=shannon-py 精确过滤,只动本项目的)----
-echo "[3/4] Docker 容器 (label: com.docker.compose.project=shannon-py)"
-containers=$(docker ps -a --filter "label=com.docker.compose.project=shannon-py" \
+# ---- 3) Docker 容器(按 compose project=supernova 精确过滤,只动本项目的)----
+echo "[3/4] Docker 容器 (label: com.docker.compose.project=supernova)"
+containers=$(docker ps -a --filter "label=com.docker.compose.project=supernova" \
                --format '{{.Names}}' 2>/dev/null || true)
 if [[ -n "$containers" ]]; then
   for c in $containers; do
@@ -101,17 +101,17 @@ if [[ -n "$containers" ]]; then
     fi
   done
 else
-  echo "  -- 无 shannon-py 容器"
+  echo "  -- 无 supernova 容器"
 fi
 
 # ---- 4) 验证 ----
 echo "[4/4] 验证"
-if ps aux | grep -E 'shannon_web|shannon-py/packages/web' | grep -qv grep; then
-  echo "  ⚠ 仍有 shannon-py 进程残留:"
-  ps aux | grep -E 'shannon_web|shannon-py/packages/web' | grep -v grep \
+if ps aux | grep -E 'supernova_web|supernova/packages/web' | grep -qv grep; then
+  echo "  ⚠ 仍有 supernova 进程残留:"
+  ps aux | grep -E 'supernova_web|supernova/packages/web' | grep -v grep \
     | awk '{print "     ", $2, $11, $12, $13}'
 else
-  echo "  ✓ 无 shannon-py 进程残留"
+  echo "  ✓ 无 supernova 进程残留"
 fi
 if ss -tlnp 2>/dev/null | grep -qE ':7878|:5173'; then
   echo "  ⚠ 端口仍在监听:"
