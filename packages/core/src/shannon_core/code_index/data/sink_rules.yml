@@ -353,9 +353,38 @@ rules:
   - rule_id: java-objectinput-readobject
     languages: [java]
     callee: readObject
-    receiver_pattern: null
+    receiver_pattern: ".+"          # 原 null → .+
     category: deserialization
     sink_subtype: deser_java
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  # fastjson JSON.parseObject / parseArray(autotype RCE 风险;receiver=JSON 静态调用或实例)
+  - rule_id: java-fastjson-parseobject
+    languages: [java]
+    callee: parseObject
+    receiver_pattern: ".+"
+    category: deserialization
+    sink_subtype: deser_fastjson
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  - rule_id: java-fastjson-parsearray
+    languages: [java]
+    callee: parseArray
+    receiver_pattern: ".+"
+    category: deserialization
+    sink_subtype: deser_fastjson
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: deserialize}]
+
+  # Jackson ObjectMapper.readValue(enableDefaultTyping RCE 风险)
+  - rule_id: java-jackson-readvalue
+    languages: [java]
+    callee: readValue
+    receiver_pattern: ".+"
+    category: deserialization
+    sink_subtype: deser_jackson
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: deserialize}]
 

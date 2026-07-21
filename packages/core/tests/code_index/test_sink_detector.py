@@ -224,7 +224,11 @@ class TestSinkRuleLibrary:
         from shannon_core.code_index.sink_detector import DEFAULT_RULES
         expected = {
             "go-db-query", "go-exec-command", "go-gorm-exec", "go-gorm-raw",
-            "go-http-get", "go-http-post", "java-httpclient-send",
+            "go-http-get", "go-http-post",
+            "java-fastjson-parsearray",         # 新增(Task 2)
+            "java-fastjson-parseobject",        # 新增(Task 2)
+            "java-httpclient-send",
+            "java-jackson-readvalue",           # 新增(Task 2)
             "java-jdbctemplate-query",          # 新增(Task 1)
             "java-jpa-createquery", "java-jpa-createnativequery",
             "java-objectinput-readobject",
@@ -880,3 +884,53 @@ class TestJavaSqlSinksHardening:
         sites = self._java_sites("    stmt.executeUpdate(sql);")
         hit = [s for s in sites if s.rule_id == "java-stmt-executeupdate"]
         assert hit, "stmt.executeUpdate(sql) 应命中新增 java-stmt-executeupdate"
+
+
+class TestJavaDeserSinksHardening:
+    """Java deser sink:fastjson/Jackson 补召回 + readObject rp 失配修复。
+
+    复现原始版 INJ-01:ClusterConfigController.apiModifyClusterConfig 的
+    JSON.parseObject(payload)(fastjson autotype,RCE 级)—— 重构版硬规则 0 命中根因之一。
+    """
+
+    def _java_sites(self, body: str):
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.java_parser import JavaParser
+        import tempfile, pathlib
+        src = f"class C {{\n  void q(String p) {{\n{body}\n  }}\n}}\n"
+        parser = JavaParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "C.java"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_fastjson_parseobject_inj01_repro(self):
+        """JSON.parseObject(payload) → java-fastjson-parseobject(复现原始版 INJ-01)。"""
+        sites = self._java_sites("    JSON.parseObject(payload);")
+        hit = [s for s in sites if s.rule_id == "java-fastjson-parseobject"]
+        assert hit, "JSON.parseObject(payload) 应命中 java-fastjson-parseobject"
+        assert hit[0].callee_name == "parseObject"
+        assert hit[0].callee_receiver == "JSON"  # 静态调用,object 字段 = JSON
+        assert hit[0].category == SinkCategory.DESERIALIZATION
+        assert hit[0].needs_review is True
+
+    def test_fastjson_parsearray_hit(self):
+        """JSON.parseArray(payload) → java-fastjson-parsearray。"""
+        sites = self._java_sites("    JSON.parseArray(payload);")
+        hit = [s for s in sites if s.rule_id == "java-fastjson-parsearray"]
+        assert hit
+
+    def test_jackson_readvalue_hit(self):
+        """objectMapper.readValue(payload, Class) → java-jackson-readvalue。"""
+        sites = self._java_sites("    objectMapper.readValue(payload, Object.class);")
+        hit = [s for s in sites if s.rule_id == "java-jackson-readvalue"]
+        assert hit
+        assert hit[0].category == SinkCategory.DESERIALIZATION
+
+    def test_readobject_arbitrary_receiver_hit(self):
+        """ois.readObject(payload) → java-objectinput-readobject(原 rp=null 不命中)。"""
+        sites = self._java_sites("    ois.readObject(payload);")
+        hit = [s for s in sites if s.rule_id == "java-objectinput-readobject"]
+        assert hit, "ois.readObject(payload) 应命中 java-objectinput-readobject(receiver=ois)"
+        assert hit[0].callee_receiver == "ois"
