@@ -49,7 +49,7 @@ class SourceCandidate:
 
 def discover_sources_by_rules(
     blocks: "list[FuncBlock]",
-    sink_func_ids: "set[str]",
+    sink_func_ids: "set[str] | None",
     *,
     entry_point_ids: "set[str] | None" = None,
     source_provider: "Callable[[FuncBlock], bytes | None]",
@@ -62,8 +62,12 @@ def discover_sources_by_rules(
     本函数是被 sink 驱动的独立兜底,只对含 sink 函数补 —— handler 不在 entry_point
     也能补回 req.body.preTax 等(NodeGoat 根因 spec §2)。复用 source_detector 的
     _line_of/_detect_validation/_dedup,规则匹配口径与主路径一致。
+
+    子项① 解耦(2026-07-21): source 探测器**主基于 entry_point_ids**;sink_func_ids
+    仅作边际扩展(多看几眼含 sink 的函数),允许为空集 / None —— sink 失明不再收窄
+    source 候选范围。两项各自 `or set()` 容错,顺序无关,行为等价但语义明确。
     """
-    target_ids = sink_func_ids | (entry_point_ids or set())
+    target_ids = (entry_point_ids or set()) | (sink_func_ids or set())
     out: list[SourcePoint] = []
     for block in blocks:
         if block.id not in target_ids:
@@ -124,7 +128,7 @@ _SOURCE_CANDIDATE_HINT = re.compile(
 
 def collect_source_candidates(
     blocks: "list[FuncBlock]",
-    sink_func_ids: "set[str]",
+    sink_func_ids: "set[str] | None",
     *,
     entry_point_ids: "set[str] | None" = None,
     source_provider: "Callable[[FuncBlock], bytes | None]",
@@ -134,8 +138,12 @@ def collect_source_candidates(
     source_detector 主路径只扫 entry_point;本函数对含 sink 函数补召回 —— 函数体含
     对象级 / 非常规取用信号(解构 ``const {a} = req.body``、对象直传、括号取用、注解)
     但 detect_sources 规则未命中 → 候选。点号取用(``req.body.x``)规则会命中 → 不候选。
+
+    子项① 解耦(2026-07-21): source 探测器**主基于 entry_point_ids**;sink_func_ids
+    仅作边际扩展(多看几眼含 sink 的函数),允许为空集 / None —— sink 失明不再收窄
+    source 候选范围。两项各自 `or set()` 容错,顺序无关,行为等价但语义明确。
     """
-    target_ids = sink_func_ids | (entry_point_ids or set())
+    target_ids = (entry_point_ids or set()) | (sink_func_ids or set())
     out: list[SourceCandidate] = []
     for block in blocks:
         if block.id not in target_ids:

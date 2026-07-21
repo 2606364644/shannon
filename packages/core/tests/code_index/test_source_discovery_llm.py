@@ -634,3 +634,76 @@ async def test_discover_sources_llm_prompt_includes_idor_instruction():
         f"prompt 须含 IDOR 指示(Task 5); 实际 prompt 片段: "
         f"{captured_prompts[0][:300]!r}")
 
+
+# ===== Task 6 (spec 子项① 解耦): source 探测器主基于 entry_point_ids =====
+# source 候选收集主基于 entry_point_ids; sink_func_ids 降为可选边际扩展(含 sink
+# 函数多看几眼)。sink 失明时 entry handler 仍能进候选 —— 锁定该语义, 防止后续回到
+# “source 被 sink 驱动”的耦合(target_ids = sink_func_ids | … 即 sink 失明 → 空)。
+
+
+def test_collect_source_candidates_independent_of_sink_funcs():
+    """sink_func_ids 空时, entry handler 仍经 entry_point_ids 进候选(子项① 解耦锁)。
+
+    Task 3 已把 entry_point_ids 编排提前;本测试锁定函数语义:target_ids 须由
+    entry_point_ids 驱动,空 sink_func_ids 不收窄候选范围。
+    """
+    src = 'function h(req){ const {userId} = req.params; db.find(userId); }\n'
+    block = _block("r.js", "h", 1, src, language="javascript")
+    # sink_func_ids 空(模拟 sink 失明); entry_point_ids 驱动 → 仍进候选
+    out = collect_source_candidates(
+        [block], sink_func_ids=set(),
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(out) == 1, (
+        f"entry handler 应经 entry_point_ids 进候选(sink 失明不收窄), 实际 {out}")
+    assert out[0].block.id == block.id
+
+
+def test_discover_sources_by_rules_independent_of_sink_funcs():
+    """sink_func_ids 空时, entry handler 的点号取用仍经 entry_point_ids 产 SourcePoint。
+
+    对称锁:discover_sources_by_rules 也须由 entry_point_ids 驱动(子项① 解耦)。
+    """
+    src = 'function h(req){ const x = req.body.preTax; return x; }\n'
+    block = _block("r.js", "h", 1, src, language="javascript")
+    out = discover_sources_by_rules(
+        [block], sink_func_ids=set(),
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(out) == 1
+    assert out[0].param_name == "preTax"
+    assert out[0].entry_point_id == block.id
+
+
+def test_collect_source_candidates_sink_func_ids_none_tolerant():
+    """sink_func_ids=None 不应 TypeError(None 容错契约)。
+
+    子项①: sink_func_ids 是 optional 边际扩展, 须像 entry_point_ids 一样支持 None。
+    旧实现 `sink_func_ids | (entry_point_ids or set())` 在 None 时 TypeError —— 本测试
+    驱动 `or set()` 容错落地。
+    """
+    src = 'function h(req){ const {x} = req.body; return x; }\n'
+    block = _block("r.js", "h", 1, src, language="javascript")
+    out = collect_source_candidates(
+        [block], sink_func_ids=None,
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(out) == 1
+    assert out[0].block.id == block.id
+
+
+def test_discover_sources_by_rules_sink_func_ids_none_tolerant():
+    """sink_func_ids=None 不应 TypeError(对称 None 容错)。"""
+    src = 'function h(req){ const x = req.body.preTax; return x; }\n'
+    block = _block("r.js", "h", 1, src, language="javascript")
+    out = discover_sources_by_rules(
+        [block], sink_func_ids=None,
+        entry_point_ids={block.id},
+        source_provider=lambda b: block.source_code.encode(),
+    )
+    assert len(out) == 1
+    assert out[0].param_name == "preTax"
+
