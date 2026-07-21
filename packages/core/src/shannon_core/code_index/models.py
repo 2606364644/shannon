@@ -85,6 +85,7 @@ class CodeIndex(BaseModel):
     # Spec B: AST-precise sink detection (use forward ref; resolved at runtime via model_rebuild)
     sink_call_sites: list["SinkCallSite"] = []
     source_points: list["SourcePoint"] = []
+    storage_write_points: list["StorageWritePoint"] = []
     parameter_graph: "ParameterPropagationGraph | None" = None
 
 
@@ -116,6 +117,7 @@ class ParameterSource(str, Enum):
     SESSION_ATTR = "session"
     INTERNAL = "internal"
     UNKNOWN = "unknown"
+    STORAGE = "storage"
 
 
 class TypedParameter(BaseModel):
@@ -213,6 +215,7 @@ def _resolve_forward_refs() -> None:
         from shannon_core.code_index.parameter_models import (  # noqa: F401
             ParameterPropagationGraph, SinkCallSite, SourcePoint,
         )
+        from shannon_core.code_index.storage_models import StorageWritePoint  # noqa: F401
         CodeIndex.model_rebuild()
     except ImportError:
         pass
