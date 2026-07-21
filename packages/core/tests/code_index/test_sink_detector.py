@@ -225,8 +225,11 @@ class TestSinkRuleLibrary:
         expected = {
             "go-db-query", "go-exec-command", "go-gorm-exec", "go-gorm-raw",
             "go-http-get", "go-http-post", "java-httpclient-send",
-            "java-jpa-createnativequery", "java-objectinput-readobject",
+            "java-jdbctemplate-query",          # 新增(Task 1)
+            "java-jpa-createquery", "java-jpa-createnativequery",
+            "java-objectinput-readobject",
             "java-runtime-exec", "java-stmt-execute", "java-stmt-executequery",
+            "java-stmt-executeupdate",          # 新增(Task 1)
             "php-curl-exec", "php-db-raw", "php-db-select-static",
             "php-file-get-contents", "php-file-put-contents", "php-include",
             "php-laravel-whereraw", "php-mysqli-query", "php-passthru",
@@ -818,3 +821,62 @@ class TestOrmModelQuery:
         assert orm, "dbConfig.trip.query(sql) 应命中 ts-orm-model-query"
         assert orm[0].callee_receiver == "dbConfig.trip"  # 整链(非首段)
         assert orm[0].needs_review is True
+
+
+class TestJavaSqlSinksHardening:
+    """Java SQL sink 规则 receiver_pattern 失配修复(治 0 命中)+ 补 createQuery/JdbcTemplate/executeUpdate。
+
+    根因:_rule_matches 对 rp=null 只匹配裸调用(receiver is None),但 Java method call 恒为
+    instance.method(),receiver 非空(stmt/em/jdbcTemplate)→ 8 条 Java 规则全 0 命中。
+    改 rp='.+' + needs_review_default=true 后任意 receiver 命中。
+    """
+
+    def _java_sites(self, body: str):
+        """helper:完整 class 包裹方法体 → JavaParser 切 block → detect_sinks。"""
+        from shannon_core.code_index.sink_detector import detect_sinks
+        from shannon_core.code_index.parsers.java_parser import JavaParser
+        import tempfile, pathlib
+        src = f"class C {{\n  void q(String s) {{\n{body}\n  }}\n}}\n"
+        parser = JavaParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "C.java"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_executequery_arbitrary_receiver_hit(self):
+        """stmt.executeQuery(sql) receiver=stmt → 命中 java-stmt-executequery(原 rp=null 不命中)。"""
+        sites = self._java_sites("    stmt.executeQuery(sql);")
+        hit = [s for s in sites if s.rule_id == "java-stmt-executequery"]
+        assert hit, "stmt.executeQuery(sql) 应命中 java-stmt-executequery"
+        assert hit[0].callee_name == "executeQuery"
+        assert hit[0].callee_receiver == "stmt"
+        assert hit[0].category == SinkCategory.SQL
+        assert hit[0].needs_review is True  # rp=.+ 静态精度不足 → needs_review
+
+    def test_createnativequery_hit(self):
+        """em.createNativeQuery(sql) → java-jpa-createnativequery(原 rp=null 不命中)。"""
+        sites = self._java_sites("    em.createNativeQuery(sql);")
+        hit = [s for s in sites if s.rule_id == "java-jpa-createnativequery"]
+        assert hit, "em.createNativeQuery(sql) 应命中 java-jpa-createnativequery"
+        assert hit[0].callee_receiver == "em"
+
+    def test_jpa_createquery_new_rule_hit(self):
+        """em.createQuery(sql) → java-jpa-createquery(新增规则)。"""
+        sites = self._java_sites("    em.createQuery(sql);")
+        hit = [s for s in sites if s.rule_id == "java-jpa-createquery"]
+        assert hit, "em.createQuery(sql) 应命中新增 java-jpa-createquery"
+        assert hit[0].category == SinkCategory.SQL
+        assert hit[0].needs_review is True
+
+    def test_jdbctemplate_query_new_rule_hit(self):
+        """jdbcTemplate.query(sql) → java-jdbctemplate-query(新增规则)。"""
+        sites = self._java_sites("    jdbcTemplate.query(sql);")
+        hit = [s for s in sites if s.rule_id == "java-jdbctemplate-query"]
+        assert hit, "jdbcTemplate.query(sql) 应命中新增 java-jdbctemplate-query"
+
+    def test_stmt_executeupdate_new_rule_hit(self):
+        """stmt.executeUpdate(sql) → java-stmt-executeupdate(新增规则,JDBC DML)。"""
+        sites = self._java_sites("    stmt.executeUpdate(sql);")
+        hit = [s for s in sites if s.rule_id == "java-stmt-executeupdate"]
+        assert hit, "stmt.executeUpdate(sql) 应命中新增 java-stmt-executeupdate"

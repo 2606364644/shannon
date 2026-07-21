@@ -52,10 +52,10 @@ rules:
   - rule_id: java-stmt-executequery
     languages: [java]
     callee: executeQuery
-    receiver_pattern: null
+    receiver_pattern: ".+"          # 原 null(只匹配裸调用,Java 不存在)→ .+ 任意 receiver
     category: sql
     sink_subtype: sql_raw
-    needs_review_default: true
+    needs_review_default: true      # rp=.+ 静态精度不足,交 chain_verdict LLM 复核
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
   - rule_id: java-stmt-execute
@@ -149,7 +149,37 @@ rules:
   - rule_id: java-jpa-createnativequery
     languages: [java]
     callee: createNativeQuery
-    receiver_pattern: null
+    receiver_pattern: ".+"          # 原 null → .+
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # Java JPA EntityManager.createQuery(HQL/JPQL)— receiver 实例变量(em/entityManager)
+  - rule_id: java-jpa-createquery
+    languages: [java]
+    callee: createQuery
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # Spring JdbcTemplate.query(sql)— receiver 实例变量(jdbcTemplate/jt)
+  - rule_id: java-jdbctemplate-query
+    languages: [java]
+    callee: query
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true      # query 通用,receiver 任意;needs_review 滤非 SQL 的 .query
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # JDBC Statement.executeUpdate(DML: INSERT/UPDATE/DELETE)— executeUpdate 独特,几乎只 JDBC
+  - rule_id: java-stmt-executeupdate
+    languages: [java]
+    callee: executeUpdate
+    receiver_pattern: ".+"
     category: sql
     sink_subtype: sql_raw
     needs_review_default: true
