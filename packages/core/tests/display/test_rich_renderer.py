@@ -2,8 +2,8 @@ import io
 
 from rich.console import Console
 
-from shannon_core.display.events import PhaseEvent, WorkflowHeader
-from shannon_core.display.rich_renderer import RichConsoleRenderer
+from supernova_core.display.events import PhaseEvent, WorkflowHeader
+from supernova_core.display.rich_renderer import RichConsoleRenderer
 
 
 def _renderer_with_capture() -> tuple[RichConsoleRenderer, io.StringIO]:
@@ -19,7 +19,7 @@ async def test_header_offline_shows_repo_mode_monitor_no_NA():
         target_url=None, repo_path="/root/code/prize_web",
         mode="offline (source code analysis)",
         web_ui_url="http://localhost:8233/namespaces/default/workflows/wf-1",
-        logs_cmd="shannon-whitebox logs wf-1 --follow", workspace="wf-1"))
+        logs_cmd="supernova-whitebox logs wf-1 --follow", workspace="wf-1"))
     out = renderer._console.export_text()
     assert "Repository:" in out
     assert "/root/code/prize_web" in out
@@ -40,7 +40,7 @@ async def test_header_with_target_url_shows_url():
 
 
 async def test_step_event_renders_step_line():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="start"))
@@ -58,7 +58,7 @@ async def test_phase_start_renders_phase_name():
     assert "Starting" in out or "started" in out
 
 
-from shannon_core.display.events import AgentEvent, LlmTurnEvent, ToolCallEvent
+from supernova_core.display.events import AgentEvent, LlmTurnEvent, ToolCallEvent
 
 
 async def test_agent_start_shows_prefix():
@@ -119,7 +119,7 @@ async def test_llm_renders_turn():
     assert "Analyzing code" in out
 
 
-from shannon_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
+from supernova_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
 
 
 async def test_error_renders_in_red_with_classification():
@@ -137,7 +137,7 @@ async def test_error_renders_warning_category_in_yellow_not_red():
     """attempt 级 retryable 失败(ErrorEvent.category=WARNING)→ 黄色 WARNING 标签,
     不再误显红色 ERROR。对齐 TS logger.warn 的可恢复语义。"""
     from unittest.mock import MagicMock
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(ErrorEvent(
         timestamp="t", category="WARNING", error_type="PentestError",
@@ -232,7 +232,7 @@ async def test_phase_rendered_by_default():
 
 
 async def test_step_start_renders_intent_when_present():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="start",
@@ -243,7 +243,7 @@ async def test_step_start_renders_intent_when_present():
 
 
 async def test_step_complete_renders_slug_and_duration():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="complete", duration_ms=12000))
@@ -254,7 +254,7 @@ async def test_step_complete_renders_slug_and_duration():
 
 
 async def test_step_start_uses_pending_circle_symbol():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="start",
@@ -266,7 +266,7 @@ async def test_step_start_uses_pending_circle_symbol():
 
 
 async def test_step_complete_uses_done_check_and_intent():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="complete", duration_ms=12000,
@@ -279,7 +279,7 @@ async def test_step_complete_uses_done_check_and_intent():
 
 
 async def test_step_fail_uses_cross_and_error():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                                     phase="pre-recon", event="complete",
@@ -293,7 +293,7 @@ async def test_step_fail_uses_cross_and_error():
 
 async def test_rich_mode_shows_steps_hides_tools_keeps_llm():
     # 复刻 workflow_logger rich 模式构造：show_phase=False, show_steps=True, show_tools=False
-    from shannon_core.display.events import StepEvent, ToolCallEvent, LlmTurnEvent, PhaseEvent
+    from supernova_core.display.events import StepEvent, ToolCallEvent, LlmTurnEvent, PhaseEvent
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=120, record=True)
     renderer = RichConsoleRenderer(console, show_phase=False, show_steps=True, show_tools=False)
@@ -315,7 +315,7 @@ async def test_rich_mode_shows_steps_hides_tools_keeps_llm():
 
 async def test_tool_rendered_by_default_show_tools_true():
     # 非 rich 默认 show_tools=True，行为不变
-    from shannon_core.display.events import ToolCallEvent
+    from supernova_core.display.events import ToolCallEvent
     renderer, _ = _renderer_with_capture()  # 默认 show_tools=True
     await renderer.render(ToolCallEvent(timestamp="t", category="TOOL", agent_name="a",
                                         tool_name="Bash", parameters={"command": "ls"}))
@@ -325,7 +325,7 @@ async def test_tool_rendered_by_default_show_tools_true():
 
 async def test_llm_renders_agent_prefix_for_attribution():
     """并行 agent 的 turn 行必须带短前缀，否则滚动区一堆 💭 Turn N 无法区分。"""
-    from shannon_core.display.events import LlmTurnEvent
+    from supernova_core.display.events import LlmTurnEvent
     renderer, _ = _renderer_with_capture()
     await renderer.render(LlmTurnEvent(
         timestamp="t", category="LLM", agent_name="injection-vuln",
@@ -357,7 +357,7 @@ async def test_phase_rule_right_edges_align_across_phases():
 
 async def test_phase_step_agent_bodies_align_same_column():
     """标签列经 tag() 补齐等宽 -> PHASE/STEP/AGENT 正文起点同列。"""
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer, _ = _renderer_with_capture()
     ts = "2026-06-23 00:42:39"
     await renderer.render(PhaseEvent(timestamp=ts, category="PHASE", phase="setup", event="start"))
@@ -378,8 +378,8 @@ async def test_phase_step_agent_bodies_align_same_column():
 
 
 async def test_rich_renderer_info_event_info_level_cyan():
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import InfoEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(
@@ -389,8 +389,8 @@ async def test_rich_renderer_info_event_info_level_cyan():
 
 
 async def test_rich_renderer_info_event_warning_level_yellow():
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import InfoEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(
@@ -402,8 +402,8 @@ async def test_rich_renderer_info_event_warning_level_yellow():
 # --- GitnexusLlmEvent (归 LLM 活动族: 🔍 [GitNexus] cyan, 对偶 💭 [Agent] magenta) ---
 
 async def test_rich_gitnexus_progress_uses_cyan_gitnexus_prefix_and_noun():
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import GitnexusLlmEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import GitnexusLlmEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
@@ -420,8 +420,8 @@ async def test_rich_gitnexus_progress_uses_cyan_gitnexus_prefix_and_noun():
 
 
 async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import GitnexusLlmEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import GitnexusLlmEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
@@ -436,8 +436,8 @@ async def test_rich_gitnexus_hit_shows_checkmark_and_detail():
 
 
 async def test_rich_gitnexus_summary_shows_done_arrow_detail():
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import GitnexusLlmEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import GitnexusLlmEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(
@@ -455,8 +455,8 @@ async def test_rich_gitnexus_note_shows_warn_symbol_and_detail():
 
     取代裸 logger.warning(撞 Rich Live footer, 因 redirect_stderr=False 是硬约束)。
     """
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
-    from shannon_core.display.events import GitnexusLlmEvent
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.events import GitnexusLlmEvent
     from unittest.mock import MagicMock
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(GitnexusLlmEvent(

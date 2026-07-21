@@ -1,6 +1,6 @@
 import pytest
-from shannon_core.code_index.entry_point_fusion import merge_entry_points
-from shannon_core.code_index.models import EntryPoint, UnifiedEntryPoint, Verdict
+from supernova_core.code_index.entry_point_fusion import merge_entry_points
+from supernova_core.code_index.models import EntryPoint, UnifiedEntryPoint, Verdict
 
 
 def test_verdict_has_needs_review():
@@ -138,7 +138,7 @@ class TestMergeEntryPoints:
 # ---------------------------------------------------------------------------
 # Task 2: parse_llm_entry_points tests
 # ---------------------------------------------------------------------------
-from shannon_core.code_index.entry_point_fusion import parse_llm_entry_points
+from supernova_core.code_index.entry_point_fusion import parse_llm_entry_points
 
 DELIVERABLE_WITH_ENTRY_POINTS = """
 # Pre-Recon Deliverable
@@ -306,7 +306,7 @@ class TestMergeWithLLM:
 # Task 4A: run_entry_point_fusion tests
 # ---------------------------------------------------------------------------
 import json
-from shannon_core.code_index import run_entry_point_fusion
+from supernova_core.code_index import run_entry_point_fusion
 
 
 def _make_test_deliverable() -> str:
@@ -402,8 +402,8 @@ class TestRunEntryPointFusion:
 # ---------------------------------------------------------------------------
 # Task 4B: save_adjudication confidence-based verdict tests
 # ---------------------------------------------------------------------------
-from shannon_core.code_index import save_adjudication
-from shannon_core.code_index.models import AdjudicationResult
+from supernova_core.code_index import save_adjudication
+from supernova_core.code_index.models import AdjudicationResult
 
 
 class TestSaveAdjudication:

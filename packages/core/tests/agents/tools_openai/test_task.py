@@ -1,8 +1,8 @@
 import pytest
 from agents import RunContextWrapper
 
-from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.task import _task_impl
+from supernova_core.agents.tools_openai import ToolContext
+from supernova_core.agents.tools_openai.task import _task_impl
 
 
 def _ctx(tmp_path, subagent_run=None):

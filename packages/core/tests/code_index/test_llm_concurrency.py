@@ -2,7 +2,7 @@
 import asyncio
 import logging
 
-from shannon_core.code_index.llm_concurrency import map_llm_with_bounds
+from supernova_core.code_index.llm_concurrency import map_llm_with_bounds
 
 
 async def test_all_items_succeed():
@@ -56,11 +56,11 @@ async def test_empty_items_returns_empty():
 
 
 async def test_default_timeout_resolved_from_env(monkeypatch):
-    """不传 per_call_timeout 时读 SHANNON_LLM_PER_CALL_TIMEOUT(治本 2 配套)。
+    """不传 per_call_timeout 时读 SUPERNOVA_LLM_PER_CALL_TIMEOUT(治本 2 配套)。
 
     覆盖 analyze_taint_llm 调用点(__init__.py:220 不显式传 timeout)。
     """
-    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "0.05")
+    monkeypatch.setenv("SUPERNOVA_LLM_PER_CALL_TIMEOUT", "0.05")
 
     async def fn(x):
         await asyncio.sleep(10)  # 远超 0.05s env 值 → 必被砍
@@ -78,7 +78,7 @@ async def test_default_timeout_resolved_from_env(monkeypatch):
 # → GitnexusLlmEvent note 行 → dispatcher → Rich Live 协调正确换行); logger 降到
 # DEBUG 作文件级兜底(on_skip=None 或排查时 elevate)。全失败仍压 1 条总结(DEBUG)。
 
-_LOGGER = "shannon_core.code_index.llm_concurrency"
+_LOGGER = "supernova_core.code_index.llm_concurrency"
 
 
 async def test_all_fail_emits_single_summary_at_debug_not_warning(caplog):

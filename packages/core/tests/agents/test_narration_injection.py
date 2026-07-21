@@ -12,16 +12,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from shannon_core.agents.narration import DIRECTIVE_ZH
+from supernova_core.agents.narration import DIRECTIVE_ZH
 
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 
 def test_claude_options_get_append_system_prompt_when_zh():
-    from shannon_core.agents.providers_anthropic import AnthropicProvider
+    from supernova_core.agents.providers_anthropic import AnthropicProvider
 
     with patch(
-        "shannon_core.agents.providers_anthropic.narration_directive",
+        "supernova_core.agents.providers_anthropic.narration_directive",
         return_value=DIRECTIVE_ZH,
     ):
         prov = AnthropicProvider.__new__(AnthropicProvider)
@@ -36,10 +36,10 @@ def test_claude_options_get_append_system_prompt_when_zh():
 
 
 def test_claude_options_unchanged_when_disabled():
-    from shannon_core.agents.providers_anthropic import AnthropicProvider
+    from supernova_core.agents.providers_anthropic import AnthropicProvider
 
     with patch(
-        "shannon_core.agents.providers_anthropic.narration_directive",
+        "supernova_core.agents.providers_anthropic.narration_directive",
         return_value=None,
     ):
         prov = AnthropicProvider.__new__(AnthropicProvider)
@@ -50,10 +50,10 @@ def test_claude_options_unchanged_when_disabled():
 
 
 def test_openai_instructions_carry_directive_when_zh():
-    from shannon_core.agents import providers_openai as po
+    from supernova_core.agents import providers_openai as po
 
     with patch(
-        "shannon_core.agents.providers_openai.narration_directive",
+        "supernova_core.agents.providers_openai.narration_directive",
         return_value=DIRECTIVE_ZH,
     ):
         prov = po.OpenAIProvider.__new__(po.OpenAIProvider)
@@ -61,10 +61,10 @@ def test_openai_instructions_carry_directive_when_zh():
 
 
 def test_openai_instructions_none_when_disabled():
-    from shannon_core.agents import providers_openai as po
+    from supernova_core.agents import providers_openai as po
 
     with patch(
-        "shannon_core.agents.providers_openai.narration_directive",
+        "supernova_core.agents.providers_openai.narration_directive",
         return_value=None,
     ):
         prov = po.OpenAIProvider.__new__(po.OpenAIProvider)

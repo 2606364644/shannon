@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from shannon_core.code_index.models import FuncBlock, TypedParameter, ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import FuncBlock, TypedParameter, ParameterSource
+from supernova_core.code_index.parameter_models import (
     DangerousSlot,
     IntraResult,
     SinkCallSite,
@@ -14,7 +14,7 @@ from shannon_core.code_index.parameter_models import (
     TaintAnalysisResult,
     TaintPath,
 )
-from shannon_core.code_index.llm_taint_analyzer import (
+from supernova_core.code_index.llm_taint_analyzer import (
     _deterministic_intra_fallback,
     _intra_result_from_llm,
     _is_literal_expression,
@@ -317,14 +317,14 @@ class TestDeterministicIntraFallback:
 
 class TestNoClientSilentFallback:
     """llm_client=None(本就无 LLM,预期降级)应静默 fallback — 不打 warning,
-    避免 SHANNON_GITNEXUS_LLM_ENABLED=0 时每个函数一条 "LLM taint analysis failed" 刷屏。
+    避免 SUPERNOVA_GITNEXUS_LLM_ENABLED=0 时每个函数一条 "LLM taint analysis failed" 刷屏。
     真 LLM 失败(client 有但调用 raise)仍保留 warning(运维需知)。"""
 
     async def test_no_client_is_silent(self, caplog):
         block = _block("handler", params=["req"])
         sink = _sink(block.id)
         with caplog.at_level(
-            logging.WARNING, logger="shannon_core.code_index.llm_taint_analyzer"
+            logging.WARNING, logger="supernova_core.code_index.llm_taint_analyzer"
         ):
             result = await analyze_taint_llm(
                 block, [sink], typed_params=None, llm_client=None)
@@ -342,7 +342,7 @@ class TestNoClientSilentFallback:
         sink = _sink(block.id)
         failing = FakeLLMClient(response=None)  # __call__ raises RuntimeError
         with caplog.at_level(
-            logging.WARNING, logger="shannon_core.code_index.llm_taint_analyzer"
+            logging.WARNING, logger="supernova_core.code_index.llm_taint_analyzer"
         ):
             await analyze_taint_llm(block, [sink], typed_params=None, llm_client=failing)
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]

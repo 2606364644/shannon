@@ -1,9 +1,9 @@
-from shannon_core.code_index.models import CallChain, FuncBlock, ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import CallChain, FuncBlock, ParameterSource
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, IntraResult, PropagationStep, SinkCallSite, SinkCategory, SlotContext,
     SourcePoint, TaintFlow,
 )
-from shannon_core.code_index.chain_propagator import (
+from supernova_core.code_index.chain_propagator import (
     _map_call_site_params_reverse,
     propagate_backward_across_chains,
 )
@@ -108,7 +108,7 @@ def test_pipeline_uses_backward_for_taint_flows():
     """pipeline 冒烟:taint_flows 由 propagate_backward 产(含 source_type 精确)。"""
     import asyncio
     from unittest.mock import AsyncMock
-    from shannon_core.code_index import build_code_index_with_gitnexus
+    from supernova_core.code_index import build_code_index_with_gitnexus
     import tempfile, os
 
     with tempfile.TemporaryDirectory() as repo:

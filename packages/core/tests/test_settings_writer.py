@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.models.config import Rule, Rules
-from shannon_core.services.settings_writer import (
+from supernova_core.models.config import Rule, Rules
+from supernova_core.services.settings_writer import (
     sync_code_path_deny_rules,
     cleanup_settings,
 )

@@ -7,7 +7,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from shannon_core.agents.providers import (
+from supernova_core.agents.providers import (
     AuthenticationError,
     ProviderError,
     RateLimitError,
@@ -16,10 +16,10 @@ from shannon_core.agents.providers import (
     create_provider,
 )
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
-from shannon_core.agents.providers_anthropic import AnthropicProvider
-from shannon_core.agents.message_dispatcher import MessageDispatcher
-from shannon_core.agents.providers_openai import OpenAIProvider
-from shannon_core.agents.runner import (
+from supernova_core.agents.providers_anthropic import AnthropicProvider
+from supernova_core.agents.message_dispatcher import MessageDispatcher
+from supernova_core.agents.providers_openai import OpenAIProvider
+from supernova_core.agents.runner import (
     DEFAULT_MODELS,
     ClaudeRunResult,
     ProviderConfig,
@@ -108,12 +108,12 @@ class TestBuildProviderConfig:
         assert config.type == "anthropic_api"
 
     def test_openai_env_vars(self):
-        """测试 openai_compatible 的 SHANNON_OPENAI_* 环境变量(删 fallback 后 openai 读 SHANNON_OPENAI_*)"""
+        """测试 openai_compatible 的 SUPERNOVA_OPENAI_* 环境变量(删 fallback 后 openai 读 SUPERNOVA_OPENAI_*)"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "openai_compatible",
-            "SHANNON_OPENAI_API_KEY": "test-key",
-            "SHANNON_OPENAI_BASE_URL": "https://api.example.com",
-            "SHANNON_MODEL": "gpt-4o",
+            "SUPERNOVA_AI_PROVIDER": "openai_compatible",
+            "SUPERNOVA_OPENAI_API_KEY": "test-key",
+            "SUPERNOVA_OPENAI_BASE_URL": "https://api.example.com",
+            "SUPERNOVA_MODEL": "gpt-4o",
         }):
             config = build_provider_config()
             assert config.type == "openai_compatible"
@@ -132,9 +132,9 @@ class TestBuildProviderConfig:
             assert config.base_url == "https://anthropic.example.com"
 
     def test_anthropic_ignores_shannon_credential_vars(self):
-        """anthropic_api 不再读 SHANNON_API_KEY(删 fallback);只认 ANTHROPIC_*。"""
+        """anthropic_api 不再读 SUPERNOVA_API_KEY(删 fallback);只认 ANTHROPIC_*。"""
         with patch.dict(os.environ, {
-            "SHANNON_API_KEY": "should-be-ignored",
+            "SUPERNOVA_API_KEY": "should-be-ignored",
         }, clear=True):
             config = build_provider_config()
             assert config.api_key is None
@@ -142,7 +142,7 @@ class TestBuildProviderConfig:
     def test_explicit_params_override_env(self):
         """测试显式参数覆盖环境变量"""
         with patch.dict(os.environ, {
-            "SHANNON_API_KEY": "env-key",
+            "SUPERNOVA_API_KEY": "env-key",
         }):
             config = build_provider_config(api_key="param-key")
             assert config.api_key == "param-key"
@@ -150,7 +150,7 @@ class TestBuildProviderConfig:
     def test_bedrock_config(self):
         """测试 Bedrock 配置"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "bedrock",
+            "SUPERNOVA_AI_PROVIDER": "bedrock",
             "AWS_REGION": "us-west-2",
         }):
             config = build_provider_config()
@@ -160,8 +160,8 @@ class TestBuildProviderConfig:
     def test_vertex_config(self):
         """测试 Vertex 配置"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "vertex",
-            "SHANNON_PROJECT_ID": "test-project",
+            "SUPERNOVA_AI_PROVIDER": "vertex",
+            "SUPERNOVA_PROJECT_ID": "test-project",
             "CLOUD_ML_REGION": "us-central1",
         }):
             config = build_provider_config()
@@ -170,11 +170,11 @@ class TestBuildProviderConfig:
             assert config.region == "us-central1"
 
     def test_tier_specific_env_vars(self):
-        """测试 SHANNON_*_MODEL 环境变量"""
+        """测试 SUPERNOVA_*_MODEL 环境变量"""
         with patch.dict(os.environ, {
-            "SHANNON_SMALL_MODEL": "custom-small",
-            "SHANNON_MEDIUM_MODEL": "custom-medium",
-            "SHANNON_LARGE_MODEL": "custom-large",
+            "SUPERNOVA_SMALL_MODEL": "custom-small",
+            "SUPERNOVA_MEDIUM_MODEL": "custom-medium",
+            "SUPERNOVA_LARGE_MODEL": "custom-large",
         }):
             config = build_provider_config()
             assert config.small_model == "custom-small"
@@ -184,7 +184,7 @@ class TestBuildProviderConfig:
     def test_tier_specific_env_vars_partial(self):
         """测试只设置部分 tier 变量"""
         with patch.dict(os.environ, {
-            "SHANNON_MEDIUM_MODEL": "custom-medium",
+            "SUPERNOVA_MEDIUM_MODEL": "custom-medium",
         }):
             config = build_provider_config()
             assert config.small_model is None
@@ -202,22 +202,22 @@ class TestBuildProviderConfig:
     def test_tier_specific_params_override_env(self):
         """测试显式参数覆盖 tier 环境变量"""
         with patch.dict(os.environ, {
-            "SHANNON_MEDIUM_MODEL": "env-medium",
+            "SUPERNOVA_MEDIUM_MODEL": "env-medium",
         }):
             config = build_provider_config(medium_model="param-medium")
             assert config.medium_model == "param-medium"
 
 
 class TestBuildProviderConfigOpenAI:
-    """测试 build_provider_config 在 openai 系下的 SHANNON_OPENAI_* 优先级"""
+    """测试 build_provider_config 在 openai 系下的 SUPERNOVA_OPENAI_* 优先级"""
 
     def test_openai_env_precedence(self, monkeypatch):
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
-        monkeypatch.setenv("SHANNON_OPENAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-        monkeypatch.setenv("SHANNON_OPENAI_API_KEY", "glm-key")
-        monkeypatch.delenv("SHANNON_BASE_URL", raising=False)
-        monkeypatch.delenv("SHANNON_API_KEY", raising=False)
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "openai_compatible")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_API_KEY", "glm-key")
+        monkeypatch.delenv("SUPERNOVA_BASE_URL", raising=False)
+        monkeypatch.delenv("SUPERNOVA_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         cfg = build_provider_config()
         assert cfg.type == "openai_compatible"
@@ -225,56 +225,56 @@ class TestBuildProviderConfigOpenAI:
         assert cfg.api_key == "glm-key"
 
     def test_openai_no_fallback_to_shannon_vars(self, monkeypatch):
-        """openai_compatible 缺 SHANNON_OPENAI_* 时不再回退 SHANNON_*(删 fallback)。"""
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
-        monkeypatch.delenv("SHANNON_OPENAI_BASE_URL", raising=False)
-        monkeypatch.delenv("SHANNON_OPENAI_API_KEY", raising=False)
-        monkeypatch.setenv("SHANNON_BASE_URL", "https://shared/v4")
-        monkeypatch.setenv("SHANNON_API_KEY", "shared-key")
+        """openai_compatible 缺 SUPERNOVA_OPENAI_* 时不再回退 SUPERNOVA_*(删 fallback)。"""
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "openai_compatible")
+        monkeypatch.delenv("SUPERNOVA_OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("SUPERNOVA_OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("SUPERNOVA_BASE_URL", "https://shared/v4")
+        monkeypatch.setenv("SUPERNOVA_API_KEY", "shared-key")
         cfg = build_provider_config()
         assert cfg.base_url is None
         assert cfg.api_key is None
 
     def test_anthropic_unchanged_by_openai_vars(self, monkeypatch):
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "anthropic_api")
-        monkeypatch.setenv("SHANNON_OPENAI_BASE_URL", "https://should-be-ignored/v4")
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "anthropic_api")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_BASE_URL", "https://should-be-ignored/v4")
         cfg = build_provider_config()
         assert cfg.base_url != "https://should-be-ignored/v4"
 
     def test_openai_tier_models_precedence(self, monkeypatch):
-        """openai 系优先读 SHANNON_OPENAI_*_MODEL（模型名与 anthropic 兼容接口不同）"""
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
-        monkeypatch.setenv("SHANNON_LARGE_MODEL", "GLM-5.2[1m]")
-        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "GLM-5.2[1m]")
-        monkeypatch.setenv("SHANNON_SMALL_MODEL", "GLM-4.5-Air")
-        monkeypatch.setenv("SHANNON_OPENAI_LARGE_MODEL", "glm-5.2")
-        monkeypatch.setenv("SHANNON_OPENAI_MEDIUM_MODEL", "glm-5.2")
-        monkeypatch.setenv("SHANNON_OPENAI_SMALL_MODEL", "glm-4.5-air")
+        """openai 系优先读 SUPERNOVA_OPENAI_*_MODEL（模型名与 anthropic 兼容接口不同）"""
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "openai_compatible")
+        monkeypatch.setenv("SUPERNOVA_LARGE_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SUPERNOVA_MEDIUM_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SUPERNOVA_SMALL_MODEL", "GLM-4.5-Air")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_LARGE_MODEL", "glm-5.2")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_MEDIUM_MODEL", "glm-5.2")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_SMALL_MODEL", "glm-4.5-air")
         cfg = build_provider_config()
         assert cfg.large_model == "glm-5.2"
         assert cfg.medium_model == "glm-5.2"
         assert cfg.small_model == "glm-4.5-air"
 
     def test_openai_tier_models_no_fallback(self, monkeypatch):
-        """openai_compatible 缺 SHANNON_OPENAI_*_MODEL 时不再回退 SHANNON_*_MODEL。"""
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "openai_compatible")
-        monkeypatch.delenv("SHANNON_OPENAI_LARGE_MODEL", raising=False)
-        monkeypatch.delenv("SHANNON_OPENAI_MEDIUM_MODEL", raising=False)
-        monkeypatch.delenv("SHANNON_OPENAI_SMALL_MODEL", raising=False)
-        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "shared-model")
+        """openai_compatible 缺 SUPERNOVA_OPENAI_*_MODEL 时不再回退 SUPERNOVA_*_MODEL。"""
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "openai_compatible")
+        monkeypatch.delenv("SUPERNOVA_OPENAI_LARGE_MODEL", raising=False)
+        monkeypatch.delenv("SUPERNOVA_OPENAI_MEDIUM_MODEL", raising=False)
+        monkeypatch.delenv("SUPERNOVA_OPENAI_SMALL_MODEL", raising=False)
+        monkeypatch.setenv("SUPERNOVA_MEDIUM_MODEL", "shared-model")
         cfg = build_provider_config()
-        assert cfg.medium_model is None  # 不回退 SHANNON_MEDIUM_MODEL
+        assert cfg.medium_model is None  # 不回退 SUPERNOVA_MEDIUM_MODEL
 
     def test_anthropic_tier_models_ignore_openai(self, monkeypatch):
-        """anthropic 系不读 SHANNON_OPENAI_*_MODEL"""
-        from shannon_core.agents.providers import build_provider_config
-        monkeypatch.setenv("SHANNON_AI_PROVIDER", "anthropic_api")
-        monkeypatch.setenv("SHANNON_MEDIUM_MODEL", "GLM-5.2[1m]")
-        monkeypatch.setenv("SHANNON_OPENAI_MEDIUM_MODEL", "glm-5.2")
+        """anthropic 系不读 SUPERNOVA_OPENAI_*_MODEL"""
+        from supernova_core.agents.providers import build_provider_config
+        monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "anthropic_api")
+        monkeypatch.setenv("SUPERNOVA_MEDIUM_MODEL", "GLM-5.2[1m]")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_MEDIUM_MODEL", "glm-5.2")
         cfg = build_provider_config()
         assert cfg.medium_model == "GLM-5.2[1m]"
 
@@ -401,7 +401,7 @@ class TestAnthropicProvider:
             yield text_event
             yield mock_result
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="Test prompt",
                 cwd="/tmp",
@@ -572,7 +572,7 @@ class TestAnthropicProviderBuildOptions:
         assert options.env.get("IS_SANDBOX") == "1"
 
     def test_build_sdk_env_no_is_sandbox_when_non_root(self, monkeypatch):
-        """非 root(getuid!=0) 不设 IS_SANDBOX: host shannon-user 跑 claude CLI 不触发 root
+        """非 root(getuid!=0) 不设 IS_SANDBOX: host supernova-user 跑 claude CLI 不触发 root
         守卫(getuid!=0), 不污染 host 路径(保持 host 与 worker 两路互不干扰)."""
         monkeypatch.setattr("os.getuid", lambda: 1000)
         config = ProviderConfig(type="anthropic_api")
@@ -583,7 +583,7 @@ class TestAnthropicProviderBuildOptions:
 
 class TestOpenAIProvider:
     def test_get_model_resolves_tier(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         config = ProviderConfig(
             type="openai_compatible",
             medium_model="GLM-5.2[1m]",
@@ -592,7 +592,7 @@ class TestOpenAIProvider:
         assert provider._get_model("medium") == "GLM-5.2[1m]"
 
     def test_get_model_falls_back_to_default(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         config = ProviderConfig(type="openai_compatible")
         provider = OpenAIProvider(config)
         # DEFAULT_MODELS["openai_compatible"]["medium"]
@@ -600,7 +600,7 @@ class TestOpenAIProvider:
 
     def test_build_agent_wires_chatcompletions_model_and_tools(self):
         from agents import Agent, OpenAIChatCompletionsModel
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         agent = provider.build_agent("m", output_format=None)
         assert isinstance(agent, Agent)
@@ -611,8 +611,8 @@ class TestOpenAIProvider:
 
     def test_build_agent_wires_output_type_when_output_format_given(self):
         """B2: output_format 非空时，Agent 必须带 output_type（强制结构化输出）。"""
-        from shannon_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         schema = {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
         agent = provider.build_agent("m", output_format=schema)
@@ -622,7 +622,7 @@ class TestOpenAIProvider:
 
     def test_build_agent_output_type_none_when_no_output_format(self):
         """B2: output_format 为 None 时，output_type 必须为 None（兼容纯文本路径）。"""
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         agent = provider.build_agent("m", output_format=None)
         assert agent.output_type is None
@@ -631,7 +631,7 @@ class TestOpenAIProvider:
     async def test_call_maps_result_and_audits(self, monkeypatch, tmp_path):
         # 用 mock Runner.run_streamed 验证 call() 的组装：event 收集 + 映射 + audit
         from unittest.mock import AsyncMock, MagicMock
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
 
         config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
         provider = OpenAIProvider(config)
@@ -646,7 +646,7 @@ class TestOpenAIProvider:
         fake_result.context_wrapper.usage = MagicMock(input_tokens=3, output_tokens=2, input_tokens_details=None)
         fake_result.stream_events = _empty
 
-        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
+        monkeypatch.setattr("supernova_core.agents.providers_openai.Runner.run_streamed",
                             MagicMock(return_value=fake_result))
 
         audit = AsyncMock()
@@ -660,7 +660,7 @@ class TestOpenAIProvider:
     async def test_call_handles_max_turns(self, monkeypatch, tmp_path):
         from unittest.mock import MagicMock
         from agents import MaxTurnsExceeded
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
 
         config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
         provider = OpenAIProvider(config)
@@ -671,7 +671,7 @@ class TestOpenAIProvider:
 
         fake_result = MagicMock()
         fake_result.stream_events = _raising_stream
-        monkeypatch.setattr("shannon_core.agents.providers_openai.Runner.run_streamed",
+        monkeypatch.setattr("supernova_core.agents.providers_openai.Runner.run_streamed",
                             MagicMock(return_value=fake_result))
         res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium")
         assert res.stop_reason == "max_turns"
@@ -681,7 +681,7 @@ class TestOpenAIProvider:
         assert res.retryable is False
 
     def test_is_retryable_classifies_rate_limit(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         assert provider._is_retryable_error(Exception("Rate limit exceeded")) is True
         assert provider._is_retryable_error(Exception("request timed out")) is True
@@ -691,35 +691,35 @@ class TestOpenAIProvider:
         assert provider._is_retryable_error(Exception("some transient error")) is True
 
     def test_classify_error_rate_limit(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(Exception("Rate limit exceeded"))
         assert code == "RateLimitError"
         assert retryable is True
 
     def test_classify_error_timeout(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(TimeoutError("request timed out"))
         assert code == "TimeoutError"
         assert retryable is True
 
     def test_classify_error_auth(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(Exception("invalid_api_key (401)"))
         assert code == "AuthenticationError"
         assert retryable is False
 
     def test_classify_error_permission(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(Exception("permission denied (403)"))
         assert code == "PermissionError"
         assert retryable is False
 
     def test_classify_error_default_agent_execution(self):
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(Exception("some transient error"))
         assert code == "AgentExecutionError"
@@ -727,7 +727,7 @@ class TestOpenAIProvider:
 
     def test_handle_error_sets_error_code(self):
         """B3: _handle_error 必须填 error_code（此前恒 None）。"""
-        from shannon_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         res = provider._handle_error(Exception("Rate limit exceeded"), duration=100, model="m")
         assert res.success is False
@@ -739,12 +739,12 @@ class TestOpenAISubagentMaxTurns:
     """B2: openai 子代理 max_turns 默认 40（对称主 agent _max_turns()）。"""
 
     def test_default_is_40(self, monkeypatch):
-        monkeypatch.delenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", raising=False)
+        monkeypatch.delenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", raising=False)
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible"))
         assert provider._subagent_max_turns() == 40
 
     def test_env_override(self, monkeypatch):
-        monkeypatch.setenv("SHANNON_OPENAI_SUBAGENT_MAX_TURNS", "60")
+        monkeypatch.setenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", "60")
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible"))
         assert provider._subagent_max_turns() == 60
 
@@ -968,7 +968,7 @@ class TestExecuteQueryWithDispatcher:
             yield assistant_event
             yield mock_result
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider._execute_query(
                 prompt="test",
                 options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
@@ -1007,7 +1007,7 @@ class TestExecuteQueryWithDispatcher:
             for e in events:
                 yield e
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider._execute_query(
                 prompt="test",
                 options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
@@ -1050,7 +1050,7 @@ class TestCallWithTurnCount:
             for e in events:
                 yield e
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="multi-turn test",
                 cwd="/tmp",
@@ -1140,7 +1140,7 @@ class TestSpendingCapDetection:
             for e in events:
                 yield e
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="do work",
                 cwd="/tmp",
@@ -1174,7 +1174,7 @@ class TestSpendingCapDetection:
             for e in events:
                 yield e
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="do work",
                 cwd="/tmp",
@@ -1195,7 +1195,7 @@ class TestSpendingCapDetection:
             raise Exception("spending limit reached")
             yield  # make it a generator
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="do work",
                 cwd="/tmp",
@@ -1235,7 +1235,7 @@ class TestSpendingCapDetection:
             for e in events:
                 yield e
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(
                 prompt="do work",
                 cwd="/tmp",
@@ -1319,8 +1319,8 @@ class TestRunClaudePromptErrorCode:
             retryable=True,
         ))
 
-        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
-            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
                 result = await run_claude_prompt(
                     prompt="test",
                     repo_path="/tmp",
@@ -1332,7 +1332,7 @@ class TestRunClaudePromptErrorCode:
     @pytest.mark.asyncio
     async def test_exception_handler_sets_error_code(self):
         """Catch-all exception handler classifies and sets error_code."""
-        with patch("shannon_core.agents.providers.build_provider_config", side_effect=Exception("authentication failed")):
+        with patch("supernova_core.agents.providers.build_provider_config", side_effect=Exception("authentication failed")):
             result = await run_claude_prompt(
                 prompt="test",
                 repo_path="/tmp",
@@ -1484,9 +1484,9 @@ class TestTierModelEnvVarIntegration:
     """端到端测试：环境变量 → build_provider_config → Provider._get_model()"""
 
     def test_single_tier_override_others_use_defaults(self):
-        """设置 SHANNON_MEDIUM_MODEL 后，只有 medium tier 被覆盖"""
+        """设置 SUPERNOVA_MEDIUM_MODEL 后，只有 medium tier 被覆盖"""
         with patch.dict(os.environ, {
-            "SHANNON_MEDIUM_MODEL": "gpt-4o",
+            "SUPERNOVA_MEDIUM_MODEL": "gpt-4o",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1496,10 +1496,10 @@ class TestTierModelEnvVarIntegration:
         assert provider._get_model("large") == "claude-opus-4-8"
 
     def test_tier_override_plus_global_fallback(self):
-        """SHANNON_MODEL + SHANNON_LARGE_MODEL：large 用 tier override，其余用 global"""
+        """SUPERNOVA_MODEL + SUPERNOVA_LARGE_MODEL：large 用 tier override，其余用 global"""
         with patch.dict(os.environ, {
-            "SHANNON_MODEL": "fallback-model",
-            "SHANNON_LARGE_MODEL": "custom-large",
+            "SUPERNOVA_MODEL": "fallback-model",
+            "SUPERNOVA_LARGE_MODEL": "custom-large",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1521,8 +1521,8 @@ class TestTierModelEnvVarIntegration:
     def test_bedrock_tier_override_with_env(self):
         """Bedrock provider 通过环境变量覆盖 tier"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "bedrock",
-            "SHANNON_SMALL_MODEL": "custom-bedrock-small",
+            "SUPERNOVA_AI_PROVIDER": "bedrock",
+            "SUPERNOVA_SMALL_MODEL": "custom-bedrock-small",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1533,8 +1533,8 @@ class TestTierModelEnvVarIntegration:
     def test_vertex_tier_override_with_env(self):
         """Vertex provider 通过环境变量覆盖 tier"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "vertex",
-            "SHANNON_LARGE_MODEL": "custom-vertex-large",
+            "SUPERNOVA_AI_PROVIDER": "vertex",
+            "SUPERNOVA_LARGE_MODEL": "custom-vertex-large",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1543,10 +1543,10 @@ class TestTierModelEnvVarIntegration:
         assert provider._get_model("small") == "claude-haiku-4-5@latest"
 
     def test_openai_tier_override_with_env(self):
-        """OpenAI compatible provider 通过 SHANNON_OPENAI_*_MODEL 覆盖 tier"""
+        """OpenAI compatible provider 通过 SUPERNOVA_OPENAI_*_MODEL 覆盖 tier"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "openai_compatible",
-            "SHANNON_OPENAI_MEDIUM_MODEL": "gpt-4o-turbo",
+            "SUPERNOVA_AI_PROVIDER": "openai_compatible",
+            "SUPERNOVA_OPENAI_MEDIUM_MODEL": "gpt-4o-turbo",
         }, clear=True):
             config = build_provider_config()
             provider = OpenAIProvider(config)
@@ -1557,8 +1557,8 @@ class TestTierModelEnvVarIntegration:
     def test_litellm_tier_override_with_env(self):
         """LiteLLM router 通过环境变量覆盖 tier"""
         with patch.dict(os.environ, {
-            "SHANNON_AI_PROVIDER": "litellm_router",
-            "SHANNON_LARGE_MODEL": "anthropic/claude-opus-4-8-custom",
+            "SUPERNOVA_AI_PROVIDER": "litellm_router",
+            "SUPERNOVA_LARGE_MODEL": "anthropic/claude-opus-4-8-custom",
         }, clear=True):
             config = build_provider_config()
             provider = OpenAIProvider(config)
@@ -1569,9 +1569,9 @@ class TestTierModelEnvVarIntegration:
     def test_all_three_tiers_overridden(self):
         """三个 tier 全部覆盖"""
         with patch.dict(os.environ, {
-            "SHANNON_SMALL_MODEL": "my-small",
-            "SHANNON_MEDIUM_MODEL": "my-medium",
-            "SHANNON_LARGE_MODEL": "my-large",
+            "SUPERNOVA_SMALL_MODEL": "my-small",
+            "SUPERNOVA_MEDIUM_MODEL": "my-medium",
+            "SUPERNOVA_LARGE_MODEL": "my-large",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1581,10 +1581,10 @@ class TestTierModelEnvVarIntegration:
         assert provider._get_model("large") == "my-large"
 
     def test_tier_override_beats_shannon_model(self):
-        """SHANNON_*_MODEL 优先级高于 SHANNON_MODEL"""
+        """SUPERNOVA_*_MODEL 优先级高于 SUPERNOVA_MODEL"""
         with patch.dict(os.environ, {
-            "SHANNON_MODEL": "global-model",
-            "SHANNON_MEDIUM_MODEL": "tier-medium",
+            "SUPERNOVA_MODEL": "global-model",
+            "SUPERNOVA_MEDIUM_MODEL": "tier-medium",
         }, clear=True):
             config = build_provider_config()
             provider = AnthropicProvider(config)
@@ -1635,7 +1635,7 @@ class TestExecuteQueryMountsResultMetadata:
         async def mock_query(*, prompt, options):
             yield mock_result
 
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             final = await provider._execute_query(
                 prompt="test",
                 options=ClaudeAgentOptions(model="claude-sonnet-4-6", cwd="/tmp"),
@@ -1653,21 +1653,21 @@ class TestStopReasonFields:
     """L2: ClaudeRunResult and AgentMetrics carry stop_reason."""
 
     def test_claude_run_result_has_stop_reason(self):
-        from shannon_core.agents.runner import ClaudeRunResult
+        from supernova_core.agents.runner import ClaudeRunResult
         result = ClaudeRunResult(text="ok", success=True, stop_reason="end_turn")
         assert result.stop_reason == "end_turn"
 
     def test_claude_run_result_stop_reason_default_none(self):
-        from shannon_core.agents.runner import ClaudeRunResult
+        from supernova_core.agents.runner import ClaudeRunResult
         assert ClaudeRunResult().stop_reason is None
 
     def test_agent_metrics_has_stop_reason(self):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         metrics = AgentMetrics(duration_ms=10, stop_reason="max_duration")
         assert metrics.stop_reason == "max_duration"
 
     def test_agent_metrics_stop_reason_default_none(self):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         assert AgentMetrics(duration_ms=10).stop_reason is None
 
 
@@ -1866,7 +1866,7 @@ class TestCallResultFailureLayer:
             duration_ms=1000, duration_api_ms=500,
             is_error=True, num_turns=200, session_id="t",
         )
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
             result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert result.success is False
         assert result.error_code == "ExecutionLimitError"
@@ -1882,7 +1882,7 @@ class TestCallResultFailureLayer:
             is_error=True, num_turns=1, session_id="t",
             api_error_status=429,
         )
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
             result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert result.success is False
         assert result.error_code == "RateLimitError"
@@ -1897,8 +1897,8 @@ class TestCallResultFailureLayer:
             is_error=False, num_turns=1, session_id="t",
             stop_reason="max_duration",
         )
-        with caplog.at_level(logging.WARNING, logger="shannon_core.agents.providers_anthropic"):
-            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+        with caplog.at_level(logging.WARNING, logger="supernova_core.agents.providers_anthropic"):
+            with patch("supernova_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
                 result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert result.success is True  # non-end_turn stop is diagnostic, not failure
         assert any("stop_reason" in r.getMessage() and "max_duration" in r.getMessage()
@@ -1915,8 +1915,8 @@ class TestCallResultFailureLayer:
             is_error=False, num_turns=1, session_id="t",
             stop_reason="stop_sequence",
         )
-        with caplog.at_level(logging.WARNING, logger="shannon_core.agents.providers_anthropic"):
-            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+        with caplog.at_level(logging.WARNING, logger="supernova_core.agents.providers_anthropic"):
+            with patch("supernova_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
                 result = await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert result.success is True
         assert any("stop_sequence" in r.getMessage() and "typically harmless" in r.getMessage()
@@ -1931,8 +1931,8 @@ class TestCallResultFailureLayer:
             is_error=False, num_turns=1, session_id="t",
             permission_denials=[{"tool": "bash"}],
         )
-        with caplog.at_level(logging.INFO, logger="shannon_core.agents.providers_anthropic"):
-            with patch("shannon_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
+        with caplog.at_level(logging.INFO, logger="supernova_core.agents.providers_anthropic"):
+            with patch("supernova_core.agents.providers_anthropic.query", side_effect=_stream(msg)):
                 await provider.call(prompt="p", cwd="/tmp", model_tier="medium")
         assert any("permission denials" in r.getMessage().lower() for r in caplog.records)
 
@@ -1942,7 +1942,7 @@ class TestStopReasonPropagationAndNonRetryable:
 
     def test_classify_chain_error_max_turns_is_non_retryable(self):
         """error_max_turns (retryable=False) reaches ApplicationFailure(non_retryable=True)."""
-        from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+        from supernova_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
         err = PentestError(
             "max turns reached",
             category="validation",
@@ -1956,7 +1956,7 @@ class TestStopReasonPropagationAndNonRetryable:
         assert non_retryable is True
 
     def test_agent_metrics_stop_reason_round_trip(self):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         metrics = AgentMetrics(duration_ms=10, stop_reason="end_turn")
         dumped = metrics.model_dump()
         assert dumped["stop_reason"] == "end_turn"
@@ -1979,7 +1979,7 @@ class TestProviderAuditLoggerInjection:
                             is_error=False, num_turns=1, session_id="t")
         async def mock_query(*, prompt, options):
             yield tool_use; yield tool_result; yield msg
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             await provider._execute_query(
                 prompt="t", options=ClaudeAgentOptions(model="m", cwd="/tmp"),
                 audit_logger=mock_audit,
@@ -2000,7 +2000,7 @@ class TestProviderAuditLoggerInjection:
                             is_error=False, num_turns=1, session_id="t")
         async def mock_query(*, prompt, options):
             yield tool_use; yield msg
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             await provider.call(prompt="t", cwd="/tmp", model_tier="medium", audit_logger=mock_audit)
         mock_audit.log_tool_start.assert_awaited_once_with("edit", {"path": "a"})
 
@@ -2011,7 +2011,7 @@ class TestProviderAuditLoggerInjection:
                             is_error=False, num_turns=1, session_id="t", result="hi")
         async def mock_query(*, prompt, options):
             yield msg
-        with patch("shannon_core.agents.providers_anthropic.query", side_effect=mock_query):
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
             result = await provider.call(prompt="t", cwd="/tmp", model_tier="medium")
         assert result.success is True
 
@@ -2021,13 +2021,13 @@ class TestRunClaudePromptAuditLogger:
 
     @pytest.mark.asyncio
     async def test_wraps_activity_logger(self):
-        from shannon_core.logging.activity_logger import ConsoleActivityLogger
-        from shannon_core.agents.tool_audit_logger import ActivityToolAuditLogger
+        from supernova_core.logging.activity_logger import ConsoleActivityLogger
+        from supernova_core.agents.tool_audit_logger import ActivityToolAuditLogger
         activity_logger = ConsoleActivityLogger()
         mock_provider = AsyncMock()
         mock_provider.call = AsyncMock(return_value=ClaudeRunResult(text="ok", success=True))
-        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
-            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
                 await run_claude_prompt(prompt="t", repo_path="/tmp", audit_logger=activity_logger)
         sent = mock_provider.call.call_args.kwargs["audit_logger"]
         assert isinstance(sent, ActivityToolAuditLogger)
@@ -2036,8 +2036,8 @@ class TestRunClaudePromptAuditLogger:
     async def test_none_audit_logger_passes_none(self):
         mock_provider = AsyncMock()
         mock_provider.call = AsyncMock(return_value=ClaudeRunResult(text="ok", success=True))
-        with patch("shannon_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
-            with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.build_provider_config", return_value=ProviderConfig()):
+            with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
                 await run_claude_prompt(prompt="t", repo_path="/tmp")
         assert mock_provider.call.call_args.kwargs.get("audit_logger") is None
 
@@ -2047,8 +2047,8 @@ class TestExecutorForwardsAuditLogger:
 
     @pytest.mark.asyncio
     async def test_forwards_audit_logger(self, tmp_path):
-        from shannon_core.agents.executor import AgentExecutor
-        from shannon_core.models.agents import AgentName
+        from supernova_core.agents.executor import AgentExecutor
+        from supernova_core.models.agents import AgentName
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -2058,10 +2058,10 @@ class TestExecutorForwardsAuditLogger:
         executor = AgentExecutor(mock_prompt_manager)
 
         sentinel = object()
-        with patch("shannon_core.agents.executor.run_claude_prompt",
+        with patch("supernova_core.agents.executor.run_claude_prompt",
                    new=AsyncMock(return_value=ClaudeRunResult(text="ok", success=True, turns=3, cost=0.01))) as mock_run, \
-             patch("shannon_core.agents.executor.GitManager") as mock_git, \
-             patch("shannon_core.agents.executor.validate_deliverable", new=AsyncMock()):
+             patch("supernova_core.agents.executor.GitManager") as mock_git, \
+             patch("supernova_core.agents.executor.validate_deliverable", new=AsyncMock()):
             mock_git.create_checkpoint = AsyncMock()
             mock_git.commit = AsyncMock()
             await executor.execute(
@@ -2077,31 +2077,31 @@ class TestBaseProviderContract:
     """D3: 两 provider 都必须是 BaseProvider 的实例（A1 契约硬化锁定）。"""
 
     def test_anthropic_provider_is_baseprovider_instance(self):
-        from shannon_core.agents.providers import BaseProvider
-        from shannon_core.agents.providers_anthropic import AnthropicProvider
-        from shannon_core.agents.runner import ProviderConfig
+        from supernova_core.agents.providers import BaseProvider
+        from supernova_core.agents.providers_anthropic import AnthropicProvider
+        from supernova_core.agents.runner import ProviderConfig
         provider = AnthropicProvider(ProviderConfig(type="anthropic_api", api_key="k"))
         assert isinstance(provider, BaseProvider), "AnthropicProvider 必须继承 BaseProvider"
 
     def test_openai_provider_is_baseprovider_instance(self):
-        from shannon_core.agents.providers import BaseProvider
-        from shannon_core.agents.providers_openai import OpenAIProvider
-        from shannon_core.agents.runner import ProviderConfig
+        from supernova_core.agents.providers import BaseProvider
+        from supernova_core.agents.providers_openai import OpenAIProvider
+        from supernova_core.agents.runner import ProviderConfig
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         assert isinstance(provider, BaseProvider)
 
     def test_anthropic_provider_inherits_init_from_base(self):
         """A1: super().__init__ 应设置 config/type，不再手动赋值。"""
-        from shannon_core.agents.providers_anthropic import AnthropicProvider
-        from shannon_core.agents.runner import ProviderConfig
+        from supernova_core.agents.providers_anthropic import AnthropicProvider
+        from supernova_core.agents.runner import ProviderConfig
         cfg = ProviderConfig(type="anthropic_api", api_key="k", base_url="http://x")
         provider = AnthropicProvider(cfg)
         assert provider.config is cfg
         assert provider.type == "anthropic_api"
 
 
-from shannon_core.models.errors import ErrorCode
-from shannon_core.agents.openai_output_schema import StructuredOutputParseError
+from supernova_core.models.errors import ErrorCode
+from supernova_core.agents.openai_output_schema import StructuredOutputParseError
 
 
 def _openai_provider():
@@ -2131,7 +2131,7 @@ def test_handle_error_sets_output_validation_failed_enum():
 def test_base_provider_call_has_max_turns_parameter():
     """ABC 签名须含 max_turns（两实现已有，补齐 Liskov）。"""
     import inspect
-    from shannon_core.agents.providers import BaseProvider
+    from supernova_core.agents.providers import BaseProvider
 
     sig = inspect.signature(BaseProvider.call)
     assert "max_turns" in sig.parameters

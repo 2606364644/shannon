@@ -4,7 +4,7 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from shannon_whitebox.pipeline import activities
+from supernova_whitebox.pipeline import activities
 
 
 class _FakeInput:
@@ -79,8 +79,8 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -129,8 +129,8 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -159,8 +159,8 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -187,8 +187,8 @@ async def test_judge_logs_warning_when_no_candidates(tmp_path):
         return type("R", (), {"success": True, "structured_output": {"vulnerabilities": []}})()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -228,8 +228,8 @@ async def test_judge_logs_info_when_candidates(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -274,8 +274,8 @@ async def test_judge_explore_fills_missing_id_not_drops(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -293,7 +293,7 @@ def test_parse_gitnexus_verdict_output_fills_missing_id():
     覆盖 candidate>0 判定分支与探索分支共用的 helper:真机 hr_20260713 的 4→0
     根因即缺 ID 被丢,这里钉死补 ID 行为 + 已有 ID 不被覆写。
     """
-    from shannon_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
+    from supernova_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
     raw = {"vulnerabilities": [
         {"endpoint": "/a", "vulnerability_type": "Horizontal",
          "externally_exploitable": False, "confidence": "low"},               # 缺 ID
@@ -309,7 +309,7 @@ def test_parse_gitnexus_verdict_output_fills_missing_id():
 
 def test_parse_gitnexus_verdict_output_invalid_raw_no_crash():
     """非 JSON / 空 raw → ([], warnings),不崩(守 parse_lenient 容错 + never silent)。"""
-    from shannon_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
+    from supernova_whitebox.pipeline.activities import _parse_gitnexus_verdict_output
     vulns, warnings = _parse_gitnexus_verdict_output("not json", "AUTHZ-GN-")
     assert vulns == []
     assert warnings  # invalid json → parse_lenient 产 warning,caller 应打日志

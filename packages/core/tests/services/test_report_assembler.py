@@ -1,6 +1,6 @@
 import pytest
 
-from shannon_core.services.report_assembler import ReportAssembler
+from supernova_core.services.report_assembler import ReportAssembler
 
 
 @pytest.mark.asyncio

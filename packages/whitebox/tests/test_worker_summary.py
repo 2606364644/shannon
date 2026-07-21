@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shannon_whitebox.pipeline.shared import PipelineState
+from supernova_whitebox.pipeline.shared import PipelineState
 
 
 @pytest.mark.asyncio
 async def test_total_cost_reads_from_session_metrics_not_pipeline():
-    from shannon_whitebox.worker import _build_final_summary
+    from supernova_whitebox.worker import _build_final_summary
 
     # PipelineState.agent_metrics 空(模拟 LLM 轨关闭:pre-recon/recon/vuln 全跳过)
     result = PipelineState(status="completed", agent_metrics={})
@@ -42,7 +42,7 @@ async def test_total_cost_reads_from_session_metrics_not_pipeline():
 async def test_total_cost_ignores_nonempty_pipeline_agent_metrics():
     """即便 PipelineState.agent_metrics 非空(LLM 轨开),total_cost 仍以 session metrics 为准
     (后者含 attack-chain/report 等 PipelineState 不收录的 agent)。"""
-    from shannon_whitebox.worker import _build_final_summary
+    from supernova_whitebox.worker import _build_final_summary
 
     result = PipelineState(status="completed", agent_metrics={
         "injection-vuln": {"cost_usd": 1.0, "duration_ms": 1000},
@@ -62,7 +62,7 @@ async def test_total_cost_ignores_nonempty_pipeline_agent_metrics():
 
 @pytest.mark.asyncio
 async def test_cost_currency_defaults_usd_when_missing():
-    from shannon_whitebox.worker import _build_final_summary
+    from supernova_whitebox.worker import _build_final_summary
 
     result = PipelineState(status="completed")
     session = SimpleNamespace(get_metrics=AsyncMock(return_value={"total_cost_usd": 0.0}))
@@ -75,7 +75,7 @@ async def test_cost_currency_defaults_usd_when_missing():
 
 @pytest.mark.asyncio
 async def test_status_falls_back_to_failed_for_non_terminal():
-    from shannon_whitebox.worker import _build_final_summary
+    from supernova_whitebox.worker import _build_final_summary
 
     result = PipelineState(status="running")   # 非终态 → failed
     session = SimpleNamespace(get_metrics=AsyncMock(return_value={}))
@@ -88,7 +88,7 @@ async def test_status_falls_back_to_failed_for_non_terminal():
 @pytest.mark.asyncio
 async def test_get_metrics_returning_none_is_safe():
     """session.get_metrics() 返 None(未 initialize)→ 不崩,currency 回落 USD。"""
-    from shannon_whitebox.worker import _build_final_summary
+    from supernova_whitebox.worker import _build_final_summary
 
     result = PipelineState(status="completed")
     session = SimpleNamespace(get_metrics=AsyncMock(return_value=None))

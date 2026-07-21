@@ -1,4 +1,4 @@
-from shannon_core.display.symbols import (
+from supernova_core.display.symbols import (
     STEP_PENDING, STEP_DONE, STEP_FAIL,
     AGENT_START, AGENT_DONE, AGENT_FAIL,
     SUMMARY_OK, SUMMARY_FAIL,

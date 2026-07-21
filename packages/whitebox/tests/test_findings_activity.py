@@ -2,13 +2,13 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
+from supernova_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
 
 
 @pytest.mark.asyncio
 async def test_render_findings_activity_generates_findings(tmp_path):
     """Integration test: render_findings activity should produce findings MD from queue JSON."""
-    from shannon_core.services.findings_renderer import FindingsRenderer
+    from supernova_core.services.findings_renderer import FindingsRenderer
 
     repo = tmp_path / "my-repo"
     deliverables = tmp_path / "workspaces" / "wb-session" / "deliverables"

@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+from supernova_web.components.workspaces_indexer import WorkspacesIndexer
 
 
 def _make_ws(root, name, status="completed", scan_type="whitebox", queues=None, nested=False):
@@ -121,7 +121,7 @@ def test_list_supplements_cost_duration_links_vuln_count(tmp_workspaces):
         "metrics": {"total_cost_usd": 1.23, "total_duration_ms": 45000},
         "links": {"child_workspaces": ["child-a", "child-b"]},
     }))
-    from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+    from supernova_web.components.workspaces_indexer import WorkspacesIndexer
     rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
     row = next(r for r in rows if r["name"] == "full-ws")
     assert row["total_cost_usd"] == 1.23
@@ -140,10 +140,10 @@ def test_list_vuln_count_aggregates_dict(tmp_workspaces):
     (ws / "session.json").write_text(json.dumps({
         "status": "completed", "scan_type": "whitebox", "created_at": 1,
     }))
-    from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+    from supernova_web.components.workspaces_indexer import WorkspacesIndexer
     idx = WorkspacesIndexer(tmp_workspaces)
     # mock get_workspace_vuln_counts 返多类型 dict
-    import shannon_web.components.workspaces_indexer as mod
+    import supernova_web.components.workspaces_indexer as mod
     orig = mod.get_workspace_vuln_counts
     mod.get_workspace_vuln_counts = lambda _p: {"injection": 3, "xss": 2}
     try:
@@ -163,7 +163,7 @@ def test_list_missing_metrics_returns_none(tmp_workspaces):
     (ws / "session.json").write_text(json.dumps({
         "status": "completed", "scan_type": "whitebox", "created_at": 1,
     }))
-    from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+    from supernova_web.components.workspaces_indexer import WorkspacesIndexer
     row = next(r for r in WorkspacesIndexer(tmp_workspaces).list_workspaces() if r["name"] == "bare-ws")
     assert row["total_cost_usd"] is None
     assert row["total_duration_ms"] is None
@@ -183,7 +183,7 @@ def test_list_exposes_cost_currency(tmp_workspaces):
         "status": "completed", "scan_type": "whitebox", "created_at": 1,
         "metrics": {"total_cost_usd": 6.49, "cost_currency": "CNY"},
     }))
-    from shannon_web.components.workspaces_indexer import WorkspacesIndexer
+    from supernova_web.components.workspaces_indexer import WorkspacesIndexer
     row = next(r for r in WorkspacesIndexer(tmp_workspaces).list_workspaces() if r["name"] == "cur-ws")
     assert row["cost_currency"] == "CNY"
     assert row["total_cost_usd"] == 6.49
@@ -208,7 +208,7 @@ def test_sort_mixed_created_at_types(tmp_workspaces):
 def test__to_unix_normalizes_mixed_created_at_types():
     """_to_unix 归一 created_at 为 unix float|None:float/int 直用、ISO str 解析、None/异常→None。
     修后端透传 ISO str 致前端 Workspace.created_at(number) Invalid Date 的契约断裂。"""
-    from shannon_web.components.workspaces_indexer import _to_unix
+    from supernova_web.components.workspaces_indexer import _to_unix
     assert _to_unix(1780000000.0) == 1780000000.0
     assert _to_unix(1780000000) == 1780000000.0
     iso_ts = _to_unix("2026-05-29T10:00:00Z")

@@ -6,7 +6,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from shannon_core.agents.runner import (
+from supernova_core.agents.runner import (
     ClaudeRunResult,
     ProviderConfig,
     TokenUsage,
@@ -72,7 +72,7 @@ class TestRunClaudePrompt:
         )
         mock_provider.call = AsyncMock(return_value=mock_result)
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             result = await run_claude_prompt(
                 prompt="Test prompt",
                 repo_path="/tmp/test",
@@ -95,7 +95,7 @@ class TestRunClaudePrompt:
             "base_url": "https://api.example.com",
         }
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider) as mock_create:
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider) as mock_create:
             await run_claude_prompt(
                 prompt="Test",
                 repo_path="/tmp",
@@ -114,7 +114,7 @@ class TestRunClaudePrompt:
         mock_result = ClaudeRunResult(success=True, text="OK")
         mock_provider.call = AsyncMock(return_value=mock_result)
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             await run_claude_prompt(
                 prompt="Test",
                 repo_path="/tmp",
@@ -137,7 +137,7 @@ class TestRunClaudePrompt:
         )
         mock_provider.call = AsyncMock(return_value=mock_result)
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             result = await run_claude_prompt(
                 prompt="Test",
                 repo_path="/tmp",
@@ -153,7 +153,7 @@ class TestRunClaudePrompt:
         mock_provider = MagicMock()
         mock_provider.call = AsyncMock(side_effect=Exception("Connection failed"))
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             result = await run_claude_prompt(
                 prompt="Test",
                 repo_path="/tmp",
@@ -177,7 +177,7 @@ class TestRunClaudePrompt:
         mock_result = ClaudeRunResult(text="ok", success=True, duration=10, turns=1)
         mock_provider.call = AsyncMock(return_value=mock_result)
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             await run_claude_prompt(prompt="p", repo_path="/tmp/repo", max_turns=500)
 
         mock_provider.call.assert_awaited_once()
@@ -190,7 +190,7 @@ class TestRunClaudePrompt:
         mock_result = ClaudeRunResult(text="ok", success=True, duration=10, turns=1)
         mock_provider.call = AsyncMock(return_value=mock_result)
 
-        with patch("shannon_core.agents.providers.create_provider", return_value=mock_provider):
+        with patch("supernova_core.agents.providers.create_provider", return_value=mock_provider):
             await run_claude_prompt(prompt="p", repo_path="/tmp/repo")
 
         assert mock_provider.call.call_args.kwargs["max_turns"] is None
@@ -261,7 +261,7 @@ class TestIsSpendingCapBehavior:
 
     def test_is_spending_cap_behavior_true(self):
         """测试识别花费上限行为"""
-        from shannon_core.agents.runner import _is_spending_cap_behavior
+        from supernova_core.agents.runner import _is_spending_cap_behavior
 
         result = ClaudeRunResult(
             success=False,
@@ -271,7 +271,7 @@ class TestIsSpendingCapBehavior:
 
     def test_is_spending_cap_behavior_variations(self):
         """测试各种花费上限关键词"""
-        from shannon_core.agents.runner import _is_spending_cap_behavior
+        from supernova_core.agents.runner import _is_spending_cap_behavior
 
         keywords = [
             "credit limit exceeded",
@@ -289,7 +289,7 @@ class TestIsSpendingCapBehavior:
 
     def test_is_spending_cap_behavior_false(self):
         """测试非花费上限错误"""
-        from shannon_core.agents.runner import _is_spending_cap_behavior
+        from supernova_core.agents.runner import _is_spending_cap_behavior
 
         result = ClaudeRunResult(
             success=True,

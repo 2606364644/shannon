@@ -2,13 +2,13 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
+from supernova_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
 
 
 @pytest.mark.asyncio
 async def test_assemble_report_activity_generates_findings(tmp_path):
     """assemble_report should run FindingsRenderer before assembling."""
-    from shannon_core.services.findings_renderer import FindingsRenderer
+    from supernova_core.services.findings_renderer import FindingsRenderer
 
     deliverables = tmp_path / "workspaces" / "bb-session" / "deliverables"
     deliverables.mkdir(parents=True)
@@ -34,7 +34,7 @@ async def test_assemble_report_activity_generates_findings(tmp_path):
 @pytest.mark.asyncio
 async def test_model_injection_in_finalize(tmp_path):
     """finalize_report should inject model info from session.json."""
-    from shannon_core.services.report_assembler import ReportAssembler
+    from supernova_core.services.report_assembler import ReportAssembler
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -58,7 +58,7 @@ async def test_model_injection_in_finalize(tmp_path):
 @pytest.mark.asyncio
 async def test_noop_output_provider(tmp_path):
     """Output provider should be NoOp by default (no side effects)."""
-    from shannon_core.interfaces.report_output_provider import NoOpReportOutputProvider
+    from supernova_core.interfaces.report_output_provider import NoOpReportOutputProvider
 
     provider = NoOpReportOutputProvider()
     result = await provider.generate(tmp_path / "report.md", tmp_path / "deliverables")

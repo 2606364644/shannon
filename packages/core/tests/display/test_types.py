@@ -1,4 +1,4 @@
-from shannon_core.display.types import LineWriter, Renderer
+from supernova_core.display.types import LineWriter, Renderer
 
 
 def test_protocols_importable():

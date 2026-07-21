@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from shannon_core.audit.workflow_logger import WorkflowLogger
+from supernova_core.audit.workflow_logger import WorkflowLogger
 
 _LOGGER_NAME = "temporalio.activity"
 
@@ -54,7 +54,7 @@ def test_install_failure_redirect_sets_path_and_propagate(tmp_path):
     wl._activity_failure_log_path = None
 
     with patch(
-        "shannon_core.audit.workflow_logger.generate_workflow_log_path",
+        "supernova_core.audit.workflow_logger.generate_workflow_log_path",
         return_value=wf_log,
     ):
         wl._install_failure_redirect()
@@ -82,7 +82,7 @@ def test_install_failure_redirect_degrades_silently_on_error(tmp_path):
     wl._activity_failure_log_path = "stale"
 
     with patch(
-        "shannon_core.audit.workflow_logger.generate_workflow_log_path",
+        "supernova_core.audit.workflow_logger.generate_workflow_log_path",
         side_effect=RuntimeError("disk full"),
     ):
         wl._install_failure_redirect()  # must NOT raise

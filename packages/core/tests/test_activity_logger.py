@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock
 
-from shannon_core.logging.activity_logger import (
+from supernova_core.logging.activity_logger import (
     ActivityLogger,
     ConsoleActivityLogger,
     TemporalActivityLogger,

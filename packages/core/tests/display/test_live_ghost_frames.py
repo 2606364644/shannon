@@ -19,8 +19,8 @@ import pytest
 
 from rich.live import Live
 
-from shannon_core.audit.display_lifecycle import run_with_display
-from shannon_core.models.metrics import SessionMetadata
+from supernova_core.audit.display_lifecycle import run_with_display
+from supernova_core.models.metrics import SessionMetadata
 
 
 def _meta() -> SessionMetadata:

@@ -1,4 +1,4 @@
-from shannon_core.code_index.template_escape_detector import (
+from supernova_core.code_index.template_escape_detector import (
     detect_template_escape,
     detect_template_escapes,
 )

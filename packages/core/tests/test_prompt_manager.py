@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from shannon_core.prompts.manager import PromptManager
+from supernova_core.prompts.manager import PromptManager
 
 @pytest.fixture
 def prompts_dir(tmp_path):
@@ -39,7 +39,7 @@ def test_missing_template_raises(prompts_dir):
         manager.load_sync("nonexistent", {"web_url": "https://x.com", "repo_path": "/r"})
 
 
-from shannon_core.models.config import (
+from supernova_core.models.config import (
     Authentication,
     Config,
     Credentials,
@@ -178,7 +178,7 @@ def test_build_login_instructions_with_totp(login_prompts_dir):
 
 
 def test_build_login_instructions_with_email_login(login_prompts_dir):
-    from shannon_core.models.config import EmailLogin
+    from supernova_core.models.config import EmailLogin
     manager = PromptManager(login_prompts_dir)
     auth = _make_auth(
         email_login=EmailLogin(address="user@example.com", password="email-pass"),
@@ -193,7 +193,7 @@ def test_build_login_instructions_with_email_login(login_prompts_dir):
 
 
 def test_build_login_instructions_with_email_totp(login_prompts_dir):
-    from shannon_core.models.config import EmailLogin
+    from supernova_core.models.config import EmailLogin
     manager = PromptManager(login_prompts_dir)
     auth = _make_auth(
         email_login=EmailLogin(address="u@e.com", password="p", totp_secret="SECRET"),
@@ -205,7 +205,7 @@ def test_build_login_instructions_with_email_totp(login_prompts_dir):
 
 def test_build_login_instructions_missing_template(login_prompts_dir):
     """Template file removed -- should raise PentestError."""
-    from shannon_core.models.errors import PentestError
+    from supernova_core.models.errors import PentestError
     (login_prompts_dir / "shared" / "login-instructions.txt").unlink()
     (login_prompts_dir / "shared").rmdir()
     manager = PromptManager(login_prompts_dir)
@@ -462,7 +462,7 @@ def test_unresolved_placeholder_logs_warning(prompts_dir, caplog):
     import logging
     (prompts_dir / "unresolved-test.txt").write_text("Hello {{WEB_URL}} and {{MISSING_VAR}} world")
     manager = PromptManager(prompts_dir)
-    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+    with caplog.at_level(logging.WARNING, logger="supernova_core.prompts.manager"):
         result = manager.load_sync("unresolved-test", {"web_url": "https://x.com", "repo_path": "/r"})
     assert "https://x.com" in result  # 已知变量正常替换
     # 残留的 MISSING_VAR 应被报告
@@ -477,7 +477,7 @@ def test_natural_language_placeholder_not_flagged(prompts_dir, caplog):
         "Count: {{number of confirmed vulnerabilities}}\nURL: {{WEB_URL}}"
     )
     manager = PromptManager(prompts_dir)
-    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+    with caplog.at_level(logging.WARNING, logger="supernova_core.prompts.manager"):
         result = manager.load_sync("fillin-test", {"web_url": "https://x.com", "repo_path": "/r"})
     # 自然语言填空提示保留在结果里(给 agent 看的占位词)
     assert "{{number of confirmed vulnerabilities}}" in result
@@ -493,7 +493,7 @@ def test_natural_language_placeholder_not_flagged(prompts_dir, caplog):
 
 def test_render_code_path_rules_tags_glob_and_file():
     """code_path 规则按通配符标 [GLOB]/[FILE]。"""
-    from shannon_core.models.config import Rule
+    from supernova_core.models.config import Rule
     manager = PromptManager(Path("/tmp"))
     rules = [
         Rule(description="secrets dir", type="code_path", value="secrets/**"),
@@ -506,7 +506,7 @@ def test_render_code_path_rules_tags_glob_and_file():
 
 def test_render_code_path_rules_filters_non_code_path_types():
     """非 code_path 类型(如 url_path)规则不进 CODE_RULES 渲染。"""
-    from shannon_core.models.config import Rule
+    from supernova_core.models.config import Rule
     manager = PromptManager(Path("/tmp"))
     rules = [
         Rule(description="admin url", type="url_path", value="/admin"),
@@ -519,7 +519,7 @@ def test_render_code_path_rules_filters_non_code_path_types():
 
 def test_render_code_path_rules_appends_description_when_distinct():
     """description 与 value 不同时附 # 注释；相同时省略。"""
-    from shannon_core.models.config import Rule
+    from supernova_core.models.config import Rule
     manager = PromptManager(Path("/tmp"))
     rules = [
         Rule(description="secrets directory", type="code_path", value="secrets/**"),
@@ -539,7 +539,7 @@ def test_render_code_path_rules_empty_returns_none():
 def test_code_path_rules_placeholders_resolved_no_warning(prompts_dir, caplog):
     """含 {{CODE_RULES_*}} 的模板经 config 渲染后占位符被替换且不触发 unresolved warning。"""
     import logging
-    from shannon_core.models.config import Rule
+    from supernova_core.models.config import Rule
     (prompts_dir / "code-rules-test.txt").write_text(
         "Avoid:\n{{CODE_RULES_AVOID}}\nFocus:\n{{CODE_RULES_FOCUS}}\n"
     )
@@ -548,7 +548,7 @@ def test_code_path_rules_placeholders_resolved_no_warning(prompts_dir, caplog):
         focus=[Rule(description="core module", type="code_path", value="src/core/**")],
     )
     manager = PromptManager(prompts_dir)
-    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+    with caplog.at_level(logging.WARNING, logger="supernova_core.prompts.manager"):
         result = manager.load_sync(
             "code-rules-test",
             {"web_url": "", "repo_path": "/r"},
@@ -571,7 +571,7 @@ def test_code_path_rules_placeholders_none_when_no_rules(prompts_dir, caplog):
     )
     config = _make_dist_config()  # avoid=[], focus=[]
     manager = PromptManager(prompts_dir)
-    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+    with caplog.at_level(logging.WARNING, logger="supernova_core.prompts.manager"):
         result = manager.load_sync(
             "code-rules-none",
             {"web_url": "", "repo_path": "/r"},
@@ -590,7 +590,7 @@ def test_code_path_rules_placeholders_resolved_without_config(prompts_dir, caplo
         "Avoid:\n{{CODE_RULES_AVOID}}\nFocus:\n{{CODE_RULES_FOCUS}}\n"
     )
     manager = PromptManager(prompts_dir)
-    with caplog.at_level(logging.WARNING, logger="shannon_core.prompts.manager"):
+    with caplog.at_level(logging.WARNING, logger="supernova_core.prompts.manager"):
         result = manager.load_sync(
             "code-rules-noconfig",
             {"web_url": "", "repo_path": "/r"},

@@ -1,22 +1,22 @@
 [project]
-name = "shannon-py"
+name = "supernova"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "shannon-whitebox",
-    "shannon-blackbox",
-    "shannon-combined",
-    "shannon-multi",
-    "shannon-web",
+    "supernova-whitebox",
+    "supernova-blackbox",
+    "supernova-combined",
+    "supernova-multi",
+    "supernova-web",
 ]
 
 [tool.uv.sources]
-shannon-core = { workspace = true }
-shannon-whitebox = { workspace = true }
-shannon-blackbox = { workspace = true }
-shannon-combined = { workspace = true }
-shannon-multi = { workspace = true }
-shannon-web = { workspace = true }
+supernova-core = { workspace = true }
+supernova-whitebox = { workspace = true }
+supernova-blackbox = { workspace = true }
+supernova-combined = { workspace = true }
+supernova-multi = { workspace = true }
+supernova-web = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]

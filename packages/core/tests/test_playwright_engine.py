@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from shannon_core.services.browser_engine import BrowserEngine
-from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+from supernova_core.services.browser_engine import BrowserEngine
+from supernova_core.services.engines.playwright_engine import PlaywrightEngine
 
 
 class TestPlaywrightEngineCleanupProcesses:
@@ -44,7 +44,7 @@ class TestPlaywrightEngineCleanupProcesses:
             def run(cmd, *a, **kw):
                 raise FileNotFoundError("no playwright-cli")
 
-        from shannon_core.services.engines import playwright_engine as mod
+        from supernova_core.services.engines import playwright_engine as mod
 
         monkeypatch.setattr(mod, "subprocess", _FakeSub, raising=False)
         result = engine.cleanup_processes(session_ids=["agent1"])
@@ -53,7 +53,7 @@ class TestPlaywrightEngineCleanupProcesses:
 
 def _record(monkeypatch, returncodes):
     """记录 subprocess.run 命令,可控 returncode。raising=False 让 RED 干净。"""
-    from shannon_core.services.engines import playwright_engine as mod
+    from supernova_core.services.engines import playwright_engine as mod
 
     cmds = []
 

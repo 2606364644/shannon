@@ -1,7 +1,7 @@
 import io
 from unittest.mock import patch
 
-from shannon_whitebox.cli.progress import (
+from supernova_whitebox.cli.progress import (
     ProgressIndicator,
     NullProgressIndicator,
     create_progress_indicator,

@@ -1,7 +1,7 @@
 import asyncio
 
-from shannon_core.audit.workflow_logger import WorkflowLogger
-from shannon_core.models.errors import ErrorCode, PentestError
+from supernova_core.audit.workflow_logger import WorkflowLogger
+from supernova_core.models.errors import ErrorCode, PentestError
 
 
 class _SpyDispatcher:

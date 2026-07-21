@@ -3,10 +3,10 @@ import subprocess
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from shannon_core.models.agents import AgentName
-from shannon_core.models.metrics import AgentMetrics
-from shannon_blackbox.agents.exploit_executor import ExploitExecutor
-from shannon_blackbox.agents.recon_executor import ReconExecutor
+from supernova_core.models.agents import AgentName
+from supernova_core.models.metrics import AgentMetrics
+from supernova_blackbox.agents.exploit_executor import ExploitExecutor
+from supernova_blackbox.agents.recon_executor import ReconExecutor
 
 
 @pytest.fixture
@@ -117,8 +117,8 @@ async def test_exploit_executor_forwards_audit_logger(mock_repo):
 
 @pytest.mark.asyncio
 async def test_validate_authentication_forwards_audit_logger(tmp_path):
-    from shannon_core.services.validate_authentication import validate_authentication
-    from shannon_core.prompts.manager import PromptManager
+    from supernova_core.services.validate_authentication import validate_authentication
+    from supernova_core.prompts.manager import PromptManager
 
     mock_executor = AsyncMock()
     # config_path=None short-circuits to success without touching the executor
@@ -138,7 +138,7 @@ async def test_validate_authentication_forwards_audit_logger(tmp_path):
 @pytest.mark.asyncio
 async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
     """ExploitExecutor 拿到 structured_output 后应：校验 → 写 evidence.md → 写 verdicts.json。"""
-    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    from supernova_blackbox.agents.exploit_executor import ExploitExecutor
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
@@ -178,9 +178,9 @@ async def test_exploit_executor_writes_evidence_and_verdicts(tmp_path):
 @pytest.mark.asyncio
 async def test_exploit_executor_falls_back_to_agent_written_verdict_file(tmp_path):
     """structured_output 空（GLM/CLI agent 用 Write 落盘而非 final JSON）时，
-    executor 应回退读 agent 写的 .shannon/deliverables/{vuln}_exploitation_verdicts.json。
+    executor 应回退读 agent 写的 .supernova/deliverables/{vuln}_exploitation_verdicts.json。
     复现 invite_code_center 真机根因（verdict 双重丢失 → 报告全 Unverified）。"""
-    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    from supernova_blackbox.agents.exploit_executor import ExploitExecutor
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
@@ -219,7 +219,7 @@ async def test_exploit_executor_falls_back_to_agent_written_verdict_file(tmp_pat
 @pytest.mark.asyncio
 async def test_exploit_executor_reads_queue_from_whitebox_subdir(tmp_path):
     """新结构：白盒 queue 在 deliverables/whitebox/，exploit_executor 走 fallback 读到。"""
-    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    from supernova_blackbox.agents.exploit_executor import ExploitExecutor
     dlv = tmp_path / "deliverables"
     (dlv / "whitebox").mkdir(parents=True)
     (dlv / "whitebox" / "injection_exploitation_queue.json").write_text(
@@ -240,7 +240,7 @@ async def test_exploit_executor_reads_queue_from_whitebox_subdir(tmp_path):
 @pytest.mark.asyncio
 async def test_exploit_executor_falls_back_to_legacy_queue(tmp_path):
     """老 workspace：queue 在 deliverables 根，fallback 读到。"""
-    from shannon_blackbox.agents.exploit_executor import ExploitExecutor
+    from supernova_blackbox.agents.exploit_executor import ExploitExecutor
     dlv = tmp_path / "deliverables"
     dlv.mkdir()
     (dlv / "injection_exploitation_queue.json").write_text(

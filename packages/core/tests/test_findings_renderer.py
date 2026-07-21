@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from shannon_core.models.config import ReportConfig
-from shannon_core.models.queue_schemas import (
+from supernova_core.models.config import ReportConfig
+from supernova_core.models.queue_schemas import (
     InjectionVulnerability,
     XssVulnerability,
     AuthVulnerability,
@@ -11,7 +11,7 @@ from shannon_core.models.queue_schemas import (
     AuthzVulnerability,
     VulnerabilityQueue,
 )
-from shannon_core.services.findings_renderer import (
+from supernova_core.services.findings_renderer import (
     render_injection_entry,
     render_xss_entry,
     render_auth_entry,
@@ -385,7 +385,7 @@ async def test_render_findings_with_subdirs_queue_in_whitebox_findings_in_blackb
     and write findings to <root>/blackbox/ — never colliding with whitebox findings
     written to <root>/whitebox/ by the whitebox caller.
     """
-    from shannon_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
+    from supernova_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
 
     root = tmp_path / "deliverables"
     (root / WHITEBOX_SUBDIR).mkdir(parents=True)
@@ -430,7 +430,7 @@ async def test_render_findings_with_subdirs_reads_legacy_queue_at_root(tmp_path)
     resolve_track_deliverable falls back to deliverables_dir/filename when the
   track subdir lacks the file — so a legacy root-level queue is still readable.
     """
-    from shannon_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
+    from supernova_core.utils.paths import WHITEBOX_SUBDIR, BLACKBOX_SUBDIR
 
     root = tmp_path / "deliverables"
     root.mkdir()

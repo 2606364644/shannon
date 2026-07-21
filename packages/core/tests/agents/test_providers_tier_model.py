@@ -3,8 +3,8 @@
 优先级: tier-specific config(medium_model 等) > global config.model > DEFAULT_MODELS。
 供 activity 层 resolve medium-tier model 名(传给 chunk threshold 派生, 不裸读 env)。
 """
-from shannon_core.agents.providers import resolve_tier_model
-from shannon_core.agents.runner import DEFAULT_MODELS, ProviderConfig
+from supernova_core.agents.providers import resolve_tier_model
+from supernova_core.agents.runner import DEFAULT_MODELS, ProviderConfig
 
 
 def _cfg(**kw):

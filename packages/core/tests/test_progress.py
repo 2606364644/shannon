@@ -1,7 +1,7 @@
-"""Tests for shannon_core.utils.progress — AgentOutcome and format_exploit_summary."""
+"""Tests for supernova_core.utils.progress — AgentOutcome and format_exploit_summary."""
 
-from shannon_core.models.metrics import AgentMetrics
-from shannon_core.utils.progress import (
+from supernova_core.models.metrics import AgentMetrics
+from supernova_core.utils.progress import (
     AgentOutcome,
     _format_duration,
     exploit_result_to_outcome,

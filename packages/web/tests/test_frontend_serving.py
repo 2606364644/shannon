@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from shannon_web.app import create_app
+from supernova_web.app import create_app
 
 
 def _make_dist(tmp_path: Path) -> Path:
@@ -20,7 +20,7 @@ def _make_dist(tmp_path: Path) -> Path:
 
 def _client_with_dist(monkeypatch, tmp_path):
     dist = _make_dist(tmp_path)
-    monkeypatch.setenv("SHANNON_WEB_FRONTEND_DIR", str(dist))
+    monkeypatch.setenv("SUPERNOVA_WEB_FRONTEND_DIR", str(dist))
     return TestClient(create_app())
 
 
@@ -70,7 +70,7 @@ def test_root_static_file_returned(monkeypatch, tmp_path):
 
 def test_no_frontend_dir_means_no_serving(monkeypatch):
     # dev 模式：不设 env → 后端不挂静态 → GET / 应 404（不崩）
-    monkeypatch.delenv("SHANNON_WEB_FRONTEND_DIR", raising=False)
+    monkeypatch.delenv("SUPERNOVA_WEB_FRONTEND_DIR", raising=False)
     client = TestClient(create_app())
     r = client.get("/")
     assert r.status_code == 404
@@ -78,7 +78,7 @@ def test_no_frontend_dir_means_no_serving(monkeypatch):
 
 def test_missing_dist_dir_does_not_crash(monkeypatch, tmp_path):
     # env 指向不存在目录 → create_app 不抛、GET / 返 404
-    monkeypatch.setenv("SHANNON_WEB_FRONTEND_DIR", str(tmp_path / "nonexistent"))
+    monkeypatch.setenv("SUPERNOVA_WEB_FRONTEND_DIR", str(tmp_path / "nonexistent"))
     client = TestClient(create_app())
     r = client.get("/")
     assert r.status_code == 404
@@ -89,7 +89,7 @@ def test_path_traversal_blocked(monkeypatch, tmp_path):
     secret = tmp_path / "secrets.txt"
     secret.write_text("TOPSECRET")
     dist = _make_dist(tmp_path)   # dist 是 tmp_path/dist,secrets.txt 在 tmp_path 根(dist 之外)
-    monkeypatch.setenv("SHANNON_WEB_FRONTEND_DIR", str(dist))
+    monkeypatch.setenv("SUPERNOVA_WEB_FRONTEND_DIR", str(dist))
     client = TestClient(create_app())
     for payload in ("/%2e%2e/secrets.txt", "/%2e%2e%2fsecrets.txt", "/..%2fsecrets.txt"):
         r = client.get(payload)

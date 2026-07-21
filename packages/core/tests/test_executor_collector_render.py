@@ -20,8 +20,8 @@ def _run(coro):
 
 @pytest.mark.asyncio
 async def test_pre_recon_executor_renders_md_from_collector(monkeypatch, tmp_path):
-    from shannon_core.agents import executor as exec_mod
-    from shannon_core.models.agents import AgentName
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
 
     repo = tmp_path / "repo"
     repo.mkdir()

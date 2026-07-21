@@ -1,4 +1,4 @@
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
 
 
 def test_correlated_workspace_field_default_none():

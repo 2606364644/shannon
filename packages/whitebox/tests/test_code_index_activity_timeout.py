@@ -7,7 +7,7 @@ kol_mapping_service 撞 timeout)→ 提至 45min(2026-07-17 Koa+Sequelize 治本
 """
 from datetime import timedelta
 
-from shannon_whitebox.pipeline.workflows import CODE_INDEX_ACTIVITY_TIMEOUT
+from supernova_whitebox.pipeline.workflows import CODE_INDEX_ACTIVITY_TIMEOUT
 
 
 def test_code_index_activity_timeout_is_45_minutes():

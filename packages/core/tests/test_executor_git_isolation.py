@@ -9,14 +9,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shannon_core.agents.executor import AgentExecutor
-from shannon_core.agents.runner import ClaudeRunResult
-from shannon_core.git_manager import GitManager
-from shannon_core.models.agents import AgentName
+from supernova_core.agents.executor import AgentExecutor
+from supernova_core.agents.runner import ClaudeRunResult
+from supernova_core.git_manager import GitManager
+from supernova_core.models.agents import AgentName
 
 
 def _init_parent_repo(repo: Path) -> None:
-    """把 repo 初始化成 git 仓库(模拟 shannon-py 主仓库)。"""
+    """把 repo 初始化成 git 仓库(模拟 supernova 主仓库)。"""
     subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.email", "parent@local"], cwd=repo, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.name", "parent"], cwd=repo, capture_output=True, check=True)
@@ -35,15 +35,15 @@ async def test_execute_isolates_deliverables_from_parent_repo(tmp_path: Path, mo
     """executor.execute 后:deliverables 有独立 .git;父仓库无 deliverable/checkpoint commit。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _init_parent_repo(repo)  # repo 模拟 shannon-py 主仓库
+    _init_parent_repo(repo)  # repo 模拟 supernova 主仓库
     deliverables = repo / "workspaces" / "session" / "deliverables"  # 嵌套在父仓库内
 
     # mock 重依赖,避免真 agent / 真校验;GitManager 用真的(测真 .git 隔离)
     async def fake_run(**kw):
         return ClaudeRunResult(text="ok", success=True, turns=1)
-    monkeypatch.setattr("shannon_core.agents.executor.run_claude_prompt", fake_run)
+    monkeypatch.setattr("supernova_core.agents.executor.run_claude_prompt", fake_run)
     monkeypatch.setattr(
-        "shannon_core.agents.executor.validate_deliverable", AsyncMock(),
+        "supernova_core.agents.executor.validate_deliverable", AsyncMock(),
     )
 
     prompt_manager = MagicMock()

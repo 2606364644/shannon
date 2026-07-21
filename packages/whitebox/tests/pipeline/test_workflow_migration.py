@@ -16,8 +16,8 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
-from shannon_whitebox.pipeline.shared import PipelineInput
+from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from supernova_whitebox.pipeline.shared import PipelineInput
 
 
 def _migration_activity_mocks(calls: list) -> list:

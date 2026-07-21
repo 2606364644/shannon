@@ -4,12 +4,12 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from shannon_core.models.agents import AgentName, AGENTS
-from shannon_core.models.metrics import AgentMetrics
-from shannon_core.agents.executor import AgentExecutor
-from shannon_core.prompts.manager import PromptManager
-from shannon_core.session import SessionManager
-from shannon_core.agents.runner import ClaudeRunResult
+from supernova_core.models.agents import AgentName, AGENTS
+from supernova_core.models.metrics import AgentMetrics
+from supernova_core.agents.executor import AgentExecutor
+from supernova_core.prompts.manager import PromptManager
+from supernova_core.session import SessionManager
+from supernova_core.agents.runner import ClaudeRunResult
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ async def test_full_pipeline_mocked(mock_repo, prompts_dir):
         call_count += 1
         return mock_results.get("pre-recon", ClaudeRunResult(success=True, text="ok"))
 
-    with patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
+    with patch("supernova_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude):
         deliverables = mock_repo.parent / "workspaces" / "wb-session" / "deliverables"
         deliverables.mkdir(parents=True, exist_ok=True)
 

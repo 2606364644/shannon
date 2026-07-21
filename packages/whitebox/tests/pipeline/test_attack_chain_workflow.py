@@ -5,8 +5,8 @@
 2. 旧 dead-end run_attack_chain_assembly 已删除（含函数本体；worker 注册/导入
    与 workflows 调用由静态导入冒烟间接覆盖）。
 """
-from shannon_whitebox.pipeline import activities
-from shannon_whitebox.pipeline import workflows
+from supernova_whitebox.pipeline import activities
+from supernova_whitebox.pipeline import workflows
 
 
 def test_attack_chain_activities_exist():

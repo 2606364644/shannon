@@ -4,9 +4,9 @@ import subprocess
 import pytest
 from pathlib import Path
 
-from shannon_core.git_manager import GitManager
-from shannon_core.models.errors import PentestError
-from shannon_core.models.result import GitResult
+from supernova_core.git_manager import GitManager
+from supernova_core.models.errors import PentestError
+from supernova_core.models.result import GitResult
 
 
 @pytest.fixture

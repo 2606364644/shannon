@@ -1,5 +1,5 @@
 from pathlib import Path
-from shannon_core.prompts.manager import PromptManager
+from supernova_core.prompts.manager import PromptManager
 
 
 def test_interpolate_deliverables_and_scratchpad_path(tmp_path):

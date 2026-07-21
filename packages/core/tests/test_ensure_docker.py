@@ -83,10 +83,10 @@ def test_buildx_download_url_darwin_arm64():
 # Asserts the root-cause fix end-to-end: buildx usable + compose no longer falls
 # back to the legacy builder (a minimal RUN --mount build must NOT report
 # "requires buildx plugin" / "requires BuildKit"). Skipped unless
-# SHANNON_RUN_ENSURE_DOCKER_INTEGRATION=1.
+# SUPERNOVA_RUN_ENSURE_DOCKER_INTEGRATION=1.
 def test_ensure_docker_idempotent_buildx_present():
-    if __import__("os").environ.get("SHANNON_RUN_ENSURE_DOCKER_INTEGRATION") != "1":
-        __import__("pytest").skip("set SHANNON_RUN_ENSURE_DOCKER_INTEGRATION=1 to run live host gate")
+    if __import__("os").environ.get("SUPERNOVA_RUN_ENSURE_DOCKER_INTEGRATION") != "1":
+        __import__("pytest").skip("set SUPERNOVA_RUN_ENSURE_DOCKER_INTEGRATION=1 to run live host gate")
     r = subprocess.run(["bash", str(ENSURE_DOCKER)], capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, f"ensure-docker exited {r.returncode}\nSTDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
     # buildx plugin usable

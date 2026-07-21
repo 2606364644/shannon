@@ -1,5 +1,5 @@
 """Tests for sink_detector module and SinkCallSite model."""
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     SinkCallSite, DangerousSlot, SlotContext, SinkCategory, SinkType,
 )
 
@@ -137,7 +137,7 @@ class TestSinkTypeCompatibility:
 
 class TestSinkRuleLibrary:
     def test_sink_rule_dataclass(self):
-        from shannon_core.code_index.sink_detector import SinkRule
+        from supernova_core.code_index.sink_detector import SinkRule
         import re
         rule = SinkRule(
             rule_id="py-db-cursor-execute",
@@ -155,7 +155,7 @@ class TestSinkRuleLibrary:
 
     def test_default_rule_library_loaded(self):
         """起始规则库至少覆盖 5 语言 x 8 类 sink."""
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES, SinkRule
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES, SinkRule
         assert len(DEFAULT_RULES) >= 40
         # Verify language coverage
         langs = {lang for r in DEFAULT_RULES for lang in r.languages}
@@ -176,7 +176,7 @@ class TestSinkRuleLibrary:
         assert SinkCategory.REDIRECT in cats
 
     def test_py_db_cursor_execute_rule_exists(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-db-cursor-execute"), None)
         assert rule is not None
         assert rule.callee == "execute"
@@ -188,7 +188,7 @@ class TestSinkRuleLibrary:
         assert rule.category == SinkCategory.SQL
 
     def test_py_subprocess_receiver(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-subprocess-popen"), None)
         assert rule is not None
         assert rule.receiver_pattern.match("subprocess")
@@ -196,7 +196,7 @@ class TestSinkRuleLibrary:
         assert rule.category == SinkCategory.COMMAND
 
     def test_ts_innerhtml_rule_needs_review(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         # innerHTML assignment handled via assignment-style rule; if present, must be needs_review
         rule = next((r for r in DEFAULT_RULES if r.rule_id == "ts-innerhtml"), None)
         assert rule is not None
@@ -204,14 +204,14 @@ class TestSinkRuleLibrary:
         assert rule.category == SinkCategory.XSS
 
     def test_py_render_template_string_rule_exists(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         rule = next((r for r in DEFAULT_RULES if r.rule_id == "py-render-template-string"), None)
         assert rule is not None
         assert rule.callee == "render_template_string"
         assert rule.category == SinkCategory.TEMPLATE
 
     def test_rule_id_unique(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         ids = [r.rule_id for r in DEFAULT_RULES]
         assert len(ids) == len(set(ids))
 
@@ -221,7 +221,7 @@ class TestSinkRuleLibrary:
         搬迁自旧硬编码 DEFAULT_RULES tuple;若 YAML 写错(漏条/改 id),此断言 fail。
         比数量断言更强 —— 防止「数量对但换了一批」。
         """
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         expected = {
             "go-db-query", "go-exec-command", "go-gorm-exec", "go-gorm-raw",
             "go-http-get", "go-http-post",
@@ -263,8 +263,8 @@ class TestSinkRuleLibrary:
 
 class TestIsEntryHint:
     def test_function_param_identifier(self):
-        from shannon_core.code_index.sink_detector import is_entry_hint
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import is_entry_hint
+        from supernova_core.code_index.models import FuncBlock
         block = FuncBlock(
             id="app.py:f:1", file_path="app.py", function_name="f",
             start_line=1, end_line=2, source_code="def f(user_id): pass",
@@ -273,8 +273,8 @@ class TestIsEntryHint:
         assert is_entry_hint("user_id", block) is True
 
     def test_request_attr_python(self):
-        from shannon_core.code_index.sink_detector import is_entry_hint
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import is_entry_hint
+        from supernova_core.code_index.models import FuncBlock
         block = FuncBlock(
             id="app.py:f:1", file_path="app.py", function_name="f",
             start_line=1, end_line=2, source_code="", parameters=[], language="python",
@@ -284,8 +284,8 @@ class TestIsEntryHint:
         assert is_entry_hint("request.json", block) is True
 
     def test_request_attr_express(self):
-        from shannon_core.code_index.sink_detector import is_entry_hint
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import is_entry_hint
+        from supernova_core.code_index.models import FuncBlock
         block = FuncBlock(
             id="app.ts:f:1", file_path="app.ts", function_name="f",
             start_line=1, end_line=2, source_code="", parameters=["req"], language="typescript",
@@ -295,8 +295,8 @@ class TestIsEntryHint:
         assert is_entry_hint("req.query.x", block) is True
 
     def test_literal_not_hint(self):
-        from shannon_core.code_index.sink_detector import is_entry_hint
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import is_entry_hint
+        from supernova_core.code_index.models import FuncBlock
         block = FuncBlock(
             id="app.py:f:1", file_path="app.py", function_name="f",
             start_line=1, end_line=2, source_code="", parameters=[], language="python",
@@ -305,8 +305,8 @@ class TestIsEntryHint:
         assert is_entry_hint("42", block) is False
 
     def test_local_var_not_hint(self):
-        from shannon_core.code_index.sink_detector import is_entry_hint
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import is_entry_hint
+        from supernova_core.code_index.models import FuncBlock
         block = FuncBlock(
             id="app.py:f:1", file_path="app.py", function_name="f",
             start_line=1, end_line=2, source_code="", parameters=["x"], language="python",
@@ -317,8 +317,8 @@ class TestIsEntryHint:
 
 class TestDetectSinksPython:
     def test_python_cursor_execute_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         # Build a block with a known cursor.execute call
         src = (
             "def f(user_sql):\n"
@@ -347,8 +347,8 @@ class TestDetectSinksPython:
         assert site.needs_review is False
 
     def test_python_os_system_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "import os\n"
@@ -365,8 +365,8 @@ class TestDetectSinksPython:
         assert "py-os-system" in rules
 
     def test_python_subprocess_run_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "import subprocess\n"
@@ -383,8 +383,8 @@ class TestDetectSinksPython:
         assert "py-subprocess-run" in rules
 
     def test_python_pickle_loads_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "import pickle\n"
@@ -401,8 +401,8 @@ class TestDetectSinksPython:
         assert "py-pickle-loads" in rules
 
     def test_python_render_template_string_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "from flask import render_template_string\n"
@@ -419,8 +419,8 @@ class TestDetectSinksPython:
         assert "py-render-template-string" in rules
 
     def test_python_requests_get_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "import requests\n"
@@ -442,8 +442,8 @@ class TestDetectSinksPython:
     def test_no_false_positive_model_query(self):
         """.query() on non-DB receiver (User.query) must NOT hit SQL rule
         (no receiver pattern match for 'User')."""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "def f():\n"
@@ -460,8 +460,8 @@ class TestDetectSinksPython:
 
     def test_id_format(self):
         """SinkCallSite.id follows '{file}:{caller_func}:{callee}:{line}:{col}'."""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "def f(user_sql):\n"
@@ -478,8 +478,8 @@ class TestDetectSinksPython:
         assert sites[0].id == "app.py:f:execute:2:4"
 
     def test_caller_id_links_back(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "def f(user_sql):\n"
@@ -494,9 +494,9 @@ class TestDetectSinksPython:
         assert sites[0].caller_id == "app.py:f:1"
 
     def test_multiple_rules_same_callee_emit_multiple_sites(self):
-        from shannon_core.code_index.sink_detector import detect_sinks, SinkRule
+        from supernova_core.code_index.sink_detector import detect_sinks, SinkRule
         import re
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         # Two rules, same callee 'f', both receiver_patterns match 'obj'.
         rule_a = SinkRule("test-multi-a", ("python",), "f", re.compile(r"^obj$"),
@@ -518,9 +518,9 @@ class TestDetectSinksPython:
 
 class TestDangerousSlotsInternals:
     def test_variadic_slot_minus_one(self):
-        from shannon_core.code_index.sink_detector import _build_dangerous_slots, SinkRule
+        from supernova_core.code_index.sink_detector import _build_dangerous_slots, SinkRule
         import re
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.models import FuncBlock
         rule = SinkRule(
             rule_id="test-variadic",
             languages=("python",),
@@ -543,8 +543,8 @@ class TestDangerousSlotsInternals:
         assert slots[0].is_entry_hint is True         # 'x' is a param → any() True
 
     def test_normal_index_and_out_of_range(self):
-        from shannon_core.code_index.sink_detector import _build_dangerous_slots, SinkRule
-        from shannon_core.code_index.models import FuncBlock
+        from supernova_core.code_index.sink_detector import _build_dangerous_slots, SinkRule
+        from supernova_core.code_index.models import FuncBlock
         rule = SinkRule(
             rule_id="test-normal",
             languages=("python",),
@@ -568,8 +568,8 @@ class TestDangerousSlotsInternals:
 
 class TestDetectSinksCrossLanguage:
     def test_ts_eval_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
         import tempfile, pathlib
         src = (
             "function f(code: string) {\n"
@@ -586,8 +586,8 @@ class TestDetectSinksCrossLanguage:
         assert "ts-eval" in rules
 
     def test_go_exec_command_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.go_parser import GoParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.go_parser import GoParser
         import tempfile, pathlib
         src = (
             "package main\n"
@@ -606,8 +606,8 @@ class TestDetectSinksCrossLanguage:
         assert "go-exec-command" in rules
 
     def test_php_unserialize_hit(self):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.php_parser import PhpParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.php_parser import PhpParser
         import tempfile, pathlib
         src = (
             "<?php\n"
@@ -631,7 +631,7 @@ class TestOrmRawRules:
     """Spec 改动 1.2 A — 9 ORM Raw / string-built SQL sink rules."""
 
     def test_orm_raw_rules_present(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         ids = {r.rule_id for r in DEFAULT_RULES}
         for rid in ("py-django-raw", "py-sqlalchemy-text", "ts-knex-raw",
                     "ts-sequelize-query", "go-gorm-raw", "go-gorm-exec",
@@ -642,8 +642,8 @@ class TestOrmRawRules:
         # Inline Go source with a string-built db.Raw(...) call + real detect_sinks.
         # Uses the same GoParser/parse_file/tempfile harness pattern as the
         # existing test_go_exec_command_hit above.
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.go_parser import GoParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.go_parser import GoParser
         import tempfile, pathlib
         src = (
             "package main\n"
@@ -663,7 +663,7 @@ class TestOrmRawRules:
 
     def test_orm_raw_rule_fields(self):
         """Spot-check field values for a couple of the new rules."""
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         def _rule(rule_id: str):
             return next(r for r in DEFAULT_RULES if r.rule_id == rule_id)
 
@@ -694,7 +694,7 @@ class TestSqlCommandWhitelistGuard:
     """Spec 改动 1.2 D — guard: SQL/COMMAND issue_types must stay in whitelist."""
 
     def test_sql_command_categories_in_whitelist(self):
-        from shannon_core.code_index.finding_models import VALID_INJECTION_CATEGORIES
+        from supernova_core.code_index.finding_models import VALID_INJECTION_CATEGORIES
         # New ORM Raw / command rules produce SQL/COMMAND findings; their
         # issue_types must be accepted by VALID_INJECTION_CATEGORIES.
         assert "sql_injection" in VALID_INJECTION_CATEGORIES
@@ -716,8 +716,8 @@ class TestSqlArgShapeIdentifier:
         # The receiver must match _DB_CURSOR (cursor|cnx|conn|db|database),
         # so we name the cursor variable "cursor" (matches existing
         # test_python_cursor_execute_hit convention).
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "def f(tn):\n"
@@ -739,8 +739,8 @@ class TestSqlArgShapeIdentifier:
     def test_py_sql_bound_arg_stays_value(self):
         # bound ?-placeholder arg stays SQL_VALUE, no SQL_IDENTIFIER slot,
         # and needs_review stays at its rule default (False for cursor.execute).
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.python_parser import PythonParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
         import tempfile, pathlib
         src = (
             "def f(name):\n"
@@ -772,7 +772,7 @@ class TestOrmModelQuery:
     交 Spec C LLM 复核滤非 SQL 的 .query(静态精度不足)。"""
 
     def test_ts_orm_model_query_rule_present(self):
-        from shannon_core.code_index.sink_detector import DEFAULT_RULES
+        from supernova_core.code_index.sink_detector import DEFAULT_RULES
         rule = next((r for r in DEFAULT_RULES if r.rule_id == "ts-orm-model-query"), None)
         assert rule is not None
         assert rule.callee == "query"
@@ -785,8 +785,8 @@ class TestOrmModelQuery:
 
     def test_trip_query_hit(self):
         """Trip.query(sql) receiver=Trip → 命中 ts-orm-model-query, needs_review=True。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
         import tempfile, pathlib
         src = (
             "function f(sql: string) {\n"
@@ -810,8 +810,8 @@ class TestOrmModelQuery:
         """dbConfig.trip.query(sql) receiver=整链 dbConfig.trip(typescript_parser
         member_expression object=整链)→ .+ 匹配(改动2 关键:整链 receiver 覆盖,
         非首段 dbConfig)。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
         import tempfile, pathlib
         src = (
             "function f(sql: string) {\n"
@@ -840,8 +840,8 @@ class TestJavaSqlSinksHardening:
 
     def _java_sites(self, body: str):
         """helper:完整 class 包裹方法体 → JavaParser 切 block → detect_sinks。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.java_parser import JavaParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.java_parser import JavaParser
         import tempfile, pathlib
         src = f"class C {{\n  void q(String s) {{\n{body}\n  }}\n}}\n"
         parser = JavaParser()
@@ -897,8 +897,8 @@ class TestJavaDeserSinksHardening:
     """
 
     def _java_sites(self, body: str):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.java_parser import JavaParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.java_parser import JavaParser
         import tempfile, pathlib
         src = f"class C {{\n  void q(String p) {{\n{body}\n  }}\n}}\n"
         parser = JavaParser()
@@ -943,8 +943,8 @@ class TestJavaSsrfCmdRedirectSinks:
     """Java SSRF/Command/Redirect 规则:rp ^(类型名)$ 失配修复(Java receiver 是实例变量/整链)+ 补全。"""
 
     def _java_sites(self, body: str):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.java_parser import JavaParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.java_parser import JavaParser
         import tempfile, pathlib
         src = f"class C {{\n  void q() {{\n{body}\n  }}\n}}\n"
         parser = JavaParser()
@@ -1005,8 +1005,8 @@ class TestExecuteDualSemantics:
     """
 
     def _java_sites(self, body: str):
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.java_parser import JavaParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.java_parser import JavaParser
         import tempfile, pathlib
         src = f"class C {{\n  void q() {{\n{body}\n  }}\n}}\n"
         parser = JavaParser()
@@ -1040,8 +1040,8 @@ class TestOtherLangsReceiverFix:
 
     def test_php_mysqli_query_dollar_receiver_hit(self):
         """$mysqli->query($sql) receiver='$mysqli' → php_parser lstrip $ → 'mysqli' → 命中 php-mysqli-query。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.php_parser import PhpParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.php_parser import PhpParser
         import tempfile, pathlib
         src = "<?php\nfunction f($sql) {\n  $mysqli->query($sql);\n}\n"
         parser = PhpParser()
@@ -1056,8 +1056,8 @@ class TestOtherLangsReceiverFix:
 
     def test_go_db_query_receiver_hit(self):
         """db.Query(sql) → go-db-query(原 rp=null 不命中;改 .+ 后命中)。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.go_parser import GoParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.go_parser import GoParser
         import tempfile, pathlib
         src = "package main\nfunc q(db DB, sql string) {\n  db.Query(sql)\n}\n"
         parser = GoParser()
@@ -1071,8 +1071,8 @@ class TestOtherLangsReceiverFix:
 
     def test_ts_child_process_exec_receiver_hit(self):
         """child_process.exec(cmd) → ts-child-process-exec(原 rp=null 不命中;改 ^(child_process|cp)$ 后)。"""
-        from shannon_core.code_index.sink_detector import detect_sinks
-        from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
         import tempfile, pathlib
         src = "import * as cp from 'child_process';\nfunction f(cmd: string) {\n  cp.exec(cmd);\n}\n"
         parser = TypeScriptParser()

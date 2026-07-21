@@ -8,7 +8,7 @@ import type { FsEntry } from "@/api/types";
 import { ApiError } from "@/api/client";
 import { cn } from "@/lib/utils";
 
-const RECENT_KEY = "shannon-fs-recent";
+const RECENT_KEY = "supernova-fs-recent";
 
 export interface FileSystemPickerProps {
   value: string;

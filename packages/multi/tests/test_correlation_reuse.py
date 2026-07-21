@@ -10,7 +10,7 @@
 """
 import json
 
-from shannon_blackbox.pipeline.workflows import has_correlation_results
+from supernova_blackbox.pipeline.workflows import has_correlation_results
 
 
 def _write_queue(dlv, vc, entries):

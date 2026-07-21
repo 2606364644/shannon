@@ -1,8 +1,8 @@
 import asyncio
 from unittest.mock import MagicMock
 
-from shannon_core.code_index.models import FuncBlock, ParameterSource
-from shannon_core.code_index.source_discovery_llm import (
+from supernova_core.code_index.models import FuncBlock, ParameterSource
+from supernova_core.code_index.source_discovery_llm import (
     collect_source_candidates, discover_sources_by_rules, discover_sources_llm,
 )
 
@@ -51,7 +51,7 @@ def test_discover_sources_llm_degrades_to_empty_when_llm_unavailable():
 
 def test_discover_sources_llm_reports_progress_and_hits():
     """progress_cb: 每个 handler 一次 tick(命中带 detail) + 末尾 finalize 汇总。"""
-    from shannon_core.code_index.progress import ProgressSample
+    from supernova_core.code_index.progress import ProgressSample
 
     # 两个 handler(不同 block), 各判一个 source。
     b1 = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')
@@ -88,7 +88,7 @@ def test_discover_sources_llm_skip_emits_note_via_progress_cb():
 
     on_skip 注入: 超时 chunk 的 file_path 经 idx 映射进 note detail(文件级)。
     """
-    from shannon_core.code_index.progress import ProgressSample
+    from supernova_core.code_index.progress import ProgressSample
 
     b1 = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')
     b2 = _block("g.js", "g", 1, 'function g(req){ const y = input.get("y"); }\n')
@@ -320,7 +320,7 @@ async def test_discover_sources_file_level_routes_verdict_to_correct_block():
 
 async def test_discover_sources_per_call_timeout_defaults_to_120(monkeypatch):
     """文件级 prompt 更重 → discover_sources_llm 不传 per_call_timeout 时默认 120s(spec §3.2)。"""
-    from shannon_core.code_index import source_discovery_llm as mod
+    from supernova_core.code_index import source_discovery_llm as mod
 
     captured: list = []
 
@@ -363,14 +363,14 @@ async def test_discover_sources_large_file_chunks_into_multiple_calls():
 
 
 async def test_discover_sources_per_call_timeout_honors_env_override(monkeypatch):
-    """spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 须能覆盖 source 的 per-call 上限。
+    """spec §3.2: SUPERNOVA_LLM_PER_CALL_TIMEOUT env 须能覆盖 source 的 per-call 上限。
 
     文件级默认 120s(下限), 但运营设 env=200 必须生效 —— 不能被硬编码 120 绕过
     (旧版 effective_timeout 恒 120 → env 失效, 违反 spec §3.2「均可经 env 覆盖」)。
     """
-    from shannon_core.code_index import source_discovery_llm as mod
+    from supernova_core.code_index import source_discovery_llm as mod
 
-    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "200")
+    monkeypatch.setenv("SUPERNOVA_LLM_PER_CALL_TIMEOUT", "200")
 
     captured: list = []
 
@@ -421,7 +421,7 @@ def test_discover_sources_threshold_derives_from_model():
     glm-5.2 context 1M × 0.75 = 750K; big_src ~125K tokens < 750K -> 1 chunk(1 次 LLM 调用)。
     """
     import asyncio
-    from shannon_core.code_index.source_discovery_llm import SourceCandidate
+    from supernova_core.code_index.source_discovery_llm import SourceCandidate
 
     big_src = "x = 1\n" * 100_000  # ~500K chars -> ~125K tokens(ascii)
     block = _block("app.js", "f", 1, big_src)
@@ -443,7 +443,7 @@ def test_discover_sources_threshold_default_model():
     big_src ~125K tokens > 96K, 但单 block 超 threshold 独立成 1 chunk(无法再拆)。
     """
     import asyncio
-    from shannon_core.code_index.source_discovery_llm import SourceCandidate
+    from supernova_core.code_index.source_discovery_llm import SourceCandidate
 
     big_src = "x = 1\n" * 100_000  # ~125K tokens
     block = _block("app.js", "f", 1, big_src)

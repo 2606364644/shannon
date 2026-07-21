@@ -6,7 +6,7 @@ from typing import Protocol
 
 import pytest
 
-from shannon_core.services.browser_engine import (
+from supernova_core.services.browser_engine import (
     BrowserEngine,
     BrowserEngineFactory,
 )
@@ -212,21 +212,21 @@ class TestBrowserEngineFactory:
             BrowserEngineFactory.get_engine("nonexistent")
 
     def test_resolve_name_defaults_to_agent_browser(self, monkeypatch):
-        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+        monkeypatch.delenv("SUPERNOVA_BROWSER_ENGINE", raising=False)
         assert BrowserEngineFactory.resolve_name(None) == "agent-browser"
 
     def test_resolve_name_env_overrides_default(self, monkeypatch):
-        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "playwright")
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "playwright")
         assert BrowserEngineFactory.resolve_name(None) == "playwright"
 
     def test_resolve_name_reads_config(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+        monkeypatch.delenv("SUPERNOVA_BROWSER_ENGINE", raising=False)
         cfg = tmp_path / "config.yaml"
         cfg.write_text("browser_engine: playwright\n")
         assert BrowserEngineFactory.resolve_name(str(cfg)) == "playwright"
 
     def test_resolve_name_env_beats_config(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "agent-browser")
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "agent-browser")
         cfg = tmp_path / "config.yaml"
         cfg.write_text("browser_engine: playwright\n")
         assert BrowserEngineFactory.resolve_name(str(cfg)) == "agent-browser"
@@ -239,7 +239,7 @@ class TestBrowserEngineFactory:
 
 class TestEnginesSubpackage:
     def test_engines_init_importable(self):
-        from shannon_core.services.engines import BrowserEngineFactory as Factory
+        from supernova_core.services.engines import BrowserEngineFactory as Factory
 
         assert Factory is BrowserEngineFactory
 
@@ -255,20 +255,20 @@ class TestRegisteredEngines:
     @pytest.fixture(autouse=True)
     def _register_engines(self):
         """Register the real engines after the autouse _clear_registry has emptied the registry."""
-        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
-        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        from supernova_core.services.engines.playwright_engine import PlaywrightEngine
+        from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
         BrowserEngineFactory.register("playwright", PlaywrightEngine)
         BrowserEngineFactory.register("agent-browser", AgentBrowserEngine)
 
     def test_factory_returns_playwright_engine(self):
         engine = BrowserEngineFactory.get_engine("playwright")
-        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        from supernova_core.services.engines.playwright_engine import PlaywrightEngine
         assert isinstance(engine, PlaywrightEngine)
         assert engine.name == "playwright"
 
     def test_factory_returns_agent_browser_engine(self):
         engine = BrowserEngineFactory.get_engine("agent-browser")
-        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
         assert isinstance(engine, AgentBrowserEngine)
         assert engine.name == "agent-browser"
 
@@ -277,21 +277,21 @@ class TestRegisteredEngines:
             BrowserEngineFactory.get_engine("nonexistent-engine")
 
     def test_playwright_satisfies_protocol(self):
-        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        from supernova_core.services.engines.playwright_engine import PlaywrightEngine
         engine = PlaywrightEngine()
         assert isinstance(engine, BrowserEngine)
 
     def test_agent_browser_satisfies_protocol(self):
-        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
         engine = AgentBrowserEngine()
         assert isinstance(engine, BrowserEngine)
 
     def test_playwright_cli_binary(self):
-        from shannon_core.services.engines.playwright_engine import PlaywrightEngine
+        from supernova_core.services.engines.playwright_engine import PlaywrightEngine
         assert PlaywrightEngine().cli_binary == "playwright-cli"
 
     def test_agent_browser_cli_binary(self):
-        from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+        from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
         assert AgentBrowserEngine().cli_binary == "agent-browser"
 
 

@@ -1,8 +1,8 @@
 import json
 
-from shannon_core.code_index import write_index_files
-from shannon_core.code_index.models import CodeIndex
-from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from supernova_core.code_index import write_index_files
+from supernova_core.code_index.models import CodeIndex
+from supernova_core.code_index.parameter_models import ParameterPropagationGraph
 
 
 def _minimal_index(**overrides):

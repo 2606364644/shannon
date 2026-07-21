@@ -1,8 +1,8 @@
 # packages/core/tests/code_index/test_authz_render_candidates.py
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     CallChain, CodeIndex, EntryPoint, FuncBlock,
 )
-from shannon_core.code_index.authz_gitnexus_track import (
+from supernova_core.code_index.authz_gitnexus_track import (
     FrameworkIDORCandidate,
     IDORCandidateChain,
     render_authz_gitnexus_candidates,

@@ -1,10 +1,10 @@
 import pytest
 from pathlib import Path
-from shannon_core.code_index.file_discovery import (
+from supernova_core.code_index.file_discovery import (
     classify_security_file, discover_security_files,
     SECURITY_FILE_TYPES,
 )
-from shannon_core.code_index.models import FileManifest
+from supernova_core.code_index.models import FileManifest
 
 
 class TestClassifySecurityFile:

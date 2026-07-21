@@ -1,5 +1,5 @@
-from shannon_core.agents.executor import resolve_template_name
-from shannon_core.models.agents import AgentName
+from supernova_core.agents.executor import resolve_template_name
+from supernova_core.models.agents import AgentName
 
 
 def test_recon_offline_uses_recon_static():

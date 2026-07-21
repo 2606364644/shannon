@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.services.temporal_infra import (
+from supernova_core.services.temporal_infra import (
     ensure_infra,
     get_compose_file,
     get_temporal_status,
@@ -29,7 +29,7 @@ class TestGetComposeFile:
 class TestIsTemporalReady:
     @pytest.mark.asyncio
     async def test_returns_true_when_connect_succeeds(self):
-        with patch("shannon_core.services.temporal_infra.Client") as mock_client_cls:
+        with patch("supernova_core.services.temporal_infra.Client") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client_cls.connect = AsyncMock(return_value=mock_client)
             mock_client.connection = MagicMock()
@@ -38,7 +38,7 @@ class TestIsTemporalReady:
 
     @pytest.mark.asyncio
     async def test_returns_false_when_connect_fails(self):
-        with patch("shannon_core.services.temporal_infra.Client") as mock_client_cls:
+        with patch("supernova_core.services.temporal_infra.Client") as mock_client_cls:
             mock_client_cls.connect = AsyncMock(side_effect=Exception("connection refused"))
             result = await is_temporal_ready("localhost:7233")
         assert result is False
@@ -48,7 +48,7 @@ class TestStartTemporal:
     def test_calls_docker_compose_up(self, tmp_path):
         compose = tmp_path / "docker-compose.yml"
         compose.write_text("services: {}")
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             start_temporal(compose)
         mock_sp.run.assert_called_once()
         args = mock_sp.run.call_args[0][0]
@@ -60,7 +60,7 @@ class TestStartTemporal:
     def test_raises_on_failure(self, tmp_path):
         compose = tmp_path / "docker-compose.yml"
         compose.write_text("services: {}")
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             mock_sp.run.side_effect = subprocess.CalledProcessError(1, "docker")
             with pytest.raises(RuntimeError, match="Failed to start Temporal"):
                 start_temporal(compose)
@@ -70,7 +70,7 @@ class TestStopTemporal:
     def test_calls_docker_compose_down(self, tmp_path):
         compose = tmp_path / "docker-compose.yml"
         compose.write_text("services: {}")
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             stop_temporal(compose)
         mock_sp.run.assert_called_once()
         args = mock_sp.run.call_args[0][0]
@@ -81,7 +81,7 @@ class TestStopTemporal:
     def test_raises_on_failure(self, tmp_path):
         compose = tmp_path / "docker-compose.yml"
         compose.write_text("services: {}")
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             mock_sp.run.side_effect = subprocess.CalledProcessError(1, "docker")
             with pytest.raises(RuntimeError, match="Failed to stop Temporal"):
                 stop_temporal(compose)
@@ -91,8 +91,8 @@ class TestGetTemporalStatus:
     @pytest.mark.asyncio
     async def test_returns_running_and_healthy_with_shannon_source(self):
         with (
-            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+            patch("supernova_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
         ):
             # First call: docker compose ps (container check)
             # Second call: docker ps --filter name=shannon-temporal (source check)
@@ -109,28 +109,28 @@ class TestGetTemporalStatus:
     @pytest.mark.asyncio
     async def test_returns_shannon_py_source(self):
         with (
-            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+            patch("supernova_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
         ):
             mock_sp.run.side_effect = [
                 MagicMock(stdout="Up 5 minutes"),    # container status
                 MagicMock(stdout=""),                 # shannon-temporal not found
-                MagicMock(stdout="Up 5 minutes"),    # shannon-py-temporal found
+                MagicMock(stdout="Up 5 minutes"),    # supernova-temporal found
             ]
             mock_ready.return_value = True
             result = await get_temporal_status()
-        assert result["source"] == "shannon-py-temporal"
+        assert result["source"] == "supernova-temporal"
 
     @pytest.mark.asyncio
     async def test_returns_external_source(self):
         with (
-            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+            patch("supernova_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
         ):
             mock_sp.run.side_effect = [
                 MagicMock(stdout="Up 5 minutes"),
                 MagicMock(stdout=""),   # shannon-temporal not found
-                MagicMock(stdout=""),   # shannon-py-temporal not found
+                MagicMock(stdout=""),   # supernova-temporal not found
             ]
             mock_ready.return_value = True
             result = await get_temporal_status()
@@ -139,8 +139,8 @@ class TestGetTemporalStatus:
     @pytest.mark.asyncio
     async def test_returns_stopped_when_container_not_found(self):
         with (
-            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
+            patch("supernova_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready,
         ):
             mock_sp.run.side_effect = FileNotFoundError("docker not found")
             mock_ready.return_value = False
@@ -153,9 +153,9 @@ class TestGetTemporalStatus:
 class TestEnsureInfra:
     @pytest.mark.asyncio
     async def test_returns_immediately_if_already_ready(self):
-        with patch("shannon_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready:
+        with patch("supernova_core.services.temporal_infra.is_temporal_ready", new_callable=AsyncMock) as mock_ready:
             mock_ready.return_value = True
-            with patch("shannon_core.services.temporal_infra.start_temporal") as mock_start:
+            with patch("supernova_core.services.temporal_infra.start_temporal") as mock_start:
                 await ensure_infra()
         mock_start.assert_not_called()
 
@@ -170,10 +170,10 @@ class TestEnsureInfra:
             return ready_count > 1
 
         with (
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
-            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=True),
-            patch("shannon_core.services.temporal_infra.subprocess") as mock_sp,
-            patch("shannon_core.services.temporal_infra.start_temporal") as mock_start,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
+            patch("supernova_core.services.temporal_infra._shannon_container_exists", return_value=True),
+            patch("supernova_core.services.temporal_infra.subprocess") as mock_sp,
+            patch("supernova_core.services.temporal_infra.start_temporal") as mock_start,
         ):
             await ensure_infra()
 
@@ -195,9 +195,9 @@ class TestEnsureInfra:
             return ready_count > 1
 
         with (
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
-            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=False),
-            patch("shannon_core.services.temporal_infra.start_temporal") as mock_start,
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", side_effect=fake_ready),
+            patch("supernova_core.services.temporal_infra._shannon_container_exists", return_value=False),
+            patch("supernova_core.services.temporal_infra.start_temporal") as mock_start,
         ):
             await ensure_infra()
 
@@ -209,11 +209,11 @@ class TestEnsureInfra:
             return False
 
         with (
-            patch("shannon_core.services.temporal_infra.is_temporal_ready", side_effect=never_ready),
-            patch("shannon_core.services.temporal_infra._shannon_container_exists", return_value=False),
-            patch("shannon_core.services.temporal_infra.start_temporal"),
-            patch("shannon_core.services.temporal_infra._READY_POLL_ATTEMPTS", 3),
-            patch("shannon_core.services.temporal_infra._READY_POLL_INTERVAL", 0),
+            patch("supernova_core.services.temporal_infra.is_temporal_ready", side_effect=never_ready),
+            patch("supernova_core.services.temporal_infra._shannon_container_exists", return_value=False),
+            patch("supernova_core.services.temporal_infra.start_temporal"),
+            patch("supernova_core.services.temporal_infra._READY_POLL_ATTEMPTS", 3),
+            patch("supernova_core.services.temporal_infra._READY_POLL_INTERVAL", 0),
         ):
             with pytest.raises(RuntimeError, match="Timed out waiting for Temporal"):
                 await ensure_infra()
@@ -221,23 +221,23 @@ class TestEnsureInfra:
 
 class TestGenerateTaskQueue:
     def test_format_is_prefix_hex8(self):
-        from shannon_core.services.temporal_infra import generate_task_queue
-        result = generate_task_queue("shannon-py-wb")
-        assert result.startswith("shannon-py-wb-")
-        suffix = result.removeprefix("shannon-py-wb-")
+        from supernova_core.services.temporal_infra import generate_task_queue
+        result = generate_task_queue("supernova-wb")
+        assert result.startswith("supernova-wb-")
+        suffix = result.removeprefix("supernova-wb-")
         assert len(suffix) == 8
         int(suffix, 16)  # must be valid hex
 
     def test_generates_unique_names(self):
-        from shannon_core.services.temporal_infra import generate_task_queue
-        names = {generate_task_queue("shannon-py-wb") for _ in range(100)}
+        from supernova_core.services.temporal_infra import generate_task_queue
+        names = {generate_task_queue("supernova-wb") for _ in range(100)}
         assert len(names) == 100
 
 
 class TestShannonContainerExists:
     def test_returns_true_when_container_found(self):
-        from shannon_core.services.temporal_infra import _shannon_container_exists
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        from supernova_core.services.temporal_infra import _shannon_container_exists
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             mock_sp.run.return_value = MagicMock(stdout="shannon-temporal")
             assert _shannon_container_exists() is True
             args = mock_sp.run.call_args[0][0]
@@ -245,13 +245,13 @@ class TestShannonContainerExists:
             assert "name=shannon-temporal" in args
 
     def test_returns_false_when_container_not_found(self):
-        from shannon_core.services.temporal_infra import _shannon_container_exists
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        from supernova_core.services.temporal_infra import _shannon_container_exists
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             mock_sp.run.return_value = MagicMock(stdout="")
             assert _shannon_container_exists() is False
 
     def test_returns_false_when_docker_not_installed(self):
-        from shannon_core.services.temporal_infra import _shannon_container_exists
-        with patch("shannon_core.services.temporal_infra.subprocess") as mock_sp:
+        from supernova_core.services.temporal_infra import _shannon_container_exists
+        with patch("supernova_core.services.temporal_infra.subprocess") as mock_sp:
             mock_sp.run.side_effect = FileNotFoundError("docker not found")
             assert _shannon_container_exists() is False

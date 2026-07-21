@@ -1,4 +1,4 @@
-from shannon_core.models.deliverables import DeliverableType, DELIVERABLE_FILENAMES
+from supernova_core.models.deliverables import DeliverableType, DELIVERABLE_FILENAMES
 
 def test_deliverable_type_values():
     assert DeliverableType.CODE_ANALYSIS == "CODE_ANALYSIS"

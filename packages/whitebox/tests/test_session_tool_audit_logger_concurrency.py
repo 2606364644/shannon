@@ -2,12 +2,12 @@ import asyncio
 import json
 from pathlib import Path
 
-from shannon_core.display.formatters import agent_prefix
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.metrics import SessionMetadata
-from shannon_whitebox.audit.session import AuditSession
-from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.display.formatters import agent_prefix
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.metrics import SessionMetadata
+from supernova_whitebox.audit.session import AuditSession
+from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

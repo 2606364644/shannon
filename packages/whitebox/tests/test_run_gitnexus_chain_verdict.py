@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from shannon_whitebox.audit.session_registry import clear_audit_session, set_audit_session
-from shannon_whitebox.pipeline import activities
+from supernova_whitebox.audit.session_registry import clear_audit_session, set_audit_session
+from supernova_whitebox.pipeline import activities
 
 
 class _RecordingSession:

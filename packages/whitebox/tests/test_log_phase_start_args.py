@@ -15,8 +15,8 @@ import asyncio
 from temporalio import activity
 from temporalio.converter import DataConverter
 
-from shannon_whitebox.pipeline.activities import log_phase_start_activity
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.pipeline.activities import log_phase_start_activity
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 def _decode_after_worker_rule(args: list) -> list:

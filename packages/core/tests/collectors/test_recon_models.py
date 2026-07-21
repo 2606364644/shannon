@@ -4,7 +4,7 @@
 关键 schema spot-check。set_endpoints 是第 9 个工具（append 语义，对齐 TS add_endpoints），
 多次调累积 endpoint，渲染 §4 (API Endpoint Inventory)。
 """
-from shannon_core.collectors.recon import RECON_SECTIONS, ReconCollector
+from supernova_core.collectors.recon import RECON_SECTIONS, ReconCollector
 
 EXPECTED_TOOLS = [
     "set_executive_summary",
@@ -198,7 +198,7 @@ def test_injection_sources_has_applicable_and_six_sink_arrays():
 
 def test_sink_ref_items_reuse_pre_recon_sink_ref_shape():
     # injection_sources 的 sink 数组 item 必须与 pre-recon SINK_REF 同构
-    from shannon_core.collectors.pre_recon import SINK_REF
+    from supernova_core.collectors.pre_recon import SINK_REF
     s = next(s for s in RECON_SECTIONS if s.tool_name == "set_injection_sources")
     item = s.json_schema["properties"]["command_injection"]["items"]
     # location/sink_function 必填，notes 可选 anyOf string|null

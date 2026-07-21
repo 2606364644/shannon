@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.workspace import (
+from supernova_core.workspace import (
     compute_deliverables_summary,
     find_latest_workspace,
     find_workspaces_by_url,
@@ -68,7 +68,7 @@ class TestUrlsMatch:
 
 class TestGetWorkspaceInfo:
     def test_returns_expected_keys(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://myapp.com", "/repo", name="test-ws", scan_type="whitebox")
@@ -86,7 +86,7 @@ class TestGetWorkspaceInfo:
         assert "deliverables_summary" in info
 
     def test_includes_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -162,7 +162,7 @@ class TestComputeDeliverablesSummarySessionCentric:
     """compute_deliverables_summary(ws) reads deliverables under the session dir (ws/deliverables)."""
 
     def test_finds_session_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -191,7 +191,7 @@ class TestComputeDeliverablesSummarySessionCentric:
         assert "xss" in summary["vuln_queues"]
 
     def test_empty_when_repo_has_no_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -205,7 +205,7 @@ def _create_workspace_with_queues(
 ) -> Path:
     """Helper: workspace whose queue files live session-centric (ws/deliverables) —
     matching production whitebox output (deliverables under workspaces/<session>)."""
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     repo = tmp_path / "repos" / name
     repo.mkdir(parents=True)
@@ -240,7 +240,7 @@ class TestFindLatestWorkspace:
         assert result is None
 
     def test_skips_empty_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
         mgr = SessionManager(tmp_path / "workspaces")
         ws = mgr.create_workspace("https://empty.com", "/repo", name="empty-ws")
         mgr.mark_completed(ws)
@@ -281,7 +281,7 @@ class TestFindWorkspacesByUrl:
         assert len(results) == 1
 
     def test_excludes_no_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
         mgr = SessionManager(tmp_path / "workspaces")
         mgr.create_workspace("https://myapp.com", "/repo", name="empty-ws")
         results = find_workspaces_by_url(tmp_path / "workspaces", "https://myapp.com")
@@ -296,7 +296,7 @@ class TestFindWorkspacesByUrl:
 
 class TestGetWorkspaceVulnCounts:
     def test_returns_per_class_counts(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -318,7 +318,7 @@ class TestGetWorkspaceVulnCounts:
         assert get_workspace_vuln_counts(ws) == {"injection": 2, "xss": 1}
 
     def test_empty_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -329,7 +329,7 @@ class TestGetWorkspaceVulnCounts:
 
 class TestGetWorkspaceAge:
     def test_returns_age_string(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         mgr = SessionManager(tmp_path / "ws")
         ws = mgr.create_workspace("https://test.com", "/repo", name="age-ws")

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.code_index.parsers.go_parser import GoParser
-from shannon_core.code_index.parsers import _PARSER_CLASSES
+from supernova_core.code_index.parsers.go_parser import GoParser
+from supernova_core.code_index.parsers import _PARSER_CLASSES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GO_FILE = FIXTURES / "go" / "http_handler.go"

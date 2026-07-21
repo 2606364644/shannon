@@ -1,15 +1,15 @@
 import pytest
 
-from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+from supernova_core.code_index.vuln_chain_builders.injection_builder import (
     build_injection_findings,
 )
-from shannon_core.code_index.chain_verdict import ChainVerdict
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.chain_verdict import ChainVerdict
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow, PropagationStep,
 )
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.models.queue_schemas import InjectionVulnerability
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.models.queue_schemas import InjectionVulnerability
 
 
 def _flow(slot, steps=None):
@@ -127,7 +127,7 @@ async def test_build_injection_findings_reports_chain_progress(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "shannon_core.code_index.vuln_chain_builders.injection_builder.judge_chain_verdict",
+        "supernova_core.code_index.vuln_chain_builders.injection_builder.judge_chain_verdict",
         fake_judge,
     )
 

@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
-from shannon_core.code_index.enhanced_parameters import (
+from supernova_core.code_index.enhanced_parameters import (
     extract_typed_parameters, mark_http_parameter_sources,
 )
-from shannon_core.code_index.models import TypedParameter, ParameterSource
+from supernova_core.code_index.models import TypedParameter, ParameterSource
 
 
 class TestExtractTypedParametersPython:

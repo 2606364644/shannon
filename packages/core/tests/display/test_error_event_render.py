@@ -7,9 +7,9 @@ from io import StringIO
 
 from rich.console import Console
 
-from shannon_core.display.events import ErrorEvent
-from shannon_core.display.file_renderer import FileLogRenderer
-from shannon_core.display.rich_renderer import RichConsoleRenderer
+from supernova_core.display.events import ErrorEvent
+from supernova_core.display.file_renderer import FileLogRenderer
+from supernova_core.display.rich_renderer import RichConsoleRenderer
 
 
 def _evt(**kw):

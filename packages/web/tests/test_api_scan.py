@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from shannon_web.app import create_app
-from shannon_web.components.scan_manager import TemporalUnavailable, TooManyScans
+from supernova_web.app import create_app
+from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
 
 
 class FakeSM:

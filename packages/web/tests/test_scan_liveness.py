@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from shannon_web.components.scan_liveness import is_scan_recently_active
+from supernova_web.components.scan_liveness import is_scan_recently_active
 
 
 def test_heartbeat_fresh_is_active(tmp_path):
@@ -50,7 +50,7 @@ def test_threshold_param_overrides_default(tmp_path):
 
 def test_default_window_is_90(monkeypatch, tmp_path):
     """窗口默认 90s(原 900s 的回归窗口太宽,改 90 压缩「卡 Running」;spec §5)。"""
-    monkeypatch.delenv("SHANNON_SCAN_LIVENESS_SECONDS", raising=False)
+    monkeypatch.delenv("SUPERNOVA_SCAN_LIVENESS_SECONDS", raising=False)
     hb = tmp_path / "heartbeat"
     hb.write_text(f"{time.time()}\n")  # <90s → 活
     assert is_scan_recently_active(tmp_path) is True
@@ -67,17 +67,17 @@ def test_default_window_is_90(monkeypatch, tmp_path):
 def test_submitted_at_within_grace_judged_alive(tmp_path, monkeypatch):
     """无 heartbeat + submitted_at 新(提交宽限内)→ is_scan_alive True。
     覆盖冷启动窗口:workflow 刚提交、worker 还没写首个 heartbeat。"""
-    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    monkeypatch.setenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
     (tmp_path / "session.json").write_text(json.dumps({"submitted_at": time.time()}))
-    from shannon_web.components.scan_liveness import is_scan_alive
+    from supernova_web.components.scan_liveness import is_scan_alive
     assert is_scan_alive(tmp_path) is True
 
 
 def test_created_at_fallback_when_no_submitted_at(tmp_path, monkeypatch):
     """老 session 无 submitted_at → 回退 created_at 判宽限(向后兼容历史 session)。"""
-    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    monkeypatch.setenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
     (tmp_path / "session.json").write_text(json.dumps({"created_at": time.time()}))
-    from shannon_web.components.scan_liveness import (
+    from supernova_web.components.scan_liveness import (
         is_scan_alive, is_scan_within_submit_grace,
     )
     assert is_scan_within_submit_grace(tmp_path) is True
@@ -86,15 +86,15 @@ def test_created_at_fallback_when_no_submitted_at(tmp_path, monkeypatch):
 
 def test_is_scan_alive_heartbeat_or_grace(tmp_path):
     """is_scan_alive = heartbeat fresh OR 提交宽限内(任一 True)。heartbeat fresh 即可。"""
-    from shannon_web.components.scan_liveness import is_scan_alive
+    from supernova_web.components.scan_liveness import is_scan_alive
     (tmp_path / "heartbeat").write_text(f"{time.time()}\n")
     assert is_scan_alive(tmp_path) is True
 
 
 def test_submit_grace_expired_not_alive(tmp_path, monkeypatch):
     """提交超宽限 + 无 heartbeat → is_scan_alive False(真孤儿:worker 没起/已退出)。"""
-    monkeypatch.setenv("SHANNON_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
+    monkeypatch.setenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", "120")
     old = time.time() - 3600
     (tmp_path / "session.json").write_text(json.dumps({"submitted_at": old}))
-    from shannon_web.components.scan_liveness import is_scan_alive
+    from supernova_web.components.scan_liveness import is_scan_alive
     assert is_scan_alive(tmp_path) is False

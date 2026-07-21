@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.code_index.parsers.python_parser import PythonParser
-from shannon_core.code_index.parsers import get_parser, available_languages
+from supernova_core.code_index.parsers.python_parser import PythonParser
+from supernova_core.code_index.parsers import get_parser, available_languages
 
 FIXTURES = Path(__file__).parent / "fixtures"
 FLASK_APP = FIXTURES / "python" / "flask_app.py"
@@ -57,7 +57,7 @@ class TestPythonParserFuncBlocks:
 
 class TestPythonParserRegistry:
     def test_registered_in_parser_registry(self):
-        from shannon_core.code_index.parsers import _PARSER_CLASSES
+        from supernova_core.code_index.parsers import _PARSER_CLASSES
         assert "python" in _PARSER_CLASSES
 
     def test_get_parser_returns_python_parser(self):

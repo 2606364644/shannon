@@ -1,12 +1,12 @@
 """Tests for WhiteboxScanWorkflow error propagation logic."""
 
-from shannon_whitebox.pipeline.shared import PipelineState
-from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
-from shannon_core.models.errors import classify_error_for_temporal
+from supernova_whitebox.pipeline.shared import PipelineState
+from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from supernova_core.models.errors import classify_error_for_temporal
 
 
 def test_vuln_phase_steps_dynamic():
-    from shannon_whitebox.pipeline.workflows import vuln_phase_steps
+    from supernova_whitebox.pipeline.workflows import vuln_phase_steps
     steps = vuln_phase_steps(["injection", "xss"])
     assert steps == ("injection-vuln", "xss-vuln")
 
@@ -89,8 +89,8 @@ class TestWhiteboxWorkflowErrorPropagation:
         assert state.status == "cancelled"
 
 
-from shannon_core.models.errors import ErrorCode, PentestError
-from shannon_core.services.browser_engine import BrowserEngineFactory
+from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.services.browser_engine import BrowserEngineFactory
 
 
 class TestWhiteboxBrowserEngineIntegration:
@@ -98,8 +98,8 @@ class TestWhiteboxBrowserEngineIntegration:
 
     def test_engine_from_config_browser_engine(self, tmp_path):
         """Engine should be resolved from config.browser_engine field."""
-        from shannon_core.config.parser import parse_config
-        import shannon_core.services.engines  # noqa: F401
+        from supernova_core.config.parser import parse_config
+        import supernova_core.services.engines  # noqa: F401
 
         config_file = tmp_path / "config.yaml"
         config_file.write_text("browser_engine: agent-browser\n")
@@ -111,7 +111,7 @@ class TestWhiteboxBrowserEngineIntegration:
 
     def test_default_playwright_without_config(self):
         """Without config, engine defaults to playwright."""
-        import shannon_core.services.engines  # noqa: F401
+        import supernova_core.services.engines  # noqa: F401
 
         engine_name = "playwright"
         engine = BrowserEngineFactory.get_engine(engine_name)
@@ -119,7 +119,7 @@ class TestWhiteboxBrowserEngineIntegration:
 
     def test_unavailable_engine_raises_error(self, monkeypatch):
         """Engine with check_available()=False should raise PentestError."""
-        import shannon_core.services.engines  # noqa: F401
+        import supernova_core.services.engines  # noqa: F401
 
         engine = BrowserEngineFactory.get_engine("playwright")
         monkeypatch.setattr(
@@ -137,7 +137,7 @@ class TestWhiteboxBrowserEngineIntegration:
 
 def test_run_prefills_completed_agents_from_input():
     """resume 时 input 携带 completed_agents，run 开头预填，守卫应能跳过。"""
-    from shannon_whitebox.pipeline.shared import PipelineInput, PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineInput, PipelineState
 
     # 模拟 run 开头的预填逻辑（不启动 Temporal）
     state = PipelineState()
@@ -158,7 +158,7 @@ def test_workflow_run_resolves_vuln_classes_via_select_function():
     """
     import inspect
 
-    from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+    from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 
     src = inspect.getsource(WhiteboxScanWorkflow.run)
     assert "select_vuln_classes" in src, "run() 必须调用 select_vuln_classes"
@@ -172,7 +172,7 @@ def test_assemble_report_reads_vuln_classes_from_input():
     """assemble_report 应从 input.vuln_classes 读（默认 ALL），不再硬编码。"""
     import inspect
 
-    from shannon_whitebox.pipeline.activities import assemble_report
+    from supernova_whitebox.pipeline.activities import assemble_report
 
     src = inspect.getsource(assemble_report)
     assert "input.vuln_classes" in src, "assemble_report 必须读 input.vuln_classes"
@@ -180,7 +180,7 @@ def test_assemble_report_reads_vuln_classes_from_input():
 
 def test_activity_input_has_vuln_classes_field():
     """ActivityInput 必须有 vuln_classes 字段（默认 None），供 assemble_report 接收 selected。"""
-    from shannon_whitebox.pipeline.shared import ActivityInput
+    from supernova_whitebox.pipeline.shared import ActivityInput
 
     ai = ActivityInput(repo_path="/tmp/x")
     assert hasattr(ai, "vuln_classes")

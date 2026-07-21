@@ -1,4 +1,4 @@
-from shannon_core.models.agents import AGENT_PHASE_MAP, AgentName
+from supernova_core.models.agents import AGENT_PHASE_MAP, AgentName
 
 
 def test_all_agent_names_have_phase_mapping():

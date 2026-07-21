@@ -37,7 +37,7 @@ def test_attack_chain_pipeline_does_not_feed_gitnexus_to_llm_prompt():
 def test_assembler_only_reads_gitnexus_own_output():
     """assembler 读 gitnexus_queue（确定性层自己产物），不反向喂 LLM 轨。"""
     import inspect
-    from shannon_core.code_index import attack_chain_assembler
+    from supernova_core.code_index import attack_chain_assembler
     src = inspect.getsource(attack_chain_assembler)
     # assembler 不读 recon_deliverable（LLM 轨）——只读 gitnexus_queue
     # （它由 activity 喂 findings，自身不读文件，source 不含 recon 读文件逻辑）

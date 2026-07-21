@@ -1,5 +1,5 @@
 import json
-from shannon_core.correlation.schemas import (
+from supernova_core.correlation.schemas import (
     CallSite, Call, TopologyEdge, ServiceNode, CrossServiceTopology,
     TrustBoundary, CorrelationResult,
 )

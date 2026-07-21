@@ -11,8 +11,8 @@ vuln agent exploitation queue 概率性漏盘(NodeGoat injection 3 连跪、auth
 AnthropicProvider 的职责 —— openai 引擎直接用裸 schema(``RawJsonSchemaOutputSchema``)。
 对齐 TS queue-schemas.ts:106 toOutputFormat + SDK types.py:1894 docstring。
 """
-from shannon_core.agents.providers_anthropic import AnthropicProvider
-from shannon_core.agents.runner import ProviderConfig
+from supernova_core.agents.providers_anthropic import AnthropicProvider
+from supernova_core.agents.runner import ProviderConfig
 
 
 class TestBuildOptionsOutputFormatEnvelope:

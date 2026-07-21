@@ -1,4 +1,4 @@
-from shannon_core.models.agents import AgentName, AgentDefinition, AGENTS, VulnType, BROWSER_SESSION_MAPPING, PLAYWRIGHT_SESSION_MAPPING
+from supernova_core.models.agents import AgentName, AgentDefinition, AGENTS, VulnType, BROWSER_SESSION_MAPPING, PLAYWRIGHT_SESSION_MAPPING
 
 def test_agent_name_values():
     assert AgentName.PRE_RECON == "pre-recon"

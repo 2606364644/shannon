@@ -35,7 +35,7 @@ def _clean_logging_singletons():
         tio.propagate = True
     # LogBus 模块级单例
     try:
-        from shannon_core.logging import LogBus
+        from supernova_core.logging import LogBus
         LogBus._dispatcher = None
         LogBus._attached = False
         LogBus._drain_task = None

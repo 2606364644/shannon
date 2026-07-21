@@ -1,9 +1,9 @@
 # =============================================================================
 # Shannon 多仓库（微服务）关联扫描配置 —— 示例：前端 Node.js + 后端 gRPC
 # -----------------------------------------------------------------------------
-# 本文件由 packages/core/src/shannon_core/config/parser.py 的
+# 本文件由 packages/core/src/supernova_core/config/parser.py 的
 # parse_multi_repo_config() 解析，schema 锁定在
-# packages/core/src/shannon_core/models/multi_repo_config.py（Pydantic，extra=forbid，
+# packages/core/src/supernova_core/models/multi_repo_config.py（Pydantic，extra=forbid，
 # 即任何没在这两个文件里出现的字段都会被拒，想加字段必须先改 model）。
 #
 # 顶层结构（4 段）：
@@ -63,7 +63,7 @@ relations:
 
 # -----------------------------------------------------------------------------
 # correlation：跨服务关联分析的输出落点。
-#   out_workspace  关联结果写入的 workspace 名（在 SHANNON_WORKER_ROOT 下创建，
+#   out_workspace  关联结果写入的 workspace 名（在 SUPERNOVA_WORKER_ROOT 下创建，
 #                  存放关联 deliverables、topology、events.ndjson 等）
 # -----------------------------------------------------------------------------
 correlation:

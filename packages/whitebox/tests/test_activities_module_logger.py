@@ -4,7 +4,7 @@ per-class builder 失败 @801）调用 logger.warning；若无模块级 logger �
 导致接通后一个 class 失败整批中断（违背 per-class 隔离设计）。"""
 import logging
 
-from shannon_whitebox.pipeline import activities
+from supernova_whitebox.pipeline import activities
 
 
 def test_activities_has_module_logger():

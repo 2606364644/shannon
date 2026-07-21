@@ -3,15 +3,15 @@ from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from shannon_blackbox.cli.main import cli
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from supernova_blackbox.cli.main import cli
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
 
 
 def test_cli_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Shannon Black-Box Scanner" in result.output
+    assert "Supernova Black-Box Scanner" in result.output
 
 
 def test_start_help():
@@ -42,9 +42,9 @@ def test_start_wires_repo_param():
         return BlackboxPipelineState(status="completed")
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com", "--repo", fake_repo])
@@ -65,9 +65,9 @@ def test_start_shows_whitebox_completion_message():
         )
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
@@ -83,9 +83,9 @@ def test_start_shows_standalone_completion_message():
         return BlackboxPipelineState(status="completed")
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
@@ -100,9 +100,9 @@ def test_start_shows_error_on_failure():
         return BlackboxPipelineState(status="failed", errors=["something broke"])
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
@@ -132,8 +132,8 @@ def test_infra_help():
 
 def test_infra_up():
     with (
-        patch("shannon_blackbox.cli.main.start_temporal"),
-        patch("shannon_blackbox.cli.main.is_temporal_ready", new_callable=AsyncMock, return_value=True),
+        patch("supernova_blackbox.cli.main.start_temporal"),
+        patch("supernova_blackbox.cli.main.is_temporal_ready", new_callable=AsyncMock, return_value=True),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "up"])
@@ -142,7 +142,7 @@ def test_infra_up():
 
 
 def test_infra_down():
-    with patch("shannon_blackbox.cli.main.stop_temporal"):
+    with patch("supernova_blackbox.cli.main.stop_temporal"):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "down"])
     assert result.exit_code == 0
@@ -153,7 +153,7 @@ def test_infra_status():
     async def fake_status(**kwargs):
         return {"container": "running", "healthy": True, "source": "shannon-temporal"}
 
-    with patch("shannon_blackbox.cli.main.get_temporal_status", side_effect=fake_status):
+    with patch("supernova_blackbox.cli.main.get_temporal_status", side_effect=fake_status):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "status"])
     assert result.exit_code == 0
@@ -179,9 +179,9 @@ def test_start_calls_ensure_infra():
         return BlackboxPipelineState(status="completed")
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", side_effect=fake_ensure) as mock_ensure,
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", side_effect=fake_ensure) as mock_ensure,
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
@@ -193,7 +193,7 @@ def test_start_calls_ensure_infra():
 def test_latest_resolves_to_workspace(tmp_path, monkeypatch):
     """--latest should resolve to the most recent whitebox workspace with deliverables."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -216,8 +216,8 @@ def test_latest_resolves_to_workspace(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "--latest"])
@@ -235,15 +235,15 @@ def _patch_env_profile():
     monkeypatch.chdir 后 tmp_path 下无 .env，故需 patch 掉这两步。
     """
     return (
-        patch("shannon_blackbox.cli.main.load_env", return_value="test"),
-        patch("shannon_blackbox.cli.main.validate_active_profile"),
+        patch("supernova_blackbox.cli.main.load_env", return_value="test"),
+        patch("supernova_blackbox.cli.main.validate_active_profile"),
     )
 
 
 def test_start_defaults_to_latest_when_no_flags(tmp_path, monkeypatch):
     """不传 -w/--latest 时默认复用最近白盒 workspace（软默认 latest）。"""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -266,8 +266,8 @@ def test_start_defaults_to_latest_when_no_flags(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         # 注意：不传 --latest 也不传 -w，应走软默认 latest
@@ -296,8 +296,8 @@ def test_start_defaults_to_standalone_when_no_whitebox(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://myapp.com"])
@@ -316,7 +316,7 @@ def test_latest_no_workspaces(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "--latest"])
@@ -339,8 +339,8 @@ def test_w_takes_precedence_over_latest(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "-w", "my-ws", "--latest"])
@@ -363,8 +363,8 @@ def test_latest_and_w_conflict_warns(tmp_path, monkeypatch):
     env_patch = _patch_env_profile()
     with (
         env_patch[0], env_patch[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://myapp.com", "-w", "my-ws", "--latest"])
@@ -377,7 +377,7 @@ def test_latest_and_w_conflict_warns(tmp_path, monkeypatch):
 def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     """workspaces command should group output by scan_type."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -404,7 +404,7 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
 def test_workspace_show(tmp_path, monkeypatch):
     """workspace show should display detailed workspace info."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -462,7 +462,7 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
 def test_workspace_delete(tmp_path, monkeypatch):
     """workspace delete should remove the workspace directory."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -491,7 +491,7 @@ def test_workspace_delete_not_found(tmp_path, monkeypatch):
 
 def test_workspace_delete_confirms(tmp_path, monkeypatch):
     """workspace delete without --force should ask for confirmation."""
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -507,7 +507,7 @@ def test_workspace_delete_confirms(tmp_path, monkeypatch):
 
 def test_workspace_delete_cancelled(tmp_path, monkeypatch):
     """workspace delete confirmation cancelled should not delete."""
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -528,11 +528,11 @@ def test_start_exits_130_on_cancelled():
         return BlackboxPipelineState(status="cancelled")
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
         # 无白盒 workspace → standalone，避免 workspace 解析干扰取消行为断言
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"])
@@ -545,10 +545,10 @@ def test_start_informs_when_blackbox_already_ran(tmp_path, monkeypatch):
     """默认（非 --rerun）检测到已跑过黑盒 → 告知、不调 run_scan。"""
     from click.testing import CliRunner
     from unittest.mock import patch, AsyncMock
-    from shannon_blackbox.cli.main import cli
+    from supernova_blackbox.cli.main import cli
 
     # deliverables 落在 session 维度（workspaces/<session>/deliverables）
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path / "worker"))
     deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# done")
@@ -559,8 +559,8 @@ def test_start_informs_when_blackbox_already_ran(tmp_path, monkeypatch):
         run_scan_called.append(True)
         return BlackboxPipelineState(status="completed")
 
-    with patch("shannon_blackbox.cli.main.ensure_infra", AsyncMock()), \
-         patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with patch("supernova_blackbox.cli.main.ensure_infra", AsyncMock()), \
+         patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://x.com", "-r", str(repo), "-w", "ws1"])
 
@@ -573,9 +573,9 @@ def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
     """--rerun 跳过幂等检测，正常调 run_scan。"""
     from click.testing import CliRunner
     from unittest.mock import patch, AsyncMock
-    from shannon_blackbox.cli.main import cli
+    from supernova_blackbox.cli.main import cli
 
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path / "worker"))
     deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# old")
@@ -588,8 +588,8 @@ def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
         captured["rerun"] = input.rerun
         return BlackboxPipelineState(status="completed")
 
-    with patch("shannon_blackbox.cli.main.ensure_infra", AsyncMock()), \
-         patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan):
+    with patch("supernova_blackbox.cli.main.ensure_infra", AsyncMock()), \
+         patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "https://x.com", "-r", str(repo), "-w", "ws1", "--rerun"])
 
@@ -601,9 +601,9 @@ def test_start_rerun_bypasses_idempotency(tmp_path, monkeypatch):
 def _capture_input(monkeypatch, extra_args, env_value=None):
     """Invoke `blackbox start` with run_scan mocked; return captured BlackboxPipelineInput."""
     if env_value is None:
-        monkeypatch.delenv("SHANNON_MAX_CONCURRENT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_MAX_CONCURRENT", raising=False)
     else:
-        monkeypatch.setenv("SHANNON_MAX_CONCURRENT", env_value)
+        monkeypatch.setenv("SUPERNOVA_MAX_CONCURRENT", env_value)
 
     captured: list[BlackboxPipelineInput] = []
 
@@ -612,9 +612,9 @@ def _capture_input(monkeypatch, extra_args, env_value=None):
         return BlackboxPipelineState(status="completed")
 
     with (
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_blackbox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://example.com"] + extra_args)
@@ -623,13 +623,13 @@ def _capture_input(monkeypatch, extra_args, env_value=None):
 
 
 def test_max_concurrent_default_from_env(monkeypatch):
-    """SHANNON_MAX_CONCURRENT=2 → BlackboxPipelineInput.max_concurrent == 2 (no CLI flag)."""
+    """SUPERNOVA_MAX_CONCURRENT=2 → BlackboxPipelineInput.max_concurrent == 2 (no CLI flag)."""
     input = _capture_input(monkeypatch, extra_args=[], env_value="2")
     assert input.max_concurrent == 2
 
 
 def test_max_concurrent_cli_overrides_env(monkeypatch):
-    """--max-concurrent 5 overrides SHANNON_MAX_CONCURRENT=2."""
+    """--max-concurrent 5 overrides SUPERNOVA_MAX_CONCURRENT=2."""
     input = _capture_input(monkeypatch, extra_args=["--max-concurrent", "5"], env_value="2")
     assert input.max_concurrent == 5
 
@@ -652,10 +652,10 @@ def test_start_workflow_failure_shows_friendly_and_exits_1(tmp_path, monkeypatch
     ep = _patch_env_profile()
     with (
         ep[0], ep[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
-        patch("shannon_blackbox.worker.run_scan", side_effect=err),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_blackbox.worker.run_scan", side_effect=err),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://localhost:4000"])
@@ -676,10 +676,10 @@ def test_start_workflow_failure_debug_prints_traceback(tmp_path, monkeypatch):
     ep = _patch_env_profile()
     with (
         ep[0], ep[1],
-        patch("shannon_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
-        patch("shannon_blackbox.worker.run_scan", side_effect=err),
+        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_blackbox.worker.run_scan", side_effect=err),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--url", "http://localhost:4000", "--debug"])

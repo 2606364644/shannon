@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from shannon_core.code_index.models import FuncBlock
-from shannon_core.code_index.parameter_models import SinkCategory, SlotContext
-from shannon_core.code_index.sink_discovery_llm import (
+from supernova_core.code_index.models import FuncBlock
+from supernova_core.code_index.parameter_models import SinkCategory, SlotContext
+from supernova_core.code_index.sink_discovery_llm import (
     SinkHunterCandidate,
     collect_entry_handler_blocks,
     discover_sinks_by_entry,
@@ -108,12 +108,12 @@ async def test_hunter_sink_routes_to_injection_queue():
                      即便侥幸过了, 第 4 步 extract 0 chains(被路由滤)。
     GREEN(after fix A+B): slot 经 category 回退 = DESERIALIZE_OBJ → 路由放进 injection 桶。
     """
-    from shannon_core.code_index.parameter_models import (
+    from supernova_core.code_index.parameter_models import (
         ParameterPropagationGraph,
         ParameterSource,
         TaintFlow,
     )
-    from shannon_core.code_index.chain_verdict import (
+    from supernova_core.code_index.chain_verdict import (
         _INJECTION_SLOTS,
         extract_candidate_chains,
     )

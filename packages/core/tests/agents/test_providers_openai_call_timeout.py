@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from shannon_core.agents.providers_openai import OpenAIProvider
-from shannon_core.agents.runner import ProviderConfig
+from supernova_core.agents.providers_openai import OpenAIProvider
+from supernova_core.agents.runner import ProviderConfig
 
 
 def _provider():
@@ -26,7 +26,7 @@ def _provider():
 async def test_call_streaming_stall_times_out_not_hang(monkeypatch):
     """stream_events 产出 1 event 后永久 stall → call() 必须 wall-clock 超时返回
     retryable 失败，而非永久 hang。"""
-    monkeypatch.setenv("SHANNON_OPENAI_CALL_TIMEOUT", "0.5")
+    monkeypatch.setenv("SUPERNOVA_OPENAI_CALL_TIMEOUT", "0.5")
     p = _provider()
 
     async def _stalling_stream():
@@ -37,7 +37,7 @@ async def test_call_streaming_stall_times_out_not_hang(monkeypatch):
     result = MagicMock()
     result.stream_events = _stalling_stream
     monkeypatch.setattr(
-        "shannon_core.agents.providers_openai.Runner.run_streamed",
+        "supernova_core.agents.providers_openai.Runner.run_streamed",
         MagicMock(return_value=result))
 
     # wait_for 兜底：若超时缺失（call 永久 hang），10s 后测试失败而非挂死整个 suite

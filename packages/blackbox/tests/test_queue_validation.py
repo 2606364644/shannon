@@ -2,7 +2,7 @@
 import json
 import pytest
 
-from shannon_blackbox.services.exploitation_checker import ExploitationChecker, QueueValidationResult
+from supernova_blackbox.services.exploitation_checker import ExploitationChecker, QueueValidationResult
 
 
 class TestValidateQueue:
@@ -112,7 +112,7 @@ def test_validate_exploitation_queue_roundtrips_as_dataclass():
 
     from temporalio.converter import DataConverter
 
-    from shannon_blackbox.pipeline.activities import validate_exploitation_queue
+    from supernova_blackbox.pipeline.activities import validate_exploitation_queue
 
     # 1) temporalio 从函数注解提取 ret_type；无注解则 workflow 侧反序列化落回 dict。
     hints = typing.get_type_hints(validate_exploitation_queue)

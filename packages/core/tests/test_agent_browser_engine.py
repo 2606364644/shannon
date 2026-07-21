@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from shannon_core.services.browser_engine import BrowserEngine
-from shannon_core.services.engines.agent_browser_engine import AgentBrowserEngine
+from supernova_core.services.browser_engine import BrowserEngine
+from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ class TestAgentBrowserEngineCleanupProcesses:
         ps -o ppid= 找父 → 父 comm 以 agent-browser 开头则 kill
         (per-session 不误并发,每个 session 有独立 daemon + 独立 profile 路径的 Chrome)。
         """
-        from shannon_core.services.engines import agent_browser_engine as mod
+        from supernova_core.services.engines import agent_browser_engine as mod
 
         engine = AgentBrowserEngine()
         cmds = []
@@ -324,7 +324,7 @@ class TestAgentBrowserEngineCleanupProcesses:
 
 def _record_subprocess(monkeypatch, returncodes):
     """记录 subprocess.run 收到的命令,可控 returncode。raising=False 让 RED 干净。"""
-    from shannon_core.services.engines import agent_browser_engine as mod
+    from supernova_core.services.engines import agent_browser_engine as mod
 
     cmds = []
 
@@ -352,7 +352,7 @@ def _record_subprocess(monkeypatch, returncodes):
 
 def _raising_subprocess(monkeypatch):
     """subprocess.run 抛异常的 fake(测 errors 吞掉路径)。"""
-    from shannon_core.services.engines import agent_browser_engine as mod
+    from supernova_core.services.engines import agent_browser_engine as mod
 
     class _FakeSub:
         DEVNULL = -3  # 占位,匹配 subprocess.DEVNULL 用法

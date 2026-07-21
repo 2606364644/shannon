@@ -3,7 +3,7 @@ import json
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
-from shannon_core.code_index.gitnexus_engine import GitNexusEngine, GitNexusError
+from supernova_core.code_index.gitnexus_engine import GitNexusEngine, GitNexusError
 
 
 def _subcommands(mock_run):
@@ -27,7 +27,7 @@ def _fake_proc(*, communicate_return=(b"{}", b""), returncode=0, communicate_sid
 class TestGitNexusEngineCLI:
     def test_ensure_indexed_runs_analyze(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
             engine.ensure_indexed()
             assert "analyze" in _subcommands(mock_run)
@@ -39,7 +39,7 @@ class TestGitNexusEngineCLI:
         """
         (tmp_path / ".gitnexus").mkdir()
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             engine.ensure_indexed()
             cmds = _subcommands(mock_run)
@@ -49,7 +49,7 @@ class TestGitNexusEngineCLI:
     def test_ensure_indexed_registers_registry_after_fresh_analyze(self, tmp_path):
         """fresh analyze 后必须 `gitnexus index` 注册进全局 registry (幂等)。"""
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
             engine.ensure_indexed()
             cmds = _subcommands(mock_run)
@@ -66,7 +66,7 @@ class TestGitNexusEngineCLI:
                 return MagicMock(returncode=1, stdout="", stderr="registry write failed")
             return MagicMock(returncode=0, stdout="{}", stderr="")
 
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.side_effect = fake_run
             result = engine.ensure_indexed()
             assert result.success is False
@@ -75,7 +75,7 @@ class TestGitNexusEngineCLI:
     def test_get_context_returns_dict(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
         context_data = {"outgoing": {"calls": []}, "incoming": {}, "processes": []}
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=json.dumps(context_data), stderr=""
             )
@@ -87,7 +87,7 @@ class TestGitNexusEngineCLI:
 
     def test_cli_error_raises_gitnexus_error(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error msg")
             result = engine.ensure_indexed()
             assert result.success is False
@@ -96,7 +96,7 @@ class TestGitNexusEngineCLI:
     def test_timeout_returns_failed_result(self, tmp_path):
         import subprocess
         engine = GitNexusEngine(tmp_path, timeout=1)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("gitnexus", 1)
             result = engine.ensure_indexed()
             assert result.success is False
@@ -104,13 +104,13 @@ class TestGitNexusEngineCLI:
 
     def test_is_available_checks_command(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.shutil.which") as mock_which:
+        with patch("supernova_core.code_index.gitnexus_engine.shutil.which") as mock_which:
             mock_which.return_value = "/usr/bin/gitnexus"
             assert engine.is_available() is True
 
     def test_is_available_returns_false_when_missing(self, tmp_path):
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.shutil.which") as mock_which:
+        with patch("supernova_core.code_index.gitnexus_engine.shutil.which") as mock_which:
             mock_which.return_value = None
             assert engine.is_available() is False
 
@@ -119,7 +119,7 @@ class TestGitNexusEngineCLI:
         and still registers the repo into the global registry afterwards."""
         (tmp_path / ".gitnexus").mkdir()  # existing index
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
             engine.ensure_indexed(force=True)
             analyze_calls = [c[0][0] for c in mock_run.call_args_list if c[0][0][1] == "analyze"]
@@ -130,7 +130,7 @@ class TestGitNexusEngineCLI:
     def test_ensure_indexed_returns_index_result(self, tmp_path):
         """ensure_indexed returns an IndexResult dataclass."""
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
             result = engine.ensure_indexed()
             assert result.success is True
@@ -139,7 +139,7 @@ class TestGitNexusEngineCLI:
     def test_ensure_indexed_failure_returns_failed_result(self, tmp_path):
         """ensure_indexed returns failed IndexResult on error."""
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error msg")
             result = engine.ensure_indexed()
             assert result.success is False
@@ -148,7 +148,7 @@ class TestGitNexusEngineCLI:
     def test_check_stale_no_git_repo(self, tmp_path):
         """check_stale returns False when no .git exists."""
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             result = engine.check_stale()
             # No git repo → can't determine staleness → assume not stale
             assert result is False
@@ -159,7 +159,7 @@ class TestGitNexusEngineCLI:
         (tmp_path / ".git").mkdir()
         (tmp_path / ".gitnexus").mkdir()
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             # git log returns a recent timestamp, .gitnexus mtime is newer
             mock_run.return_value = MagicMock(
                 returncode=0,
@@ -175,7 +175,7 @@ class TestGitNexusEngineCLI:
         (tmp_path / ".git").mkdir()
         (tmp_path / ".gitnexus").mkdir()
         engine = GitNexusEngine(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run") as mock_run:
             # git log returns a very recent timestamp (future)
             mock_run.return_value = MagicMock(
                 returncode=0,

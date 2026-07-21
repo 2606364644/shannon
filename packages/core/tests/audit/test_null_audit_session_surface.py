@@ -14,7 +14,7 @@ whitebox/blackbox activities 调用 ``log_phase_start(steps=...)`` / ``track_ste
 """
 import pytest
 
-from shannon_core.audit.session_registry import NullAuditSession
+from supernova_core.audit.session_registry import NullAuditSession
 
 
 @pytest.mark.asyncio

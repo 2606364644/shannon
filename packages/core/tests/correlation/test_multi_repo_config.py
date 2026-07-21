@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from shannon_core.models.multi_repo_config import MultiRepoConfig
-from shannon_core.config.parser import parse_multi_repo_config
+from supernova_core.models.multi_repo_config import MultiRepoConfig
+from supernova_core.config.parser import parse_multi_repo_config
 
 
 def _write(tmp_path: Path, body: str) -> Path:

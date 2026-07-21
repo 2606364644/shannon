@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.models.audit import AgentLogDetails, WorkflowSummary, AgentMetricsSummary, ResumeInfo
-from shannon_whitebox.audit.workflow_logger import WorkflowLogger
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.models.audit import AgentLogDetails, WorkflowSummary, AgentMetricsSummary, ResumeInfo
+from supernova_whitebox.audit.workflow_logger import WorkflowLogger
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:
@@ -24,7 +24,7 @@ async def test_initialize_creates_workflow_log(tmp_path: Path):
     await logger.initialize(workflow_id="wf-123")
     assert (_audit_dir(tmp_path) / "workflow.log").exists()
     content = _read_log(tmp_path)
-    assert "Shannon Pentest - Workflow Log" in content
+    assert "Supernova Pentest - Workflow Log" in content
     assert "Workflow ID: wf-123" in content
     assert "Target URL:  https://example.com" in content
     await logger.close()
@@ -35,7 +35,7 @@ async def test_initialize_without_workflow_id(tmp_path: Path):
     logger = WorkflowLogger(meta)
     await logger.initialize()
     content = _read_log(tmp_path)
-    assert "Shannon Pentest - Workflow Log" in content
+    assert "Supernova Pentest - Workflow Log" in content
     assert "Target URL:  https://example.com" in content
     assert "Workflow ID:" not in content
     await logger.close()
@@ -264,7 +264,7 @@ async def test_log_agent_end_includes_prefix_and_cost(tmp_path: Path):
     meta = _make_meta(tmp_path)
     logger = WorkflowLogger(meta)
     await logger.initialize(workflow_id="wf-1")
-    from shannon_core.models.audit import AgentLogDetails
+    from supernova_core.models.audit import AgentLogDetails
     await logger.log_agent("xss-vuln", "end", AgentLogDetails(
         attempt_number=1, duration_ms=5200, cost_usd=0.15, success=True))
     content = _read_log(tmp_path)
@@ -275,7 +275,7 @@ async def test_log_agent_end_includes_prefix_and_cost(tmp_path: Path):
 async def test_use_rich_attaches_dashboard_renderer(tmp_path: Path):
     import io
     from rich.console import Console
-    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    from supernova_core.display.live_dashboard import LiveDashboardRenderer
     meta = _make_meta(tmp_path)
     console = Console(file=io.StringIO(), width=100)
     dashboard = LiveDashboardRenderer(console)
@@ -283,8 +283,8 @@ async def test_use_rich_attaches_dashboard_renderer(tmp_path: Path):
     await logger.initialize(workflow_id="wf-1")
     # dispatcher should have 3 renderers: File, RichConsole, LiveDashboard
     renderers = logger._dispatcher._renderers
-    from shannon_core.display.file_renderer import FileLogRenderer
-    from shannon_core.display.rich_renderer import RichConsoleRenderer
+    from supernova_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.rich_renderer import RichConsoleRenderer
     assert len(renderers) == 3
     assert isinstance(renderers[0], FileLogRenderer)
     assert isinstance(renderers[1], RichConsoleRenderer)
@@ -346,22 +346,22 @@ async def test_initialize_offline_header_has_repo_mode_monitor(tmp_path: Path, m
     await logger.initialize(workflow_id="wf-1")
     # Read the log from the path the logger actually wrote (meta.id="wf-1", not the
     # default "test-session" that _read_log/_audit_dir derive from _make_meta).
-    from shannon_core.audit.utils import generate_workflow_log_path
+    from supernova_core.audit.utils import generate_workflow_log_path
     content = generate_workflow_log_path(meta).read_text()
     assert "Repository:" in content
     assert "/root/code/prize_web" in content
     assert "offline" in content
     assert "Monitor:" in content
     assert "namespaces/default/workflows/wf-1" in content
-    assert "shannon-whitebox logs wf-1 --follow" in content
+    assert "supernova-whitebox logs wf-1 --follow" in content
     await logger.close()
 
 
 async def test_log_step_threads_intent_into_step_event():
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     # 直接用 WorkflowLogger + 假 dispatcher 捕获
-    from shannon_core.audit.workflow_logger import WorkflowLogger
-    from shannon_core.models.metrics import SessionMetadata
+    from supernova_core.audit.workflow_logger import WorkflowLogger
+    from supernova_core.models.metrics import SessionMetadata
 
     captured = []
 
@@ -378,9 +378,9 @@ async def test_log_step_threads_intent_into_step_event():
 
 
 async def test_log_phase_threads_step_intents():
-    from shannon_core.display.events import PhaseEvent
-    from shannon_core.audit.workflow_logger import WorkflowLogger
-    from shannon_core.models.metrics import SessionMetadata
+    from supernova_core.display.events import PhaseEvent
+    from supernova_core.audit.workflow_logger import WorkflowLogger
+    from supernova_core.models.metrics import SessionMetadata
 
     captured = []
 
@@ -402,7 +402,7 @@ async def test_rich_mode_renders_phase_line_to_stdout(tmp_path):
     否则滚动区缺少阶段结构感。"""
     import io
     from rich.console import Console
-    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    from supernova_core.display.live_dashboard import LiveDashboardRenderer
     meta = _make_meta(tmp_path)
     buf = io.StringIO()
     console = Console(file=buf, width=100, force_terminal=True, color_system=None)

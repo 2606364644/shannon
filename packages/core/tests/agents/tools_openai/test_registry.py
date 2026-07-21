@@ -1,4 +1,4 @@
-from shannon_core.agents.tools_openai import build_tools
+from supernova_core.agents.tools_openai import build_tools
 
 
 def test_build_tools_returns_nine():

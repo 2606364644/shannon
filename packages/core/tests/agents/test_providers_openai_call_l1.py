@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shannon_core.agents.openai_output_schema import StructuredOutputParseError
-from shannon_core.agents.providers_openai import OpenAIProvider, _ReparsedRunResult
-from shannon_core.agents.runner import ProviderConfig
+from supernova_core.agents.openai_output_schema import StructuredOutputParseError
+from supernova_core.agents.providers_openai import OpenAIProvider, _ReparsedRunResult
+from supernova_core.agents.runner import ProviderConfig
 
 
 def _provider():
@@ -37,7 +37,7 @@ async def test_call_l1_recovers_structured_output(monkeypatch):
     monkeypatch.setattr(p, "_lightweight_reparse", AsyncMock(return_value=_ReparsedRunResult(
         {"vulnerabilities": []}, input_tokens=3, output_tokens=7)))
     monkeypatch.setattr(
-        "shannon_core.agents.providers_openai.Runner.run_streamed",
+        "supernova_core.agents.providers_openai.Runner.run_streamed",
         MagicMock(return_value=_streaming_result_that_raises(StructuredOutputParseError("bad"))))
 
     result = await p.call(prompt="P", cwd="/tmp", model_tier="medium",
@@ -54,11 +54,11 @@ async def test_call_l1_failure_raises_for_l2(monkeypatch):
     p = _provider()
     monkeypatch.setattr(p, "_lightweight_reparse", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "shannon_core.agents.providers_openai.Runner.run_streamed",
+        "supernova_core.agents.providers_openai.Runner.run_streamed",
         MagicMock(return_value=_streaming_result_that_raises(StructuredOutputParseError("bad"))))
 
     result = await p.call(prompt="P", cwd="/tmp", model_tier="medium",
                           output_format={"type": "object"})
     assert result.success is False
-    from shannon_core.models.errors import ErrorCode
+    from supernova_core.models.errors import ErrorCode
     assert result.error_code == ErrorCode.OUTPUT_VALIDATION_FAILED

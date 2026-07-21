@@ -1,4 +1,4 @@
-from shannon_core.display.formatters import format_duration, format_log_time, format_timestamp
+from supernova_core.display.formatters import format_duration, format_log_time, format_timestamp
 
 
 def test_format_duration_milliseconds():
@@ -25,7 +25,7 @@ def test_format_log_time_format():
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", format_log_time())
 
 
-from shannon_core.display.formatters import agent_prefix
+from supernova_core.display.formatters import agent_prefix
 
 
 def test_agent_prefix_known_vuln_agents():
@@ -47,7 +47,7 @@ def test_agent_prefix_unknown_falls_back():
     assert agent_prefix("totally-unknown") == "[Agent]"
 
 
-from shannon_core.display.formatters import format_error_block, summarize_todo
+from supernova_core.display.formatters import format_error_block, summarize_todo
 
 
 def test_summarize_todo_shows_latest_completed():
@@ -84,7 +84,7 @@ def test_format_error_block_single_segment():
     assert format_error_block("just one error") == "Error:       just one error\n"
 
 
-from shannon_core.display.formatters import humanize_tool_call, maybe_browser_action
+from supernova_core.display.formatters import humanize_tool_call, maybe_browser_action
 
 
 def test_humanize_task_launch():
@@ -151,7 +151,7 @@ def test_maybe_browser_action_agent_browser_snapshot():
     ) == "📸 Taking page snapshot"
 
 
-from shannon_core.display.formatters import first_nonempty_line
+from supernova_core.display.formatters import first_nonempty_line
 
 
 def test_first_nonempty_line_single_line():
@@ -167,7 +167,7 @@ def test_first_nonempty_line_empty_returns_empty():
     assert first_nonempty_line("   \n  ") == ""
 
 
-from shannon_core.display.formatters import pad_rule, PHASE_RULE_WIDTH
+from supernova_core.display.formatters import pad_rule, PHASE_RULE_WIDTH
 
 
 def test_pad_rule_constant_exists():
@@ -199,7 +199,7 @@ def test_pad_rule_same_col_aligns_right_edge():
     assert cell_len(a) == cell_len(b)
 
 
-from shannon_core.display.formatters import tag, LABEL_WIDTH
+from supernova_core.display.formatters import tag, LABEL_WIDTH
 
 
 def test_tag_pads_short_label_to_width():
@@ -216,8 +216,8 @@ def test_tag_all_core_labels_equal_width():
     assert LABEL_WIDTH == 5
 
 
-from shannon_core.display.formatters import step_body
-from shannon_core.display.events import StepEvent
+from supernova_core.display.formatters import step_body
+from supernova_core.display.events import StepEvent
 
 
 def test_step_body_start_uses_pending_and_intent():
@@ -249,8 +249,8 @@ def test_step_body_error_uses_cross_and_error():
     assert step_body(e) == "✗ 构建调用图  — 索引构建超时"
 
 
-from shannon_core.display.formatters import phase_body, agent_title, agent_body
-from shannon_core.display.events import PhaseEvent, AgentEvent
+from supernova_core.display.formatters import phase_body, agent_title, agent_body
+from supernova_core.display.events import PhaseEvent, AgentEvent
 
 
 def test_phase_body_start():
@@ -296,8 +296,8 @@ def test_agent_body_end_failed():
     assert agent_body(e) == "✗ [XSS] xss-vuln failed (100ms) — boom"
 
 
-from shannon_core.display.formatters import gitnexus_body, gitnexus_hits_noun
-from shannon_core.display.events import GitnexusLlmEvent
+from supernova_core.display.formatters import gitnexus_body, gitnexus_hits_noun
+from supernova_core.display.events import GitnexusLlmEvent
 
 
 def _gn_evt(kind, **kw):
@@ -343,7 +343,7 @@ def test_gitnexus_body_note_shows_warn_and_detail():
     assert gitnexus_body(e) == "sink-discovery  ⚠ src/api/users.py: timed out (>60s), skipped"
 
 
-from shannon_core.display.formatters import wrap_body, truncate_action, LOG_INDENT
+from supernova_core.display.formatters import wrap_body, truncate_action, LOG_INDENT
 
 
 def test_log_indent_constant_is_label_column_offset():

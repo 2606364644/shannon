@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from shannon_web.components.event_tailer import EventTailer
+from supernova_web.components.event_tailer import EventTailer
 
 
 def _line(d):

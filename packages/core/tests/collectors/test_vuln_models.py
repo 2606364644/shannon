@@ -6,8 +6,8 @@ Plan 3 Task 1：3 shared section + 1 per-class strategic_intelligence section。
 """
 import pytest
 
-from shannon_core.collectors.base import CollectorBase, SectionSchema
-from shannon_core.collectors.vuln import (
+from supernova_core.collectors.base import CollectorBase, SectionSchema
+from supernova_core.collectors.vuln import (
     AUTHZ_STRATEGIC_INTEL,
     AUTH_STRATEGIC_INTEL,
     INJECTION_STRATEGIC_INTEL,

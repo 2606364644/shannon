@@ -1,4 +1,4 @@
-from shannon_core.models.retry import agent_retry_category
+from supernova_core.models.retry import agent_retry_category
 
 
 def test_vuln_agents_map_to_vuln():

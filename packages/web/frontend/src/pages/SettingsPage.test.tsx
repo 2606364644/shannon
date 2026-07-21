@@ -10,7 +10,7 @@ const okBody = {
   browser_engine: "agent-browser",
   temporal: { enabled: true, host: "localhost:7233", last_status: "connected", last_error: null },
   git: { binary_available: true, credentials_configured: true },
-  version: "shannon-web 0.1.0",
+  version: "supernova-web 0.1.0",
 };
 
 const server = setupServer(
@@ -37,7 +37,7 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByText("claude")).toBeInTheDocument());
     expect(screen.getByText("agent-browser")).toBeInTheDocument();
     expect(screen.getByText("localhost:7233")).toBeInTheDocument();
-    expect(screen.getByText("shannon-web 0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("supernova-web 0.1.0")).toBeInTheDocument();
     // git 拆成两个独立信号(二进制 / GitLab 凭据)
     expect(screen.getByText("已装")).toBeInTheDocument(); // git 二进制
     expect(screen.getByText("已配置")).toBeInTheDocument(); // GitLab 凭据
@@ -57,7 +57,7 @@ describe("SettingsPage", () => {
     const sw = screen.getByRole("switch", { name: /切换深浅主题/ });
     fireEvent.click(sw);
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    expect(localStorage.getItem("shannon-theme")).toBe("light");
+    expect(localStorage.getItem("supernova-theme")).toBe("light");
   });
 
   it("status fetch 失败 → 局部 ErrorState(role=alert)", async () => {

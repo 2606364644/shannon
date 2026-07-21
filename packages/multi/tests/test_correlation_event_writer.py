@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from shannon_multi.correlation_event_writer import CorrelationEventWriter
+from supernova_multi.correlation_event_writer import CorrelationEventWriter
 
 
 def _rows(p):

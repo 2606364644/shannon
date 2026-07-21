@@ -1,6 +1,6 @@
-from shannon_core.models.base import BasePipelineInput
-from shannon_whitebox.pipeline.shared import PipelineInput
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from supernova_core.models.base import BasePipelineInput
+from supernova_whitebox.pipeline.shared import PipelineInput
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
 
 
 def test_pipeline_input_inherits_base():
@@ -24,16 +24,16 @@ def test_base_has_shared_fields():
 
 
 def test_deliverables_subdir_uses_default_without_env(monkeypatch):
-    """Without SHANNON_DELIVERABLES_SUBDIR env var, uses DEFAULT_DELIVERABLES_SUBDIR."""
-    from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
-    monkeypatch.delenv("SHANNON_DELIVERABLES_SUBDIR", raising=False)
+    """Without SUPERNOVA_DELIVERABLES_SUBDIR env var, uses DEFAULT_DELIVERABLES_SUBDIR."""
+    from supernova_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+    monkeypatch.delenv("SUPERNOVA_DELIVERABLES_SUBDIR", raising=False)
     inp = BasePipelineInput()
     assert inp.deliverables_subdir == DEFAULT_DELIVERABLES_SUBDIR
 
 
 def test_deliverables_subdir_uses_env_when_set(monkeypatch):
-    """With SHANNON_DELIVERABLES_SUBDIR env var set, uses its value."""
-    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "custom/path")
+    """With SUPERNOVA_DELIVERABLES_SUBDIR env var set, uses its value."""
+    monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "custom/path")
     inp = BasePipelineInput()
     assert inp.deliverables_subdir == "custom/path"
 

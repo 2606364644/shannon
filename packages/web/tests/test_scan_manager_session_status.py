@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shannon_web.components.scan_manager import ScanManager
+from supernova_web.components.scan_manager import ScanManager
 
 
 def _make_handle(status) -> MagicMock:
@@ -40,7 +40,7 @@ async def test_watch_marks_session_failed_on_workflow_failed(tmp_path):
     await mgr._watch(ws, event_file)
 
     # session.json 落 failed
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
     data = SessionManager(workspaces).get_session_data(workspaces / ws)
     assert data["status"] == "failed", f"FAILED 后 session.status 应=failed, 实际={data.get('status')}"
     assert data.get("completed_at") is not None, "completed_at 应被写入"
@@ -71,7 +71,7 @@ async def test_watch_does_not_mark_failed_on_running(tmp_path):
 
     await mgr._watch(ws, event_file)
 
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
     data = SessionManager(workspaces).get_session_data(workspaces / ws)
     # RUNNING 时不应写 failed(timeout 兜底写 crashed,但 session.status 不该是 failed)
     assert data.get("status") != "failed", "RUNNING 时不应标 failed"
@@ -92,6 +92,6 @@ async def test_write_scan_end_accepts_session_status(tmp_path):
                               session_status="failed", workspace_name=ws,
                               workspaces_dir=workspaces)
 
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
     data = SessionManager(workspaces).get_session_data(workspaces / ws)
     assert data["status"] == "failed"

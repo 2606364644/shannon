@@ -1,7 +1,7 @@
 """Spec C: atomic_write_text —— markdown deliverable 的原子写入。"""
 from pathlib import Path
 
-from shannon_core.utils.atomic_write import atomic_write_text
+from supernova_core.utils.atomic_write import atomic_write_text
 
 
 def test_writes_text_content(tmp_path: Path):

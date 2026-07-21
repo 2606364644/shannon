@@ -1,11 +1,11 @@
-# shannon-blackbox
+# supernova-blackbox
 
 黑盒运行时漏洞验证和报告生成
 
 ## 依赖
 
-- shannon-core
-- shannon-whitebox
+- supernova-core
+- supernova-whitebox
 - temporalio>=1.0
 - click>=8.0
 - aiofiles>=23.0
@@ -25,7 +25,7 @@
 ## CLI
 
 ```bash
-shannon-blackbox start --url <target_url> [--output <dir>] [--workspace <name>] [--config <file>] [--vuln-classes <class>] [--no-exploit]
-shannon-blackbox logs <workspace_name>
-shannon-blackbox workspaces
+supernova-blackbox start --url <target_url> [--output <dir>] [--workspace <name>] [--config <file>] [--vuln-classes <class>] [--no-exploit]
+supernova-blackbox logs <workspace_name>
+supernova-blackbox workspaces
 ```

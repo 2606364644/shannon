@@ -1,6 +1,6 @@
 import pytest
 
-from shannon_whitebox.pipeline.step_intents import (
+from supernova_whitebox.pipeline.step_intents import (
     PHASE_STEPS, StepSpec, step_names, step_intents, intent_for,
 )
 

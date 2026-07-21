@@ -1,4 +1,4 @@
-from shannon_core.models.audit import (
+from supernova_core.models.audit import (
     AgentEndResult,
     AgentLogDetails,
     AgentMetricsSummary,

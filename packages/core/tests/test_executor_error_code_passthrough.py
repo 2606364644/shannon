@@ -7,8 +7,8 @@ import asyncio
 
 import pytest
 
-from shannon_core.agents import executor as exec_mod
-from shannon_core.models.errors import ErrorCode, PentestError
+from supernova_core.agents import executor as exec_mod
+from supernova_core.models.errors import ErrorCode, PentestError
 
 
 def _run(coro):
@@ -24,7 +24,7 @@ def _patch_runtime(monkeypatch, tmp_path):
                         lambda *a, **k: asyncio.sleep(0))
     monkeypatch.setattr(exec_mod.GitManager, "rollback",
                         lambda *a, **k: asyncio.sleep(0))
-    from shannon_core.prompts.manager import PromptManager
+    from supernova_core.prompts.manager import PromptManager
     pm = PromptManager.__new__(PromptManager)
     pm.prompts_dir = tmp_path
     monkeypatch.setattr(pm, "load_sync", lambda *a, **k: "PROMPT")

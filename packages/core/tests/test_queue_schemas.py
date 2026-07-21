@@ -1,5 +1,5 @@
 import json
-from shannon_core.models.queue_schemas import (
+from supernova_core.models.queue_schemas import (
     BaseVulnerability, InjectionVulnerability, XssVulnerability,
     AuthVulnerability, SsrfVulnerability, AuthzVulnerability,
     LenientParseResult, VulnerabilityQueue,

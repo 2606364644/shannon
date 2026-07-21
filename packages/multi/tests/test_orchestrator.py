@@ -1,6 +1,6 @@
 import pytest
-from shannon_core.models.multi_repo_config import MultiRepoConfig, RepoSpec, Relation, CorrelationConfig
-from shannon_multi.orchestrator import plan_repo_scans, RepoScanPlan
+from supernova_core.models.multi_repo_config import MultiRepoConfig, RepoSpec, Relation, CorrelationConfig
+from supernova_multi.orchestrator import plan_repo_scans, RepoScanPlan
 
 
 def _cfg(**overrides):
@@ -37,7 +37,7 @@ def test_all_three_repos_planned():
 # Task A6: per-edge asyncio + 单边隔离 + merge
 # ---------------------------------------------------------------------------
 import asyncio  # noqa: E402
-from shannon_multi.orchestrator import _run_edge, _merge_edge_results  # noqa: E402
+from supernova_multi.orchestrator import _run_edge, _merge_edge_results  # noqa: E402
 
 
 def _edge_result(from_, to, status="ok"):
@@ -71,7 +71,7 @@ def test_merge_edges_collects_all():
 def test_prompts_dir_is_absolute_and_points_to_real_prompts():
     """final-review IMPORTANT 1 回归锚点:prompts 路径必须绝对且指向真实 prompts 目录,
     防止非 repo-root CWD 调用时 Prompt file not found 崩溃回归。"""
-    from shannon_multi.orchestrator import _prompts_dir
+    from supernova_multi.orchestrator import _prompts_dir
     d = _prompts_dir()
     assert d.is_absolute()
     assert (d / "cross-repo-correlation.txt").exists()
@@ -79,8 +79,8 @@ def test_prompts_dir_is_absolute_and_points_to_real_prompts():
 
 def test_write_correlation_deliverables_writes_all_files(tmp_path):
     """Task A6: report.py 落盘 helper 写齐四类产物。"""
-    from shannon_core.correlation.report import write_correlation_deliverables
-    from shannon_core.correlation.schemas import (
+    from supernova_core.correlation.report import write_correlation_deliverables
+    from supernova_core.correlation.schemas import (
         CrossServiceTopology, ServiceNode, TopologyEdge, TrustBoundary,
     )
     topology = CrossServiceTopology(

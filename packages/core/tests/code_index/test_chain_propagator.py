@@ -1,8 +1,8 @@
 """chain_propagator 单元测试 — 确定性跨函数 taint 传播。"""
 import pytest
 
-from shannon_core.code_index.models import FuncBlock, CallChain
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import FuncBlock, CallChain
+from supernova_core.code_index.parameter_models import (
     DangerousSlot,
     IntraResult,
     PropagationStep,
@@ -10,12 +10,12 @@ from shannon_core.code_index.parameter_models import (
     SinkCategory,
     SlotContext,
 )
-from shannon_core.code_index.chain_propagator import (
+from supernova_core.code_index.chain_propagator import (
     propagate_across_chains,
     _references_tainted,
 )
-from shannon_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
-from shannon_core.code_index.parameter_models import TaintFlow
+from supernova_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
+from supernova_core.code_index.parameter_models import TaintFlow
 
 
 def _block(
@@ -176,7 +176,7 @@ async def test_raising_llm_client_yields_nonempty_flows_via_fallback():
     """P1: raising LLM client → analyze_taint_llm conservative fallback
     (all params tainted + every sink marked hit) → propagate_across_chains
     emits non-empty flows (taint channel non-empty, not silently dead)."""
-    from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
+    from supernova_core.code_index.llm_taint_analyzer import analyze_taint_llm
 
     block = _block("handler", "app.py", 1, params=["q"])
     sink = _sink(block.id, sink_id="sink_1")

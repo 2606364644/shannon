@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.metrics import SessionMetadata
-from shannon_whitebox.audit.session import AuditSession
-from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.metrics import SessionMetadata
+from supernova_whitebox.audit.session import AuditSession
+from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:
@@ -57,7 +57,7 @@ async def test_log_error_reaches_workflow_log(tmp_path: Path):
 async def test_initialize_creates_per_agent_log(tmp_path: Path):
     """initialize() writes the per-agent JSON header + agent_start (covers the
     migration of the old test_start_agent_creates_agent_log from test_audit_session)."""
-    from shannon_whitebox.audit.utils import generate_audit_path
+    from supernova_whitebox.audit.utils import generate_audit_path
     session = AuditSession(_make_meta(tmp_path))
     await session.initialize()
     await session.start_agent("recon", "p", attempt=1)
@@ -72,7 +72,7 @@ async def test_close_writes_agent_end(tmp_path: Path):
     """close() writes the agent_end event to the per-agent JSON (covers the migration
     of the old test_end_agent_writes_agent_end_event from test_audit_session)."""
     import json
-    from shannon_whitebox.audit.utils import generate_audit_path
+    from supernova_whitebox.audit.utils import generate_audit_path
     session = AuditSession(_make_meta(tmp_path))
     await session.initialize()
     await session.start_agent("recon", "p", attempt=1)

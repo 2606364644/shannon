@@ -2,14 +2,14 @@ from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from shannon_combined.cli.main import cli
+from supernova_combined.cli.main import cli
 
 
 def test_cli_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Shannon" in result.output
+    assert "Supernova" in result.output
 
 
 def test_scan_help():
@@ -31,8 +31,8 @@ def test_scan_calls_orchestrator():
         }
 
     with (
-        patch("shannon_combined.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_combined.orchestrator.run_combined_scan", side_effect=fake_combined),
+        patch("supernova_combined.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_combined.orchestrator.run_combined_scan", side_effect=fake_combined),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["scan", "--repo", "/tmp/repo", "--url", "https://example.com"])
@@ -47,8 +47,8 @@ def test_scan_exits_130_on_cancelled():
         return {"status": "cancelled", "phase": "whitebox"}
 
     with (
-        patch("shannon_combined.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_combined.orchestrator.run_combined_scan", side_effect=fake_combined),
+        patch("supernova_combined.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_combined.orchestrator.run_combined_scan", side_effect=fake_combined),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["scan", "--repo", "/tmp/repo", "--url", "https://example.com"])

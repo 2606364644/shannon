@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from shannon_core.scripts.generate_totp import (
+from supernova_core.scripts.generate_totp import (
     base32_decode,
     generate_hotp,
     generate_totp,
@@ -185,7 +185,7 @@ class TestTOTP:
         result2 = generate_totp(self.SECRET)
         assert result1 == result2
 
-    @mock.patch("shannon_core.scripts.generate_totp.time")
+    @mock.patch("supernova_core.scripts.generate_totp.time")
     def test_totp_with_known_time(self, mock_time):
         """TOTP at a known timestamp produces a deterministic result."""
         # Set time to a known value: epoch 59 (counter = 59 // 30 = 1)
@@ -197,7 +197,7 @@ class TestTOTP:
         expected = generate_hotp(self.SECRET, counter=1)
         assert result == expected
 
-    @mock.patch("shannon_core.scripts.generate_totp.time")
+    @mock.patch("supernova_core.scripts.generate_totp.time")
     def test_totp_at_epoch_zero(self, mock_time):
         """TOTP at epoch 0 should use counter 0."""
         mock_time.time.return_value = 0.0
@@ -207,7 +207,7 @@ class TestTOTP:
         expected = generate_hotp(self.SECRET, counter=0)
         assert result == expected
 
-    @mock.patch("shannon_core.scripts.generate_totp.time")
+    @mock.patch("supernova_core.scripts.generate_totp.time")
     def test_totp_counter_calculation(self, mock_time):
         """Verify the counter is floor(time / time_step)."""
         # At time=29, counter should be 0
@@ -247,7 +247,7 @@ class TestCLI:
     def _run_cli(self, args: list[str]) -> subprocess.CompletedProcess:
         """Helper to run the CLI as a subprocess."""
         return subprocess.run(
-            [sys.executable, "-m", "shannon_core.scripts.generate_totp"] + args,
+            [sys.executable, "-m", "supernova_core.scripts.generate_totp"] + args,
             capture_output=True,
             text=True,
             timeout=10,

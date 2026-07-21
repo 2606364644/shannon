@@ -1,7 +1,7 @@
 """Tests for sink report merger (deterministic + LLM)."""
 import pytest
-from shannon_core.code_index.sink_merger import merge_sink_reports, parse_llm_sinks
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.sink_merger import merge_sink_reports, parse_llm_sinks
+from supernova_core.code_index.parameter_models import (
     SinkCallSite, SinkCategory, DangerousSlot, SlotContext,
 )
 

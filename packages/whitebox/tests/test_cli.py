@@ -1,14 +1,14 @@
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
-from shannon_whitebox.cli.main import cli
+from supernova_whitebox.cli.main import cli
 
 
 def test_cli_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Shannon White-Box Scanner" in result.output
+    assert "Supernova White-Box Scanner" in result.output
 
 
 def test_start_help():
@@ -39,8 +39,8 @@ def test_infra_help():
 
 def test_infra_up():
     with (
-        patch("shannon_whitebox.cli.main.start_temporal"),
-        patch("shannon_whitebox.cli.main.is_temporal_ready", new_callable=AsyncMock, return_value=True),
+        patch("supernova_whitebox.cli.main.start_temporal"),
+        patch("supernova_whitebox.cli.main.is_temporal_ready", new_callable=AsyncMock, return_value=True),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "up"])
@@ -49,7 +49,7 @@ def test_infra_up():
 
 
 def test_infra_down():
-    with patch("shannon_whitebox.cli.main.stop_temporal"):
+    with patch("supernova_whitebox.cli.main.stop_temporal"):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "down"])
     assert result.exit_code == 0
@@ -60,7 +60,7 @@ def test_infra_status():
     async def fake_status(**kwargs):
         return {"container": "running", "healthy": True, "source": "shannon-temporal"}
 
-    with patch("shannon_whitebox.cli.main.get_temporal_status", side_effect=fake_status):
+    with patch("supernova_whitebox.cli.main.get_temporal_status", side_effect=fake_status):
         runner = CliRunner()
         result = runner.invoke(cli, ["infra", "status"])
     assert result.exit_code == 0
@@ -78,8 +78,8 @@ def test_start_calls_ensure_infra():
         return {"status": "completed"}
 
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure) as mock_ensure,
-        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_whitebox.cli.main.ensure_infra", side_effect=fake_ensure) as mock_ensure,
+        patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
@@ -102,12 +102,12 @@ def test_start_configures_logging_with_workspace_log_dir(tmp_path, monkeypatch):
         return {"status": "completed", "workspace_name": "ws-test"}
 
     with (
-        patch("shannon_whitebox.cli.main.load_env"),
-        patch("shannon_whitebox.cli.main.validate_active_profile"),
-        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
-        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
-        patch("shannon_whitebox.cli.main.configure_logging") as mock_cfg,
+        patch("supernova_whitebox.cli.main.load_env"),
+        patch("supernova_whitebox.cli.main.validate_active_profile"),
+        patch("supernova_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_whitebox.cli.main.configure_logging") as mock_cfg,
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", str(tmp_path), "--workspace", "ws-test"])
@@ -129,8 +129,8 @@ def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
         return {"status": "completed", "workspace_name": "myapp-20260603-143022"}
 
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
-        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
@@ -138,7 +138,7 @@ def test_start_shows_workspace_and_next_steps(tmp_path, monkeypatch):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Workspace:" in result.output
     assert "Next steps:" in result.output
-    assert "shannon-blackbox start" in result.output
+    assert "supernova-blackbox start" in result.output
     assert "--latest" in result.output
 
 
@@ -158,8 +158,8 @@ def test_start_shows_deliverables_path(tmp_path, monkeypatch):
         }
 
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
-        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
@@ -172,7 +172,7 @@ def test_start_shows_deliverables_path(tmp_path, monkeypatch):
 def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
     """workspaces command should group output by scan_type."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -201,7 +201,7 @@ def test_workspaces_grouped_by_scan_type(tmp_path, monkeypatch):
 def test_workspace_show(tmp_path, monkeypatch):
     """workspace show should display detailed workspace info."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -242,7 +242,7 @@ def test_start_shows_results_summary(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     # Create a workspace with deliverables so compute_deliverables_summary works
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
     mgr = SessionManager(tmp_path / "workspaces")
     ws = mgr.create_workspace("https://myapp.com", "/repo", name="myapp-summary-ws")
     mgr.mark_completed(ws)
@@ -273,8 +273,8 @@ def test_start_shows_results_summary(tmp_path, monkeypatch):
         }
 
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
-        patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan),
+        patch("supernova_whitebox.cli.main.ensure_infra", side_effect=fake_ensure),
+        patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
@@ -309,8 +309,8 @@ def test_logs_command_shows_content_without_follow(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # cli group 回调调 validate_active_profile（chdir 后 cwd 无 .env.profiles → 抛错），
     # patch 掉以聚焦 logs 命令体行为（对齐 test_logs_command_diagnostic_flag）。
-    with patch("shannon_whitebox.cli.main.load_env"), patch(
-        "shannon_whitebox.cli.main.validate_active_profile"
+    with patch("supernova_whitebox.cli.main.load_env"), patch(
+        "supernova_whitebox.cli.main.validate_active_profile"
     ):
         result = runner.invoke(cli, ["logs", "test-ws"])
     assert result.exit_code == 0
@@ -327,8 +327,8 @@ def test_logs_command_diagnostic_flag_reads_diagnostic_log(tmp_path, monkeypatch
     (ws / "workflow.log").write_text("this is workflow progress\n")
     (logs_dir / "diagnostic.log").write_text("this is diagnostic WARNING\n")
     monkeypatch.chdir(tmp_path)
-    with patch("shannon_whitebox.cli.main.load_env"), patch(
-        "shannon_whitebox.cli.main.validate_active_profile"
+    with patch("supernova_whitebox.cli.main.load_env"), patch(
+        "supernova_whitebox.cli.main.validate_active_profile"
     ):
         result = runner.invoke(cli, ["logs", "test-ws", "--diagnostic"])
     assert result.exit_code == 0, result.output
@@ -339,7 +339,7 @@ def test_logs_command_diagnostic_flag_reads_diagnostic_log(tmp_path, monkeypatch
 def test_workspace_delete(tmp_path, monkeypatch):
     """workspace delete should remove the workspace directory."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -369,7 +369,7 @@ def test_workspace_delete_not_found(tmp_path, monkeypatch):
 def test_workspace_delete_confirms(tmp_path, monkeypatch):
     """workspace delete without --force should ask for confirmation."""
     import json
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -386,7 +386,7 @@ def test_workspace_delete_confirms(tmp_path, monkeypatch):
 
 def test_workspace_delete_cancelled(tmp_path, monkeypatch):
     """workspace delete confirmation cancelled should not delete."""
-    from shannon_core.session import SessionManager
+    from supernova_core.session import SessionManager
 
     monkeypatch.chdir(tmp_path)
 
@@ -404,7 +404,7 @@ def test_workspace_delete_cancelled(tmp_path, monkeypatch):
 
 def test_start_rejects_fresh_and_rewind_together(monkeypatch):
     from click.testing import CliRunner
-    from shannon_whitebox.cli.main import cli
+    from supernova_whitebox.cli.main import cli
     runner = CliRunner()
     result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--fresh", "--rewind", "recon"])
     assert result.exit_code != 0
@@ -414,12 +414,12 @@ def test_start_rejects_fresh_and_rewind_together(monkeypatch):
 def test_start_rewind_accepted(monkeypatch):
     from click.testing import CliRunner
     from unittest.mock import patch, AsyncMock
-    from shannon_whitebox.cli.main import cli
+    from supernova_whitebox.cli.main import cli
 
     async def fake_run_scan(input, temporal_address, use_rich=False):
         return {"status": "completed"}
-    with patch("shannon_whitebox.cli.main.ensure_infra", AsyncMock()), \
-         patch("shannon_whitebox.worker.run_scan", side_effect=fake_run_scan):
+    with patch("supernova_whitebox.cli.main.ensure_infra", AsyncMock()), \
+         patch("supernova_whitebox.worker.run_scan", side_effect=fake_run_scan):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--rewind", "recon"])
     assert result.exit_code == 0
@@ -428,10 +428,10 @@ def test_start_rewind_accepted(monkeypatch):
 def test_start_exits_130_on_cancelled():
     """When the scan is cancelled, the CLI should print a message and exit 130."""
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
         patch(
-            "shannon_whitebox.worker.run_scan",
+            "supernova_whitebox.worker.run_scan",
             new=AsyncMock(return_value={"status": "cancelled"}),
         ),
     ):
@@ -451,9 +451,9 @@ def test_start_workflow_failure_shows_friendly_and_exits_1():
         type="InvalidTargetError",
     )
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
-        patch("shannon_whitebox.worker.run_scan", side_effect=err),
+        patch("supernova_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_whitebox.worker.run_scan", side_effect=err),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake"])
@@ -471,9 +471,9 @@ def test_start_workflow_failure_debug_prints_traceback():
 
     err = ApplicationError("boom loopback detail", type="InvalidTargetError")
     with (
-        patch("shannon_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("shannon_core.runtime.prerequisites.ensure_prerequisite"),
-        patch("shannon_whitebox.worker.run_scan", side_effect=err),
+        patch("supernova_whitebox.cli.main.ensure_infra", new_callable=AsyncMock),
+        patch("supernova_core.runtime.prerequisites.ensure_prerequisite"),
+        patch("supernova_whitebox.worker.run_scan", side_effect=err),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--repo", "/tmp/fake", "--debug"])
@@ -497,14 +497,14 @@ def _patch_start_env(monkeypatch, tmp_path):
             "web_url": "",
         }
 
-    # cli/main.py:49 是函数内 `from shannon_whitebox.worker import run_scan`，
+    # cli/main.py:49 是函数内 `from supernova_whitebox.worker import run_scan`，
     # patch worker 模块源头即可被函数内 import 取到。
-    monkeypatch.setattr("shannon_whitebox.worker.run_scan", fake_run_scan)
+    monkeypatch.setattr("supernova_whitebox.worker.run_scan", fake_run_scan)
     # ensure_infra 是顶部 import，绑定在 cli.main 命名空间。
-    monkeypatch.setattr("shannon_whitebox.cli.main.ensure_infra", AsyncMock(return_value=None))
+    monkeypatch.setattr("supernova_whitebox.cli.main.ensure_infra", AsyncMock(return_value=None))
     # ensure_prerequisite 是函数内 import（line 67），patch 源头模块。
     monkeypatch.setattr(
-        "shannon_core.runtime.prerequisites.ensure_prerequisite",
+        "supernova_core.runtime.prerequisites.ensure_prerequisite",
         lambda *a, **k: None,
     )
     return captured
@@ -526,8 +526,8 @@ def test_start_vuln_classes_option_sets_pipeline_input(monkeypatch, tmp_path):
 
 
 def test_start_vuln_classes_env_sets_pipeline_input(monkeypatch, tmp_path):
-    """SHANNON_VULN_CLASSES env → PipelineInput.vuln_classes。"""
-    monkeypatch.setenv("SHANNON_VULN_CLASSES", "injection,ssrf")
+    """SUPERNOVA_VULN_CLASSES env → PipelineInput.vuln_classes。"""
+    monkeypatch.setenv("SUPERNOVA_VULN_CLASSES", "injection,ssrf")
     captured = _patch_start_env(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -540,7 +540,7 @@ def test_start_vuln_classes_env_sets_pipeline_input(monkeypatch, tmp_path):
 
 def test_start_vuln_classes_cli_overrides_env(monkeypatch, tmp_path):
     """CLI > env 优先。"""
-    monkeypatch.setenv("SHANNON_VULN_CLASSES", "ssrf")
+    monkeypatch.setenv("SUPERNOVA_VULN_CLASSES", "ssrf")
     captured = _patch_start_env(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -574,7 +574,7 @@ def test_start_vuln_classes_invalid_raises_usage_error(monkeypatch, tmp_path):
 def test_logs_full_flag_renders_events_ndjson(tmp_path, monkeypatch):
     """logs --full 读 ws/events.ndjson 全量渲染（非 follow）。"""
     from click.testing import CliRunner
-    from shannon_whitebox.cli.main import cli
+    from supernova_whitebox.cli.main import cli
     ws = tmp_path / "ws1"
     ws.mkdir()
     (ws / "events.ndjson").write_text(
@@ -582,7 +582,7 @@ def test_logs_full_flag_renders_events_ndjson(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "shannon_whitebox.cli.main.resolve_workspaces_dir", lambda: tmp_path)
+        "supernova_whitebox.cli.main.resolve_workspaces_dir", lambda: tmp_path)
     res = CliRunner().invoke(cli, ["logs", "ws1", "--full"])
     assert res.exit_code == 0, res.output
     assert "[WARNING]" in res.output

@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from shannon_core.audit.workflow_logger import WorkflowLogger
-from shannon_core.display.events import InfoEvent
+from supernova_core.audit.workflow_logger import WorkflowLogger
+from supernova_core.display.events import InfoEvent
 
 
 @pytest.mark.asyncio
@@ -34,8 +34,8 @@ async def test_log_error_retryable_in_progress_uses_warning_category():
 
     对齐原始 TS createVulnValidator 的 logger.warn(shannon/session-manager.ts:143)。
     """
-    from shannon_core.models.errors import PentestError, ErrorCode
-    from shannon_core.display.events import ErrorEvent
+    from supernova_core.models.errors import PentestError, ErrorCode
+    from supernova_core.display.events import ErrorEvent
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None
@@ -51,8 +51,8 @@ async def test_log_error_retryable_in_progress_uses_warning_category():
 @pytest.mark.asyncio
 async def test_log_error_retryable_exhausted_uses_error_category():
     """retryable 但 attempt 已达 max(用尽)→ ERROR:最终失败,不再重试。"""
-    from shannon_core.models.errors import PentestError, ErrorCode
-    from shannon_core.display.events import ErrorEvent
+    from supernova_core.models.errors import PentestError, ErrorCode
+    from supernova_core.display.events import ErrorEvent
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None
@@ -68,8 +68,8 @@ async def test_log_error_retryable_exhausted_uses_error_category():
 @pytest.mark.asyncio
 async def test_log_error_non_retryable_uses_error_category():
     """non-retryable → ERROR:本就不会重试,即最终失败。"""
-    from shannon_core.models.errors import PentestError, ErrorCode
-    from shannon_core.display.events import ErrorEvent
+    from supernova_core.models.errors import PentestError, ErrorCode
+    from supernova_core.display.events import ErrorEvent
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None
@@ -80,16 +80,16 @@ async def test_log_error_non_retryable_uses_error_category():
     assert event.category == "ERROR"
 
 
-# --- SHANNON_SILENT_RETRY env:attempt 级失败静默(对齐 TS 终端不渲染 attempt 级) ---
+# --- SUPERNOVA_SILENT_RETRY env:attempt 级失败静默(对齐 TS 终端不渲染 attempt 级) ---
 
 @pytest.mark.asyncio
 async def test_log_error_silent_retry_env_suppresses_attempt_warning(monkeypatch):
-    """SHANNON_SILENT_RETRY=1 → attempt 级失败不进终端 UI(dispatch 不调用)。
+    """SUPERNOVA_SILENT_RETRY=1 → attempt 级失败不进终端 UI(dispatch 不调用)。
 
     对齐 TS progress-indicator 不渲染 attempt 级(只 spinner);用尽/non-retryable 不受影响。
     """
-    from shannon_core.models.errors import PentestError, ErrorCode
-    monkeypatch.setenv("SHANNON_SILENT_RETRY", "1")
+    from supernova_core.models.errors import PentestError, ErrorCode
+    monkeypatch.setenv("SUPERNOVA_SILENT_RETRY", "1")
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None
@@ -102,9 +102,9 @@ async def test_log_error_silent_retry_env_suppresses_attempt_warning(monkeypatch
 @pytest.mark.asyncio
 async def test_log_error_silent_retry_does_not_suppress_exhausted(monkeypatch):
     """silent 只影响 attempt 级;用尽(attempt=max)→ 仍 dispatch ERROR(真失败必须可见)。"""
-    from shannon_core.models.errors import PentestError, ErrorCode
-    from shannon_core.display.events import ErrorEvent
-    monkeypatch.setenv("SHANNON_SILENT_RETRY", "1")
+    from supernova_core.models.errors import PentestError, ErrorCode
+    from supernova_core.display.events import ErrorEvent
+    monkeypatch.setenv("SUPERNOVA_SILENT_RETRY", "1")
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None
@@ -119,9 +119,9 @@ async def test_log_error_silent_retry_does_not_suppress_exhausted(monkeypatch):
 @pytest.mark.asyncio
 async def test_log_error_silent_retry_off_defaults_to_warning(monkeypatch):
     """env 未设 → attempt 级仍显示 WARNING(默认行为,回归保护)。"""
-    from shannon_core.models.errors import PentestError, ErrorCode
-    from shannon_core.display.events import ErrorEvent
-    monkeypatch.delenv("SHANNON_SILENT_RETRY", raising=False)
+    from supernova_core.models.errors import PentestError, ErrorCode
+    from supernova_core.display.events import ErrorEvent
+    monkeypatch.delenv("SUPERNOVA_SILENT_RETRY", raising=False)
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = AsyncMock()
     wl._activity_failure_log_path = None

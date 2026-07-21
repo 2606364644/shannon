@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from shannon_web.components.deliverables_reader import DeliverablesReader
+from supernova_web.components.deliverables_reader import DeliverablesReader
 
 
 def test_read_json_new_layout(tmp_path):

@@ -2,8 +2,8 @@ import io
 
 from rich.console import Console
 
-from shannon_core.display.events import StepEvent, PhaseEvent, AgentEvent
-from shannon_core.display.live_dashboard import LiveDashboardRenderer
+from supernova_core.display.events import StepEvent, PhaseEvent, AgentEvent
+from supernova_core.display.live_dashboard import LiveDashboardRenderer
 
 
 def _console(width: int = 100) -> tuple[Console, io.StringIO]:
@@ -97,7 +97,7 @@ async def test_pinned_row_shows_step_intent_and_latest_turn():
     await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="pre-recon", event="start",
                               steps=("code-index", "pre-recon"),
                               step_intents=("构建调用图", "扫描架构与入口点")))
-    from shannon_core.display.events import LlmTurnEvent
+    from supernova_core.display.events import LlmTurnEvent
     await r.render(AgentEvent(timestamp="t", category="AGENT", agent_name="pre-recon",
                               event="start", attempt=1))
     await r.render(LlmTurnEvent(timestamp="t", category="LLM", agent_name="pre-recon",
@@ -145,7 +145,7 @@ async def test_multiple_running_agents_each_get_a_row():
 
 async def test_agent_row_prefers_current_tool_over_turn_text():
     """每行优先显示当前工具（更实时），其次 turn 文本。"""
-    from shannon_core.display.events import LlmTurnEvent, ToolCallEvent
+    from supernova_core.display.events import LlmTurnEvent, ToolCallEvent
     console, buf = _console()
     r = LiveDashboardRenderer(console)
     await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="vuln", event="start"))
@@ -194,7 +194,7 @@ async def test_spinner_action_truncated_no_internal_path_leak():
     spec 2026-07-14 §模块5：原 action 直接显示 last_action_detail（humanize 后仍可达 80
     字符），把 /Users/.../memory... 全路径甩到状态栏。truncate_action 截到 60 + …。
     """
-    from shannon_core.display.events import ToolCallEvent
+    from supernova_core.display.events import ToolCallEvent
     console, buf = _console(width=100)
     r = LiveDashboardRenderer(console)
     await r.render(PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start"))

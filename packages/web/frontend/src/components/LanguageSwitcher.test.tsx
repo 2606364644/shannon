@@ -5,7 +5,7 @@ import i18n from "@/i18n";
 
 describe("LanguageSwitcher", () => {
   beforeEach(() => {
-    localStorage.removeItem("shannon.lang");
+    localStorage.removeItem("supernova.lang");
     i18n.changeLanguage("zh");
   });
 
@@ -18,6 +18,6 @@ describe("LanguageSwitcher", () => {
     render(<LanguageSwitcher />);
     fireEvent.click(screen.getByLabelText("切换语言"));
     expect(i18n.language).toMatch(/^en/);
-    expect(localStorage.getItem("shannon.lang")).toBe("en");
+    expect(localStorage.getItem("supernova.lang")).toBe("en");
   });
 });

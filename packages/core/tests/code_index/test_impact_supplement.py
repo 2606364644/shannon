@@ -1,6 +1,6 @@
 """impact_supplement 单元测试。"""
 import pytest
-from shannon_core.code_index.impact_supplement import (
+from supernova_core.code_index.impact_supplement import (
     impact_upstream, impact_downstream,
 )
 

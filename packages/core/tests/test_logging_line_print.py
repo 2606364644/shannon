@@ -1,4 +1,4 @@
-"""TDD for shannon_core.logging.line_print.print_line.
+"""TDD for supernova_core.logging.line_print.print_line.
 
 spec: docs/superpowers/specs/2026-07-08-unified-logging-facade-design.md (组件 2)
 给拿不到 audit_session 的地方（scan_runner 信号 handler、非 activity CLI 进度）用：
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from shannon_core.display.symbols import STEP_DONE
-from shannon_core.logging.line_print import print_line
+from supernova_core.display.symbols import STEP_DONE
+from supernova_core.logging.line_print import print_line
 
 
 def test_format_has_timestamp_tag_symbol_body(capsys):

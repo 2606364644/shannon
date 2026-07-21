@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from shannon_web.app import create_app
+from supernova_web.app import create_app
 
 
 def test_health_ok():

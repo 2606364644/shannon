@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.code_index import save_adjudication
-from shannon_core.code_index.models import (
+from supernova_core.code_index import save_adjudication
+from supernova_core.code_index.models import (
     AdjudicatedEntryPoint,
     AdjudicationResult,
     CodeIndex,

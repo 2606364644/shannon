@@ -10,11 +10,11 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from shannon_whitebox.audit.session_registry import (
+from supernova_whitebox.audit.session_registry import (
     clear_audit_session,
     set_audit_session,
 )
-from shannon_whitebox.pipeline import activities
+from supernova_whitebox.pipeline import activities
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +173,7 @@ async def test_builder_exception_marks_class_failed(tmp_path, monkeypatch):
     the patched callable. The xss/ssrf builders see no xss/ssrf sink_call_sites
     in code_index.json (not written here), so they return [] cleanly.
     """
-    import shannon_core.code_index.vuln_chain_builders.injection_builder as inj_mod
+    import supernova_core.code_index.vuln_chain_builders.injection_builder as inj_mod
 
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)

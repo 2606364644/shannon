@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
-from shannon_core.models.agents import AgentName
-from shannon_core.models.errors import ErrorCode, PentestError
-from shannon_core.agents.validators import validate_deliverable, get_vuln_type, get_queue_filename
+from supernova_core.models.agents import AgentName
+from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.agents.validators import validate_deliverable, get_vuln_type, get_queue_filename
 
 def test_get_vuln_type():
     assert get_vuln_type(AgentName.INJECTION_VULN) == "injection"

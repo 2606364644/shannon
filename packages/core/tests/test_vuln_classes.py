@@ -1,12 +1,12 @@
 """vuln 类选择纯函数：优先级链 CLI > env > YAML > 默认，集中可测、黑白盒可复用。"""
 import pytest
 
-from shannon_core.config.vuln_selection import (
+from supernova_core.config.vuln_selection import (
     InvalidVulnClass,
     resolve_vuln_classes,
     select_vuln_classes,
 )
-from shannon_core.models.config import ALL_VULN_CLASSES
+from supernova_core.models.config import ALL_VULN_CLASSES
 
 
 class TestResolveVulnClasses:

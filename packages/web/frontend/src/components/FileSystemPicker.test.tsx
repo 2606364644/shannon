@@ -86,7 +86,7 @@ describe("FileSystemPicker", () => {
     fireEvent.click(screen.getByText("sub"));
     fireEvent.click(screen.getByRole("button", { name: /选择此目录/ }));
     expect(onChange).toHaveBeenCalledWith(SUB);
-    const recent = JSON.parse(localStorage.getItem("shannon-fs-recent") ?? "[]");
+    const recent = JSON.parse(localStorage.getItem("supernova-fs-recent") ?? "[]");
     expect(recent).toContain(SUB);
   });
 

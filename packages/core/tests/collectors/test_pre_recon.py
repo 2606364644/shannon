@@ -1,4 +1,4 @@
-from shannon_core.collectors.pre_recon import PRE_RECON_SECTIONS, PreReconCollector
+from supernova_core.collectors.pre_recon import PRE_RECON_SECTIONS, PreReconCollector
 
 EXPECTED_TOOLS = [
     "set_executive_summary",
@@ -95,8 +95,8 @@ def test_sink_ref_items_schema_has_location_and_sink_function():
 
 
 def test_make_collector_dispatches_pre_recon_and_returns_none_for_others():
-    from shannon_core.collectors import make_collector
-    from shannon_core.models.agents import AgentName
+    from supernova_core.collectors import make_collector
+    from supernova_core.models.agents import AgentName
 
     pre = make_collector(AgentName.PRE_RECON)
     assert isinstance(pre, PreReconCollector)

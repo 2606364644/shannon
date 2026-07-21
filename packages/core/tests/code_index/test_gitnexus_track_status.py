@@ -1,6 +1,6 @@
 # packages/core/tests/code_index/test_gitnexus_track_status.py
 from pathlib import Path
-from shannon_core.code_index.gitnexus_track_status import write_track_status, read_track_status
+from supernova_core.code_index.gitnexus_track_status import write_track_status, read_track_status
 
 def test_write_then_read_roundtrip(tmp_path):
     statuses = {

@@ -1,5 +1,5 @@
 """provider_settings: provider → 环境变量名映射表。"""
-from shannon_core.config.provider_settings import (
+from supernova_core.config.provider_settings import (
     PROVIDER_SETTINGS,
     ProviderFields,
     get_provider_fields,
@@ -11,14 +11,14 @@ def test_anthropic_reads_anthropic_prefixed_vars():
     assert f.base_url == "ANTHROPIC_BASE_URL"
     assert f.api_key == "ANTHROPIC_API_KEY"
     assert f.auth_token == "ANTHROPIC_AUTH_TOKEN"
-    assert f.medium_model == "SHANNON_MEDIUM_MODEL"
+    assert f.medium_model == "SUPERNOVA_MEDIUM_MODEL"
 
 
 def test_openai_reads_openai_prefixed_vars():
     f = PROVIDER_SETTINGS["openai_compatible"]
-    assert f.base_url == "SHANNON_OPENAI_BASE_URL"
-    assert f.api_key == "SHANNON_OPENAI_API_KEY"
-    assert f.medium_model == "SHANNON_OPENAI_MEDIUM_MODEL"
+    assert f.base_url == "SUPERNOVA_OPENAI_BASE_URL"
+    assert f.api_key == "SUPERNOVA_OPENAI_API_KEY"
+    assert f.medium_model == "SUPERNOVA_OPENAI_MEDIUM_MODEL"
 
 
 def test_anthropic_requires_credential_either_of():

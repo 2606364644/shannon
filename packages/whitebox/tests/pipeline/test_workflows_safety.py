@@ -10,7 +10,7 @@ directly — the same pattern used by the authz judge ordering anchor in
 import inspect
 import re
 
-from shannon_whitebox.pipeline import workflows
+from supernova_whitebox.pipeline import workflows
 
 
 def _activity_timeout(src: str, activity_attr: str) -> str | None:

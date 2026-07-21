@@ -60,7 +60,7 @@ def _patch_executor_env(monkeypatch, tmp_path):
     make_collector / render_deliverable / atomic_write_json / validate_deliverable
     全部走真实代码(这是 e2e 验证目标)。
     """
-    from shannon_core.agents import executor as exec_mod
+    from supernova_core.agents import executor as exec_mod
 
     monkeypatch.setattr(
         exec_mod.GitManager, "ensure_repository",
@@ -86,8 +86,8 @@ def _patch_executor_env(monkeypatch, tmp_path):
 async def test_injection_vuln_renders_analysis_md_and_queue_both_written(monkeypatch, tmp_path):
     """双通道同 run:analysis md(collector→renderer)+ exploitation_queue.json
     (structured_output)都在一次 execute() 中落盘——Plan 3 核心不变量。"""
-    from shannon_core.agents import executor as exec_mod
-    from shannon_core.models.agents import AgentName
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -165,9 +165,9 @@ async def test_injection_vuln_skipped_all_sections_md_written_no_raise(monkeypat
     queue.json 照常写。这是 Plan 3 的整个动机——self-Write 路径下 GLM 失忆丢 Write
     会触发 Missing-deliverable 重跑;host-render 把 md 渲染从 agent 行为解耦。
     """
-    from shannon_core.agents import executor as exec_mod
-    from shannon_core.models.agents import AgentName
-    from shannon_core.models.errors import PentestError
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
+    from supernova_core.models.errors import PentestError
 
     repo = tmp_path / "repo"
     repo.mkdir()

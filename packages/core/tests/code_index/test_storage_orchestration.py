@@ -29,8 +29,8 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock
 
-from shannon_core.code_index import build_code_index_with_gitnexus
-from shannon_core.code_index.models import ParameterSource
+from supernova_core.code_index import build_code_index_with_gitnexus
+from supernova_core.code_index.models import ParameterSource
 
 
 # Java fixture —— 两个 handler(@PostMapping save + @GetMapping show)。

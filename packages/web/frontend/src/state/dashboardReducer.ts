@@ -1,4 +1,4 @@
-// 1:1 复刻 packages/core/src/shannon_core/display/dashboard_state.py:70-132 DashboardState.apply。
+// 1:1 复刻 packages/core/src/supernova_core/display/dashboard_state.py:70-132 DashboardState.apply。
 // 前端独立可信的 SSE 状态累积器（spec §4.1）。纯函数、不可变、无 IO、无时间调用。
 import type { NdjsonEvent } from "../api/types";
 import { firstNonemptyLine, humanizeToolCall } from "./formatters";

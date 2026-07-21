@@ -1,9 +1,9 @@
 # packages/core/tests/code_index/test_authz_dominance.py
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     CallChain, CallEdge, CodeIndex, EntryPoint, FuncBlock, ParameterSource,
 )
-from shannon_core.code_index.parameter_models import SourcePoint
-from shannon_core.code_index.authz_gitnexus_track import (
+from supernova_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.authz_gitnexus_track import (
     IDORCandidateChain,
     find_unguarded_sink_paths,
 )

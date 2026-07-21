@@ -21,8 +21,8 @@ PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 INCLUDE_LINE = "@include(shared/_static-dataflow-hints.txt)"
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-WORKFLOWS_PY = REPO_ROOT / "packages/whitebox/src/shannon_whitebox/pipeline/workflows.py"
-ACTIVITIES_PY = REPO_ROOT / "packages/whitebox/src/shannon_whitebox/pipeline/activities.py"
+WORKFLOWS_PY = REPO_ROOT / "packages/whitebox/src/supernova_whitebox/pipeline/workflows.py"
+ACTIVITIES_PY = REPO_ROOT / "packages/whitebox/src/supernova_whitebox/pipeline/activities.py"
 
 
 def test_no_prompt_includes_static_dataflow_hints():

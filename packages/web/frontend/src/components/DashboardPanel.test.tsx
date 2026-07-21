@@ -24,7 +24,7 @@ describe("DashboardPanel", () => {
   });
   it("运行中 agent 行：spinner + name + turn + last_action", () => {
     const { container } = render(<DashboardPanel state={state} elapsedMs={0} />);
-    expect(container.querySelector(".shannon-spinner")).toBeInTheDocument();
+    expect(container.querySelector(".supernova-spinner")).toBeInTheDocument();
     // Xss 现在既作为 phase_units 单元名出现，也作为运行中 agent 名出现
     expect(screen.getAllByText(/Xss/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/t2/)).toBeInTheDocument();

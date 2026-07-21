@@ -2,12 +2,12 @@
 blackbox AuditSession -> WorkflowLogger -> dispatcher -> FileLogRenderer path."""
 from pathlib import Path
 
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.audit.session import AuditSession
-from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
-from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
-from shannon_core.audit.utils import generate_audit_path
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.audit.session import AuditSession
+from supernova_core.audit.session_registry import set_audit_session, clear_audit_session
+from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_core.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

@@ -1,5 +1,5 @@
-from shannon_core.display.events import PhaseEvent, WorkflowHeader
-from shannon_core.display.file_renderer import FileLogRenderer
+from supernova_core.display.events import PhaseEvent, WorkflowHeader
+from supernova_core.display.file_renderer import FileLogRenderer
 
 
 class FakeWriter:
@@ -20,7 +20,7 @@ async def test_header_includes_workflow_id_and_target():
         timestamp="2026-01-01 12:00:00", category="HEADER",
         workflow_id="wf-1", target_url="https://x.com"))
     out = renderer._writer.text
-    assert "Shannon Pentest - Workflow Log" in out
+    assert "Supernova Pentest - Workflow Log" in out
     assert "Workflow ID: wf-1" in out
     assert "Target URL:  https://x.com" in out
     assert "Started:     2026-01-01 12:00:00" in out
@@ -46,7 +46,7 @@ async def test_phase_complete_no_blank_prefix():
     assert not out.startswith("\n")
 
 
-from shannon_core.display.events import AgentEvent, LlmTurnEvent, ToolCallEvent
+from supernova_core.display.events import AgentEvent, LlmTurnEvent, ToolCallEvent
 
 
 async def test_agent_start_with_prefix():
@@ -99,7 +99,7 @@ async def test_llm_line_alignment():
     assert "[LLM]   [Injection] injection-vuln: Turn 1: Analyzing\n" in out  # three spaces after [LLM]
 
 
-from shannon_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
+from supernova_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent
 
 
 async def test_error_line_basic():
@@ -180,7 +180,7 @@ async def test_resume_block():
     assert "New Workflow ID:      w2" in out
 
 
-from shannon_core.display.events import StepEvent
+from supernova_core.display.events import StepEvent
 
 
 async def test_step_event_renders_step_line():
@@ -188,7 +188,7 @@ async def test_step_event_renders_step_line():
         def __init__(self): self.lines = []
         async def write(self, s): self.lines.append(s)
     w = _W()
-    from shannon_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.file_renderer import FileLogRenderer
     r = FileLogRenderer(w)
     await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                              phase="pre-recon", event="start"))
@@ -204,9 +204,9 @@ async def test_step_file_line_includes_intent_when_present():
         def __init__(self): self.lines = []
         async def write(self, s): self.lines.append(s)
     w = _W()
-    from shannon_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.file_renderer import FileLogRenderer
     r = FileLogRenderer(w)
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     await r.render(StepEvent(timestamp="t", category="STEP", name="code-index",
                              phase="pre-recon", event="start",
                              intent="构建调用图与代码索引"))
@@ -219,13 +219,13 @@ async def test_header_renders_repo_and_monitor_when_offline():
         def __init__(self): self.lines = []
         async def write(self, s): self.lines.append(s)
     w = _W()
-    from shannon_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.file_renderer import FileLogRenderer
     r = FileLogRenderer(w)
     await r.render(WorkflowHeader(
         timestamp="2026-06-16 13:49:44", category="HEADER", workflow_id="wf-1",
         target_url=None, repo_path="/root/code/prize_web", mode="offline (source code analysis)",
         web_ui_url="http://localhost:8233/namespaces/default/workflows/wf-1",
-        logs_cmd="shannon-whitebox logs wf-1 --follow", workspace="wf-1"))
+        logs_cmd="supernova-whitebox logs wf-1 --follow", workspace="wf-1"))
     out = "".join(w.lines)
     assert "Repository:" in out
     assert "/root/code/prize_web" in out
@@ -236,8 +236,8 @@ async def test_header_renders_repo_and_monitor_when_offline():
 
 
 async def test_file_summary_uses_ok_symbol_for_success():
-    from shannon_core.display.events import AgentMetric, SummaryEvent
-    from shannon_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.events import AgentMetric, SummaryEvent
+    from supernova_core.display.file_renderer import FileLogRenderer
 
     class _Buf:
         def __init__(self):
@@ -256,8 +256,8 @@ async def test_file_summary_uses_ok_symbol_for_success():
 
 
 async def test_file_renderer_info_event_info_level():
-    from shannon_core.display.file_renderer import FileLogRenderer
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.events import InfoEvent
     from unittest.mock import AsyncMock
     writer = AsyncMock()
     await FileLogRenderer(writer).render(
@@ -267,8 +267,8 @@ async def test_file_renderer_info_event_info_level():
 
 
 async def test_file_renderer_info_event_warning_level():
-    from shannon_core.display.file_renderer import FileLogRenderer
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.file_renderer import FileLogRenderer
+    from supernova_core.display.events import InfoEvent
     from unittest.mock import AsyncMock
     writer = AsyncMock()
     await FileLogRenderer(writer).render(
@@ -278,7 +278,7 @@ async def test_file_renderer_info_event_warning_level():
 
 async def test_phase_step_agent_labels_align_in_file():
     """file [PHASE]/[STEP ]/[AGENT] 标签列等宽 -> 正文起点同列。"""
-    from shannon_core.display.events import StepEvent
+    from supernova_core.display.events import StepEvent
     renderer = FileLogRenderer(FakeWriter())
     ts = "2026-06-23 00:42:39"
     await renderer.render(PhaseEvent(timestamp=ts, category="PHASE", phase="setup", event="start"))
@@ -300,7 +300,7 @@ async def test_phase_step_agent_labels_align_in_file():
 
 # --- GitnexusLlmEvent (归 LLM 族: [LLM]   [GitNexus], 对偶 _llm 的 [LLM]   [Agent]) ---
 
-from shannon_core.display.events import GitnexusLlmEvent
+from supernova_core.display.events import GitnexusLlmEvent
 
 
 def _gn_evt(kind, **kw):

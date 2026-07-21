@@ -3,7 +3,7 @@ from pathlib import Path
 
 from temporalio.exceptions import ApplicationError
 
-from shannon_core.cli.error_render import extract_root_cause
+from supernova_core.cli.error_render import extract_root_cause
 
 
 class _FakeTemporalError(Exception):
@@ -65,7 +65,7 @@ def test_root_cause_prefers_shallowest_typed_in_multi_layer_chain():
     assert "loopback" in rc.message
 
 
-from shannon_core.cli.error_render import format_workflow_failure
+from supernova_core.cli.error_render import format_workflow_failure
 
 
 def test_format_loopback_target():
@@ -107,7 +107,7 @@ def test_format_unknown_type_falls_back():
     assert "something weird boom" in out
 
 
-from shannon_core.cli.error_render import persist_workflow_traceback
+from supernova_core.cli.error_render import persist_workflow_traceback
 
 
 def test_persist_writes_activity_failures_log(tmp_path):

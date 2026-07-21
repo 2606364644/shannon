@@ -1,5 +1,5 @@
-from shannon_core.display.dashboard_state import DashboardState, AgentRow
-from shannon_core.display.events import (
+from supernova_core.display.dashboard_state import DashboardState, AgentRow
+from supernova_core.display.events import (
     PhaseEvent, AgentEvent, ToolCallEvent, LlmTurnEvent, ErrorEvent, ResumeEvent,
 )
 
@@ -100,13 +100,13 @@ def test_apply_is_immutable():
 
 
 def test_unknown_event_is_noop():
-    from shannon_core.display.events import WorkflowHeader
+    from supernova_core.display.events import WorkflowHeader
     s = DashboardState().apply(WorkflowHeader(timestamp="t", category="HEADER",
                                               workflow_id="w", target_url="u"))
     assert s == DashboardState()
 
 
-from shannon_core.display.events import StepEvent
+from supernova_core.display.events import StepEvent
 
 
 def _phase_with_steps(name: str, steps) -> PhaseEvent:

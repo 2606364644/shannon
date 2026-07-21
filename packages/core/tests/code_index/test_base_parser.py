@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
 
-from shannon_core.code_index.parsers.base import BaseParser
-from shannon_core.code_index.models import FuncBlock
+from supernova_core.code_index.parsers.base import BaseParser
+from supernova_core.code_index.models import FuncBlock
 
 
 def test_base_parser_cannot_instantiate():
@@ -37,7 +37,7 @@ def test_concrete_parser_implements_both_methods():
 
 
 def test_call_node_dataclass():
-    from shannon_core.code_index.parsers.base import CallNode
+    from supernova_core.code_index.parsers.base import CallNode
     node = CallNode(
         raw_call_node=None,
         raw_arg_nodes=[],
@@ -50,7 +50,7 @@ def test_call_node_dataclass():
 
 
 def test_concrete_parser_must_implement_iter_calls():
-    from shannon_core.code_index.parsers.base import BaseParser
+    from supernova_core.code_index.parsers.base import BaseParser
 
     class IncompleteParser(BaseParser):
         def parse_file(self, file_path, repo_root):
@@ -63,7 +63,7 @@ def test_concrete_parser_must_implement_iter_calls():
 
 
 def test_concrete_parser_with_new_methods_instantiates():
-    from shannon_core.code_index.parsers.base import BaseParser
+    from supernova_core.code_index.parsers.base import BaseParser
 
     class FullParser(BaseParser):
         def parse_file(self, file_path, repo_root):
@@ -90,7 +90,7 @@ def test_iter_calls_cached_parses_each_source_once():
     pre-recon deadlock (worker stuck in iter_calls, CPU 1.5h, MCP idle). Each
     distinct source must parse exactly once, every block in it reuses the index.
     """
-    from shannon_core.code_index.parsers.python_parser import PythonParser
+    from supernova_core.code_index.parsers.python_parser import PythonParser
 
     fixtures = Path(__file__).parent / "fixtures"
     flask = fixtures / "python" / "flask_app.py"

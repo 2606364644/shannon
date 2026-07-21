@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from agents import RunContextWrapper
 
-from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.web import _web_fetch_impl, _web_search_impl
+from supernova_core.agents.tools_openai import ToolContext
+from supernova_core.agents.tools_openai.web import _web_fetch_impl, _web_search_impl
 
 
 def _ctx(tmp_path):
@@ -19,7 +19,7 @@ async def test_web_fetch_strips_html(tmp_path):
     fake_resp.raise_for_status = MagicMock()
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
-    with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
+    with patch("supernova_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
         out = await _web_fetch_impl(_ctx(tmp_path), "https://example.com")
     assert "Hello there" in out
     assert "<p>" not in out
@@ -33,7 +33,7 @@ async def test_web_fetch_truncates(tmp_path):
     fake_resp.raise_for_status = MagicMock()
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
-    with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
+    with patch("supernova_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
         out = await _web_fetch_impl(_ctx(tmp_path), "https://example.com", max_length=1000)
     assert len(out) <= 1100
 
@@ -50,6 +50,6 @@ async def test_web_search_returns_results(tmp_path):
     fake_resp.raise_for_status = MagicMock()
     client = AsyncMock()
     client.get = AsyncMock(return_value=fake_resp)
-    with patch("shannon_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
+    with patch("supernova_core.agents.tools_openai.web.httpx.AsyncClient", return_value=client):
         out = await _web_search_impl(_ctx(tmp_path), "foo")
     assert "foo.example" in out or "Foo" in out

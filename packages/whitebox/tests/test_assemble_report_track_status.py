@@ -11,8 +11,8 @@ inject_attack_chains 模式,新 activity 在 report-executive 之后注入。
 """
 import json
 
-from shannon_whitebox.pipeline import activities
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.pipeline import activities
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 def _write_report(deliverables, content: str) -> None:

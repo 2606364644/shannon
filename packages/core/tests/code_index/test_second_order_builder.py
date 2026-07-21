@@ -13,17 +13,17 @@ read's resolved literal token, so extract_second_order_candidates pairs them.
 """
 import pytest
 
-from shannon_core.code_index.chain_verdict import CandidateChain
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.chain_verdict import CandidateChain
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     SinkCallSite,
     SinkCategory,
     SourcePoint,
     TaintFlow,
 )
-from shannon_core.code_index.storage_models import StorageMedium, StorageWritePoint
-from shannon_core.code_index.vuln_chain_builders.second_order_builder import (
+from supernova_core.code_index.storage_models import StorageMedium, StorageWritePoint
+from supernova_core.code_index.vuln_chain_builders.second_order_builder import (
     build_second_order_findings,
 )
 
@@ -157,7 +157,7 @@ async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
       (b) ``build_second_order_findings`` with the same stub DOES emit a
           2ND-GN-* finding (second-order is authoritative).
     """
-    from shannon_core.code_index.vuln_chain_builders.xss_builder import (
+    from supernova_core.code_index.vuln_chain_builders.xss_builder import (
         build_xss_findings,
     )
 

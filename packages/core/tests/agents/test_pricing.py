@@ -1,7 +1,7 @@
 import pytest
 
-from shannon_core.agents.runner import TokenUsage
-from shannon_core.agents.pricing import (
+from supernova_core.agents.runner import TokenUsage
+from supernova_core.agents.pricing import (
     GLM_PRICING_CNY,
     CostAmount,
     compute_cost,
@@ -121,8 +121,8 @@ def test_compute_cost_usd_wrapper_returns_cost():
 
 
 def test_compute_cost_ignores_usd_cny_rate(monkeypatch):
-    """单 session cost 本币直达，SHANNON_USD_CNY_RATE 不再参与计算（spec §4.4）。"""
-    monkeypatch.setenv("SHANNON_USD_CNY_RATE", "10.0")
+    """单 session cost 本币直达，SUPERNOVA_USD_CNY_RATE 不再参与计算（spec §4.4）。"""
+    monkeypatch.setenv("SUPERNOVA_USD_CNY_RATE", "10.0")
     p = GLM_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000  # = 0.8，不除汇率
@@ -140,7 +140,7 @@ def test_override_new_schema_with_currency(tmp_path, monkeypatch):
         '{"currency":"USD","models":{"glm-5.2":{"input":10,"output":30,"cache_read":2,"cache_creation":4}}}',
         encoding="utf-8",
     )
-    monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", str(f))
     r = compute_cost("glm-5.2", TokenUsage(input_tokens=1_000_000, output_tokens=0))
     assert r.currency == "USD"
     assert r.cost == 10.0  # USD 直达，不除汇率
@@ -153,7 +153,7 @@ def test_override_old_flat_schema_defaults_cny(tmp_path, monkeypatch):
         '{"glm-4.5-air":{"input":100.0,"output":100.0,"cache_read":25.0}}',
         encoding="utf-8",
     )
-    monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", str(f))
     r = compute_cost("glm-4.5-air", TokenUsage(input_tokens=1_000_000))
     assert r.currency == "CNY"
     assert r.cost == pytest.approx(100.0)  # override 同 key 覆盖内置
@@ -163,7 +163,7 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
     """override JSON 解析失败 → 忽略覆盖、用内置、不崩（spec §4.5）。"""
     f = tmp_path / "bad.json"
     f.write_text("{not valid json")
-    monkeypatch.setenv("SHANNON_PRICING_OVERRIDE", str(f))
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", str(f))
     p = GLM_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000

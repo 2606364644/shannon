@@ -16,7 +16,7 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from shannon_whitebox.pipeline import activities
+from supernova_whitebox.pipeline import activities
 
 
 class _FakeInput:
@@ -67,8 +67,8 @@ async def test_build_track_failure_returns_failed_not_raise(tmp_path):
         raise FileNotFoundError("code_index.json missing")
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track", new=fake_build):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track", new=fake_build):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -96,8 +96,8 @@ async def test_explore_branch_not_failed(tmp_path):
         })()
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
-            with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                 inst = gs.return_value
                 inst.track_step = _noop_cm_factory()
                 inst.log_info = AsyncMock()
@@ -124,9 +124,9 @@ async def test_verdict_agent_exception_marks_failed(tmp_path):
         raise RuntimeError("LLM API connection refused")
 
     with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
-        with patch("shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track", new=fake_build):
-            with patch("shannon_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run_raises):
-                with patch("shannon_whitebox.audit.session_registry.get_audit_session") as gs:
+        with patch("supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track", new=fake_build):
+            with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run_raises):
+                with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
                     inst = gs.return_value
                     inst.track_step = _noop_cm_factory()
                     inst.log_info = AsyncMock()

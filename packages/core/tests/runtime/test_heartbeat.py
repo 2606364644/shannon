@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from shannon_core.runtime.heartbeat import HeartbeatManager
+from supernova_core.runtime.heartbeat import HeartbeatManager
 
 pytestmark = pytest.mark.asyncio
 
@@ -95,17 +95,17 @@ async def test_no_on_cancel_callback_safe(tmp_path):
 
 
 async def test_default_interval_from_env(monkeypatch):
-    """interval 默认从 SHANNON_HEARTBEAT_INTERVAL_SECONDS 读(默认 30;spec §5)。"""
-    from shannon_core.runtime.heartbeat import _default_interval
-    monkeypatch.delenv("SHANNON_HEARTBEAT_INTERVAL_SECONDS", raising=False)
+    """interval 默认从 SUPERNOVA_HEARTBEAT_INTERVAL_SECONDS 读(默认 30;spec §5)。"""
+    from supernova_core.runtime.heartbeat import _default_interval
+    monkeypatch.delenv("SUPERNOVA_HEARTBEAT_INTERVAL_SECONDS", raising=False)
     assert _default_interval() == 30.0
-    monkeypatch.setenv("SHANNON_HEARTBEAT_INTERVAL_SECONDS", "5")
+    monkeypatch.setenv("SUPERNOVA_HEARTBEAT_INTERVAL_SECONDS", "5")
     assert _default_interval() == 5.0
 
 
 async def test_mark_owner_if_unset(tmp_path):
     """worker 标 owner=host,仅当 session.json 未设 owner(不覆盖 scan_manager 写的 owner=web)。"""
-    from shannon_core.runtime.heartbeat import mark_owner_if_unset
+    from supernova_core.runtime.heartbeat import mark_owner_if_unset
     sf = tmp_path / "session.json"
     # 未设 → 写 host(CLI 起的 scan)
     sf.write_text(json.dumps({"status": "running"}))

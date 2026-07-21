@@ -1,5 +1,5 @@
 """PipelineInput.event_file 字段：web 提交端塞路径，worker activity 读它写 events.ndjson。"""
-from shannon_whitebox.pipeline.shared import PipelineInput
+from supernova_whitebox.pipeline.shared import PipelineInput
 
 
 def test_pipeline_input_has_event_file_field():

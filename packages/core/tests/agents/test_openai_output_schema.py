@@ -1,6 +1,6 @@
 import pytest
 
-from shannon_core.agents.openai_output_schema import (
+from supernova_core.agents.openai_output_schema import (
     RawJsonSchemaOutputSchema,
     StructuredOutputParseError,
     _extract_json_payload,

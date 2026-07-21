@@ -1,6 +1,6 @@
 import pytest
 
-from shannon_web.components.git_fetcher import GitFetcher
+from supernova_web.components.git_fetcher import GitFetcher
 
 
 def test_repo_name_strips_git():

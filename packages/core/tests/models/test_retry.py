@@ -1,4 +1,4 @@
-from shannon_core.models.retry import GITNEXUS_VERDICT_RETRY, retry_for
+from supernova_core.models.retry import GITNEXUS_VERDICT_RETRY, retry_for
 
 
 def test_gitnexus_verdict_retry_policy():
@@ -14,7 +14,7 @@ def test_production_retry_capped_at_8():
     """pre-recon/recon/report 等 standard 单次 LLM agent 的重试上限。
     2026-07-20 从 50 下调:50×~6min 会把 transient/确定性失败放大成 ~5h 卡死
     (sentinel_dashboard 实测)。对齐 VULN_RETRY(8) 哲学。"""
-    from shannon_core.models.retry import PRODUCTION_RETRY
+    from supernova_core.models.retry import PRODUCTION_RETRY
     assert PRODUCTION_RETRY.maximum_attempts == 8
 
 

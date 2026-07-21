@@ -53,30 +53,30 @@ def test_detect_pkg_mgr_reads_os_release_file(tmp_path):
 # ── system-level gate: idempotent re-run on this host (spec §8 layer 1) ──
 # Mutating steps (docker/gitnexus/acl/ownership) can't be unit-tested; this
 # runs the real orchestrator on the already-provisioned host and asserts a
-# no-op + green verify. Skipped unless SHANNON_RUN_PROVISION_INTEGRATION=1
+# no-op + green verify. Skipped unless SUPERNOVA_RUN_PROVISION_INTEGRATION=1
 # (it mutates the live host — opt-in).
 
 def test_provision_idempotent_rerun_verify_green():
-    if __import__("os").environ.get("SHANNON_RUN_PROVISION_INTEGRATION") != "1":
-        __import__("pytest").skip("set SHANNON_RUN_PROVISION_INTEGRATION=1 to run live host gate")
+    if __import__("os").environ.get("SUPERNOVA_RUN_PROVISION_INTEGRATION") != "1":
+        __import__("pytest").skip("set SUPERNOVA_RUN_PROVISION_INTEGRATION=1 to run live host gate")
     r = subprocess.run(["bash", str(PROVISION)], capture_output=True, text=True, timeout=600)
     assert r.returncode == 0, f"provision exited {r.returncode}\nSTDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
     assert "all green" in r.stdout.lower(), f"verify not green:\n{r.stdout}"
 
 
 # ── Regression: WEB container (root) must access repos regardless of .git owner ──
-# Bug: fix_ownership once chown'd repos/ to shannon-user; WEB runs as container
+# Bug: fix_ownership once chown'd repos/ to supernova-user; WEB runs as container
 # root, so git flagged dubious ownership (exit 128) → WEB scans died. Fix =
 # provision no longer chowns repos + Dockerfile sets safe.directory '/app/repos/*'.
 def test_web_container_scans_repos_regardless_of_git_owner():
-    if __import__("os").environ.get("SHANNON_RUN_PROVISION_INTEGRATION") != "1":
-        __import__("pytest").skip("set SHANNON_RUN_PROVISION_INTEGRATION=1 (needs running web container)")
+    if __import__("os").environ.get("SUPERNOVA_RUN_PROVISION_INTEGRATION") != "1":
+        __import__("pytest").skip("set SUPERNOVA_RUN_PROVISION_INTEGRATION=1 (needs running web container)")
     repos_dir = REPO / "repos"
     sample = next(repos_dir.rglob(".git"), None)
     assert sample is not None, "no repo under repos/ to test"
     repo_rel = sample.parent.relative_to(REPO)  # e.g. repos/frontend/xxx
     r = subprocess.run(
-        ["docker", "exec", "shannon-py-web", "git", "-C", f"/app/{repo_rel}",
+        ["docker", "exec", "supernova-web", "git", "-C", f"/app/{repo_rel}",
          "rev-parse", "--is-inside-work-tree"],
         capture_output=True, text=True, timeout=60,
     )

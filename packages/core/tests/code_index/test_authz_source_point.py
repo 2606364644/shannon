@@ -1,6 +1,6 @@
-from shannon_core.code_index.models import CallChain, CodeIndex, EntryPoint, FuncBlock, ParameterSource
-from shannon_core.code_index.parameter_models import SourcePoint
-from shannon_core.code_index.authz_gitnexus_track import (
+from supernova_core.code_index.models import CallChain, CodeIndex, EntryPoint, FuncBlock, ParameterSource
+from supernova_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.authz_gitnexus_track import (
     IDORCandidateChain, _source_reaches_sink, find_unguarded_sink_paths,
 )
 

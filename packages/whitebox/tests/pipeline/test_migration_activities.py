@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.logging.log_bus import LogBus
+from supernova_core.logging.log_bus import LogBus
 
 
 @pytest.mark.asyncio
@@ -21,8 +21,8 @@ async def test_setup_display_injects_audit_session_with_event_file(tmp_path):
     event_file 透传到 WorkflowLogger.initialize → StructuredEventRenderer 挂载 →
     WorkflowHeader 落 events.ndjson（验证真行为，非 mock-theater）。
     """
-    from shannon_whitebox.pipeline.activities import setup_display
-    from shannon_whitebox.pipeline.shared import ActivityInput
+    from supernova_whitebox.pipeline.activities import setup_display
+    from supernova_whitebox.pipeline.shared import ActivityInput
 
     event_file = str(tmp_path / "events.ndjson")
     inp = ActivityInput(
@@ -30,7 +30,7 @@ async def test_setup_display_injects_audit_session_with_event_file(tmp_path):
         workspace_path=str(tmp_path),
         event_file=event_file,
     )
-    with patch("shannon_whitebox.audit.session_registry.set_audit_session") as mock_set:
+    with patch("supernova_whitebox.audit.session_registry.set_audit_session") as mock_set:
         await setup_display(inp)
         mock_set.assert_called_once()
         session = mock_set.call_args[0][0]
@@ -45,10 +45,10 @@ async def test_setup_display_injects_audit_session_with_event_file(tmp_path):
 async def test_setup_display_none_event_file_does_not_mount_renderer(tmp_path):
     """event_file=None 时不挂 StructuredEventRenderer（env 兜底由 WorkflowLogger 处理）。
 
-    确保向后兼容: CLI 路径 event_file=None, 不产生 events.ndjson（靠 env SHANNON_WEB_EVENT_FILE）。
+    确保向后兼容: CLI 路径 event_file=None, 不产生 events.ndjson（靠 env SUPERNOVA_WEB_EVENT_FILE）。
     """
-    from shannon_whitebox.pipeline.activities import setup_display
-    from shannon_whitebox.pipeline.shared import ActivityInput
+    from supernova_whitebox.pipeline.activities import setup_display
+    from supernova_whitebox.pipeline.shared import ActivityInput
 
     inp = ActivityInput(
         repo_path=str(tmp_path),
@@ -58,8 +58,8 @@ async def test_setup_display_none_event_file_does_not_mount_renderer(tmp_path):
     event_file = str(tmp_path / "events.ndjson")
     with patch.dict("os.environ", {}, clear=False):
         import os
-        os.environ.pop("SHANNON_WEB_EVENT_FILE", None)  # 确保 env 不兜底
-        with patch("shannon_whitebox.audit.session_registry.set_audit_session") as mock_set:
+        os.environ.pop("SUPERNOVA_WEB_EVENT_FILE", None)  # 确保 env 不兜底
+        with patch("supernova_whitebox.audit.session_registry.set_audit_session") as mock_set:
             await setup_display(inp)
             session = mock_set.call_args[0][0]
             assert session is not None
@@ -71,8 +71,8 @@ async def test_setup_display_none_event_file_does_not_mount_renderer(tmp_path):
 @pytest.mark.asyncio
 async def test_run_heartbeat_writes_heartbeat_file_until_cancelled(tmp_path):
     """run_heartbeat 长驻写 heartbeat 文件; cancel 时干净退出(HeartbeatManager __aexit__)."""
-    from shannon_whitebox.pipeline.activities import run_heartbeat
-    from shannon_whitebox.pipeline.shared import ActivityInput
+    from supernova_whitebox.pipeline.activities import run_heartbeat
+    from supernova_whitebox.pipeline.shared import ActivityInput
 
     inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
     task = asyncio.create_task(run_heartbeat(inp))
@@ -86,9 +86,9 @@ async def test_run_heartbeat_writes_heartbeat_file_until_cancelled(tmp_path):
 @pytest.mark.asyncio
 async def test_finalize_summary_logs_complete_and_clears_session(tmp_path):
     """finalize_summary 构造 WorkflowSummary + 调 log_workflow_complete + clear_audit_session."""
-    from shannon_whitebox.pipeline.activities import finalize_summary
-    from shannon_whitebox.pipeline.shared import ActivityInput
-    from shannon_core.models.audit import WorkflowSummary
+    from supernova_whitebox.pipeline.activities import finalize_summary
+    from supernova_whitebox.pipeline.shared import ActivityInput
+    from supernova_core.models.audit import WorkflowSummary
 
     inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
     mock_session = MagicMock()
@@ -104,8 +104,8 @@ async def test_finalize_summary_logs_complete_and_clears_session(tmp_path):
         "agent_metrics": {},
         "error": None,
     }
-    with patch("shannon_whitebox.audit.session_registry.get_audit_session", return_value=mock_session), \
-         patch("shannon_whitebox.audit.session_registry.clear_audit_session") as mock_clear:
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session", return_value=mock_session), \
+         patch("supernova_whitebox.audit.session_registry.clear_audit_session") as mock_clear:
         await finalize_summary(inp, summary)
         mock_session.log_workflow_complete.assert_awaited_once()
         # 验证传入的是真实 WorkflowSummary 且字段正确（非 mock-theater）
@@ -124,9 +124,9 @@ async def test_finalize_summary_reads_cost_from_session_metrics(tmp_path):
     summary dict 的 total_cost 来自 PipelineState.agent_metrics(workflow self._state 构建),
     LLM 轨关闭时残缺→0(与 NodeGoat CLI ``Total Cost: $0.0000`` 回归同源)。对齐 CLI 路径
     (worker._build_final_summary):两条路径 cost 数据源一致 = MetricsTracker。"""
-    from shannon_whitebox.pipeline.activities import finalize_summary
-    from shannon_whitebox.pipeline.shared import ActivityInput
-    from shannon_core.models.audit import WorkflowSummary
+    from supernova_whitebox.pipeline.activities import finalize_summary
+    from supernova_whitebox.pipeline.shared import ActivityInput
+    from supernova_core.models.audit import WorkflowSummary
 
     inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
     mock_session = MagicMock()
@@ -137,8 +137,8 @@ async def test_finalize_summary_reads_cost_from_session_metrics(tmp_path):
     # summary dict 的 total_cost_usd 残缺为 0(LLM 轨关),应被 session metrics 覆盖
     summary = {"status": "completed", "total_duration_ms": 100, "total_cost_usd": 0.0,
                "completed_agents": [], "agent_metrics": {}, "error": None}
-    with patch("shannon_whitebox.audit.session_registry.get_audit_session", return_value=mock_session), \
-         patch("shannon_whitebox.audit.session_registry.clear_audit_session"):
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session", return_value=mock_session), \
+         patch("supernova_whitebox.audit.session_registry.clear_audit_session"):
         await finalize_summary(inp, summary)
 
     ws = mock_session.log_workflow_complete.call_args[0][0]
@@ -153,10 +153,10 @@ async def test_setup_display_mounts_logbus_handler_so_logevent_reaches_files(tmp
     getLogger 的 LogEvent 经 LogBus→dispatcher 进 events.ndjson + diagnostic.log。
     （修前: worker 路径 root 无 LogBusHandler → LogEvent 走 lastResort stderr, 两文件皆空。）"""
     import asyncio, logging
-    from shannon_whitebox.pipeline.activities import setup_display
-    from shannon_whitebox.pipeline.shared import ActivityInput
-    from shannon_core.audit.session_registry import clear_audit_session
-    from shannon_core.logging.log_bus import LogBus
+    from supernova_whitebox.pipeline.activities import setup_display
+    from supernova_whitebox.pipeline.shared import ActivityInput
+    from supernova_core.audit.session_registry import clear_audit_session
+    from supernova_core.logging.log_bus import LogBus
 
     # 快照 + 还原 root logger（configure_logging 是进程级）
     root = logging.getLogger()

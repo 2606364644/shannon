@@ -3,12 +3,12 @@ import contextlib
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
 
 
 @pytest.mark.asyncio
 async def test_run_scan_uses_dynamic_task_queue():
-    """run_scan should generate a unique task queue per scan with shannon-py-bb prefix."""
+    """run_scan should generate a unique task queue per scan with supernova-bb prefix."""
     input = BlackboxPipelineInput(
         web_url="http://example.com",
         workspace_name="test-bb-tq",
@@ -33,16 +33,16 @@ async def test_run_scan_uses_dynamic_task_queue():
         mock_worker.__aexit__ = AsyncMock(return_value=None)
         return mock_worker
 
-    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_blackbox.worker.ShutdownController.install"), \
-         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
-        from shannon_blackbox.worker import run_scan
+    with patch("supernova_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("supernova_blackbox.worker.ShutdownController.install"), \
+         patch("supernova_blackbox.worker.ShutdownController.uninstall"):
+        from supernova_blackbox.worker import run_scan
         await run_scan(input, "localhost:7233")
 
     assert captured_task_queue is not None
-    assert captured_task_queue.startswith("shannon-py-bb-"), f"Expected shannon-py-bb- prefix, got: {captured_task_queue}"
-    suffix = captured_task_queue.removeprefix("shannon-py-bb-")
+    assert captured_task_queue.startswith("supernova-bb-"), f"Expected supernova-bb- prefix, got: {captured_task_queue}"
+    suffix = captured_task_queue.removeprefix("supernova-bb-")
     assert len(suffix) == 8
     int(suffix, 16)  # must be valid hex
 
@@ -79,7 +79,7 @@ async def test_run_scan_emits_failed_summary_on_workflow_error():
     fake_session = FakeSession()
 
     real_run_with_display = __import__(
-        "shannon_blackbox.worker", fromlist=["run_with_display"]
+        "supernova_blackbox.worker", fromlist=["run_with_display"]
     ).run_with_display
 
     import contextlib
@@ -89,12 +89,12 @@ async def test_run_scan_emits_failed_summary_on_workflow_error():
         captured_session["session"] = fake_session
         yield fake_session
 
-    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_blackbox.worker.run_with_display", fake_display), \
-         patch("shannon_blackbox.worker.ShutdownController.install"), \
-         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
-        from shannon_blackbox.worker import run_scan
+    with patch("supernova_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("supernova_blackbox.worker.run_with_display", fake_display), \
+         patch("supernova_blackbox.worker.ShutdownController.install"), \
+         patch("supernova_blackbox.worker.ShutdownController.uninstall"):
+        from supernova_blackbox.worker import run_scan
         with pytest.raises(RuntimeError, match="browser-engine-unavailable"):
             await run_scan(input, "localhost:7233")
 
@@ -108,7 +108,7 @@ async def test_run_scan_emits_failed_summary_on_workflow_error():
 async def test_run_scan_returns_cancelled_on_scan_cancelled():
     """On user interrupt (ScanCancelled), run_scan returns
     BlackboxPipelineState(status='cancelled') and still clears the audit session."""
-    from shannon_core.runtime.scan_runner import ScanCancelled
+    from supernova_core.runtime.scan_runner import ScanCancelled
     import contextlib
 
     input = BlackboxPipelineInput(
@@ -134,18 +134,18 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled():
         yield FakeSession()
 
     with (
-        patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)),
-        patch("shannon_blackbox.worker.Worker", side_effect=capture_worker),
-        patch("shannon_blackbox.worker.run_with_display", fake_display),
-        patch("shannon_blackbox.worker.ShutdownController.install"),
-        patch("shannon_blackbox.worker.ShutdownController.uninstall"),
+        patch("supernova_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)),
+        patch("supernova_blackbox.worker.Worker", side_effect=capture_worker),
+        patch("supernova_blackbox.worker.run_with_display", fake_display),
+        patch("supernova_blackbox.worker.ShutdownController.install"),
+        patch("supernova_blackbox.worker.ShutdownController.uninstall"),
         patch(
-            "shannon_blackbox.worker.await_workflow_with_shutdown",
+            "supernova_blackbox.worker.await_workflow_with_shutdown",
             AsyncMock(side_effect=ScanCancelled()),
         ),
-        patch("shannon_blackbox.worker.clear_audit_session") as mock_clear,
+        patch("supernova_blackbox.worker.clear_audit_session") as mock_clear,
     ):
-        from shannon_blackbox.worker import run_scan
+        from supernova_blackbox.worker import run_scan
         result = await run_scan(input, "localhost:7233")
 
     assert result == BlackboxPipelineState(status="cancelled")
@@ -156,8 +156,8 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled():
 async def test_run_scan_rerun_archives_old_evidence_and_uses_new_id(tmp_path, monkeypatch):
     """--rerun 时：归档旧 evidence + workflow id 带 -rerun- 后缀。"""
     # deliverables 落在 session 维度（workspaces/<session>/deliverables）；
-    # resolve_workspaces_dir 读 SHANNON_WORKER_ROOT（非 SHANNON_WORKSPACES_DIR）。
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    # resolve_workspaces_dir 读 SUPERNOVA_WORKER_ROOT（非 SUPERNOVA_WORKSPACES_DIR）。
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path / "worker"))
     deliverables = tmp_path / "worker" / "workspaces" / "ws1" / "deliverables"
     deliverables.mkdir(parents=True)
     (deliverables / "injection_exploitation_evidence.md").write_text("# old")
@@ -197,12 +197,12 @@ async def test_run_scan_rerun_archives_old_evidence_and_uses_new_id(tmp_path, mo
         rerun=True,
     )
 
-    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_blackbox.worker.run_with_display", fake_display), \
-         patch("shannon_blackbox.worker.ShutdownController.install"), \
-         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
-        from shannon_blackbox.worker import run_scan
+    with patch("supernova_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("supernova_blackbox.worker.run_with_display", fake_display), \
+         patch("supernova_blackbox.worker.ShutdownController.install"), \
+         patch("supernova_blackbox.worker.ShutdownController.uninstall"):
+        from supernova_blackbox.worker import run_scan
         await run_scan(inp, "localhost:7233")
 
     # 归档了旧 evidence
@@ -224,7 +224,7 @@ async def test_run_scan_self_creates_session_when_workspace_name_empty(tmp_path,
     import json
     import contextlib
 
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path / "worker"))
 
     inp = BlackboxPipelineInput(
         web_url="https://standalone.example.com",
@@ -252,12 +252,12 @@ async def test_run_scan_self_creates_session_when_workspace_name_empty(tmp_path,
     async def fake_display(meta, use_rich=False):
         yield FakeSession()
 
-    with patch("shannon_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_blackbox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_blackbox.worker.run_with_display", fake_display), \
-         patch("shannon_blackbox.worker.ShutdownController.install"), \
-         patch("shannon_blackbox.worker.ShutdownController.uninstall"):
-        from shannon_blackbox.worker import run_scan
+    with patch("supernova_blackbox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_blackbox.worker.Worker", side_effect=capture_worker), \
+         patch("supernova_blackbox.worker.run_with_display", fake_display), \
+         patch("supernova_blackbox.worker.ShutdownController.install"), \
+         patch("supernova_blackbox.worker.ShutdownController.uninstall"):
+        from supernova_blackbox.worker import run_scan
         await run_scan(inp, "localhost:7233")
 
     # workspace_name 已被回填
@@ -277,8 +277,8 @@ def test_all_activities_registered():
     防 finalize_report 式漏注册（temporal NotFoundError → production retry 卡死~24h）。
     见 docs/superpowers/specs/2026-06-29-blackbox-finalize-report-worker-registration-design.md。
     """
-    from shannon_core.testing.activity_registration import assert_all_activities_registered
-    from shannon_blackbox import worker
-    from shannon_blackbox.pipeline import activities
+    from supernova_core.testing.activity_registration import assert_all_activities_registered
+    from supernova_blackbox import worker
+    from supernova_blackbox.pipeline import activities
 
     assert_all_activities_registered(worker, [activities])

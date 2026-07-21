@@ -7,8 +7,8 @@ describe("theme lib", () => {
     document.documentElement.classList.remove("dark", "light");
   });
 
-  it("THEME_KEY = shannon-theme", () => {
-    expect(THEME_KEY).toBe("shannon-theme");
+  it("THEME_KEY = supernova-theme", () => {
+    expect(THEME_KEY).toBe("supernova-theme");
   });
 
   it("getInitialTheme: localStorage 优先", () => {

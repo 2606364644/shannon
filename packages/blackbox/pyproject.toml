@@ -1,20 +1,20 @@
 [project]
-name = "shannon-blackbox"
+name = "supernova-blackbox"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "shannon-core",
+    "supernova-core",
     "temporalio>=1.0",
     "click>=8.0",
     "aiofiles>=23.0",
 ]
 
 [project.scripts]
-shannon-blackbox = "shannon_blackbox.cli.main:main"
+supernova-blackbox = "supernova_blackbox.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shannon_blackbox"]
+packages = ["src/supernova_blackbox"]

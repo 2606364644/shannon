@@ -1,18 +1,18 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from shannon_core.models.metrics import AgentMetrics, SessionMetadata
-from shannon_core.audit.session import AuditSession
-from shannon_core.audit.session_registry import set_audit_session, clear_audit_session
-from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
-from shannon_blackbox.pipeline.shared import BlackboxActivityInput
+from supernova_core.models.metrics import AgentMetrics, SessionMetadata
+from supernova_core.audit.session import AuditSession
+from supernova_core.audit.session_registry import set_audit_session, clear_audit_session
+from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_blackbox.pipeline.shared import BlackboxActivityInput
 
 
 @pytest.mark.asyncio
 async def test_run_recon_wires_tool_audit_logger(tmp_path, monkeypatch):
     """run_recon derives a SessionToolAuditLogger from the AuditSession and passes
     it through to ReconExecutor (NOT audit_logger — that was dropped in Task 3)."""
-    from shannon_blackbox.pipeline import activities
+    from supernova_blackbox.pipeline import activities
 
     deliverables_root = tmp_path
     meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
@@ -28,9 +28,9 @@ async def test_run_recon_wires_tool_audit_logger(tmp_path, monkeypatch):
     # Temporal context is absent under direct invocation).
     monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=1))
     try:
-        with patch("shannon_blackbox.pipeline.activities.resolve_deliverables_path",
+        with patch("supernova_blackbox.pipeline.activities.resolve_deliverables_path",
                    return_value=deliverables_root / "deliverables"), \
-             patch("shannon_blackbox.agents.recon_executor.ReconExecutor", return_value=mock_recon):
+             patch("supernova_blackbox.agents.recon_executor.ReconExecutor", return_value=mock_recon):
             inp = BlackboxActivityInput(web_url="https://example.com", workspace_name="recon-blackbox")
             await activities.run_recon(inp)
 

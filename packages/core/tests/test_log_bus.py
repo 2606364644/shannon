@@ -20,8 +20,8 @@ from datetime import datetime
 
 import pytest
 
-from shannon_core.logging import LogBus, LogBusHandler
-from shannon_core.logging.setup import configure_logging
+from supernova_core.logging import LogBus, LogBusHandler
+from supernova_core.logging.setup import configure_logging
 
 
 # --- fixtures：restore root logger + LogBus 单例（防跨测试泄漏）---
@@ -121,7 +121,7 @@ def test_configure_logging_creates_diagnostic_log_file(tmp_path):
 def test_logging_never_writes_stderr(tmp_path, capsys):
     """散落 logger.warning 经 LogBusHandler，不落 stderr（防鬼影根）。"""
     configure_logging(log_dir=tmp_path)
-    logging.getLogger("shannon_core.services.x").warning("queue unreadable: boom")
+    logging.getLogger("supernova_core.services.x").warning("queue unreadable: boom")
     captured = capsys.readouterr()
     assert "queue unreadable: boom" not in captured.err
 
@@ -129,7 +129,7 @@ def test_logging_never_writes_stderr(tmp_path, capsys):
 def test_lastresort_never_engages(tmp_path, capsys):
     """LogBusHandler emit 不抛 → record handled → lastResort（硬编码 stderr）不触发。"""
     configure_logging(log_dir=tmp_path)
-    logging.getLogger("shannon_core.services.y").error("real boom")
+    logging.getLogger("supernova_core.services.y").error("real boom")
     captured = capsys.readouterr()
     assert "real boom" not in captured.err
 
@@ -140,7 +140,7 @@ def test_logging_falls_back_to_diagnostic_log_without_session(tmp_path):
     """无 session（is_attached=False）→ LogBusHandler emit 走 diagnostic.log fallback。"""
     configure_logging(log_dir=tmp_path)
     assert not LogBus.is_attached
-    logging.getLogger("shannon_core.code_index").warning("queue unreadable: boom")
+    logging.getLogger("supernova_core.code_index").warning("queue unreadable: boom")
     text = (tmp_path / "diagnostic.log").read_text()
     assert "queue unreadable: boom" in text
     assert "WARNING" in text
@@ -150,7 +150,7 @@ def test_logging_falls_back_to_diagnostic_log_without_session(tmp_path):
 def test_fallback_records_exc_info_into_diagnostic(tmp_path):
     """带 exc_info 的 record fallback 时把 traceback 写进 diagnostic.log。"""
     configure_logging(log_dir=tmp_path)
-    log = logging.getLogger("shannon_core.z")
+    log = logging.getLogger("supernova_core.z")
     try:
         raise RuntimeError("kaboom")
     except RuntimeError:
@@ -167,7 +167,7 @@ def test_logbus_handler_emit_does_not_touch_console_or_stderr(tmp_path, capsys):
     configure_logging(log_dir=tmp_path)
     handler = next(h for h in logging.getLogger().handlers if isinstance(h, LogBusHandler))
     record = logging.LogRecord(
-        name="shannon_core.x", level=logging.WARNING, pathname=__file__, lineno=1,
+        name="supernova_core.x", level=logging.WARNING, pathname=__file__, lineno=1,
         msg="boom-in-sandbox", args=None, exc_info=None)
     handler.emit(record)
     captured = capsys.readouterr()
@@ -179,7 +179,7 @@ def test_logbus_handler_emit_queues_when_attached(tmp_path):
     """is_attached=True → emit 走 queue.put_nowait（不碰 console，drain 在 task 4）。"""
     configure_logging(log_dir=tmp_path)
     LogBus._attached = True  # 模拟 session 已 attach（drain 由 task 4 接，这里只验分流）
-    logging.getLogger("shannon_core.q").warning("queued-msg")
+    logging.getLogger("supernova_core.q").warning("queued-msg")
     # queue 里应有 LogEvent，diagnostic.log 不应有（走了 queue 而非 fallback）
     drained = []
     while True:
@@ -193,15 +193,15 @@ def test_logbus_handler_emit_queues_when_attached(tmp_path):
 
 def test_logbus_handler_prepare_builds_logevent(tmp_path):
     """prepare 物化 message + 构造 LogEvent（带 logger_name/level/exc_txt）。"""
-    from shannon_core.display.events import LogEvent
+    from supernova_core.display.events import LogEvent
     configure_logging(log_dir=tmp_path)
     handler = next(h for h in logging.getLogger().handlers if isinstance(h, LogBusHandler))
     record = logging.LogRecord(
-        name="shannon_core.foo", level=logging.ERROR, pathname=__file__, lineno=1,
+        name="supernova_core.foo", level=logging.ERROR, pathname=__file__, lineno=1,
         msg="err %s", args=("x",), exc_info=None)
     event = handler.prepare(record)
     assert isinstance(event, LogEvent)
     assert event.message == "err x"            # getMessage 物化 %s
     assert event.level == "ERROR"
-    assert event.logger_name == "shannon_core.foo"
+    assert event.logger_name == "supernova_core.foo"
     assert event.category == "ERROR"

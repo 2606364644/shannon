@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from shannon_web.components.multi_repo_config_store import MultiRepoConfigStore
+from supernova_web.components.multi_repo_config_store import MultiRepoConfigStore
 
 _VALID = """\
 repos:

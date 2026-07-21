@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
-from shannon_whitebox.pipeline.activities import run_code_index, _get_paths
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.pipeline.activities import run_code_index, _get_paths
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 @pytest.mark.asyncio
@@ -13,12 +13,12 @@ async def test_run_code_index_raises_when_gitnexus_unavailable(tmp_path):
     """GitNexus CLI 不可用 → run_code_index 抛 ApplicationFailure,不再降级。"""
     input = ActivityInput(repo_path=str(tmp_path), workspace_name="test")
 
-    with patch("shannon_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
-         patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
-         patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths:
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("supernova_whitebox.pipeline.activities._get_paths") as mock_paths:
         # track_step 是 async context manager。
         # 关键:__aexit__ 必须返回 falsy,否则会吞掉块内抛出的异常
-        # (真实 track_step 在 __aexit__ 里 re-raise,见 shannon_core.audit.session)。
+        # (真实 track_step 在 __aexit__ 里 re-raise,见 supernova_core.audit.session)。
         cm = mock_sess.return_value.track_step.return_value
         cm.__aenter__ = AsyncMock(return_value=None)
         cm.__aexit__ = AsyncMock(return_value=None)
@@ -40,13 +40,13 @@ async def test_run_code_index_logs_chains_warning_when_empty(tmp_path):
         total_blocks=10, total_entry_points=0, total_chains=0, degradation_level="full",
     )
 
-    with patch("shannon_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
-         patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
-         patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
-         patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
-         patch("shannon_core.code_index.build_code_index_with_gitnexus",
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("supernova_whitebox.pipeline.activities._get_paths") as mock_paths, \
+         patch("supernova_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
+         patch("supernova_core.code_index.build_code_index_with_gitnexus",
                new=AsyncMock(return_value=(fake_index, [], [], []))), \
-         patch("shannon_core.code_index.write_index_files",
+         patch("supernova_core.code_index.write_index_files",
                return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
         cm = mock_sess.return_value.track_step.return_value
         cm.__aenter__ = AsyncMock(return_value=None)
@@ -75,13 +75,13 @@ async def test_run_code_index_logs_info_when_chains_present(tmp_path):
         total_blocks=10, total_entry_points=3, total_chains=5, degradation_level="none",
     )
 
-    with patch("shannon_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
-         patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
-         patch("shannon_whitebox.pipeline.activities._get_paths") as mock_paths, \
-         patch("shannon_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
-         patch("shannon_core.code_index.build_code_index_with_gitnexus",
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("supernova_whitebox.pipeline.activities._get_paths") as mock_paths, \
+         patch("supernova_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
+         patch("supernova_core.code_index.build_code_index_with_gitnexus",
                new=AsyncMock(return_value=(fake_index, [], [], []))), \
-         patch("shannon_core.code_index.write_index_files",
+         patch("supernova_core.code_index.write_index_files",
                return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")):
         cm = mock_sess.return_value.track_step.return_value
         cm.__aenter__ = AsyncMock(return_value=None)

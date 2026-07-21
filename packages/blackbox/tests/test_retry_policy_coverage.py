@@ -8,7 +8,7 @@ from pathlib import Path
 
 WORKFLOW_FILE = (
     Path(__file__).resolve().parents[1]
-    / "src" / "shannon_blackbox" / "pipeline" / "workflows.py"
+    / "src" / "supernova_blackbox" / "pipeline" / "workflows.py"
 )
 
 

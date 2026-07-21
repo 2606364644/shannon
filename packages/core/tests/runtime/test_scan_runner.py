@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.runtime.scan_runner import (
+from supernova_core.runtime.scan_runner import (
     ScanCancelled,
     ShutdownController,
     await_workflow_with_shutdown,
@@ -28,7 +28,7 @@ class TestShutdownController:
         ctrl = ShutdownController()
         ctrl._loop = MagicMock()
         ctrl._on_signal(signal.SIGINT)  # 第 1 次
-        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+        with patch("supernova_core.runtime.scan_runner.os._exit") as mock_exit:
             ctrl._on_signal(signal.SIGINT)  # 第 2 次
         mock_exit.assert_called_once_with(130)
 
@@ -90,7 +90,7 @@ class TestShutdownMessagesUsePrintLine:
     @pytest.mark.asyncio
     async def test_do_cancel_message_tagged(self, capsys):
         """_do_cancel 的 '正在取消 Temporal workflow…' 经 print_line 带标签。"""
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
         result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不自然完成
         try:
             fake_handle = MagicMock()
@@ -111,7 +111,7 @@ class TestDoCancelEscalateTerminate:
 
     @pytest.mark.asyncio
     async def test_escalates_to_terminate_on_grace_timeout(self, capsys):
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
         result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成
         try:
             fake_handle = MagicMock()
@@ -132,7 +132,7 @@ class TestDoCancelEscalateTerminate:
     @pytest.mark.asyncio
     async def test_terminate_swallows_exception(self, capsys):
         """terminate 抛异常（workflow 已结束等）不向上抛，仍走 give-up cleanup。"""
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
         called = []
 
         def cleanup(session_ids=None):
@@ -161,7 +161,7 @@ class TestDoCancelEscalateTerminate:
         旧版 _do_cancel 从 wait_for 改 asyncio.wait 后(不取消 task 保留给 escalate
         observe), terminate 双超时 give-up 路径漏了清理 result_task → orphan 泄漏。
         """
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
         result_task = asyncio.ensure_future(asyncio.sleep(100))  # 永不完成 → give-up
         fake_handle = MagicMock()
         fake_handle.cancel = AsyncMock()
@@ -177,7 +177,7 @@ class TestDoCancelEscalateTerminate:
     @pytest.mark.asyncio
     async def test_no_terminate_when_grace_resolves(self):
         """grace 期内 result_task 完成（协作取消成功）→ 不升级 terminate。"""
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
         result_task = asyncio.ensure_future(asyncio.sleep(0))  # 立即完成
         await asyncio.sleep(0.01)  # 让它完成
         fake_handle = MagicMock()
@@ -194,7 +194,7 @@ class TestDoCancelEscalateTerminate:
         """result_task 抛 Exception（temporalio CancelledError/TerminatedError 属此）
         → 视作已结束，不升级 terminate。注：asyncio.CancelledError 是 BaseException
         不属此路径，会向上传播（外层 cancel 语义）。"""
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
 
         async def raise_exc():
             raise RuntimeError("workflow cancelled")
@@ -229,7 +229,7 @@ class TestPollProgress:
             if len(sleeps) >= 1:
                 raise asyncio.CancelledError()
 
-        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+        with patch("supernova_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
             with pytest.raises(asyncio.CancelledError):
                 await poll_progress(fake_handle, progress_type=MagicMock(), total=13)
 
@@ -247,7 +247,7 @@ class TestPollProgress:
         async def fake_sleep(seconds):
             raise asyncio.CancelledError()
 
-        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+        with patch("supernova_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
             with pytest.raises(asyncio.CancelledError):
                 await poll_progress(fake_handle, progress_type=MagicMock(), total=13)
         # 异常被吞掉，没有向上抛 RuntimeError
@@ -283,7 +283,7 @@ class TestAwaitWorkflowWithShutdown:
             raise asyncio.CancelledError()  # poll 第一轮 sleep 即取消
 
         ctrl = ShutdownController()
-        with patch("shannon_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
+        with patch("supernova_core.runtime.scan_runner.asyncio.sleep", fake_sleep):
             result = await await_workflow_with_shutdown(
                 fake_handle, ctrl, progress_type=MagicMock(), total=7
             )
@@ -333,7 +333,7 @@ class TestAwaitWorkflowWithShutdown:
         async def fake_do_cancel(handle, result_task, grace, *, cleanup_callback=None):
             captured["cb"] = cleanup_callback
 
-        with patch("shannon_core.runtime.scan_runner._do_cancel", fake_do_cancel):
+        with patch("supernova_core.runtime.scan_runner._do_cancel", fake_do_cancel):
             with pytest.raises(ScanCancelled):
                 await await_workflow_with_shutdown(
                     fake_handle, triggered, cancel_grace_seconds=0.01
@@ -356,12 +356,12 @@ class TestRunScanGracefulNormal:
         fake_worker = _make_fake_worker()
 
         with patch(
-            "shannon_core.runtime.scan_runner.Client.connect",
+            "supernova_core.runtime.scan_runner.Client.connect",
             AsyncMock(return_value=fake_client),
         ), patch(
-            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+            "supernova_core.runtime.scan_runner.Worker", return_value=fake_worker
         ) as mock_worker_cls, patch(
-            "shannon_core.runtime.scan_runner.generate_task_queue",
+            "supernova_core.runtime.scan_runner.generate_task_queue",
             return_value="tq-test",
         ), patch.object(ShutdownController, "install"), patch.object(
             ShutdownController, "uninstall"
@@ -403,15 +403,15 @@ class TestRunScanGracefulCancel:
         triggered.uninstall = MagicMock()
 
         with patch(
-            "shannon_core.runtime.scan_runner.Client.connect",
+            "supernova_core.runtime.scan_runner.Client.connect",
             AsyncMock(return_value=fake_client),
         ), patch(
-            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+            "supernova_core.runtime.scan_runner.Worker", return_value=fake_worker
         ), patch(
-            "shannon_core.runtime.scan_runner.generate_task_queue",
+            "supernova_core.runtime.scan_runner.generate_task_queue",
             return_value="tq-test",
         ), patch(
-            "shannon_core.runtime.scan_runner.ShutdownController",
+            "supernova_core.runtime.scan_runner.ShutdownController",
             return_value=triggered,
         ):
             with pytest.raises(ScanCancelled):
@@ -445,15 +445,15 @@ class TestRunScanGracefulCancel:
         triggered.uninstall = MagicMock()
 
         with patch(
-            "shannon_core.runtime.scan_runner.Client.connect",
+            "supernova_core.runtime.scan_runner.Client.connect",
             AsyncMock(return_value=fake_client),
         ), patch(
-            "shannon_core.runtime.scan_runner.Worker", return_value=fake_worker
+            "supernova_core.runtime.scan_runner.Worker", return_value=fake_worker
         ), patch(
-            "shannon_core.runtime.scan_runner.generate_task_queue",
+            "supernova_core.runtime.scan_runner.generate_task_queue",
             return_value="tq-test",
         ), patch(
-            "shannon_core.runtime.scan_runner.ShutdownController",
+            "supernova_core.runtime.scan_runner.ShutdownController",
             return_value=triggered,
         ):
             with pytest.raises(ScanCancelled):  # 不是 RuntimeError
@@ -482,7 +482,7 @@ class TestShutdownCleanup:
         ctrl._loop = MagicMock()
         ctrl.install(MagicMock(), cleanup_callback=cleanup)
         ctrl._on_signal(signal.SIGINT)  # 第 1 次: graceful
-        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+        with patch("supernova_core.runtime.scan_runner.os._exit") as mock_exit:
             ctrl._on_signal(signal.SIGINT)  # 第 2 次: force
         mock_exit.assert_called_once_with(130)
         assert called == [None]  # cleanup 在 os._exit 前被调一次,session_ids=None
@@ -493,7 +493,7 @@ class TestShutdownCleanup:
         ctrl._loop = MagicMock()
         ctrl.install(MagicMock())  # 无 cleanup_callback
         ctrl._on_signal(signal.SIGINT)
-        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+        with patch("supernova_core.runtime.scan_runner.os._exit") as mock_exit:
             ctrl._on_signal(signal.SIGINT)
         mock_exit.assert_called_once_with(130)
 
@@ -507,14 +507,14 @@ class TestShutdownCleanup:
         ctrl._loop = MagicMock()
         ctrl.install(MagicMock(), cleanup_callback=boom)
         ctrl._on_signal(signal.SIGINT)
-        with patch("shannon_core.runtime.scan_runner.os._exit") as mock_exit:
+        with patch("supernova_core.runtime.scan_runner.os._exit") as mock_exit:
             ctrl._on_signal(signal.SIGINT)
         mock_exit.assert_called_once_with(130)
 
     @pytest.mark.asyncio
     async def test_do_cancel_calls_cleanup_on_timeout(self):
         """路径②: _do_cancel grace 超时→升级 terminate→settle 仍超时→调 cleanup_callback。"""
-        from shannon_core.runtime.scan_runner import _do_cancel
+        from supernova_core.runtime.scan_runner import _do_cancel
 
         called = []
 

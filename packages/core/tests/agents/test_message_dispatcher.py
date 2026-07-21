@@ -8,11 +8,11 @@ from claude_agent_sdk import (
     UserMessage, ToolResultBlock,
 )
 
-from shannon_core.agents.message_dispatcher import (
+from supernova_core.agents.message_dispatcher import (
     SPENDING_CAP_PATTERNS,
     MessageDispatcher,
 )
-from shannon_core.agents.tool_audit_logger import NullToolAuditLogger
+from supernova_core.agents.tool_audit_logger import NullToolAuditLogger
 
 
 def _make_text_event(text: str) -> object:

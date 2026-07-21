@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.display.events import InfoEvent, LogEvent
-from shannon_core.display.file_renderer import DiagnosticLogRenderer
-from shannon_core.logging.diagnostic_log import DiagnosticLog
+from supernova_core.display.events import InfoEvent, LogEvent
+from supernova_core.display.file_renderer import DiagnosticLogRenderer
+from supernova_core.logging.diagnostic_log import DiagnosticLog
 
 
 # --- DiagnosticLog 单元（sync 文件句柄 + Lock）---
@@ -58,12 +58,12 @@ async def test_diagnostic_log_renderer_writes_line(tmp_path):
     diag = DiagnosticLog(tmp_path / "diagnostic.log")
     r = DiagnosticLogRenderer(diag)
     evt = LogEvent(timestamp="2026-07-08 10:00:00", category="WARNING",
-                   logger_name="shannon_core.code_index", level="WARNING",
+                   logger_name="supernova_core.code_index", level="WARNING",
                    message="queue unreadable: boom", exc_txt=None)
     await r.render(evt)
     diag.close()
     text = (tmp_path / "diagnostic.log").read_text()
-    assert ("[2026-07-08 10:00:00] [WARNING] shannon_core.code_index: "
+    assert ("[2026-07-08 10:00:00] [WARNING] supernova_core.code_index: "
             "queue unreadable: boom\n") in text
 
 

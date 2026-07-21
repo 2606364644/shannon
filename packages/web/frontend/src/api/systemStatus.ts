@@ -15,6 +15,7 @@ export interface SystemStatus {
   temporal: TemporalStatus;
   git: { binary_available: boolean; credentials_configured: boolean };
   version: string;
+  brand_name: string;
 }
 
 export interface UseSystemStatusResult {

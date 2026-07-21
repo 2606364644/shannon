@@ -1,5 +1,5 @@
-from shannon_core.code_index.dual_track_merger import merge_dual_track_queues
-from shannon_core.models.queue_schemas import AuthzVulnerability, InjectionVulnerability
+from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
+from supernova_core.models.queue_schemas import AuthzVulnerability, InjectionVulnerability
 
 
 def _inj(ID, verdict, source="q", sink_call="db.exec", **kw):

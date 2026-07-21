@@ -7,7 +7,7 @@ Covers dominance candidates (handler→sink no ownership), framework candidates
 import json
 from pathlib import Path
 
-from shannon_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
+from supernova_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
 
 NODEGOAT_FIXTURE = Path(__file__).parent / "fixtures" / "nodegoat_code_index.json"
 

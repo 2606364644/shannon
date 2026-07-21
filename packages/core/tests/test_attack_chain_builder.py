@@ -2,9 +2,9 @@
 import logging
 import pytest
 
-from shannon_core.services.attack_chain_builder import build_attack_chains
-from shannon_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
-from shannon_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain
+from supernova_core.services.attack_chain_builder import build_attack_chains
+from supernova_core.services.framework_analyzer import FrameworkAnalysisResult, InferredEndpoint
+from supernova_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain
 
 
 class TestBuildAttackChains:

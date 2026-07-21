@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from shannon_blackbox.pipeline.activities import detect_whitebox_results
-from shannon_blackbox.pipeline.workflows import has_correlation_results
+from supernova_blackbox.pipeline.activities import detect_whitebox_results
+from supernova_blackbox.pipeline.workflows import has_correlation_results
 
 
 def _write_queue(path: Path) -> None:

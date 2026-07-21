@@ -3,12 +3,12 @@
 import pytest
 from unittest.mock import MagicMock
 
-from shannon_core.agents.tool_audit_logger import (
+from supernova_core.agents.tool_audit_logger import (
     ActivityToolAuditLogger,
     NullToolAuditLogger,
     ToolAuditLogger,
 )
-from shannon_core.logging.activity_logger import ActivityLogger
+from supernova_core.logging.activity_logger import ActivityLogger
 
 
 class TestToolAuditLoggerInterface:

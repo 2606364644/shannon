@@ -4,17 +4,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_whitebox.pipeline.shared import PipelineInput
+from supernova_whitebox.pipeline.shared import PipelineInput
 
 
 @pytest.mark.asyncio
 async def test_run_scan_persists_session_data(tmp_path, monkeypatch):
     """run_scan should create a session.json with repo_path via SessionManager."""
-    from shannon_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineState
 
     # Redirect workspaces root to tmp_path so resolve_workspaces_dir lands here
-    # instead of the shannon-py project root (read by find_project_root()).
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    # instead of the supernova project root (read by find_project_root()).
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -38,11 +38,11 @@ async def test_run_scan_persists_session_data(tmp_path, monkeypatch):
     mock_worker.__aenter__ = AsyncMock(return_value=None)
     mock_worker.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
-         patch("shannon_whitebox.worker.ShutdownController.install"), \
-         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
-        from shannon_whitebox.worker import run_scan
+    with patch("supernova_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("supernova_whitebox.worker.ShutdownController.install"), \
+         patch("supernova_whitebox.worker.ShutdownController.uninstall"):
+        from supernova_whitebox.worker import run_scan
         result = await run_scan(input, "localhost:7233")
 
     # Verify session.json was created with repo_path
@@ -64,9 +64,9 @@ async def test_run_scan_auto_generates_workspace_name_when_none(tmp_path, monkey
     Task 3 降级覆盖：mock 掉 Temporal/Worker，断言回填后的 workspace_name
     非空、session.json 已生成、且 deliverables_path 指向 session 维度。
     """
-    from shannon_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineState
 
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "myapp"
     repo.mkdir()
@@ -88,11 +88,11 @@ async def test_run_scan_auto_generates_workspace_name_when_none(tmp_path, monkey
     mock_worker.__aenter__ = AsyncMock(return_value=None)
     mock_worker.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
-         patch("shannon_whitebox.worker.ShutdownController.install"), \
-         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
-        from shannon_whitebox.worker import run_scan
+    with patch("supernova_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("supernova_whitebox.worker.ShutdownController.install"), \
+         patch("supernova_whitebox.worker.ShutdownController.uninstall"):
+        from supernova_whitebox.worker import run_scan
         result = await run_scan(input, "localhost:7233")
 
     # workspace_name 已回填，且基于 repo basename 命名
@@ -122,11 +122,11 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
     deliverables（F=False）对账，G∧¬F 误判"文件被误删"而中止（NodeGoat 冒烟抓到）。
     修复：resume 探测只在用户显式 -w（explicit_workspace）时触发。
     """
-    from shannon_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineState
 
     repo = tmp_path / "NodeGoat"
     repo.mkdir()
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     input = PipelineInput(repo_path=str(repo))  # 无 workspace_name
     assert input.workspace_name is None
@@ -147,16 +147,16 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
     )
     with (
         patch(
-            "shannon_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder"
+            "supernova_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder"
         ) as MockBuilder,
     ):
         MockBuilder.return_value.build = explode_build
         with (
-            patch("shannon_whitebox.worker.Client.connect",
+            patch("supernova_whitebox.worker.Client.connect",
                   AsyncMock(return_value=mock_client)),
-            patch("shannon_whitebox.worker.Worker", return_value=mock_worker),
-            patch("shannon_whitebox.worker.ShutdownController.install"),
-            patch("shannon_whitebox.worker.ShutdownController.uninstall"),
+            patch("supernova_whitebox.worker.Worker", return_value=mock_worker),
+            patch("supernova_whitebox.worker.ShutdownController.install"),
+            patch("supernova_whitebox.worker.ShutdownController.uninstall"),
         ):
             sess = MagicMock()
             sess.log_workflow_complete = AsyncMock()
@@ -172,10 +172,10 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
                 return _Ctx()
 
             with patch(
-                "shannon_whitebox.audit.display_lifecycle.run_with_display",
+                "supernova_whitebox.audit.display_lifecycle.run_with_display",
                 side_effect=fake_display,
             ):
-                from shannon_whitebox.worker import run_scan
+                from supernova_whitebox.worker import run_scan
                 await run_scan(input, "localhost:7233")
 
     explode_build.assert_not_called()
@@ -184,11 +184,11 @@ async def test_run_scan_auto_generated_workspace_skips_resume(tmp_path, monkeypa
 @pytest.mark.asyncio
 async def test_run_scan_uses_dynamic_task_queue(tmp_path, monkeypatch):
     """run_scan should generate a unique task queue per scan, not use a fixed name."""
-    from shannon_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineState
 
     # 隔离 workspaces 到 tmp_path：否则 resolve_workspaces_dir 走 cwd-based 落到真实
     # 项目 workspaces/，既污染真实目录，又让 resume 探测命中遗留 workspace 而 abort。
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -217,17 +217,17 @@ async def test_run_scan_uses_dynamic_task_queue(tmp_path, monkeypatch):
         mock_worker.__aexit__ = AsyncMock(return_value=None)
         return mock_worker
 
-    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", side_effect=capture_worker), \
-         patch("shannon_whitebox.worker.ShutdownController.install"), \
-         patch("shannon_whitebox.worker.ShutdownController.uninstall"):
-        from shannon_whitebox.worker import run_scan
+    with patch("supernova_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_whitebox.worker.Worker", side_effect=capture_worker), \
+         patch("supernova_whitebox.worker.ShutdownController.install"), \
+         patch("supernova_whitebox.worker.ShutdownController.uninstall"):
+        from supernova_whitebox.worker import run_scan
         await run_scan(input, "localhost:7233")
 
-    # Task queue should have the shannon-py-wb prefix
+    # Task queue should have the supernova-wb prefix
     assert captured_task_queue is not None
-    assert captured_task_queue.startswith("shannon-py-wb-"), f"Expected shannon-py-wb- prefix, got: {captured_task_queue}"
-    suffix = captured_task_queue.removeprefix("shannon-py-wb-")
+    assert captured_task_queue.startswith("supernova-wb-"), f"Expected supernova-wb- prefix, got: {captured_task_queue}"
+    suffix = captured_task_queue.removeprefix("supernova-wb-")
     assert len(suffix) == 8
     int(suffix, 16)  # must be valid hex
 
@@ -235,12 +235,12 @@ async def test_run_scan_uses_dynamic_task_queue(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path, monkeypatch):
     """run_scan should return {"status": "cancelled"} when the workflow is interrupted."""
-    from shannon_core.runtime.scan_runner import ScanCancelled
-    from shannon_whitebox.worker import run_scan
+    from supernova_core.runtime.scan_runner import ScanCancelled
+    from supernova_whitebox.worker import run_scan
 
     # 隔离 workspaces 到 tmp_path：否则 resolve_workspaces_dir 走 cwd-based 落到真实
     # 项目 workspaces/，既污染真实目录，又让 resume 探测命中遗留 workspace 而 abort。
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -252,20 +252,20 @@ async def test_run_scan_returns_cancelled_on_scan_cancelled(tmp_path, monkeypatc
     mock_worker.__aenter__ = AsyncMock(return_value=None)
     mock_worker.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("shannon_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
-         patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
-         patch("shannon_whitebox.worker.ShutdownController.install"), \
-         patch("shannon_whitebox.worker.ShutdownController.uninstall"), \
-         patch("shannon_whitebox.worker.await_workflow_with_shutdown",
+    with patch("supernova_whitebox.worker.Client.connect", AsyncMock(return_value=mock_client)), \
+         patch("supernova_whitebox.worker.Worker", return_value=mock_worker), \
+         patch("supernova_whitebox.worker.ShutdownController.install"), \
+         patch("supernova_whitebox.worker.ShutdownController.uninstall"), \
+         patch("supernova_whitebox.worker.await_workflow_with_shutdown",
                AsyncMock(side_effect=ScanCancelled())), \
-         patch("shannon_whitebox.audit.session_registry.clear_audit_session") as mock_clear:
+         patch("supernova_whitebox.audit.session_registry.clear_audit_session") as mock_clear:
         result = await run_scan(input, "localhost:7233")
 
     assert result == {"status": "cancelled"}
     mock_clear.assert_called()  # 清理在 cancel 路径仍执行
 
 
-from shannon_whitebox.worker import resolve_workflow_id
+from supernova_whitebox.worker import resolve_workflow_id
 
 
 def test_resolve_workflow_id_uses_workspace_name_when_given():
@@ -297,8 +297,8 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
     - session.json 的 resumeAttempts 被追加一条
     """
     import json as _json
-    from shannon_whitebox.pipeline.shared import PipelineState
-    from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeState
+    from supernova_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeState
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
@@ -319,9 +319,9 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
         ],
     }))
 
-    # resolve_workspaces_dir 依赖 find_project_root / SHANNON_WORKER_ROOT；
+    # resolve_workspaces_dir 依赖 find_project_root / SUPERNOVA_WORKER_ROOT；
     # 强制指向 tmp_path/workspaces。
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     input = PipelineInput(repo_path=str(repo), workspace_name=ws_name)
 
@@ -337,12 +337,12 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
     fake_builder.build = builder_build
     fake_builder.cleanup = builder_cleanup
     with patch(
-        "shannon_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder",
+        "supernova_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder",
         return_value=fake_builder,
     ):
         # mock git_completed（build 内部调 GitManager.get_completed_agents）
         with patch(
-            "shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+            "supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
             AsyncMock(return_value={"pre_recon"}),
         ):
             # mock Temporal
@@ -364,11 +364,11 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
 
             mock_client.start_workflow.side_effect = capture_start
 
-            with patch("shannon_whitebox.worker.Client.connect",
+            with patch("supernova_whitebox.worker.Client.connect",
                        AsyncMock(return_value=mock_client)), \
-                 patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
-                 patch("shannon_whitebox.worker.ShutdownController.install"), \
-                 patch("shannon_whitebox.worker.ShutdownController.uninstall"):
+                 patch("supernova_whitebox.worker.Worker", return_value=mock_worker), \
+                 patch("supernova_whitebox.worker.ShutdownController.install"), \
+                 patch("supernova_whitebox.worker.ShutdownController.uninstall"):
                 # capture meta via run_with_display（meta 在 run_scan 内局部构造）
                 metas = []
 
@@ -386,9 +386,9 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
                             return False
                     return _Ctx()
 
-                with patch("shannon_whitebox.audit.display_lifecycle.run_with_display",
+                with patch("supernova_whitebox.audit.display_lifecycle.run_with_display",
                            side_effect=capture_display):
-                    from shannon_whitebox.worker import run_scan
+                    from supernova_whitebox.worker import run_scan
                     result = await run_scan(input, "localhost:7233")
 
     # 断言
@@ -409,11 +409,11 @@ async def test_run_scan_resume_rebuilds_completed_agents(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_run_scan_fresh_mode_skips_resume(tmp_path, monkeypatch):
     """fresh 模式（input._fresh=True）：跳过 resume 探测，workflow_id 不含 -resume-。"""
-    from shannon_whitebox.pipeline.shared import PipelineState
+    from supernova_whitebox.pipeline.shared import PipelineState
 
     repo = tmp_path / "target-repo"
     repo.mkdir()
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
 
     input = PipelineInput(repo_path=str(repo), workspace_name="fresh-ws")
     setattr(input, "_fresh", True)
@@ -437,14 +437,14 @@ async def test_run_scan_fresh_mode_skips_resume(tmp_path, monkeypatch):
     # builder.build 不应被调用 —— 用会爆炸的 mock 验证
     explode_build = AsyncMock(side_effect=AssertionError("fresh 模式不应调 builder.build"))
     with patch(
-        "shannon_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder"
+        "supernova_whitebox.pipeline.whitebox_resume.WhiteboxResumeStateBuilder"
     ) as MockBuilder:
         MockBuilder.return_value.build = explode_build
-        with patch("shannon_whitebox.worker.Client.connect",
+        with patch("supernova_whitebox.worker.Client.connect",
                    AsyncMock(return_value=mock_client)), \
-             patch("shannon_whitebox.worker.Worker", return_value=mock_worker), \
-             patch("shannon_whitebox.worker.ShutdownController.install"), \
-             patch("shannon_whitebox.worker.ShutdownController.uninstall"):
+             patch("supernova_whitebox.worker.Worker", return_value=mock_worker), \
+             patch("supernova_whitebox.worker.ShutdownController.install"), \
+             patch("supernova_whitebox.worker.ShutdownController.uninstall"):
             sess = MagicMock()
             sess.log_workflow_complete = AsyncMock()
             sess.get_metrics = AsyncMock(return_value={})
@@ -458,9 +458,9 @@ async def test_run_scan_fresh_mode_skips_resume(tmp_path, monkeypatch):
                         return False
                 return _Ctx()
 
-            with patch("shannon_whitebox.audit.display_lifecycle.run_with_display",
+            with patch("supernova_whitebox.audit.display_lifecycle.run_with_display",
                        side_effect=fake_display):
-                from shannon_whitebox.worker import run_scan
+                from supernova_whitebox.worker import run_scan
                 await run_scan(input, "localhost:7233")
 
     assert captured["workflow_id"] == "fresh-ws"
@@ -478,8 +478,8 @@ async def test_resume_attempts_survive_metrics_tracker_initialize(tmp_path):
     key —— 这是 top-level resumeAttempts 跨 init 存活的依赖点。本测试钉死该不变量：
     若未来有人改成整体覆盖写，此测试会立刻红。
     """
-    from shannon_core.models.metrics import SessionMetadata
-    from shannon_core.audit.metrics_tracker import MetricsTracker
+    from supernova_core.models.metrics import SessionMetadata
+    from supernova_core.audit.metrics_tracker import MetricsTracker
 
     # 构造一个已有 top-level resumeAttempts（非空）的 workspace session.json
     workspaces_dir = tmp_path / "workspaces"
@@ -533,9 +533,9 @@ def test_all_activities_registered():
 
     whitebox 当前 26/26 全齐，本测试作为防未来漏注册的保护（无行为变更）。
     """
-    from shannon_core.testing.activity_registration import assert_all_activities_registered
-    from shannon_whitebox import worker
-    from shannon_whitebox.pipeline import activities
+    from supernova_core.testing.activity_registration import assert_all_activities_registered
+    from supernova_whitebox import worker
+    from supernova_whitebox.pipeline import activities
 
     assert_all_activities_registered(worker, [activities])
 

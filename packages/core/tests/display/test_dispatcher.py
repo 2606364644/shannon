@@ -1,7 +1,7 @@
 import asyncio
 
-from shannon_core.display.dispatcher import DisplayDispatcher
-from shannon_core.display.events import PhaseEvent
+from supernova_core.display.dispatcher import DisplayDispatcher
+from supernova_core.display.events import PhaseEvent
 
 
 class _RecordingRenderer:

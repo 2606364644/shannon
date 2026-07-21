@@ -1,10 +1,10 @@
 [project]
-name = "shannon-web"
+name = "supernova-web"
 version = "0.1.0"
 description = "Shannon Web Platform backend (FastAPI)"
 requires-python = ">=3.12"
 dependencies = [
-    "shannon-core",
+    "supernova-core",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "aiofiles>=23.0",
@@ -12,14 +12,14 @@ dependencies = [
 ]
 
 [project.scripts]
-shannon-web = "shannon_web.app:main"
+supernova-web = "supernova_web.app:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shannon_web"]
+packages = ["src/supernova_web"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

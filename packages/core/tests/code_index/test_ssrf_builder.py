@@ -1,15 +1,15 @@
 import pytest
 
-from shannon_core.code_index.chain_verdict import ChainVerdict
-from shannon_core.code_index.vuln_chain_builders.ssrf_builder import (
+from supernova_core.code_index.chain_verdict import ChainVerdict
+from supernova_core.code_index.vuln_chain_builders.ssrf_builder import (
     build_ssrf_findings,
 )
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow,
 )
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.models.queue_schemas import SsrfVulnerability
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.models.queue_schemas import SsrfVulnerability
 
 
 def _flow(source="url", source_type=ParameterSource.QUERY_PARAM):
@@ -98,7 +98,7 @@ async def test_build_ssrf_findings_reports_chain_progress(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "shannon_core.code_index.vuln_chain_builders.ssrf_builder.judge_chain_verdict",
+        "supernova_core.code_index.vuln_chain_builders.ssrf_builder.judge_chain_verdict",
         fake_judge,
     )
 

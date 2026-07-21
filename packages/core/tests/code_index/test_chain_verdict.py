@@ -1,12 +1,12 @@
 import pytest
 
-from shannon_core.code_index.chain_verdict import (
+from supernova_core.code_index.chain_verdict import (
     CandidateChain,
     extract_candidate_chains,
     judge_chain_verdict,
     ChainVerdict,
 )
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     DangerousSlot,
     SlotContext,
     ParameterPropagationGraph,
@@ -15,7 +15,7 @@ from shannon_core.code_index.parameter_models import (
     TaintFlow,
     PropagationStep,
 )
-from shannon_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import ParameterSource
 
 
 def _flow(sink_slot, source="q", source_type=ParameterSource.QUERY_PARAM, steps=None,

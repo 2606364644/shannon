@@ -9,7 +9,7 @@ from pathlib import Path
 
 CLI_FILE = (
     Path(__file__).resolve().parents[1]
-    / "src" / "shannon_blackbox" / "cli" / "main.py"
+    / "src" / "supernova_blackbox" / "cli" / "main.py"
 )
 
 

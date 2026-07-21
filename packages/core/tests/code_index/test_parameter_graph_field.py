@@ -1,5 +1,5 @@
-from shannon_core.code_index.models import CodeIndex
-from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+from supernova_core.code_index.models import CodeIndex
+from supernova_core.code_index.parameter_models import ParameterPropagationGraph
 
 
 def _minimal_index(**overrides):

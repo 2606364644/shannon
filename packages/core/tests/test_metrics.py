@@ -1,5 +1,5 @@
-from shannon_core.models.metrics import AgentMetrics, SessionMetadata
-from shannon_core.models.audit import PhaseMetrics
+from supernova_core.models.metrics import AgentMetrics, SessionMetadata
+from supernova_core.models.audit import PhaseMetrics
 
 def test_agent_metrics_defaults():
     m = AgentMetrics(duration_ms=1000)
@@ -52,13 +52,13 @@ def test_session_metadata_extra_fields():
 
 
 def test_agent_metrics_structured_output_none():
-    from shannon_core.models.metrics import AgentMetrics
+    from supernova_core.models.metrics import AgentMetrics
     m = AgentMetrics(duration_ms=100)
     assert m.structured_output is None
 
 
 def test_agent_metrics_structured_output_dict():
-    from shannon_core.models.metrics import AgentMetrics
+    from supernova_core.models.metrics import AgentMetrics
     m = AgentMetrics(
         duration_ms=100,
         structured_output={"login_success": True},
@@ -67,7 +67,7 @@ def test_agent_metrics_structured_output_dict():
 
 
 def test_agent_metrics_structured_output_nested():
-    from shannon_core.models.metrics import AgentMetrics
+    from supernova_core.models.metrics import AgentMetrics
     data = {
         "login_success": False,
         "failure_point": "totp_secret",

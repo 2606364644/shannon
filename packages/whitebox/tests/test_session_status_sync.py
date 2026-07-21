@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def _wf_src() -> str:
-    from shannon_whitebox.pipeline import workflows
+    from supernova_whitebox.pipeline import workflows
     return inspect.getsource(workflows)
 
 
@@ -54,7 +54,7 @@ def test_workflow_except_exception_reraises():
 
 def test_worker_has_except_exception_after_scancancelled():
     """whitebox CLI worker.py 内层 try 必须有 except Exception 兜底(抄 blackbox worker.py:201-211)."""
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     sc = src.find("except ScanCancelled:")
     assert sc != -1, "worker.py 须有 except ScanCancelled"
@@ -65,7 +65,7 @@ def test_worker_has_except_exception_after_scancancelled():
 
 def test_worker_except_branch_logs_failed_summary():
     """except Exception 分支必须调 session.log_workflow_complete 写 failed summary."""
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     sc = src.find("except ScanCancelled:")
     ee = src.find("except Exception as e:", sc)
@@ -79,7 +79,7 @@ def test_worker_except_branch_logs_failed_summary():
 
 def test_worker_scancancelled_logs_cancelled_summary():
     """except ScanCancelled 分支也必须落盘 cancelled(原版只 return,session 永远 running)."""
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     sc = src.find("except ScanCancelled:")
     ee = src.find("except Exception as e:", sc)
@@ -90,7 +90,7 @@ def test_worker_scancancelled_logs_cancelled_summary():
 
 def test_worker_imports_pipeline_state():
     """worker.py 必须 import PipelineState(failed/cancelled summary 构造 state 需要它)."""
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     # 检查真实 import 语句行(而非裸子串,避免 docstring 里的 PipelineState 字样误过)
     assert any(

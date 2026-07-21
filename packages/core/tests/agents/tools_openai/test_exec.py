@@ -4,8 +4,8 @@ import os
 import pytest
 from agents import RunContextWrapper
 
-from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.exec import _bash_impl
+from supernova_core.agents.tools_openai import ToolContext
+from supernova_core.agents.tools_openai.exec import _bash_impl
 
 
 def _ctx(tmp_path):
@@ -44,7 +44,7 @@ async def test_bash_truncates_long_output(tmp_path):
     assert result.endswith("...[truncated]")
 
 
-from shannon_core.agents.tools_openai.exec import _grep_impl
+from supernova_core.agents.tools_openai.exec import _grep_impl
 
 
 @pytest.mark.asyncio

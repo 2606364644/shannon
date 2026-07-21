@@ -1,6 +1,6 @@
-from shannon_core.models.queue_schemas import VulnerabilityQueue
-from shannon_blackbox.services.exploitation_checker import CoverageResult
-from shannon_blackbox.services.coverage_renderer import render_unverified_section
+from supernova_core.models.queue_schemas import VulnerabilityQueue
+from supernova_blackbox.services.exploitation_checker import CoverageResult
+from supernova_blackbox.services.coverage_renderer import render_unverified_section
 
 
 def _queue(*vulns) -> VulnerabilityQueue:
@@ -8,7 +8,7 @@ def _queue(*vulns) -> VulnerabilityQueue:
 
 
 def test_render_unverified_section_auth_fields():
-    from shannon_core.models.queue_schemas import AuthVulnerability
+    from supernova_core.models.queue_schemas import AuthVulnerability
     queue = _queue(AuthVulnerability(
         ID="AUTH-VULN-08", vulnerability_type="Transport_Exposure",
         externally_exploitable=True, confidence="high",
@@ -29,7 +29,7 @@ def test_render_unverified_section_auth_fields():
 
 
 def test_render_unverified_section_authz_fields():
-    from shannon_core.models.queue_schemas import AuthzVulnerability
+    from supernova_core.models.queue_schemas import AuthzVulnerability
     queue = _queue(AuthzVulnerability(
         ID="AUTHZ-VULN-09", vulnerability_type="IDOR",
         externally_exploitable=True, confidence="high",
@@ -46,7 +46,7 @@ def test_render_unverified_section_authz_fields():
 
 
 def test_render_unverified_section_injection_fields():
-    from shannon_core.models.queue_schemas import InjectionVulnerability
+    from supernova_core.models.queue_schemas import InjectionVulnerability
     queue = _queue(InjectionVulnerability(
         ID="INJECTION-VULN-12", vulnerability_type="SQLi",
         externally_exploitable=True, confidence="medium",
@@ -64,7 +64,7 @@ def test_render_unverified_section_injection_fields():
 
 
 def test_render_unverified_section_sorted_and_header_count():
-    from shannon_core.models.queue_schemas import AuthVulnerability
+    from supernova_core.models.queue_schemas import AuthVulnerability
     queue = _queue(
         AuthVulnerability(ID="AUTH-VULN-24", vulnerability_type="t",
                           externally_exploitable=True, confidence="high"),
@@ -86,7 +86,7 @@ import logging
 
 import pytest
 
-from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
+from supernova_blackbox.services.coverage_renderer import close_coverage_gaps
 
 
 def _write_queue(tmp_path, vuln_class, ids):
@@ -152,7 +152,7 @@ async def test_close_coverage_gaps_idempotent(tmp_path):
 @pytest.mark.asyncio
 async def test_uncovered_section_reaches_final_report(tmp_path):
     """组合：close_coverage_gaps 写 evidence 节 → ReportAssembler 把 evidence 全文带进报告。"""
-    from shannon_core.services.report_assembler import ReportAssembler
+    from supernova_core.services.report_assembler import ReportAssembler
 
     _write_queue(tmp_path, "auth", ["AUTH-VULN-01", "AUTH-VULN-02"])
     (tmp_path / "auth_exploitation_evidence.md").write_text(
@@ -202,7 +202,7 @@ async def test_close_coverage_gaps_logs_lenient_recovery_warning(tmp_path, caplo
         "# Ev\n## Successfully Exploited\n### AUTH-VULN-01: a\n"
     )
 
-    with caplog.at_level(logging.WARNING, logger="shannon_blackbox.services.coverage_renderer"):
+    with caplog.at_level(logging.WARNING, logger="supernova_blackbox.services.coverage_renderer"):
         await close_coverage_gaps(tmp_path, ["auth"])
 
     assert any("leniently" in r.message for r in caplog.records)
@@ -211,7 +211,7 @@ async def test_close_coverage_gaps_logs_lenient_recovery_warning(tmp_path, caplo
 @pytest.mark.asyncio
 async def test_close_coverage_gaps_reads_queue_from_whitebox_writes_evidence_to_blackbox(tmp_path):
     """新结构：queue 在 whitebox/、evidence 在 blackbox/。"""
-    from shannon_blackbox.services.coverage_renderer import close_coverage_gaps
+    from supernova_blackbox.services.coverage_renderer import close_coverage_gaps
     dlv = tmp_path / "deliverables"
     (dlv / "whitebox").mkdir(parents=True)
     (dlv / "blackbox").mkdir(parents=True)

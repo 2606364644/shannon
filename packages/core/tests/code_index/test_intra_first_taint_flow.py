@@ -4,12 +4,12 @@
 _source_points_matching 推广到 sink 所在函数 → 匹配 SourcePoint 直接产 TaintFlow。
 覆盖 NodeGoat handler 不在 chain → propagate_backward 丢弃 intra 结果的根因(§2)。
 """
-from shannon_core.code_index.models import FuncBlock, ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import FuncBlock, ParameterSource
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, IntraResult, PropagationStep, SinkCallSite, SinkCategory,
     SlotContext, SourcePoint, TaintFlow,
 )
-from shannon_core.code_index.chain_propagator import (
+from supernova_core.code_index.chain_propagator import (
     merge_taint_flows,
     produce_intra_first_taint_flows,
 )
@@ -169,7 +169,7 @@ def test_pipeline_intra_first_rescues_handler_not_in_entry_point():
     entry_point(detect_entry_points 把路由归注册处)→ detect_sources 主路径漏,
     source 补召回(对含 sink 函数)+ intra-first 产 TaintFlow(当前 0,修复后 >0)。
 
-    llm_client=None 模拟关 LLM 轨(SHANNON_LLM_TRACK_ENABLED=0 + GitNexus LLM 不可用)
+    llm_client=None 模拟关 LLM 轨(SUPERNOVA_LLM_TRACK_ENABLED=0 + GitNexus LLM 不可用)
     → analyze_taint_llm 走确定性 fallback(tainted_params=全部参数,守召回)。
     """
     import asyncio
@@ -177,7 +177,7 @@ def test_pipeline_intra_first_rescues_handler_not_in_entry_point():
     import tempfile
     from unittest.mock import AsyncMock, patch
 
-    from shannon_core.code_index import build_code_index_with_gitnexus
+    from supernova_core.code_index import build_code_index_with_gitnexus
 
     with tempfile.TemporaryDirectory() as repo:
         with open(os.path.join(repo, "app.js"), "w") as fh:
@@ -189,7 +189,7 @@ def test_pipeline_intra_first_rescues_handler_not_in_entry_point():
         os.makedirs(os.path.join(repo, ".git"), exist_ok=True)
         fake_mcp = AsyncMock()
         fake_mcp.call_tool = AsyncMock(return_value={"upstream": [], "downstream": []})
-        with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
+        with patch("supernova_core.code_index.detect_entry_points", return_value=[]):
             index, _rg, _sg, _sg2 = asyncio.run(build_code_index_with_gitnexus(
                 repo, mcp_client=fake_mcp, llm_client=None))  # 关 LLM → 确定性 fallback
 

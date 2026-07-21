@@ -13,8 +13,8 @@ chain_propagator 零实现改动 —— 本测试锁定该契约.
 GREEN-from-the-start 即为正确的证明 (强制 RED 或为本测试加入 source_type 分支
 都会违反 "零改动复用" 契约).
 """
-from shannon_core.code_index.models import FuncBlock, ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import FuncBlock, ParameterSource
+from supernova_core.code_index.parameter_models import (
     DangerousSlot,
     IntraResult,
     PropagationStep,
@@ -23,7 +23,7 @@ from shannon_core.code_index.parameter_models import (
     SlotContext,
     SourcePoint,
 )
-from shannon_core.code_index.chain_propagator import produce_intra_first_taint_flows
+from supernova_core.code_index.chain_propagator import produce_intra_first_taint_flows
 
 
 # Handler FuncBlock id —— 同时是 sink.caller_id / source.entry_point_id / intra_results key

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.models.metrics import AgentMetrics
-from shannon_core.services.validate_authentication import (
+from supernova_core.models.metrics import AgentMetrics
+from supernova_core.services.validate_authentication import (
     AuthValidationResult,
     auth_state_path,
     cleanup_auth_state,
@@ -128,8 +128,8 @@ async def test_auth_validation_config_no_auth_section():
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = None
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -154,7 +154,7 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
             "cookies": [{"name": "session", "value": "new"}],
             "origins": [],
         }))
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
 
     mock_executor = MagicMock()
@@ -164,8 +164,8 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin", "password": "pass123"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -191,8 +191,8 @@ async def test_auth_validation_detects_missing_state_file(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -215,7 +215,7 @@ async def test_auth_validation_verifies_state_content(tmp_path):
             "cookies": [{"name": "session", "value": "abc"}],
             "origins": [],
         }))
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
 
     mock_executor = MagicMock()
@@ -225,8 +225,8 @@ async def test_auth_validation_verifies_state_content(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -242,7 +242,7 @@ async def test_auth_validation_verifies_state_content(tmp_path):
 
 def test_auth_validation_schema_constant():
     """AUTH_VALIDATION_SCHEMA has the expected structure."""
-    from shannon_core.services.validate_authentication import AUTH_VALIDATION_SCHEMA
+    from supernova_core.services.validate_authentication import AUTH_VALIDATION_SCHEMA
     assert AUTH_VALIDATION_SCHEMA["type"] == "object"
     assert "login_success" in AUTH_VALIDATION_SCHEMA["properties"]
     assert AUTH_VALIDATION_SCHEMA["properties"]["login_success"]["type"] == "boolean"
@@ -263,7 +263,7 @@ async def test_auth_validation_uses_validate_auth_agent(tmp_path):
             "cookies": [{"name": "session", "value": "abc"}],
             "origins": [],
         }))
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(
             duration_ms=5000,
             structured_output={"login_success": True},
@@ -275,9 +275,9 @@ async def test_auth_validation_uses_validate_auth_agent(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
-        from shannon_core.models.agents import AgentName
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
+        from supernova_core.models.agents import AgentName
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -296,7 +296,7 @@ async def test_auth_validation_uses_validate_auth_agent(tmp_path):
 async def test_auth_validation_structured_output_failure_username(tmp_path):
     """Structured output with login_success=False and failure_point=username_or_password."""
     async def fake_execute(**kwargs):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(
             duration_ms=5000,
             structured_output={
@@ -312,8 +312,8 @@ async def test_auth_validation_structured_output_failure_username(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -331,7 +331,7 @@ async def test_auth_validation_structured_output_failure_username(tmp_path):
 async def test_auth_validation_structured_output_failure_totp(tmp_path):
     """Structured output with failure_point=totp_secret."""
     async def fake_execute(**kwargs):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(
             duration_ms=5000,
             structured_output={
@@ -347,8 +347,8 @@ async def test_auth_validation_structured_output_failure_totp(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -365,7 +365,7 @@ async def test_auth_validation_structured_output_failure_totp(tmp_path):
 async def test_auth_validation_structured_output_failure_out_of_band(tmp_path):
     """Structured output with failure_point=out_of_band."""
     async def fake_execute(**kwargs):
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(
             duration_ms=5000,
             structured_output={
@@ -381,8 +381,8 @@ async def test_auth_validation_structured_output_failure_out_of_band(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -406,7 +406,7 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
             "cookies": [{"name": "session", "value": "abc"}],
             "origins": [],
         }))
-        from shannon_core.models.metrics import AgentMetrics
+        from supernova_core.models.metrics import AgentMetrics
         return AgentMetrics(duration_ms=5000)  # No structured_output
 
     mock_executor = MagicMock()
@@ -415,8 +415,8 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -445,8 +445,8 @@ async def test_auth_validation_structured_success_but_missing_state_file(tmp_pat
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
 
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -466,7 +466,7 @@ async def test_auth_validation_structured_success_but_missing_state_file(tmp_pat
 async def test_auth_validation_forwards_deliverables_path(tmp_path):
     """validate_authentication forwards deliverables_path to executor.execute.
 
-    防止 validate-authentication agent 在被扫仓库 mkdir .shannon/deliverables 污染源。
+    防止 validate-authentication agent 在被扫仓库 mkdir .supernova/deliverables 污染源。
     """
     state_file = tmp_path / "auth-state.json"
 
@@ -481,8 +481,8 @@ async def test_auth_validation_forwards_deliverables_path(tmp_path):
     mock_dist_config.authentication = {"username": "admin"}
 
     deliverables_dir = tmp_path / "session-deliverables"
-    with patch("shannon_core.config.parser.parse_config", return_value=MagicMock()), \
-         patch("shannon_core.config.parser.distribute_config", return_value=mock_dist_config):
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
         result = await validate_authentication(
             web_url="https://example.com",
             config_path="/path/to/config.yaml",
@@ -501,10 +501,10 @@ async def test_auth_validation_forwards_deliverables_path(tmp_path):
 async def test_executor_raises_when_deliverables_path_missing(tmp_path):
     """AgentExecutor.execute raises ValueError when deliverables_path 未传.
 
-    防止 executor 内部 fallback 到 repo/.shannon/deliverables 复活污染源。
+    防止 executor 内部 fallback 到 repo/.supernova/deliverables 复活污染源。
     """
-    from shannon_core.agents.executor import AgentExecutor
-    from shannon_core.models.agents import AgentName
+    from supernova_core.agents.executor import AgentExecutor
+    from supernova_core.models.agents import AgentName
 
     mock_prompt_manager = MagicMock()
     executor = AgentExecutor(mock_prompt_manager)

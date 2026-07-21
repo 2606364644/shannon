@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def _workflow_src() -> str:
-    p = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/pipeline/workflows.py"
+    p = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/pipeline/workflows.py"
     return p.read_text(encoding="utf-8")
 
 
@@ -41,7 +41,7 @@ def test_reporting_phase_order_assemble_before_report():
 
 def test_reporting_phase_has_inject_attack_chains_after_run_report_agent() -> None:
     """攻击链注入必须在 run-report-agent 之后（顺序硬约束，防覆盖回归）。"""
-    from shannon_whitebox.pipeline.step_intents import step_names
+    from supernova_whitebox.pipeline.step_intents import step_names
     steps = step_names("reporting")
     assert "inject-attack-chains" in steps
     assert steps.index("inject-attack-chains") > steps.index("run-report-agent")

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def test_gitnexus_chain_verdict_registered_in_worker():
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     # Must appear in BOTH the import block AND the activities=[...] list.
     assert src.count("run_gitnexus_chain_verdict") >= 2, (

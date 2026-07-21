@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.git_manager import GitManager
+from supernova_core.git_manager import GitManager
 
 
 def _init_repo(repo: Path) -> None:

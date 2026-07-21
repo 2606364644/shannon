@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from shannon_whitebox.audit.log_stream import LogStream
+from supernova_whitebox.audit.log_stream import LogStream
 
 
 async def test_open_creates_file(tmp_path: Path):

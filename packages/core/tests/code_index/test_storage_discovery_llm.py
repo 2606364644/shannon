@@ -9,14 +9,14 @@ import asyncio
 
 import pytest
 
-from shannon_core.code_index.models import FuncBlock, ParameterSource
-from shannon_core.code_index.storage_discovery_llm import (
+from supernova_core.code_index.models import FuncBlock, ParameterSource
+from supernova_core.code_index.storage_discovery_llm import (
     StorageReadCandidate,
     StorageWriteCandidate,
     discover_storage_reads_llm,
     discover_storage_writes_llm,
 )
-from shannon_core.code_index.storage_models import StorageMedium
+from supernova_core.code_index.storage_models import StorageMedium
 
 
 def _block(file_path, func_name, start_line, source, language="java"):

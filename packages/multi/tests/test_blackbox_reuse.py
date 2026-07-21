@@ -1,6 +1,6 @@
 import json
 
-from shannon_blackbox.pipeline.workflows import _load_correlation_context
+from supernova_blackbox.pipeline.workflows import _load_correlation_context
 
 
 def test_load_correlation_context_when_files_exist(tmp_path):

@@ -1,6 +1,6 @@
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from shannon_web.models import ScanRequest, Source
+from supernova_web.models import ScanRequest, Source
 
 
 def test_repo_source_accepted():

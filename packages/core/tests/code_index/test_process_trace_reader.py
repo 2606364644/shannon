@@ -1,10 +1,10 @@
 """process_trace_reader 单元测试。"""
 import pytest
-from shannon_core.code_index.process_trace_reader import (
+from supernova_core.code_index.process_trace_reader import (
     ProcessTrace, parse_trace_steps, read_all_process_traces,
 )
-from shannon_core.code_index.models import CallChain, FuncBlock
-from shannon_core.code_index.process_trace_reader import trace_to_chain
+from supernova_core.code_index.models import CallChain, FuncBlock
+from supernova_core.code_index.process_trace_reader import trace_to_chain
 
 
 class FakeTraceMCP:

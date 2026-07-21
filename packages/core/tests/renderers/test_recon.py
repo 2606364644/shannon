@@ -3,7 +3,7 @@
 验证 render_recon(data) 把 ReconCollector 的 9-section payload 渲染成
 recon_deliverable.md，结构对齐 prompts/recon.txt §0-9。
 """
-from shannon_core.renderers.recon import render_recon
+from supernova_core.renderers.recon import render_recon
 
 
 # ── §0 + all-skipped ────────────────────────────────────────────────────

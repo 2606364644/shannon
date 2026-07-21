@@ -1,10 +1,10 @@
 import json
 import pytest
-from shannon_core.code_index.degradation import (
+from supernova_core.code_index.degradation import (
     DegradationReport, build_degradation_report,
     DEGRADED_GAPS, MINIMAL_GAPS,
 )
-from shannon_core.code_index.models import DegradationLevel
+from supernova_core.code_index.models import DegradationLevel
 
 
 class TestDegradationReport:

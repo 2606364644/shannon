@@ -6,15 +6,15 @@ source_track / evidence_chain survive into the merged exploitation queue.
 """
 import pytest
 
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph, TaintFlow, PropagationStep,
 )
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.vuln_chain_builders.injection_builder import (
     build_injection_findings,
 )
-from shannon_core.code_index.dual_track_merger import merge_dual_track_queues
-from shannon_core.models.queue_schemas import InjectionVulnerability
+from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
+from supernova_core.models.queue_schemas import InjectionVulnerability
 
 
 def _flow(slot="sql_value", steps=None):

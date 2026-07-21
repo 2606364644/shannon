@@ -1,4 +1,4 @@
-from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+from supernova_core.constants import DEFAULT_DELIVERABLES_SUBDIR
 
 
 def test_default_deliverables_subdir_is_string():

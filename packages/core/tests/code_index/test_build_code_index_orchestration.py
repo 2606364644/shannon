@@ -17,10 +17,10 @@ import tempfile
 
 import pytest
 
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     CallGraphResult, EntryPoint, FuncBlock,
 )
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, IntraResult, SinkCallSite, SinkCategory, SlotContext,
 )
 
@@ -45,8 +45,8 @@ async def test_sink_hunter_runs_before_taint_and_feeds_it(monkeypatch):
     3. hunter stub → 产 1 个 e1 上的 SinkCallSite(让 taint 有 item 跑)
     4. analyze_taint_llm stub → 记录 order + 收到的 sinks_in_func(证明 hunter sink 进入)
     """
-    import shannon_core.code_index as ci
-    from shannon_core.code_index import build_code_index_with_gitnexus
+    import supernova_core.code_index as ci
+    from supernova_core.code_index import build_code_index_with_gitnexus
 
     order: list[str] = []
     taint_inputs: dict[str, list] = {}  # func_id -> sinks_in_func received by taint

@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
 
-import shannon_whitebox.pipeline.activities as act
-from shannon_whitebox.pipeline.shared import ActivityInput
-from shannon_whitebox.audit.session_registry import (
+import supernova_whitebox.pipeline.activities as act
+from supernova_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.audit.session_registry import (
     set_audit_session, clear_audit_session,
 )
 
@@ -50,7 +50,7 @@ async def test_assemble_report_writes_comprehensive_report(tmp_path, monkeypatch
 async def test_inject_attack_chains_appends_section(tmp_path, monkeypatch) -> None:
     """report-executive 之后注入：attack_chains.json → ## 攻击链 章节追加到最终报告。"""
     import json
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
 
     deliverables = tmp_path / "whitebox"
     deliverables.mkdir()
@@ -76,7 +76,7 @@ async def test_inject_attack_chains_appends_section(tmp_path, monkeypatch) -> No
 
 
 async def test_inject_attack_chains_idempotent(tmp_path, monkeypatch) -> None:
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
     import json
 
     deliverables = tmp_path / "whitebox"
@@ -95,7 +95,7 @@ async def test_inject_attack_chains_idempotent(tmp_path, monkeypatch) -> None:
 
 
 async def test_inject_attack_chains_noop_when_missing(tmp_path, monkeypatch) -> None:
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
     import json
 
     deliverables = tmp_path / "whitebox"
@@ -116,7 +116,7 @@ async def test_inject_attack_chains_noop_when_missing(tmp_path, monkeypatch) -> 
 
 async def test_assemble_report_no_longer_appends_attack_chains(tmp_path, monkeypatch) -> None:
     """assemble_report 移除了攻击链追加；攻击链章节由 inject_attack_chains 负责。"""
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
     import json
 
     deliverables = tmp_path / "whitebox"

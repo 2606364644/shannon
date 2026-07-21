@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from shannon_blackbox.pipeline.blackbox_rerun import (
+from supernova_blackbox.pipeline.blackbox_rerun import (
     detect_blackbox_completed,
     archive_blackbox_deliverables,
 )
@@ -32,7 +32,7 @@ def test_detect_returns_true_when_evidence_exists(tmp_path):
 
 def test_detect_returns_true_when_evidence_in_blackbox_subdir(tmp_path):
     """新结构：evidence 在 deliverables/blackbox/。"""
-    from shannon_blackbox.pipeline.blackbox_rerun import detect_blackbox_completed
+    from supernova_blackbox.pipeline.blackbox_rerun import detect_blackbox_completed
     dlv = tmp_path / "deliverables"
     (dlv / "blackbox").mkdir(parents=True)
     (dlv / "blackbox" / "injection_exploitation_evidence.md").write_text("x")
@@ -63,7 +63,7 @@ def test_archive_moves_blackbox_deliverables_to_dated_dir(tmp_path):
 
 def test_archive_moves_to_blackbox_subdir_archive(tmp_path):
     """归档源与目标都在 blackbox/ 内。"""
-    from shannon_blackbox.pipeline.blackbox_rerun import archive_blackbox_deliverables
+    from supernova_blackbox.pipeline.blackbox_rerun import archive_blackbox_deliverables
     dlv = tmp_path / "deliverables"
     (dlv / "blackbox").mkdir(parents=True)
     (dlv / "blackbox" / "injection_exploitation_evidence.md").write_text("x")
@@ -138,8 +138,8 @@ def test_clean_command_removed():
     调用应非零退出（click 报 no such command "clean"）。护栏防 clean 复活。
     """
     from click.testing import CliRunner
-    from shannon_blackbox.cli.main import cli as bb_cli
-    from shannon_whitebox.cli.main import cli as wb_cli
+    from supernova_blackbox.cli.main import cli as bb_cli
+    from supernova_whitebox.cli.main import cli as wb_cli
 
     runner = CliRunner()
 

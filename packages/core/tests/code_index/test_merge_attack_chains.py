@@ -1,4 +1,4 @@
-from shannon_core.code_index.dual_track_merger import merge_attack_chains
+from supernova_core.code_index.dual_track_merger import merge_attack_chains
 
 
 def _chain(name, endpoints, source="llm", confidence="probable"):

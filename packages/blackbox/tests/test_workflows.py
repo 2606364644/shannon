@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
-from shannon_blackbox.pipeline.workflows import BlackboxScanWorkflow
-from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
-from shannon_core.services.browser_engine import BrowserEngineFactory
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
+from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
+from supernova_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+from supernova_core.services.browser_engine import BrowserEngineFactory
 
 
 def test_pipeline_progress_query_registered_as_PipelineProgress():
@@ -24,7 +24,7 @@ def test_pipeline_progress_query_registered_as_PipelineProgress():
     assert defn.name == "PipelineProgress"
 
 
-from shannon_core.utils.paths import resolve_deliverables_path
+from supernova_core.utils.paths import resolve_deliverables_path
 
 
 def test_path_resolution_workspace_name_priority(tmp_path):
@@ -147,7 +147,7 @@ def test_exploit_tasks_unpacking_arity_matches_construction():
     空跑（无漏洞 → exploit_tasks=[]）从不触发，故长期潜伏。
     """
     import ast
-    from shannon_blackbox.pipeline import workflows as wf
+    from supernova_blackbox.pipeline import workflows as wf
 
     tree = ast.parse(Path(wf.__file__).read_text())
 
@@ -196,7 +196,7 @@ class TestBlackboxBrowserEngineIntegration:
 
     def test_unavailable_engine_raises_error(self, monkeypatch):
         """Engine with check_available()=False should trigger PentestError at startup."""
-        import shannon_core.services.engines  # noqa: F401 — register engines
+        import supernova_core.services.engines  # noqa: F401 — register engines
 
         engine = BrowserEngineFactory.get_engine("playwright")
         monkeypatch.setattr(
@@ -218,8 +218,8 @@ class TestBlackboxBrowserEngineIntegration:
 
     def test_engine_resolved_from_config(self, tmp_path):
         """Engine name should match config.browser_engine field."""
-        from shannon_core.config.parser import parse_config
-        import shannon_core.services.engines  # noqa: F401
+        from supernova_core.config.parser import parse_config
+        import supernova_core.services.engines  # noqa: F401
 
         config_file = tmp_path / "config.yaml"
         config_file.write_text("browser_engine: agent-browser\n")
@@ -231,7 +231,7 @@ class TestBlackboxBrowserEngineIntegration:
 
     def test_default_engine_without_config(self):
         """Without config, engine defaults to agent-browser."""
-        import shannon_core.services.engines  # noqa: F401
+        import supernova_core.services.engines  # noqa: F401
 
         engine_name = "agent-browser"
         engine = BrowserEngineFactory.get_engine(engine_name)
@@ -239,7 +239,7 @@ class TestBlackboxBrowserEngineIntegration:
 
     def test_engine_write_config_replaces_write_stealth_config(self, tmp_path):
         """engine.write_config() should produce the same result as write_stealth_config."""
-        import shannon_core.services.engines  # noqa: F401
+        import supernova_core.services.engines  # noqa: F401
 
         engine = BrowserEngineFactory.get_engine("playwright")
         result = engine.write_config(str(tmp_path))
@@ -248,7 +248,7 @@ class TestBlackboxBrowserEngineIntegration:
 
     def test_engine_cleanup_removes_config(self, tmp_path):
         """engine.cleanup_config() should remove all engine artifacts."""
-        import shannon_core.services.engines  # noqa: F401
+        import supernova_core.services.engines  # noqa: F401
 
         engine = BrowserEngineFactory.get_engine("playwright")
         engine.write_config(str(tmp_path))

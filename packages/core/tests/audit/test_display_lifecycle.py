@@ -1,7 +1,7 @@
 from unittest import mock
 
-from shannon_core.audit.display_lifecycle import run_with_display
-from shannon_core.models.metrics import SessionMetadata
+from supernova_core.audit.display_lifecycle import run_with_display
+from supernova_core.models.metrics import SessionMetadata
 
 
 async def test_rich_mode_constructs_transient_live(tmp_path):
@@ -9,7 +9,7 @@ async def test_rich_mode_constructs_transient_live(tmp_path):
     SummaryEvent (printed above the live region) is the final visible output."""
     meta = SessionMetadata(id="x", web_url=None, output_path=str(tmp_path))
     with mock.patch("rich.live.Live") as live_cls, \
-         mock.patch("shannon_core.audit.display_lifecycle.AuditSession") as session_cls:
+         mock.patch("supernova_core.audit.display_lifecycle.AuditSession") as session_cls:
         session_cls.return_value.initialize = mock.AsyncMock()
         session_cls.return_value.close = mock.AsyncMock()
         async with run_with_display(meta, use_rich=True) as session:
@@ -21,7 +21,7 @@ async def test_rich_mode_constructs_transient_live(tmp_path):
 async def test_non_rich_mode_does_not_construct_live(tmp_path):
     meta = SessionMetadata(id="x", web_url=None, output_path=str(tmp_path))
     with mock.patch("rich.live.Live") as live_cls, \
-         mock.patch("shannon_core.audit.display_lifecycle.AuditSession") as session_cls:
+         mock.patch("supernova_core.audit.display_lifecycle.AuditSession") as session_cls:
         session_cls.return_value.initialize = mock.AsyncMock()
         session_cls.return_value.close = mock.AsyncMock()
         async with run_with_display(meta, use_rich=False):

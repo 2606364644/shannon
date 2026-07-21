@@ -1,4 +1,4 @@
-from shannon_core.models.agents import AgentName, AGENTS, AGENT_PHASE_MAP
+from supernova_core.models.agents import AgentName, AGENTS, AGENT_PHASE_MAP
 
 
 def test_attack_chain_agent_registered():

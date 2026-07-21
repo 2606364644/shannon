@@ -3,7 +3,7 @@ from pathlib import Path
 
 WORKER_FILE = (
     Path(__file__).resolve().parents[1]
-    / "src" / "shannon_whitebox" / "worker.py"
+    / "src" / "supernova_whitebox" / "worker.py"
 )
 
 

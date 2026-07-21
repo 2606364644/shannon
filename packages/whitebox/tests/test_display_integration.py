@@ -6,11 +6,11 @@ from pathlib import Path
 
 from rich.console import Console
 
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.display.live_dashboard import LiveDashboardRenderer
-from shannon_whitebox.audit.session import AuditSession
-from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.display.live_dashboard import LiveDashboardRenderer
+from supernova_whitebox.audit.session import AuditSession
+from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

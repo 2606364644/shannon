@@ -1,4 +1,4 @@
-from shannon_core.code_index.patterns import OWNERSHIP_PREDICATE_RE
+from supernova_core.code_index.patterns import OWNERSHIP_PREDICATE_RE
 
 
 def test_ownership_predicate_matches_user_id_where():

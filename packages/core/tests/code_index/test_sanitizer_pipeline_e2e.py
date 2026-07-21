@@ -7,11 +7,11 @@ propagate_backward_across_chains → extract_candidate_chains → judge_chain_ve
 """
 import pytest
 
-from shannon_core.code_index.llm_taint_analyzer import analyze_taint_llm
-from shannon_core.code_index.chain_propagator import propagate_backward_across_chains
-from shannon_core.code_index.chain_verdict import extract_candidate_chains, judge_chain_verdict
-from shannon_core.code_index.models import FuncBlock, CallChain, ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.llm_taint_analyzer import analyze_taint_llm
+from supernova_core.code_index.chain_propagator import propagate_backward_across_chains
+from supernova_core.code_index.chain_verdict import extract_candidate_chains, judge_chain_verdict
+from supernova_core.code_index.models import FuncBlock, CallChain, ParameterSource
+from supernova_core.code_index.parameter_models import (
     DangerousSlot, SinkCallSite, SinkCategory, SlotContext,
     TaintAnalysisResult, TaintPath,
 )
@@ -40,7 +40,7 @@ def _sink():
 
 
 def _source():
-    from shannon_core.code_index.parameter_models import SourcePoint
+    from supernova_core.code_index.parameter_models import SourcePoint
     return SourcePoint(
         id="app.py:handler::q::10", entry_point_id="app.py:handler", param_name="q",
         source_type=ParameterSource.QUERY_PARAM, expression="req.query.q",
@@ -86,7 +86,7 @@ async def test_sanitizer_pipeline_flows_end_to_end():
     ), "TaintFlow 必须含 intra summary step(断点 B 防回退)"
 
     # 3. extract + judge
-    from shannon_core.code_index.parameter_models import ParameterPropagationGraph
+    from supernova_core.code_index.parameter_models import ParameterPropagationGraph
     pgraph = ParameterPropagationGraph(taint_flows=flows, language_coverage=["python"])
     candidates = extract_candidate_chains(
         pgraph, vuln_class="injection", sink_call_sites={SINK_ID: _sink()})

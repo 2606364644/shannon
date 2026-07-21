@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.models.metrics import AgentMetrics
-from shannon_whitebox.pipeline import activities
+from supernova_core.models.metrics import AgentMetrics
+from supernova_whitebox.pipeline import activities
 
 
 def _runtime_patches(captured: dict):
@@ -27,8 +27,8 @@ def _runtime_patches(captured: dict):
 
     return (
         patch.object(activities.activity, "info", return_value=MagicMock(attempt=1)),
-        patch("shannon_whitebox.audit.session_registry.get_audit_session", return_value=session),
-        patch("shannon_whitebox.audit.session_tool_audit_logger.SessionToolAuditLogger", return_value=logger),
+        patch("supernova_whitebox.audit.session_registry.get_audit_session", return_value=session),
+        patch("supernova_whitebox.audit.session_tool_audit_logger.SessionToolAuditLogger", return_value=logger),
         patch.object(activities, "AgentExecutor", return_value=executor),
     )
 

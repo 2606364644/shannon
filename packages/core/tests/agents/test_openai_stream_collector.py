@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from openai.types.responses import ResponseTextDeltaEvent
 
-from shannon_core.agents.openai_stream_collector import StreamCollector, _item_tool_args
+from supernova_core.agents.openai_stream_collector import StreamCollector, _item_tool_args
 
 
 def _text_event(delta: str):

@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.models.audit import AgentEndResult, WorkflowSummary, AgentMetricsSummary, ResumeInfo
-from shannon_whitebox.audit.session import AuditSession
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.models.audit import AgentEndResult, WorkflowSummary, AgentMetricsSummary, ResumeInfo
+from supernova_whitebox.audit.session import AuditSession
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:
@@ -132,7 +132,7 @@ async def test_get_metrics(tmp_path: Path):
 
 async def test_full_lifecycle(tmp_path: Path):
     """End-to-end: initialize → start_agent → logger events → end_agent → complete."""
-    from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
     meta = _make_meta(tmp_path)
     session = AuditSession(meta)
     await session.initialize(workflow_id="wf-lifecycle")
@@ -158,7 +158,7 @@ async def test_full_lifecycle(tmp_path: Path):
 
     ad = _audit_dir(tmp_path)
     wf = (ad / "workflow.log").read_text()
-    assert "Shannon Pentest - Workflow Log" in wf
+    assert "Supernova Pentest - Workflow Log" in wf
     assert "Workflow ID: wf-lifecycle" in wf
     assert "[PHASE] Starting recon" in wf
     assert "[AGENT] recon: Starting" in wf
@@ -183,7 +183,7 @@ async def test_full_lifecycle(tmp_path: Path):
 async def test_display_config_passed_to_workflow_logger(tmp_path: Path):
     import io
     from rich.console import Console
-    from shannon_core.display.live_dashboard import LiveDashboardRenderer
+    from supernova_core.display.live_dashboard import LiveDashboardRenderer
     meta = _make_meta(tmp_path)
     console = Console(file=io.StringIO(), width=100)
     dashboard = LiveDashboardRenderer(console)

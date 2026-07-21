@@ -1,6 +1,6 @@
 """PipelineInput.max_concurrent field tests (mirrors blackbox test_workflows.py)."""
 
-from shannon_whitebox.pipeline.shared import PipelineInput
+from supernova_whitebox.pipeline.shared import PipelineInput
 
 
 def test_pipeline_input_max_concurrent_default():

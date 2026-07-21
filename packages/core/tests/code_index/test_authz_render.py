@@ -4,12 +4,12 @@
 dominance 表格新增 "Params" 列，把命中 SourcePoint 的
 `param_name(source_type): expression` 渲染进喂 LLM 的 prompt。
 """
-from shannon_core.code_index.authz_gitnexus_track import (
+from supernova_core.code_index.authz_gitnexus_track import (
     IDORCandidateChain,
     render_authz_gitnexus_candidates,
 )
-from shannon_core.code_index.models import EntryPoint
-from shannon_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.models import EntryPoint
+from supernova_core.code_index.parameter_models import SourcePoint
 
 
 def _sp(i, name, st, expr):

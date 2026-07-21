@@ -8,7 +8,7 @@ import inspect
 
 
 def _wf_src() -> str:
-    from shannon_blackbox.pipeline import workflows
+    from supernova_blackbox.pipeline import workflows
     return inspect.getsource(workflows)
 
 

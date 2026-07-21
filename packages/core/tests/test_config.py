@@ -1,6 +1,6 @@
 import pytest
-from shannon_core.models.config import Config, Rule, Rules, ReportConfig
-from shannon_core.config.parser import distribute_config
+from supernova_core.models.config import Config, Rule, Rules, ReportConfig
+from supernova_core.config.parser import distribute_config
 
 def test_empty_config():
     c = Config()
@@ -45,19 +45,19 @@ def test_distributed_config():
 
 
 def test_email_login_model():
-    from shannon_core.models.config import EmailLogin
+    from supernova_core.models.config import EmailLogin
     el = EmailLogin(address="user@example.com", password="secret")
     assert el.address == "user@example.com"
     assert el.password == "secret"
     assert el.totp_secret is None
 
 def test_email_login_with_totp():
-    from shannon_core.models.config import EmailLogin
+    from supernova_core.models.config import EmailLogin
     el = EmailLogin(address="user@example.com", password="secret", totp_secret="JBSWY3DPEHPK3PXP")
     assert el.totp_secret == "JBSWY3DPEHPK3PXP"
 
 def test_credentials_with_email_login():
-    from shannon_core.models.config import Credentials, EmailLogin
+    from supernova_core.models.config import Credentials, EmailLogin
     creds = Credentials(
         username="admin",
         password="pass123",
@@ -67,12 +67,12 @@ def test_credentials_with_email_login():
     assert creds.email_login.password == "email-pass"
 
 def test_credentials_without_email_login():
-    from shannon_core.models.config import Credentials
+    from supernova_core.models.config import Credentials
     creds = Credentials(username="admin", password="pass123")
     assert creds.email_login is None
 
 def test_authentication_with_email_login():
-    from shannon_core.models.config import Authentication, Credentials, EmailLogin, SuccessCondition
+    from supernova_core.models.config import Authentication, Credentials, EmailLogin, SuccessCondition
     auth = Authentication(
         login_type="form",
         login_url="https://example.com/login",

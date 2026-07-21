@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from shannon_core.collectors.base import CollectorBase, SectionSchema
-from shannon_core.collectors.bridge import build_claude_mcp_server, build_openai_tools
+from supernova_core.collectors.base import CollectorBase, SectionSchema
+from supernova_core.collectors.bridge import build_claude_mcp_server, build_openai_tools
 
 SCHEMA = SectionSchema(
     tool_name="set_alpha",
@@ -78,7 +78,7 @@ async def test_claude_mcp_server_is_in_process_sdk_config():
 
 @pytest.mark.asyncio
 async def test_claude_sdk_tool_input_schema_is_full_json_schema():
-    from shannon_core.collectors.bridge import _make_claude_sdk_tool
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
 
     collector = _collector()
     sdk_tool = _make_claude_sdk_tool(collector, SCHEMA)
@@ -88,7 +88,7 @@ async def test_claude_sdk_tool_input_schema_is_full_json_schema():
 
 @pytest.mark.asyncio
 async def test_claude_sdk_tool_handler_writes_collector():
-    from shannon_core.collectors.bridge import _make_claude_sdk_tool
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
 
     collector = _collector()
     sdk_tool = _make_claude_sdk_tool(collector, SCHEMA)
@@ -101,7 +101,7 @@ async def test_claude_sdk_tool_handler_writes_collector():
 
 @pytest.mark.asyncio
 async def test_claude_sdk_tool_handler_duplicate_is_error_envelope():
-    from shannon_core.collectors.bridge import _make_claude_sdk_tool
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
 
     collector = _collector()
     sdk_tool = _make_claude_sdk_tool(collector, SCHEMA)
@@ -135,7 +135,7 @@ async def test_openai_append_tool_invocation_accumulates_and_reports_count():
 
 @pytest.mark.asyncio
 async def test_claude_append_tool_handler_accumulates_and_reports_count():
-    from shannon_core.collectors.bridge import _make_claude_sdk_tool
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
 
     collector = _append_collector()
     sdk_tool = _make_claude_sdk_tool(collector, APPEND_SCHEMA)

@@ -5,8 +5,8 @@ sample.phase、best-effort 吞 session 异常。cb=None 路径由 core emitter �
 """
 import pytest
 
-from shannon_whitebox.pipeline.activities import _make_gitnexus_progress_cb
-from shannon_core.code_index.progress import ProgressSample
+from supernova_whitebox.pipeline.activities import _make_gitnexus_progress_cb
+from supernova_core.code_index.progress import ProgressSample
 
 
 class _FakeSession:

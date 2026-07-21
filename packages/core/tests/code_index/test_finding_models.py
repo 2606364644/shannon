@@ -1,5 +1,5 @@
 import pytest
-from shannon_core.code_index.finding_models import (
+from supernova_core.code_index.finding_models import (
     VulnFinding, FindingVerdict,
     parse_and_validate_findings, deduplicate_findings,
     VALID_INJECTION_CATEGORIES, VALID_AUTH_CATEGORIES,

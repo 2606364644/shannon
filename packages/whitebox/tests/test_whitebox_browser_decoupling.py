@@ -15,7 +15,7 @@ import pytest
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 WORKFLOW_PATH = (
     Path(__file__).resolve().parents[1]
-    / "src/shannon_whitebox/pipeline/workflows.py"
+    / "src/supernova_whitebox/pipeline/workflows.py"
 )
 
 # 白盒专用模板(Phase 2 须清干净 browser)

@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from temporalio.common import RetryPolicy
 
-from shannon_core.models.retry import (
+from supernova_core.models.retry import (
     PRODUCTION_RETRY,
     TESTING_RETRY,
     SUBSCRIPTION_RETRY,

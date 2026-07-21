@@ -6,9 +6,9 @@
 """
 import pytest
 
-from shannon_core.code_index._rule_loader import DATA_DIR, load_yaml
-from shannon_core.code_index import sink_detector, source_detector, sink_discovery_llm
-from shannon_core.code_index.parameter_models import SlotContext
+from supernova_core.code_index._rule_loader import DATA_DIR, load_yaml
+from supernova_core.code_index import sink_detector, source_detector, sink_discovery_llm
+from supernova_core.code_index.parameter_models import SlotContext
 
 
 def test_data_dir_has_three_rule_files():

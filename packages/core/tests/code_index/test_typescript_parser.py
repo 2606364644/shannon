@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.code_index.parsers.typescript_parser import TypeScriptParser
-from shannon_core.code_index.parsers import get_parser
+from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+from supernova_core.code_index.parsers import get_parser
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXPRESS_APP = FIXTURES / "typescript" / "express_app.ts"
@@ -33,7 +33,7 @@ class TestTypeScriptParserFuncBlocks:
 
 class TestTypeScriptParserRegistry:
     def test_registered_in_parser_registry(self):
-        from shannon_core.code_index.parsers import _PARSER_CLASSES
+        from supernova_core.code_index.parsers import _PARSER_CLASSES
         assert "typescript" in _PARSER_CLASSES
 
 

@@ -1,14 +1,14 @@
 import pytest
 
-from shannon_core.code_index.chain_verdict import ChainVerdict
-from shannon_core.code_index.vuln_chain_builders.xss_builder import (
+from supernova_core.code_index.chain_verdict import ChainVerdict
+from supernova_core.code_index.vuln_chain_builders.xss_builder import (
     build_xss_findings, _find_stored_xss_synthesis,
 )
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph, TaintFlow, PropagationStep, SinkCallSite, SinkCategory,
 )
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.models.queue_schemas import XssVulnerability
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.models.queue_schemas import XssVulnerability
 
 
 def _flow(slot="generic", source="name", source_type=ParameterSource.QUERY_PARAM,
@@ -160,7 +160,7 @@ async def test_build_xss_findings_reports_chain_progress(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "shannon_core.code_index.vuln_chain_builders.xss_builder.judge_chain_verdict",
+        "supernova_core.code_index.vuln_chain_builders.xss_builder.judge_chain_verdict",
         fake_judge,
     )
 

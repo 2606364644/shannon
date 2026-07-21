@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from shannon_core.display.events import (
+from supernova_core.display.events import (
     AgentEvent,
     DisplayEvent,
     ErrorEvent,
@@ -135,14 +135,14 @@ def test_phase_event_step_intents_default_empty():
 
 
 def test_info_event_defaults_to_info_level():
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.events import InfoEvent
     e = InfoEvent(timestamp="2026-06-28 12:00:00", category="INFO", message="hello")
     assert e.message == "hello"
     assert e.level == "info"
 
 
 def test_info_event_warning_level():
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.events import InfoEvent
     e = InfoEvent(timestamp="t", category="INFO", message="careful", level="warning")
     assert e.level == "warning"
 
@@ -152,7 +152,7 @@ def test_cost_currency_and_token_fields_on_events():
 
     asdict 断言覆盖 StructuredEventRenderer→events.ndjson 的序列化路径（Web SSE 读它）。
     """
-    from shannon_core.display.events import AgentMetric
+    from supernova_core.display.events import AgentMetric
 
     ae = AgentEvent(timestamp="t", category="AGENT", agent_name="recon", event="end",
                     attempt=1, cost_usd=0.5, cost_currency="CNY", input_tokens=1000,

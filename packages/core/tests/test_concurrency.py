@@ -2,7 +2,7 @@
 
 import asyncio
 
-from shannon_core.utils.concurrency import SessionMutex, run_with_concurrency_limit
+from supernova_core.utils.concurrency import SessionMutex, run_with_concurrency_limit
 
 
 # ---------------------------------------------------------------------------

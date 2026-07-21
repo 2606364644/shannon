@@ -3,7 +3,7 @@ import re
 import pytest
 from datetime import datetime
 from pathlib import Path
-from shannon_core.session import SessionManager
+from supernova_core.session import SessionManager
 
 def test_create_workspace(tmp_path):
     mgr = SessionManager(tmp_path / "workspaces")
@@ -307,7 +307,7 @@ def test_workspace_name_collision_appends_suffix(tmp_path, monkeypatch):
     用 monkeypatch 冻结 session 模块的 datetime，保证两次调用生成相同 base
     （deterministic，不依赖真实时钟同秒——避免 flaky）。
     """
-    import shannon_core.session as session_mod
+    import supernova_core.session as session_mod
     fixed = datetime(2026, 6, 19, 14, 30, 0)
 
     class _FixedDateTime(datetime):

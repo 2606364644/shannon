@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from shannon_core.correlation.queue_merge import merge_exploitation_queues
-from shannon_core.utils.paths import WHITEBOX_SUBDIR, has_valid_whitebox_results
+from supernova_core.correlation.queue_merge import merge_exploitation_queues
+from supernova_core.utils.paths import WHITEBOX_SUBDIR, has_valid_whitebox_results
 
 
 def _entry(ID="INJ-001", **kw):
@@ -61,7 +61,7 @@ def _write_queue(path: Path, entries: list[dict]) -> None:
 def _collect_queue_files(dlv: Path) -> dict[str, Path]:
     """复刻 orchestrator 的去重 glob: whitebox/ 优先, 根条目仅补白。
 
-    与 shannon_multi.orchestrator.run_cross_repo 中的 collection 逻辑同构,
+    与 supernova_multi.orchestrator.run_cross_repo 中的 collection 逻辑同构,
     用来锚定子仓 queue 读取路径契约(不直接 import orchestrator, 避免 multi 包依赖环)。
     """
     queue_files: dict[str, Path] = {}

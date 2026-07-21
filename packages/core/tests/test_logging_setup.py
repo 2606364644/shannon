@@ -1,4 +1,4 @@
-"""TDD for shannon_core.logging.setup.configure_logging（统一日志总线版）。
+"""TDD for supernova_core.logging.setup.configure_logging（统一日志总线版）。
 
 spec: docs/superpowers/specs/2026-07-08-unified-logging-facade-design.md
 plan: docs/superpowers/plans/2026-07-08-unified-log-bus.md
@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.logging import LogBus, LogBusHandler
-from shannon_core.logging.diagnostic_log import format_diagnostic_line
-from shannon_core.logging.setup import configure_logging
+from supernova_core.logging import LogBus, LogBusHandler
+from supernova_core.logging.diagnostic_log import format_diagnostic_line
+from supernova_core.logging.setup import configure_logging
 
 _TEMPORALIO_LOGGER = "temporalio.activity"
 
@@ -121,7 +121,7 @@ def test_root_has_logbus_handler_only(tmp_path):
 
 def test_format_diagnostic_line_padded_level():
     """format_diagnostic_line level 右对齐 5 列（对齐 _FORMAT [%(levelname)5s]）。"""
-    from shannon_core.display.events import LogEvent
+    from supernova_core.display.events import LogEvent
     line = format_diagnostic_line(LogEvent(
         timestamp="t", category="INFO", logger_name="x", level="INFO",
         message="hi", exc_txt=None))
@@ -161,7 +161,7 @@ def test_temporalio_activity_not_captured(tmp_path):
 
 def test_temporalio_propagate_stays_false_after_redirect(tmp_path):
     """若 temporalio_redirect 已设 propagate=False，configure_logging 不应翻回 True。"""
-    from shannon_core.logging.temporalio_redirect import install_temporalio_log_redirect
+    from supernova_core.logging.temporalio_redirect import install_temporalio_log_redirect
     install_temporalio_log_redirect(tmp_path / "activity.log")
     logger = logging.getLogger(_TEMPORALIO_LOGGER)
     assert logger.propagate is False
@@ -175,7 +175,7 @@ def test_third_party_logger_uses_root_formatter(tmp_path, capsys):
     """散落 getLogger 的 WARNING 经 LogBusHandler fallback 写 diagnostic.log（零改动统一），
     且不落 stderr（防鬼影根）。--验证 ~20 处调用点零改动即统一汇入。"""
     configure_logging(log_dir=tmp_path)
-    logging.getLogger("shannon_core.services.some_service").warning("queue unreadable: boom")
+    logging.getLogger("supernova_core.services.some_service").warning("queue unreadable: boom")
     log_text = (tmp_path / "diagnostic.log").read_text()
     assert "queue unreadable: boom" in log_text
     assert "some_service" in log_text
@@ -184,10 +184,10 @@ def test_third_party_logger_uses_root_formatter(tmp_path, capsys):
     assert "queue unreadable" not in captured.err  # 防鬼影根：不落 stderr
 
 
-# --- RED 6: SHANNON_LOG_LEVEL 覆盖 root level ---
+# --- RED 6: SUPERNOVA_LOG_LEVEL 覆盖 root level ---
 
 def test_shannong_log_level_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("SHANNON_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("SUPERNOVA_LOG_LEVEL", "DEBUG")
     configure_logging(log_dir=tmp_path)
     assert logging.getLogger().level == logging.DEBUG
 

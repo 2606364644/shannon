@@ -1,11 +1,11 @@
 import pytest
-from shannon_core.config.parser import (
+from supernova_core.config.parser import (
     parse_config,
     distribute_config,
     _sanitize_authentication,
     _sanitize_rule,
 )
-from shannon_core.models.config import (
+from supernova_core.models.config import (
     Authentication,
     Config,
     Credentials,
@@ -14,7 +14,7 @@ from shannon_core.models.config import (
     Rules,
     SuccessCondition,
 )
-from shannon_core.models.errors import PentestError, ErrorCode
+from supernova_core.models.errors import PentestError, ErrorCode
 
 def test_parse_valid_config(tmp_path):
     config_file = tmp_path / "config.yaml"
@@ -307,7 +307,7 @@ class TestSanitizeRaw:
     """
 
     def test_raw_rule_lowercase_and_strip(self):
-        from shannon_core.config.parser import _sanitize_raw_rule
+        from supernova_core.config.parser import _sanitize_raw_rule
         rule = {"description": "  test  ", "type": "  URL_PATH  ", "value": "  /admin  "}
         result = _sanitize_raw_rule(rule)
         assert result["description"] == "test"
@@ -315,7 +315,7 @@ class TestSanitizeRaw:
         assert result["value"] == "/admin"
 
     def test_raw_auth_lowercase_login_type(self):
-        from shannon_core.config.parser import _sanitize_raw_auth
+        from supernova_core.config.parser import _sanitize_raw_auth
         auth = {
             "login_type": " FORM ",
             "login_url": "  https://example.com  ",
@@ -330,7 +330,7 @@ class TestSanitizeRaw:
         assert result["success_condition"]["value"] == "/ok"
 
     def test_raw_auth_login_flow_stripped(self):
-        from shannon_core.config.parser import _sanitize_raw_auth
+        from supernova_core.config.parser import _sanitize_raw_auth
         auth = {
             "login_type": "form",
             "login_url": "https://example.com",
@@ -342,7 +342,7 @@ class TestSanitizeRaw:
         assert result["login_flow"] == ["step one", "step two"]
 
     def test_raw_auth_email_login_stripped(self):
-        from shannon_core.config.parser import _sanitize_raw_auth
+        from supernova_core.config.parser import _sanitize_raw_auth
         auth = {
             "login_type": "form",
             "login_url": "https://example.com",
@@ -363,7 +363,7 @@ class TestSanitizeRaw:
         assert el["totp_secret"] == "KEY"
 
     def test_raw_dict_full_sanitize(self):
-        from shannon_core.config.parser import _sanitize_raw_dict
+        from supernova_core.config.parser import _sanitize_raw_dict
         raw = {
             "authentication": {
                 "login_type": "FORM",
@@ -382,7 +382,7 @@ class TestSanitizeRaw:
         assert result["rules"]["avoid"][0]["value"] == "/admin"
 
     def test_raw_dict_no_auth_no_rules(self):
-        from shannon_core.config.parser import _sanitize_raw_dict
+        from supernova_core.config.parser import _sanitize_raw_dict
         raw = {"description": "simple config"}
         result = _sanitize_raw_dict(raw)
         assert result == {"description": "simple config"}

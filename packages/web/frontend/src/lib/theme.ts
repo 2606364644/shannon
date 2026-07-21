@@ -1,5 +1,5 @@
 export type Theme = "dark" | "light";
-export const THEME_KEY = "shannon-theme";
+export const THEME_KEY = "supernova-theme";
 
 export function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "dark";

@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from shannon_blackbox.pipeline.shared import BlackboxPipelineState
-from shannon_combined.orchestrator import run_combined_scan
+from supernova_blackbox.pipeline.shared import BlackboxPipelineState
+from supernova_combined.orchestrator import run_combined_scan
 
 
 @pytest.mark.asyncio
@@ -23,8 +23,8 @@ async def test_run_combined_scan_calls_whitebox_then_blackbox():
     }
 
     with (
-        patch("shannon_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
-        patch("shannon_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock, return_value=blackbox_state) as mock_bb,
+        patch("supernova_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
+        patch("supernova_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock, return_value=blackbox_state) as mock_bb,
     ):
         result = await run_combined_scan(
             repo_path="/data/repos/myrepo",
@@ -44,8 +44,8 @@ async def test_run_combined_scan_stops_on_whitebox_failure():
     whitebox_result = {"status": "failed", "error": "repo not found"}
 
     with (
-        patch("shannon_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
-        patch("shannon_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock) as mock_bb,
+        patch("supernova_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
+        patch("supernova_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock) as mock_bb,
     ):
         result = await run_combined_scan(
             repo_path="/data/repos/myrepo",
@@ -63,8 +63,8 @@ async def test_whitebox_cancelled_short_circuits_before_blackbox():
     """If whitebox is cancelled, the combined scan returns cancelled and
     does not run blackbox."""
     with (
-        patch("shannon_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value={"status": "cancelled"}) as mock_wb,
-        patch("shannon_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock) as mock_bb,
+        patch("supernova_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value={"status": "cancelled"}) as mock_wb,
+        patch("supernova_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock) as mock_bb,
     ):
         result = await run_combined_scan(
             repo_path="/data/repos/myrepo",
@@ -79,14 +79,14 @@ async def test_whitebox_cancelled_short_circuits_before_blackbox():
 
 @pytest.mark.asyncio
 async def test_combined_wires_env_concurrency_to_both_inputs(monkeypatch):
-    """SHANNON_MAX_CONCURRENT=2 → both wb_input and bb_input get max_concurrent=2."""
-    monkeypatch.setenv("SHANNON_MAX_CONCURRENT", "2")
+    """SUPERNOVA_MAX_CONCURRENT=2 → both wb_input and bb_input get max_concurrent=2."""
+    monkeypatch.setenv("SUPERNOVA_MAX_CONCURRENT", "2")
     whitebox_result = {"status": "completed", "workspace_name": "ws-1"}
     blackbox_state = BlackboxPipelineState(status="completed")
 
     with (
-        patch("shannon_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
-        patch("shannon_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock, return_value=blackbox_state) as mock_bb,
+        patch("supernova_combined.orchestrator.run_whitebox_scan", new_callable=AsyncMock, return_value=whitebox_result) as mock_wb,
+        patch("supernova_combined.orchestrator.run_blackbox_scan", new_callable=AsyncMock, return_value=blackbox_state) as mock_bb,
     ):
         await run_combined_scan(repo_path="/fake/repo", url="http://example.com")
 

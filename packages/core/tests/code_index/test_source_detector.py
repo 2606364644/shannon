@@ -1,5 +1,5 @@
-from shannon_core.code_index.parameter_models import SourcePoint
-from shannon_core.code_index.models import CodeIndex, ParameterSource
+from supernova_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.models import CodeIndex, ParameterSource
 
 
 def test_source_point_basic_fields():
@@ -30,8 +30,8 @@ def test_code_index_has_source_points_field():
     assert ci.source_points == []  # default empty list
 
 
-from shannon_core.code_index.source_detector import detect_sources, DEFAULT_SOURCE_RULES
-from shannon_core.code_index.models import FuncBlock
+from supernova_core.code_index.source_detector import detect_sources, DEFAULT_SOURCE_RULES
+from supernova_core.code_index.models import FuncBlock
 
 
 def test_default_source_rules_externalized_stable():
@@ -129,7 +129,7 @@ def test_build_code_index_populates_source_points():
     """
     import asyncio
     from unittest.mock import AsyncMock
-    from shannon_core.code_index import build_code_index_with_gitnexus
+    from supernova_core.code_index import build_code_index_with_gitnexus
     import tempfile, os
 
     # route 注册 + handler 取用都在 setupRoutes 函数体内 → detect_entry_points Pass 1 命中

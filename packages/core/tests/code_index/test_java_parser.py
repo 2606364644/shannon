@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.code_index.parsers.java_parser import JavaParser
-from shannon_core.code_index.parsers import _PARSER_CLASSES
+from supernova_core.code_index.parsers.java_parser import JavaParser
+from supernova_core.code_index.parsers import _PARSER_CLASSES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 JAVA_FILE = FIXTURES / "java" / "SpringController.java"

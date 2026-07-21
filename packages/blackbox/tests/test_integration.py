@@ -3,16 +3,16 @@ import subprocess
 import pytest
 from unittest.mock import patch
 
-from shannon_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES
-from shannon_core.models.metrics import AgentMetrics
-from shannon_core.agents.executor import AgentExecutor
-from shannon_core.agents.runner import ClaudeRunResult
-from shannon_core.prompts.manager import PromptManager
+from supernova_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES
+from supernova_core.models.metrics import AgentMetrics
+from supernova_core.agents.executor import AgentExecutor
+from supernova_core.agents.runner import ClaudeRunResult
+from supernova_core.prompts.manager import PromptManager
 
-from shannon_blackbox.agents.exploit_executor import ExploitExecutor
-from shannon_blackbox.agents.recon_executor import ReconExecutor
-from shannon_blackbox.services.exploitation_checker import ExploitationChecker
-from shannon_core.services.report_assembler import ReportAssembler
+from supernova_blackbox.agents.exploit_executor import ExploitExecutor
+from supernova_blackbox.agents.recon_executor import ReconExecutor
+from supernova_blackbox.services.exploitation_checker import ExploitationChecker
+from supernova_core.services.report_assembler import ReportAssembler
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ async def test_full_blackbox_pipeline_independent(mock_repo, prompts_dir):
 
     mock_result = ClaudeRunResult(text="Done", success=True, duration=1000, turns=3, cost=0.01, model="test")
 
-    with patch("shannon_core.agents.executor.run_claude_prompt", return_value=mock_result):
+    with patch("supernova_core.agents.executor.run_claude_prompt", return_value=mock_result):
         pm = PromptManager(prompts_dir)
         executor = AgentExecutor(pm)
 

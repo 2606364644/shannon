@@ -4,13 +4,13 @@ import sys
 import textwrap
 import pytest
 from pathlib import Path
-from shannon_web.components.repo_manager import RepoManager, TooManyClones
+from supernova_web.components.repo_manager import RepoManager, TooManyClones
 
 
 def _rm(tmp_path, monkeypatch) -> RepoManager:
-    monkeypatch.setenv("SHANNON_REPOS_DIR", str(tmp_path / "repos"))
-    from shannon_web.config import get_config; get_config.cache_clear()
-    from shannon_web.components.git_fetcher import GitFetcher
+    monkeypatch.setenv("SUPERNOVA_REPOS_DIR", str(tmp_path / "repos"))
+    from supernova_web.config import get_config; get_config.cache_clear()
+    from supernova_web.components.git_fetcher import GitFetcher
     cfg = get_config()
     return RepoManager(cfg.repos_dir, GitFetcher(cfg.repos_dir, "u", "t"), max_concurrent=3)
 
@@ -36,7 +36,7 @@ async def test_clone_writes_ndjson_and_meta(tmp_path, monkeypatch, fake_clone_ok
     assert name == "foo"
     # 等 task 结束
     await asyncio.sleep(0.3)
-    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
     assert meta["state"] == "ready"
     lines = (tmp_path / "repos" / "foo" / "clone.ndjson").read_text().splitlines()
     assert any("40" in l and '"progress"' in l for l in lines)
@@ -52,7 +52,7 @@ async def test_clone_failed_writes_failed_state(tmp_path, monkeypatch):
                         lambda url, target, branch: [sys.executable, str(crash)])
     await rm.clone("https://gitlab.example/foo.git", None, None, None)
     await asyncio.sleep(0.3)
-    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
     assert meta["state"] == "failed"
     assert "t@" not in meta["last_error"]  # token 脱敏（last_error 是固定串，本就行）
     # 真正的安全属性：stderr 的 `https://u:t@host` 经 _git.redact 写进 clone.ndjson 的
@@ -110,7 +110,7 @@ async def test_clone_with_group(tmp_path, monkeypatch, fake_clone_ok):
     name = await rm.clone("https://gitlab.example/foo.git", None, None, None, group="frontend")
     assert name == "frontend/foo"
     await asyncio.sleep(0.3)
-    meta_path = tmp_path / "repos" / "frontend" / "foo" / ".shannon-repo.json"
+    meta_path = tmp_path / "repos" / "frontend" / "foo" / ".supernova-repo.json"
     assert meta_path.exists()
     assert json.loads(meta_path.read_text())["state"] == "ready"
 
@@ -158,7 +158,7 @@ async def test_delete_does_not_rmtree_group_dir(tmp_path, monkeypatch):
 
 def test_validate_repo_name_allows_group():
     """_validate_repo_name 允许 group/repo，拒多层/遍历/空段/首尾斜杠。"""
-    from shannon_web.components.repo_manager import _validate_repo_name
+    from supernova_web.components.repo_manager import _validate_repo_name
     _validate_repo_name("foo")
     _validate_repo_name("frontend/foo")
     for evil in ("a/b/c", "../evil", "a//b", "/a", "a/", "a/../b", ".", "..", "a\\b"):
@@ -167,14 +167,14 @@ def test_validate_repo_name_allows_group():
 
 
 def test_list_repos_treats_group_dir_with_stale_meta_as_group(tmp_path, monkeypatch):
-    """分组目录有残留 .shannon-repo.json（旧版误写）时，list_repos 仍当分组深入一层，
+    """分组目录有残留 .supernova-repo.json（旧版误写）时，list_repos 仍当分组深入一层，
     不把分组目录本身当仓库（回归 2026-07-08 /repos 把分组目录当仓库、真仓库全被吞的 bug）。"""
     rm = _rm(tmp_path, monkeypatch)
     base = tmp_path / "repos"
     (base / "frontend" / "foo").mkdir(parents=True)
     (base / "frontend" / "foo" / ".git").mkdir()  # 子仓库
     # 旧版误写到分组目录的脏 meta（kind=unknown，非 clone 产物）
-    (base / "frontend" / ".shannon-repo.json").write_text(
+    (base / "frontend" / ".supernova-repo.json").write_text(
         json.dumps({"name": "frontend", "source": {"kind": "unknown"}, "state": "ready"}))
     views = {r["name"]: r for r in rm.list_repos()}
     assert set(views) == {"frontend/foo"}
@@ -188,16 +188,16 @@ def test_migrate_legacy_cleans_miswritten_group_meta(tmp_path, monkeypatch):
     base = tmp_path / "repos"
     (base / "backend" / "honor").mkdir(parents=True)
     (base / "backend" / "honor" / ".git").mkdir()  # 子仓库
-    stale = base / "backend" / ".shannon-repo.json"
+    stale = base / "backend" / ".supernova-repo.json"
     stale.write_text(json.dumps({"name": "backend", "source": {"kind": "unknown"}, "state": "ready"}))
     rm.migrate_legacy()
     assert not stale.exists()  # 脏 meta 被清
     # 子仓库被正常 migrate（补 meta）
-    assert (base / "backend" / "honor" / ".shannon-repo.json").exists()
+    assert (base / "backend" / "honor" / ".supernova-repo.json").exists()
 
 
 def _make_bare_git(repo: Path, url: str, branch: str) -> None:
-    """构造一个"已 clone"仓库目录：含 .git/config(url) + .git/HEAD(ref) 但无 .shannon-repo.json。
+    """构造一个"已 clone"仓库目录：含 .git/config(url) + .git/HEAD(ref) 但无 .supernova-repo.json。
 
     模拟用户在服务运行期间把已 clone 的仓库直接拷进 repos_dir（未走 clone 流程）——
     list_repos 凭 .git 能扫到，但 _read_meta 找不到 meta 返回兜底（无 url/branch/size）。
@@ -209,7 +209,7 @@ def _make_bare_git(repo: Path, url: str, branch: str) -> None:
 
 
 def test_list_repos_self_heals_runtime_copied_repo(tmp_path, monkeypatch):
-    """运行期拷入的仓库（有 .git 无 .shannon-repo.json）经 list_repos 自愈补 meta：
+    """运行期拷入的仓库（有 .git 无 .supernova-repo.json）经 list_repos 自愈补 meta：
     来源/分支从 .git 推断、size_bytes 落盘，刷新页面即恢复三列数据（回归 2026-07-13
     /repos 的 vuln-range 下拷入仓库三列全空的 bug）。"""
     rm = _rm(tmp_path, monkeypatch)
@@ -221,7 +221,7 @@ def test_list_repos_self_heals_runtime_copied_repo(tmp_path, monkeypatch):
     assert v["source"]["branch"] == "main"
     assert isinstance(v["size_bytes"], int)
     # 自愈落盘 meta（后续刷新不再重算）
-    assert (base / "vuln-range" / "NodeGoat" / ".shannon-repo.json").exists()
+    assert (base / "vuln-range" / "NodeGoat" / ".supernova-repo.json").exists()
 
 
 def test_migrate_legacy_writes_size_bytes(tmp_path, monkeypatch):
@@ -232,7 +232,7 @@ def test_migrate_legacy_writes_size_bytes(tmp_path, monkeypatch):
     _make_bare_git(repo, "https://x/solo.git", "dev")
     (repo / "README.md").write_text("hello")  # 占位文件让 size > 0
     rm.migrate_legacy()
-    meta = json.loads((repo / ".shannon-repo.json").read_text())
+    meta = json.loads((repo / ".supernova-repo.json").read_text())
     assert meta["source"]["url"] == "https://x/solo.git"
     assert meta["source"]["branch"] == "dev"
     assert isinstance(meta["size_bytes"], int) and meta["size_bytes"] > 0
@@ -240,12 +240,12 @@ def test_migrate_legacy_writes_size_bytes(tmp_path, monkeypatch):
 
 # ---- source.url 凭据脱敏（GitLab token 泄露安全修复）----
 # 泄露路径：带凭据的 clone URL（https://oauth2:TOKEN@host 或 _inject_auth 注入的
-# USER:TOKEN@）会原样落盘 .shannon-repo.json 的 source.url，并经 _repo_view 透传给
+# USER:TOKEN@）会原样落盘 .supernova-repo.json 的 source.url，并经 _repo_view 透传给
 # /api/repos 返回前端。这些测试锁定：落盘前 + 出站前都必须剥离 userinfo。
 
 def test_strip_credentials():
     """strip_credentials 剥离 URL userinfo（username/password），保留 host/port/path/query。"""
-    from shannon_web.components.git_fetcher import strip_credentials
+    from supernova_web.components.git_fetcher import strip_credentials
     # 标准带凭据 https
     assert strip_credentials("https://oauth2:glpat-xyz@gitlab.example/foo.git") == \
         "https://gitlab.example/foo.git"
@@ -272,7 +272,7 @@ async def test_clone_strips_credentials_from_source_url(tmp_path, monkeypatch, f
     await rm.clone(secret, None, None, None)
     await asyncio.sleep(0.3)
     # 落盘 meta 不含 token
-    meta = json.loads((tmp_path / "repos" / "foo" / ".shannon-repo.json").read_text())
+    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
     assert "glpat-LEAK-TOKEN" not in json.dumps(meta)
     assert meta["source"]["url"] == "https://gitlab.example/foo.git"
     # 出站（get_repo）也不含 token
@@ -288,7 +288,7 @@ def test_get_repo_redacts_credentials_in_legacy_meta(tmp_path, monkeypatch):
     d = base / "foo"
     d.mkdir(parents=True)
     (d / ".git").mkdir()
-    (d / ".shannon-repo.json").write_text(json.dumps({
+    (d / ".supernova-repo.json").write_text(json.dumps({
         "name": "foo",
         "source": {"kind": "git", "url": "https://oauth2:glpat-LEGACY-LEAK@gitlab.example/foo.git"},
         "state": "ready",
@@ -305,7 +305,7 @@ def test_list_repos_redacts_credentials(tmp_path, monkeypatch):
     d = base / "foo"
     d.mkdir(parents=True)
     (d / ".git").mkdir()
-    (d / ".shannon-repo.json").write_text(json.dumps({
+    (d / ".supernova-repo.json").write_text(json.dumps({
         "name": "foo",
         "source": {"kind": "git", "url": "https://oauth2:glpat-LIST-LEAK@gitlab.example/foo.git"},
         "state": "ready",
@@ -327,6 +327,6 @@ def test_migrate_strips_credentials_from_git_config(tmp_path, monkeypatch):
         '[remote "origin"]\n\turl = https://u:glpat-MIGRATE-LEAK@gitlab.example/foo.git\n')
     (gitcfg / "HEAD").write_text("ref: refs/heads/main\n")
     rm.migrate_legacy()
-    meta = json.loads((d / ".shannon-repo.json").read_text())
+    meta = json.loads((d / ".supernova-repo.json").read_text())
     assert "glpat-MIGRATE-LEAK" not in json.dumps(meta)
     assert meta["source"]["url"] == "https://gitlab.example/foo.git"

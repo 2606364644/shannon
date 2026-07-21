@@ -1,8 +1,8 @@
 """Spec A: TaintFlow / PropagationStep / ParameterPropagationGraph 升级契约测试。"""
 import json
 
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     PropagationStep,
     SlotContext,

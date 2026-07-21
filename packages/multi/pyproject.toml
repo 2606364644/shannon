@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "shannon-multi"
+name = "supernova-multi"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "shannon-core",
-    "shannon-whitebox",
+    "supernova-core",
+    "supernova-whitebox",
 ]
 
 [project.scripts]
-shannon-multi = "shannon_multi.cli.main:main"
+supernova-multi = "supernova_multi.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shannon_multi"]
+packages = ["src/supernova_multi"]

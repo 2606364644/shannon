@@ -8,7 +8,11 @@ import { Toaster } from "@/components/ui/sonner";
 import i18n from "@/i18n";
 
 // jsdom 默认 location.pathname = "/"，createBrowserRouter 读 History API → 落地根路由。
-const server = setupServer(http.get("/api/workspaces", () => HttpResponse.json([])));
+// BrandProvider(根)启动时拉 /api/system-status 取 brand_name,这里一并 mock 避免警告。
+const server = setupServer(
+  http.get("/api/workspaces", () => HttpResponse.json([])),
+  http.get("/api/system-status", () => HttpResponse.json({ brand_name: "Supernova" })),
+);
 beforeAll(() => {
   server.listen();
   // jsdom navigator.language 默认 en-US → LanguageDetector 渲染英文，本测试断言中文文案，

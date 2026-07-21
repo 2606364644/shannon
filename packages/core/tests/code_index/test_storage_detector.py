@@ -3,10 +3,10 @@
 Mirror test_source_detector.py's fixture idiom (source_provider kwarg +
 FuncBlock.source_code, NOT the brief's buggy _text_of/block.text form).
 """
-from shannon_core.code_index.models import ParameterSource, FuncBlock
-from shannon_core.code_index.parameter_models import SourcePoint
-from shannon_core.code_index.storage_models import StorageMedium
-from shannon_core.code_index.storage_detector import (
+from supernova_core.code_index.models import ParameterSource, FuncBlock
+from supernova_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.storage_models import StorageMedium
+from supernova_core.code_index.storage_detector import (
     detect_storage_reads, detect_storage_writes,
 )
 

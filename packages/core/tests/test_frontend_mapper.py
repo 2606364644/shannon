@@ -1,7 +1,7 @@
 """Tests for frontend_mapper service."""
 import pytest
 
-from shannon_core.services.frontend_mapper import (
+from supernova_core.services.frontend_mapper import (
     FrontendRoute,
     ApiCall,
     UserInputPoint,

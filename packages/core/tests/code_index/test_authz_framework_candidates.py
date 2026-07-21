@@ -1,7 +1,7 @@
 # packages/core/tests/code_index/test_authz_framework_candidates.py
 import json
 
-from shannon_core.code_index.authz_gitnexus_track import (
+from supernova_core.code_index.authz_gitnexus_track import (
     FrameworkIDORCandidate,
     find_framework_idor_candidates,
 )

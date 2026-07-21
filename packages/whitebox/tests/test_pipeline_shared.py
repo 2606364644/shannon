@@ -1,5 +1,5 @@
 import pytest
-from shannon_whitebox.pipeline.shared import PipelineState
+from supernova_whitebox.pipeline.shared import PipelineState
 
 
 def test_pipeline_state_initializes_with_empty_errors_list():

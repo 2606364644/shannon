@@ -6,12 +6,12 @@
 """
 from dataclasses import dataclass
 
-from shannon_core.code_index.llm_concurrency import (
+from supernova_core.code_index.llm_concurrency import (
     FileChunk,
     _estimate_tokens,
     chunk_items_by_file,
 )
-from shannon_core.code_index.models import FuncBlock
+from supernova_core.code_index.models import FuncBlock
 
 
 @dataclass

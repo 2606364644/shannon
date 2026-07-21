@@ -2,7 +2,7 @@
 
 import textwrap
 
-from shannon_core.code_index.schema_entry_parser import parse_openapi_schema_files
+from supernova_core.code_index.schema_entry_parser import parse_openapi_schema_files
 
 
 def _write_json(repo, name, payload_str):

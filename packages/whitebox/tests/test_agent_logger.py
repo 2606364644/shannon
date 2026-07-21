@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_whitebox.audit.agent_logger import AgentLogger
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.models.metrics import SessionMetadata
+from supernova_whitebox.audit.agent_logger import AgentLogger
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

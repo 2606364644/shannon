@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from shannon_web.components.orphan_reconciler import reconcile_orphaned, _has_scan_end
+from supernova_web.components.orphan_reconciler import reconcile_orphaned, _has_scan_end
 
 
 def _make_ws(tmp_path, status="running", scan_end_status=None, with_activity_log=False):

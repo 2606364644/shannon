@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from shannon_whitebox.pipeline import workflows
+from supernova_whitebox.pipeline import workflows
 
 
 # ── Strategy C: _decide_gitnexus_failfast 纯函数单测 ─────────────────────
@@ -103,13 +103,13 @@ def _wf_src() -> str:
 
 
 def _activities_src() -> str:
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
     return inspect.getsource(activities)
 
 
 def test_write_track_status_activity_defined():
     """activities.py 必须定义 write_track_status_activity (@activity.defn)."""
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
     assert hasattr(activities, "write_track_status_activity"), (
         "activities.write_track_status_activity 必须存在 (Task 1 helper 的 activity 包装)")
     # temporalio @activity.defn 装饰的函数挂 __temporal_activity_definition 属性
@@ -177,7 +177,7 @@ def test_workflow_track_statuses_field_passed_to_activity():
 
 def test_activity_input_has_track_statuses_field():
     """ActivityInput dataclass 必须有 track_statuses 可选字段."""
-    from shannon_whitebox.pipeline.shared import ActivityInput
+    from supernova_whitebox.pipeline.shared import ActivityInput
     import dataclasses
     field_names = {f.name for f in dataclasses.fields(ActivityInput)}
     assert "track_statuses" in field_names, (
@@ -196,7 +196,7 @@ def test_write_track_status_activity_calls_helper():
     """
     src = _activities_src()
     # 函数体内 import + 调 write_track_status
-    assert "from shannon_core.code_index.gitnexus_track_status import write_track_status" in src, (
+    assert "from supernova_core.code_index.gitnexus_track_status import write_track_status" in src, (
         "write_track_status_activity 必须 import Task 1 的 write_track_status helper (薄包装)")
     assert "write_track_status(" in src, (
         "write_track_status_activity 必须调 write_track_status(deliverables, ...)")

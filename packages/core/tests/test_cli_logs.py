@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from shannon_core.cli.logs import LogFileHandler, COMPLETION_PATTERN
+from supernova_core.cli.logs import LogFileHandler, COMPLETION_PATTERN
 
 
 def test_completion_pattern_matches_completed():
@@ -67,7 +67,7 @@ def test_log_file_handler_incremental_flush(tmp_path: Path):
 
 
 def test_tail_workflow_log_missing_workspace(tmp_path, capsys):
-    from shannon_core.cli.logs import tail_workflow_log
+    from supernova_core.cli.logs import tail_workflow_log
     # Use side_effect to actually raise SystemExit when sys.exit is called
     with patch.object(sys, "exit", side_effect=SystemExit) as mock_exit:
         with pytest.raises(SystemExit):
@@ -81,7 +81,7 @@ def test_tail_workflow_log_missing_workspace(tmp_path, capsys):
 
 
 def test_render_event_line_logevent_uses_diagnostic_format():
-    from shannon_core.cli.logs import render_event_line
+    from supernova_core.cli.logs import render_event_line
     line = render_event_line({
         "ts": "2026-07-16 02:00:00", "category": "WARNING", "type": "LogEvent",
         "logger_name": "mod.x", "level": "WARNING", "message": "careful",
@@ -91,7 +91,7 @@ def test_render_event_line_logevent_uses_diagnostic_format():
 
 
 def test_render_event_line_step_reuses_formatters():
-    from shannon_core.cli.logs import render_event_line
+    from supernova_core.cli.logs import render_event_line
     line = render_event_line({
         "ts": "2026-07-16 02:00:00", "category": "STEP", "type": "StepEvent",
         "name": "code-index", "phase": "pre-recon", "event": "complete",
@@ -103,7 +103,7 @@ def test_render_event_line_step_reuses_formatters():
 
 
 def test_render_event_line_scan_end():
-    from shannon_core.cli.logs import render_event_line
+    from supernova_core.cli.logs import render_event_line
     line = render_event_line({
         "ts": "2026-07-16 02:00:00", "category": "CONTROL",
         "type": "scan_end", "status": "completed",
@@ -114,7 +114,7 @@ def test_render_event_line_scan_end():
 
 def test_tail_events_ndjson_renders_and_exits_on_scan_end(tmp_path, capsys):
     """一次性 flush 全量 + 遇 scan_end 立即返回（不等 watchdog）。"""
-    import shannon_core.cli.logs as L
+    import supernova_core.cli.logs as L
     ws = tmp_path / "ws1"
     ws.mkdir()
     ndjson = ws / "events.ndjson"

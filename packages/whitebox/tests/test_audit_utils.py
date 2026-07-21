@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_whitebox.audit.utils import (
+from supernova_core.models.metrics import SessionMetadata
+from supernova_whitebox.audit.utils import (
     format_duration,
     format_timestamp,
     format_log_time,

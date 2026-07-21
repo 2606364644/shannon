@@ -2,7 +2,7 @@
 actually reaches the terminal. Empty capture => pipeline not wired.
 
 This is the §3.4 anti-regression check the prior logging-display work lacked:
-it drives a REAL blackbox AuditSession (the core shannon_core.audit.session
+it drives a REAL blackbox AuditSession (the core supernova_core.audit.session
 implementation used by the blackbox pipeline) through the full
 WorkflowLogger -> DisplayDispatcher -> FileLogRenderer + RichConsoleRenderer +
 LiveDashboardRenderer path against a capturing Console. If the session isn't
@@ -13,11 +13,11 @@ from pathlib import Path
 
 from rich.console import Console
 
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.display.live_dashboard import LiveDashboardRenderer
-from shannon_core.audit.session import AuditSession
-from shannon_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.display.live_dashboard import LiveDashboardRenderer
+from supernova_core.audit.session import AuditSession
+from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

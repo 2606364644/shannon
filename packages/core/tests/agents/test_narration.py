@@ -1,22 +1,22 @@
 import pytest
 
-from shannon_core.agents.narration import narration_directive, DIRECTIVE_ZH
+from supernova_core.agents.narration import narration_directive, DIRECTIVE_ZH
 
 
 @pytest.mark.parametrize("val", ["zh", "ZH", " zh "])
 def test_zh_returns_directive(monkeypatch, val):
-    monkeypatch.setenv("SHANNON_AGENT_NARRATION_LANG", val)
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", val)
     assert narration_directive() == DIRECTIVE_ZH
 
 
 @pytest.mark.parametrize("val", ["en", "EN", "", "off"])
 def test_non_zh_returns_none(monkeypatch, val):
-    monkeypatch.setenv("SHANNON_AGENT_NARRATION_LANG", val)
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", val)
     assert narration_directive() is None
 
 
 def test_default_is_zh(monkeypatch):
-    monkeypatch.delenv("SHANNON_AGENT_NARRATION_LANG", raising=False)
+    monkeypatch.delenv("SUPERNOVA_AGENT_NARRATION_LANG", raising=False)
     assert narration_directive() == DIRECTIVE_ZH
 
 

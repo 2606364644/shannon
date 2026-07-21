@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { BrandMark } from "./BrandMark";
+import { useBrand } from "@/brand/BrandContext";
 
 interface NavItem {
   labelKey: string;
@@ -22,12 +23,13 @@ const NAV: NavItem[] = [
 
 export function TopBar() {
   const { t } = useTranslation();
+  const brand = useBrand();
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
         <Link to="/" className="flex items-center gap-1.5 font-semibold tracking-tight text-base">
           <BrandMark className="h-[1.15em] w-[1.15em] text-foreground" />
-          <span>ft-shannon</span>
+          <span>{brand}</span>
         </Link>
         <nav className="flex items-center gap-1" aria-label={t("nav.mainAria")}>
           {NAV.map((n) =>

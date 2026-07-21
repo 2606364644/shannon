@@ -13,11 +13,11 @@ import pytest
 
 WORKFLOW_FILE = (
     Path(__file__).resolve().parents[1]
-    / "src" / "shannon_blackbox" / "pipeline" / "workflows.py"
+    / "src" / "supernova_blackbox" / "pipeline" / "workflows.py"
 )
 WORKER_FILE = (
     Path(__file__).resolve().parents[1]
-    / "src" / "shannon_blackbox" / "worker.py"
+    / "src" / "supernova_blackbox" / "worker.py"
 )
 
 # 读 env/cwd 的函数名直接调用（ast.Call + ast.Name）

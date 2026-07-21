@@ -4,8 +4,8 @@ from unittest.mock import patch, AsyncMock
 import httpx
 import pytest
 
-from shannon_core.models.errors import ErrorCode, PentestError
-from shannon_core.utils.security import (
+from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.utils.security import (
     resolve_and_pin_host,
     check_url_reachable,
     validate_target_url,
@@ -14,25 +14,25 @@ from shannon_core.utils.security import (
 
 class TestResolveAndPinHost:
     def test_returns_pinned_ip_and_host(self):
-        with patch("shannon_core.utils.security.resolve_host", return_value="93.184.216.34"):
+        with patch("supernova_core.utils.security.resolve_host", return_value="93.184.216.34"):
             ip, host = resolve_and_pin_host("https://example.com/path")
             assert ip == "93.184.216.34"
             assert host == "example.com"
 
     def test_rejects_ssrf_ip(self):
-        with patch("shannon_core.utils.security.resolve_host", return_value="169.254.169.254"):
+        with patch("supernova_core.utils.security.resolve_host", return_value="169.254.169.254"):
             with pytest.raises(PentestError) as exc_info:
                 resolve_and_pin_host("http://metadata.google.internal")
             assert exc_info.value.error_code == ErrorCode.TARGET_UNREACHABLE
 
     def test_rejects_loopback_ip(self):
-        with patch("shannon_core.utils.security.resolve_host", return_value="127.0.0.1"):
+        with patch("supernova_core.utils.security.resolve_host", return_value="127.0.0.1"):
             with pytest.raises(PentestError) as exc_info:
                 resolve_and_pin_host("http://localhost:3000")
             assert exc_info.value.error_code == ErrorCode.TARGET_UNREACHABLE
 
     def test_returns_none_on_resolution_failure(self):
-        with patch("shannon_core.utils.security.resolve_host", return_value=None):
+        with patch("supernova_core.utils.security.resolve_host", return_value=None):
             with pytest.raises(PentestError) as exc_info:
                 resolve_and_pin_host("https://unresolvable.invalid")
             assert exc_info.value.error_code == ErrorCode.TARGET_UNREACHABLE
@@ -69,6 +69,6 @@ class TestCheckUrlReachablePinned:
 
 class TestValidateTargetUrlReturnsPinnedIp:
     def test_returns_pinned_ip_on_success(self):
-        with patch("shannon_core.utils.security.resolve_host", return_value="93.184.216.34"):
+        with patch("supernova_core.utils.security.resolve_host", return_value="93.184.216.34"):
             ip = validate_target_url("https://example.com")
             assert ip == "93.184.216.34"

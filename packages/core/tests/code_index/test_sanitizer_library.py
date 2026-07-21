@@ -1,8 +1,8 @@
-from shannon_core.code_index.sanitizer_library import (
+from supernova_core.code_index.sanitizer_library import (
     SanitizerLibrary,
     annotate_sanitizers,
 )
-from shannon_core.code_index.parameter_models import PropagationStep
+from supernova_core.code_index.parameter_models import PropagationStep
 
 
 def _step(transformation, code_location="app.py:10"):

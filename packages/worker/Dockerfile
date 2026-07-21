@@ -14,7 +14,7 @@ RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sourc
 
 # ── safe.directory：全信任（修正 78881cfa 的 '/app/repos/*' 带路径通配失效）──
 # git 的 * 不跨 /，带路径 pattern 不 glob；只有整值 '*' 或精确路径有效。
-# worker 容器扫 repos 下任意属主仓库（root clone / shannon-user clone 挂载），靠全信任避免 dubious ownership。
+# worker 容器扫 repos 下任意属主仓库（root clone / supernova-user clone 挂载），靠全信任避免 dubious ownership。
 RUN git config --global --add safe.directory '*'
 
 # ── node 24（NodeSource，供 gitnexus + agent-browser；agent-browser@latest 要 node>=24）──
@@ -44,7 +44,7 @@ RUN npm config set registry https://registry.npmmirror.com \
 # 容器以 root 跑 chromium 通常需 --no-sandbox；agent-browser doctor 实测后再定是否补 AGENT_BROWSER_ARGS。
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# ── python：uv sync 装全部 workspace 包（含 shannon-worker）──
+# ── python：uv sync 装全部 workspace 包（含 supernova-worker）──
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
@@ -59,11 +59,11 @@ COPY packages ./packages
 # (2026-07-14 端到端验证暴露: worker 容器跑 WEB 扫描, 非像 CLI 在 host 读 repo 根 prompts/).
 COPY prompts ./prompts
 
-# --all-packages：强制装全部 workspace 成员（含 shannon-worker，root deps 不含它）。
+# --all-packages：强制装全部 workspace 成员（含 supernova-worker，root deps 不含它）。
 # 不用 --frozen：让 uv 走阿里源下载（与 web Dockerfile 同策略）。lockfile 仍锁版本。
 RUN uv sync --all-packages
 
-# .venv/bin 让 shannon-worker 可解析；/usr/bin 让 gitnexus/agent-browser/node 可解析。
+# .venv/bin 让 supernova-worker 可解析；/usr/bin 让 gitnexus/agent-browser/node 可解析。
 ENV PATH="/app/.venv/bin:/usr/bin:${PATH}"
 
-CMD ["shannon-worker"]
+CMD ["supernova-worker"]

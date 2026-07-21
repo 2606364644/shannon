@@ -20,7 +20,7 @@ spec: docs/superpowers/specs/2026-07-09-recon-llm-track-gating-design.md(部分�
 import ast
 import inspect
 
-from shannon_whitebox.pipeline import workflows
+from supernova_whitebox.pipeline import workflows
 
 
 def _src() -> str:

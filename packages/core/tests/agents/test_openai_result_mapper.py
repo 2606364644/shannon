@@ -1,9 +1,9 @@
 import json
 from unittest.mock import MagicMock
 
-from shannon_core.agents.openai_result_mapper import map_run_result
-from shannon_core.agents.pricing import compute_cost_usd
-from shannon_core.agents.runner import ClaudeRunResult, TokenUsage
+from supernova_core.agents.openai_result_mapper import map_run_result
+from supernova_core.agents.pricing import compute_cost_usd
+from supernova_core.agents.runner import ClaudeRunResult, TokenUsage
 
 
 def _usage(inp, outp, cached=0):
@@ -98,10 +98,10 @@ def test_map_cost_nonzero_for_priced_model():
 
 def test_map_cost_zero_unknown_model_warning(caplog):
     """未知模型 → cost=0.0 + warning（spec §4.3）。"""
-    from shannon_core.agents import openai_result_mapper as _m
+    from supernova_core.agents import openai_result_mapper as _m
     _m._WARNED_UNKNOWN_MODELS.clear()  # 隔离模块级去重状态
     rr = _run_result("hi", _usage(1000, 500))
-    with caplog.at_level("WARNING", logger="shannon_core.agents.openai_result_mapper"):
+    with caplog.at_level("WARNING", logger="supernova_core.agents.openai_result_mapper"):
         res = map_run_result(rr, duration_ms=10, model="mystery-model-xyz", turns=1)
     assert res.cost == 0.0
     assert any("未在价目表" in r.getMessage() for r in caplog.records)
@@ -109,10 +109,10 @@ def test_map_cost_zero_unknown_model_warning(caplog):
 
 def test_map_unknown_model_warning_dedup(caplog):
     """同模型进程内只 warning 一次（spec §4.3 去重）。"""
-    from shannon_core.agents import openai_result_mapper as m
+    from supernova_core.agents import openai_result_mapper as m
     m._WARNED_UNKNOWN_MODELS.clear()  # 隔离跨测试污染
     rr = _run_result("hi", _usage(1000, 500))
-    with caplog.at_level("WARNING", logger="shannon_core.agents.openai_result_mapper"):
+    with caplog.at_level("WARNING", logger="supernova_core.agents.openai_result_mapper"):
         map_run_result(rr, duration_ms=10, model="dedup-model-xyz", turns=1)
         map_run_result(rr, duration_ms=10, model="dedup-model-xyz", turns=1)
     assert sum(1 for r in caplog.records if "未在价目表" in r.getMessage()) == 1

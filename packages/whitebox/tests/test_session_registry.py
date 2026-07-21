@@ -1,4 +1,4 @@
-from shannon_whitebox.audit.session_registry import (
+from supernova_whitebox.audit.session_registry import (
     get_audit_session, set_audit_session, clear_audit_session, NullAuditSession,
 )
 

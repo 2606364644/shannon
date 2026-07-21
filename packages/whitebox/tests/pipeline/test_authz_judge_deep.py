@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 @pytest.mark.asyncio
 async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monkeypatch):
     """candidate_count>0 时调 run_gitnexus_verdict_agent（多轮），非单次 run_claude_prompt。"""
-    from shannon_whitebox.pipeline import activities as act
+    from supernova_whitebox.pipeline import activities as act
 
     # 准备：patch build_authz_gitnexus_track 返固定候选（绕开 JSON 启发式构造，
     # 聚焦 T3 切换断言——candidate_count>0 即进判定段）。
@@ -22,7 +22,7 @@ async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monk
     # patch 源模块（activity 内 `from ... import build_authz_gitnexus_track` 每次调用
     # 都从源模块取当前属性，patch 源模块即拦截）。
     monkeypatch.setattr(
-        "shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+        "supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
         lambda d: fake_result,
     )
 
@@ -47,7 +47,7 @@ async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monk
     # 绑到 activities 命名空间，故 patch activities 上的名字才真正拦截判定段旧调用；
     # 同时 patch 源模块以兜底 verdict_agent 内部延迟 import）。
     monkeypatch.setattr(act, "run_claude_prompt", fake_single)
-    monkeypatch.setattr("shannon_core.agents.runner.run_claude_prompt", fake_single)
+    monkeypatch.setattr("supernova_core.agents.runner.run_claude_prompt", fake_single)
 
     # _get_paths 返 (repo, deliverables, workspaces)；deliverables 需可写 queue。
     deliverables = tmp_path / "deliverables" / "whitebox"
@@ -59,7 +59,7 @@ async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monk
     session.track_step = _noop_cm_factory()
     session.log_info = AsyncMock()
     monkeypatch.setattr(
-        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+        "supernova_whitebox.audit.session_registry.get_audit_session", lambda: session
     )
 
     inp = MagicMock()
@@ -75,11 +75,11 @@ async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monk
 @pytest.mark.asyncio
 async def test_authz_judge_verdict_passes_audit_session(tmp_path, monkeypatch):
     """verdict_agent 收到 get_audit_session()（非 None），供多轮工具调用审计。"""
-    from shannon_whitebox.pipeline import activities as act
+    from supernova_whitebox.pipeline import activities as act
 
     fake_result = _fake_build_result(markdown="## 候选")
     monkeypatch.setattr(
-        "shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+        "supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
         lambda d: fake_result,
     )
 
@@ -102,7 +102,7 @@ async def test_authz_judge_verdict_passes_audit_session(tmp_path, monkeypatch):
     session.track_step = _noop_cm_factory()
     session.log_info = AsyncMock()
     monkeypatch.setattr(
-        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+        "supernova_whitebox.audit.session_registry.get_audit_session", lambda: session
     )
 
     inp = MagicMock()
@@ -118,11 +118,11 @@ async def test_authz_judge_verdict_passes_audit_session(tmp_path, monkeypatch):
 async def test_authz_judge_verdict_writes_queue_with_source_track(tmp_path, monkeypatch):
     """verdict_agent 返回的 vulnerabilities 落盘，且 source_track='gitnexus'（schema 不变）。"""
     import json as _json
-    from shannon_whitebox.pipeline import activities as act
+    from supernova_whitebox.pipeline import activities as act
 
     fake_result = _fake_build_result(markdown="## 候选")
     monkeypatch.setattr(
-        "shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+        "supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
         lambda d: fake_result,
     )
 
@@ -148,7 +148,7 @@ async def test_authz_judge_verdict_writes_queue_with_source_track(tmp_path, monk
     session.track_step = _noop_cm_factory()
     session.log_info = AsyncMock()
     monkeypatch.setattr(
-        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+        "supernova_whitebox.audit.session_registry.get_audit_session", lambda: session
     )
 
     inp = MagicMock()
@@ -173,12 +173,12 @@ async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
     核心断言（不削弱）：0 候选时 explored==1（explore prompt 被调一次），且 prompt 含
     explore/route 字样。产软候选 needs_review=True + source_track='gitnexus'。
     """
-    import shannon_whitebox.pipeline.activities as act
+    import supernova_whitebox.pipeline.activities as act
 
     # 0 候选 fixture（dom=fw=0）
     fake_result = _fake_build_result(markdown="", dom=0, fw=0, http=0, total=0)
     monkeypatch.setattr(
-        "shannon_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+        "supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
         lambda d: fake_result,
     )
 
@@ -203,7 +203,7 @@ async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
     session.track_step = _noop_cm_factory()
     session.log_info = AsyncMock()
     monkeypatch.setattr(
-        "shannon_whitebox.audit.session_registry.get_audit_session", lambda: session
+        "supernova_whitebox.audit.session_registry.get_audit_session", lambda: session
     )
 
     inp = MagicMock()
@@ -221,7 +221,7 @@ async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
 def _fake_build_result(*, markdown="## 候选", dom=1, fw=0, http=1, total=1):
     """构造可按位置解包成 5 元组的 AuthzTrackBuildResult（MagicMock 默认 __iter__ 返空，
     解包触发 'got 0' 错，故必须用真 NamedTuple）。dom/fw 控候选数量。"""
-    from shannon_core.code_index.authz_gitnexus_track import AuthzTrackBuildResult
+    from supernova_core.code_index.authz_gitnexus_track import AuthzTrackBuildResult
     return AuthzTrackBuildResult(
         markdown=markdown,
         dominance_candidates=[MagicMock() for _ in range(dom)],

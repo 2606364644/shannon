@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from shannon_core.code_index.progress import ProgressEmitter, ProgressSample
+from supernova_core.code_index.progress import ProgressEmitter, ProgressSample
 
 
 def test_sample_is_frozen():

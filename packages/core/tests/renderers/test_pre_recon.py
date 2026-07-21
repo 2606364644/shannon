@@ -1,6 +1,6 @@
-from shannon_core.renderers.pre_recon import render_pre_recon
-from shannon_core.renderers import render_deliverable
-from shannon_core.models.agents import AgentName
+from supernova_core.renderers.pre_recon import render_pre_recon
+from supernova_core.renderers import render_deliverable
+from supernova_core.models.agents import AgentName
 
 
 def test_empty_data_renders_preamble_and_all_placeholders():

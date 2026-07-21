@@ -1,8 +1,8 @@
 import pytest
 from agents import RunContextWrapper
 
-from shannon_core.agents.tools_openai import ToolContext
-from shannon_core.agents.tools_openai.fs import _edit_file_impl, _glob_impl, _read_file_impl, _write_file_impl
+from supernova_core.agents.tools_openai import ToolContext
+from supernova_core.agents.tools_openai.fs import _edit_file_impl, _glob_impl, _read_file_impl, _write_file_impl
 
 
 def _ctx(tmp_path):

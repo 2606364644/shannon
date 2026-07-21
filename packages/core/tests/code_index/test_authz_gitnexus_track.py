@@ -20,14 +20,14 @@ JSON 文件 round-trip),构造最小但**真实**的 ``CodeIndex`` Python 对象
 """
 from __future__ import annotations
 
-from shannon_core.code_index.authz_gitnexus_track import find_unguarded_sink_paths
-from shannon_core.code_index.models import (
+from supernova_core.code_index.authz_gitnexus_track import find_unguarded_sink_paths
+from supernova_core.code_index.models import (
     CallChain,
     CodeIndex,
     EntryPoint,
     FuncBlock,
 )
-from shannon_core.code_index.parameter_models import (
+from supernova_core.code_index.parameter_models import (
     ParameterSource,
     SinkCallSite,
     SinkCategory,

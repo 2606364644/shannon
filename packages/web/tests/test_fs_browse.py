@@ -11,11 +11,11 @@ def app_no_roots(app_with_ws):
 
 @pytest.fixture
 def app_with_roots(tmp_path, monkeypatch):
-    """配 SHANNON_FS_ROOTS=tmp_path 限制可见根。"""
-    monkeypatch.setenv("SHANNON_FS_ROOTS", str(tmp_path))
-    from shannon_web import config as cfg_mod
+    """配 SUPERNOVA_FS_ROOTS=tmp_path 限制可见根。"""
+    monkeypatch.setenv("SUPERNOVA_FS_ROOTS", str(tmp_path))
+    from supernova_web import config as cfg_mod
     cfg_mod.get_config.cache_clear()
-    from shannon_web.app import create_app
+    from supernova_web.app import create_app
     app = create_app()
     cfg_mod.get_config.cache_clear()
     return app
@@ -112,7 +112,7 @@ def test_truncated(monkeypatch, app_no_roots, tmp_path):
     # 造 10 个 entry，MAX_ENTRIES 改 5 → truncated=True + 5 条
     for i in range(10):
         (tmp_path / f"f{i}.txt").write_text("x")
-    from shannon_web.api import fs as fs_mod
+    from supernova_web.api import fs as fs_mod
     monkeypatch.setattr(fs_mod, "MAX_ENTRIES", 5)
     client = TestClient(app_no_roots)
     body = client.get("/api/fs/browse", params={"path": str(tmp_path)}).json()

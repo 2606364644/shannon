@@ -1,4 +1,4 @@
-from shannon_core.models.errors import ErrorCode, PentestError
+from supernova_core.models.errors import ErrorCode, PentestError
 
 def test_error_code_values():
     assert ErrorCode.CONFIG_NOT_FOUND == "CONFIG_NOT_FOUND"

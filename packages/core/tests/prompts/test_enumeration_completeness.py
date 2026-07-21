@@ -1,13 +1,13 @@
 # packages/core/tests/prompts/test_enumeration_completeness.py
 from pathlib import Path
 
-# prompts is at repo root ( /root/shannon-py/prompts ), tests are at packages/core/tests/
-# File is at: /root/shannon-py/packages/core/tests/prompts/test_*.py
-# parents[0] = /root/shannon-py/packages/core/tests/prompts/
-# parents[1] = /root/shannon-py/packages/core/tests/
-# parents[2] = /root/shannon-py/packages/core/
-# parents[3] = /root/shannon-py/packages/
-# parents[4] = /root/shannon-py/
+# prompts is at repo root ( /root/supernova/prompts ), tests are at packages/core/tests/
+# File is at: /root/supernova/packages/core/tests/prompts/test_*.py
+# parents[0] = /root/supernova/packages/core/tests/prompts/
+# parents[1] = /root/supernova/packages/core/tests/
+# parents[2] = /root/supernova/packages/core/
+# parents[3] = /root/supernova/packages/
+# parents[4] = /root/supernova/
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
 

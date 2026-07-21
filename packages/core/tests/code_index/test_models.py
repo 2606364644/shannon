@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     FuncBlock,
     CallEdge,
     EntryPoint,
@@ -368,7 +368,7 @@ def test_degradation_level_enum():
 
 class TestCodeIndexSinkCallSites:
     def test_default_empty_sink_call_sites(self):
-        from shannon_core.code_index.models import CodeIndex
+        from supernova_core.code_index.models import CodeIndex
         index = CodeIndex(
             repository="repo",
             language="python",
@@ -383,8 +383,8 @@ class TestCodeIndexSinkCallSites:
         assert index.sink_call_sites == []
 
     def test_sink_call_sites_serialized(self):
-        from shannon_core.code_index.models import CodeIndex
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.models import CodeIndex
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory,
         )
         site = SinkCallSite(
@@ -419,7 +419,7 @@ class TestCodeIndexSinkCallSites:
 
 class TestCallGraphResult:
     def test_call_graph_result_holds_edges_chains_entry_points(self):
-        from shannon_core.code_index.models import (
+        from supernova_core.code_index.models import (
             CallGraphResult, CallEdge, CallChain, FuncBlock,
         )
         edge = CallEdge(
@@ -458,8 +458,8 @@ class TestCallGraphResult:
 
 class TestIntraResult:
     def test_intra_result_holds_taint_data(self):
-        from shannon_core.code_index.parameter_models import IntraResult
-        from shannon_core.code_index.parameter_models import PropagationStep
+        from supernova_core.code_index.parameter_models import IntraResult
+        from supernova_core.code_index.parameter_models import PropagationStep
         step = PropagationStep(
             from_func_id="app.py:handler:1",
             from_param="user_input",
@@ -476,7 +476,7 @@ class TestIntraResult:
         assert len(result.local_steps) == 1
 
     def test_intra_result_empty(self):
-        from shannon_core.code_index.parameter_models import IntraResult
+        from supernova_core.code_index.parameter_models import IntraResult
         result = IntraResult()
         assert len(result.tainted_params) == 0
         assert len(result.hits) == 0

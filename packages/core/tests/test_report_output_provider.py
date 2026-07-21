@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from shannon_core.interfaces.report_output_provider import (
+from supernova_core.interfaces.report_output_provider import (
     ReportOutputProvider,
     NoOpReportOutputProvider,
 )

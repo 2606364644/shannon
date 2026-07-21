@@ -3,14 +3,14 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.models.audit import AgentEndResult
-from shannon_core.models.errors import PentestError
-from shannon_whitebox.audit.session import AuditSession
-from shannon_whitebox.audit.session_registry import set_audit_session, clear_audit_session
-from shannon_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
-from shannon_whitebox.audit.utils import generate_audit_path
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.models.audit import AgentEndResult
+from supernova_core.models.errors import PentestError
+from supernova_whitebox.audit.session import AuditSession
+from supernova_whitebox.audit.session_registry import set_audit_session, clear_audit_session
+from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
+from supernova_whitebox.audit.utils import generate_audit_path
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:
@@ -55,7 +55,7 @@ async def test_run_agent_failure_path_logs_end_and_error(tmp_path: Path, monkeyp
         # Force activity.info().attempt = 1 without a real Temporal context
         monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=1))
         # Stub AgentExecutor.execute to raise a PentestError
-        from shannon_whitebox.pipeline import activities as act_mod
+        from supernova_whitebox.pipeline import activities as act_mod
         fake_executor = MagicMock()
         fake_executor.execute = AsyncMock(side_effect=PentestError("boom", "agent"))
         with patch.object(act_mod, "AgentExecutor", return_value=fake_executor):
@@ -78,7 +78,7 @@ async def test_run_agent_output_validation_exhausted_is_non_retryable(tmp_path, 
     不吐 exploitation_queue 时,3 次后停止重试,而非吃满通用 VULN_RETRY(8) 白烧 ~5×20min。
     """
     from temporalio.exceptions import ApplicationError as ApplicationFailure
-    from shannon_core.models.errors import ErrorCode
+    from supernova_core.models.errors import ErrorCode
 
     meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
     session = AuditSession(meta)
@@ -86,7 +86,7 @@ async def test_run_agent_output_validation_exhausted_is_non_retryable(tmp_path, 
     set_audit_session(session)
     try:
         monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=3))
-        from shannon_whitebox.pipeline import activities as act_mod
+        from supernova_whitebox.pipeline import activities as act_mod
         fake_executor = MagicMock()
         fake_executor.execute = AsyncMock(side_effect=PentestError(
             "Missing exploitation queue", "validation",
@@ -104,7 +104,7 @@ async def test_run_agent_output_validation_exhausted_is_non_retryable(tmp_path, 
 async def test_run_agent_output_validation_before_cap_still_retryable(tmp_path, monkeypatch):
     """OUTPUT_VALIDATION_FAILED + attempt<cap(3) → non_retryable=False,继续重试。"""
     from temporalio.exceptions import ApplicationError as ApplicationFailure
-    from shannon_core.models.errors import ErrorCode
+    from supernova_core.models.errors import ErrorCode
 
     meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
     session = AuditSession(meta)
@@ -112,7 +112,7 @@ async def test_run_agent_output_validation_before_cap_still_retryable(tmp_path, 
     set_audit_session(session)
     try:
         monkeypatch.setattr("temporalio.activity.info", lambda: MagicMock(attempt=2))
-        from shannon_whitebox.pipeline import activities as act_mod
+        from supernova_whitebox.pipeline import activities as act_mod
         fake_executor = MagicMock()
         fake_executor.execute = AsyncMock(side_effect=PentestError(
             "Missing exploitation queue", "validation",
@@ -137,7 +137,7 @@ async def test_step_intent_flows_end_to_end_from_registry(tmp_path: Path):
     in the chain (track_step / log_step / StepEvent.intent / FileLogRenderer._step)
     dropped the intent.
     """
-    from shannon_whitebox.pipeline.step_intents import intent_for
+    from supernova_whitebox.pipeline.step_intents import intent_for
 
     intent = intent_for("adjudication")
     assert intent is not None  # guard: registry must know this step

@@ -16,8 +16,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_recon_executor_renders_md_from_collector(monkeypatch, tmp_path):
-    from shannon_core.agents import executor as exec_mod
-    from shannon_core.models.agents import AgentName
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -120,8 +120,8 @@ async def test_recon_executor_skipped_all_renders_placeholders(monkeypatch, tmp_
     渲染 recon_deliverable.md(全 placeholder),validate 见文件即过,不 raise
     OUTPUT_VALIDATION_FAILED。对齐 TS host-render 必渲染行为。
     """
-    from shannon_core.agents import executor as exec_mod
-    from shannon_core.models.agents import AgentName
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
 
     repo = tmp_path / "repo"
     repo.mkdir()

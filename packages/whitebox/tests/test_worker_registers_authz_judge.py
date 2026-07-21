@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def test_authz_gitnexus_judge_registered_in_worker():
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     # Must appear in BOTH the import block AND the activities=[...] list.
     assert src.count("run_authz_gitnexus_judge") >= 2, (
@@ -17,7 +17,7 @@ def test_authz_gitnexus_judge_registered_in_worker():
 
 def test_merge_dual_track_queues_registered_in_worker():
     """The Plan 3 merger (consumes authz_gitnexus_queue.json) must be registered too."""
-    worker = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/worker.py"
     src = worker.read_text()
     assert src.count("run_merge_dual_track_queues") >= 2, (
         "run_merge_dual_track_queues must be imported AND listed in worker.py activities"
@@ -32,7 +32,7 @@ def test_authz_gitnexus_judge_is_activity_defn():
     真 activity run_authz_gitnexus_judge 失去装饰器 → worker 注册报
     'Activity run_authz_gitnexus_judge missing attributes, was it decorated with @activity.defn?'。
     源码 count 测试只数名字出现次数,不看装饰器归属,故漏网。"""
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
 
     assert hasattr(
         activities.run_authz_gitnexus_judge, "__temporal_activity_definition"
@@ -41,7 +41,7 @@ def test_authz_gitnexus_judge_is_activity_defn():
 
 def test_parse_gitnexus_verdict_output_not_activity_defn():
     """装饰器错位的另一侧:普通同步 helper 不该被 @activity.defn 装饰。"""
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
 
     assert not hasattr(
         activities._parse_gitnexus_verdict_output, "__temporal_activity_definition"
@@ -58,7 +58,7 @@ def test_all_worker_registered_activities_are_defn():
     本测试遍历 worker 注册全集,任何 activity 缺装饰器都会在 CI 暴露,不必等真机。"""
     import ast
 
-    import shannon_whitebox.worker as worker_mod
+    import supernova_whitebox.worker as worker_mod
 
     tree = ast.parse(Path(worker_mod.__file__).read_text())
     registered = []

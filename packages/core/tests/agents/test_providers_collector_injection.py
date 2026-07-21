@@ -14,9 +14,9 @@ provider 内被正确翻译成本引擎原生工具（claude→MCP server、open
   （后者只用 narration_directive()，无实例属性依赖）。__new__ + monkeypatch
   _get_client 即足够（brief 指定路径）。
 """
-from shannon_core.agents.runner import ProviderConfig
-from shannon_core.collectors.bridge import build_claude_mcp_server, build_openai_tools
-from shannon_core.collectors.pre_recon import PreReconCollector
+from supernova_core.agents.runner import ProviderConfig
+from supernova_core.collectors.bridge import build_claude_mcp_server, build_openai_tools
+from supernova_core.collectors.pre_recon import PreReconCollector
 
 
 def _collector():
@@ -25,7 +25,7 @@ def _collector():
 
 def _make_anthropic_provider():
     """对齐 test_providers_anthropic_output_format.py 构造模式（无 API key）。"""
-    from shannon_core.agents.providers_anthropic import AnthropicProvider
+    from supernova_core.agents.providers_anthropic import AnthropicProvider
 
     return AnthropicProvider(ProviderConfig(type="anthropic_api"))
 
@@ -56,7 +56,7 @@ def test_anthropic_build_options_without_collector_leaves_mcp_empty():
 # ---------- openai: build_agent 注入 extra_tools ----------
 
 def test_openai_build_agent_includes_extra_tools(monkeypatch):
-    from shannon_core.agents.providers_openai import OpenAIProvider
+    from supernova_core.agents.providers_openai import OpenAIProvider
 
     provider = OpenAIProvider.__new__(OpenAIProvider)
     monkeypatch.setattr(provider, "_get_client", lambda: object())
@@ -69,7 +69,7 @@ def test_openai_build_agent_includes_extra_tools(monkeypatch):
 
 
 def test_openai_build_agent_without_extra_tools_keeps_builtin_only(monkeypatch):
-    from shannon_core.agents.providers_openai import OpenAIProvider
+    from supernova_core.agents.providers_openai import OpenAIProvider
 
     provider = OpenAIProvider.__new__(OpenAIProvider)
     monkeypatch.setattr(provider, "_get_client", lambda: object())

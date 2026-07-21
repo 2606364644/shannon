@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from shannon_core.code_index.parser import (
+from supernova_core.code_index.parser import (
     detect_language, discover_source_files,
     detect_all_languages, discover_all_source_files,
 )

@@ -1,10 +1,10 @@
-# shannon-py/packages/core/tests/test_credential_validator.py
+# supernova/packages/core/tests/test_credential_validator.py
 from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 
-from shannon_core.models.errors import ErrorCode, PentestError
-from shannon_core.utils.credential_validator import validate_credentials
+from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.utils.credential_validator import validate_credentials
 
 
 class TestValidateAnthropic:

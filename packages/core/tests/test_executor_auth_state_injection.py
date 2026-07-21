@@ -5,8 +5,8 @@
 """
 import asyncio
 
-from shannon_core.agents import executor as exec_mod
-from shannon_core.models.agents import AgentName
+from supernova_core.agents import executor as exec_mod
+from supernova_core.models.agents import AgentName
 
 
 def _run(coro):
@@ -54,7 +54,7 @@ def test_executor_injects_auth_state_file(tmp_path, monkeypatch):
         lambda *a, **k: asyncio.sleep(0),
     )
 
-    from shannon_core.prompts.manager import PromptManager
+    from supernova_core.prompts.manager import PromptManager
     pm = PromptManager.__new__(PromptManager)
     pm.prompts_dir = tmp_path
     captured = {}

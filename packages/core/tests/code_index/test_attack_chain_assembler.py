@@ -1,5 +1,5 @@
 import logging
-from shannon_core.code_index.attack_chain_assembler import assemble_attack_chains
+from supernova_core.code_index.attack_chain_assembler import assemble_attack_chains
 
 
 def _finding(vt, source, sink, path, evidence="src→sink"):

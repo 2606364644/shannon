@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
-from shannon_core.utils.paths import BLACKBOX_SUBDIR, WHITEBOX_SUBDIR
-from shannon_blackbox.pipeline.activities import assemble_report, finalize_report
-from shannon_blackbox.pipeline.shared import BlackboxActivityInput
+from supernova_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
+from supernova_core.utils.paths import BLACKBOX_SUBDIR, WHITEBOX_SUBDIR
+from supernova_blackbox.pipeline.activities import assemble_report, finalize_report
+from supernova_blackbox.pipeline.shared import BlackboxActivityInput
 
 
 def _make_input(repo: Path, workspace_name: str) -> BlackboxActivityInput:
@@ -28,17 +28,17 @@ def _make_input(repo: Path, workspace_name: str) -> BlackboxActivityInput:
 async def test_assemble_report_lands_in_blackbox_dir(tmp_path, monkeypatch):
     """assemble_report activity writes report + findings under deliverables/blackbox/."""
     # locate deliverables the way the activity does (resolve_deliverables_path uses
-    # SHANNON_WORKER_ROOT when workspace_name is set; pin it to tmp_path/workspaces)
+    # SUPERNOVA_WORKER_ROOT when workspace_name is set; pin it to tmp_path/workspaces)
     workspaces_root = tmp_path / "workspaces"
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(workspaces_root))
-    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "deliverables")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(workspaces_root))
+    monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "deliverables")
 
     repo = tmp_path / "repo"
     repo.mkdir()
     inp = _make_input(repo, "bb-session")
 
     # resolve the deliverables root for test assertions (same algorithm the activity uses)
-    from shannon_core.utils.paths import resolve_deliverables_path
+    from supernova_core.utils.paths import resolve_deliverables_path
     deliverables = resolve_deliverables_path(
         repo_path=inp.repo_path,
         deliverables_subdir=inp.deliverables_subdir,
@@ -73,14 +73,14 @@ async def test_assemble_report_lands_in_blackbox_dir(tmp_path, monkeypatch):
 async def test_assemble_report_does_not_overwrite_whitebox_report(tmp_path, monkeypatch):
     """A pre-existing whitebox report at deliverables/whitebox/ must coexist."""
     workspaces_root = tmp_path / "workspaces"
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(workspaces_root))
-    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "deliverables")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(workspaces_root))
+    monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "deliverables")
 
     repo = tmp_path / "repo"
     repo.mkdir()
     inp = _make_input(repo, "bb-session-2")
 
-    from shannon_core.utils.paths import resolve_deliverables_path
+    from supernova_core.utils.paths import resolve_deliverables_path
     deliverables = resolve_deliverables_path(
         repo_path=inp.repo_path,
         deliverables_subdir=inp.deliverables_subdir,
@@ -128,14 +128,14 @@ async def test_assemble_report_body_contains_evidence_content(tmp_path, monkeypa
     the token assertion would fail.
     """
     workspaces_root = tmp_path / "workspaces"
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(workspaces_root))
-    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "deliverables")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(workspaces_root))
+    monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "deliverables")
 
     repo = tmp_path / "repo"
     repo.mkdir()
     inp = _make_input(repo, "bb-session-body")
 
-    from shannon_core.utils.paths import resolve_deliverables_path
+    from supernova_core.utils.paths import resolve_deliverables_path
     deliverables = resolve_deliverables_path(
         repo_path=inp.repo_path,
         deliverables_subdir=inp.deliverables_subdir,
@@ -179,15 +179,15 @@ async def test_assemble_report_body_contains_evidence_content(tmp_path, monkeypa
 async def test_finalize_report_writes_blackbox_dir_path(tmp_path, monkeypatch):
     """finalize_report resolves report_path under deliverables/blackbox/."""
     workspaces_root = tmp_path / "workspaces"
-    monkeypatch.setenv("SHANNON_WORKER_ROOT", str(workspaces_root))
-    monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "deliverables")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(workspaces_root))
+    monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "deliverables")
 
     repo = tmp_path / "repo"
     repo.mkdir()
     workspace_name = "bb-session-3"
     inp = _make_input(repo, workspace_name)
 
-    from shannon_core.utils.paths import resolve_deliverables_path
+    from supernova_core.utils.paths import resolve_deliverables_path
     deliverables = resolve_deliverables_path(
         repo_path=inp.repo_path,
         deliverables_subdir=inp.deliverables_subdir,

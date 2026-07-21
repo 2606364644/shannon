@@ -2,7 +2,7 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results, get_default_deliverables_subdir, deliverables_dir_for_workspace
+from supernova_core.utils.paths import resolve_workspaces_dir, resolve_deliverables_path, has_valid_whitebox_results, get_default_deliverables_subdir, deliverables_dir_for_workspace
 
 
 class TestResolveWorkspacesDir:
@@ -12,7 +12,7 @@ class TestResolveWorkspacesDir:
         project_root.mkdir()
         (project_root / ".git").mkdir()
         monkeypatch.chdir(project_root)
-        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir("/data/repos/myrepo")
         assert result == project_root / "workspaces"
 
@@ -22,7 +22,7 @@ class TestResolveWorkspacesDir:
         project_root.mkdir()
         (project_root / ".git").mkdir()
         monkeypatch.chdir(project_root)
-        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir("/a/b/c")
         assert result == project_root / "workspaces"
 
@@ -51,26 +51,26 @@ class TestResolveWorkspacesDir:
         assert result == project_root / "workspaces"
 
     def test_with_worker_root_env(self, tmp_path, monkeypatch):
-        """When SHANNON_WORKER_ROOT is set, returns worker_root / workspaces."""
-        worker_root = tmp_path / "shannon-worker"
+        """When SUPERNOVA_WORKER_ROOT is set, returns worker_root / workspaces."""
+        worker_root = tmp_path / "supernova-worker"
         worker_root.mkdir()
-        monkeypatch.setenv("SHANNON_WORKER_ROOT", str(worker_root))
+        monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(worker_root))
         result = resolve_workspaces_dir()
         assert result == worker_root / "workspaces"
 
     def test_worker_root_env_used_even_when_repo_path_given(self, monkeypatch):
-        """SHANNON_WORKER_ROOT 优先级高于 repo_path(repo_path 已不再参与定位 workspace 根)。"""
-        monkeypatch.setenv("SHANNON_WORKER_ROOT", "/custom/worker/root")
+        """SUPERNOVA_WORKER_ROOT 优先级高于 repo_path(repo_path 已不再参与定位 workspace 根)。"""
+        monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", "/custom/worker/root")
         result = resolve_workspaces_dir("/data/repos/myrepo")
         assert result == Path("/custom/worker/root/workspaces")
 
     def test_worker_root_fallback_without_repo_path(self, tmp_path, monkeypatch):
-        """When no repo_path and no SHANNON_WORKER_ROOT, uses project_root."""
+        """When no repo_path and no SUPERNOVA_WORKER_ROOT, uses project_root."""
         project_root = tmp_path / "project"
         project_root.mkdir()
         (project_root / ".git").mkdir()
         monkeypatch.chdir(project_root)
-        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir()
         assert result == project_root / "workspaces"
 
@@ -81,18 +81,18 @@ class TestResolveWorkspacesDir:
         repo.mkdir()
         (repo / ".git").mkdir()  # find_project_root 从 repo 内 cwd 找到 repo 本身
         monkeypatch.chdir(repo)
-        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_WORKER_ROOT", raising=False)
         result = resolve_workspaces_dir(str(repo))
         assert result == repo.resolve().parent / "workspaces"
 
     def test_no_fallback_when_cwd_root_outside_repo(self, tmp_path, monkeypatch):
-        """cwd-based 根不在被扫 repo 内(用户在 shannon-py 跑,repo 在别处)→ 正常返回
+        """cwd-based 根不在被扫 repo 内(用户在 supernova 跑,repo 在别处)→ 正常返回
         project_root/workspaces,不触发 fallback(e6d74db 的默认行为不变)。"""
-        project = tmp_path / "shannon-py"
+        project = tmp_path / "supernova"
         project.mkdir()
         (project / ".git").mkdir()
         monkeypatch.chdir(project)
-        monkeypatch.delenv("SHANNON_WORKER_ROOT", raising=False)
+        monkeypatch.delenv("SUPERNOVA_WORKER_ROOT", raising=False)
         repo = tmp_path / "vuln-range" / "NodeGoat"
         repo.mkdir(parents=True)
         result = resolve_workspaces_dir(str(repo))
@@ -112,7 +112,7 @@ class TestResolveDeliverablesPath:
 
     def test_workspace_name_without_workspaces_root(self, tmp_path, monkeypatch):
         """workspace_name 但未传 workspaces_root → 用 resolve_workspaces_dir()。"""
-        monkeypatch.setenv("SHANNON_WORKER_ROOT", str(tmp_path / "worker"))
+        monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path / "worker"))
         result = resolve_deliverables_path(
             repo_path=None,
             deliverables_subdir="deliverables",
@@ -223,19 +223,19 @@ class TestHasValidWhiteboxResults:
 
 class TestGetDefaultDeliverablesSubdir:
     def test_returns_constant_when_no_env(self, monkeypatch):
-        """When SHANNON_DELIVERABLES_SUBDIR is not set, returns the default constant."""
-        from shannon_core.constants import DEFAULT_DELIVERABLES_SUBDIR
-        monkeypatch.delenv("SHANNON_DELIVERABLES_SUBDIR", raising=False)
+        """When SUPERNOVA_DELIVERABLES_SUBDIR is not set, returns the default constant."""
+        from supernova_core.constants import DEFAULT_DELIVERABLES_SUBDIR
+        monkeypatch.delenv("SUPERNOVA_DELIVERABLES_SUBDIR", raising=False)
         assert get_default_deliverables_subdir() == DEFAULT_DELIVERABLES_SUBDIR
 
     def test_returns_env_value_when_set(self, monkeypatch):
-        """When SHANNON_DELIVERABLES_SUBDIR is set, returns its value."""
-        monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "custom/output")
+        """When SUPERNOVA_DELIVERABLES_SUBDIR is set, returns its value."""
+        monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "custom/output")
         assert get_default_deliverables_subdir() == "custom/output"
 
     def test_returns_empty_string_when_env_empty(self, monkeypatch):
-        """When SHANNON_DELIVERABLES_SUBDIR is set to empty string, returns empty string."""
-        monkeypatch.setenv("SHANNON_DELIVERABLES_SUBDIR", "")
+        """When SUPERNOVA_DELIVERABLES_SUBDIR is set to empty string, returns empty string."""
+        monkeypatch.setenv("SUPERNOVA_DELIVERABLES_SUBDIR", "")
         assert get_default_deliverables_subdir() == ""
 
 
@@ -243,7 +243,7 @@ class TestDeliverablesDirForWorkspace:
     """deliverables_dir_for_workspace 直接返回 workspace 下的 deliverables 目录。"""
 
     def test_returns_workspace_deliverables(self, tmp_path):
-        from shannon_core.session import SessionManager
+        from supernova_core.session import SessionManager
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -258,7 +258,7 @@ class TestDeliverablesDirForWorkspace:
         assert deliverables_dir_for_workspace(ws) == ws / "deliverables"
 
 
-from shannon_core.utils.paths import (
+from supernova_core.utils.paths import (
     WHITEBOX_SUBDIR, BLACKBOX_SUBDIR,
     whitebox_dir, blackbox_dir, resolve_track_deliverable,
 )

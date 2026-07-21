@@ -1,7 +1,7 @@
 # packages/core/tests/code_index/test_authz_build_track.py
 import json
 
-from shannon_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
+from supernova_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
 
 
 def _block(bid, source, params=None):

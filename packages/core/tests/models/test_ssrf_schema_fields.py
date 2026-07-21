@@ -1,4 +1,4 @@
-from shannon_core.models.queue_schemas import SsrfVulnerability, VulnerabilityQueue
+from supernova_core.models.queue_schemas import SsrfVulnerability, VulnerabilityQueue
 
 
 def _ssrf(**kw):

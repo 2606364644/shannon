@@ -1,9 +1,9 @@
 import json
 import pytest
-from shannon_core.code_index.coverage_report import (
+from supernova_core.code_index.coverage_report import (
     AuditTierReport, CoverageReport, Phase0Coverage, Phase3Coverage,
 )
-from shannon_core.code_index.risk_scorer import ChainRiskScore
+from supernova_core.code_index.risk_scorer import ChainRiskScore
 
 
 class TestAuditTierReport:

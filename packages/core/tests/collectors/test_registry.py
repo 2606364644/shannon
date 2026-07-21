@@ -1,7 +1,7 @@
 """make_collector / render_deliverable 双函数 RECON 分发测试（Plan 2 Task 3）。"""
-from shannon_core.collectors import make_collector
-from shannon_core.renderers import render_deliverable
-from shannon_core.models.agents import AgentName
+from supernova_core.collectors import make_collector
+from supernova_core.renderers import render_deliverable
+from supernova_core.models.agents import AgentName
 
 
 def test_make_collector_returns_recon_collector():
@@ -38,7 +38,7 @@ def test_render_deliverable_recon_uses_endpoints_data():
 def test_unmapped_agent_returns_none_for_both():
     # 一个无 collector 通道的 agent（如 VALIDATE_AUTH，若有；否则用 RECON_BLACKBOX）
     # 确认返 None（走 self-Write 路径）
-    from shannon_core.models.agents import AgentName as A
+    from supernova_core.models.agents import AgentName as A
     # RECON_BLACKBOX 是黑盒，不在 core host-render 范围
     assert make_collector(A.RECON_BLACKBOX) is None
     assert render_deliverable(A.RECON_BLACKBOX, {}) is None

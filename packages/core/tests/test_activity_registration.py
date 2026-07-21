@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from shannon_core.testing.activity_registration import (
+from supernova_core.testing.activity_registration import (
     _activity_def_names,
     _registered_activity_names,
     assert_all_activities_registered,

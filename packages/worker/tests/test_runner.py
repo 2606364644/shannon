@@ -4,18 +4,18 @@ from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from shannon_core.services.temporal_infra import (
+from supernova_core.services.temporal_infra import (
     WEB_TASK_QUEUE_WHITEBOX,
     WEB_TASK_QUEUE_BLACKBOX,
 )
-from shannon_whitebox.pipeline.workflows import WhiteboxScanWorkflow
-from shannon_blackbox.pipeline.workflows import BlackboxScanWorkflow
+from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
 
 
 @pytest.mark.asyncio
 async def test_run_worker_connects_and_registers_two_workers():
     """run_worker 连 temporal + 起两个 Worker（白盒/黑盒固定 queue）+ 并行 run。"""
-    from shannon_worker.runner import run_worker
+    from supernova_worker.runner import run_worker
 
     mock_client = AsyncMock()
 
@@ -25,9 +25,9 @@ async def test_run_worker_connects_and_registers_two_workers():
     bb_worker.run = AsyncMock(return_value=None)
 
     with (
-        patch("shannon_worker.runner.Client.connect",
+        patch("supernova_worker.runner.Client.connect",
               AsyncMock(return_value=mock_client)) as mock_connect,
-        patch("shannon_worker.runner.Worker",
+        patch("supernova_worker.runner.Worker",
               side_effect=[wb_worker, bb_worker]) as mock_worker_cls,
     ):
         await run_worker("temporal:7233")
@@ -59,9 +59,9 @@ async def test_run_worker_connects_and_registers_two_workers():
 @pytest.mark.asyncio
 async def test_run_worker_propagates_connect_failure():
     """temporal 连不上时 run_worker 抛错（fail-fast，不静默吞）。"""
-    from shannon_worker.runner import run_worker
+    from supernova_worker.runner import run_worker
 
-    with patch("shannon_worker.runner.Client.connect",
+    with patch("supernova_worker.runner.Client.connect",
                AsyncMock(side_effect=RuntimeError("temporal down"))):
         with pytest.raises(RuntimeError, match="temporal down"):
             await run_worker("bad:7233")
@@ -74,7 +74,7 @@ async def test_run_worker_whitebox_concurrency_one_and_migration_activities():
     AuditSession 是进程全局 _current(session_registry.py), events.ndjson 经它写.
     worker 容器并发多白盒扫描会冲突 → 白盒 Worker 并发=1. 解锁需把 AuditSession 改 contextvar(留 follow-up).
     """
-    from shannon_worker.runner import run_worker
+    from supernova_worker.runner import run_worker
 
     mock_client = AsyncMock()
     wb_worker = MagicMock()
@@ -82,9 +82,9 @@ async def test_run_worker_whitebox_concurrency_one_and_migration_activities():
     bb_worker = MagicMock()
     bb_worker.run = AsyncMock()
 
-    with patch("shannon_worker.runner.Client.connect",
+    with patch("supernova_worker.runner.Client.connect",
                AsyncMock(return_value=mock_client)), \
-         patch("shannon_worker.runner.Worker",
+         patch("supernova_worker.runner.Worker",
                side_effect=[wb_worker, bb_worker]) as mw:
         await run_worker("temporal:7233")
 
@@ -103,13 +103,13 @@ def test_main_loads_profile_env_before_starting_worker():
     """main() 启动时先 load_env()——锁住「worker 入口必须加载 profile 凭证」不变量。
 
     根因(2026-07-15 真机 trip_1784107863): worker runner.main() 漏调 load_env(),
-    profile 的 SHANNON_AI_PROVIDER / SHANNON_OPENAI_* 不进进程环境 → 引擎回落
+    profile 的 SUPERNOVA_AI_PROVIDER / SUPERNOVA_OPENAI_* 不进进程环境 → 引擎回落
     anthropic_api(claude CLI)→ deepseek-openai profile 无 ANTHROPIC 凭证 →
     claude CLI 子进程 "Not logged in · Please run /login" → pre-recon 失败 →
     扫描卡死、WEB 各页全空。对齐 CLI 入口(whitebox/blackbox/combined main.py
     均首行 load_env())。
     """
-    from shannon_worker import runner
+    from supernova_worker import runner
 
     # 同一 parent Mock 记录调用顺序，验证 load_env 先于 asyncio.run。
     # patch run_worker 避免真起 temporal 连接 + 不留未 await coroutine。
@@ -117,7 +117,7 @@ def test_main_loads_profile_env_before_starting_worker():
     with patch.object(runner, "load_env", parent.load_env), \
          patch.object(runner, "asyncio", parent.asyncio), \
          patch.object(runner, "run_worker", return_value="worker-coroutine"), \
-         patch.dict(os.environ, {"SHANNON_TEMPORAL_HOST": "th", "SHANNON_TEMPORAL_PORT": "tp"}):
+         patch.dict(os.environ, {"SUPERNOVA_TEMPORAL_HOST": "th", "SUPERNOVA_TEMPORAL_PORT": "tp"}):
         runner.main()
 
     # load_env 必须在起 worker 之前调用（profile 凭证先于 provider 配置加载）

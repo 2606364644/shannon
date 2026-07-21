@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
 
-from shannon_whitebox.pipeline.activities import (
+from supernova_whitebox.pipeline.activities import (
     log_phase_start_activity, log_phase_complete_activity,
 )
-from shannon_whitebox.pipeline.shared import ActivityInput
-from shannon_whitebox.audit.session_registry import (
+from supernova_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.audit.session_registry import (
     set_audit_session, clear_audit_session,
 )
 
@@ -83,8 +83,8 @@ async def test_phase_marker_backward_compat_no_steps():
 
 async def test_save_adjudication_emits_step_events(monkeypatch):
     """Representative deterministic activity wrapped in track_step."""
-    import shannon_whitebox.pipeline.activities as act
-    import shannon_core.code_index as ci
+    import supernova_whitebox.pipeline.activities as act
+    import supernova_core.code_index as ci
     monkeypatch.setattr(ci, "save_adjudication", lambda d: None)   # stub function-level import
     monkeypatch.setattr(act, "_get_paths", lambda inp: ("repo", "deliverables", "ws"))
     rec = _RecordingSession()

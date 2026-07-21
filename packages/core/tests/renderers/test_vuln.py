@@ -1,6 +1,6 @@
 """vuln renderer TDD — 5 vuln class 共用 render_vuln。"""
-from shannon_core.renderers._helpers import placeholder, render_table
-from shannon_core.renderers.vuln import render_vuln
+from supernova_core.renderers._helpers import placeholder, render_table
+from supernova_core.renderers.vuln import render_vuln
 
 
 def test_all_missing_renders_placeholders_per_class():
@@ -52,8 +52,8 @@ def test_strategic_intel_schema_keys_match_renderer_subheaders():
     行为,drift 会让字段悄悄消失——brief 担心的 silent drop 风险)。用公共 API,
     不依赖私有名。(final-review M1 follow-up 落地)
     """
-    from shannon_core.collectors.vuln import VULN_CLASSES, make_vuln_sections
-    from shannon_core.renderers.vuln import STRATEGIC_INTEL_SUBHEADERS
+    from supernova_core.collectors.vuln import VULN_CLASSES, make_vuln_sections
+    from supernova_core.renderers.vuln import STRATEGIC_INTEL_SUBHEADERS
 
     for vc in VULN_CLASSES:
         sections = make_vuln_sections(vc)

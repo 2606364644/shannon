@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from shannon_core.audit.session import AuditSession
-from shannon_core.audit.session_registry import NullAuditSession
+from supernova_core.audit.session import AuditSession
+from supernova_core.audit.session_registry import NullAuditSession
 
 
 @pytest.mark.asyncio

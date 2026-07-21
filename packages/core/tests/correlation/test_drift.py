@@ -1,4 +1,4 @@
-from shannon_core.correlation.drift import detect_drift
+from supernova_core.correlation.drift import detect_drift
 
 
 def test_no_drift_when_repo_older():

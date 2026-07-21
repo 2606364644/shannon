@@ -8,8 +8,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
 LLM_TRACK_DOMAINS = [
-    "packages/core/src/shannon_core/collectors",   # vuln collector(LLM 轨 set_* 工具)
-    "packages/core/src/shannon_core/renderers",     # LLM 轨 deliverable 渲染
+    "packages/core/src/supernova_core/collectors",   # vuln collector(LLM 轨 set_* 工具)
+    "packages/core/src/supernova_core/renderers",     # LLM 轨 deliverable 渲染
     "prompts",                                       # LLM 轨 prompt(含 partial)
 ]
 ALLOWED = {"pipeline/workflows.py", "pipeline/activities.py",

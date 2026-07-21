@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from shannon_core.code_index.models import FuncBlock
-from shannon_core.code_index.parameter_models import SinkCategory, SlotContext
-from shannon_core.code_index.sink_discovery_llm import (
+from supernova_core.code_index.models import FuncBlock
+from supernova_core.code_index.parameter_models import SinkCategory, SlotContext
+from supernova_core.code_index.sink_discovery_llm import (
     SuspiciousCall,
     collect_suspicious_calls,
     discover_sinks_llm,
@@ -123,7 +123,7 @@ def test_case_sensitivity_by_language():
 
 def _suspicious(callee="raw_query", receiver="custom_db", line=1, arg="uid",
                 file="app.py", name="handler", source="def handler(): pass"):
-    from shannon_core.code_index.models import FuncBlock
+    from supernova_core.code_index.models import FuncBlock
     block = FuncBlock(
         id=f"{file}:{name}:{line}", file_path=file, function_name=name,
         start_line=line, end_line=line + 10, source_code=source,
@@ -197,8 +197,8 @@ async def test_gap_aggregation():
 async def test_soft_sink_flows_into_intra_hits():
     """软 sink 并入 sinks_by_func → analyze_taint_llm 能对其产 hits(集成 smoke)."""
     from collections import defaultdict
-    from shannon_core.code_index.parameter_models import IntraResult
-    from shannon_core.code_index import chain_propagator  # 仅验类型可达, 实际用 mock
+    from supernova_core.code_index.parameter_models import IntraResult
+    from supernova_core.code_index import chain_propagator  # 仅验类型可达, 实际用 mock
 
     # 构造一个软 sink + 一个有它作 sink 的 block, 验证它进 sinks_by_func 后
     # analyze_taint_llm 的确定性 fallback 能命中它(is_entry_hint 或 indirect)。
@@ -214,7 +214,7 @@ async def test_soft_sink_flows_into_intra_hits():
     sinks_by_func = defaultdict(list)
     for s in soft:
         sinks_by_func[s.caller_id].append(s)
-    from shannon_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
+    from supernova_core.code_index.llm_taint_analyzer import _deterministic_intra_fallback
     intra = _deterministic_intra_fallback(sc.block, sinks_by_func[sc.block.id])
     assert soft[0].id in intra.hits  # 软 sink 被 intra 命中 → 会进 TaintFlow
 
@@ -238,16 +238,16 @@ async def test_soft_sink_does_not_break_injection_whitelist():
 
     (旧版的 source-text/白名单维度断言已删除: comparing sink_subtype against
     issue_type strings 是 non-falsifiable, 锁不到运行时行为.)"""
-    from shannon_core.code_index.parameter_models import (
+    from supernova_core.code_index.parameter_models import (
         ParameterPropagationGraph,
         ParameterSource,
         TaintFlow,
     )
-    from shannon_core.code_index.chain_verdict import (
+    from supernova_core.code_index.chain_verdict import (
         _INJECTION_SLOTS,
         extract_candidate_chains,
     )
-    from shannon_core.code_index.vuln_chain_builders.injection_builder import (
+    from supernova_core.code_index.vuln_chain_builders.injection_builder import (
         build_injection_findings,
     )
 
@@ -330,7 +330,7 @@ async def test_discover_sinks_llm_reports_progress_and_hits():
 
     文件级后 total/done = chunk 数(= 文件数, spec §3.1)。两个不同文件 → 2 chunk 2 tick。
     """
-    from shannon_core.code_index.progress import ProgressSample
+    from supernova_core.code_index.progress import ProgressSample
 
     # 两个不同文件 → 2 chunk; a.py 判 sink, b.py 判非 sink。
     calls = [
@@ -381,7 +381,7 @@ async def test_discover_sinks_llm_skip_emits_note_via_progress_cb():
     单位是文件 chunk, 取代撞 Rich Live footer 的裸 logger.warning)。
     """
     import asyncio
-    from shannon_core.code_index.progress import ProgressSample
+    from supernova_core.code_index.progress import ProgressSample
 
     # 两个不同文件 → 2 chunk; slow.py 挂死, fast.py 正常 → 部分失败触发 on_skip。
     calls = [
@@ -524,7 +524,7 @@ async def test_discover_cross_file_merges_small_files_into_one_call():
 async def test_discover_per_call_timeout_defaults_to_120(monkeypatch):
     """文件级 prompt 更重 → discover_sinks_llm 不传 per_call_timeout 时默认 120s
     (局部覆盖, 不动 concurrency 全局 60s; spec §3.2)。显式传值优先。"""
-    from shannon_core.code_index import sink_discovery_llm as mod
+    from supernova_core.code_index import sink_discovery_llm as mod
 
     captured: list = []
 
@@ -564,15 +564,15 @@ async def test_discover_large_file_chunks_into_multiple_calls():
 
 
 async def test_discover_per_call_timeout_honors_env_override(monkeypatch):
-    """spec §3.2: SHANNON_LLM_PER_CALL_TIMEOUT env 须能覆盖 sink 的 per-call 上限。
+    """spec §3.2: SUPERNOVA_LLM_PER_CALL_TIMEOUT env 须能覆盖 sink 的 per-call 上限。
 
     文件级默认 120s(下限, prompt 更重), 但运营设 env=200 给慢模型必须生效 ——
     不能被硬编码 120 绕过(旧版 effective_timeout 恒 120 → env 失效, 违反
     spec §3.2「均可经 env 覆盖」+ concurrency.py docstring)。回归锚点。
     """
-    from shannon_core.code_index import sink_discovery_llm as mod
+    from supernova_core.code_index import sink_discovery_llm as mod
 
-    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "200")
+    monkeypatch.setenv("SUPERNOVA_LLM_PER_CALL_TIMEOUT", "200")
 
     captured: list = []
 
@@ -623,7 +623,7 @@ async def test_discover_sinks_threshold_derives_from_model():
     glm-5.2 context 1M × 0.75 = 750K; big_src ~100K tokens < 750K -> 1 chunk(1 次 LLM 调用)。
     """
     import asyncio
-    from shannon_core.code_index.models import FuncBlock
+    from supernova_core.code_index.models import FuncBlock
 
     big_src = "x = 1\n" * 100_000  # ~500K chars -> ~125K tokens(ascii)
     block = FuncBlock(
@@ -649,7 +649,7 @@ async def test_discover_sinks_threshold_default_model(monkeypatch):
 
     big_src ~125K tokens > 96K, 但单 block 超 threshold 独立成 1 chunk(无法再拆)。
     """
-    from shannon_core.code_index.models import FuncBlock
+    from supernova_core.code_index.models import FuncBlock
 
     big_src = "x = 1\n" * 100_000  # ~125K tokens
     block = FuncBlock(

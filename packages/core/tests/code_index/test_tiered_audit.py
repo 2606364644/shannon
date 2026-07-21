@@ -1,10 +1,10 @@
 import pytest
-from shannon_core.code_index.tiered_audit import (
+from supernova_core.code_index.tiered_audit import (
     TieredAuditPlanner, AuditPlan,
 )
-from shannon_core.code_index.models import FuncBlock, CallChain, ParameterSource
-from shannon_core.code_index.parameter_models import TaintFlow, SinkType, SlotContext
-from shannon_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
+from supernova_core.code_index.models import FuncBlock, CallChain, ParameterSource
+from supernova_core.code_index.parameter_models import TaintFlow, SinkType, SlotContext
+from supernova_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
 
 
 def _block(name: str, file: str = "app.py", line: int = 1,
@@ -189,7 +189,7 @@ class TestTieredAuditPlannerSinkCallSites:
     def test_planner_forwards_sink_call_sites_so_taint_completeness_nonzero(self):
         """Spec A 集成：TieredAuditPlanner.plan() 必须把 sink_call_sites 转发给
         ChainRiskScore，使 sink_call_site_id 命中的 flow 在生产路径也激活 taint_completeness。"""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             DangerousSlot, SinkCallSite, SinkCategory, SlotContext, TaintFlow,
         )
 

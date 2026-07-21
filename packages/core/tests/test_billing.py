@@ -1,4 +1,4 @@
-from shannon_core.utils.billing import is_spending_cap_behavior
+from supernova_core.utils.billing import is_spending_cap_behavior
 
 def test_spending_cap_detected():
     assert is_spending_cap_behavior(turns=1, cost=0.0, text="I've reached my spending cap")

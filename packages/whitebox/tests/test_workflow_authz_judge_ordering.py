@@ -21,7 +21,7 @@ async def test_judge_runs_before_merge_in_workflow(tmp_path, monkeypatch):
         return {"merged_classes": []}
 
     # Import the workflow module to patch the activities it references.
-    from shannon_whitebox.pipeline import workflows
+    from supernova_whitebox.pipeline import workflows
 
     with patch.object(workflows.activities, "run_authz_gitnexus_judge", new=fake_judge):
         with patch.object(workflows.activities, "run_merge_dual_track_queues", new=fake_merge):
@@ -38,7 +38,7 @@ def test_workflow_source_calls_judge_before_merge():
     """Source-level check: run_authz_gitnexus_judge appears before
     run_merge_dual_track_queues in the workflow's vuln-phase tail."""
     from pathlib import Path
-    wf = Path(__file__).resolve().parents[1] / "src/shannon_whitebox/pipeline/workflows.py"
+    wf = Path(__file__).resolve().parents[1] / "src/supernova_whitebox/pipeline/workflows.py"
     src = wf.read_text()
     j = src.find("run_authz_gitnexus_judge")
     m = src.find("run_merge_dual_track_queues")

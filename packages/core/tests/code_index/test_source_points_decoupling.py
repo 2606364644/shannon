@@ -7,7 +7,7 @@ LLM 轨 prompt。
 层(GitNexus),破坏双轨独立性。
 
 `source_points` 是 GitNexus 轨 `parameter_graph.json` 的确定性字段
-(`packages/core/src/shannon_core/code_index/models.py`: ParameterGraph.source_points
+(`packages/core/src/supernova_core/code_index/models.py`: ParameterGraph.source_points
 = list[SourcePoint]),由 `source_detector.detect_sources` 规则 + LLM 补召回产出
 (同 SinkCallSite 一类)。它绝不允许跨轨注入 LLM 轨 prompt。
 
@@ -33,7 +33,7 @@ FORBIDDEN_TOKENS = ("source_points", "SourcePoint", "source_point_ids")
 
 
 def _all_prompt_files():
-    """遍历 shannon-py 真实 prompts 目录下的所有 prompt 文件(.txt / .md)。
+    """遍历 supernova 真实 prompts 目录下的所有 prompt 文件(.txt / .md)。
 
     若 PROMPTS_DIR 不存在(路径错),yield 为空——test_no_prompt_references_source_points
     的 scanned > 0 断言会失败,从而暴露路径错误,防 vacuous pass。"""

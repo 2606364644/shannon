@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.services.workspace_discovery import (
+from supernova_core.services.workspace_discovery import (
     DiscoveryResult,
     ValidationResult,
     WorkspaceDiscovery,
 )
-from shannon_core.session import SessionManager
+from supernova_core.session import SessionManager
 
 
 def _setup_workspace(tmp_path, name, web_url, vuln_classes, scan_type="whitebox"):

@@ -5,8 +5,8 @@ C1 Phase B Task 2: web 提交端是另一进程(worker 容器), env 到不了容
 """
 import pytest
 
-from shannon_core.audit.workflow_logger import WorkflowLogger
-from shannon_core.models.metrics import SessionMetadata
+from supernova_core.audit.workflow_logger import WorkflowLogger
+from supernova_core.models.metrics import SessionMetadata
 
 
 def _make_logger(tmp_path) -> WorkflowLogger:
@@ -19,7 +19,7 @@ def _make_logger(tmp_path) -> WorkflowLogger:
 @pytest.mark.asyncio
 async def test_initialize_uses_explicit_event_file_over_env(tmp_path, monkeypatch):
     """显式 event_file 参数挂 StructuredEventRenderer 到该路径, 不读 env。"""
-    monkeypatch.setenv("SHANNON_WEB_EVENT_FILE", "/should/not/use")
+    monkeypatch.setenv("SUPERNOVA_WEB_EVENT_FILE", "/should/not/use")
     logger = _make_logger(tmp_path)
     ef = tmp_path / "events.ndjson"
     await logger.initialize(event_file=str(ef))
@@ -33,7 +33,7 @@ async def test_initialize_uses_explicit_event_file_over_env(tmp_path, monkeypatc
 async def test_initialize_falls_back_to_env_when_event_file_none(tmp_path, monkeypatch):
     """event_file=None 时回落 env(CLI 路径不变)。"""
     ef = tmp_path / "from_env.ndjson"
-    monkeypatch.setenv("SHANNON_WEB_EVENT_FILE", str(ef))
+    monkeypatch.setenv("SUPERNOVA_WEB_EVENT_FILE", str(ef))
     logger = _make_logger(tmp_path)
     await logger.initialize(event_file=None)
     paths = [getattr(r, "_path", None) for r in logger._dispatcher._renderers]
@@ -44,7 +44,7 @@ async def test_initialize_falls_back_to_env_when_event_file_none(tmp_path, monke
 @pytest.mark.asyncio
 async def test_initialize_no_event_file_no_env_no_renderer(tmp_path, monkeypatch):
     """两边都无 → 不挂 StructuredEventRenderer(纯 CLI rich 路径)。"""
-    monkeypatch.delenv("SHANNON_WEB_EVENT_FILE", raising=False)
+    monkeypatch.delenv("SUPERNOVA_WEB_EVENT_FILE", raising=False)
     logger = _make_logger(tmp_path)
     await logger.initialize(event_file=None)
     types = [type(r).__name__ for r in logger._dispatcher._renderers]

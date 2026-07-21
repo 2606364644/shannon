@@ -1,6 +1,6 @@
 import asyncio
-from shannon_core.display.events import GitnexusLlmEvent
-from shannon_core.audit.session_registry import NullAuditSession
+from supernova_core.display.events import GitnexusLlmEvent
+from supernova_core.audit.session_registry import NullAuditSession
 
 
 def test_null_session_log_gitnexus_progress_is_noop():
@@ -11,7 +11,7 @@ def test_null_session_log_gitnexus_progress_is_noop():
 
 
 def test_workflow_logger_dispatches_gitnexus_event(monkeypatch):
-    from shannon_core.audit.workflow_logger import WorkflowLogger
+    from supernova_core.audit.workflow_logger import WorkflowLogger
     dispatched = []
     wl = WorkflowLogger.__new__(WorkflowLogger)   # bypass __init__ (needs meta)
     wl._dispatcher = type("D", (), {"dispatch": staticmethod(
@@ -23,7 +23,7 @@ def test_workflow_logger_dispatches_gitnexus_event(monkeypatch):
 
 
 def test_workflow_logger_no_dispatcher_is_safe():
-    from shannon_core.audit.workflow_logger import WorkflowLogger
+    from supernova_core.audit.workflow_logger import WorkflowLogger
     wl = WorkflowLogger.__new__(WorkflowLogger)
     wl._dispatcher = None
     asyncio.run(

@@ -1,4 +1,4 @@
-// 1:1 移植 packages/core/src/shannon_core/display/formatters.py
+// 1:1 移植 packages/core/src/supernova_core/display/formatters.py
 // first_nonempty_line + humanize_tool_call + 依赖（default_tool_params / summarize_todo /
 // maybe_browser_action）。reducer 对齐测试锁定行为，以 formatters.py 为准。
 

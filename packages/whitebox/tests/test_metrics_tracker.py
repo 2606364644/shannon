@@ -2,10 +2,10 @@ import json
 import pytest
 from pathlib import Path
 
-from shannon_core.models.metrics import SessionMetadata
-from shannon_core.models.audit import AgentEndResult
-from shannon_whitebox.audit.metrics_tracker import MetricsTracker
-from shannon_whitebox.audit.utils import generate_audit_path
+from supernova_core.models.metrics import SessionMetadata
+from supernova_core.models.audit import AgentEndResult
+from supernova_whitebox.audit.metrics_tracker import MetricsTracker
+from supernova_whitebox.audit.utils import generate_audit_path
 
 
 def _make_meta(tmp_path: Path) -> SessionMetadata:

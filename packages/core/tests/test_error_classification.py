@@ -2,7 +2,7 @@
 
 import pytest
 
-from shannon_core.models.errors import (
+from supernova_core.models.errors import (
     NON_RETRYABLE_PATTERNS,
     NON_RETRYABLE_TYPES,
     RETRYABLE_PATTERNS,

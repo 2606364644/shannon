@@ -33,20 +33,20 @@
 }
 
 /* braille spinner（DSF 自包含，不依赖 events.css） */
-@keyframes shannon-spin {
+@keyframes supernova-spin {
   0% { content: "⠋"; } 10% { content: "⠙"; } 20% { content: "⠹"; } 30% { content: "⠸"; }
   40% { content: "⠼"; } 50% { content: "⠴"; } 60% { content: "⠦"; } 70% { content: "⠧"; }
   80% { content: "⠇"; } 90% { content: "⠏"; }
 }
-.shannon-spinner::before {
+.supernova-spinner::before {
   content: "⠋";
-  animation: shannon-spin 1.05s steps(1) infinite;
+  animation: supernova-spin 1.05s steps(1) infinite;
   display: inline-block;
   width: 1ch;
   color: hsl(var(--primary));
 }
 @media (prefers-reduced-motion: reduce) {
-  .shannon-spinner::before { animation: none; content: "•"; }
+  .supernova-spinner::before { animation: none; content: "•"; }
 }
 
 /* Card 可达性变体（spec §4，供子项目 VulnCard：<Card className="card-reachable">） */

@@ -5,7 +5,7 @@ export function Spinner({ label }: { label?: string }) {
       aria-live="polite"
       className="inline-flex items-center gap-1.5 text-sm text-primary"
     >
-      <span className="shannon-spinner" aria-hidden="true" />
+      <span className="supernova-spinner" aria-hidden="true" />
       {label}
     </span>
   );

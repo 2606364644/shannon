@@ -1,7 +1,7 @@
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     FuncBlock, CallEdge, EntryPoint, CallChain, CodeIndex,
 )
-from shannon_core.code_index.summary import generate_summary
+from supernova_core.code_index.summary import generate_summary
 
 
 def _make_index() -> CodeIndex:

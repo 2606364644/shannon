@@ -11,6 +11,6 @@ describe("Spinner", () => {
   it("无 label 也渲染（aria-live polite）", () => {
     const { container } = render(<Spinner />);
     expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(container.querySelector(".shannon-spinner")).toBeTruthy();
+    expect(container.querySelector(".supernova-spinner")).toBeTruthy();
   });
 });

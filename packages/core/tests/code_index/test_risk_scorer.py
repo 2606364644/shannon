@@ -1,6 +1,6 @@
-from shannon_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
-from shannon_core.code_index.models import FuncBlock, CallChain, ParameterSource
-from shannon_core.code_index.parameter_models import TaintFlow, SinkType, PropagationStep
+from supernova_core.code_index.risk_scorer import ChainRiskScore, AuditBudget
+from supernova_core.code_index.models import FuncBlock, CallChain, ParameterSource
+from supernova_core.code_index.parameter_models import TaintFlow, SinkType, PropagationStep
 
 
 def _block(name: str, file: str = "app.py", line: int = 1,
@@ -176,10 +176,10 @@ class TestChainRiskScoreSinkCallSites:
     def test_score_uses_sink_call_sites_when_present(self):
         """When a chain has SinkCallSite records attached, use their category
         instead of falling back to classify_sink regex."""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory,
         )
-        from shannon_core.code_index.models import CodeIndex
+        from supernova_core.code_index.models import CodeIndex
 
         # middle block has a SQL sink call site
         sql_site = SinkCallSite(
@@ -214,7 +214,7 @@ class TestChainRiskScoreSinkCallSites:
 
     def test_score_picks_max_danger_across_chain(self):
         """Chain has multiple sinks (one SQL, one LOG) — pick the max."""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory,
         )
         sql_site = SinkCallSite(
@@ -279,7 +279,7 @@ class TestChainRiskScoreSinkCallSites:
 
     def test_score_xss_uses_template_render_score(self):
         """XSS category maps to TEMPLATE_RENDER (closest legacy fit)."""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory,
         )
         xss_site = SinkCallSite(
@@ -314,7 +314,7 @@ class TestChainRiskScoreSinkCallSites:
 
     def test_sink_call_sites_present_but_none_match_chain(self):
         """Sites exist but none have caller_id on the chain → classify_sink fallback."""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory,
         )
         # site on a node NOT in the chain path
@@ -368,7 +368,7 @@ class TestTaintCompletenessUsesSinkCallSiteId:
     def test_completeness_uses_sink_call_site_id_when_chain_has_matching_site(self):
         """chain.path 包含 SinkCallSite.caller_id 且 flow.sink_call_site_id 命中
         → taint_completeness > 0。"""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             DangerousSlot, SinkCallSite, SinkCategory, SlotContext, TaintFlow,
         )
 
@@ -408,7 +408,7 @@ class TestTaintCompletenessUsesSinkCallSiteId:
 
     def test_completeness_zero_when_flow_does_not_match_chain_sites(self):
         """flow.sink_call_site_id 指向的 sink 不在 chain 上 → taint_completeness=0。"""
-        from shannon_core.code_index.parameter_models import (
+        from supernova_core.code_index.parameter_models import (
             SinkCallSite, SinkCategory, SlotContext, TaintFlow,
         )
 

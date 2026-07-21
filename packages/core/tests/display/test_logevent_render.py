@@ -15,16 +15,16 @@ from rich.console import Console
 
 import re
 
-from shannon_core.display.events import LogEvent, StepEvent
-from shannon_core.display.file_renderer import FileLogRenderer
-from shannon_core.display.rich_renderer import RichConsoleRenderer
+from supernova_core.display.events import LogEvent, StepEvent
+from supernova_core.display.file_renderer import FileLogRenderer
+from supernova_core.display.rich_renderer import RichConsoleRenderer
 
 
 def _evt(level="WARNING", **kw):
     base = dict(
         timestamp="2026-07-08 10:00:00",
         category=level,
-        logger_name="shannon_core.code_index",
+        logger_name="supernova_core.code_index",
         level=level,
         message="queue unreadable: boom",
         exc_txt=None,
@@ -50,7 +50,7 @@ def test_logevent_render_includes_logger_level_message():
     r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
     r._render_log(_evt(level="WARNING"))
     out = buf.getvalue()
-    assert "shannon_core.code_index" in out
+    assert "supernova_core.code_index" in out
     assert "WARNING" in out
     assert "queue unreadable: boom" in out
 
@@ -107,7 +107,7 @@ async def test_logevent_not_written_to_workflow_log():
 
 def test_logevent_long_message_continuation_indented():
     """长诊断消息续行缩进到 LOG_INDENT 列，不再 Rich 硬换行顶格。"""
-    from shannon_core.display.formatters import LOG_INDENT
+    from supernova_core.display.formatters import LOG_INDENT
     buf = StringIO()
     r = RichConsoleRenderer(Console(file=buf, width=60, color_system=None))
     long_msg = "Discovered 34 security files: " + ("config=10, " * 20)
@@ -120,7 +120,7 @@ def test_logevent_long_message_continuation_indented():
 async def test_info_event_render_not_dim_keeps_bright():
     """InfoEvent(显式用户消息)保持亮色，不受诊断 LogEvent 的 dim 降级影响。"""
     from unittest.mock import MagicMock
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.events import InfoEvent
     console = MagicMock()
     await RichConsoleRenderer(console=console).render(
         InfoEvent(timestamp="t", category="INFO", message="hi", level="info"))
@@ -132,8 +132,8 @@ async def test_info_event_render_not_dim_keeps_bright():
 # --- verbose 开关（spec 2026-07-14 §模块4）---
 
 def test_logevent_verbose_0_suppresses_terminal_output(monkeypatch):
-    """SHANNON_LOG_VERBOSE=0：诊断 LogEvent 不上终端（仍落 diagnostic.log，独立 renderer）。"""
-    monkeypatch.setenv("SHANNON_LOG_VERBOSE", "0")
+    """SUPERNOVA_LOG_VERBOSE=0：诊断 LogEvent 不上终端（仍落 diagnostic.log，独立 renderer）。"""
+    monkeypatch.setenv("SUPERNOVA_LOG_VERBOSE", "0")
     buf = StringIO()
     r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
     r._render_log(_evt(level="WARNING"))
@@ -141,8 +141,8 @@ def test_logevent_verbose_0_suppresses_terminal_output(monkeypatch):
 
 
 def test_logevent_verbose_default_shows_on_terminal(monkeypatch):
-    """SHANNON_LOG_VERBOSE 未设(默认 1)：诊断 LogEvent 正常 dim 渲染到终端。"""
-    monkeypatch.delenv("SHANNON_LOG_VERBOSE", raising=False)
+    """SUPERNOVA_LOG_VERBOSE 未设(默认 1)：诊断 LogEvent 正常 dim 渲染到终端。"""
+    monkeypatch.delenv("SUPERNOVA_LOG_VERBOSE", raising=False)
     buf = StringIO()
     r = RichConsoleRenderer(Console(file=buf, width=200, color_system=None))
     r._render_log(_evt(level="WARNING"))
@@ -183,7 +183,7 @@ def test_log_dim_column_aligns_with_bright_step_body():
 
 def test_log_dim_warning_column_aligns_with_bright_info_warning():
     """dim WARNING LogEvent 也与亮色 InfoEvent WARNING 对齐（标签 7 字符同宽场景）。"""
-    from shannon_core.display.events import InfoEvent
+    from supernova_core.display.events import InfoEvent
     log_col = _body_start_col(lambda r: r._render_log(_evt(level="WARNING")))
     info_col = _body_start_col(lambda r: r._render_info(InfoEvent(
         timestamp="2026-07-08 10:00:00", category="INFO",

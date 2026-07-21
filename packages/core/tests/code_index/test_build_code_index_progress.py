@@ -17,8 +17,8 @@ import tempfile
 
 import pytest
 
-from shannon_core import code_index as ci
-from shannon_core.code_index.parameter_models import IntraResult
+from supernova_core import code_index as ci
+from supernova_core.code_index.parameter_models import IntraResult
 
 
 class _ShortCircuit(Exception):
@@ -71,7 +71,7 @@ async def test_progress_cb_threaded_to_discover_sinks_and_sources(monkeypatch):
         return IntraResult(tainted_params=set(), hits={}, local_steps=[])
 
     async def _fake_call_graph(*a, **kw):
-        from shannon_core.code_index.models import CallGraphResult
+        from supernova_core.code_index.models import CallGraphResult
         return CallGraphResult(edges=[], chains=[], entry_points=[])
 
     monkeypatch.setattr(ci, "build_call_graph_from_gitnexus", _fake_call_graph)
@@ -100,7 +100,7 @@ async def test_taint_emitter_built_with_cb_and_ticks(monkeypatch):
     and patch detect_sinks to surface one synthetic sink keyed to a real
     FuncBlock so _taint_one runs exactly once.
     """
-    from shannon_core.code_index.models import CallGraphResult
+    from supernova_core.code_index.models import CallGraphResult
 
     tmp = tempfile.mkdtemp()
     block_src = "def handler(req):\n    return query(req.param)\n"
@@ -190,7 +190,7 @@ async def test_taint_skip_emits_note_via_emitter_note(monkeypatch):
     作 caller_id, 确保 _taint_one 能查到 block(返回 tuple, 非 None)。
     """
     import asyncio
-    from shannon_core.code_index.models import CallGraphResult
+    from supernova_core.code_index.models import CallGraphResult
     from types import SimpleNamespace
 
     tmp = tempfile.mkdtemp()
@@ -228,7 +228,7 @@ async def test_taint_skip_emits_note_via_emitter_note(monkeypatch):
         raise _ShortCircuit("after taint emitter")
     monkeypatch.setattr(ci, "propagate_backward_across_chains", _abort_after_taint)
     # 短超时(覆盖 env 默认 60s), 让 handler 的 sleep(10) 必超时
-    monkeypatch.setenv("SHANNON_LLM_PER_CALL_TIMEOUT", "0.2")
+    monkeypatch.setenv("SUPERNOVA_LLM_PER_CALL_TIMEOUT", "0.2")
 
     instances: list = []
 

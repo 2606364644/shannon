@@ -1,5 +1,5 @@
 import pytest
-from shannon_blackbox.pipeline.shared import BlackboxPipelineState
+from supernova_blackbox.pipeline.shared import BlackboxPipelineState
 
 
 def test_blackbox_pipeline_state_initializes_with_empty_errors_list():
@@ -69,7 +69,7 @@ class TestBlackboxPipelineStateErrorPropagation:
         assert state.status == "cancelled"
 
 
-from shannon_blackbox.pipeline.shared import BlackboxPipelineInput
+from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
 
 
 def test_blackbox_input_has_rerun_field_default_false():

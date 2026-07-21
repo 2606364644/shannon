@@ -19,7 +19,7 @@ void i18n
     react: { useSuspense: false },
     detection: {
       order: ["localStorage", "navigator"],
-      lookupLocalStorage: "shannon.lang",
+      lookupLocalStorage: "supernova.lang",
       // languagedetector v8 移除了 cacheUserLanguage;caches 指定持久化后端,
       // ["localStorage"] 与 lookupLocalStorage 对称读写,等价于旧版 cacheUserLanguage:true。
       caches: ["localStorage"],

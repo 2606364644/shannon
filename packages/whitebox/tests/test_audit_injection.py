@@ -1,15 +1,15 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from shannon_core.models.metrics import AgentMetrics
-from shannon_core.logging.activity_logger import ConsoleActivityLogger
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_core.models.metrics import AgentMetrics
+from supernova_core.logging.activity_logger import ConsoleActivityLogger
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 @pytest.mark.asyncio
 async def test_run_agent_injects_activity_logger(tmp_path):
     """run_agent calls create_activity_logger() and passes it to executor.execute."""
-    from shannon_whitebox.pipeline import activities
+    from supernova_whitebox.pipeline import activities
 
     repo = tmp_path / "repo"
     repo.mkdir()

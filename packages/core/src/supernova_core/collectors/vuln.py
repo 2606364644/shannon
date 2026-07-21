@@ -1,0 +1,343 @@
+"""vuln 5 class 共用 collector:3 shared section + 1 per-class strategic_intelligence。
+
+移植 TS apps/worker/src/collectors/vuln-collector.ts(整个文件权威；字段对照原 schema)。
+- set_findings_summary       (§1 + §2) shared
+- set_strategic_intelligence (§3)      per-class, 按 vuln_class 选 5 个 schema 之一
+- set_safe_vectors           (§4)      shared
+- set_blind_spots            (§5)      shared
+
+声明式 schema(纯 JSON Schema dict,无 pydantic),经 bridge.py 双引擎桥生成 set_* 工具。
+本模块不 import 任何 GitNexus / 确定性层 / code_index 符号——vuln source 是 LLM 自身分析,
+collector 仅作结构化通道(守 §1 双轨独立性)。
+"""
+from __future__ import annotations
+
+from supernova_core.collectors.base import CollectorBase, SectionSchema
+
+VULN_CLASSES: list[str] = ["injection", "xss", "auth", "ssrf", "authz"]
+
+
+# ── 本地 schema 构造 helper(不 import pre_recon.py 的私有 helper) ───────
+def _str_field(desc: str, min_length: int = 1) -> dict:
+    return {"type": "string", "minLength": min_length, "description": desc}
+
+
+def _obj(props: dict, required: list[str], desc: str = "") -> dict:
+    schema: dict = {"type": "object", "properties": props, "required": required}
+    if desc:
+        schema["description"] = desc
+    return schema
+
+
+# ============================================================================
+# SHARED SCHEMAS — set_findings_summary / set_safe_vectors / set_blind_spots
+# ============================================================================
+
+# Pattern(对齐 TS PatternSchema)
+_PATTERN: dict = _obj(
+    {
+        "name": _str_field(
+            'Concise pattern name, e.g. "Weak Session Management", '
+            '"Reflected XSS in Search Parameter", "Insufficient URL Validation".'
+        ),
+        "description": _str_field(
+            "One- to two-sentence description of the pattern observed in the codebase."
+        ),
+        "implication": _str_field(
+            "One- to two-sentence implication for exploitation — what does this pattern "
+            "enable an attacker to do."
+        ),
+        "representative_finding_ids": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "description": (
+                "IDs of findings that exhibit this pattern (e.g. "
+                '["AUTH-VULN-01", "AUTH-VULN-02"]). Must match IDs the agent has assigned '
+                "in the structured-output exploitation queue."
+            ),
+        },
+    },
+    ["name", "description", "implication", "representative_finding_ids"],
+)
+
+# set_findings_summary (§1 + §2)
+FINDINGS_SUMMARY: dict = _obj(
+    {
+        "key_outcome": _str_field(
+            "One to two sentences capturing the headline result of your analysis — what was "
+            "found and its severity profile (e.g. \"Several high-confidence SQL injection "
+            'vulnerabilities were identified; all findings have been passed to the exploitation '
+            'phase"). Becomes Section 1 of the rendered deliverable.'
+        ),
+        "patterns": {
+            "type": "array",
+            "items": _PATTERN,
+            "description": (
+                "Complete list of dominant patterns observed across findings. Pass all patterns "
+                "in one call. Empty array is acceptable if no recurring patterns were observed — "
+                'the deliverable will render "No dominant patterns identified" for Section 2 in '
+                "that case."
+            ),
+        },
+    },
+    ["key_outcome", "patterns"],
+)
+
+# SafeVector item(对齐 TS SafeVectorInputSchema)
+_SAFE_VECTOR: dict = _obj(
+    {
+        "subject": _str_field(
+            "The specific subject of analysis. For injection/xss runs, the input parameter name "
+            '(e.g. "username", "redirect_url"). For auth/ssrf runs, the component or flow name '
+            '(e.g. "Password Hashing", "Webhook Configuration"). For authz runs, the endpoint '
+            '(e.g. "POST /api/auth/logout"). The renderer maps this to the class-appropriate '
+            "column header."
+        ),
+        "location": _str_field(
+            'File path with line number (e.g. "controllers/authController.js:45") or endpoint '
+            'URL (e.g. "/profile"). For authz runs, this is the guard location specifically '
+            '(e.g. "middleware/auth.js:45"). The renderer maps this to the class-appropriate '
+            "column header."
+        ),
+        "defense_mechanism": _str_field(
+            "The robust defense observed (e.g. \"Prepared Statement (Parameter Binding)\", "
+            '"HTML Entity Encoding", "Strict URL Whitelist Validation", '
+            '"bcrypt.compare for constant-time check").'
+        ),
+        "render_context": {
+            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "description": (
+                "XSS-only: the DOM render context for the validated vector — one of HTML_BODY, "
+                "HTML_ATTRIBUTE, JAVASCRIPT_STRING, URL_PARAM, CSS_VALUE. Omit (or pass null) for "
+                "non-XSS classes; the renderer only emits this column for the XSS deliverable."
+            ),
+        },
+    },
+    ["subject", "location", "defense_mechanism"],  # render_context 不在 required
+)
+
+# set_safe_vectors (§4)
+SAFE_VECTORS: dict = _obj(
+    {
+        "vectors": {
+            "type": "array",
+            "items": _SAFE_VECTOR,
+            "description": (
+                "All input vectors / components / endpoints that were analyzed and confirmed to "
+                'have robust, context-appropriate defenses. Empty array is acceptable but unusual — '
+                'the deliverable will render "No vectors confirmed secure during analysis" for '
+                "Section 4 in that case. Becomes Section 4 of the rendered deliverable. The "
+                "renderer sorts by (subject, location) before rendering, so emission order does "
+                "not affect output."
+            ),
+        },
+    },
+    ["vectors"],
+)
+
+# BlindSpot item(对齐 TS BlindSpotItemSchema)
+_BLIND_SPOT_ITEM: dict = _obj(
+    {
+        "heading": _str_field(
+            'Short heading for the blind spot (e.g. "Untraced Asynchronous Flows", '
+            '"Limited Visibility into Stored Procedures", "Minified JavaScript Bundle").'
+        ),
+        "description": _str_field(
+            "One to three sentences describing the analysis gap — what could not be traced, "
+            "why, and what the residual risk is."
+        ),
+    },
+    ["heading", "description"],
+)
+
+# set_blind_spots (§5)
+BLIND_SPOTS: dict = _obj(
+    {
+        "items": {
+            "type": "array",
+            "items": _BLIND_SPOT_ITEM,
+            "description": (
+                "Analysis constraints, untraced code paths, or other coverage gaps that should be "
+                'noted. Empty array is acceptable on high-coverage runs — the deliverable will '
+                'render "No analysis constraints or blind spots identified" for Section 5 in that '
+                "case. Becomes Section 5 of the rendered deliverable."
+            ),
+        },
+    },
+    ["items"],
+)
+
+
+# ============================================================================
+# PER-CLASS set_strategic_intelligence SCHEMAS(字段对照 TS line 155-285)
+# ============================================================================
+
+INJECTION_STRATEGIC_INTEL: dict = _obj(
+    {
+        "defensive_evasion_waf": _str_field(
+            "WAF behavior observed during analysis: active rules, common payloads blocked, "
+            'identified bypasses (e.g. "WAF blocks UNION SELECT but not time-based blind '
+            'injection"). Write "Not applicable — no WAF observed" if none was detected.'
+        ),
+        "error_based_potential": _str_field(
+            "Whether endpoints leak verbose database errors that enable error-based injection "
+            '(/api/products returns verbose PostgreSQL error messages, prime target for error-based '
+            'exploitation"). Write "Not applicable" if no injection findings exist.'
+        ),
+        "confirmed_database_technology": _str_field(
+            "Database engine(s) confirmed via error syntax or function calls (e.g. "
+            '"PostgreSQL, confirmed via pg_sleep() and verbose error syntax"). Drives payload '
+            'selection downstream. Write "Not applicable" if no DB sinks in scope.'
+        ),
+    },
+    ["defensive_evasion_waf", "error_based_potential", "confirmed_database_technology"],
+)
+
+XSS_STRATEGIC_INTEL: dict = _obj(
+    {
+        "csp_analysis": _str_field(
+            "Content Security Policy observed and its bypassability: current policy text, "
+            "critical bypasses (e.g. \"script-src 'self' https://trusted-cdn.com — the trusted "
+            'CDN hosts vulnerable AngularJS, enabling client-side template injection bypass"). '
+            'Write "Not applicable — no CSP header served" if none.'
+        ),
+        "cookie_security": _str_field(
+            "Session cookie security observations: HttpOnly, Secure, SameSite flags, and storage "
+            "mechanism (e.g. \"Primary session cookie `sessionid` is missing HttpOnly; tokens are "
+            'also stored in localStorage, both accessible to JavaScript"). Drives exfiltration '
+            "strategy."
+        ),
+    },
+    ["csp_analysis", "cookie_security"],
+)
+
+AUTH_STRATEGIC_INTEL: dict = _obj(
+    {
+        "authentication_method": _str_field(
+            "How users authenticate: JWT, session cookie, OAuth, SAML, etc. Include any algorithm "
+            'or library details (e.g. "JWT (RS256) with hardcoded private key in lib/insecurity.ts:23").'
+        ),
+        "session_token_details": _str_field(
+            "Where tokens live and how they are protected: cookie name, storage mechanism (cookie "
+            "vs localStorage), cookie flags, expiration (e.g. \"JWT stored in localStorage under "
+            'key `token`; cookie copy lacks HttpOnly/Secure/SameSite; 6-hour TTL with no revocation").'
+        ),
+        "password_policy": _str_field(
+            "Observed server-side password policy and storage: complexity rules, hashing algorithm, "
+            "salt, (e.g. \"MD5 without salt via crypto.createHash; no server-side complexity policy; "
+            'client-side 5-char minimum trivially bypassed").'
+        ),
+    },
+    ["authentication_method", "session_token_details", "password_policy"],
+)
+
+SSRF_STRATEGIC_INTEL: dict = _obj(
+    {
+        "http_client_library": _str_field(
+            "HTTP client library/libraries used for outbound requests (e.g. \"axios 1.6\", "
+            '"node-fetch", "requests", "HttpClient (Spring)"). Include version where it informs '
+            "known bypass techniques."
+        ),
+        "request_architecture": _str_field(
+            "How outbound requests are constructed and routed: proxy/middleware patterns, internal "
+            "routing rules (e.g. \"Webhook URLs are POSTed directly without an outbound proxy; "
+            'redirects are followed by default with no maxRedirects limit").'
+        ),
+        "internal_services": _str_field(
+            "Internal endpoints, services, or cloud-metadata addresses discovered during analysis "
+            "that an SSRF could reach (e.g. \"169.254.169.254 (AWS IMDS), internal admin API at "
+            'admin.internal:8443, PostgreSQL on localhost:5432").'
+        ),
+    },
+    ["http_client_library", "request_architecture", "internal_services"],
+)
+
+AUTHZ_STRATEGIC_INTEL: dict = _obj(
+    {
+        "session_management_architecture": _str_field(
+            "Session and authentication architecture relevant to authorization decisions: where "
+            "user identity comes from, whether the user ID is trusted by downstream guards (e.g. "
+            "\"JWT tokens in cookies; user ID extracted from `req.user.id` and used directly in DB "
+            'queries without ownership re-validation").'
+        ),
+        "role_permission_model": _str_field(
+            "Roles, capabilities, and where they live: identified roles, their privilege levels, "
+            "and where role/permission data is stored (e.g. \"Three roles: user, moderator, admin. "
+            "Role embedded in JWT and database; checks inconsistent — many admin routes only check "
+            '`req.user` presence").'
+        ),
+        "resource_access_patterns": _str_field(
+            "How resource IDs flow through the system and ownership patterns: e.g. \"Most endpoints "
+            "use path parameters for resource IDs (/api/users/{id}); IDs are passed to DB queries "
+            'without ownership validation". Critical for IDOR exploitation.'
+        ),
+        "workflow_implementation": _str_field(
+            "Multi-step processes and state transitions: how workflow stages are tracked, whether "
+            "prior-state checks are enforced (e.g. \"Multi-step processes use status fields in "
+            'database; status transitions do not verify prior state completion"). Drives '
+            "context-based authz exploitation."
+        ),
+    },
+    [
+        "session_management_architecture",
+        "role_permission_model",
+        "resource_access_patterns",
+        "workflow_implementation",
+    ],
+)
+
+_STRATEGIC_INTEL_SCHEMAS: dict[str, dict] = {
+    "injection": INJECTION_STRATEGIC_INTEL,
+    "xss": XSS_STRATEGIC_INTEL,
+    "auth": AUTH_STRATEGIC_INTEL,
+    "ssrf": SSRF_STRATEGIC_INTEL,
+    "authz": AUTHZ_STRATEGIC_INTEL,
+}
+
+
+def _section(tool_name: str, key: str, desc: str, schema: dict) -> SectionSchema:
+    return SectionSchema(
+        tool_name=tool_name, section_key=key, description=desc, json_schema=schema
+    )
+
+
+def make_vuln_sections(vuln_class: str) -> list[SectionSchema]:
+    """4 个 set_* section(顺序对齐 TS VULN_TOOLS)。strategic_intelligence 按 class 选 schema。"""
+    if vuln_class not in _STRATEGIC_INTEL_SCHEMAS:
+        raise ValueError(f"unknown vuln class: {vuln_class!r}")
+    intel_schema = _STRATEGIC_INTEL_SCHEMAS[vuln_class]
+    return [
+        _section(
+            "set_findings_summary",
+            "findings_summary",
+            "Headline result (Section 1) + dominant patterns (Section 2). Empty patterns array "
+            'renders "No dominant patterns identified".',
+            FINDINGS_SUMMARY,
+        ),
+        _section(
+            "set_strategic_intelligence",
+            "strategic_intelligence",
+            f"{vuln_class} strategic intelligence (Section 3). Per-class schema.",
+            intel_schema,
+        ),
+        _section(
+            "set_safe_vectors",
+            "safe_vectors",
+            'Vectors/components confirmed secure (Section 4). Empty renders "No vectors confirmed '
+            'secure during analysis".',
+            SAFE_VECTORS,
+        ),
+        _section(
+            "set_blind_spots",
+            "blind_spots",
+            'Analysis constraints or blind spots (Section 5). Empty renders "No analysis '
+            'constraints or blind spots identified".',
+            BLIND_SPOTS,
+        ),
+    ]
+
+
+def make_vuln_collector(vuln_class: str) -> CollectorBase:
+    """per-vuln-class CollectorBase(4 section)。"""
+    return CollectorBase(section_schemas=make_vuln_sections(vuln_class))

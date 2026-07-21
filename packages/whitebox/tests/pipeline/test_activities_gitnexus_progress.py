@@ -10,8 +10,8 @@ source-discovery/taint-analysis/chain-verdict）。session 异常被吞（best-e
 """
 import asyncio
 import pytest
-from shannon_whitebox.pipeline.activities import _make_gitnexus_progress_cb
-from shannon_core.code_index.progress import ProgressSample
+from supernova_whitebox.pipeline.activities import _make_gitnexus_progress_cb
+from supernova_core.code_index.progress import ProgressSample
 
 
 class _FakeSession:

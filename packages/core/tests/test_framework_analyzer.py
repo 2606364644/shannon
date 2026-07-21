@@ -1,6 +1,6 @@
 """Tests for framework_analyzer service."""
 
-from shannon_core.services.framework_analyzer import (
+from supernova_core.services.framework_analyzer import (
     EndpointTemplate,
     FrameworkPattern,
     FRAMEWORK_PATTERNS,

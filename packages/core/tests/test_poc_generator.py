@@ -4,10 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from shannon_core.models.queue_schemas import (
+from supernova_core.models.queue_schemas import (
     VulnerabilityQueue, InjectionVulnerability, XssVulnerability,
 )
-from shannon_core.services.poc_generator import (
+from supernova_core.services.poc_generator import (
     HttpRequestSpec, ConfidenceBand, AuthState,
     extract_method_path, extract_param_name, derive_method_path,
     classify_confidence, resolve_host, derive_auth_state, auth_header,
@@ -257,7 +257,7 @@ async def test_llm_fill_gap_success(monkeypatch):
             "body": "id_token=forged.none.sig", "query": None, "headers": None, "steps": None,
         }, error=None)
 
-    import shannon_core.services.poc_generator as mod
+    import supernova_core.services.poc_generator as mod
     monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
     out = await llm_fill_gap(_AUTH_VULN, "auth", "https://t.example.com", {}, repo_path="/tmp/x")
     assert out["method"] == "POST"
@@ -267,7 +267,7 @@ async def test_llm_fill_gap_success(monkeypatch):
 async def test_llm_fill_gap_failure_returns_none(monkeypatch):
     async def boom(prompt, **kw):
         raise RuntimeError("llm down")
-    import shannon_core.services.poc_generator as mod
+    import supernova_core.services.poc_generator as mod
     monkeypatch.setattr(mod, "run_claude_prompt", boom)
     out = await llm_fill_gap(_AUTH_VULN, "auth", "https://t.example.com", {}, repo_path="/tmp/x")
     assert out is None
@@ -382,7 +382,7 @@ async def test_generate_emits_progress_via_audit_session(tmp_path, monkeypatch, 
             info_calls.append(message)
 
     monkeypatch.setattr(
-        "shannon_core.services.poc_generator.get_audit_session",
+        "supernova_core.services.poc_generator.get_audit_session",
         lambda: _RecordingSession(),
     )
 
@@ -440,14 +440,14 @@ async def test_generate_llm_failure_degrades_gracefully(tmp_path, monkeypatch):
     """auth 漏洞走 LLM；LLM 失败 → 退骨架+标注，不阻塞。"""
     d = tmp_path / "deliverables" / "whitebox"
     d.mkdir(parents=True)
-    from shannon_core.models.queue_schemas import AuthVulnerability
+    from supernova_core.models.queue_schemas import AuthVulnerability
     q = VulnerabilityQueue(vulnerabilities=[
         AuthVulnerability(ID="AUTH-1", vulnerability_type="missing-jwt", externally_exploitable=True,
                           confidence="needs_review", exploitation_hypothesis="no verify",
                           suggested_exploit_technique="forge jwt"),
     ])
     (d / "auth_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
-    import shannon_core.services.poc_generator as mod
+    import supernova_core.services.poc_generator as mod
     async def boom(prompt, **kw):
         raise RuntimeError("llm down")
     monkeypatch.setattr(mod, "run_claude_prompt", boom)

@@ -1,10 +1,10 @@
-# shannon-whitebox
+# supernova-whitebox
 
 白盒源码漏洞分析扫描器
 
 ## 依赖
 
-- shannon-core
+- supernova-core
 - temporalio>=1.0
 - click>=8.0
 - aiofiles>=23.0
@@ -25,7 +25,7 @@
 ## CLI
 
 ```bash
-shannon-whitebox start --repo <path> [--output <dir>] [--workspace <name>] [--config <file>]
-shannon-whitebox logs <workspace_name>
-shannon-whitebox workspaces
+supernova-whitebox start --repo <path> [--output <dir>] [--workspace <name>] [--config <file>]
+supernova-whitebox logs <workspace_name>
+supernova-whitebox workspaces
 ```

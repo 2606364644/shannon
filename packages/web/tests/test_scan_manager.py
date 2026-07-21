@@ -1,6 +1,6 @@
 """C1 Phase B: ScanManager 改 temporal workflow 提交者(不再 fork CLI 子进程).
 
-start → Client.connect + start_workflow(固定 queue shannon-py-wb-web);
+start → Client.connect + start_workflow(固定 queue supernova-wb-web);
 _watch → tail events.ndjson 直到 scan_end; cancel → handle.cancel(temporal 原生) +
 ② ③ 轨(heartbeat/cancel.requested 文件, 兼容 host CLI). active_pids 返空.
 """
@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shannon_web.models import PathSource, RepoSource, ScanRequest
-from shannon_web.components.scan_manager import ScanManager, TemporalUnavailable, TooManyScans
+from supernova_web.models import PathSource, RepoSource, ScanRequest
+from supernova_web.components.scan_manager import ScanManager, TemporalUnavailable, TooManyScans
 
 
 async def _ok():
@@ -31,7 +31,7 @@ def _patch_client(monkeypatch, handle=None):
     mock_handle.id = "ws-mock"
     mock_client = AsyncMock()
     mock_client.start_workflow = AsyncMock(return_value=mock_handle)
-    monkeypatch.setattr("shannon_web.components.scan_manager.Client.connect",
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
                        AsyncMock(return_value=mock_client))
     return mock_client
 
@@ -41,8 +41,8 @@ def _patch_client(monkeypatch, handle=None):
 @pytest.mark.asyncio
 async def test_start_submits_workflow_to_fixed_queue(tmp_path, monkeypatch):
     """start 改 start_workflow: 连 temporal + 提交到 WEB_TASK_QUEUE_WHITEBOX + 存 handle."""
-    from shannon_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
-    from shannon_whitebox.pipeline.shared import PipelineInput
+    from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
+    from supernova_whitebox.pipeline.shared import PipelineInput
 
     mgr = ScanManager(tmp_path, tmp_path / "repos", None, max_concurrent=2)
     _patch_temporal_ok(monkeypatch, mgr)
@@ -103,7 +103,7 @@ async def test_start_cleanup_active_reqs_on_submit_failure(tmp_path, monkeypatch
     _patch_temporal_ok(monkeypatch, mgr)
     mock_client = AsyncMock()
     mock_client.start_workflow = AsyncMock(side_effect=RuntimeError("temporal reject"))
-    monkeypatch.setattr("shannon_web.components.scan_manager.Client.connect",
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
                        AsyncMock(return_value=mock_client))
     with pytest.raises(RuntimeError, match="temporal reject"):
         await mgr.start(ScanRequest(type="whitebox",
@@ -330,7 +330,7 @@ def test_active_pids_returns_empty(tmp_path):
 @pytest.mark.asyncio
 async def test_correlation_config_name_traversal_rejected(tmp_path, monkeypatch):
     """config_name="../evil" 必须被 store 遍历校验拦截(在 C1 raise ValueError 前)."""
-    from shannon_web.components.multi_repo_config_store import MultiRepoConfigStore
+    from supernova_web.components.multi_repo_config_store import MultiRepoConfigStore
     store = MultiRepoConfigStore(tmp_path / "configs")
     mgr = ScanManager(tmp_path, tmp_path / "r", store, max_concurrent=2)
     _patch_temporal_ok(monkeypatch, mgr)

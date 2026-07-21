@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shannon_core.agents.providers_openai import OpenAIProvider, _ReparsedRunResult
-from shannon_core.agents.runner import ProviderConfig
+from supernova_core.agents.providers_openai import OpenAIProvider, _ReparsedRunResult
+from supernova_core.agents.runner import ProviderConfig
 
 
 def _provider_with_client(fake_client):

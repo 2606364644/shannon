@@ -12,11 +12,11 @@
 """
 import pytest
 
-from shannon_core.collectors import make_collector
-from shannon_core.collectors.base import CollectorBase
-from shannon_core.collectors.pre_recon import PreReconCollector
-from shannon_core.models.agents import AgentName
-from shannon_core.renderers import render_deliverable
+from supernova_core.collectors import make_collector
+from supernova_core.collectors.base import CollectorBase
+from supernova_core.collectors.pre_recon import PreReconCollector
+from supernova_core.models.agents import AgentName
+from supernova_core.renderers import render_deliverable
 
 # 与 collectors/vuln.py / renderers/vuln.py 对齐的 4 个 set_* 工具名
 EXPECTED_TOOL_NAMES = [
@@ -92,7 +92,7 @@ def test_strategic_intel_schema_differs_per_class_via_registry():
     """经 registry 分发后，injection 的 set_strategic_intelligence section 仍携带
     INJECTION_STRATEGIC_INTEL，authz 的仍携带 AUTHZ_STRATEGIC_INTEL（per-class
     branching 不漂移）。"""
-    from shannon_core.collectors.vuln import (
+    from supernova_core.collectors.vuln import (
         AUTHZ_STRATEGIC_INTEL,
         INJECTION_STRATEGIC_INTEL,
     )
@@ -124,7 +124,7 @@ def test_render_deliverable_pre_recon_branch_intact():
 
 # ── 回归：非 vuln 也非 pre-recon/exploit 的 agent（如 REPORT）仍 None（兜底分支不动） ───
 def test_make_collector_unwired_agents_still_return_none():
-    from shannon_core.models.agents import AgentName as A
+    from supernova_core.models.agents import AgentName as A
 
     assert make_collector(A.REPORT) is None
     assert make_collector(A.ATTACK_CHAIN) is None
@@ -133,7 +133,7 @@ def test_make_collector_unwired_agents_still_return_none():
 
 
 def test_render_deliverable_unwired_agents_still_return_none():
-    from shannon_core.models.agents import AgentName as A
+    from supernova_core.models.agents import AgentName as A
 
     assert render_deliverable(A.REPORT, {}) is None
     # exploit agent 有 renderer（Plan 4 Task 3 已接，不再 None）

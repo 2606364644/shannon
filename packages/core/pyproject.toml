@@ -1,5 +1,5 @@
 [project]
-name = "shannon-core"
+name = "supernova-core"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,17 +24,17 @@ dependencies = [
 ]
 
 [project.scripts]
-generate-totp = "shannon_core.scripts.generate_totp:main"
+generate-totp = "supernova_core.scripts.generate_totp:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shannon_core"]
+packages = ["src/supernova_core"]
 
 # 规则 YAML(sink/source/sink_candidates)是首批包内非 .py 数据。hatch 默认 wheel 只打
 # .py,必须显式 force-include,否则 pip install 后运行 FileNotFoundError。editable install
 # 不暴露此问题(Path(__file__).parent 指向源码)—— 隐性陷阱,靠 wheel 构建冒烟测试覆盖。
 [tool.hatch.build.targets.wheel.force-include]
-"src/shannon_core/code_index/data" = "shannon_core/code_index/data"
+"src/supernova_core/code_index/data" = "supernova_core/code_index/data"

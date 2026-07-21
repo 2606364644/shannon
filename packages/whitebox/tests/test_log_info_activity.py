@@ -6,8 +6,8 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from shannon_whitebox.pipeline.activities import log_info_activity
-from shannon_whitebox.pipeline.shared import ActivityInput
+from supernova_whitebox.pipeline.activities import log_info_activity
+from supernova_whitebox.pipeline.shared import ActivityInput
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,7 @@ async def test_log_info_activity_swallows_session_error(monkeypatch):
     mock_session = AsyncMock()
     mock_session.log_info = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(
-        "shannon_whitebox.audit.session_registry.get_audit_session",
+        "supernova_whitebox.audit.session_registry.get_audit_session",
         lambda: mock_session,
     )
     inp = ActivityInput(repo_path="x", info_message="m", info_level="warning")

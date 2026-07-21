@@ -1,5 +1,5 @@
-from shannon_core.code_index.models import ParameterSource, CodeIndex
-from shannon_core.code_index.storage_models import StorageWritePoint, StorageMedium
+from supernova_core.code_index.models import ParameterSource, CodeIndex
+from supernova_core.code_index.storage_models import StorageWritePoint, StorageMedium
 
 
 def test_parameter_source_has_storage_flavor():

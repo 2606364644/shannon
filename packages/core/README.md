@@ -1,4 +1,4 @@
-# shannon-core
+# supernova-core
 
 共享模型、配置解析和工具函数
 
@@ -26,4 +26,4 @@
 
 ## 关系
 
-shannon-core 是基础层，被 shannon-whitebox 和 shannon-blackbox 共同依赖。
+supernova-core 是基础层，被 supernova-whitebox 和 supernova-blackbox 共同依赖。

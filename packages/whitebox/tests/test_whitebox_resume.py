@@ -1,7 +1,7 @@
 # packages/whitebox/tests/test_whitebox_resume.py
 import pytest
 
-from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeState, reconcile
+from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeState, reconcile
 
 
 @pytest.mark.parametrize("g,j,f,expected_completed,expected_aborted,expects_warning", [
@@ -44,7 +44,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
+from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
 
 
 def _write_session(workspace: Path, agents_success: dict[str, bool]) -> None:
@@ -68,7 +68,7 @@ async def test_builder_auto_resume_skips_completed(tmp_path):
     _write_session(workspace, {"pre-recon": True, "recon": True})
 
     builder = WhiteboxResumeStateBuilder()
-    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+    with patch("supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
                AsyncMock(return_value={"pre-recon", "recon"})):
         state = await builder.build(
             mode="auto", workspace=workspace, deliverables=deliverables, repo_path=repo,
@@ -88,7 +88,7 @@ async def test_builder_aborts_when_file_missing(tmp_path):
     _write_session(workspace, {"recon": True})
 
     builder = WhiteboxResumeStateBuilder()
-    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+    with patch("supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
                AsyncMock(return_value={"recon"})):
         state = await builder.build(
             mode="auto", workspace=workspace, deliverables=deliverables, repo_path=repo,
@@ -143,7 +143,7 @@ async def test_builder_rewind_keeps_only_before_target(tmp_path):
     _write_session(workspace, {"pre-recon": True, "recon": True, "injection-vuln": True})
 
     builder = WhiteboxResumeStateBuilder()
-    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+    with patch("supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
                AsyncMock(return_value={"pre-recon", "recon", "injection-vuln"})):
         state = await builder.build(
             mode="rewind", workspace=workspace, deliverables=deliverables,
@@ -174,7 +174,7 @@ async def test_builder_rewind_vuln_maps_to_injection_vuln(tmp_path):
     })
 
     builder = WhiteboxResumeStateBuilder()
-    with patch("shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
+    with patch("supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents",
                AsyncMock(return_value={"pre-recon", "recon", "injection-vuln", "xss-vuln"})):
         state = await builder.build(
             mode="rewind", workspace=workspace, deliverables=deliverables,
@@ -213,10 +213,10 @@ def test_session_success_swallows_corrupt_json(tmp_path):
 async def test_resume_build_scans_deliverables_not_repo(tmp_path, monkeypatch):
     """resume 的 get_completed_agents 应扫 deliverables 独立仓库(非被扫 repo)。
 
-    修复前传 repo_path(deliverable commit 实际落 shannon-py,扫不到)。
+    修复前传 repo_path(deliverable commit 实际落 supernova,扫不到)。
     """
-    from shannon_core.git_manager import GitManager
-    from shannon_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
+    from supernova_core.git_manager import GitManager
+    from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -233,7 +233,7 @@ async def test_resume_build_scans_deliverables_not_repo(tmp_path, monkeypatch):
         return set()
 
     monkeypatch.setattr(
-        "shannon_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents", spy,
+        "supernova_whitebox.pipeline.whitebox_resume.GitManager.get_completed_agents", spy,
     )
 
     builder = WhiteboxResumeStateBuilder()

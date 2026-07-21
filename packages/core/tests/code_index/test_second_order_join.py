@@ -1,10 +1,10 @@
 """Tests for second_order_join: bipartite (medium, token) join of storage
 writes × storage-read chains (spec §3.3, Task 6)."""
-from shannon_core.code_index.storage_models import StorageWritePoint, StorageMedium
-from shannon_core.code_index.parameter_models import SourcePoint
-from shannon_core.code_index.models import ParameterSource
-from shannon_core.code_index.chain_verdict import CandidateChain
-from shannon_core.code_index.second_order_join import (
+from supernova_core.code_index.storage_models import StorageWritePoint, StorageMedium
+from supernova_core.code_index.parameter_models import SourcePoint
+from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.chain_verdict import CandidateChain
+from supernova_core.code_index.second_order_join import (
     extract_second_order_candidates,
     is_resolvable_token,
 )

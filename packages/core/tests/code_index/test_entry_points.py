@@ -1,5 +1,5 @@
-from shannon_core.code_index.models import FuncBlock
-from shannon_core.code_index.entry_points import detect_entry_points
+from supernova_core.code_index.models import FuncBlock
+from supernova_core.code_index.entry_points import detect_entry_points
 
 
 def _block(**overrides) -> FuncBlock:

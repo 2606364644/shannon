@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from shannon_core.code_index.parsers.php_parser import PhpParser
-from shannon_core.code_index.parsers import _PARSER_CLASSES
+from supernova_core.code_index.parsers.php_parser import PhpParser
+from supernova_core.code_index.parsers import _PARSER_CLASSES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PHP_FILE = FIXTURES / "php" / "laravel_routes.php"

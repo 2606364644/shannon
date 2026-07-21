@@ -2,10 +2,10 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from shannon_core.code_index.models import (
+from supernova_core.code_index.models import (
     CallChain, CallEdge, FuncBlock,
 )
-from shannon_core.code_index.gitnexus_call_graph import (
+from supernova_core.code_index.gitnexus_call_graph import (
     build_call_graph_from_gitnexus,
     trace_from_sink,
     find_sinks_by_patterns,
@@ -81,7 +81,7 @@ class TestBuildCallGraphFromGitnexus:
     @pytest.mark.asyncio
     async def test_raises_when_not_indexed(self):
         """cypher probe 返 None（未索引）→ GitNexusNotIndexedError。"""
-        from shannon_core.code_index.models import GitNexusNotIndexedError
+        from supernova_core.code_index.models import GitNexusNotIndexedError
         mcp = FakeTraceMCPClient(cypher_none=True)
         with pytest.raises(GitNexusNotIndexedError):
             await build_call_graph_from_gitnexus(
@@ -205,14 +205,14 @@ class TestPipelineAutoIndexing:
     async def test_unavailable_gitnexus_raises(self, tmp_path):
         """GitNexus CLI 不可用时,build_code_index_with_gitnexus 必须硬失败,
         不再降级到 minimal AST-only mode。"""
-        from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.models.errors import PentestError
+        from supernova_core.code_index import build_code_index_with_gitnexus
+        from supernova_core.models.errors import PentestError
 
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / "app.py").write_text("def handler(): pass\n")
 
-        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
+        with patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
             mcp = FakeImpactMCPClient(responses={})
             with pytest.raises(PentestError, match="GitNexus"):
                 await build_code_index_with_gitnexus(
@@ -225,15 +225,15 @@ class TestPipelineAutoIndexing:
     @pytest.mark.asyncio
     async def test_hard_fail_path_does_not_build_parameter_graph(self, tmp_path):
         """Hard-fail path never reaches pgraph construction."""
-        from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.models.errors import PentestError
+        from supernova_core.code_index import build_code_index_with_gitnexus
+        from supernova_core.models.errors import PentestError
 
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / "app.py").write_text("def handler(): pass\n")
 
-        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
-            with patch("shannon_core.code_index.ParameterPropagationGraph") as mock_pgraph:
+        with patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine.is_available", return_value=False):
+            with patch("supernova_core.code_index.ParameterPropagationGraph") as mock_pgraph:
                 mcp = FakeImpactMCPClient(responses={})
                 with pytest.raises(PentestError, match="GitNexus"):
                     await build_code_index_with_gitnexus(
@@ -248,8 +248,8 @@ class TestPipelineAutoIndexing:
     @pytest.mark.asyncio
     async def test_success_path_returns_parameter_graph(self, tmp_path):
         """GitNexus success path attaches the constructed pgraph to CodeIndex."""
-        from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.code_index.models import CallGraphResult
+        from supernova_core.code_index import build_code_index_with_gitnexus
+        from supernova_core.code_index.models import CallGraphResult
 
         source_file = tmp_path / "app.py"
         source_file.write_text("def handler(): pass\n")
@@ -257,18 +257,18 @@ class TestPipelineAutoIndexing:
         parser = MagicMock()
         parser.parse_file.return_value = [handler]
 
-        with patch("shannon_core.code_index.detect_language", return_value="python"):
-            with patch("shannon_core.code_index.discover_source_files", return_value=[source_file]):
-                with patch("shannon_core.code_index.get_parser", return_value=parser):
+        with patch("supernova_core.code_index.detect_language", return_value="python"):
+            with patch("supernova_core.code_index.discover_source_files", return_value=[source_file]):
+                with patch("supernova_core.code_index.get_parser", return_value=parser):
                     with patch(
-                        "shannon_core.code_index.build_call_graph_from_gitnexus",
+                        "supernova_core.code_index.build_call_graph_from_gitnexus",
                         new=AsyncMock(return_value=CallGraphResult(entry_points=[handler])),
                     ):
-                        with patch("shannon_core.code_index.detect_sinks", return_value=[]):
-                            with patch("shannon_core.code_index.detect_entry_points", return_value=[]):
+                        with patch("supernova_core.code_index.detect_sinks", return_value=[]):
+                            with patch("supernova_core.code_index.detect_entry_points", return_value=[]):
                                 # pipeline 已切 backward(B3):patch target 须跟到
                                 # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
-                                with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
+                                with patch("supernova_core.code_index.propagate_backward_across_chains", return_value=[]):
                                     index, rule_gaps, _source_gaps, _storage_gaps = await build_code_index_with_gitnexus(
                                         str(tmp_path),
                                         mcp_client=FakeImpactMCPClient(responses={}),
@@ -283,8 +283,8 @@ class TestPipelineAutoIndexing:
     async def test_entry_points_union_detect_and_process(self, tmp_path):
         """G2: CodeIndex.entry_points = detect_entry_points ∪ process entry。
         process entry 用 entry_type='gitnexus_process'；同 id 时 detect 优先。"""
-        from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.code_index.models import CallGraphResult, EntryPoint
+        from supernova_core.code_index import build_code_index_with_gitnexus
+        from supernova_core.code_index.models import CallGraphResult, EntryPoint
 
         source_file = tmp_path / "app.py"
         source_file.write_text("def cli_main(): pass\ndef Upload(): pass\n")
@@ -298,18 +298,18 @@ class TestPipelineAutoIndexing:
             confidence=0.9, evidence="cli", needs_llm_review=False, source="code_index",
         )]
 
-        with patch("shannon_core.code_index.detect_language", return_value="python"):
-            with patch("shannon_core.code_index.discover_source_files", return_value=[source_file]):
-                with patch("shannon_core.code_index.get_parser", return_value=parser):
+        with patch("supernova_core.code_index.detect_language", return_value="python"):
+            with patch("supernova_core.code_index.discover_source_files", return_value=[source_file]):
+                with patch("supernova_core.code_index.get_parser", return_value=parser):
                     with patch(
-                        "shannon_core.code_index.build_call_graph_from_gitnexus",
+                        "supernova_core.code_index.build_call_graph_from_gitnexus",
                         new=AsyncMock(return_value=CallGraphResult(entry_points=[upload])),
                     ):
-                        with patch("shannon_core.code_index.detect_sinks", return_value=[]):
-                            with patch("shannon_core.code_index.detect_entry_points", return_value=detected):
+                        with patch("supernova_core.code_index.detect_sinks", return_value=[]):
+                            with patch("supernova_core.code_index.detect_entry_points", return_value=detected):
                                 # pipeline 已切 backward(B3):patch target 须跟到
                                 # propagate_backward_across_chains,否则 patch 是 no-op(失效)。
-                                with patch("shannon_core.code_index.propagate_backward_across_chains", return_value=[]):
+                                with patch("supernova_core.code_index.propagate_backward_across_chains", return_value=[]):
                                     index, _rg, _sg, _sg2 = await build_code_index_with_gitnexus(
                                         str(tmp_path), mcp_client=FakeImpactMCPClient(responses={}),
                                         llm_client=AsyncMock(return_value="{}"),
@@ -324,14 +324,14 @@ class TestPipelineAutoIndexing:
     @pytest.mark.asyncio
     async def test_indexing_failure_raises(self, tmp_path):
         """ensure_indexed() 失败时,build_code_index_with_gitnexus 必须硬失败。"""
-        from shannon_core.code_index import build_code_index_with_gitnexus
-        from shannon_core.models.errors import PentestError
+        from supernova_core.code_index import build_code_index_with_gitnexus
+        from supernova_core.models.errors import PentestError
 
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / "app.py").write_text("def handler(): pass\n")
 
-        with patch("shannon_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls:
+        with patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls:
             mock_engine = MagicMock()
             mock_engine.is_available.return_value = True
             mock_engine.ensure_indexed.return_value = MagicMock(

@@ -4,7 +4,7 @@ import json
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from shannon_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
+from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
 
 
 class TestGitNexusMCPClient:
@@ -16,7 +16,7 @@ class TestGitNexusMCPClient:
     @pytest.mark.asyncio
     async def test_start_launches_process(self, tmp_path):
         client = GitNexusMCPClient(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = MagicMock()
             mock_proc.stdin = MagicMock()
             mock_proc.stdin.drain = AsyncMock()
@@ -35,7 +35,7 @@ class TestGitNexusMCPClient:
     @pytest.mark.asyncio
     async def test_call_tool_sends_request(self, tmp_path):
         client = GitNexusMCPClient(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = MagicMock()
             mock_proc.stdin = MagicMock()
             mock_proc.stdin.drain = AsyncMock()
@@ -94,7 +94,7 @@ class TestGitNexusMCPClient:
         zombie.wait = _wait
         client._process = zombie
 
-        with patch("shannon_core.code_index.gitnexus_mcp.MCP_STOP_TIMEOUT", 0.05):
+        with patch("supernova_core.code_index.gitnexus_mcp.MCP_STOP_TIMEOUT", 0.05):
             # stop 必须在 2s 内自拔返回,不能永久阻塞
             await asyncio.wait_for(client.stop(), timeout=2)
 
@@ -123,7 +123,7 @@ class TestGitNexusMCPClient:
         client = GitNexusMCPClient(tmp_path)
         sent_lines: list[bytes] = []
 
-        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = MagicMock()
             mock_proc.stdin = MagicMock()
             mock_proc.stdin.drain = AsyncMock()
@@ -153,7 +153,7 @@ class TestGitNexusMCPClient:
     async def test_context_manager(self, tmp_path):
         """GitNexusMCPClient supports async with statement."""
         client = GitNexusMCPClient(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = MagicMock()
             mock_proc.stdin = MagicMock()
             mock_proc.stdin.drain = AsyncMock()
@@ -187,7 +187,7 @@ class TestGitNexusMCPClient:
         """readline 64KB bug 修复：start() 必须给 create_subprocess_exec 传 limit=4MB,
         否则全量 cypher(>64KB) 会让 stdout.readline() 抛 'Separator found, chunk longer than limit'。"""
         client = GitNexusMCPClient(tmp_path)
-        with patch("shannon_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = MagicMock()
             mock_proc.stdin = MagicMock()
             mock_proc.stdin.drain = AsyncMock()
@@ -243,7 +243,7 @@ class TestParseToolResultRobustness:
     def test_error_text_returns_none_with_warning(self, tmp_path, caplog):
         client = GitNexusMCPClient(tmp_path)
         text = 'Error: Multiple repositories indexed. Specify which one with the "repo" parameter.'
-        with caplog.at_level("WARNING", logger="shannon_core.code_index.gitnexus_mcp"):
+        with caplog.at_level("WARNING", logger="supernova_core.code_index.gitnexus_mcp"):
             result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
         assert result is None
         assert "non-JSON" in caplog.text
@@ -251,7 +251,7 @@ class TestParseToolResultRobustness:
     def test_ambiguous_returns_none_with_warning(self, tmp_path, caplog):
         client = GitNexusMCPClient(tmp_path)
         text = '{"status": "ambiguous", "message": "Found 4 symbols matching"}\nhint'
-        with caplog.at_level("WARNING", logger="shannon_core.code_index.gitnexus_mcp"):
+        with caplog.at_level("WARNING", logger="supernova_core.code_index.gitnexus_mcp"):
             result = client._parse_tool_result({"content": [{"type": "text", "text": text}]})
         assert result is None
         assert "ambiguous" in caplog.text

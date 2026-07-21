@@ -12,7 +12,7 @@ def _run(coro):
 
 
 def test_skip_postprocess_avoids_queue_write(tmp_path, monkeypatch):
-    from shannon_core.agents import executor as exec_mod
+    from supernova_core.agents import executor as exec_mod
 
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
@@ -54,7 +54,7 @@ def test_skip_postprocess_avoids_queue_write(tmp_path, monkeypatch):
         raise AssertionError("validate_deliverable must NOT be called when skip=True")
     monkeypatch.setattr(exec_mod, "validate_deliverable", boom_validate)
 
-    from shannon_core.prompts.manager import PromptManager
+    from supernova_core.prompts.manager import PromptManager
     pm = PromptManager.__new__(PromptManager)
     pm.prompts_dir = tmp_path
     monkeypatch.setattr(pm, "load_sync", lambda *a, **k: "PROMPT")

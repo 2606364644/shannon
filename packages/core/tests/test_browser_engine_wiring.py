@@ -2,7 +2,7 @@
 
 Covers:
 - BROWSER_ENGINE_UNAVAILABLE error code classification
-- SHANNON_BROWSER_ENGINE env var override in config parser
+- SUPERNOVA_BROWSER_ENGINE env var override in config parser
 - AgentExecutor browser_engine injection from config
 """
 
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shannon_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
+from supernova_core.models.errors import ErrorCode, PentestError, classify_error_for_temporal
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ class TestBrowserEngineUnavailableErrorCode:
         assert retryable is False
 
 
-from shannon_core.config.parser import parse_config
+from supernova_core.config.parser import parse_config
 
 
 def _write_config(tmp_path: Path, content: str) -> str:
@@ -54,38 +54,38 @@ def _write_config(tmp_path: Path, content: str) -> str:
 
 class TestBrowserEngineEnvVarOverride:
     def test_env_var_overrides_yaml_value(self, tmp_path, monkeypatch):
-        """SHANNON_BROWSER_ENGINE env var should override yaml browser_engine."""
+        """SUPERNOVA_BROWSER_ENGINE env var should override yaml browser_engine."""
         config_path = _write_config(tmp_path, "browser_engine: playwright\n")
-        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "agent-browser")
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "agent-browser")
         config = parse_config(config_path)
         assert config.browser_engine == "agent-browser"
 
     def test_env_var_sets_engine_when_yaml_omits_it(self, tmp_path, monkeypatch):
-        """SHANNON_BROWSER_ENGINE should set browser_engine even when yaml omits it."""
+        """SUPERNOVA_BROWSER_ENGINE should set browser_engine even when yaml omits it."""
         config_path = _write_config(tmp_path, "description: test app\n")
-        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "agent-browser")
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "agent-browser")
         config = parse_config(config_path)
         assert config.browser_engine == "agent-browser"
 
     def test_default_agent_browser_without_env_var(self, tmp_path, monkeypatch):
-        """Without SHANNON_BROWSER_ENGINE, browser_engine defaults to agent-browser."""
-        monkeypatch.delenv("SHANNON_BROWSER_ENGINE", raising=False)
+        """Without SUPERNOVA_BROWSER_ENGINE, browser_engine defaults to agent-browser."""
+        monkeypatch.delenv("SUPERNOVA_BROWSER_ENGINE", raising=False)
         config_path = _write_config(tmp_path, "description: test app\n")
         config = parse_config(config_path)
         assert config.browser_engine == "agent-browser"
 
     def test_invalid_env_var_raises_validation_error(self, tmp_path, monkeypatch):
-        """Invalid SHANNON_BROWSER_ENGINE value (e.g. 'chromium') should raise PentestError."""
+        """Invalid SUPERNOVA_BROWSER_ENGINE value (e.g. 'chromium') should raise PentestError."""
         config_path = _write_config(tmp_path, "description: test app\n")
-        monkeypatch.setenv("SHANNON_BROWSER_ENGINE", "chromium")
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "chromium")
         with pytest.raises(PentestError, match="validation failed"):
             parse_config(config_path)
 
 
-from shannon_core.agents.executor import AgentExecutor
-from shannon_core.prompts.manager import PromptManager
-from shannon_core.models.agents import AgentName
-from shannon_core.git_manager import GitManager
+from supernova_core.agents.executor import AgentExecutor
+from supernova_core.prompts.manager import PromptManager
+from supernova_core.models.agents import AgentName
+from supernova_core.git_manager import GitManager
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ from shannon_core.git_manager import GitManager
 @pytest.mark.asyncio
 async def test_executor_injects_browser_engine_from_config(tmp_path):
     """AgentExecutor should inject browser_engine from config into prompt variables."""
-    import shannon_core.services.engines  # noqa: F401 — register engines
+    import supernova_core.services.engines  # noqa: F401 — register engines
 
     config_file = tmp_path / "config.yaml"
     config_file.write_text("browser_engine: agent-browser")
@@ -128,10 +128,10 @@ async def test_executor_injects_browser_engine_from_config(tmp_path):
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
-         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch("supernova_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
          patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
          patch.object(GitManager, "commit", new_callable=AsyncMock), \
-         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+         patch("supernova_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
 
         pm = PromptManager(prompts_dir)
         executor = AgentExecutor(pm)
@@ -148,7 +148,7 @@ async def test_executor_injects_browser_engine_from_config(tmp_path):
 @pytest.mark.asyncio
 async def test_executor_no_browser_engine_without_config(tmp_path):
     """Without a config file, executor should not inject browser_engine."""
-    import shannon_core.services.engines  # noqa: F401 — register engines
+    import supernova_core.services.engines  # noqa: F401 — register engines
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -177,10 +177,10 @@ async def test_executor_no_browser_engine_without_config(tmp_path):
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
-         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch("supernova_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
          patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
          patch.object(GitManager, "commit", new_callable=AsyncMock), \
-         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+         patch("supernova_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
 
         pm = PromptManager(prompts_dir)
         executor = AgentExecutor(pm)
@@ -197,7 +197,7 @@ async def test_executor_no_browser_engine_without_config(tmp_path):
 @pytest.mark.asyncio
 async def test_executor_prompt_variables_override_config_engine(tmp_path):
     """prompt_variables should override browser_engine from config."""
-    import shannon_core.services.engines  # noqa: F401 — register engines
+    import supernova_core.services.engines  # noqa: F401 — register engines
 
     config_file = tmp_path / "config.yaml"
     config_file.write_text("browser_engine: playwright")
@@ -229,10 +229,10 @@ async def test_executor_prompt_variables_override_config_engine(tmp_path):
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
-         patch("shannon_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch("supernova_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
          patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
          patch.object(GitManager, "commit", new_callable=AsyncMock), \
-         patch("shannon_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+         patch("supernova_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
 
         pm = PromptManager(prompts_dir)
         executor = AgentExecutor(pm)

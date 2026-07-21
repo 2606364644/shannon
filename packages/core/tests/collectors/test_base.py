@@ -1,4 +1,4 @@
-from shannon_core.collectors.base import (
+from supernova_core.collectors.base import (
     CollectorBase,
     DuplicateCallError,
     SectionSchema,
@@ -151,7 +151,7 @@ def test_get_all_append_returns_deep_copy():
 
 def test_set_mode_unchanged_for_existing_collectors():
     # 回归：PreReconCollector 的 section_schemas 全 mode="set"（默认值）
-    from shannon_core.collectors.pre_recon import PreReconCollector
+    from supernova_core.collectors.pre_recon import PreReconCollector
 
     c = PreReconCollector()
     for s in c.section_schemas:

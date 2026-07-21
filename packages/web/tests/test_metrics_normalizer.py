@@ -8,7 +8,7 @@
 前端 OverviewTab AgentTable 读 a.cost_usd.toFixed() 等,旧格式 agent 这些字段全 undefined → 崩。
 归一化在 web 层做(对齐 types.ts,前端零改动,core 不动)。
 """
-from shannon_web.components.metrics_normalizer import _normalize_agent, normalize_metrics
+from supernova_web.components.metrics_normalizer import _normalize_agent, normalize_metrics
 
 
 # === 新格式(NodeGoat,当前 metrics_tracker 产出)===

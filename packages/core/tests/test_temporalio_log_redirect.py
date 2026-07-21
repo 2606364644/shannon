@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from shannon_core.logging.temporalio_redirect import install_temporalio_log_redirect
+from supernova_core.logging.temporalio_redirect import install_temporalio_log_redirect
 
 
 _LOGGER_NAME = "temporalio.activity"
@@ -99,12 +99,12 @@ def test_install_is_idempotent(tmp_path):
 
 def test_worker_activity_debug_goes_to_file_when_debug_env(tmp_path, monkeypatch):
     """temporalio.worker._activity 的执行边界 DEBUG(:315 Running / :521 Completing)
-    在 SHANNON_TEMPORALIO_LOG_LEVEL=DEBUG 时进入 per-workspace 文件。
+    在 SUPERNOVA_TEMPORALIO_LOG_LEVEL=DEBUG 时进入 per-workspace 文件。
 
     这是 '10min 无日志空窗' 可观测性的核心: 拿到 activity 被 worker 取走执行的
     时间戳序列, 判定 attempt=1 有无被执行。默认(env 未设)不进文件。
     """
-    monkeypatch.setenv("SHANNON_TEMPORALIO_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("SUPERNOVA_TEMPORALIO_LOG_LEVEL", "DEBUG")
     log_path = tmp_path / "temporalio-activity.log"
     install_temporalio_log_redirect(log_path)
 
@@ -122,7 +122,7 @@ def test_worker_debug_does_not_leak_to_root_when_debug_env(tmp_path, monkeypatch
     本测试用一个 root stderr handler 探测传播是否被截断。
     """
     import sys
-    monkeypatch.setenv("SHANNON_TEMPORALIO_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("SUPERNOVA_TEMPORALIO_LOG_LEVEL", "DEBUG")
     log_path = tmp_path / "temporalio-activity.log"
     install_temporalio_log_redirect(log_path)
 
@@ -144,7 +144,7 @@ def test_worker_activity_debug_filtered_when_env_unset(tmp_path, monkeypatch):
 
     零回归不变量 I1: env 未设时行为与改前完全一致(worker 子树默认也不泄 DEBUG)。
     """
-    monkeypatch.delenv("SHANNON_TEMPORALIO_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("SUPERNOVA_TEMPORALIO_LOG_LEVEL", raising=False)
     log_path = tmp_path / "temporalio-activity.log"
     install_temporalio_log_redirect(log_path)
 
@@ -155,7 +155,7 @@ def test_worker_activity_debug_filtered_when_env_unset(tmp_path, monkeypatch):
 
 def test_invalid_env_level_falls_back_to_warning(tmp_path, monkeypatch):
     """env 非法值 → 回落 WARNING, 不抛(spec §7); handler 级别 == WARNING, DEBUG 被滤。"""
-    monkeypatch.setenv("SHANNON_TEMPORALIO_LOG_LEVEL", "BOGUS")
+    monkeypatch.setenv("SUPERNOVA_TEMPORALIO_LOG_LEVEL", "BOGUS")
     log_path = tmp_path / "temporalio-activity.log"
     install_temporalio_log_redirect(log_path)              # 不抛
 
