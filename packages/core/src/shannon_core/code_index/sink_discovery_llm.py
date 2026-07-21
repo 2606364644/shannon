@@ -423,3 +423,154 @@ async def discover_sinks_llm(
         f"{len(soft_sinks)} soft sinks · {len(_aggregate_gaps(soft_sinks))} rule gaps"
         f" · {skipped} timeouts")
     return soft_sinks, _aggregate_gaps(soft_sinks)
+
+
+# === 子项③: sink 探测器(entry-driven, 对称 source 探测器)=====================
+
+_SINK_HUNTER_PROMPT_TMPL = """You are a security sink detector for the GitNexus track.
+Given a FILE with one or more entry handler functions, identify ALL security sinks
+WITHIN each function. Rule-based detection already covered common sinks (raw SQL
+execute, Runtime.exec, ObjectInputStream.readObject, HttpClient.send); you handle
+the unconventional ones — framework-specific deserialization (fastjson
+JSON.parseObject, Jackson enableDefaultTyping), custom URL builders followed by
+HTTP execute, template engines, reflection.
+
+## File(s)
+{file_paths}
+
+## Functions
+{functions_repr}
+
+## Task
+Return a JSON array. One object per sink found (omit functions with no sink):
+{{"sink":"<call expression>","category":"sql|command|file|template|deserialization|ssrf|xss|redirect|log","dangerous_arg":"<expression reaching the sink>","line":<int>,"is_sink":true,"rationale":"<one line>"}}
+Return ONLY the JSON array, no prose. `line` is the FILE-absolute line number of the sink call."""
+
+
+def _build_sink_hunter_prompt(chunk: "FileChunk") -> str:
+    func_parts: list[str] = []
+    for b in chunk.blocks:
+        func_parts.append(
+            f"### {b.function_name} ({b.file_path}:{b.start_line})\n"
+            f"Parameters: {list(b.parameters)}\n"
+            f"```\n{b.source_code}\n```"
+        )
+    return _SINK_HUNTER_PROMPT_TMPL.format(
+        file_paths=", ".join(chunk.file_paths),
+        functions_repr="\n\n".join(func_parts),
+    )
+
+
+def _parse_sink_verdicts(raw: str) -> list[dict]:
+    try:
+        data = json.loads(raw)
+        return [d for d in data if isinstance(d, dict)]
+    except Exception:
+        logger.debug("discover_sinks_by_entry: failed to parse LLM JSON: %s", raw[:120])
+        return []
+
+
+def _resolve_block_for_line(chunk: "FileChunk", line: int | None):
+    """verdict.line 反查所属 block(文件级 chunk 含多函数)。line 缺失/越界 → 首个 block。
+
+    对称 source_discovery_llm._resolve_block_for_line: 用 parser 已填充的 end_line
+    判界 b.start_line <= line <= b.end_line(而非 source_code.count(b"\\n") —— 后者
+    一则在 str 字段上调 bytes pattern 会 TypeError, 二则 end_line 是 parser 权威产物)。
+    """
+    if line is None:
+        return chunk.blocks[0]
+    for b in chunk.blocks:
+        if b.start_line <= line <= b.end_line:
+            return b
+    return chunk.blocks[0]
+
+
+def _to_hunter_sink(block: "FuncBlock", field: dict) -> SinkCallSite:
+    category = _to_category(field.get("category", "sql"))
+    expr = field.get("dangerous_arg") or field.get("sink", "")
+    line = int(field.get("line") or block.start_line)
+    return SinkCallSite(
+        id=f"llm:{block.file_path}:{line}",
+        caller_id=block.id,
+        callee_name=field.get("sink", ""),
+        callee_receiver=None,
+        category=category,
+        sink_subtype=field.get("subtype") or category.value,
+        file_path=block.file_path,
+        line=line,
+        column=0,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=_to_slot(field.get("slot", "generic")),
+            expression=expr, is_entry_hint=is_entry_hint(expr, block),
+        )],
+        rule_id="llm-discovered-sink",
+        needs_review=True,
+    )
+
+
+async def discover_sinks_by_entry(
+    candidates: list[SinkHunterCandidate],
+    llm_client: "LLMClient | None",
+    *,
+    concurrency: int | None = None,
+    per_call_timeout: float | None = None,
+    progress_cb: "ProgressCb" = None,
+    token_threshold: int | None = None,
+    model: str | None = None,
+    max_calls: int | None = None,
+) -> tuple[list[SinkCallSite], list[RuleGap]]:
+    """entry-driven sink 探测器(对称 discover_sources_llm): 对 entry handler 整函数
+    送 LLM,自由识别 sink → 软 SinkCallSite + RuleGap。
+
+    与 discover_sinks_llm(候选表筛选→判定器)互补: 覆盖候选表外的框架特有 sink
+    (fastjson.parseObject / ClassPathResource.createRelative / 自研 executeCommand)。
+    LLM 不可用/超时/不可解析 → 该 chunk 跳过返回空(降级, 守 GitNexus 确定性兜底)。
+    """
+    if llm_client is None or not candidates:
+        return [], []
+    effective_threshold = (token_threshold if token_threshold is not None
+                           else get_chunk_token_threshold(model))
+    effective_max_calls = (max_calls if max_calls is not None
+                           else get_chunk_max_calls())
+    chunks: list[FileChunk] = chunk_items_by_file(
+        candidates,
+        block_of=lambda c: c.block,
+        token_threshold=effective_threshold,
+        max_calls=effective_max_calls,
+    )
+    emitter = ProgressEmitter("sink-hunter", len(chunks), progress_cb)
+
+    async def _hunt_one(chunk: "FileChunk"):
+        prompt = _build_sink_hunter_prompt(chunk)
+        raw = await llm_client(prompt)
+        verdicts = _parse_sink_verdicts(raw)
+        out: list[SinkCallSite] = []
+        for v in verdicts:
+            if v.get("is_sink") is not True:
+                continue
+            try:
+                block = _resolve_block_for_line(chunk, v.get("line"))
+                out.append(_to_hunter_sink(block, v))
+            except Exception:
+                logger.debug("discover_sinks_by_entry: skip malformed verdict", exc_info=True)
+                continue
+        await emitter.tick(detail=out[0].callee_name if out else None, hits_delta=len(out))
+        return out
+
+    conc = concurrency if concurrency is not None else get_max_concurrent()
+    effective_timeout = (per_call_timeout if per_call_timeout is not None
+                         else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
+
+    async def _on_skip(idx, message):
+        chunk = chunks[idx]
+        await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
+
+    per_chunk = await map_llm_with_bounds(
+        chunks, _hunt_one,
+        concurrency=conc, per_call_timeout=effective_timeout, label="discover_sinks_by_entry",
+        on_skip=_on_skip,
+    )
+    all_sinks = [s for chunk_sinks in per_chunk for s in chunk_sinks]
+    gaps = _aggregate_gaps(all_sinks)
+    await emitter.finalize(f"{len(all_sinks)} sinks · {len(gaps)} gaps")
+    return all_sinks, gaps
