@@ -16,11 +16,32 @@ if TYPE_CHECKING:
     from .session import AuditSession
 
 
+class _NullAgentLogger:
+    """No-op AgentLogger stand-in：session 未绑定（NullAuditSession）时用。
+
+    NullAuditSession 按设计只镜像 AuditSession 的公开方法、不暴露私有 ``_meta``
+    （SessionMetadata 实例，Null 无对应物）。故 ``AgentLogger(session._meta)`` 在 Null
+    上会 AttributeError。此 stand-in 镜像 AgentLogger 被 SessionToolAuditLogger 用到的
+    公开面（initialize/log_event/close），使审计调用 no-op、业务逻辑继续——审计是日志层，
+    session 缺失不应崩在 agent 启动前（曾致 temporal retry 无效 + activity_failures.log
+    噪音，2026-07-22 NodeGoat_1784743576）。
+    """
+
+    async def initialize(self) -> None: pass
+    async def log_event(self, event_type: str, event_data: Any) -> None: pass
+    async def close(self) -> None: pass
+
+
 class SessionToolAuditLogger(ToolAuditLogger):
     def __init__(self, session: "AuditSession", agent_name: str, attempt: int = 1) -> None:
         self._session = session
         self._agent_name = agent_name
-        self._agent_logger = AgentLogger(session._meta, agent_name, attempt)
+        # NullAuditSession 不暴露私有 _meta（只镜像公开方法）→ 用 no-op logger，使审计调用
+        # no-op、业务逻辑继续（getattr 解耦，免 import NullAuditSession）。
+        meta = getattr(session, "_meta", None)
+        self._agent_logger = (
+            AgentLogger(meta, agent_name, attempt) if meta is not None else _NullAgentLogger()
+        )
 
     async def initialize(self) -> None:
         """Open the per-agent JSON log and write its header + agent_start event."""
