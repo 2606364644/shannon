@@ -207,7 +207,7 @@ def test_normalize_token_keeps_original_when_unsure():
     false joins). Applies to table names AND unmapped PascalCase tokens — we
     do NOT guess entity→table here (write-side naming is _resolve_write_token's
     job; guessing on read-side ORM property names like `Name` would risk
-   误连)."""
+    误连)."""
     assert _normalize_token("orders", {}) == "orders"
     assert _normalize_token("SomeEntity", {}) == "SomeEntity"
 
