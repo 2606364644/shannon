@@ -88,11 +88,13 @@ export default function WorkspaceDetail() {
         </div>
       </div>
       <Tabs value={current} onValueChange={(v) => navigate(v)}>
-        <TabsList>
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
-          ))}
-        </TabsList>
+        <div data-testid="wd-tabs-sticky" className="sticky top-12 z-30 print:static">
+          <TabsList>
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
       </Tabs>
       <div><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
     </div>

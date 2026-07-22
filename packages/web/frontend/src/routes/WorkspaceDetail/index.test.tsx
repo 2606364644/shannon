@@ -57,6 +57,15 @@ describe("WorkspaceDetail shell", () => {
     renderAt("/p/ws/overview");
     expect(screen.getByText(/返回列表/)).toBeInTheDocument();
   });
+
+  it("Tabs 外层容器 sticky 吸顶（top-12 z-30，紧贴 TopBar 下沿）", () => {
+    renderAt("/p/ws/overview");
+    const sticky = screen.getByTestId("wd-tabs-sticky");
+    expect(sticky.className).toContain("sticky");
+    expect(sticky.className).toContain("top-12");
+    expect(sticky.className).toContain("z-30");
+    expect(sticky.className).toContain("print:static");
+  });
 });
 
 describe("WorkspaceDetail shell i18n", () => {
