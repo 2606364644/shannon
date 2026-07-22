@@ -6,6 +6,12 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from supernova_core.code_index.gitnexus_engine import GitNexusEngine, GitNexusError
 
 
+@pytest.fixture(autouse=True)
+def _isolate_gitnexus_home(monkeypatch, tmp_path):
+    """隔离 ~/.gitnexus：flock lock + registry 读写不触碰真实 home（每测试独立 tmp）。"""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+
 def _subcommands(mock_run):
     """提取所有 gitnexus 子调用中的子命令名 (cmd[1], 如 'analyze'/'index')。"""
     return [c[0][0][1] for c in mock_run.call_args_list]
@@ -184,6 +190,107 @@ class TestGitNexusEngineCLI:
             )
             result = engine.check_stale()
             assert result is True
+
+
+class TestRegistryConcurrencyProtection:
+    """gitnexus index 并发写 registry.json 的 ENOENT race 缓解（2026-07-22
+    NodeGoat_1784743576 + 1784741574 并发 scan → ActivityError → scan failed）。
+
+    根因：GitNexus 1.6.8 ``writeRegistry`` 用固定 ``registry.json.tmp`` + 无 flock，
+    多 scan/activity 并发 ``gitnexus index`` 写同一全局 registry → rename 互相踩 → ENOENT。
+    缓解：ensure_indexed 用 flock 跨进程串行 index + index 失败幂等检查（repo 已注册则成功）。
+    """
+
+    @staticmethod
+    def _seed_registry(home: Path, repo_path: Path) -> None:
+        reg = home / ".gitnexus"
+        reg.mkdir(parents=True, exist_ok=True)
+        (reg / "registry.json").write_text(
+            json.dumps([{"name": "x", "path": str(repo_path)}]), encoding="utf-8")
+
+    def test_is_repo_registered_true_when_in_registry(self, monkeypatch, tmp_path):
+        self._seed_registry(tmp_path, tmp_path)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert GitNexusEngine(tmp_path)._is_repo_registered() is True
+
+    def test_is_repo_registered_false_when_other_repo(self, monkeypatch, tmp_path):
+        self._seed_registry(tmp_path, tmp_path / "other-repo")
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert GitNexusEngine(tmp_path)._is_repo_registered() is False
+
+    def test_is_repo_registered_false_when_registry_absent(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert GitNexusEngine(tmp_path)._is_repo_registered() is False
+
+    def test_is_repo_registered_false_when_registry_corrupt(self, monkeypatch, tmp_path):
+        reg = tmp_path / ".gitnexus"
+        reg.mkdir(parents=True)
+        (reg / "registry.json").write_text("not json", encoding="utf-8")
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert GitNexusEngine(tmp_path)._is_repo_registered() is False
+
+    def test_ensure_indexed_idempotent_when_index_fails_but_registered(self, monkeypatch, tmp_path):
+        """index 失败 + repo 已注册 → success=True（race 下另一进程已注册本 repo）。"""
+        (tmp_path / ".gitnexus").mkdir()
+        self._seed_registry(tmp_path, tmp_path)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[1] == "index":
+                return MagicMock(returncode=1, stdout="", stderr="ENOENT rename race")
+            return MagicMock(returncode=0, stdout="{}", stderr="")
+
+        engine = GitNexusEngine(tmp_path)
+        with patch("supernova_core.code_index.gitnexus_engine.subprocess.run", side_effect=fake_run):
+            result = engine.ensure_indexed()
+        assert result.success is True  # 幂等：已注册视为成功
+
+    def test_registry_lock_is_mutually_exclusive(self, monkeypatch, tmp_path):
+        """flock 锁互斥：一线程持锁时，另一非阻塞 flock 拿不到（串行化 gitnexus index）。"""
+        import fcntl
+        import os
+        import threading
+        import time
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        engine = GitNexusEngine(tmp_path)
+        inside = threading.Event()
+
+        def holder():
+            with engine._registry_lock():
+                inside.set()
+                time.sleep(0.15)
+            inside.clear()
+
+        t = threading.Thread(target=holder)
+        t.start()
+        try:
+            deadline = time.time() + 1.0
+            while not inside.is_set() and time.time() < deadline:
+                time.sleep(0.005)
+            assert inside.is_set(), "holder 未持锁"
+            # 主线程非阻塞尝试应被拒（BlockingIOError）
+            fd = os.open(str(engine._registry_lock_path()), os.O_CREAT | os.O_RDWR)
+            try:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd)
+        finally:
+            t.join()
+
+    @pytest.mark.asyncio
+    async def test_ensure_indexed_async_idempotent_when_index_fails_but_registered(self, monkeypatch, tmp_path):
+        """async 版幂等：index 失败 + repo 已注册 → success=True。"""
+        (tmp_path / ".gitnexus").mkdir()
+        self._seed_registry(tmp_path, tmp_path)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        proc = _fake_proc(communicate_return=(b"", b"ENOENT rename race"), returncode=1)
+        engine = GitNexusEngine(tmp_path)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            result = await engine.ensure_indexed_async()
+        assert result.success is True
 
 
 class TestGitNexusEngineAsyncCLI:

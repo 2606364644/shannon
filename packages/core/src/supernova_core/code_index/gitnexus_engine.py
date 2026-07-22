@@ -7,8 +7,10 @@ The MCP channel is in gitnexus_mcp.py.
 
 import asyncio
 import contextlib
+import fcntl
 import json
 import logging
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -52,6 +54,67 @@ class GitNexusEngine:
         """Check if gitnexus CLI is installed."""
         return shutil.which("gitnexus") is not None
 
+    def _registry_json_path(self) -> Path:
+        """全局 registry.json 路径（~/.gitnexus/registry.json）。"""
+        return Path.home() / ".gitnexus" / "registry.json"
+
+    def _registry_lock_path(self) -> Path:
+        """跨进程 flock 锁文件：串行化 gitnexus index，防 writeRegistry ENOENT race。"""
+        return Path.home() / ".gitnexus" / "registry.json.lock"
+
+    def _is_repo_registered(self) -> bool:
+        """读 registry.json 检查 repo_root 是否已注册（index 失败时的幂等检查）。
+
+        GitNexus registry.json 是 ``[{"path": "...", ...}]`` 数组；race/并发下另一进程
+        可能已成功注册本 repo，此时 index 失败可视为成功（repo 实际已在 registry）。
+        文件缺失/坏 JSON → False（保守：无法证明已注册）。
+        """
+        try:
+            data = json.loads(self._registry_json_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        repo_str = str(self.repo_root)
+        return isinstance(data, list) and any(
+            isinstance(entry, dict) and entry.get("path") == repo_str for entry in data
+        )
+
+    @contextlib.contextmanager
+    def _registry_lock(self):
+        """跨进程 flock 串行化 gitnexus index（同步版，阻塞等锁）。
+
+        GitNexus 1.6.8 ``writeRegistry`` 用固定 ``registry.json.tmp`` + 无锁，并发
+        ``gitnexus index`` 会 ENOENT rename race。flock 让同 worker 进程内 + 跨进程
+        的 index 调用串行（Docker 单 worker 共享 ~/.gitnexus/ 场景）。
+        """
+        lock_path = self._registry_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+    @contextlib.asynccontextmanager
+    async def _registry_lock_async(self):
+        """async 版 flock：非阻塞 + asyncio 轮询，不卡 event loop（守 _run_cli_async 可取消性）。"""
+        lock_path = self._registry_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    await asyncio.sleep(0.2)
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
     def ensure_indexed(self, force: bool = False) -> IndexResult:
         """Run gitnexus analyze if needed, then register the repo into the
         global registry (~/.gitnexus/registry.json) via ``gitnexus index``.
@@ -89,12 +152,20 @@ class GitNexusEngine:
         # Idempotently register the repo into the global registry. Without this
         # the MCP channel deadlocks even though .gitnexus/ is present and fresh.
         try:
-            self._run_cli("index", str(self.repo_root))
+            with self._registry_lock():
+                self._run_cli("index", str(self.repo_root))
         except GitNexusError as exc:
-            return IndexResult(
-                success=False,
-                error_message=f"failed to register repo in global registry: {exc}",
-            )
+            # 幂等检查（flock 双保险）：race/并发下另一进程可能已注册本 repo，
+            # 此时 index 失败可视为成功（repo 实际已在 registry，MCP 能发现）。
+            if self._is_repo_registered():
+                logger.warning(
+                    "gitnexus index failed but repo already in registry "
+                    "(likely registered by a concurrent process): %s", exc)
+            else:
+                return IndexResult(
+                    success=False,
+                    error_message=f"failed to register repo in global registry: {exc}",
+                )
 
         return IndexResult(success=True)
 
@@ -120,12 +191,20 @@ class GitNexusEngine:
         # Idempotently register the repo into the global registry. Without this
         # the MCP channel deadlocks even though .gitnexus/ is present and fresh.
         try:
-            await self._run_cli_async("index", str(self.repo_root))
+            async with self._registry_lock_async():
+                await self._run_cli_async("index", str(self.repo_root))
         except GitNexusError as exc:
-            return IndexResult(
-                success=False,
-                error_message=f"failed to register repo in global registry: {exc}",
-            )
+            # 幂等检查（flock 双保险）：race/并发下另一进程可能已注册本 repo，
+            # 此时 index 失败可视为成功（repo 实际已在 registry，MCP 能发现）。
+            if self._is_repo_registered():
+                logger.warning(
+                    "gitnexus index failed but repo already in registry "
+                    "(likely registered by a concurrent process): %s", exc)
+            else:
+                return IndexResult(
+                    success=False,
+                    error_message=f"failed to register repo in global registry: {exc}",
+                )
 
         return IndexResult(success=True)
 
