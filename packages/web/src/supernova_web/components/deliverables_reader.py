@@ -8,6 +8,9 @@ from supernova_core.utils.paths import WHITEBOX_SUBDIR, resolve_track_deliverabl
 BIG_JSON_THRESHOLD = 50_000
 _EXCLUDE_DIRS = {".git", "__pycache__", "schemas"}
 
+# PoC 生成器(poc_generator._POC_FILENAME)写入的产物文件名,report() 接口拼接用。
+POC_FILENAME = "exploitable_poc_collection.md"
+
 
 def _is_valid_queue_file(p: Path) -> bool:
     """非空且含 vulnerabilities 数组的 queue 文件。"""
@@ -151,3 +154,16 @@ class DeliverablesReader:
         if not p.exists():
             raise FileNotFoundError(name)
         return p.read_text("utf-8")
+
+    def read_poc(self) -> str | None:
+        """读 PoC md(exploitable_poc_collection.md),不存在返回 None(不抛,调用方按无 PoC 处理)。
+        track-scoped(deliverables/{track}/)+ legacy flat 布局与 read() 同口径。
+        PoC md 自带「# 可利用漏洞 PoC 集合」一级标题 + 概览/置信度统计。
+        """
+        p = resolve_track_deliverable(self._deliverables, self._infer_track(), POC_FILENAME)
+        if not p.exists():
+            return None
+        try:
+            return p.read_text("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None

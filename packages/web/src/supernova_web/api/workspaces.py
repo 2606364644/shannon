@@ -104,7 +104,15 @@ async def report(ws: str, request: Request):
         # 无报告产物 → 200 空文本:前端 ReportTab Empty「报告尚未生成」契约。
         # workspace 不存在已由 _workspace_path 抛 404,这里只处理「存在但无报告」。
         return ""
-    return reader.read(chosen)
+    body = reader.read(chosen)
+    poc = reader.read_poc()
+    if poc:
+        # 方向 a1:PoC md 自带「# 可利用漏洞 PoC 集合」一级标题 + 概览/置信度统计,
+        # 整体作为报告尾部章节,--- 分隔线让 MarkdownView 渲染 <hr> 划清边界。
+        # PoC 含 ```bash/```http 围栏块,前端复用现成 rehype-highlight 语法高亮 + 复制按钮,零前端改动。
+        # 无 PoC(扫描中断/PoC activity 未跑)则只返综合报告。
+        return f"{body.rstrip()}\n\n---\n\n{poc.lstrip()}"
+    return body
 
 
 @router.get("/{ws}/logs")

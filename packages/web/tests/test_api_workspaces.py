@@ -112,6 +112,32 @@ def test_logs_dual_mode(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/L/logs?file=nope.log").status_code == 404
 
 
+def test_report_appends_poc_when_present(app_with_ws, tmp_workspaces):
+    """direction a1: report appends PoC md after comprehensive report. PoC keeps its
+    own '# 可利用漏洞 PoC 集合' heading, --- separator, ```bash/```http fences preserved
+    for the frontend's existing rehype-highlight render (zero frontend change)."""
+    _ws(tmp_workspaces, "P")
+    dl = (tmp_workspaces / "P" / "deliverables" / "whitebox")
+    dl.mkdir(parents=True)
+    (dl / "comprehensive_security_assessment_report.md").write_text("# 综合报告\n\n正文")
+    (dl / "exploitable_poc_collection.md").write_text(
+        "# 可利用漏洞 PoC 集合（白盒）\n\n```bash\ncurl -i -X GET 'https://t/x'\n```")
+    body = TestClient(app_with_ws).get("/api/workspaces/P/report").text
+    assert body.startswith("# 综合报告")
+    assert "---" in body                            # 分隔线 <hr>
+    assert "# 可利用漏洞 PoC 集合（白盒）" in body     # PoC 自带标题保留
+    assert "```bash" in body and "curl -i" in body   # 代码块保留
+
+
+def test_report_without_poc_unchanged(app_with_ws, tmp_workspaces):
+    """无 PoC md（扫描中断 / PoC activity 未跑）-> report 只返综合报告，不拼接。"""
+    _ws(tmp_workspaces, "Q")
+    dl = (tmp_workspaces / "Q" / "deliverables" / "whitebox")
+    dl.mkdir(parents=True)
+    (dl / "comprehensive_security_assessment_report.md").write_text("# R")
+    assert TestClient(app_with_ws).get("/api/workspaces/Q/report").text == "# R"
+
+
 def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
     """workspace 存在但无报告产物 → 200 + 空文本(前端 ReportTab Empty「报告尚未生成」契约),
     非 404。404 保留给 workspace 不存在(_workspace_path 已抛)。
