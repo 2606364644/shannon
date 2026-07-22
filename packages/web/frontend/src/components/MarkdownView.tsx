@@ -512,7 +512,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
 
       <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
         {twoCol && (
-          <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-4 self-start">
+          <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-20 self-start">
             <div className="mb-2 flex items-center justify-between gap-2 px-2">
               <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {t("markdown.toc")}
@@ -604,7 +604,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         )}
         <div ref={contentRef} className="space-y-5">
           {hasVulns && (
-            <div className="sticky top-0 z-20 -mx-1 mb-1 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+            <div data-testid="findings-bar" className="sticky top-20 z-20 -mx-1 mb-1 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
               <span className="px-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {t("markdown.findings")}
               </span>

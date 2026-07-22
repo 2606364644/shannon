@@ -412,3 +412,26 @@ describe("MarkdownView i18n", () => {
     expect(screen.getByRole("heading", { level: 2, name: "执行摘要" })).toBeInTheDocument();
   });
 });
+
+describe("MarkdownView sticky top 对齐全局栈（集成约束）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("findings 工具栏 sticky top-20（吸附在 TopBar+Tabs 栈正下方），z-20 不变", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const bar = container.querySelector('[data-testid="findings-bar"]');
+    expect(bar).not.toBeNull();
+    expect(bar?.className).toContain("sticky");
+    expect(bar?.className).toContain("top-20");
+    expect(bar?.className).toContain("z-20");
+    expect(bar?.className).not.toContain("top-0"); // 旧值已改
+  });
+
+  it("TOC sticky top-20（旧 top-4 已改），不再贴视口顶被 chrome 盖", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc).not.toBeNull();
+    expect(toc?.className).toContain("sticky");
+    expect(toc?.className).toContain("top-20");
+    expect(toc?.className).not.toContain("top-4"); // 旧值已改
+  });
+});
