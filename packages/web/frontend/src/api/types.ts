@@ -168,7 +168,7 @@ export interface ParsedVulnField {
 
 /**
  * 从报告 markdown 解析出的单个漏洞块（`### XXX-VULN-NN — 标题` + 后续 kv-list + witness fenced code）。
- * 由 splitByVulnBlocks + parseVulnBlock 产出，供 MarkdownVulnCard 渲染、inferSeverity 推断等级。
+ * 由 splitByVulnBlocks + parseVulnBlock 产出，供报告渲染（MarkdownView 按严重度着色 + 完整原始 markdown 渲染）、inferSeverity 推断等级。
  */
 export interface ParsedVulnBlock {
   id: string;                       // "XSS-VULN-04"

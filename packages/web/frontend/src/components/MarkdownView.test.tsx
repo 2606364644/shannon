@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import i18n from "@/i18n";
 import { MarkdownView } from "./MarkdownView";
 
@@ -47,17 +47,17 @@ Count: 4
 beforeEach(() => i18n.changeLanguage("zh"));
 
 describe("MarkdownView", () => {
-  it("渲染 H1/H2 标题；vuln 块进卡片（INJ-VULN-01 不再是 heading）", () => {
+  it("渲染 H1/H2 标题；vuln 块完整渲染（标题+字段都在，按 severity 着色）", () => {
     render(<MarkdownView markdown={MD} />);
     expect(screen.getByRole("heading", { level: 1, name: "安全评估报告" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "执行摘要" })).toBeInTheDocument();
     // prose 段的 ### 类型小节仍是 heading
     expect(screen.getByRole("heading", { level: 3, name: "Injection" })).toBeInTheDocument();
-    // INJ-VULN-01 块进卡片，不再渲染为 heading
-    expect(screen.queryByRole("heading", { level: 3, name: /INJ-VULN-01/ })).not.toBeInTheDocument();
+    // vuln 块完整渲染：ID 在常驻 header，字段在 body（不裁剪、不丢信息）
     const card = screen.getByTestId("vuln-card");
     expect(card).toHaveAttribute("data-severity");
     expect(card).toHaveTextContent("INJ-VULN-01");
+    expect(card).toHaveTextContent("CommandInjection");
   });
 
   it("TOC 含类型 + 执行摘要条目（从 DOM 读真实 id）", () => {
@@ -79,6 +79,38 @@ describe("MarkdownView", () => {
       // 核心：TOC href 必须对应 DOM 真实元素，否则点击无反应
       expect(container.querySelector(`[id="${id}"]`)).not.toBeNull();
     }
+  });
+
+  it("TOC 默认折叠；章节可展开/收起（chevron + 全部展开）", () => {
+    const md = [
+      "# 报告",
+      "",
+      "## 单点漏洞",
+      "",
+      "### INJ-VULN-01: SQLi",
+      "",
+      "- **vulnerability_type:** SQLi",
+      "",
+      "### INJ-VULN-02: XSS",
+      "",
+      "- **vulnerability_type:** XSS",
+    ].join("\n");
+    const { container } = render(<MarkdownView markdown={md} />);
+    const toc = container.querySelector('[data-testid="toc"]')!;
+    // 默认折叠：章节带 chevron 但子条目隐藏、箭头收起
+    expect(toc.querySelectorAll('[data-testid="toc-toggle"]').length).toBeGreaterThan(0);
+    expect(toc.querySelectorAll('[data-testid="toc-children"]')).toHaveLength(0);
+    expect(toc.querySelector('[data-testid="toc-toggle"]')).toHaveAttribute("aria-expanded", "false");
+    // 展开该章节 → 子条目出现、chevron 展开
+    fireEvent.click(toc.querySelector('[data-testid="toc-toggle"]')!);
+    expect(toc.querySelectorAll('[data-testid="toc-children"]')).toHaveLength(1);
+    expect(toc.querySelector('[data-testid="toc-toggle"]')).toHaveAttribute("aria-expanded", "true");
+    // 再次点击 → 收起
+    fireEvent.click(toc.querySelector('[data-testid="toc-toggle"]')!);
+    expect(toc.querySelectorAll('[data-testid="toc-children"]')).toHaveLength(0);
+    // 全部展开 → 子条目恢复
+    fireEvent.click(toc.querySelector('[data-testid="toc-toggle-all"]')!);
+    expect(toc.querySelectorAll('[data-testid="toc-children"]')).toHaveLength(1);
   });
 
   it("重复同名 h2 → 唯一 DOM id 且 TOC 各自命中（juice-shop 结构）", () => {
@@ -170,12 +202,27 @@ describe("MarkdownView", () => {
     expect(kvKeys).not.toContain("SSRF");
   });
 
-  it("vuln 块的 witness_payload 进卡片 PoC（折叠，展开后显示）", () => {
+  it("vuln 块的 witness_payload 代码完整展示（直接渲染，不折叠丢信息）", () => {
     render(<MarkdownView markdown={MD} />);
-    const toggle = screen.getByTestId("poc-toggle");
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const card = screen.getByTestId("vuln-card");
+    // witness 代码内容直接出现在卡片里（完整展示，不再折叠成 PoC toggle）
+    expect(card).toHaveTextContent("preTax=res.send(...)");
+  });
+
+  it("单张 vuln 卡片可独立折叠/展开（header 按钮 + aria-expanded）", () => {
+    render(<MarkdownView markdown={MD} />);
+    const card = screen.getByTestId("vuln-card");
+    const toggle = within(card).getByTestId("vuln-toggle");
+    // 默认展开：正文在、aria-expanded=true
+    expect(card).toHaveTextContent("preTax=res.send(...)");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // 折叠本卡 → 正文隐藏
     fireEvent.click(toggle);
-    expect(screen.getByTestId("poc-code").textContent).toContain("preTax=res.send(...)");
+    expect(within(card).getByTestId("vuln-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(card).not.toHaveTextContent("preTax=res.send(...)");
+    // 再展开 → 正文回来
+    fireEvent.click(within(card).getByTestId("vuln-toggle"));
+    expect(card).toHaveTextContent("preTax=res.send(...)");
   });
 
   it("prose 段 block code 在 <pre> 内、带复制按钮 + 语言角标", () => {

@@ -9,7 +9,6 @@ import { visit } from "unist-util-visit";
 import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { MarkdownVulnCard } from "./MarkdownVulnCard";
 import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
@@ -32,7 +31,7 @@ interface Heading {
 interface TocItem {
   id: string;
   text: string;
-  level: 1 | 2;
+  level: 1 | 2 | 3;
 }
 
 /**
@@ -200,7 +199,7 @@ function makeProseComponents(t: TFunction) {
         return (
           <li {...props} data-testid="kv-row" className="flex items-baseline gap-2">
             <span className="kv-key shrink-0 font-mono text-muted-foreground">{keyText}</span>
-            <span className="kv-val">{valKids}</span>
+            <span className="kv-val min-w-0 break-words">{valKids}</span>
           </li>
         );
       }
@@ -251,6 +250,42 @@ function makeProseComponents(t: TFunction) {
 
 const REMARK_PLUGINS = [remarkGfm];
 
+/** severity → 配色：报告里不同危害程度用不同颜色区分（左轨边框 / 底色微染 / 圆点 / 标签文字）。 */
+// severity 配色：DSF 暖色语义通道 --c-red/orange/yellow（与 coral 主色同暖系，Claude 感）。
+// 只在「药丸标签 + 圆点」上着色；卡片本体保持 bg-card + hairline + shadow-card 的 Claude 卡面
+// （对齐 AttackChainSection，不搞 alert 式色条/底色）。
+const SEV_PILL: Record<string, string> = {
+  Critical: "bg-red/15 text-red",
+  High: "bg-orange/15 text-orange",
+  Medium: "bg-yellow/15 text-yellow",
+  Low: "bg-muted text-muted-foreground",
+};
+const SEV_DOT: Record<string, string> = {
+  Critical: "bg-red",
+  High: "bg-orange",
+  Medium: "bg-yellow",
+  Low: "bg-muted-foreground",
+};
+
+/** 从漏洞块派生一行可扫的「是什么」小标题：优先 Sink/Location 的 basename:行号，其次 vulnType。
+ *  GitNexus 轨漏洞标题只有 ID（无描述），靠这个给出有意义的扫描线索。 */
+function vulnPreview(block: ParsedVulnBlock): string {
+  const f =
+    block.fields.find((x) => /sink call|sink/i.test(x.key)) ||
+    block.fields.find((x) => /vulnerable location|location|source|endpoint/i.test(x.key));
+  const raw = f?.val?.replace(/`/g, "") ?? "";
+  const bm = /([^/()\s]+\.\w{1,5})/.exec(raw);
+  const base = bm?.[1];
+  if (base) {
+    // basename 之后的第一个 :<数字> = 源/汇行号（路径形如 file.java:method:innercall:712:36）
+    const after = raw.slice((bm?.index ?? 0) + base.length);
+    const line = /:(\d+)/.exec(after)?.[1];
+    return line ? `${base}:${line}` : base;
+  }
+  if (raw) return raw.split(/\s/)[0];
+  return block.vulnType || "";
+}
+
 /** 连续 vuln 段合并成一个 grid 组，prose 段单独成组。 */
 type VulnGroup = { type: "prose"; md: string } | { type: "grid"; blocks: ParsedVulnBlock[] };
 function groupSegments(segments: Segment[]): VulnGroup[] {
@@ -274,6 +309,15 @@ function groupSegments(segments: Segment[]): VulnGroup[] {
 export function MarkdownView({ markdown }: { markdown: string }) {
   const { t } = useTranslation();
   const [heroCollapsed, setHeroCollapsed] = useState(false);
+  // 默认全部展开（完整展示，不丢信息）。每张卡片可单独折叠（chevron）；粘性按钮批量「全部收起/展开」。
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const toggleCard = (id: string) =>
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const proseComponents = useMemo(() => makeProseComponents(t), [t]);
   const { headings, topRisks, typeSummaries } = useMemo(() => parseStructure(markdown), [markdown]);
   const execH2 = headings.find((h) => h.text.includes("执行摘要"));
@@ -305,6 +349,12 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     [segments, topRiskIds, topRisks, typeSummaries, attackChainSplit],
   );
   const groups = useMemo(() => groupSegments(segments), [segments]);
+  const hasVulns = groups.some((g) => g.type === "grid");
+  const allVulnIds = useMemo(
+    () => groups.flatMap((g) => (g.type === "grid" ? g.blocks.map((b) => b.id) : [])),
+    [groups],
+  );
+  const allCollapsed = allVulnIds.length > 0 && allVulnIds.every((id) => collapsedIds.has(id));
 
   // TOC：从渲染后 DOM 读真实 heading id（h1 章节为骨架 + h2 子节；vuln h3 太碎不进 TOC）。
   // 这保证每个 TOC href 都命中 DOM 真实元素，与 id 生成方式解耦——根治「点了没反应」。
@@ -317,15 +367,37 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       return;
     }
     const items: TocItem[] = [];
-    root.querySelectorAll<HTMLElement>("h1[id], h2[id]").forEach((el) => {
-      const id = el.id;
-      if (!id) return;
-      const level = (el.tagName === "H1" ? 1 : 2) as 1 | 2;
-      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (text) items.push({ id, text, level });
+    // 收集：h1/h2 章节标题 + 攻击链章节 + 单漏洞卡 / 攻击链条目（按 DOM 顺序，href 命中真实 id）
+    root.querySelectorAll<HTMLElement>(
+      "h1[id], h2[id], [data-testid='attack-chain-section'], [data-testid='vuln-card'][id], [data-testid='chain-card'][id]",
+    ).forEach((el) => {
+      const testid = el.getAttribute("data-testid");
+      let level: 1 | 2 | 3;
+      let id = el.id;
+      let text = "";
+      const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+      if (el.tagName === "H1") {
+        level = 1;
+        text = clean(el.textContent);
+      } else if (el.tagName === "H2") {
+        level = 2;
+        text = clean(el.textContent);
+      } else if (testid === "attack-chain-section") {
+        level = 2;
+        id = "attack-chain-section";
+        text = clean(el.querySelector("h2")?.textContent) || t("report.attackChains");
+      } else if (testid === "chain-card") {
+        level = 3;
+        text = clean(el.querySelector('[data-testid="chain-title"]')?.textContent) || id;
+      } else {
+        // vuln-card：用 ID 作可扫条目
+        level = 3;
+        text = id;
+      }
+      if (id && text) items.push({ id, text, level });
     });
     setTocItems(items);
-  }, [markdown, groups]);
+  }, [markdown, groups, t]);
 
   // scroll-spy：高亮当前可视章节。jsdom 无 IntersectionObserver → 跳过（不影响 TOC 渲染）。
   const [activeId, setActiveId] = useState<string>("");
@@ -346,6 +418,52 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     }
     return () => observer.disconnect();
   }, [tocItems]);
+
+  // TOC 树：把 level-3（漏洞/攻击链条目）挂到最近的 level<=2 父章节下，做成可折叠树。
+  const tocTree = useMemo(() => {
+    const tree: { item: TocItem; children: TocItem[] }[] = [];
+    const childToParent: Record<string, string> = {};
+    let cur: { item: TocItem; children: TocItem[] } | null = null;
+    for (const it of tocItems) {
+      if (it.level <= 2) {
+        cur = { item: it, children: [] };
+        tree.push(cur);
+      } else if (cur) {
+        cur.children.push(it);
+        childToParent[it.id] = cur.item.id;
+      }
+    }
+    return { tree, childToParent };
+  }, [tocItems]);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
+  const toggleSection = (id: string) =>
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const tocSectionIds = tocTree.tree.filter((n) => n.children.length > 0).map((n) => n.item.id);
+  const tocAllCollapsed = tocSectionIds.length > 0 && tocSectionIds.every((id) => collapsedSections.has(id));
+  // 默认折叠：首次构建出目录树时，把所有带子条目的章节收起（用户后续手动操作不受影响）。
+  const tocCollapseInited = useRef(false);
+  useEffect(() => {
+    if (tocCollapseInited.current || tocSectionIds.length === 0) return;
+    tocCollapseInited.current = true;
+    setCollapsedSections(new Set(tocSectionIds));
+  }, [tocSectionIds]);
+  // scroll-spy 命中折叠章节内的条目时，自动展开该章节（保证高亮可见）。
+  useEffect(() => {
+    if (!activeId) return;
+    const parent = tocTree.childToParent[activeId];
+    if (!parent) return;
+    setCollapsedSections((prev) => {
+      if (!prev.has(parent)) return prev;
+      const next = new Set(prev);
+      next.delete(parent);
+      return next;
+    });
+  }, [activeId, tocTree.childToParent]);
 
   const twoCol = tocItems.length >= 2;
 
@@ -395,32 +513,89 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
         {twoCol && (
           <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-4 self-start">
-            <div className="mb-2 px-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {t("markdown.toc")}
+            <div className="mb-2 flex items-center justify-between gap-2 px-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t("markdown.toc")}
+              </span>
+              {tocSectionIds.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="toc-toggle-all"
+                  onClick={() => setCollapsedSections(tocAllCollapsed ? new Set() : new Set(tocSectionIds))}
+                  className="font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
+                </button>
+              )}
             </div>
-            <ul className="space-y-0.5">
-              {tocItems.map((h, i) => {
-                const active = h.id === activeId;
+            <ul className="max-h-[calc(100vh-3rem)] space-y-0.5 overflow-y-auto pr-1">
+              {tocTree.tree.map((node) => {
+                const hasKids = node.children.length > 0;
+                const collapsed = collapsedSections.has(node.item.id);
+                const active = node.item.id === activeId;
                 return (
-                  <li key={`${i}-${h.id}`}>
-                    <a
-                      href={`#${h.id}`}
-                      className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors ${
-                        h.level === 2 ? "pl-7" : ""
-                      } ${
-                        active
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                      }`}
-                    >
-                      <span
-                        className={`h-1 w-1 shrink-0 rounded-full transition-colors ${
-                          active ? "bg-primary" : "bg-transparent group-hover:bg-muted-foreground/60"
+                  <li key={node.item.id}>
+                    <div className="flex items-center gap-0.5">
+                      {hasKids ? (
+                        <button
+                          type="button"
+                          data-testid="toc-toggle"
+                          onClick={() => toggleSection(node.item.id)}
+                          aria-expanded={!collapsed}
+                          aria-label={collapsed ? t("markdown.expand") : t("markdown.collapse")}
+                          className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                        >
+                          <ChevronDown
+                            className={`size-3 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      ) : (
+                        <span className="size-4 shrink-0" aria-hidden="true" />
+                      )}
+                      <a
+                        href={`#${node.item.id}`}
+                        className={`group flex flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${
+                          node.item.level === 1 ? "font-semibold" : ""
+                        } ${
+                          active
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                         }`}
-                        aria-hidden="true"
-                      />
-                      <span className="truncate">{h.text}</span>
-                    </a>
+                      >
+                        <span
+                          className={`h-1 w-1 shrink-0 rounded-full transition-colors ${
+                            active ? "bg-primary" : "bg-transparent group-hover:bg-muted-foreground/60"
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <span className="truncate">{node.item.text}</span>
+                      </a>
+                    </div>
+                    {hasKids && !collapsed && (
+                      <ul
+                        data-testid="toc-children"
+                        className="ml-3.5 mt-0.5 space-y-0.5 border-l border-border/40 pl-1.5"
+                      >
+                        {node.children.map((child) => {
+                          const cActive = child.id === activeId;
+                          return (
+                            <li key={child.id}>
+                              <a
+                                href={`#${child.id}`}
+                                className={`group flex items-center rounded-md px-1.5 py-1 font-mono text-[11px] transition-colors ${
+                                  cActive
+                                    ? "bg-accent text-foreground"
+                                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                                }`}
+                              >
+                                <span className="truncate">{child.text}</span>
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </li>
                 );
               })}
@@ -428,6 +603,22 @@ export function MarkdownView({ markdown }: { markdown: string }) {
           </nav>
         )}
         <div ref={contentRef} className="space-y-5">
+          {hasVulns && (
+            <div className="sticky top-0 z-20 -mx-1 mb-1 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+              <span className="px-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t("markdown.findings")}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="vuln-expand-all"
+                onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
+                className="h-7 font-mono text-[11px]"
+              >
+                {allCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
+              </Button>
+            </div>
+          )}
           {groups.map((g, i) =>
             g.type === "prose" ? (
               <div
@@ -443,18 +634,62 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 </ReactMarkdown>
               </div>
             ) : (
-              <div
-                key={i}
-                data-testid="vuln-grid"
-                className="grid grid-cols-1 gap-3 lg:grid-cols-2"
-              >
-                {g.blocks.map((block) => (
-                  <MarkdownVulnCard
-                    key={block.id}
-                    block={block}
-                    severity={inferSeverity(block, topRiskIds)}
-                  />
-                ))}
+              <div key={i} data-testid="vuln-grid" className="space-y-4">
+                {g.blocks.map((block) => {
+                  const sev = inferSeverity(block, topRiskIds);
+                  // body = 原始 markdown 去掉首行标题（ID 在 header 里显示），完整保留所有字段/代码/散文——不裁剪丢信息。
+                  const bodyMd = block.raw.split(/\r?\n/).slice(1).join("\n").trim();
+                  const subtitle = block.title || vulnPreview(block);
+                  return (
+                    <section
+                      key={block.id}
+                      id={block.id}
+                      data-testid="vuln-card"
+                      data-severity={sev}
+                      className="vuln-entry scroll-mt-20 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+                    >
+                      {/* 常驻 header：整行可点折叠（accordion）。ID + severity 药丸（暖色 --c-*）+ 一行「是什么」+ chevron。
+                          min-w-0 让 subtitle truncate 生效；flex-wrap 窄屏优雅换行；折叠态也能扫。 */}
+                      <button
+                        type="button"
+                        data-testid="vuln-toggle"
+                        onClick={() => toggleCard(block.id)}
+                        aria-expanded={!collapsedIds.has(block.id)}
+                        aria-controls={`${block.id}-body`}
+                        className="flex w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 text-left"
+                      >
+                        <span className="shrink-0 font-mono text-[13px] font-semibold text-foreground">{block.id}</span>
+                        <span
+                          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[sev]}`}
+                          data-testid="vuln-sev"
+                        >
+                          <span className={`size-1.5 rounded-full ${SEV_DOT[sev]}`} aria-hidden="true" data-testid="vuln-dot" />
+                          {t(`vuln.severity.${sev}`, { defaultValue: sev })}
+                        </span>
+                        {subtitle && (
+                          <span className="min-w-0 truncate text-[13px] font-medium text-foreground/70">{subtitle}</span>
+                        )}
+                        <ChevronDown
+                          className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${collapsedIds.has(block.id) ? "-rotate-90" : ""}`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {/* body：完整原始内容，默认展开（不丢信息）；本卡折叠时隐藏（扫描视图）。
+                          break-words 让长路径自动折行，不溢出卡片。 */}
+                      {!collapsedIds.has(block.id) && bodyMd && (
+                        <div id={`${block.id}-body`} className="prose prose-sm mt-3 max-w-none break-words prose-headings:font-sans">
+                          <ReactMarkdown
+                            remarkPlugins={REMARK_PLUGINS}
+                            rehypePlugins={[rehypeHighlight] as never}
+                            components={proseComponents as never}
+                          >
+                            {bodyMd}
+                          </ReactMarkdown>
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             ),
           )}
