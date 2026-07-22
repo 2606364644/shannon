@@ -9,6 +9,7 @@ from supernova_core.code_index.second_order_join import (
     is_resolvable_token,
     _resolve_write_token,
     _resolve_read_table,
+    _normalize_token,
 )
 
 
@@ -189,3 +190,35 @@ def test_resolve_read_table_orm_returns_param():
     (Task 4). Does not fabricate a table name."""
     src = _make_read_src(param_name="Name", expression="findOneByName(")
     assert _resolve_read_table(src) == "Name"
+
+
+# ------------------------------------------------------------------
+# Task 4 (2026-07-22): token normalisation layer (_normalize_token) +
+# false-join guard. Map-only & conservative — see implementation note.
+# ------------------------------------------------------------------
+
+def test_normalize_token_aligns_entity_class():
+    """UserEntity + map{UserEntity:users} → users (explicit map hit wins)."""
+    assert _normalize_token("UserEntity", {"UserEntity": "users"}) == "users"
+
+
+def test_normalize_token_keeps_original_when_unsure():
+    """No map entry → keep original (保守: never fabricate a table, avoid
+    false joins). Applies to table names AND unmapped PascalCase tokens — we
+    do NOT guess entity→table here (write-side naming is _resolve_write_token's
+    job; guessing on read-side ORM property names like `Name` would risk
+   误连)."""
+    assert _normalize_token("orders", {}) == "orders"
+    assert _normalize_token("SomeEntity", {}) == "SomeEntity"
+
+
+def test_no_false_join_unrelated_tokens():
+    """write UserEntity (→ users via receiver naming) + read `orders` → NOT
+    paired. 误连防护核心: unrelated tokens must not be force-aligned."""
+    w = _make_write("unresolvable", callee_receiver="UserEntity")
+    src = _make_read_src(param_name="orders", expression="SELECT * FROM orders")
+    chain = _make_chain("orders")
+    cands = extract_second_order_candidates(
+        [w], [chain], reads_by_id={"orders": src},
+    )
+    assert cands == []

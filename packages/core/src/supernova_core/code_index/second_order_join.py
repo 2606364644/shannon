@@ -184,6 +184,30 @@ def _resolve_write_token(write: StorageWritePoint, source_text: str | None) -> s
     return original
 
 
+def _normalize_token(token: str, entity_table_map: dict[str, str]) -> str:
+    """Normalise a write/read token to a canonical table name for join
+    matching (spec §3.4). Conservative by design: a token that cannot be
+    confidently mapped is returned unchanged — under-recall goes to the LLM
+    track; a wrong guess here would pair unrelated write↔read sites and
+    produce a FALSE second-order finding (误连 > 漏报 更糟).
+
+    Mapping strategy (map-only, deliberately):
+      - explicit map hit (entity class → table, from @Table annotations) →
+        map value wins;
+      - every other token (table names, ORM property names, unmapped PascalCase)
+        is returned unchanged.
+
+    Write-side entity→table *naming-convention* (``User``→``users``) is handled
+    upstream by :func:`_resolve_write_token`, not here — applying it on the read
+    side would rewrite ORM property names (``Name``→``names``) and risk false
+    joins. If real-machine recall proves too low, a guarded naming-convention
+    step can be added here as a follow-up.
+    """
+    if not token or not is_resolvable_token(token):
+        return token
+    return entity_table_map.get(token, token)
+
+
 @dataclass(frozen=True)
 class SecondOrderCandidate:
     """One (write, read) pair joined by (medium, token). Feeds Task 7 builder
@@ -210,26 +234,12 @@ def extract_second_order_candidates(
     ``source_provider`` (optional, default None): lazy loader returning a write
     point's file source (bytes). When supplied, each ORM-style write's
     ``storage_token`` is resolved to a table name via :func:`_resolve_write_token`
-    (same-file @Table / naming convention) before matching — this is what lets
-    ``repo.save(u)`` (token "unresolvable") join a ``FROM users`` read.
-    ``None`` → writes keep their literal ``storage_token``; read-side
-    normalisation is added in Task 4.
+    (same-file @Table / naming convention) and BOTH write & read tokens are
+    normalised via :func:`_normalize_token` against a merged entity→table map
+    built from the write files — this is what lets ``repo.save(u)`` (token
+    "unresolvable") join a ``FROM users`` read. ``None`` → literal-token join
+    only (Tasks 2-4 features inactive).
     """
-    # Index read chains by resolved literal token. Only STORAGE sources with
-    # resolvable tokens participate; non-storage sources and dynamic tokens
-    # are ignored (belong to single-hop track / LLM track respectively).
-    by_token: dict[str, list[tuple[SourcePoint, CandidateChain]]] = {}
-    for chain in read_chains:
-        src = reads_by_id.get(chain.source_param)
-        if src is None:
-            continue
-        if src.source_type.value != "storage":
-            continue
-        tok = _resolve_read_table(src)
-        if not is_resolvable_token(tok):
-            continue
-        by_token.setdefault(tok, []).append((src, chain))
-
     # Per-file source cache: avoid re-reading the same file for each write.
     src_cache: dict[str, str | None] = {}
 
@@ -242,6 +252,31 @@ def extract_second_order_candidates(
             src_cache[fp] = raw.decode("utf-8", errors="replace") if raw else None
         return src_cache[fp]
 
+    # Merged entity→table map across all write files (for normalising both
+    # sides). Built once from cached sources; empty when no provider.
+    merged_map: dict[str, str] = {}
+    if source_provider is not None:
+        for w in writes:
+            _source_text_for(w)            # populate cache for each write file
+        for st in src_cache.values():
+            if st:
+                merged_map.update(_build_entity_table_map(st))
+
+    # Index read chains by normalised token. Only STORAGE sources with
+    # resolvable tokens participate; non-storage sources and dynamic tokens
+    # are ignored (belong to single-hop track / LLM track respectively).
+    by_token: dict[str, list[tuple[SourcePoint, CandidateChain]]] = {}
+    for chain in read_chains:
+        src = reads_by_id.get(chain.source_param)
+        if src is None:
+            continue
+        if src.source_type.value != "storage":
+            continue
+        tok = _normalize_token(_resolve_read_table(src), merged_map)
+        if not is_resolvable_token(tok):
+            continue
+        by_token.setdefault(tok, []).append((src, chain))
+
     out: list[SecondOrderCandidate] = []
     for w in writes:
         w_token = w.storage_token
@@ -249,6 +284,7 @@ def extract_second_order_candidates(
             resolved = _resolve_write_token(w, _source_text_for(w))
             if is_resolvable_token(resolved):
                 w_token = resolved
+        w_token = _normalize_token(w_token, merged_map)
         if not is_resolvable_token(w_token):
             continue
         for src, chain in by_token.get(w_token, []):
