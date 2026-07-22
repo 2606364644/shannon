@@ -118,6 +118,38 @@ def _arg_expr_at(call_text: str, idx: int) -> str:
     return parts[idx] if idx < len(parts) else (parts[0] if parts else inside)
 
 
+def _full_call_text(text: str, match: re.Match) -> str:
+    """Extend a write-rule match to cover the whole call incl. args + ')'.
+
+    Write patterns end at the opening ``(`` (or just past a literal token), so
+    ``match.group(0)`` never contains the arguments or the closing paren —
+    which would leave ``_arg_expr_at`` with a truncated call and a garbage
+    ``written_expr``. This scans forward from the call's ``(`` with a simple
+    balanced-paren counter and returns the full ``name(...)`` slice.
+
+    Best-effort: if parens never rebalance (truncated source) it returns the
+    text from the match start to end-of-input — never worse than the old
+    truncated behaviour.
+    """
+    g0 = match.group(0)
+    rel_open = g0.find("(")
+    if rel_open == -1:
+        return g0
+    open_pos = match.start() + rel_open
+    depth = 0
+    i = open_pos
+    while i < len(text):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return text[match.start():i + 1]
+        i += 1
+    return text[match.start():]
+
+
 def detect_storage_reads(
     blocks: "list[FuncBlock]",
     parser,
@@ -195,14 +227,15 @@ def detect_storage_writes(
                 else:
                     token = tok
                 callee = m.group(0).split("(", 1)[0].split(".")[-1]
-                written = _arg_expr_at(m.group(0), rule.written_arg)
+                receiver = gd.get("receiver")
+                written = _arg_expr_at(_full_call_text(text, m), rule.written_arg)
                 rel_line = _line_of(text, m.start())
                 abs_line = block.start_line + rel_line - 1
                 out.append(StorageWritePoint(
                     id=f"{block.id}::{rule.rule_id}::{abs_line}",
                     caller_id=block.id,
                     callee_name=callee,
-                    callee_receiver=None,
+                    callee_receiver=receiver,
                     medium=rule.medium,
                     storage_token=token,
                     written_expr=written,

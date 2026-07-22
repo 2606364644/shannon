@@ -3,6 +3,12 @@
 # Token = regex group "tok" (literal). Dynamic/concatenated tokens are left
 # for the LLM track (Task 4 hunter) — they cannot be resolved statically.
 #
+# ORM-style writes (java-orm-save / python-sqlalchemy-add / go-gorm-write /
+# php-eloquent-create) carry NO `tok` group: the table name is not present at
+# the call site, so a `receiver` named group captures the ORM handle / model
+# class instead; the join layer infers the table from @Table annotation +
+# naming convention + receiver (second_order_join._resolve_write_token).
+#
 # YAML backslash rule: in a YAML double-quoted string, `\\` denotes one literal
 # `\` (so `\\s` → `\s`, `\\(` → `\(`, `\\.` → `\.`, `\\"` → `"`). Brief's
 # original draft mixed `\\` and single `\s`; the single-backslash form is a
@@ -16,6 +22,8 @@
 #   medium       StorageMedium: db | config | cache | file
 #   pattern      regex string; group "tok" carries the literal storage token
 #                (table name / property key / cache key / file path).
+#                Group "receiver" (optional) carries the ORM handle / model
+#                class for ORM-style writes with no literal token.
 #   param_of     (reads only) group name from which the read var is derived;
 #                defaults to "tok". `java-orm-find` uses group(1) instead.
 #   written_arg  (writes only) 0-based index of the argument carrying the
@@ -45,10 +53,14 @@ storage_reads:
 
 
 storage_writes:
+  # ORM save has no literal table token at the call site (table name lives in
+  # @Table / entity naming) — so NO `tok` group. Instead capture the receiver
+  # (`repo.save` → repo) as a named group; the join layer infers the table
+  # from receiver + @Table annotation + naming convention.
   - rule_id: java-orm-save
     languages: [java]
     medium: db
-    pattern: "(?:save|persist|merge)\\("
+    pattern: "(?:(?P<receiver>\\w+)\\.)?(?:save|persist|merge)\\("
     written_arg: 0
 
   - rule_id: java-setproperty
@@ -67,4 +79,46 @@ storage_writes:
     languages: [typescript, javascript]
     medium: file
     pattern: "writeFile(?:Sync)?\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+    written_arg: 1
+
+  # ---- Python (2026-07-22 二阶召回强化) ----
+  # SQLAlchemy ORM write: `session.add(u)` / `db.add(u)`. No literal table
+  # token; receiver=session|db (ORM handle). Table inferred downstream.
+  - rule_id: python-sqlalchemy-add
+    languages: [python]
+    medium: db
+    pattern: "(?P<receiver>session|db)\\.add\\("
+    written_arg: 0
+
+  # Python cache write: `cache.set("k", v)` / `redis.set("k", v)`.
+  # Literal cache key captured as `tok` (resolvable).
+  - rule_id: python-cache-set
+    languages: [python]
+    medium: cache
+    pattern: "(?P<receiver>cache|redis)\\.set\\(\\s*[\"'](?P<tok>[^\"']+)[\"']"
+    written_arg: 1
+
+  # ---- Go (gorm) ----
+  # gorm write: `db.Create(&u)` / `db.Save(&u)` / `db.Updates(&u)`.
+  - rule_id: go-gorm-write
+    languages: [go]
+    medium: db
+    pattern: "(?P<receiver>db|tx)\\.(?:Create|Save|Updates)\\("
+    written_arg: 0
+
+  # ---- PHP (Eloquent / query builder) ----
+  # Eloquent static write: `User::create($d)` / `User::insert($d)`.
+  # Receiver = model class (table-name inference线索).
+  - rule_id: php-eloquent-create
+    languages: [php]
+    medium: db
+    pattern: "(?P<receiver>\\w+)::(?:create|insert)\\("
+    written_arg: 0
+
+  # Query-builder write: `DB::table("users")->insert($d)`.
+  # Literal table name captured as `tok` (resolvable for join).
+  - rule_id: php-db-table-insert
+    languages: [php]
+    medium: db
+    pattern: "DB::table\\(\\s*[\"'](?P<tok>[^\"']+)[\"']\\s*\\)->insert\\("
     written_arg: 1
