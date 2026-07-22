@@ -522,7 +522,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                   type="button"
                   data-testid="toc-toggle-all"
                   onClick={() => setCollapsedSections(tocAllCollapsed ? new Set() : new Set(tocSectionIds))}
-                  className="font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                 >
                   {tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
                 </button>
@@ -555,7 +555,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                       )}
                       <a
                         href={`#${node.item.id}`}
-                        className={`group flex flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${
+                        className={`flex flex-1 items-center rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${
                           node.item.level === 1 ? "font-semibold" : ""
                         } ${
                           active
@@ -563,19 +563,17 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                         }`}
                       >
-                        <span
-                          className={`h-1 w-1 shrink-0 rounded-full transition-colors ${
-                            active ? "bg-primary" : "bg-transparent group-hover:bg-muted-foreground/60"
-                          }`}
-                          aria-hidden="true"
-                        />
                         <span className="truncate">{node.item.text}</span>
                       </a>
                     </div>
+                    {/* 树形缩进：竖线(ml-6=24px)对齐父标题「文本」起始列（箭头16+gap2+a-pad6=24px），
+                        子条目文本落在 39px，明显缩进到父标题右侧——根治「小标题比大标题靠前」。
+                        父标题前导圆点已去（active 靠 bg-accent 背景足矣）：它曾把父文本推到 36px、
+                        且逼竖线落在父文本左侧，视觉上子条目反显靠前。改父前导（箭头/pad）时复核 ml-6。 */}
                     {hasKids && !collapsed && (
                       <ul
                         data-testid="toc-children"
-                        className="ml-3.5 mt-0.5 space-y-0.5 border-l border-border/40 pl-1.5"
+                        className="ml-6 mt-0.5 space-y-0.5 border-l border-border/40 pl-2"
                       >
                         {node.children.map((child) => {
                           const cActive = child.id === activeId;
@@ -604,19 +602,18 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         )}
         <div ref={contentRef} className="space-y-5">
           {hasVulns && (
-            <div data-testid="findings-bar" className="sticky top-20 z-20 -mx-1 mb-1 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-              <span className="px-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div data-testid="findings-bar" className="sticky top-20 z-20 mb-2 flex items-center justify-between gap-2 bg-background/75 px-0.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {t("markdown.findings")}
               </span>
-              <Button
-                size="sm"
-                variant="outline"
+              <button
+                type="button"
                 data-testid="vuln-expand-all"
                 onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
-                className="h-7 font-mono text-[11px]"
+                className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               >
                 {allCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
-              </Button>
+              </button>
             </div>
           )}
           {groups.map((g, i) =>
