@@ -137,10 +137,24 @@ def _full_call_text(text: str, match: re.Match) -> str:
         return g0
     open_pos = match.start() + rel_open
     depth = 0
+    in_str: str | None = None   # current quote char, or None when in code
     i = open_pos
     while i < len(text):
         c = text[i]
-        if c == "(":
+        if in_str is not None:
+            # Inside a string literal: ignore parens; honour escapes; close
+            # only on the matching quote (so an unbalanced ')' inside a
+            # string does not terminate the call early).
+            if c == "\\" and i + 1 < len(text):
+                i += 2          # skip the escaped char
+                continue
+            if c == in_str:
+                in_str = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            in_str = c
+        elif c == "(":
             depth += 1
         elif c == ")":
             depth -= 1

@@ -181,3 +181,22 @@ def test_php_db_table_insert_write():
     pw = next(w for w in writes if w.rule_id == "php-db-table-insert")
     assert pw.medium is StorageMedium.DB
     assert pw.storage_token == "users"
+
+
+# ------------------------------------------------------------------
+# Follow-up B2 (2026-07-22): _full_call_text string-literal paren handling.
+# An *unbalanced* ')' inside a string literal must not close the call early.
+# ------------------------------------------------------------------
+
+def test_written_expr_unbalanced_paren_in_string_literal():
+    """An unbalanced ')' inside a string literal must not close the call early.
+
+    `repo.save("a)b")` -> written_expr must be the full `"a)b"` arg, proving
+    the balanced-paren scanner tracks string state.
+    """
+    block = _block('class C { void s(){ repo.save("a)b"); } }\n', name="ParenStr")
+    writes = detect_storage_writes([block], parser=None,
+                                   entry_point_ids={block.id},
+                                   source_provider=_provider(block))
+    save_w = next(w for w in writes if w.rule_id == "java-orm-save")
+    assert save_w.written_expr == '"a)b"'
