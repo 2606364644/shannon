@@ -230,3 +230,64 @@ async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
 def test_looks_user_tainted_precision(expr, expected):
     """config/constant/enum writes are not user-tainted; user data still is."""
     assert _looks_user_tainted(expr) is expected
+
+
+@pytest.mark.asyncio
+async def test_save_entity_joins_from_sql_read():
+    """End-to-end (Task 6): ``repo.save(UserEntity)`` in a file whose source
+    declares ``@Table(name = "users")`` + a ``SELECT ... FROM users`` read →
+    emits ``2ND-GN-*``. Proves the full recall chain: write token resolved via
+    source_provider (@Table, Task 2) + read table via FROM (Task 3) +
+    normalisation (Task 4)."""
+    SOURCE = (
+        '@Entity\n'
+        '@Table(name = "users")\n'
+        'public class UserEntity {\n'
+        '}\n'
+    )
+    write = StorageWritePoint(
+        id="w", caller_id="C.java:Save:1", callee_name="save",
+        callee_receiver="repo", medium=StorageMedium.DB,
+        storage_token="unresolvable",      # ORM save — no literal token at call site
+        written_expr="user",
+        file_path="UserController.java", line=2, rule_id="java-orm-save",
+    )
+
+    def source_provider(w):
+        return SOURCE.encode("utf-8") if w.file_path == "UserController.java" else None
+
+    flow = TaintFlow(
+        flow_id="ep#sink1", entry_point_id="C.java:ProfileServlet:1",
+        source_param="users", source_type=ParameterSource.STORAGE,
+        sink_call_site_id=_SINK_ID, propagation_steps=[],
+    )
+    pgraph = ParameterPropagationGraph(taint_flows=[flow], language_coverage=["java"])
+    sink = SinkCallSite(
+        id=_SINK_ID, caller_id="C.java:ProfileServlet", callee_name="innerHTML",
+        callee_receiver="el", category=SinkCategory.XSS, sink_subtype="xss_innerhtml",
+        file_path="C.java", line=5, column=10, dangerous_slots=[], rule_id="xss-innerhtml",
+    )
+    read_src = SourcePoint(
+        id="C.java:ProfileServlet:1::users::3",
+        entry_point_id="C.java:ProfileServlet:1", param_name="users",
+        source_type=ParameterSource.STORAGE,
+        expression="SELECT name FROM users WHERE id = ?",
+        file_path="C.java", line=3, rule_id="storage-read",
+    )
+    reads_by_id = {"users": read_src}
+
+    async def llm(prompt, **kw):
+        return (
+            '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
+            '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
+            '"mismatch_reason":"stored value rendered without encoding",'
+            '"confidence":"high"}'
+        )
+
+    findings = await build_second_order_findings(
+        [write], pgraph, llm_client=llm, sink_call_sites={_SINK_ID: sink},
+        reads_by_id=reads_by_id, source_provider=source_provider,
+    )
+    assert findings, "must emit a 2ND-GN-* finding (write token resolved via @Table)"
+    assert findings[0].ID.startswith("2ND-GN-")
+    assert findings[0].vulnerability_type == "second_order_xss"

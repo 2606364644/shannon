@@ -1402,9 +1402,21 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                     from supernova_core.code_index.vuln_chain_builders.second_order_builder import (
                         build_second_order_findings,
                     )
+
+                    def _second_order_source_provider(w):
+                        # Lazy-load a write point's file source for table-name
+                        # resolution (@Table / naming convention, Tasks 2-4).
+                        # Missing/unreadable file → None → join degrades
+                        # conservatively (under-recall, never a crash).
+                        try:
+                            return (repo / w.file_path).read_bytes()
+                        except (FileNotFoundError, OSError, IsADirectoryError):
+                            return None
+
                     second_order = await build_second_order_findings(
                         storage_writes, pgraph, llm_client=llm,
                         sink_call_sites=sink_call_sites, reads_by_id=reads_by_id,
+                        source_provider=_second_order_source_provider,
                         progress_cb=_chain_cb,
                     )
                     for f in second_order:

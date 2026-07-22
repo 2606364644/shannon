@@ -69,6 +69,7 @@ async def build_second_order_findings(
     llm_client: Callable[..., Awaitable[str]],
     sink_call_sites,
     reads_by_id: dict,
+    source_provider: "Callable[[StorageWritePoint], bytes | None] | None" = None,
     progress_cb: ProgressCb = None,
 ) -> list[InjectionVulnerability]:
     """Emit second-order findings for storage taint pairs.
@@ -78,12 +79,18 @@ async def build_second_order_findings(
          and injection (second-order SQLi) vuln classes — each routes by
          its own sinkSlot / sinkCategory rules inside ``extract_candidate_chains``.
       2. Join writes × read-chains by (medium, literal-token) via
-         ``extract_second_order_candidates`` (Task 6).
+         ``extract_second_order_candidates`` (Task 6). When ``source_provider``
+         is given, ORM-style writes are resolved to table names from their
+         file source (@Table / naming convention) before joining (Tasks 2-4).
       3. For each candidate: ``judge_chain_verdict`` on the read side, and a
          lightweight tainted check on the write side's ``written_expr``.
          verdict = (write_tainted) ∧ (read_verdict == "vulnerable").
       4. Emit an ``InjectionVulnerability`` with ``source_track="gitnexus"``
          and ``ID="2ND-GN-NN"``.
+
+    ``source_provider``: lazy loader ``StorageWritePoint -> bytes | None`` for a
+    write's file source; ``None`` → literal-token join only. Missing file →
+    provider returns None → join degrades conservatively (under-recall).
 
     ``externally_exploitable=True`` is a reachability placeholder; the
     activity layer refines per-route at real-machine time. It is NOT a
@@ -101,6 +108,7 @@ async def build_second_order_findings(
     # 2. Bipartite join writes × read-chains by (medium, token).
     candidates = extract_second_order_candidates(
         writes, read_chains, reads_by_id=reads_by_id,
+        source_provider=source_provider,
     )
 
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
