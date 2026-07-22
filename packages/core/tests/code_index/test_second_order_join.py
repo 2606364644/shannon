@@ -7,12 +7,14 @@ from supernova_core.code_index.chain_verdict import CandidateChain
 from supernova_core.code_index.second_order_join import (
     extract_second_order_candidates,
     is_resolvable_token,
+    _resolve_write_token,
 )
 
 
-def _make_write(token: str, *, wid: str = "w1") -> StorageWritePoint:
+def _make_write(token: str, *, wid: str = "w1", callee_receiver: str | None = None) -> StorageWritePoint:
     return StorageWritePoint(
         id=wid, caller_id="A", callee_name="save",
+        callee_receiver=callee_receiver,
         medium=StorageMedium.DB, storage_token=token,
         written_expr="user.name", file_path="a", line=1, rule_id="r",
     )
@@ -110,3 +112,54 @@ def test_cartesian_product_same_token():
     chains_seen = {c.read_side_chain.flow_id for c in cands}
     assert writes_seen == {"w1", "w2"}
     assert chains_seen == {"f1", "f2"}
+
+
+# ------------------------------------------------------------------
+# Task 2 (2026-07-22): write-side table-name resolution
+# (_resolve_write_token — @Table annotation / naming convention / receiver).
+# ------------------------------------------------------------------
+
+def test_resolve_write_token_from_table_annotation():
+    """@Table(name="users") class User + repo.save(u) (generic receiver) →
+    single-entity-file heuristic resolves to table `users`."""
+    src = (
+        '@Entity\n'
+        '@Table(name = "users")\n'
+        'public class User {\n'
+        '}\n'
+    )
+    w = _make_write("unresolvable", callee_receiver="repo")
+    assert _resolve_write_token(w, src) == "users"
+
+
+def test_resolve_write_token_by_naming_convention():
+    """No annotation; receiver `userRepository` → strip Repository → User →
+    naming convention (camelCase→snake_case + plural) → users."""
+    w = _make_write("unresolvable", callee_receiver="userRepository")
+    assert _resolve_write_token(w, None) == "users"
+
+
+def test_resolve_write_token_unresolvable_when_no_context():
+    """Bare save(u) — no receiver, no annotation → keep original token
+    (保守: do not fabricate a table name)."""
+    w = _make_write("unresolvable", callee_receiver=None)
+    assert _resolve_write_token(w, None) == "unresolvable"
+
+
+def test_resolve_write_token_multi_entity_no_guess():
+    """File with TWO @Table mappings + generic-receiver save → do NOT guess
+    (保守漏召 > 误连): ambiguous → keep original token."""
+    src = (
+        '@Table(name = "users")\npublic class User {}\n'
+        '@Table(name = "orders")\npublic class Order {}\n'
+    )
+    w = _make_write("unresolvable", callee_receiver="repo")
+    assert _resolve_write_token(w, src) == "unresolvable"
+
+
+def test_resolve_write_token_keeps_literal_token():
+    """A write that already has a literal token (cache.set("user:1")) must
+    pass through unchanged — resolution is only for ORM-style unresolvable
+    tokens."""
+    w = _make_write("user:1", callee_receiver="cache")
+    assert _resolve_write_token(w, None) == "user:1"
