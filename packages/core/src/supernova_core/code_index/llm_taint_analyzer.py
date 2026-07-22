@@ -179,17 +179,29 @@ def build_taint_prompt(
 # 3. LLM response parser
 # ---------------------------------------------------------------------------
 
-def parse_llm_response(raw: str) -> TaintAnalysisResult:
+def parse_llm_response(raw: str) -> TaintAnalysisResult | None:
     """Parse LLM JSON response into TaintAnalysisResult.
 
-    On any parsing error, returns an empty TaintAnalysisResult (conservative).
+    On parsing failure returns ``None`` (distinguishable from a legitimately
+    empty but well-formed response like ``{}``), so the caller
+    (``analyze_taint_llm``) can fall back to the deterministic intra analysis
+    instead of silently under-approximating with empty ``tainted_params``.
+
+    GLM commonly returns fenced (```json ... ```) / non-strict JSON / extra
+    fields that trip ``json.loads`` -> this path. Previously the failure was
+    logged at DEBUG and swallowed as an empty result, dropping all taint flows
+    for the function (sentinel_dashboard SSRF=0 root cause contributor).
     """
     try:
         data = json.loads(raw)
         return TaintAnalysisResult.model_validate(data)
     except (json.JSONDecodeError, Exception) as exc:
-        logger.debug("Failed to parse LLM response: %s", exc)
-        return TaintAnalysisResult(tainted_params=[], propagation_paths=[])
+        snippet = raw[:200] if isinstance(raw, str) else raw
+        logger.warning(
+            "Failed to parse LLM taint response (%s); snippet=%r. "
+            "Caller will fall back to deterministic intra analysis.", exc, snippet,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +374,16 @@ async def analyze_taint_llm(
     # Parse response
     if raw_response is not None:
         llm_result = parse_llm_response(raw_response)
+        if llm_result is None:
+            # LLM 返回了响应但 parse 失败(非合法 JSON / schema 不符)-> 兜底,
+            # 兑现 docstring "On LLM failure conservatively mark *all* params
+            # tainted"(避免静默 under-approximation 丢 taint flow,如 sentinel_dashboard
+            # SSRF:proxyPprofRequest 等 LLM 返回垃圾时 tainted_params 被吞空)。
+            logger.warning(
+                "LLM taint response unparseable for %s; using deterministic fallback.",
+                block.id,
+            )
+            return _deterministic_intra_fallback(block, sinks_in_func)
         return _intra_result_from_llm(block, llm_result, sinks_in_func)
 
     # Deterministic fallback (spec 改动: 立场 B): use is_entry_hint to tier

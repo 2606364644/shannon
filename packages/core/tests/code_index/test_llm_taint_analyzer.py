@@ -137,9 +137,11 @@ class TestParseLLMResponse:
         assert "user_input" in result.tainted_params
         assert len(result.propagation_paths) == 1
 
-    def test_invalid_json_returns_conservative(self):
+    def test_invalid_json_returns_none_for_caller_fallback(self):
+        # parse 失败返回 None(区分合法空响应 "{}"),让 analyze_taint_llm 走确定性兜底,
+        # 而非静默 under-approximate 兜底(兑现 docstring "LLM 失败保守标全参 tainted")。
         result = parse_llm_response("not json at all")
-        assert isinstance(result, TaintAnalysisResult)
+        assert result is None
 
     def test_empty_response(self):
         result = parse_llm_response("{}")

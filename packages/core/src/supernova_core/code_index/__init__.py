@@ -16,7 +16,10 @@ from supernova_core.code_index.degradation import build_degradation_report
 from supernova_core.code_index.file_discovery import discover_security_files
 from supernova_core.code_index.models import DegradationLevel, FileManifest
 from supernova_core.code_index.gitnexus_call_graph import build_call_graph_from_gitnexus
-from supernova_core.code_index.llm_taint_analyzer import analyze_taint_llm
+from supernova_core.code_index.llm_taint_analyzer import (
+    _deterministic_intra_fallback,
+    analyze_taint_llm,
+)
 from supernova_core.code_index.chain_propagator import (
     merge_taint_flows,
     produce_intra_first_taint_flows,
@@ -53,6 +56,32 @@ from supernova_core.code_index.storage_discovery_llm import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def backfill_skipped_taint_fallback(taint_items, taint_pairs, blocks_by_id):
+    """LLM 超时/异常跳过的 sink 函数走确定性兜底(CLAUDE.md §1 "LLM 不可用档不浪费")。
+
+    map_llm_with_bounds 的 _Skip(超时/error)函数不进 ``taint_pairs`` -> 原本不进
+    intra_results -> backward ``_tainted_params_reaching_sink`` 拿到 ``intra=None``
+    -> 回退 ``dangerous_slots.expression``(常为局部变量,如 ``httpClient.execute(request)``
+    的 "request")-> 无法映射到 caller 参数 -> source 锚定失败 -> 跨函数 taint flow
+    全丢(sentinel_dashboard SSRF=0 真根因:proxyPprofRequest 等核心 sink 函数 >60s
+    超时被跳过)。
+
+    兜底 ``_deterministic_intra_fallback`` 标 ``tainted_params=全部参数`` + ``hits=0.5``
+    (间接命中, is_entry_hint=False),保 backward chain seed 与跨函数传播,不损失召回
+    (双轨铁律:GitNexus 轨确定性补召回)。误报由下游 chain_verdict 轻量 LLM 复核过滤。
+    """
+    intra_results = {func_id: result for func_id, result in taint_pairs}
+    analyzed_ids = set(intra_results)
+    for func_id, func_sinks in taint_items:
+        if func_id in analyzed_ids:
+            continue
+        block = blocks_by_id.get(func_id)
+        if block is None:
+            continue
+        intra_results[func_id] = _deterministic_intra_fallback(block, func_sinks)
+    return intra_results
 
 
 def _build_typed_params_by_block(index: CodeIndex) -> dict[str, list[TypedParameter]]:
@@ -320,7 +349,9 @@ async def build_code_index_with_gitnexus(
     )
     await taint_emitter.finalize(
         f"{sum(_count_taint_flows(r) for _, r in taint_pairs)} taint_flows")
-    intra_results = {func_id: result for func_id, result in taint_pairs}
+    # 超时/异常跳过的 sink 函数走确定性兜底(CLAUDE.md §1 "不浪费"),否则 backward
+    # 拿不到 seed -> 跨函数 taint flow 全丢(如 SSRF controller->service)。
+    intra_results = backfill_skipped_taint_fallback(taint_items, taint_pairs, blocks_by_id)
 
     # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink；主路径扫 entry_point）
     #    entry_point_ids 已在 ⑦(③b 后)提前算出, 此处直接引用(原 :295 行删除, 解耦子项①)。

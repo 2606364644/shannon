@@ -206,7 +206,8 @@ async def test_taint_skip_emits_note_via_emitter_note(monkeypatch):
 
     def _fake_detect_sinks(blocks, parser, source_provider=None):
         # 真实 block.id 作 caller_id → _taint_one 必能查到 block(返回 tuple, 非 None)
-        return [SimpleNamespace(caller_id=b.id) for b in blocks]
+        return [SimpleNamespace(caller_id=b.id, id=f"{b.id}::fake:1:0",
+                                dangerous_slots=[]) for b in blocks]
 
     monkeypatch.setattr(ci, "collect_suspicious_calls", lambda *a, **kw: [])
     async def _fake_discover_sinks(suspicious, llm_client, **kw):
