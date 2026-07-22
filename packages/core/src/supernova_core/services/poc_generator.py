@@ -508,13 +508,25 @@ def _load_accepted_ids(deliverables_dir: Path, vuln_class: str) -> set[str]:
         return set()
 
 
+def _coerce_request_body(raw: Any) -> str | None:
+    """LLM structured_output 不可靠（GLM 无 strict），body 可能返回 dict/list 而非 schema
+    声明的 str。归一化为 JSON 字符串以保 spec.body 类型不变量 str|None，否则 to_burp_raw
+    的 spec.body.lstrip() 对 dict 崩（2026-07-21 sentinel_dashboard 实测，整个 PoC 报告丢失）。
+    """
+    if isinstance(raw, (dict, list)):
+        return json.dumps(raw, ensure_ascii=False)
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
 def _spec_from_llm_guess(guess: dict, vuln: Any, vuln_class: str, band: ConfidenceBand) -> HttpRequestSpec:
     return HttpRequestSpec(
         method=(guess.get("method") or "GET").upper(),
         path=guess.get("path") or "/",
         query={k: str(v) for k, v in (guess.get("query") or {}).items()},
         headers={k: str(v) for k, v in (guess.get("headers") or {}).items()},
-        body=guess.get("body"),
+        body=_coerce_request_body(guess.get("body")),
         auth_state=AuthState.UNKNOWN,
         confidence_band=band,
         source_id=getattr(vuln, "ID", ""),

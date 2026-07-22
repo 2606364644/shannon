@@ -15,6 +15,7 @@ from supernova_core.services.poc_generator import (
     to_curl, to_burp_raw,
     build_template_spec,
     build_llm_prompt, llm_fill_gap, LLM_REQUEST_SCHEMA,
+    _spec_from_llm_guess,
     render_poc_md, empty_poc_md,
     PoCGenerator,
 )
@@ -273,6 +274,43 @@ async def test_llm_fill_gap_failure_returns_none(monkeypatch):
     assert out is None
 
 
+def test_spec_from_llm_guess_normalizes_dict_body():
+    """regression：LLM structured_output 不可靠（GLM 无 strict），body 可能返回 dict 而非
+    schema 声明的 str。_spec_from_llm_guess 须归一化为 JSON 字符串，否则 to_burp_raw
+    的 spec.body.lstrip() 对 dict 崩 -> 整个 PoC 报告丢失（冒泡到顶层 except）。
+    """
+    v = SimpleNamespace(ID="AUTH-1")
+    guess = {"method": "POST", "path": "/auth/callback",
+             "body": {"id_token": "forged.none.sig"}, "query": None, "headers": None, "steps": None}
+    spec = _spec_from_llm_guess(guess, v, "auth", ConfidenceBand.HIGH)
+    assert isinstance(spec.body, str)
+    assert spec.body == '{"id_token": "forged.none.sig"}'
+    raw = to_burp_raw(spec, "https://t.example.com")
+    assert "Content-Type: application/json" in raw
+    assert '"id_token": "forged.none.sig"' in raw
+
+
+def test_spec_from_llm_guess_normalizes_list_body():
+    """list body 同样归一化（合法 JSON 数组），走 application/json 分支。"""
+    v = SimpleNamespace(ID="X-1")
+    guess = {"method": "POST", "path": "/x", "body": ["a", "b"],
+             "query": None, "headers": None, "steps": None}
+    spec = _spec_from_llm_guess(guess, v, "auth", ConfidenceBand.HIGH)
+    assert spec.body == '["a", "b"]'
+    raw = to_burp_raw(spec, "https://t.example.com")
+    assert "Content-Type: application/json" in raw
+
+
+def test_spec_from_llm_guess_keeps_str_and_none_body():
+    v = SimpleNamespace(ID="A-1")
+    s1 = _spec_from_llm_guess({"method": "POST", "path": "/x", "body": "k=v",
+                               "query": None, "headers": None, "steps": None}, v, "auth", ConfidenceBand.HIGH)
+    assert s1.body == "k=v"
+    s2 = _spec_from_llm_guess({"method": "GET", "path": "/x", "body": None,
+                               "query": None, "headers": None, "steps": None}, v, "auth", ConfidenceBand.HIGH)
+    assert s2.body is None
+
+
 # Task 6: md 渲染（概览表 + 详细 PoC + 空表兜底）
 
 _INJ_ENTRY = (
@@ -455,3 +493,35 @@ async def test_generate_llm_failure_degrades_gracefully(tmp_path, monkeypatch):
     md = out.read_text(encoding="utf-8")
     assert "AUTH-1" in md  # 仍产出条目
     assert "请求形态未推断" in md
+
+
+async def test_generate_llm_dict_body_does_not_crash(tmp_path, monkeypatch):
+    """regression（sentinel_dashboard 2026-07-21）：LLM gap-fill 返回 dict body（GLM
+    structured_output 不可靠，schema 声明 string|null 但实际返回 object）曾致
+    to_burp_raw spec.body.lstrip() 对 dict 崩 -> 整个 PoC 报告丢失（冒泡到顶层 except）。
+    归一化后应正常写入 md，含 JSON body + application/json Content-Type。
+    """
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    from supernova_core.models.queue_schemas import AuthVulnerability
+    q = VulnerabilityQueue(vulnerabilities=[
+        AuthVulnerability(ID="AUTH-1", vulnerability_type="missing-jwt", externally_exploitable=True,
+                          confidence="needs_review", exploitation_hypothesis="no verify",
+                          suggested_exploit_technique="forge jwt"),
+    ])
+    (d / "auth_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    import supernova_core.services.poc_generator as mod
+
+    async def fake_run(prompt, **kw):
+        return SimpleNamespace(success=True, structured_output={
+            "method": "POST", "path": "/auth/callback",
+            "body": {"id_token": "forged.none.sig"},  # dict，非 schema 声明的 str
+            "query": None, "headers": None, "steps": None,
+        }, error=None)
+
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+    out = await PoCGenerator.generate(d, ["auth"], "https://t.example.com", "whitebox", repo_path="/tmp/x")
+    md = out.read_text(encoding="utf-8")
+    assert "AUTH-1" in md
+    assert "Content-Type: application/json" in md
+    assert '"id_token": "forged.none.sig"' in md
