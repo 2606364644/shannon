@@ -82,3 +82,21 @@ describe("TopBar i18n", () => {
     expect(screen.getByLabelText("切换语言")).toBeInTheDocument();
   });
 });
+
+describe("TopBar sticky 吸顶", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("header 含 sticky/top-0/z-40/print:static（全局吸顶，低于弹窗 z-50）", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    const header = screen.getByTestId("topbar");
+    expect(header.tagName).toBe("HEADER");
+    expect(header.className).toContain("sticky");
+    expect(header.className).toContain("top-0");
+    expect(header.className).toContain("z-40");
+    expect(header.className).toContain("print:static");
+  });
+});
