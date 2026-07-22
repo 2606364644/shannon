@@ -27,10 +27,14 @@ describe("LogStream", () => {
     expect(rows[2].className).toContain("ev-error");
   });
 
-  it("每行含时间戳 + type + 摘要", () => {
-    render(<LogStream events={events} />);
+  it("每行含时间戳 + data-type + 摘要", () => {
+    const { container } = render(<LogStream events={events} />);
     expect(screen.getByText(/09:44:01/)).toBeInTheDocument();
-    expect(screen.getAllByText(/PhaseEvent|AgentEvent|ErrorEvent/).length).toBe(3);
+    const rows = container.querySelectorAll(".log-row");
+    expect(rows.length).toBe(3);
+    // type 身份经 data-type 属性承载（显示列已换成短语义标签）
+    const types = Array.from(rows).map((r) => r.getAttribute("data-type"));
+    expect(types).toEqual(["PhaseEvent", "AgentEvent", "ErrorEvent"]);
   });
 
   it("events > 500 切 react-window 虚拟滚动（结构断言：行仍按 category 上色）", () => {

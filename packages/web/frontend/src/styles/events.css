@@ -91,3 +91,44 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
 .submit-btn:disabled { background: var(--panel); color: var(--trace); cursor: not-allowed; }
 .yaml-editor { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
 
+/* === LogStream 实时日志行网格（operator-console 对齐重做，非新组件）
+   修旧版「[ts] Type  摘要」三段空格拼接的列参差：固定列网格
+   色边 | 时间 | 图标 | 标签 | 主体(minmax ellipsis) | metrics。
+   - ev-* 色留在行容器 .log-row（测试 ROW_SELECTOR 不变量，整行单点命中）；
+   - ts/tag/metrics 降级 var(--trace) + normal weight，主体/icon 继承 ev-* 类别色；
+   - 单行 ellipsis：react-window FixedSizeList 固定 20px 行高，不长内容换行（hover title 补全文）。
+   signature = 左侧 2px 事件色边（currentColor），扫一眼凭色密度感知阶段。 === */
+.log-row {
+  display: grid;
+  grid-template-columns: 2px 56px 14px 50px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  line-height: 20px;
+  border-radius: 3px;
+}
+.log-gutter {
+  align-self: stretch;
+  height: 100%;
+  background: currentColor;      /* 继承行 ev-* 类别色 → 事件色边 */
+  opacity: .5;
+  border-radius: 1px;
+}
+.log-ts,
+.log-tag,
+.log-metrics {
+  color: var(--trace);
+  font-weight: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-tag { font-size: 0.82em; letter-spacing: 0.04em; text-transform: uppercase; }
+.log-metrics { text-align: right; }
+.log-icon { font-weight: normal; opacity: .92; text-align: center; }
+.log-body {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-row:hover { background: hsl(var(--secondary) / 0.55); }
+

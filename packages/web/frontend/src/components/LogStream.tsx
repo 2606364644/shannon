@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import { FixedSizeList } from "react-window";
 import type { NdjsonEvent, EventCategory } from "../api/types";
 import { humanizeToolCall, firstNonemptyLine } from "../state/formatters";
@@ -46,58 +47,59 @@ function fmtTokens(input?: number, output?: number): string {
   return `${i}/${o} tok`;
 }
 
-function summarize(e: NdjsonEvent): string {
+/** 单行结构化描述：icon/tag 放固定列对齐，body 是主体，metrics 右对齐拆出。
+ *  取代旧版 summarize() 的「图标+type+全文」挤一个 nowrap 串导致的列参差。 */
+type RowDesc = { icon: string; tag: string; body: string; metrics?: string };
+
+function describe(e: NdjsonEvent): RowDesc {
   switch (e.type) {
     case "PhaseEvent":
-      return `${e.event === "start" ? "Starting" : "Complete"} ${e.phase}`;
+      return { icon: "◆", tag: "PHASE", body: `${e.event === "start" ? "Starting" : "Complete"} ${e.phase}` };
 
     case "StepEvent": {
       const label = e.intent || e.name;
-      if (e.event === "start") return `○ ${label}`;
-      if (e.error) return `✗ ${label}  — ${e.error}`;
-      const dur = e.duration_ms != null ? `  ${fmtDuration(e.duration_ms)}` : "";
-      return `✓ ${label}${dur}`;
+      if (e.event === "start") return { icon: "○", tag: "STEP", body: label };
+      if (e.error) return { icon: "✗", tag: "STEP", body: `${label} — ${e.error}` };
+      return { icon: "✓", tag: "STEP", body: label, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
     }
 
     case "AgentEvent": {
       const pfx = agentPrefix(e.agent_name);
       if (e.event === "start") {
-        return `▶ ${pfx} ${e.agent_name} started (attempt ${e.attempt})`;
+        return { icon: "▶", tag: "AGENT", body: `${pfx} ${e.agent_name} started (attempt ${e.attempt})` };
       }
       if (e.success === false) {
-        const dur = e.duration_ms != null ? fmtDuration(e.duration_ms) : "?";
         const err = e.error ? ` — ${e.error}` : "";
-        return `✗ ${pfx} ${e.agent_name} failed (${dur})${err}`;
+        return { icon: "✗", tag: "AGENT", body: `${pfx} ${e.agent_name} failed${err}`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
       }
       const parts: string[] = [];
       if (e.duration_ms != null) parts.push(fmtDuration(e.duration_ms));
       if (e.cost_usd != null) parts.push(fmtCost(e.cost_usd, e.cost_currency));
       const toks = fmtTokens(e.input_tokens, e.output_tokens);
       if (toks) parts.push(toks);
-      const metrics = parts.length ? ` (${parts.join(", ")})` : "";
-      return `✓ ${pfx} ${e.agent_name} Completed${metrics}`;
+      return { icon: "✓", tag: "AGENT", body: `${pfx} ${e.agent_name} Completed`, metrics: parts.join(" · ") || undefined };
     }
 
     case "ToolCallEvent": {
       const pfx = agentPrefix(e.agent_name);
       const params = humanizeToolCall(e.tool_name, e.parameters ?? {});
-      return `🔧 ${pfx} ${e.tool_name}${params ? `: ${params}` : ""}`;
+      return { icon: "↳", tag: "TOOL", body: `${pfx} ${e.tool_name}${params ? `: ${params}` : ""}` };
     }
 
     case "LlmTurnEvent": {
       const pfx = agentPrefix(e.agent_name);
       const line = firstNonemptyLine(e.content);
-      return `💭 ${pfx} Turn ${e.turn}${line ? `: ${line}` : ""}`;
+      return { icon: "›", tag: "LLM", body: `${pfx} Turn ${e.turn}${line ? `: ${line}` : ""}` };
     }
 
     case "GitnexusLlmEvent": {
       const e2 = e as unknown as Record<string, unknown>;
       const phase = String(e2.phase ?? "?");
       const kind = String(e2.kind ?? "progress");
-      if (kind === "hit") return `🔍 [GitNexus] ${phase}  ✓ ${e2.detail ?? ""}`;
-      if (kind === "summary") return `🔍 [GitNexus] ${phase}  done ${e2.done}/${e2.total} → ${e2.detail ?? ""}`;
-      if (kind === "note") return `🔍 [GitNexus] ${phase}  ⚠ ${e2.detail ?? ""}`;
-      return `🔍 [GitNexus] ${phase}  ${e2.done}/${e2.total}  · ${e2.hits} hits`;
+      if (kind === "hit") return { icon: "◎", tag: "GITNX", body: `${phase} ✓ ${e2.detail ?? ""}` };
+      if (kind === "summary") return { icon: "◎", tag: "GITNX", body: `${phase} done ${e2.done}/${e2.total} → ${e2.detail ?? ""}` };
+      if (kind === "note") return { icon: "◎", tag: "GITNX", body: `${phase} ⚠ ${e2.detail ?? ""}` };
+      return { icon: "◎", tag: "GITNX", body: `${phase} ${e2.done}/${e2.total} · ${e2.hits} hits` };
     }
 
     case "WorkflowHeader": {
@@ -106,7 +108,7 @@ function summarize(e: NdjsonEvent): string {
       if (e2.repo_path) parts.push(`repo: ${e2.repo_path}`);
       if (e2.target_url) parts.push(`target: ${e2.target_url}`);
       if (e2.mode) parts.push(`mode: ${e2.mode}`);
-      return parts.join("  ");
+      return { icon: "#", tag: "META", body: parts.join("  ") };
     }
 
     case "ErrorEvent": {
@@ -119,31 +121,34 @@ function summarize(e: NdjsonEvent): string {
           msg += ` [${e.classified}]`;
         }
       }
-      return msg;
+      return { icon: "✗", tag: "ERROR", body: msg };
     }
 
     case "SummaryEvent": {
-      const parts: string[] = [e.status];
+      const parts: string[] = [];
       if (e.total_duration_ms != null) parts.push(fmtDuration(e.total_duration_ms));
       if (e.total_cost_usd != null) parts.push(fmtCost(e.total_cost_usd, e.cost_currency));
       if (e.agents?.length) parts.push(`${e.agents.length} agents`);
-      return parts.join("  ");
+      return { icon: "■", tag: "DONE", body: e.status, metrics: parts.join(" · ") || undefined };
     }
 
     case "LogEvent": {
       const line = `[${e.level}] ${e.logger_name}: ${e.message}`;
-      return e.exc_txt ? `${line}\n${e.exc_txt}` : line;
+      return { icon: "·", tag: "LOG", body: e.exc_txt ? `${line}\n${e.exc_txt}` : line };
     }
+
     case "ResumeEvent":
-      return `resume ← ${e.previous_workflow_id}`;
+      return { icon: "↺", tag: "RESUME", body: `resume ← ${e.previous_workflow_id}` };
+
     case "InfoEvent":
-      return e.message;
+      return { icon: "·", tag: "INFO", body: e.message };
+
     default:
-      return e.type;
+      return { icon: "·", tag: e.type, body: e.type };
   }
 }
 
-/** 单行 CSS class：base category class + Agent end 成功/失败追加色。 */
+/** 行 CSS class：base category class + Agent end 成功/失败追加色。 */
 function rowClass(e: NdjsonEvent): string {
   if (e.type === "LogEvent") {
     if (e.level === "ERROR") return "ev-error";
@@ -161,15 +166,26 @@ function rowClass(e: NdjsonEvent): string {
 const ROW_HEIGHT = 20;
 const VIRTUAL_THRESHOLD = 500;
 
-function Row({ index, style, data }: { index: number; style: React.CSSProperties; data: NdjsonEvent[] }) {
-  const e = data[index];
+/** 单事件行：固定列网格（色边|时间|图标|标签|主体|metrics）。
+ *  - ev-* 色留在行容器（测试 ROW_SELECTOR 不变量）；ts/tag/metrics 降级 muted + normal。
+ *  - data-type 保留 type 身份（hover tooltip + 测试 hook），替代旧版裸 type 名文本。 */
+function LogRow({ e, style }: { e: NdjsonEvent; style?: CSSProperties }) {
+  const { icon, tag, body, metrics } = describe(e);
+  const title = metrics ? `${body}  ${metrics}` : body;
   return (
-    <div style={style} className={`whitespace-nowrap overflow-hidden text-ellipsis ${rowClass(e)}`}>
-      <span className="text-muted-foreground">[{tsClock(e.ts)}]</span>{" "}
-      <span className="text-muted-foreground">{e.type}</span>{" "}
-      {summarize(e)}
+    <div style={style} className={`log-row ${rowClass(e)}`} data-type={e.type} title={title}>
+      <span className="log-gutter" aria-hidden />
+      <span className="log-ts">{tsClock(e.ts)}</span>
+      <span className="log-icon" aria-hidden>{icon}</span>
+      <span className="log-tag">{tag}</span>
+      <span className="log-body">{body}</span>
+      <span className="log-metrics">{metrics ?? ""}</span>
     </div>
   );
+}
+
+function VirtualRow({ index, style, data }: { index: number; style: CSSProperties; data: NdjsonEvent[] }) {
+  return <LogRow e={data[index]} style={style} />;
 }
 
 export function LogStream({ events }: { events: NdjsonEvent[] }) {
@@ -202,7 +218,7 @@ export function LogStream({ events }: { events: NdjsonEvent[] }) {
           itemSize={ROW_HEIGHT}
           itemData={events}
         >
-          {Row}
+          {VirtualRow}
         </FixedSizeList>
       </div>
     );
@@ -210,11 +226,7 @@ export function LogStream({ events }: { events: NdjsonEvent[] }) {
   return (
     <div ref={containerRef} className="max-h-[480px] space-y-0 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs" aria-live="polite">
       {events.map((e, i) => (
-        <div key={i} style={{ lineHeight: "20px" }} className={`whitespace-nowrap overflow-hidden text-ellipsis ${rowClass(e)}`}>
-          <span className="text-muted-foreground">[{tsClock(e.ts)}]</span>{" "}
-          <span className="text-muted-foreground">{e.type}</span>{" "}
-          {summarize(e)}
-        </div>
+        <LogRow key={i} e={e} />
       ))}
     </div>
   );
