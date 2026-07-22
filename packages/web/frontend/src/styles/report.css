@@ -1,5 +1,12 @@
 /* 报告页专属：hljs token 配色（接 DSF --c- 语义色）+ 表格 + scroll-margin + pre 背景。
-   深色（:root 默认）为主，.light 覆盖一套调亮度保 AA 对比。 */
+   深色（:root 默认）为主，.light 覆盖一套调亮度保 AA 对比。
+
+   ★ 80px = sticky 栈总高（TopBar h-12=48px + 详情 Tabs h-9=36px ≈ 84px，取整 80）。
+   改 TopBar/Tabs 高度时，须同步以下依赖此常量之处：
+     - report.css：.prose :is(h1,h2,h3) 与 [data-testid="vuln-card"] 的 scroll-margin-top
+     - MarkdownView.tsx：vuln-card 的 scroll-mt-20、scroll-spy rootMargin("-80px...")
+     - MarkdownView.tsx：findings 工具栏 / TOC 的 sticky top-20（吸附在栈正下方）
+   详见 docs/superpowers/specs/2026-07-22-sticky-nav-consistency-design.md §3.2 / §5-I3。 */
 
 /* —— 锚点跳转：平滑滚动（尊重 reduced-motion）—— */
 html { scroll-behavior: smooth; }
@@ -99,3 +106,12 @@ html { scroll-behavior: smooth; }
 .light .hljs-attr    { color: hsl(var(--c-yellow) / 0.95); }
 .light .hljs-meta    { color: hsl(var(--c-red) / 0.9); }
 .light .hljs-comment { color: hsl(var(--muted-foreground)); }
+
+/* 打印兜底：所有 sticky 退回 static，避免 PDF 每页重复出现吸顶元素
+   （TopBar/Tabs 已有 print:static 变体；本规则兜底未来新增 sticky）。 */
+@media print {
+  [data-testid="topbar"],
+  [data-testid="wd-tabs-sticky"],
+  [data-testid="findings-bar"],
+  [data-testid="toc"] { position: static !important; }
+}
