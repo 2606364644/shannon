@@ -38,8 +38,8 @@ candidates:
     note: "cursor.execute 规则已覆盖常见 receiver;本组补 db2/custom cursor + SQLAlchemy text@session"
 
   - languages: [java]
-    callees: [createNativeQuery, executeQuery, execute, prepareStatement]
-    note: "JPA createNativeQuery / JDBC Statement(规则只覆盖 bare,本组补 receiver 变体)"
+    callees: [execute, prepareStatement]
+    note: "JDBC Statement 补 receiver 变体;createNativeQuery/executeQuery 已由规则 java-jpa-createnativequery/java-stmt-executequery(receiver_pattern .+,原 null)全覆盖,命中规则被排除不进候选"
 
   - languages: [php]
     callees: [query, whereRaw, raw, select]

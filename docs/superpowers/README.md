@@ -33,6 +33,8 @@
 - [taint-persist-plan](plans/2026-06-24-taint-persist-plan.md) — taint 落盘 ✅
 - [injection-recall-port](plans/2026-06-25-injection-recall-port.md) / [spec](specs/2026-06-25-injection-recall-port-design.md) — injection 召回 port（跨服务全链 leak-free）🔧
 - [llm-track-vuln-parity-restoration](plans/2026-06-28-llm-track-vuln-parity-restoration.md) / [spec](specs/2026-06-28-llm-track-vuln-parity-restoration-design.md) — LLM 轨 vuln 对齐 TS（max_turns/方法论补回）🔧
+- [second-order-storage-taint-dual-track](specs/2026-07-21-second-order-storage-taint-dual-track-design.md) - 二阶存储中转双轨（子项⑤，GitNexus 确定性 join + LLM 二阶方法论）🔧
+- [second-order-recall-rules-join-hardening](plans/2026-07-22-second-order-recall-rules-join-hardening.md) / [spec](specs/2026-07-22-second-order-recall-rules-join-hardening-design.md) - 二阶召回强化：写规则补 token + join 实体类↔表名归一化（不上 agent）📐
 
 ### 显示 UX
 - [whitebox-display-clarity](plans/2026-06-16-whitebox-display-clarity.md) / [spec](specs/2026-06-16-whitebox-display-clarity-design.md) — 白盒 live 显示重设计 🔧

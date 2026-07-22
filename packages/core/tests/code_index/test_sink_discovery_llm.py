@@ -87,13 +87,13 @@ def test_go_capitalized_raw_collected():
     assert out[0].callee == "Raw"
 
 
-def test_jpa_createnativequery_collected():
-    """Java em.createNativeQuery(...) —— 命中候选;规则只覆盖 bare → 收集(补召回)。"""
+def test_jpa_createnativequery_not_in_candidates():
+    """Java em.createNativeQuery(...) -- 规则 java-jpa-createnativequery 的 receiver_pattern
+    已由 null 升级为 .+ 全覆盖（4d66a6ee），命中硬规则 sink，不再进 LLM 补召回候选（规则升级正向结果）。"""
     block = _block(language="java")
     parser = _FakeParser([("createNativeQuery", "em", ["uid"], 1)])
     out = collect_suspicious_calls([block], parser, source_provider=lambda b: b"src")
-    assert len(out) == 1
-    assert out[0].callee == "createNativeQuery"
+    assert out == []
 
 
 def test_receiver_constraint_filters():
