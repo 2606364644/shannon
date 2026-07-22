@@ -25,6 +25,7 @@ from supernova_core.code_index.parameter_models import (
 from supernova_core.code_index.storage_models import StorageMedium, StorageWritePoint
 from supernova_core.code_index.vuln_chain_builders.second_order_builder import (
     build_second_order_findings,
+    _looks_user_tainted,
 )
 
 
@@ -196,3 +197,36 @@ async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
         f"second-order builder must emit 2ND-GN-* for STORAGE-sourced chain, "
         f"got ids={second_order_ids}"
     )
+
+
+# ------------------------------------------------------------------
+# Task 5 (2026-07-22): write-side taint precision (_looks_user_tainted).
+# Recognise config / constant / enum writes as NOT user-controlled (reduce
+# false-positive candidates sent to judge_chain_verdict). Conservative
+# direction: only removes false-positives, never adds false-negatives.
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize("expr,expected", [
+    # config / i18n / env / settings prefix → not tainted
+    ("config.timeout", False),
+    ("i18n.messages", False),
+    ("env.db_url", False),
+    ("settings.max_size", False),
+    # SCREAMING_SNAKE constants → not tainted
+    ("DEFAULT_ROLE", False),
+    ("MAX_SIZE", False),
+    # Enum-like (Pascal.UPPER) → not tainted
+    ("Color.RED", False),
+    ("UserRole.ADMIN", False),
+    # existing literal handling (regression)
+    ("42", False),
+    ('"hardcoded"', False),
+    ("", False),
+    # genuinely user-controlled → still tainted (no regression)
+    ("user.name", True),
+    ("req.body.x", True),
+    ("user.bio", True),
+])
+def test_looks_user_tainted_precision(expr, expected):
+    """config/constant/enum writes are not user-tainted; user data still is."""
+    assert _looks_user_tainted(expr) is expected

@@ -6,6 +6,7 @@ verdict = (write tainted) ∧ (read single-hop vulnerable).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
@@ -21,15 +22,29 @@ from supernova_core.models.queue_schemas import InjectionVulnerability
 
 logger = logging.getLogger(__name__)
 
+# SCREAMING_SNAKE constant (DEFAULT_ROLE, MAX_SIZE) — 2+ chars, upper/digit/_.
+_CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
+# Enum-like access (Color.RED, UserRole.ADMIN): Pascal.UPPER.
+_ENUM_RE = re.compile(r"^[A-Z]\w*\.[A-Z][A-Z0-9_]*$")
+# Config / i18n / env / settings prefixes (case-insensitive) — not user data.
+_CONFIG_PREFIXES = ("config.", "i18n.", "env.", "settings.", "cfg.", "conf.")
+
 
 def _looks_user_tainted(written_expr: str | None) -> bool:
-    """Lightweight write-side taint check.
+    """Lightweight write-side taint check (Task 5 precision pass).
 
-    Pure literals (numbers, single quoted strings) are treated as NOT
-    user-tainted. Anything else (variable, field access, concatenation,
-    interpolation, ...) is considered tainted. This is intentionally a
-    coarse heuristic; the authoritative judgment happens on the read side
-    via ``judge_chain_verdict``.
+    Returns False (NOT user-tainted) for patterns that are clearly not
+    user-controlled, reducing false-positive candidates sent to
+    ``judge_chain_verdict``:
+      - empty / pure numbers / single-quoted string literals (unchanged);
+      - config / i18n / env / settings prefixes (``config.timeout``);
+      - SCREAMING_SNAKE constants (``DEFAULT_ROLE``);
+      - enum-like access (``Color.RED``).
+
+    Anything else (variable, field access, concatenation, interpolation, ...)
+    is considered tainted. Conservative direction: this only removes
+    false-positives; the authoritative judgment is still on the read side via
+    ``judge_chain_verdict``.
     """
     e = (written_expr or "").strip()
     if not e:
@@ -37,6 +52,12 @@ def _looks_user_tainted(written_expr: str | None) -> bool:
     if e.isdigit():
         return False
     if len(e) >= 2 and e[0] in "\"'" and e[-1] == e[0]:
+        return False
+    if e.lower().startswith(_CONFIG_PREFIXES):
+        return False
+    if _CONSTANT_RE.match(e):
+        return False
+    if _ENUM_RE.match(e):
         return False
     return True
 
