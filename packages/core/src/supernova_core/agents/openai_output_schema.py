@@ -82,4 +82,13 @@ class RawJsonSchemaOutputSchema(AgentOutputSchemaBase):
         candidate = _extract_json_payload(json_str)
         if candidate is None:
             raise StructuredOutputParseError(json_str)
-        return json.loads(candidate)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            # 含 {} 但 JSON 语法坏（非法反斜杠转义，如正则 \d、Windows 路径 \U）：
+            # _extract_json_payload 已提取到 candidate，失败发生在 json.loads 这步。
+            # 转成 StructuredOutputParseError 走 L1 轻量重输兜底（providers_openai
+            # except StructuredOutputParseError → _lightweight_reparse），而非裸
+            # JSONDecodeError 冒泡成 AgentExecutionError retryable（2026-07-22
+            # auth-vuln ``Invalid \escape`` 失败根因——L0 此前未捕获该分支）。
+            raise StructuredOutputParseError(json_str) from e

@@ -86,6 +86,21 @@ def test_validate_json_raises_structured_output_parse_error_on_prose():
         s.validate_json("纯叙述收尾，没有 JSON")
 
 
+def test_validate_json_converts_invalid_escape_to_structured_output_parse_error():
+    """含 {} 但 JSON 语法坏（非法反斜杠转义，如正则 \\d、Windows 路径 \\U）应转成
+    StructuredOutputParseError 走 L1 轻量重输兜底，而非裸 json.JSONDecodeError 冒泡成
+    AgentExecutionError retryable（2026-07-22 auth-vuln ``Invalid \\escape`` 失败根因）。
+
+    _extract_json_payload 能提取到 candidate（fence/叙述剥离不关心转义），故失败发生在
+    json.loads 这一步——此分支此前未捕获 JSONDecodeError，是 L0 容错的盲区。
+    """
+    s = RawJsonSchemaOutputSchema({"type": "object"})
+    # GLM 在 JSON 字符串值里写了正则元字符 \d + Windows 路径 \U（均为非法 JSON 转义）
+    bad = r'{"regex": "\d+", "path": "C:\Users\admin"}'
+    with pytest.raises(StructuredOutputParseError):
+        s.validate_json(bad)
+
+
 def test_structured_output_parse_error_not_model_behavior_error():
     """不变量：不继承 ModelBehaviorError，避免被 openai-agents error handler 误吞。"""
     from agents import ModelBehaviorError
