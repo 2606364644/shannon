@@ -19,6 +19,7 @@ from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     SinkCallSite,
     SinkCategory,
+    SlotContext,
     SourcePoint,
     TaintFlow,
 )
@@ -291,3 +292,70 @@ async def test_save_entity_joins_from_sql_read():
     assert findings, "must emit a 2ND-GN-* finding (write token resolved via @Table)"
     assert findings[0].ID.startswith("2ND-GN-")
     assert findings[0].vulnerability_type == "second_order_xss"
+
+
+@pytest.mark.asyncio
+async def test_second_order_injection_via_stored_sql_read():
+    """Second-order SQLi (follow-up / predecessor 子项⑤ T7 gap): the injection
+    path is wired (``extract_candidate_chains(vuln_class="injection")``) but had
+    no end-to-end seed test. Stored data written to the `users` table + a
+    FROM-users read that flows into a SQL sink → emits a
+    ``second_order_injection`` (2ND-GN-*) finding.
+
+    Locks: (a) injection routing by sink_slot ∈ _INJECTION_SLOTS works for a
+    STORAGE-sourced chain through the second-order builder; (b) the 2ND-GN
+    finding is tagged ``second_order_injection`` (not xss)."""
+    SOURCE = (
+        '@Entity\n'
+        '@Table(name = "users")\n'
+        'public class UserEntity {\n'
+        '}\n'
+    )
+    write = StorageWritePoint(
+        id="w", caller_id="C.java:Save:1", callee_name="save",
+        callee_receiver="repo", medium=StorageMedium.DB,
+        storage_token="unresolvable", written_expr="user",
+        file_path="UserController.java", line=2, rule_id="java-orm-save",
+    )
+
+    def source_provider(w):
+        return SOURCE.encode("utf-8") if w.file_path == "UserController.java" else None
+
+    SQL_SINK = "C.java:QueryServlet:db.execute:9:0"
+    flow = TaintFlow(
+        flow_id="ep#sql", entry_point_id="C.java:QueryServlet:1",
+        source_param="users", source_type=ParameterSource.STORAGE,
+        sink_call_site_id=SQL_SINK, sink_slot=SlotContext.SQL_VALUE,
+        propagation_steps=[],
+    )
+    pgraph = ParameterPropagationGraph(taint_flows=[flow], language_coverage=["java"])
+    sink = SinkCallSite(
+        id=SQL_SINK, caller_id="C.java:QueryServlet", callee_name="execute",
+        callee_receiver="db", category=SinkCategory.SQL, sink_subtype="sql_raw_query",
+        file_path="C.java", line=9, column=10, dangerous_slots=[], rule_id="sql-execute",
+    )
+    read_src = SourcePoint(
+        id="C.java:QueryServlet:1::users::3",
+        entry_point_id="C.java:QueryServlet:1", param_name="users",
+        source_type=ParameterSource.STORAGE,
+        expression="SELECT bio FROM users WHERE id = ?",
+        file_path="C.java", line=3, rule_id="storage-read",
+    )
+    reads_by_id = {"users": read_src}
+
+    async def llm(prompt, **kw):
+        return (
+            '{"verdict":"vulnerable","witness_payload":"\' OR 1=1--",'
+            '"evidence_chain":"users(Storage) -> db.execute unparameterised",'
+            '"mismatch_reason":"stored value concatenated into SQL",'
+            '"confidence":"high"}'
+        )
+
+    findings = await build_second_order_findings(
+        [write], pgraph, llm_client=llm, sink_call_sites={SQL_SINK: sink},
+        reads_by_id=reads_by_id, source_provider=source_provider,
+    )
+    assert findings, "must emit a second-order injection finding"
+    f = findings[0]
+    assert f.ID.startswith("2ND-GN-")
+    assert f.vulnerability_type == "second_order_injection"
