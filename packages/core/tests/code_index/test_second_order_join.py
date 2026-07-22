@@ -8,6 +8,7 @@ from supernova_core.code_index.second_order_join import (
     extract_second_order_candidates,
     is_resolvable_token,
     _resolve_write_token,
+    _resolve_read_table,
 )
 
 
@@ -163,3 +164,28 @@ def test_resolve_write_token_keeps_literal_token():
     tokens."""
     w = _make_write("user:1", callee_receiver="cache")
     assert _resolve_write_token(w, None) == "user:1"
+
+
+# ------------------------------------------------------------------
+# Task 3 (2026-07-22): read-side table-name resolution (_resolve_read_table).
+# ------------------------------------------------------------------
+
+def test_resolve_read_table_from_sql_from():
+    """Raw SQL read: `SELECT * FROM users WHERE id = ?` → table `users`
+    (distinct param_name proves it's FROM extraction, not the fallback)."""
+    src = _make_read_src(param_name="x", expression="SELECT * FROM users WHERE id = ?")
+    assert _resolve_read_table(src) == "users"
+
+
+def test_resolve_read_table_from_sql_into():
+    """INSERT INTO users (...) → table `users`."""
+    src = _make_read_src(param_name="x", expression="INSERT INTO users (name) VALUES (?)")
+    assert _resolve_read_table(src) == "users"
+
+
+def test_resolve_read_table_orm_returns_param():
+    """ORM read (findOneByName) carries no table in its expression → return
+    param_name (property name); aligned to the write side via normalisation
+    (Task 4). Does not fabricate a table name."""
+    src = _make_read_src(param_name="Name", expression="findOneByName(")
+    assert _resolve_read_table(src) == "Name"

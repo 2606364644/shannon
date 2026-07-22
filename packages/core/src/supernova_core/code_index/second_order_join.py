@@ -38,13 +38,30 @@ def is_resolvable_token(token: str) -> bool:
 # optional closing quote. Tolerates ``"users"`` / ``'users'`` / ``users``.
 _LITERAL_RE = re.compile(r"""["']?([A-Za-z_][\w./-]*)["']?$""")
 
+# Raw-SQL table reference: FROM/INTO <table> (Task 3). Case-insensitive;
+# table = the leading identifier after the keyword.
+_SQL_TABLE_RE = re.compile(r"\b(?:FROM|INTO)\s+([A-Za-z_]\w*)", re.IGNORECASE)
 
-def _read_token(read_src: SourcePoint) -> str:
-    """Best-effort literal token for a STORAGE source: prefer the literal in
-    ``read_src.expression`` (e.g. ``"users"`` / ``'user_prefs'``), fall back to
-    ``param_name`` when no literal can be parsed."""
-    m = _LITERAL_RE.search(read_src.expression or "")
-    return (m.group(1) if m else "") or read_src.param_name
+
+def _resolve_read_table(read_src: SourcePoint) -> str:
+    """Best-effort table name for a STORAGE read source (spec §3.3).
+
+    1. Raw SQL: extract ``FROM <table>`` / ``INTO <table>`` from the
+       expression (e.g. ``SELECT * FROM users`` → ``users``).
+    2. Trailing literal: a quoted/identifier literal at the end of the
+       expression (e.g. ``"users"``) — legacy single-token reads.
+    3. Fall back to ``param_name`` (ORM ``findOneBy*`` reads carry no table;
+       the property name is aligned to the write side via normalisation in
+       Task 4).
+    """
+    expr = read_src.expression or ""
+    m = _SQL_TABLE_RE.search(expr)
+    if m:
+        return m.group(1)
+    lm = _LITERAL_RE.search(expr)
+    if lm:
+        return lm.group(1)
+    return read_src.param_name
 
 
 # ===== Task 2 (2026-07-22): write-side table-name resolution (spec §3.2) =====
@@ -208,7 +225,7 @@ def extract_second_order_candidates(
             continue
         if src.source_type.value != "storage":
             continue
-        tok = _read_token(src)
+        tok = _resolve_read_table(src)
         if not is_resolvable_token(tok):
             continue
         by_token.setdefault(tok, []).append((src, chain))
