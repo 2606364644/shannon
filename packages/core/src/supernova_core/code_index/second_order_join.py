@@ -93,6 +93,14 @@ _ENTITY_SUFFIXES: tuple[str, ...] = ("Repository", "Repo", "Service", "Manager",
 # Suffixes stripped from an entity class name before table-name derivation.
 _CLASS_SUFFIXES: tuple[str, ...] = ("Entity", "Model", "DTO", "VO", "DO", "PO")
 
+# Common English irregular plurals for table-name derivation (small allowlist;
+# a wrong plural only ever causes under-recall, never a false join).
+_PLURAL_IRREGULAR: dict[str, str] = {
+    "person": "people", "child": "children", "man": "men", "woman": "women",
+    "mouse": "mice", "goose": "geese", "foot": "feet", "tooth": "teeth",
+    "ox": "oxen",
+}
+
 
 def _build_entity_table_map(source_text: str) -> dict[str, str]:
     """Scan one file's source for @Table/@TableName/@Document annotations and
@@ -109,6 +117,25 @@ def _strip_class_suffix(name: str) -> str:
         if name.endswith(suf) and len(name) > len(suf):
             return name[: -len(suf)]
     return name
+
+
+def _pluralize_word(word: str) -> str:
+    """Best-effort English plural of a single lowercase word.
+
+    Covers: irregulars (person→people), sibilants (box→boxes, brush→brushes),
+    consonant+y (category→categories), and default +s. Conservative — a wrong
+    plural only causes under-recall (the read side keeps its real table name),
+    never a false join.
+    """
+    if not word:
+        return word
+    if word in _PLURAL_IRREGULAR:
+        return _PLURAL_IRREGULAR[word]
+    if word.endswith(("s", "x", "z", "ch", "sh")):
+        return word + "es"
+    if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+        return word[:-1] + "ies"
+    return word + "s"
 
 
 def _entity_from_receiver(receiver: str) -> str | None:
@@ -137,14 +164,17 @@ def _entity_from_receiver(receiver: str) -> str | None:
 
 def _entity_to_table(entity: str) -> str | None:
     """Entity class name → table name via Spring/JPA naming convention:
-    camelCase → snake_case + naive plural (``User`` → ``users``,
-    ``UserProfile`` → ``user_profiles``). Best-effort — wrong pluralisation
-    only causes under-recall (保守), never a false join."""
+    camelCase → snake_case + plural of the last word (``User`` → ``users``,
+    ``UserProfile`` → ``user_profiles``, ``Category`` → ``categories``).
+    Best-effort — a wrong plural only causes under-recall (保守), never a
+    false join."""
     name = _strip_class_suffix(entity)
     if not name:
         return None
     snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    return snake + "s"
+    parts = snake.split("_")
+    parts[-1] = _pluralize_word(parts[-1])
+    return "_".join(parts)
 
 
 def _resolve_write_token(write: StorageWritePoint, source_text: str | None) -> str:

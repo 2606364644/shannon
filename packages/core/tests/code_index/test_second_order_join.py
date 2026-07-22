@@ -1,5 +1,7 @@
 """Tests for second_order_join: bipartite (medium, token) join of storage
 writes × storage-read chains (spec §3.3, Task 6)."""
+import pytest
+
 from supernova_core.code_index.storage_models import StorageWritePoint, StorageMedium
 from supernova_core.code_index.parameter_models import SourcePoint
 from supernova_core.code_index.models import ParameterSource
@@ -10,6 +12,7 @@ from supernova_core.code_index.second_order_join import (
     _resolve_write_token,
     _resolve_read_table,
     _normalize_token,
+    _entity_to_table,
 )
 
 
@@ -222,3 +225,25 @@ def test_no_false_join_unrelated_tokens():
         [w], [chain], reads_by_id={"orders": src},
     )
     assert cands == []
+
+
+# ------------------------------------------------------------------
+# Follow-up B1 (2026-07-22): _entity_to_table pluralisation accuracy.
+# Wrong pluralisation only causes under-recall (保守), never a false join —
+# but accurate plurals directly recover real joins (Category→categories).
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize("entity,table", [
+    ("User", "users"),
+    ("Category", "categories"),
+    ("Address", "addresses"),
+    ("Box", "boxes"),
+    ("Brush", "brushes"),
+    ("Person", "people"),
+    ("Child", "children"),
+    ("UserProfile", "user_profiles"),
+    ("UserCategory", "user_categories"),
+    ("UserEntity", "users"),            # Entity suffix stripped → users
+])
+def test_entity_to_table_pluralization(entity, table):
+    assert _entity_to_table(entity) == table
