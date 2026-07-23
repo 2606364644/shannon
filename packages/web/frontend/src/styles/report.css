@@ -87,13 +87,21 @@ html { scroll-behavior: smooth; }
   box-shadow: 0 1px 2px hsl(250 40% 2% / 0.35);
 }
 
-/* —— block code 容器背景 —— */
+/* —— block code 容器：换行不溢出（spec 2026-07-24 §3.3；长 URL / 无空格串也折行，不再横滚）—— */
 .prose pre {
   border-radius: var(--radius);
   background: hsl(var(--muted));
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
-.prose pre code { background: transparent; padding: 0; }
+.prose pre code {
+  background: transparent;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
 
 /* —— 浅色覆盖（保 AA 对比，cyan/green/yellow 提升亮度） —— */
 .light .hljs-keyword,

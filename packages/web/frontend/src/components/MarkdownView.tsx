@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement } from "react";
+import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
@@ -13,7 +13,7 @@ import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
 import { splitByVulnBlocks, inferSeverity, type Segment } from "@/lib/vuln-block";
-import { splitAttackChainSection } from "@/lib/report-sections";
+import { splitAttackChainSection, splitPocSection, parsePocEntries } from "@/lib/report-sections";
 import {
   computeStats,
   type ParsedTypeSummary,
@@ -327,12 +327,16 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     for (const r of topRisks) for (const id of r.vulnIds) s.add(id);
     return s;
   }, [topRisks]);
+  // PoC 独立章节最先切出（后端 report endpoint 把「主报告 + --- + PoC md」拼一份；PoC 在最末）。
+  // 切出后按 ID 并入对应漏洞卡片 body，不再独立成章（spec 2026-07-24 §3.1）。
+  const pocSplit = useMemo(() => splitPocSection(markdown), [markdown]);
+  const withoutPoc = pocSplit ? pocSplit.before : markdown;
   // 攻击链章节独立切出（架构语义：攻击链 ≠ 单点漏洞，分开渲染/计数，见 spec §2/§5）。
-  // splitByVulnBlocks 只对「去掉攻击链章节后的 md」切单点漏洞，避免攻击链内容进 vuln 切分。
-  const attackChainSplit = useMemo(() => splitAttackChainSection(markdown), [markdown]);
+  // splitByVulnBlocks 只对「去掉 PoC + 攻击链章节后的 md」切单点漏洞。
+  const attackChainSplit = useMemo(() => splitAttackChainSection(withoutPoc), [withoutPoc]);
   const singleVulnMd = attackChainSplit
     ? attackChainSplit.before + attackChainSplit.after
-    : markdown;
+    : withoutPoc;
   const segments = useMemo(() => splitByVulnBlocks(singleVulnMd), [singleVulnMd]);
   const stats = useMemo(
     () => ({
@@ -355,6 +359,46 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     [groups],
   );
   const allCollapsed = allVulnIds.length > 0 && allVulnIds.every((id) => collapsedIds.has(id));
+
+  // PoC → 漏洞卡片映射（spec 2026-07-24 §3.1）。重复 id 取首条。
+  const pocEntries = useMemo(
+    () => (pocSplit ? parsePocEntries(pocSplit.pocMd) : []),
+    [pocSplit],
+  );
+  const pocById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of pocEntries) if (!m.has(e.id)) m.set(e.id, e.md);
+    return m;
+  }, [pocEntries]);
+  // 已并入卡片的 PoC（有对应漏洞卡片）；无对应卡片的 PoC 末尾兜底列出，不丢信息。
+  const matchedPocIds = useMemo(
+    () => new Set(allVulnIds.filter((id) => pocById.has(id))),
+    [allVulnIds, pocById],
+  );
+  const orphanPocEntries = useMemo(
+    () => pocEntries.filter((e) => !matchedPocIds.has(e.id)),
+    [pocEntries, matchedPocIds],
+  );
+
+  // 锚点跳转：只平滑滚动，不 focus 目标（避免浏览器原生锚点的 outline / 焦点跳动）。
+  // 保留 href 供无障碍 / 键盘 / 右键复制（spec 2026-07-24 §3.2）。
+  const scrollToId = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // 漏洞卡片「全部收起/展开」按钮（原 findings-bar 浮动条移除，挪进 TOC 侧栏；无 TOC 时降级非 sticky）。
+  const collapseAllCardsBtn =
+    hasVulns && allVulnIds.length > 0 ? (
+      <button
+        type="button"
+        data-testid="vuln-expand-all"
+        onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
+        className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+      >
+        {allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
+      </button>
+    ) : null;
 
   // TOC：从渲染后 DOM 读真实 heading id（h1 章节为骨架 + h2 子节；vuln h3 太碎不进 TOC）。
   // 这保证每个 TOC href 都命中 DOM 真实元素，与 id 生成方式解耦——根治「点了没反应」。
@@ -495,6 +539,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                   {r.vulnIds.length > 0 && (
                     <a
                       href={`#${r.vulnIds[0]}`}
+                      onClick={(e) => scrollToId(e, r.vulnIds[0])}
                       className="kv-vuln-id font-mono text-primary"
                     >
                       {r.vulnIds.join("/")}
@@ -528,6 +573,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 </button>
               )}
             </div>
+            {collapseAllCardsBtn && <div className="mb-2 px-2">{collapseAllCardsBtn}</div>}
             <ul className="max-h-[calc(100vh-3rem)] space-y-0.5 overflow-y-auto pr-1">
               {tocTree.tree.map((node) => {
                 const hasKids = node.children.length > 0;
@@ -555,6 +601,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                       )}
                       <a
                         href={`#${node.item.id}`}
+                        onClick={(e) => scrollToId(e, node.item.id)}
                         className={`flex flex-1 items-center rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${
                           node.item.level === 1 ? "font-semibold" : ""
                         } ${
@@ -581,6 +628,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                             <li key={child.id}>
                               <a
                                 href={`#${child.id}`}
+                                onClick={(e) => scrollToId(e, child.id)}
                                 className={`group flex items-center rounded-md px-1.5 py-1 font-mono text-[11px] transition-colors ${
                                   cActive
                                     ? "bg-accent text-foreground"
@@ -601,19 +649,12 @@ export function MarkdownView({ markdown }: { markdown: string }) {
           </nav>
         )}
         <div ref={contentRef} className="space-y-5">
-          {hasVulns && (
-            <div data-testid="findings-bar" className="sticky top-20 z-20 mb-2 flex items-center justify-between gap-2 bg-background/75 px-0.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          {!twoCol && collapseAllCardsBtn && (
+            <div className="mb-2 flex items-center justify-between gap-2 px-0.5 py-1">
               <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {t("markdown.findings")}
               </span>
-              <button
-                type="button"
-                data-testid="vuln-expand-all"
-                onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
-                className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-              >
-                {allCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
-              </button>
+              {collapseAllCardsBtn}
             </div>
           )}
           {groups.map((g, i) =>
@@ -636,6 +677,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                   const sev = inferSeverity(block, topRiskIds);
                   // body = 原始 markdown 去掉首行标题（ID 在 header 里显示），完整保留所有字段/代码/散文——不裁剪丢信息。
                   const bodyMd = block.raw.split(/\r?\n/).slice(1).join("\n").trim();
+                  const pocMd = pocById.get(block.id);
                   const subtitle = block.title || vulnPreview(block);
                   return (
                     <section
@@ -671,17 +713,37 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                           aria-hidden="true"
                         />
                       </button>
-                      {/* body：完整原始内容，默认展开（不丢信息）；本卡折叠时隐藏（扫描视图）。
-                          break-words 让长路径自动折行，不溢出卡片。 */}
-                      {!collapsedIds.has(block.id) && bodyMd && (
-                        <div id={`${block.id}-body`} className="prose prose-sm mt-3 max-w-none break-words prose-headings:font-sans">
-                          <ReactMarkdown
-                            remarkPlugins={REMARK_PLUGINS}
-                            rehypePlugins={[rehypeHighlight] as never}
-                            components={proseComponents as never}
-                          >
-                            {bodyMd}
-                          </ReactMarkdown>
+                      {/* body：完整原始内容（命中时并入对应 PoC），默认展开（不丢信息）；
+                          本卡折叠时隐藏（扫描视图）。break-words 让长路径自动折行，不溢出卡片。 */}
+                      {!collapsedIds.has(block.id) && (bodyMd || pocMd) && (
+                        <div className="mt-3 space-y-3">
+                          {bodyMd && (
+                            <div id={`${block.id}-body`} className="prose prose-sm max-w-none break-words prose-headings:font-sans">
+                              <ReactMarkdown
+                                remarkPlugins={REMARK_PLUGINS}
+                                rehypePlugins={[rehypeHighlight] as never}
+                                components={proseComponents as never}
+                              >
+                                {bodyMd}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                          {pocMd && (
+                            <div data-testid="vuln-poc" className="border-t border-border pt-3">
+                              <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                                {t("markdown.pocSection")}
+                              </div>
+                              <div className="prose prose-sm max-w-none break-words prose-headings:font-sans">
+                                <ReactMarkdown
+                                  remarkPlugins={REMARK_PLUGINS}
+                                  rehypePlugins={[rehypeHighlight] as never}
+                                  components={proseComponents as never}
+                                >
+                                  {pocMd}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </section>
@@ -689,6 +751,30 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 })}
               </div>
             ),
+          )}
+          {orphanPocEntries.length > 0 && (
+            <div data-testid="poc-orphan-group" className="space-y-4">
+              {orphanPocEntries.map((e) => (
+                <section
+                  key={e.id}
+                  data-testid="poc-orphan"
+                  className="vuln-entry scroll-mt-20 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+                >
+                  <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {t("markdown.pocSection")} · {e.id}
+                  </div>
+                  <div className="prose prose-sm max-w-none break-words prose-headings:font-sans">
+                    <ReactMarkdown
+                      remarkPlugins={REMARK_PLUGINS}
+                      rehypePlugins={[rehypeHighlight] as never}
+                      components={proseComponents as never}
+                    >
+                      {e.md}
+                    </ReactMarkdown>
+                  </div>
+                </section>
+              ))}
+            </div>
           )}
           {attackChainSplit && (
             <AttackChainSection md={attackChainSplit.sectionMd} count={attackChainSplit.count} />

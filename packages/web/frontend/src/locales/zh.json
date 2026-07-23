@@ -434,7 +434,10 @@
     "toc": "目录",
     "tocAria": "目录",
     "toggleHeroAria": "切换摘要折叠",
-    "copy": "复制"
+    "copy": "复制",
+    "pocSection": "复现 PoC",
+    "collapseCards": "收起卡片",
+    "expandCards": "展开卡片"
   },
   "fileSystemPicker": {
     "titleDefault": "选择代码目录",

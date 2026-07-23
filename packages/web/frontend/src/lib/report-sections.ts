@@ -79,3 +79,119 @@ export function splitAttackChainSection(md: string): AttackChainSplit | null {
     count,
   };
 }
+
+/**
+ * 报告页 PoC 并入卡片（spec 2026-07-24-report-poc-inline-and-layout-fixes §3.1）：
+ * - splitPocSection：把「# 可利用漏洞 PoC 集合」独立章节从报告 md 切出。后端 report
+ *   endpoint（web/api/workspaces.py）把「主报告 + \n\n---\n\n + PoC md」拼成一份返回，
+ *   前端要切出 PoC 章节以并入对应漏洞卡片、不再独立成章。
+ * - parsePocEntries：解析「## 详细 PoC」下每条 `### ✓ ID · ...`，按 heading 提 vuln ID，
+ *   建 {id, md} 映射，供 MarkdownView 把 PoC 并入对应漏洞卡片 body。
+ *
+ * 不变量：只做切分/解析，不把 PoC 条目解析为 vuln block、不经 parseVulnBlock、不进 vuln
+ * segment。VULN_HEADING_RE / VULN_ID_RE 不动——PoC 的 ### heading 仅用于 ID 提取 + 并入，
+ * 不当 vuln（PoC 是 externally_exploitable 漏洞的复现请求，依附于已存在的单点 vuln 卡片）。
+ */
+
+export interface PocSplit {
+  /** PoC 章节之前的 md（主报告 + 攻击链；尾部 `---` 分隔线已剥离） */
+  before: string;
+  /** PoC 整章 md（自 `# 可利用漏洞 PoC 集合` 标题行起） */
+  pocMd: string;
+}
+
+/**
+ * 判断一行是否是 PoC 集合一级标题。
+ * 命中条件：`^# ` 开头，标题文本（转小写、去空白后）含「poc集合」或「poccollection」，
+ * 容错「# 可利用漏洞 PoC 集合（白盒/黑盒）」措辞变体。
+ *
+ * 脆弱点（显式记录）：依赖 poc_generator.render_poc_md 的标题措辞；若生成层改措辞需同步本规则。
+ */
+function isPocCollectionHeading(line: string): boolean {
+  const m = /^#\s+(.+)$/.exec(line);
+  if (!m) return false;
+  const text = m[1].toLowerCase().replace(/\s+/g, "");
+  return text.includes("poc集合") || text.includes("poccollection");
+}
+
+/**
+ * 切出 PoC 独立章节。无 PoC（老报告 / 扫描未跑到 generate_poc_report）→ 返回 null。
+ * before 尾部的 `---` 分隔线（后端 `\n\n---\n\n` 拼接产物）连同空行一并剥离，
+ * 避免主报告末尾留孤立的 `---` 被渲染成水平线。
+ */
+export function splitPocSection(md: string): PocSplit | null {
+  const lines = md.split(/\r?\n/);
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isPocCollectionHeading(lines[i])) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx === -1) return null;
+  const beforeLines = lines.slice(0, idx);
+  // 剥离尾部空行 + 后端拼接的 `---` 分隔线
+  while (beforeLines.length > 0) {
+    const last = beforeLines[beforeLines.length - 1].trim();
+    if (last === "" || last === "---") beforeLines.pop();
+    else break;
+  }
+  return {
+    before: beforeLines.join("\n"),
+    pocMd: lines.slice(idx).join("\n"),
+  };
+}
+
+export interface PocEntry {
+  /** vuln ID（从 PoC 条目 `### ✓ ID · ...` heading 提取），形如 INJ-VULN-01 / INJ-GN-08 */
+  id: string;
+  /** 条目体 md（去首行 heading；含 meta 行 + curl/Burp 代码块） */
+  md: string;
+}
+
+/** PoC 条目 heading 里的 vuln ID（与 vuln-block 的 VULN_ID_RE 同源：PREFIX-VULN-NN / PREFIX-GN-NN）。 */
+const POC_HEADING_ID_RE = /\b([A-Z]+-(?:VULN|GN)-\d+)\b/;
+
+/** 定位「## 详细 PoC」二级标题的字符 offset（中英文容错）。无则 -1。 */
+function findDetailPoCOffset(pocMd: string): number {
+  const m = /^##\s+.*?(详细\s*PoC|detailed\s*poc).*$/im.exec(pocMd);
+  return m ? m.index : -1;
+}
+
+/**
+ * 解析 PoC md 的「## 详细 PoC」章节，按 `### ` 切条目，每条提 vuln ID。
+ * - 无「## 详细 PoC」标题（格式异常 / 仅概览表）→ 返回 []（保守，不误并概览表内容进卡片）。
+ * - 无 vuln ID 的 `###` 条目（纯描述 / 异常 heading）跳过，其内容忽略到下一个带 ID 的条目。
+ * - 条目体首行 heading 已剥离；尾部 `---` 条目分隔线 + 空行剥离。
+ */
+export function parsePocEntries(pocMd: string): PocEntry[] {
+  const offset = findDetailPoCOffset(pocMd);
+  if (offset < 0) return [];
+  const body = pocMd.slice(offset);
+  const lines = body.split(/\r?\n/);
+  const entries: PocEntry[] = [];
+  let cur: { id: string; lines: string[] } | null = null;
+  const flush = () => {
+    if (!cur) return;
+    const buf = [...cur.lines];
+    while (buf.length > 0) {
+      const last = buf[buf.length - 1].trim();
+      if (last === "" || last === "---") buf.pop();
+      else break;
+    }
+    const md = buf.join("\n").trim();
+    if (md) entries.push({ id: cur.id, md });
+    cur = null;
+  };
+  for (const line of lines) {
+    if (/^###\s+/.test(line)) {
+      flush();
+      const m = POC_HEADING_ID_RE.exec(line);
+      if (m) cur = { id: m[1], lines: [] };
+      continue;
+    }
+    if (cur) cur.lines.push(line);
+  }
+  flush();
+  return entries;
+}

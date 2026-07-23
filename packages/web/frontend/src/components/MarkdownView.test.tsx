@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import i18n from "@/i18n";
 import { MarkdownView } from "./MarkdownView";
@@ -416,14 +416,15 @@ describe("MarkdownView i18n", () => {
 describe("MarkdownView sticky top 对齐全局栈（集成约束）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("findings 工具栏 sticky top-20（吸附在 TopBar+Tabs 栈正下方），z-20 不变", () => {
+  it("findings 浮动条已移除；卡片折叠按钮挪进 TOC 侧栏（非 sticky 浮动）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
-    const bar = container.querySelector('[data-testid="findings-bar"]');
-    expect(bar).not.toBeNull();
-    expect(bar?.className).toContain("sticky");
-    expect(bar?.className).toContain("top-20");
-    expect(bar?.className).toContain("z-20");
-    expect(bar?.className).not.toContain("top-0"); // 旧值已改
+    // findings-bar 浮动条不再存在
+    expect(container.querySelector('[data-testid="findings-bar"]')).toBeNull();
+    // 卡片「全部收起/展开」按钮在 TOC 侧栏内
+    const toc = container.querySelector('[data-testid="toc"]');
+    const vulnExpandAll = container.querySelector('[data-testid="vuln-expand-all"]');
+    expect(vulnExpandAll).not.toBeNull();
+    expect(toc?.contains(vulnExpandAll)).toBe(true);
   });
 
   it("TOC sticky top-20（旧 top-4 已改），不再贴视口顶被 chrome 盖", () => {
@@ -433,5 +434,92 @@ describe("MarkdownView sticky top 对齐全局栈（集成约束）", () => {
     expect(toc?.className).toContain("sticky");
     expect(toc?.className).toContain("top-20");
     expect(toc?.className).not.toContain("top-4"); // 旧值已改
+  });
+});
+
+describe("MarkdownView PoC 并入漏洞卡片（spec 2026-07-24）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  // jsdom 无原生 scrollIntoView；TOC 不 focus 测试 mock 它，测后还原避免污染其他用例
+  type ScrollFn = (...a: unknown[]) => void;
+  const proto = Element.prototype as unknown as { scrollIntoView?: ScrollFn };
+  let origScrollIntoView: ScrollFn | undefined;
+  beforeEach(() => {
+    origScrollIntoView = proto.scrollIntoView;
+  });
+  afterEach(() => {
+    proto.scrollIntoView = origScrollIntoView;
+  });
+
+  /** 后端 report endpoint 拼接形态：主报告 + \n\n---\n\n + PoC md */
+  function withPoc(pocMd: string, main = "# 报告\n\n## Injection\n\n### INJ-VULN-01: SQLi\n\n- **vulnerability_type:** SQLi\n") {
+    return `${main}\n\n---\n\n${pocMd}`;
+  }
+
+  it("PoC 按 ID 并入对应卡片 body；独立 PoC 章节（含概览表）不再渲染", () => {
+    const pocMd = [
+      "# 可利用漏洞 PoC 集合（白盒）",
+      "",
+      "## 概览",
+      "",
+      "| ID | 类型 | 路径 | 认证 | 置信度 |",
+      "| INJ-VULN-01 | injection | GET /login | 需登录 | ✓ |",
+      "",
+      "## 详细 PoC",
+      "",
+      "### ✓ INJ-VULN-01 · injection @ GET /login",
+      "**置信度：已确认可复现**",
+      "",
+      "**curl:**",
+      "```bash",
+      "curl -i -X GET 'https://t/login?u=%27'",
+      "```",
+    ].join("\n");
+    const { container } = render(<MarkdownView markdown={withPoc(pocMd)} />);
+    const card = screen.getByTestId("vuln-card");
+    // PoC curl 内容并入对应卡片
+    expect(card).toHaveTextContent("curl -i -X GET");
+    expect(card.querySelector('[data-testid="vuln-poc"]')).not.toBeNull();
+    // 独立 PoC 章节完全移除（标题 + 概览表 都不在 DOM）
+    expect(container.textContent).not.toContain("可利用漏洞 PoC 集合");
+    expect(container.textContent).not.toContain("概览");
+  });
+
+  it("PoC 无对应漏洞卡片 → 末尾兜底（poc-orphan），不丢信息；主卡片不受污染", () => {
+    const pocMd = [
+      "# 可利用漏洞 PoC 集合（白盒）",
+      "",
+      "## 详细 PoC",
+      "",
+      "### ✓ ORPHAN-VULN-99 · injection @ GET /x",
+      "**curl:**",
+      "```bash",
+      "curl -i -X GET 'https://t/x'",
+      "```",
+    ].join("\n");
+    const { container } = render(<MarkdownView markdown={withPoc(pocMd)} />);
+    const orphans = container.querySelectorAll('[data-testid="poc-orphan"]');
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0]).toHaveTextContent("ORPHAN-VULN-99");
+    expect(orphans[0]).toHaveTextContent("curl -i -X GET");
+    // 主卡片不含 orphan PoC
+    expect(screen.getByTestId("vuln-card")).not.toHaveTextContent("ORPHAN-VULN-99");
+  });
+
+  it("无 PoC 章节 → 不渲染 PoC 区块 / orphan（老报告兼容）", () => {
+    const { container } = render(<MarkdownView markdown={MD} />);
+    expect(container.querySelector('[data-testid="vuln-poc"]')).toBeNull();
+    expect(container.querySelector('[data-testid="poc-orphan"]')).toBeNull();
+  });
+
+  it("TOC 锚点点击走 JS scrollIntoView（不依赖原生锚点 focus）", () => {
+    const scrollIntoView = vi.fn();
+    proto.scrollIntoView = scrollIntoView;
+    const { container } = render(<MarkdownView markdown={MD} />);
+    const toc = container.querySelector('[data-testid="toc"]');
+    const link = toc!.querySelector("a[href^='#']") as HTMLAnchorElement;
+    expect(link).toBeTruthy();
+    fireEvent.click(link);
+    // onClick preventDefault + 手动 scrollIntoView：证明走 JS 路径而非浏览器原生锚点 focus
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 });

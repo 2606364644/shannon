@@ -434,7 +434,10 @@
     "toc": "Contents",
     "tocAria": "Table of contents",
     "toggleHeroAria": "Toggle summary",
-    "copy": "Copy"
+    "copy": "Copy",
+    "pocSection": "Replay PoC",
+    "collapseCards": "Collapse cards",
+    "expandCards": "Expand cards"
   },
   "fileSystemPicker": {
     "titleDefault": "Select code directory",
