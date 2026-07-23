@@ -676,7 +676,9 @@ async def llm_fill_gaps(
             prompt=prompt,
             repo_path=repo_path or "/tmp/poc-gen",
             model_tier=model_tier,
-            structured_output_schema=GAPFILL_OUTPUT_SCHEMA,
+            # runner 现状:output_format 是主参(structured_output_schema 为别名,见 runner.py:139)。
+            # chain_verdict 的 _make_verdict_llm_client 也走 output_format,此处对齐。
+            output_format=GAPFILL_OUTPUT_SCHEMA,
             api_key=api_key,
             max_turns=int(os.getenv("SUPERNOVA_POC_MAX_TURNS", "10")),
         )

@@ -45,6 +45,8 @@ retry（`POC_RETRY`）从第 1 条重来（**无 checkpoint**），3 次耗尽 �
 
 → `derive_method_path` 从 GitNexus 的 source/path 提取不出 HTTP method/path，`build_template_spec` 返回 None → **逐条被迫走 LLM 兜底**。PoC 从「少数走 LLM」退化成「绝大多数走 LLM」，量级失控。
 
+**witness_payload 为何是 None（深挖根因）**：实测 sentinel_dashboard 全部 14 条 GitNexus INJ-GN 的 `mismatch_reason='llm chain-verdict pass returned unparseable output; needs review'`、`confidence='low'`——即**全部命中 `chain_verdict.py:290-293` 的 unparseable 分支**：判定 LLM 经 `output_format=CHAIN_VERDICT_SCHEMA` 调用后输出无法被 `_extract_json_payload` 解析（GLM 结构化输出不合规），保守标 `verdict=vulnerable`（OR-friendly 不漏报）但 `witness_payload=None`。所以 GitNexus 轨的 witness 缺失是 **verdict 层 LLM 不合规的表征**，非数据天生没有。**改 verdict 链属 CLAUDE.md 铁律禁区，本 spec 不碰**；PoC 层把 witness 当「缺口」与 route 一起补（§4.4），是正确的分层——即便 verdict 层修好产出 witness，route 仍缺，gap-fill 仍需。
+
 **跨轨复用空间有限**（按 controller 类名实测）：GitNexus externally_exploitable injection 14 条中，仅 4 条能匹配到 LLM 轨同 controller（可继承 route+witness），**10 条是 GitNexus-only**（双轨的意义——GitNexus 找到 LLM 轨漏的，但它是代码级发现，天生不带 HTTP 形状）。
 
 ### 2.3 失配 ③：上游 §8 非阻塞契约被 Temporal timeout 击穿（回归）
@@ -342,4 +344,5 @@ def _coerce_str_dict(raw: Any) -> dict[str, str]:
 - **R3（checkpoint 与并发）**：本设计 PoC 内部仍串行（分组后顺序调 LLM），checkpoint 无并发写竞争。未来若上并发需加锁。
 - **R4（cap 取值）**：默认 cap=8 经验值。过小 → 调用次数多；过大 → 单次易错。env 可调，留 plan 阶段据实测微调。
 - **O1（GitNexus 轨 dedup）**：§2.2 提到 merger 因两轨 location 格式不同不 dedup（INJ-GN 与 INJ-VULN 并存）。本 spec 不处理；未来若修 merger 跨轨 dedup，PoC 的 GitNexus-only 数量会下降，gap-fill 调用更少——但属独立议题。
-- **O2（上游确定性层富化）**：§3 非目标。若未来在 GitNexus builder 记录 `@RequestMapping` 路由 + 强制 chain_verdict 输出 witness，则 GitNexus 轨全可模板化、gap-fill 趋零——独立 epic，本 spec 用 LLM 补缺口替代。
+- **R5（GLM 结构化输出可靠性，重要）**：本设计的 gap-fill 与 chain_verdict 用**同一套** `run_claude_prompt` + `output_format`（structured_output 优先、文本兜底抽 JSON）infra、同一 GLM 模型。实测 chain_verdict 对 sentinel_dashboard 14 条 GitNexus 候选**全部 unparseable**（见 §2.2 根因）——即 GLM 对该 schema 的合规率极低。PoC gap-fill 的 prompt 更简单聚焦（读单文件、返回 route+witness，非判定整条 taint 链），合规率应优于 verdict 层，但**不保证**。缓解：①新 runner 文本兜底抽 JSON；②失败降级骨架（§7）不崩、不阻塞；③Fix A/B 兑现「即使大量降级也不拖垮 workflow、retry 能续跑」。**预期**：若 GLM 持续不合规，gap-fill 会大量降级骨架（低价值但安全）。是否值得对 GAPFILL_OUTPUT_SCHEMA 做更激进的简化（如分两次单字段调用）留实测后定。
+- **O2（上游确定性层富化）**：§3 非目标。若未来在 GitNexus builder 记录 `@RequestMapping` 路由 + 修好 chain_verdict 的 unparseable（让判定 LLM 可靠产出 witness），则 GitNexus 轨全可模板化、gap-fill 趋零——独立 epic，本 spec 用 LLM 补缺口替代。**chain_verdict unparseable 是更优先的独立议题**：它不止致 witness 缺失，更使 GitNexus 轨 verdict 整体不可信（全 conservative vulnerable+low），值得单独立项。
