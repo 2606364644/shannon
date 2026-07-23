@@ -405,6 +405,24 @@ def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRe
         spec.query = {param: witness}
     return spec
 
+
+def _group_by_controller_file(
+    partials: list["PartialSpec"], cap: int = 8
+) -> list[tuple[str | None, list["PartialSpec"]]]:
+    """按 controller_file 聚合待补 PartialSpec，每组 ≤ cap，超出按 cap 拆分多次。
+
+    无 controller_file（提取不到）→ fallback 桶 key=None。
+    cap 由 env SUPERNOVA_POC_GROUP_CAP 覆盖（默认 8）。
+    """
+    buckets: dict[str | None, list["PartialSpec"]] = {}
+    for p in partials:
+        buckets.setdefault(p.controller_file, []).append(p)
+    out: list[tuple[str | None, list["PartialSpec"]]] = []
+    for f, ps in buckets.items():
+        for i in range(0, len(ps), cap):
+            out.append((f, ps[i:i + cap]))
+    return out
+
 _LLM_RICH_FIELDS = (
     "ID", "vulnerability_type", "source", "source_endpoint", "endpoint", "path",
     "witness_payload", "sink_call", "vulnerable_code_location",

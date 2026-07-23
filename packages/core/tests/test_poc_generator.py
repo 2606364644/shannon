@@ -656,3 +656,36 @@ def test_assemble_degrades_when_gap_empty():
     spec = _assemble(p, None, {})
     assert spec.method == "GET"  # 无 gap 兜底
     assert spec.note and "手工补全" in spec.note
+
+
+def _gn_partial(vid, f):
+    from supernova_core.services.poc_generator import PartialSpec
+    class V:
+        ID = vid
+    return PartialSpec(vuln=V(), vuln_class="injection", band=ConfidenceBand.HIGH,
+                       param_name="p", placement="query", controller_file=f,
+                       method=None, path=None, witness=None)
+
+
+def test_group_by_controller_file_buckets_and_caps():
+    from supernova_core.services.poc_generator import _group_by_controller_file
+    partials = [
+        _gn_partial("A1", "C1.java"), _gn_partial("A2", "C1.java"),
+        _gn_partial("B1", "C2.java"),
+        _gn_partial("U1", None),  # 无文件 → fallback 桶
+    ]
+    groups = _group_by_controller_file(partials, cap=8)
+    files = sorted(str(f) for f, _ in groups)
+    assert files == ["C1.java", "C2.java", "None"]  # None 桶兜底
+    c1 = [ps for f, ps in groups if f == "C1.java"][0]
+    assert len(c1) == 2
+
+
+def test_group_by_controller_file_splits_on_cap():
+    from supernova_core.services.poc_generator import _group_by_controller_file
+    # 同一文件 10 条，cap=4 → 拆成 3 组(4+4+2)
+    partials = [_gn_partial(f"X{i}", "Same.java") for i in range(10)]
+    groups = _group_by_controller_file(partials, cap=4)
+    same = [ps for f, ps in groups if f == "Same.java"]
+    assert len(same) == 3  # 4+4+2
+    assert len(same[0]) == 4 and len(same[2]) == 2
