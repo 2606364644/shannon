@@ -69,18 +69,19 @@ async def test_setup_display_none_event_file_does_not_mount_renderer(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_heartbeat_writes_heartbeat_file_until_cancelled(tmp_path):
-    """run_heartbeat 长驻写 heartbeat 文件; cancel 时干净退出(HeartbeatManager __aexit__)."""
-    from supernova_whitebox.pipeline.activities import run_heartbeat
-    from supernova_whitebox.pipeline.shared import ActivityInput
+async def test_heartbeat_started_and_stopped_cleanly(tmp_path):
+    """start_heartbeat 写出首个 heartbeat; stop_heartbeat 干净停 daemon(join, 不卡/不残留).
 
-    inp = ActivityInput(repo_path=str(tmp_path), workspace_path=str(tmp_path))
-    task = asyncio.create_task(run_heartbeat(inp))
-    await asyncio.sleep(0.1)  # 让 heartbeat 初始写
-    assert (tmp_path / "heartbeat").exists()
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    替代旧 run_heartbeat activity 测试: C1 Phase B 的 background activity 已删——worker
+    max_concurrent_workflow_tasks=1(AuditSession 全局单例所致)下 worker 不 dispatch background
+    activity handler → heartbeat 永不写(2026-07-23 hr_1784788700 回归). 改 setup_display 启动
+    HeartbeatManager daemon 线程, finalize_summary 调 stop_heartbeat 停.
+    """
+    from supernova_core.runtime.heartbeat import start_heartbeat, stop_heartbeat
+
+    await start_heartbeat(tmp_path)
+    assert (tmp_path / "heartbeat").exists()  # __aenter__ 同步写首个
+    await stop_heartbeat()  # daemon join + 清理, 应快速返回
 
 
 @pytest.mark.asyncio

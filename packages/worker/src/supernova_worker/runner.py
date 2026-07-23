@@ -30,7 +30,7 @@ from supernova_whitebox.pipeline.activities import (
     inject_gitnexus_track_status,
     write_track_status_activity,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
-    setup_display, run_heartbeat, finalize_summary,
+    setup_display, finalize_summary,
 )
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
 from supernova_blackbox.pipeline.activities import (
@@ -67,7 +67,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             inject_gitnexus_track_status,
             write_track_status_activity,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
-            setup_display, run_heartbeat, finalize_summary,
+            setup_display, finalize_summary,
         ],
         # AuditSession 是进程全局 _current 单例(session_registry.py), events.ndjson 经它写.
         # worker 容器并发多白盒扫描会冲突 → 白盒 Worker 并发=1. 解锁需把 AuditSession 改

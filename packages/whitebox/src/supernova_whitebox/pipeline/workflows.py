@@ -99,7 +99,6 @@ class WhiteboxScanWorkflow:
         # 已 set_audit_session/heartbeat/log_workflow_complete, workflow 内不重复(守 "CLI
         # 零改动" + 消除 R1 双重 scan_end/heartbeat/set_audit_session).
         is_worker_path = input.event_file is not None
-        heartbeat_handle = None
 
         # Resolve config (YAML) early so vuln-class selection can consult cfg.vuln_classes.
         cfg = None
@@ -147,16 +146,11 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=retry_for("standard"),
             )
-            # run_heartbeat 是并行 long-running activity(永阻塞, 靠 cancel 退出). 必须
-            # asyncio.create_task 包起才会实际调度执行——裸 workflow.execute_activity(...) 仅
-            # 产 coroutine, 不 await/create_task 则 activity 永不执行 → heartbeat 永不写 →
-            # web 判活在 120s 提交宽限后误判 interrupted(2026-07-14 端到端验证暴露). 返回 Task
-            # 供下方 finally 的 heartbeat_handle.cancel() 终止(Task.cancel 有效; coroutine 无).
-            heartbeat_handle = asyncio.create_task(workflow.execute_activity(
-                activities.run_heartbeat, act_input,
-                start_to_close_timeout=timedelta(hours=24),
-                retry_policy=RetryPolicy(maximum_attempts=1),
-            ))
+            # heartbeat 由 setup_display(上面 await)启动的 daemon 线程写, 非 workflow background
+            # activity. 曾用 start_activity/create_task 包 run_heartbeat, 但 max_concurrent_workflow_tasks=1
+            # (runner.py wb_worker, AuditSession 全局单例所致)下 worker 不 dispatch background activity
+            # handler → heartbeat 永不写(2026-07-23 hr_1784788700 回归, test_workflow_heartbeat_execution
+            # 钉死). finalize_summary 停止 daemon(终态自停兜底).
         await workflow.execute_activity(
             activities.log_phase_start_activity,
             args=[
@@ -630,11 +624,6 @@ class WhiteboxScanWorkflow:
             # C1 Phase B: worker 路径后置 finalize_summary(写 scan_end + 清 AuditSession) +
             # 停 heartbeat. CLI 路径跳过(外层 run_scan 已 log_workflow_complete).
             if is_worker_path:
-                if heartbeat_handle is not None:
-                    try:
-                        heartbeat_handle.cancel()
-                    except Exception:
-                        pass
                 summary = self._build_finalize_summary(error_fallback=None)
                 await workflow.execute_activity(
                     activities.finalize_summary, args=[act_input, summary],
@@ -644,12 +633,13 @@ class WhiteboxScanWorkflow:
             self._state.current_phase = None
             return self._state
         except CancelledError:
+            # 不调 finalize_summary/stop_heartbeat 是有意的: cancel 终态写入由 web 侧
+            # 负责(scan_manager._mark_cancelled 在 handle.cancel() 后立即写 session.json
+            # status=cancelled + scan_end), workflow 此处再调 finalize_summary 会重复写
+            # scan_end 致报告混乱 + workflow determinism 风险(except 内 await activity).
+            # 心跳 daemon 靠 _session_is_terminal 终态自停(≤1 周期, test_heartbeat.py 覆盖)
+            # 兜底, 无需显式 stop. AuditSession 残留由下个 scan 的 setup_display 覆盖.
             self._state.status = "cancelled"
-            if heartbeat_handle is not None:
-                try:
-                    heartbeat_handle.cancel()
-                except Exception:
-                    pass
             self._state.current_phase = None
             return self._state
         except Exception as e:
@@ -660,11 +650,6 @@ class WhiteboxScanWorkflow:
             if not self._state.errors:
                 self._state.errors.append(f"{type(e).__name__}: {e}")
             if is_worker_path:
-                if heartbeat_handle is not None:
-                    try:
-                        heartbeat_handle.cancel()
-                    except Exception:
-                        pass
                 summary = self._build_finalize_summary(error_fallback=str(e))
                 try:
                     await workflow.execute_activity(
@@ -677,11 +662,6 @@ class WhiteboxScanWorkflow:
             self._state.current_phase = None
             raise
         finally:
-            if heartbeat_handle is not None:
-                try:
-                    heartbeat_handle.cancel()
-                except Exception:
-                    pass
             cleanup_settings()
             cleanup_auth_state_sync(workspace_path)
 

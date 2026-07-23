@@ -58,6 +58,71 @@ def mark_owner_if_unset(ws_dir: Path, owner: str) -> None:
         pass
 
 
+# 终态 status:心跳自感知——session 进入终态后,即使 cancel 传播链断裂(temporal workflow
+# cancel 未把取消信号可靠传到 run_heartbeat activity),心跳线程也下个周期自停。对齐 web 的
+# _TERMINAL_STATUSES(core 不依赖 web,自持一份同口径集合)。
+_TERMINAL_SESSION_STATUSES = frozenset(
+    {"completed", "failed", "interrupted", "cancelled", "killed", "crashed"}
+)
+
+
+def _session_is_terminal(ws_dir: Path) -> bool:
+    """读 session.json status,终态返回 True;无文件/读失败/非终态一律 False。
+
+    心跳线程自感知终态的依据,独立于 cancel 传播链。best-effort:任何 IO/解析异常都视作
+    「未终态」(继续跳),绝不误停正常 scan(session.json 尚未写/损坏时)。
+    """
+    session_file = Path(ws_dir) / "session.json"
+    try:
+        data = json.loads(session_file.read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    status = data.get("status")
+    # 兼容 nested 格式(与 session.SessionManager.get_status 同口径)
+    if status is None and isinstance(data.get("session"), dict):
+        status = data["session"].get("status")
+    return status in _TERMINAL_SESSION_STATUSES
+
+
+# 进程级 heartbeat 单例 API: 供主线 activity(setup_display 启动 / finalize_summary 停止)调用,
+# 替代曾用的 background activity(workflow.start_activity / asyncio.create_task 包的 run_heartbeat).
+# 后者在 worker max_concurrent_workflow_tasks=1(AuditSession 进程全局单例所致, runner.py wb_worker)
+# 下被 worker poll 到 task(server pendingActivities.state=STARTED) 却从不 dispatch handler →
+# heartbeat 永不写(2026-07-23 hr_1784788700 回归, test_workflow_heartbeat_execution 钉死).
+# 走主线 await activity 启动 daemon 线程, 绕过 background activity 的 dispatch 缺陷.
+_current_heartbeat: "HeartbeatManager | None" = None
+
+
+async def start_heartbeat(ws_dir: Path | str) -> None:
+    """启动 heartbeat daemon 线程(写 <ws_dir>/heartbeat). 由 setup_display(主线首个 await
+    activity, 真机确认执行)调用. 幂等: 同 ws_dir 已在跑则跳过; ws_dir 变化先停再起."""
+    global _current_heartbeat
+    ws = Path(ws_dir)
+    if _current_heartbeat is not None and _current_heartbeat._ws_dir == ws:
+        return  # 同 ws_dir, 幂等跳过(setup_display retry 等)
+    if _current_heartbeat is not None:
+        await _stop_current_heartbeat()  # ws_dir 变了, 先停旧的
+    mgr = HeartbeatManager(ws, on_cancel=None)
+    await mgr.__aenter__()  # 写首个 heartbeat(消除空窗) + 起 daemon 线程
+    _current_heartbeat = mgr
+
+
+async def stop_heartbeat() -> None:
+    """停止 heartbeat(daemon 线程退出 + best-effort 删 heartbeat 文件). 由 finalize_summary
+    调用. 即使未调, daemon _heartbeat_loop 终态自停(session.json 终态)兜底, 不残留."""
+    await _stop_current_heartbeat()
+
+
+async def _stop_current_heartbeat() -> None:
+    global _current_heartbeat
+    mgr = _current_heartbeat
+    _current_heartbeat = None
+    if mgr is not None:
+        await mgr.__aexit__(None, None, None)
+
+
 class HeartbeatManager:
     """async context manager:周期写 heartbeat(daemon 线程,脱离 event loop)+ 周期检测
     cancel.requested(asyncio task)。
@@ -133,8 +198,15 @@ class HeartbeatManager:
 
         worker 进程活→线程转→心跳跳;进程退出→daemon 线程随进程结束。用
         _stop_event.wait(interval) 做可中断周期(False=超时该写了,True=被请求停止)。
+
+        终态自停:每周期先查 session.json status,终态(cancelled/completed/failed 等)即
+        set stop_event + 退出。不依赖 cancel 传播链(temporal workflow cancel 可能未传到本
+        activity),否则靠 worker 常驻进程不退出而永久残留的 daemon 线程由此自愈(≤1 周期)。
         """
         while not self._stop_event.wait(self._interval):
+            if _session_is_terminal(self._ws_dir):
+                self._stop_event.set()
+                return
             try:
                 self._write_heartbeat()
             except OSError:

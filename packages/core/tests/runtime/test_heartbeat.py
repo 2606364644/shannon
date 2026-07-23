@@ -157,3 +157,69 @@ async def test_heartbeat_writes_while_event_loop_blocked(tmp_path):
         # 且最后一次写距现在不远(线程在阻塞末尾仍活跃,非阻塞前的陈旧值)
         age = time.time() - hb.stat().st_mtime
         assert age < 0.5, f"heartbeat age={age:.2f}s 过大,疑似阻塞期间未持续写"
+
+
+async def test_heartbeat_self_stops_when_session_reaches_terminal_status(tmp_path):
+    """终态自停:session.json 标 cancelled 后心跳线程在 ≤1 周期内自停(不依赖 cancel 传播链)。
+
+    根因(2026-07-23 sentinel_dashboard_1784787580):WEB cancel → temporal workflow cancel
+    的取消信号未可靠传到 run_heartbeat activity,HeartbeatManager.__aexit__ 不执行,daemon
+    心跳线程因 worker 常驻进程不退出而永久残留(实测 scan 取消 9+ 分钟后仍每 30s 写)。
+    终态自停让心跳线程下个周期读 session.json 见终态即自行退出,绕开脆弱的 cancel 传播链。
+    """
+    async with HeartbeatManager(tmp_path, interval=0.05) as mgr:
+        thread = mgr._heartbeat_thread
+        assert thread is not None and thread.is_alive()
+        # 写终态(web cancel 时 scan_manager 标 status=cancelled,bind mount 共享)
+        (tmp_path / "session.json").write_text(json.dumps({"status": "cancelled"}))
+        # 等 ≤ 数个周期让心跳线程检测到终态自停
+        deadline = time.time() + 2.0
+        while time.time() < deadline and thread.is_alive():
+            await asyncio.sleep(0.05)
+        assert not thread.is_alive(), "终态后心跳线程未自停(cancel 传播链断裂时残留)"
+
+
+async def test_heartbeat_keeps_writing_when_session_running(tmp_path):
+    """非终态(running)不停:自停只在终态触发,正常 scan 期间心跳照跳。"""
+    (tmp_path / "session.json").write_text(json.dumps({"status": "running"}))
+    async with HeartbeatManager(tmp_path, interval=0.05) as mgr:
+        await asyncio.sleep(0.15)  # >2 周期
+        assert mgr._heartbeat_thread.is_alive(), "running 态心跳被误停"
+        assert (tmp_path / "heartbeat").exists()
+
+
+async def test_heartbeat_self_stops_for_each_terminal_status(tmp_path):
+    """六个终态 status 都触发自停;且兼容 nested session 格式({"session":{"status":...}})。"""
+    cases = [
+        ("completed", False), ("failed", False), ("interrupted", False),
+        ("cancelled", False), ("killed", False), ("crashed", False),
+        ("cancelled", True),  # nested 格式(与 session.SessionManager.get_status 同口径)
+    ]
+    for status, nested in cases:
+        ws = tmp_path / f"ws-{status}-{nested}"
+        ws.mkdir()
+        payload = ({"session": {"status": status}} if nested else {"status": status})
+        (ws / "session.json").write_text(json.dumps(payload))
+        mgr = HeartbeatManager(ws, interval=0.03)
+        async with mgr:
+            deadline = time.time() + 1.5
+            while time.time() < deadline and mgr._heartbeat_thread.is_alive():
+                await asyncio.sleep(0.03)
+            assert not mgr._heartbeat_thread.is_alive(), (
+                f"status={status} nested={nested} 未触发自停")
+
+
+async def test_heartbeat_keeps_writing_when_session_missing_or_invalid(tmp_path):
+    """session.json 缺失/损坏/非 dict → 不停(best-effort,继续跳,绝不误杀正常 scan)。"""
+    async with HeartbeatManager(tmp_path, interval=0.05) as mgr:
+        # 1) 无 session.json
+        await asyncio.sleep(0.15)
+        assert mgr._heartbeat_thread.is_alive(), "无 session.json 时心跳被误停"
+        # 2) 损坏 json
+        (tmp_path / "session.json").write_text("not-json{")
+        await asyncio.sleep(0.15)
+        assert mgr._heartbeat_thread.is_alive(), "session.json 损坏时心跳被误停"
+        # 3) 非 dict 根
+        (tmp_path / "session.json").write_text(json.dumps(["a", "b"]))
+        await asyncio.sleep(0.15)
+        assert mgr._heartbeat_thread.is_alive(), "session.json 非 dict 时心跳被误停"

@@ -19,7 +19,7 @@ from supernova_core.models.errors import (
 )
 from supernova_core.models.metrics import AgentMetrics
 from supernova_core.models.retry import agent_retry_category, retry_for
-from supernova_core.runtime.heartbeat import HeartbeatManager
+from supernova_core.runtime.heartbeat import start_heartbeat, stop_heartbeat
 from supernova_core.utils.atomic_write import atomic_write_json
 from supernova_core.utils.paths import resolve_deliverables_path
 from supernova_core.utils.credential_validator import validate_credentials
@@ -1770,23 +1770,11 @@ async def setup_display(input: ActivityInput) -> None:
     # 不 attach 则 activity 内裸 getLogger 诊断不进 dispatcher → 漏 workflow.log/events.ndjson。
     await LogBus.attach(session.dispatcher)
     set_audit_session(session)
-
-
-@activity.defn
-async def run_heartbeat(input: ActivityInput) -> None:
-    """C1 并行 long-running activity: 周期写 heartbeat(web 据其 mtime 判活)。
-
-    on_cancel=None: C1 取消靠 temporal 原生 handle.cancel() 传播到 workflow + activity，
-    不再用 cancel.requested 文件触发 ShutdownController（web 端 cancel 兜底用文件 +
-    temporal 双轨）。永阻塞(asyncio.Event().wait())，靠 activity cancel(CancelledError)
-    退出 → HeartbeatManager.__aexit__ 清理（cancel 心跳 task + best-effort 删 heartbeat）。
-    """
-    ws_dir = (
-        Path(input.workspace_path) if input.workspace_path
-        else Path(input.repo_path))
-    mgr = HeartbeatManager(ws_dir, on_cancel=None)
-    async with mgr:
-        await asyncio.Event().wait()  # 永不 set; activity cancel 时 CancelledError 传出
+    # heartbeat 由主线 activity 启动(非 background activity): worker max_concurrent_workflow_tasks=1
+    # (AuditSession 全局单例所致)下 background fire-and-forget activity 被 poll 到却不 dispatch
+    # handler → heartbeat 永不写(2026-07-23 hr_1784788700 回归, test_workflow_heartbeat_execution).
+    # daemon 线程持续写 <ws>/heartbeat, finalize_summary 停止(daemon 终态自停兜底).
+    await start_heartbeat(ws_path)
 
 
 @activity.defn
@@ -1822,4 +1810,5 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
         # finally 顺序（drain_and_detach → session.close）。
         await LogBus.drain_and_detach()
         await session.log_workflow_complete(ws)
+    await stop_heartbeat()  # 停 heartbeat daemon(启动于 setup_display); 终态自停兜底
     clear_audit_session()
