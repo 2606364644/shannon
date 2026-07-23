@@ -839,24 +839,55 @@ class PoCGenerator:
         await _poc_progress(f"{track_cn} PoC: {total} 个 externally_exploitable 漏洞")
 
         entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
+        entries_by_idx: dict[int, tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = {}
+        # inj/xss/ssrf 的待补项(模板未命中),收集后按文件分组批量补缺
+        gapped: list[tuple[int, "PartialSpec"]] = []
+
         for i, (vc, v, accepted) in enumerate(items, 1):
             vid = getattr(v, "ID", "?")
             label = f"({i}/{total}) {_POC_CLASS_TAG.get(vc, f'[{vc}]')} {vid}"
             t0 = time.monotonic()
             try:
-                spec = await PoCGenerator._build_entry(v, vc, host, endpoints, accepted,
-                                                       repo_path=repo_path, api_key=api_key,
-                                                       model_tier=model_tier)
-                dt_ms = int((time.monotonic() - t0) * 1000)
-                if spec is not None:
-                    entries.append((vc, v, spec))
-                    await _poc_progress(f"{label}  {format_duration(dt_ms)}")
+                if vc in ("authz", "auth"):
+                    # authz(成对模板)/auth(量小,上游 §5.3 默认 LLM)保持既有 per-item 路径
+                    spec = await PoCGenerator._build_entry(
+                        v, vc, host, endpoints, accepted,
+                        repo_path=repo_path, api_key=api_key, model_tier=model_tier)
+                    dt_ms = int((time.monotonic() - t0) * 1000)
+                    if spec is not None:
+                        entries_by_idx[i] = (vc, v, spec)
+                        await _poc_progress(f"{label}  {format_duration(dt_ms)}")
+                    else:
+                        await _poc_progress(f"{label}  skip {format_duration(dt_ms)}")
                 else:
-                    await _poc_progress(f"{label}  skip {format_duration(dt_ms)}")
+                    # inj/xss/ssrf:模板优先(0ms);未命中 → 收集待补
+                    band = classify_confidence(v, is_accepted=(vid in accepted))
+                    template = build_template_spec(v, vc, host, endpoints, band)
+                    if template is not None:
+                        entries_by_idx[i] = (vc, v, template)
+                        await _poc_progress(f"{label}  {format_duration(int((time.monotonic()-t0)*1000))}")
+                    else:
+                        partial = _extract_deterministic(v, vc, endpoints, band)
+                        gapped.append((i, partial))
+                        await _poc_progress(f"{label}  待补缺(分组) {format_duration(int((time.monotonic()-t0)*1000))}")
             except Exception as exc:  # 单条失败不阻塞其余
                 dt_ms = int((time.monotonic() - t0) * 1000)
                 logger.warning("poc: build failed for %s: %s", vid, exc)
                 await _poc_progress(f"{label}  — {exc} ({format_duration(dt_ms)})")
+
+        # 分组批量补缺(GitNexus 轨缺 route/witness 的项)
+        if gapped:
+            await _poc_progress(f"PoC 分组补缺: {len(gapped)} 条待补")
+            gapmap = await _batch_fill_gaps(
+                [p for _, p in gapped], endpoints=endpoints,
+                repo_path=repo_path or "/tmp/poc-gen", api_key=api_key, model_tier=model_tier)
+            for i, partial in gapped:
+                vid = getattr(partial.vuln, "ID", "?")
+                spec = _assemble(partial, gapmap.get(vid), endpoints)
+                entries_by_idx[i] = (partial.vuln_class, partial.vuln, spec)
+            await _poc_progress(f"PoC 分组补缺完成: {len(gapmap)}/{len(gapped)} 条补回 route+witness")
+
+        entries = [entries_by_idx[i] for i in sorted(entries_by_idx)]
 
         # placeholder 块总是显示：即便 host 真实，需登录的 PoC 仍含 <AUTH_TOKEN>/<SESSION_COOKIE> 占位符，operator 需替换指引。
         md = render_poc_md(entries, host, track) if entries else empty_poc_md(track)

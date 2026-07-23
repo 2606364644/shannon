@@ -745,3 +745,47 @@ async def test_llm_fill_gaps_exception_returns_empty(monkeypatch):
     partials = [_gn_partial("A1", "C.java")]
     gapmap = await mod.llm_fill_gaps("C.java", partials, recon_ctx={}, repo_path="/tmp/x")
     assert gapmap == {}  # 异常 → 空(降级骨架)
+
+
+async def test_generate_layered_template_first_then_grouped_gapfill(tmp_path, monkeypatch):
+    """LLM 轨(有 route+witness)0ms 模板命中,不走 LLM;GitNexus 轨按文件分组批量补缺。"""
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    q = VulnerabilityQueue(vulnerabilities=[
+        # LLM 轨:模板命中(有 path + witness)→ 不触发 LLM
+        InjectionVulnerability(ID="INJ-VULN-01", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="GET /api/users?id=1", path="GET /api/users?id=1 -> sink",
+            witness_payload="1' OR '1'='1", verdict="vulnerable"),
+        # GitNexus 轨:无 route/witness → 分组补缺
+        InjectionVulnerability(ID="INJ-GN-01", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="payload (src/main/java/x/C.java:m:70)",
+            path="payload -> C.java:m", witness_payload=None, verdict="vulnerable"),
+        InjectionVulnerability(ID="INJ-GN-02", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="payload (src/main/java/x/C.java:m2:80)",
+            path="payload -> C.java:m2", witness_payload=None, verdict="vulnerable"),
+    ])
+    (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    import supernova_core.services.poc_generator as mod
+    calls = []
+
+    async def fake_run(prompt, **kw):
+        calls.append(prompt)
+        return SimpleNamespace(success=True, structured_output={
+            "items": [
+                {"ID": "INJ-GN-01", "http_method": "POST", "route_path": "/c1",
+                 "witness_payload": "w1"},
+                {"ID": "INJ-GN-02", "http_method": "GET", "route_path": "/c2",
+                 "witness_payload": "w2"},
+            ]}, error=None)
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+
+    out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com",
+                                      "whitebox", repo_path="/tmp/x")
+    md = out.read_text(encoding="utf-8")
+    assert len(calls) == 1  # 2 条 GN 同文件 → 1 次批量调用(LLM 轨未触发 LLM)
+    assert "INJ-VULN-01" in md and "INJ-GN-01" in md and "INJ-GN-02" in md
+    assert "/api/users" in md   # 模板产
+    assert "/c1" in md and "/c2" in md  # gap-fill 产
