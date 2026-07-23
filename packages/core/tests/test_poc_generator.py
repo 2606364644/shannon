@@ -789,3 +789,62 @@ async def test_generate_layered_template_first_then_grouped_gapfill(tmp_path, mo
     assert "INJ-VULN-01" in md and "INJ-GN-01" in md and "INJ-GN-02" in md
     assert "/api/users" in md   # 模板产
     assert "/c1" in md and "/c2" in md  # gap-fill 产
+
+
+async def test_generate_checkpoint_resumes_skipping_done(tmp_path, monkeypatch):
+    """已有 checkpoint 的条目跳过(不重跑 LLM/模板),只补未完成项。"""
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    q = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(ID="INJ-GN-01", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="payload (src/x/C.java:m:70)", path="payload -> C.java:m",
+            witness_payload=None, verdict="vulnerable"),
+        InjectionVulnerability(ID="INJ-GN-02", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="payload (src/x/C.java:m2:80)", path="payload -> C.java:m2",
+            witness_payload=None, verdict="vulnerable"),
+    ])
+    (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    # 预置 checkpoint:INJ-GN-01 已完成
+    from supernova_core.services.poc_generator import _POC_CHECKPOINT_FILENAME
+    ckpt = {"version": 1, "track": "whitebox", "completed": {
+        "INJ-GN-01": {"vuln_class": "injection", "spec": {
+            "method": "POST", "path": "/done", "query": {"payload": "DONE"},
+            "headers": {}, "body": None, "auth_state": "unknown",
+            "confidence_band": "suspected", "source_id": "INJ-GN-01",
+            "vuln_class": "injection", "note": None, "steps": None}}}}
+    (d / _POC_CHECKPOINT_FILENAME).write_text(json.dumps(ckpt), encoding="utf-8")
+
+    import supernova_core.services.poc_generator as mod
+    seen_ids = []
+
+    async def fake_run(prompt, **kw):
+        seen_ids.append("called")
+        return SimpleNamespace(success=True, structured_output={
+            "items": [{"ID": "INJ-GN-02", "http_method": "GET",
+                       "route_path": "/c2", "witness_payload": "w2"}]}, error=None)
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+
+    out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com",
+                                      "whitebox", repo_path="/tmp/x")
+    md = out.read_text(encoding="utf-8")
+    assert "/done" in md           # checkpoint 复用
+    assert "/c2" in md             # 本轮补的
+    assert len(seen_ids) == 1      # 只 1 次分组调用(跳过已完成的 INJ-GN-01)
+
+
+async def test_generate_checkpoint_corrupt_starts_fresh(tmp_path, monkeypatch):
+    """checkpoint 损坏 → 当作无 checkpoint 从头跑,不报错。"""
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
+    q = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(ID="INJ-GN-01", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="GET /a?id=1", witness_payload="x", verdict="vulnerable"),
+    ])
+    (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    from supernova_core.services.poc_generator import _POC_CHECKPOINT_FILENAME
+    (d / _POC_CHECKPOINT_FILENAME).write_text("{NOT JSON", encoding="utf-8")  # 损坏
+    out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com", "whitebox")
+    assert out.exists()  # 不报错,正常产出

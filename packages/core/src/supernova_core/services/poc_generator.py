@@ -694,6 +694,73 @@ def empty_poc_md(track: str) -> str:
 
 logger = logging.getLogger(__name__)
 _POC_FILENAME = "exploitable_poc_collection.md"
+_POC_CHECKPOINT_FILENAME = ".poc_checkpoint.json"
+
+
+def _ckpt_path(deliverables_dir: Path) -> Path:
+    return deliverables_dir / _POC_CHECKPOINT_FILENAME
+
+
+def _load_checkpoint(deliverables_dir: Path) -> dict:
+    """读 sidecar checkpoint。损坏/缺失 → 返回空(从头跑,降级不报错)。"""
+    p = _ckpt_path(deliverables_dir)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data.get("completed", {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _spec_to_ckpt(spec: HttpRequestSpec | list[HttpRequestSpec]) -> Any:
+    """HttpRequestSpec(或 list)序列化为 checkpoint 可存 dict。"""
+    if isinstance(spec, list):
+        return [_spec_to_ckpt(s) for s in spec]
+    return {
+        "method": spec.method, "path": spec.path, "query": spec.query,
+        "headers": spec.headers, "body": spec.body, "auth_state": spec.auth_state.value,
+        "confidence_band": spec.confidence_band.value, "source_id": spec.source_id,
+        "vuln_class": spec.vuln_class, "note": spec.note, "steps": None,
+    }
+
+
+def _spec_from_ckpt(raw: Any) -> HttpRequestSpec | list[HttpRequestSpec] | None:
+    """从 checkpoint dict 还原 HttpRequestSpec(authz 成对存为 list,一并还原)。
+
+    与 _spec_to_ckpt 对称:dict→单 spec,list→list[spec]。损坏结构 → None(调用方跳过)。
+    """
+    if isinstance(raw, list):
+        items = [_spec_from_ckpt(r) for r in raw]
+        return items if items and all(s is not None for s in items) else None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return HttpRequestSpec(
+            method=raw.get("method", "GET"), path=raw.get("path", "/"),
+            query=raw.get("query", {}), headers=raw.get("headers", {}),
+            body=raw.get("body"),
+            auth_state=AuthState(raw.get("auth_state", "unknown")),
+            confidence_band=ConfidenceBand(raw.get("confidence_band", "suspected")),
+            source_id=raw.get("source_id", ""), vuln_class=raw.get("vuln_class", ""),
+            note=raw.get("note"),
+        )
+    except Exception:
+        return None
+
+
+def _write_checkpoint(deliverables_dir: Path, track: str,
+                      completed: dict[str, dict]) -> None:
+    """原子写 checkpoint(临时文件 + os.replace)。"""
+    p = _ckpt_path(deliverables_dir)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(
+            {"version": 1, "track": track, "completed": completed}, ensure_ascii=False),
+            encoding="utf-8")
+        os.replace(tmp, p)
+    except Exception:
+        logger.warning("poc: checkpoint write failed (non-blocking)")
 
 
 def _resolve_input(deliverables_dir: Path, filename: str) -> Path | None:
@@ -842,12 +909,23 @@ class PoCGenerator:
         entries_by_idx: dict[int, tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = {}
         # inj/xss/ssrf 的待补项(模板未命中),收集后按文件分组批量补缺
         gapped: list[tuple[int, "PartialSpec"]] = []
+        # Fix B:断点续传 — 读 checkpoint,reuse 已完成项,retry 不从零重来
+        ckpt_completed = _load_checkpoint(deliverables_dir)
+        ckpt_done_ids = set(ckpt_completed.keys())
 
         for i, (vc, v, accepted) in enumerate(items, 1):
             vid = getattr(v, "ID", "?")
             label = f"({i}/{total}) {_POC_CLASS_TAG.get(vc, f'[{vc}]')} {vid}"
             t0 = time.monotonic()
             try:
+                # Fix B:断点续传 — checkpoint 命中则复用,跳过模板/LLM
+                if vid in ckpt_done_ids and vid in ckpt_completed:
+                    raw = ckpt_completed[vid]
+                    spec = _spec_from_ckpt(raw["spec"]) if isinstance(raw, dict) else None
+                    if spec is not None:
+                        entries_by_idx[i] = (vc, v, spec)
+                        await _poc_progress(f"{label}  复用(checkpoint)")
+                        continue
                 if vc in ("authz", "auth"):
                     # authz(成对模板)/auth(量小,上游 §5.3 默认 LLM)保持既有 per-item 路径
                     spec = await PoCGenerator._build_entry(
@@ -870,6 +948,12 @@ class PoCGenerator:
                         partial = _extract_deterministic(v, vc, endpoints, band)
                         gapped.append((i, partial))
                         await _poc_progress(f"{label}  待补缺(分组) {format_duration(int((time.monotonic()-t0)*1000))}")
+                # Fix B:增量写 checkpoint(模板/authz/auth 路径;gapped 待补项此处尚未 resolve,在分组补缺后统一写)
+                if i in entries_by_idx:
+                    _vc, _v, _spec = entries_by_idx[i]
+                    ckpt_completed[getattr(_v, "ID", str(i))] = {
+                        "vuln_class": _vc, "spec": _spec_to_ckpt(_spec)}
+                    _write_checkpoint(deliverables_dir, track, ckpt_completed)
             except Exception as exc:  # 单条失败不阻塞其余
                 dt_ms = int((time.monotonic() - t0) * 1000)
                 logger.warning("poc: build failed for %s: %s", vid, exc)
@@ -885,6 +969,9 @@ class PoCGenerator:
                 vid = getattr(partial.vuln, "ID", "?")
                 spec = _assemble(partial, gapmap.get(vid), endpoints)
                 entries_by_idx[i] = (partial.vuln_class, partial.vuln, spec)
+                ckpt_completed[vid] = {
+                    "vuln_class": partial.vuln_class, "spec": _spec_to_ckpt(spec)}
+            _write_checkpoint(deliverables_dir, track, ckpt_completed)
             await _poc_progress(f"PoC 分组补缺完成: {len(gapmap)}/{len(gapped)} 条补回 route+witness")
 
         entries = [entries_by_idx[i] for i in sorted(entries_by_idx)]
