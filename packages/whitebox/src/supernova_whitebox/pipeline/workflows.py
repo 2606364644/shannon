@@ -599,12 +599,19 @@ class WhiteboxScanWorkflow:
             self._state.current_agent = None
             # === 报告增强：生成 PoC md（失败由 activity 内部吞掉，不影响主报告） ===
             self._state.current_agent = "generate-poc-report"
-            await workflow.execute_activity(
-                activities.generate_poc_report, act_input,
-                start_to_close_timeout=timedelta(minutes=20),
-                retry_policy=retry_for("poc"),
-            )
-            self._state.current_agent = None
+            try:
+                # §8 契约硬化:PoC 是非关键报告增强,timeout/ActivityError 绝不阻塞主流程。
+                # activity 内部 try/except 抓不到 Temporal start_to_close_timeout(runtime
+                # cancel 非 Python 异常),须在 workflow 层兜底(sentinel_dashboard 2026-07-22 回归)。
+                await workflow.execute_activity(
+                    activities.generate_poc_report, act_input,
+                    start_to_close_timeout=timedelta(minutes=20),
+                    retry_policy=retry_for("poc"),
+                )
+            except Exception:  # noqa: BLE001 — PoC 任何失败(含 ActivityError)只降级
+                pass
+            finally:
+                self._state.current_agent = None
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "reporting"}),

@@ -408,11 +408,16 @@ class BlackboxScanWorkflow:
             )
 
             # === 报告增强：生成 PoC md（失败由 activity 吞掉） ===
-            await workflow.execute_activity(
-                activities.generate_poc_report, act_input,
-                start_to_close_timeout=timedelta(minutes=20),
-                retry_policy=retry_for("poc"),
-            )
+            try:
+                # §8 契约硬化:PoC 非关键报告增强,timeout/ActivityError 绝不阻塞主流程
+                # (activity 内 try/except 抓不到 Temporal runtime cancel)。
+                await workflow.execute_activity(
+                    activities.generate_poc_report, act_input,
+                    start_to_close_timeout=timedelta(minutes=20),
+                    retry_policy=retry_for("poc"),
+                )
+            except Exception:  # noqa: BLE001 — PoC 任何失败(含 ActivityError)只降级
+                pass
 
             # Set final status based on failure tracking
             if self._state.failed_agents:
