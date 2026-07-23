@@ -525,3 +525,32 @@ async def test_generate_llm_dict_body_does_not_crash(tmp_path, monkeypatch):
     assert "AUTH-1" in md
     assert "Content-Type: application/json" in md
     assert '"id_token": "forged.none.sig"' in md
+
+
+def test_coerce_str_dict_handles_str_query_headers():
+    """regression（sentinel_dashboard 2026-07-22 INJ-GN-08）:LLM 返回 str 类型
+    query/headers（GLM 无 strict）曾致 'str' object has no attribute 'items'。"""
+    from supernova_core.services.poc_generator import _coerce_str_dict
+    # dict 直通
+    assert _coerce_str_dict({"a": "1"}) == {"a": "1"}
+    # None / 空
+    assert _coerce_str_dict(None) == {}
+    assert _coerce_str_dict("") == {}
+    # query string
+    assert _coerce_str_dict("a=1&b=2") == {"a": "1", "b": "2"}
+    # JSON 对象字符串
+    assert _coerce_str_dict('{"a": "1"}') == {"a": "1"}
+    # 乱串不崩
+    assert _coerce_str_dict("garbage") == {}
+
+
+def test_spec_from_llm_guess_str_query_does_not_crash():
+    """_spec_from_llm_guess 收到 str query/headers 不再崩。"""
+    from supernova_core.services.poc_generator import _spec_from_llm_guess
+    class V:
+        ID = "X-1"
+    spec = _spec_from_llm_guess(
+        {"method": "GET", "path": "/x", "query": "a=1&b=2",
+         "headers": "X-Test: y", "body": None}, V(), "injection", ConfidenceBand.SUSPECTED)
+    assert spec.query == {"a": "1", "b": "2"}
+    assert spec.headers == {}  # "X-Test: y" 非 k=v& 形态 → 空 dict（不崩即可）

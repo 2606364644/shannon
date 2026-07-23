@@ -520,12 +520,38 @@ def _coerce_request_body(raw: Any) -> str | None:
     return None
 
 
+def _coerce_str_dict(raw: Any) -> dict[str, str]:
+    """LLM structured_output 不可靠（GLM 无 strict），query/headers 可能返回 str 而非
+    schema 声明的 object。归一化为 dict[str,str]，守 spec 类型不变量，避免
+    'str' object has no attribute 'items'（2026-07-22 sentinel_dashboard INJ-GN-08 实测）。
+    """
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return {}
+        if s[:1] in ("{", "["):
+            try:
+                p = json.loads(s)
+                return {str(k): str(v) for k, v in p.items()} if isinstance(p, dict) else {}
+            except Exception:
+                return {}
+        out: dict[str, str] = {}
+        for pair in s.split("&"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out
+    return {}
+
+
 def _spec_from_llm_guess(guess: dict, vuln: Any, vuln_class: str, band: ConfidenceBand) -> HttpRequestSpec:
     return HttpRequestSpec(
         method=(guess.get("method") or "GET").upper(),
         path=guess.get("path") or "/",
-        query={k: str(v) for k, v in (guess.get("query") or {}).items()},
-        headers={k: str(v) for k, v in (guess.get("headers") or {}).items()},
+        query=_coerce_str_dict(guess.get("query")),
+        headers=_coerce_str_dict(guess.get("headers")),
         body=_coerce_request_body(guess.get("body")),
         auth_state=AuthState.UNKNOWN,
         confidence_band=band,
