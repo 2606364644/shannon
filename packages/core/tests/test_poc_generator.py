@@ -554,3 +554,29 @@ def test_spec_from_llm_guess_str_query_does_not_crash():
          "headers": "X-Test: y", "body": None}, V(), "injection", ConfidenceBand.SUSPECTED)
     assert spec.query == {"a": "1", "b": "2"}
     assert spec.headers == {}  # "X-Test: y" 非 k=v& 形态 → 空 dict（不崩即可）
+
+
+def test_extract_gn_location_java_controller():
+    from supernova_core.services.poc_generator import extract_gn_location
+    src = "payload (src/main/java/com/alibaba/csp/sentinel/dashboard/controller/cluster/ClusterConfigController.java:apiModifyClusterConfig:70)"
+    param, f, m = extract_gn_location(src)
+    assert param == "payload"
+    assert f == "src/main/java/com/alibaba/csp/sentinel/dashboard/controller/cluster/ClusterConfigController.java"
+    assert m == "apiModifyClusterConfig"
+
+
+def test_extract_gn_location_ts_handler():
+    from supernova_core.services.poc_generator import extract_gn_location
+    src = "userId (src/routes/user.ts:getUser:42)"
+    param, f, m = extract_gn_location(src)
+    assert param == "userId"
+    assert f == "src/routes/user.ts"
+    assert m == "getUser"
+
+
+def test_extract_gn_location_non_gn_returns_none():
+    from supernova_core.services.poc_generator import extract_gn_location
+    # LLM 轨格式（无括号 file:method:line）→ None
+    assert extract_gn_location("payload — @RequestBody at Foo.java:71") == (None, None, None)
+    assert extract_gn_location(None) == (None, None, None)
+    assert extract_gn_location("") == (None, None, None)

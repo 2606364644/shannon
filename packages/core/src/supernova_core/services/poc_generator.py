@@ -310,6 +310,26 @@ def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[
 
 # Task 5: 富信息 LLM 补缺口
 
+_GN_SOURCE_RE = re.compile(
+    r"^(\S+)\s*\((.+?):([^/:]+):(\d+)\)\s*$"
+)
+
+
+def extract_gn_location(source: str | None) -> tuple[str | None, str | None, str | None]:
+    """从 GitNexus 轨 source 提取 (param_name, file_path, method)。
+
+    GitNexus builder 的 _source_text 产 'param (file:method:line)' 形态
+    （如 'payload (…/Controller.java:apiModifyClusterConfig:70)'）。
+    file 可含 '/'/'.'；method 是单个标识符（不含 ':/'）；line 是纯数字。
+    非 GitNexus 格式（LLM 轨的 '@RequestBody at Foo.java:71' 等）→ (None, None, None)。
+    """
+    if not source:
+        return (None, None, None)
+    m = _GN_SOURCE_RE.match(source.strip())
+    if not m:
+        return (None, None, None)
+    return (m.group(1), m.group(2), m.group(3))
+
 _LLM_RICH_FIELDS = (
     "ID", "vulnerability_type", "source", "source_endpoint", "endpoint", "path",
     "witness_payload", "sink_call", "vulnerable_code_location",
