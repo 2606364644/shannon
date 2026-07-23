@@ -4,13 +4,13 @@
 #
 # 适用场景：
 #   本机已有独立运行、被多个项目共用的 temporal 容器
-#   （例如容器名 shannon-temporal，在 shannon-net 网络，占 127.0.0.1:7233），
+#   （例如容器名 supernova-temporal，在独立网络 ext-temporal-net，占 127.0.0.1:7233），
 #   不想让 compose 再自建 temporal 抢 7233。
 #
 # 用法（二选一）：
 #
 #   方式 A（推荐 · 自动）：
-#     ./scripts/up.sh        # 脚本检测 7233 端口自动加载本模板
+#     ./scripts/up.sh        # 脚本判断 7233 被【非本项目】进程占用时自动加载本模板
 #
 #   方式 B（手动）：
 #     docker compose -f docker-compose.yml \
@@ -23,12 +23,13 @@
 # 机制：
 #   - 给 temporal 服务加 profiles:["disabled"]，默认不启动（不抢 7233）
 #   - web 的 depends_on 清空（temporal 不在 compose 管辖）
-#   - web 改用容器名 shannon-temporal 直连，并接入 shannon-net 外部网络
+#   - web 改用外部 temporal 容器名直连，并接入外部 temporal 所在网络
 #
-# 前提：
-#   - 外部 temporal 容器在运行，容器名 = shannon-temporal（见 SUPERNOVA_TEMPORAL_HOST）
-#   - 存在 docker 网络名 shannon-net
-#   若你的容器名/网络名不同，改下方两处即可。
+# 前提（⚠️ 按你的实际环境改下方「容器名」与「网络名」两处）：
+#   - 外部 temporal 容器在运行，容器名 = supernova-temporal（见 SUPERNOVA_TEMPORAL_HOST）
+#   - 存在 docker 网络名 ext-temporal-net，且该 temporal 容器已接入此网络
+#   网络名故意取中性 ext-temporal-net（不能与本项目 default 网络 supernova-net 同名，否则冲突）；
+#   若你的外部容器名 / 网络名不同，改 web/worker 的 SUPERNOVA_TEMPORAL_HOST 与 networks.ext-temporal-net 即可。
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -39,25 +40,25 @@ services:
   web:
     depends_on: !reset []
     environment:
-      # 容器名直连：shannon-py-temporal 在 shannon-py-net 网络里可被 DNS 解析
+      # 容器名直连：supernova-temporal 在 ext-temporal-net 网络里可被 DNS 解析
       # （绕开外部 temporal 绑 127.0.0.1 致容器够不到的限制）
-      - SUPERNOVA_TEMPORAL_HOST=shannon-py-temporal
+      - SUPERNOVA_TEMPORAL_HOST=supernova-temporal
       - SUPERNOVA_TEMPORAL_PORT=7233
     networks:
-      - default          # 保留 supernova-net（compose 内部通信）
-      - shannon-py-net   # 接入外部 temporal 所在网络
+      - default           # 保留 supernova-net（compose 内部通信）
+      - ext-temporal-net  # 接入外部 temporal 所在网络
 
   worker:
     # 镜像 web 块：清空 depends_on（temporal 不在 compose 管辖）+
-    # 直连外部 shannon-py-temporal + 接入 shannon-py-net。
+    # 直连外部 supernova-temporal + 接入 ext-temporal-net。
     depends_on: !reset []
     environment:
-      - SUPERNOVA_TEMPORAL_HOST=shannon-py-temporal
+      - SUPERNOVA_TEMPORAL_HOST=supernova-temporal
       - SUPERNOVA_TEMPORAL_PORT=7233
     networks:
-      - default          # 保留 supernova-net（compose 内部通信）
-      - shannon-py-net   # 接入外部 temporal 所在网络
+      - default           # 保留 supernova-net（compose 内部通信）
+      - ext-temporal-net  # 接入外部 temporal 所在网络
 
 networks:
-  shannon-py-net:
-    external: true       # 复用已存在的 shannon-py-net，不新建
+  ext-temporal-net:
+    external: true        # 复用已存在的外部 temporal 网络，不新建

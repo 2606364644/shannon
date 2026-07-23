@@ -17,9 +17,12 @@
 #   安全（双重，绝不误删外部 shannon-temporal）：
 #     - docker compose ps 只列本项目(supernova)容器，物理上排除外部 shannon-temporal；
 #     - 且只删非运行态，running 的容器（含外部 temporal）一律不动。
-#   再检测宿主 7233 端口是否被占用（通常意味着已有外部 temporal 在跑）：
-#     - 已占用 → 复用模式：-f 加载 external-temporal override，不起 compose 的 temporal
-#     - 未占用 → 自建模式：裸 docker compose up（主 compose 默认就自建 temporal）
+#   再判断 temporal 模式（三态，关键防误判）：
+#     - 本项目 temporal(supernova-temporal) 已在跑 → 自建模式（「再次 up」常态，不套 override）
+#     - 否则若 7233 被非本项目进程占用 → 复用模式：-f 加载 external-temporal override
+#     - 否则（7233 空闲）→ 自建模式：裸 docker compose up（主 compose 默认就自建 temporal）
+#   ⚠️ 不能只看 7233 是否被占：自己的 temporal 启动后就占着 7233，会被误判成「外部 temporal」
+#      从而套 override、把 web/worker 指向不存在的主机名 → worker crash loop（曾发生）。
 #
 # 设计要点：
 #   - 主 docker-compose.yml 默认就是"自建 temporal"，裸跑 docker compose up 不报错。
@@ -73,6 +76,18 @@ port_in_use() {
   fi
 }
 
+# 本项目（supernova）的 temporal 容器是否正在运行。
+# 关键：区分「自己的 supernova-temporal 占了 7233」与「真正的外部 temporal 占了 7233」。
+# 前者是「再次 up」（改完配置重启 web/worker 等）的正常情况——应维持自建模式，
+# 绝不能因 7233 被自己的 temporal 占用就误判成「外部 temporal 已存在」去套 override
+# （曾导致 worker/web 连向不存在的旧主机名 shannon-py-temporal → DNS 失败 → crash loop）。
+# 只有 7233 被非本项目的进程占用，才是真正的「复用外部 temporal」场景。
+own_temporal_running() {
+  local tid
+  tid=$(docker compose -f docker-compose.yml ps -q temporal 2>/dev/null || true)
+  [ -n "$tid" ] && [ "$(docker inspect -f '{{.State.Running}}' "$tid" 2>/dev/null)" = "true" ]
+}
+
 # 清理 compose 项目内失败/空壳容器（Created/Exited/Dead 等非运行态）。
 # 专治：曾直接 `docker compose up` 失败，留下 supernova-{temporal,web} 的 Created 态空壳，
 #       这些空壳在后续模式切换 / 端口检测 / up 时捣乱。
@@ -116,8 +131,12 @@ if [ "$ACTION" = "up" ]; then
   # 组装 compose 文件列表：base + temporal 模式（互斥）+ dev override（正交，可叠加）。
   # 用数组而非两条分支，便于 dev override 独立于 temporal 模式叠加在任一之上。
   COMPOSE_FILES=(-f docker-compose.yml)
-  if port_in_use; then
-    echo ">> 检测到 7233 已被占用 → 复用外部 temporal 模式"
+  if own_temporal_running; then
+    # 本项目 temporal(supernova-temporal) 已在运行 → 维持自建模式，不套 override。
+    # 即便它占着 7233 也不是「外部 temporal」，而是「再次 up」的常态。
+    echo ">> 本项目 temporal(supernova-temporal) 已在运行 → 自建模式（不套 override）"
+  elif port_in_use; then
+    echo ">> 7233 被非本项目的进程占用 → 复用外部 temporal 模式"
     if [ ! -f "$OVERRIDE_FILE" ]; then
       echo "❌ 缺少 $OVERRIDE_FILE（复用模式依赖它）。请检查仓库。" >&2
       exit 1
