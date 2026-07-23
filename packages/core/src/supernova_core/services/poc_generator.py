@@ -330,6 +330,81 @@ def extract_gn_location(source: str | None) -> tuple[str | None, str | None, str
         return (None, None, None)
     return (m.group(1), m.group(2), m.group(3))
 
+
+@dataclass
+class PartialSpec:
+    """确定性提取的部分 PoC spec（inj/xss/ssrf 分层组装中间结构）。
+
+    route/witness 任一缺失 → needs_gap_fill=True，归入按 controller 文件分组的 LLM 补缺。
+    """
+    vuln: Any
+    vuln_class: str
+    band: ConfidenceBand
+    param_name: str | None
+    placement: str            # "query" | "body"
+    controller_file: str | None
+    method: str | None
+    path: str | None
+    witness: str | None
+
+    @property
+    def needs_gap_fill(self) -> bool:
+        return not self.method or not self.path or not self.witness
+
+
+def _extract_deterministic(
+    vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand
+) -> PartialSpec:
+    """从 vuln 确定性提取 PartialSpec（不调 LLM）。缺 route/witness 时 needs_gap_fill=True。"""
+    method, path = derive_method_path(vuln)
+    param = extract_param_name(getattr(vuln, "source", None))
+    gn_param, gn_file, _gn_method = extract_gn_location(getattr(vuln, "source", None))
+    if not param and gn_param:
+        param = gn_param
+    witness = getattr(vuln, "witness_payload", None) or None
+    placement = "body" if vuln_class == "ssrf" else "query"
+    return PartialSpec(
+        vuln=vuln, vuln_class=vuln_class, band=band, param_name=param,
+        placement=placement, controller_file=gn_file,
+        method=method, path=path, witness=witness,
+    )
+
+
+def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRequestSpec:
+    """用确定性 partial + LLM gap-fill({http_method,route_path,witness_payload}) 组装最终 spec。
+
+    route 补回后重查 recon endpoints 得 auth_state。无 gap/缺 witness → 骨架 + 标注。
+    """
+    g = gap or {}
+    method = partial.method or (g.get("http_method") or "GET")
+    path = partial.path or (g.get("route_path") or "/")
+    witness = partial.witness or g.get("witness_payload") or ""
+    info = find_endpoint_info(endpoints, path)
+    auth_st = derive_auth_state(info)
+    spec = HttpRequestSpec(
+        method=str(method).upper(), path=path,
+        headers=auth_header(auth_st, info), auth_state=auth_st,
+        confidence_band=partial.band,
+        source_id=getattr(partial.vuln, "ID", ""), vuln_class=partial.vuln_class,
+    )
+    if not witness:
+        spec.note = "请求形态未推断（缺 witness），需手工补全 body/参数"
+        return spec
+    # 按 vuln_class 决定参数位（对齐既有 build_template_spec 逻辑）
+    if partial.vuln_class == "ssrf":
+        if _is_open_redirect(partial.vuln):
+            param = partial.param_name or "next"
+            spec.query = {param: witness}
+        else:
+            param = getattr(partial.vuln, "vulnerable_parameter", None) or partial.param_name or "url"
+            if spec.method == "GET":
+                spec.method = "POST"
+            spec.body = f"{param}={witness}"
+    else:  # injection / xss
+        param = partial.param_name or ("id" if partial.vuln_class == "injection" else "q")
+        spec.query = {param: witness}
+    return spec
+
 _LLM_RICH_FIELDS = (
     "ID", "vulnerability_type", "source", "source_endpoint", "endpoint", "path",
     "witness_payload", "sink_call", "vulnerable_code_location",

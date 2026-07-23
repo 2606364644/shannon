@@ -580,3 +580,79 @@ def test_extract_gn_location_non_gn_returns_none():
     assert extract_gn_location("payload — @RequestBody at Foo.java:71") == (None, None, None)
     assert extract_gn_location(None) == (None, None, None)
     assert extract_gn_location("") == (None, None, None)
+
+
+def test_extract_deterministic_gn_vuln_has_gaps():
+    from supernova_core.services.poc_generator import _extract_deterministic
+    class V:
+        ID = "INJ-GN-01"
+        source = "payload (src/main/java/x/Controller.java:apiModifyClusterConfig:70)"
+        path = "payload -> src/main/java/x/Controller.java:apiModifyClusterConfig"
+        endpoint = None
+        source_endpoint = None
+        witness_payload = None
+        verdict = "vulnerable"
+        confidence = "high"
+    p = _extract_deterministic(V(), "injection", {}, ConfidenceBand.HIGH)
+    assert p.param_name == "payload"
+    assert p.controller_file == "src/main/java/x/Controller.java"
+    assert p.method is None and p.path is None and p.witness is None
+    assert p.needs_gap_fill is True
+
+
+def test_extract_deterministic_llm_vuln_no_gap():
+    from supernova_core.services.poc_generator import _extract_deterministic
+    class V:
+        ID = "INJ-VULN-01"
+        source = "payload — @RequestBody String payload at C.java:71"
+        path = "POST /cluster/config/modify_single -> apiModifyClusterConfig"
+        endpoint = None
+        source_endpoint = None
+        witness_payload = '{"@type":"x"}'
+        verdict = "vulnerable"
+        confidence = "high"
+    p = _extract_deterministic(V(), "injection", {}, ConfidenceBand.CONFIRMED)
+    assert p.method == "POST" and p.path == "/cluster/config/modify_single"
+    assert p.witness == '{"@type":"x"}'
+    assert p.needs_gap_fill is False
+
+
+def test_assemble_injection_with_gapfill():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    class V:
+        ID = "INJ-GN-01"
+        source = "payload (src/main/java/x/C.java:m:70)"
+        path = "payload -> C.java:m"; endpoint = None; source_endpoint = None
+        witness_payload = None; verdict = "vulnerable"; confidence = "high"
+    p = _extract_deterministic(V(), "injection", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, {"http_method": "POST", "route_path": "/cluster/config/modify_single",
+                         "witness_payload": "1' OR '1'='1"}, {})
+    assert spec.method == "POST"
+    assert spec.path == "/cluster/config/modify_single"
+    assert spec.query == {"payload": "1' OR '1'='1"}
+
+
+def test_assemble_ssrf_defaults_post_body():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    class V:
+        ID = "SSRF-GN-01"; source = "url (src/x/Fetch.java:fetchUrl:30)"
+        path = "url -> Fetch.java"; endpoint = None; source_endpoint = None
+        witness_payload = None; verdict = "vulnerable"; confidence = "high"
+        suggested_exploit_technique = ""; vulnerable_parameter = None
+    p = _extract_deterministic(V(), "ssrf", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, {"http_method": "GET", "route_path": "/fetch",
+                         "witness_payload": "http://evil/x"}, {})
+    assert spec.method == "POST"  # ssrf 非 redirect 默认 POST
+    assert spec.body == "url=http://evil/x"
+
+
+def test_assemble_degrades_when_gap_empty():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    class V:
+        ID = "INJ-GN-09"; source = "payload (src/x/C.java:m:70)"
+        path = "payload -> C.java:m"; endpoint = None; source_endpoint = None
+        witness_payload = None; verdict = "vulnerable"; confidence = "high"
+    p = _extract_deterministic(V(), "injection", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, None, {})
+    assert spec.method == "GET"  # 无 gap 兜底
+    assert spec.note and "手工补全" in spec.note
