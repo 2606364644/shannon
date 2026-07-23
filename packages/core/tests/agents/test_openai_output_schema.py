@@ -70,6 +70,61 @@ def test_extract_json_payload_no_braces():
     assert _extract_json_payload("纯叙述收尾，没有 JSON") is None
 
 
+def test_extract_json_payload_glm_markdown_with_code_block():
+    """GLM 真实形态：Markdown 标题 + 分析 + ```java 代码示例(含{}) + 末尾 ```json。
+
+    旧实现 find('{') 落在 ```java 代码块里，提取出夹 java 代码的畸形子串导致
+    json.loads 失败（taint-analysis WARNING 刷屏根因）。增强后从后往前取合法 fence。
+    """
+    text = (
+        "# 污点传播分析\n\n"
+        "## 分析过程\n\n"
+        "函数数据流：\n\n"
+        "```java\nprivate void fetchItems(String ip) {\n    Assert.notNull(ip);\n}\n```\n\n"
+        "ip 直达 sink，结果：\n\n"
+        '```json\n{"tainted_params":["ip"],"propagation_paths":[]}\n```'
+    )
+    import json as _json
+    payload = _extract_json_payload(text)
+    assert payload is not None
+    assert _json.loads(payload) == {"tainted_params": ["ip"], "propagation_paths": []}
+
+
+def test_extract_json_payload_multiple_fences_takes_last_valid():
+    """多个 fence 时从后往前取首个合法 JSON（前面 ```java 非 JSON 跳过）。"""
+    text = (
+        "```python\nnot json here\n```\n"
+        '```json\n{"valid": true}\n```'
+    )
+    import json as _json
+    assert _json.loads(_extract_json_payload(text)) == {"valid": True}
+
+
+def test_extract_json_payload_array_root():
+    """JSON array 根（sink/source discovery 返回 array）。
+
+    旧实现 find('{') 漏掉 array，rfind('}') 落到最后一个元素，把 [{...}] 截断成
+    单个 object（丢 [...] 包裹），下游 [d for d in data if isinstance(d,dict)] 遍历
+    dict 的 keys 返回空 -> 软 sink 召回全丢。增强后正确返回 array。
+    """
+    import json as _json
+    text = "```json\n[{\"sink\":\"exec\",\"line\":10},{\"sink\":\"query\",\"line\":20}]\n```"
+    payload = _extract_json_payload(text)
+    assert payload is not None
+    data = _json.loads(payload)
+    assert isinstance(data, list) and len(data) == 2
+
+
+def test_extract_json_payload_array_root_with_braces_in_prose():
+    """array 根 + 前导叙述含 {}（旧实现截断 bug 的危险形态）。"""
+    import json as _json
+    text = "函数 foo() {} 有问题。\n```json\n[{\"sink\":\"exec\"}]\n```"
+    payload = _extract_json_payload(text)
+    assert payload is not None
+    data = _json.loads(payload)
+    assert isinstance(data, list) and data == [{"sink": "exec"}]
+
+
 def test_validate_json_parses_markdown_fence():
     s = RawJsonSchemaOutputSchema({"type": "object"})
     assert s.validate_json('```json\n{"k": "v"}\n```') == {"k": "v"}

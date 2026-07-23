@@ -22,6 +22,25 @@ from supernova_core.code_index.llm_concurrency import (
     map_llm_with_bounds,
 )
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
+from supernova_core.agents.llm_json import _extract_json_payload
+
+# Structured output schema：LLM source discovery，JSON array 根。经 output_format 通道
+# 强制模型吐合法 JSON。
+_SOURCE_FIELD_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "field": {"type": "string"},
+            "source_type": {"type": "string"},
+            "expression": {"type": "string"},
+            "line": {"type": "integer"},
+            "is_source": {"type": "boolean"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["field", "is_source"],
+    },
+}
 from supernova_core.agents.model_caps import get_chunk_token_threshold
 from supernova_core.config.concurrency import (
     get_chunk_max_calls,
@@ -201,8 +220,11 @@ def _build_prompt(chunk: FileChunk) -> str:
 
 
 def _parse_fields(raw: str) -> list[dict]:
+    payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
-        data = json.loads(raw)
+        if payload is None:
+            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
+        data = json.loads(payload)
         return [d for d in data if isinstance(d, dict)]
     except Exception:
         logger.debug("discover_sources_llm: failed to parse LLM JSON: %s", raw[:120])
@@ -328,7 +350,7 @@ async def discover_sources_llm(
 
     async def _discover_one(chunk: FileChunk):
         prompt = _build_prompt(chunk)
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=_SOURCE_FIELD_SCHEMA)
         fields = _parse_fields(raw)
         out: list[SourcePoint] = []
         for f in fields:

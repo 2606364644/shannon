@@ -40,7 +40,7 @@ def test_discover_storage_reads_soft_source_on_llm_verdict():
         'void f(String name){ var x = repo.findByName(name); echo(x); }\n')
     cands = [StorageReadCandidate(block=block)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"read":"repo.findByName(name)","medium":"db","token":"name",'
                 '"read_var":"x","line":1,"is_storage_read":true,'
                 '"rationale":"orm find"}]')
@@ -69,7 +69,7 @@ def test_discover_storage_reads_empty_candidates_short_circuits():
     """No candidates → ([], []) without calling LLM."""
     calls: list = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         calls.append(prompt)
         return "[]"
 
@@ -83,7 +83,7 @@ def test_discover_storage_reads_skips_non_storage_verdict():
     block = _block("H.java", "f", 1, 'void f(String n){ repo.findByName(n); }\n')
     cands = [StorageReadCandidate(block=block)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"read":"repo.findByName(name)","medium":"db","token":"name",'
                 '"read_var":"x","line":1,"is_storage_read":false,'
                 '"rationale":"not storage"}]')
@@ -98,7 +98,7 @@ def test_discover_storage_reads_routes_line_to_correct_block():
     b2 = _block("Svc.java", "g", 10, 'void g(String n){ repo.findByName(n); }\n')
     cands = [StorageReadCandidate(block=b1), StorageReadCandidate(block=b2)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         # line=12 ∈ [10,15] → b2 (g)
         return ('[{"read":"repo.findByName(name)","medium":"db","token":"name",'
                 '"read_var":"y","line":12,"is_storage_read":true,"rationale":"r"}]')
@@ -115,7 +115,7 @@ def test_discover_storage_reads_malformed_field_does_not_kill_chunk():
     b2 = _block("Svc.java", "g", 10, 'void g(String n){ repo.findByName(n); }\n')
     cands = [StorageReadCandidate(block=b1), StorageReadCandidate(block=b2)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"read":"repo.findByName(name)","medium":"db","token":"name",'
                 '"read_var":"good","line":1,"is_storage_read":true,"rationale":"g"},'
                 '{"read":"x","medium":"db","token":"y","read_var":"bad","line":null,'
@@ -137,7 +137,7 @@ def test_discover_storage_writes_soft_write_on_llm_verdict():
         'void f(String name, User u){ repo.save(name, u); }\n')
     cands = [StorageWriteCandidate(block=block)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"write":"repo.save(name, u)","medium":"db","token":"name",'
                 '"written_arg":"u","line":1,"is_storage_write":true,'
                 '"rationale":"orm save"}]')
@@ -166,7 +166,7 @@ def test_discover_storage_writes_dynamic_token_marked_unresolvable():
     block = _block("H.java", "f", 1, 'void f(String k){ cache.set(k, v); }\n')
     cands = [StorageWriteCandidate(block=block)]
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"write":"cache.set(k, v)","medium":"cache","token":null,'
                 '"written_arg":"v","line":1,"is_storage_write":true,'
                 '"rationale":"dynamic key"}]')
@@ -185,7 +185,7 @@ def test_discover_storage_reads_prompt_includes_file_and_function():
     cands = [StorageReadCandidate(block=block)]
     seen: list[str] = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         seen.append(prompt)
         return "[]"
 

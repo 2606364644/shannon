@@ -148,6 +148,27 @@ class TestParseLLMResponse:
         assert result.tainted_params == []
         assert result.propagation_paths == []
 
+    def test_glm_markdown_with_java_block_parses(self):
+        """GLM 真实形态:Markdown 标题 + 分析 + ```java 代码块(含{}) + 末尾 ```json。
+
+        旧实现裸 json.loads 首字符非 { 崩(Expecting value: line 1 column 1),
+        走 fallback 降级。增强 extract 后能正确解析出 tainted_params。
+        """
+        raw = (
+            "# 污点传播分析\n\n"
+            "## 分析过程\n\n"
+            "函数数据流：\n\n"
+            "```java\nprivate void fetch(String ip) {\n    Assert.notNull(ip);\n}\n```\n\n"
+            "ip 直达 sink，结果：\n\n"
+            '```json\n{"tainted_params":["ip"],"propagation_paths":[{'
+            '"source_param":"ip","sink_id":"sink_1","sink_arg_index":0,"confidence":0.9}]}\n```'
+        )
+        result = parse_llm_response(raw)
+        assert result is not None
+        assert "ip" in result.tainted_params
+        assert len(result.propagation_paths) == 1
+        assert result.propagation_paths[0].source_param == "ip"
+
 
 class TestAnalyzeTaintLLM:
     @pytest.mark.asyncio

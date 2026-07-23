@@ -35,6 +35,43 @@ from supernova_core.code_index.llm_concurrency import (
     map_llm_with_bounds,
 )
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
+from supernova_core.agents.llm_json import _extract_json_payload
+
+# Structured output schema：LLM storage READ discovery，JSON array 根。
+_STORAGE_READ_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "read": {"type": "string"},
+            "medium": {"type": "string"},
+            "token": {"type": ["string", "null"]},
+            "read_var": {"type": "string"},
+            "line": {"type": "integer"},
+            "is_storage_read": {"type": "boolean"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["read", "is_storage_read"],
+    },
+}
+
+# Structured output schema：LLM storage WRITE discovery，JSON array 根。
+_STORAGE_WRITE_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "write": {"type": "string"},
+            "medium": {"type": "string"},
+            "token": {"type": ["string", "null"]},
+            "written_arg": {"type": "string"},
+            "line": {"type": "integer"},
+            "is_storage_write": {"type": "boolean"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["write", "is_storage_write"],
+    },
+}
 from supernova_core.agents.model_caps import get_chunk_token_threshold
 from supernova_core.config.concurrency import (
     get_chunk_max_calls,
@@ -162,8 +199,11 @@ def _functions_repr(chunk: FileChunk) -> str:
 
 
 def _parse_verdicts(raw: str) -> list[dict]:
+    payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
-        data = json.loads(raw)
+        if payload is None:
+            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
+        data = json.loads(payload)
         return [d for d in data if isinstance(d, dict)]
     except Exception:
         logger.debug("storage_discovery_llm: failed to parse LLM JSON: %s",
@@ -323,7 +363,7 @@ async def discover_storage_reads_llm(
 
     async def _discover_one(chunk: FileChunk) -> list[SourcePoint]:
         prompt = _build_read_prompt(chunk)
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=_STORAGE_READ_SCHEMA)
         verdicts = _parse_verdicts(raw)
         out: list[SourcePoint] = []
         for v in verdicts:
@@ -403,7 +443,7 @@ async def discover_storage_writes_llm(
 
     async def _discover_one(chunk: FileChunk) -> list[StorageWritePoint]:
         prompt = _build_write_prompt(chunk)
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=_STORAGE_WRITE_SCHEMA)
         verdicts = _parse_verdicts(raw)
         out: list[StorageWritePoint] = []
         for v in verdicts:

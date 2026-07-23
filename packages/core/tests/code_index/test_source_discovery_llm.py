@@ -29,7 +29,7 @@ def test_discover_sources_llm_soft_source_on_llm_verdict():
     block = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')
     cands = collect_source_candidates([block], {block.id},
                                       source_provider=lambda b: block.source_code.encode())
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"field":"x","source_type":"query","is_source":true,"rationale":"r"}]')
     out = asyncio.run(discover_sources_llm(cands, fake_llm))
     soft, gaps = out
@@ -59,7 +59,7 @@ def test_discover_sources_llm_reports_progress_and_hits():
     cands = (collect_source_candidates([b1, b2], {b1.id, b2.id},
              source_provider=lambda b: b.source_code.encode()))
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         if "f.js" in prompt:
             return ('[{"field":"x","source_type":"query","is_source":true,"rationale":"r"}]')
         return ('[{"field":"y","source_type":"body","is_source":true,"rationale":"r"}]')
@@ -95,7 +95,7 @@ def test_discover_sources_llm_skip_emits_note_via_progress_cb():
     cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
                                       source_provider=lambda b: b.source_code.encode())
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         if "function f" in prompt:  # f 的 source code → 挂死超时
             await asyncio.sleep(10)
         return '[]'
@@ -120,7 +120,7 @@ def test_discover_sources_llm_progress_cb_none_ok():
     cands = collect_source_candidates([block], {block.id},
                                       source_provider=lambda b: block.source_code.encode())
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return "[]"  # 无 source
 
     out = asyncio.run(discover_sources_llm(cands, fake_llm, progress_cb=None))
@@ -198,7 +198,7 @@ def test_discover_sources_llm_soft_source_on_destructure():
                                       source_provider=lambda b: block.source_code.encode())
     assert cands  # 解构进候选
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"field":"a","source_type":"body","expression":"req.body","line":1,'
                 '"is_source":true,"rationale":"r"}]')
 
@@ -234,7 +234,7 @@ async def test_discover_sources_file_level_groups_same_file_into_one_call():
 
     n_calls = 0
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         nonlocal n_calls
         n_calls += 1
         return '[]'
@@ -253,7 +253,7 @@ async def test_discover_sources_cross_file_merges_into_one_call():
                                       source_provider=lambda b: b.source_code.encode())
     seen: list[str] = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         seen.append(prompt)
         return '[]'
 
@@ -270,7 +270,7 @@ async def test_discover_sources_max_calls_cap_separates_files():
                                       source_provider=lambda b: b.source_code.encode())
     n_calls = 0
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         nonlocal n_calls
         n_calls += 1
         return '[]'
@@ -289,7 +289,7 @@ async def test_discover_sources_file_level_prompt_lists_all_functions():
                                       source_provider=lambda b: b.source_code.encode())
     seen: list[str] = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         seen.append(prompt)
         return '[]'
 
@@ -308,7 +308,7 @@ async def test_discover_sources_file_level_routes_verdict_to_correct_block():
     cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
                                       source_provider=lambda b: b.source_code.encode())
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         return ('[{"field":"b","source_type":"body","expression":"req.body","line":12,'
                 '"is_source":true,"rationale":"r"}]')
 
@@ -333,7 +333,7 @@ async def test_discover_sources_per_call_timeout_defaults_to_120(monkeypatch):
     cands = collect_source_candidates([b], {b.id},
                                       source_provider=lambda x: b.source_code.encode())
 
-    async def dummy(prompt):
+    async def dummy(prompt, **kwargs):
         return "[]"
 
     await discover_sources_llm(cands, dummy)
@@ -353,7 +353,7 @@ async def test_discover_sources_large_file_chunks_into_multiple_calls():
 
     n_calls = 0
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         nonlocal n_calls
         n_calls += 1
         return '[]'
@@ -383,7 +383,7 @@ async def test_discover_sources_per_call_timeout_honors_env_override(monkeypatch
     cands = collect_source_candidates([b], {b.id},
                                       source_provider=lambda x: b.source_code.encode())
 
-    async def dummy(prompt):
+    async def dummy(prompt, **kwargs):
         return "[]"
 
     await discover_sources_llm(cands, dummy)
@@ -403,7 +403,7 @@ async def test_discover_sources_skips_malformed_field_keeps_other_sources():
     cands = collect_source_candidates([b1, b2], {b1.id, b2.id},
                                       source_provider=lambda x: x.source_code.encode())
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         # good line=1 正常; bad line=null → int(None) 旧版崩
         return ('[{"field":"good","source_type":"body","expression":"req.body","line":1,'
                 '"is_source":true,"rationale":"g"},'
@@ -428,7 +428,7 @@ def test_discover_sources_threshold_derives_from_model():
     cands = [SourceCandidate(block=block)]
     calls = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         calls.append(prompt)
         return "[]"  # 空 verdict
 
@@ -450,7 +450,7 @@ def test_discover_sources_threshold_default_model():
     cands = [SourceCandidate(block=block)]
     calls = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         calls.append(prompt)
         return "[]"
 
@@ -613,7 +613,7 @@ async def test_discover_sources_llm_prompt_includes_idor_instruction():
 
     captured_prompts: list[str] = []
 
-    async def fake_llm(prompt):
+    async def fake_llm(prompt, **kwargs):
         captured_prompts.append(prompt)
         # IDOR 风味: userId 经 getParam 取出, 流入 findById(IDOR vector)
         return ('[{"field":"userId","source_type":"path",'

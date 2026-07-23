@@ -30,6 +30,43 @@ from supernova_core.code_index.llm_concurrency import (
 )
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.agents.model_caps import get_chunk_token_threshold
+from supernova_core.agents.llm_json import _extract_json_payload
+
+# Structured output schema：LLM sink 判定器（discover_sinks_llm），JSON array 根。
+# 经 run_claude_prompt output_format 通道强制模型吐合法 JSON，省去事后 extract 的不确定性。
+_SINK_VERDICT_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "call_ref": {"type": "string"},
+            "is_sink": {"type": "boolean"},
+            "category": {"type": "string"},
+            "slot": {"type": "string"},
+            "arg_index": {"type": "integer"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["call_ref", "is_sink"],
+    },
+}
+
+# Structured output schema：LLM sink hunter（discover_sinks_by_entry），JSON array 根。
+_SINK_HUNTER_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "sink": {"type": "string"},
+            "category": {"type": "string"},
+            "slot": {"type": "string"},
+            "dangerous_arg": {"type": "string"},
+            "line": {"type": "integer"},
+            "is_sink": {"type": "boolean"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["sink", "is_sink"],
+    },
+}
 from supernova_core.config.concurrency import (
     get_chunk_max_calls,
     get_max_concurrent,
@@ -254,8 +291,11 @@ def _build_discovery_prompt(chunk: FileChunk) -> str:
 
 
 def _parse_verdicts(raw: str) -> list[dict]:
+    payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
-        data = json.loads(raw)
+        if payload is None:
+            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
+        data = json.loads(payload)
         return [d for d in data if isinstance(d, dict)]
     except Exception:
         logger.debug("discover_sinks_llm: failed to parse LLM JSON: %s", raw[:120])
@@ -372,7 +412,7 @@ async def discover_sinks_llm(
 
     async def _discover_one(chunk: FileChunk) -> list[SinkCallSite]:
         prompt = _build_discovery_prompt(chunk)
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=_SINK_VERDICT_SCHEMA)
         verdicts = _parse_verdicts(raw)
         vmap = {str(v.get("call_ref")): v for v in verdicts}
         out: list[SinkCallSite] = []
@@ -462,8 +502,11 @@ def _build_sink_hunter_prompt(chunk: "FileChunk") -> str:
 
 
 def _parse_sink_verdicts(raw: str) -> list[dict]:
+    payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
-        data = json.loads(raw)
+        if payload is None:
+            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
+        data = json.loads(payload)
         return [d for d in data if isinstance(d, dict)]
     except Exception:
         logger.debug("discover_sinks_by_entry: failed to parse LLM JSON: %s", raw[:120])
@@ -564,7 +607,7 @@ async def discover_sinks_by_entry(
 
     async def _hunt_one(chunk: "FileChunk"):
         prompt = _build_sink_hunter_prompt(chunk)
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=_SINK_HUNTER_SCHEMA)
         verdicts = _parse_sink_verdicts(raw)
         out: list[SinkCallSite] = []
         for v in verdicts:

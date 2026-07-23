@@ -21,11 +21,41 @@ from supernova_core.code_index.parameter_models import (
     TaintAnalysisResult,
     TaintPath,
 )
+from supernova_core.agents.llm_json import _extract_json_payload
 
 logger = logging.getLogger(__name__)
 
 # Type alias for the async LLM client callable
 LLMClient = Callable[..., Awaitable[str]]
+
+# Structured output schema for LLM taint analysis（run_claude_prompt 的 output_format 通道，
+# 经 CLI --json-schema 强制模型吐合法 JSON + SDK structured_output 预解析）。手写 dict
+# 对齐项目惯例（AUTH_VALIDATION_SCHEMA 等），避免 pydantic .model_json_schema() 的
+# str|None union 生成 anyOf 在 CLI AJV draft-07 校验器上的兼容坑。
+TAINT_ANALYSIS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "tainted_params": {"type": "array", "items": {"type": "string"}},
+        "propagation_paths": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source_param": {"type": "string"},
+                    "sink_id": {"type": "string"},
+                    "sink_arg_index": {"type": "integer"},
+                    "intermediate_vars": {"type": "array", "items": {"type": "string"}},
+                    "sanitized": {"type": "boolean"},
+                    "sanitizer_description": {"type": ["string", "null"]},
+                    "post_sanitized_concat": {"type": "boolean"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["source_param", "sink_id", "sink_arg_index"],
+            },
+        },
+    },
+    "required": ["tainted_params", "propagation_paths"],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -187,16 +217,24 @@ def parse_llm_response(raw: str) -> TaintAnalysisResult | None:
     (``analyze_taint_llm``) can fall back to the deterministic intra analysis
     instead of silently under-approximating with empty ``tainted_params``.
 
-    GLM commonly returns fenced (```json ... ```) / non-strict JSON / extra
-    fields that trip ``json.loads`` -> this path. Previously the failure was
-    logged at DEBUG and swallowed as an empty result, dropping all taint flows
-    for the function (sentinel_dashboard SSRF=0 root cause contributor).
+    GLM commonly returns Markdown analysis + fenced (```json ... ```) result /
+    non-strict JSON / extra fields. 直接 ``json.loads`` 会在首字符非 ``{`` 时崩
+    （``Expecting value: line 1 column 1``，sentinel_dashboard taint WARNING 刷屏
+    根因）。先经 ``_extract_json_payload`` 剥 fence + 取 JSON 子串，再 validate。
     """
+    payload = _extract_json_payload(raw) if isinstance(raw, str) else None
+    if payload is None:
+        logger.warning(
+            "Failed to extract JSON from LLM taint response; snippet=%r. "
+            "Caller will fall back to deterministic intra analysis.",
+            raw[:200] if isinstance(raw, str) else raw,
+        )
+        return None
     try:
-        data = json.loads(raw)
+        data = json.loads(payload)
         return TaintAnalysisResult.model_validate(data)
     except (json.JSONDecodeError, Exception) as exc:
-        snippet = raw[:200] if isinstance(raw, str) else raw
+        snippet = payload[:200]
         logger.warning(
             "Failed to parse LLM taint response (%s); snippet=%r. "
             "Caller will fall back to deterministic intra analysis.", exc, snippet,
@@ -362,7 +400,7 @@ async def analyze_taint_llm(
     if llm_client is not None:
         for attempt in range(retry_count + 1):
             try:
-                raw_response = await llm_client(prompt)
+                raw_response = await llm_client(prompt, output_format=TAINT_ANALYSIS_SCHEMA)
                 break
             except Exception as exc:
                 last_exc = exc

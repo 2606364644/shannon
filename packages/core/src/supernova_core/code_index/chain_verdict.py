@@ -36,6 +36,22 @@ from supernova_core.code_index.parameter_models import (
     SinkCategory,
 )
 from supernova_core.code_index.sanitizer_library import annotate_sanitizers
+from supernova_core.agents.llm_json import _extract_json_payload
+
+# Structured output schema：chain-verdict 轻量 LLM 判定，JSON object 根。
+# 对齐 ChainVerdict dataclass（verdict/witness_payload/evidence_chain/
+# mismatch_reason/confidence）。经 output_format 通道强制合法 JSON，省事后 extract。
+CHAIN_VERDICT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string"},
+        "witness_payload": {"type": ["string", "null"]},
+        "evidence_chain": {"type": "string"},
+        "mismatch_reason": {"type": ["string", "null"]},
+        "confidence": {"type": "string"},
+    },
+    "required": ["verdict", "evidence_chain"],
+}
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +269,7 @@ async def judge_chain_verdict(
     )
 
     try:
-        raw = await llm_client(prompt)
+        raw = await llm_client(prompt, output_format=CHAIN_VERDICT_SCHEMA)
     except Exception as exc:
         logger.warning("chain-verdict LLM pass failed (%s); marking needs_review", exc)
         return ChainVerdict(
@@ -265,7 +281,10 @@ async def judge_chain_verdict(
         )
 
     try:
-        data = json.loads(raw)
+        payload = _extract_json_payload(raw) if isinstance(raw, str) else None
+        if payload is None:
+            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
+        data = json.loads(payload)
     except (json.JSONDecodeError, TypeError):
         logger.warning("chain-verdict LLM returned non-JSON: %r", raw[:200])
         return ChainVerdict(

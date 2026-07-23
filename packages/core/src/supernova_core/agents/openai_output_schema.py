@@ -29,32 +29,10 @@ class StructuredOutputParseError(Exception):
     """
 
 
-def _extract_json_payload(text: str) -> str | None:
-    """从 LLM 输出文本提取 JSON 字符串（L0/L1 复用）。
-
-    模拟 Claude SDK「把 LLM 文本变成合法 JSON」的契约（TS 侧 SDK 免费；
-    openai-agents 无此层，Python 自己补）。处理 GLM 常见收尾形态：
-      1. markdown fence 包裹（```json ... ``` / ``` ... ```）；
-      2. 前导叙述 + JSON（取首个 { 到末个 } 的子串）。
-    全无 { / } → 返回 None（调用方据此抛 StructuredOutputParseError）。
-    """
-    if not text:
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    if s.startswith("```"):
-        lines = s.splitlines()
-        if lines:
-            lines = lines[1:]            # 去首行 ```（含可能的语言标签）
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]        # 去末行 ```
-            s = "\n".join(lines).strip()
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return s[start : end + 1]
+# 实现已下沉到无 SDK 依赖的 llm_json.py（code_index 等核心层可安全复用，不必拖
+# openai-agents SDK 进 import 链）。此处 re-export 保持 providers_anthropic /
+# providers_openai 现有 `from .openai_output_schema import _extract_json_payload` 不破。
+from .llm_json import _extract_json_payload
 
 
 class RawJsonSchemaOutputSchema(AgentOutputSchemaBase):

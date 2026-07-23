@@ -671,17 +671,32 @@ async def run_code_index(input: ActivityInput) -> dict:
             # Create LLM client for taint analysis (+ LLM sink discovery)
             def _make_gitnexus_llm_client(repo_path: str):
                 """封装 run_claude_prompt 成 analyze_taint_llm/discover 期望的
-                async (prompt)->str 契约。env 关时返回 None → consumer 入口各自
-                静默降级(discover_sinks/sources 早退返回空, analyze_taint_llm 走
-                deterministic fallback), 不再跑 N 个无用的 raise-task 刷屏(2026-07-01)。"""
+                async (prompt, output_format=None)->str 契约。
+
+                output_format（JSON Schema）透传给 run_claude_prompt -> CLI --json-schema
+                强制模型吐合法 JSON + SDK structured_output 预解析（对齐 TS outputFormat 通道，
+                根因治本：GLM 不再返回 Markdown 文本致 json.loads 崩）。优先返回
+                structured_output（json.dumps 成 str 保持契约）；空则回退 result.text，由下游
+                _extract_json_payload + 各自 fallback 兜底（三重防线）。
+
+                env 关时返回 None → consumer 入口各自静默降级(discover_sinks/sources 早退返回空,
+                analyze_taint_llm 走 deterministic fallback), 不再跑 N 个无用的 raise-task 刷屏。"""
                 if not is_gitnexus_llm_enabled():
                     return None
 
                 async def _client(prompt: str, **kwargs) -> str:
                     result = await run_claude_prompt(
                         prompt=prompt, repo_path=repo_path, model_tier="medium",
+                        structured_output_schema=kwargs.get("output_format"),
                     )
-                    return result.text  # ClaudeRunResult.text (runner.py:77) = 纯文本输出
+                    # structured_output 由 provider 填充（SDK 原生优先，缺失时 _extract_json_payload
+                    # 从 collected_text 兜底）。非空时它是已解析的 dict/list，json.dumps 还原成 str
+                    # 契约供下游 parse。空 → 回退 .text（下游 _extract_json_payload + fallback）。
+                    so = result.structured_output
+                    if so is not None:
+                        import json as _json
+                        return _json.dumps(so)
+                    return result.text
                 return _client
 
             _llm_taint_client = _make_gitnexus_llm_client(str(repo))
@@ -1209,7 +1224,12 @@ async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
 
 
 def _make_verdict_llm_client(repo_path: str):
-    """接通后: 真 client; env 关时返回 raise-client(降级)。"""
+    """接通后: 真 client; env 关时返回 raise-client(降级)。
+
+    output_format（JSON Schema）透传 run_claude_prompt -> CLI --json-schema，强制模型
+    吐合法 JSON + SDK structured_output（对齐 TS outputFormat，根因治本 GLM Markdown 崩）。
+    优先返回 structured_output（json.dumps 还原 str 契约），空则回退 result.text 走 extract。
+    """
     if not is_gitnexus_llm_enabled():
         return _gitnexus_verdict_llm_client  # 模块级 raise 兜底
     from supernova_core.agents.runner import run_claude_prompt
@@ -1217,7 +1237,12 @@ def _make_verdict_llm_client(repo_path: str):
     async def _client(prompt: str, **kwargs) -> str:
         result = await run_claude_prompt(
             prompt=prompt, repo_path=repo_path, model_tier="medium",
+            structured_output_schema=kwargs.get("output_format"),
         )
+        so = result.structured_output
+        if so is not None:
+            import json as _json
+            return _json.dumps(so)
         return result.text
     return _client
 

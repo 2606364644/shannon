@@ -635,7 +635,7 @@ async def test_discover_sinks_threshold_derives_from_model():
                         arg_exprs=["uid"], file_path="app.py", line=1, column=0)
     calls = []
 
-    async def fake_client(prompt):
+    async def fake_client(prompt, **kwargs):
         calls.append(prompt)
         return "[]"  # 空 verdict
 
@@ -661,7 +661,7 @@ async def test_discover_sinks_threshold_default_model(monkeypatch):
                         arg_exprs=["uid"], file_path="app.py", line=1, column=0)
     calls = []
 
-    async def fake_client(prompt):
+    async def fake_client(prompt, **kwargs):
         calls.append(prompt)
         return "[]"
 
