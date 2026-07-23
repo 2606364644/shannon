@@ -444,6 +444,28 @@ LLM_REQUEST_SCHEMA: dict = {
 }
 
 
+GAPFILL_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ID": {"type": "string"},
+                    "http_method": {"type": ["string", "null"],
+                                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", None]},
+                    "route_path": {"type": ["string", "null"]},
+                    "witness_payload": {"type": ["string", "null"]},
+                },
+                "required": ["ID"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+
 def build_llm_prompt(vuln: Any, vuln_class: str, host: str, recon_ctx: dict) -> str:
     fields = {f: getattr(vuln, f) for f in _LLM_RICH_FIELDS if getattr(vuln, f, None)}
     return (
@@ -485,6 +507,81 @@ async def llm_fill_gap(
     if not getattr(result, "success", False) or not getattr(result, "structured_output", None):
         return None
     return result.structured_output
+
+
+def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], recon_ctx: dict) -> str:
+    items_desc = json.dumps([
+        {"ID": getattr(p.vuln, "ID", ""), "param": p.param_name,
+         "method_hint": None, "vuln_class": p.vuln_class,
+         "evidence_chain": (getattr(p.vuln, "evidence_chain", None) or "")[:300]}
+        for p in partials
+    ], ensure_ascii=False)
+    file_line = f"Handler file: {file_key}\n" if file_key else "Handler file: unknown\n"
+    return (
+        f"You are reconstructing HTTP request shapes for confirmed vulnerabilities.\n\n"
+        f"{file_line}Read that file and find each handler method's HTTP route "
+        f"(@PostMapping / router.get / @app.route …) and a minimal witness payload.\n\n"
+        f"Vulnerabilities to fill:\n{items_desc}\n\n"
+        f"Recon endpoint context:\n{json.dumps(recon_ctx, ensure_ascii=False)}\n\n"
+        f"Output JSON {{\"items\":[{{\"ID\",\"http_method\",\"route_path\","
+        f"\"witness_payload\"}}]}}. Output JSON only."
+    )
+
+
+async def llm_fill_gaps(
+    file_key: str | None, partials: list["PartialSpec"], *, recon_ctx: dict,
+    repo_path: str, api_key: str | None = None, model_tier: str = "medium",
+) -> dict[str, dict]:
+    """一个 controller 文件组一次 LLM 调用,返回 {ID: {http_method,route_path,witness_payload}}。
+
+    失败/不可用 → 返回 {}(调用方对缺 gap 的条目降级骨架)。
+    """
+    prompt = _build_gapfill_prompt(file_key, partials, recon_ctx)
+    try:
+        result = await run_claude_prompt(
+            prompt=prompt,
+            repo_path=repo_path or "/tmp/poc-gen",
+            model_tier=model_tier,
+            # runner 现状:output_format 是主参(structured_output_schema 为别名,见 runner.py:139)。
+            # chain_verdict 的 _make_verdict_llm_client 也走 output_format,此处对齐。
+            output_format=GAPFILL_OUTPUT_SCHEMA,
+            api_key=api_key,
+            max_turns=int(os.getenv("SUPERNOVA_POC_MAX_TURNS", "10")),
+        )
+    except Exception:
+        return {}
+    if not getattr(result, "success", False) or not getattr(result, "structured_output", None):
+        return {}
+    items = result.structured_output.get("items") or []
+    out: dict[str, dict] = {}
+    for it in items:
+        vid = it.get("ID")
+        if vid:
+            out[vid] = {
+                "http_method": it.get("http_method"),
+                "route_path": it.get("route_path"),
+                "witness_payload": it.get("witness_payload"),
+            }
+    return out
+
+
+async def _batch_fill_gaps(
+    partials: list["PartialSpec"], *, endpoints: dict, repo_path: str,
+    api_key: str | None = None, model_tier: str = "medium",
+) -> dict[str, dict]:
+    """编排:分组 + 逐组调 llm_fill_gaps,合并 {ID: gap}。失败的组其条目无 gap(后降级)。"""
+    cap = int(os.getenv("SUPERNOVA_POC_GROUP_CAP", "8"))
+    groups = _group_by_controller_file(partials, cap=cap)
+    gapmap: dict[str, dict] = {}
+    for file_key, group_partials in groups:
+        recon_ctx = {ep: info for ep, info in endpoints.items()} if endpoints else {}
+        try:
+            gapmap.update(await llm_fill_gaps(
+                file_key, group_partials, recon_ctx=recon_ctx,
+                repo_path=repo_path, api_key=api_key, model_tier=model_tier))
+        except Exception as exc:  # 单组失败不阻塞其余
+            logger.warning("poc: llm_fill_gaps failed for %s: %s", file_key, exc)
+    return gapmap
 
 
 # Task 6: md 渲染（概览表 + 详细 PoC + 空表兜底）

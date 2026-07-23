@@ -689,3 +689,59 @@ def test_group_by_controller_file_splits_on_cap():
     same = [ps for f, ps in groups if f == "Same.java"]
     assert len(same) == 3  # 4+4+2
     assert len(same[0]) == 4 and len(same[2]) == 2
+
+
+async def test_llm_fill_gaps_groups_by_file_and_returns_map(monkeypatch):
+    """同文件多条 → 1 次 LLM 调用,返回 {ID: {method,route,witness}}。"""
+    import supernova_core.services.poc_generator as mod
+    calls = []
+
+    async def fake_run(prompt, **kw):
+        calls.append(kw.get("structured_output_schema"))
+        return SimpleNamespace(success=True, structured_output={
+            "items": [
+                {"ID": "INJ-GN-01", "http_method": "POST",
+                 "route_path": "/a", "witness_payload": "w1"},
+                {"ID": "INJ-GN-02", "http_method": "GET",
+                 "route_path": "/b", "witness_payload": "w2"},
+            ]}, error=None)
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+
+    partials = [_gn_partial("INJ-GN-01", "C.java"), _gn_partial("INJ-GN-02", "C.java")]
+    gapmap = await mod.llm_fill_gaps("C.java", partials, recon_ctx={},
+                                     repo_path="/tmp/x")
+    assert len(calls) == 1  # 同文件 2 条只 1 次调用
+    assert gapmap["INJ-GN-01"]["route_path"] == "/a"
+    assert gapmap["INJ-GN-02"]["witness_payload"] == "w2"
+
+
+async def test_batch_fill_gaps_merges_groups(monkeypatch):
+    """2 个文件 → 2 次调用,结果合并;某组失败不影响他组。"""
+    import supernova_core.services.poc_generator as mod
+    n = {"i": 0}
+
+    async def fake_run(prompt, **kw):
+        n["i"] += 1
+        if n["i"] == 1:  # 第一组(C1.java)成功
+            return SimpleNamespace(success=True, structured_output={
+                "items": [{"ID": "A1", "http_method": "POST",
+                           "route_path": "/a", "witness_payload": "wa"}]}, error=None)
+        # 第二组(C2.java)失败
+        return SimpleNamespace(success=False, structured_output=None, error="boom")
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+
+    partials = [_gn_partial("A1", "C1.java"), _gn_partial("B1", "C2.java")]
+    gapmap = await mod._batch_fill_gaps(partials, endpoints={}, repo_path="/tmp/x")
+    assert gapmap == {"A1": {"http_method": "POST", "route_path": "/a", "witness_payload": "wa"}}
+    assert "B1" not in gapmap  # 失败组无 gap → 后续降级骨架
+
+
+async def test_llm_fill_gaps_exception_returns_empty(monkeypatch):
+    import supernova_core.services.poc_generator as mod
+
+    async def boom(prompt, **kw):
+        raise RuntimeError("llm down")
+    monkeypatch.setattr(mod, "run_claude_prompt", boom)
+    partials = [_gn_partial("A1", "C.java")]
+    gapmap = await mod.llm_fill_gaps("C.java", partials, recon_ctx={}, repo_path="/tmp/x")
+    assert gapmap == {}  # 异常 → 空(降级骨架)
