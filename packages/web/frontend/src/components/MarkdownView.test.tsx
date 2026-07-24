@@ -416,15 +416,28 @@ describe("MarkdownView i18n", () => {
 describe("MarkdownView sticky top 对齐全局栈（集成约束）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("findings 浮动条已移除；卡片折叠按钮挪进 TOC 侧栏（非 sticky 浮动）", () => {
+  it("findings 浮动条已移除；两折叠按钮在 TOC 顶部行（目录树之前，展开后仍可见）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
     // findings-bar 浮动条不再存在
     expect(container.querySelector('[data-testid="findings-bar"]')).toBeNull();
-    // 卡片「全部收起/展开」按钮在 TOC 侧栏内
     const toc = container.querySelector('[data-testid="toc"]');
+    // 卡片「收起卡片」+ 目录「收起目录」两按钮都在 TOC 侧栏内
     const vulnExpandAll = container.querySelector('[data-testid="vuln-expand-all"]');
+    const tocToggleAll = container.querySelector('[data-testid="toc-toggle-all"]');
     expect(vulnExpandAll).not.toBeNull();
+    expect(tocToggleAll).not.toBeNull();
     expect(toc?.contains(vulnExpandAll)).toBe(true);
+    expect(toc?.contains(tocToggleAll)).toBe(true);
+    // ★ 两按钮都在目录树 <ul> 之前（DOM 顺序）：展开任意章节、目录条目增多时
+    //   按钮恒在顶部可见，不被目录滚动区带走（用户 2026-07-24 诉求）。
+    const ul = toc!.querySelector("ul");
+    expect(ul).not.toBeNull();
+    expect(vulnExpandAll!.compareDocumentPosition(ul!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(tocToggleAll!.compareDocumentPosition(ul!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("TOC sticky top-20（旧 top-4 已改），不再贴视口顶被 chrome 盖", () => {

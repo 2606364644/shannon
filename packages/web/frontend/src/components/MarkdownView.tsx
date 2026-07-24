@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ListCollapse, List, LayoutPanelTop, LayoutGrid } from "lucide-react";
 import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
@@ -387,16 +387,24 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // 漏洞卡片「全部收起/展开」按钮（原 findings-bar 浮动条移除，挪进 TOC 侧栏；无 TOC 时降级非 sticky）。
+  // 漏洞卡片「全部收起/展开」按钮：图标态（与「收起目录」并排于 TOC 顶部行，风格统一；
+  // 无 TOC 时降级放 vuln-grid 上方非 sticky）。图标 + aria-label + title：200px 侧栏不溢出，
+  // hover 文字提示语义，无障碍可读。两态图标：展开态 LayoutPanelTop（面板朝上）/ 收起态 LayoutGrid。
   const collapseAllCardsBtn =
     hasVulns && allVulnIds.length > 0 ? (
       <button
         type="button"
         data-testid="vuln-expand-all"
         onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
-        className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+        aria-label={allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
+        title={allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
+        className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
       >
-        {allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
+        {allCollapsed ? (
+          <LayoutGrid className="size-3.5" aria-hidden="true" />
+        ) : (
+          <LayoutPanelTop className="size-3.5" aria-hidden="true" />
+        )}
       </button>
     ) : null;
 
@@ -558,22 +566,35 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
         {twoCol && (
           <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-20 self-start">
-            <div className="mb-2 flex items-center justify-between gap-2 px-2">
+            {/* 顶部工具行：「目录」label + 两个折叠图标按钮并排。
+                ★ 两按钮都在 <ul> 目录树之上（ul 自身 max-h + overflow-y-auto），
+                展开任意章节、目录条目增多时按钮恒在顶部可见，不被滚走。
+                左：收起目录（toc-toggle-all，控 collapsedSections）
+                右：收起卡片（vuln-expand-all，控 collapsedIds）--语义靠 aria-label/title 区分。 */}
+            <div className="mb-2 flex items-center justify-between gap-1 px-2">
               <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {t("markdown.toc")}
               </span>
-              {tocSectionIds.length > 0 && (
-                <button
-                  type="button"
-                  data-testid="toc-toggle-all"
-                  onClick={() => setCollapsedSections(tocAllCollapsed ? new Set() : new Set(tocSectionIds))}
-                  className="rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                >
-                  {tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
-                </button>
-              )}
+              <div className="flex items-center gap-0.5">
+                {tocSectionIds.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="toc-toggle-all"
+                    onClick={() => setCollapsedSections(tocAllCollapsed ? new Set() : new Set(tocSectionIds))}
+                    aria-label={tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
+                    title={tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
+                    className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                  >
+                    {tocAllCollapsed ? (
+                      <List className="size-3.5" aria-hidden="true" />
+                    ) : (
+                      <ListCollapse className="size-3.5" aria-hidden="true" />
+                    )}
+                  </button>
+                )}
+                {collapseAllCardsBtn}
+              </div>
             </div>
-            {collapseAllCardsBtn && <div className="mb-2 px-2">{collapseAllCardsBtn}</div>}
             <ul className="max-h-[calc(100vh-3rem)] space-y-0.5 overflow-y-auto pr-1">
               {tocTree.tree.map((node) => {
                 const hasKids = node.children.length > 0;
