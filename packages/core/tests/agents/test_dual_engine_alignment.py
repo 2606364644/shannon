@@ -98,15 +98,27 @@ def test_structured_output_dict_final_path():
     assert isinstance(res.text, str)  # dict → json.dumps 成 str
 
 
-def test_build_agent_openai_wires_output_type():
-    """B2: OpenAI build_agent 在 output_format 非空时带 output_type（与 Claude options.output_format 对齐）。"""
-    from supernova_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
+def test_structured_output_extracts_from_markdown_fence():
+    """openai 引擎不设 output_type -> final_output 是含 ```json 围栏的纯文本；
+    map_run_result L0 容错解析（_extract_json_payload）剥围栏出 dict（2026-07-24）。"""
+    from unittest.mock import MagicMock
+    from supernova_core.agents.openai_result_mapper import map_run_result
+    rr = MagicMock()
+    rr.final_output = '```json\n{"verdict": "vulnerable"}\n```'
+    rr.context_wrapper.usage.input_tokens = 1
+    rr.context_wrapper.usage.output_tokens = 1
+    rr.context_wrapper.usage.input_tokens_details = None
+    res = map_run_result(rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
+    assert res.structured_output == {"verdict": "vulnerable"}
+
+
+def test_build_agent_openai_no_output_type():
+    """openai 引擎不设 output_type（第三方端点不支持 response_format json_schema，传之必 400，2026-07-24）；结构化输出靠 map_run_result 本地 L0 解析 + call L1 兜底。"""
     from supernova_core.agents.providers_openai import OpenAIProvider
     from supernova_core.agents.runner import ProviderConfig
     provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
     agent = provider.build_agent("m", output_format={"type": "object"})
-    assert isinstance(agent.output_type, RawJsonSchemaOutputSchema)
-
+    assert agent.output_type is None
 
 def test_both_engines_same_cost_for_same_usage():
     """cost 定价(spec 2026-07-09): 两引擎对相同 model+token 经 compute_cost 算出相同 CostAmount。

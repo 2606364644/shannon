@@ -609,16 +609,13 @@ class TestOpenAIProvider:
         # 原：工具集非空（不再断言固定 count，因 task tool 等横向计划会增减工具集）
         assert len(agent.tools) > 0
 
-    def test_build_agent_wires_output_type_when_output_format_given(self):
-        """B2: output_format 非空时，Agent 必须带 output_type（强制结构化输出）。"""
-        from supernova_core.agents.openai_output_schema import RawJsonSchemaOutputSchema
+    def test_build_agent_no_output_type_even_when_output_format_given(self):
+        """openai 引擎不设 output_type（第三方端点不支持 response_format json_schema，传之必 400，2026-07-24）；结构化输出靠本地 L0 解析。"""
         from supernova_core.agents.providers_openai import OpenAIProvider
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k", medium_model="m"))
         schema = {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
         agent = provider.build_agent("m", output_format=schema)
-        assert agent.output_type is not None
-        assert isinstance(agent.output_type, RawJsonSchemaOutputSchema)
-        assert agent.output_type.json_schema() == schema
+        assert agent.output_type is None
 
     def test_build_agent_output_type_none_when_no_output_format(self):
         """B2: output_format 为 None 时，output_type 必须为 None（兼容纯文本路径）。"""
@@ -724,6 +721,59 @@ class TestOpenAIProvider:
         code, retryable = provider._classify_error(Exception("some transient error"))
         assert code == "AgentExecutionError"
         assert retryable is True
+
+    def test_classify_error_response_format_400_non_retryable(self):
+        """第三方端点不支持 response_format json_schema -> 400 invalid_request，
+        参数级永久拒绝，重试无意义（2026-07-24 致 injection/authz/auth/ssrf 四个
+        *-vuln agent 8/8 空转根因）。须判 non-retryable，避免被 "unavailable" 误判。"""
+        from supernova_core.agents.providers_openai import OpenAIProvider
+        provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
+        msg = ("Error code: 400 - {'error': {'message': 'This response_format type "
+               "is unavailable now', 'type': 'invalid_request_error'}}")
+        code, retryable = provider._classify_error(Exception(msg))
+        assert code == "BadRequestError"
+        assert retryable is False
+
+    @pytest.mark.asyncio
+    async def test_call_l1_reparse_when_l0_fails(self, monkeypatch, tmp_path):
+        """openai 引擎不设 output_type -> L0 在 map_run_result；final 非法 JSON
+        (structured_output None) 时 L1 _lightweight_reparse 兜底恢复 structured_output（2026-07-24）。"""
+        from unittest.mock import AsyncMock, MagicMock
+        from supernova_core.agents.providers_openai import OpenAIProvider, _ReparsedRunResult
+
+        config = ProviderConfig(type="openai_compatible", base_url="https://x/v4", api_key="k", medium_model="m")
+        provider = OpenAIProvider(config)
+
+        async def _empty():
+            if False:
+                yield
+
+        fake_result = MagicMock()
+        fake_result.final_output = "not json at all, no braces here"
+        fake_result.context_wrapper = MagicMock()
+        fake_result.context_wrapper.usage = MagicMock(input_tokens=1, output_tokens=1, input_tokens_details=None)
+        fake_result.stream_events = _empty
+        monkeypatch.setattr("supernova_core.agents.providers_openai.Runner.run_streamed",
+                            MagicMock(return_value=fake_result))
+
+        class _FakeSC:
+            def __init__(self, *a, **kw):
+                self.text = "not json at all, no braces here"
+                self.turns = 1
+                self.tool_call_count = 0
+            async def on_event(self, event):
+                pass
+            async def close(self):
+                pass
+        monkeypatch.setattr("supernova_core.agents.providers_openai.StreamCollector", _FakeSC)
+
+        reparsed = _ReparsedRunResult({"verdict": "vulnerable"}, input_tokens=2, output_tokens=2)
+        monkeypatch.setattr(provider, "_lightweight_reparse", AsyncMock(return_value=reparsed))
+
+        res = await provider.call(prompt="hi", cwd=str(tmp_path), model_tier="medium",
+                                  output_format={"type": "object"})
+        assert res.success is True
+        assert res.structured_output == {"verdict": "vulnerable"}
 
     def test_handle_error_sets_error_code(self):
         """B3: _handle_error 必须填 error_code（此前恒 None）。"""

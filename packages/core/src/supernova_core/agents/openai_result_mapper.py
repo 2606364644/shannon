@@ -7,6 +7,7 @@ from typing import Any
 
 from agents import RunResult
 
+from .llm_json import _extract_json_payload
 from .pricing import compute_cost, is_model_priced, normalize_model
 from .runner import ClaudeRunResult, TokenUsage
 
@@ -72,10 +73,16 @@ def map_run_result(
         if isinstance(final, (dict, list)):
             structured_output = final
         elif isinstance(final, str) and text:
-            try:
-                structured_output = json.loads(text)
-            except (json.JSONDecodeError, TypeError):
-                structured_output = None
+            # openai engine does not set output_type (avoids third-party endpoint
+            # response_format 400), so final_output is plain text; L0 tolerant parse
+            # here (strip ```json fence / leading prose / array root), same source as
+            # claude engine's _extract_json_payload.
+            candidate = _extract_json_payload(final)
+            if candidate is not None:
+                try:
+                    structured_output = json.loads(candidate)
+                except (json.JSONDecodeError, ValueError):
+                    structured_output = None
 
     # B1: max_turns 对齐 Claude subtype=error_max_turns → 失败 + 不可重试（spec §1.2）
     is_max_turns = stop_reason == "max_turns"

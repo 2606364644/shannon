@@ -24,7 +24,6 @@ from openai import AsyncOpenAI
 
 from .narration import narration_directive
 from .openai_output_schema import (
-    RawJsonSchemaOutputSchema,
     StructuredOutputParseError,
     _extract_json_payload,
 )
@@ -107,15 +106,23 @@ class OpenAIProvider(BaseProvider):
     def build_agent(self, model: str, output_format: dict | None, extra_tools: list | None = None) -> Agent:
         client = self._get_client()
         chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
-        # B2: output_format 非空时强制结构化输出（对齐 Claude options.output_format）
-        output_type = RawJsonSchemaOutputSchema(output_format) if output_format else None
+        # 不设 output_type：第三方 openai 兼容端点（deepseek/GLM）不支持
+        # response_format.type=json_schema，传之必 400 "This response_format type is
+        # unavailable now"（探针确证 2026-07-24，致 injection/authz/auth/ssrf 四个
+        # *-vuln agent 8/8 重试全失败）。openai-agents 的 convert_response_format 只要
+        # output_type 非 None 且 is_plain_text()=False 就向端点传 json_schema（无论
+        # strict）。故结构化输出改为 prompt 约束 + map_run_result 本地 L0 解析
+        # （_extract_json_payload）+ call L1 轻量重输兜底。属"功能性对齐"（同 prompt+
+        # schema 产出 structured_output），机制差异是 SDK 哲学（CLAUDE.md §2）；claude
+        # 引擎仍走 CLI --json-schema（端点支持）。output_format 参数保留供
+        # map_run_result/call 触发本地解析，不传给 SDK。
         return Agent(
             name="shannon-openai-agent",
             instructions=self._instructions(),  # None when disabled
             tools=build_tools() + (extra_tools or []),
             model=chat_model,
             model_settings=ModelSettings(include_usage=True),
-            output_type=output_type,
+            output_type=None,
         )
 
     def _make_subagent_runner(self, model: str, cwd: str):
@@ -238,17 +245,9 @@ class OpenAIProvider(BaseProvider):
                 # 无可用 RunResult，构造一个最小结果对象
                 run_result = _MaxTurnsStub(stream_collector.text)
                 stop_reason = "max_turns"
-            except StructuredOutputParseError:
-                # L1：L0 容错失败 → 轻量重输，模拟 Claude SDK 单次内部重试。
-                # 失败（None）→ re-raise → 外层 except Exception → _handle_error → L2。
-                await stream_collector.close()
-                reparsed = await self._lightweight_reparse(stream_collector.text, output_format, model)
-                if reparsed is None:
-                    raise
-                run_result = reparsed
 
             duration = int((time.time() - start_time) * 1000)
-            return map_run_result(
+            result = map_run_result(
                 run_result,
                 duration_ms=duration,
                 model=model,
@@ -256,6 +255,27 @@ class OpenAIProvider(BaseProvider):
                 stop_reason=stop_reason,
                 output_format=output_format,
             )
+            # L1：openai 引擎不设 output_type -> SDK 不调 validate_json，L0 容错解析在
+            # map_run_result 完成；L0 失败（final 非法 JSON -> structured_output is None）
+            # 时轻量重输兜底，模拟 Claude SDK 单次内部重试（openai-agents 无此层）。
+            # L1 成功 -> 用 _ReparsedRunResult（含 L1 chat completion 真实 token usage）
+            # 重走 map_run_result，L1 token 计入 cost（与原 StructuredOutputParseError
+            # 路径语义一致）。L1 失败 / 未触发 -> 返回原 result（structured_output=None，
+            # caller 自行降级）。
+            if output_format and result.success and result.structured_output is None:
+                final_text = stream_collector.text or ""
+                if final_text.strip():
+                    reparsed = await self._lightweight_reparse(final_text, output_format, model)
+                    if reparsed is not None:
+                        return map_run_result(
+                            reparsed,
+                            duration_ms=duration,
+                            model=model,
+                            turns=max(stream_collector.turns, 1),
+                            stop_reason=stop_reason,
+                            output_format=output_format,
+                        )
+            return result
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
             return self._handle_error(e, duration, model)
@@ -293,6 +313,12 @@ class OpenAIProvider(BaseProvider):
             return ("OutputValidationError", True)
         error_msg = str(error).lower()
         error_type = type(error).__name__.lower()
+        # response_format unavailable: param-level permanent 400 (third-party endpoint
+        # rejects json_schema) -> NOT retryable (retries just re-400; caused 8/8 spins
+        # on *-vuln agents, 2026-07-24). Must precede the "unavailable" -> ServiceUnavailable
+        # branch so "This response_format type is unavailable now" isn't misclassified.
+        if "response_format" in error_msg:
+            return ("BadRequestError", False)
         # 速率限制 → 可重试
         if "rate" in error_msg or "limit" in error_msg or error_type == "ratelimiterror":
             return ("RateLimitError", True)
