@@ -25,11 +25,19 @@ class WebConfig:
         self.fs_roots: list[Path] = [
             Path(p).resolve() for p in os.environ.get("SUPERNOVA_FS_ROOTS", "").split(",") if p.strip()
         ]
+        # auth（P0）
+        self.session_ttl_hours = int(os.environ.get("SUPERNOVA_WEB_SESSION_TTL_HOURS", "12"))
+        self.cookie_secure = os.environ.get("SUPERNOVA_WEB_COOKIE_SECURE", "1") not in ("0", "false", "False")
+        self.users_seed_file = os.environ.get("SUPERNOVA_WEB_USERS_SEED", "configs/users.yaml")
 
     @property
     def workspaces_dir(self) -> Path:
         from supernova_core.utils.paths import resolve_workspaces_dir
         return Path(resolve_workspaces_dir())
+
+    @property
+    def auth_db_path(self) -> Path:
+        return self.workspaces_dir / "auth.db"
 
     @property
     def git_binary_available(self) -> bool:
