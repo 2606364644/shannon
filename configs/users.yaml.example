@@ -1,0 +1,9 @@
+# configs/users.yaml.example — 拷成 configs/users.yaml 后改。password_hash 用
+# `uv run python scripts/web_hash_password.py` 生成。users.yaml 含凭据勿入库（.gitignore 已忽略 configs/*.yaml）。
+users:
+  - username: admin
+    password_hash: "$2b$12$REPLACE_WITH_GENERATED_HASH"
+    role: admin
+  - username: alice
+    password_hash: "$2b$12$REPLACE_WITH_GENERATED_HASH"
+    role: user
