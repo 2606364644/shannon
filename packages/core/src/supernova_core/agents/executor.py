@@ -63,6 +63,7 @@ class AgentExecutor:
         tool_audit_logger: "ToolAuditLogger | None" = None,
         max_turns: int | None = None,
         skip_artifact_postprocess: bool = False,
+        provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -123,6 +124,7 @@ class AgentExecutor:
             tool_audit_logger=tool_audit_logger,
             max_turns=max_turns,
             collector=collector,
+            provider_config=provider_config,   # P3c 阶段 1
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 

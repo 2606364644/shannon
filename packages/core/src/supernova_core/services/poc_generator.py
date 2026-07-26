@@ -483,6 +483,7 @@ def build_llm_prompt(vuln: Any, vuln_class: str, host: str, recon_ctx: dict) -> 
 async def llm_fill_gap(
     vuln: Any, vuln_class: str, host: str, recon_ctx: dict, *,
     repo_path: str, api_key: str | None = None, model_tier: str = "medium",
+    provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
 ) -> dict | None:
     """富信息 LLM 补缺口。失败/不可用返回 None（调用方退纯模板+标注）。"""
     prompt = build_llm_prompt(vuln, vuln_class, host, recon_ctx)
@@ -497,6 +498,7 @@ async def llm_fill_gap(
             model_tier=model_tier,
             structured_output_schema=LLM_REQUEST_SCHEMA,
             api_key=api_key,
+            provider_config=provider_config,   # P3c 阶段 1
             # 默认 10:原 50 让单 PoC 跑满 4-5min（GLM 对 HTTP schema 结构化输出
             # 反复不合规），N 个串行易超 start_to_close_timeout 被 retry 放大
             # （2026-07-10 NodeGoat 实测）。JSON-only 正常 1-2 轮即返回，10 足容错。
@@ -531,6 +533,7 @@ def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], r
 async def llm_fill_gaps(
     file_key: str | None, partials: list["PartialSpec"], *, recon_ctx: dict,
     repo_path: str, api_key: str | None = None, model_tier: str = "medium",
+    provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
 ) -> dict[str, dict]:
     """一个 controller 文件组一次 LLM 调用,返回 {ID: {http_method,route_path,witness_payload}}。
 
@@ -546,6 +549,7 @@ async def llm_fill_gaps(
             # chain_verdict 的 _make_verdict_llm_client 也走 output_format,此处对齐。
             output_format=GAPFILL_OUTPUT_SCHEMA,
             api_key=api_key,
+            provider_config=provider_config,   # P3c 阶段 1
             max_turns=int(os.getenv("SUPERNOVA_POC_MAX_TURNS", "10")),
         )
     except Exception:
@@ -568,6 +572,7 @@ async def llm_fill_gaps(
 async def _batch_fill_gaps(
     partials: list["PartialSpec"], *, endpoints: dict, repo_path: str,
     api_key: str | None = None, model_tier: str = "medium",
+    provider_config: dict | None = None,   # P3c 阶段 1：透传 llm_fill_gaps
 ) -> dict[str, dict]:
     """编排:分组 + 逐组调 llm_fill_gaps,合并 {ID: gap}。失败的组其条目无 gap(后降级)。"""
     cap = int(os.getenv("SUPERNOVA_POC_GROUP_CAP", "8"))
@@ -578,7 +583,8 @@ async def _batch_fill_gaps(
         try:
             gapmap.update(await llm_fill_gaps(
                 file_key, group_partials, recon_ctx=recon_ctx,
-                repo_path=repo_path, api_key=api_key, model_tier=model_tier))
+                repo_path=repo_path, api_key=api_key, model_tier=model_tier,
+                provider_config=provider_config))   # P3c 阶段 1
         except Exception as exc:  # 单组失败不阻塞其余
             logger.warning("poc: llm_fill_gaps failed for %s: %s", file_key, exc)
     return gapmap
@@ -869,6 +875,7 @@ class PoCGenerator:
         repo_path: str | None = None,
         api_key: str | None = None,
         model_tier: str = "medium",
+        provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 _build_entry/_batch_fill_gaps
     ) -> Path | None:
         # 开关：SUPERNOVA_SKIP_POC_REPORT=1 跳过整个 PoC 生成（默认 0=生成 PoC）。
         # 报告增强本就非关键路径，token 紧张或暂不需要 PoC 时设 1 秒过，不阻塞主报告。
@@ -930,7 +937,8 @@ class PoCGenerator:
                     # authz(成对模板)/auth(量小,上游 §5.3 默认 LLM)保持既有 per-item 路径
                     spec = await PoCGenerator._build_entry(
                         v, vc, host, endpoints, accepted,
-                        repo_path=repo_path, api_key=api_key, model_tier=model_tier)
+                        repo_path=repo_path, api_key=api_key, model_tier=model_tier,
+                        provider_config=provider_config)   # P3c 阶段 1
                     dt_ms = int((time.monotonic() - t0) * 1000)
                     if spec is not None:
                         entries_by_idx[i] = (vc, v, spec)
@@ -964,7 +972,8 @@ class PoCGenerator:
             await _poc_progress(f"PoC 分组补缺: {len(gapped)} 条待补")
             gapmap = await _batch_fill_gaps(
                 [p for _, p in gapped], endpoints=endpoints,
-                repo_path=repo_path or "/tmp/poc-gen", api_key=api_key, model_tier=model_tier)
+                repo_path=repo_path or "/tmp/poc-gen", api_key=api_key, model_tier=model_tier,
+                provider_config=provider_config)   # P3c 阶段 1
             for i, partial in gapped:
                 vid = getattr(partial.vuln, "ID", "?")
                 spec = _assemble(partial, gapmap.get(vid), endpoints)
@@ -985,7 +994,8 @@ class PoCGenerator:
 
     @staticmethod
     async def _build_entry(vuln, vuln_class, host, endpoints, accepted, *,
-                           repo_path, api_key, model_tier) -> HttpRequestSpec | list[HttpRequestSpec] | None:
+                           repo_path, api_key, model_tier,
+                           provider_config: dict | None = None) -> HttpRequestSpec | list[HttpRequestSpec] | None:   # P3c 阶段 1：透传 llm_fill_gap
         band = classify_confidence(vuln, is_accepted=(getattr(vuln, "ID", "") in accepted))
         template = build_template_spec(vuln, vuln_class, host, endpoints, band)
         if template is not None:
@@ -996,7 +1006,8 @@ class PoCGenerator:
         recon_ctx = {path or "?": info} if info else {}
         guess = await llm_fill_gap(vuln, vuln_class, host, recon_ctx,
                                    repo_path=repo_path or "/tmp/poc-gen",
-                                   api_key=api_key, model_tier=model_tier)
+                                   api_key=api_key, model_tier=model_tier,
+                                   provider_config=provider_config)   # P3c 阶段 1
         if not guess:
             # LLM 不可用/失败 → 骨架 + 标注
             spec = _base_spec(vuln, vuln_class, endpoints, band)
