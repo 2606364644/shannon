@@ -1,17 +1,53 @@
-"""Process-wide registry for the current scan's AuditSession.
+"""Process-wide registry for AuditSession instances, keyed by workflow_id.
 
-Activities reach the live display via get_audit_session(). The driver
-(run_scan) sets the singleton before starting the worker and clears it after.
+Activities reach the live display via ``get_audit_session()``, which resolves
+the current workflow_id (``activity.info()`` in the worker path; explicit param
+or ``'_cli'`` fallback in CLI/tests). The driver (``run_scan``) sets the
+per-workflow entry before starting the worker and clears it after. P3c 阶段 3：
+三个进程级单例之一 dict 化，解除 ``max_concurrent_workflow_tasks=1`` 硬钉。
 
 NullAuditSession is the safe default when no scan is active (tests, standalone
 tooling): every method is a no-op so callers never null-check.
 """
 from __future__ import annotations
 
+import contextvars
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-_current: "Any" = None
+# P3c 阶段 3：按 workflow_id 索引（替代进程级 _current 单例）。
+# web worker 路径 setup_display/finalize 在 activity 体内 → _resolve_wf_id 自动拿 workflow_id；
+# CLI 路径 worker.py:342 在 workflow 启动前 → 显式传 workflow_id（Task 4）。
+_SESSIONS: dict[str, Any] = {}
+_current_wf_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "audit_wf_id", default=None
+)
+
+
+def _resolve_wf_id(explicit: str | None = None) -> str:
+    """解析当前 workflow_id。
+
+    优先级：显式参数 > contextvar > ``activity.info().workflow_id`` > ``'_cli'`` 兜底。
+    try/except 惯例对齐 ``logging/activity_logger.py::create_activity_logger``。
+    """
+    if explicit:
+        return explicit
+    ctx = _current_wf_id.get()
+    if ctx:
+        return ctx
+    try:
+        from temporalio import activity
+
+        wf_id = activity.info().workflow_id
+        if wf_id:
+            return wf_id
+    except RuntimeError:
+        pass
+    return "_cli"
+
+
+# 保留旧名 _current 供现有导入兼容（已无实际用途，恒 None）。
+_current: Any = None
 
 
 class NullAuditSession:
@@ -67,15 +103,23 @@ class NullAuditSession:
         return None
 
 
-def set_audit_session(session: Any) -> None:
-    global _current
-    _current = session
+def set_audit_session(session: Any, workflow_id: str | None = None) -> None:
+    wf_id = _resolve_wf_id(workflow_id)
+    _SESSIONS[wf_id] = session
 
 
 def get_audit_session() -> Any:
-    return _current if _current is not None else NullAuditSession()
+    wf_id = _resolve_wf_id()
+    s = _SESSIONS.get(wf_id)
+    return s if s is not None else NullAuditSession()
 
 
-def clear_audit_session() -> None:
-    global _current
-    _current = None
+def get_audit_session_for(workflow_id: str) -> Any:
+    """显式按 workflow_id 查询（测试 + CLI 兜底用）。"""
+    s = _SESSIONS.get(workflow_id)
+    return s if s is not None else NullAuditSession()
+
+
+def clear_audit_session(workflow_id: str | None = None) -> None:
+    wf_id = _resolve_wf_id(workflow_id)
+    _SESSIONS.pop(wf_id, None)
