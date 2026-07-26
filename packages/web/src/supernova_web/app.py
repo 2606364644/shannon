@@ -111,7 +111,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.multi_repo_config_store import MultiRepoConfigStore
     from .components.repo_manager import RepoManager
     from .components.scan_manager import ScanManager
-    from .api import events, fs, multi_configs, repos, scan, system_status, workspaces
+    from .api import events, fs, members, multi_configs, repos, scan, system_status, users, workspaces
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
@@ -132,6 +132,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(events.router, dependencies=_require_auth)
     app.include_router(fs.router, dependencies=_require_auth)
     app.include_router(system_status.router, dependencies=_require_auth)
+    app.include_router(members.router, dependencies=_require_auth)
+    app.include_router(users.router)
 
     from .auth import routes as auth_routes
     app.include_router(auth_routes.router)
