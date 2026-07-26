@@ -17,6 +17,7 @@ import type { SessionData } from "./api/types";
 import { AppShell } from "./components/layout/AppShell";
 import { DevComponentsPage } from "./pages/DevComponentsPage";
 import LoginPage from "./pages/LoginPage";
+import { RequireAuth } from "./auth/RequireAuth";
 
 // 默认 tab：进行中 → live，完成 → report。fetch status 后 navigate（replace 避免占历史栈）。
 function DefaultTab() {
@@ -39,7 +40,7 @@ export const router = createBrowserRouter([
   // /login 公开路由（不进 AppShell；业务路由的 RequireAuth 包裹在 Task 16 加）
   { path: "/login", element: <LoginPage /> },
   {
-    element: <AppShell />,
+    element: <RequireAuth><AppShell /></RequireAuth>,
     children: [
       { path: "/", element: <DashboardPage /> },
       { path: "/workspaces", element: <WorkspaceListPage /> },

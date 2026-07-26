@@ -5,9 +5,11 @@ import { resolve } from "node:path";
 const router = readFileSync(resolve(__dirname, "router.tsx"), "utf8");
 
 describe("router.tsx 结构", () => {
-  it("根包 <AppShell />", () => {
+  it("根包 <RequireAuth><AppShell /></RequireAuth>", () => {
     expect(router).toContain("AppShell");
-    expect(router).toMatch(/element:\s*<AppShell/);
+    // Task 16: 业务路由组 AppShell 包 RequireAuth 路由守卫
+    expect(router).toMatch(/element:\s*<RequireAuth>\s*<AppShell/);
+    expect(router).toContain('import { RequireAuth }');
   });
   it("dev 预览页 dev-only 守卫（import.meta.env.DEV）", () => {
     expect(router).toContain("import.meta.env.DEV");

@@ -9,9 +9,14 @@ import i18n from "@/i18n";
 
 // jsdom 默认 location.pathname = "/"，createBrowserRouter 读 History API → 落地根路由。
 // BrandProvider(根)启动时拉 /api/system-status 取 brand_name,这里一并 mock 避免警告。
+// Task 16: 业务路由组已被 RequireAuth 包裹，AuthProvider 拉 /api/auth/me 必须返已登录用户，
+// 否则 RequireAuth 跳 /login，根路由不再渲染 DashboardPage。
 const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json([])),
   http.get("/api/system-status", () => HttpResponse.json({ brand_name: "Supernova" })),
+  http.get("/api/auth/me", () =>
+    HttpResponse.json({ user: { id: 1, username: "tester", role: "user" } }),
+  ),
 );
 beforeAll(() => {
   server.listen();
@@ -24,7 +29,9 @@ afterAll(() => server.close());
 describe("App 集成冒烟", () => {
   it("根路由渲染 DashboardPage（main 内含空态提示；子项目5 Task3 改根路由）", async () => {
     render(<App />);
-    const main = screen.getByRole("main");
+    // Task 16: 业务路由组已包 RequireAuth，AuthProvider 拉 /auth/me 完成 + 通过守卫后 AppShell 才挂，
+    // 故用 findByRole（异步）等 main 出现，而非原同步 getByRole。
+    const main = await screen.findByRole("main");
     await waitFor(() => {
       expect(within(main).getByText(/还没有扫描/i)).toBeInTheDocument();
     });
