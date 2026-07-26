@@ -71,12 +71,18 @@ class OpenAIProvider(BaseProvider):
         return self._client
 
     def _max_turns(self) -> int:
+        # P3c 阶段 0：self.config.max_turns 优先（None 回落 env）
+        if self.config.max_turns is not None:
+            return self.config.max_turns
         return int(os.getenv("SUPERNOVA_OPENAI_MAX_TURNS", "200"))
 
     def _subagent_max_turns(self) -> int:
         # 子代理（Task 委派）max_turns。结构层已硬限单层（子代理无 subagent_run
         # + 只读工具集 [read_file, glob, grep]），调大无递归风险，仅增单次 token。
         # B2: 20→40,锚定更复杂的追链子任务。
+        # P3c 阶段 0：self.config.subagent_max_turns 优先（None 回落 env）
+        if self.config.subagent_max_turns is not None:
+            return self.config.subagent_max_turns
         return int(os.getenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", "40"))
 
     def _call_timeout(self) -> float:
@@ -89,7 +95,11 @@ class OpenAIProvider(BaseProvider):
         卡死 50min，2h activity timeout 未到，live 页无日志更新）。超时 → asyncio.TimeoutError
         → 外层 except → _classify_error 判 retryable → activity 重试。默认 1800s（30min，
         覆盖 pre-recon 等长 agent 的正常时长，仅兜底永久 hang，不误杀慢但正常的 run）。
+
+        P3c 阶段 0：self.config.call_timeout 优先（None 回落 env，默认 1800s）。
         """
+        if self.config.call_timeout is not None:
+            return self.config.call_timeout
         return float(os.getenv("SUPERNOVA_OPENAI_CALL_TIMEOUT", "1800"))
 
     def _instructions(self) -> str | None:
