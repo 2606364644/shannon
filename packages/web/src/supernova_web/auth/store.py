@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Iterable
 
 from .models import SessionRow, User
 
@@ -51,6 +50,13 @@ class AuthStore:
                 "SELECT id, username, role FROM users WHERE username=?", (username,)
             ).fetchone()
         return User(id=row[0], username=row[1], role=row[2]) if row else None
+
+    def get_password_hash(self, username: str) -> str | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT password_hash FROM users WHERE username=?", (username,)
+            ).fetchone()
+        return row[0] if row else None
 
     def get_user(self, user_id: int) -> User | None:
         with self._conn() as c:

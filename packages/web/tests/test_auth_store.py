@@ -20,6 +20,13 @@ def test_create_and_get_user(tmp_path):
     assert s.get_user(u.id).username == "alice"
 
 
+def test_get_password_hash(tmp_path):
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    s.create_user("alice", "$2b$12$xxx")
+    assert s.get_password_hash("alice") == "$2b$12$xxx"
+    assert s.get_password_hash("nobody") is None
+
+
 def test_username_unique(tmp_path):
     import pytest
     s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()

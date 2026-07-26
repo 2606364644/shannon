@@ -82,6 +82,15 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     cfg = get_config()
     app.state.config = cfg
 
+    from .auth.store import AuthStore
+    from .auth.session import SessionManager
+    from .auth.middleware import AuthMiddleware
+    auth_store = AuthStore(str(cfg.auth_db_path))
+    auth_store.init_schema()
+    app.state.auth_store = auth_store
+    app.state.session_manager = SessionManager(auth_store, ttl_hours=cfg.session_ttl_hours)
+    app.add_middleware(AuthMiddleware)
+
     from .components.workspaces_indexer import WorkspacesIndexer
     from .components.git_fetcher import GitFetcher
     from .components.multi_repo_config_store import MultiRepoConfigStore
@@ -106,6 +115,9 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(fs.router)
     app.include_router(system_status.router)
+
+    from .auth import routes as auth_routes
+    app.include_router(auth_routes.router)
 
     @app.get("/health")
     async def health() -> dict:
