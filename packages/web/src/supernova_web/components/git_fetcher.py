@@ -32,13 +32,23 @@ def strip_credentials(url: str | None) -> str | None:
 
 
 class GitFetcher:
-    def __init__(self, repos_dir: Path, gitlab_user: str | None, gitlab_token: str | None) -> None:
+    def __init__(self, repos_dir: Path, gitlab_user: str | None, gitlab_token: str | None,
+                 ws_config_store=None) -> None:
         self._dir = Path(repos_dir)
-        self._user = gitlab_user
-        self._token = gitlab_token
+        self._user = gitlab_user          # 全局默认
+        self._token = gitlab_token        # 全局默认
+        self._ws_config_store = ws_config_store   # P3c 阶段 4：per-ws 凭据
 
-    def available(self) -> bool:
-        return bool(self._user and self._token)
+    def _creds_for(self, ws: str | None = None) -> tuple[str | None, str | None]:
+        """P3c 阶段 4：按 ws 解析凭据——ws git 段优先（字段级 or 合并），回落全局。"""
+        if ws and self._ws_config_store is not None:
+            git = self._ws_config_store.read(ws).git
+            return git.gitlab_user or self._user, git.gitlab_token or self._token
+        return self._user, self._token
+
+    def available(self, ws: str | None = None) -> bool:
+        u, t = self._creds_for(ws)
+        return bool(u and t)
 
     @staticmethod
     def repo_name(url: str) -> str:
@@ -49,8 +59,9 @@ class GitFetcher:
     def redact(text: str) -> str:
         return _TOKEN_RE.sub("https://***:***@", text)
 
-    def _inject_auth(self, url: str) -> str:
-        return url.replace("https://", f"https://{self._user}:{self._token}@", 1)
+    def _inject_auth(self, url: str, ws: str | None = None) -> str:
+        u, t = self._creds_for(ws)
+        return url.replace("https://", f"https://{u}:{t}@", 1)
 
     async def _run(self, args: list[str], cwd: str | Path | None = None) -> tuple[int, str, str]:
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -62,12 +73,13 @@ class GitFetcher:
         return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
     async def fetch(self, url: str, branch: str | None = None,
-                    commit: str | None = None, force_reclone: bool = False) -> Path:
-        if not self.available():
+                    commit: str | None = None, force_reclone: bool = False,
+                    ws: str | None = None) -> Path:
+        if not self.available(ws):
             raise PermissionError("GitLab credentials missing")
         name = self.repo_name(url)
         target = self._dir / name
-        authed = self._inject_auth(url)
+        authed = self._inject_auth(url, ws)
 
         if target.exists() and not force_reclone:
             rc, _, _ = await self._run(["git", "pull", "--ff-only"], cwd=target)
