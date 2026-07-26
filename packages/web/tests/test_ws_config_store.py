@@ -76,3 +76,35 @@ def test_validate_ws_config_none_provider_ok():
 
 def test_validate_ws_config_known_provider_ok():
     validate_ws_config(WsConfig(provider=WsProviderFields(ai_provider="openai_compatible")))
+
+
+# ---- P3c 阶段 4：git 段 + 凭据加解密 ----
+
+def test_write_then_read_git_credentials(store, tmp_path):
+    """git.gitlab_token 密文落盘，读回明文。"""
+    (tmp_path / "ws-a").mkdir()
+    from supernova_web.components.ws_config_store import WsConfig, WsGitFields
+    store.write("ws-a", WsConfig(
+        provider=WsProviderFields(),
+        git=WsGitFields(gitlab_user="bot-a", gitlab_token="glpat-a"),
+    ))
+    raw = (tmp_path / "ws-a" / "config.yaml").read_text()
+    assert "glpat-a" not in raw                # 密文
+    assert "bot-a" in raw                      # user 明文
+    cfg = store.read("ws-a")
+    assert cfg.git.gitlab_user == "bot-a"
+    assert cfg.git.gitlab_token == "glpat-a"   # 读回明文
+
+
+def test_read_missing_git_returns_empty(store, tmp_path):
+    """无 config.yaml → git 段全 None。"""
+    (tmp_path / "ws-a").mkdir()
+    cfg = store.read("ws-a")
+    assert cfg.git.gitlab_user is None
+    assert cfg.git.gitlab_token is None
+
+
+def test_credential_fields_includes_gitlab_token():
+    """gitlab_token 在凭据白名单（WsConfigStore 据此加密）。"""
+    from supernova_web.components.credential_vault import CredentialVault
+    assert "gitlab_token" in CredentialVault.CREDENTIAL_FIELDS

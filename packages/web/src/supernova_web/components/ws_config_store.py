@@ -38,8 +38,15 @@ class WsProviderFields:
 
 
 @dataclass
+class WsGitFields:
+    gitlab_user: str | None = None
+    gitlab_token: str | None = None      # 内存明文；落盘密文
+
+
+@dataclass
 class WsConfig:
     provider: WsProviderFields = field(default_factory=WsProviderFields)
+    git: WsGitFields = field(default_factory=WsGitFields)
 
 
 def validate_ws_config(cfg: WsConfig) -> None:
@@ -76,9 +83,18 @@ class WsConfigStore:
         # 凭据字段解密
         if "api_key" in prov_raw:
             prov_raw["api_key"] = self._vault.decrypt(prov_raw["api_key"])
-        known = {f.name for f in fields(WsProviderFields)}
-        prov_kwargs = {k: prov_raw.get(k) for k in known}
-        return WsConfig(provider=WsProviderFields(**prov_kwargs))
+        known_prov = {f.name for f in fields(WsProviderFields)}
+        prov_kwargs = {k: prov_raw.get(k) for k in known_prov}
+        # git 段（P3c 阶段 4）：gitlab_token 解密
+        git_raw = data.get("git") or {}
+        if "gitlab_token" in git_raw:
+            git_raw["gitlab_token"] = self._vault.decrypt(git_raw["gitlab_token"])
+        known_git = {f.name for f in fields(WsGitFields)}
+        git_kwargs = {k: git_raw.get(k) for k in known_git}
+        return WsConfig(
+            provider=WsProviderFields(**prov_kwargs),
+            git=WsGitFields(**git_kwargs),
+        )
 
     def write(self, ws: str, cfg: WsConfig) -> None:
         validate_ws_config(cfg)
@@ -88,7 +104,11 @@ class WsConfigStore:
         # 凭据字段加密（仅非 None）
         if prov.get("api_key") is not None:
             prov["api_key"] = self._vault.encrypt(prov["api_key"])
-        data = {"provider": prov}
+        git = asdict(cfg.git)
+        # git 凭据加密（仅 gitlab_token 非 None）
+        if git.get("gitlab_token") is not None:
+            git["gitlab_token"] = self._vault.encrypt(git["gitlab_token"])
+        data = {"provider": prov, "git": git}
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), "utf-8")
 
     def resolve_provider_config(self, ws: str) -> dict:
