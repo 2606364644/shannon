@@ -20,6 +20,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_seen_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS workspace_members (
+  workspace_name TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_name, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_wm_user ON workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_wm_ws ON workspace_members(workspace_name);
 """
 
 
@@ -93,3 +102,46 @@ class AuthStore:
         with self._conn() as c:
             cur = c.execute("DELETE FROM sessions WHERE expires_at < ?", (now_iso,))
             return cur.rowcount
+
+    def add_workspace_member(self, ws_name: str, user_id: int, role: str = "member") -> None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO workspace_members(workspace_name, user_id, role, created_at) VALUES(?,?,?,?)",
+                (ws_name, user_id, role, now),
+            )
+
+    def remove_workspace_member(self, ws_name: str, user_id: int) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM workspace_members WHERE workspace_name=? AND user_id=?", (ws_name, user_id))
+
+    def list_workspace_members(self, ws_name: str) -> list[tuple[int, str, str]]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT u.id, u.username, m.role FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_name=?",
+                (ws_name,),
+            ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def list_user_workspaces(self, user_id: int) -> list[str]:
+        with self._conn() as c:
+            rows = c.execute("SELECT workspace_name FROM workspace_members WHERE user_id=?", (user_id,)).fetchall()
+        return [r[0] for r in rows]
+
+    def get_workspace_member_role(self, ws_name: str, user_id: int) -> str | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT role FROM workspace_members WHERE workspace_name=? AND user_id=?", (ws_name, user_id)
+            ).fetchone()
+        return row[0] if row else None
+
+    def delete_workspace_members(self, ws_name: str) -> int:
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM workspace_members WHERE workspace_name=?", (ws_name,))
+            return cur.rowcount
+
+    def list_all_users(self) -> list["User"]:
+        with self._conn() as c:
+            rows = c.execute("SELECT id, username, role FROM users ORDER BY id").fetchall()
+        return [User(id=r[0], username=r[1], role=r[2]) for r in rows]
