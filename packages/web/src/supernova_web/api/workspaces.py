@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import shutil
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+
+from supernova_web.auth.dependencies import current_user
+from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -17,10 +20,14 @@ def _workspace_path(request: Request, ws: str):
 
 
 @router.get("")
-async def list_workspaces(request: Request):
+async def list_workspaces(request: Request, user: User = Depends(current_user)):
     idx = request.app.state.indexer
     idx.sync_active(request.app.state.scan_manager.active_pids())
-    return idx.list_workspaces()
+    all_ws = idx.list_workspaces()
+    if user.role == "admin":
+        return all_ws
+    allowed = set(request.app.state.auth_store.list_user_workspaces(user.id))
+    return [w for w in all_ws if w["name"] in allowed]
 
 
 @router.get("/{ws}")
