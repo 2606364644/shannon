@@ -86,7 +86,7 @@ function selectRepoOption(optionName: RegExp | string) {
 }
 
 // 默认 sourceKind=repo；这里：先选 ws → 切 path → 填齐 path + url，让提交可用。
-// P2 起：所有提交类用例必须先选 ws（提交 body workspace_name 必填）。
+// P2 起：所有提交类用例必须先选 ws（提交 body workspace 必填）。
 async function fillValidPath() {
   await selectWorkspace("ws1");
   await selectOption(/已下载仓库/, "本地路径");
@@ -257,8 +257,8 @@ describe("ScanNewPage", () => {
 
   // === repo 预选 / repo 选择 / not-ready（P2：repo 路径已迁到 /workspaces/<ws>/repos） ===
 
-  it("URL ?repo=foo → 选 ws 后预选 foo 显出 + buildBody workspace_name=选中 ws", async () => {
-    let captured: { source?: { kind?: string; value?: string }; workspace_name?: string } | undefined;
+  it("URL ?repo=foo → 选 ws 后预选 foo 显出 + buildBody workspace=选中 ws", async () => {
+    let captured: { source?: { kind?: string; value?: string }; workspace?: string } | undefined;
     server.use(
       http.get("/api/workspaces/:ws/repos", () =>
         HttpResponse.json([
@@ -266,7 +266,7 @@ describe("ScanNewPage", () => {
         ]),
       ),
       http.post("/api/scan", async ({ request }) => {
-        captured = (await request.json()) as { source?: { kind?: string; value?: string }; workspace_name?: string };
+        captured = (await request.json()) as { source?: { kind?: string; value?: string }; workspace?: string };
         return HttpResponse.json({ workspace: "ws1" }, { status: 202 });
       }),
     );
@@ -285,11 +285,11 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(captured).toBeDefined());
     expect(captured!.source?.kind).toBe("repo");
     expect(captured!.source?.value).toBe("foo");
-    expect(captured!.workspace_name).toBe("ws1");
+    expect(captured!.workspace).toBe("ws1");
   });
 
   it("手选 repo 且就绪 → buildBody source.kind=repo", async () => {
-    let captured: { source?: { kind?: string; value?: string }; workspace_name?: string } | undefined;
+    let captured: { source?: { kind?: string; value?: string }; workspace?: string } | undefined;
     server.use(
       http.get("/api/workspaces/:ws/repos", () =>
         HttpResponse.json([
@@ -297,7 +297,7 @@ describe("ScanNewPage", () => {
         ]),
       ),
       http.post("/api/scan", async ({ request }) => {
-        captured = (await request.json()) as { source?: { kind?: string; value?: string }; workspace_name?: string };
+        captured = (await request.json()) as { source?: { kind?: string; value?: string }; workspace?: string };
         return HttpResponse.json({ workspace: "bar-ws" }, { status: 202 });
       }),
     );
@@ -314,7 +314,7 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(captured).toBeDefined());
     expect(captured!.source?.kind).toBe("repo");
     expect(captured!.source?.value).toBe("bar");
-    expect(captured!.workspace_name).toBe("ws1");
+    expect(captured!.workspace).toBe("ws1");
   });
 
   it("选中的 repo 正在 cloning → 显 CloneProgress（clone 中文案）", async () => {

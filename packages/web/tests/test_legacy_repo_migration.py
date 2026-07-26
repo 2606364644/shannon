@@ -110,3 +110,41 @@ def test_no_repos_dir_does_not_crash(tmp_path, monkeypatch):
 
     # 没崩、没生成 __legacy__
     assert not (tmp_path / "workspaces" / "__legacy__").exists()
+
+
+def test_legacy_ws_visible_in_list_workspaces_for_admin(tmp_path, monkeypatch):
+    """C1 final-review 回归：迁移后 __legacy__ 必须在 GET /api/workspaces 对 admin 可见。
+
+    Root cause（final-review C1）：`_migrate_legacy_repos` 只 mkdir `workspaces/__legacy__/repos`
+    + 搬仓库，不写 `session.json`。`SessionManager.list_workspaces`（session.py:63-70）过滤
+    `(p/session.json).exists()` → `__legacy__` 被排除 → GET /api/workspaces 对**全员**（含
+    admin）不可见。T7 commit message 说 "admin 可见" 但实测不可见 —— 与 P1 create_workspace
+    踩过的同型 bug（P1 已在 POST handler 写 session.json 修过）。
+
+    Fix：`_migrate_legacy_repos` 在搬迁后给 `__legacy__/` 补写最小 session.json（mirror
+    create_workspace），使 list_workspaces 收录。本测试用真实 admin 登录 → GET /api/workspaces
+    → 断言 `__legacy__` 在响应内。
+    """
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_REPOS_DIR", str(tmp_path / "repos"))
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    from supernova_web.config import get_config
+    get_config.cache_clear()
+
+    (tmp_path / "workspaces").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "repos" / "oldrepo" / ".git").mkdir(parents=True)
+
+    from supernova_web.auth.passwords import hash_password
+    app = create_app()
+    app.state.auth_store.create_user("admin", hash_password("test-pw"), role="admin")
+
+    with TestClient(app) as client:
+        tok = client.get("/api/auth/csrf").json()["csrf_token"]
+        client.post("/api/auth/login", json={"username": "admin", "password": "test-pw"},
+                    headers={"X-CSRF-Token": tok})
+        r = client.get("/api/workspaces")
+        assert r.status_code == 200
+        names = [w["name"] for w in r.json()]
+        assert "__legacy__" in names, (
+            f"__legacy__ not visible to admin in GET /api/workspaces: {names}"
+        )

@@ -204,7 +204,9 @@ export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
   source?: { kind: "repo" | "path"; value: string };
   url?: string;
-  workspace_name?: string;
+  // final-review C2: 字段名必须与 backend ScanRequest (models.py:25) 一致 = `workspace`。
+  // pydantic v2 默认不容未知键, 旧 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422。
+  workspace?: string;
   reuse_latest_whitebox?: boolean;
   config_yaml?: string;
   config_name?: string;

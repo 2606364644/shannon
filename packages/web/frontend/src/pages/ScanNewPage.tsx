@@ -24,8 +24,12 @@ export interface FormState {
 
 /**
  * 构造 /scan 提交 body。
- * P2 (2026-07-26): `workspace_name` 来自父组件显式选定的 workspace（替代 pre-P1 的
+ * P2 (2026-07-26): `workspace` 来自父组件显式选定的 workspace（替代 pre-P1 的
  * 自动生成/可选 wsName 字段）。扫描目标 ws 必须是用户可访问的已有 ws（P1 已过滤）。
+ *
+ * final-review C2: 字段名必须与 backend `ScanRequest` (models.py:25) 一致 = `workspace`。
+ * pydantic v2 默认不容未知键, 发 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422
+ * （P2 final-review 抓到的 prod-blocking bug: 每个前端扫描提交都 422）。
  */
 function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
@@ -36,7 +40,7 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
     type,
     source,
     url: f.url || undefined,
-    workspace_name: workspace || undefined,
+    workspace: workspace || undefined,
   };
   if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
   return body;

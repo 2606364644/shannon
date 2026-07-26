@@ -95,13 +95,23 @@ def _migrate_legacy_repos(app: FastAPI) -> None:
     仅迁 top-level 且含 ``.git`` 的目录（避免误搬普通文件夹）；目标已存在或源缺失则跳过
     （幂等）。admin 分配由 ``_migrate_legacy_workspace_members`` 复用既有逻辑，**此处不
     重复实现**。单仓库失败不阻塞启动（best-effort）。
+
+    final-review C1：搬迁后给 ``__legacy__/`` 补写最小 ``session.json``（mirror
+    ``POST /api/workspaces`` create_workspace 的写法），否则 ``SessionManager.list_workspaces``
+    按 ``(p/session.json).exists()`` 过滤会排除 ``__legacy__`` → GET /api/workspaces 对
+    全员（含 admin）不可见。仅在 ``__legacy__`` 已作为真实 ws 目录存在（至少迁了一个仓库）
+    时写，幂等（已存在则不覆盖），写失败不阻塞启动。
     """
+    import json
     import shutil
+    from datetime import datetime, timezone
+
     cfg = app.state.config
     old_root = cfg.repos_dir
     if not old_root.is_dir():
         return
-    legacy_repos = cfg.workspaces_dir / "__legacy__" / "repos"
+    legacy_ws = cfg.workspaces_dir / "__legacy__"
+    legacy_repos = legacy_ws / "repos"
     for sub in list(old_root.iterdir()):
         if not sub.is_dir() or sub.name.startswith("."):
             continue
@@ -116,6 +126,25 @@ def _migrate_legacy_repos(app: FastAPI) -> None:
         except Exception:
             # 单仓库失败不影响其他仓库与整体启动
             continue
+
+    # final-review C1：__legacy__ ws 目录已存在（至少迁了一个仓库）→ 补写最小 session.json，
+    # 使其在 GET /api/workspaces 可见（list_workspaces 经 session.json 过滤）。mirror
+    # create_workspace 的 minimal session.json（同字段/同 shape，status=completed 对未扫描
+    # 的空 ws 正确：_status_of 视 completed 为终态，不显 spinner）。幂等 + best-effort。
+    if legacy_repos.is_dir():
+        session_file = legacy_ws / "session.json"
+        if not session_file.exists():
+            try:
+                session_file.write_text(json.dumps({
+                    "status": "completed",
+                    "scan_type": "whitebox",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "web_url": "",
+                    "repo_path": "",
+                }), encoding="utf-8")
+            except Exception:
+                # 写 session.json 失败不阻塞启动（best-effort）
+                pass
 
 
 def _reconcile_repo_meta(app: FastAPI) -> None:
