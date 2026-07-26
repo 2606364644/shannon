@@ -13,6 +13,22 @@
     "loadFailedStatus": "加载失败（{{status}}）",
     "langSwitchAria": "切换语言"
   },
+  "auth": {
+    "tagline": "白盒 · 黑盒 安全审计",
+    "login": {
+      "title": "登录 Supernova",
+      "username": "用户名",
+      "password": "密码",
+      "submit": "登录",
+      "invalid": "用户名或密码错误",
+      "welcome": "欢迎回来",
+      "sub": "登录以继续"
+    },
+    "logout": "登出",
+    "sessionExpired": "会话已过期，请重新登录",
+    "sessionTtlHint": "会话有效期 12 小时",
+    "role": { "admin": "管理员", "user": "用户" }
+  },
   "nav": {
     "dashboard": "概览",
     "workspaces": "工作区",

@@ -13,6 +13,22 @@
     "loadFailedStatus": "Failed to load ({{status}})",
     "langSwitchAria": "Switch language"
   },
+  "auth": {
+    "tagline": "White-box · Black-box Security Audit",
+    "login": {
+      "title": "Sign in to Supernova",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign in",
+      "invalid": "Invalid username or password",
+      "welcome": "Welcome back",
+      "sub": "Sign in to continue"
+    },
+    "logout": "Sign out",
+    "sessionExpired": "Session expired, please sign in again",
+    "sessionTtlHint": "Session valid for 12 hours",
+    "role": { "admin": "Admin", "user": "User" }
+  },
   "nav": {
     "dashboard": "Dashboard",
     "workspaces": "Workspaces",
