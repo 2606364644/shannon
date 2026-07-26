@@ -6,6 +6,12 @@ import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import WorkspaceDetail from "./index";
 
+// MemberManagerDialog 依赖 AuthProvider + 自有成员 API；shell 测试聚焦 tab/导航/404，
+// 隔离该子组件（其行为在 MemberManagerDialog.test.tsx 独立覆盖）。
+vi.mock("@/components/MemberManagerDialog", () => ({
+  MemberManagerDialog: () => null,
+}));
+
 const server = setupServer(
   http.get("/api/workspaces/:ws", () => HttpResponse.json({ status: "running" })),
 );

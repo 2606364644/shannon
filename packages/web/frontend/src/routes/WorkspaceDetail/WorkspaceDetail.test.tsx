@@ -6,6 +6,12 @@ import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import WorkspaceDetail from "./index";
 
+// MemberManagerDialog 依赖 AuthProvider + 自有成员 API；header 测试聚焦元信息/降级/404，
+// 隔离该子组件（其行为在 MemberManagerDialog.test.tsx 独立覆盖）。
+vi.mock("@/components/MemberManagerDialog", () => ({
+  MemberManagerDialog: () => null,
+}));
+
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

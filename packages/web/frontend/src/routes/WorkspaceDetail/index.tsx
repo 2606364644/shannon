@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
+import { MemberManagerDialog } from "@/components/MemberManagerDialog";
 import { apiGet, ApiError } from "@/api/client";
 import type { SessionData } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -72,6 +73,7 @@ export default function WorkspaceDetail() {
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-mono text-xl">{workspace}</h2>
+          {workspace && <MemberManagerDialog ws={workspace} />}
           {loading ? (
             <Skeleton className="h-5 w-40" />
           ) : (

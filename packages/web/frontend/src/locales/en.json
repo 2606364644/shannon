@@ -29,6 +29,15 @@
     "sessionTtlHint": "Session valid for 12 hours",
     "role": { "admin": "Admin", "user": "User" }
   },
+  "members": {
+    "title": "Members",
+    "add": "Add member",
+    "remove": "Remove",
+    "username": "Select user",
+    "manager": "Manager",
+    "member": "Member",
+    "manage": "Manage members"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "workspaces": "Workspaces",

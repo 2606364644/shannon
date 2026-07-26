@@ -29,6 +29,15 @@
     "sessionTtlHint": "会话有效期 12 小时",
     "role": { "admin": "管理员", "user": "用户" }
   },
+  "members": {
+    "title": "成员管理",
+    "add": "添加成员",
+    "remove": "移除",
+    "username": "选择用户",
+    "manager": "管理者",
+    "member": "成员",
+    "manage": "管理成员"
+  },
   "nav": {
     "dashboard": "概览",
     "workspaces": "工作区",
