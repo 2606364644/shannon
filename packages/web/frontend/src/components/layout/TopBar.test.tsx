@@ -1,8 +1,19 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TopBar } from "./TopBar";
 import i18n from "@/i18n";
+
+// TopBar 集成 UserMenu（T17），UserMenu 用 useAuth。本测试聚焦 TopBar 业务（导航/i18n/sticky），
+// 不测 auth 行为，故 stub useAuth 注入固定 user 避免 "useAuth 必须在 AuthProvider 内使用"。
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "alice", role: "user" },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
 
 function renderAt(path: string) {
   return render(

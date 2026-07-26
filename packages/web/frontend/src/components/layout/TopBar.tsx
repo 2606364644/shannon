@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { BrandMark } from "./BrandMark";
+import { UserMenu } from "./UserMenu";
 import { useBrand } from "@/brand/BrandContext";
 
 interface NavItem {
@@ -64,6 +65,7 @@ export function TopBar() {
           {/* 运行中扫描指示器 slot（子项目 5 接 SSE） */}
           <LanguageSwitcher />
           <ThemeToggle />
+          <UserMenu />
         </div>
       </div>
     </header>

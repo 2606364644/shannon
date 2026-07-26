@@ -1,7 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./AppShell";
+
+// AppShell 含 TopBar（T17 起 TopBar 集成 UserMenu，UserMenu 用 useAuth）。
+// 本测试聚焦 AppShell 渲染 TopBar + Outlet，不测 auth，故 stub useAuth 注入固定 user
+// 避免 "useAuth 必须在 AuthProvider 内使用"。
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "alice", role: "user" },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
 
 describe("AppShell", () => {
   it("渲染 TopBar + Outlet 内容", () => {
