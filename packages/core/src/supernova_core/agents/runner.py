@@ -42,6 +42,14 @@ class ProviderConfig:
     small_model: str | None = None
     medium_model: str | None = None
     large_model: str | None = None
+    # —— P3c 阶段 0：运行时调参，收编引擎内部 os.getenv。
+    # 语义：None = 未覆盖（引擎回落 env）；非 None = 显式覆盖（阶段 2 per-ws 配置填充）。
+    # 注意：build_provider_config 不主动从 env 读这些字段，只透传显式参数（方案 Y）。——
+    max_turns: int | None = None              # CLAUDE_MAX_TURNS / SUPERNOVA_OPENAI_MAX_TURNS
+    subagent_max_turns: int | None = None     # SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS
+    max_output_tokens: int | None = None      # CLAUDE_CODE_MAX_OUTPUT_TOKENS
+    call_timeout: float | None = None         # SUPERNOVA_OPENAI_CALL_TIMEOUT（秒）
+    adaptive_thinking: bool | None = None     # CLAUDE_ADAPTIVE_THINKING
 
 
 # 默认模型映射表

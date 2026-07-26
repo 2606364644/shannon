@@ -195,6 +195,12 @@ def build_provider_config(
     small_model: str | None = None,
     medium_model: str | None = None,
     large_model: str | None = None,
+    # —— P3c 阶段 0：运行时调参透传（None=未覆盖，引擎回落 env；build 不读 env）——
+    max_turns: int | None = None,
+    subagent_max_turns: int | None = None,
+    max_output_tokens: int | None = None,
+    call_timeout: float | None = None,
+    adaptive_thinking: bool | None = None,
 ) -> ProviderConfig:
     """从环境变量和参数构建 ProviderConfig。
 
@@ -203,6 +209,8 @@ def build_provider_config(
     bedrock / vertex / litellm_router: 保留现有读取行为(用户未使用, 非本次范围)。
 
     显式参数优先于环境变量。
+
+    P3c 阶段 0：运行时调参（max_turns 等）只透传，不从 env 读——引擎负责 None 时回落 env。
     """
     if provider_type is None:
         provider_type = os.getenv("SUPERNOVA_AI_PROVIDER", "anthropic_api")
@@ -217,6 +225,11 @@ def build_provider_config(
             small_model=small_model,
             medium_model=medium_model,
             large_model=large_model,
+            max_turns=max_turns,
+            subagent_max_turns=subagent_max_turns,
+            max_output_tokens=max_output_tokens,
+            call_timeout=call_timeout,
+            adaptive_thinking=adaptive_thinking,
         )
 
     # bedrock / vertex / litellm_router: 现有 fallback 读取(非本次范围, 保持不变)
@@ -231,6 +244,11 @@ def build_provider_config(
         small_model=small_model,
         medium_model=medium_model,
         large_model=large_model,
+        max_turns=max_turns,
+        subagent_max_turns=subagent_max_turns,
+        max_output_tokens=max_output_tokens,
+        call_timeout=call_timeout,
+        adaptive_thinking=adaptive_thinking,
     )
 
 
@@ -252,6 +270,11 @@ def _build_from_settings(
     small_model: str | None,
     medium_model: str | None,
     large_model: str | None,
+    max_turns: int | None,
+    subagent_max_turns: int | None,
+    max_output_tokens: int | None,
+    call_timeout: float | None,
+    adaptive_thinking: bool | None,
 ) -> ProviderConfig:
     """anthropic_api / openai_compatible: 按 PROVIDER_SETTINGS 读取, 无跨前缀 fallback。"""
     f = PROVIDER_SETTINGS[provider_type]
@@ -266,6 +289,12 @@ def _build_from_settings(
         small_model=_read(small_model, f.small_model),
         medium_model=_read(medium_model, f.medium_model),
         large_model=_read(large_model, f.large_model),
+        # P3c 阶段 0：透传运行时调参（不读 env；None=引擎回落 env）
+        max_turns=max_turns,
+        subagent_max_turns=subagent_max_turns,
+        max_output_tokens=max_output_tokens,
+        call_timeout=call_timeout,
+        adaptive_thinking=adaptive_thinking,
     )
 
 
@@ -281,6 +310,11 @@ def _build_legacy(
     small_model: str | None,
     medium_model: str | None,
     large_model: str | None,
+    max_turns: int | None,
+    subagent_max_turns: int | None,
+    max_output_tokens: int | None,
+    call_timeout: float | None,
+    adaptive_thinking: bool | None,
 ) -> ProviderConfig:
     """bedrock / vertex / litellm_router: 保留删除 fallback 前的读取行为。
 
@@ -335,4 +369,10 @@ def _build_legacy(
         small_model=small_model,
         medium_model=medium_model,
         large_model=large_model,
+        # P3c 阶段 0：透传运行时调参（不读 env；None=引擎回落 env）
+        max_turns=max_turns,
+        subagent_max_turns=subagent_max_turns,
+        max_output_tokens=max_output_tokens,
+        call_timeout=call_timeout,
+        adaptive_thinking=adaptive_thinking,
     )
