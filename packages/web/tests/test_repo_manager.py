@@ -7,12 +7,25 @@ from pathlib import Path
 from supernova_web.components.repo_manager import RepoManager, TooManyClones
 
 
+WS = "ws1"  # all tests in this file operate in a single workspace
+
+
 def _rm(tmp_path, monkeypatch) -> RepoManager:
+    # T1 (web repos isolation P2): RepoManager 现按 workspaces/<ws>/repos 分桶。
+    # 把 workspaces_dir 设到 tmp_path/workspaces，并预建 ws1，repo 落到其下 repos/。
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
     monkeypatch.setenv("SUPERNOVA_REPOS_DIR", str(tmp_path / "repos"))
     from supernova_web.config import get_config; get_config.cache_clear()
     from supernova_web.components.git_fetcher import GitFetcher
     cfg = get_config()
-    return RepoManager(cfg.repos_dir, GitFetcher(cfg.repos_dir, "u", "t"), max_concurrent=3)
+    ws_dir = cfg.workspaces_dir
+    (ws_dir / WS).mkdir(parents=True, exist_ok=True)
+    return RepoManager(ws_dir, GitFetcher(cfg.repos_dir, "u", "t"), max_concurrent=3)
+
+
+def _repos_base(tmp_path) -> Path:
+    """该 ws 的 repos 根目录：tmp_path/workspaces/ws1/repos。"""
+    return tmp_path / "workspaces" / WS / "repos"
 
 
 @pytest.fixture
@@ -32,13 +45,13 @@ async def test_clone_writes_ndjson_and_meta(tmp_path, monkeypatch, fake_clone_ok
     rm = _rm(tmp_path, monkeypatch)
     monkeypatch.setattr(rm, "_build_clone_argv",
                         lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
-    name = await rm.clone("https://gitlab.example/foo.git", None, None, None)
+    name = await rm.clone(WS, "https://gitlab.example/foo.git", None, None, None)
     assert name == "foo"
     # 等 task 结束
     await asyncio.sleep(0.3)
-    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
+    meta = json.loads((_repos_base(tmp_path) / "foo" / ".supernova-repo.json").read_text())
     assert meta["state"] == "ready"
-    lines = (tmp_path / "repos" / "foo" / "clone.ndjson").read_text().splitlines()
+    lines = (_repos_base(tmp_path) / "foo" / "clone.ndjson").read_text().splitlines()
     assert any("40" in l and '"progress"' in l for l in lines)
     assert any('"clone_end"' in l and '"ready"' in l for l in lines)
 
@@ -50,14 +63,14 @@ async def test_clone_failed_writes_failed_state(tmp_path, monkeypatch):
     rm = _rm(tmp_path, monkeypatch)
     monkeypatch.setattr(rm, "_build_clone_argv",
                         lambda url, target, branch: [sys.executable, str(crash)])
-    await rm.clone("https://gitlab.example/foo.git", None, None, None)
+    await rm.clone(WS, "https://gitlab.example/foo.git", None, None, None)
     await asyncio.sleep(0.3)
-    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
+    meta = json.loads((_repos_base(tmp_path) / "foo" / ".supernova-repo.json").read_text())
     assert meta["state"] == "failed"
     assert "t@" not in meta["last_error"]  # token 脱敏（last_error 是固定串，本就行）
     # 真正的安全属性：stderr 的 `https://u:t@host` 经 _git.redact 写进 clone.ndjson 的
     # message 字段，必须脱敏为 `https://***:***@host`，绝不含 `u:t@` token 模式。
-    ndjson = (tmp_path / "repos" / "foo" / "clone.ndjson").read_text("utf-8", errors="replace")
+    ndjson = (_repos_base(tmp_path) / "foo" / "clone.ndjson").read_text("utf-8", errors="replace")
     assert "u:t@" not in ndjson
     assert "***:***@" in ndjson
 
@@ -77,16 +90,15 @@ async def test_clone_rejects_path_traversal_name(tmp_path, monkeypatch):
     monkeypatch.setattr(rm, "_build_clone_argv", _no_real_clone)
     for evil in ("../evil", "a/b", ".", "..", "x\\y", "x/y"):
         with pytest.raises(ValueError, match="非法仓库名"):
-            await rm.clone("https://gitlab.example/foo.git", None, None, evil)
+            await rm.clone(WS, "https://gitlab.example/foo.git", None, None, evil)
 
 
 @pytest.mark.asyncio
 async def test_name_conflict_raises(tmp_path, monkeypatch):
     rm = _rm(tmp_path, monkeypatch)
-    (tmp_path / "repos").mkdir()
-    (tmp_path / "repos" / "foo").mkdir()
+    (_repos_base(tmp_path) / "foo").mkdir(parents=True)
     with pytest.raises(ValueError, match="已存在"):
-        await rm.clone("https://gitlab.example/foo.git", None, None, None)
+        await rm.clone(WS, "https://gitlab.example/foo.git", None, None, None)
 
 
 @pytest.mark.asyncio
@@ -96,9 +108,9 @@ async def test_concurrent_limit(tmp_path, monkeypatch):
     # _rm hardcodes max_concurrent=3, so override to 1 to make len(_jobs)=1 trigger the raise.
     rm._max_concurrent = 1
     rm._sem = asyncio.Semaphore(1)  # secondary backstop (harmless)
-    rm._jobs["busy"] = asyncio.create_task(asyncio.sleep(10))
+    rm._jobs[(WS, "busy")] = asyncio.create_task(asyncio.sleep(10))
     with pytest.raises(TooManyClones):
-        await rm.clone("https://gitlab.example/bar.git", None, None, None)
+        await rm.clone(WS, "https://gitlab.example/bar.git", None, None, None)
 
 
 @pytest.mark.asyncio
@@ -107,10 +119,10 @@ async def test_clone_with_group(tmp_path, monkeypatch, fake_clone_ok):
     rm = _rm(tmp_path, monkeypatch)
     monkeypatch.setattr(rm, "_build_clone_argv",
                         lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
-    name = await rm.clone("https://gitlab.example/foo.git", None, None, None, group="frontend")
+    name = await rm.clone(WS, "https://gitlab.example/foo.git", None, None, None, group="frontend")
     assert name == "frontend/foo"
     await asyncio.sleep(0.3)
-    meta_path = tmp_path / "repos" / "frontend" / "foo" / ".supernova-repo.json"
+    meta_path = _repos_base(tmp_path) / "frontend" / "foo" / ".supernova-repo.json"
     assert meta_path.exists()
     assert json.loads(meta_path.read_text())["state"] == "ready"
 
@@ -118,13 +130,13 @@ async def test_clone_with_group(tmp_path, monkeypatch, fake_clone_ok):
 def test_list_repos_groups(tmp_path, monkeypatch):
     """分组目录下的真仓库识别为 group/repo；分组目录本身不当仓库；同名跨组不冲突。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     for rel in ["frontend/foo", "backend/honor", "frontend/honor"]:
         d = base / rel; d.mkdir(parents=True)
         (d / ".git").mkdir()  # 真仓库标志
     (base / "baz").mkdir()
     (base / "baz" / ".git").mkdir()  # 扁平仓库
-    views = {r["name"]: r for r in rm.list_repos()}
+    views = {r["name"]: r for r in rm.list_repos(WS)}
     assert set(views) == {"frontend/foo", "backend/honor", "frontend/honor", "baz"}
     assert "frontend" not in views and "backend" not in views  # 分组目录不入列
     assert views["frontend/foo"]["group"] == "frontend"
@@ -136,22 +148,22 @@ def test_list_repos_groups(tmp_path, monkeypatch):
 def test_get_repo_rejects_group_dir(tmp_path, monkeypatch):
     """get_repo 对分组目录（无 .git 无 meta）返回 None，不当作仓库。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     (base / "frontend" / "foo").mkdir(parents=True)
     (base / "frontend" / "foo" / ".git").mkdir()
-    assert rm.get_repo("frontend/foo") is not None
-    assert rm.get_repo("frontend") is None  # 分组目录
+    assert rm.get_repo(WS, "frontend/foo") is not None
+    assert rm.get_repo(WS, "frontend") is None  # 分组目录
 
 
 @pytest.mark.asyncio
 async def test_delete_does_not_rmtree_group_dir(tmp_path, monkeypatch):
     """delete 分组目录绝不能 rmtree 子仓库（误删/越界防护）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     for rel in ["frontend/foo", "frontend/bar"]:
         d = base / rel; d.mkdir(parents=True)
         (d / ".git").mkdir()
-    await rm.delete("frontend")  # 分组目录：不应删任何子仓库
+    await rm.delete(WS, "frontend")  # 分组目录：不应删任何子仓库
     assert (base / "frontend" / "foo" / ".git").exists()
     assert (base / "frontend" / "bar" / ".git").exists()
 
@@ -170,13 +182,13 @@ def test_list_repos_treats_group_dir_with_stale_meta_as_group(tmp_path, monkeypa
     """分组目录有残留 .supernova-repo.json（旧版误写）时，list_repos 仍当分组深入一层，
     不把分组目录本身当仓库（回归 2026-07-08 /repos 把分组目录当仓库、真仓库全被吞的 bug）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     (base / "frontend" / "foo").mkdir(parents=True)
     (base / "frontend" / "foo" / ".git").mkdir()  # 子仓库
     # 旧版误写到分组目录的脏 meta（kind=unknown，非 clone 产物）
     (base / "frontend" / ".supernova-repo.json").write_text(
         json.dumps({"name": "frontend", "source": {"kind": "unknown"}, "state": "ready"}))
-    views = {r["name"]: r for r in rm.list_repos()}
+    views = {r["name"]: r for r in rm.list_repos(WS)}
     assert set(views) == {"frontend/foo"}
     assert "frontend" not in views  # 分组目录（即使有脏 meta）不入列
     assert views["frontend/foo"]["group"] == "frontend"
@@ -185,12 +197,12 @@ def test_list_repos_treats_group_dir_with_stale_meta_as_group(tmp_path, monkeypa
 def test_migrate_legacy_cleans_miswritten_group_meta(tmp_path, monkeypatch):
     """migrate_legacy 清理被旧版误写到分组目录的脏 meta（有 meta、无 .git、且含子仓库）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     (base / "backend" / "honor").mkdir(parents=True)
     (base / "backend" / "honor" / ".git").mkdir()  # 子仓库
     stale = base / "backend" / ".supernova-repo.json"
     stale.write_text(json.dumps({"name": "backend", "source": {"kind": "unknown"}, "state": "ready"}))
-    rm.migrate_legacy()
+    rm.migrate_legacy(WS)
     assert not stale.exists()  # 脏 meta 被清
     # 子仓库被正常 migrate（补 meta）
     assert (base / "backend" / "honor" / ".supernova-repo.json").exists()
@@ -213,9 +225,9 @@ def test_list_repos_self_heals_runtime_copied_repo(tmp_path, monkeypatch):
     来源/分支从 .git 推断、size_bytes 落盘，刷新页面即恢复三列数据（回归 2026-07-13
     /repos 的 vuln-range 下拷入仓库三列全空的 bug）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     _make_bare_git(base / "vuln-range" / "NodeGoat", "https://x/NodeGoat.git", "main")
-    views = {r["name"]: r for r in rm.list_repos()}
+    views = {r["name"]: r for r in rm.list_repos(WS)}
     v = views["vuln-range/NodeGoat"]
     assert v["source"]["url"] == "https://x/NodeGoat.git"
     assert v["source"]["branch"] == "main"
@@ -227,11 +239,11 @@ def test_list_repos_self_heals_runtime_copied_repo(tmp_path, monkeypatch):
 def test_migrate_legacy_writes_size_bytes(tmp_path, monkeypatch):
     """migrate_legacy 补 meta 时计算 size_bytes（迁移入库的旧仓库大小列不再恒空）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     repo = base / "solo"
     _make_bare_git(repo, "https://x/solo.git", "dev")
     (repo / "README.md").write_text("hello")  # 占位文件让 size > 0
-    rm.migrate_legacy()
+    rm.migrate_legacy(WS)
     meta = json.loads((repo / ".supernova-repo.json").read_text())
     assert meta["source"]["url"] == "https://x/solo.git"
     assert meta["source"]["branch"] == "dev"
@@ -269,14 +281,14 @@ async def test_clone_strips_credentials_from_source_url(tmp_path, monkeypatch, f
     monkeypatch.setattr(rm, "_build_clone_argv",
                         lambda url, target, branch: [sys.executable, str(fake_clone_ok)])
     secret = "https://oauth2:glpat-LEAK-TOKEN@gitlab.example/foo.git"
-    await rm.clone(secret, None, None, None)
+    await rm.clone(WS, secret, None, None, None)
     await asyncio.sleep(0.3)
     # 落盘 meta 不含 token
-    meta = json.loads((tmp_path / "repos" / "foo" / ".supernova-repo.json").read_text())
+    meta = json.loads((_repos_base(tmp_path) / "foo" / ".supernova-repo.json").read_text())
     assert "glpat-LEAK-TOKEN" not in json.dumps(meta)
     assert meta["source"]["url"] == "https://gitlab.example/foo.git"
     # 出站（get_repo）也不含 token
-    view = rm.get_repo("foo")
+    view = rm.get_repo(WS, "foo")
     assert "glpat-LEAK-TOKEN" not in json.dumps(view)
     assert view["source"]["url"] == "https://gitlab.example/foo.git"
 
@@ -284,7 +296,7 @@ async def test_clone_strips_credentials_from_source_url(tmp_path, monkeypatch, f
 def test_get_repo_redacts_credentials_in_legacy_meta(tmp_path, monkeypatch):
     """旧 meta 已含带凭据的 source.url（历史/手动写入）：get_repo 出站兜底仍须剥离。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     d = base / "foo"
     d.mkdir(parents=True)
     (d / ".git").mkdir()
@@ -293,7 +305,7 @@ def test_get_repo_redacts_credentials_in_legacy_meta(tmp_path, monkeypatch):
         "source": {"kind": "git", "url": "https://oauth2:glpat-LEGACY-LEAK@gitlab.example/foo.git"},
         "state": "ready",
     }))
-    view = rm.get_repo("foo")
+    view = rm.get_repo(WS, "foo")
     assert "glpat-LEGACY-LEAK" not in json.dumps(view)
     assert view["source"]["url"] == "https://gitlab.example/foo.git"
 
@@ -301,7 +313,7 @@ def test_get_repo_redacts_credentials_in_legacy_meta(tmp_path, monkeypatch):
 def test_list_repos_redacts_credentials(tmp_path, monkeypatch):
     """list_repos 出站清洗带凭据的 source.url（_repo_view 是共同出口）。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     d = base / "foo"
     d.mkdir(parents=True)
     (d / ".git").mkdir()
@@ -310,14 +322,14 @@ def test_list_repos_redacts_credentials(tmp_path, monkeypatch):
         "source": {"kind": "git", "url": "https://oauth2:glpat-LIST-LEAK@gitlab.example/foo.git"},
         "state": "ready",
     }))
-    blob = json.dumps(rm.list_repos())
+    blob = json.dumps(rm.list_repos(WS))
     assert "glpat-LIST-LEAK" not in blob
 
 
 def test_migrate_strips_credentials_from_git_config(tmp_path, monkeypatch):
     """migrate_legacy 从 .git/config 读回带凭据 url（_inject_auth 注入污染）：落盘须剥离。"""
     rm = _rm(tmp_path, monkeypatch)
-    base = tmp_path / "repos"
+    base = _repos_base(tmp_path)
     d = base / "foo"
     d.mkdir(parents=True)
     gitcfg = d / ".git"
@@ -326,7 +338,7 @@ def test_migrate_strips_credentials_from_git_config(tmp_path, monkeypatch):
     (gitcfg / "config").write_text(
         '[remote "origin"]\n\turl = https://u:glpat-MIGRATE-LEAK@gitlab.example/foo.git\n')
     (gitcfg / "HEAD").write_text("ref: refs/heads/main\n")
-    rm.migrate_legacy()
+    rm.migrate_legacy(WS)
     meta = json.loads((d / ".supernova-repo.json").read_text())
     assert "glpat-MIGRATE-LEAK" not in json.dumps(meta)
     assert meta["source"]["url"] == "https://gitlab.example/foo.git"

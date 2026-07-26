@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(3600)
     app.state._purge_task = asyncio.create_task(_purge_loop())
 
-    app.state.repo_manager.migrate_legacy()  # 旧 repos 目录纳入管理
+    _migrate_legacy_repos(app)  # 旧 repos 目录纳入管理（per-ws）
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
     yield
     app.state._purge_task.cancel()
@@ -76,6 +76,25 @@ def _migrate_legacy_workspace_members(app: FastAPI) -> None:
             continue  # 已有成员，跳过
         for a in admins:
             store.add_workspace_member(d.name, a.id, "manager")
+
+
+def _migrate_legacy_repos(app: FastAPI) -> None:
+    """对每个 workspace 跑 RepoManager.migrate_legacy(ws)——把已 clone 但未纳入管理的
+    旧仓库补写 meta。RepoManager.migrate_legacy 现按 ws 分桶（workspaces/<ws>/repos），
+    需逐 ws 调用。单 ws 异常不阻塞启动（与 _reconcile_orphaned_scans 同款 best-effort）。
+    """
+    cfg = app.state.config
+    if not cfg.workspaces_dir.is_dir():
+        return
+    rm = app.state.repo_manager
+    for d in cfg.workspaces_dir.iterdir():
+        if not d.is_dir():
+            continue
+        try:
+            rm.migrate_legacy(d.name)
+        except Exception:
+            # 单 ws 失败不影响其他 ws 与整体启动
+            continue
 
 
 def _mount_frontend(app: FastAPI, cfg) -> None:
@@ -141,7 +160,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
         max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout)
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
-        cfg.repos_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
+        cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
     from .auth.dependencies import current_user
     _require_auth = [Depends(current_user)]
