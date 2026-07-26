@@ -22,7 +22,7 @@ def _authed_cookies(app_with_ws, monkeypatch):
     app = app_with_ws
     store = app.state.auth_store
     if store.get_user_by_username("tester") is None:
-        store.create_user("tester", hash_password("test-pw"))
+        store.create_user("tester", hash_password("test-pw"), role="admin")
     # 直接走 /api/auth/login（TestClient 在 cookie_secure=0 后才能跑）——
     # 但 cfg 已 cached；改用直接生成 session 注入：
     sid = app.state.session_manager.create(

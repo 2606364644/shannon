@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from supernova_web.auth.dependencies import workspace_member
+from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 
 router = APIRouter(prefix="/api/workspaces", tags=["events"])
 
 
 @router.get("/{ws}/events")
-async def stream_events(ws: str, request: Request):
+async def stream_events(ws: str, request: Request, _: User = Depends(workspace_member)):
     cfg = request.app.state.config
     ws_dir = cfg.workspaces_dir / ws
     if not ws_dir.exists():

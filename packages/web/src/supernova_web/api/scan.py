@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
-from supernova_web.auth.dependencies import current_user
+from supernova_web.auth.dependencies import current_user, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
 from supernova_web.models import ScanAccepted, ScanRequest
@@ -41,7 +41,7 @@ async def create_scan(req: ScanRequest, request: Request,
 
 
 @router.delete("/{ws}")
-async def cancel_scan(ws: str, request: Request):
+async def cancel_scan(ws: str, request: Request, _: User = Depends(workspace_member)):
     result = await request.app.state.scan_manager.cancel(ws)
     if result is None:
         raise HTTPException(404, "scan not found")

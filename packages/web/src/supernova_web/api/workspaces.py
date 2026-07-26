@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from supernova_web.auth.dependencies import current_user, require_admin
+from supernova_web.auth.dependencies import current_user, require_admin, workspace_member
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -53,7 +53,7 @@ async def list_workspaces(request: Request, user: User = Depends(current_user)):
 
 
 @router.get("/{ws}")
-async def get_workspace(ws: str, request: Request):
+async def get_workspace(ws: str, request: Request, _: User = Depends(workspace_member)):
     idx = request.app.state.indexer
     idx.sync_active(request.app.state.scan_manager.active_pids())
     p = _workspace_path(request, ws)  # 404 if 不存在
@@ -94,7 +94,7 @@ async def delete_workspace(ws: str, request: Request):
 
 
 @router.get("/{ws}/deliverables")
-async def deliverables_summary(ws: str, request: Request, path: str | None = Query(None)):
+async def deliverables_summary(ws: str, request: Request, _: User = Depends(workspace_member), path: str | None = Query(None)):
     from supernova_web.components.deliverables_reader import DeliverablesReader
     reader = DeliverablesReader(_workspace_path(request, ws))
     if path is None:
@@ -115,7 +115,7 @@ async def deliverables_summary(ws: str, request: Request, path: str | None = Que
 
 
 @router.get("/{ws}/deliverables/{filename}")
-async def deliverables_file(ws: str, filename: str, request: Request, track: str = "whitebox"):
+async def deliverables_file(ws: str, filename: str, request: Request, _: User = Depends(workspace_member), track: str = "whitebox"):
     from supernova_web.components.deliverables_reader import DeliverablesReader
     try:
         return DeliverablesReader(_workspace_path(request, ws)).read(filename, track)
@@ -124,7 +124,7 @@ async def deliverables_file(ws: str, filename: str, request: Request, track: str
 
 
 @router.get("/{ws}/report", response_class=PlainTextResponse)
-async def report(ws: str, request: Request):
+async def report(ws: str, request: Request, _: User = Depends(workspace_member)):
     from supernova_web.components.deliverables_reader import DeliverablesReader
     reader = DeliverablesReader(_workspace_path(request, ws))
     reports = reader.list_reports()
@@ -145,7 +145,7 @@ async def report(ws: str, request: Request):
 
 
 @router.get("/{ws}/logs")
-async def logs(ws: str, request: Request, file: str | None = Query(None)):
+async def logs(ws: str, request: Request, _: User = Depends(workspace_member), file: str | None = Query(None)):
     from supernova_web.components.deliverables_reader import DeliverablesReader
     reader = DeliverablesReader(_workspace_path(request, ws))
     if file is None:
