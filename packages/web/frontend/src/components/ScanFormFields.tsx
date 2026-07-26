@@ -10,7 +10,7 @@ import { RepoCombobox } from "./RepoCombobox";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos } from "@/api/client";
-import type { Repo } from "@/api/types";
+import type { Repo, Workspace } from "@/api/types";
 import type { FormState } from "../pages/ScanNewPage";
 
 interface Props {
@@ -19,8 +19,12 @@ interface Props {
   set: (patch: Partial<FormState>) => void;
   sourceErr: string | null;
   urlErr: string | null;
-  loadingConflict: boolean;
-  derivedName: string;
+  /** P2: 选定的目标 workspace——驱动 listRepos(ws) 与子组件 ws 参数 */
+  workspace: string;
+  /** P2: 用户可见的 ws 列表（P1 后端已过滤）——供下拉选项 */
+  wsList: Workspace[];
+  /** P2: ws 下拉变更回调 */
+  onWorkspaceChange: (ws: string) => void;
 }
 
 /** 步骤分组容器：圆角 + secondary 背景 + 边框 */
@@ -49,16 +53,33 @@ function StepGroup({ step, title, tag, tagClass, children }: {
   );
 }
 
-export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflict, derivedName }: Props) {
+export function ScanFormFields({
+  type,
+  f,
+  set,
+  sourceErr,
+  urlErr,
+  workspace,
+  wsList,
+  onWorkspaceChange,
+}: Props) {
   const { t } = useTranslation();
   const [repos, setRepos] = useState<Repo[]>([]);
   const [addOpen, setAddOpen] = useState(false);
 
-  useEffect(() => { listRepos().then(setRepos).catch(() => {}); }, [addOpen]);
+  // P2: repo 列表按选定 ws 拉取——ws 未选时不发起（路径无意义）
+  useEffect(() => {
+    if (!workspace) {
+      setRepos([]);
+      return;
+    }
+    listRepos(workspace).then(setRepos).catch(() => {});
+  }, [workspace, addOpen]);
 
   const selectedRepoState = repos.find((r) => r.name === f.selectedRepo)?.state;
 
   // —— 共用：代码源选择器 ——
+  // P2: repo 模式下未选 ws 时显提示，不渲染仓库 picker / 添加按钮（listRepos 必须 ws）
   const sourceSelector = (
     <>
       <Select value={f.sourceKind} onValueChange={(v) => set({ sourceKind: v as "repo" | "path" })}>
@@ -70,25 +91,29 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
       </Select>
 
       {f.sourceKind === "repo" ? (
-        <div className="space-y-2">
-          <RepoCombobox
-            repos={repos}
-            value={f.selectedRepo || null}
-            onChange={(v) => set({ selectedRepo: v })}
-            placeholder={t("scan.repo.selectPlaceholder")}
-            searchPlaceholder={t("scan.repo.searchPlaceholder")}
-            emptyText={t("scan.repo.noMatch")}
-            ungroupedLabel={t("scan.repo.ungrouped")}
-          />
-          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>{t("scan.repo.addBtn")}</Button>
-          {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (
-            selectedRepoState === "cloning" || selectedRepoState === "pulling"
-              ? <CloneProgress name={f.selectedRepo} />
-              : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: selectedRepoState })}</div>
-          )}
-          <AddRepoDialog open={addOpen} onOpenChange={setAddOpen}
-            onCreated={(name) => set({ selectedRepo: name })} />
-        </div>
+        workspace ? (
+          <div className="space-y-2">
+            <RepoCombobox
+              repos={repos}
+              value={f.selectedRepo || null}
+              onChange={(v) => set({ selectedRepo: v })}
+              placeholder={t("scan.repo.selectPlaceholder")}
+              searchPlaceholder={t("scan.repo.searchPlaceholder")}
+              emptyText={t("scan.repo.noMatch")}
+              ungroupedLabel={t("scan.repo.ungrouped")}
+            />
+            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>{t("scan.repo.addBtn")}</Button>
+            {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (
+              selectedRepoState === "cloning" || selectedRepoState === "pulling"
+                ? <CloneProgress ws={workspace} name={f.selectedRepo} />
+                : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: selectedRepoState })}</div>
+            )}
+            <AddRepoDialog ws={workspace} open={addOpen} onOpenChange={setAddOpen}
+              onCreated={(name) => set({ selectedRepo: name })} />
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+        )
       ) : (
         <div className="flex gap-2">
           <Input value={f.sourceValue} onChange={(e) => set({ sourceValue: e.target.value })}
@@ -100,16 +125,21 @@ export function ScanFormFields({ type, f, set, sourceErr, urlErr, loadingConflic
     </>
   );
 
-  // —— 共用：工作区名称 ——
+  // —— 共用：workspace 选择器（P2: 替代原自由文本 wsName + 自动派生 + 冲突检测） ——
+  // 后端 resume 语义不变：扫到已有 ws 即追加 resumeAttempts；用户已显式选定，无需确认弹窗
   const workspaceField = (
     <div className="space-y-1.5">
-      <Label htmlFor="wsName" className="text-xs font-medium">
-        {t("scan.fields.wsNameLabel")}
-        <span className="font-normal text-muted-foreground"> — {t("scan.fields.optional")}</span>
-      </Label>
-      <Input id="wsName" value={f.wsName} onChange={(e) => set({ wsName: e.target.value })} placeholder={t("scan.fields.wsNamePlaceholder")} className="font-mono" />
-      {loadingConflict && <div className="text-xs text-yellow">{t("scan.fields.checkingConflict")}</div>}
-      {!f.wsName && derivedName && <div className="text-xs text-muted-foreground font-mono">{t("scan.fields.previewName", { name: derivedName })}</div>}
+      <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
+      <Select value={workspace} onValueChange={onWorkspaceChange}>
+        <SelectTrigger className="w-full font-mono">
+          <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          {wsList.map((w) => (
+            <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 

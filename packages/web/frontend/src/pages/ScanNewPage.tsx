@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -7,9 +7,6 @@ import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -21,17 +18,26 @@ export interface FormState {
   selectedRepo: string;
   sourceValue: string;
   url: string;
-  wsName: string;
   reuseLatest: boolean;
   yaml: string;
 }
 
-function buildBody(type: ScanType, f: FormState): ScanRequest {
+/**
+ * 构造 /scan 提交 body。
+ * P2 (2026-07-26): `workspace_name` 来自父组件显式选定的 workspace（替代 pre-P1 的
+ * 自动生成/可选 wsName 字段）。扫描目标 ws 必须是用户可访问的已有 ws（P1 已过滤）。
+ */
+function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
   const source = f.sourceKind === "repo"
     ? { kind: "repo" as const, value: f.selectedRepo }
     : { kind: "path" as const, value: f.sourceValue };
-  const body: ScanRequest = { type, source, url: f.url || undefined, workspace_name: f.wsName || undefined };
+  const body: ScanRequest = {
+    type,
+    source,
+    url: f.url || undefined,
+    workspace_name: workspace || undefined,
+  };
   if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
   return body;
 }
@@ -62,17 +68,6 @@ function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
   return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
-function deriveName(kind: "repo" | "path", selectedRepo: string, pathValue: string): string {
-  const base = kind === "repo"
-    ? (selectedRepo.split("/").pop() ?? "")
-    : (pathValue.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
-  if (!base) return "";
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  return `${base}_${ts}`;
-}
-
 /** 侧栏信息卡片数据 */
 interface SidebarItem {
   title: string;
@@ -90,14 +85,13 @@ export function ScanNewPage() {
     selectedRepo: "",
     sourceValue: "",
     url: "",
-    wsName: "",
     reuseLatest: false,
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
-  const [conflict, setConflict] = useState<string | null>(null);
-  const [loadingConflict, setLoadingConflict] = useState(false);
+  // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
+  const [workspace, setWorkspace] = useState("");
+  const [wsList, setWsList] = useState<Workspace[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
 
@@ -106,56 +100,33 @@ export function ScanNewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetRepo]);
 
+  // 拉取 ws 列表（用户可见的 ws，P1 后端已过滤）——供 ScanFormFields 的 ws 下拉使用
   useEffect(() => {
-    if (!f.wsName) {
-      setConflict(null);
-      setLoadingConflict(false);
-      return;
-    }
-    setLoadingConflict(true);
-    const t = setTimeout(() => {
-      apiGet<Workspace[]>("/workspaces")
-        .then((ws) => {
-          setConflict(ws.some((w) => w.name === f.wsName) ? f.wsName : null);
-        })
-        .finally(() => setLoadingConflict(false));
-    }, 300);
-    return () => clearTimeout(t);
-  }, [f.wsName]);
+    apiGet<Workspace[]>("/workspaces").then(setWsList).catch(() => {});
+  }, []);
 
   const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue, t);
   const urlErr = validateUrl(f.url, type, t);
   const isCorrelation = type === "correlation";
-  const isValid =
-    !sourceErr && !urlErr && !loadingConflict && !(isCorrelation && yamlErr);
+  // 提交校验：source 合法 + url 合法 + workspace 已选（联动模式不需要 ws/source）
+  const isValid = isCorrelation
+    ? !yamlErr
+    : !sourceErr && !urlErr && !!workspace;
 
-  const derivedName = useMemo(
-    () => (type === "correlation" ? "" : deriveName(f.sourceKind, f.selectedRepo, f.sourceValue)),
-    [type, f.sourceKind, f.selectedRepo, f.sourceValue],
-  );
-
-  async function doSubmit() {
+  async function onSubmit() {
     if (type === "correlation" && yamlErr) {
       toast.error(t("scan.errors.yamlRuntimeError"));
       return;
     }
     try {
       setSubmitting(true);
-      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f));
+      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace));
       nav(`/p/${r.workspace}/live`);
     } catch (e) {
       if (e instanceof ApiError) toast.error(renderError(e, t));
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function onSubmit() {
-    if (conflict) {
-      setConfirmOpen(true);
-      return;
-    }
-    void doSubmit();
   }
 
   // —— 侧栏内容（按扫描类型差异化） ——
@@ -240,8 +211,9 @@ export function ScanNewPage() {
                 set={set}
                 sourceErr={sourceErr}
                 urlErr={urlErr}
-                loadingConflict={loadingConflict}
-                derivedName={derivedName}
+                workspace={workspace}
+                wsList={wsList}
+                onWorkspaceChange={setWorkspace}
               />
             )}
           </div>
@@ -297,26 +269,6 @@ export function ScanNewPage() {
           <div className="text-xs text-muted-foreground text-center">{t("scan.submitHint")}</div>
         </>
       )}
-
-      {/* 续扫确认 Dialog */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent onInteractOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle>{t("scan.resume.title")}</DialogTitle>
-            <DialogDescription>
-              {t("scan.resume.desc", { name: conflict ?? "" })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => { set({ wsName: "" }); setConfirmOpen(false); }}>
-              {t("scan.resume.cancel")}
-            </Button>
-            <Button onClick={() => { setConfirmOpen(false); void doSubmit(); }}>
-              {t("scan.resume.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
