@@ -24,8 +24,22 @@ def _user_out(u: User) -> dict:
     return {"id": u.id, "username": u.username, "role": u.role}
 
 
-def _cookie_kwargs(cfg) -> dict:
-    return {"httponly": True, "samesite": "lax", "secure": cfg.cookie_secure,
+def _cookie_secure(cfg, request: Request) -> bool:
+    """sn-sid/sn-csrf 是否打 Secure 标志。
+
+    - cfg.cookie_secure=True（env SUPERNOVA_WEB_COOKIE_SECURE=1）→ 无条件 secure
+    - 否则按请求实际 scheme：HTTPS（含反代 X-Forwarded-Proto）才 secure
+    修复：曾一律用 cfg.cookie_secure 且默认 True，而 main() 纯 HTTP 启动 →
+    http:// 下浏览器丢弃 cookie → 登录循环。
+    """
+    if cfg.cookie_secure:
+        return True
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+    return scheme == "https"
+
+
+def _cookie_kwargs(cfg, request: Request) -> dict:
+    return {"httponly": True, "samesite": "lax", "secure": _cookie_secure(cfg, request),
             "max_age": cfg.session_ttl_hours * 3600}
 
 
@@ -34,7 +48,8 @@ def csrf(request: Request):
     cfg = request.app.state.config
     tok = generate_csrf_token()
     resp = JSONResponse({"csrf_token": tok})
-    resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax", secure=cfg.cookie_secure)
+    resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax",
+                    secure=_cookie_secure(cfg, request))
     return resp
 
 
@@ -55,9 +70,10 @@ def login(body: LoginIn, request: Request):
     _brute.reset(body.username)
     sid = request.app.state.session_manager.create(user.id)
     resp = JSONResponse({"user": _user_out(user)})
-    resp.set_cookie("sn-sid", sid, **_cookie_kwargs(cfg))
+    resp.set_cookie("sn-sid", sid, **_cookie_kwargs(cfg, request))
     tok = generate_csrf_token()  # 登录后续签 csrf
-    resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax", secure=cfg.cookie_secure,
+    resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax",
+                    secure=_cookie_secure(cfg, request),
                     max_age=cfg.session_ttl_hours * 3600)
     return resp
 

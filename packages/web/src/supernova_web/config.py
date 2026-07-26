@@ -28,7 +28,12 @@ class WebConfig:
         ]
         # auth（P0）
         self.session_ttl_hours = int(os.environ.get("SUPERNOVA_WEB_SESSION_TTL_HOURS", "12"))
-        self.cookie_secure = os.environ.get("SUPERNOVA_WEB_COOKIE_SECURE", "1") not in ("0", "false", "False")
+        # cookie_secure 仅作「强制 secure」开关：True 时无条件打 Secure。
+        # 默认 False——实际是否 secure 由 routes 按请求 scheme（含反代
+        # X-Forwarded-Proto）决定。曾默认 True，但 main() 纯 HTTP 启动，
+        # 致 http:// 下浏览器丢弃 session cookie → 登录循环（/login?expired=1）。
+        # 生产 HTTPS 直接经 env=1 强制，或由 scheme 自动判断。
+        self.cookie_secure = os.environ.get("SUPERNOVA_WEB_COOKIE_SECURE", "0") not in ("0", "false", "False")
         self.users_seed_file = os.environ.get("SUPERNOVA_WEB_USERS_SEED", "configs/users.yaml")
 
     @property

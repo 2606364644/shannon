@@ -38,8 +38,9 @@ def app_with_ws(tmp_workspaces, monkeypatch):
     SUPERNOVA_WORKER_ROOT 改成父目录，使解析结果恰好等于 tmp_workspaces，
     这样测试在 tmp_workspaces 下直接建 ws 目录即可被 indexer 命中。
 
-    T11 起同时把 SUPERNOVA_WEB_COOKIE_SECURE 关掉——所有用此 fixture 的测试
-    走 TestClient（HTTP），Secure 标志会让 cookie 不发送致登录/CSRF 失败。
+    另显式把 SUPERNOVA_WEB_COOKIE_SECURE 关掉（belt-and-suspenders）：
+    routes 现按请求 scheme 自动判断（HTTP→不 secure），TestClient 走 HTTP，
+    cookie 本就能发送；显式设 0 确保即便 scheme 判断逻辑变化测试也不受影响。
     """
     from supernova_core.utils.paths import resolve_workspaces_dir
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
