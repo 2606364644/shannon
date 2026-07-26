@@ -64,6 +64,8 @@ def login(body: LoginIn, request: Request):
 
 @router.post("/logout")
 def logout(request: Request):
+    if not verify_csrf(request.headers.get("x-csrf-token"), request.cookies.get("sn-csrf")):
+        raise HTTPException(status_code=403, detail="invalid csrf token")
     sid = request.cookies.get("sn-sid")
     if sid:
         request.app.state.session_manager.revoke(sid)
