@@ -63,16 +63,17 @@ describe("TopBar", () => {
 describe("TopBar i18n", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("中文渲染导航「仓库」", () => {
+  it("中文渲染主导航文本（工作区 + 扫描）", () => {
     render(
       <MemoryRouter>
         <TopBar />
       </MemoryRouter>
     );
-    expect(screen.getByText("仓库")).toBeInTheDocument();
+    expect(screen.getByText("工作区")).toBeInTheDocument();
+    expect(screen.getByText("扫描")).toBeInTheDocument();
   });
 
-  it("切英文后导航变 Repositories", async () => {
+  it("切英文后导航 Workspaces / Scan 文本切换", async () => {
     render(
       <MemoryRouter>
         <TopBar />
@@ -81,7 +82,18 @@ describe("TopBar i18n", () => {
     await act(async () => {
       await i18n.changeLanguage("en");
     });
-    expect(screen.getByText("Repositories")).toBeInTheDocument();
+    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(screen.getByText("Scan")).toBeInTheDocument();
+  });
+
+  it("P2: 顶级 /repos nav 已撤销（仓库迁入 ws 内 tab）", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    // 「仓库」/ Repositories 不再作为顶级 nav 项
+    expect(screen.queryByText("仓库")).not.toBeInTheDocument();
   });
 
   it("渲染语言切换器", () => {

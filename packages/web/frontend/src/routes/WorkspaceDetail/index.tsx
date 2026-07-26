@@ -17,6 +17,8 @@ const TABS = [
   { value: "deliverables", labelKey: "workspaceDetail.tabs.deliverables" },
   { value: "logs", labelKey: "workspaceDetail.tabs.logs" },
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
+  // P2: 仓库 tab 迁入 ws 内（原顶级 /repos 撤销）
+  { value: "repos", labelKey: "workspaceDetail.tabs.repos" },
 ] as const;
 
 export default function WorkspaceDetail() {

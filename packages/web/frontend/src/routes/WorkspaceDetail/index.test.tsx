@@ -42,10 +42,10 @@ function renderAt(initialPath: string) {
 }
 
 describe("WorkspaceDetail shell", () => {
-  it("渲染 tablist 与 5 个 tab role", () => {
+  it("渲染 tablist 与 6 个 tab role", () => {
     renderAt("/p/ws/overview");
     expect(screen.getByRole("tablist")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
   });
   it("当前 tab 由路由段决定（aria-selected）", () => {
     renderAt("/p/ws/logs");
@@ -83,6 +83,7 @@ describe("WorkspaceDetail shell i18n", () => {
     expect(screen.getByRole("tab", { name: "Deliverables" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Live" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Repositories" })).toBeInTheDocument();
     expect(screen.getByText(/Back to list/)).toBeInTheDocument();
   });
 });

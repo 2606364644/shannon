@@ -372,7 +372,8 @@
       "report": "报告",
       "deliverables": "产物",
       "logs": "日志",
-      "live": "实时"
+      "live": "实时",
+      "repos": "仓库"
     },
     "notFound": {
       "message": "工作区不存在或已被删除，无法显示实时进度。可能扫描已被清理或服务重启后丢失。"

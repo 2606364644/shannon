@@ -71,19 +71,33 @@ export const cancelScan = (ws: string) =>
   apiDelete<CancelResult>(`/scan/${encodeURIComponent(ws)}`);
 
 /** 仓库名（可为 group/repo）按段 encode：保留 `/` 作路径分隔，每段安全转义。
- *  /repos/frontend/foo 直接命中后端 {name:path}，含空格等特殊字符的段也安全。 */
+ *  /workspaces/<ws>/repos/frontend/foo 直接命中后端 {name:path}，含空格等特殊字符的段也安全。 */
 const encRepo = (name: string) => name.split("/").map(encodeURIComponent).join("/");
 
-export const listRepos = () => apiGet<Repo[]>("/repos");
-export const getRepo = (name: string) => apiGet<RepoDetail>(`/repos/${encRepo(name)}`);
-export const createRepo = (body: { git_url: string; branch?: string; commit?: string; name?: string; group?: string }) =>
-  apiPost<{ name: string }>("/repos", body);
-export const deleteRepo = (name: string) =>
-  apiDelete<{ deleted: string }>(`/repos/${encRepo(name)}`);
-export const pullRepo = (name: string) =>
-  apiPost<{ pulling: string }>(`/repos/${encRepo(name)}/pull`, {});
-export const checkoutRepo = (name: string, branch: string) =>
-  apiPost<{ checked_out: string }>(`/repos/${encRepo(name)}/checkout`, { branch });
+/** workspace 名整体 encode（不允许 `/`，作为单段 path 参数）。 */
+const encWs = (ws: string) => encodeURIComponent(ws);
+
+// P2: 仓库已迁到 ws 内——所有 repo API 路径前置 /workspaces/<ws>，对齐后端
+//     POST/GET/DELETE /api/workspaces/{ws}/repos[/{name:path}] (+ /pull, /checkout, /events)
+export const listRepos = (ws: string) =>
+  apiGet<Repo[]>(`/workspaces/${encWs(ws)}/repos`);
+export const getRepo = (ws: string, name: string) =>
+  apiGet<RepoDetail>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}`);
+export const createRepo = (
+  ws: string,
+  body: { git_url: string; branch?: string; commit?: string; name?: string; group?: string },
+) => apiPost<{ name: string }>(`/workspaces/${encWs(ws)}/repos`, body);
+export const deleteRepo = (ws: string, name: string) =>
+  apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}`);
+export const pullRepo = (ws: string, name: string) =>
+  apiPost<{ pulling: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}/pull`, {});
+export const checkoutRepo = (ws: string, name: string, branch: string) =>
+  apiPost<{ checked_out: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}/checkout`, { branch });
+
+/** CloneProgress SSE 路径——client 这层不直接消费（CloneProgress 自管 useEventSource），
+ *  暴露给组件层用，避免各处再写一遍 ws+name 拼接。 */
+export const repoEventsUrl = (ws: string, name: string) =>
+  `/api/workspaces/${encWs(ws)}/repos/${encRepo(name)}/events`;
 
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。
  *  注：此端点不经统一 request()，故不带 CSRF/401 处理——仅为兼容现有 text 调用。 */

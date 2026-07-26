@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { createRepo, ApiError } from "@/api/client";
 
 interface Props {
+  /** P2: 仓库落在 ws 内，调用 createRepo(ws, body) */
+  ws: string;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: (name: string) => void;
 }
 
-export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
+export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [branch, setBranch] = useState("");
@@ -26,7 +28,7 @@ export function AddRepoDialog({ open, onOpenChange, onCreated }: Props) {
   async function submit() {
     try {
       setBusy(true);
-      const r = await createRepo({
+      const r = await createRepo(ws, {
         git_url: url.trim(),
         branch: branch.trim() || undefined,
         commit: commit.trim() || undefined,

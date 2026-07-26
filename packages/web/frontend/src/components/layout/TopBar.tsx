@@ -17,7 +17,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { labelKey: "nav.dashboard", to: "/", end: true },
   { labelKey: "nav.workspaces", to: "/workspaces", end: true },
-  { labelKey: "nav.repos", to: "/repos", end: true },
+  // P2: 仓库入口已迁入工作区详情页的「仓库」tab，顶级 nav 撤销
   { labelKey: "nav.scan", to: "/scan/new" },
   { labelKey: "nav.settings", to: "/settings" },
 ];

@@ -1,8 +1,6 @@
 import { createBrowserRouter, useNavigate, useParams } from "react-router-dom";
 import { useEffect } from "react";
 import { WorkspaceListPage } from "./pages/WorkspaceListPage";
-import { ReposPage } from "./pages/ReposPage";
-import { RepoDetailPage } from "./pages/RepoDetailPage";
 import { ScanNewPage } from "./pages/ScanNewPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -12,6 +10,7 @@ import { ReportTab } from "./routes/WorkspaceDetail/ReportTab";
 import { DeliverablesTab } from "./routes/WorkspaceDetail/DeliverablesTab";
 import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
 import LiveTab from "./routes/WorkspaceDetail/LiveTab";
+import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
 import { apiGet } from "./api/client";
 import type { SessionData } from "./api/types";
 import { AppShell } from "./components/layout/AppShell";
@@ -44,8 +43,6 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <DashboardPage /> },
       { path: "/workspaces", element: <WorkspaceListPage /> },
-      { path: "/repos", element: <ReposPage /> },
-      { path: "/repos/*", element: <RepoDetailPage /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         path: "/p/:workspace",
@@ -57,6 +54,8 @@ export const router = createBrowserRouter([
           { path: "deliverables", element: <DeliverablesTab /> },
           { path: "logs", element: <LogsTab /> },
           { path: "live", element: <LiveTab /> },
+          // P2: 仓库迁到 ws 内（原 /repos 顶级路由撤销）
+          { path: "repos", element: <ReposTab /> },
         ],
       },
       { path: "/settings", element: <SettingsPage /> },

@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { listRepos, deleteRepo, pullRepo, ApiError } from "@/api/client";
+import { useAuth } from "@/auth/AuthContext";
 import type { Repo, RepoState } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
-import { PageHeader } from "@/components/PageHeader";
 import { StatRow, type StatItem } from "@/components/StatRow";
 import { ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -52,20 +52,37 @@ const STATE_BADGE: Record<RepoState, { key: string; cls: string }> = {
   pulling: { key: "repos.states.pulling", cls: "border-cyan/40 text-cyan" },
 };
 
-function StateCell({ repo }: { repo: Repo }) {
+function StateBadge({ ws, repo }: { ws: string; repo: Repo }) {
   const { t } = useTranslation();
-  // cloning/pulling 复用 CloneProgress（含进度条 + "clone 中" 文本，测试断言依赖）
+  // cloning/pulling 复用 CloneProgress（含进度条 + "clone 中" 文本）
   if (repo.state === "cloning" || repo.state === "pulling") {
-    return <CloneProgress name={repo.name} />;
+    return <CloneProgress ws={ws} name={repo.name} />;
   }
   const m = STATE_BADGE[repo.state];
   return <Badge variant="outline" className={cn("gap-1 font-mono", m.cls)}>{t(m.key)}</Badge>;
 }
 
+interface Props {
+  /**
+   * workspace 名。两种来源：
+   *  - 路由模式下：父组件不传，从 useParams() 取（router.tsx 里 `<ReposTab />` 不带 props）。
+   *  - 测试 / 嵌入：直接传字面值（如 `<ReposTab workspace="ws1" />`）。
+   */
+  workspace?: string;
+}
 
-
-export function ReposPage() {
+/**
+ * 工作区内的"仓库"tab：克隆/列表/pull/checkout/删除。
+ * 由原 pages/ReposPage.tsx + RepoDetailPage.tsx 合并迁入（P2：仓库迁到 ws 内）。
+ *  - 不再独立 /repos 路由（TopBar 不再有其入口）。
+ *  - 所有 API 调用带 ws 参数。
+ *  - 仓库 → RepoDetail 的二级路由也一并撤销（无独立详情页；扫描入口在新建扫描页选 repo）。
+ */
+export function ReposTab({ workspace: wsProp }: Props) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const params = useParams<{ workspace: string }>();
+  const workspace = wsProp ?? params.workspace ?? "";
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -77,25 +94,34 @@ export function ReposPage() {
 
   const refresh = useCallback(async () => {
     try {
-      setRepos(await listRepos());
+      setRepos(await listRepos(workspace));
     } catch (e) {
       if (e instanceof ApiError) toast.error(t("repos.errors.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, workspace]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // 等用户态 ready 再拉取（与 MemberManagerDialog 一致）。
+  // 在生产环境路由已包 RequireAuth，user 进入此组件时已就绪；
+  // 在测试里 AuthProvider 异步拉 /auth/me，未就绪时跳过首拉、待 user 改变再触发。
+  useEffect(() => { if (user) void refresh(); }, [refresh, user]);
   useEffect(() => () => { if (pullTimerRef.current) clearTimeout(pullTimerRef.current); }, []);
 
   async function doDelete() {
     if (!pendingDelete) return;
     try {
       setBusy(true);
-      await deleteRepo(pendingDelete);
+      await deleteRepo(workspace, pendingDelete);
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) toast.error(e.status === 409 ? t("repos.errors.inUse") : t("repos.errors.deleteFailed", { status: e.status }));
+      if (e instanceof ApiError) {
+        toast.error(
+          e.status === 409
+            ? t("repos.errors.inUse")
+            : t("repos.errors.deleteFailed", { status: e.status }),
+        );
+      }
     } finally {
       setBusy(false);
       setPendingDelete(null);
@@ -104,7 +130,7 @@ export function ReposPage() {
 
   async function doPull(name: string) {
     try {
-      await pullRepo(name);
+      await pullRepo(workspace, name);
       toast.success(t("repos.updating", { name }));
       if (pullTimerRef.current) clearTimeout(pullTimerRef.current);
       pullTimerRef.current = setTimeout(() => void refresh(), PULL_REFRESH_DELAY_MS);
@@ -144,7 +170,6 @@ export function ReposPage() {
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        <PageHeader title={t("repos.title")} subtitle={t("repos.subtitle")} />
         <StatRow stats={stats} />
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={() => setAddOpen(true)}>{t("repos.addRepo")}</Button>
@@ -197,21 +222,16 @@ export function ReposPage() {
                           const url = r.source?.url;
                           return (
                             <TableRow key={r.name} className="border-b border-border">
-                              {/* 名称：可点 + 截断（超长 group/repo hover 看全名） */}
+                              {/* 名称（不再点入 RepoDetail：P2 撤销了 /repos/* 路由） */}
                               <TableCell className="py-2 pl-4 pr-3">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Link
-                                      to={`/repos/${r.name}`}
-                                      className="block truncate text-primary hover:underline"
-                                    >
-                                      {r.name}
-                                    </Link>
+                                    <span className="block truncate font-mono text-sm">{r.name}</span>
                                   </TooltipTrigger>
                                   <TooltipContent>{r.name}</TooltipContent>
                                 </Tooltip>
                               </TableCell>
-                              {/* 来源：URL 截断 + tooltip + 复制按钮；长 URL 被右侧渐变蒙层 + 按钮覆盖，不挤压右侧列 */}
+                              {/* 来源：URL 截断 + tooltip + 复制按钮 */}
                               <TableCell className="py-2 px-3">
                                 {url ? (
                                   <div className="relative flex items-center">
@@ -242,7 +262,7 @@ export function ReposPage() {
                                 {fmtSize(r.size_bytes)}
                               </TableCell>
                               <TableCell className="whitespace-nowrap py-2 px-3">
-                                <StateCell repo={r} />
+                                <StateBadge ws={workspace} repo={r} />
                               </TableCell>
                               <TableCell className="whitespace-nowrap py-2 px-3 text-center">
                                 <span className="inline-flex gap-1">
@@ -278,7 +298,7 @@ export function ReposPage() {
           </div>
         )}
 
-        <AddRepoDialog open={addOpen} onOpenChange={setAddOpen} onCreated={() => void refresh()} />
+        <AddRepoDialog ws={workspace} open={addOpen} onOpenChange={setAddOpen} onCreated={() => void refresh()} />
 
         <Dialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
           <DialogContent>

@@ -372,7 +372,8 @@
       "report": "Report",
       "deliverables": "Deliverables",
       "logs": "Logs",
-      "live": "Live"
+      "live": "Live",
+      "repos": "Repositories"
     },
     "notFound": {
       "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
