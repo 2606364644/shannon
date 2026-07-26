@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from supernova_web.auth.dependencies import current_user, require_admin, workspace_member
+from supernova_web.auth.dependencies import current_user, require_admin, workspace_member, workspace_manager
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -78,7 +78,7 @@ async def get_workspace(ws: str, request: Request, _: User = Depends(workspace_m
 
 
 @router.delete("/{ws}")
-async def delete_workspace(ws: str, request: Request):
+async def delete_workspace(ws: str, request: Request, _: User = Depends(workspace_manager)):
     p = _workspace_path(request, ws)  # 404 if 不存在
     idx = request.app.state.indexer
     # 活跃判定改用 _status_of==running(终态优先 + heartbeat,spec §4.7)。cancel 标
@@ -90,6 +90,7 @@ async def delete_workspace(ws: str, request: Request):
         raise HTTPException(status_code=409, detail="workspace running, cancel scan first")
     shutil.rmtree(p)
     idx.set_active_pid(ws, None)
+    request.app.state.auth_store.delete_workspace_members(ws)
     return {"deleted": ws}
 
 

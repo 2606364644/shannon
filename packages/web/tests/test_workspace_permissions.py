@@ -101,3 +101,25 @@ def test_non_member_cannot_read_workspace(_prod_app):
 def test_member_can_read(_prod_app):
     alice = _login(_prod_app, "alice")
     assert alice.get("/api/workspaces/ws_alice").status_code != 403  # 200（可能空 metrics）
+
+
+# --- P1 Task 6: DELETE workspace 需 manager 权限 + 清成员 ---
+
+
+def test_member_cannot_delete_workspace(_prod_app):
+    # 让 bob 也成为 ws_alice 的 member（非 manager）
+    st = _prod_app.state.auth_store
+    st.add_workspace_member("ws_alice", st.get_user_by_username("bob").id, "member")
+    bob = _login(_prod_app, "bob")
+    tok = bob.get("/api/auth/csrf").json()["csrf_token"]
+    r = bob.delete("/api/workspaces/ws_alice", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 403
+
+
+def test_manager_delete_clears_members(_prod_app):
+    st = _prod_app.state.auth_store
+    alice = _login(_prod_app, "alice")
+    tok = alice.get("/api/auth/csrf").json()["csrf_token"]
+    r = alice.delete("/api/workspaces/ws_alice", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert st.list_workspace_members("ws_alice") == []  # 成员关系已清
