@@ -194,10 +194,13 @@ class AnthropicProvider(BaseProvider):
         """Build SDK subprocess environment variables (aligned with TS claude-executor.ts)."""
         sdk_env: dict[str, str] = {}
 
-        # Base config
-        max_tokens = os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
-        if max_tokens:
-            sdk_env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = max_tokens
+        # Base config —— P3c 阶段 0：self.config.max_output_tokens 优先（None 回落 env）
+        if self.config.max_output_tokens is not None:
+            sdk_env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(self.config.max_output_tokens)
+        else:
+            max_tokens = os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
+            if max_tokens:
+                sdk_env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = max_tokens
 
         # Provider-specific config
         if self.type == "anthropic_api":
@@ -254,6 +257,17 @@ class AnthropicProvider(BaseProvider):
 
         return sdk_env
 
+    def _resolve_max_turns(self, max_turns_override: int | None) -> int:
+        """解析 max_turns，优先级：vuln 外部 override > P3c config > CLAUDE_MAX_TURNS env > 200。
+
+        提取为纯函数便于阶段 0 测试（原内联在 _build_options:276）。
+        """
+        if max_turns_override is not None:
+            return max_turns_override
+        if self.config.max_turns is not None:
+            return self.config.max_turns
+        return int(os.getenv("CLAUDE_MAX_TURNS", "200"))
+
     def _build_options(
         self,
         cwd: str,
@@ -270,10 +284,8 @@ class AnthropicProvider(BaseProvider):
             permission_mode="bypassPermissions",  # 无交互环境必需
         )
 
-        # max_turns: high "runaway" ceiling. Single-agent pentest scans finish in
-        # tens of turns; 200 is a safety net. Tunable via CLAUDE_MAX_TURNS.
-        # B2: 外部 override 优先（vuln 专用），否则沿用 CLAUDE_MAX_TURNS。
-        max_turns = max_turns_override or int(os.getenv("CLAUDE_MAX_TURNS", "200"))
+        # max_turns: high "runaway" ceiling. 优先级见 _resolve_max_turns。
+        max_turns = self._resolve_max_turns(max_turns_override)
         options.max_turns = max_turns
 
         # 添加结构化输出:包装成 claude_agent_sdk 信封契约 {type:'json_schema', schema:{...}}。
@@ -325,9 +337,13 @@ class AnthropicProvider(BaseProvider):
         return options
 
     def _is_adaptive_thinking_enabled(self) -> bool:
-        """检查是否启用 adaptive thinking"""
-        env_value = os.getenv("CLAUDE_ADAPTIVE_THINKING", "true").lower()
-        return env_value != "false"
+        """检查是否启用 adaptive thinking。
+
+        P3c 阶段 0：self.config.adaptive_thinking 优先（None 回落 CLAUDE_ADAPTIVE_THINKING env）。
+        """
+        if self.config.adaptive_thinking is not None:
+            return self.config.adaptive_thinking
+        return os.getenv("CLAUDE_ADAPTIVE_THINKING", "true").lower() != "false"
 
     def _detect_spending_cap_behavior(self, result: ClaudeRunResult, turn_count: int) -> bool:
         """Layer 2: behavioral heuristic — low turns + zero cost + no output = suspected cap."""
