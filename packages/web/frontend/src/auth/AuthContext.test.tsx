@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { setUnauthorizedHandler } from "@/api/client";
 
 function ShowUser() {
   const { user, loading } = useAuth();
@@ -22,5 +23,33 @@ describe("AuthContext", () => {
     );
     render(<AuthProvider><ShowUser /></AuthProvider>);
     await waitFor(() => expect(screen.getByText("user:alice")).toBeTruthy());
+  });
+
+  it("login 凭证错误不触发过期跳转（由表单 catch 提示）", async () => {
+    // 根因：login 401（凭证错/用户不存在）曾因 apiPost 未 silent 而触发
+    // onUnauthorized → window.location.assign('/login?expired=1') 整页跳转，
+    // 掩盖表单错误提示 → 用户反复输错 → 「一直跳转 /login?expired=1」循环。
+    // login 调用应 silent：凭证错归 LoginPage 处理，不等于 session 过期。
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    const fm = vi.spyOn(window, "fetch").mockImplementation((url) => {
+      const s = String(url);
+      if (s.includes("/auth/csrf"))
+        return Promise.resolve(new Response(JSON.stringify({ csrf_token: "t" }), { status: 200 }));
+      if (s.includes("/auth/login"))
+        return Promise.resolve(new Response(JSON.stringify({ detail: "invalid credentials" }), { status: 401 }));
+      return Promise.resolve(new Response("{}", { status: 401 })); // /auth/me 等
+    });
+    function Probe() {
+      const { login } = useAuth();
+      return <button onClick={() => login("bad", "pw").catch(() => {})}>go</button>;
+    }
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => screen.getByRole("button", { name: "go" }));
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    await waitFor(() =>
+      expect(fm).toHaveBeenCalledWith("/api/auth/login", expect.objectContaining({ method: "POST" })),
+    );
+    expect(handler).not.toHaveBeenCalled();
   });
 });

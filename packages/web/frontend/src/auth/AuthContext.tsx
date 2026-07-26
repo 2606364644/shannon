@@ -24,8 +24,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(username: string, password: string) {
-    await apiGet("/auth/csrf");  // 拿 sn-csrf cookie（写操作 csrf header 由 client 自动注入）
-    const r = await apiPost<{ user: AuthUser }>("/auth/login", { username, password });
+    // silent: 凭证错误（401）由 LoginPage 表单提示，不触发 onUnauthorized
+    // 整页跳转 /login?expired=1——凭证错 ≠ session 过期，跳转会掩盖错误提示，
+    // 用户反复输错即表现为「一直跳转 /login?expired=1」循环。
+    await apiGet("/auth/csrf", { silent: true });  // 拿 sn-csrf cookie（写操作 csrf header 由 client 自动注入）
+    const r = await apiPost<{ user: AuthUser }>("/auth/login", { username, password }, { silent: true });
     setUser(r.user);
   }
 
