@@ -518,11 +518,18 @@
       "mediumModel": "Medium model",
       "largeModel": "Large model",
       "maxTurns": "Max turns",
-      "adaptiveThinking": "Adaptive thinking"
+      "adaptiveThinking": "Adaptive thinking",
+      "gitlabUser": "GitLab User",
+      "gitlabToken": "GitLab Token"
     },
+    "gitSection": "Git credentials (for cloning repos; blank falls back to global)",
     "apiKey": {
       "configured": "Configured (••••), leave blank to keep",
       "notConfigured": "Not configured"
+    },
+    "gitToken": {
+      "configured": "Configured (••••), leave blank to keep",
+      "notConfigured": "Not configured (blank = fall back to global)"
     },
     "save": "Save",
     "saved": "Configuration saved",

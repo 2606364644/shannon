@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAuth } from "@/auth/AuthContext";
-import { getWsConfig, putWsConfig, type WsProviderFields } from "@/api/wsConfig";
+import { getWsConfig, putWsConfig, type WsProviderFields, type WsGitFields } from "@/api/wsConfig";
 import { getMembers } from "@/api/members";
 import type { Member } from "@/api/members";
 import { ApiError } from "@/api/client";
@@ -19,6 +19,8 @@ const EMPTY: WsProviderFields = {
   small_model: null, medium_model: null, large_model: null,
   max_turns: null, adaptive_thinking: null,
 };
+
+const EMPTY_GIT: WsGitFields = { gitlab_user: null, gitlab_token: null };
 
 // 合法 provider 名（与后端 PROVIDER_SETTINGS 键一致）
 const PROVIDERS = ["anthropic_api", "openai_compatible", "bedrock", "vertex", "litellm_router"];
@@ -39,11 +41,13 @@ export default function WsSettingsTab() {
   const [cfg, setCfg] = useState<WsProviderFields>(EMPTY);
   const [members, setMembers] = useState<Member[]>([]);
   const [apiKeyInput, setApiKeyInput] = useState(""); // password 框，空=不改
+  const [gitCfg, setGitCfg] = useState<WsGitFields>(EMPTY_GIT);
+  const [gitlabTokenInput, setGitlabTokenInput] = useState(""); // password 框，空=不改
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    getWsConfig(ws).then((r) => { setCfg(r.provider); setLoaded(true); })
+    getWsConfig(ws).then((r) => { setCfg(r.provider); setGitCfg(r.git ?? EMPTY_GIT); setLoaded(true); })
       .catch(() => setLoaded(true));
     getMembers(ws).then((r) => setMembers(r.members)).catch(() => {});
   }, [ws]);
@@ -60,10 +64,16 @@ export default function WsSettingsTab() {
           ...cfg,
           api_key: apiKeyInput || undefined, // 空=不发（后端保原值）
         },
+        git: {
+          gitlab_user: gitCfg.gitlab_user,
+          gitlab_token: gitlabTokenInput || undefined, // 空=不发（后端保原值）
+        },
       });
       setApiKeyInput("");
+      setGitlabTokenInput("");
       const fresh = await getWsConfig(ws);
       setCfg(fresh.provider);
+      setGitCfg(fresh.git ?? EMPTY_GIT);
       toast.success(t("wsConfig.saved"));
     } catch (e) {
       const status = e instanceof ApiError ? e.status : 0;
@@ -115,6 +125,20 @@ export default function WsSettingsTab() {
           <Switch checked={cfg.adaptive_thinking ?? false} disabled={!canEdit}
                   onCheckedChange={(v) => setCfg({ ...cfg, adaptive_thinking: v })} />
           <Label>{t("wsConfig.fields.adaptiveThinking")}</Label>
+        </div>
+        <div className="border-t pt-4">
+          <p className="text-sm font-medium">{t("wsConfig.gitSection")}</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ws-gitlab-user">{t("wsConfig.fields.gitlabUser")}</Label>
+          <Input id="ws-gitlab-user" value={gitCfg.gitlab_user ?? ""} disabled={!canEdit}
+                 onChange={(e) => setGitCfg({ ...gitCfg, gitlab_user: e.target.value || null })} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ws-gitlab-token">{t("wsConfig.fields.gitlabToken")}</Label>
+          <Input id="ws-gitlab-token" type="password" value={gitlabTokenInput} disabled={!canEdit}
+                 placeholder={gitCfg.gitlab_token ? t("wsConfig.gitToken.configured") : t("wsConfig.gitToken.notConfigured")}
+                 onChange={(e) => setGitlabTokenInput(e.target.value)} />
         </div>
         {canEdit && (
           <Button onClick={onSave} disabled={busy}>{t("wsConfig.save")}</Button>

@@ -11,8 +11,18 @@ export interface WsProviderFields {
   max_turns: number | null;
   adaptive_thinking: boolean | null;
 }
-export interface WsConfig { provider: WsProviderFields; }
-export type WsConfigInput = { provider: Partial<WsProviderFields> };
+export interface WsGitFields {
+  gitlab_user: string | null;
+  gitlab_token: string | null; // GET 返 "••••"（已配置）或 null
+}
+export interface WsConfig {
+  provider: WsProviderFields;
+  git?: WsGitFields; // P3c 阶段 4
+}
+export type WsConfigInput = {
+  provider: Partial<WsProviderFields>;
+  git?: { gitlab_user?: string | null; gitlab_token?: string | null };
+};
 
 const enc = encodeURIComponent;
 

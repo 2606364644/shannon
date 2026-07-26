@@ -518,11 +518,18 @@
       "mediumModel": "中模型",
       "largeModel": "大模型",
       "maxTurns": "最大轮数",
-      "adaptiveThinking": "自适应思考"
+      "adaptiveThinking": "自适应思考",
+      "gitlabUser": "GitLab 用户",
+      "gitlabToken": "GitLab Token"
     },
+    "gitSection": "Git 凭据（clone 仓库用，留空回落全局）",
     "apiKey": {
       "configured": "已配置（••••），留空不改",
       "notConfigured": "未配置"
+    },
+    "gitToken": {
+      "configured": "已配置（••••），留空不改",
+      "notConfigured": "未配置（留空回落全局）"
     },
     "save": "保存",
     "saved": "配置已保存",

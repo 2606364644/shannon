@@ -77,4 +77,40 @@ describe("WsSettingsTab", () => {
     await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
     expect(screen.queryByText("wsConfig.save")).toBeNull();
   });
+
+  it("已配置 gitlab_token → git 段显脱敏占位", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({
+        provider: EMPTY_PROVIDER,
+        git: { gitlab_user: "bot", gitlab_token: "••••" },
+      })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("wsConfig.gitToken.configured")).toBeInTheDocument();
+  });
+
+  it("填 gitlab_user + 保存 → PUT body 含 git.gitlab_user", async () => {
+    let putBody: { git?: { gitlab_user?: string | null } } | null = null;
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({
+        provider: EMPTY_PROVIDER,
+        git: { gitlab_user: null, gitlab_token: null },
+      })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+      http.put("/api/workspaces/:ws/config", async ({ request }) => {
+        putBody = await request.json() as { git?: { gitlab_user?: string | null } };
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.save")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("wsConfig.fields.gitlabUser"), { target: { value: "bot-a" } });
+    fireEvent.click(screen.getByText("wsConfig.save"));
+    await waitFor(() => expect(putBody).not.toBeNull());
+    expect(putBody!.git!.gitlab_user).toBe("bot-a");
+  });
 });
