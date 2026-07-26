@@ -31,7 +31,9 @@ def _login(c):
 
 def test_protected_routes_require_auth(app_and_client):
     _, c = app_and_client
-    for path in ["/api/workspaces", "/api/repos", "/api/multi-configs", "/api/system-status"]:
+    # P2: repos 路由迁到 /api/workspaces/{ws}/repos 下（/api/repos 已不存在）。
+    # router 仍挂 dependencies=_require_auth，未登录访问任一 repos 子路径都应 401。
+    for path in ["/api/workspaces", "/api/workspaces/ws1/repos", "/api/multi-configs", "/api/system-status"]:
         assert c.get(path).status_code == 401, path
 
 

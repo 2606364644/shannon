@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from supernova_web.auth.dependencies import workspace_member
+from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 from supernova_web.components.repo_manager import TooManyClones
 
-router = APIRouter(prefix="/api/repos", tags=["repos"])
+router = APIRouter(prefix="/api/workspaces", tags=["repos"])
 
 
 class CreateRepoBody(BaseModel):
@@ -24,18 +26,19 @@ class CheckoutBody(BaseModel):
     branch: str
 
 
-@router.get("")
-async def list_repos(request: Request):
-    return request.app.state.repo_manager.list_repos()
+@router.get("/{ws}/repos")
+async def list_repos(ws: str, request: Request, _: User = Depends(workspace_member)):
+    return request.app.state.repo_manager.list_repos(ws)
 
 
-@router.post("", status_code=202)
-async def create_repo(body: CreateRepoBody, request: Request):
+@router.post("/{ws}/repos", status_code=202)
+async def create_repo(ws: str, body: CreateRepoBody, request: Request,
+                      _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
     try:
-        name = await rm.clone(body.git_url, body.branch, body.commit, body.name, body.group)
-    except PermissionError as e:
-        raise HTTPException(503, str(e))
+        name = await rm.clone(ws, body.git_url, body.branch, body.commit, body.name, body.group)
+    except PermissionError:
+        raise HTTPException(503, "未配置 git 凭据（GITLAB_USER/TOKEN）")
     except ValueError as e:        # 已存在
         raise HTTPException(409, str(e))
     except TooManyClones as e:
@@ -45,13 +48,15 @@ async def create_repo(body: CreateRepoBody, request: Request):
 
 # 仓库名可为 group/repo（含 '/'），故用 {name:path} 吃整段路径。带后缀的具体路由
 # （events/pull/checkout）必须声明在 GET /{name:path} 之前——{name:path} 贪婪匹配
-# 否则会吞掉后缀（/api/repos/foo/events 被当 name="foo/events"）。先声明的先匹配。
-@router.get("/{name:path}/events")
-async def repo_events(name: str, request: Request):
+# 否则会吞掉后缀（/api/workspaces/{ws}/repos/foo/events 被当 name="foo/events"）。
+# 先声明的先匹配。
+@router.get("/{ws}/repos/{name:path}/events")
+async def repo_events(ws: str, name: str, request: Request,
+                      _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
-    if rm.get_repo(name) is None:
+    if rm.get_repo(ws, name) is None:
         raise HTTPException(404, "repo not found")
-    ndjson = rm._repo_dir(name) / "clone.ndjson"
+    ndjson = rm._repo_dir(ws, name) / "clone.ndjson"
     last = request.headers.get("Last-Event-ID")
     last_offset = int(last) if last else None
 
@@ -81,42 +86,48 @@ async def repo_events(name: str, request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-@router.get("/{name:path}")
-async def get_repo(name: str, request: Request):
-    repo = request.app.state.repo_manager.get_repo(name)
+@router.get("/{ws}/repos/{name:path}")
+async def get_repo(ws: str, name: str, request: Request,
+                   _: User = Depends(workspace_member)):
+    repo = request.app.state.repo_manager.get_repo(ws, name)
     if repo is None:
         raise HTTPException(404, "repo not found")
     return repo
 
 
-@router.delete("/{name:path}")
-async def delete_repo(name: str, request: Request):
+@router.delete("/{ws}/repos/{name:path}")
+async def delete_repo(ws: str, name: str, request: Request,
+                      _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
     sm = request.app.state.scan_manager
-    if name in sm.active_repo_sources():
+    # T2 期间 active_repo_sources() 仍返 set[str]（仅 name），(ws, name) in 永为 False；
+    # T3 把返回类型改为 set[tuple[str, str]] 后此门才生效（latent no-op, 见 plan）。
+    if (ws, name) in sm.active_repo_sources():
         raise HTTPException(409, "仓库正被扫描引用")
     try:
-        await rm.delete(name)
+        await rm.delete(ws, name)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"deleted": name}
 
 
-@router.post("/{name:path}/pull", status_code=202)
-async def pull_repo(name: str, request: Request):
+@router.post("/{ws}/repos/{name:path}/pull", status_code=202)
+async def pull_repo(ws: str, name: str, request: Request,
+                    _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
     try:
-        await rm.pull(name)
+        await rm.pull(ws, name)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"pulling": name}
 
 
-@router.post("/{name:path}/checkout")
-async def checkout_repo(name: str, body: CheckoutBody, request: Request):
+@router.post("/{ws}/repos/{name:path}/checkout")
+async def checkout_repo(ws: str, name: str, body: CheckoutBody, request: Request,
+                        _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
     try:
-        await rm.checkout(name, body.branch)
+        await rm.checkout(ws, name, body.branch)
     except ValueError as e:
         raise HTTPException(422, str(e))
     return {"checked_out": body.branch}
