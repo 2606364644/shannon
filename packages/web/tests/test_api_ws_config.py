@@ -101,3 +101,34 @@ def test_put_non_manager_403(_app):
               json={"provider": {"ai_provider": "openai_compatible"}},
               headers={"X-CSRF-Token": tok})
     assert r.status_code == 403
+
+
+# ---- P3c 阶段 4：git 段（GET 脱敏 / PUT）----
+
+def test_put_then_get_masks_gitlab_token(authed_client, tmp_workspaces):
+    """写 git 凭据 → GET 返 gitlab_token 脱敏。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "provider": {},
+        "git": {"gitlab_user": "bot-a", "gitlab_token": "glpat-secret"},
+    }, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    g = authed_client.get("/api/workspaces/ws-a/config").json()["git"]
+    assert g["gitlab_user"] == "bot-a"
+    assert g["gitlab_token"] == "••••"     # 脱敏
+
+
+def test_put_empty_gitlab_token_keeps_existing(authed_client, tmp_workspaces):
+    """gitlab_token 空串/缺省 = 不改（保留原值）。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "provider": {}, "git": {"gitlab_token": "glpat-orig"},
+    }, headers={"X-CSRF-Token": tok})
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "provider": {}, "git": {"gitlab_user": "bot-a"},   # 不带 token
+    }, headers={"X-CSRF-Token": tok})
+    g = authed_client.get("/api/workspaces/ws-a/config").json()["git"]
+    assert g["gitlab_token"] == "••••"     # 保留原值
+    assert g["gitlab_user"] == "bot-a"
