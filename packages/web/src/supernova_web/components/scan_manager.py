@@ -130,10 +130,8 @@ class ScanManager:
         """
         client = await Client.connect(self._temporal_address())
         workflow_id = self._resolve_workflow_id(ws)
-        # P3c 阶段 1：从全局 env 构造 provider_config 穿线（行为不变；阶段 2 改为按 ws 解析）。
-        from dataclasses import asdict
-        from supernova_core.agents.providers import build_provider_config
-        provider_config = asdict(build_provider_config())
+        # P3c 阶段 2：按 ws 解析 provider_config（ws_config_store 非None）或全局 env 兜底。
+        provider_config = self._resolve_provider_config(ws)
         inp = PipelineInput(
             repo_path=target or "",
             web_url=req.url or "",
@@ -149,6 +147,20 @@ class ScanManager:
         # 失败分支(start_workflow 抛)不会到达此处 → 提交失败不写 submitted_at.
         self._mark_submitted_at(self._workspaces_dir / ws)
         return handle
+
+    def _resolve_provider_config(self, ws: str) -> dict:
+        """P3c 阶段 2：per-ws 解析（ws_config_store）；None → 全局 env 兜底（阶段1/CLI）。
+
+        ws_config_store 非None 时先 validate_ws_config fail-fast（非法 ai_provider 不提交），
+        再 resolve_provider_config 拼「全局默认 + ws 覆盖」。None（CLI/旧测试）走全局 env。
+        """
+        if self._ws_config_store is not None:
+            from .ws_config_store import validate_ws_config
+            validate_ws_config(self._ws_config_store.read(ws))
+            return self._ws_config_store.resolve_provider_config(ws)
+        from dataclasses import asdict
+        from supernova_core.agents.providers import build_provider_config
+        return asdict(build_provider_config())
 
     def _resolve_workflow_id(self, ws: str) -> str:
         """读 session.json top-level resumeAttempts, 算 -resume-N 后缀(workflow_id 提交时定).
