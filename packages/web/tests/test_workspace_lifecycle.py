@@ -60,6 +60,19 @@ def test_scan_requires_existing_workspace(_app, monkeypatch):
     assert r.status_code == 422  # ws 不存在
 
 
+def test_created_workspace_visible_in_list(_app):
+    # final-review I1: POST /api/workspaces 建的 ws 必须在 GET /api/workspaces 可见。
+    # create_workspace 原本只 mkdir + add_workspace_member, 未写 session.json ->
+    # list_workspaces 经 SessionManager.list_workspaces 过滤 (p/session.json).exists()
+    # -> 新建 ws 不可见。修复: create_workspace 写最小 session.json(status=completed)。
+    c = _login(_app, "admin")
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    r = c.post("/api/workspaces", json={"name": "ws1"}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 201
+    names = [w["name"] for w in c.get("/api/workspaces").json()]
+    assert "ws1" in names
+
+
 def test_scan_requires_membership(_app, monkeypatch):
     admin_c = _login(_app, "admin")
     atok = admin_c.get("/api/auth/csrf").json()["csrf_token"]

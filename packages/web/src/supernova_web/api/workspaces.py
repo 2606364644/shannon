@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -37,6 +38,19 @@ async def create_workspace(body: CreateWorkspaceIn, request: Request,
     if ws_dir.exists():
         raise HTTPException(409, "workspace already exists")
     ws_dir.mkdir(parents=True)
+    # 写最小 session.json 使新建 ws 在 GET /api/workspaces 可见(final-review I1)。
+    # list_workspaces 经 SessionManager.list_workspaces 过滤 (p/session.json).exists();
+    # 不写则新建 ws 不可见, admin 无法导航/分配成员。
+    # status=completed(非 running): _status_of 视 completed 为终态 -> 返回 completed,
+    # 对未扫描的空 ws 正确(不显示 spinner)。不用 SessionManager.create_workspace
+    # (它写 status=running, 对未扫描 ws 错误显示运行中)。
+    (ws_dir / "session.json").write_text(json.dumps({
+        "status": "completed",
+        "scan_type": "whitebox",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "web_url": "",
+        "repo_path": "",
+    }), encoding="utf-8")
     request.app.state.auth_store.add_workspace_member(ws, user.id, "manager")
     return {"name": ws}
 
