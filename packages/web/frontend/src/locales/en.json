@@ -27,7 +27,10 @@
     "logout": "Sign out",
     "sessionExpired": "Session expired, please sign in again",
     "sessionTtlHint": "Session valid for 12 hours",
-    "role": { "admin": "Admin", "user": "User" }
+    "role": {
+      "admin": "Admin",
+      "user": "User"
+    }
   },
   "members": {
     "title": "Members",
@@ -356,7 +359,9 @@
     },
     "errors": {
       "loadFailed": "Status load failed: {{error}}"
-    }
+    },
+    "perWsTitle": "Per-Workspace Config",
+    "perWsHint": "Per-workspace configuration is edited on each workspace's Config page (workspace detail → config gear)."
   },
   "workspaceDetail": {
     "backToList": "Back to list",
@@ -500,5 +505,33 @@
   "fileTree": {
     "empty": "(empty)",
     "large": "(large)"
+  },
+  "wsConfig": {
+    "title": "Workspace Config",
+    "subtitle": "Override global provider config; empty fields fall back to global defaults.",
+    "fields": {
+      "aiProvider": "AI Provider",
+      "apiKey": "API Key",
+      "baseUrl": "Base URL",
+      "model": "Model",
+      "smallModel": "Small model",
+      "mediumModel": "Medium model",
+      "largeModel": "Large model",
+      "maxTurns": "Max turns",
+      "adaptiveThinking": "Adaptive thinking"
+    },
+    "apiKey": {
+      "configured": "Configured (••••), leave blank to keep",
+      "notConfigured": "Not configured"
+    },
+    "save": "Save",
+    "saved": "Configuration saved",
+    "errors": {
+      "forbidden": "No permission to modify config",
+      "saveFailed": "Save failed",
+      "invalid": "Invalid configuration"
+    },
+    "fallbackHint": "Blank = fall back to global default",
+    "openSettings": "Workspace config"
   }
 }

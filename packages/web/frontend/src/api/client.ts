@@ -57,6 +57,8 @@ async function request<T>(path: string, init?: RequestInit, opts?: ReqOptions): 
 export const apiGet = <T>(path: string, opts?: ReqOptions) => request<T>(path, undefined, opts);
 export const apiPost = <T>(path: string, body: unknown, opts?: ReqOptions) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body) }, opts);
+export const apiPut = <T>(path: string, body: unknown, opts?: ReqOptions) =>
+  request<T>(path, { method: "PUT", body: JSON.stringify(body) }, opts);
 export const apiDelete = <T>(path: string, opts?: ReqOptions) =>
   request<T>(path, { method: "DELETE" }, opts);
 

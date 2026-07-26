@@ -11,6 +11,7 @@ import { DeliverablesTab } from "./routes/WorkspaceDetail/DeliverablesTab";
 import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
 import LiveTab from "./routes/WorkspaceDetail/LiveTab";
 import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
+import WsSettingsTab from "./routes/WorkspaceDetail/WsSettingsTab";
 import { apiGet } from "./api/client";
 import type { SessionData } from "./api/types";
 import { AppShell } from "./components/layout/AppShell";
@@ -56,6 +57,8 @@ export const router = createBrowserRouter([
           { path: "live", element: <LiveTab /> },
           // P2: 仓库迁到 ws 内（原 /repos 顶级路由撤销）
           { path: "repos", element: <ReposTab /> },
+          // P3c 阶段 2：per-ws 配置页（header 齿轮入口）
+          { path: "settings", element: <WsSettingsTab /> },
         ],
       },
       { path: "/settings", element: <SettingsPage /> },

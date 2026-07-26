@@ -27,7 +27,10 @@
     "logout": "登出",
     "sessionExpired": "会话已过期，请重新登录",
     "sessionTtlHint": "会话有效期 12 小时",
-    "role": { "admin": "管理员", "user": "用户" }
+    "role": {
+      "admin": "管理员",
+      "user": "用户"
+    }
   },
   "members": {
     "title": "成员管理",
@@ -356,7 +359,9 @@
     },
     "errors": {
       "loadFailed": "状态加载失败：{{error}}"
-    }
+    },
+    "perWsTitle": "Per-Workspace 配置",
+    "perWsHint": "per-workspace 配置在各工作区的「配置」页编辑（ws 详情 → 配置齿轮）。"
   },
   "workspaceDetail": {
     "backToList": "返回列表",
@@ -500,5 +505,33 @@
   "fileTree": {
     "empty": "（空）",
     "large": "（大）"
+  },
+  "wsConfig": {
+    "title": "工作区配置",
+    "subtitle": "覆盖全局 provider 配置；留空字段回落全局默认。",
+    "fields": {
+      "aiProvider": "AI 引擎",
+      "apiKey": "API 密钥",
+      "baseUrl": "基础 URL",
+      "model": "模型",
+      "smallModel": "小模型",
+      "mediumModel": "中模型",
+      "largeModel": "大模型",
+      "maxTurns": "最大轮数",
+      "adaptiveThinking": "自适应思考"
+    },
+    "apiKey": {
+      "configured": "已配置（••••），留空不改",
+      "notConfigured": "未配置"
+    },
+    "save": "保存",
+    "saved": "配置已保存",
+    "errors": {
+      "forbidden": "无权修改配置",
+      "saveFailed": "保存失败",
+      "invalid": "配置不合法"
+    },
+    "fallbackHint": "留空 = 回落全局默认",
+    "openSettings": "工作区配置"
   }
 }

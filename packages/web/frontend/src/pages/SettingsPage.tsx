@@ -74,6 +74,13 @@ export function SettingsPage() {
           <div>{t("settings.aboutDesc")}</div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("settings.perWsTitle")}</CardTitle></CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          <div>{t("settings.perWsHint")}</div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

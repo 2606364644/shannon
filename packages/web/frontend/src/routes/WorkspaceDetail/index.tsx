@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Settings } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MemberManagerDialog } from "@/components/MemberManagerDialog";
 import { apiGet, ApiError } from "@/api/client";
@@ -76,6 +77,13 @@ export default function WorkspaceDetail() {
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-mono text-xl">{workspace}</h2>
           {workspace && <MemberManagerDialog ws={workspace} />}
+          {workspace && (
+            <Button variant="outline" size="icon" asChild>
+              <Link to="settings" aria-label={t("wsConfig.openSettings")} title={t("wsConfig.openSettings")}>
+                <Settings className="size-4" />
+              </Link>
+            </Button>
+          )}
           {loading ? (
             <Skeleton className="h-5 w-40" />
           ) : (
