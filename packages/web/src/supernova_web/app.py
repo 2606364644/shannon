@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
@@ -12,9 +12,24 @@ from .config import get_config
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # auth: 启动 seed 预置账号 + 周期清理过期 session
+    from .auth.seed import seed_users
+    import asyncio
+    seed_users(app.state.auth_store, app.state.config.users_seed_file)
+
+    async def _purge_loop():
+        while True:
+            try:
+                app.state.session_manager.purge_expired()
+            except Exception:
+                pass
+            await asyncio.sleep(3600)
+    app.state._purge_task = asyncio.create_task(_purge_loop())
+
     app.state.repo_manager.migrate_legacy()  # 旧 repos 目录纳入管理
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
     yield
+    app.state._purge_task.cancel()
     # shutdown（任务 9 接入 ScanManager 取消在途扫描后填充）
 
 
@@ -108,13 +123,15 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
         cfg.repos_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
-    app.include_router(workspaces.router)
-    app.include_router(scan.router)
-    app.include_router(multi_configs.router)
-    app.include_router(repos.router)
-    app.include_router(events.router)
-    app.include_router(fs.router)
-    app.include_router(system_status.router)
+    from .auth.dependencies import current_user
+    _require_auth = [Depends(current_user)]
+    app.include_router(workspaces.router, dependencies=_require_auth)
+    app.include_router(scan.router, dependencies=_require_auth)
+    app.include_router(multi_configs.router, dependencies=_require_auth)
+    app.include_router(repos.router, dependencies=_require_auth)
+    app.include_router(events.router, dependencies=_require_auth)
+    app.include_router(fs.router, dependencies=_require_auth)
+    app.include_router(system_status.router, dependencies=_require_auth)
 
     from .auth import routes as auth_routes
     app.include_router(auth_routes.router)

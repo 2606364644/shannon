@@ -21,7 +21,23 @@ def _make_dist(tmp_path: Path) -> Path:
 def _client_with_dist(monkeypatch, tmp_path):
     dist = _make_dist(tmp_path)
     monkeypatch.setenv("SUPERNOVA_WEB_FRONTEND_DIR", str(dist))
+    # T11 后业务路由要求登录；测试走 HTTP，关掉 cookie Secure 标志才能登
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    from supernova_web import config as cfg_mod
+    cfg_mod.get_config.cache_clear()
     return TestClient(create_app())
+
+
+def _login(c, username="tester", password="test-pw"):
+    """T11 后业务 /api/* 要求登录；为 client 创建用户并登录，返回 csrf token（写操作用）。"""
+    from supernova_web.auth.passwords import hash_password
+    store = c.app.state.auth_store
+    if store.get_user_by_username(username) is None:
+        store.create_user(username, hash_password(password))
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": username, "password": password},
+           headers={"X-CSRF-Token": tok})
+    return tok
 
 
 def test_serves_index_at_root(monkeypatch, tmp_path):
@@ -40,6 +56,8 @@ def test_health_not_swallowed(monkeypatch, tmp_path):
 
 def test_api_routes_not_swallowed(monkeypatch, tmp_path):
     client = _client_with_dist(monkeypatch, tmp_path)
+    # T11 后 /api/workspaces 要求登录；登录后该路由仍应返 JSON（不被 SPA fallback 吞掉）
+    _login(client)
     r = client.get("/api/workspaces")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/json")

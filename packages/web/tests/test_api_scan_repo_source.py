@@ -12,9 +12,26 @@ def _app_with_repos(tmp_path, monkeypatch, repos_state):
     for name, state in repos_state.items():
         d = tmp_path / "repos" / name; d.mkdir()
         (d / ".supernova-repo.json").write_text(json.dumps({"name": name, "state": state}))
+    # T11 auth cascade: auth.db 落在 workspaces_dir/auth.db，必须先建好该目录，
+    # 否则 AuthStore.init_schema() → sqlite3.OperationalError。
+    (tmp_path / "workspaces").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     from supernova_web.config import get_config; get_config.cache_clear()
     return create_app()
+
+
+def _authed(app):
+    """构造已登录的 TestClient（仅 test_scan_git_kind_422 用）。"""
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        store.create_user("tester", hash_password("test-pw"))
+    c = TestClient(app)
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": "tester", "password": "test-pw"},
+           headers={"X-CSRF-Token": tok})
+    return c
 
 
 def test_resolve_repo_ready(tmp_path, monkeypatch):
@@ -43,6 +60,9 @@ def test_resolve_repo_missing_raises(tmp_path, monkeypatch):
 
 def test_scan_git_kind_422(tmp_path, monkeypatch):
     app = _app_with_repos(tmp_path, monkeypatch, {})
-    r = TestClient(app).post("/api/scan", json={
-        "type": "whitebox", "source": {"kind": "git", "value": "https://x.git"}, "url": "http://x"})
+    client = _authed(app)
+    tok = client.get("/api/auth/csrf").json()["csrf_token"]
+    r = client.post("/api/scan", json={
+        "type": "whitebox", "source": {"kind": "git", "value": "https://x.git"}, "url": "http://x"},
+        headers={"X-CSRF-Token": tok})
     assert r.status_code == 422

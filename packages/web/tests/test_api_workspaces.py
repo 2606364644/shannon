@@ -12,9 +12,9 @@ def _ws(root, name, **kw):
     (ws / "session.json").write_text(json.dumps(data))
 
 
-def test_list_and_get(app_with_ws, tmp_workspaces):
+def test_list_and_get(authed_client, tmp_workspaces):
     _ws(tmp_workspaces, "A")
-    client = TestClient(app_with_ws)
+    client = authed_client
     r = client.get("/api/workspaces")
     assert r.status_code == 200
     assert any(w["name"] == "A" for w in r.json())
@@ -22,7 +22,7 @@ def test_list_and_get(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/nope").status_code == 404
 
 
-def test_report_deliverables_logs(app_with_ws, tmp_workspaces):
+def test_report_deliverables_logs(authed_client, tmp_workspaces):
     _ws(tmp_workspaces, "A")
     ws = tmp_workspaces / "A"
     dl = ws / "deliverables" / "whitebox"
@@ -30,7 +30,7 @@ def test_report_deliverables_logs(app_with_ws, tmp_workspaces):
     (dl / "comprehensive_security_assessment_report.md").write_text("# R")
     (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [
         {"ID": "XSS-01", "vulnerability_type": "xss", "externally_exploitable": False}]}))
-    client = TestClient(app_with_ws)
+    client = authed_client
     assert client.get("/api/workspaces/A/report").text == "# R"
     s = client.get("/api/workspaces/A/deliverables").json()
     # 新 DeliverablesSummary shape(非旧 vuln_queues/reports)
@@ -41,7 +41,7 @@ def test_report_deliverables_logs(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/A/deliverables/missing.json").status_code == 404
 
 
-def test_deliverables_summary_shape(app_with_ws, tmp_workspaces):
+def test_deliverables_summary_shape(authed_client, tmp_workspaces):
     """deliverables 端点返 DeliverablesSummary {track, files, aggregated_vulnerabilities, notes}。
     files 排除 .git/schemas;kind 判定;path 含 track 前缀(#5,#7)。"""
     _ws(tmp_workspaces, "D")
@@ -54,7 +54,7 @@ def test_deliverables_summary_shape(app_with_ws, tmp_workspaces):
     (dl / "empty_authz_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": []}))
     (dl / ".git").mkdir()
     (dl / ".git" / "config").write_text("x")
-    s = TestClient(app_with_ws).get("/api/workspaces/D/deliverables").json()
+    s = authed_client.get("/api/workspaces/D/deliverables").json()
     assert s["track"] == "whitebox"
     assert "vuln_queues" not in s and "reports" not in s  # 旧 shape 移除
     paths = [f["path"] for f in s["files"]]
@@ -66,7 +66,7 @@ def test_deliverables_summary_shape(app_with_ws, tmp_workspaces):
     assert s["notes"]["injection_has_no_queue"] is True  # 无 injection queue
 
 
-def test_deliverables_file_preview_dual_mode(app_with_ws, tmp_workspaces):
+def test_deliverables_file_preview_dual_mode(authed_client, tmp_workspaces):
     """deliverables 端点双模式:无 path→summary JSON;?path=whitebox/xxx→文件内容 text/plain(#6)。
     前端 FilePreview apiGetText('/deliverables?path=...') 打这个端点。"""
     _ws(tmp_workspaces, "F")
@@ -75,7 +75,7 @@ def test_deliverables_file_preview_dual_mode(app_with_ws, tmp_workspaces):
     dl.mkdir(parents=True)
     (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [{"ID": "X"}]}))
     (dl / "report.md").write_text("# R")
-    client = TestClient(app_with_ws)
+    client = authed_client
     # 无 path → JSON summary
     assert client.get("/api/workspaces/F/deliverables").headers["content-type"].startswith("application/json")
     # ?path= md → text/plain + 原样内容
@@ -92,7 +92,7 @@ def test_deliverables_file_preview_dual_mode(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/F/deliverables?path=whitebox/nope.json").status_code == 404
 
 
-def test_logs_dual_mode(app_with_ws, tmp_workspaces):
+def test_logs_dual_mode(authed_client, tmp_workspaces):
     """logs 端点双模式:无 file→{files};有 file→{content}。参数 file 对齐前端 LogsTab ?file=(#8,#9)。"""
     _ws(tmp_workspaces, "L")
     ws = tmp_workspaces / "L"
@@ -101,7 +101,7 @@ def test_logs_dual_mode(app_with_ws, tmp_workspaces):
     agents = ws / "agents"
     agents.mkdir()
     (agents / "1782_recon_attempt-1.log").write_text("agent content")
-    client = TestClient(app_with_ws)
+    client = authed_client
     files = client.get("/api/workspaces/L/logs").json()["files"]
     assert "workflow.log" in files
     assert "activity_failures.log" in files
@@ -112,7 +112,7 @@ def test_logs_dual_mode(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/L/logs?file=nope.log").status_code == 404
 
 
-def test_report_appends_poc_when_present(app_with_ws, tmp_workspaces):
+def test_report_appends_poc_when_present(authed_client, tmp_workspaces):
     """direction a1: report appends PoC md after comprehensive report. PoC keeps its
     own '# 可利用漏洞 PoC 集合' heading, --- separator, ```bash/```http fences preserved
     for the frontend's existing rehype-highlight render (zero frontend change)."""
@@ -122,28 +122,28 @@ def test_report_appends_poc_when_present(app_with_ws, tmp_workspaces):
     (dl / "comprehensive_security_assessment_report.md").write_text("# 综合报告\n\n正文")
     (dl / "exploitable_poc_collection.md").write_text(
         "# 可利用漏洞 PoC 集合（白盒）\n\n```bash\ncurl -i -X GET 'https://t/x'\n```")
-    body = TestClient(app_with_ws).get("/api/workspaces/P/report").text
+    body = authed_client.get("/api/workspaces/P/report").text
     assert body.startswith("# 综合报告")
     assert "---" in body                            # 分隔线 <hr>
     assert "# 可利用漏洞 PoC 集合（白盒）" in body     # PoC 自带标题保留
     assert "```bash" in body and "curl -i" in body   # 代码块保留
 
 
-def test_report_without_poc_unchanged(app_with_ws, tmp_workspaces):
+def test_report_without_poc_unchanged(authed_client, tmp_workspaces):
     """无 PoC md（扫描中断 / PoC activity 未跑）-> report 只返综合报告，不拼接。"""
     _ws(tmp_workspaces, "Q")
     dl = (tmp_workspaces / "Q" / "deliverables" / "whitebox")
     dl.mkdir(parents=True)
     (dl / "comprehensive_security_assessment_report.md").write_text("# R")
-    assert TestClient(app_with_ws).get("/api/workspaces/Q/report").text == "# R"
+    assert authed_client.get("/api/workspaces/Q/report").text == "# R"
 
 
-def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
+def test_report_no_report_returns_empty_200(authed_client, tmp_workspaces):
     """workspace 存在但无报告产物 → 200 + 空文本(前端 ReportTab Empty「报告尚未生成」契约),
     非 404。404 保留给 workspace 不存在(_workspace_path 已抛)。
     回归:曾因后端对无报告返 404,前端把 404 当加载错误显示「报告加载失败:ApiError: API 404」。"""
     _ws(tmp_workspaces, "NoReport")  # 有 session.json,无 deliverables
-    client = TestClient(app_with_ws)
+    client = authed_client
     r = client.get("/api/workspaces/NoReport/report")
     assert r.status_code == 200
     assert r.text == ""
@@ -151,7 +151,7 @@ def test_report_no_report_returns_empty_200(app_with_ws, tmp_workspaces):
     assert client.get("/api/workspaces/nope/report").status_code == 404
 
 
-def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
+def test_get_workspace_returns_session_data(authed_client, tmp_workspaces):
     """get_workspace 返 SessionData(含 metrics.phases/agents + session 嵌套),非 indexer row。
     OverviewTab 依赖 metrics 渲染阶段瀑布 + agent 账本(#4)。"""
     _ws(tmp_workspaces, "A",
@@ -163,7 +163,7 @@ def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
             "agents": {"recon": {"duration_ms": 1000, "cost_usd": 1.5, "success": True, "attempt_number": 1, "model": "x"}},
         },
         session={"id": "A", "status": "completed", "createdAt": "2026-05-29T10:00:00Z"})
-    d = TestClient(app_with_ws).get("/api/workspaces/A").json()
+    d = authed_client.get("/api/workspaces/A").json()
     # SessionData 字段
     assert d["repo_path"] == "/repo"
     assert d["scan_type"] == "whitebox"
@@ -181,7 +181,7 @@ def test_get_workspace_returns_session_data(app_with_ws, tmp_workspaces):
     assert "is_correlation" not in d
 
 
-def test_get_workspace_recently_active_not_500(app_with_ws, tmp_workspaces):
+def test_get_workspace_recently_active_not_500(authed_client, tmp_workspaces):
     """回归:get_workspace 对 host CLI 起的活 scan(web 看不到 pid,但 heartbeat fresh)
     必须返 200 + status=running,不得 500。曾因 _status_of 改签名收 Path 但此端点仍传 str,
     触发 `'str' object has no attribute 'name'`(completed/failed 态在首行 return 不触发,
@@ -192,12 +192,12 @@ def test_get_workspace_recently_active_not_500(app_with_ws, tmp_workspaces):
         created_at=_time.time(), completed_at=None)
     ws = tmp_workspaces / "HostAlive"
     (ws / "heartbeat").write_text(f"{_time.time()}\n")  # fresh heartbeat → scan 存活
-    r = TestClient(app_with_ws).get("/api/workspaces/HostAlive")
+    r = authed_client.get("/api/workspaces/HostAlive")
     assert r.status_code == 200
     assert r.json()["status"] == "running"
 
 
-def test_get_workspace_normalizes_legacy_agents(app_with_ws, tmp_workspaces):
+def test_get_workspace_normalizes_legacy_agents(authed_client, tmp_workspaces):
     """get_workspace 归一化旧格式 metrics.agents(juice-shop_whitebox-* 实例)。
     回归:旧格式 final_duration_ms/total_cost_usd/status/attempts[] 直接透传时,
     前端 OverviewTab a.cost_usd.toFixed() 崩(Cannot read properties of undefined)。"""
@@ -215,7 +215,7 @@ def test_get_workspace_normalizes_legacy_agents(app_with_ws, tmp_workspaces):
             },
         },
     })
-    d = TestClient(app_with_ws).get("/api/workspaces/Legacy").json()
+    d = authed_client.get("/api/workspaces/Legacy").json()
     a = d["metrics"]["agents"]["recon"]
     # 归一化到新 schema(types.ts SessionMetrics.agents)
     assert a["cost_usd"] == 8.79            # total_cost_usd → cost_usd

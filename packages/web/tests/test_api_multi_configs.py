@@ -12,16 +12,25 @@ correlation:
 """
 
 
-def test_crud(app_with_ws, tmp_workspaces):
-    client = TestClient(app_with_ws)
-    assert client.post("/api/multi-configs", json={"name": "demo", "content": _VALID}).status_code == 201
+def _csrf(c):
+    """T11 后写操作（POST）需 X-CSRF-Token header。"""
+    return c.get("/api/auth/csrf").json()["csrf_token"]
+
+
+def test_crud(authed_client, tmp_workspaces):
+    client = authed_client
+    tok = _csrf(client)
+    assert client.post("/api/multi-configs", json={"name": "demo", "content": _VALID},
+                       headers={"X-CSRF-Token": tok}).status_code == 201
     assert "demo" in client.get("/api/multi-configs").json()
     got = client.get("/api/multi-configs/demo").json()
     assert got["content"] == _VALID
 
 
-def test_invalid_returns_422(app_with_ws):
-    client = TestClient(app_with_ws)
-    r = client.post("/api/multi-configs", json={"name": "bad", "content": "repos: not-a-mapping\n"})
+def test_invalid_returns_422(authed_client):
+    client = authed_client
+    tok = _csrf(client)
+    r = client.post("/api/multi-configs", json={"name": "bad", "content": "repos: not-a-mapping\n"},
+                    headers={"X-CSRF-Token": tok})
     assert r.status_code == 422
     assert isinstance(r.json()["detail"], list)

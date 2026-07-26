@@ -10,14 +10,40 @@ def _app(tmp_path, monkeypatch, repos):
     for name, state in repos.items():
         d = tmp_path / "repos" / name; d.mkdir()
         (d / ".supernova-repo.json").write_text(json.dumps({"name": name, "state": state}))
+        # 注：commit 628f2844（pre-T11）把 list_repos 顶层判定从 _is_repo 改为
+        # (sub/.git).exists()；测试 setup 加 .git 模拟真 clone 产物（装配补全，非断言改动）。
+        (d / ".git").mkdir()
+    # T11 auth cascade: auth.db 落在 workspaces_dir/auth.db，必须先建好该目录，
+    # 否则 AuthStore.init_schema() → sqlite3.OperationalError。
+    (tmp_path / "workspaces").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_path))
+    # cookie_secure 关掉，TestClient HTTP 才能登
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     from supernova_web.config import get_config; get_config.cache_clear()
     return create_app()
 
 
+def _authed(app):
+    """构造已登录的 TestClient + 创建测试用户。返回 (client, csrf_token_for_writes)。"""
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        store.create_user("tester", hash_password("test-pw"))
+    c = TestClient(app)
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": "tester", "password": "test-pw"},
+           headers={"X-CSRF-Token": tok})
+    return c
+
+
+def _csrf(c):
+    return c.get("/api/auth/csrf").json()["csrf_token"]
+
+
 def test_list_repos(tmp_path, monkeypatch):
     app = _app(tmp_path, monkeypatch, {"foo": "ready", "bar": "failed"})
-    r = TestClient(app).get("/api/repos")
+    client = _authed(app)
+    r = client.get("/api/repos")
     assert r.status_code == 200
     names = [x["name"] for x in r.json()]
     assert names == ["bar", "foo"]
@@ -27,23 +53,28 @@ def test_list_repos(tmp_path, monkeypatch):
 
 def test_get_repo_detail(tmp_path, monkeypatch):
     app = _app(tmp_path, monkeypatch, {"foo": "ready"})
-    r = TestClient(app).get("/api/repos/foo")
+    client = _authed(app)
+    r = client.get("/api/repos/foo")
     assert r.status_code == 200 and r.json()["name"] == "foo"
-    assert TestClient(app).get("/api/repos/missing").status_code == 404
+    assert client.get("/api/repos/missing").status_code == 404
 
 
 def test_post_repo_503_no_creds(tmp_path, monkeypatch):
     monkeypatch.delenv("GITLAB_USER", raising=False)
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     app = _app(tmp_path, monkeypatch, {})
-    r = TestClient(app).post("/api/repos", json={"git_url": "https://x/foo.git"})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post("/api/repos", json={"git_url": "https://x/foo.git"}, headers={"X-CSRF-Token": tok})
     assert r.status_code == 503
 
 
 def test_post_repo_409_conflict(tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_USER", "u"); monkeypatch.setenv("GITLAB_TOKEN", "t")
     app = _app(tmp_path, monkeypatch, {"foo": "ready"})
-    r = TestClient(app).post("/api/repos", json={"git_url": "https://x/foo.git"})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post("/api/repos", json={"git_url": "https://x/foo.git"}, headers={"X-CSRF-Token": tok})
     assert r.status_code == 409
 
 
@@ -55,9 +86,18 @@ async def test_delete_busy_409(tmp_path, monkeypatch):
     import httpx
     app = _app(tmp_path, monkeypatch, {"foo": "cloning"})
     app.state.repo_manager._jobs["foo"] = asyncio.create_task(asyncio.sleep(10))
+    # 直接生成 session + csrf 注入 cookie（ASGITransport 不走 TestClient cookie jar）
+    from supernova_web.auth.csrf import generate_csrf_token
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        store.create_user("tester", hash_password("test-pw"))
+    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    tok = generate_csrf_token()
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.delete("/api/repos/foo")
+    async with httpx.AsyncClient(transport=transport, base_url="http://t",
+                                 cookies={"sn-sid": sid, "sn-csrf": tok}) as c:
+        r = await c.delete("/api/repos/foo", headers={"X-CSRF-Token": tok})
     assert r.status_code == 409
 
 
@@ -68,9 +108,16 @@ async def test_sse_events(tmp_path, monkeypatch):
     (tmp_path / "repos" / "foo" / "clone.ndjson").write_text(
         json.dumps({"ts": "t1", "phase": "cloning", "progress": 40, "status": "progress"}) + "\n"
         + json.dumps({"ts": "t2", "type": "clone_end", "status": "ready"}) + "\n")
+    # 直接生成 session 注入 cookie
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        from supernova_web.auth.passwords import hash_password
+        store.create_user("tester", hash_password("test-pw"))
+    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
     transport = httpx.ASGITransport(app=app)
     lines = []
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=5) as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=5,
+                                 cookies={"sn-sid": sid}) as c:
         async with c.stream("GET", "/api/repos/foo/events") as r:
             assert r.status_code == 200
             async for line in r.aiter_lines():
@@ -83,12 +130,13 @@ async def test_sse_events(tmp_path, monkeypatch):
 def test_get_repo_grouped_path(tmp_path, monkeypatch):
     """{name:path} 吃 group/repo 含 '/' 的路径，返回 group 字段。"""
     app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
     base = tmp_path / "repos"
     d = base / "frontend" / "foo"; d.mkdir(parents=True)
     (d / ".supernova-repo.json").write_text(json.dumps({"name": "frontend/foo", "state": "ready"}))
-    r = TestClient(app).get("/api/repos/frontend/foo")
+    r = client.get("/api/repos/frontend/foo")
     assert r.status_code == 200
     assert r.json()["name"] == "frontend/foo"
     assert r.json()["group"] == "frontend"
     # 分组目录本身 404
-    assert TestClient(app).get("/api/repos/frontend").status_code == 404
+    assert client.get("/api/repos/frontend").status_code == 404
