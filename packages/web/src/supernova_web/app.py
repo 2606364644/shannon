@@ -16,7 +16,6 @@ async def lifespan(app: FastAPI):
     from .auth.seed import seed_users
     import asyncio
     seed_users(app.state.auth_store, app.state.config.users_seed_file)
-    _migrate_legacy_workspace_members(app)
 
     async def _purge_loop():
         while True:
@@ -27,7 +26,15 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(3600)
     app.state._purge_task = asyncio.create_task(_purge_loop())
 
-    _migrate_legacy_repos(app)  # 旧 repos 目录纳入管理（per-ws）
+    # 启动迁移序列（顺序敏感）：
+    #   1) 旧全局 repos/<name> → workspaces/__legacy__/repos/<name>（创建 __legacy__ ws 目录）
+    #   2) 给无成员记录的 ws（含刚创建的 __legacy__）分配 admin (manager)
+    #   3) per-ws 补写仓库 meta（覆盖 __legacy__ 的搬迁仓库）
+    #   4) 重建孤儿 scan 状态
+    # purge_loop 与本序列无依赖、保持原位即可。
+    _migrate_legacy_repos(app)
+    _migrate_legacy_workspace_members(app)
+    _reconcile_repo_meta(app)
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
     yield
     app.state._purge_task.cancel()
@@ -79,9 +86,45 @@ def _migrate_legacy_workspace_members(app: FastAPI) -> None:
 
 
 def _migrate_legacy_repos(app: FastAPI) -> None:
-    """对每个 workspace 跑 RepoManager.migrate_legacy(ws)——把已 clone 但未纳入管理的
-    旧仓库补写 meta。RepoManager.migrate_legacy 现按 ws 分桶（workspaces/<ws>/repos），
-    需逐 ws 调用。单 ws 异常不阻塞启动（与 _reconcile_orphaned_scans 同款 best-effort）。
+    """启动迁移：把旧全局 ``repos/<name>`` 搬到 ``workspaces/__legacy__/repos/<name>``。
+
+    背景：web repos 隔离 P2 前，所有 clone 仓库落在共享全局 ``repos/`` 下（无 ws 归属）。
+    P2 起 repos 按 ws 分桶（``workspaces/<ws>/repos/``），旧全局目录废弃。本函数在启动时
+    一次性把残留的旧全局仓库迁入 ``__legacy__`` ws，使其对 admin 可见、可扫。
+
+    仅迁 top-level 且含 ``.git`` 的目录（避免误搬普通文件夹）；目标已存在或源缺失则跳过
+    （幂等）。admin 分配由 ``_migrate_legacy_workspace_members`` 复用既有逻辑，**此处不
+    重复实现**。单仓库失败不阻塞启动（best-effort）。
+    """
+    import shutil
+    cfg = app.state.config
+    old_root = cfg.repos_dir
+    if not old_root.is_dir():
+        return
+    legacy_repos = cfg.workspaces_dir / "__legacy__" / "repos"
+    for sub in list(old_root.iterdir()):
+        if not sub.is_dir() or sub.name.startswith("."):
+            continue
+        if not (sub / ".git").exists():
+            continue  # 仅迁真仓库（含 .git），跳过普通文件夹
+        target = legacy_repos / sub.name
+        if target.exists():
+            continue  # 幂等：目标已存在，跳过（不覆盖）
+        try:
+            legacy_repos.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(sub), str(target))
+        except Exception:
+            # 单仓库失败不影响其他仓库与整体启动
+            continue
+
+
+def _reconcile_repo_meta(app: FastAPI) -> None:
+    """对每个 workspace 跑 RepoManager.migrate_legacy(ws)——为已存在但缺 meta 的仓库
+    补写 ``.supernova-repo.json``（含从旧全局迁入 ``__legacy__`` 的仓库）。
+
+    旧名 ``_migrate_legacy_repos`` 与本函数语义不符（migrate_legacy 不搬仓库、只补 meta），
+    2026-07-26 web repos isolation P2 Task 7 重命名为 ``_reconcile_repo_meta``，腾出原名
+    给「搬旧全局 repos → __legacy__ ws」的新函数。单 ws 异常不阻塞启动（best-effort）。
     """
     cfg = app.state.config
     if not cfg.workspaces_dir.is_dir():
