@@ -59,6 +59,7 @@ def _input(repo):
         deliverables_subdir = None
         workspace_name = None
         workspace_path = None
+        provider_config = None   # P3c 阶段 1：穿线字段（run_gitnexus_chain_verdict 经 _make_verdict_llm_client 读）
 
     return FakeInput()
 
@@ -174,7 +175,7 @@ async def test_xss_queue_contains_second_order_finding(tmp_path, monkeypatch):
     # is_gitnexus_llm_enabled branch (default=True would otherwise build a
     # real-LLM client and bypass the stub below). See Task 8 fix.
     monkeypatch.setattr(
-        activities, "_make_verdict_llm_client", lambda repo: fake_llm
+        activities, "_make_verdict_llm_client", lambda repo, provider_config=None: fake_llm
     )
     set_audit_session(_RecordingSession())
     try:

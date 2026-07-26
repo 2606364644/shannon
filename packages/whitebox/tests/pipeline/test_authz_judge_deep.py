@@ -28,7 +28,7 @@ async def test_authz_judge_uses_multiturn_verdict_when_candidates(tmp_path, monk
 
     verdict_called = {"n": 0}
 
-    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None, provider_config=None):
         verdict_called["n"] += 1
         r = MagicMock()
         r.structured_output = {"vulnerabilities": []}
@@ -85,7 +85,7 @@ async def test_authz_judge_verdict_passes_audit_session(tmp_path, monkeypatch):
 
     captured = {}
 
-    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None, provider_config=None):
         captured["audit_session"] = audit_session
         r = MagicMock()
         r.structured_output = {"vulnerabilities": []}
@@ -126,7 +126,7 @@ async def test_authz_judge_verdict_writes_queue_with_source_track(tmp_path, monk
         lambda d: fake_result,
     )
 
-    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None, provider_config=None):
         r = MagicMock()
         r.structured_output = {"vulnerabilities": [{
             "ID": "AUTHZ-GN-01", "vulnerability_type": "Horizontal",
@@ -184,7 +184,7 @@ async def test_authz_judge_explores_when_zero_candidates(tmp_path, monkeypatch):
 
     explored = {"n": 0, "prompt": None}
 
-    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None):
+    async def fake_verdict(*, prompt, repo_path, structured_output_schema=None, audit_session=None, provider_config=None):
         explored["n"] += 1
         explored["prompt"] = prompt
         assert "explore" in prompt.lower() or "route" in prompt.lower(), "应用探索 prompt"

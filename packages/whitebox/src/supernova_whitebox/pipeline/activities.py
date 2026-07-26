@@ -218,6 +218,7 @@ async def run_agent(input: ActivityInput) -> dict:
             tool_audit_logger=tool_audit_logger,
             max_turns=_vuln_max_turns(agent_name.value),
             structured_output_schema=_vuln_output_schema(agent_name),
+            provider_config=input.provider_config,   # P3c 阶段 1
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -284,7 +285,7 @@ def _is_vuln_agent(agent_name: AgentName) -> bool:
     return agent_name in _VULN_AGENT_NAMES
 
 
-def _make_recon_summary_llm_client(repo_path: str):
+def _make_recon_summary_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
     """LLM client for summarize_recon_context.
 
     Always attempts an LLM call (not gated by GitNexus-LLM toggle, since the
@@ -295,6 +296,7 @@ def _make_recon_summary_llm_client(repo_path: str):
     async def _client(prompt: str, **kwargs) -> str:
         result = await run_claude_prompt(
             prompt=prompt, repo_path=repo_path, model_tier="medium",
+            provider_config=provider_config,
         )
         return result.text
     return _client
@@ -317,7 +319,7 @@ async def _build_vuln_prompt_variables(
     # RECON_CONTEXT: summarize recon_deliverable.md §4/§8
     recon_md_path = deliverables / "recon_deliverable.md"
     recon_md = recon_md_path.read_text("utf-8") if recon_md_path.exists() else ""
-    llm_client = _make_recon_summary_llm_client(str(repo))
+    llm_client = _make_recon_summary_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
     recon_context = await summarize_recon_context(recon_md, llm_client)
     base["RECON_CONTEXT"] = recon_context
 
@@ -518,6 +520,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                             },
                         },
                         audit_session=get_audit_session(),
+                        provider_config=input.provider_config,   # P3c 阶段 1
                     )
                 except Exception as exc:
                     failed = True
@@ -574,6 +577,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                             },
                         },
                         audit_session=get_audit_session(),
+                        provider_config=input.provider_config,   # P3c 阶段 1
                     )
                 except Exception as exc:
                     failed = True
@@ -636,9 +640,14 @@ async def run_credential_check(input: ActivityInput) -> None:
     from supernova_whitebox.audit.session_registry import get_audit_session
     try:
         async with get_audit_session().track_step("setup", "credential-check", intent=intent_for("credential-check")):
+            # P3c 阶段 1：web 穿线优先（input.provider_config），CLI 兜底 build from env。
             from supernova_core.agents.providers import build_provider_config
+            from supernova_core.agents.runner import ProviderConfig
 
-            config = build_provider_config(api_key=input.api_key or None)
+            if input.provider_config:
+                config = ProviderConfig(**input.provider_config)
+            else:
+                config = build_provider_config(api_key=input.api_key or None)
             if config.api_key or config.type != "anthropic_api":
                 await validate_credentials(
                     config.type,
@@ -669,7 +678,7 @@ async def run_code_index(input: ActivityInput) -> dict:
 
         async with get_audit_session().track_step("pre-recon", "code-index", intent=intent_for("code-index")):
             # Create LLM client for taint analysis (+ LLM sink discovery)
-            def _make_gitnexus_llm_client(repo_path: str):
+            def _make_gitnexus_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
                 """封装 run_claude_prompt 成 analyze_taint_llm/discover 期望的
                 async (prompt, output_format=None)->str 契约。
 
@@ -688,6 +697,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                     result = await run_claude_prompt(
                         prompt=prompt, repo_path=repo_path, model_tier="medium",
                         structured_output_schema=kwargs.get("output_format"),
+                        provider_config=provider_config,
                     )
                     # structured_output 由 provider 填充（SDK 原生优先，缺失时 _extract_json_payload
                     # 从 collected_text 兜底）。非空时它是已解析的 dict/list，json.dumps 还原成 str
@@ -699,7 +709,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                     return result.text
                 return _client
 
-            _llm_taint_client = _make_gitnexus_llm_client(str(repo))
+            _llm_taint_client = _make_gitnexus_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
 
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry
@@ -730,8 +740,13 @@ async def run_code_index(input: ActivityInput) -> dict:
                 # 与 gitnexus 轨实际用的 medium tier 错配会估大 context 致爆)。resolve 失败
                 # -> None -> discovery 走默认 context, 不阻断。
                 from supernova_core.agents.providers import build_provider_config, resolve_tier_model
+                from supernova_core.agents.runner import ProviderConfig
                 try:
-                    _pcfg = build_provider_config(api_key=input.api_key or None)
+                    # P3c 阶段 1：web 穿线优先（input.provider_config），CLI 兜底 build from env。
+                    if input.provider_config:
+                        _pcfg = ProviderConfig(**input.provider_config)
+                    else:
+                        _pcfg = build_provider_config(api_key=input.api_key or None)
                     _medium_model = resolve_tier_model(_pcfg, "medium")
                 except Exception:
                     _medium_model = None
@@ -1204,6 +1219,7 @@ async def generate_poc_report(input: ActivityInput) -> None:
             track="whitebox",
             repo_path=input.repo_path,
             api_key=input.api_key,
+            provider_config=input.provider_config,   # P3c 阶段 1
         )
     except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
         log.warning("poc: whitebox generate_poc_report failed (non-blocking): %s", exc)
@@ -1223,7 +1239,7 @@ async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
     )
 
 
-def _make_verdict_llm_client(repo_path: str):
+def _make_verdict_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
     """接通后: 真 client; env 关时返回 raise-client(降级)。
 
     output_format（JSON Schema）透传 run_claude_prompt -> CLI --json-schema，强制模型
@@ -1238,6 +1254,7 @@ def _make_verdict_llm_client(repo_path: str):
         result = await run_claude_prompt(
             prompt=prompt, repo_path=repo_path, model_tier="medium",
             structured_output_schema=kwargs.get("output_format"),
+            provider_config=provider_config,
         )
         so = result.structured_output
         if so is not None:
@@ -1253,6 +1270,7 @@ async def run_gitnexus_verdict_agent(
     repo_path: str,
     structured_output_schema: dict | None = None,
     audit_session: "AuditSession | None" = None,
+    provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
@@ -1285,6 +1303,7 @@ async def run_gitnexus_verdict_agent(
             max_turns=int(os.getenv("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", "30")),
             structured_output_schema=structured_output_schema,
             tool_audit_logger=tool_audit_logger,
+            provider_config=provider_config,   # P3c 阶段 1
         )
     finally:
         if tool_audit_logger is not None:
@@ -1410,7 +1429,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             "vulnerability-analysis", "gitnexus-chain-verdict",
             intent=None,
         ):
-            llm = _make_verdict_llm_client(str(repo))
+            llm = _make_verdict_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
 
             # Second-order storage-taint findings (子项⑤): compute once, group
