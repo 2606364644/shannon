@@ -15,6 +15,8 @@ class BlackboxPipelineInput(BasePipelineInput):
     rerun: bool = False  # 强制重跑黑盒（归档旧 evidence + 新 workflow id）
     correlated_workspace: str | None = None  # 跨仓关联 workspace（B1：复用 topology 做网关层校验，Phase B 接入）
     workspaces_root: str | None = None  # sandbox 外（CLI/worker）解析的 workspaces 根绝对路径（sandbox 内禁 os.getenv/Path.cwd）
+    # P3c 阶段 1：provider 配置穿线（Phase C 黑盒 C1 化时由 scan_manager 填；CLI 兜底 None）。
+    provider_config: dict | None = None
 
 
 @dataclass
@@ -50,6 +52,8 @@ class BlackboxActivityInput:
     correlation_context: dict | None = None  # B3：关联 workspace topology/boundaries（由 workflow 从 state 注入，exploit activity 消费）
     info_message: str | None = None   # log_info_activity 的用户提示文本（替代裸 logger.warning→stderr 抢行）
     info_level: str = "info"          # "info" | "warning"（rich 着色：cyan/yellow）
+    # P3c 阶段 1：provider 配置穿线（Phase C 黑盒 workflow 灌入）。
+    provider_config: dict | None = None
 
 
 @dataclass

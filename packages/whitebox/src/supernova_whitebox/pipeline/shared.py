@@ -19,6 +19,9 @@ class PipelineInput(BasePipelineInput):
     max_concurrent: int = 3                    # SUPERNOVA_MAX_CONCURRENT 注入;vuln agents 并发上限
     enable_llm_track: bool = True              # SUPERNOVA_LLM_TRACK_ENABLED 注入;False=只跑 GitNexus 轨
     event_file: str | None = None              # C1: web 提交端塞 events.ndjson 路径(env 不跨容器); CLI 为 None 走 env 兜底
+    # P3c 阶段 1：provider 配置穿线（dict，跨 worker 边界 serializable）。
+    # None=未穿线（CLI 兜底走 env）；web 路径由 scan_manager 塞全局/阶段2 per-ws 配置。
+    provider_config: dict | None = None
 
 
 @dataclass
@@ -54,6 +57,8 @@ class ActivityInput:
     vuln_classes: list[str] | None = None   # assemble_report 用（默认 ALL，由 workflow 传 selected）
     event_file: str | None = None     # C1: setup_display 透传到 AuditSession.initialize→WorkflowLogger（挂 StructuredEventRenderer）；CLI 为 None 走 env 兜底
     track_statuses: dict = field(default_factory=dict)   # fail-fast: GitNexus 轨 per-class 状态(workflow->write_track_status_activity)
+    # P3c 阶段 1：由 workflow 从 PipelineInput.provider_config 灌入；activity 下传 run_claude_prompt。
+    provider_config: dict | None = None
 
 
 @dataclass
