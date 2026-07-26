@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI):
     from .auth.seed import seed_users
     import asyncio
     seed_users(app.state.auth_store, app.state.config.users_seed_file)
+    _migrate_legacy_workspace_members(app)
 
     async def _purge_loop():
         while True:
@@ -56,6 +57,25 @@ async def _reconcile_orphaned_scans(app: FastAPI) -> None:
             await reconcile_orphaned(ws_dir, indexer.is_running(ws_dir.name))
         except Exception:
             continue
+
+
+def _migrate_legacy_workspace_members(app: FastAPI) -> None:
+    """把无成员记录的 legacy workspace 分配给所有 admin（manager），让 admin 能见/管。
+    已有成员记录的 workspace 不动（不重复分配、不覆盖）。"""
+    store = app.state.auth_store
+    admins = [u for u in store.list_all_users() if u.role == "admin"]
+    if not admins:
+        return
+    ws_dir = app.state.config.workspaces_dir
+    if not ws_dir.is_dir():
+        return
+    for d in ws_dir.iterdir():
+        if not d.is_dir():
+            continue
+        if store.list_workspace_members(d.name):
+            continue  # 已有成员，跳过
+        for a in admins:
+            store.add_workspace_member(d.name, a.id, "manager")
 
 
 def _mount_frontend(app: FastAPI, cfg) -> None:
