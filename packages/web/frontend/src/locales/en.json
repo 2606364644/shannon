@@ -36,7 +36,9 @@
     "username": "Select user",
     "manager": "Manager",
     "member": "Member",
-    "manage": "Manage members"
+    "manage": "Manage members",
+    "addFailed": "Failed to add member",
+    "removeFailed": "Failed to remove member"
   },
   "nav": {
     "dashboard": "Dashboard",

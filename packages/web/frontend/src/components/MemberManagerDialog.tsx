@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,17 +28,29 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
 
   async function onAdd() {
     if (!picked) return;
-    await addMember(ws, picked, "member");
-    setPicked("");
-    setMembers((await getMembers(ws)).members);
+    try {
+      await addMember(ws, picked, "member");
+      setPicked("");
+      setMembers((await getMembers(ws)).members);
+    } catch {
+      toast.error(t("members.addFailed"));
+    }
   }
   async function onRemove(username: string) {
-    await removeMember(ws, username);
-    setMembers((await getMembers(ws)).members);
+    try {
+      await removeMember(ws, username);
+      setMembers((await getMembers(ws)).members);
+    } catch {
+      toast.error(t("members.removeFailed"));
+    }
   }
   async function onOpen() {
-    setOpen(true);
-    setUsers((await listUsers()).users);
+    try {
+      setOpen(true);
+      setUsers((await listUsers()).users);
+    } catch {
+      // listUsers 失败非关键: dialog 仍打开, 仅用户列表为空
+    }
   }
 
   return (

@@ -36,7 +36,9 @@
     "username": "选择用户",
     "manager": "管理者",
     "member": "成员",
-    "manage": "管理成员"
+    "manage": "管理成员",
+    "addFailed": "添加成员失败",
+    "removeFailed": "移除成员失败"
   },
   "nav": {
     "dashboard": "概览",
