@@ -127,11 +127,16 @@ class ScanManager:
         """
         client = await Client.connect(self._temporal_address())
         workflow_id = self._resolve_workflow_id(ws)
+        # P3c 阶段 1：从全局 env 构造 provider_config 穿线（行为不变；阶段 2 改为按 ws 解析）。
+        from dataclasses import asdict
+        from supernova_core.agents.providers import build_provider_config
+        provider_config = asdict(build_provider_config())
         inp = PipelineInput(
             repo_path=target or "",
             web_url=req.url or "",
             workspace_name=ws,
             event_file=str(event_file),
+            provider_config=provider_config,
         )
         handle = await client.start_workflow(
             WhiteboxScanWorkflow.run, inp, id=workflow_id,
