@@ -58,7 +58,7 @@ def authed_client(app_with_ws, monkeypatch):
     from starlette.testclient import TestClient
     from supernova_web.auth.passwords import hash_password
     app = app_with_ws
-    app.state.auth_store.create_user("tester", hash_password("test-pw"))
+    app.state.auth_store.create_user("tester", hash_password("test-pw"), role="admin")
     c = TestClient(app)
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
     c.post(
