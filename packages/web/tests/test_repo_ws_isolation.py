@@ -28,7 +28,7 @@ def test_list_repos_empty_per_ws(rm):
 @pytest.mark.asyncio
 async def test_clone_into_ws_dir(rm, monkeypatch):
     # mock git 子进程 + available
-    monkeypatch.setattr(rm._git, "available", lambda: True)
+    monkeypatch.setattr(rm._git, "available", lambda ws=None: True)
     async def _fake_clone_task(self, *a, **kw):  # 不真跑 git
         self._jobs.pop(a[0] if isinstance(a[0], tuple) else (a[0]), None)
     monkeypatch.setattr(RepoManager, "_clone_task", _fake_clone_task)

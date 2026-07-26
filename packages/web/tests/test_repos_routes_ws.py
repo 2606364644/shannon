@@ -50,7 +50,7 @@ def test_clone_into_ws(_app, monkeypatch):
     async def _fake_clone(ws, url, branch, commit, name, group=None):
         return name or "y"
     monkeypatch.setattr(_app.state.repo_manager, "clone", _fake_clone)
-    monkeypatch.setattr(_app.state.repo_manager._git, "available", lambda: True)
+    monkeypatch.setattr(_app.state.repo_manager._git, "available", lambda ws=None: True)
     alice = _login(_app, "alice")
     tok = alice.get("/api/auth/csrf").json()["csrf_token"]
     r = alice.post("/api/workspaces/ws1/repos", json={"git_url": "https://x/y.git"}, headers={"X-CSRF-Token": tok})

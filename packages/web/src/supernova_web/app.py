@@ -231,7 +231,10 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.state.credential_vault = CredentialVault(cfg.master_key_file)
     app.state.ws_config_store = WsConfigStore(cfg.workspaces_dir, app.state.credential_vault)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
-    git_fetcher = GitFetcher(cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token)
+    git_fetcher = GitFetcher(
+        cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token,
+        ws_config_store=app.state.ws_config_store,
+    )
     overrides = overrides or {}
     app.state.scan_manager = overrides.get("scan_manager") or ScanManager(
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,

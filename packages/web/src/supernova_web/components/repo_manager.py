@@ -240,7 +240,7 @@ class RepoManager:
     # ---- clone / pull ----
     async def clone(self, ws: str, url: str, branch: str | None, commit: str | None,
                     name: str | None, group: str | None = None) -> str:
-        if not self._git.available():
+        if not self._git.available(ws):
             raise PermissionError("未配置 git 凭证（GITLAB_USER/TOKEN）")
         name = name or self._git.repo_name(url)
         # name/group 各为单段目录名；组合成 group/repo 后整体由 _repo_dir 校验 + 兜底
@@ -268,7 +268,7 @@ class RepoManager:
             async with self._sem:
                 ok = await self._run_git_with_progress(
                     ws, name, phase="cloning",
-                    argv=self._build_clone_argv(self._git._inject_auth(url), target, branch))
+                    argv=self._build_clone_argv(self._git._inject_auth(url, ws), target, branch))
                 # _mark_failed 已写 state=failed；跳过 ready 收尾，保持 failed 状态
                 if ok:
                     # commit checkout（可选）
