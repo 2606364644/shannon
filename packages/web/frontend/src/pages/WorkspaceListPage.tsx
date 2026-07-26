@@ -22,6 +22,7 @@ import { Empty } from "@/components/Empty";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useWorkspaces } from "@/api/useWorkspaces";
 import { cancelScan, deleteWorkspace } from "@/api/client";
+import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
 import type { Workspace } from "@/api/types";
 
 const helper = createColumnHelper<Workspace>();
@@ -180,6 +181,7 @@ export function WorkspaceListPage() {
         <Link to="/scan/new">
           <Button>{t("workspaces.newScan")}</Button>
         </Link>
+        <CreateWorkspaceDialog onCreated={() => { refresh(); }} />
         <Input
           placeholder={t("workspaces.searchPlaceholder")}
           value={globalFilter}

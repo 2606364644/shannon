@@ -62,6 +62,8 @@ export const apiDelete = <T>(path: string, opts?: ReqOptions) =>
 
 export const browseFs = (path: string) =>
   apiGet<FsBrowseResult>(`/fs/browse?path=${encodeURIComponent(path)}`);
+export const createWorkspace = (name: string) =>
+  apiPost<{ name: string }>("/workspaces", { name });
 export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export type CancelResult = { cancelled: string; via?: string; was_dead?: boolean };

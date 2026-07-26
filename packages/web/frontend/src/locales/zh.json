@@ -204,6 +204,17 @@
     "cancelWasDead": "该 scan 已不在运行，已标记取消",
     "actionFailed": "操作失败：{{error}}"
   },
+  "workspace": {
+    "create": {
+      "button": "新建工作区",
+      "title": "新建工作区",
+      "name": "名称",
+      "placeholder": "如 my-team-scan",
+      "submit": "创建",
+      "submitting": "创建中…",
+      "failed": "创建失败：{{error}}"
+    }
+  },
   "scan": {
     "tabs": {
       "whitebox": "白盒",

@@ -8,6 +8,12 @@ import { Toaster } from "@/components/ui/sonner";
 import { WorkspaceListPage } from "./WorkspaceListPage";
 import type { Workspace } from "../api/types";
 
+// CreateWorkspaceDialog 依赖 AuthProvider（useAuth self-gate admin）；
+// 列表页测试聚焦表格/筛选/i18n，隔离该子组件（其行为在 CreateWorkspaceDialog.test.tsx 独立覆盖）。
+vi.mock("@/components/CreateWorkspaceDialog", () => ({
+  CreateWorkspaceDialog: () => null,
+}));
+
 const baseWorkspaces: Workspace[] = [
   { name: "ws-a", scan_type: "whitebox", status: "running", created_at: 1780000000, total_cost_usd: 2.34, total_duration_ms: 2530000, vuln_count: 14, is_correlation: false },
   { name: "ws-failed", scan_type: "blackbox", status: "failed", created_at: 1780000100, total_cost_usd: 0.5, total_duration_ms: 60000, vuln_count: 0, is_correlation: false },

@@ -204,6 +204,17 @@
     "cancelWasDead": "Scan no longer running; marked cancelled",
     "actionFailed": "Action failed: {{error}}"
   },
+  "workspace": {
+    "create": {
+      "button": "New workspace",
+      "title": "New workspace",
+      "name": "Name",
+      "placeholder": "e.g. my-team-scan",
+      "submit": "Create",
+      "submitting": "Creating…",
+      "failed": "Create failed: {{error}}"
+    }
+  },
   "scan": {
     "tabs": {
       "whitebox": "whitebox",
