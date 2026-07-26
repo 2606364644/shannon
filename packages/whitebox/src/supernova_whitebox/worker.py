@@ -339,7 +339,11 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                 from supernova_whitebox.audit.session_registry import (
                     set_audit_session, clear_audit_session,
                 )
-                set_audit_session(session)
+                # P3c 阶段 3：显式传 workflow_id(= start_workflow 的 id)——CLI 在 workflow
+                # 启动前(非 activity context)调,set 默认会落 '_cli';而 activity 内
+                # get_audit_session() 经 activity.info().workflow_id 查真实 wf id。传真实
+                # workflow_id 让两者匹配(activity 拿到 session 而非 NullAuditSession)。
+                set_audit_session(session, workflow_id=workflow_id)
                 scan_start = time.monotonic()
                 try:
                     handle = await client.start_workflow(
@@ -369,7 +373,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                                 session, scan_start))
                         raise
                 finally:
-                    clear_audit_session()
+                    clear_audit_session(workflow_id=workflow_id)
 
                 # Emit the final summary so the Rich summary table / dashboard
                 # finalization fires. cost/currency 取 session metrics(MetricsTracker 累积

@@ -184,7 +184,10 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         await heartbeat.__aenter__()
         async with worker:
             async with run_with_display(meta, use_rich=use_rich) as session:
-                set_audit_session(session)
+                # P3c 阶段 3：显式传 workflow_id(= start_workflow 的 id)对齐 activity 内
+                # get_audit_session() 的 activity.info().workflow_id(CLI 非 activity context
+                # 默认落 '_cli' 会失配)。详见 whitebox worker.py 同段注释。
+                set_audit_session(session, workflow_id=workflow_id)
                 scan_start = time.monotonic()
                 handle = await client.start_workflow(
                     BlackboxScanWorkflow.run,
@@ -210,7 +213,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
                     ))
                     raise
                 finally:
-                    clear_audit_session()
+                    clear_audit_session(workflow_id=workflow_id)
 
                 total_duration_ms = int((time.monotonic() - scan_start) * 1000)
                 await session.log_workflow_complete(_to_workflow_summary(result, total_duration_ms))
