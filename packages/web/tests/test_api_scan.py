@@ -25,7 +25,8 @@ class FakeSM:
         return {}
 
 
-_BODY = {"type": "whitebox", "source": {"kind": "path", "value": "/x"}, "url": "http://e"}
+_BODY = {"type": "whitebox", "source": {"kind": "path", "value": "/x"}, "url": "http://e",
+        "workspace": "WSX"}
 
 
 @pytest.fixture
@@ -33,6 +34,10 @@ def _authed_app(tmp_workspaces, monkeypatch):
     """T11 后 /api/scan 要求登录 + 写操作 CSRF；返 (app, csrf_getter)。
 
     create_app 之前需把 cookie_secure 关掉（get_config lru_cache）。
+
+    Task 4 起 /api/scan 还要求 ws 已存在 + 当前用户成员/admin。tester 改为 admin
+    + 预建 WSX 目录, 使现有 6 个测试 (测 endpoint 错误处理, 非测成员) 不受影响。
+    成员语义由 test_workspace_lifecycle.py 覆盖。
     """
     from supernova_core.utils.paths import resolve_workspaces_dir
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
@@ -40,7 +45,10 @@ def _authed_app(tmp_workspaces, monkeypatch):
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     from supernova_web.auth.passwords import hash_password
     app = create_app()
-    app.state.auth_store.create_user("tester", hash_password("test-pw"))
+    app.state.auth_store.create_user("tester", hash_password("test-pw"), role="admin")
+    # 预建 WSX 目录, 使 create_scan 的 ws-exists 校验通过; FakeSM.start 仍返 "WSX"。
+    # per-test create_app(overrides=...) 共享同一 workspaces_dir (经 env), WSX 可见。
+    app.state.config.workspaces_dir.joinpath("WSX").mkdir(parents=True, exist_ok=True)
     return app
 
 

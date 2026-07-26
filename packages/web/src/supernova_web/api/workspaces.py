@@ -5,8 +5,9 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
-from supernova_web.auth.dependencies import current_user
+from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -17,6 +18,27 @@ def _workspace_path(request: Request, ws: str):
     if not p.exists():
         raise HTTPException(404, "workspace not found")
     return p
+
+
+class CreateWorkspaceIn(BaseModel):
+    name: str
+
+
+@router.post("", status_code=201)
+async def create_workspace(body: CreateWorkspaceIn, request: Request,
+                           user: User = Depends(require_admin)):
+    """P1: admin 显式建 workspace (替代原 scan 创建 manager 模型)。
+
+    ws 先于 scan 存在, 为 P2 repo 隔离铺路; admin 自动成为 manager,
+    其他成员由 admin 预分配 (P1 Task 5/6)。
+    """
+    ws = body.name
+    ws_dir = request.app.state.config.workspaces_dir / ws
+    if ws_dir.exists():
+        raise HTTPException(409, "workspace already exists")
+    ws_dir.mkdir(parents=True)
+    request.app.state.auth_store.add_workspace_member(ws, user.id, "manager")
+    return {"name": ws}
 
 
 @router.get("")

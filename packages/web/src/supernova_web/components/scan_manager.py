@@ -85,7 +85,8 @@ class ScanManager:
             ws = self._resolve_out_workspace(yaml_path)
         else:
             target, yaml_path = await self._resolve_inputs(req)
-            ws = req.workspace or self._gen_ws_name(req)
+            # P1: ws 必须由 admin 预建 (create_scan 已校验存在 + 成员); 不再自动生成。
+            ws = req.workspace
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
@@ -301,14 +302,6 @@ class ScanManager:
                 return self._config_store.write(req.save_as, req.config_content)
             return self._config_store.write_temp(req.config_content)
         raise ValueError("correlation 扫描需 config_name 或 config_content")
-
-    def _gen_ws_name(self, req: ScanRequest) -> str:
-        base = "scan"
-        if req.source:
-            base = Path(req.source.value).stem or "scan"
-        elif req.config_name:
-            base = req.config_name
-        return f"{base}_{int(time.time())}"
 
     async def _watch(self, ws: str, event_file: Path) -> None:
         """C1: tail events.ndjson 直到 scan_end(worker finalize_summary 写)或超时.
