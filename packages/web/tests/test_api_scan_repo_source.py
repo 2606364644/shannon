@@ -22,11 +22,15 @@ def _app_with_repos(tmp_path, monkeypatch, repos_state):
 
 
 def _authed(app):
-    """构造已登录的 TestClient（仅 test_scan_git_kind_422 用）。"""
+    """构造已登录的 TestClient（仅 test_scan_git_kind_422 用）。
+
+    Task 4 起 create_scan 还要求 ws 已存在 + 当前用户成员/admin。tester 改为 admin,
+    使 ws-校验通过 -> 请求能到达 sm.start -> _resolve_inputs 的 git-kind ValueError 路径。
+    """
     from supernova_web.auth.passwords import hash_password
     store = app.state.auth_store
     if store.get_user_by_username("tester") is None:
-        store.create_user("tester", hash_password("test-pw"))
+        store.create_user("tester", hash_password("test-pw"), role="admin")
     c = TestClient(app)
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
     c.post("/api/auth/login", json={"username": "tester", "password": "test-pw"},
@@ -60,9 +64,13 @@ def test_resolve_repo_missing_raises(tmp_path, monkeypatch):
 
 def test_scan_git_kind_422(tmp_path, monkeypatch):
     app = _app_with_repos(tmp_path, monkeypatch, {})
+    # Task 4: create_scan 先校验 ws 存在 + 成员;预建 ws1 + tester admin 使校验通过,
+    # 422 才会来自 _resolve_inputs 的 git-kind ValueError (而非缺 ws)。
+    app.state.config.workspaces_dir.joinpath("ws1").mkdir(parents=True, exist_ok=True)
     client = _authed(app)
     tok = client.get("/api/auth/csrf").json()["csrf_token"]
     r = client.post("/api/scan", json={
-        "type": "whitebox", "source": {"kind": "git", "value": "https://x.git"}, "url": "http://x"},
+        "type": "whitebox", "source": {"kind": "git", "value": "https://x.git"},
+        "url": "http://x", "workspace": "ws1"},
         headers={"X-CSRF-Token": tok})
     assert r.status_code == 422
