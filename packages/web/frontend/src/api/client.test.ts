@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { apiGet, apiPost, apiDelete, ApiError } from "./client";
+import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler } from "./client";
 
 // 构造符合 fetch Response 真实契约的 mock：text() 与 json() 都在。
 function res({ ok, status, body }: { ok: boolean; status: number; body: unknown }) {
@@ -56,5 +56,41 @@ describe("api client", () => {
     expect(captured.init?.method).toBe("POST");
     expect((captured.init?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
     expect(captured.init?.body).toBe(JSON.stringify({ type: "blackbox" }));
+  });
+});
+
+describe("client auth", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    document.cookie = "sn-csrf=token123; path=/";
+  });
+
+  it("sends credentials: include", async () => {
+    const fm = vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    await apiGet("/foo");
+    expect(fm.mock.calls[0][1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("adds X-CSRF-Token on POST", async () => {
+    const fm = vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    await apiPost("/foo", { a: 1 });
+    const init = fm.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token123");
+  });
+
+  it("401 silent does not fire handler", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    const h = vi.fn();
+    setUnauthorizedHandler(h);
+    await expect(apiGet("/me", { silent: true })).rejects.toThrow();
+    expect(h).not.toHaveBeenCalled();
+  });
+
+  it("401 non-silent fires handler", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    const h = vi.fn();
+    setUnauthorizedHandler(h);
+    await expect(apiGet("/workspaces")).rejects.toThrow();
+    expect(h).toHaveBeenCalled();
   });
 });

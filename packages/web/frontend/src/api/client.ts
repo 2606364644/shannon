@@ -1,17 +1,52 @@
 import type { FsBrowseResult, Repo, RepoDetail } from "./types";
 
 export class ApiError extends Error {
-  constructor(public status: number, public body: unknown) { super(`API ${status}`); this.name = "ApiError"; }
+  constructor(public status: number, public body: unknown) {
+    super(`API ${status}`);
+    this.name = "ApiError";
+  }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export type ReqOptions = { silent?: boolean; signal?: AbortSignal };
+
+let onUnauthorized: () => void = () => window.location.assign("/login?expired=1");
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn;
+}
+
+function readCookie(name: string): string | null {
+  const m = document.cookie.match(
+    new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\/+^])/g, "\\$1") + "=([^;]*)"),
+  );
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+async function request<T>(path: string, init?: RequestInit, opts?: ReqOptions): Promise<T> {
+  const method = init?.method?.toUpperCase();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  if (method && WRITE_METHODS.has(method)) {
+    const tok = readCookie("sn-csrf");
+    if (tok) headers["X-CSRF-Token"] = tok;
+  }
   const res = await fetch(`/api${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
+    credentials: "include",
+    signal: opts?.signal,
   });
   if (!res.ok) {
+    if (res.status === 401 && !opts?.silent) onUnauthorized();
     let body: unknown;
-    try { body = await res.json(); } catch { body = await res.text(); }
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text();
+    }
     throw new ApiError(res.status, body);
   }
   // 204/无 body
@@ -19,10 +54,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-export const apiGet = <T>(path: string) => request<T>(path);
-export const apiPost = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: "POST", body: JSON.stringify(body) });
-export const apiDelete = <T>(path: string) => request<T>(path, { method: "DELETE" });
+export const apiGet = <T>(path: string, opts?: ReqOptions) => request<T>(path, undefined, opts);
+export const apiPost = <T>(path: string, body: unknown, opts?: ReqOptions) =>
+  request<T>(path, { method: "POST", body: JSON.stringify(body) }, opts);
+export const apiDelete = <T>(path: string, opts?: ReqOptions) =>
+  request<T>(path, { method: "DELETE" }, opts);
 
 export const browseFs = (path: string) =>
   apiGet<FsBrowseResult>(`/fs/browse?path=${encodeURIComponent(path)}`);
@@ -47,9 +83,10 @@ export const pullRepo = (name: string) =>
 export const checkoutRepo = (name: string, branch: string) =>
   apiPost<{ checked_out: string }>(`/repos/${encRepo(name)}/checkout`, { branch });
 
-/** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。 */
+/** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。
+ *  注：此端点不经统一 request()，故不带 CSRF/401 处理——仅为兼容现有 text 调用。 */
 export async function apiGetText(path: string): Promise<string> {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(`/api${path}`, { credentials: "include" });
   if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.text();
 }
