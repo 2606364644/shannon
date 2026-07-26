@@ -33,19 +33,25 @@ def _clean_logging_singletons():
             tio.removeHandler(h)
             h.close()
         tio.propagate = True
-    # LogBus 模块级单例
+    # LogBus：P3c 阶段 3 已 dict 化（_BUSES 按 workflow_id 索引），清注册表所有 bus。
+    # （旧版写 LogBus._xxx 落在 _LogBusProxy 代理 instance __dict__、不触达真实 bus，
+    # 且污染代理后续 __getattr__ → 跨测试串读。）
     try:
-        from supernova_core.logging import LogBus
-        LogBus._dispatcher = None
-        LogBus._attached = False
-        LogBus._drain_task = None
-        if LogBus._diagnostic is not None:
-            LogBus._diagnostic.close()
-            LogBus._diagnostic = None
-        while True:
-            try:
-                LogBus.queue.get_nowait()
-            except _queue.Empty:
-                break
+        from supernova_core.logging.log_bus import _BUSES
+        for bus in list(_BUSES.values()):
+            bus._attached = False
+            bus._dispatcher = None
+            if bus._drain_task is not None and not bus._drain_task.done():
+                bus._drain_task.cancel()
+            bus._drain_task = None
+            if bus._diagnostic is not None:
+                bus._diagnostic.close()
+                bus._diagnostic = None
+            while True:
+                try:
+                    bus.queue.get_nowait()
+                except _queue.Empty:
+                    break
+        _BUSES.clear()
     except Exception:  # pragma: no cover - LogBus 未导入的极端情况
         pass

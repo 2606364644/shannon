@@ -27,6 +27,7 @@ import traceback
 from datetime import datetime
 
 from .diagnostic_log import DiagnosticLog, format_diagnostic_line
+from supernova_core.audit.session_registry import _resolve_wf_id
 
 
 class _LogBus:
@@ -116,7 +117,48 @@ class _LogBus:
                 self.write_fallback(event)
 
 
-LogBus = _LogBus()
+# P3c 阶段 3：按 workflow_id 索引（替代进程级 LogBus 单例）。
+# 每个 _LogBus 实例 = 一个 workflow 的独立 queue + drain task + diagnostic。
+_BUSES: dict[str, _LogBus] = {}
+
+
+def get_log_bus(workflow_id: str) -> _LogBus:
+    """取（或创建）该 workflow 的 LogBus 实例（独立 queue + drain task + diagnostic）。"""
+    return _BUSES.setdefault(workflow_id, _LogBus())
+
+
+async def attach(dispatcher, *, workflow_id: str | None = None) -> None:
+    """Attach dispatcher 到该 workflow 的 LogBus（显式 workflow_id 或 _resolve_wf_id 兜底）。"""
+    await get_log_bus(_resolve_wf_id(workflow_id)).attach(dispatcher)
+
+
+async def drain_and_detach(*, workflow_id: str | None = None) -> None:
+    wf_id = _resolve_wf_id(workflow_id)
+    bus = _BUSES.get(wf_id)
+    if bus is not None:
+        await bus.drain_and_detach()
+
+
+def is_attached(*, workflow_id: str | None = None) -> bool:
+    bus = _BUSES.get(_resolve_wf_id(workflow_id))
+    return bus.is_attached if bus else False
+
+
+class _LogBusProxy:
+    """兼容层：现有 ``LogBus.attach`` / ``LogBus.queue`` / ``LogBus.is_attached`` /
+    ``LogBus.configure_diagnostic`` 等调用零改动——``__getattr__`` 把属性/方法访问转发到
+    当前 workflow 的 _LogBus 实例（经 ``_resolve_wf_id()`` 查表，activity 体内自动拿
+    workflow_id）。与 ``LogBusHandler.emit`` 的动态路由共用同一 ``_resolve_wf_id``，
+    故 attach 的 bus 与 emit 路由的 bus 天然一致（同线程同 context 同结果）。
+
+    跨线程的 ``LogBusHandler`` 不走代理（emit 时按 ``_resolve_wf_id`` 动态 ``get_log_bus``）。
+    """
+
+    def __getattr__(self, name):
+        return getattr(get_log_bus(_resolve_wf_id()), name)
+
+
+LogBus = _LogBusProxy()
 
 
 class LogBusHandler(logging.handlers.QueueHandler):
@@ -129,9 +171,11 @@ class LogBusHandler(logging.handlers.QueueHandler):
     """
 
     def __init__(self, bus: _LogBus | None = None) -> None:
-        bus = bus or LogBus
-        super().__init__(bus.queue)
-        self._bus = bus
+        # P3c 阶段 3：root 共享单 handler，emit 时按 _resolve_wf_id() 动态路由到对应
+        # workflow 的 bus（多 scan 并发不串台）。bus 参数供测试注入；默认占位实例，
+        # emit 不依赖 self._bus（动态 get_log_bus）。
+        self._bus = bus if bus is not None else _LogBus()
+        super().__init__(self._bus.queue)
 
     def prepare(self, record):  # type: ignore[override]
         """Materialize the message + build a LogEvent. Runs on the production thread,
@@ -156,10 +200,14 @@ class LogBusHandler(logging.handlers.QueueHandler):
     def emit(self, record):  # type: ignore[override]
         try:
             event = self.prepare(record)
-            if self._bus.is_attached:
-                self.enqueue(event)            # session active → queue for drain task
+            # P3c 阶段 3：按当前线程 _resolve_wf_id 动态路由到对应 workflow 的 bus。
+            # async/to_thread 线程内 temporalio activity context 是 contextvar、被
+            # asyncio.to_thread 复制传播 → activity.info() 可用 → 正确 workflow_id。
+            bus = get_log_bus(_resolve_wf_id())
+            if bus.is_attached:
+                bus.queue.put_nowait(event)   # session active → queue for drain task
             else:
-                self._bus.write_fallback(event)  # no session → diagnostic.log
+                bus.write_fallback(event)      # no session → diagnostic.log
         except Exception:
             # Never raise: an unhandled record would trip logging.lastResort (stderr).
             self.handleError(record)

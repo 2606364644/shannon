@@ -24,6 +24,7 @@ from supernova_core.display.dispatcher import DisplayDispatcher
 from supernova_core.display.events import LogEvent
 from supernova_core.display.rich_renderer import RichConsoleRenderer
 from supernova_core.logging import LogBus
+from supernova_core.logging.log_bus import _BUSES
 from supernova_core.logging.setup import configure_logging
 
 
@@ -46,21 +47,26 @@ def _restore_root_logger():
 
 
 @pytest.fixture(autouse=True)
-def _restore_log_bus():
-    try:
-        yield
-    finally:
-        LogBus._dispatcher = None
-        LogBus._attached = False
-        LogBus._drain_task = None
-        if LogBus._diagnostic is not None:
-            LogBus._diagnostic.close()
-            LogBus._diagnostic = None
+async def _restore_log_bus():
+    # P3c 阶段 3：LogBus 是 _BUSES dict 的代理（__getattr__ 转发到当前 workflow 的 bus）。
+    # 旧版写 LogBus._xxx 会落在代理 instance __dict__、不触达真实 bus，且后续读命中
+    # instance dict 不走 __getattr__ → 跨 test 污染。改为清 _BUSES 注册表。
+    yield
+    for bus in list(_BUSES.values()):
+        bus._attached = False
+        bus._dispatcher = None
+        if bus._drain_task is not None and not bus._drain_task.done():
+            bus._drain_task.cancel()
+        bus._drain_task = None
+        if bus._diagnostic is not None:
+            bus._diagnostic.close()
+            bus._diagnostic = None
         while True:
             try:
-                LogBus.queue.get_nowait()
+                bus.queue.get_nowait()
             except _queue.Empty:
                 break
+    _BUSES.clear()
 
 
 # --- attach/detach 状态机 + drain 链路 ---
