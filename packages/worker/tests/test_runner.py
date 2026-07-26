@@ -13,10 +13,11 @@ from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
 
 
 @pytest.mark.asyncio
-async def test_run_worker_connects_and_registers_two_workers():
+async def test_run_worker_connects_and_registers_two_workers(monkeypatch):
     """run_worker 连 temporal + 起两个 Worker（白盒/黑盒固定 queue）+ 并行 run。"""
     from supernova_worker.runner import run_worker
 
+    monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
     mock_client = AsyncMock()
 
     wb_worker = MagicMock()
@@ -47,9 +48,9 @@ async def test_run_worker_connects_and_registers_two_workers():
     assert BlackboxScanWorkflow in bb_call.kwargs["workflows"]
     assert len(bb_call.kwargs["activities"]) >= 10  # 黑盒 ~16 activities
 
-    # bb_worker 并发=1：LogBus 单例 + AuditSession 全局单例多 scan 并发会串台/冲突，
-    # 对齐 wb_worker(max_concurrent_workflow_tasks=1)。
-    assert bb_call.kwargs["max_concurrent_workflow_tasks"] == 1
+    # P3c 阶段 3：contextvar 化（AuditSession/LogBus/heartbeat 按 workflow_id 隔离）后
+    # 并发不再串台。max_concurrent 读 SUPERNOVA_WORKER_MAX_CONCURRENT_WF（默认 4）。
+    assert bb_call.kwargs["max_concurrent_workflow_tasks"] == 4
 
     # 两个 worker 都 run（并行 gather）
     wb_worker.run.assert_awaited_once()
@@ -68,14 +69,15 @@ async def test_run_worker_propagates_connect_failure():
 
 
 @pytest.mark.asyncio
-async def test_run_worker_whitebox_concurrency_one_and_migration_activities():
-    """白盒 Worker: max_concurrent_workflow_tasks=1(AuditSession 进程全局单例约束) + 注册迁移 activity.
+async def test_run_worker_whitebox_concurrent_and_migration_activities(monkeypatch):
+    """白盒 Worker: 注册 setup_display/finalize_summary（display 生命周期 activity）。
 
-    AuditSession 是进程全局 _current(session_registry.py), events.ndjson 经它写.
-    worker 容器并发多白盒扫描会冲突 → 白盒 Worker 并发=1. 解锁需把 AuditSession 改 contextvar(留 follow-up).
+    P3c 阶段 3：contextvar 化后 max_concurrent 放开（默认 4）。run_heartbeat 非注册
+    activity（heartbeat 由 setup_display 内 HeartbeatManager 启动），旧断言过时已删。
     """
     from supernova_worker.runner import run_worker
 
+    monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
     mock_client = AsyncMock()
     wb_worker = MagicMock()
     wb_worker.run = AsyncMock()
@@ -89,14 +91,33 @@ async def test_run_worker_whitebox_concurrency_one_and_migration_activities():
         await run_worker("temporal:7233")
 
     wb_call = mw.call_args_list[0]
-    assert wb_call.kwargs["max_concurrent_workflow_tasks"] == 1, \
-        "白盒 Worker 并发=1(AuditSession 进程全局单例约束)"
+    assert wb_call.kwargs["max_concurrent_workflow_tasks"] == 4, \
+        "白盒 Worker 并发默认 4(contextvar 化后放开)"
     activity_names = {getattr(a, "__name__", a) for a in wb_call.kwargs["activities"]}
     assert "setup_display" in activity_names, "白盒 Worker 须注册 setup_display"
-    assert "run_heartbeat" in activity_names, "白盒 Worker 须注册 run_heartbeat"
     assert "finalize_summary" in activity_names, "白盒 Worker 须注册 finalize_summary"
     # auth GitNexus 轨已删(plan zazzy-roaming-shamir, 2026-07-14):
     # run_auth_config_scan/run_auth_gitnexus_judge 不再存在, 不注册.
+
+
+@pytest.mark.asyncio
+async def test_worker_max_concurrent_reads_env(monkeypatch):
+    """max_concurrent_workflow_tasks 读 SUPERNOVA_WORKER_MAX_CONCURRENT_WF（默认 4，env 可配）。"""
+    from supernova_worker.runner import run_worker
+
+    monkeypatch.setenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "8")
+    mock_client = AsyncMock()
+    wb_worker = MagicMock()
+    wb_worker.run = AsyncMock()
+    bb_worker = MagicMock()
+    bb_worker.run = AsyncMock()
+    with patch("supernova_worker.runner.Client.connect",
+               AsyncMock(return_value=mock_client)), \
+         patch("supernova_worker.runner.Worker",
+               side_effect=[wb_worker, bb_worker]) as mw:
+        await run_worker("temporal:7233")
+    assert mw.call_args_list[0].kwargs["max_concurrent_workflow_tasks"] == 8
+    assert mw.call_args_list[1].kwargs["max_concurrent_workflow_tasks"] == 8
 
 
 def test_main_loads_profile_env_before_starting_worker():

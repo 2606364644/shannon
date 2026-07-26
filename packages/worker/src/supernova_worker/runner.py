@@ -8,6 +8,7 @@ CLI 路径（supernova-whitebox/-blackbox start）零改动，仍用 generate_ta
 唯一随机 queue 自己提交自己消费，与本 worker 容器互不干扰（queue 精确匹配）。
 """
 import asyncio
+import os
 from datetime import timedelta
 
 from temporalio.client import Client
@@ -69,10 +70,11 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, finalize_summary,
         ],
-        # AuditSession 是进程全局 _current 单例(session_registry.py), events.ndjson 经它写.
-        # worker 容器并发多白盒扫描会冲突 → 白盒 Worker 并发=1. 解锁需把 AuditSession 改
-        # contextvar(更大重构, 留 follow-up, 不在本 plan).
-        max_concurrent_workflow_tasks=1,
+        # P3c 阶段 3：AuditSession/LogBus/heartbeat 已 contextvar 化（按 workflow_id 隔离），
+        # 多 scan 并发不再串台 → max_concurrent 放开（默认 4，env 可配）。
+        max_concurrent_workflow_tasks=int(
+            os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
+        ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
     )
     bb_worker = Worker(
@@ -87,9 +89,10 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             load_correlation_context, resolve_blackbox_engine, detect_whitebox_results,
             write_engine_config_for_session, cleanup_engine_configs,
         ],
-        # 对齐 wb_worker: AuditSession 全局单例 + LogBus 单例多 scan 并发会冲突/串台
-        # (runner.py:68-71 注释同因)。黑盒 web 扫描 C1 化(Plan B)前先就位。
-        max_concurrent_workflow_tasks=1,
+        # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
+        max_concurrent_workflow_tasks=int(
+            os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
+        ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
     )
 
