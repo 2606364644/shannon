@@ -36,6 +36,11 @@ class WebConfig:
         return Path(resolve_workspaces_dir())
 
     @property
+    def master_key_file(self) -> Path:
+        """P3c 阶段 2：凭据 master key 落盘路径（env SUPERNOVA_MASTER_KEY 优先于该文件）。"""
+        return self.workspaces_dir / ".master_key"
+
+    @property
     def auth_db_path(self) -> Path:
         return self.workspaces_dir / "auth.db"
 

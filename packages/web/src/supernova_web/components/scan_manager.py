@@ -44,7 +44,8 @@ class ScanManager:
     """
 
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
-                 max_concurrent: int = 1, scan_timeout: float = 0.0) -> None:
+                 max_concurrent: int = 1, scan_timeout: float = 0.0,
+                 ws_config_store: Any = None) -> None:
         self._workspaces_dir = Path(workspaces_dir)
         self._repos_dir = Path(repos_dir)
         self._config_store = config_store
@@ -55,6 +56,8 @@ class ScanManager:
         self._tasks: dict[str, asyncio.Task] = {}
         # 进行中的 scan 请求快照（ws -> ScanRequest），供 active_repo_sources() 判引用
         self._active_reqs: dict[str, ScanRequest] = {}
+        # P3c 阶段 2：per-ws 配置解析（None=CLI/旧测试兜底，走全局 env）
+        self._ws_config_store = ws_config_store
 
     # ---- 公共 API ----
     def active_pids(self) -> dict[str, int]:

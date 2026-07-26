@@ -222,15 +222,21 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.multi_repo_config_store import MultiRepoConfigStore
     from .components.repo_manager import RepoManager
     from .components.scan_manager import ScanManager
-    from .api import events, fs, members, multi_configs, repos, scan, system_status, users, workspaces
+    from .components.credential_vault import CredentialVault
+    from .components.ws_config_store import WsConfigStore
+    from .api import events, fs, members, multi_configs, repos, scan, system_status, users, workspaces, ws_config
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
+    # P3c 阶段 2：per-ws 配置
+    app.state.credential_vault = CredentialVault(cfg.master_key_file)
+    app.state.ws_config_store = WsConfigStore(cfg.workspaces_dir, app.state.credential_vault)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
     git_fetcher = GitFetcher(cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token)
     overrides = overrides or {}
     app.state.scan_manager = overrides.get("scan_manager") or ScanManager(
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
-        max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout)
+        max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout,
+        ws_config_store=app.state.ws_config_store)
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
         cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
@@ -244,6 +250,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(fs.router, dependencies=_require_auth)
     app.include_router(system_status.router, dependencies=_require_auth)
     app.include_router(members.router, dependencies=_require_auth)
+    app.include_router(ws_config.router, dependencies=_require_auth)
     app.include_router(users.router)
 
     from .auth import routes as auth_routes
