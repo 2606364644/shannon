@@ -17,7 +17,7 @@ from supernova_core.session import SessionManager
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
-from .repo_manager import _resolve_repo_dir
+from .repo_manager import _resolve_repo_dir, _validate_ws_segment
 from .scan_liveness import is_scan_recently_active
 
 
@@ -62,12 +62,17 @@ class ScanManager:
         # (heartbeat mtime). orphan_reconciler 的 is_scan_recently_active 门兜底(不误杀活 workflow).
         return {}
 
-    def active_repo_sources(self) -> set[str]:
-        """当前正在跑的 scan 引用的 repo 名集合（DELETE /repos 判引用用）。"""
-        out: set[str] = set()
-        for req in self._active_reqs.values():
+    def active_repo_sources(self) -> set[tuple[str, str]]:
+        """当前正在跑的 scan 引用的 (ws, repo 名) 集合（DELETE /repos 判引用用）。
+
+        T3: 返回值改为 (ws, name) 元组集合——P2 隔离后 ws 维度必须参与引用判定,
+        否则 ws-A 的 scan 引用 repo-X 时 ws-B 仍能删 ws-B/repo-X(虽然 RepoManager
+        已 per-ws 隔离不会真删错, 但 409 引用门本应感知 ws)。
+        """
+        out: set[tuple[str, str]] = set()
+        for ws, req in self._active_reqs.items():
             if req.source is not None and req.source.kind == "repo":
-                out.add(req.source.value)
+                out.add((ws, req.source.value))
         return out
 
     async def reap_zombies(self) -> None:
@@ -260,16 +265,24 @@ class ScanManager:
         yaml_path: Path | None = None
         if req.source is not None:
             if req.source.kind == "repo":
-                target = self._resolve_repo_path(req.source.value)
+                target = self._resolve_repo_path(req.workspace, req.source.value)
             else:  # path
                 target = req.source.value
         if req.type == "correlation":
             yaml_path = await self._resolve_correlation_yaml(req)
         return target, yaml_path
 
-    def _resolve_repo_path(self, name: str) -> str:
-        """将 repo 名（可为 group/repo）解析为 repos_dir 内绝对路径，并校验 state==ready。"""
-        repo_dir = _resolve_repo_dir(self._repos_dir, name)
+    def _resolve_repo_path(self, ws: str, name: str) -> str:
+        """将 repo 名（可为 group/repo）解析为 workspaces/<ws>/repos 内绝对路径，
+        并校验 state==ready。
+
+        T3: P2 隔离后 repo 路径从全局 repos/ 改为 workspaces/<ws>/repos（RepoManager
+        per-ws 落地）；ws 来自 P1 的 req.workspace（scan 路由已校验 ws 存在 + 用户为
+        成员），这里再过一道 _validate_ws_segment 是 defense-in-depth（与 RepoManager
+        ._repos_root 同档约束）。
+        """
+        _validate_ws_segment(ws)
+        repo_dir = _resolve_repo_dir(self._workspaces_dir / ws / "repos", name)
         if not repo_dir.is_dir():
             raise ValueError(f"仓库不存在：{name}")
         meta_file = repo_dir / ".supernova-repo.json"
@@ -280,7 +293,7 @@ class ScanManager:
             except json.JSONDecodeError:
                 state = "ready"  # 元数据损坏不阻塞扫描
         if state != "ready":
-            raise ValueError(f"仓库未就绪（state={state}），请先在 /repos 完成 clone")
+            raise ValueError(f"仓库未就绪（state={state}），请先在 ws 内完成 clone")
         return str(repo_dir)
 
     def _resolve_out_workspace(self, yaml_path: Path | None) -> str:

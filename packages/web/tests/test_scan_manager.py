@@ -308,12 +308,16 @@ async def test_watch_crashed_fallback_when_no_scan_end(tmp_path):
 # ── active_repo_sources / active_pids ─────────────────────────────────────
 
 def test_active_repo_sources_tracks_running_then_clears(tmp_path):
-    """active_repo_sources(): 在途 scan 引用的 repo 出现于集合, scan 结束后消失."""
+    """active_repo_sources(): 在途 scan 引用的 (ws, repo) 出现于集合, scan 结束后消失.
+
+    T3: 返回 set[tuple[str,str]]——delete_repo 用 (ws, name) in ... 判引用, ws 维度
+    必须参与（防 ws-A 的 scan 误锁 ws-B 的同名 repo）。
+    """
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     assert mgr.active_repo_sources() == set()
     mgr._active_reqs["ws1"] = ScanRequest(
         type="whitebox", source=RepoSource(kind="repo", value="foo"), url="http://e")
-    assert "foo" in mgr.active_repo_sources()
+    assert ("ws1", "foo") in mgr.active_repo_sources()
     mgr._active_reqs.pop("ws1", None)
     assert mgr.active_repo_sources() == set()
 
