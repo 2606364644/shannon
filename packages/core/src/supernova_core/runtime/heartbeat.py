@@ -30,6 +30,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from supernova_core.audit.session_registry import _resolve_wf_id
+
 HEARTBEAT_FILENAME = "heartbeat"
 CANCEL_REQUESTED_FILENAME = "cancel.requested"
 
@@ -86,39 +88,35 @@ def _session_is_terminal(ws_dir: Path) -> bool:
     return status in _TERMINAL_SESSION_STATUSES
 
 
-# 进程级 heartbeat 单例 API: 供主线 activity(setup_display 启动 / finalize_summary 停止)调用,
+# heartbeat 注册表 API: 供主线 activity(setup_display 启动 / finalize_summary 停止)调用,
 # 替代曾用的 background activity(workflow.start_activity / asyncio.create_task 包的 run_heartbeat).
-# 后者在 worker max_concurrent_workflow_tasks=1(AuditSession 进程全局单例所致, runner.py wb_worker)
-# 下被 worker poll 到 task(server pendingActivities.state=STARTED) 却从不 dispatch handler →
+# 后者在 worker poll 到 task(server pendingActivities.state=STARTED) 却从不 dispatch handler →
 # heartbeat 永不写(2026-07-23 hr_1784788700 回归, test_workflow_heartbeat_execution 钉死).
 # 走主线 await activity 启动 daemon 线程, 绕过 background activity 的 dispatch 缺陷.
-_current_heartbeat: "HeartbeatManager | None" = None
+# P3c 阶段 3: _current_heartbeat 单例 → _HEARTBEATS dict 按 workflow_id 索引, 解除
+# max_concurrent_workflow_tasks=1 硬钉; 多 scan 并发各自 daemon 互不影响。旧「ws_dir 变了先停旧」
+# 分支(并发杀心跳元凶)删除——按 workflow_id 隔离后不同 workflow 各自独立。
+_HEARTBEATS: dict[str, "HeartbeatManager"] = {}
 
 
-async def start_heartbeat(ws_dir: Path | str) -> None:
+async def start_heartbeat(ws_dir: Path | str, workflow_id: str | None = None) -> None:
     """启动 heartbeat daemon 线程(写 <ws_dir>/heartbeat). 由 setup_display(主线首个 await
-    activity, 真机确认执行)调用. 幂等: 同 ws_dir 已在跑则跳过; ws_dir 变化先停再起."""
-    global _current_heartbeat
+    activity, 真机确认执行)调用. 幂等: 同 workflow_id + 同 ws_dir 已在跑则跳过."""
+    wf_id = _resolve_wf_id(workflow_id)
     ws = Path(ws_dir)
-    if _current_heartbeat is not None and _current_heartbeat._ws_dir == ws:
-        return  # 同 ws_dir, 幂等跳过(setup_display retry 等)
-    if _current_heartbeat is not None:
-        await _stop_current_heartbeat()  # ws_dir 变了, 先停旧的
+    existing = _HEARTBEATS.get(wf_id)
+    if existing is not None and existing._ws_dir == ws:
+        return  # 同 workflow + 同 ws_dir, 幂等跳过(setup_display retry 等)
     mgr = HeartbeatManager(ws, on_cancel=None)
     await mgr.__aenter__()  # 写首个 heartbeat(消除空窗) + 起 daemon 线程
-    _current_heartbeat = mgr
+    _HEARTBEATS[wf_id] = mgr
 
 
-async def stop_heartbeat() -> None:
+async def stop_heartbeat(workflow_id: str | None = None) -> None:
     """停止 heartbeat(daemon 线程退出 + best-effort 删 heartbeat 文件). 由 finalize_summary
     调用. 即使未调, daemon _heartbeat_loop 终态自停(session.json 终态)兜底, 不残留."""
-    await _stop_current_heartbeat()
-
-
-async def _stop_current_heartbeat() -> None:
-    global _current_heartbeat
-    mgr = _current_heartbeat
-    _current_heartbeat = None
+    wf_id = _resolve_wf_id(workflow_id)
+    mgr = _HEARTBEATS.pop(wf_id, None)
     if mgr is not None:
         await mgr.__aexit__(None, None, None)
 
