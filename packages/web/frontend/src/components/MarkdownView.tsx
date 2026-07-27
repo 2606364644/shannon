@@ -197,9 +197,15 @@ function makeProseComponents(t: TFunction) {
           }
         }
         return (
-          <li {...props} data-testid="kv-row" className="flex items-baseline gap-2">
-            <span className="kv-key shrink-0 font-mono text-muted-foreground">{keyText}</span>
-            <span className="kv-val min-w-0 break-words">{valKids}</span>
+          // 自然句式流（非 flex 两列）：标签紧贴值，长值换行占满整行宽度。
+          // 旧 flex + key shrink-0 因各行 key 长短不一，把长标签那行的值推到右边、值列参差。
+          // 冒号走 kv-key 伪元素（after:content）→ 继承标签 11px/muted 色，视觉一体不再跳眼；
+          // 伪元素不计入 DOM textContent，故 .kv-key 仍断言为纯字段名（无冒号）。
+          // {" "} 显式空格分隔（不依赖源码换行空白，免被格式化吞掉）。
+          <li {...props} data-testid="kv-row" className="min-w-0 break-words">
+            <span className="kv-key font-mono text-[11px] uppercase tracking-wide text-muted-foreground after:content-[':']">{keyText}</span>
+            {" "}
+            <span className="kv-val break-words">{valKids}</span>
           </li>
         );
       }
@@ -220,27 +226,34 @@ function makeProseComponents(t: TFunction) {
     const lang = /language-(\w+)/.exec(cls)?.[1] ?? "";
     const text = flatten(codeChild?.props?.children);
     return (
-      <pre {...props} data-testid="code-block" className="relative">
-        {lang && (
-          <span
-            data-testid="code-lang"
-            className="absolute right-2 top-1 font-mono text-xs text-muted-foreground"
+      <pre {...props} data-testid="code-block" className="group relative pt-7">
+        {/* 工具栏：语言角标 + 复制按钮并排右上角（同一 flex 容器水平排列）。
+            旧实现一上一下绝对定位（top-1 / bottom-1），单行 http/bash 矮代码块时
+            二者垂直区间交叠 → 重叠。改水平并排后矮代码块也不重叠；pt-7 给工具栏
+            腾顶部空间，代码首行不被遮挡。语言角标弱化（辅助信息，eyebrow 风格），
+            复制按钮 hover 整块 pre 时才完全显形。 */}
+        <div className="absolute right-1 top-1 flex items-center gap-1">
+          {lang && (
+            <span
+              data-testid="code-lang"
+              className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70"
+            >
+              {lang}
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="copy-btn"
+            className="copy-btn h-6 px-2 text-xs opacity-50 transition-opacity group-hover:opacity-100"
+            onClick={(e) => {
+              navigator.clipboard?.writeText(text);
+              e.currentTarget.textContent = "✓";
+            }}
           >
-            {lang}
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          data-testid="copy-btn"
-          className="copy-btn absolute right-2 bottom-1 text-xs opacity-60 hover:opacity-100"
-          onClick={(e) => {
-            navigator.clipboard?.writeText(text);
-            e.currentTarget.textContent = "✓";
-          }}
-        >
-          {t("markdown.copy")}
-        </Button>
+            {t("markdown.copy")}
+          </Button>
+        </div>
         {children}
       </pre>
     );

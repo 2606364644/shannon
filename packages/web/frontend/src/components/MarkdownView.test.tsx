@@ -233,6 +233,17 @@ describe("MarkdownView", () => {
     expect(container.querySelector('[data-testid="code-lang"]')?.textContent).toBe("bash");
   });
 
+  it("语言角标与复制按钮并排同一工具栏（矮代码块不垂直重叠）", () => {
+    const { container } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
+    const lang = container.querySelector('[data-testid="code-lang"]');
+    const copy = container.querySelector(".copy-btn");
+    expect(lang).not.toBeNull();
+    expect(copy).not.toBeNull();
+    // 二者为兄弟节点（同一 flex 工具栏内水平排列），而非一上一下绝对定位 →
+    // 单行 http/bash 矮代码块也不再垂直重叠（用户报告的重叠 bug 回归守护）。
+    expect(lang?.parentElement).toBe(copy?.parentElement);
+  });
+
   it("inline code 无 pre 包装、无复制按钮", () => {
     const { container } = render(<MarkdownView markdown={"正文 `inline_x` 结尾"} />);
     const code = container.querySelector("code");

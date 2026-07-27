@@ -27,6 +27,10 @@
   --tw-prose-bold: hsl(var(--prose-bold));
   --tw-prose-code: hsl(var(--prose-code));
   --tw-prose-pre-bg: hsl(var(--prose-code-bg));
+  /* ★ block code 文字色：typography 默认 --tw-prose-pre-code=#e5e7eb（浅灰，假定深底）。
+     深色主题下浅字配深 pre 底恰好可见；但切 light 后浅灰字落在浅奶油 pre 底上对比~1:1
+     → 代码块普通文字（未被 hljs 着色部分）完全看不见。接到 --foreground 双主题跟随。 */
+  --tw-prose-pre-code: hsl(var(--foreground));
   --tw-prose-quotes: hsl(var(--prose-quotes));
   --tw-prose-bullets: hsl(var(--prose-bullets));
   --tw-prose-hr: hsl(var(--prose-hr));
