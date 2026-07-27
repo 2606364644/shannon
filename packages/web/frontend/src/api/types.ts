@@ -132,6 +132,8 @@ export interface ScanSummary {
   total_duration_ms?: number | null;
   links?: { parent_workspace?: string | null; child_workspaces?: string[] };
   is_correlation?: boolean;
+  // IA 重设计 §3：跨 ws 聚合（GET /api/scans）注入的归属工作区名。per-ws listScans 不返此字段。
+  workspace?: string;
 }
 
 export interface SessionMetrics {

@@ -9,6 +9,8 @@ export type AuthUser = {
   // 后端默认账号（users.yaml must_change_password: true）seed 时置 true；
   // 登录后前端据此弹改密提醒 + 顶栏 badge。change-password 成功后置 false。
   must_change_password: boolean;
+  // per-user 置顶工作区（IA 重设计 §2.3）。null=未置顶。经 /auth/me 返回。
+  pinned_workspace?: string | null;
 };
 export type AuthState = {
   user: AuthUser | null;

@@ -136,6 +136,13 @@ export const repoEventsUrl = (ws: string, name: string) =>
 export const listScans = (ws: string) =>
   apiGet<ScanSummary[]>(`/workspaces/${encWs(ws)}/scans`);
 
+/** 跨 ws 聚合所有 scans（IA 重设计 §3，GET /api/scans）。返回项注入 workspace 字段。 */
+export const listAllScans = () => apiGet<ScanSummary[]>("/scans");
+
+/** 置顶当前用户的工作区（IA 重设计 §2.3，PUT /api/users/me/pinned-workspace）。 */
+export const setPinnedWorkspace = (ws: string) =>
+  apiPut<{ pinned: string }>("/users/me/pinned-workspace", { workspace: ws });
+
 /** scan 详情（同旧 GET /workspaces/{ws} payload shape，读 scan_dir）。 */
 export const getScan = (ws: string, scanId: string) =>
   apiGet<SessionData>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
