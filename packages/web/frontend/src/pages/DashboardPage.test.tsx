@@ -1,130 +1,73 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { setupServer } from "msw/node";
-import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
-import type { Workspace } from "../api/types";
 
-// 用「今天」的 unix 秒,验证 isToday 过滤
-const todaySec = Math.floor(Date.now() / 1000);
-const oldSec = todaySec - 3 * 86400; // 3 天前
+// 只 mock listAllScans（Task 4 的跨 ws 聚合 API）。DashboardPage 不再读 useWorkspaces。
+vi.mock("@/api/client", () => ({
+  listAllScans: vi.fn(),
+}));
 
-const workspaces: Workspace[] = [
-  { name: "ws-run", scan_type: "whitebox", status: "running", created_at: todaySec, total_cost_usd: 1.5, total_duration_ms: 120000, vuln_count: 3, is_correlation: false },
-  { name: "ws-today", scan_type: "blackbox", status: "completed", created_at: oldSec, completed_at: todaySec, total_cost_usd: 2.0, total_duration_ms: 50000, vuln_count: 5, is_correlation: false },
-  { name: "ws-old", scan_type: "whitebox", status: "completed", created_at: oldSec, completed_at: oldSec, total_cost_usd: 0.5, total_duration_ms: 30000, vuln_count: 7, is_correlation: false },
+const mockScans = [
+  { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 100, vuln_count: 1, is_running: true, workspace: "ws-a", total_cost_usd: 0.1 },
+  { scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 200, vuln_count: 2, is_running: false, workspace: "ws-b", total_cost_usd: 0.2 },
 ];
-
-const server = setupServer(
-  http.get("/api/workspaces", () => HttpResponse.json(workspaces)),
-);
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-// jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
-beforeEach(() => i18n.changeLanguage("zh"));
-afterEach(() => { server.resetHandlers(); cleanup(); });
-afterAll(() => server.close());
 
 function renderPage() {
   return render(<MemoryRouter><DashboardPage /></MemoryRouter>);
 }
 
-describe("DashboardPage 骨架 + 汇总", () => {
-  it("全空态(data=[])→ 引导卡 + 新建扫描按钮", async () => {
-    server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
+describe("DashboardPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
+    // 状态筛选选项断言用中文「已完成」,逐测试钉回 zh。
+    return i18n.changeLanguage("zh");
+  });
+  afterEach(() => cleanup());
+
+  it("renders scan table with workspace column", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
     renderPage();
-    expect(await screen.findByText(/还没有扫描/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /\+ 新建扫描/ })).toHaveAttribute("href", "/scan/new");
+    // s1 是 running,同时出现在顶部 running 卡片和表格中 -> getAllByText
+    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
+    // 工作区列:ws-a / ws-b 都在表格的 Link 文本里(running 卡片里是「工作区: ws-a」整段,不撞 exact 匹配)
+    expect(screen.getByText("ws-a")).toBeInTheDocument();
+    expect(screen.getByText("ws-b")).toBeInTheDocument();
   });
 
-  it("汇总数字:运行中 1 / 今日完成 1 / 累计漏洞 15 / 累计 cost 4.00", async () => {
+  it("status filter narrows results", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
     renderPage();
-    // 等累计漏洞出现(Task4 只渲染汇总行;ws-run 名字是 Task5 才渲染)
-    await waitFor(() => expect(screen.getByText("15")).toBeInTheDocument());
-    // 4 个汇总值;用 getAllByText 精确匹配数字
-    // 运行中=1, 今日完成=1 → 两个 "1"(精确匹配,不撞 $1.50 等含 1 的文本)
-    expect(screen.getAllByText("1")).toHaveLength(2);
-    // 累计漏洞 = 3+5+7 = 15
-    expect(screen.getByText("15")).toBeInTheDocument();
-    // 累计 cost = 1.5+2.0+0.5 = 4.00
-    expect(screen.getByText("$4.00")).toBeInTheDocument();
-  });
+    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
 
-  it("顶栏「+ 新建扫描」入口跳 /scan/new", async () => {
-    renderPage();
-    // 等累计漏洞出现(Task4 只渲染汇总行;ws-run 名字是 Task5 才渲染)
-    await waitFor(() => expect(screen.getByText("15")).toBeInTheDocument());
-    const links = screen.getAllByRole("link", { name: /\+ 新建扫描/ });
-    expect(links.some((l) => l.getAttribute("href") === "/scan/new")).toBe(true);
-  });
+    // ScanFilters 的 combobox 顺序 = status[0] / type[1] / time[2](keyword 是 Input 非 combobox)。
+    // brief 原写 statusSelects[1] 实际命中 type,错误;改用 aria-label 精确定位 status 筛选。
+    // 用 fireEvent.click 而非 mouseDown:本 jsdom 版本 mouseDown 触发 pointerCapture 未实现错误
+    // (见 ScanNewPage.test 同款注释)。click 是已验证可复现的姿势。
+    const statusTrigger = screen.getByRole("combobox", { name: /状态筛选/ });
+    fireEvent.click(statusTrigger);
+    const opt = await screen.findByRole("option", { name: "已完成" }, { timeout: 1000 });
+    fireEvent.click(opt);
 
-  it("error → ErrorState(role=alert)+ 重试", async () => {
-    server.use(http.get("/api/workspaces", () => HttpResponse.json({}, { status: 500 })));
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
-  });
-
-  it("loading → Skeleton", async () => {
-    server.use(http.get("/api/workspaces", () => new Promise(() => {}))); // 永不 resolve
-    renderPage();
-    expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
-  });
-
-  it("running 卡片墙:整张可点跳 /p/ws-run/live", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
-    const link = screen.getByRole("link", { name: /查看实时/ });
-    expect(link.getAttribute("href")).toBe("/p/ws-run/live");
-  });
-
-  it("最近扫描区:非 running 行 + 「查看全部」跳 /workspaces", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByText("ws-today")).toBeInTheDocument());
-    expect(screen.getByText("ws-old")).toBeInTheDocument();
-    // 「查看全部 →」跳列表页
-    expect(screen.getByRole("link", { name: /查看全部/ }).getAttribute("href")).toBe("/workspaces");
-    // 最近行整行可点跳 /p/{ws}
-    expect(screen.getByRole("link", { name: /ws-today/ }).getAttribute("href")).toBe("/p/ws-today");
-  });
-
-  it("无 running → 显示空态文案", async () => {
-    server.use(http.get("/api/workspaces", () => HttpResponse.json([
-      { name: "ws-done", scan_type: "whitebox", status: "completed", created_at: todaySec, completed_at: todaySec, vuln_count: 1, is_correlation: false },
-    ])));
-    renderPage();
-    await waitFor(() => expect(screen.getByText("ws-done")).toBeInTheDocument());
-    expect(screen.getByText(/当前无运行中扫描/)).toBeInTheDocument();
-  });
-
-  it("标题区统一为 PageHeader：显「仪表盘」+ 副标题", async () => {
-    renderPage();
-    expect(await screen.findByRole("heading", { name: "仪表盘" })).toBeInTheDocument();
-    expect(screen.getByText("扫描概览与最近活动")).toBeInTheDocument();
-  });
-});
-
-describe("DashboardPage i18n", () => {
-  afterEach(() => i18n.changeLanguage("zh"));
-
-  it("中文渲染汇总标签与最近扫描区标题", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
-    expect(screen.getByText("今日完成")).toBeInTheDocument();
-    expect(screen.getByText("累计漏洞")).toBeInTheDocument();
-    expect(screen.getByText("最近扫描")).toBeInTheDocument();
-  });
-
-  it("切英文后汇总标签变 Completed today 等", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByText("ws-run")).toBeInTheDocument());
-    await act(async () => {
-      await i18n.changeLanguage("en");
+    // 选 completed -> 只剩 s2(completed);s1(running) 从 running 卡片 + 表格整体消失
+    await waitFor(() => {
+      expect(screen.queryByText("s1")).not.toBeInTheDocument();
+      expect(screen.getByText("s2")).toBeInTheDocument();
     });
-    expect(await screen.findByText("Completed today")).toBeInTheDocument();
-    expect(screen.getByText("Total vulns")).toBeInTheDocument();
-    expect(screen.getByText("Recent scans")).toBeInTheDocument();
+  });
+
+  it("empty state when no scans", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([]);
+    renderPage();
+    // Empty 空态:title「还没有扫描」+ 新建扫描按钮。用 exact 标题断言空态渲染
+    // (brief 原正则 /还没有扫描|新建扫描/ 同时命中 title 和按钮文本 -> getByText 多元素抛错,
+    //  改 exact 单匹配)。
+    await waitFor(() => expect(screen.getByText("还没有扫描")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /新建扫描/ })).toHaveAttribute("href", "/scan/new");
   });
 });

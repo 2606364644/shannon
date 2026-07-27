@@ -361,6 +361,19 @@
     },
     "errors": {
       "loadFailed": "Dashboard 加载失败：{{error}}"
+    },
+    "scanTable": {
+      "status": "状态",
+      "scanId": "扫描",
+      "workspace": "工作区",
+      "type": "类型",
+      "vulns": "漏洞",
+      "cost": "花费",
+      "time": "时间"
+    },
+    "noWorkspace": {
+      "title": "尚未分配工作区",
+      "hint": "请联系管理员为你分配工作区"
     }
   },
   "settings": {

@@ -361,6 +361,19 @@
     },
     "errors": {
       "loadFailed": "Dashboard load failed: {{error}}"
+    },
+    "scanTable": {
+      "status": "Status",
+      "scanId": "Scan",
+      "workspace": "Workspace",
+      "type": "Type",
+      "vulns": "Vulns",
+      "cost": "Cost",
+      "time": "Time"
+    },
+    "noWorkspace": {
+      "title": "No workspace assigned",
+      "hint": "Contact your admin to assign a workspace"
     }
   },
   "settings": {
