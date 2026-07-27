@@ -17,7 +17,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { labelKey: "nav.dashboard", to: "/", end: true },
-  { labelKey: "nav.workspaces", to: "/workspaces", end: true },
+  { labelKey: "nav.workspaces", to: "/workspaces-entry", end: true },
   // P2: 仓库入口已迁入工作区详情页的「仓库」tab，顶级 nav 撤销
   { labelKey: "nav.scan", to: "/scan/new" },
   { labelKey: "nav.settings", to: "/settings" },
@@ -64,6 +64,25 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
             )
           )}
         </nav>
+        {/* admin 专属「工作区管理」入口（/workspaces 包 RequireAdmin）。IA 重设计 §2.2 */}
+        {user?.role === "admin" && (
+          <NavLink to="/workspaces" className="inline-flex">
+            {({ isActive }) => (
+              <span
+                data-testid="nav-workspace-manage"
+                data-active={isActive}
+                className={cn(
+                  "border-b-2 px-3 py-1.5 text-sm transition-colors",
+                  isActive
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {t("nav.workspaceManage")}
+              </span>
+            )}
+          </NavLink>
+        )}
         <div className="ml-auto flex items-center gap-1">
           {/* 运行中扫描指示器 slot（子项目 5 接 SSE） */}
           {mustChange && (

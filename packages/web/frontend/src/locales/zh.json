@@ -69,6 +69,7 @@
   "nav": {
     "dashboard": "概览",
     "workspaces": "工作区",
+    "workspaceManage": "工作区管理",
     "repos": "仓库",
     "scan": "扫描",
     "settings": "设置",

@@ -21,6 +21,7 @@ import LoginPage from "./pages/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
 import { UsersPage } from "./pages/UsersPage";
 import { RequireAdmin } from "./auth/RequireAdmin";
+import { WorkspacesEntry } from "./components/WorkspacesEntry";
 
 // per-scan 默认 tab：进行中 -> live，完成 -> report。fetch scan status 后 navigate（replace 避免占历史栈）。
 function DefaultScanTab() {
@@ -67,7 +68,10 @@ export const router = createBrowserRouter([
     element: <RequireAuth><AppShell /></RequireAuth>,
     children: [
       { path: "/", element: <DashboardPage /> },
-      { path: "/workspaces", element: <WorkspaceListPage /> },
+      // 顶栏「工作区」入口：三段跳转（pinned->最近->空态）。IA 重设计 §2.3
+      { path: "/workspaces-entry", element: <WorkspacesEntry /> },
+      // 工作区管理页（admin 专属）：列表 + CRUD。普通用户走 /workspaces-entry 跳转。
+      { path: "/workspaces", element: <RequireAdmin><WorkspaceListPage /></RequireAdmin> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         // ws 概览（容器）：ws header + 扫描列表 + 仓库/settings 入口

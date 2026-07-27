@@ -35,4 +35,10 @@ describe("router.tsx 结构", () => {
     expect(router).toContain('"/workspaces"');
     expect(router).toContain('"/settings"');
   });
+  it("Task 11: 顶栏「工作区」入口三段跳转 + /workspaces admin 专属", () => {
+    expect(router).toContain("WorkspacesEntry");
+    expect(router).toContain('"/workspaces-entry"');
+    // /workspaces 包 RequireAdmin（admin 专属管理页）
+    expect(router).toMatch(/path:\s*"\/workspaces",\s*element:\s*<RequireAdmin><WorkspaceListPage/);
+  });
 });

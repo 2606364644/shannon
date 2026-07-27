@@ -69,6 +69,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "workspaces": "Workspaces",
+    "workspaceManage": "Workspaces",
     "repos": "Repositories",
     "scan": "Scan",
     "settings": "Settings",

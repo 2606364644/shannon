@@ -6,14 +6,12 @@ import i18n from "@/i18n";
 
 // TopBar 集成 UserMenu（T17），UserMenu 用 useAuth。本测试聚焦 TopBar 业务（导航/i18n/sticky），
 // 不测 auth 行为，故 stub useAuth 注入固定 user 避免 "useAuth 必须在 AuthProvider 内使用"。
-vi.mock("@/auth/AuthContext", () => ({
-  useAuth: () => ({
-    user: { id: 1, username: "alice", role: "user" },
-    loading: false,
-    login: vi.fn(),
-    logout: vi.fn(),
-  }),
-}));
+// 用 vi.hoisted 暴露 mockUseAuth，逐测试切换 user.role 验证 admin 专属「工作区管理」入口。
+const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
+
+const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
+const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
 
 function renderAt(path: string) {
   return render(
@@ -24,6 +22,11 @@ function renderAt(path: string) {
     </MemoryRouter>
   );
 }
+
+// 默认普通用户（admin 入口不渲染）；admin 专属 describe 内 beforeEach 覆写。
+beforeEach(() => {
+  mockUseAuth.mockReturnValue({ user: userUser, loading: false, login: vi.fn(), logout: vi.fn() });
+});
 
 describe("TopBar", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
@@ -121,5 +124,31 @@ describe("TopBar sticky 吸顶", () => {
     expect(header.className).toContain("top-0");
     expect(header.className).toContain("z-40");
     expect(header.className).toContain("print:static");
+  });
+});
+
+describe("TopBar admin 入口", () => {
+  beforeEach(() => {
+    i18n.changeLanguage("zh");
+    mockUseAuth.mockReturnValue({ user: userAdmin, loading: false, login: vi.fn(), logout: vi.fn() });
+  });
+
+  it("admin 可见「工作区管理」入口指向 /workspaces", () => {
+    renderAt("/workspaces");
+    const entry = screen.getByTestId("nav-workspace-manage");
+    expect(entry).toHaveTextContent("工作区管理");
+    expect(entry.closest("a")).toHaveAttribute("href", "/workspaces");
+  });
+
+  it("普通用户不可见「工作区管理」入口", () => {
+    mockUseAuth.mockReturnValue({ user: userUser, loading: false, login: vi.fn(), logout: vi.fn() });
+    renderAt("/");
+    expect(screen.queryByTestId("nav-workspace-manage")).not.toBeInTheDocument();
+  });
+
+  it("顶栏「工作区」入口改跳 /workspaces-entry（IA 重设计 §2.3）", () => {
+    renderAt("/workspaces-entry");
+    const link = screen.getByText("工作区").closest("a");
+    expect(link).toHaveAttribute("href", "/workspaces-entry");
   });
 });
