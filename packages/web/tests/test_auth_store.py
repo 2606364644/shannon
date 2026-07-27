@@ -144,3 +144,38 @@ def test_update_workspace_member_role(tmp_path):
     s.add_workspace_member("ws-a", u.id, "member")
     s.update_workspace_member_role("ws-a", u.id, "manager")
     assert s.get_workspace_member_role("ws-a", u.id) == "manager"
+
+
+def test_pinned_workspace_column_migration_and_update(tmp_path):
+    """旧库（无 pinned_workspace 列）启动补列不崩；update/get 读写 pinned。"""
+    import sqlite3
+    from supernova_web.auth.store import AuthStore
+    from supernova_web.auth.passwords import hash_password
+
+    db = tmp_path / "auth.db"
+    # 模拟旧库：手动建无 pinned_workspace 列的 users 表 + 一条用户
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+            "password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', "
+            "created_at TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 0)"
+        )
+        c.execute(
+            "INSERT INTO users(username, password_hash, role, created_at, must_change_password) "
+            "VALUES(?,?,?,?,?)",
+            ("alice", hash_password("pw"), "user", "2026-01-01T00:00:00Z", 0),
+        )
+
+    store = AuthStore(str(db))
+    store.init_schema()  # 旧库补列，不崩
+
+    u = store.get_user_by_username("alice")
+    assert u is not None
+    assert u.pinned_workspace is None  # 旧库补列后默认 None
+
+    store.update_pinned_workspace(u.id, "ws-alpha")
+    assert store.get_user(u.id).pinned_workspace == "ws-alpha"
+
+    # 新建用户 pinned_workspace 默认 None
+    new = store.create_user("bob", hash_password("pw"), role="user")
+    assert store.get_user(new.id).pinned_workspace is None

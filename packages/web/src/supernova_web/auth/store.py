@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
   created_at TEXT NOT NULL,
-  must_change_password INTEGER NOT NULL DEFAULT 0
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  pinned_workspace TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -38,6 +39,10 @@ CREATE INDEX IF NOT EXISTS idx_wm_ws ON workspace_members(workspace_name);
 # 必抛 -> 同样吞掉。保证旧 auth.db 升级、新 auth.db 重复 init 均不崩。
 _ADD_MUST_CHANGE_COL = "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
 
+# pinned_workspace 列后加（2026-07-27 IA 重设计 §2.3 per-user 置顶工作区）。同上，
+# ALTER TABLE ADD COLUMN 无 IF NOT EXISTS，对已建库幂等补列：列已存 -> OperationalError 吞掉。
+_ADD_PINNED_WS_COL = "ALTER TABLE users ADD COLUMN pinned_workspace TEXT"
+
 
 class AuthStore:
     def __init__(self, db_path: str) -> None:
@@ -53,6 +58,10 @@ class AuthStore:
                 c.execute(_ADD_MUST_CHANGE_COL)  # 旧库补列；新库已含 -> OperationalError 吞掉
             except sqlite3.OperationalError:
                 pass
+            try:
+                c.execute(_ADD_PINNED_WS_COL)  # 旧库补列；新库已含 -> OperationalError 吞掉
+            except sqlite3.OperationalError:
+                pass
 
     def create_user(self, username: str, password_hash: str, role: str = "user",
                     must_change: bool = False) -> User:
@@ -60,9 +69,9 @@ class AuthStore:
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO users(username, password_hash, role, created_at, must_change_password) "
-                "VALUES(?,?,?,?,?)",
-                (username, password_hash, role, now, 1 if must_change else 0),
+                "INSERT INTO users(username, password_hash, role, created_at, must_change_password, pinned_workspace) "
+                "VALUES(?,?,?,?,?,?)",
+                (username, password_hash, role, now, 1 if must_change else 0, None),
             )
             return User(id=cur.lastrowid, username=username, role=role,
                         must_change_password=must_change)
@@ -70,10 +79,11 @@ class AuthStore:
     def get_user_by_username(self, username: str) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role, must_change_password FROM users WHERE username=?", (username,)
+                "SELECT id, username, role, must_change_password, pinned_workspace FROM users WHERE username=?", (username,)
             ).fetchone()
         return User(id=row[0], username=row[1], role=row[2],
-                    must_change_password=bool(row[3])) if row else None
+                    must_change_password=bool(row[3]),
+                    pinned_workspace=row[4]) if row else None
 
     def get_password_hash(self, username: str) -> str | None:
         with self._conn() as c:
@@ -85,10 +95,11 @@ class AuthStore:
     def get_user(self, user_id: int) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role, must_change_password FROM users WHERE id=?", (user_id,)
+                "SELECT id, username, role, must_change_password, pinned_workspace FROM users WHERE id=?", (user_id,)
             ).fetchone()
         return User(id=row[0], username=row[1], role=row[2],
-                    must_change_password=bool(row[3])) if row else None
+                    must_change_password=bool(row[3]),
+                    pinned_workspace=row[4]) if row else None
 
     def update_password(self, user_id: int, new_hash: str) -> None:
         """改密码：写新 hash 并把 must_change_password 置 0（改密即脱默认密码提醒）。"""
@@ -168,10 +179,11 @@ class AuthStore:
     def list_all_users(self) -> list["User"]:
         with self._conn() as c:
             rows = c.execute(
-                "SELECT id, username, role, must_change_password, created_at FROM users ORDER BY id"
+                "SELECT id, username, role, must_change_password, created_at, pinned_workspace FROM users ORDER BY id"
             ).fetchall()
         return [User(id=r[0], username=r[1], role=r[2],
-                     must_change_password=bool(r[3]), created_at=r[4]) for r in rows]
+                     must_change_password=bool(r[3]), created_at=r[4],
+                     pinned_workspace=r[5]) for r in rows]
 
     def delete_user(self, user_id: int) -> None:
         """删用户：单事务清 workspace_members + sessions + users。
@@ -210,3 +222,8 @@ class AuthStore:
                 "UPDATE workspace_members SET role=? WHERE workspace_name=? AND user_id=?",
                 (role, ws_name, user_id),
             )
+
+    def update_pinned_workspace(self, user_id: int, ws_name: str | None) -> None:
+        """per-user 置顶工作区。ws_name=None 清除置顶。多对多关系不动--pin 不改成员关系。"""
+        with self._conn() as c:
+            c.execute("UPDATE users SET pinned_workspace=? WHERE id=?", (ws_name, user_id))
