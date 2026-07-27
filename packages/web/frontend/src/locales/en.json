@@ -241,6 +241,12 @@
       "failed": "Create failed: {{error}}"
     }
   },
+  "workspaceSwitcher": {
+    "title": "Switch workspace",
+    "search": "Search workspace…",
+    "empty": "No workspaces",
+    "newWorkspace": "+ New workspace"
+  },
   "scanFilters": {
     "status": "Status",
     "type": "Type",

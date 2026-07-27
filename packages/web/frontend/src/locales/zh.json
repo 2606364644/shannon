@@ -241,6 +241,12 @@
       "failed": "创建失败：{{error}}"
     }
   },
+  "workspaceSwitcher": {
+    "title": "切换工作区",
+    "search": "搜索工作区…",
+    "empty": "无工作区",
+    "newWorkspace": "+ 新建工作区"
+  },
   "scanFilters": {
     "status": "状态筛选",
     "type": "类型筛选",
