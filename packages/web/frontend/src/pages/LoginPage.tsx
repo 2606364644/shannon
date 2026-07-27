@@ -7,6 +7,7 @@ import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 const SERIF = { fontFamily: "var(--font-serif), Georgia, serif" } as const;
 const GRADIENT = "linear-gradient(155deg, #2E2520 0%, #4A2E22 55%, #6B3A26 100%)";
@@ -39,15 +40,19 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="light flex min-h-screen">
+    <div className="flex min-h-screen">
+      {/* 主题切换（登录页不在 AppShell 内，独立浮动；复用全局 lib/theme.ts 机制） */}
+      <div className="fixed top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       {/* 左品牌区 */}
       <div
         className="hidden flex-col items-center justify-center gap-3 text-white md:flex md:w-[45%]"
         style={{ background: GRADIENT }}
       >
         <div
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-[#D97757] text-2xl"
-          style={{ boxShadow: "0 0 0 8px rgba(217,119,87,0.18)" }}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-2xl"
+          style={{ boxShadow: "0 0 0 8px hsl(var(--c-orange) / 0.18)" }}
         >
           ✦
         </div>
@@ -76,6 +81,9 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "…" : t("auth.login.submit")}
           </Button>
+          <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-center text-xs text-muted-foreground">
+            {t("auth.login.defaultHint")}
+          </div>
           <p className="text-center text-xs text-muted-foreground">{t("auth.sessionTtlHint")}</p>
         </form>
       </div>
