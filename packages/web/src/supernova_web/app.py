@@ -321,6 +321,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     _require_auth = [Depends(current_user)]
     app.include_router(workspaces.router, dependencies=_require_auth)
     app.include_router(scans.router, dependencies=_require_auth)
+    app.include_router(scans.cross_ws_router, dependencies=_require_auth)
     app.include_router(scan.router, dependencies=_require_auth)
     app.include_router(multi_configs.router, dependencies=_require_auth)
     app.include_router(repos.router, dependencies=_require_auth)

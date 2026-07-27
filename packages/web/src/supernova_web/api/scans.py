@@ -12,16 +12,43 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
-from supernova_web.auth.dependencies import workspace_member
+from supernova_web.auth.dependencies import current_user, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.deliverables_reader import DeliverablesReader
 
 router = APIRouter(prefix="/api/workspaces", tags=["scans"])
 
+# 跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）：独立 prefix /api/scans，不属于 /{ws}/scans 命名空间。
+# 不能挂 router（prefix=/api/workspaces）--@router.get("") 会撞 workspaces.py 的列表路由。
+cross_ws_router = APIRouter(prefix="/api/scans", tags=["scans"])
+
 
 def _store(request: Request):
     from supernova_web.components.scan_store import ScanStore
     return ScanStore(request.app.state.config.workspaces_dir)
+
+
+@cross_ws_router.get("")
+async def list_all_scans(request: Request, user: User = Depends(current_user)):
+    """跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）。admin 见全部 ws 扫描，
+    普通用户只见归属 ws（list_user_workspaces）的扫描。每条注入 workspace 字段，
+    按 created_at 倒序。ws 量通常个位数到几十，每 ws list_scans 是目录扫描，可接受。"""
+    from supernova_web.components.scan_store import ScanStore
+    cfg = request.app.state.config
+    indexer = request.app.state.indexer
+    store = ScanStore(cfg.workspaces_dir)
+    if user.role == "admin":
+        ws_names = [w["name"] for w in indexer.list_workspaces()]
+    else:
+        ws_names = request.app.state.auth_store.list_user_workspaces(user.id)
+    out = []
+    for ws in ws_names:
+        for s in store.list_scans(ws):
+            d = s.as_dict()
+            d["workspace"] = ws
+            out.append(d)
+    out.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
+    return out
 
 
 def _scan_dir_or_404(request: Request, ws: str, scan_id: str):
