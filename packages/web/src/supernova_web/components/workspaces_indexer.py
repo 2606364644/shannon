@@ -4,9 +4,6 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from supernova_core.session import SessionManager
-from supernova_core.workspace import get_workspace_vuln_counts
-
 from .scan_liveness import is_scan_alive
 
 
@@ -35,6 +32,26 @@ def _created_at_key(row: dict) -> float:
 _TERMINAL_STATUSES = frozenset(
     {"completed", "failed", "interrupted", "cancelled", "killed", "crashed"}
 )
+
+
+def _compute_status(path: Path, session_status: str | None) -> str:
+    """scan 状态计算（scan_dir/ws_dir 通用）：终态优先 + heartbeat 判活 + 兜底 interrupted。
+
+    抽成模块级函数供 ScanStore 与 WorkspacesIndexer 共用（1 ws : N scans 后两者都
+    需在 scan_dir 维度算状态），避免判活逻辑重复。
+    """
+    # 终态优先(强信号,立即定):session.json 显式标了终态 -> 该终态。取代旧「只认
+    # completed/failed + 兜底推断 interrupted」的混乱(spec §4.3)。
+    if session_status in _TERMINAL_STATUSES:
+        return session_status
+    # 判活:heartbeat fresh(worker 在跑)OR 提交宽限内(workflow 刚提交、worker 还没写首个
+    # heartbeat 的冷启动窗口)。pid 表不参与判活(只服务 cancel)。回归:
+    # kol_mapping_service_20260708-193139(host CLI 活 scan)被误标 interrupted 即缺 heartbeat 门;
+    # hr_1784014329(提交后 1s 误杀)即缺提交宽限门。
+    if is_scan_alive(path):
+        return "running"
+    # 无终态 + 无 fresh heartbeat = 未正常结束(死掉的孤儿/容器重启后子进程同死)。
+    return "interrupted"
 
 
 class WorkspacesIndexer:
@@ -70,48 +87,71 @@ class WorkspacesIndexer:
         return pid is not None and self._pid_alive(pid)
 
     def _status_of(self, ws_path: Path, session_status: str | None) -> str:
-        # 终态优先(强信号,立即定):session.json 显式标了终态 → 该终态。取代旧「只认
-        # completed/failed + 兜底推断 interrupted」的混乱(spec §4.3)。
-        if session_status in _TERMINAL_STATUSES:
-            return session_status
-        # 判活:heartbeat fresh(worker 在跑)OR 提交宽限内(workflow 刚提交、worker 还没写首个
-        # heartbeat 的冷启动窗口)。pid 表不参与判活(只服务 cancel)。回归:
-        # kol_mapping_service_20260708-193139(host CLI 活 scan)被误标 interrupted 即缺 heartbeat 门;
-        # hr_1784014329(提交后 1s 误杀)即缺提交宽限门。
-        if is_scan_alive(ws_path):
-            return "running"
-        # 无终态 + 无 fresh heartbeat = 未正常结束(死掉的孤儿/容器重启后子进程同死)。
-        return "interrupted"
+        """ws/scan 状态：委托模块级 _compute_status（保留实例方法兼容现有调用方）。"""
+        return _compute_status(ws_path, session_status)
 
     def list_workspaces(self) -> list[dict]:
-        mgr = SessionManager(self._dir)
+        """列 workspace（1 ws : N scans 后）：扫 workspaces/*/ 识别 ws（workspace.json
+        优先，回退 legacy ws 根 session.json），每 ws 经 ScanStore.list_scans 聚合
+        scan_count/latest_status/latest_created_at，ws 行字段取 latest scan。
+
+        空 ws（workspace.json 但无 scan）-> scan_count=0、status=completed（idle，不显
+        spinner，对齐旧 POST /api/workspaces 写 status=completed 的行为）。
+        """
+        # lazy import 避免 scan_store ↔ workspaces_indexer 循环导入
+        #（scan_store 顶层 from .workspaces_indexer import _compute_status, _to_unix）。
+        from .scan_store import ScanStore, read_workspace_meta
+        store = ScanStore(self._dir)
         out: list[dict] = []
-        for ws_path in mgr.list_workspaces():
-            name = ws_path.name
-            try:
-                data = mgr.get_session_data(ws_path)
-            except Exception:
+        if not self._dir.is_dir():
+            return out
+        for ws_dir in sorted(self._dir.iterdir()):
+            if not ws_dir.is_dir():
                 continue
-            scan_type = mgr.get_scan_type(ws_path)
-            status = self._status_of(ws_path, mgr.get_status(ws_path))
-            try:
-                vuln = get_workspace_vuln_counts(ws_path)
-            except Exception:
-                vuln = {}
-            metrics = data.get("metrics", {}) if isinstance(data, dict) else {}
-            out.append({
-                "name": name,
-                "scan_type": scan_type,
-                "status": status,
-                "vuln_counts": vuln,
-                "vuln_count": sum(vuln.values()) if vuln else 0,
-                "total_cost_usd": metrics.get("total_cost_usd"),
-                "cost_currency": metrics.get("cost_currency"),
-                "total_duration_ms": metrics.get("total_duration_ms"),
-                "links": data.get("links", {}) if isinstance(data, dict) else {},
-                "created_at": _to_unix(mgr.get_created_at(ws_path)),
-                "completed_at": _to_unix(mgr.get_completed_at(ws_path)),
-                "is_correlation": scan_type == "correlation",
-            })
+            meta = read_workspace_meta(ws_dir)
+            if meta is None:
+                continue  # 非 ws（无 workspace.json 且无 session.json）
+            name = ws_dir.name
+            scans = store.list_scans(name)
+            if scans:
+                latest = scans[0]  # list_scans 已按 created_at 倒序
+                out.append({
+                    "name": name,
+                    "scan_type": latest.scan_type,
+                    "status": latest.status,
+                    "vuln_counts": latest.vuln_counts,
+                    "vuln_count": latest.vuln_count,
+                    "total_cost_usd": latest.total_cost_usd,
+                    "cost_currency": latest.cost_currency,
+                    "total_duration_ms": latest.total_duration_ms,
+                    "links": latest.links,
+                    "created_at": latest.created_at,
+                    "completed_at": latest.completed_at,
+                    "is_correlation": latest.is_correlation,
+                    "scan_count": len(scans),
+                    "latest_status": latest.status,
+                    "latest_created_at": latest.created_at,
+                })
+            else:
+                # 空 ws：无 scan。status=completed（idle），created_at 取 ws 元数据。
+                ws_created = _to_unix(meta.get("created_at"))
+                scan_type = meta.get("scan_type", "whitebox")
+                out.append({
+                    "name": name,
+                    "scan_type": scan_type,
+                    "status": "completed",
+                    "vuln_counts": {},
+                    "vuln_count": 0,
+                    "total_cost_usd": None,
+                    "cost_currency": None,
+                    "total_duration_ms": None,
+                    "links": {},
+                    "created_at": ws_created,
+                    "completed_at": None,
+                    "is_correlation": scan_type == "correlation",
+                    "scan_count": 0,
+                    "latest_status": "completed",
+                    "latest_created_at": ws_created,
+                })
         out.sort(key=_created_at_key, reverse=True)
         return out

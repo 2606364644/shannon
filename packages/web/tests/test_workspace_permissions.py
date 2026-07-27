@@ -92,15 +92,16 @@ def _login(app, username):
 
 def test_non_member_cannot_read_workspace(_prod_app):
     bob = _login(_prod_app, "bob")     # bob 非 ws_alice 成员
-    assert bob.get("/api/workspaces/ws_alice").status_code == 403
-    assert bob.get("/api/workspaces/ws_alice/report").status_code == 403
-    assert bob.get("/api/workspaces/ws_alice/logs").status_code == 403
-    assert bob.get("/api/workspaces/ws_alice/events").status_code == 403
+    # scan-scoped 端点 enforce workspace_member（旧 ws-scoped GET shim 已移除）
+    assert bob.get("/api/workspaces/ws_alice/scans").status_code == 403
+    assert bob.get("/api/workspaces/ws_alice/scans/any/report").status_code == 403
+    assert bob.get("/api/workspaces/ws_alice/scans/any/logs").status_code == 403
+    assert bob.get("/api/workspaces/ws_alice/scans/any/events").status_code == 403
 
 
 def test_member_can_read(_prod_app):
     alice = _login(_prod_app, "alice")
-    assert alice.get("/api/workspaces/ws_alice").status_code != 403  # 200（可能空 metrics）
+    assert alice.get("/api/workspaces/ws_alice/scans").status_code == 200  # 成员可读 scan 列表
 
 
 # --- P1 Task 6: DELETE workspace 需 manager 权限 + 清成员 ---

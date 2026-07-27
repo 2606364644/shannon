@@ -27,12 +27,14 @@ async def lifespan(app: FastAPI):
     app.state._purge_task = asyncio.create_task(_purge_loop())
 
     # 启动迁移序列（顺序敏感）：
-    #   1) 旧全局 repos/<name> → workspaces/__legacy__/repos/<name>（创建 __legacy__ ws 目录）
-    #   2) 给无成员记录的 ws（含刚创建的 __legacy__）分配 admin (manager)
-    #   3) per-ws 补写仓库 meta（覆盖 __legacy__ 的搬迁仓库）
-    #   4) 重建孤儿 scan 状态
+    #   1) 旧全局 repos/<name> -> workspaces/__legacy__/repos/<name>（创建 __legacy__ ws 目录）
+    #   2) ws 根 legacy scan（session.json）-> scans/<legacy_id>/（T5 解耦 1:N）
+    #   3) 给无成员记录的 ws（含 __legacy__）分配 admin (manager)
+    #   4) per-ws 补写仓库 meta（覆盖 __legacy__ 的搬迁仓库）
+    #   5) 重建孤儿 scan 状态（遍历 ScanStore scans，含迁移后的 legacy scan）
     # purge_loop 与本序列无依赖、保持原位即可。
     _migrate_legacy_repos(app)
+    _migrate_legacy_scans(app)
     _migrate_legacy_workspace_members(app)
     _reconcile_repo_meta(app)
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
@@ -42,28 +44,33 @@ async def lifespan(app: FastAPI):
 
 
 async def _reconcile_orphaned_scans(app: FastAPI) -> None:
-    """启动时遍历 workspaces，对孤儿 scan（session running 但 worker 已不存活、
-    且无 scan_end）补写 scan_end(interrupted) + 失败原因。
+    """启动时遍历每个 ws 的所有 scan（ScanStore 双源：新 scans/<id>/ + legacy 根），
+    对孤儿 scan（session running 但 worker 已不存活、且无 scan_end）补写 scan_end
+    (interrupted) + 失败原因。
 
-    容器重启会杀掉 scan_manager._watch 协程，导致在途 scan 永不写 scan_end、
-    session 卡 running、live SSE 空等。此处一次性兜底，使重开 live 页能正常显
-    「已中断」+ 原因。单 ws 异常不阻塞启动。
+    T5: 改遍历 ScanStore._scan_entries（per-scan），而非 ws 根目录 -- 1:N 后 scan 在
+    scans/<id>/（含迁移后的 legacy scan）。容器重启会杀掉 scan_manager._watch 协程，
+    导致在途 scan 永不写 scan_end、session 卡 running、live SSE 空等。此处一次性兜底，
+    使重开 live 页能正常显「已中断」+ 原因。单 scan 异常不阻塞启动。
     """
     from .components.orphan_reconciler import reconcile_orphaned
+    from .components.scan_store import ScanStore
     cfg = app.state.config
     indexer = app.state.indexer
     # 启动时 scan_manager._procs 为空，active_pids()={} -> is_running 对所有 ws=False，
-    # 故所有 session running 的 ws 都会被判孤儿并补 scan_end（这正是重启后的真实情况）。
+    # 故所有 session running 的 scan 都会被判孤儿并补 scan_end（这正是重启后的真实情况）。
     indexer.sync_active(app.state.scan_manager.active_pids())
     if not cfg.workspaces_dir.is_dir():
         return
+    store = ScanStore(cfg.workspaces_dir)
     for ws_dir in cfg.workspaces_dir.iterdir():
         if not ws_dir.is_dir():
             continue
-        try:
-            await reconcile_orphaned(ws_dir, indexer.is_running(ws_dir.name))
-        except Exception:
-            continue
+        for _scan_id, scan_dir in store._scan_entries(ws_dir.name):
+            try:
+                await reconcile_orphaned(scan_dir, False)
+            except Exception:
+                continue
 
 
 def _migrate_legacy_workspace_members(app: FastAPI) -> None:
@@ -96,15 +103,12 @@ def _migrate_legacy_repos(app: FastAPI) -> None:
     （幂等）。admin 分配由 ``_migrate_legacy_workspace_members`` 复用既有逻辑，**此处不
     重复实现**。单仓库失败不阻塞启动（best-effort）。
 
-    final-review C1：搬迁后给 ``__legacy__/`` 补写最小 ``session.json``（mirror
-    ``POST /api/workspaces`` create_workspace 的写法），否则 ``SessionManager.list_workspaces``
-    按 ``(p/session.json).exists()`` 过滤会排除 ``__legacy__`` → GET /api/workspaces 对
-    全员（含 admin）不可见。仅在 ``__legacy__`` 已作为真实 ws 目录存在（至少迁了一个仓库）
-    时写，幂等（已存在则不覆盖），写失败不阻塞启动。
+    final-review C1：搬迁后给 ``__legacy__/`` 补写 ``workspace.json``（mirror
+    ``POST /api/workspaces`` 的写法），否则 indexer ``read_workspace_meta`` 不认
+    ``__legacy__`` -> GET /api/workspaces 对全员（含 admin）不可见。仅在 ``__legacy__``
+    已作为真实 ws 目录存在（至少迁了一个仓库）时写，幂等（已存在则不覆盖），写失败不阻塞启动。
     """
-    import json
     import shutil
-    from datetime import datetime, timezone
 
     cfg = app.state.config
     old_root = cfg.repos_dir
@@ -127,24 +131,94 @@ def _migrate_legacy_repos(app: FastAPI) -> None:
             # 单仓库失败不影响其他仓库与整体启动
             continue
 
-    # final-review C1：__legacy__ ws 目录已存在（至少迁了一个仓库）→ 补写最小 session.json，
-    # 使其在 GET /api/workspaces 可见（list_workspaces 经 session.json 过滤）。mirror
-    # create_workspace 的 minimal session.json（同字段/同 shape，status=completed 对未扫描
-    # 的空 ws 正确：_status_of 视 completed 为终态，不显 spinner）。幂等 + best-effort。
+    # final-review C1：__legacy__ ws 目录已存在（至少迁了一个仓库）-> 补写 workspace.json，
+    # 使其在 GET /api/workspaces 可见（indexer read_workspace_meta 认 workspace.json）。T2
+    # 后 ws 元数据与 scan 状态机解耦：ws 级写 workspace.json（非 session.json），空 ws 经
+    # indexer 聚合 scan_count=0 可见。mirror POST /api/workspaces 的写法。幂等 + best-effort。
     if legacy_repos.is_dir():
-        session_file = legacy_ws / "session.json"
-        if not session_file.exists():
+        from .components.scan_store import write_workspace_meta
+        meta_file = legacy_ws / "workspace.json"
+        if not meta_file.exists():
             try:
-                session_file.write_text(json.dumps({
-                    "status": "completed",
-                    "scan_type": "whitebox",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "web_url": "",
-                    "repo_path": "",
-                }), encoding="utf-8")
+                write_workspace_meta(legacy_ws, name="__legacy__", owner="legacy")
             except Exception:
-                # 写 session.json 失败不阻塞启动（best-effort）
+                # 写 workspace.json 失败不阻塞启动（best-effort）
                 pass
+
+
+def _migrate_legacy_scans(app: FastAPI) -> None:
+    """T5: 把 ws 根 legacy scan（session.json）整体迁入 scans/<legacy_id>/，补 workspace.json。
+
+    1 ws : N scans 前 ws 根 session.json 既是 ws 元数据也是单 scan 状态机（1:1 混存）。
+    本函数在启动时把 scan 部分（session.json + events.ndjson + deliverables/ + agents/
+    + *.log + heartbeat + cancel.requested + prompts/）搬入 scans/<legacy_id>/，ws 级
+    （workspace.json / config.yaml / repos/ / scans/）留根。
+
+    - legacy_id 从 session.json created_at 派生 YYYYMMDD-HHMMSS（同秒/同 ws 碰撞 -2/-3）；
+      缺失/异常回退 ws 目录名。
+    - 补 workspace.json（owner 取原 session.json owner 或 "legacy"），使迁移后 ws 仍可见。
+    - 幂等：ws 根无 session.json（已迁 / 新模型 ws）-> 跳过。session.json 最后搬（搬完即标志已迁）。
+    - best-effort：损坏 session.json / 单 ws 失败记 warning 不阻断启动。
+
+    不动 CLI/worker.py（仍产 ws 根 session.json，legacy 双源兼容；二期统一）。
+    """
+    import json
+    import shutil
+    from datetime import datetime
+
+    from .components.scan_store import write_workspace_meta
+    from .components.workspaces_indexer import _to_unix
+
+    cfg = app.state.config
+    if not cfg.workspaces_dir.is_dir():
+        return
+    # scan 产物名（搬入 scans/<legacy_id>/）；session.json 最后搬（迁移完成标志）。
+    _SCAN_ARTIFACTS = (
+        "events.ndjson", "deliverables", "agents", "heartbeat",
+        "cancel.requested", "prompts", "workflow.log", "activity_failures.log",
+    )
+    for ws_dir in cfg.workspaces_dir.iterdir():
+        if not ws_dir.is_dir():
+            continue
+        root_session = ws_dir / "session.json"
+        if not root_session.exists():
+            continue  # 已迁或新模型 ws（workspace.json，无根 session.json）
+        try:
+            data = json.loads(root_session.read_text("utf-8"))
+            if not isinstance(data, dict):
+                continue
+        except (json.JSONDecodeError, OSError):
+            continue  # 损坏 -> 跳过不崩
+        # legacy_id 从 created_at 派生
+        ts = _to_unix(data.get("created_at"))
+        if ts:
+            legacy_id = datetime.fromtimestamp(ts).strftime("%Y%m%d-%H%M%S")
+        else:
+            legacy_id = ws_dir.name
+        scans_dir = ws_dir / "scans"
+        target = scans_dir / legacy_id
+        i = 2
+        while target.exists():
+            target = scans_dir / f"{legacy_id}-{i}"
+            i += 1
+        try:
+            scans_dir.mkdir(parents=True, exist_ok=True)
+            target.mkdir(parents=True, exist_ok=True)
+            for name in _SCAN_ARTIFACTS:
+                src = ws_dir / name
+                if src.exists():
+                    shutil.move(str(src), str(target / name))
+            # session.json 最后搬（搬完则 ws 根无 session.json = 已迁标志，幂等）
+            shutil.move(str(root_session), str(target / "session.json"))
+            # 补 workspace.json（迁移后 ws 元数据载体）
+            if not (ws_dir / "workspace.json").exists():
+                owner = data.get("owner") or "legacy"
+                created_at = data.get("created_at") if isinstance(data.get("created_at"), str) else None
+                write_workspace_meta(ws_dir, name=ws_dir.name, owner=owner,
+                                     created_at=created_at)
+        except Exception:
+            # best-effort：单 ws 失败不阻断启动（下次启动可重试，session.json 仍在根）
+            continue
 
 
 def _reconcile_repo_meta(app: FastAPI) -> None:
@@ -224,7 +298,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.scan_manager import ScanManager
     from .components.credential_vault import CredentialVault
     from .components.ws_config_store import WsConfigStore
-    from .api import events, fs, members, multi_configs, repos, scan, system_status, users, workspaces, ws_config
+    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
@@ -246,10 +320,10 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .auth.dependencies import current_user
     _require_auth = [Depends(current_user)]
     app.include_router(workspaces.router, dependencies=_require_auth)
+    app.include_router(scans.router, dependencies=_require_auth)
     app.include_router(scan.router, dependencies=_require_auth)
     app.include_router(multi_configs.router, dependencies=_require_auth)
     app.include_router(repos.router, dependencies=_require_auth)
-    app.include_router(events.router, dependencies=_require_auth)
     app.include_router(fs.router, dependencies=_require_auth)
     app.include_router(system_status.router, dependencies=_require_auth)
     app.include_router(members.router, dependencies=_require_auth)

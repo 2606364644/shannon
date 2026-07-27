@@ -15,7 +15,7 @@ class FakeSM:
         if self.exc:
             raise self.exc
         self.started.append(req)
-        return "WSX"
+        return "WSX", "20260727-120000"  # T3: (ws, scan_id)
 
     async def cancel(self, ws):
         self.cancelled.append(ws)
@@ -75,7 +75,7 @@ def test_post_scan_202(_authed_app):
     tok = _csrf(client)
     r = client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok})
     assert r.status_code == 202
-    assert r.json() == {"workspace": "WSX"}
+    assert r.json() == {"workspace": "WSX", "scan_id": "20260727-120000"}
     assert len(fake.started) == 1
 
 
@@ -172,7 +172,7 @@ def test_post_scan_workspace_field_name_contract(_authed_app):
                "url": "http://e", "workspace": "WSX"}
     r = client.post("/api/scan", json=body_ok, headers={"X-CSRF-Token": tok})
     assert r.status_code == 202, r.text
-    assert r.json() == {"workspace": "WSX"}
+    assert r.json() == {"workspace": "WSX", "scan_id": "20260727-120000"}
     assert len(fake.started) == 1
     # 关键断言：经 pydantic HTTP 序列化层后，ScanRequest.workspace 真的收到了值
     assert fake.started[0].workspace == "WSX"

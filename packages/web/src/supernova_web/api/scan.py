@@ -25,7 +25,7 @@ async def create_scan(req: ScanRequest, request: Request,
         raise HTTPException(403, "非该 workspace 成员")
     sm = request.app.state.scan_manager
     try:
-        ws_name = await sm.start(req)
+        ws_name, scan_id = await sm.start(req)
     except TemporalUnavailable:
         raise HTTPException(400, "Temporal 服务未运行，请先 docker-compose up -d")
     except TooManyScans as e:
@@ -37,7 +37,7 @@ async def create_scan(req: ScanRequest, request: Request,
         raise HTTPException(422, str(e))
     except ValidationError as e:  # correlation yaml 校验失败
         raise HTTPException(422, detail=e.errors())
-    return ScanAccepted(workspace=ws_name)
+    return ScanAccepted(workspace=ws_name, scan_id=scan_id)
 
 
 @router.delete("/{ws}")

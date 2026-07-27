@@ -8,7 +8,6 @@ import yaml
 
 from supernova_web.components.credential_vault import CredentialVault
 from supernova_web.components.ws_config_store import WsConfigStore, WsConfig, WsProviderFields
-from supernova_web.models import ScanRequest
 
 
 def _patch_connect(monkeypatch, captured):
@@ -42,8 +41,9 @@ async def test_submit_uses_ws_config(tmp_path, monkeypatch):
                      ws_config_store=store)
     sm._mark_submitted_at = lambda ws_dir: None
 
-    req = ScanRequest(type="whitebox", workspace="ws-a")
-    await sm._submit_whitebox(target="/r", ws="ws-a", event_file=tmp_path / "events.ndjson", req=req)
+    # T3: _submit_whitebox(target, ws, scan_id, scan_dir, event_file, web_url)
+    scan_dir = tmp_path / "ws-a" / "scans" / "s1"; scan_dir.mkdir(parents=True, exist_ok=True)
+    await sm._submit_whitebox(target="/r", ws="ws-a", scan_id="s1", scan_dir=scan_dir, event_file=tmp_path / "events.ndjson", web_url="")
 
     inp = captured["inp"]
     assert inp.provider_config["type"] == "openai_compatible"
@@ -69,9 +69,10 @@ async def test_submit_fails_fast_on_invalid_ws_config(tmp_path, monkeypatch):
     sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object(),
                      ws_config_store=store)
 
-    req = ScanRequest(type="whitebox", workspace="ws-a")
+    # T3: _submit_whitebox(target, ws, scan_id, scan_dir, event_file, web_url)
+    scan_dir = tmp_path / "ws-a" / "scans" / "s1"; scan_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError):
-        await sm._submit_whitebox(target="/r", ws="ws-a", event_file=tmp_path / "events.ndjson", req=req)
+        await sm._submit_whitebox(target="/r", ws="ws-a", scan_id="s1", scan_dir=scan_dir, event_file=tmp_path / "events.ndjson", web_url="")
     assert "inp" not in captured  # 未提交
 
 
@@ -85,8 +86,9 @@ async def test_submit_falls_back_when_ws_config_store_none(tmp_path, monkeypatch
     sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())  # ws_config_store=None
     sm._mark_submitted_at = lambda ws_dir: None
 
-    req = ScanRequest(type="whitebox", workspace="ws-a")
-    await sm._submit_whitebox(target="/r", ws="ws-a", event_file=tmp_path / "events.ndjson", req=req)
+    # T3: _submit_whitebox(target, ws, scan_id, scan_dir, event_file, web_url)
+    scan_dir = tmp_path / "ws-a" / "scans" / "s1"; scan_dir.mkdir(parents=True, exist_ok=True)
+    await sm._submit_whitebox(target="/r", ws="ws-a", scan_id="s1", scan_dir=scan_dir, event_file=tmp_path / "events.ndjson", web_url="")
 
     inp = captured["inp"]
     assert inp.provider_config is not None

@@ -1,33 +1,40 @@
 # packages/web/src/supernova_web/api/events.py
+"""scan events SSE 构造（build_scan_events_response）。
+
+旧 ws-scoped GET /{ws}/events shim 已移除（Phase 2 前端切 scan-scoped
+GET /{ws}/scans/{scan_id}/events，零前端调用，联合验收确认）。scan-scoped 路由在
+api/scans.py，调本模块的 build_scan_events_response。
+"""
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from supernova_web.auth.dependencies import workspace_member
-from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 
-router = APIRouter(prefix="/api/workspaces", tags=["events"])
 
+async def build_scan_events_response(request: Request, scan_dir: Path) -> StreamingResponse:
+    """构造 scan events SSE StreamingResponse（tail scan_dir/events.ndjson + 孤儿对账）。
 
-@router.get("/{ws}/events")
-async def stream_events(ws: str, request: Request, _: User = Depends(workspace_member)):
-    cfg = request.app.state.config
-    ws_dir = cfg.workspaces_dir / ws
-    if not ws_dir.exists():
-        raise HTTPException(404, "workspace not found")
-    ndjson = ws_dir / "events.ndjson"
+    scans.py 的 GET /{ws}/scans/{scan_id}/events 调本函数。孤儿对账 per-scan：scan 非在跑
+    + 无 scan_end -> 补 scan_end（让 SSE 立即有关流信号 + 失败原因，而非空等 idle_timeout
+    后关流再被前端重连死循环）。
+    """
+    ndjson = scan_dir / "events.ndjson"
 
-    # 惰性对账：孤儿 scan（worker 已不存活、无 scan_end）补写 scan_end，让 SSE 立即
-    # 有关流信号 + 失败原因，而非空等 idle_timeout(300s) 后关流再被前端重连死循环。
     idx = request.app.state.indexer
     idx.sync_active(request.app.state.scan_manager.active_pids())
-    if not idx.is_running(ws):
+    # 判活 per-scan（heartbeat），非 ws 级 pid（C1 容器无本机 pid）。
+    from supernova_core.session import SessionManager
+    from supernova_web.components.workspaces_indexer import _compute_status
+    mgr = SessionManager(scan_dir.parent)
+    is_running = _compute_status(scan_dir, mgr.get_status(scan_dir)) == "running"
+    if not is_running:
         from supernova_web.components.orphan_reconciler import reconcile_orphaned
-        await reconcile_orphaned(ws_dir, False)
+        await reconcile_orphaned(scan_dir, False)
 
     last = request.headers.get("last-event-id")
     last_offset = int(last) if last else None

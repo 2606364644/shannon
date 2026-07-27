@@ -8,7 +8,6 @@ mock Client.connect 返假 client，捕获提交的 PipelineInput，断言 provi
 
 async def test_submit_whitebox_injects_global_provider_config(tmp_path, monkeypatch):
     from supernova_web.components.scan_manager import ScanManager
-    from supernova_web.models import ScanRequest
 
     captured: dict = {}
 
@@ -26,11 +25,13 @@ async def test_submit_whitebox_injects_global_provider_config(tmp_path, monkeypa
     monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect", fake_connect)
 
     sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
-    sm._mark_submitted_at = lambda ws_dir: None  # 聚焦穿线，跳过 session.json 写
+    sm._mark_submitted_at = lambda scan_dir: None  # 聚焦穿线，跳过 session.json 写
 
-    req = ScanRequest(type="whitebox", workspace="ws-a")
+    # T3: _submit_whitebox(target, ws, scan_id, scan_dir, event_file, web_url)
+    scan_dir = tmp_path / "ws-a" / "scans" / "s1"; scan_dir.mkdir(parents=True)
     await sm._submit_whitebox(
-        target="/r", ws="ws-a", event_file=tmp_path / "events.ndjson", req=req,
+        target="/r", ws="ws-a", scan_id="s1", scan_dir=scan_dir,
+        event_file=tmp_path / "events.ndjson", web_url="",
     )
 
     inp = captured.get("inp")

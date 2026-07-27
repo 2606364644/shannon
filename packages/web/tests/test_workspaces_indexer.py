@@ -143,13 +143,15 @@ def test_list_vuln_count_aggregates_dict(tmp_workspaces):
     from supernova_web.components.workspaces_indexer import WorkspacesIndexer
     idx = WorkspacesIndexer(tmp_workspaces)
     # mock get_workspace_vuln_counts 返多类型 dict
-    import supernova_web.components.workspaces_indexer as mod
-    orig = mod.get_workspace_vuln_counts
-    mod.get_workspace_vuln_counts = lambda _p: {"injection": 3, "xss": 2}
+    # T2: vuln_counts 由 ScanStore._summarize 算（get_workspace_vuln_counts 在 scan_store 模块）。
+    # monkeypatch scan_store 模块的引用（非 workspaces_indexer，后者已不再直接调用）。
+    import supernova_web.components.scan_store as store_mod
+    orig = store_mod.get_workspace_vuln_counts
+    store_mod.get_workspace_vuln_counts = lambda _p: {"injection": 3, "xss": 2}
     try:
         rows = idx.list_workspaces()
     finally:
-        mod.get_workspace_vuln_counts = orig
+        store_mod.get_workspace_vuln_counts = orig
     row = next(r for r in rows if r["name"] == "agg-ws")
     assert row["vuln_count"] == 5
     assert row["vuln_counts"] == {"injection": 3, "xss": 2}
@@ -233,3 +235,63 @@ def test_list_created_at_is_unix_number(tmp_workspaces):
     assert row["created_at"] == 1780000000.0
     assert isinstance(row["completed_at"], float)
     assert row["completed_at"] == 1780000005.0
+
+
+# ── T2: 1 ws : N scans 聚合 ─────────────────────────────────────────────────
+
+def test_list_empty_ws_with_workspace_json(tmp_workspaces):
+    """空 ws（workspace.json + 无 scan）-> scan_count=0、status=completed（idle）。"""
+    from supernova_web.components.scan_store import write_workspace_meta
+    ws = tmp_workspaces / "empty-ws"
+    ws.mkdir()
+    write_workspace_meta(ws, name="empty-ws", owner="admin")
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    row = next(r for r in rows if r["name"] == "empty-ws")
+    assert row["scan_count"] == 0
+    assert row["status"] == "completed"
+    assert row["latest_status"] == "completed"
+    assert row["vuln_count"] == 0
+    assert row["latest_created_at"] is not None  # ws 元数据 created_at
+
+
+def test_list_ws_multiple_scans_aggregated(tmp_workspaces):
+    """ws（workspace.json + 2 scan）-> scan_count=2、latest_* 取最新 scan。"""
+    from supernova_web.components.scan_store import ScanStore, write_workspace_meta
+    ws = tmp_workspaces / "multi-ws"
+    ws.mkdir()
+    write_workspace_meta(ws, name="multi-ws", owner="admin")
+    store = ScanStore(tmp_workspaces)
+    _, d1 = store.create_scan("multi-ws", "http://e", "/x")
+    # 第一个 scan 标 completed（旧）
+    import json as _json
+    s1 = _json.loads((d1 / "session.json").read_text())
+    s1["status"] = "completed"; s1["created_at"] = 1780000000.0
+    (d1 / "session.json").write_text(_json.dumps(s1))
+    _, d2 = store.create_scan("multi-ws", "http://e", "/x")
+    s2 = _json.loads((d2 / "session.json").read_text())
+    s2["status"] = "failed"; s2["created_at"] = 1780003600.0  # 更新
+    (d2 / "session.json").write_text(_json.dumps(s2))
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    row = next(r for r in rows if r["name"] == "multi-ws")
+    assert row["scan_count"] == 2
+    assert row["status"] == "failed"          # 最新 scan 的 status
+    assert row["latest_status"] == "failed"
+    assert row["latest_created_at"] == 1780003600.0
+
+
+def test_list_legacy_ws_root_session_count_1(tmp_workspaces):
+    """legacy ws（ws 根 session.json，未迁移）-> scan_count=1（双源兼容）。"""
+    _make_ws(tmp_workspaces, "legacy-ws", status="completed")
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    row = next(r for r in rows if r["name"] == "legacy-ws")
+    assert row["scan_count"] == 1
+    assert row["status"] == "completed"
+
+
+def test_list_row_has_aggregation_fields(tmp_workspaces):
+    """row 含 scan_count/latest_status/latest_created_at 三个新字段（spec §5.3）。"""
+    _make_ws(tmp_workspaces, "fields-ws", status="completed")
+    row = WorkspacesIndexer(tmp_workspaces).list_workspaces()[0]
+    assert "scan_count" in row
+    assert "latest_status" in row
+    assert "latest_created_at" in row

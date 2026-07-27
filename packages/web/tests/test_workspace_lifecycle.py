@@ -51,7 +51,7 @@ def test_create_workspace_conflict(_app):
 
 def test_scan_requires_existing_workspace(_app, monkeypatch):
     async def _fake_start(req):
-        return req.workspace
+        return req.workspace, "20260727-120000"  # T3: (ws, scan_id)
     _app.state.scan_manager.start = _fake_start
     c = _login(_app, "alice")
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
@@ -78,10 +78,30 @@ def test_scan_requires_membership(_app, monkeypatch):
     atok = admin_c.get("/api/auth/csrf").json()["csrf_token"]
     admin_c.post("/api/workspaces", json={"name": "ws1"}, headers={"X-CSRF-Token": atok})  # admin 建 ws1
     async def _fake_start(req):
-        return req.workspace
+        return req.workspace, "20260727-120000"  # T3: (ws, scan_id)
     _app.state.scan_manager.start = _fake_start
     alice_c = _login(_app, "alice")
     altok = alice_c.get("/api/auth/csrf").json()["csrf_token"]
     r = alice_c.post("/api/scan", json={"type": "whitebox", "workspace": "ws1", "url": "http://x"},
                      headers={"X-CSRF-Token": altok})
     assert r.status_code == 403  # alice 非 ws1 成员
+
+
+def test_post_workspace_writes_workspace_json(_app):
+    """T2: POST /api/workspaces 写 workspace.json（ws 元数据），非 ws 根 session.json。
+
+    1 ws : N scans 后 ws 元数据与 scan 状态机解耦：ws 级 workspace.json，scan 状态机在
+    scans/<scan_id>/session.json。空 ws 经 indexer 聚合 scan_count=0 可见。
+    """
+    import json
+    c = _login(_app, "admin")
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    r = c.post("/api/workspaces", json={"name": "ws_meta"}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 201
+    ws_dir = _app.state.config.workspaces_dir / "ws_meta"
+    assert (ws_dir / "workspace.json").exists()
+    meta = json.loads((ws_dir / "workspace.json").read_text())
+    assert meta["name"] == "ws_meta"
+    assert meta["owner"] == "admin"
+    # ws 根不再写 session.json（scan 状态机下沉到 scans/<id>/）
+    assert not (ws_dir / "session.json").exists()

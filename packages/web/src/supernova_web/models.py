@@ -32,6 +32,8 @@ class ScanRequest(BaseModel):
 
 class ScanAccepted(BaseModel):
     workspace: str
+    # T3: 1 ws : N scans 后 POST /api/scan 返回新 scan 的 scan_id（旧前端忽略仍可用）。
+    scan_id: str | None = None
 
 
 class ErrorOut(BaseModel):
