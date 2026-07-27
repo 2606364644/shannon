@@ -10,7 +10,7 @@ export type AuthUser = {
   // 登录后前端据此弹改密提醒 + 顶栏 badge。change-password 成功后置 false。
   must_change_password: boolean;
 };
-type AuthState = {
+export type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -18,7 +18,7 @@ type AuthState = {
   refreshUser: () => Promise<void>;
 };
 
-const Ctx = createContext<AuthState | null>(null);
+export const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -52,11 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   }
 
-  return <Ctx.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</Ctx.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {
-  const v = useContext(Ctx);
+  const v = useContext(AuthContext);
   if (!v) throw new Error("useAuth 必须在 AuthProvider 内使用");
   return v;
 }

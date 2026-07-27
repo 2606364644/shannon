@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
@@ -28,6 +29,13 @@ export function UserMenu() {
           <div className="font-medium">{user.username}</div>
           <div className="text-xs text-muted-foreground">{t(`auth.role.${user.role}`)}</div>
         </div>
+        {isAdmin && (
+          <Button variant="ghost" className="w-full justify-start" asChild>
+            <Link to="/users" data-testid="user-mgmt-link" onClick={() => setOpen(false)}>
+              {t("users.manageLink")}
+            </Link>
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="w-full justify-start"

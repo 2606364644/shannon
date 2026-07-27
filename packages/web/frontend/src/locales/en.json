@@ -59,7 +59,12 @@
     "member": "Member",
     "manage": "Manage members",
     "addFailed": "Failed to add member",
-    "removeFailed": "Failed to remove member"
+    "removeFailed": "Failed to remove member",
+    "input": {
+      "placeholder": "Enter username",
+      "addFailed": "Add failed",
+      "notFound": "User not found"
+    }
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -591,5 +596,48 @@
     },
     "fallbackHint": "Blank = fall back to global default",
     "openSettings": "Workspace config"
+  },
+  "users": {
+    "manageLink": "User Management",
+    "title": "User Management",
+    "subtitle": "Manage accounts and workspace membership",
+    "create": "New User",
+    "username": "Username",
+    "role": "Global Role",
+    "roleAdmin": "Admin",
+    "roleUser": "User",
+    "mustChange": "Password Change Due",
+    "createdAt": "Created",
+    "actions": "Actions",
+    "expand": "Workspace Membership",
+    "delete": "Delete",
+    "resetPassword": "Reset Password",
+    "loadFailed": "Failed to load users",
+    "created": "User created",
+    "createFailed": "Create failed",
+    "deleted": "User deleted",
+    "deleteFailed": "Delete failed",
+    "deleteConfirm": "Delete user {{name}}? This cannot be undone and removes all workspace memberships and sessions.",
+    "deleteConfirmBtn": "Confirm Delete",
+    "cancel": "Cancel",
+    "password": "Initial Password",
+    "passwordHint": "User must change on first login",
+    "roleChanged": "Role updated",
+    "roleChangeFailed": "Role update failed",
+    "passwordReset": "Password reset",
+    "passwordResetFailed": "Reset failed",
+    "newPassword": "New temporary password",
+    "members": {
+      "title": "Workspace Membership",
+      "workspace": "Workspace",
+      "wsRole": "Role",
+      "add": "Add",
+      "remove": "Remove",
+      "save": "Save",
+      "saved": "Membership updated",
+      "saveFailed": "Some updates failed; refreshed",
+      "notMember": "Not a member",
+      "empty": "Not a member of any workspace"
+    }
   }
 }

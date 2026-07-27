@@ -71,6 +71,8 @@ export const apiPut = <T>(path: string, body: unknown, opts?: ReqOptions) =>
   request<T>(path, { method: "PUT", body: JSON.stringify(body) }, opts);
 export const apiDelete = <T>(path: string, opts?: ReqOptions) =>
   request<T>(path, { method: "DELETE" }, opts);
+export const apiPatch = <T>(path: string, body: unknown, opts?: ReqOptions) =>
+  request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, opts);
 
 export const browseFs = (path: string) =>
   apiGet<FsBrowseResult>(`/fs/browse?path=${encodeURIComponent(path)}`);
