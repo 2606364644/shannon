@@ -328,7 +328,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(system_status.router, dependencies=_require_auth)
     app.include_router(members.router, dependencies=_require_auth)
     app.include_router(ws_config.router, dependencies=_require_auth)
-    app.include_router(users.router)
+    app.include_router(users.router, dependencies=_require_auth)
 
     from .auth import routes as auth_routes
     app.include_router(auth_routes.router)
