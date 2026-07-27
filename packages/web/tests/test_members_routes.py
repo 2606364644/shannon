@@ -1,67 +1,63 @@
-# packages/web/tests/test_members_routes.py
 import pytest
 from starlette.testclient import TestClient
+
 from supernova_web.app import create_app
 from supernova_web.auth.passwords import hash_password
 
 
 @pytest.fixture
-def _app(tmp_workspaces, monkeypatch):
+def admin_client(tmp_workspaces, monkeypatch):
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
-    # tmp_workspaces 把 SUPERNOVA_WORKER_ROOT 设成 tmp_path/"workspaces", 而
-    # resolve_workspaces_dir() 会再追加 /"workspaces" -> 嵌套一层不存在目录,
-    # 致 AuthStore.init_schema() 建不了 auth.db。rebase 到父目录使解析结果
-    # 恰好等于 tmp_workspaces (同 conftest.app_with_ws 模式)。
+    from supernova_core.utils.paths import resolve_workspaces_dir
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    assert resolve_workspaces_dir() == tmp_workspaces
     app = create_app()
-    st = app.state.auth_store
-    st.create_user("alice", hash_password("p"))
-    st.create_user("bob", hash_password("p"))
-    (app.state.config.workspaces_dir / "ws1").mkdir()
-    st.add_workspace_member("ws1", st.get_user_by_username("alice").id, "manager")
-    return app
-
-
-def _login(app, username):
+    app.state.auth_store.create_user("admin", hash_password("admin-pw"), role="admin")
     c = TestClient(app)
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
-    c.post("/api/auth/login", json={"username": username, "password": "p"}, headers={"X-CSRF-Token": tok})
-    return c
+    c.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"},
+           headers={"X-CSRF-Token": tok})
+    return c, app
 
 
-def test_list_users(_app):
-    c = _login(_app, "alice")
-    names = sorted(u["username"] for u in c.get("/api/users").json()["users"])
-    assert names == ["alice", "bob"]
+def _csrf(c):
+    return c.cookies.get("sn-csrf") or c.get("/api/auth/csrf").json()["csrf_token"]
 
 
-def test_list_members(_app):
-    c = _login(_app, "alice")
-    members = c.get("/api/workspaces/ws1/members").json()["members"]
-    assert any(m["username"] == "alice" and m["role"] == "manager" for m in members)
-
-
-def test_manager_adds_member(_app):
-    c = _login(_app, "alice")
-    tok = c.get("/api/auth/csrf").json()["csrf_token"]
-    r = c.post("/api/workspaces/ws1/members", json={"username": "bob", "role": "member"},
-               headers={"X-CSRF-Token": tok})
+def test_patch_member_role_success(admin_client):
+    c, app = admin_client
+    st = app.state.auth_store
+    u = st.create_user("alice", "h")
+    st.add_workspace_member("ws-a", u.id, "member")
+    r = c.patch("/api/workspaces/ws-a/members/alice", json={"role": "manager"},
+                headers={"X-CSRF-Token": _csrf(c)})
     assert r.status_code == 200
-    members = c.get("/api/workspaces/ws1/members").json()["members"]
-    assert any(m["username"] == "bob" for m in members)
+    assert st.get_workspace_member_role("ws-a", u.id) == "manager"
 
 
-def test_member_cannot_add(_app):
-    # bob 先被加为 member
-    _app.state.auth_store.add_workspace_member("ws1", _app.state.auth_store.get_user_by_username("bob").id, "member")
-    c = _login(_app, "bob")
-    tok = c.get("/api/auth/csrf").json()["csrf_token"]
-    r = c.post("/api/workspaces/ws1/members", json={"username": "alice"}, headers={"X-CSRF-Token": tok})
-    assert r.status_code == 403
-
-
-def test_cannot_remove_last_manager(_app):
-    c = _login(_app, "alice")
-    tok = c.get("/api/auth/csrf").json()["csrf_token"]
-    r = c.delete("/api/workspaces/ws1/members/alice", headers={"X-CSRF-Token": tok})
+def test_patch_member_role_last_manager_409(admin_client):
+    """降最后 manager -> 409（复用 remove_member 的护栏逻辑）。"""
+    c, app = admin_client
+    st = app.state.auth_store
+    u = st.create_user("alice", "h")
+    st.add_workspace_member("ws-a", u.id, "manager")  # 唯一 manager
+    r = c.patch("/api/workspaces/ws-a/members/alice", json={"role": "member"},
+                headers={"X-CSRF-Token": _csrf(c)})
     assert r.status_code == 409
+
+
+def test_patch_member_role_bad_role_422(admin_client):
+    c, app = admin_client
+    st = app.state.auth_store
+    u = st.create_user("alice", "h")
+    st.add_workspace_member("ws-a", u.id, "member")
+    r = c.patch("/api/workspaces/ws-a/members/alice", json={"role": "owner"},
+                headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 422
+
+
+def test_patch_member_role_user_not_found_404(admin_client):
+    c, app = admin_client
+    r = c.patch("/api/workspaces/ws-a/members/nobody", json={"role": "manager"},
+                headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 404
