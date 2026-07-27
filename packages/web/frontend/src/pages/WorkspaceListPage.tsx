@@ -11,7 +11,6 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/PageHeader";
-import { StatRow, type StatItem } from "@/components/StatRow";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,21 +120,6 @@ export function WorkspaceListPage() {
     }),
   ], [t]);
 
-  // 概览条：客户端聚合 data（不动后端契约）
-  const stats: StatItem[] = useMemo(() => {
-    const running = data.filter((w) => w.status === "running").length;
-    const completed = data.filter((w) => w.status === "completed").length;
-    const failed = data.filter((w) => w.status === "failed" || w.status === "killed").length;
-    const totalCost = data.reduce((sum, w) => sum + (w.total_cost_usd ?? 0), 0);
-    const currency = data.find((w) => w.cost_currency)?.cost_currency;
-    return [
-      { label: t("workspaces.stats.running"), value: running, tone: "cyan" },
-      { label: t("workspaces.stats.completed"), value: completed, tone: "green" },
-      { label: t("workspaces.stats.failed"), value: failed, tone: "red" },
-      { label: t("workspaces.stats.totalCost"), value: fmtCost(totalCost, currency) },
-    ];
-  }, [data, t]);
-
   const table = useReactTable({
     data: filtered, columns,
     state: { sorting, globalFilter },
@@ -175,7 +159,6 @@ export function WorkspaceListPage() {
     <TooltipProvider>
     <div className="space-y-4">
       <PageHeader title={t("workspaces.title")} subtitle={t("workspaces.subtitle")} />
-      <StatRow stats={stats} />
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="cta" asChild>

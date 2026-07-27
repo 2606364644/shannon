@@ -189,19 +189,6 @@ describe("WorkspaceListPage (DataTable)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "工作区" })).toBeInTheDocument();
     expect(screen.getByText(/所有扫描任务/)).toBeInTheDocument();
   });
-
-  it("精修：概览条聚合 运行中/已完成/失败 计数 + 总成本", async () => {
-    const { container } = renderPage();
-    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
-    const statValue = (label: string) =>
-      Array.from(container.querySelectorAll(".uppercase"))
-        .find((n) => n.textContent === label)?.nextElementSibling?.textContent ?? "";
-    // ws-a running / ws-corr completed / ws-failed failed；成本 2.34+0.5=2.84
-    expect(statValue("运行中")).toBe("1");
-    expect(statValue("已完成")).toBe("1");
-    expect(statValue("失败")).toBe("1");
-    expect(statValue("总成本")).toMatch(/2\.84/);
-  });
 });
 
 describe("WorkspaceListPage i18n", () => {
