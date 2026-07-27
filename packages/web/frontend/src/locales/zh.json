@@ -430,6 +430,7 @@
       "canceled": "已取消扫描 {{scanId}}",
       "deleted": "已删除扫描 {{scanId}}",
       "resumed": "已恢复扫描，跳转实时页",
+      "noMatch": "无匹配的扫描任务",
       "card": {
         "scanId": "扫描 ID",
         "type": "类型",

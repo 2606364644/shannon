@@ -430,6 +430,7 @@
       "canceled": "Scan {{scanId}} canceled",
       "deleted": "Scan {{scanId}} deleted",
       "resumed": "Scan resumed, jumping to live view",
+      "noMatch": "No matching scans",
       "card": {
         "scanId": "Scan ID",
         "type": "Type",

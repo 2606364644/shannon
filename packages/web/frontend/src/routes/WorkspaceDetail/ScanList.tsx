@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ErrorState } from "@/components/ErrorState";
 import { Empty } from "@/components/Empty";
+import { ScanFilters, DEFAULT_SCAN_FILTERS, useScanFilters } from "@/components/ScanFilters";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -33,6 +34,7 @@ export function ScanList() {
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [filters, setFilters] = useState(DEFAULT_SCAN_FILTERS);
 
   const load = () => {
     if (!workspace) return;
@@ -48,6 +50,8 @@ export function ScanList() {
 
   if (err) return <ErrorState message={t("workspaceDetail.scans.loadError", { error: err })} />;
 
+  const { filtered } = useScanFilters(scans, filters);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -60,6 +64,8 @@ export function ScanList() {
           </Button>
         )}
       </div>
+
+      <ScanFilters value={filters} onChange={setFilters} />
 
       {loading ? (
         <div className="space-y-2">
@@ -75,8 +81,10 @@ export function ScanList() {
             </Button>
           )}
         </Empty>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("workspaceDetail.scans.noMatch")}</p>
       ) : (
-        scans.map((s) => (
+        filtered.map((s) => (
           <ScanCard key={s.scan_id} ws={workspace!} scan={s} onChanged={load} />
         ))
       )}
