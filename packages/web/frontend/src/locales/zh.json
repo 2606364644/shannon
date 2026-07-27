@@ -241,6 +241,13 @@
       "failed": "创建失败：{{error}}"
     }
   },
+  "scanFilters": {
+    "status": "状态筛选",
+    "type": "类型筛选",
+    "keyword": "搜索 scan_id 或工作区名…",
+    "timeLabel": "时间筛选",
+    "time": { "all": "全部时间", "today": "今天", "7d": "近7天", "30d": "近30天" }
+  },
   "scan": {
     "tabs": {
       "whitebox": "白盒",

@@ -241,6 +241,13 @@
       "failed": "Create failed: {{error}}"
     }
   },
+  "scanFilters": {
+    "status": "Status",
+    "type": "Type",
+    "keyword": "Search scan_id or workspace…",
+    "timeLabel": "Time",
+    "time": { "all": "All time", "today": "Today", "7d": "Last 7d", "30d": "Last 30d" }
+  },
   "scan": {
     "tabs": {
       "whitebox": "whitebox",
