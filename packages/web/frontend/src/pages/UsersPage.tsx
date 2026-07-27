@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
 import { ConfirmDeleteUserDialog } from "@/components/ConfirmDeleteUserDialog";
+import { UserWorkspacesPanel } from "@/components/UserWorkspacesPanel";
 import { useAuth } from "@/auth/AuthContext";
 import { listUsers, updateRole, type UserRow } from "@/api/users";
 
@@ -24,6 +25,7 @@ export function UsersPage() {
   const [resetOpen, setResetOpen] = useState(false);
   const [delTarget, setDelTarget] = useState<UserRow | null>(null);
   const [delOpen, setDelOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -61,28 +63,40 @@ export function UsersPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-t" data-testid={`user-row-${u.username}`}>
-                <td className="py-2 font-mono">{u.username}</td>
-                <td className="py-2">{t(`users.role${u.role === "admin" ? "Admin" : "User"}`)}</td>
-                <td className="py-2">{u.must_change_password && <Badge variant="outline" className="border-amber/50 text-amber">{t("users.mustChange")}</Badge>}</td>
-                <td className="py-2 text-muted-foreground">{u.created_at.slice(0, 10)}</td>
-                <td className="py-2 space-x-2">
-                  <Select defaultValue={u.role} disabled={u.id === me?.id} onValueChange={async (v) => {
-                    try { await updateRole(u.id, v as "admin" | "user"); toast.success(t("users.roleChanged")); void refresh(); }
-                    catch { toast.error(t("users.roleChangeFailed")); }
-                  }}>
-                    <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="user">{t("users.roleUser")}</SelectItem>
-                      <SelectItem value="admin">{t("users.roleAdmin")}</SelectItem>
-                    </SelectContent>
-                  </Select>{" "}
-                  <Button variant="outline" size="sm" disabled={u.id === me?.id}
-                          onClick={() => { setResetTarget(u); setResetOpen(true); }}>{t("users.resetPassword")}</Button>{" "}
-                  <Button variant="outline" size="sm" disabled={u.id === me?.id}
-                          onClick={() => { setDelTarget(u); setDelOpen(true); }}>{t("users.delete")}</Button>
-                </td>
-              </tr>
+              <Fragment key={u.id}>
+                <tr className="border-t" data-testid={`user-row-${u.username}`}>
+                  <td className="py-2 font-mono">
+                    <button
+                      className="mr-1"
+                      aria-label="toggle-workspaces"
+                      onClick={() => setExpanded((s) => { const n = new Set(s); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })}
+                    >{expanded.has(u.id) ? "▼" : "▶"}</button>{" "}
+                    <span>{u.username}</span>
+                  </td>
+                  <td className="py-2">{t(`users.role${u.role === "admin" ? "Admin" : "User"}`)}</td>
+                  <td className="py-2">{u.must_change_password && <Badge variant="outline" className="border-amber/50 text-amber">{t("users.mustChange")}</Badge>}</td>
+                  <td className="py-2 text-muted-foreground">{u.created_at.slice(0, 10)}</td>
+                  <td className="py-2 space-x-2">
+                    <Select defaultValue={u.role} disabled={u.id === me?.id} onValueChange={async (v) => {
+                      try { await updateRole(u.id, v as "admin" | "user"); toast.success(t("users.roleChanged")); void refresh(); }
+                      catch { toast.error(t("users.roleChangeFailed")); }
+                    }}>
+                      <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">{t("users.roleUser")}</SelectItem>
+                        <SelectItem value="admin">{t("users.roleAdmin")}</SelectItem>
+                      </SelectContent>
+                    </Select>{" "}
+                    <Button variant="outline" size="sm" disabled={u.id === me?.id}
+                            onClick={() => { setResetTarget(u); setResetOpen(true); }}>{t("users.resetPassword")}</Button>{" "}
+                    <Button variant="outline" size="sm" disabled={u.id === me?.id}
+                            onClick={() => { setDelTarget(u); setDelOpen(true); }}>{t("users.delete")}</Button>
+                  </td>
+                </tr>
+                {expanded.has(u.id) && (
+                  <tr className="border-t bg-muted/30"><td colSpan={5} className="p-2"><UserWorkspacesPanel user={u} /></td></tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
