@@ -83,6 +83,7 @@ export function ScanNewPage() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const presetRepo = params.get("repo");
+  const presetWs = params.get("workspace");
   const [type, setType] = useState<ScanType>("whitebox");
   const [f, setF] = useState<FormState>({
     sourceKind: "repo",
@@ -93,7 +94,7 @@ export function ScanNewPage() {
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
-  const [workspace, setWorkspace] = useState("");
+  const [workspace, setWorkspace] = useState(presetWs ?? "");
   const [wsList, setWsList] = useState<Workspace[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
@@ -125,7 +126,9 @@ export function ScanNewPage() {
     try {
       setSubmitting(true);
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace));
-      nav(`/p/${r.workspace}/live`);
+      // ws-scan 解耦：scan_id 有则跳 scan-scoped live（精确到刚建的 scan）；
+      // 过渡期 Phase 1 未返 scan_id 时回退旧 ws-scoped live（LegacyWsTabRedirect 兜底）。
+      nav(r.scan_id ? `/p/${r.workspace}/scans/${r.scan_id}/live` : `/p/${r.workspace}/live`);
     } catch (e) {
       if (e instanceof ApiError) toast.error(renderError(e, t));
     } finally {

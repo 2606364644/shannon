@@ -20,7 +20,14 @@ describe("router.tsx 结构", () => {
     expect(router).toContain("WorkspaceListPage");
     expect(router).toContain("ScanNewPage");
     expect(router).toContain("WorkspaceDetail");
-    expect(router).toContain("DefaultTab");
+    expect(router).toContain("DefaultScanTab");
+  });
+  it("ws-scan 解耦：ws 概览 ScanList + per-scan ScanDetail 路由", () => {
+    expect(router).toContain("ScanList");
+    expect(router).toContain("ScanDetail");
+    expect(router).toContain("scans/:scanId");
+    // 旧 ws-scoped tab 路由过渡期 redirect shim
+    expect(router).toContain("LegacyWsTabRedirect");
   });
   it("子项目5:Dashboard/Settings 路由 + Workspaces 迁 /workspaces", () => {
     expect(router).toContain("DashboardPage");

@@ -12,6 +12,7 @@ export function useEventSource(url: string, stopType: string = "scan_end"): UseE
   const [lastEventId, setLastEventId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
+    if (!url) return;     // 守卫：url 缺失（如 scanId 尚未就绪）不连接，避免 EventSource 异常
     const Es = (globalThis as { EventSource?: typeof EventSource }).EventSource;
     if (!Es) return;
     const es = new Es(url);

@@ -12,8 +12,8 @@ vi.mock("../../api/useEventSource", () => ({
 
 function renderLive() {
   return render(
-    <MemoryRouter initialEntries={["/p/ws/live"]}>
-      <Routes><Route path="/p/:workspace/live" element={<LiveTab />} /></Routes>
+    <MemoryRouter initialEntries={["/p/ws/scans/scan1/live"]}>
+      <Routes><Route path="/p/:workspace/scans/:scanId/live" element={<LiveTab />} /></Routes>
     </MemoryRouter>,
   );
 }

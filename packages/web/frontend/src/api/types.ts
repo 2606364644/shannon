@@ -94,13 +94,42 @@ export type WorkspaceStatus =
 export interface Workspace {
   name: string;
   scan_type: "whitebox" | "blackbox" | "correlation";
-  status: WorkspaceStatus;          // 归一后（见 §3.1 status 矛盾兜底）
-  created_at: number;               // unix
+  status: WorkspaceStatus;          // 归一后（见 §3.1 status 矛盾兜底）= latest scan 聚合
+  created_at: number;               // unix（= latest scan created_at）
   completed_at?: number | null;
   vuln_count?: number;
   total_cost_usd?: number;
   cost_currency?: string;
   total_duration_ms?: number;
+  links?: { parent_workspace?: string | null; child_workspaces?: string[] };
+  is_correlation?: boolean;
+  // ws-scan 解耦（spec §5.3）：ws 是容器，scan_count/latest_* 从该 ws 的 scans 聚合。
+  // 旧后端（Phase 1 未上线）不返这些字段 -> 可选，消费方 null-safe。
+  scan_count?: number;
+  latest_status?: WorkspaceStatus | string;
+  latest_created_at?: number;
+}
+
+/**
+ * ws 内单个 scan 的摘要（spec §4.2）。GET /workspaces/{ws}/scans 返该数组；
+ * GET /workspaces/{ws} 的 scans[] 兼容字段也用此 shape。
+ *
+ * Phase 1 scan_store.ScanSummary 额外聚合了 vuln_counts/total_duration_ms/links/
+ * is_correlation（供 ws 列表行从 latest scan 聚合），此处设可选兼容，前端按需用。
+ */
+export interface ScanSummary {
+  scan_id: string;
+  scan_type: "whitebox" | "blackbox" | "correlation";
+  status: WorkspaceStatus | string;   // 归一后（终态优先 + heartbeat）
+  created_at: number;                  // unix
+  completed_at?: number | null;
+  vuln_count: number;
+  total_cost_usd?: number | null;
+  cost_currency?: string | null;
+  is_running: boolean;
+  // Phase 1 额外聚合字段（兼容，spec §4.2 未列但 scan_store 已产出）
+  vuln_counts?: Record<string, number>;
+  total_duration_ms?: number | null;
   links?: { parent_workspace?: string | null; child_workspaces?: string[] };
   is_correlation?: boolean;
 }
@@ -214,6 +243,9 @@ export interface ScanRequest {
 
 export interface ScanResponse {
   workspace: string;
+  // ws-scan 解耦（spec §5.2）：POST /api/scan 的 ScanAccepted 增 scan_id。
+  // 可选--过渡期 Phase 1 未上线时后端不返 scan_id，前端 F4 回退跳旧 ws-scoped live 路由。
+  scan_id?: string;
 }
 
 export interface FsEntry {

@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { SessionData, SessionMetrics } from "../../api/types";
 import { fmtCost } from "../../utils/currency";
-import { apiGet } from "../../api/client";
+import { getScan } from "../../api/client";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
@@ -22,17 +22,18 @@ function fmtMs(ms: number | null | undefined): string {
 
 export function OverviewTab() {
   const { t } = useTranslation();
-  const { workspace } = useParams<{ workspace: string }>();
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const [s, setS] = useState<SessionData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    if (!workspace || !scanId) return;
     setErr(null);
     setLoading(true);
-    apiGet<SessionData>(`/workspaces/${workspace}`)
+    getScan(workspace, scanId)
       .then((data) => { setS(data); setLoading(false); })
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [workspace]);
+  }, [workspace, scanId]);
 
   if (err) return <ErrorState message={t("workspaceDetail.overview.loadError", { error: err })} />;
   if (loading) {

@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { FixedSizeList } from "react-window";
-import { apiGet } from "../../api/client";
+import { apiGet, scanLogsPath } from "../../api/client";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -48,7 +48,7 @@ function VirtualLines({ lines, height }: { lines: string[]; height: number }) {
 
 export function LogsTab() {
   const { t } = useTranslation();
-  const { workspace } = useParams<{ workspace: string }>();
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const [files, setFiles] = useState<string[]>([]);
   const [filesErr, setFilesErr] = useState<string | null>(null);
   const [filesLoading, setFilesLoading] = useState(true);
@@ -70,22 +70,23 @@ export function LogsTab() {
   }, []);
 
   useEffect(() => {
+    if (!workspace || !scanId) return;
     setFilesLoading(true);
     setFilesErr(null);
-    apiGet<{ files: string[] }>(`/workspaces/${workspace}/logs`)
+    apiGet<{ files: string[] }>(scanLogsPath(workspace, scanId))
       .then((r) => setFiles(r.files))
       .catch((e: unknown) => setFilesErr(e instanceof Error ? e.message : t("workspaceDetail.logs.listLoadError")))
       .finally(() => setFilesLoading(false));
-  }, [workspace]);
+  }, [workspace, scanId]);
 
   useEffect(() => {
-    if (!sel) return;
+    if (!sel || !workspace || !scanId) return;
     setContent("");
     setContentErr(null);
-    apiGet<{ content: string }>(`/workspaces/${workspace}/logs?file=${encodeURIComponent(sel)}`)
+    apiGet<{ content: string }>(scanLogsPath(workspace, scanId, sel))
       .then((r) => setContent(r.content ?? ""))
       .catch((e: unknown) => setContentErr(e instanceof Error ? e.message : t("workspaceDetail.logs.contentLoadError")));
-  }, [workspace, sel]);
+  }, [workspace, scanId, sel]);
 
   const isJsonl = sel?.endsWith(".log") && !sel.endsWith("workflow.log") && !sel.endsWith("activity_failures.log");
   const lines = content.split(/\r?\n/).filter(Boolean);

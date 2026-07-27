@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet, useParams, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Settings } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Outlet, useParams, Link } from "react-router-dom";
+import { ArrowLeft, Settings, FolderGit2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -12,23 +11,21 @@ import { apiGet, ApiError } from "@/api/client";
 import type { SessionData } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-const TABS = [
-  { value: "overview", labelKey: "workspaceDetail.tabs.overview" },
-  { value: "report", labelKey: "workspaceDetail.tabs.report" },
-  { value: "deliverables", labelKey: "workspaceDetail.tabs.deliverables" },
-  { value: "logs", labelKey: "workspaceDetail.tabs.logs" },
-  { value: "live", labelKey: "workspaceDetail.tabs.live" },
-  // P2: 仓库 tab 迁入 ws 内（原顶级 /repos 撤销）
-  { value: "repos", labelKey: "workspaceDetail.tabs.repos" },
-] as const;
-
+/**
+ * ws 概览布局（/p/:ws）：ws header（名 + latest_status + scan_count + 成员/仓库/settings 入口）
+ * + Outlet（index=ScanList 扫描列表 / repos=ReposTab / settings=WsSettingsTab）。
+ *
+ * ws-scan 解耦（spec §12.7）：workspace 是容器，无「再次扫描」入口--只有「新建扫描」+
+ * 扫描列表（在 ScanList）。scan 级 tab（overview/report/...）在 ScanDetail（/p/:ws/scans/:scanId）。
+ *
+ * header 的 latest_status/scan_count 取自 GET /workspaces/{ws} shim（返 latest scan payload +
+ * scans[]）；Phase 1 未上线时旧 payload 无 scans[]，scan_count 缺失不显，不阻塞。
+ */
 export default function WorkspaceDetail() {
   const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
-  const { pathname } = useLocation();
-  const navigate = useNavigate();
-  const current = pathname.split("/").pop() ?? "overview";
   const [meta, setMeta] = useState<SessionData | null>(null);
+  const [scansCount, setScansCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -36,18 +33,21 @@ export default function WorkspaceDetail() {
     if (!workspace) return;
     setLoading(true);
     setNotFound(false);
-    apiGet<SessionData>(`/workspaces/${workspace}`)
-      .then((s) => { setMeta(s); setLoading(false); })
+    apiGet<SessionData & { scans?: unknown[] }>(`/workspaces/${workspace}`)
+      .then((s) => {
+        setMeta(s);
+        setScansCount(Array.isArray(s.scans) ? s.scans.length : null);
+        setLoading(false);
+      })
       .catch((e) => {
         setMeta(null);
+        setScansCount(null);
         setLoading(false);
-        // 404 = 工作区不存在/已删：显明确错误态，不降级成 running 误导。
-        // 其余错误（500 等）保持现降级（显名 + tabs + 默认 running），不阻塞浏览。
         setNotFound(e instanceof ApiError && e.status === 404);
       });
   }, [workspace]);
 
-  const status = meta?.status ?? meta?.session?.status ?? "running";
+  const status = meta?.status ?? meta?.session?.status;
 
   if (notFound) {
     return (
@@ -78,6 +78,13 @@ export default function WorkspaceDetail() {
           <h2 className="font-mono text-xl">{workspace}</h2>
           {workspace && <MemberManagerDialog ws={workspace} />}
           {workspace && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to="repos" aria-label={t("workspaceDetail.tabs.repos")} title={t("workspaceDetail.tabs.repos")}>
+                <FolderGit2 className="size-4" /> {t("workspaceDetail.tabs.repos")}
+              </Link>
+            </Button>
+          )}
+          {workspace && (
             <Button variant="outline" size="icon" asChild>
               <Link to="settings" aria-label={t("wsConfig.openSettings")} title={t("wsConfig.openSettings")}>
                 <Settings className="size-4" />
@@ -88,27 +95,20 @@ export default function WorkspaceDetail() {
             <Skeleton className="h-5 w-40" />
           ) : (
             <>
-              <StatusBadge status={status} />
+              {status && <StatusBadge status={status} />}
               {meta?.scan_type && (
                 <Badge variant="outline" className="font-mono">{meta.scan_type}</Badge>
               )}
-              {meta?.repo_path && (
-                <span className="font-mono text-sm text-muted-foreground">{meta.repo_path}</span>
+              {scansCount != null && (
+                <Badge variant="secondary" className="font-mono">
+                  {t("workspaceDetail.scans.listTitle")} · {scansCount}
+                </Badge>
               )}
             </>
           )}
         </div>
       </div>
-      <Tabs value={current} onValueChange={(v) => navigate(v)}>
-        <div data-testid="wd-tabs-sticky" className="sticky top-12 z-30 print:static">
-          <TabsList>
-            {TABS.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      </Tabs>
-      <div><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
+      <ErrorBoundary><Outlet /></ErrorBoundary>
     </div>
   );
 }

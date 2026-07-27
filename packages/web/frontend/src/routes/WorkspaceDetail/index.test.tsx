@@ -1,19 +1,26 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import WorkspaceDetail from "./index";
 
-// MemberManagerDialog 依赖 AuthProvider + 自有成员 API；shell 测试聚焦 tab/导航/404，
+// MemberManagerDialog 依赖 AuthProvider + 自有成员 API；ws 概览测试聚焦 header/入口/404，
 // 隔离该子组件（其行为在 MemberManagerDialog.test.tsx 独立覆盖）。
 vi.mock("@/components/MemberManagerDialog", () => ({
   MemberManagerDialog: () => null,
 }));
 
 const server = setupServer(
-  http.get("/api/workspaces/:ws", () => HttpResponse.json({ status: "running" })),
+  // ws 概览 header fetch GET /workspaces/{ws}（shim 返 latest scan payload + scans[]）。
+  http.get("/api/workspaces/:ws", () =>
+    HttpResponse.json({
+      status: "running",
+      scan_type: "whitebox",
+      scans: [{ scan_id: "s1" }, { scan_id: "s2" }],
+    }),
+  ),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -25,81 +32,75 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
+// index/repos/settings 用占位 div 替换，聚焦 WorkspaceDetail 布局本身（header + Outlet），
+// 不引入 ScanList/ReposTab 的自有请求。
 function renderAt(initialPath: string) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/p/:workspace" element={<WorkspaceDetail />}>
-          <Route path="overview" element={<div>ov-content</div>} />
-          <Route path="report" element={<div>rp-content</div>} />
-          <Route path="deliverables" element={<div>dl-content</div>} />
-          <Route path="logs" element={<div>lg-content</div>} />
-          <Route path="live" element={<div>lv-content</div>} />
+          <Route index element={<div>scanlist-content</div>} />
+          <Route path="repos" element={<div>repos-content</div>} />
+          <Route path="settings" element={<div>settings-content</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
   );
 }
 
-describe("WorkspaceDetail shell", () => {
-  it("渲染 tablist 与 6 个 tab role", () => {
-    renderAt("/p/ws/overview");
-    expect(screen.getByRole("tablist")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(6);
-  });
-  it("当前 tab 由路由段决定（aria-selected）", () => {
-    renderAt("/p/ws/logs");
-    expect(screen.getByRole("tab", { name: "日志" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "false");
+describe("WorkspaceDetail ws 概览", () => {
+  it("渲染 ws 名 + 返回列表链接 + 仓库/settings 入口", async () => {
+    renderAt("/p/ws");
+    expect(screen.getByText("ws")).toBeInTheDocument();
+    expect(screen.getByText(/返回列表/)).toBeInTheDocument();
+    // 仓库入口链接（含「仓库」文案）
+    expect(screen.getByRole("link", { name: /仓库/ })).toBeInTheDocument();
+    // settings 入口（齿轮，aria-label 来自 wsConfig.openSettings）
+    expect(screen.getByRole("link", { name: /配置|settings/i })).toBeInTheDocument();
+    // index Outlet 渲染扫描列表占位
+    expect(screen.getByText("scanlist-content")).toBeInTheDocument();
   });
 
-  it("mousedown 一个 tab 触发导航", () => {
-    renderAt("/p/ws/overview");
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "实时" }));
-    expect(screen.getByText("lv-content")).toBeInTheDocument();
+  it("header 显 latest_status badge + scan_count 聚合（scans[].length）", async () => {
+    renderAt("/p/ws");
+    // scans 数组长度 2 -> 「扫描任务 · 2」
+    await waitFor(() => expect(screen.getByText(/扫描任务 · 2/)).toBeInTheDocument());
+  });
+
+  it("点击仓库入口 -> 导航到 repos", async () => {
+    renderAt("/p/ws");
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(screen.getByRole("link", { name: /仓库/ }));
+    await waitFor(() => expect(screen.getByText("repos-content")).toBeInTheDocument());
   });
 
   it("返回列表链接渲染（中文）", () => {
-    renderAt("/p/ws/overview");
+    renderAt("/p/ws");
     expect(screen.getByText(/返回列表/)).toBeInTheDocument();
   });
-
-  it("Tabs 外层容器 sticky 吸顶（top-12 z-30，紧贴 TopBar 下沿）", () => {
-    renderAt("/p/ws/overview");
-    const sticky = screen.getByTestId("wd-tabs-sticky");
-    expect(sticky.className).toContain("sticky");
-    expect(sticky.className).toContain("top-12");
-    expect(sticky.className).toContain("z-30");
-    expect(sticky.className).toContain("print:static");
-  });
 });
 
-describe("WorkspaceDetail shell i18n", () => {
-  it("切英文 tab 标签 + 返回链接为英文", () => {
+describe("WorkspaceDetail ws 概览 i18n", () => {
+  it("切英文 -> 返回列表 + 仓库入口为英文", async () => {
     i18n.changeLanguage("en");
-    renderAt("/p/ws/overview");
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Report" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Deliverables" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Live" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Repositories" })).toBeInTheDocument();
+    renderAt("/p/ws");
     expect(screen.getByText(/Back to list/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Repositories/ })).toBeInTheDocument();
   });
 });
 
-describe("WorkspaceDetail shell notFound", () => {
-  it("404 → 显 notFound 消息（中文）", async () => {
+describe("WorkspaceDetail ws 概览 notFound", () => {
+  it("404 -> 显 notFound 消息（中文）", async () => {
     server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json({ detail: "nope" }, { status: 404 })));
-    renderAt("/p/ghost/overview");
+    renderAt("/p/ghost");
     await waitFor(() => expect(screen.getByText(/工作区不存在或已被删除/)).toBeInTheDocument());
     expect(screen.getByText(/返回列表/)).toBeInTheDocument();
   });
 
-  it("404 + 切英文 → notFound 消息英文", async () => {
+  it("404 + 切英文 -> notFound 消息英文", async () => {
     i18n.changeLanguage("en");
     server.use(http.get("/api/workspaces/:ws", () => HttpResponse.json({ detail: "nope" }, { status: 404 })));
-    renderAt("/p/ghost/overview");
+    renderAt("/p/ghost");
     await waitFor(() => expect(screen.getByText(/does not exist or has been deleted/i)).toBeInTheDocument());
     expect(screen.getByText(/Back to list/)).toBeInTheDocument();
   });

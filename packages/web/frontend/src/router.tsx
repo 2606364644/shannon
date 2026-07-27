@@ -5,6 +5,8 @@ import { ScanNewPage } from "./pages/ScanNewPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import WorkspaceDetail from "./routes/WorkspaceDetail";
+import { ScanList } from "./routes/WorkspaceDetail/ScanList";
+import ScanDetail from "./routes/WorkspaceDetail/ScanDetail";
 import { OverviewTab } from "./routes/WorkspaceDetail/OverviewTab";
 import { ReportTab } from "./routes/WorkspaceDetail/ReportTab";
 import { DeliverablesTab } from "./routes/WorkspaceDetail/DeliverablesTab";
@@ -12,23 +14,43 @@ import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
 import LiveTab from "./routes/WorkspaceDetail/LiveTab";
 import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
 import WsSettingsTab from "./routes/WorkspaceDetail/WsSettingsTab";
-import { apiGet } from "./api/client";
-import type { SessionData } from "./api/types";
+import { getScan, listScans } from "./api/client";
 import { AppShell } from "./components/layout/AppShell";
 import { DevComponentsPage } from "./pages/DevComponentsPage";
 import LoginPage from "./pages/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
 
-// 默认 tab：进行中 → live，完成 → report。fetch status 后 navigate（replace 避免占历史栈）。
-function DefaultTab() {
+// per-scan 默认 tab：进行中 -> live，完成 -> report。fetch scan status 后 navigate（replace 避免占历史栈）。
+function DefaultScanTab() {
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
+  const nav = useNavigate();
+  useEffect(() => {
+    if (!workspace || !scanId) return;
+    getScan(workspace, scanId)
+      .then((s) => {
+        const st = s.status ?? s.session?.status ?? "running";
+        nav(st === "completed" || st === "done" ? "report" : "live", { replace: true });
+      })
+      .catch(() => nav("live", { replace: true }));
+  }, [workspace, scanId, nav]);
+  return null;
+}
+
+// 旧 ws-scoped tab 路由（/p/:ws/overview 等）过渡期 shim：redirect 到 latest scan 的对应 tab。
+// spec §5.2 shim：旧端点操作 ws 内 latest scan。Phase 2 切完后此 redirect 移除（F6）。
+function LegacyWsTabRedirect({ tab }: { tab: string }) {
   const { workspace } = useParams<{ workspace: string }>();
   const nav = useNavigate();
   useEffect(() => {
-    apiGet<SessionData>(`/workspaces/${workspace}`).then((s) => {
-      const st = s.status ?? s.session?.status ?? "running";
-      nav(st === "completed" || st === "done" ? "report" : "live", { replace: true });
-    }).catch(() => nav("live", { replace: true }));
-  }, [workspace, nav]);
+    if (!workspace) return;
+    listScans(workspace)
+      .then((scans) => {
+        if (scans.length === 0) { nav(`/p/${workspace}`, { replace: true }); return; }
+        // listScans 按 created_at 倒序，首项 = latest scan
+        nav(`/p/${workspace}/scans/${scans[0].scan_id}/${tab}`, { replace: true });
+      })
+      .catch(() => nav(`/p/${workspace}`, { replace: true }));
+  }, [workspace, tab, nav]);
   return null;
 }
 
@@ -46,19 +68,33 @@ export const router = createBrowserRouter([
       { path: "/workspaces", element: <WorkspaceListPage /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
+        // ws 概览（容器）：ws header + 扫描列表 + 仓库/settings 入口
         path: "/p/:workspace",
         element: <WorkspaceDetail />,
         children: [
-          { index: true, element: <DefaultTab /> },
+          { index: true, element: <ScanList /> },
+          // ws 级 tab（仓库/配置）保留在 ws 概览下
+          { path: "repos", element: <ReposTab /> },
+          { path: "settings", element: <WsSettingsTab /> },
+          // 旧 ws-scoped scan tab 路由 -> redirect 到 latest scan 对应 tab（过渡期 shim）
+          { path: "overview", element: <LegacyWsTabRedirect tab="overview" /> },
+          { path: "report", element: <LegacyWsTabRedirect tab="report" /> },
+          { path: "deliverables", element: <LegacyWsTabRedirect tab="deliverables" /> },
+          { path: "logs", element: <LegacyWsTabRedirect tab="logs" /> },
+          { path: "live", element: <LegacyWsTabRedirect tab="live" /> },
+        ],
+      },
+      {
+        // per-scan 视图：scan header + scan tabs（overview/report/deliverables/logs/live）
+        path: "/p/:workspace/scans/:scanId",
+        element: <ScanDetail />,
+        children: [
+          { index: true, element: <DefaultScanTab /> },
           { path: "overview", element: <OverviewTab /> },
           { path: "report", element: <ReportTab /> },
           { path: "deliverables", element: <DeliverablesTab /> },
           { path: "logs", element: <LogsTab /> },
           { path: "live", element: <LiveTab /> },
-          // P2: 仓库迁到 ws 内（原 /repos 顶级路由撤销）
-          { path: "repos", element: <ReposTab /> },
-          // P3c 阶段 2：per-ws 配置页（header 齿轮入口）
-          { path: "settings", element: <WsSettingsTab /> },
         ],
       },
       { path: "/settings", element: <SettingsPage /> },

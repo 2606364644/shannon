@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEventSource } from "../../api/useEventSource";
+import { scanEventsUrl } from "../../api/client";
 import { dashboardReducer, emptyState } from "../../state/dashboardReducer";
 import type { DashboardState } from "../../state/dashboardReducer";
 import type { ScanEndEvent } from "../../api/types";
@@ -26,9 +27,11 @@ const END_LABEL: Record<string, string> = {
 
 export default function LiveTab() {
   const { t } = useTranslation();
-  const { workspace } = useParams<{ workspace: string }>();
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const navigate = useNavigate();
-  const { events, status } = useEventSource(`/api/workspaces/${workspace}/events`);
+  const { events, status } = useEventSource(
+    workspace && scanId ? scanEventsUrl(workspace, scanId) : "",
+  );
   const [state, setState] = useState<DashboardState>(emptyState);
   const [elapsed, setElapsed] = useState(0);
   const lastApplied = useRef(0);
@@ -87,7 +90,7 @@ export default function LiveTab() {
         <div role="status" className="flex items-center gap-3 rounded-md border border-border bg-card p-3 text-sm">
           <span className="text-cyan">{t("workspaceDetail.live.endedTitle")}</span>
           <span className="text-muted-foreground">{t("workspaceDetail.live.endedHint")}</span>
-          <Button size="sm" variant="outline" onClick={() => navigate(`/p/${workspace}/report`)}>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/p/${workspace}/scans/${scanId}/report`)}>
             {t("workspaceDetail.live.viewReport")}
           </Button>
         </div>

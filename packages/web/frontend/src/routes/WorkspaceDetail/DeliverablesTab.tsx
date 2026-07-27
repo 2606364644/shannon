@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGet, apiGetText } from "../../api/client";
+import { apiGet, apiGetText, scanDeliverablesPath } from "../../api/client";
 import type { DeliverablesSummary, DeliverablesFile } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { MarkdownView } from "../../components/MarkdownView";
@@ -13,21 +13,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function DeliverablesTab() {
   const { t } = useTranslation();
-  const { workspace } = useParams<{ workspace: string }>();
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const [data, setData] = useState<DeliverablesSummary | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<DeliverablesFile | null>(null);
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || !scanId) return;
     setLoading(true);
     setData(null);
     setSel(null);
     setErr(null);
-    apiGet<DeliverablesSummary>(`/workspaces/${workspace}/deliverables`)
+    apiGet<DeliverablesSummary>(scanDeliverablesPath(workspace, scanId))
       .then((d) => { setData(d); setLoading(false); })
       .catch((e: unknown) => { setData(null); setErr(String(e)); setLoading(false); });
-  }, [workspace]);
+  }, [workspace, scanId]);
 
   // 三态早返回（同 Task 9 模式）：err → ErrorState；loading → Skeleton；data → 主布局
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.loadError", { error: err })} />;
@@ -69,13 +69,13 @@ export function DeliverablesTab() {
       </div>
       <div className="max-h-[calc(100vh-200px)] overflow-auto border-l border-border pl-4">
         <FileTree files={data.files} onSelect={setSel} />
-        {sel && <FilePreview ws={workspace!} file={sel} />}
+        {sel && <FilePreview ws={workspace!} scanId={scanId!} file={sel} />}
       </div>
     </div>
   );
 }
 
-function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
+function FilePreview({ ws, scanId, file }: { ws: string; scanId: string; file: DeliverablesFile }) {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -83,11 +83,11 @@ function FilePreview({ ws, file }: { ws: string; file: DeliverablesFile }) {
     setContent("");
     setErr(null);
     if (file.kind === "md" || file.kind === "other_json" || file.kind.endsWith("_queue")) {
-      apiGetText(`/workspaces/${ws}/deliverables?path=${encodeURIComponent(file.path)}`)
+      apiGetText(scanDeliverablesPath(ws, scanId, file.path))
         .then(setContent)
         .catch((e) => { setContent(""); setErr(String(e)); });
     }
-  }, [ws, file.path]);
+  }, [ws, scanId, file.path]);
   // 文件预览失败：局部 ErrorState（不整页崩，左侧 vuln grid 仍可用）
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.fileLoadError", { error: err })} />;
   if (file.kind === "empty_json") return <div className="text-sm text-muted-foreground">{t("workspaceDetail.deliverables.emptyJson")}</div>;

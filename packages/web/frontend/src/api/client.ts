@@ -1,4 +1,4 @@
-import type { FsBrowseResult, Repo, RepoDetail } from "./types";
+import type { FsBrowseResult, Repo, RepoDetail, ScanSummary, SessionData } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
@@ -9,9 +9,19 @@ export class ApiError extends Error {
 
 export type ReqOptions = { silent?: boolean; signal?: AbortSignal };
 
-let onUnauthorized: () => void = () => window.location.assign("/login?expired=1");
+function defaultUnauthorizedHandler(): void {
+  // 已在 /login 时不重复跳转--防 BrandProvider 等全局组件在未登录 /login 页发
+  // 非 silent 401 -> assign("/login?expired=1") -> 整页刷新 -> 重新 mount -> 循环
+  // （login 页"一直在重复刷新"的根治防御）。
+  if (window.location.pathname === "/login") return;
+  window.location.assign("/login?expired=1");
+}
+let onUnauthorized: () => void = defaultUnauthorizedHandler;
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
+}
+export function resetUnauthorizedHandler() {
+  onUnauthorized = defaultUnauthorizedHandler;
 }
 
 function readCookie(name: string): string | null {
@@ -69,8 +79,16 @@ export const createWorkspace = (name: string) =>
 export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export type CancelResult = { cancelled: string; via?: string; was_dead?: boolean };
-export const cancelScan = (ws: string) =>
-  apiDelete<CancelResult>(`/scan/${encodeURIComponent(ws)}`);
+// ws-scan 解耦（spec §5.1/§5.2）：cancelScan 重载兼容两种粒度。
+//   cancelScan(ws)            -> DELETE /api/scan/{ws}        （旧 ws-scoped shim，取消 latest/active scan，WorkspaceListPage 用）
+//   cancelScan(ws, scanId)    -> DELETE /api/workspaces/{ws}/scans/{scanId}  （scan-scoped，scan 卡片用）
+export function cancelScan(ws: string): Promise<CancelResult>;
+export function cancelScan(ws: string, scanId: string): Promise<CancelResult>;
+export function cancelScan(ws: string, scanId?: string): Promise<CancelResult> {
+  return scanId
+    ? apiDelete<CancelResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`)
+    : apiDelete<CancelResult>(`/scan/${encWs(ws)}`);
+}
 
 /** 仓库名（可为 group/repo）按段 encode：保留 `/` 作路径分隔，每段安全转义。
  *  /workspaces/<ws>/repos/frontend/foo 直接命中后端 {name:path}，含空格等特殊字符的段也安全。 */
@@ -100,6 +118,48 @@ export const checkoutRepo = (ws: string, name: string, branch: string) =>
  *  暴露给组件层用，避免各处再写一遍 ws+name 拼接。 */
 export const repoEventsUrl = (ws: string, name: string) =>
   `/api/workspaces/${encWs(ws)}/repos/${encRepo(name)}/events`;
+
+// === ws-scan 解耦（spec §5.1）：scan-scoped API helper ===
+// scan_id 是 ws 内单段（YYYYMMDD-HHMMSS[-N]，不含 `/`），用 encWs 单段 encode 即安全。
+// Path helper 返不含 /api 前缀的 path（喂 apiGet/apiGetText，内部加 /api）；
+// scanEventsUrl 返含 /api 完整 URL（喂 EventSource，对齐 repoEventsUrl 约定）。
+
+/** 列该 ws 的 scans（ScanSummary[]，按 created_at 倒序）。 */
+export const listScans = (ws: string) =>
+  apiGet<ScanSummary[]>(`/workspaces/${encWs(ws)}/scans`);
+
+/** scan 详情（同旧 GET /workspaces/{ws} payload shape，读 scan_dir）。 */
+export const getScan = (ws: string, scanId: string) =>
+  apiGet<SessionData>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
+
+/** 综合报告 + PoC（text/plain）path--喂 apiGetText。 */
+export const scanReportPath = (ws: string, scanId: string) =>
+  `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/report`;
+
+/** 产物摘要（无 file）或单产物文件内容（带 file path）--摘要喂 apiGet，文件喂 apiGetText。 */
+export const scanDeliverablesPath = (ws: string, scanId: string, file?: string) =>
+  file
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/deliverables?path=${encodeURIComponent(file)}`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/deliverables`;
+
+/** 日志文件列表（无 file）或单日志内容（带 file）--都喂 apiGet。 */
+export const scanLogsPath = (ws: string, scanId: string, file?: string) =>
+  file
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/logs?file=${encodeURIComponent(file)}`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/logs`;
+
+/** scan events SSE URL（tail scan_dir/events.ndjson）--喂 EventSource，含 /api 前缀。 */
+export const scanEventsUrl = (ws: string, scanId: string) =>
+  `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/events`;
+
+/** 恢复未完成 scan（仅非终态放行，终态后端 422）。返回对齐 ScanAccepted 风格。 */
+export type ResumeResult = { workspace: string; scan_id: string };
+export const resumeScan = (ws: string, scanId: string) =>
+  apiPost<ResumeResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/resume`, {});
+
+/** 删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE）。 */
+export const deleteScan = (ws: string, scanId: string) =>
+  apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
 
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。
  *  注：此端点不经统一 request()，故不带 CSRF/401 处理——仅为兼容现有 text 调用。 */

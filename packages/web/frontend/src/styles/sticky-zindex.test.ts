@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 // 本测试读源码字符串（同 styles/tokens.test.ts 风格），防后人改 className 时回潮。
 const SRC = resolve(__dirname, "..");
 const topbar = readFileSync(resolve(SRC, "components/layout/TopBar.tsx"), "utf8");
-const wd = readFileSync(resolve(SRC, "routes/WorkspaceDetail/index.tsx"), "utf8");
+const scanDetail = readFileSync(resolve(SRC, "routes/WorkspaceDetail/ScanDetail.tsx"), "utf8");
 const dialog = readFileSync(resolve(SRC, "components/ui/dialog.tsx"), "utf8");
 const popover = readFileSync(resolve(SRC, "components/ui/popover.tsx"), "utf8");
 const tooltip = readFileSync(resolve(SRC, "components/ui/tooltip.tsx"), "utf8");
@@ -18,8 +18,9 @@ describe("sticky z-index 栈不变量", () => {
   it("TopBar header 含 z-40（导航层，低于弹窗）", () => {
     expect(topbar).toContain("z-40");
   });
-  it("WorkspaceDetail Tabs 容器含 z-30", () => {
-    expect(wd).toContain("z-30");
+  it("ScanDetail Tabs 容器含 z-30", () => {
+    // ws-scan 解耦：scan tabs 从 WorkspaceDetail 移到 ScanDetail（per-scan 视图）。
+    expect(scanDetail).toContain("z-30");
   });
   it("弹窗类（dialog/popover/tooltip/select）统一 z-50，永远最上", () => {
     expect(dialog).toContain("z-50");

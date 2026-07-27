@@ -20,7 +20,7 @@ function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/p/:workspace/logs" element={<LogsTab />} />
+        <Route path="/p/:workspace/scans/:scanId/logs" element={<LogsTab />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -38,7 +38,7 @@ function makeShortLines(n: number): string {
 describe("LogsTab", () => {
   it("日志文件列表渲染 + 点击 .log 文件加载内容", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) {
           return HttpResponse.json({ content: JSON.stringify({ ts: "t1", type: "AgentEvent", message: "hello" }) });
@@ -46,7 +46,7 @@ describe("LogsTab", () => {
         return HttpResponse.json({ files: ["workflow.log", "recon.log"] });
       }),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
     fireEvent.click(screen.getByText("recon.log"));
     await waitFor(() => expect(screen.getByText(/hello/)).toBeInTheDocument());
@@ -57,7 +57,7 @@ describe("LogsTab", () => {
     // 旧实现（按字符 100k）不会虚拟化 → 此测试在旧实现下 RED。
     const manyLines = makeShortLines(6000);
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) {
           return HttpResponse.json({ content: manyLines });
@@ -65,7 +65,7 @@ describe("LogsTab", () => {
         return HttpResponse.json({ files: ["recon.log"] });
       }),
     );
-    const { container } = renderAt("/p/ws/logs");
+    const { container } = renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
     fireEvent.click(screen.getByText("recon.log"));
     // 虚拟滚动提示出现
@@ -80,7 +80,7 @@ describe("LogsTab", () => {
     // 100 行短行：远低于行阈值，应直接渲染全部。
     const fewLines = makeShortLines(100);
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) {
           return HttpResponse.json({ content: fewLines });
@@ -88,7 +88,7 @@ describe("LogsTab", () => {
         return HttpResponse.json({ files: ["recon.log"] });
       }),
     );
-    const { container } = renderAt("/p/ws/logs");
+    const { container } = renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
     fireEvent.click(screen.getByText("recon.log"));
     await waitFor(() => expect(screen.getByText(/line-0/)).toBeInTheDocument());
@@ -101,7 +101,7 @@ describe("LogsTab", () => {
 
   it("非 .log 文件（如 .txt）走 pre 原样渲染", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) {
           return HttpResponse.json({ content: "plain text content" });
@@ -109,7 +109,7 @@ describe("LogsTab", () => {
         return HttpResponse.json({ files: ["notes.txt"] });
       }),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("notes.txt")).toBeInTheDocument());
     fireEvent.click(screen.getByText("notes.txt"));
     await waitFor(() => expect(screen.getByText(/plain text content/)).toBeInTheDocument());
@@ -117,7 +117,7 @@ describe("LogsTab", () => {
 
   it("文件列表项是 button（键盘可达）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) {
           return HttpResponse.json({ content: "log content" });
@@ -125,7 +125,7 @@ describe("LogsTab", () => {
         return HttpResponse.json({ files: ["workflow.log", "recon.log"] });
       }),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
     // 文件名以 .log 结尾的 button 存在（键盘可达 + aria-current 可用）
     const fileButtons = screen.getAllByRole("button").filter((b) => /\.log$/.test(b.textContent ?? ""));
@@ -137,11 +137,11 @@ describe("LogsTab", () => {
 
   it("fetch 文件列表失败渲染 ErrorState（role=alert）不永久 loading", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
   });
 });
@@ -151,9 +151,9 @@ describe("LogsTab i18n", () => {
 
   it("切英文后空态标题变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", () => HttpResponse.json({ files: [] })),
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", () => HttpResponse.json({ files: [] })),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await screen.findByText(/暂无日志文件/);
     await i18n.changeLanguage("en");
     expect(await screen.findByText("No log files")).toBeInTheDocument();
@@ -162,9 +162,9 @@ describe("LogsTab i18n", () => {
 
   it("切英文后『选择左侧日志文件』变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/logs", () => HttpResponse.json({ files: ["workflow.log"] })),
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", () => HttpResponse.json({ files: ["workflow.log"] })),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await screen.findByText("workflow.log");
     await i18n.changeLanguage("en");
     expect(await screen.findByText("Select a log file on the left")).toBeInTheDocument();
@@ -173,13 +173,13 @@ describe("LogsTab i18n", () => {
   it("日志行内容不随语言变化（数据不动）", async () => {
     const logLine = JSON.stringify({ ts: "t1", type: "AgentEvent", message: "hello" });
     server.use(
-      http.get("/api/workspaces/:ws/logs", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("file")) return HttpResponse.json({ content: logLine });
         return HttpResponse.json({ files: ["recon.log"] });
       }),
     );
-    renderAt("/p/ws/logs");
+    renderAt("/p/ws/scans/scan1/logs");
     await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
     fireEvent.click(screen.getByText("recon.log"));
     await waitFor(() => expect(screen.getByText(/hello/)).toBeInTheDocument());

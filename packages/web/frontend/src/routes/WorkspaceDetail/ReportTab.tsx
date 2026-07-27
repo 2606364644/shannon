@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGetText } from "../../api/client";
+import { apiGetText, scanReportPath } from "../../api/client";
 import { MarkdownView } from "../../components/MarkdownView";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
@@ -9,19 +9,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function ReportTab() {
   const { t } = useTranslation();
-  const { workspace } = useParams<{ workspace: string }>();
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const [md, setMd] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || !scanId) return;
     setLoading(true);
     setErr(null);
     setMd("");
-    apiGetText(`/workspaces/${workspace}/report`)
+    apiGetText(scanReportPath(workspace, scanId))
       .then((txt) => { setMd(txt); setLoading(false); })
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [workspace]);
+  }, [workspace, scanId]);
   if (err) return <ErrorState message={t("workspaceDetail.report.loadError", { error: err })} />;
   if (loading) {
     return (

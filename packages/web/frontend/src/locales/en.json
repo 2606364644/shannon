@@ -22,11 +22,29 @@
       "submit": "Sign in",
       "invalid": "Invalid username or password",
       "welcome": "Welcome back",
-      "sub": "Sign in to continue"
+      "sub": "Sign in to continue",
+      "defaultHint": "Default account: admin / 123456 (demo only — change it after sign-in)"
     },
     "logout": "Sign out",
     "sessionExpired": "Session expired, please sign in again",
     "sessionTtlHint": "Session valid for 12 hours",
+    "changePassword": {
+      "title": "Change password",
+      "old": "Current password",
+      "new": "New password",
+      "confirm": "Confirm new password",
+      "submit": "Change",
+      "skip": "Later",
+      "mismatch": "New passwords do not match",
+      "wrongOld": "Current password is incorrect",
+      "tooShort": "New password must be at least 8 characters and differ from the current one",
+      "failed": "Change failed, please retry"
+    },
+    "mustChange": {
+      "badge": "Default password in use - change it soon",
+      "badgeShort": "Change default password",
+      "banner": "This account uses the default password. Change it soon to stay secure."
+    },
     "role": {
       "admin": "Admin",
       "user": "User"
@@ -361,10 +379,14 @@
       "loadFailed": "Status load failed: {{error}}"
     },
     "perWsTitle": "Per-Workspace Config",
-    "perWsHint": "Per-workspace configuration is edited on each workspace's Config page (workspace detail → config gear)."
+    "perWsHint": "Per-workspace configuration is edited on each workspace's Config page (workspace detail → config gear).",
+    "accountSecurityTitle": "Account security",
+    "accountSecurityHint": "Change your sign-in password",
+    "changePasswordBtn": "Change password"
   },
   "workspaceDetail": {
     "backToList": "Back to list",
+    "backToWs": "Back to workspace {{ws}}",
     "tabs": {
       "overview": "Overview",
       "report": "Report",
@@ -375,6 +397,35 @@
     },
     "notFound": {
       "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
+    },
+    "scans": {
+      "listTitle": "Scan jobs",
+      "empty": "No scan jobs yet",
+      "emptyHint": "Start a new scan to begin auditing",
+      "newScan": "+ New scan",
+      "view": "View",
+      "resume": "Resume",
+      "rerun": "Rerun",
+      "loadError": "Failed to load scan list: {{error}}",
+      "cancelConfirmTitle": "Cancel scan",
+      "cancelConfirmDesc": "Cancel scan {{scanId}}? Progress will be lost.",
+      "deleteConfirmTitle": "Delete scan",
+      "deleteConfirmDesc": "Delete scan {{scanId}}? The scan's directory and deliverables will be permanently removed; the workspace and other scans are unaffected.",
+      "resumeFailed": "Resume failed: {{error}}",
+      "cancelFailed": "Cancel failed: {{error}}",
+      "deleteFailed": "Delete failed: {{error}}",
+      "rerunFailed": "Rerun failed: {{error}}",
+      "canceled": "Scan {{scanId}} canceled",
+      "deleted": "Scan {{scanId}} deleted",
+      "resumed": "Scan resumed, jumping to live view",
+      "card": {
+        "scanId": "Scan ID",
+        "type": "Type",
+        "status": "Status",
+        "created": "Created",
+        "cost": "Cost",
+        "vulns": "Vulns"
+      }
     },
     "errorBoundary": {
       "title": "This section failed to load",

@@ -32,7 +32,7 @@ function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/p/:workspace/deliverables" element={<DeliverablesTab />} />
+        <Route path="/p/:workspace/scans/:scanId/deliverables" element={<DeliverablesTab />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -41,7 +41,7 @@ function renderAt(path: string) {
 describe("DeliverablesTab", () => {
   it("渲染漏洞聚合网格标题 + vuln 行（结构性：删除 vuln 行则失败）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(
           makeSummary({
             aggregated_vulnerabilities: [
@@ -58,7 +58,7 @@ describe("DeliverablesTab", () => {
         ),
       ),
     );
-    renderAt("/p/NodeGoat/deliverables");
+    renderAt("/p/NodeGoat/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("SSRF-01")).toBeInTheDocument());
     expect(screen.getByText(/漏洞聚合/)).toHaveTextContent("漏洞聚合 · 1");
     // 可达性 ● 徽章
@@ -71,7 +71,7 @@ describe("DeliverablesTab", () => {
 
   it("三种 merge_source 值各渲染正确徽章（llm-only / gitnexus-only / both）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(
           makeSummary({
             aggregated_vulnerabilities: [
@@ -83,7 +83,7 @@ describe("DeliverablesTab", () => {
         ),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("A-01")).toBeInTheDocument());
     expect(screen.getByText(/LLM 轨/)).toBeInTheDocument();
     expect(screen.getByText(/GN 轨/)).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe("DeliverablesTab", () => {
 
   it("未知 merge_source 字符串走 other 分支（literal-guard 防回退）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(
           makeSummary({
             aggregated_vulnerabilities: [
@@ -102,7 +102,7 @@ describe("DeliverablesTab", () => {
         ),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("X-01")).toBeInTheDocument());
     // 未知值走 trace badge 显示原值
     expect(screen.getByText("weird-value")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("DeliverablesTab", () => {
 
   it("merge_source 缺失（undefined）不渲染徽章", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(
           makeSummary({
             aggregated_vulnerabilities: [
@@ -124,7 +124,7 @@ describe("DeliverablesTab", () => {
         ),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("N-01")).toBeInTheDocument());
     expect(screen.queryByText(/LLM 轨/)).not.toBeInTheDocument();
     expect(screen.queryByText(/双轨确认/)).not.toBeInTheDocument();
@@ -132,11 +132,11 @@ describe("DeliverablesTab", () => {
 
   it("injection 无 queue 用 Badge + 原生 title tooltip（不暴露裸 queue 文案）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(makeSummary({ notes: { injection_has_no_queue: true } })),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText(/injection 类/)).toBeInTheDocument());
     // Badge 提供原生 title tooltip（不暴露实现细节的裸 queue 文案给普通断言）
     const badge = screen.getByText(/injection 类/).closest("[title]");
@@ -148,9 +148,9 @@ describe("DeliverablesTab", () => {
 
   it("空产物（聚合 0 + 无 injection 标注）显示空态组件", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () => HttpResponse.json(makeSummary())),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText(/漏洞聚合/)).toHaveTextContent("漏洞聚合 · 0"));
     // Empty 组件渲染『暂无聚合漏洞』标题
     expect(screen.getByText(/暂无聚合漏洞/)).toBeInTheDocument();
@@ -159,7 +159,7 @@ describe("DeliverablesTab", () => {
   it("FileTree 点击文件触发 FilePreview：md kind 走 MarkdownView（请求 ?path=）", async () => {
     let mdRequested = false;
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           mdRequested = true;
@@ -174,7 +174,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("injection_findings.md")).toBeInTheDocument());
     fireEvent.click(screen.getByText("injection_findings.md"));
     await waitFor(() => expect(mdRequested).toBe(true));
@@ -183,7 +183,7 @@ describe("DeliverablesTab", () => {
   it("empty_json kind 文件点击显示『无数据（常态空）』不请求 ?path=", async () => {
     let pathRequested = false;
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           pathRequested = true;
@@ -196,7 +196,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("authz_gitnexus_queue.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("authz_gitnexus_queue.json"));
     await waitFor(() => expect(screen.getByText(/无数据/)).toBeInTheDocument());
@@ -206,7 +206,7 @@ describe("DeliverablesTab", () => {
   it("big_json kind 显示『文件过大』提示（含字节数），无空 <pre> 占位", async () => {
     let pathRequested = false;
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           pathRequested = true;
@@ -219,7 +219,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    const { container } = renderAt("/p/ws/deliverables");
+    const { container } = renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("parameter_graph.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("parameter_graph.json"));
     // 显示『文件过大』提示 + 字节数（size 来自 summary）
@@ -236,7 +236,7 @@ describe("DeliverablesTab", () => {
   it("llm_queue kind 点击触发 ?path= 请求并渲染文本（防 exploitation_queue 唯一守卫退化）", async () => {
     let pathRequested = false;
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           pathRequested = true;
@@ -249,7 +249,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("injection_llm_queue.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("injection_llm_queue.json"));
     await waitFor(() => expect(pathRequested).toBe(true));
@@ -259,7 +259,7 @@ describe("DeliverablesTab", () => {
   it("gitnexus_queue kind 点击触发 ?path= 请求并渲染文本（防 exploitation_queue 唯一守卫退化）", async () => {
     let pathRequested = false;
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           pathRequested = true;
@@ -272,7 +272,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("xss_gitnexus_queue.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("xss_gitnexus_queue.json"));
     await waitFor(() => expect(pathRequested).toBe(true));
@@ -281,12 +281,12 @@ describe("DeliverablesTab", () => {
 
   it("加载中显示 Skeleton 占位（不暴露 trace 文案）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", async () => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", async () => {
         await new Promise((r) => setTimeout(r, 50));
         return HttpResponse.json(makeSummary());
       }),
     );
-    const { container } = renderAt("/p/ws/deliverables");
+    const { container } = renderAt("/p/ws/scans/scan1/deliverables");
     // Skeleton 占位（animate-pulse）出现
     expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
     // 关键守卫：不暴露旧 trace『加载产物』文案
@@ -296,11 +296,11 @@ describe("DeliverablesTab", () => {
 
   it("产物聚合 fetch 失败渲染 ErrorState 错误态（不永久 loading）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText(/产物加载失败/)).toBeInTheDocument());
     // ErrorState 用 role="alert"
     expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -310,7 +310,7 @@ describe("DeliverablesTab", () => {
 
   it("文件预览 fetch 失败渲染局部 ErrorState（不整页崩，左侧 vuln grid 仍可用）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", ({ request }) => {
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.has("path")) {
           return HttpResponse.json({ detail: "file boom" }, { status: 500 });
@@ -322,7 +322,7 @@ describe("DeliverablesTab", () => {
         );
       }),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await waitFor(() => expect(screen.getByText("injection_findings.md")).toBeInTheDocument());
     fireEvent.click(screen.getByText("injection_findings.md"));
     await waitFor(() => expect(screen.getByText(/文件加载失败/)).toBeInTheDocument());
@@ -340,9 +340,9 @@ describe("DeliverablesTab i18n", () => {
 
   it("切英文后聚合标题变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () => HttpResponse.json(makeSummary())),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await screen.findByText(/漏洞聚合/);
     await i18n.changeLanguage("en");
     expect(await screen.findByText(/Vulnerability aggregation/)).toBeInTheDocument();
@@ -350,9 +350,9 @@ describe("DeliverablesTab i18n", () => {
 
   it("切英文后空态标题变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () => HttpResponse.json(makeSummary())),
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () => HttpResponse.json(makeSummary())),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await screen.findByText(/暂无聚合漏洞/);
     await i18n.changeLanguage("en");
     expect(await screen.findByText("No aggregated vulnerabilities")).toBeInTheDocument();
@@ -360,11 +360,11 @@ describe("DeliverablesTab i18n", () => {
 
   it("切英文后 injection 类 badge 变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json(makeSummary({ notes: { injection_has_no_queue: true } })),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await screen.findByText(/injection 类/);
     await i18n.changeLanguage("en");
     expect(await screen.findByText(/injection class/)).toBeInTheDocument();
@@ -372,11 +372,11 @@ describe("DeliverablesTab i18n", () => {
 
   it("切英文后产物加载失败变英文", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/deliverables", () =>
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
     );
-    renderAt("/p/ws/deliverables");
+    renderAt("/p/ws/scans/scan1/deliverables");
     await screen.findByText(/产物加载失败/);
     await i18n.changeLanguage("en");
     expect(await screen.findByText(/Deliverables load failed/)).toBeInTheDocument();
