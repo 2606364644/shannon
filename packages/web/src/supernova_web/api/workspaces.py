@@ -78,5 +78,5 @@ async def delete_workspace(ws: str, request: Request, _: User = Depends(workspac
 
 # 注：旧 ws-scoped GET shim（GET /{ws}、/{ws}/deliverables|report|logs、/{ws}/events）
 # 已移除（Phase 2 前端全切 scan-scoped /{ws}/scans/{scan_id}/...，零前端调用，联合验收确认）。
-# scan-scoped 等价端点见 api/scans.py。DELETE /api/scan/{ws}（cancel latest，WorkspaceListPage
-# 仍用）+ POST /api/scan 保留（api/scan.py）。
+# scan-scoped 等价端点见 api/scans.py。DELETE /api/scan/{ws}（旧 cancel-latest shim）也已于
+# e1406473 移除（前端 WorkspaceListPage 改 cancelActiveScan 走 scan-scoped）；POST /api/scan 保留（真端点，api/scan.py）。

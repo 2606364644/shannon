@@ -51,8 +51,8 @@ class ScanManager:
     event_file=scan_dir/events.ndjson（worker 据其 parent 推导产物目录，零改动）。
     同 ws 多 scan 不互斥（key 不同），全局 max_concurrent 保留为全局上限。
     start -> Client.connect + start_workflow; _watch -> tail events.ndjson 直到 scan_end;
-    cancel(ws, scan_id) 精确取消 / cancel(ws) shim 取消 latest/active（旧 DELETE /api/scan/{ws}）;
-    resume(ws, scan_id) 续跑已停未完成 scan。active_pids 返空(判活靠 heartbeat mtime)。
+    cancel(ws, scan_id) 精确取消（scan_id 强制；旧 cancel(ws) shim + DELETE /api/scan/{ws} 已于 e1406473 移除）;
+    resume(ws, scan_id) 续跑 interrupted/crashed scan（completed/failed/cancelled/running 拒）。active_pids 返空(判活靠 heartbeat mtime)。
     """
 
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,

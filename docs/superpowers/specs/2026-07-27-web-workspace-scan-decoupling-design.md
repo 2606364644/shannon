@@ -100,20 +100,19 @@ ScanSummary {
 | GET | `/api/workspaces/{ws}/scans/{scan_id}/logs?file=` | 日志文件列表或内容 | `workspace_member` |
 | GET | `/api/workspaces/{ws}/scans/{scan_id}/events` | SSE，tail scan_dir/events.ndjson | `workspace_member` |
 | DELETE | `/api/workspaces/{ws}/scans/{scan_id}` | cancel 该 scan | `workspace_member` |
-| POST | `/api/workspaces/{ws}/scans/{scan_id}/resume` | 恢复未完成 scan（increment resumeAttempts，提交 resume workflow） | `workspace_member` |
+| POST | `/api/workspaces/{ws}/scans/{scan_id}/resume` | 恢复已停未完成 scan（仅 interrupted/crashed；increment resumeAttempts，提交 resume workflow） | `workspace_member` |
 
 - 路径校验：scan_id 拒 `..`/`/`/空（复用 `_validate_ws_segment` 档约束 + `resolve().is_relative_to(scans_dir)`）。
-- `resume` 仅对非终态 scan 放行（终态 422）。
+- `resume` 仅 `interrupted`/`crashed` 可用（已停未完成，worker 中途停有部分进度）；`completed`/`failed`/`cancelled`/`running` 均 422（`running` 虽非终态但禁，避免重复 workflow；此时用重扫 `POST /api/scan` 起新 scan_id）。
 
-### 5.2 兼容 shim（Phase 1 保留，Phase 2 切完后移除）
-旧端点改操作 ws 内「最新 scan」（`ScanStore.latest_scan(ws)`：active 优先，否则 max created_at）：
-- `GET /api/workspaces/{ws}` —— 返回旧 payload shape + **增 `scans: ScanSummary[]`**。
-- `GET /api/workspaces/{ws}/report|deliverables|logs|events` —— 转发到 latest scan。
-- `DELETE /api/scan/{ws}` —— cancel latest/active scan。
+### 5.2 ws-scoped shim（已全部移除）
+Phase 1 初版保留旧 ws-scoped 端点作 shim（转发到 ws 内 latest scan）供旧前端过渡。**shim 已于 commit `e1406473` 彻底移除**（Phase 2 前端全切 scan-scoped，零调用）：
+- `GET /api/workspaces/{ws}`、`GET /api/workspaces/{ws}/report|deliverables|logs`、`GET /api/workspaces/{ws}/events`、`DELETE /api/scan/{ws}` —— 均已删。
+- scan-scoped 等价端点见 §5.1。
 
-`POST /api/scan` 的 `ScanAccepted` 增字段：
+`POST /api/scan` 保留（真端点，非 shim），`ScanAccepted` 增 `scan_id`：
 ```
-ScanAccepted { workspace: str, scan_id: str }   # scan_id 新增；旧前端忽略仍可用
+ScanAccepted { workspace: str, scan_id: str }
 ```
 
 ### 5.3 workspace 列表（Phase 1 T2）
@@ -133,7 +132,7 @@ Workspace {
 
 - **新建扫描**：`POST /api/scan`（ws=req.workspace 校验不变）-> `ScanStore.create_scan(ws, ...)` 建 scan_id -> 提交 temporal workflow -> 返回 `(ws, scan_id)`。不复位 resume。
 - **重跑**：scan 卡片「重跑」-> `POST /api/scan`（同 ws，预填 source）-> 新 scan_id -> 跳新 live。**workspace 无「再次扫描」入口**。
-- **恢复**：`POST .../scans/{scan_id}/resume`（仅未完成）-> 读该 scan 的 `resumeAttempts` 算 workflow_id（`{ws}-{scan_id}[-resume-N]`）-> 提交 resume workflow。
+- **恢复**：`POST .../scans/{scan_id}/resume`（仅 `interrupted`/`crashed`）-> 读该 scan 的 `resumeAttempts` 算 workflow_id（`{ws}-{scan_id}-resume-N`）-> 剥旧 `scan_end` 让 `_watch` 能 tail -> 提交 resume workflow。
 - **取消**：`DELETE .../scans/{scan_id}` -> `handle.cancel()` + `_mark_cancelled(scan_dir)`。
 - **并发**：`scan_manager._handles`/`_tasks`/`_active_reqs` 由 key=`ws` 改 key=`(ws, scan_id)`；同 ws 多 scan 不互斥。全局 `max_concurrent`（P3c 阶段3 已放宽到 N）保留为全局上限。
 
@@ -184,7 +183,7 @@ Workspace {
 1. **scan 落 `scans/<scan_id>/` 子目录**（非 ws 根）—— 解耦 1:1 的核心。
 2. **core/worker 零改动**（web 复用 `SessionManager` + worker 路径推导）—— 降 feat/fork-py 在途工作回归风险。
 3. **scan_id = 时间戳**（非 uuid）—— 可读、可排序，对齐现有 ws 命名风格。
-4. **重扫 = 新 scan 任务**（旧 scan 保留）；**恢复 = 续跑未完成 scan**—— 贴合用户心智模型「scan 才有再次扫描」。
+4. **重扫 = 新 scan 任务**（旧 scan 保留）；**恢复 = 续跑 interrupted/crashed scan**（已停未完成，`completed`/`failed`/`cancelled`/`running` 均不可 resume）—— 贴合用户心智模型「scan 才有再次扫描」。
 5. **legacy 双源兼容**（不强迫 CLI 同步改）—— 降低波及面；二期统一。
 6. **shim 保留**（Phase 1 旧前端不破，Phase 2 切完移除）—— 增量、可回滚。
 7. **workspace 无「再次扫描」入口**（只有「新建扫描」+「扫描列表」）—— 用户明确确认。

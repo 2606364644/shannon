@@ -41,13 +41,14 @@
 - **测试 `tests/test_scan_manager_multi.py`**：同 ws 起两个 scan 不互斥（`_handles` 两键，不触发 TooManyScans）；cancel 按 scan_id 精确；提交失败清理 `_active_reqs`；active_repo_sources 多 ws 多 scan；_watch 各 scan 独立 tail 各自 events.ndjson。
 
 ### T4. scan-scoped API 路由 + shim 改造
-- **新 `api/scans.py`**（挂 `/api/workspaces`，spec §5.1 全部端点）：list/detail/deliverables/report/logs/events(SSE)/cancel/resume。所有路由 `Depends(workspace_member)`；resume 仅非终态 scan 放行（终态 422）。
-- **shim 改造**：
-  - `api/workspaces.py`：`GET /{ws}`（`workspaces.py:69`）改读 `ScanStore.latest_scan(ws)` 返旧 payload + `scans: ScanSummary[]`；`/{ws}/report|deliverables|logs`（`workspaces.py:111+`）转发 latest scan。
-  - `api/events.py`：`GET /{ws}/events` 转发 latest scan events.ndjson。
-  - `api/scan.py`：`POST /api/scan`（`scan.py:14`）返回 `ScanAccepted(workspace, scan_id)`；`DELETE /api/scan/{ws}`（`scan.py:43`）cancel latest/active scan。
+- **新 `api/scans.py`**（挂 `/api/workspaces`，spec §5.1 全部端点）：list/detail/deliverables/report/logs/events(SSE)/cancel/resume。所有路由 `Depends(workspace_member)`；resume 仅 interrupted/crashed（completed/failed/cancelled/running 均 422，spec §5.1）。
+- **shim 改造（注：shim 后续已全部移除，见末行）**：
+  - ~~`api/workspaces.py`：`GET /{ws}`（`workspaces.py:69`）改读 `ScanStore.latest_scan(ws)` 返旧 payload + `scans: ScanSummary[]`；`/{ws}/report|deliverables|logs`（`workspaces.py:111+`）转发 latest scan~~
+  - ~~`api/events.py`：`GET /{ws}/events` 转发 latest scan events.ndjson~~
+  - `api/scan.py`：`POST /api/scan`（`scan.py:14`）返回 `ScanAccepted(workspace, scan_id)`（保留，真端点）；~~`DELETE /api/scan/{ws}`（`scan.py:43`）cancel latest/active~~
+  - **后续（commit `e1406473`）**：上述 ws-scoped GET shim + `DELETE /api/scan/{ws}` 已全部移除（Phase 2 前端全切 scan-scoped，零调用）；前端 WorkspaceListPage 改 `cancelActiveScan(ws)` 走 scan-scoped `cancelScan`。spec §5.2 已同步。
 - `models.py`：`ScanAccepted` 加 `scan_id: str`。
-- **测试 `tests/test_scans_api.py`**：list/detail/report/deliverables/logs 按 scan_id；跨 ws 403；resume 终态 422 / 非终态 202；shim `GET /{ws}` 含 scans[]；shim `DELETE /api/scan/{ws}` cancel latest；`POST /api/scan` 返 scan_id；resume 提交后 resumeAttempts+1。
+- **测试 `tests/test_scans_api.py`**：list/detail/report/deliverables/logs 按 scan_id；跨 ws 403；resume interrupted/crashed 202、completed/failed/cancelled/running 422；`POST /api/scan` 返 scan_id；resume 提交后 resumeAttempts+1。（shim 相关测试随 `e1406473` 删；新增 `test_legacy_ws_scoped_delete_now_404` 锁定 `DELETE /api/scan/{ws}` 已 404。）
 
 ### T5. legacy 迁移（启动幂等）
 - `app.py` lifespan（与现有 legacy ws->admin 迁移同阶段，`app.py:100` 附近）：扫 `workspaces/*/session.json`（ws 根），best-effort `shutil.move` 入 `workspaces/<ws>/scans/<legacy_id>/`（legacy_id 从 created_at 派生，碰撞 `-2`/`-3`），补 `workspace.json`（owner 取原 owner 或 "legacy"）。已迁跳过；异常记 warning 不阻断启动。
