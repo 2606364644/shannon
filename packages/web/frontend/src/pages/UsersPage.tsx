@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { ErrorState } from "@/components/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { listUsers, type UserRow } from "@/api/users";
 
 export function UsersPage() {
@@ -11,6 +13,7 @@ export function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -29,6 +32,10 @@ export function UsersPage() {
     <div className="space-y-4">
       <PageHeader title={t("users.title")} />
       <p className="text-sm text-muted-foreground">{t("users.subtitle")}</p>
+      <div className="flex justify-end">
+        <Button onClick={() => setCreateOpen(true)}>{t("users.create")}</Button>
+      </div>
+      <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
       {loading && <Skeleton className="h-40 w-full" />}
       {error && <ErrorState message={error} onRetry={refresh} />}
       {!loading && !error && (
