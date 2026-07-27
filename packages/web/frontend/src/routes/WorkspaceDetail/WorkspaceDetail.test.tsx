@@ -11,6 +11,20 @@ import WorkspaceDetail from "./index";
 vi.mock("@/components/MemberManagerDialog", () => ({
   MemberManagerDialog: () => null,
 }));
+// WorkspaceSwitcher（Task 9 入口）依赖 useAuth + useWorkspaces（GET /api/workspaces）；
+// header 测试不断言切换器，隔离避免 AuthProvider + workspaces API 噪音（行为在
+// WorkspaceSwitcher.test.tsx 独立覆盖）。
+vi.mock("@/components/WorkspaceSwitcher", () => ({
+  WorkspaceSwitcher: () => null,
+}));
+// WorkspaceDetail header 置顶按钮（Task 9）依赖 useAuth（user.pinned_workspace + refreshUser）；
+// header 测试不断言置顶态，隔离 useAuth 避免 AuthProvider + /auth/me 噪音。
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "admin", role: "admin", must_change_password: false },
+    refreshUser: vi.fn(),
+  }),
+}));
 
 const server = setupServer();
 
