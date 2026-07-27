@@ -19,6 +19,8 @@ import { AppShell } from "./components/layout/AppShell";
 import { DevComponentsPage } from "./pages/DevComponentsPage";
 import LoginPage from "./pages/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
+import { UsersPage } from "./pages/UsersPage";
+import { RequireAdmin } from "./auth/RequireAdmin";
 
 // per-scan 默认 tab：进行中 -> live，完成 -> report。fetch scan status 后 navigate（replace 避免占历史栈）。
 function DefaultScanTab() {
@@ -98,6 +100,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: "/settings", element: <SettingsPage /> },
+      { path: "/users", element: <RequireAdmin><UsersPage /></RequireAdmin> },
       ...devRoutes,
     ],
   },
