@@ -49,7 +49,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (name: string)
       }
     }}>
       <DialogTrigger asChild>
-        <Button size="sm">{t("workspace.create.button")}</Button>
+        <Button variant="outline">{t("workspace.create.button")}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

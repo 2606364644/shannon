@@ -74,21 +74,12 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
 .badge { font-size: 0.78em; padding: 1px 6px; border: 1px solid var(--rule); border-radius: 3px; margin-left: 4px; }
 
 /* === ScanNewPage（Task 10）=== */
-.scan-page .segmented { display: inline-flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
-.segmented button { background: var(--panel); color: var(--ink); border: none; padding: 6px 16px; cursor: pointer; border-right: 1px solid var(--rule); }
-.segmented button:last-child { border-right: none; }
-.seg-active { background: var(--cyan) !important; color: var(--void) !important; }
 .form-area, .correlation-area { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
 .form-area label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .form-area input[type="text"], .form-area input:not([type]), .form-area select, .form-area input[type="checkbox"] { accent-color: var(--cyan); }
 .form-area input, .correlation-area input { background: var(--void); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 8px; font-family: var(--font-mono); }
 .git-extra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-left: 12px; }
-.confirm-dialog { background: var(--panel); padding: 10px 14px; border-radius: 4px; border-left: 3px solid var(--yellow); }
-.confirm-continue { background: var(--yellow); color: var(--void); border: none; padding: 4px 12px; border-radius: 3px; cursor: pointer; font-weight: bold; }
-.confirm-dialog button { background: var(--panel); border: 1px solid var(--rule); color: var(--ink); padding: 4px 10px; border-radius: 3px; margin-left: 8px; cursor: pointer; }
 .err-banner { padding: 8px 12px; background: var(--panel); border-radius: 4px; margin: 12px 0; max-width: 640px; }
-.submit-btn { background: var(--cyan); color: var(--void); border: none; padding: 8px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 16px; }
-.submit-btn:disabled { background: var(--panel); color: var(--trace); cursor: not-allowed; }
 .yaml-editor { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
 
 /* === LogStream 实时日志行网格（operator-console 对齐重做，非新组件）

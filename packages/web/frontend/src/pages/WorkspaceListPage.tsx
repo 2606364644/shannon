@@ -71,7 +71,7 @@ export function WorkspaceListPage() {
       header: () => "",
       cell: ({ row }) =>
         row.original.is_correlation ? (
-          <button aria-label={t("workspaces.expandAria")} onClick={row.getToggleExpandedHandler()} className="text-muted-foreground">
+          <button aria-label={t("workspaces.expandAria")} onClick={row.getToggleExpandedHandler()} className="mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
             {row.getIsExpanded() ? "▼" : "▶"}
           </button>
         ) : null,
@@ -114,7 +114,7 @@ export function WorkspaceListPage() {
             {w.status === "running" && (
               <Button size="sm" variant="ghost" onClick={() => setPendingAction({ ws: w.name, kind: "cancel" })}>{t("common.cancel")}</Button>
             )}
-            <Button size="sm" variant="ghost" className="text-red" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>{t("common.delete")}</Button>
+            <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setPendingAction({ ws: w.name, kind: "delete" })}>{t("common.delete")}</Button>
           </div>
         );
       },
@@ -178,9 +178,9 @@ export function WorkspaceListPage() {
       <StatRow stats={stats} />
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/scan/new">
-          <Button>{t("workspaces.newScan")}</Button>
-        </Link>
+        <Button variant="cta" asChild>
+          <Link to="/scan/new">{t("workspaces.newScan")}</Link>
+        </Button>
         <CreateWorkspaceDialog onCreated={() => { refresh(); }} />
         <Input
           placeholder={t("workspaces.searchPlaceholder")}
@@ -224,7 +224,7 @@ export function WorkspaceListPage() {
         </div>
       ) : data.length === 0 ? (
         <Empty title={t("workspaces.empty.title")} hint={t("workspaces.empty.hint")}>
-          <Link to="/scan/new"><Button>{t("workspaces.newScan")}</Button></Link>
+          <Button variant="cta" asChild><Link to="/scan/new">{t("workspaces.newScan")}</Link></Button>
         </Empty>
       ) : (
         <Card className="overflow-hidden p-0">

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Play, RefreshCw, Trash2, Eye } from "lucide-react";
+import { Play, RefreshCw, Trash2, Eye } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,9 +53,9 @@ export function ScanList() {
       <div className="flex items-center justify-between">
         <h3 className="font-semibold tracking-tight text-base">{t("workspaceDetail.scans.listTitle")}</h3>
         {workspace && (
-          <Button asChild size="sm">
+          <Button variant="cta" asChild>
             <Link to={`/scan/new?workspace=${encodeURIComponent(workspace)}`}>
-              <Plus className="size-4" /> {t("workspaceDetail.scans.newScan")}
+              {t("workspaceDetail.scans.newScan")}
             </Link>
           </Button>
         )}
@@ -177,7 +177,7 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
               {t("common.cancel")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="text-red" onClick={() => setPending("delete")} disabled={busy}>
+          <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setPending("delete")} disabled={busy}>
             <Trash2 className="size-3.5" /> {t("common.delete")}
           </Button>
         </div>

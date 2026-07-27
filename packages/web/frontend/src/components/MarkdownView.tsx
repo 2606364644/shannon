@@ -398,7 +398,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(allVulnIds))}
         aria-label={allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
         title={allCollapsed ? t("markdown.expandCards") : t("markdown.collapseCards")}
-        className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+        className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
       >
         {allCollapsed ? (
           <LayoutGrid className="size-3.5" aria-hidden="true" />
@@ -583,7 +583,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                     onClick={() => setCollapsedSections(tocAllCollapsed ? new Set() : new Set(tocSectionIds))}
                     aria-label={tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
                     title={tocAllCollapsed ? t("markdown.expandAll") : t("markdown.collapseAll")}
-                    className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                   >
                     {tocAllCollapsed ? (
                       <List className="size-3.5" aria-hidden="true" />
@@ -610,7 +610,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                           onClick={() => toggleSection(node.item.id)}
                           aria-expanded={!collapsed}
                           aria-label={collapsed ? t("markdown.expand") : t("markdown.collapse")}
-                          className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                          className="flex size-4 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                         >
                           <ChevronDown
                             className={`size-3 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}

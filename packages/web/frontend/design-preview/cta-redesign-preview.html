@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CTA 最终效果 · supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: hsl(34 7% 10%); --card: hsl(34 5% 13%); --fg: hsl(36 10% 91%);
+    --muted: hsl(36 5% 62%); --border: hsl(34 5% 20%);
+    --primary: hsl(15 60% 56%); --primary-fg: hsl(34 7% 10%);
+    --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
+    --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.22), inset 0 -1px 0 hsl(0 0% 0% / 0.18), 0 1px 2px hsl(15 60% 40% / 0.35), 0 6px 18px hsl(15 70% 45% / 0.30);
+    --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.28), inset 0 -1px 0 hsl(0 0% 0% / 0.20), 0 2px 4px hsl(15 60% 40% / 0.40), 0 10px 26px hsl(15 75% 50% / 0.42);
+  }
+  .light{
+    --bg: hsl(40 32% 95%); --card: hsl(38 28% 97%); --fg: hsl(30 26% 18%);
+    --muted: hsl(34 32% 36%); --border: hsl(36 44% 76%);
+    --primary: hsl(15 58% 50%); --primary-fg: hsl(0 0% 100%);
+    --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
+    --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.40), inset 0 -1px 0 hsl(15 58% 30% / 0.15), 0 1px 2px hsl(15 58% 40% / 0.20), 0 4px 14px hsl(15 58% 45% / 0.18);
+    --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.50), inset 0 -1px 0 hsl(15 58% 30% / 0.18), 0 2px 4px hsl(15 58% 40% / 0.25), 0 8px 22px hsl(15 58% 50% / 0.25);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto;padding:48px 28px 80px}
+  h1{font-size:22px;font-weight:600;letter-spacing:-0.01em;margin:0 0 6px}
+  .lede{color:var(--muted);font-size:14px;margin:0 0 36px;line-height:1.6}
+  .block{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:26px;box-shadow:var(--shadow-card);margin-bottom:22px}
+  .tag{font-family:"IBM Plex Mono";font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:20px}
+  .scene{margin-bottom:26px}
+  .scene:last-child{margin-bottom:0}
+  .scene-t{font-size:13px;font-weight:600;margin-bottom:12px;color:var(--fg)}
+  .scene-d{font-size:12px;color:var(--muted);margin-bottom:12px}
+  .bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;background:hsl(0 0% 0% / 0.12);border-radius:10px;border:1px solid var(--border)}
+  .light .bar{background:hsl(0 0% 0% / 0.03)}
+
+  button{font-family:inherit;cursor:pointer;border:0;transition:all .18s ease;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-size:13.5px}
+  button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+  /* cta · A Command Run（h-9 = 36px，与其他按钮同高）*/
+  .cta{
+    height:36px;padding:0 16px;border-radius:10px;
+    background:var(--primary);color:var(--primary-fg);
+    font-family:"IBM Plex Mono";font-weight:500;letter-spacing:0.035em;
+    box-shadow:var(--shadow-cta);
+  }
+  .cta::before{content:"❯";margin-right:6px;font-weight:600;opacity:0.8}
+  .cta:hover{box-shadow:var(--shadow-cta-hover)}
+  .cta:active{transform:translateY(1px)}
+  .cta.w-full{width:100%;justify-content:center}
+
+  /* outline · 次要创建（h-9 同高，描边区分主次）*/
+  .outline{
+    height:36px;padding:0 16px;border-radius:10px;
+    background:transparent;color:var(--fg);
+    border:1px solid var(--border);
+  }
+  .outline:hover{border-color:var(--primary);color:var(--primary)}
+
+  /* ghost sm · 行内操作（h-8 = 32px，比工具栏小一级）*/
+  .ghost-sm{
+    height:32px;padding:0 12px;border-radius:9px;
+    background:transparent;color:var(--fg);font-size:12.5px;
+  }
+  .ghost-sm:hover{background:hsl(0 0% 100% / 0.08)}
+  .ghost-sm.del{color:var(--primary)}
+  .ghost-sm.del:hover{background:hsl(15 60% 56% / 0.12)}
+  .light .ghost-sm.del{color:hsl(5 58% 46%)}
+
+  /* destructive · Dialog 危险确认（h-9）*/
+  .destructive{
+    height:36px;padding:0 16px;border-radius:10px;
+    background:hsl(5 62% 56%);color:hsl(34 7% 10%);font-weight:500;
+  }
+  .light .destructive{background:hsl(5 58% 46%);color:#fff}
+
+  .hint{margin-top:24px;padding:14px 16px;border-radius:10px;background:hsl(15 60% 56% / 0.08);border:1px solid hsl(15 60% 56% / 0.2);font-size:12.5px;color:var(--muted);line-height:1.6}
+  .hint b{color:var(--primary)}
+  code{font-family:"IBM Plex Mono";font-size:0.92em;background:hsl(0 0% 100% / 0.06);padding:1px 5px;border-radius:4px}
+  .r{display:flex;gap:8px;align-items:center;margin-top:10px}
+  .r .lbl{font-family:"IBM Plex Mono";font-size:10.5px;color:var(--muted);width:70px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>「新建 / 开始扫描」CTA · A · Command Run 最终效果</h1>
+  <p class="lede">已落地。所有创建/开始 CTA 统一 <code>cta</code> variant：coral 实心陶瓷 + IBM Plex Mono + <code>❯</code> 提示符 + coral 光晕。<b>尺寸统一 h-9（36px）</b>，与工具栏其他按钮同高，靠质感而非尺寸区分主次。深/浅双主题。</p>
+
+  <!-- 深主题 -->
+  <div class="block">
+    <div class="tag">深 · 暖炭黑</div>
+
+    <div class="scene">
+      <div class="scene-t">工具栏 · 主创建 CTA 并排</div>
+      <div class="scene-d">WorkspaceList 工具栏：新建扫描(cta) + 新建工作区(outline) + 刷新(ghost icon)，三者同高 h-9 垂直对齐。</div>
+      <div class="bar">
+        <button class="cta">新建扫描</button>
+        <button class="outline">新建工作区</button>
+        <button class="ghost-sm" aria-label="刷新">↻</button>
+      </div>
+    </div>
+
+    <div class="scene">
+      <div class="scene-t">ScanNewPage · 开始扫描提交（全产品最重 CTA）</div>
+      <div class="scene-d">表单底部 + correlation 全宽。同一 cta variant，❯ 自动注入，coral 光晕表达"启动"。</div>
+      <div class="bar">
+        <button class="cta">开始扫描</button>
+      </div>
+      <div class="r"><span class="lbl">correlation</span><button class="cta w-full">开始扫描</button></div>
+    </div>
+
+    <div class="scene">
+      <div class="scene-t">各页主创建 CTA（统一 cta）</div>
+      <div class="scene-d">Dashboard 空态 / UsersPage 新建用户 / ReposTab 添加仓库 / ScanList 新建扫描——同形态同尺寸。</div>
+      <div class="bar">
+        <button class="cta">新建扫描</button>
+        <button class="cta">新建用户</button>
+        <button class="cta">添加仓库</button>
+      </div>
+    </div>
+
+    <div class="scene">
+      <div class="scene-t">行内操作 vs Dialog 确认（层次对照）</div>
+      <div class="scene-d">表格行内 ghost sm(h-8) 比 cta 小一级；Dialog 危险确认 destructive(h-9) 红实心。</div>
+      <div class="bar">
+        <button class="ghost-sm">查看</button>
+        <button class="ghost-sm">恢复</button>
+        <button class="ghost-sm del">删除</button>
+        <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+        <button class="outline">取消</button>
+        <button class="destructive">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 浅主题 -->
+  <div class="block light">
+    <div class="tag">浅 · 暖纸张</div>
+
+    <div class="scene">
+      <div class="scene-t">工具栏 · 主创建 CTA 并排</div>
+      <div class="bar">
+        <button class="cta">新建扫描</button>
+        <button class="outline">新建工作区</button>
+        <button class="ghost-sm" aria-label="刷新">↻</button>
+      </div>
+    </div>
+
+    <div class="scene">
+      <div class="scene-t">ScanNewPage · 开始扫描</div>
+      <div class="bar">
+        <button class="cta">开始扫描</button>
+      </div>
+      <div class="r"><span class="lbl">correlation</span><button class="cta w-full">开始扫描</button></div>
+    </div>
+
+    <div class="scene">
+      <div class="scene-t">各页主创建 + 行内/Dialog 对照</div>
+      <div class="bar">
+        <button class="cta">新建用户</button>
+        <button class="cta">添加仓库</button>
+        <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+        <button class="ghost-sm del">删除</button>
+        <button class="destructive">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint">
+    <b>设计要点</b><br/>
+    · <b>signature</b>：<code>❯</code> 提示符 + IBM Plex Mono——取自产品自身的命令行血统（scan_id / Cypher / log 皆 Mono），非通用 Plus 图标。<br/>
+    · <b>质感</b>：coral 实心 + 内描边高光（陶瓷感）+ coral 光晕阴影，解决原实心方块的"贴纸感"。<br/>
+    · <b>统一 h-9</b>：主 CTA 不加大尺寸，靠质感区分主次；工具栏按钮垂直对齐，栅格安定。<br/>
+    · <b>层次</b>：cta(实心陶瓷❯) &gt; outline(描边) &gt; ghost sm(透明h-8) &gt; destructive(红实心)。<br/>
+    · 鼠标悬停看 hover 光晕扩散；按下有 1px 下沉反馈。
+  </div>
+</div>
+</body>
+</html>

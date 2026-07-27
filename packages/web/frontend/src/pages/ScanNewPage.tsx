@@ -185,7 +185,7 @@ export function ScanNewPage() {
               role="tab"
               aria-selected={type === v}
               onClick={() => setType(v)}
-              className={`px-5 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 type === v
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -259,7 +259,7 @@ export function ScanNewPage() {
         {/* 底部操作栏 */}
         {type !== "correlation" && (
           <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
-            <Button onClick={onSubmit} disabled={!isValid || submitting}>
+            <Button variant="cta" onClick={onSubmit} disabled={!isValid || submitting}>
               {submitLabel}
             </Button>
             <span className="text-xs text-muted-foreground">{footerHint}</span>
@@ -270,7 +270,7 @@ export function ScanNewPage() {
       {/* correlation 提交按钮（不在卡片底部栏内，因为无侧栏） */}
       {type === "correlation" && (
         <>
-          <Button className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
+          <Button variant="cta" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
             {submitLabel}
           </Button>
           <div className="text-xs text-muted-foreground text-center">{t("scan.submitHint")}</div>

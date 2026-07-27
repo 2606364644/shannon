@@ -57,7 +57,7 @@ export function DashboardPage() {
   if (data.length === 0) {
     return (
       <Empty title={t("dashboard.empty.title")} hint={t("dashboard.empty.hint")}>
-        <Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>
+        <Button variant="cta" asChild><Link to="/scan/new">{t("dashboard.newScan")}</Link></Button>
       </Empty>
     );
   }
@@ -78,7 +78,7 @@ export function DashboardPage() {
       <PageHeader
         title={t("dashboard.title")}
         subtitle={t("dashboard.subtitle")}
-        action={<Link to="/scan/new"><Button>{t("dashboard.newScan")}</Button></Link>}
+        action={<Button variant="cta" asChild><Link to="/scan/new">{t("dashboard.newScan")}</Link></Button>}
       />
       <StatRow stats={[
         { label: t("dashboard.stats.running"), value: running.length, tone: "cyan" },

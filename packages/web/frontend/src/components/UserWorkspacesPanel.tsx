@@ -89,7 +89,7 @@ export function UserWorkspacesPanel({ user }: { user: UserRow }) {
                 <Button variant="ghost" size="sm" onClick={() => onRemove(ws)}>{t("users.members.remove")}</Button>
               </>
             ) : (
-              <Button variant="outline" size="sm" data-testid={`add-${ws}`} onClick={() => onAdd(ws)}>{t("users.members.add")}</Button>
+              <Button variant="ghost" size="sm" data-testid={`add-${ws}`} onClick={() => onAdd(ws)}>{t("users.members.add")}</Button>
             )}
           </div>
         );

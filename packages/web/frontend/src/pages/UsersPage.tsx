@@ -45,7 +45,7 @@ export function UsersPage() {
       <PageHeader title={t("users.title")} />
       <p className="text-sm text-muted-foreground">{t("users.subtitle")}</p>
       <div className="flex justify-end">
-        <Button onClick={() => setCreateOpen(true)}>{t("users.create")}</Button>
+        <Button variant="cta" onClick={() => setCreateOpen(true)}>{t("users.create")}</Button>
       </div>
       <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
       {loading && <Skeleton className="h-40 w-full" />}
@@ -67,7 +67,7 @@ export function UsersPage() {
                 <tr className="border-t" data-testid={`user-row-${u.username}`}>
                   <td className="py-2 font-mono">
                     <button
-                      className="mr-1"
+                      className="mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       aria-label="toggle-workspaces"
                       onClick={() => setExpanded((s) => { const n = new Set(s); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })}
                     >{expanded.has(u.id) ? "▼" : "▶"}</button>{" "}
@@ -87,9 +87,9 @@ export function UsersPage() {
                         <SelectItem value="admin">{t("users.roleAdmin")}</SelectItem>
                       </SelectContent>
                     </Select>{" "}
-                    <Button variant="outline" size="sm" disabled={u.id === me?.id}
+                    <Button variant="ghost" size="sm" disabled={u.id === me?.id}
                             onClick={() => { setResetTarget(u); setResetOpen(true); }}>{t("users.resetPassword")}</Button>{" "}
-                    <Button variant="outline" size="sm" disabled={u.id === me?.id}
+                    <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" disabled={u.id === me?.id}
                             onClick={() => { setDelTarget(u); setDelOpen(true); }}>{t("users.delete")}</Button>
                   </td>
                 </tr>

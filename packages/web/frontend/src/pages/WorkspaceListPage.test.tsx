@@ -216,8 +216,8 @@ describe("WorkspaceListPage i18n", () => {
     expect(screen.getByText("操作")).toBeInTheDocument();
     // 搜索框 placeholder 中文
     expect(screen.getByPlaceholderText(/搜索工作区/)).toBeInTheDocument();
-    // 新建扫描按钮中文
-    expect(screen.getByRole("button", { name: /新建扫描/ })).toBeInTheDocument();
+    // 新建扫描入口中文（asChild 合并渲染为 <a>，role=link，与 ScanList/DashboardPage 测试一致）
+    expect(screen.getByRole("link", { name: /新建扫描/ })).toBeInTheDocument();
   });
 
   it("切英文后表头变英文 Workspace/Vulns/Actions", async () => {

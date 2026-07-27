@@ -105,7 +105,7 @@ export function LogsTab() {
             key={f}
             type="button"
             aria-current={sel === f ? "true" : undefined}
-            className={`block w-full text-left rounded-sm px-2 py-0.5 font-mono text-xs hover:bg-accent ${sel === f ? "bg-accent text-primary" : "text-foreground"}`}
+            className={`block w-full text-left rounded-md px-2 py-0.5 font-mono text-xs hover:bg-accent ${sel === f ? "bg-accent text-primary" : "text-foreground"}`}
             onClick={() => setSel(f)}
           >
             {f}

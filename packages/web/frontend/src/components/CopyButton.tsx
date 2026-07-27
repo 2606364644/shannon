@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Check } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const FEEDBACK_MS = 1200;
 
@@ -28,16 +28,15 @@ export function CopyButton({ value, className, ariaLabel }: {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       onClick={onCopy}
       aria-label={done ? t("common.copied") : (ariaLabel ?? t("common.copy"))}
-      className={cn(
-        "inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground",
-        className,
-      )}
+      className={className}
     >
-      <Icon className="h-3.5 w-3.5" />
-    </button>
+      <Icon />
+    </Button>
   );
 }

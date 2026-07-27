@@ -102,7 +102,7 @@ export function FileSystemPicker({ value, onChange, title, triggerLabel }: FileS
             <div className="flex flex-wrap items-center gap-1 text-xs">
               <span className="text-muted-foreground">{t("fileSystemPicker.recent")}</span>
               {recent.map((p) => (
-                <button key={p} className="rounded border border-border px-2 py-0.5 hover:bg-accent" onClick={() => load(p)}>
+                <button key={p} className="rounded-md border border-border px-2 py-0.5 hover:bg-accent" onClick={() => load(p)}>
                   {p.split("/").pop() || p}
                 </button>
               ))}
