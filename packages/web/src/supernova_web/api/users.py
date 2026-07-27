@@ -6,11 +6,36 @@ from pydantic import BaseModel
 from typing import Literal
 
 from supernova_web.auth.csrf import verify_csrf
-from supernova_web.auth.dependencies import require_admin
+from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
 from supernova_web.auth.passwords import NEW_PASSWORD_MIN_LEN, hash_password
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+class PinnedWorkspaceIn(BaseModel):
+    workspace: str
+
+
+@router.put("/me/pinned-workspace")
+async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
+                               user: User = Depends(current_user)):
+    """per-user 置顶工作区（IA 重设计 §2.3）。只能 pin 有权限的 ws
+    （workspace_member 依赖项鉴权：admin 全部、普通用户需为成员）。"""
+    _check_csrf(request)
+    # workspace_member 依赖项的 ws 来自路径参数，此处 ws 来自 body，手动复用同款鉴权。
+    # 顺序：先 403（成员检查）后 404（存在性）--非成员对任意 ws 一律 403，不泄露 ws 存在性，
+    # 与 workspace_member 依赖项语义一致；admin 跳过 403 后命中 404。get_workspace_member_role
+    # 对不存在的 ws 返 None -> 403，故非成员探测不到存在性。
+    if user.role != "admin":
+        role = request.app.state.auth_store.get_workspace_member_role(body.workspace, user.id)
+        if role is None:
+            raise HTTPException(403, "not a workspace member")
+    ws_dir = request.app.state.config.workspaces_dir / body.workspace
+    if not ws_dir.exists():
+        raise HTTPException(404, "workspace not found")
+    request.app.state.auth_store.update_pinned_workspace(user.id, body.workspace)
+    return {"pinned": body.workspace}
 
 
 class CreateUserIn(BaseModel):

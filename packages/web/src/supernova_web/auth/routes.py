@@ -32,7 +32,8 @@ _NEW_PASSWORD_MIN_LEN = 8
 
 def _user_out(u: User) -> dict:
     return {"id": u.id, "username": u.username, "role": u.role,
-            "must_change_password": u.must_change_password}
+            "must_change_password": u.must_change_password,
+            "pinned_workspace": u.pinned_workspace}
 
 
 def _cookie_secure(cfg, request: Request) -> bool:
