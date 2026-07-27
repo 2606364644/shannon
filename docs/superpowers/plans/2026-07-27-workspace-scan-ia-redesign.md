@@ -343,14 +343,17 @@ async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
                                user: User = Depends(current_user)):
     """per-user 置顶工作区（IA 重设计 §2.3）。只能 pin 有权限的 ws
     （workspace_member 依赖项鉴权：admin 全部、普通用户需为成员）。"""
-    ws_dir = request.app.state.config.workspaces_dir / body.workspace
-    if not ws_dir.exists():
-        raise HTTPException(404, "workspace not found")
-    # workspace_member 依赖项无法在 body 参数里用（ws 来自 body），手动鉴权
+    # workspace_member 依赖项的 ws 来自路径参数，此处 ws 来自 body，手动复用同款鉴权。
+    # 顺序：先 403（成员检查）后 404（存在性）--非成员对任意 ws 一律 403，不泄露 ws 存在性，
+    # 与 workspace_member 依赖项语义一致；admin 跳过 403 后命中 404。get_workspace_member_role
+    # 对不存在的 ws 返 None -> 403，故非成员探测不到存在性。
     if user.role != "admin":
         role = request.app.state.auth_store.get_workspace_member_role(body.workspace, user.id)
         if role is None:
             raise HTTPException(403, "not a workspace member")
+    ws_dir = request.app.state.config.workspaces_dir / body.workspace
+    if not ws_dir.exists():
+        raise HTTPException(404, "workspace not found")
     request.app.state.auth_store.update_pinned_workspace(user.id, body.workspace)
     return {"pinned": body.workspace}
 ```
@@ -379,11 +382,14 @@ IA 重设计 §2.3/§7.2/§7.3。"
 
 **Files:**
 - Modify: `packages/web/src/supernova_web/api/scans.py`
+- Modify: `packages/web/src/supernova_web/app.py`
 - Test: `packages/web/tests/test_scans_cross_ws.py`
 
 **Interfaces:**
 - Consumes: `ScanStore.list_scans(ws)`（现有，返 `list[ScanSummary]`）；`indexer.list_workspaces()`（现有）；`auth_store.list_user_workspaces(user_id)`（现有）。
 - Produces: `GET /api/scans` 返 `ScanSummary[]`，每条注入 `workspace: str` 字段，按 `created_at` 倒序。前端 Task 7 的 `listAllScans()` 依赖此端点。
+
+**路由落点说明（关键，勿踩）：** `api/scans.py` 现有 `router` 的 prefix 是 `/api/workspaces`（所有 per-ws 路由是 `/{ws}/scans/...` 形态）。`GET /api/scans` 是跨 ws 的，不属于 `/{ws}/scans` 命名空间，**不能**挂现有 `router`——否则 `@router.get("")` 会落在 `GET /api/workspaces`，与 `workspaces.py` 的列表路由（同为 prefix `/api/workspaces` + `@router.get("")`）冲突，FastAPI 按注册顺序命中导致其中一个失效。故新增独立 `cross_ws_router`（prefix `/api/scans`），在 `app.py` 单独 include。
 
 - [ ] **Step 1: 写失败测试 — 跨 ws 聚合 + 权限过滤 + workspace 字段**
 
@@ -471,21 +477,31 @@ def test_unauth_401(setup):
 Run: `cd /root/shannon-py/packages/web && python -m pytest tests/test_scans_cross_ws.py -v`
 Expected: FAIL — `GET /api/scans` 404（路由不存在）。
 
-- [ ] **Step 3: 改 `api/scans.py` — 新增 GET /api/scans 路由**
+- [ ] **Step 3: 改 `api/scans.py` 新增 `cross_ws_router` + `app.py` include**
 
-在 `packages/web/src/supernova_web/api/scans.py`，确保顶部 import 有 `current_user` / `ScanStore` / `User`（若已有则不重复）。在现有 per-ws 路由外（router 顶层），加：
+3a. `packages/web/src/supernova_web/api/scans.py` 顶部 import 区，把现有 `workspace_member` 那行补上 `current_user`（`User`/`Depends`/`Request` 已 import，无需重复）：
 
 ```python
-from supernova_web.auth.dependencies import current_user
-from supernova_web.auth.models import User
-from supernova_web.components.scan_store import ScanStore
+from supernova_web.auth.dependencies import current_user, workspace_member
+```
 
+3b. 在 `router = APIRouter(prefix="/api/workspaces", tags=["scans"])` 行**之后**，新增独立 router（跨 ws 命名空间，与 per-ws 的 `/{ws}/scans/...` 分离）：
 
-@router.get("")
+```python
+# 跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）：独立 prefix /api/scans，不属于 /{ws}/scans 命名空间。
+# 不能挂 router（prefix=/api/workspaces）--@router.get("") 会撞 workspaces.py 的列表路由。
+cross_ws_router = APIRouter(prefix="/api/scans", tags=["scans"])
+```
+
+3c. 在文件内（现有 per-ws 路由之后，或 `_store` helper 之后均可）挂跨 ws 路由，复用 `_store` 的 lazy import 风格：
+
+```python
+@cross_ws_router.get("")
 async def list_all_scans(request: Request, user: User = Depends(current_user)):
     """跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）。admin 见全部 ws 扫描，
     普通用户只见归属 ws（list_user_workspaces）的扫描。每条注入 workspace 字段，
     按 created_at 倒序。ws 量通常个位数到几十，每 ws list_scans 是目录扫描，可接受。"""
+    from supernova_web.components.scan_store import ScanStore
     cfg = request.app.state.config
     indexer = request.app.state.indexer
     store = ScanStore(cfg.workspaces_dir)
@@ -496,14 +512,20 @@ async def list_all_scans(request: Request, user: User = Depends(current_user)):
     out = []
     for ws in ws_names:
         for s in store.list_scans(ws):
-            d = s.__dict__ if not hasattr(s, "model_dump") else s.model_dump()
+            d = s.as_dict()
             d["workspace"] = ws
             out.append(d)
     out.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
     return out
 ```
 
-注：`ScanSummary` 是 pydantic model（`scan_store.py:82`），优先用 `model_dump()`；`__dict__` 兜底防非 pydantic。`created_at` 在 `ScanSummary` 是 unix int（见 `api/types.ts` 注释），排序键用 `x.get("created_at") or 0` 防 None。
+3d. `packages/web/src/supernova_web/app.py`，在 `app.include_router(scans.router, dependencies=_require_auth)` 行**之后**加一行 include 新 router：
+
+```python
+    app.include_router(scans.cross_ws_router, dependencies=_require_auth)
+```
+
+注：`ScanSummary` 是 `@dataclass`（`scan_store.py:82`，**非 pydantic**），用其 `as_dict()` 方法序列化为 dict 再注入 `workspace` 字段。`created_at` 经 `_to_unix` 归一为 unix float（`_summarize` 已做），排序键 `x.get("created_at") or 0` 防 None。`scans` 模块已在 app.py 顶部 `from .api import ... scans ...` import，无需补 import。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -514,7 +536,7 @@ Expected: PASS（新测试 + 既有 scan 解耦不变量测试不破）。
 
 ```bash
 cd /root/shannon-py
-git add packages/web/src/supernova_web/api/scans.py packages/web/tests/test_scans_cross_ws.py
+git add packages/web/src/supernova_web/api/scans.py packages/web/src/supernova_web/app.py packages/web/tests/test_scans_cross_ws.py
 git commit -m "feat(web): GET /api/scans 跨 ws 扫描聚合
 
 admin 全部/普通用户归属 ws 的扫描并集，每条注入 workspace 字段，created_at 倒序。
