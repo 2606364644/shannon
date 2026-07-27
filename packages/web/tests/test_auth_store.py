@@ -85,3 +85,62 @@ def test_session_crud_and_purge(tmp_path):
     assert s.get_session("sid-old") is None
     s.delete_session("sid-1")
     assert s.get_session("sid-1") is None
+
+
+def test_list_all_users_includes_created_at_and_must_change(tmp_path):
+    """list_all_users 返回的 User 必须带 created_at 与 must_change_password。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    s.create_user("alice", "h", role="user")
+    s.create_user("admin", "h", role="admin", must_change=True)
+    users = s.list_all_users()
+    by_name = {u.username: u for u in users}
+    assert by_name["alice"].created_at != ""          # create_user 写了 created_at
+    assert by_name["admin"].must_change_password is True
+
+
+def test_delete_user_clears_members_and_sessions(tmp_path):
+    """删用户必须单事务清 workspace_members + sessions + users（FK 不强制，手动清）。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "h")
+    s.add_workspace_member("ws-a", u.id, "member")
+    s.insert_session(SessionRow(id="sid-1", user_id=u.id,
+                                expires_at="2099-01-01T00:00:00",
+                                last_seen_at="2026-01-01T00:00:00"))
+    assert s.list_workspace_members("ws-a") != []      # 前置：有成员
+    s.delete_user(u.id)
+    assert s.get_user(u.id) is None                     # 本体已删
+    assert s.list_workspace_members("ws-a") == []       # 成员记录已清
+    assert s.get_session("sid-1") is None               # session 已清
+
+
+def test_update_role(tmp_path):
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "h", role="user")
+    s.update_role(u.id, "admin")
+    assert s.get_user(u.id).role == "admin"
+
+
+def test_reset_password_sets_must_change(tmp_path):
+    """reset_password 写新 hash 并置 must_change=1（与 update_password 置 0 相对）。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "$2b$12$old")
+    s.reset_password(u.id, "$2b$12$new")
+    assert s.get_password_hash("alice") == "$2b$12$new"
+    assert s.get_user(u.id).must_change_password is True
+
+
+def test_list_user_workspaces_with_role(tmp_path):
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "h")
+    s.add_workspace_member("ws-a", u.id, "manager")
+    s.add_workspace_member("ws-b", u.id, "member")
+    got = dict(s.list_user_workspaces_with_role(u.id))
+    assert got == {"ws-a": "manager", "ws-b": "member"}
+
+
+def test_update_workspace_member_role(tmp_path):
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "h")
+    s.add_workspace_member("ws-a", u.id, "member")
+    s.update_workspace_member_role("ws-a", u.id, "manager")
+    assert s.get_workspace_member_role("ws-a", u.id) == "manager"

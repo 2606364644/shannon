@@ -167,5 +167,46 @@ class AuthStore:
 
     def list_all_users(self) -> list["User"]:
         with self._conn() as c:
-            rows = c.execute("SELECT id, username, role FROM users ORDER BY id").fetchall()
-        return [User(id=r[0], username=r[1], role=r[2]) for r in rows]
+            rows = c.execute(
+                "SELECT id, username, role, must_change_password, created_at FROM users ORDER BY id"
+            ).fetchall()
+        return [User(id=r[0], username=r[1], role=r[2],
+                     must_change_password=bool(r[3]), created_at=r[4]) for r in rows]
+
+    def delete_user(self, user_id: int) -> None:
+        """删用户：单事务清 workspace_members + sessions + users。
+        SQLite 未开 PRAGMA foreign_keys，REFERENCES 不强制，必须手动清，否则孤儿成员 +
+        被删用户 session 残留有效。护栏（自删/最后 admin）在 route 层先做。"""
+        with self._conn() as c:
+            c.execute("DELETE FROM workspace_members WHERE user_id=?", (user_id,))
+            c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            c.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    def update_role(self, user_id: int, role: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+
+    def reset_password(self, user_id: int, new_hash: str) -> None:
+        """admin 重置他人密码：写新 hash 并置 must_change=1（强制对方首登改密）。
+        区别于 update_password（自己改自己，置 must_change=0）。"""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?",
+                (new_hash, user_id),
+            )
+
+    def list_user_workspaces_with_role(self, user_id: int) -> list[tuple[str, str]]:
+        """该用户的全部 ws 归属 [(ws_name, role)]（形态 A 展开面板用）。"""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT workspace_name, role FROM workspace_members WHERE user_id=?",
+                (user_id,),
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def update_workspace_member_role(self, ws_name: str, user_id: int, role: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE workspace_members SET role=? WHERE workspace_name=? AND user_id=?",
+                (role, ws_name, user_id),
+            )

@@ -10,6 +10,7 @@ class User(BaseModel):
     # 默认账号（users.yaml 标 must_change_password: true）seed 时置 True；
     # 登录后前端据此提醒改密，改密成功（update_password）后置 False。
     must_change_password: bool = False
+    created_at: str = ""  # ISO8601；list_all_users 填充，其余构造点默认空
 
 
 class SessionRow(BaseModel):
