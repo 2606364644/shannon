@@ -1,6 +1,6 @@
 # 下线工作区管理页（WorkspaceListPage）—— 能力并入 Dashboard + 切换器
 
-> 状态：设计已定，待实现（回家做）
+> 状态：设计已定，待实现（回家做）｜ 2026-07-28 摸底确认 5 处决策（见 §3.2 / §3.3 / §3.6 / §9），可落地性已验证
 > 日期：2026-07-27
 > 分支：`feat/fork-py`
 
@@ -47,21 +47,22 @@ WorkspaceListPage 的「🔗 展开子工作区」只服务于 ②。结论：**
 - 扫描表新增 admin-only **「操作」列**：
   - `user.role === "admin"` 时渲染列；普通用户无此列（表头也不出）。
   - 行内 `s.is_running || s.status === "running"` → 显示「取消」按钮。
-  - 点击 → 复用 WorkspaceListPage 的确认 Dialog（`workspaces.deleteDialog.cancelTitle/cancelDesc`）→ 调 `cancelScan(s.workspace, s.scan_id)`。
+  - 点击 → 确认 Dialog 用 **per-scan 文案** `workspaceDetail.scans.cancelConfirmTitle/Desc`（插值 `{{scanId}}`，与 `ScanList.tsx` 取消卡片统一）；**不复用** ws 级 `workspaces.deleteDialog.cancelDesc`——那个用 `{{ws}}`，措辞「取消扫描 ws-a?」主语含糊。→ 调 `cancelScan(s.workspace, s.scan_id)`。
   - 结果 toast 复用 `workspaces.cancelViaSignal` / `workspaces.cancelWasDead`；失败 `workspaces.actionFailed`。
-  - 成功后刷新：`useAsync(listAllScans)` 需暴露 refetch（若现 `useAsync` 无 refetch，加一个；或本地维护 `reload` 计数触发重拉）。
+  - 成功后刷新：`useAsync(listAllScans)` **已暴露 `refresh`**（`lib/useAsync.ts:33`），解构多取一个即可，**无需改 hook / 加 reload 计数器**。
 - 表头列名复用 `workspaces.table.actions`（"操作"）。
 - StatRow / 运行中卡片 / ScanFilters 不动。
 
 > 注：Dashboard 取消是 **per-scan**（精确到 scanId），比旧 WorkspaceListPage 的 ws 级 `cancelActiveScan`（先 listScans 找 active 再取消）更准。
 
 ### 3.3 `components/WorkspaceSwitcher.tsx`（核心）
-- 抽屉底部已有「新建工作区」（admin）保留。
+- 抽屉底部已有「新建工作区」（admin）保留；**顺带修现存小 bug**：`onCreated={() => {}}` 空回调 → `onCreated={refresh}`（否则新建后只靠 useWorkspaces 5s 轮询兜底才刷新列表）。
 - **新增删除入口**（admin/manager，即 `user.role === "admin"` 先行；manager 精细化后置）：
-  - 每个工作区**行**右侧加 trash 图标按钮（`lucide-react` 的 `Trash2`），`size-3.5`，`stop-propagation` 防误触发行跳转。
-  - 点击 → 复用 WorkspaceListPage 的删除确认 Dialog（`workspaces.deleteDialog.deleteTitle/deleteDesc`，`{{ws}}` 插值）。
+  - **行结构重构**（spec 原版漏的 HTML/a11y 陷阱）：当前每行是单个 `<button>`（`WorkspaceSwitcher.tsx:58`），trash 嵌进去 = button-in-button 无效 HTML + 点击冒泡触发 `pick(w.name)` 跳转。改为行 `<div role="button" tabIndex={0} onClick onKeyDown(Enter/Space)>` + trash 作**内部独立 `<button>`** + `e.stopPropagation()`，保持单行视觉不变。
+  - trash 图标（`lucide-react` 的 `Trash2`），`size-3.5`，行右侧。
+  - 点击 → 确认 Dialog 复用 `workspaces.deleteDialog.deleteTitle/deleteDesc`（`{{ws}}` 插值）。
   - 确认 → `deleteWorkspace(w.name)` → 成功 toast + `refresh()`（`useWorkspaces` 已暴露）；失败 `workspaces.actionFailed`。
-  - 删除当前所在 ws 后：留在抽屉，列表刷新；若删的是 `currentWorkspace`，可选 `nav("/")` 跳回 Dashboard（避免停在已不存在的 ws 详情）。
+  - **删的是 `currentWorkspace` → 必 `nav("/")`**（非可选）：否则 ws 已删、路由仍停 `/p/{ws}`，几秒后 `WorkspaceDetail` 的 `apiGet` 404 才降级到 notFound，有错愕感。
 - i18n 复用 `workspaces.deleteDialog.*` + `workspaces.actionFailed`；trash 的 `aria-label` 新增 `workspaceSwitcher.deleteAria`（"删除工作区"）。
 
 ### 3.4 `router.tsx`
@@ -74,8 +75,9 @@ WorkspaceListPage 的「🔗 展开子工作区」只服务于 ②。结论：**
 - 其余三段逻辑（pinned → recent）不变。
 
 ### 3.6 `routes/WorkspaceDetail/index.tsx`
-- 两处「← 返回列表」`to="/workspaces"` → `to="/"`（notFound 分支 + 主 header 分支）。
-- i18n `workspaceDetail.backToList` 文案可选改为「← 返回概览」（非必须，只改 `to` 也行）。
+- 两处「← 返回列表」`to="/workspaces"` → `to="/workspaces-entry"`（notFound 分支 + 主 header 分支）。从 ws 详情「返回」回工作区聚合入口比回全站 Dashboard(`/`)更贴合「上一级」语义；`/workspaces-entry` 自带 pinned/recent 导航。
+  - 注：§3.5 的 WorkspacesEntry **空态**仍跳 `/`（Dashboard 自带「暂无扫描 + 新建扫描」空态，比 entry 更适合兜底）——两处语境不同，各自合理，别为了统一而统一。
+- i18n `workspaceDetail.backToList` 文案可选改为「← 返回工作区」（非必须，只改 `to` 也行）。
 
 ### 3.7 删除文件
 - `pages/WorkspaceListPage.tsx`
@@ -127,7 +129,8 @@ deleteWorkspace(ws: string): Promise<{ deleted: string }>
 4. 补/改测试（§6），`pnpm test` 绿。
 5. commit + push。
 
-## 9. 风险
+## 9. 风险（2026-07-28 摸底后已澄清）
 
-- Dashboard 的 `useAsync` 若无 refetch，需小改 hook 或加 reload 机制——实现时确认。
-- 删除当前 `currentWorkspace` 后停留行为——建议跳 `/`，实现时定。
+- ~~Dashboard 的 `useAsync` 若无 refetch，需小改 hook 或加 reload 机制——实现时确认。~~ **已消除**：`lib/useAsync.ts:33` 已暴露 `refresh`，解构即用。
+- ~~删除当前 `currentWorkspace` 后停留行为——建议跳 `/`，实现时定。~~ **已定**：删 currentWorkspace 必 `nav("/")`（见 §3.3）。
+- **新增（摸底发现）**：WorkspaceSwitcher 行内 trash 的 button-in-button 嵌套——行结构须重构为 `div role=button` + 内嵌 button（见 §3.3），spec 原版漏了这个 HTML/a11y 陷阱。
