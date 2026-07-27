@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, Link } from "react-router-dom";
-import { ArrowLeft, Settings, FolderGit2 } from "lucide-react";
+import { ArrowLeft, Settings, FolderGit2, Pin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MemberManagerDialog } from "@/components/MemberManagerDialog";
-import { apiGet, ApiError } from "@/api/client";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { apiGet, ApiError, setPinnedWorkspace } from "@/api/client";
 import type { SessionData } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { useAuth } from "@/auth/AuthContext";
+import { toast } from "sonner";
 
 /**
  * ws 概览布局（/p/:ws）：ws header（名 + latest_status + scan_count + 成员/仓库/settings 入口）
@@ -47,6 +50,20 @@ export default function WorkspaceDetail() {
       });
   }, [workspace]);
 
+  const { user, refreshUser } = useAuth();
+  const isPinned = user?.pinned_workspace === workspace;
+
+  async function onPin() {
+    if (!workspace) return;
+    try {
+      await setPinnedWorkspace(workspace);
+      await refreshUser();
+      toast.success(t("workspaceDetail.pinPinned"));
+    } catch (e) {
+      toast.error(t("workspaceDetail.pinFailed", { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
   const status = meta?.status ?? meta?.session?.status;
 
   if (notFound) {
@@ -76,6 +93,10 @@ export default function WorkspaceDetail() {
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-mono text-xl">{workspace}</h2>
+          <Button variant={isPinned ? "secondary" : "outline"} size="icon" onClick={onPin} title={t(isPinned ? "workspaceDetail.unpin" : "workspaceDetail.pin")}>
+            <Pin className="size-4" />
+          </Button>
+          <WorkspaceSwitcher currentWorkspace={workspace} />
           {workspace && <MemberManagerDialog ws={workspace} />}
           {workspace && (
             <Button variant="outline" size="sm" asChild>

@@ -12,6 +12,29 @@ vi.mock("@/components/MemberManagerDialog", () => ({
   MemberManagerDialog: () => null,
 }));
 
+// Task 9：WorkspaceDetail header 新增置顶按钮（useAuth）+ WorkspaceSwitcher 入口
+// （useAuth + useWorkspaces）。ws 概览测试聚焦 header/入口/404，隔离这些 hook 的真实
+// 网络与 provider 依赖（其行为在 WorkspaceSwitcher.test.tsx 独立覆盖）。
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "admin", role: "admin", must_change_password: false, pinned_workspace: null },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
+
+vi.mock("@/api/useWorkspaces", () => ({
+  useWorkspaces: () => ({
+    data: [],
+    loading: false,
+    lastUpdated: new Date(),
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));
+
 const server = setupServer(
   // ws 概览 header fetch GET /workspaces/{ws}（shim 返 latest scan payload + scans[]）。
   http.get("/api/workspaces/:ws", () =>
