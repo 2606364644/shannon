@@ -3,17 +3,17 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/auth/AuthContext";
-import { getMembers, addMember, removeMember, listUsers } from "@/api/members";
-import type { Member, UserLite } from "@/api/members";
+import { getMembers, addMember, removeMember } from "@/api/members";
+import { ApiError } from "@/api/client";
+import type { Member } from "@/api/members";
 
 export function MemberManagerDialog({ ws }: { ws: string }) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
-  const [users, setUsers] = useState<UserLite[]>([]);
   const [picked, setPicked] = useState("");
 
   useEffect(() => {
@@ -32,8 +32,10 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
       await addMember(ws, picked, "member");
       setPicked("");
       setMembers((await getMembers(ws)).members);
-    } catch {
-      toast.error(t("members.addFailed"));
+    } catch (e) {
+      // 404=用户不存在（GET /users 收紧后 manager 拉不到列表，改为手输）；其余按 addFailed
+      const status = e instanceof ApiError ? e.status : 0;
+      toast.error(status === 404 ? t("members.input.notFound") : t("members.addFailed"));
     }
   }
   async function onRemove(username: string) {
@@ -44,19 +46,11 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
       toast.error(t("members.removeFailed"));
     }
   }
-  async function onOpen() {
-    try {
-      setOpen(true);
-      setUsers((await listUsers()).users);
-    } catch {
-      // listUsers 失败非关键: dialog 仍打开, 仅用户列表为空
-    }
-  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" onClick={onOpen} data-testid="member-manager">{t("members.manage")}</Button>
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="member-manager">{t("members.manage")}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{t("members.title")}</DialogTitle></DialogHeader>
@@ -69,14 +63,8 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
           ))}
         </ul>
         <div className="flex items-center gap-2">
-          <Select value={picked} onValueChange={setPicked}>
-            <SelectTrigger className="flex-1"><SelectValue placeholder={t("members.username")} /></SelectTrigger>
-            <SelectContent>
-              {users.filter((u) => !members.some((m) => m.user_id === u.id)).map((u) => (
-                <SelectItem key={u.id} value={u.username}>{u.username}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input value={picked} onChange={(e) => setPicked(e.target.value)}
+                 placeholder={t("members.input.placeholder")} className="flex-1" />
           <Button onClick={onAdd} disabled={!picked}>{t("members.add")}</Button>
         </div>
       </DialogContent>
