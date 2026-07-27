@@ -245,10 +245,22 @@
   },
   "workspaceSwitcher": {
     "title": "Switch workspace",
+    "subtitle": "{{count}} workspaces",
+    "filtered": "{{shown}} / {{total}}",
     "search": "Search workspace…",
     "empty": "No workspaces",
     "newWorkspace": "+ New workspace",
-    "deleteAria": "Delete workspace {{ws}}"
+    "deleteAria": "Delete workspace {{ws}}",
+    "stats": {
+      "vulns": "Vulns",
+      "cost": "Cost",
+      "scans": "Scans",
+      "time": "Updated"
+    },
+    "summary": {
+      "fleetCost": "Spent {{cost}}"
+    },
+    "rowAria": "{{ws}} — {{status}}, {{vulns}} vulns, {{cost}}, {{scans}} scans, {{when}}"
   },
   "scanFilters": {
     "status": "Status",

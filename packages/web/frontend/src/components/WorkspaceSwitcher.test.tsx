@@ -14,8 +14,10 @@ const { mockRefresh, mockDeleteWorkspace, mockNav, mockUseAuth } = vi.hoisted(()
 vi.mock("@/api/useWorkspaces", () => ({
   useWorkspaces: () => ({
     data: [
-      { name: "ws-a", status: "running", scan_type: "whitebox", created_at: 1, scan_count: 2 },
-      { name: "ws-b", status: "completed", scan_type: "blackbox", created_at: 2, scan_count: 1 },
+      { name: "ws-a", status: "running", scan_type: "whitebox", created_at: 1, scan_count: 2, vuln_count: 5, total_cost_usd: 3.42, cost_currency: "CNY" },
+      { name: "ws-b", status: "completed", scan_type: "blackbox", created_at: 2, scan_count: 1, vuln_count: 0, total_cost_usd: 1.1, cost_currency: "USD" },
+      // ws-c 模拟旧后端（Phase 1 未上线）缺字段 → null-safe 回退 0/—
+      { name: "ws-c", status: "failed", scan_type: "whitebox", created_at: 3 },
     ],
     loading: false, lastUpdated: new Date(), error: null, refresh: mockRefresh,
   }),
@@ -76,6 +78,48 @@ describe("WorkspaceSwitcher", () => {
     renderIt();
     fireEvent.click(screen.getByRole("button", { name: /切换/i }));
     await waitFor(() => expect(screen.getByTestId("create-ws-dialog")).toBeInTheDocument());
+  });
+});
+
+describe("WorkspaceSwitcher 状态卡重做（spec 2026-07-28：加宽 + 详情 + 单 X）", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: userAdmin });
+  });
+
+  it("仅渲染一个关闭按钮（修复双 X bug）", async () => {
+    renderIt();
+    fireEvent.click(screen.getByRole("button", { name: /切换/i }));
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // DialogContent 内置单个 close（sr-only "Close"），不再有手写 X
+    expect(screen.getAllByRole("button", { name: /^close$/i })).toHaveLength(1);
+  });
+
+  it("每行展示漏洞/花费/扫描详情（aria-label 含完整口径）", async () => {
+    renderIt("ws-a");
+    fireEvent.click(screen.getByRole("button", { name: /切换/i }));
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    const rowA = screen.getByText("ws-a").closest("[data-current]") as HTMLElement;
+    expect(rowA.getAttribute("aria-label")).toContain("5 个漏洞");
+    expect(rowA.getAttribute("aria-label")).toContain("¥3.42");
+    expect(rowA.getAttribute("aria-label")).toContain("2 次扫描");
+  });
+
+  it("缺字段回退 null-safe（旧后端 ws-c：0 漏洞 / — 花费 / 0 扫描）", async () => {
+    renderIt("ws-a");
+    fireEvent.click(screen.getByRole("button", { name: /切换/i }));
+    await waitFor(() => expect(screen.getByText("ws-c")).toBeInTheDocument());
+    const rowC = screen.getByText("ws-c").closest("[data-current]") as HTMLElement;
+    expect(rowC.getAttribute("aria-label")).toContain("0 个漏洞");
+    expect(rowC.getAttribute("aria-label")).toContain("—");
+    expect(rowC.getAttribute("aria-label")).toContain("0 次扫描");
+  });
+
+  it("顶部舰队汇总：累计漏洞 + 累计花费（币种取首个 ws）", async () => {
+    renderIt();
+    fireEvent.click(screen.getByRole("button", { name: /切换/i }));
+    await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
+    // 5+0+0=5 漏洞；3.42+1.1+0=4.52，币种 CNY → ¥4.52
+    expect(screen.getByText(/累计花费/)).toHaveTextContent("¥4.52");
   });
 });
 

@@ -245,10 +245,22 @@
   },
   "workspaceSwitcher": {
     "title": "切换工作区",
+    "subtitle": "{{count}} 个工作区",
+    "filtered": "{{shown}} / {{total}}",
     "search": "搜索工作区…",
     "empty": "无工作区",
     "newWorkspace": "+ 新建工作区",
-    "deleteAria": "删除工作区 {{ws}}"
+    "deleteAria": "删除工作区 {{ws}}",
+    "stats": {
+      "vulns": "漏洞",
+      "cost": "花费",
+      "scans": "扫描",
+      "time": "最近"
+    },
+    "summary": {
+      "fleetCost": "累计花费 {{cost}}"
+    },
+    "rowAria": "{{ws}}——{{status}}，{{vulns}} 个漏洞，{{cost}}，{{scans}} 次扫描，{{when}}"
   },
   "scanFilters": {
     "status": "状态筛选",
