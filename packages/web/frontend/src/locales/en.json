@@ -225,7 +225,8 @@
       "cancelTitle": "Cancel scan",
       "cancelDesc": "Cancel scan {{ws}}? Progress will be lost.",
       "deleteTitle": "Delete workspace",
-      "deleteDesc": "Delete workspace {{ws}}? Directory and deliverables will be permanently removed."
+      "deleteDesc": "Delete workspace {{ws}}? Directory and deliverables will be permanently removed.",
+      "deleted": "Deleted workspace {{ws}}"
     },
     "cancelViaSignal": "Stop signal sent; host process exits within 30s",
     "cancelWasDead": "Scan no longer running; marked cancelled",
@@ -246,7 +247,8 @@
     "title": "Switch workspace",
     "search": "Search workspace…",
     "empty": "No workspaces",
-    "newWorkspace": "+ New workspace"
+    "newWorkspace": "+ New workspace",
+    "deleteAria": "Delete workspace {{ws}}"
   },
   "scanFilters": {
     "status": "Status",
@@ -376,7 +378,8 @@
       "type": "Type",
       "vulns": "Vulns",
       "cost": "Cost",
-      "time": "Time"
+      "time": "Time",
+      "actions": "Actions"
     },
     "noWorkspace": {
       "title": "No workspace assigned",

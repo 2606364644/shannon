@@ -225,7 +225,8 @@
       "cancelTitle": "取消扫描",
       "cancelDesc": "取消扫描 {{ws}}？进度会丢失。",
       "deleteTitle": "删除工作区",
-      "deleteDesc": "删除工作区 {{ws}}？目录和产物将永久删除。"
+      "deleteDesc": "删除工作区 {{ws}}？目录和产物将永久删除。",
+      "deleted": "已删除工作区 {{ws}}"
     },
     "cancelViaSignal": "已发停止信号，宿主进程 ≤30s 退出",
     "cancelWasDead": "该 scan 已不在运行，已标记取消",
@@ -246,7 +247,8 @@
     "title": "切换工作区",
     "search": "搜索工作区…",
     "empty": "无工作区",
-    "newWorkspace": "+ 新建工作区"
+    "newWorkspace": "+ 新建工作区",
+    "deleteAria": "删除工作区 {{ws}}"
   },
   "scanFilters": {
     "status": "状态筛选",
@@ -376,7 +378,8 @@
       "type": "类型",
       "vulns": "漏洞",
       "cost": "花费",
-      "time": "时间"
+      "time": "时间",
+      "actions": "操作"
     },
     "noWorkspace": {
       "title": "尚未分配工作区",

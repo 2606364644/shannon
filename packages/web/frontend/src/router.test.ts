@@ -17,7 +17,6 @@ describe("router.tsx 结构", () => {
     expect(router).toContain("/dev/components");
   });
   it("保留现有业务路由", () => {
-    expect(router).toContain("WorkspaceListPage");
     expect(router).toContain("ScanNewPage");
     expect(router).toContain("WorkspaceDetail");
     expect(router).toContain("DefaultScanTab");
@@ -35,10 +34,14 @@ describe("router.tsx 结构", () => {
     expect(router).toContain('"/workspaces"');
     expect(router).toContain('"/settings"');
   });
-  it("Task 11: 顶栏「工作区」入口三段跳转 + /workspaces admin 专属", () => {
+  it("下线 WorkspaceListPage：/workspaces → redirect /（旧链接不 404）", () => {
     expect(router).toContain("WorkspacesEntry");
     expect(router).toContain('"/workspaces-entry"');
-    // /workspaces 包 RequireAdmin（admin 专属管理页）
-    expect(router).toMatch(/path:\s*"\/workspaces",\s*element:\s*<RequireAdmin><WorkspaceListPage/);
+    // WorkspaceListPage 已下线：不再 import、不再 JSX 使用（注释里提及名字不算）
+    expect(router).not.toMatch(/import\s*\{[^}]*WorkspaceListPage/);
+    expect(router).not.toMatch(/<WorkspaceListPage/);
+    // 旧 /workspaces 链接 redirect 到 Dashboard（书签/外链不 404）
+    expect(router).toMatch(/path:\s*"\/workspaces",\s*element:\s*<Navigate to="\/" replace\s*\/?>/);
+    expect(router).toContain("Navigate");
   });
 });

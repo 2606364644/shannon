@@ -29,12 +29,8 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
   const brand = useBrand();
   const { user } = useAuth();
   const mustChange = user?.must_change_password === true;
-  // admin 专属「工作区管理」并入主 nav 数组（IA 重设计 §2.2），
-  // 与其它项同源渲染——不再作为 nav 后的独立悬浮块，消除「突兀」感。
-  const items: NavItem[] =
-    user?.role === "admin"
-      ? [...NAV, { labelKey: "nav.workspaceManage", to: "/workspaces", testId: "nav-workspace-manage" }]
-      : NAV;
+  // nav 统一 4 项（概览/工作区/扫描/设置），所有角色一致——WorkspaceListPage 已下线（spec 2026-07-27）。
+  const items: NavItem[] = NAV;
   return (
     <header data-testid="topbar" className="sticky top-0 z-40 border-b border-border bg-card print:static">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">

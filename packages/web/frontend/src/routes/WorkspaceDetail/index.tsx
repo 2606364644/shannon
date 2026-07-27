@@ -69,7 +69,7 @@ export default function WorkspaceDetail() {
   if (notFound) {
     return (
       <div className="space-y-4">
-        <Link to="/workspaces" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
+        <Link to="/workspaces-entry" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
           <ArrowLeft className="size-3.5" /> {t("workspaceDetail.backToList")}
         </Link>
         <div className="rounded-md border border-yellow/40 bg-card p-6 text-sm">
@@ -86,7 +86,7 @@ export default function WorkspaceDetail() {
     <div className="space-y-4">
       <div className="space-y-2">
         <Link
-          to="/workspaces"
+          to="/workspaces-entry"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"
         >
           <ArrowLeft className="size-3.5" /> {t("workspaceDetail.backToList")}

@@ -32,7 +32,6 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/" element={<div data-testid="home" />} />
         <Route path="/p/:workspace" element={<WsDetail />} />
-        <Route path="/workspaces" element={<div data-testid="ws-list" />} />
         <Route path="*" element={<WorkspacesEntry />} />
       </Routes>
     </MemoryRouter>
@@ -69,12 +68,12 @@ describe("WorkspacesEntry", () => {
     expect(screen.getByTestId("ws-detail")).toHaveAttribute("data-ws", "ws-new");
   });
 
-  it("redirects to /workspaces when no membership", async () => {
+  it("redirects to / (Dashboard) when no membership", async () => {
     mockUseAuth.mockReturnValue({ user: { pinned_workspace: null } });
     mockUseWorkspaces.mockReturnValue({ data: [], loading: false });
     const { container } = renderAt("/entry");
     await waitFor(() =>
-      expect(container.querySelector("[data-testid='ws-list']")).toBeInTheDocument(),
+      expect(container.querySelector("[data-testid='home']")).toBeInTheDocument(),
     );
   });
 });

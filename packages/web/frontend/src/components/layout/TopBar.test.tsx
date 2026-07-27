@@ -133,20 +133,19 @@ describe("TopBar admin 入口", () => {
     mockUseAuth.mockReturnValue({ user: userAdmin, loading: false, login: vi.fn(), logout: vi.fn() });
   });
 
-  it("admin 可见「工作区管理」入口指向 /workspaces", () => {
-    renderAt("/workspaces");
-    const entry = screen.getByTestId("nav-workspace-manage");
-    expect(entry).toHaveTextContent("工作区管理");
-    expect(entry.closest("a")).toHaveAttribute("href", "/workspaces");
+  it("下线 WorkspaceListPage：admin 也不再有「工作区管理」入口", () => {
+    renderAt("/");
+    expect(screen.queryByTestId("nav-workspace-manage")).not.toBeInTheDocument();
+    expect(screen.queryByText("工作区管理")).not.toBeInTheDocument();
   });
 
-  it("普通用户不可见「工作区管理」入口", () => {
+  it("普通用户同样无「工作区管理」入口", () => {
     mockUseAuth.mockReturnValue({ user: userUser, loading: false, login: vi.fn(), logout: vi.fn() });
     renderAt("/");
     expect(screen.queryByTestId("nav-workspace-manage")).not.toBeInTheDocument();
   });
 
-  it("顶栏「工作区」入口改跳 /workspaces-entry（IA 重设计 §2.3）", () => {
+  it("顶栏「工作区」入口跳 /workspaces-entry（IA 重设计 §2.3）", () => {
     renderAt("/workspaces-entry");
     const link = screen.getByText("工作区").closest("a");
     expect(link).toHaveAttribute("href", "/workspaces-entry");

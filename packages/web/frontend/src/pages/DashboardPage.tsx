@@ -10,11 +10,16 @@ import { StatRow } from "@/components/StatRow";
 import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/Empty";
 import { ScanFilters, DEFAULT_SCAN_FILTERS, useScanFilters } from "@/components/ScanFilters";
-import { listAllScans } from "@/api/client";
+import { listAllScans, cancelScan, type CancelResult } from "@/api/client";
 import type { ScanSummary } from "@/api/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fmtCost } from "@/utils/currency";
 import { useAsync } from "@/lib/useAsync";
+import { useAuth } from "@/auth/AuthContext";
+import { toast } from "sonner";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 function isToday(unix: number | null | undefined): boolean {
   if (!unix) return false;
@@ -33,7 +38,29 @@ function fmtTime(unix?: number | null): string {
 export function DashboardPage() {
   const { t } = useTranslation();
   // 跨 ws 扫描聚合(IA 重设计 §3,GET /api/scans)。每项注入 workspace 字段供表格「归属工作区」列消费。
-  const { data, loading } = useAsync(listAllScans, []);
+  const { data, loading, refresh } = useAsync(listAllScans, []);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  // admin 操作列：取消 running scan（spec 2026-07-27，下线 WorkspaceListPage 后取消并入 Dashboard）。
+  const [pending, setPending] = useState<ScanSummary | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function doCancel() {
+    if (!pending || !pending.workspace) return;
+    setBusy(true);
+    try {
+      const res: CancelResult = await cancelScan(pending.workspace, pending.scan_id);
+      // via/was_dead 区分 toast（对齐旧 WorkspaceListPage 语义，复用 workspaces.* 文案）
+      if (res?.was_dead) toast.success(t("workspaces.cancelWasDead"));
+      else toast.success(t("workspaces.cancelViaSignal"));
+      setPending(null);
+      refresh();
+    } catch (e) {
+      toast.error(t("workspaces.actionFailed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setBusy(false);
+    }
+  }
   const [filters, setFilters] = useState(DEFAULT_SCAN_FILTERS);
   const { filtered } = useScanFilters(data, filters);
 
@@ -108,6 +135,7 @@ export function DashboardPage() {
               <TableHead>{t("dashboard.scanTable.vulns")}</TableHead>
               <TableHead>{t("dashboard.scanTable.cost")}</TableHead>
               <TableHead>{t("dashboard.scanTable.time")}</TableHead>
+              {isAdmin && <TableHead className="w-px whitespace-nowrap">{t("dashboard.scanTable.actions")}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -120,12 +148,43 @@ export function DashboardPage() {
                 <TableCell>{s.vuln_count ?? 0}</TableCell>
                 <TableCell>{s.total_cost_usd != null ? fmtCost(s.total_cost_usd, s.cost_currency) : "-"}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{fmtTime(s.created_at)}</TableCell>
+                {isAdmin && (
+                  <TableCell className="w-px whitespace-nowrap">
+                    {(s.is_running || s.status === "running") ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:bg-destructive/10"
+                        data-testid={`dashboard-cancel-scan-${s.scan_id}`}
+                        onClick={() => setPending(s)}
+                      >
+                        {t("common.cancel")}
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </Card>
       {filtered.length === 0 && <p className="text-sm text-muted-foreground">{t("workspaceDetail.scans.noMatch")}</p>}
+
+      {/* admin 取消 running scan 确认 Dialog（per-scan 文案，对齐 ScanList） */}
+      <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workspaceDetail.scans.cancelConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("workspaceDetail.scans.cancelConfirmDesc", { scanId: pending?.scan_id })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPending(null)}>{t("common.cancel")}</Button>
+            <Button variant="destructive" disabled={busy} onClick={doCancel}>{t("common.confirm")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,6 +1,5 @@
-import { createBrowserRouter, useNavigate, useParams } from "react-router-dom";
+import { createBrowserRouter, useNavigate, useParams, Navigate } from "react-router-dom";
 import { useEffect } from "react";
-import { WorkspaceListPage } from "./pages/WorkspaceListPage";
 import { ScanNewPage } from "./pages/ScanNewPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -70,8 +69,9 @@ export const router = createBrowserRouter([
       { path: "/", element: <DashboardPage /> },
       // 顶栏「工作区」入口：三段跳转（pinned->最近->空态）。IA 重设计 §2.3
       { path: "/workspaces-entry", element: <WorkspacesEntry /> },
-      // 工作区管理页（admin 专属）：列表 + CRUD。普通用户走 /workspaces-entry 跳转。
-      { path: "/workspaces", element: <RequireAdmin><WorkspaceListPage /></RequireAdmin> },
+      // WorkspaceListPage 已下线（取消并入 Dashboard、删除并入切换器，spec 2026-07-27）。
+      // 旧 /workspaces 链接/书签 redirect 到 Dashboard，不 404。
+      { path: "/workspaces", element: <Navigate to="/" replace /> },
       { path: "/scan/new", element: <ScanNewPage /> },
       {
         // ws 概览（容器）：ws header + 扫描列表 + 仓库/settings 入口

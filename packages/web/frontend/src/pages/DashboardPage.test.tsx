@@ -4,15 +4,20 @@ import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
 
-// 只 mock listAllScans（Task 4 的跨 ws 聚合 API）。DashboardPage 不再读 useWorkspaces。
+// mock listAllScans（跨 ws 聚合）+ cancelScan（admin 操作列）+ useAuth（admin/user gate）。
+const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
 vi.mock("@/api/client", () => ({
   listAllScans: vi.fn(),
+  cancelScan: vi.fn(),
 }));
 
 const mockScans = [
   { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 100, vuln_count: 1, is_running: true, workspace: "ws-a", total_cost_usd: 0.1 },
   { scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 200, vuln_count: 2, is_running: false, workspace: "ws-b", total_cost_usd: 0.2 },
 ];
+const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
+const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
 
 function renderPage() {
   return render(<MemoryRouter><DashboardPage /></MemoryRouter>);
@@ -21,6 +26,8 @@ function renderPage() {
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 默认普通用户（admin 操作列不渲染）；admin describe 内 beforeEach 覆写为 admin。
+    mockUseAuth.mockReturnValue({ user: userUser });
     // jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
     // 状态筛选选项断言用中文「已完成」,逐测试钉回 zh。
     return i18n.changeLanguage("zh");
@@ -69,5 +76,43 @@ describe("DashboardPage", () => {
     //  改 exact 单匹配)。
     await waitFor(() => expect(screen.getByText("还没有扫描")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: /新建扫描/ })).toHaveAttribute("href", "/scan/new");
+  });
+});
+
+describe("DashboardPage admin 操作列（spec 2026-07-27 下线 WorkspaceListPage：取消并入 Dashboard）", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: userAdmin });
+  });
+
+  it("admin: running 行渲染操作列取消按钮，completed 行无按钮", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
+    renderPage();
+    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
+    // s1(running, ws-a)有取消按钮；s2(completed)操作列无按钮
+    expect(screen.queryByTestId("dashboard-cancel-scan-s1")).toBeInTheDocument();
+    expect(screen.queryByTestId("dashboard-cancel-scan-s2")).not.toBeInTheDocument();
+  });
+
+  it("admin: 点取消→确认 Dialog→调 cancelScan(ws, scanId) per-scan", async () => {
+    const { listAllScans, cancelScan } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
+    (cancelScan as any).mockResolvedValue({ cancelled: "s1", via: "signal" });
+    renderPage();
+    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByTestId("dashboard-cancel-scan-s1"));
+    // Dialog 确认按钮（common.confirm = 确认）
+    const confirm = await screen.findByRole("button", { name: /^确认$/ });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(cancelScan).toHaveBeenCalledWith("ws-a", "s1"));
+  });
+
+  it("普通用户:无操作列（admin gate，体验不降级）", async () => {
+    mockUseAuth.mockReturnValue({ user: userUser });
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
+    renderPage();
+    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("dashboard-cancel-scan-s1")).not.toBeInTheDocument();
   });
 });
