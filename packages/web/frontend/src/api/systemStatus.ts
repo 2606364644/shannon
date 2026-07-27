@@ -32,7 +32,10 @@ export function useSystemStatus(): UseSystemStatusResult {
 
   const refresh = useCallback(async () => {
     try {
-      const d = await apiGet<SystemStatus>("/system-status");
+      // silent：brand 是装饰数据，加载失败回落默认值即可，不该触发 session 过期跳转。
+      // BrandProvider 在 App.tsx 最外层，未登录 /login 页也会发此请求，非 silent 401
+      // 会触发 onUnauthorized -> assign("/login?expired=1") -> 整页刷新 -> 循环。
+      const d = await apiGet<SystemStatus>("/system-status", { silent: true });
       setData(d);
       setError(null);
     } catch (e) {

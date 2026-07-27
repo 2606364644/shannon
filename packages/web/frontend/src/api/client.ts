@@ -79,15 +79,21 @@ export const createWorkspace = (name: string) =>
 export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export type CancelResult = { cancelled: string; via?: string; was_dead?: boolean };
-// ws-scan 解耦（spec §5.1/§5.2）：cancelScan 重载兼容两种粒度。
-//   cancelScan(ws)            -> DELETE /api/scan/{ws}        （旧 ws-scoped shim，取消 latest/active scan，WorkspaceListPage 用）
-//   cancelScan(ws, scanId)    -> DELETE /api/workspaces/{ws}/scans/{scanId}  （scan-scoped，scan 卡片用）
-export function cancelScan(ws: string): Promise<CancelResult>;
-export function cancelScan(ws: string, scanId: string): Promise<CancelResult>;
-export function cancelScan(ws: string, scanId?: string): Promise<CancelResult> {
-  return scanId
-    ? apiDelete<CancelResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`)
-    : apiDelete<CancelResult>(`/scan/${encWs(ws)}`);
+// ws-scan 解耦：cancelScan 一律走 scan-scoped（DELETE /api/workspaces/{ws}/scans/{scanId}）。
+// ws 列表行只有 ws 名、无 scan_id -> 用 cancelActiveScan 先 listScans 解析出在跑的 scan 再取消。
+export function cancelScan(ws: string, scanId: string): Promise<CancelResult> {
+  return apiDelete<CancelResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
+}
+
+/** 取消该 ws 正在跑的 scan（ws 列表行用：无 scan_id，先 listScans 找 active/latest running，再 scan-scoped 取消）。
+ *  对齐旧 DELETE /api/scan/{ws} shim 语义（cancel latest/active）。无在跑 scan -> 抛错（对应旧 shim 的 404）。 */
+export async function cancelActiveScan(ws: string): Promise<CancelResult> {
+  const scans = await listScans(ws);
+  const active = scans.find((s) => s.is_running || s.status === "running");
+  if (!active) {
+    throw new Error("该工作区当前无在跑的扫描");
+  }
+  return cancelScan(ws, active.scan_id);
 }
 
 /** 仓库名（可为 group/repo）按段 encode：保留 `/` 作路径分隔，每段安全转义。

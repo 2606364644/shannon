@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Empty } from "@/components/Empty";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useWorkspaces } from "@/api/useWorkspaces";
-import { cancelScan, deleteWorkspace } from "@/api/client";
+import { cancelActiveScan, deleteWorkspace } from "@/api/client";
 import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
 import type { Workspace } from "@/api/types";
 
@@ -152,7 +152,7 @@ export function WorkspaceListPage() {
     setBusy(true);
     try {
       if (pendingAction.kind === "cancel") {
-        const res = await cancelScan(pendingAction.ws);
+        const res = await cancelActiveScan(pendingAction.ws);
         // 协作式取消语义提示(宿主 scan:已发信号 ≤30s 退;已死:直接标记)。
         if (res?.via === "signal") toast.info(t("workspaces.cancelViaSignal"));
         else if (res?.was_dead) toast.info(t("workspaces.cancelWasDead"));

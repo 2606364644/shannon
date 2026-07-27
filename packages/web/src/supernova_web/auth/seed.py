@@ -25,6 +25,11 @@ def seed_users(store: AuthStore, yaml_path: str) -> int:
             continue
         if store.get_user_by_username(username) is not None:
             continue  # 不覆盖
-        store.create_user(username, u.get("password_hash", ""), role=u.get("role", "user"))
+        store.create_user(
+            username,
+            u.get("password_hash", ""),
+            role=u.get("role", "user"),
+            must_change=bool(u.get("must_change_password", False)),
+        )
         created += 1
     return created

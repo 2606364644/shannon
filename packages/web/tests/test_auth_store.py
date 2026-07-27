@@ -27,6 +27,43 @@ def test_get_password_hash(tmp_path):
     assert s.get_password_hash("nobody") is None
 
 
+def test_create_user_default_must_change_false(tmp_path):
+    """新建用户默认 must_change_password=False。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("alice", "h")
+    assert u.must_change_password is False
+    got = s.get_user(u.id)
+    assert got is not None and got.must_change_password is False
+
+
+def test_create_user_with_must_change_true(tmp_path):
+    """create_user 可显式置 must_change_password=True（默认账号场景）。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("admin", "h", role="admin", must_change=True)
+    assert u.must_change_password is True
+    got = s.get_user_by_username("admin")
+    assert got is not None and got.must_change_password is True
+
+
+def test_update_password_clears_must_change(tmp_path):
+    """update_password 改 hash 并把 must_change_password 置 False（改密即脱提醒）。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    u = s.create_user("admin", "$2b$12$old", must_change=True)
+    assert s.get_user(u.id).must_change_password is True
+    s.update_password(u.id, "$2b$12$new")
+    assert s.get_password_hash("admin") == "$2b$12$new"
+    got = s.get_user(u.id)
+    assert got is not None and got.must_change_password is False
+
+
+def test_must_change_column_migration_idempotent(tmp_path):
+    """init_schema 多次调用不报错（ALTER TABLE ADD COLUMN 幂等：列已存则跳过）。"""
+    s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()
+    s.init_schema()  # 二次 init_schema 不应因列已存在而崩
+    s.create_user("alice", "h", must_change=True)
+    assert s.get_user_by_username("alice").must_change_password is True
+
+
 def test_username_unique(tmp_path):
     import pytest
     s = AuthStore(str(tmp_path / "auth.db")); s.init_schema()

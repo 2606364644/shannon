@@ -84,19 +84,6 @@ async def test_cancel_by_scan_id_precise(tmp_path):
     # 此处仅验 h2 未被动 + h1 被精确取消。
 
 
-@pytest.mark.asyncio
-async def test_cancel_shim_picks_active_when_multiple(tmp_path):
-    """shim cancel(ws) 多 scan 时取 _handles 里的 active scan（非 latest 已完成）。"""
-    mgr = ScanManager(tmp_path, tmp_path / "r", None)
-    _make_scan_dir(tmp_path, "WS", scan_id="s1", status="completed")  # 最新但已完成
-    _make_scan_dir(tmp_path, "WS", scan_id="s2", status="running")   # 在跑
-    h_active = AsyncMock()
-    mgr._handles[("WS", "s2")] = h_active  # s2 在 _handles（active）
-    result = await mgr.cancel("WS")  # shim
-    h_active.cancel.assert_awaited_once()
-    assert result == {"cancelled": "s2"}  # 取 active，非 latest s1
-
-
 def test_active_repo_sources_multi_ws_multi_scan(tmp_path):
     """active_repo_sources 多 ws 多 scan 聚合 (ws, repo) 集。"""
     mgr = ScanManager(tmp_path, tmp_path / "r", None)

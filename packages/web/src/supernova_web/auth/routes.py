@@ -8,7 +8,7 @@ from .brute import BruteGuard
 from .csrf import generate_csrf_token, verify_csrf
 from .dependencies import current_user
 from .models import User
-from .passwords import verify_password
+from .passwords import hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -20,8 +20,19 @@ class LoginIn(BaseModel):
     password: str
 
 
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
+# 新密码最小长度（change-password 校验）。弱默认密码（如 123456）改密时应强制
+# 不少于 8 位，避免用户把默认弱密码改成另一个弱密码。
+_NEW_PASSWORD_MIN_LEN = 8
+
+
 def _user_out(u: User) -> dict:
-    return {"id": u.id, "username": u.username, "role": u.role}
+    return {"id": u.id, "username": u.username, "role": u.role,
+            "must_change_password": u.must_change_password}
 
 
 def _cookie_secure(cfg, request: Request) -> bool:
@@ -76,6 +87,24 @@ def login(body: LoginIn, request: Request):
                     secure=_cookie_secure(cfg, request),
                     max_age=cfg.session_ttl_hours * 3600)
     return resp
+
+
+@router.post("/change-password")
+def change_password(body: ChangePasswordIn, request: Request, user: User = Depends(current_user)):
+    """已登录用户改密码。需 CSRF + 登录态；校验旧密码正确、新密码合法后改 hash
+    并清 must_change_password。默认账号（must_change_password=True）改密后即脱提醒。"""
+    if not verify_csrf(request.headers.get("x-csrf-token"), request.cookies.get("sn-csrf")):
+        raise HTTPException(status_code=403, detail="invalid csrf token")
+    if len(body.new_password) < _NEW_PASSWORD_MIN_LEN:
+        raise HTTPException(status_code=400, detail=f"new password must be at least {_NEW_PASSWORD_MIN_LEN} characters")
+    if body.new_password == body.old_password:
+        raise HTTPException(status_code=400, detail="new password must differ from old")
+    store = request.app.state.auth_store
+    pw_hash = store.get_password_hash(user.username)
+    if pw_hash is None or not verify_password(body.old_password, pw_hash):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    store.update_password(user.id, hash_password(body.new_password))
+    return {"ok": True}
 
 
 @router.post("/logout")

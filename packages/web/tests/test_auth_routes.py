@@ -89,3 +89,91 @@ def test_login_sets_secure_cookie_attributes(client):
     assert "HttpOnly" in sid_cookie
     assert "SameSite=lax" in sid_cookie
     assert "Max-Age=" in sid_cookie
+
+
+# ---------- change-password + must_change_password flag ----------
+
+def test_login_response_includes_must_change_flag(client):
+    """login 响应的 user 必须带 must_change_password 字段（默认 False）。"""
+    tok = _csrf(client)
+    r = client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json()["user"]["must_change_password"] is False
+
+
+def test_change_password_success_clears_flag(client):
+    """改密成功：新 hash 生效、must_change_password 清 0、能用新密码登录。"""
+    tok = _csrf(client)
+    client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                headers={"X-CSRF-Token": tok})
+    tok = client.cookies.get("sn-csrf", tok)
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "pw123", "new_password": "newpw-456"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    # 新密码登录成功
+    tok2 = _csrf(client)
+    r2 = client.post("/api/auth/login", json={"username": "alice", "password": "newpw-456"},
+                     headers={"X-CSRF-Token": tok2})
+    assert r2.status_code == 200
+    assert r2.json()["user"]["must_change_password"] is False
+
+
+def test_change_password_wrong_old_rejected(client):
+    """旧密码错 -> 401，新密码未生效。"""
+    tok = _csrf(client)
+    client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                headers={"X-CSRF-Token": tok})
+    tok = client.cookies.get("sn-csrf", tok)
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "wrong", "new_password": "newpw-456"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 401
+    # 旧密码仍可用
+    tok2 = _csrf(client)
+    assert client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                       headers={"X-CSRF-Token": tok2}).status_code == 200
+
+
+def test_change_password_new_equals_old_rejected(client):
+    """新密码 == 旧密码 -> 400。"""
+    tok = _csrf(client)
+    client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                headers={"X-CSRF-Token": tok})
+    tok = client.cookies.get("sn-csrf", tok)
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "pw123", "new_password": "pw123"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 400
+
+
+def test_change_password_too_short_rejected(client):
+    """新密码长度 < 8 -> 400。"""
+    tok = _csrf(client)
+    client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                headers={"X-CSRF-Token": tok})
+    tok = client.cookies.get("sn-csrf", tok)
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "pw123", "new_password": "123"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 400
+
+
+def test_change_password_requires_csrf(client):
+    """change-password 必须校验 CSRF（缺 token -> 403）。"""
+    tok = _csrf(client)
+    client.post("/api/auth/login", json={"username": "alice", "password": "pw123"},
+                headers={"X-CSRF-Token": tok})
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "pw123", "new_password": "newpw-456"})
+    assert r.status_code == 403
+
+
+def test_change_password_requires_login(client):
+    """未登录 -> 401。"""
+    tok = _csrf(client)
+    r = client.post("/api/auth/change-password",
+                    json={"old_password": "pw123", "new_password": "newpw-456"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 401

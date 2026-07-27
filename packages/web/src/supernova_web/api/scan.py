@@ -38,11 +38,3 @@ async def create_scan(req: ScanRequest, request: Request,
     except ValidationError as e:  # correlation yaml 校验失败
         raise HTTPException(422, detail=e.errors())
     return ScanAccepted(workspace=ws_name, scan_id=scan_id)
-
-
-@router.delete("/{ws}")
-async def cancel_scan(ws: str, request: Request, _: User = Depends(workspace_member)):
-    result = await request.app.state.scan_manager.cancel(ws)
-    if result is None:
-        raise HTTPException(404, "scan not found")
-    return result

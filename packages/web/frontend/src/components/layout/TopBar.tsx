@@ -6,6 +6,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { BrandMark } from "./BrandMark";
 import { UserMenu } from "./UserMenu";
 import { useBrand } from "@/brand/BrandContext";
+import { useAuth } from "@/auth/AuthContext";
 
 interface NavItem {
   labelKey: string;
@@ -22,9 +23,11 @@ const NAV: NavItem[] = [
   { labelKey: "nav.settings", to: "/settings" },
 ];
 
-export function TopBar() {
+export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {}) {
   const { t } = useTranslation();
   const brand = useBrand();
+  const { user } = useAuth();
+  const mustChange = user?.must_change_password === true;
   return (
     <header data-testid="topbar" className="sticky top-0 z-40 border-b border-border bg-card print:static">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
@@ -63,6 +66,17 @@ export function TopBar() {
         </nav>
         <div className="ml-auto flex items-center gap-1">
           {/* 运行中扫描指示器 slot（子项目 5 接 SSE） */}
+          {mustChange && (
+            <button
+              data-testid="must-change-badge"
+              onClick={onOpenChangePwd}
+              title={t("auth.mustChange.badge")}
+              className="flex items-center gap-1 rounded-md border border-amber/50 px-2 py-1 text-xs text-amber hover:bg-amber/10"
+            >
+              <span aria-hidden>⚠</span>
+              <span className="hidden sm:inline">{t("auth.mustChange.badgeShort")}</span>
+            </button>
+          )}
           <LanguageSwitcher />
           <ThemeToggle />
           <UserMenu />

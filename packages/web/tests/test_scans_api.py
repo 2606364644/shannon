@@ -165,17 +165,38 @@ def test_cancel_scan_by_id(authed_client, app_with_ws, tmp_workspaces):
     assert fake.cancelled == [("WS", "s1")]
 
 
-# ── shim（旧前端兼容）──────────────────────────────────────────────────────
-
-def test_shim_delete_scan_cancels_latest(authed_client, app_with_ws, tmp_workspaces):
-    """shim DELETE /api/scan/{ws} cancel latest/active scan。"""
+def test_cancel_scan_passes_through_via_signal(authed_client, app_with_ws, tmp_workspaces):
+    """scan-scoped cancel 返 via:signal 时 api 透传给前端（ws 列表 cancelActiveScan 依赖）。"""
     _make_scan(tmp_workspaces, "WS", scan_id="s1", status="running")
-    fake = FakeSM()
+
+    class HostSM:
+        def __init__(self):
+            self.cancelled = []
+
+        async def cancel(self, ws, scan_id):
+            self.cancelled.append((ws, scan_id))
+            return {"cancelled": scan_id, "via": "signal"}
+
+        def active_pids(self):
+            return {}
+
+    fake = HostSM()
     app_with_ws.state.scan_manager = fake
     tok = _csrf(authed_client)
-    r = authed_client.delete("/api/scan/WS", headers={"X-CSRF-Token": tok})
+    r = authed_client.delete("/api/workspaces/WS/scans/s1", headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
-    assert len(fake.cancelled) == 1  # shim cancel(ws)
+    assert r.json() == {"cancelled": "s1", "via": "signal"}
+    assert fake.cancelled == [("WS", "s1")]
+
+
+# ── shim 已彻底移除（scan-scoped 是唯一取消路径）──────────────────────────────
+
+
+def test_legacy_ws_scoped_delete_now_404(authed_client, tmp_workspaces):
+    """旧 DELETE /api/scan/{ws} shim 已移除 -> 404（路由不存在；scan-scoped DELETE 才是唯一取消路径）。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="running")
+    tok = _csrf(authed_client)
+    assert authed_client.delete("/api/scan/WS", headers={"X-CSRF-Token": tok}).status_code == 404
 
 
 def _scan_with(tmp_workspaces, ws, scan_id="s1", status="completed", **extra):

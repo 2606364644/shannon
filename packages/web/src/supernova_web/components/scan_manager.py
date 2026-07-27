@@ -256,28 +256,17 @@ class ScanManager:
         base = f"{ws}-{scan_id}"
         return f"{base}-resume-{n}" if n > 0 else base
 
-    async def cancel(self, ws: str, scan_id: str | None = None) -> dict | None:
+    async def cancel(self, ws: str, scan_id: str) -> dict | None:
         """取消 scan 三轨(C1 后):
         ① _handles 有(web 自起) -> handle.cancel()(temporal 原生, 传播到 workflow + heartbeat activity).
         ② heartbeat fresh(owner=host 在跑) -> 写 cancel.requested(协作式兜底, 兼容 host CLI).
         ③ heartbeat stale(已死) -> 标 cancelled + was_dead.
 
-        T3: scan_id 给定 -> 精确取消该 scan；scan_id=None -> shim 取消 latest/active scan
-        （旧 DELETE /api/scan/{ws}）。web 侧立即返回(不等 worker 真退)-> 状态立即翻转 -> Delete 立即可用.
+        scan_id 必填（scan-scoped DELETE /api/workspaces/{ws}/scans/{scan_id}）。ws 列表行无
+        scan_id 的取消由前端 cancelActiveScan 先 listScans 解析出在跑 scan 再调本方法。
+        web 侧立即返回(不等 worker 真退)-> 状态立即翻转 -> Delete 立即可用.
         """
-        if scan_id is None:
-            # shim: cancel latest/active scan（旧 DELETE /api/scan/{ws}）
-            active_keys = [k for k in self._handles if k[0] == ws]
-            if active_keys:
-                scan_id = active_keys[0][1]
-                scan_dir = self._store.get_scan_dir(ws, scan_id)
-            else:
-                entries = self._store._scan_entries(ws)  # [(scan_id, scan_dir)] created_at 倒序
-                if not entries:
-                    return None  # 无 scan -> 404
-                scan_id, scan_dir = entries[0]
-        else:
-            scan_dir = self._store.get_scan_dir(ws, scan_id)
+        scan_dir = self._store.get_scan_dir(ws, scan_id)
         if scan_dir is None:
             return None  # scan 不存在 -> 404
 

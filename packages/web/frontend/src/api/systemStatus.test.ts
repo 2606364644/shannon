@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import { useSystemStatus } from "./systemStatus";
+import { setUnauthorizedHandler, resetUnauthorizedHandler } from "./client";
 
 const okBody = {
   ai_provider: "claude",
@@ -20,7 +21,7 @@ const server = setupServer(
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 beforeEach(() => i18n.changeLanguage("zh"));
-afterEach(() => { server.resetHandlers(); i18n.changeLanguage("zh"); });
+afterEach(() => { server.resetHandlers(); i18n.changeLanguage("zh"); resetUnauthorizedHandler(); });
 afterAll(() => server.close());
 
 describe("useSystemStatus", () => {
@@ -64,5 +65,19 @@ describe("useSystemStatus", () => {
     server.use(http.get("/api/system-status", () => { called += 1; return HttpResponse.json(okBody); }));
     await result.current.refresh();
     expect(called).toBe(1);
+  });
+
+  it("401 不触发 onUnauthorized（brand 是装饰数据，未登录 /login 页 BrandProvider 也会发此请求，非 silent 会循环刷新）", async () => {
+    // 根因：BrandProvider 在 App.tsx 最外层，无条件调 useSystemStatus -> GET /system-status
+    // （需登录）。未登录访问 /login 页时该请求 401，若非 silent -> onUnauthorized
+    // -> window.location.assign("/login?expired=1") -> 整页刷新 -> BrandProvider 重新
+    // mount -> 又发 401 -> 又 assign -> 无限循环（login 页"一直在重复刷新"）。
+    // brand 加载失败应静默回落默认，不该等同于 session 过期。
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    server.use(http.get("/api/system-status", () => HttpResponse.json({}, { status: 401 })));
+    const { result } = renderHook(() => useSystemStatus());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(handler).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  must_change_password INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -31,6 +32,12 @@ CREATE INDEX IF NOT EXISTS idx_wm_user ON workspace_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_wm_ws ON workspace_members(workspace_name);
 """
 
+# must_change_password 列后加（2026-07-27 默认密码改密提醒）。SQLite 的
+# ALTER TABLE ADD COLUMN 无 IF NOT EXISTS，对已建库需幂等补列：列已存则
+# OperationalError，吞掉即可。新建库（_SCHEMA 已含该列）init_schema 后此句
+# 必抛 -> 同样吞掉。保证旧 auth.db 升级、新 auth.db 重复 init 均不崩。
+_ADD_MUST_CHANGE_COL = "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+
 
 class AuthStore:
     def __init__(self, db_path: str) -> None:
@@ -42,23 +49,31 @@ class AuthStore:
     def init_schema(self) -> None:
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            try:
+                c.execute(_ADD_MUST_CHANGE_COL)  # 旧库补列；新库已含 -> OperationalError 吞掉
+            except sqlite3.OperationalError:
+                pass
 
-    def create_user(self, username: str, password_hash: str, role: str = "user") -> User:
+    def create_user(self, username: str, password_hash: str, role: str = "user",
+                    must_change: bool = False) -> User:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO users(username, password_hash, role, created_at) VALUES(?,?,?,?)",
-                (username, password_hash, role, now),
+                "INSERT INTO users(username, password_hash, role, created_at, must_change_password) "
+                "VALUES(?,?,?,?,?)",
+                (username, password_hash, role, now, 1 if must_change else 0),
             )
-            return User(id=cur.lastrowid, username=username, role=role)
+            return User(id=cur.lastrowid, username=username, role=role,
+                        must_change_password=must_change)
 
     def get_user_by_username(self, username: str) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role FROM users WHERE username=?", (username,)
+                "SELECT id, username, role, must_change_password FROM users WHERE username=?", (username,)
             ).fetchone()
-        return User(id=row[0], username=row[1], role=row[2]) if row else None
+        return User(id=row[0], username=row[1], role=row[2],
+                    must_change_password=bool(row[3])) if row else None
 
     def get_password_hash(self, username: str) -> str | None:
         with self._conn() as c:
@@ -70,9 +85,18 @@ class AuthStore:
     def get_user(self, user_id: int) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role FROM users WHERE id=?", (user_id,)
+                "SELECT id, username, role, must_change_password FROM users WHERE id=?", (user_id,)
             ).fetchone()
-        return User(id=row[0], username=row[1], role=row[2]) if row else None
+        return User(id=row[0], username=row[1], role=row[2],
+                    must_change_password=bool(row[3])) if row else None
+
+    def update_password(self, user_id: int, new_hash: str) -> None:
+        """改密码：写新 hash 并把 must_change_password 置 0（改密即脱默认密码提醒）。"""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?",
+                (new_hash, user_id),
+            )
 
     def insert_session(self, row: SessionRow) -> None:
         from datetime import datetime, timezone

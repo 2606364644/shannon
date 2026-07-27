@@ -287,20 +287,6 @@ async def test_cancel_unknown_scan_returns_none(tmp_path):
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     _make_scan_dir(tmp_path, "ws", scan_id="s1")
     assert await mgr.cancel("ws", "nope") is None  # scan_id 不存在
-    assert await mgr.cancel("nope") is None  # ws 无 scan
-
-
-@pytest.mark.asyncio
-async def test_cancel_shim_latest_active(tmp_path):
-    """T3: cancel(ws) shim -> cancel latest/active scan（旧 DELETE /api/scan/{ws}）。"""
-    mgr = ScanManager(tmp_path, tmp_path / "r", None)
-    scan_dir = _make_scan_dir(tmp_path, "ws", scan_id="s1", status="running")
-    mock_handle = AsyncMock()
-    mgr._handles[("ws", "s1")] = mock_handle  # active web scan
-    # shim: scan_id=None -> 取 _handles 里的 active scan
-    result = await mgr.cancel("ws")
-    mock_handle.cancel.assert_awaited_once()
-    assert result == {"cancelled": "s1"}
 
 
 # ── _watch: tail events.ndjson 直到 scan_end ──────────────────────────────

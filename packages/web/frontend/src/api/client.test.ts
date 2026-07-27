@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler } from "./client";
+import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler } from "./client";
 
 // 构造符合 fetch Response 真实契约的 mock：text() 与 json() 都在。
 function res({ ok, status, body }: { ok: boolean; status: number; body: unknown }) {
@@ -92,5 +92,23 @@ describe("client auth", () => {
     setUnauthorizedHandler(h);
     await expect(apiGet("/workspaces")).rejects.toThrow();
     expect(h).toHaveBeenCalled();
+  });
+
+  it("默认 handler 在 /login 页不重复跳转（防全局组件非 silent 401 致 login 页循环刷新）", async () => {
+    // 根因：BrandProvider 在 App.tsx 最外层，未登录 /login 页也会发非 silent 401 请求
+    // -> 默认 handler window.location.assign("/login?expired=1") -> 整页刷新 -> 重新
+    // mount -> 又 401 -> 循环。默认 handler 在已在 /login 时不再 assign，根治循环。
+    resetUnauthorizedHandler();
+    const assignSpy = vi.fn();
+    const origLoc = window.location;
+    Object.defineProperty(window, "location", {
+      value: { pathname: "/login", assign: assignSpy } as unknown as Location,
+      writable: true,
+      configurable: true,
+    });
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    await expect(apiGet("/system-status")).rejects.toThrow();
+    expect(assignSpy).not.toHaveBeenCalled();
+    Object.defineProperty(window, "location", { value: origLoc, writable: true, configurable: true });
   });
 });

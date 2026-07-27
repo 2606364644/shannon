@@ -20,10 +20,16 @@ const baseWorkspaces: Workspace[] = [
   { name: "ws-corr", scan_type: "correlation", status: "completed", created_at: 1780000200, is_correlation: true, links: { child_workspaces: ["ws-child1"] } },
 ];
 
+const activeScan = {
+  scan_id: "20260727-120000", scan_type: "whitebox", status: "running",
+  created_at: 1780000000, vuln_count: 14, is_running: true,
+};
 const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json(baseWorkspaces)),
+  // ws 列表行 Cancel 无 scan_id -> cancelActiveScan 先 listScans 再 scan-scoped DELETE。
+  http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([activeScan])),
   http.delete("/api/workspaces/:ws", ({ params }) => HttpResponse.json({ deleted: params.ws })),
-  http.delete("/api/scan/:ws", ({ params }) => HttpResponse.json({ cancelled: params.ws })),
+  http.delete("/api/workspaces/:ws/scans/:scanId", ({ params }) => HttpResponse.json({ cancelled: params.scanId })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -82,7 +88,7 @@ describe("WorkspaceListPage (DataTable)", () => {
     // Dialog 标题 + 描述都含 "取消扫描"，用 heading role 精确匹配标题
     expect(await screen.findByRole("heading", { name: /取消扫描/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /确认/ }));
-    // cancelScan DELETE /api/scan/ws-a 已 mock → 触发 refresh
+    // cancelActiveScan（listScans + DELETE scans/.../）已 mock → 触发 refresh
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
@@ -106,7 +112,7 @@ describe("WorkspaceListPage (DataTable)", () => {
   });
 
   it("cancel 返 via:signal → toast 语义提示「已发停止信号」", async () => {
-    server.use(http.delete("/api/scan/:ws", () => HttpResponse.json({ cancelled: "ws-a", via: "signal" })));
+    server.use(http.delete("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json({ cancelled: "20260727-120000", via: "signal" })));
     renderPage();
     await waitFor(() => expect(screen.getByText("ws-a")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /取消/ }));

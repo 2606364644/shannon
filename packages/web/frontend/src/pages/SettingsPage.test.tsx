@@ -1,9 +1,21 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import { SettingsPage } from "./SettingsPage";
+
+// SettingsPage 用 useAuth 取 must_change_password / refreshUser。本测试聚焦系统状态
+// 渲染，stub 掉 AuthContext 避免必须包 AuthProvider + mock /auth/me。
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "admin", role: "admin", must_change_password: false },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
 
 const okBody = {
   ai_provider: "claude",

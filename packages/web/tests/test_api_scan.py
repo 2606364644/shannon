@@ -17,10 +17,6 @@ class FakeSM:
         self.started.append(req)
         return "WSX", "20260727-120000"  # T3: (ws, scan_id)
 
-    async def cancel(self, ws):
-        self.cancelled.append(ws)
-        return True
-
     def active_pids(self):
         return {}
 
@@ -99,52 +95,6 @@ def test_post_scan_409_concurrent(_authed_app):
     client = _authed_client(app)
     tok = _csrf(client)
     assert client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok}).status_code == 409
-
-
-def test_delete_scan(_authed_app):
-    fake = FakeSM()
-    app = create_app(overrides={"scan_manager": fake})
-    app.state.auth_store = _authed_app.state.auth_store
-    app.state.session_manager = _authed_app.state.session_manager
-    client = _authed_client(app)
-    tok = _csrf(client)
-    assert client.delete("/api/scan/WSX", headers={"X-CSRF-Token": tok}).status_code == 200
-
-
-def test_cancel_passes_through_via_signal(_authed_app):
-    """cancel 对 owner=host scan 返 via:signal 时,api 透传给前端(语义提示)。"""
-    class HostSM:
-        async def cancel(self, ws):
-            return {"cancelled": ws, "via": "signal"}
-
-        def active_pids(self):
-            return {}
-
-    app = create_app(overrides={"scan_manager": HostSM()})
-    app.state.auth_store = _authed_app.state.auth_store
-    app.state.session_manager = _authed_app.state.session_manager
-    client = _authed_client(app)
-    tok = _csrf(client)
-    r = client.delete("/api/scan/WSX", headers={"X-CSRF-Token": tok})
-    assert r.status_code == 200
-    assert r.json() == {"cancelled": "WSX", "via": "signal"}
-
-
-def test_cancel_404_when_workspace_missing(_authed_app):
-    """workspace 不存在(scan_manager.cancel 返 None)→ 唯一 404(spec §4.6)。"""
-    class NoScanSM:
-        async def cancel(self, ws):
-            return None
-
-        def active_pids(self):
-            return {}
-
-    app = create_app(overrides={"scan_manager": NoScanSM()})
-    app.state.auth_store = _authed_app.state.auth_store
-    app.state.session_manager = _authed_app.state.session_manager
-    client = _authed_client(app)
-    tok = _csrf(client)
-    assert client.delete("/api/scan/WSX", headers={"X-CSRF-Token": tok}).status_code == 404
 
 
 def test_post_scan_workspace_field_name_contract(_authed_app):
