@@ -129,8 +129,10 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
 function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (ms: number) => string }) {
   const { t } = useTranslation();
   return (
-    <Card className="p-4">
-      <CardTitle className="mb-2 font-semibold tracking-tight text-base">{t("workspaceDetail.overview.agentLedger")}</CardTitle>
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <CardTitle className="font-semibold tracking-tight text-sm">{t("workspaceDetail.overview.agentLedger")}</CardTitle>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>

@@ -39,7 +39,7 @@ export function WorkspaceSwitcher({ currentWorkspace }: { currentWorkspace?: str
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} aria-label={t("workspaceSwitcher.title")}>
+      <Button variant="outline" onClick={() => setOpen(true)} aria-label={t("workspaceSwitcher.title")}>
         <ArrowLeftRight className="size-4" /> {t("workspaceSwitcher.title")}
       </Button>
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
@@ -59,14 +59,14 @@ export function WorkspaceSwitcher({ currentWorkspace }: { currentWorkspace?: str
                   key={w.name}
                   data-current={w.name === currentWorkspace}
                   onClick={() => pick(w.name)}
-                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent ${
-                    w.name === currentWorkspace ? "bg-accent" : ""
+                  className={`flex w-full items-center gap-2.5 rounded-md border border-transparent px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${
+                    w.name === currentWorkspace ? "border-border bg-accent" : ""
                   }`}
                 >
-                  <span className={`inline-block size-2 rounded-full ${statusColor(w.status)}`} />
-                  <span className="flex-1 font-mono">{w.name}</span>
+                  <span className={`inline-block size-2 shrink-0 rounded-full ${statusColor(w.status)}`} />
+                  <span className="flex-1 truncate font-mono">{w.name}</span>
                   {w.scan_count != null && <span className="text-xs text-muted-foreground">{w.scan_count}</span>}
-                  {pinned === w.name && <Pin className="size-3 text-primary" />}
+                  {pinned === w.name && <Pin className="size-3.5 text-primary" />}
                 </button>
               ))}
             </div>

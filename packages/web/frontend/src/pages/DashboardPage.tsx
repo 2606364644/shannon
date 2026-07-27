@@ -12,6 +12,7 @@ import { Empty } from "@/components/Empty";
 import { ScanFilters, DEFAULT_SCAN_FILTERS, useScanFilters } from "@/components/ScanFilters";
 import { listAllScans } from "@/api/client";
 import type { ScanSummary } from "@/api/types";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fmtCost } from "@/utils/currency";
 import { useAsync } from "@/lib/useAsync";
 
@@ -97,32 +98,32 @@ export function DashboardPage() {
       <ScanFilters value={filters} onChange={setFilters} />
 
       <Card className="overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead className="border-b bg-muted/30">
-            <tr className="text-left">
-              <th className="p-2">{t("dashboard.scanTable.status")}</th>
-              <th className="p-2">{t("dashboard.scanTable.scanId")}</th>
-              <th className="p-2">{t("dashboard.scanTable.workspace")}</th>
-              <th className="p-2">{t("dashboard.scanTable.type")}</th>
-              <th className="p-2">{t("dashboard.scanTable.vulns")}</th>
-              <th className="p-2">{t("dashboard.scanTable.cost")}</th>
-              <th className="p-2">{t("dashboard.scanTable.time")}</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("dashboard.scanTable.status")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.scanId")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.workspace")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.type")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.vulns")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.cost")}</TableHead>
+              <TableHead>{t("dashboard.scanTable.time")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {filtered.map((s: ScanSummary) => (
-              <tr key={s.scan_id} className="border-b last:border-0 hover:bg-accent">
-                <td className="p-2"><StatusBadge status={s.status} /></td>
-                <td className="p-2 font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.scan_id}</Link></td>
-                <td className="p-2 font-mono"><Link to={`/p/${s.workspace}`} className="hover:text-primary">{s.workspace}</Link></td>
-                <td className="p-2"><Badge variant="outline">{s.scan_type}</Badge></td>
-                <td className="p-2">{s.vuln_count ?? 0}</td>
-                <td className="p-2">{s.total_cost_usd != null ? fmtCost(s.total_cost_usd, s.cost_currency) : "-"}</td>
-                <td className="p-2 text-xs text-muted-foreground">{fmtTime(s.created_at)}</td>
-              </tr>
+              <TableRow key={s.scan_id}>
+                <TableCell><StatusBadge status={s.status} /></TableCell>
+                <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.scan_id}</Link></TableCell>
+                <TableCell className="font-mono"><Link to={`/p/${s.workspace}`} className="hover:text-primary">{s.workspace}</Link></TableCell>
+                <TableCell><Badge variant="outline">{s.scan_type}</Badge></TableCell>
+                <TableCell>{s.vuln_count ?? 0}</TableCell>
+                <TableCell>{s.total_cost_usd != null ? fmtCost(s.total_cost_usd, s.cost_currency) : "-"}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{fmtTime(s.created_at)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </Card>
       {filtered.length === 0 && <p className="text-sm text-muted-foreground">{t("workspaceDetail.scans.noMatch")}</p>}
     </div>

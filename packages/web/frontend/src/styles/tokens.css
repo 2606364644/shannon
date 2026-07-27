@@ -51,9 +51,10 @@
   /* 层 E · elevation（深 · 暖黑柔阴影浮起；hue30 与背景同系） */
   --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
 
-  /* cta 按钮专用：coral 陶瓷内描边高光 + coral 光晕（A · Command Run signature）*/
-  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.22), inset 0 -1px 0 hsl(0 0% 0% / 0.18), 0 1px 2px hsl(15 60% 40% / 0.35), 0 6px 18px hsl(15 70% 45% / 0.30);
-  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.28), inset 0 -1px 0 hsl(0 0% 0% / 0.20), 0 2px 4px hsl(15 60% 40% / 0.40), 0 10px 26px hsl(15 75% 50% / 0.42);
+  /* cta 按钮专用：coral 柔和材质阴影（ambient coral 光晕 + 落影），非 neon inset 高光。
+     hover 加强光晕 + 投影，配合按钮 hover:-translate-y-px 微浮起。*/
+  --shadow-cta: 0 1px 2px hsl(0 0% 0% / 0.30), 0 6px 16px -6px hsl(15 70% 45% / 0.35);
+  --shadow-cta-hover: 0 2px 4px hsl(0 0% 0% / 0.30), 0 12px 24px -6px hsl(15 75% 50% / 0.45);
 
   /* 层 D · @tailwindcss/typography prose 主题（深 · 暖黑；links 用 coral） */
   --prose-body: 40 14% 90%;
@@ -114,7 +115,7 @@
   /* 层 E · elevation（浅 · 暖棕柔阴影） */
   --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
 
-  /* cta 按钮专用（浅 · 光晕更柔，避免暖白底上 coral 光晕发脏）*/
-  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.40), inset 0 -1px 0 hsl(15 58% 30% / 0.15), 0 1px 2px hsl(15 58% 40% / 0.20), 0 4px 14px hsl(15 58% 45% / 0.18);
-  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.50), inset 0 -1px 0 hsl(15 58% 30% / 0.18), 0 2px 4px hsl(15 58% 40% / 0.25), 0 8px 22px hsl(15 58% 50% / 0.25);
+  /* cta 按钮专用（浅 · 柔和暖棕落影 + 微 coral 光晕）*/
+  --shadow-cta: 0 1px 2px hsl(34 40% 30% / 0.14), 0 6px 16px -6px hsl(15 58% 45% / 0.22);
+  --shadow-cta-hover: 0 2px 4px hsl(34 40% 30% / 0.18), 0 12px 24px -6px hsl(15 58% 50% / 0.30);
 }

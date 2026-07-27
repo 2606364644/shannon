@@ -13,6 +13,7 @@ interface NavItem {
   to: string;
   disabled?: boolean;
   end?: boolean;
+  testId?: string;
 }
 
 const NAV: NavItem[] = [
@@ -28,6 +29,12 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
   const brand = useBrand();
   const { user } = useAuth();
   const mustChange = user?.must_change_password === true;
+  // admin 专属「工作区管理」并入主 nav 数组（IA 重设计 §2.2），
+  // 与其它项同源渲染——不再作为 nav 后的独立悬浮块，消除「突兀」感。
+  const items: NavItem[] =
+    user?.role === "admin"
+      ? [...NAV, { labelKey: "nav.workspaceManage", to: "/workspaces", testId: "nav-workspace-manage" }]
+      : NAV;
   return (
     <header data-testid="topbar" className="sticky top-0 z-40 border-b border-border bg-card print:static">
       <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
@@ -36,7 +43,7 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
           <span>{brand}</span>
         </Link>
         <nav className="flex items-center gap-1" aria-label={t("nav.mainAria")}>
-          {NAV.map((n) =>
+          {items.map((n) =>
             n.disabled ? (
               <span
                 key={n.labelKey}
@@ -49,6 +56,7 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
               <NavLink key={n.labelKey} to={n.to} end={n.end} className="inline-flex">
                 {({ isActive }) => (
                   <span
+                    data-testid={n.testId}
                     data-active={isActive}
                     className={cn(
                       "border-b-2 px-3 py-1.5 text-sm transition-colors",
@@ -64,25 +72,6 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
             )
           )}
         </nav>
-        {/* admin 专属「工作区管理」入口（/workspaces 包 RequireAdmin）。IA 重设计 §2.2 */}
-        {user?.role === "admin" && (
-          <NavLink to="/workspaces" className="inline-flex">
-            {({ isActive }) => (
-              <span
-                data-testid="nav-workspace-manage"
-                data-active={isActive}
-                className={cn(
-                  "border-b-2 px-3 py-1.5 text-sm transition-colors",
-                  isActive
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {t("nav.workspaceManage")}
-              </span>
-            )}
-          </NavLink>
-        )}
         <div className="ml-auto flex items-center gap-1">
           {/* 运行中扫描指示器 slot（子项目 5 接 SSE） */}
           {mustChange && (

@@ -176,3 +176,36 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     await waitFor(() => expect(screen.queryByText("扫描任务")).not.toBeInTheDocument());
   });
 });
+
+describe("ScanCard 指标带设计不变量（concern 1：漏洞/花花费 hero）", () => {
+  it("vuln_count > 0：漏洞数以大号 mono + 红色 hero 呈现（醒目）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    // 找「漏洞数」标签，其后的值应为 3，且 className 含 text-lg + text-red（hero + 危险色）
+    const label = screen.getByText("漏洞数");
+    const value = label.parentElement?.querySelector(".font-mono.text-lg");
+    expect(value?.textContent).toBe("3");
+    expect(value?.className).toMatch(/text-lg/);
+    expect(value?.className).toMatch(/text-red/);
+  });
+
+  it("vuln_count = 0：漏洞值中性色（不染红，避免空扫描虚警）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s1")).toBeInTheDocument());
+    const label = screen.getByText("漏洞数");
+    const value = label.parentElement?.querySelector(".font-mono.text-lg");
+    expect(value?.textContent).toBe("0");
+    expect(value?.className).not.toMatch(/text-red/);
+  });
+
+  it("花费以 hero（大号 mono）呈现", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    const label = screen.getByText("花费");
+    const value = label.parentElement?.querySelector(".font-mono.text-lg");
+    expect(value).toBeTruthy();
+  });
+});

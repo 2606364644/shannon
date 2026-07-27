@@ -19,11 +19,11 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        // cta · Command Run：coral 实心陶瓷 + IBM Plex Mono + ❯ 提示符 + coral 光晕。
-        // signature 取自产品自身的命令行血统（scan_id/Cypher/log 皆 Mono），非通用 Plus 图标。
-        // ❯ 经 before 伪元素自动注入，调用点只写文案。尺寸同 default(h-9)，靠质感而非加大尺寸区分主次。
+        // cta · 主命令按钮：coral 实心 + sans 字体 + 柔和材质阴影 + hover 微浮。
+        // 不再用 ❯ 提示符 / mono / neon 光晕（过重且与文案 + 号重复）。
+        // 靠质感（阴影 + hover 浮起）区分主次，尺寸同 default(h-9)，不加大。
         cta:
-          "bg-primary text-primary-foreground font-mono tracking-[0.035em] before:content-['❯'] before:mr-1.5 before:font-semibold before:opacity-80 shadow-[var(--shadow-cta)] hover:shadow-[var(--shadow-cta-hover)] active:translate-y-px",
+          "bg-primary text-primary-foreground font-medium shadow-[var(--shadow-cta)] hover:shadow-[var(--shadow-cta-hover)] hover:-translate-y-px active:translate-y-0 transition-all",
       },
       size: {
         default: "h-9 px-4 py-2",

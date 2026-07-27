@@ -93,25 +93,28 @@ export default function WorkspaceDetail() {
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-mono text-xl">{workspace}</h2>
-          <Button variant={isPinned ? "secondary" : "outline"} size="icon" onClick={onPin} title={t(isPinned ? "workspaceDetail.unpin" : "workspaceDetail.pin")}>
-            <Pin className="size-4" />
-          </Button>
-          <WorkspaceSwitcher currentWorkspace={workspace} />
-          {workspace && <MemberManagerDialog ws={workspace} />}
-          {workspace && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to="repos" aria-label={t("workspaceDetail.tabs.repos")} title={t("workspaceDetail.tabs.repos")}>
-                <FolderGit2 className="size-4" /> {t("workspaceDetail.tabs.repos")}
-              </Link>
+          {/* 命令栏：所有操作按钮统一 h-9（outline 同层），不再 sm/icon 混用导致高低不一 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant={isPinned ? "secondary" : "outline"} size="icon" onClick={onPin} title={t(isPinned ? "workspaceDetail.unpin" : "workspaceDetail.pin")}>
+              <Pin className="size-4" />
             </Button>
-          )}
-          {workspace && (
-            <Button variant="outline" size="icon" asChild>
-              <Link to="settings" aria-label={t("wsConfig.openSettings")} title={t("wsConfig.openSettings")}>
-                <Settings className="size-4" />
-              </Link>
-            </Button>
-          )}
+            <WorkspaceSwitcher currentWorkspace={workspace} />
+            {workspace && <MemberManagerDialog ws={workspace} />}
+            {workspace && (
+              <Button variant="outline" asChild>
+                <Link to="repos" aria-label={t("workspaceDetail.tabs.repos")} title={t("workspaceDetail.tabs.repos")}>
+                  <FolderGit2 className="size-4" /> {t("workspaceDetail.tabs.repos")}
+                </Link>
+              </Button>
+            )}
+            {workspace && (
+              <Button variant="outline" size="icon" asChild>
+                <Link to="settings" aria-label={t("wsConfig.openSettings")} title={t("wsConfig.openSettings")}>
+                  <Settings className="size-4" />
+                </Link>
+              </Button>
+            )}
+          </div>
           {loading ? (
             <Skeleton className="h-5 w-40" />
           ) : (

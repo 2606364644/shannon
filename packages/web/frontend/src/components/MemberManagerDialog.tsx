@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/auth/AuthContext";
 import { getMembers, addMember, removeMember } from "@/api/members";
 import { ApiError } from "@/api/client";
@@ -50,14 +51,14 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="member-manager">{t("members.manage")}</Button>
+        <Button variant="outline" onClick={() => setOpen(true)} data-testid="member-manager">{t("members.manage")}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{t("members.title")}</DialogTitle></DialogHeader>
         <ul className="space-y-1">
           {members.map((m) => (
-            <li key={m.user_id} className="flex items-center justify-between rounded border px-3 py-1.5 text-sm">
-              <span>{m.username} <span className="text-xs text-muted-foreground">{t(`members.${m.role}`)}</span></span>
+            <li key={m.user_id} className="flex items-center justify-between rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+              <span className="flex items-center gap-2">{m.username} <Badge variant="outline" className="font-mono text-xs text-muted-foreground">{t(`members.${m.role}`)}</Badge></span>
               <Button variant="ghost" size="sm" onClick={() => onRemove(m.username)}>{t("members.remove")}</Button>
             </li>
           ))}
@@ -65,7 +66,7 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
         <div className="flex items-center gap-2">
           <Input value={picked} onChange={(e) => setPicked(e.target.value)}
                  placeholder={t("members.input.placeholder")} className="flex-1" />
-          <Button onClick={onAdd} disabled={!picked}>{t("members.add")}</Button>
+          <Button variant="outline" onClick={onAdd} disabled={!picked}>{t("members.add")}</Button>
         </div>
       </DialogContent>
     </Dialog>

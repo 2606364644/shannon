@@ -147,28 +147,38 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
   }
 
   return (
-    <Card className="p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        {/* 左：scan 标识 + 元信息 */}
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link to={`${scanPath}/live`} className="font-mono text-sm font-medium hover:text-primary">
-              {scan.scan_id}
-            </Link>
-            <StatusBadge status={scan.status} />
-            <Badge variant="outline" className="font-mono">{scan.scan_type}</Badge>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span><span className="text-foreground/60">{t("workspaceDetail.scans.card.created")}:</span> {fmtTime(scan.created_at)}</span>
-            <span><span className="text-foreground/60">{t("workspaceDetail.scans.card.vulns")}:</span> {scan.vuln_count ?? 0}</span>
-            <span><span className="text-foreground/60">{t("workspaceDetail.scans.card.cost")}:</span> {fmtCost(scan.total_cost_usd ?? null, scan.cost_currency ?? null)}</span>
-            {scan.completed_at && (
-              <span><span className="text-foreground/60">{t("workspaceDetail.scans.card.status")}:</span> {fmtTime(scan.completed_at)}</span>
-            )}
-          </div>
+    <Card className="px-4 py-2.5">
+      {/* 单行：scan 标识 + 状态/类型 + 内联 hero 指标（漏洞/花费 大号 mono）+ 操作。
+         漏洞数 >0 染红——安全工具里「发现」是头条；=0 中性不刺眼。*/}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Link to={`${scanPath}/live`} className="font-mono text-sm font-medium hover:text-primary">
+            {scan.scan_id}
+          </Link>
+          <StatusBadge status={scan.status} />
+          <Badge variant="outline" className="font-mono">{scan.scan_type}</Badge>
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-xs text-muted-foreground">{t("workspaceDetail.scans.card.vulns")}</span>
+            <span
+              className={`font-mono text-lg font-semibold leading-none ${
+                (scan.vuln_count ?? 0) > 0 ? "text-red" : "text-foreground"
+              }`}
+            >
+              {String(scan.vuln_count ?? 0)}
+            </span>
+          </span>
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-xs text-muted-foreground">{t("workspaceDetail.scans.card.cost")}</span>
+            <span className="font-mono text-lg leading-none">
+              {fmtCost(scan.total_cost_usd ?? null, scan.cost_currency ?? null)}
+            </span>
+          </span>
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-xs text-muted-foreground">{t("workspaceDetail.scans.card.created")}</span>
+            <span className="font-mono text-sm text-muted-foreground">{fmtTime(scan.created_at)}</span>
+          </span>
         </div>
-        {/* 右：操作 */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1">
           <Button size="sm" variant="ghost" asChild>
             <Link to={`${scanPath}/live`}><Eye className="size-3.5" /> {t("workspaceDetail.scans.view")}</Link>
           </Button>
@@ -220,3 +230,5 @@ function msg(e: unknown): string {
   if (e instanceof ApiError) return String(e.status);
   return e instanceof Error ? e.message : String(e);
 }
+
+

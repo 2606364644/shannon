@@ -213,7 +213,7 @@
       "blackbox": "黑盒",
       "correlation": "关联"
     },
-    "newScan": "+ 新建扫描",
+    "newScan": "新建扫描",
     "lastRefresh": "上次刷新 {{time}}",
     "refreshAria": "手动刷新",
     "empty": {
@@ -298,7 +298,7 @@
       "searchPlaceholder": "搜索仓库…",
       "noMatch": "无匹配仓库"
     },
-    "submit": "开始扫描 ▶",
+    "submit": "开始扫描",
     "submitHint": "→ 202 → 跳 /p/{ws}/live · 错误：400(Temporal)/409(并发)/422(yaml)",
     "errors": {
       "yamlRuntimeError": "yaml 有错，无法运行",
@@ -317,7 +317,7 @@
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
     "subtitleBlackbox": "对运行中的目标服务发起黑盒渗透测试",
     "subtitleCorrelation": "合并多份扫描结果，生成关联分析报告",
-    "submitBlackbox": "开始渗透 ▶",
+    "submitBlackbox": "开始渗透",
     "footerHintWhitebox": "⌘+Enter 快速提交",
     "footerHintBlackbox": "确认目标 URL 正确后提交",
     "sidebar": {
@@ -348,7 +348,7 @@
   "dashboard": {
     "title": "仪表盘",
     "subtitle": "扫描概览与最近活动",
-    "newScan": "+ 新建扫描",
+    "newScan": "新建扫描",
     "summaryAria": "汇总",
     "stats": {
       "running": "运行中",
@@ -357,7 +357,7 @@
       "totalCost": "累计成本"
     },
     "runningTitle": "正在运行",
-    "viewLive": "查看实时 →",
+    "viewLive": "查看实时",
     "noRunning": "当前无运行中扫描",
     "noRunningAgents": "无运行中 agent",
     "recentTitle": "最近扫描",
@@ -438,7 +438,7 @@
       "listTitle": "扫描任务",
       "empty": "尚无扫描任务",
       "emptyHint": "新建一个扫描开始审计",
-      "newScan": "+ 新建扫描",
+      "newScan": "新建扫描",
       "view": "查看",
       "resume": "恢复",
       "rerun": "重跑",

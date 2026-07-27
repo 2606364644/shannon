@@ -213,7 +213,7 @@
       "blackbox": "blackbox",
       "correlation": "correlation"
     },
-    "newScan": "+ New scan",
+    "newScan": "New scan",
     "lastRefresh": "Last updated {{time}}",
     "refreshAria": "Manual refresh",
     "empty": {
@@ -298,7 +298,7 @@
       "searchPlaceholder": "Search repositories...",
       "noMatch": "No matching repositories"
     },
-    "submit": "Start scan ▶",
+    "submit": "Start scan",
     "submitHint": "→ 202 → redirect /p/{ws}/live · errors: 400(Temporal)/409(concurrent)/422(yaml)",
     "errors": {
       "yamlRuntimeError": "yaml has errors; cannot run",
@@ -317,7 +317,7 @@
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
     "subtitleBlackbox": "Launch a blackbox penetration test against a running target",
     "subtitleCorrelation": "Merge multiple scan results into a correlation report",
-    "submitBlackbox": "Start Pentest ▶",
+    "submitBlackbox": "Start Pentest",
     "footerHintWhitebox": "⌘+Enter to submit",
     "footerHintBlackbox": "Verify the target URL before submitting",
     "sidebar": {
@@ -348,7 +348,7 @@
   "dashboard": {
     "title": "Dashboard",
     "subtitle": "Scan overview and recent activity",
-    "newScan": "+ New scan",
+    "newScan": "New scan",
     "summaryAria": "Summary",
     "stats": {
       "running": "Running",
@@ -357,7 +357,7 @@
       "totalCost": "Total cost"
     },
     "runningTitle": "Running",
-    "viewLive": "View live →",
+    "viewLive": "View live",
     "noRunning": "No running scans",
     "noRunningAgents": "No running agents",
     "recentTitle": "Recent scans",
@@ -438,7 +438,7 @@
       "listTitle": "Scan jobs",
       "empty": "No scan jobs yet",
       "emptyHint": "Start a new scan to begin auditing",
-      "newScan": "+ New scan",
+      "newScan": "New scan",
       "view": "View",
       "resume": "Resume",
       "rerun": "Rerun",

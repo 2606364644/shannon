@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { X, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getUserWorkspaces, type UserRow, type UserWorkspace } from "@/api/users";
@@ -68,32 +70,48 @@ export function UserWorkspacesPanel({ user }: { user: UserRow }) {
   }
 
   if (loading) return <Skeleton className="h-20 w-full" />;
+  const assigned = Object.keys(memberOf).length;
   return (
-    <div className="rounded border p-3 space-y-2" data-testid={`wsp-${user.username}`}>
-      <p className="text-sm font-medium">{t("users.members.title")}</p>
-      {allWs.length === 0 && <p className="text-sm text-muted-foreground">{t("users.members.empty")}</p>}
-      {allWs.map((ws) => {
-        const role = memberOf[ws];
-        return (
-          <div key={ws} className="flex items-center justify-between text-sm">
-            <span className="font-mono">{ws}</span>
-            {role ? (
-              <>
-                <Select value={role} onValueChange={(v) => onRoleChange(ws, v as "manager" | "member")}>
-                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">{t("users.members.wsRole")} member</SelectItem>
-                    <SelectItem value="manager">manager</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button variant="ghost" size="sm" onClick={() => onRemove(ws)}>{t("users.members.remove")}</Button>
-              </>
-            ) : (
-              <Button variant="ghost" size="sm" data-testid={`add-${ws}`} onClick={() => onAdd(ws)}>{t("users.members.add")}</Button>
-            )}
-          </div>
-        );
-      })}
+    <div className="overflow-hidden rounded-lg border border-border bg-card" data-testid={`wsp-${user.username}`}>
+      {/* 标题条：归属标题 + 已分配计数 */}
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <span className="text-xs font-medium text-muted-foreground">{t("users.members.title")}</span>
+        <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">{assigned}/{allWs.length}</Badge>
+      </div>
+      {/* 行：ws 名 + （已加入：角色 select + 移除） / （未加入：加入按钮），细分线分隔 */}
+      <div className="divide-y divide-border">
+        {allWs.length === 0 && (
+          <p className="px-3 py-2 text-sm text-muted-foreground">{t("users.members.empty")}</p>
+        )}
+        {allWs.map((ws) => {
+          const role = memberOf[ws];
+          return (
+            <div key={ws} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+              <span className="truncate font-mono">{ws}</span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {role ? (
+                  <>
+                    <Select value={role} onValueChange={(v) => onRoleChange(ws, v as "manager" | "member")}>
+                      <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="member">{t("users.members.wsRole")} member</SelectItem>
+                        <SelectItem value="manager">manager</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="ghost" size="icon-sm" aria-label={t("users.members.remove")} title={t("users.members.remove")} onClick={() => onRemove(ws)}>
+                      <X className="size-3.5" />
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" data-testid={`add-${ws}`} onClick={() => onAdd(ws)}>
+                    <Plus className="size-3.5" /> {t("users.members.add")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
