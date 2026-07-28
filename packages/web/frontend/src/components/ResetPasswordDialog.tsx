@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { resetPassword } from "@/api/users";
+import { PASSWORD_MIN_LEN } from "@/lib/password";
+import { apiErrorMessage } from "@/lib/apiError";
 
 export function ResetPasswordDialog({ userId, open, onOpenChange }: {
   userId: number; open: boolean; onOpenChange: (o: boolean) => void;
@@ -15,14 +17,18 @@ export function ResetPasswordDialog({ userId, open, onOpenChange }: {
   const [busy, setBusy] = useState(false);
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (pw.length < PASSWORD_MIN_LEN) {
+      toast.error(t("users.passwordMinLength"));
+      return;
+    }
     setBusy(true);
     try {
       await resetPassword(userId, pw);
       toast.success(t("users.passwordReset"));
       setPw("");
       onOpenChange(false);
-    } catch {
-      toast.error(t("users.passwordResetFailed"));
+    } catch (e) {
+      toast.error(apiErrorMessage(e, t("users.passwordResetFailed")));
     } finally { setBusy(false); }
   }
   return (

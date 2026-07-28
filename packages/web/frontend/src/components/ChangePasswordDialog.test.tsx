@@ -44,6 +44,14 @@ describe("ChangePasswordDialog", () => {
     expect(fm).not.toHaveBeenCalled();
   });
 
+  it("新密码不足 8 位时提示且不提交", async () => {
+    const fm = vi.spyOn(window, "fetch");
+    renderDialog(true);
+    fillAndSubmit("oldpw-123", "short", "short");
+    await waitFor(() => expect(screen.getByText("auth.changePassword.tooShort")).toBeInTheDocument());
+    expect(fm).not.toHaveBeenCalled();
+  });
+
   it("提交成功调 onChanged 并关闭", async () => {
     const fm = vi.spyOn(window, "fetch");
     fm.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));

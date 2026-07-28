@@ -1,17 +1,18 @@
-import { useState } from "react";
 import { Sun, Moon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { applyTheme, getInitialTheme, type Theme } from "@/lib/theme";
+import { useTheme } from "@/lib/theme-context";
+import { resolveEffectiveTheme } from "@/lib/theme";
 
 export function ThemeToggle() {
   const { t } = useTranslation();
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const { theme, setTheme } = useTheme();
+  const effective = resolveEffectiveTheme(theme);
 
   function toggle() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    applyTheme(next);
+    // 快捷翻转：切到 effective 的反色并落为显式态。
+    // system 用户点一下 → 退出 system，落到显式 dark/light（"我要明确换到对面"的语义）。
+    setTheme(effective === "dark" ? "light" : "dark");
   }
 
   return (
@@ -20,9 +21,9 @@ export function ThemeToggle() {
       size="icon"
       onClick={toggle}
       aria-label={t("theme.toggleAria")}
-      title={theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
+      title={effective === "dark" ? t("theme.toLight") : t("theme.toDark")}
     >
-      {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      {effective === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
     </Button>
   );
 }

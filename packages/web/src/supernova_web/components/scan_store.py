@@ -33,6 +33,61 @@ def _now_local() -> datetime:
     return datetime.now()
 
 
+def resolve_workflow_id(ws: str, scan_dir: Path, scan_id: str) -> str:
+    """temporal workflow_id（前端「扫描任务名」展示，替代纯日期 scan_id）。
+
+    优先读 scan_dir/events.ndjson 首行 WorkflowHeader.workflow_id —— 真实 temporal id 的
+    single source of truth：CLI/legacy scan 的 workflow_id = workspace_name（CLI scheme，如
+    sentinel_dashboard_20260721-201435），与 web scan 的 {ws}-{scan_id}（web scheme）不同，
+    算不出来只能读。web scan 的 ndjson WorkflowHeader.workflow_id 亦是 {ws}-{scan_id}
+    （scan_manager 提交时由 worker 写入），与 fallback 一致。
+
+    读不到（无 events.ndjson，如未启动 scan）才 fallback 算 {ws}-{scan_id}[-resume-N]
+    （读 session.json resumeAttempts 算 N，对齐 scan_manager._resolve_workflow_id）。
+    """
+    wf = _read_workflow_id_from_ndjson(scan_dir)
+    if wf:
+        return wf
+    n = 0
+    session_file = scan_dir / "session.json"
+    if session_file.exists():
+        try:
+            data = json.loads(session_file.read_text("utf-8"))
+            attempts = data.get("resumeAttempts") or []
+            if isinstance(attempts, list):
+                n = len(attempts)
+        except (json.JSONDecodeError, OSError):
+            n = 0
+    base = f"{ws}-{scan_id}"
+    return f"{base}-resume-{n}" if n > 0 else base
+
+
+def _read_workflow_id_from_ndjson(scan_dir: Path) -> str | None:
+    """读 events.ndjson 首行 WorkflowHeader.workflow_id（scan 启动即写，真实 temporal id）。
+
+    WorkflowHeader 是 scan 首个 event（必为首行）；只读首个非空行即停，避免扫整个大 ndjson。
+    损坏 / 首行非 WorkflowHeader -> None（调用方 fallback 算）。
+    """
+    ndjson = scan_dir / "events.ndjson"
+    if not ndjson.exists():
+        return None
+    try:
+        with ndjson.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                evt = json.loads(line)
+                if isinstance(evt, dict) and evt.get("type") == "WorkflowHeader":
+                    wf = evt.get("workflow_id")
+                    if isinstance(wf, str) and wf:
+                        return wf
+                break  # 首个非空行非 WorkflowHeader -> 放弃（不扫全文件）
+    except (json.JSONDecodeError, OSError):
+        return None
+    return None
+
+
 # ws 级保留目录/文件（非 scan 产物）：T5 legacy 整体搬迁时留在 ws 根不动。
 # indexer 列 ws 也据此区分 ws 级元数据 vs scan 产物。
 WORKSPACE_META_FILENAME = "workspace.json"
@@ -98,6 +153,7 @@ class ScanSummary:
     links: dict
     is_running: bool
     is_correlation: bool
+    workflow_id: str  # temporal workflow 标识 {ws}-{scan_id}[-resume-N]，前端任务名展示
 
     def as_dict(self) -> dict:
         return {
@@ -114,6 +170,7 @@ class ScanSummary:
             "links": self.links,
             "is_running": self.is_running,
             "is_correlation": self.is_correlation,
+            "workflow_id": self.workflow_id,
         }
 
 
@@ -178,10 +235,10 @@ class ScanStore:
         return [(eid, edir) for eid, edir, _ in entries]
 
     def list_scans(self, ws: str) -> list[ScanSummary]:
-        return [self._summarize(scan_dir, scan_id)
+        return [self._summarize(ws, scan_dir, scan_id)
                 for scan_id, scan_dir in self._scan_entries(ws)]
 
-    def _summarize(self, scan_dir: Path, scan_id: str) -> ScanSummary:
+    def _summarize(self, ws: str, scan_dir: Path, scan_id: str) -> ScanSummary:
         """聚合单个 scan 的摘要。SessionManager 读写只依赖 workspace_path，parent 作
         workspaces_dir 仅供 list/delete（此处不用）。"""
         mgr = SessionManager(scan_dir.parent)
@@ -208,6 +265,7 @@ class ScanStore:
             links=links,
             is_running=(status == "running"),
             is_correlation=(scan_type == "correlation"),
+            workflow_id=resolve_workflow_id(ws, scan_dir, scan_id),
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

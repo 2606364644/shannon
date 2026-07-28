@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PASSWORD_MIN_LEN } from "@/lib/password";
 
 interface Props {
   open: boolean;
@@ -28,6 +29,10 @@ export function ChangePasswordDialog({ open, onOpenChange, onChanged }: Props) {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (newPw.length < PASSWORD_MIN_LEN) {
+      setError(t("auth.changePassword.tooShort"));
+      return;
+    }
     if (newPw !== confirmPw) {
       setError(t("auth.changePassword.mismatch"));
       return;

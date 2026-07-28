@@ -32,6 +32,7 @@ export default {
         orange: "hsl(var(--c-orange) / <alpha-value>)",
         red: "hsl(var(--c-red) / <alpha-value>)",
         yellow: "hsl(var(--c-yellow) / <alpha-value>)",
+        amber: "hsl(var(--c-amber) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",

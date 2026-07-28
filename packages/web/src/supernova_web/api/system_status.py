@@ -10,6 +10,16 @@ from fastapi import APIRouter, Request
 router = APIRouter(prefix="/api", tags=["system-status"])
 
 
+def resolve_brand_name(request: Request) -> str:
+    """品牌名解析:运行时覆盖(store) > env(默认 Supernova)。"""
+    store = getattr(request.app.state, "branding_store", None)
+    if store is not None:
+        override = store.get_brand_name()
+        if override:
+            return override
+    return request.app.state.config.brand_name
+
+
 async def _probe_temporal() -> tuple[str, str | None]:
     """轻量 socket 探测 Temporal 可达性(复用 scan_manager._check_temporal 同款逻辑)。
 
@@ -52,6 +62,7 @@ async def system_status(request: Request) -> dict:
             "credentials_configured": bool(cfg.gitlab_user and cfg.gitlab_token),
         },
         "version": f"supernova-web {ver}",
-        # 平台品牌名(左上角字标数据源);由 SUPERNOVA_WEB_BRAND_NAME env 驱动,默认 Supernova。
-        "brand_name": cfg.brand_name,
+        # 平台品牌名(左上角字标数据源)。优先级:branding.json 运行时覆盖 >
+        # SUPERNOVA_WEB_BRAND_NAME env > 默认 "Supernova";管理员可在设置页改名。
+        "brand_name": resolve_brand_name(request),
     }

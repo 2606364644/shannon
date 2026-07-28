@@ -127,6 +127,9 @@ export interface ScanSummary {
   total_cost_usd?: number | null;
   cost_currency?: string | null;
   is_running: boolean;
+  // temporal workflow 标识 {ws}-{scan_id}[-resume-N]（前端「扫描任务名」展示用，替代纯日期 scan_id）。
+  // 旧后端不返 -> 可选，消费方 ?? scan_id 兜底。
+  workflow_id?: string;
   // Phase 1 额外聚合字段（兼容，spec §4.2 未列但 scan_store 已产出）
   vuln_counts?: Record<string, number>;
   total_duration_ms?: number | null;
@@ -166,6 +169,7 @@ export interface SessionData {
   links?: { parent_workspace?: string | null; child_workspaces?: string[] };
   metrics?: SessionMetrics;
   session?: { status?: string; createdAt?: string; id?: string };  // 嵌套旧格式
+  workflow_id?: string;  // temporal workflow 标识（ScanDetail header 任务名展示）
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;

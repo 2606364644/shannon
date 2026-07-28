@@ -230,3 +230,50 @@ def test_scan_summary_running_when_heartbeat_fresh(tmp_path):
     s = store.list_scans("WS")[0]
     assert s.status == "running"
     assert s.is_running is True
+
+
+# ── workflow_id（前端任务名展示）──────────────────────────────────────────────
+
+def test_scan_summary_workflow_id(tmp_path):
+    """workflow_id = {ws}-{scan_id}[-resume-N]（读 resumeAttempts 算 N）。"""
+    store = ScanStore(tmp_path)
+    new_id, scan_dir = store.create_scan("WS1", "u", "/x")
+    s = store.list_scans("WS1")[0]
+    # 首次（无 resumeAttempts）-> {ws}-{scan_id}
+    assert s.workflow_id == f"WS1-{new_id}"
+    assert s.as_dict()["workflow_id"] == f"WS1-{new_id}"
+    # 写 resumeAttempts（模拟已 resume 1 次）-> 加 -resume-1
+    sess = json.loads((scan_dir / "session.json").read_text())
+    sess["resumeAttempts"] = [{"at": 1}]
+    (scan_dir / "session.json").write_text(json.dumps(sess))
+    s2 = store.list_scans("WS1")[0]
+    assert s2.workflow_id == f"WS1-{new_id}-resume-1"
+
+
+def test_scan_summary_workflow_id_legacy(tmp_path):
+    """legacy ws 根 scan 的 workflow_id = {ws}-{legacy_id}（读 ws 根 session.json）。"""
+    store = ScanStore(tmp_path)
+    _make_legacy_root_scan(tmp_path / "WS2", created_at=1780000000.0)
+    s = store.list_scans("WS2")[0]
+    legacy_id = store._legacy_scan_id(tmp_path / "WS2")
+    assert s.workflow_id == f"WS2-{legacy_id}"
+
+
+def test_scan_summary_workflow_id_prefers_ndjson_header(tmp_path):
+    """events.ndjson 首行 WorkflowHeader.workflow_id 是真实 temporal id（single source of
+    truth）——CLI/legacy scan 的 workflow_id = workspace_name（CLI scheme），与 web scan 的
+    {ws}-{scan_id}（web scheme）不同，算不出来只能读。有 ndjson 时优先读，覆盖算的值。
+
+    真机 sentinel_dashboard scan 即此结构：scan_id=20260721-121435（migration 派生），
+    但 ndjson WorkflowHeader.workflow_id=sentinel_dashboard_20260721-201435（CLI workspace_name）。
+    """
+    store = ScanStore(tmp_path)
+    new_id, scan_dir = store.create_scan("WS1", "u", "/x")
+    (scan_dir / "events.ndjson").write_text(
+        json.dumps({"ts": "2026-07-21 20:14:35", "category": "HEADER",
+                    "type": "WorkflowHeader",
+                    "workflow_id": "sentinel_dashboard_20260721-201435"}) + "\n"
+    )
+    s = store.list_scans("WS1")[0]
+    assert s.workflow_id == "sentinel_dashboard_20260721-201435"
+    assert s.workflow_id != f"WS1-{new_id}"  # 不是算的 web scheme

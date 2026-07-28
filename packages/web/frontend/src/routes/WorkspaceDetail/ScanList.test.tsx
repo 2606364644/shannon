@@ -70,6 +70,22 @@ describe("ScanList 扫描列表", () => {
       "/scan/new?workspace=ws",
     );
   });
+
+  it("任务名展示 workflow_id（{ws}-{scan_id}），路由仍用 scan_id", async () => {
+    // 后端 ScanSummary 透传 workflow_id；前端任务名展示它，路由/定位仍走 scan_id。
+    const wf = { ...running, workflow_id: "ws-s1" };
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([wf])),
+    );
+    renderList();
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "ws-s1" })).toBeInTheDocument(),
+    );
+    // 显示 workflow_id，但链接路由仍是 scan_id（s1）—— 显示与定位解耦。
+    expect(screen.getByRole("link", { name: "ws-s1" }).getAttribute("href")).toBe(
+      "/p/ws/scans/s1/live",
+    );
+  });
 });
 
 describe("ScanList 卡片操作按钮按 status 显隐", () => {
@@ -103,11 +119,21 @@ describe("ScanList 卡片操作按钮按 status 显隐", () => {
     expect(screen.getByRole("link", { name: /查看/ })).toBeInTheDocument();
   });
 
-  it("查看链接指向 scans/:scanId/live", async () => {
+  it("查看链接按 status 智能指向：完成 -> report", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
     renderList();
     await waitFor(() => expect(screen.getByRole("link", { name: /查看/ })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /查看/ }).getAttribute("href")).toBe("/p/ws/scans/s2/live");
+    // 完成 -> report（看结果），与 router.tsx DefaultScanTab 一致
+    expect(screen.getByRole("link", { name: /查看/ }).getAttribute("href")).toBe("/p/ws/scans/s2/report");
+    // scan_id 链接同策略
+    expect(screen.getByRole("link", { name: "s2" }).getAttribute("href")).toBe("/p/ws/scans/s2/report");
+  });
+
+  it("查看链接：running scan -> live（看实时）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    renderList();
+    await waitFor(() => expect(screen.getByRole("link", { name: /查看/ })).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /查看/ }).getAttribute("href")).toBe("/p/ws/scans/s1/live");
   });
 });
 

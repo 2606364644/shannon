@@ -14,12 +14,19 @@ vi.mock("@monaco-editor/react", () => ({
   ),
 }));
 
+// 空态提示按 role 切文案 → useAuth 可控（同 DashboardPage.test 模式）。
+const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
+
 // P2: 扫描目标 ws 必须从下拉选——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）。
 // 默认 ws 列表覆盖 ws1 / ws2 两个，模拟用户已有 ws 的常见态。
 const WS_LIST = [
   { name: "ws1", scan_type: "whitebox", status: "completed", created_at: 0 },
   { name: "ws2", scan_type: "blackbox", status: "completed", created_at: 0 },
 ];
+
+const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
+const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
 
 const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json(WS_LIST)),
@@ -29,7 +36,11 @@ const server = setupServer(
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 // jsdom navigator.language 默认 en,LanguageDetector 会把 i18n 切到 en;迁移后断言依赖中文渲染,逐测试钉回 zh。
-beforeEach(() => i18n.changeLanguage("zh"));
+// 默认普通用户（空态提示按 role 切文案；现有 ws/repo 用例不依赖 role，给默认 user 无副作用）。
+beforeEach(() => {
+  i18n.changeLanguage("zh");
+  mockUseAuth.mockReturnValue({ user: userUser });
+});
 afterEach(() => {
   server.resetHandlers();
   vi.restoreAllMocks();
@@ -371,6 +382,35 @@ describe("ScanNewPage", () => {
     expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
+  });
+
+  // === 无可用工作区空态提示（普通用户提示联系管理员 / admin 提示新建工作区） ===
+  it("普通用户无 ws → 显「联系管理员」提示，不显 admin 文案；下拉显空态项", async () => {
+    server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
+    renderPage();
+    // 下方提示行（普通用户文案）
+    expect(await screen.findByText(/联系管理员/)).toBeInTheDocument();
+    expect(screen.queryByText(/新建一个工作区/)).toBeNull();
+    // 下拉内 disabled 空态项
+    fireEvent.click(screen.getByText("选择 workspace").closest("button")!);
+    expect(await screen.findByRole("option", { name: /暂无可用的工作区/ })).toBeInTheDocument();
+  });
+
+  it("admin 无 ws → 显「新建工作区」提示", async () => {
+    server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
+    mockUseAuth.mockReturnValue({ user: userAdmin });
+    renderPage();
+    expect(await screen.findByText(/新建一个工作区/)).toBeInTheDocument();
+    expect(screen.queryByText(/联系管理员/)).toBeNull();
+  });
+
+  it("有 ws → 不显空态提示", async () => {
+    renderPage();
+    // 默认 WS_LIST 非空：展开下拉能看到 ws1（确认 wsList 加载完）→ 不应有任何空态提示
+    fireEvent.click(screen.getByText("选择 workspace").closest("button")!);
+    expect(await screen.findByRole("option", { name: "ws1" })).toBeInTheDocument();
+    expect(screen.queryByText(/联系管理员/)).toBeNull();
+    expect(screen.queryByText(/新建一个工作区/)).toBeNull();
   });
 });
 

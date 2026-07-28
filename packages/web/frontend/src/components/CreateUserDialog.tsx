@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createUser } from "@/api/users";
+import { PASSWORD_MIN_LEN } from "@/lib/password";
+import { apiErrorMessage } from "@/lib/apiError";
 
 interface Props {
   open: boolean;
@@ -25,6 +27,10 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (password.length < PASSWORD_MIN_LEN) {
+      toast.error(t("users.passwordMinLength"));
+      return;
+    }
     setBusy(true);
     try {
       await createUser({ username, password, role });
@@ -32,9 +38,9 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
       reset();
       onCreated();
       onOpenChange(false);
-    } catch {
-      // 409 重名 / 400 短密码 / 422 角色 等均显 createFailed，Dialog 不关闭让用户重试
-      toast.error(t("users.createFailed"));
+    } catch (e) {
+      // 透传后端真实原因（409 重名 "username exists" 等）；非 ApiError 或无 detail 退回笼统提示
+      toast.error(apiErrorMessage(e, t("users.createFailed")));
     } finally {
       setBusy(false);
     }

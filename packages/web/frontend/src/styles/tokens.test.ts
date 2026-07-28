@@ -12,7 +12,7 @@ const SHADCN_TOKENS = [
   "--accent", "--accent-foreground", "--destructive", "--destructive-foreground",
   "--border", "--input", "--ring",
 ];
-const SEMANTIC = ["--c-cyan", "--c-magenta", "--c-green", "--c-red", "--c-yellow"];
+const SEMANTIC = ["--c-cyan", "--c-magenta", "--c-green", "--c-red", "--c-orange", "--c-yellow", "--c-amber"];
 
 describe("tokens.css 漂移护栏", () => {
   it("含全部 shadcn token", () => {
@@ -49,5 +49,19 @@ describe("tailwind.config 消费 token", () => {
   it("plugins 含 typography + animate", () => {
     expect(cfg).toMatch(/@tailwindcss\/typography/);
     expect(cfg).toMatch(/tailwindcss-animate/);
+  });
+});
+
+describe("amber 语义色（must_change 提醒用，对齐 --c-orange/yellow 暖梯度）", () => {
+  it("tokens.css :root（深）定义 --c-amber（HSL channel）", () => {
+    expect(tokens).toMatch(/:root[\s\S]*?--c-amber:\s*\d+\s+\d+%\s+\d+%/);
+  });
+  it("tokens.css .light（浅）定义 --c-amber（HSL channel）", () => {
+    const lightBlock = tokens.match(/\.light\s*\{([\s\S]*?)\}/);
+    expect(lightBlock, ".light 块应存在").not.toBeNull();
+    expect(lightBlock![1]).toMatch(/--c-amber:\s*\d+\s+\d+%\s+\d+%/);
+  });
+  it("tailwind 映射 amber → hsl(var(--c-amber))，支持 alpha 修饰", () => {
+    expect(cfg).toMatch(/amber:\s*"hsl\(var\(--c-amber\) \/ <alpha-value>\)"/);
   });
 });

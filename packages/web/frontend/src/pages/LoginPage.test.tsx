@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthContext";
+import { ThemeProvider } from "@/lib/theme-context";
 import i18n from "@/i18n";
 import LoginPage from "./LoginPage";
 import { THEME_KEY } from "@/lib/theme";
@@ -9,9 +10,11 @@ import { THEME_KEY } from "@/lib/theme";
 function wrap() {
   return render(
     <AuthProvider>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Routes><Route path="/login" element={<LoginPage />} /></Routes>
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/login"]}>
+          <Routes><Route path="/login" element={<LoginPage />} /></Routes>
+        </MemoryRouter>
+      </ThemeProvider>
     </AuthProvider>
   );
 }

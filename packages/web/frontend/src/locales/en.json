@@ -267,7 +267,12 @@
     "type": "Type",
     "keyword": "Search scan_id or workspace…",
     "timeLabel": "Time",
-    "time": { "all": "All time", "today": "Today", "7d": "Last 7d", "30d": "Last 30d" }
+    "time": {
+      "all": "All time",
+      "today": "Today",
+      "7d": "Last 7d",
+      "30d": "Last 30d"
+    }
   },
   "scan": {
     "tabs": {
@@ -290,6 +295,9 @@
       "wsSelectLabel": "Target workspace",
       "wsSelectPlaceholder": "Select workspace",
       "selectWsFirst": "Select a workspace first (repos are scoped per-ws)",
+      "wsEmptyOption": "No workspaces available",
+      "wsEmptyHintUser": "You haven't been added to any workspace. Please contact an administrator to be added before creating a scan.",
+      "wsEmptyHintAdmin": "No workspaces yet. Please create one in the workspace switcher first.",
       "reuseLatest": "Reuse latest whitebox result",
       "reuseHint": "--latest matches by url; unchecked sends --repo for explicit standalone",
       "pathPlaceholder": "/root/code/foo",
@@ -400,13 +408,25 @@
   },
   "settings": {
     "title": "Settings",
+    "subtitle": "Appearance, platform name, and account",
+    "section": {
+      "branding": "Branding",
+      "personalization": "Personalization",
+      "system": "System",
+      "about": "About"
+    },
     "themeTitle": "Theme",
     "themeDark": "Dark",
     "themeLight": "Light",
+    "themeSystem": "Auto",
     "themeSwitchAria": "Toggle light/dark theme",
+    "accountSecurityTitle": "Account security",
+    "accountSecurityHint": "Change your sign-in password",
+    "changePasswordBtn": "Change password",
     "statusTitle": "System status",
-    "aboutTitle": "About",
-    "aboutDesc": "Supernova security scanning platform web console. See the system status panel above for version info.",
+    "aboutTitle": "About Supernova",
+    "aboutDesc": "Supernova is a code security scanning platform: white-box taint-chain analysis and black-box penetration over your repositories, producing reproducible vulnerability reports.",
+    "aboutVersionLabel": "Version",
     "fields": {
       "aiProvider": "AI engine",
       "browserEngine": "Browser engine",
@@ -425,11 +445,7 @@
     "errors": {
       "loadFailed": "Status load failed: {{error}}"
     },
-    "perWsTitle": "Per-Workspace Config",
-    "perWsHint": "Per-workspace configuration is edited on each workspace's Config page (workspace detail → config gear).",
-    "accountSecurityTitle": "Account security",
-    "accountSecurityHint": "Change your sign-in password",
-    "changePasswordBtn": "Change password"
+    "perWsHint": "Each workspace's scan config is edited on its own Config page in workspace detail."
   },
   "workspaceDetail": {
     "backToList": "Back to list",
@@ -668,7 +684,8 @@
     "deleteConfirmBtn": "Confirm Delete",
     "cancel": "Cancel",
     "password": "Initial Password",
-    "passwordHint": "User must change on first login",
+    "passwordHint": "At least 8 characters; user must change on first login",
+    "passwordMinLength": "Password must be at least 8 characters",
     "roleChanged": "Role updated",
     "roleChangeFailed": "Role update failed",
     "passwordReset": "Password reset",
@@ -685,6 +702,23 @@
       "saveFailed": "Some updates failed; refreshed",
       "notMember": "Not a member",
       "empty": "Not a member of any workspace"
+    }
+  },
+  "branding": {
+    "title": "Platform name",
+    "desc": "Shown in the top-left wordmark and the browser tab. Changes take effect immediately and persist across restarts.",
+    "fieldLabel": "Name",
+    "placeholder": "e.g. Supernova",
+    "preview": "Preview",
+    "save": "Save",
+    "reset": "Reset to default",
+    "saved": "Updated",
+    "adminOnly": "Admins only can rename",
+    "readOnlyHint": "Current name (admins only can change it)",
+    "charCount": "{{count}} / {{max}}",
+    "errors": {
+      "saveFailed": "Save failed, please retry",
+      "saveFailedStatus": "Save failed ({{status}})"
     }
   }
 }

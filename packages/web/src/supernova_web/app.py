@@ -293,18 +293,21 @@ def create_app(overrides: dict | None = None) -> FastAPI:
 
     from .components.workspaces_indexer import WorkspacesIndexer
     from .components.git_fetcher import GitFetcher
+    from .components.branding_store import BrandingStore
     from .components.multi_repo_config_store import MultiRepoConfigStore
     from .components.repo_manager import RepoManager
     from .components.scan_manager import ScanManager
     from .components.credential_vault import CredentialVault
     from .components.ws_config_store import WsConfigStore
-    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config
+    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
     app.state.credential_vault = CredentialVault(cfg.master_key_file)
     app.state.ws_config_store = WsConfigStore(cfg.workspaces_dir, app.state.credential_vault)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
+    # 品牌名运行时覆盖存储(设置页改名):branding.json 落盘,system_status 解析优先读。
+    app.state.branding_store = BrandingStore(cfg.workspaces_dir)
     git_fetcher = GitFetcher(
         cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token,
         ws_config_store=app.state.ws_config_store,
@@ -330,6 +333,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(members.router, dependencies=_require_auth)
     app.include_router(ws_config.router, dependencies=_require_auth)
     app.include_router(users.router, dependencies=_require_auth)
+    # branding:GET 需登录(任意角色可看当前名),PUT 需 admin(route 内 require_admin)。
+    app.include_router(branding.router, dependencies=_require_auth)
 
     from .auth import routes as auth_routes
     app.include_router(auth_routes.router)

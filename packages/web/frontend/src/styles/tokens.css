@@ -41,6 +41,7 @@
   --c-red: 5 62% 60%;
   --c-orange: 24 75% 62%;
   --c-yellow: 38 75% 60%;
+  --c-amber: 36 78% 58%;
 
   /* 层 C · 字体 / 圆角 */
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -100,6 +101,7 @@
   --c-red: 5 58% 46%;
   --c-orange: 26 74% 45%;
   --c-yellow: 40 72% 36%;
+  --c-amber: 36 73% 40%;
 
   /* 层 D · prose 主题（浅 · 暖褐文字配黄暖白底） */
   --prose-body: 30 22% 16%;

@@ -96,6 +96,8 @@ export function ScanNewPage() {
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
   const [workspace, setWorkspace] = useState(presetWs ?? "");
   const [wsList, setWsList] = useState<Workspace[]>([]);
+  // ws 列表加载中标志：初始 [] 与"加载完真的为空"都表现为 wsList=[]，需区分以防空态提示闪现
+  const [wsLoading, setWsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [yamlErr, setYamlErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
@@ -107,7 +109,10 @@ export function ScanNewPage() {
 
   // 拉取 ws 列表（用户可见的 ws，P1 后端已过滤）——供 ScanFormFields 的 ws 下拉使用
   useEffect(() => {
-    apiGet<Workspace[]>("/workspaces").then(setWsList).catch(() => {});
+    apiGet<Workspace[]>("/workspaces")
+      .then(setWsList)
+      .catch(() => {})
+      .finally(() => setWsLoading(false));
   }, []);
 
   const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue, t);
@@ -221,6 +226,7 @@ export function ScanNewPage() {
                 workspace={workspace}
                 wsList={wsList}
                 onWorkspaceChange={setWorkspace}
+                wsLoading={wsLoading}
               />
             )}
           </div>

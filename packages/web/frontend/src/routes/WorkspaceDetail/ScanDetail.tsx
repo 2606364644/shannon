@@ -57,7 +57,7 @@ export default function ScanDetail() {
           <ArrowLeft className="size-3.5" /> {t("workspaceDetail.backToWs", { ws: workspace })}
         </Link>
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="font-mono text-xl">{scanId}</h2>
+          <h2 className="font-mono text-xl">{meta?.workflow_id ?? scanId}</h2>
           <WorkspaceSwitcher currentWorkspace={workspace} />
           {loading ? (
             <Skeleton className="h-5 w-40" />

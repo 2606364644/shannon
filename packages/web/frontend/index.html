@@ -12,7 +12,9 @@
       (function () {
         try {
           var t = localStorage.getItem("supernova-theme");
-          if (t !== "dark" && t !== "light") {
+          // "system" 或非法值 → 读 prefers-color-scheme 解析为 dark/light
+          // （system 是逻辑态，<html> 只挂 dark/light；旧 dark/light 向后兼容）
+          if (t === "system" || (t !== "dark" && t !== "light")) {
             t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
           }
           document.documentElement.classList.add(t);

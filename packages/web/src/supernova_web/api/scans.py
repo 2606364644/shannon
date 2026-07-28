@@ -59,11 +59,12 @@ def _scan_dir_or_404(request: Request, ws: str, scan_id: str):
     return scan_dir
 
 
-def _scan_detail(request: Request, scan_dir) -> dict:
+def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     """scan 详情 payload（同旧 GET /{ws} SessionData shape，读 scan_dir session.json）。"""
     from supernova_core.session import SessionManager
     from supernova_web.components.metrics_normalizer import normalize_metrics
     from supernova_web.components.workspaces_indexer import _to_unix
+    from supernova_web.components.scan_store import resolve_workflow_id
     mgr = SessionManager(scan_dir.parent)
     data = mgr.get_session_data(scan_dir)
     idx = request.app.state.indexer
@@ -77,6 +78,7 @@ def _scan_detail(request: Request, scan_dir) -> dict:
         "links": data.get("links", {}),
         "metrics": normalize_metrics(data.get("metrics", {})),
         "session": data.get("session", {}),
+        "workflow_id": resolve_workflow_id(ws, scan_dir, scan_id),
     }
 
 
@@ -140,7 +142,7 @@ async def list_scans(ws: str, request: Request, _: User = Depends(workspace_memb
 
 @router.get("/{ws}/scans/{scan_id}")
 async def get_scan(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
-    return _scan_detail(request, _scan_dir_or_404(request, ws, scan_id))
+    return _scan_detail(request, ws, scan_id, _scan_dir_or_404(request, ws, scan_id))
 
 
 @router.get("/{ws}/scans/{scan_id}/deliverables")

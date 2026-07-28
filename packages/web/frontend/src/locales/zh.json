@@ -267,7 +267,12 @@
     "type": "类型筛选",
     "keyword": "搜索 scan_id 或工作区名…",
     "timeLabel": "时间筛选",
-    "time": { "all": "全部时间", "today": "今天", "7d": "近7天", "30d": "近30天" }
+    "time": {
+      "all": "全部时间",
+      "today": "今天",
+      "7d": "近7天",
+      "30d": "近30天"
+    }
   },
   "scan": {
     "tabs": {
@@ -290,6 +295,9 @@
       "wsSelectLabel": "目标 workspace",
       "wsSelectPlaceholder": "选择 workspace",
       "selectWsFirst": "请先选择 workspace（仓库列表按 ws 隔离）",
+      "wsEmptyOption": "暂无可用的工作区",
+      "wsEmptyHintUser": "你还没有被加入任何工作区，请联系管理员将你加入后再创建扫描。",
+      "wsEmptyHintAdmin": "还没有工作区，请先在工作区切换器中新建一个工作区。",
       "reuseLatest": "复用最新白盒结果",
       "reuseHint": "--latest 按 url 匹配；不勾选时后端传 --repo 显式 standalone",
       "pathPlaceholder": "/root/code/foo",
@@ -400,13 +408,25 @@
   },
   "settings": {
     "title": "设置",
+    "subtitle": "平台外观、名称与账户",
+    "section": {
+      "branding": "品牌",
+      "personalization": "个人化",
+      "system": "系统",
+      "about": "关于"
+    },
     "themeTitle": "主题",
     "themeDark": "深色",
     "themeLight": "浅色",
+    "themeSystem": "跟随系统",
     "themeSwitchAria": "切换深浅主题",
+    "accountSecurityTitle": "账户安全",
+    "accountSecurityHint": "修改登录密码",
+    "changePasswordBtn": "修改密码",
     "statusTitle": "系统状态",
-    "aboutTitle": "关于",
-    "aboutDesc": "Supernova 安全扫描平台 web 控制台。版本信息见上方系统状态面板。",
+    "aboutTitle": "关于 Supernova",
+    "aboutDesc": "Supernova 是代码安全扫描平台：对仓库做白盒污点链分析与黑盒渗透，产出可复现的漏洞报告。",
+    "aboutVersionLabel": "版本",
     "fields": {
       "aiProvider": "AI 引擎",
       "browserEngine": "浏览器引擎",
@@ -420,16 +440,12 @@
     },
     "gitCredentials": {
       "configured": "已配置",
-      "notConfigured": "未配置(仅 git URL 模式需要,本地路径模式无需)"
+      "notConfigured": "未配置（仅 git URL 模式需要，本地路径模式无需）"
     },
     "errors": {
       "loadFailed": "状态加载失败：{{error}}"
     },
-    "perWsTitle": "Per-Workspace 配置",
-    "perWsHint": "per-workspace 配置在各工作区的「配置」页编辑（ws 详情 → 配置齿轮）。",
-    "accountSecurityTitle": "账户安全",
-    "accountSecurityHint": "修改登录密码",
-    "changePasswordBtn": "修改密码"
+    "perWsHint": "各工作区的扫描配置在工作区详情的「配置」页单独编辑。"
   },
   "workspaceDetail": {
     "backToList": "返回列表",
@@ -668,7 +684,8 @@
     "deleteConfirmBtn": "确认删除",
     "cancel": "取消",
     "password": "初始密码",
-    "passwordHint": "用户首次登录需改密",
+    "passwordHint": "至少 8 位；用户首次登录需改密",
+    "passwordMinLength": "密码至少 8 位",
     "roleChanged": "角色已更新",
     "roleChangeFailed": "角色更新失败",
     "passwordReset": "密码已重置",
@@ -685,6 +702,23 @@
       "saveFailed": "部分更新失败,已刷新",
       "notMember": "未加入",
       "empty": "该用户未加入任何工作区"
+    }
+  },
+  "branding": {
+    "title": "平台名称",
+    "desc": "显示在左上角字标与浏览器标签页。改完即时生效，重启后保留。",
+    "fieldLabel": "名称",
+    "placeholder": "例如：Supernova",
+    "preview": "预览",
+    "save": "保存",
+    "reset": "恢复默认",
+    "saved": "已更新",
+    "adminOnly": "仅管理员可改名",
+    "readOnlyHint": "当前名称（仅管理员可修改）",
+    "charCount": "{{count}} / {{max}}",
+    "errors": {
+      "saveFailed": "保存失败，请重试",
+      "saveFailedStatus": "保存失败（{{status}}）"
     }
   }
 }

@@ -111,7 +111,7 @@ export function DashboardPage() {
                       <StatusBadge status={s.status} />
                       <Badge variant="outline">{s.scan_type}</Badge>
                     </div>
-                    <div className="text-base text-foreground">{s.scan_id}</div>
+                    <div className="text-base text-foreground">{s.workflow_id ?? s.scan_id}</div>
                     <div className="text-xs text-muted-foreground">{t("dashboard.scanTable.workspace")}: {s.workspace}</div>
                     <div className="text-xs text-primary">{t("dashboard.viewLive")}</div>
                   </CardContent>
@@ -142,7 +142,7 @@ export function DashboardPage() {
             {filtered.map((s: ScanSummary) => (
               <TableRow key={s.scan_id}>
                 <TableCell><StatusBadge status={s.status} /></TableCell>
-                <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.scan_id}</Link></TableCell>
+                <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.workflow_id ?? s.scan_id}</Link></TableCell>
                 <TableCell className="font-mono"><Link to={`/p/${s.workspace}`} className="hover:text-primary">{s.workspace}</Link></TableCell>
                 <TableCell><Badge variant="outline">{s.scan_type}</Badge></TableCell>
                 <TableCell>{s.vuln_count ?? 0}</TableCell>
@@ -176,7 +176,7 @@ export function DashboardPage() {
           <DialogHeader>
             <DialogTitle>{t("workspaceDetail.scans.cancelConfirmTitle")}</DialogTitle>
             <DialogDescription>
-              {t("workspaceDetail.scans.cancelConfirmDesc", { scanId: pending?.scan_id })}
+              {t("workspaceDetail.scans.cancelConfirmDesc", { scanId: pending?.workflow_id ?? pending?.scan_id })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -12,6 +12,8 @@ import { CloneProgress } from "./CloneProgress";
 import { listRepos } from "@/api/client";
 import type { Repo, Workspace } from "@/api/types";
 import type { FormState } from "../pages/ScanNewPage";
+import { useAuth } from "@/auth/AuthContext";
+import { AlertCircle } from "lucide-react";
 
 interface Props {
   type: "whitebox" | "blackbox";
@@ -25,6 +27,8 @@ interface Props {
   wsList: Workspace[];
   /** P2: ws 下拉变更回调 */
   onWorkspaceChange: (ws: string) => void;
+  /** ws 列表加载中（防首帧 [] 误判为空态闪现提示） */
+  wsLoading: boolean;
 }
 
 /** 步骤分组容器：圆角 + secondary 背景 + 边框 */
@@ -62,8 +66,11 @@ export function ScanFormFields({
   workspace,
   wsList,
   onWorkspaceChange,
+  wsLoading,
 }: Props) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [repos, setRepos] = useState<Repo[]>([]);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -127,6 +134,9 @@ export function ScanFormFields({
 
   // —— 共用：workspace 选择器（P2: 替代原自由文本 wsName + 自动派生 + 冲突检测） ——
   // 后端 resume 语义不变：扫到已有 ws 即追加 resumeAttempts；用户已显式选定，无需确认弹窗
+  // 无可用工作区空态（排除加载中）：下拉显 disabled 占位项 + 下方按角色显引导。
+  // 普通用户无 ws → 提示联系管理员；admin 无 ws（新部署）→ 提示去新建。
+  const wsEmpty = !wsLoading && wsList.length === 0;
   const workspaceField = (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
@@ -135,23 +145,37 @@ export function ScanFormFields({
           <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
-          {wsList.map((w) => (
+          {wsEmpty ? (
+            <SelectItem value="__empty__" disabled>{t("scan.fields.wsEmptyOption")}</SelectItem>
+          ) : wsList.map((w) => (
             <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {wsEmpty && (
+        <div className="flex items-start gap-1.5 text-xs text-amber">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <span>{t(isAdmin ? "scan.fields.wsEmptyHintAdmin" : "scan.fields.wsEmptyHintUser")}</span>
+        </div>
+      )}
     </div>
   );
 
-  // —— 白盒布局：Step 1 代码源 → Step 2 目标信息 ——
+  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源 → Step 3 目标地址（可选）——
+  // IA 不变量：repo 列表按 ws 隔离（listRepos(workspace)），故「选工作区」必须在「选仓库」之上——
+  // 表单顺序对齐依赖方向，避免用户先撞 Step1 仓库、发现选不了、再下滑选 ws、又上滑回选仓库。
   if (type === "whitebox") {
     return (
       <div className="flex flex-col gap-3.5">
-        <StepGroup step={1} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
+        <StepGroup step={1} title={t("scan.steps.workspace")}>
+          {workspaceField}
+        </StepGroup>
+
+        <StepGroup step={2} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
           {sourceSelector}
         </StepGroup>
 
-        <StepGroup step={2} title={t("scan.steps.target")}>
+        <StepGroup step={3} title={t("scan.steps.target")}>
           <div className="space-y-1.5">
             <Label htmlFor="url" className="text-xs font-medium">
               {t("scan.fields.urlLabel")}
@@ -161,13 +185,13 @@ export function ScanFormFields({
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
             {!f.url && <div className="text-xs text-muted-foreground">{t("scan.fields.urlHint")}</div>}
           </div>
-          {workspaceField}
         </StepGroup>
       </div>
     );
   }
 
-  // —— 黑盒布局：Step 1 目标 URL → Step 2 代码上下文 → Step 3 工作区 ——
+  // —— 黑盒布局：Step 1 目标服务 → Step 2 工作区（容器，解锁 repo）→ Step 3 代码上下文 ——
+  // IA 不变量：repo 按工作区隔离，「选工作区」必须在「选仓库」之上；URL 是黑盒主输入，故保持 Step 1。
   return (
     <div className="flex flex-col gap-3.5">
       <StepGroup
@@ -190,7 +214,11 @@ export function ScanFormFields({
         </div>
       </StepGroup>
 
-      <StepGroup step={2} title={t("scan.steps.codeContext")} tag={t("scan.tags.auxiliary")} tagClass="text-[10px] text-muted-foreground font-normal">
+      <StepGroup step={2} title={t("scan.steps.workspace")}>
+        {workspaceField}
+      </StepGroup>
+
+      <StepGroup step={3} title={t("scan.steps.codeContext")} tag={t("scan.tags.auxiliary")} tagClass="text-[10px] text-muted-foreground font-normal">
         {/* 复用开关 — 卡片样式 */}
         <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-3">
           <Checkbox
@@ -205,10 +233,6 @@ export function ScanFormFields({
           </div>
         </div>
         {sourceSelector}
-      </StepGroup>
-
-      <StepGroup step={3} title={t("scan.steps.workspace")}>
-        {workspaceField}
       </StepGroup>
     </div>
   );

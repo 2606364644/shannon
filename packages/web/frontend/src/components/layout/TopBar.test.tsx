@@ -9,6 +9,8 @@ import i18n from "@/i18n";
 // 用 vi.hoisted 暴露 mockUseAuth，逐测试切换 user.role 验证 admin 专属「工作区管理」入口。
 const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
 vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
+// TopBar 含 ThemeToggle（消费 useTheme）；本测试聚焦 TopBar 业务不测主题切换，stub useTheme 避免必须 ThemeProvider。
+vi.mock("@/lib/theme-context", () => ({ useTheme: () => ({ theme: "dark", setTheme: vi.fn() }) }));
 
 const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
 const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };

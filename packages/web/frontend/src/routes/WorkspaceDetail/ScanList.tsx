@@ -103,6 +103,11 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
   // 恢复仅未完成（非 running 非终态，如 interrupted）；running 在跑无需恢复，终态不可恢复。
   const canResume = !isRunning && !isTerminal;
   const scanPath = `/p/${ws}/scans/${scan.scan_id}`;
+  // 任务名展示用 workflow_id（{ws}-{scan_id}[-resume-N]），路由/API 仍用 scan_id 定位目录。
+  const label = scan.workflow_id ?? scan.scan_id;
+  // 默认进 scan 详情的 tab：完成 -> report（看结果），其余 -> live（看实时）。
+  // 与 router.tsx DefaultScanTab 一致；此处据 scan.status 直定，免走 DefaultScanTab 多一次 getScan + 空白闪烁。
+  const defaultTab = scan.status === "completed" || scan.status === "done" ? "report" : "live";
 
   async function onResume() {
     setBusy(true);
@@ -129,10 +134,10 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
     try {
       if (pending === "cancel") {
         await cancelScan(ws, scan.scan_id);
-        toast.success(t("workspaceDetail.scans.canceled", { scanId: scan.scan_id }));
+        toast.success(t("workspaceDetail.scans.canceled", { scanId: label }));
       } else {
         await deleteScan(ws, scan.scan_id);
-        toast.success(t("workspaceDetail.scans.deleted", { scanId: scan.scan_id }));
+        toast.success(t("workspaceDetail.scans.deleted", { scanId: label }));
       }
       setPending(null);
       onChanged();
@@ -152,8 +157,8 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
          漏洞数 >0 染红——安全工具里「发现」是头条；=0 中性不刺眼。*/}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <Link to={`${scanPath}/live`} className="font-mono text-sm font-medium hover:text-primary">
-            {scan.scan_id}
+          <Link to={`${scanPath}/${defaultTab}`} className="font-mono text-sm font-medium hover:text-primary">
+            {label}
           </Link>
           <StatusBadge status={scan.status} />
           <Badge variant="outline" className="font-mono">{scan.scan_type}</Badge>
@@ -180,7 +185,7 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <Button size="sm" variant="ghost" asChild>
-            <Link to={`${scanPath}/live`}><Eye className="size-3.5" /> {t("workspaceDetail.scans.view")}</Link>
+            <Link to={`${scanPath}/${defaultTab}`}><Eye className="size-3.5" /> {t("workspaceDetail.scans.view")}</Link>
           </Button>
           {canResume && (
             <Button size="sm" variant="ghost" onClick={onResume} disabled={busy}>
@@ -212,8 +217,8 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
             </DialogTitle>
             <DialogDescription>
               {pending === "cancel"
-                ? t("workspaceDetail.scans.cancelConfirmDesc", { scanId: scan.scan_id })
-                : t("workspaceDetail.scans.deleteConfirmDesc", { scanId: scan.scan_id })}
+                ? t("workspaceDetail.scans.cancelConfirmDesc", { scanId: label })
+                : t("workspaceDetail.scans.deleteConfirmDesc", { scanId: label })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

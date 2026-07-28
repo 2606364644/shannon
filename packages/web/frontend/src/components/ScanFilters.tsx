@@ -77,7 +77,7 @@ export function useScanFilters(scans: ScanSummary[], value: ScanFiltersValue) {
     if (value.time !== "all" && !inTimeWindow(s.created_at, value.time)) return false;
     if (value.keyword.trim()) {
       const q = value.keyword.toLowerCase();
-      const hay = `${s.scan_id} ${s.workspace ?? ""}`.toLowerCase();
+      const hay = `${s.workflow_id ?? s.scan_id} ${s.scan_id} ${s.workspace ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

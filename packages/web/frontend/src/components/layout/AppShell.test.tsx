@@ -14,6 +14,10 @@ vi.mock("@/auth/AuthContext", () => ({
     logout: vi.fn(),
   }),
 }));
+// AppShell 含 TopBar → ThemeToggle（消费 useTheme）；本测试聚焦布局不测主题，stub useTheme。
+vi.mock("@/lib/theme-context", () => ({
+  useTheme: () => ({ theme: "dark", setTheme: vi.fn() }),
+}));
 
 describe("AppShell", () => {
   it("渲染 TopBar + Outlet 内容", () => {
