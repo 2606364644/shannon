@@ -85,4 +85,22 @@ describe("RepoCombobox", () => {
       expect(onChange).toHaveBeenCalledWith("frontend/admin"),
     );
   });
+
+  it("关联仓库项显示关联标记", async () => {
+    const repos: Repo[] = [
+      { name: "ftoa", group: null, source: { kind: "linked" }, state: "ready", linked: true },
+    ];
+    render(<RepoCombobox repos={repos} value={null} onChange={() => {}}
+      placeholder="选" linkedLabel="关联" />);
+    fireEvent.click(screen.getByText("选"));
+    expect(await screen.findByText("ftoa")).toBeInTheDocument();
+    expect(screen.getByText("关联")).toBeInTheDocument();
+  });
+
+  it("非关联仓库不显示关联标记", async () => {
+    render(<RepoCombobox {...baseProps} value={null} onChange={() => {}} linkedLabel="关联" />);
+    fireEvent.click(screen.getByText("选择仓库"));
+    await screen.findByText("admin");
+    expect(screen.queryByText("关联")).not.toBeInTheDocument();
+  });
 });

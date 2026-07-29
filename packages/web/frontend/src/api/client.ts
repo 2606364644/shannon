@@ -115,6 +115,11 @@ export const createRepo = (
   ws: string,
   body: { git_url: string; branch?: string; commit?: string; name?: string; group?: string },
 ) => apiPost<{ name: string }>(`/workspaces/${encWs(ws)}/repos`, body);
+
+/** 批量关联父目录下所有 git 仓库。admin-only；返回 {imported, skipped}。 */
+export const linkReposInDir = (ws: string, body: { path: string }) =>
+  apiPost<{ imported: { name: string; path: string }[]; skipped: { name?: string; path: string; reason: string }[] }>(
+    `/workspaces/${encWs(ws)}/repos/link-dir`, body);
 export const deleteRepo = (ws: string, name: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}`);
 export const pullRepo = (ws: string, name: string) =>

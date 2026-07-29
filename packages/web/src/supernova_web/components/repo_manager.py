@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 from datetime import datetime, timezone
@@ -80,6 +81,13 @@ class TooManyClones(Exception):
         super().__init__(f"并发 clone 上限 {limit}")
 
 
+class RepoExists(Exception):
+    """ws 内仓库名已存在（私有克隆或既有关联）—— link 时重名抛此异常（→ API 409）。"""
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"仓库已存在：{name}")
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -93,6 +101,51 @@ def _dir_size(p: Path) -> int:
             except OSError:
                 pass
     return total
+
+
+# ---- 关联仓库（linked repos）状态 IO ----
+# 关联记录 = 把一个已存在的目录路径（绝对路径）「关联」进某 ws，多 ws 可关联同一路径
+# （共享一份磁盘克隆）。状态独立存 workspaces/<ws>/linked_repos.json（不放进 workspace.json，
+# 避开其全量重写被 legacy 迁移擦除）。RepoManager 与 ScanManager 共用这些模块函数。
+
+LINKED_REPOS_FILENAME = "linked_repos.json"
+
+
+def _linked_repos_path(ws_dir: Path) -> Path:
+    return Path(ws_dir) / LINKED_REPOS_FILENAME
+
+
+def read_linked_repos(ws_dir: Path) -> list[dict]:
+    """读 ws 的关联记录列表。文件缺失/损坏/结构异常 → 降级为空列表（绝不抛）。"""
+    f = _linked_repos_path(ws_dir)
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text("utf-8", errors="replace"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    links = data.get("links") if isinstance(data, dict) else None
+    if not isinstance(links, list):
+        return []
+    # 只留结构完整的记录（name + path 都在）
+    return [l for l in links if isinstance(l, dict) and l.get("name") and l.get("path")]
+
+
+def write_linked_repos(ws_dir: Path, links: list[dict]) -> None:
+    ws_dir = Path(ws_dir)
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (_linked_repos_path(ws_dir)).write_text(
+        json.dumps({"links": links}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def resolve_linked_repo_path(workspaces_dir: Path, ws: str, name: str) -> str | None:
+    """ws 内 name 是否为关联仓库 → 返回其存储路径，否则 None。供 ScanManager 解析扫描目标。"""
+    _validate_ws_segment(ws)
+    ws_dir = Path(workspaces_dir).resolve() / ws
+    for link in read_linked_repos(ws_dir):
+        if link.get("name") == name:
+            return link.get("path")
+    return None
 
 
 class RepoManager:
@@ -115,6 +168,15 @@ class RepoManager:
         _validate_ws_segment(ws)
         base = self._workspaces_dir.resolve()
         p = (base / ws / "repos").resolve()
+        if not p.is_relative_to(base):
+            raise ValueError(f"非法 workspace：{ws!r}")
+        return p
+
+    def _ws_dir(self, ws: str) -> Path:
+        """workspaces/<ws> 绝对路径（linked_repos.json 落此）。与 _repos_root 同档双重防线。"""
+        _validate_ws_segment(ws)
+        base = self._workspaces_dir.resolve()
+        p = (base / ws).resolve()
         if not p.is_relative_to(base):
             raise ValueError(f"非法 workspace：{ws!r}")
         return p
@@ -153,18 +215,29 @@ class RepoManager:
                         out.append(self._repo_view(ws, f"{sub.name}/{sub2.name}"))
                     except ValueError:
                         continue
+        # 关联仓库并入（私有克隆 ∪ 关联；关联项 linked=True）
+        for link in read_linked_repos(self._ws_dir(ws)):
+            try:
+                out.append(self._linked_repo_view(
+                    link["name"], link["path"], link.get("linked_at", "")))
+            except Exception:
+                continue  # 单条坏记录（如 path 已被外部删）不阻断整个列表
         return out
 
     def get_repo(self, ws: str, name: str) -> dict | None:
         try:
             d = self._repo_dir(ws, name)
         except ValueError:
-            return None
-        if not d.is_dir() or not _is_repo(d):
-            return None
-        view = self._repo_view(ws, name)
-        view["recent_events"] = self._recent_events(ws, name, 20)
-        return view
+            d = None
+        if d is not None and d.is_dir() and _is_repo(d):
+            view = self._repo_view(ws, name)
+            view["recent_events"] = self._recent_events(ws, name, 20)
+            return view
+        # 关联仓库（私有克隆未中 → 查关联记录）
+        for link in read_linked_repos(self._ws_dir(ws)):
+            if link.get("name") == name:
+                return self._linked_repo_view(name, link["path"], link.get("linked_at", ""))
+        return None
 
     def _repo_view(self, ws: str, name: str) -> dict:
         self._ensure_meta(ws, name)  # 读时自愈：运行期拷入的仓库补 meta
@@ -343,10 +416,120 @@ class RepoManager:
     async def delete(self, ws: str, name: str) -> None:
         if (ws, name) in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
+        # 关联仓库 → 仅取消引用（unlink），绝不删源文件（共享路径，可能他 ws 仍用）
+        if self._is_linked(ws, name):
+            self.unlink_repo(ws, name)
+            return
         target = self._repo_dir(ws, name)
         # 仅删除真仓库目录（有 .git 或 meta），绝不 rmtree 分组目录（含多个子仓库）
         if target.is_dir() and _is_repo(target):
             shutil.rmtree(target, ignore_errors=False)
+
+    # ---- 关联仓库（linked repos）----
+    def link_repo(self, ws: str, name: str, path: str) -> dict:
+        """把一个已存在的目录路径（绝对路径）关联进 ws。
+
+        校验：ws/name 合法、path 存在且是目录、name 与 ws 内现有 repo（私有克隆 ∪
+        既有关联）不重名。多 ws 可关联同一路径（共享）。写 linked_repos.json，返回 view。
+        """
+        _validate_ws_segment(ws)
+        _validate_repo_name(name)
+        target = Path(path).expanduser().resolve()
+        if not target.is_dir():
+            raise ValueError(f"路径不存在或非目录：{path}")
+        ws_dir = self._ws_dir(ws)
+        clone_names = {r["name"] for r in self.list_repos(ws)}
+        linked_names = {l["name"] for l in read_linked_repos(ws_dir)}
+        if name in (clone_names | linked_names):
+            raise RepoExists(name)
+        linked_at = _now_iso()
+        links = read_linked_repos(ws_dir)
+        links.append({"name": name, "path": str(target), "linked_at": linked_at})
+        write_linked_repos(ws_dir, links)
+        return self._linked_repo_view(name, str(target), linked_at)
+
+    def _linked_repo_view(self, name: str, path: str, linked_at: str) -> dict:
+        """关联仓库的 view：source.kind=linked；若 path 含 .git 则推断 url/branch 展示。
+        无 state（关联仓库无 clone 状态，恒视为 ready）、无 size_bytes（避免对共享/大仓
+        目录每次列表都 walk）。"""
+        group = name.split("/", 1)[0] if "/" in name else None
+        url, branch = self._infer_from_git(Path(path))
+        source: dict = {"kind": "linked"}
+        if url or branch:
+            source = {"kind": "linked",
+                      "url": strip_credentials(url) if url else None,
+                      "branch": branch}
+        return {
+            "name": name,
+            "group": group,
+            "linked": True,
+            "source": source,
+            "state": "ready",
+            "cloned_at": linked_at,
+        }
+
+    def unlink_repo(self, ws: str, name: str) -> None:
+        """取消关联：仅从 linked_repos.json 移除记录，绝不触碰源目录文件。不存在 → ValueError。"""
+        _validate_ws_segment(ws)
+        ws_dir = self._ws_dir(ws)
+        links = read_linked_repos(ws_dir)
+        new_links = [l for l in links if l.get("name") != name]
+        if len(new_links) == len(links):
+            raise ValueError(f"关联仓库不存在：{name}")
+        write_linked_repos(ws_dir, new_links)
+
+    # 批量扫描时跳过的噪声目录名（依赖产物 / 构建缓存，绝非用户要关联的仓库）
+    _NOISE_DIR_NAMES = frozenset({
+        ".git", "node_modules", ".venv", "venv", "__pycache__",
+        ".idea", ".vscode", ".next", "dist", "build", "target", ".cache",
+    })
+    _LINK_DIR_MAX_DEPTH = 4  # name 至多一层分组（2 段）；扫描深度上限防全盘
+
+    def link_repos_in_dir(self, ws: str, path: str) -> dict:
+        """扫描父目录下所有 git 仓库（含 .git），批量关联进 ws。
+
+        name = 相对父目录的路径（至多一层分组 ``group/repo``；超出 2 段的跳过并报告）。
+        ws 内已存在的 name 跳过（不中断批量）。找到仓库后不再深入其内部（submodule 边界）。
+        返回 ``{"imported": [{name, path}], "skipped": [{name?, path, reason}]}``。
+        """
+        _validate_ws_segment(ws)
+        base = Path(path).expanduser().resolve()
+        if not base.is_dir():
+            raise ValueError(f"路径不存在或非目录：{path}")
+        ws_dir = self._ws_dir(ws)
+        existing = {r["name"] for r in self.list_repos(ws)}  # 私有克隆 ∪ 已关联
+        links = read_linked_repos(ws_dir)
+        imported: list[dict] = []
+        skipped: list[dict] = []
+        for dirpath, dirnames, _ in os.walk(base, topdown=True):
+            cur = Path(dirpath)
+            depth = len(cur.relative_to(base).parts)
+            if depth >= self._LINK_DIR_MAX_DEPTH:
+                dirnames[:] = []
+                continue
+            dirnames[:] = [d for d in dirnames if d not in self._NOISE_DIR_NAMES]
+            if not _is_repo(cur):
+                continue  # 非仓库目录 -> 继续递归其（已过滤噪声的）子目录
+            # 仓库根：生成 name（相对父目录的路径）
+            name = base.name if cur == base else "/".join(cur.relative_to(base).parts)
+            try:
+                _validate_repo_name(name)
+            except ValueError:
+                skipped.append({"path": str(cur), "reason": "路径层级过深（仅支持至多一层分组）"})
+                dirnames[:] = []
+                continue
+            if name in existing:
+                skipped.append({"name": name, "path": str(cur), "reason": "已存在"})
+            else:
+                links.append({"name": name, "path": str(cur), "linked_at": _now_iso()})
+                existing.add(name)
+                imported.append({"name": name, "path": str(cur)})
+            dirnames[:] = []  # 仓库内部不再深入（避免把仓库内 .git 当子仓库）
+        write_linked_repos(ws_dir, links)
+        return {"imported": imported, "skipped": skipped}
+
+    def _is_linked(self, ws: str, name: str) -> bool:
+        return any(l.get("name") == name for l in read_linked_repos(self._ws_dir(ws)))
 
     # ---- git 子进程 + stderr 进度解析 ----
     def _build_clone_argv(self, authed_url: str, target: Path, branch: str | None) -> list[str]:

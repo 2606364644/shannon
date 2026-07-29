@@ -17,7 +17,7 @@ from supernova_core.session import SessionManager
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
-from .repo_manager import _resolve_repo_dir, _validate_ws_segment
+from .repo_manager import _resolve_repo_dir, _validate_ws_segment, resolve_linked_repo_path
 from .scan_liveness import is_scan_recently_active
 from .scan_store import ScanStore
 from .workspaces_indexer import _compute_status
@@ -383,6 +383,11 @@ class ScanManager:
         ._repos_root 同档约束）。
         """
         _validate_ws_segment(ws)
+        # 关联仓库优先：命中 linked_repos.json → 返回其存储路径（无 state 校验，关联仓库
+        # 无 clone 状态；多 ws 可共享同一路径）。name 与私有克隆不重名（link 时禁碰撞）。
+        linked = resolve_linked_repo_path(self._workspaces_dir, ws, name)
+        if linked is not None:
+            return linked
         repo_dir = _resolve_repo_dir(self._workspaces_dir / ws / "repos", name)
         if not repo_dir.is_dir():
             raise ValueError(f"仓库不存在：{name}")

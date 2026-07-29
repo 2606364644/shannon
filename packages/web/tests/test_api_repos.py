@@ -163,3 +163,119 @@ def test_get_repo_grouped_path(tmp_path, monkeypatch):
     assert r.json()["group"] == "frontend"
     # 分组目录本身 404
     assert client.get(f"{BASE}/frontend").status_code == 404
+
+
+# ---- 关联仓库 API（POST /repos/link, admin-only, 关联只读）----
+
+def _authed_as(app, username="tester", role="admin"):
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username(username) is None:
+        store.create_user(username, hash_password("test-pw"), role=role)
+    c = TestClient(app)
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": username, "password": "test-pw"},
+           headers={"X-CSRF-Token": tok})
+    return c
+
+
+def _ext_repo(tmp_path, name="ext"):
+    d = tmp_path / "external" / name
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    return d
+
+
+def test_list_repos_includes_linked(tmp_path, monkeypatch):
+    target = _ext_repo(tmp_path)
+    app = _app(tmp_path, monkeypatch, {"foo": "ready"})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))  # 造关联数据
+    client = _authed(app)
+    names = [x["name"] for x in client.get(BASE).json()]
+    assert "ftoa" in names and "foo" in names
+
+
+def test_delete_linked_unlinks_keeps_files(tmp_path, monkeypatch):
+    target = _ext_repo(tmp_path)
+    (target / "README.md").write_text("x")
+    app = _app(tmp_path, monkeypatch, {})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.delete(f"{BASE}/ftoa", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert "ftoa" not in [x["name"] for x in client.get(BASE).json()]
+    assert target.exists() and (target / "README.md").exists()  # 源文件未删
+
+
+def test_pull_and_checkout_linked_405(tmp_path, monkeypatch):
+    target = _ext_repo(tmp_path)
+    app = _app(tmp_path, monkeypatch, {})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))
+    client = _authed(app)
+    tok = _csrf(client)
+    assert client.post(f"{BASE}/ftoa/pull", headers={"X-CSRF-Token": tok}).status_code == 405
+    r = client.post(f"{BASE}/ftoa/checkout", json={"branch": "main"},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_events_linked_empty_stream(tmp_path, monkeypatch):
+    import httpx
+    target = _ext_repo(tmp_path)
+    app = _app(tmp_path, monkeypatch, {})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        from supernova_web.auth.passwords import hash_password
+        store.create_user("tester", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=3,
+                                 cookies={"sn-sid": sid}) as c:
+        async with c.stream("GET", f"{BASE}/ftoa/events") as r:
+            assert r.status_code == 200
+            lines = [line async for line in r.aiter_lines()]
+    assert lines == []  # 关联仓库无 clone 进度，空流
+
+
+# ---- 批量关联目录 API（POST /repos/link-dir, admin-only）----
+
+def _proj_with_repos(tmp_path):
+    proj = tmp_path / "proj"
+    (proj / "frontend" / ".git").mkdir(parents=True)
+    (proj / "services" / "auth" / ".git").mkdir(parents=True)
+    return proj
+
+
+def test_link_dir_admin_imports(tmp_path, monkeypatch):
+    proj = _proj_with_repos(tmp_path)
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/link-dir", json={"path": str(proj)},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    names = {x["name"] for x in body["imported"]}
+    assert names == {"frontend", "services/auth"}
+
+
+def test_link_dir_non_admin_403(tmp_path, monkeypatch):
+    proj = _proj_with_repos(tmp_path)
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed_as(app, "member", "user")
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/link-dir", json={"path": str(proj)},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 403
+
+
+def test_link_dir_bad_path_422(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/link-dir", json={"path": str(tmp_path / "nope")},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422

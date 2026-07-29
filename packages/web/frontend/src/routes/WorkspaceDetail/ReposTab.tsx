@@ -224,12 +224,19 @@ export function ReposTab({ workspace: wsProp }: Props) {
                             <TableRow key={r.name} className="border-b border-border">
                               {/* 名称（不再点入 RepoDetail：P2 撤销了 /repos/* 路由） */}
                               <TableCell className="py-2 pl-4 pr-3">
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="block truncate font-mono text-sm">{r.name}</span>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{r.name}</TooltipContent>
-                                </Tooltip>
+                                <div className="flex items-center gap-2">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="block truncate font-mono text-sm">{r.name}</span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{r.name}</TooltipContent>
+                                  </Tooltip>
+                                  {r.linked && (
+                                    <Badge variant="outline" className="border-cyan/40 text-cyan">
+                                      {t("repos.linkedBadge")}
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               {/* 来源：URL 截断 + tooltip + 复制按钮 */}
                               <TableCell className="py-2 px-3">
@@ -266,14 +273,17 @@ export function ReposTab({ workspace: wsProp }: Props) {
                               </TableCell>
                               <TableCell className="whitespace-nowrap py-2 px-3 text-center">
                                 <span className="inline-flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    aria-label={t("repos.updateAria", { name: r.name })}
-                                    onClick={() => doPull(r.name)}
-                                  >
-                                    {t("common.update")}
-                                  </Button>
+                                  {/* 关联仓库只读：隐藏更新(pull)——共享路径下 pull 会跨 ws 干扰 */}
+                                  {!r.linked && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      aria-label={t("repos.updateAria", { name: r.name })}
+                                      onClick={() => doPull(r.name)}
+                                    >
+                                      {t("common.update")}
+                                    </Button>
+                                  )}
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -281,7 +291,8 @@ export function ReposTab({ workspace: wsProp }: Props) {
                                     aria-label={t("repos.deleteAria", { name: r.name })}
                                     onClick={() => setPendingDelete(r.name)}
                                   >
-                                    {t("common.delete")}
+                                    {/* 关联仓库：取消关联（仅移除引用，不删源文件） */}
+                                    {r.linked ? t("repos.unlink") : t("common.delete")}
                                   </Button>
                                 </span>
                               </TableCell>

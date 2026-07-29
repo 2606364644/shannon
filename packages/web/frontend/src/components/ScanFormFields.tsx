@@ -108,6 +108,7 @@ export function ScanFormFields({
               searchPlaceholder={t("scan.repo.searchPlaceholder")}
               emptyText={t("scan.repo.noMatch")}
               ungroupedLabel={t("scan.repo.ungrouped")}
+              linkedLabel={t("repos.linkedBadge")}
             />
             <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>{t("scan.repo.addBtn")}</Button>
             {f.selectedRepo && selectedRepoState && selectedRepoState !== "ready" && (

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from supernova_web.auth.dependencies import workspace_member
+from supernova_web.auth.dependencies import require_admin, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 from supernova_web.components.repo_manager import TooManyClones
@@ -20,6 +20,10 @@ class CreateRepoBody(BaseModel):
     commit: str | None = None
     name: str | None = None
     group: str | None = None
+
+
+class LinkDirBody(BaseModel):
+    path: str
 
 
 class CheckoutBody(BaseModel):
@@ -46,6 +50,17 @@ async def create_repo(ws: str, body: CreateRepoBody, request: Request,
     return {"name": name}
 
 
+@router.post("/{ws}/repos/link-dir", status_code=200)
+async def link_repos_in_dir(ws: str, body: LinkDirBody, request: Request,
+                            _: User = Depends(require_admin)):
+    """批量关联父目录下的所有 git 仓库（admin-only）。返回 {imported, skipped}。"""
+    rm = request.app.state.repo_manager
+    try:
+        return rm.link_repos_in_dir(ws, body.path)
+    except ValueError as e:  # 路径不存在 / 非目录
+        raise HTTPException(422, str(e))
+
+
 # 仓库名可为 group/repo（含 '/'），故用 {name:path} 吃整段路径。带后缀的具体路由
 # （events/pull/checkout）必须声明在 GET /{name:path} 之前——{name:path} 贪婪匹配
 # 否则会吞掉后缀（/api/workspaces/{ws}/repos/foo/events 被当 name="foo/events"）。
@@ -56,6 +71,9 @@ async def repo_events(ws: str, name: str, request: Request,
     rm = request.app.state.repo_manager
     if rm.get_repo(ws, name) is None:
         raise HTTPException(404, "repo not found")
+    # 关联仓库无 clone.ndjson（非 clone 产物）→ 空流（200），不 tail 不存在的文件
+    if rm._is_linked(ws, name):
+        return StreamingResponse(iter(()), media_type="text/event-stream")
     ndjson = rm._repo_dir(ws, name) / "clone.ndjson"
     last = request.headers.get("Last-Event-ID")
     last_offset = int(last) if last else None
@@ -115,6 +133,8 @@ async def delete_repo(ws: str, name: str, request: Request,
 async def pull_repo(ws: str, name: str, request: Request,
                     _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
+    if rm._is_linked(ws, name):
+        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
     try:
         await rm.pull(ws, name)
     except ValueError as e:
@@ -126,6 +146,8 @@ async def pull_repo(ws: str, name: str, request: Request,
 async def checkout_repo(ws: str, name: str, body: CheckoutBody, request: Request,
                         _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
+    if rm._is_linked(ws, name):
+        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
     try:
         await rm.checkout(ws, name, body.branch)
     except ValueError as e:

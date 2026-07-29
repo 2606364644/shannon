@@ -92,6 +92,8 @@
     "expand": "Expand ▸",
     "collapse": "Collapse ▾",
     "ungrouped": "Ungrouped",
+    "linkedBadge": "Linked",
+    "unlink": "Unlink",
     "updating": "Updating {{name}}",
     "updateAria": "Update {{name}}",
     "deleteAria": "Delete {{name}}",
@@ -132,11 +134,19 @@
       "branchPlaceholder": "Branch (optional)",
       "commitPlaceholder": "Commit (optional)",
       "cloneBtn": "clone",
+      "modeClone": "Clone",
+      "modeLinkDir": "Link directory (batch)",
+      "linkDirDesc": "Scan a directory containing multiple repositories; auto-detect git repos and link them in batch.",
+      "linkDirPathLabel": "Parent directory absolute path",
+      "linkDirPathPlaceholder": "/app/repos/frontend",
+      "linkDirBtn": "Scan & link",
+      "linkDirResult": "Imported {{imported}}, skipped {{skipped}}",
       "errors": {
         "noCreds": "Git credentials not configured (GITLAB_USER/TOKEN)",
         "exists": "Repository already exists; try update instead",
         "failed": "Add failed ({{status}})",
-        "network": "Add failed (network error)"
+        "network": "Add failed (network error)",
+        "badPath": "Path does not exist or is not a directory"
       }
     },
     "clone": {

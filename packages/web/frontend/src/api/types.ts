@@ -272,8 +272,10 @@ export type RepoState = "ready" | "cloning" | "pulling" | "failed" | "stale";
 export interface Repo {
   name: string;
   group?: string | null;  // 分组名（如 frontend/backend）；扁平仓库为 null
-  source?: { kind: string; url?: string; branch?: string; commit?: string };
+  source?: { kind: "git" | "linked" | "unknown" | string; url?: string; branch?: string; commit?: string };
   state: RepoState;
+  /** 关联仓库（admin 按绝对路径关联的已存在目录，非本 ws 私有克隆）→ true；只读（禁 pull/checkout）。 */
+  linked?: boolean;
   size_bytes?: number;
   cloned_at?: string;
   last_pull_at?: string;

@@ -92,6 +92,8 @@
     "expand": "展开 ▸",
     "collapse": "折叠 ▾",
     "ungrouped": "未分组",
+    "linkedBadge": "关联",
+    "unlink": "取消关联",
     "updating": "正在更新 {{name}}",
     "updateAria": "更新 {{name}}",
     "deleteAria": "删除 {{name}}",
@@ -132,11 +134,19 @@
       "branchPlaceholder": "分支(可选)",
       "commitPlaceholder": "commit(可选)",
       "cloneBtn": "clone",
+      "modeClone": "克隆",
+      "modeLinkDir": "批量关联目录",
+      "linkDirDesc": "扫描一个含多个仓库的目录，自动识别其中的 git 仓库并批量关联。",
+      "linkDirPathLabel": "父目录绝对路径",
+      "linkDirPathPlaceholder": "/app/repos/frontend",
+      "linkDirBtn": "扫描并关联",
+      "linkDirResult": "已导入 {{imported}} 个，跳过 {{skipped}} 个",
       "errors": {
         "noCreds": "未配置 git 凭证（GITLAB_USER/TOKEN）",
         "exists": "仓库已存在，可改用更新",
         "failed": "添加失败（{{status}}）",
-        "network": "添加失败（网络错误）"
+        "network": "添加失败（网络错误）",
+        "badPath": "路径不存在或非目录"
       }
     },
     "clone": {

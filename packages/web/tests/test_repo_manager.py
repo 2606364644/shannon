@@ -342,3 +342,231 @@ def test_migrate_strips_credentials_from_git_config(tmp_path, monkeypatch):
     meta = json.loads((d / ".supernova-repo.json").read_text())
     assert "glpat-MIGRATE-LEAK" not in json.dumps(meta)
     assert meta["source"]["url"] == "https://gitlab.example/foo.git"
+
+
+# ---- 关联仓库（linked repos）：admin 按绝对路径关联已存在目录，多 ws 可共享 ----
+
+def _make_real_repo(tmp_path, name="real-repo") -> Path:
+    """构造一个真实可被关联的目录（含 .git 以测分支推断；非必须）。"""
+    d = tmp_path / "external" / name
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    (d / ".git" / "config").write_text('[remote "origin"]\n\turl = https://x/foo.git\n')
+    (d / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (d / "README.md").write_text("hi")
+    return d
+
+
+def _ws_dir(tmp_path) -> Path:
+    return tmp_path / "workspaces" / WS
+
+
+def test_link_repo_writes_linked_repos_json(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    view = rm.link_repo(WS, "ftoa", str(target))
+    assert view["name"] == "ftoa"
+    assert view["linked"] is True
+    assert view["source"]["kind"] == "linked"
+    # git 目录推断出 branch
+    assert view["source"]["branch"] == "main"
+    data = json.loads((_ws_dir(tmp_path) / "linked_repos.json").read_text())
+    assert data["links"] == [
+        {"name": "ftoa", "path": str(target), "linked_at": view["cloned_at"]}]
+
+
+def test_link_repo_rejects_missing_path(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    with pytest.raises(ValueError):
+        rm.link_repo(WS, "ftoa", str(tmp_path / "nope"))
+
+
+def test_link_repo_rejects_file_path(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    f = tmp_path / "afile"
+    f.write_text("x")
+    with pytest.raises(ValueError):
+        rm.link_repo(WS, "ftoa", str(f))
+
+
+def test_link_repo_rejects_bad_name(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    for evil in ("../x", "a/b/c", "..", "."):
+        with pytest.raises(ValueError, match="非法"):
+            rm.link_repo(WS, evil, str(target))
+
+
+def test_link_repo_collision_with_clone_raises_repoexists(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import RepoExists
+    rm = _rm(tmp_path, monkeypatch)
+    d = _repos_base(tmp_path) / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    target = _make_real_repo(tmp_path)
+    with pytest.raises(RepoExists):
+        rm.link_repo(WS, "foo", str(target))
+
+
+def test_link_repo_duplicate_name_raises_repoexists(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import RepoExists
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    with pytest.raises(RepoExists):
+        rm.link_repo(WS, "ftoa", str(target))
+
+
+def test_resolve_linked_repo_path_hits_and_misses(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import resolve_linked_repo_path
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    workspaces_dir = tmp_path / "workspaces"
+    assert resolve_linked_repo_path(workspaces_dir, WS, "ftoa") == str(target)
+    assert resolve_linked_repo_path(workspaces_dir, WS, "nope") is None
+
+
+def test_read_linked_repos_corrupt_degrades_to_empty(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import read_linked_repos
+    _rm(tmp_path, monkeypatch)
+    (_ws_dir(tmp_path) / "linked_repos.json").write_text("{ broken json")
+    assert read_linked_repos(_ws_dir(tmp_path)) == []
+
+
+# ---- 批量关联目录（link_repos_in_dir）----
+
+def _git_dir(p: Path) -> Path:
+    """构造一个 git 仓库目录（含 .git 标志）。"""
+    p.mkdir(parents=True, exist_ok=True)
+    (p / ".git").mkdir(exist_ok=True)
+    return p
+
+
+def test_link_repos_in_dir_imports_flat_and_grouped(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _git_dir(proj / "frontend")
+    _git_dir(proj / "services" / "auth")
+    res = rm.link_repos_in_dir(WS, str(proj))
+    names = {x["name"] for x in res["imported"]}
+    assert names == {"frontend", "services/auth"}
+    from supernova_web.components.repo_manager import read_linked_repos
+    links = {l["name"]: l for l in read_linked_repos(_ws_dir(tmp_path))}
+    assert set(links) == {"frontend", "services/auth"}
+    assert links["services/auth"]["path"].endswith("services/auth")
+
+
+def test_link_repos_in_dir_skips_non_git(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    (proj / "plain").mkdir(parents=True)  # 非 git 目录
+    _git_dir(proj / "repo")
+    res = rm.link_repos_in_dir(WS, str(proj))
+    assert {x["name"] for x in res["imported"]} == {"repo"}
+
+
+def test_link_repos_in_dir_skips_existing(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _git_dir(proj / "frontend")
+    other = _git_dir(tmp_path / "other")  # 先单条关联一个同名 frontend
+    rm.link_repo(WS, "frontend", str(other))
+    res = rm.link_repos_in_dir(WS, str(proj))
+    assert {x["name"] for x in res["imported"]} == set()
+    assert "frontend" in {x.get("name") for x in res["skipped"]}
+
+
+def test_link_repos_in_dir_skips_too_deep(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _git_dir(proj / "a" / "b" / "c")  # 相对 a/b/c -> 3 段（超过一层分组）
+    res = rm.link_repos_in_dir(WS, str(proj))
+    assert res["imported"] == []
+    assert any("深" in x["reason"] for x in res["skipped"])
+
+
+def test_link_repos_in_dir_prunes_inside_repo(tmp_path, monkeypatch):
+    """仓库内部不再深入：proj/repo/.git + proj/repo/inner/.git 只导入 repo。"""
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _git_dir(proj / "repo")
+    _git_dir(proj / "repo" / "inner")
+    res = rm.link_repos_in_dir(WS, str(proj))
+    names = {x["name"] for x in res["imported"]}
+    assert names == {"repo"}
+    assert "repo/inner" not in names
+
+
+def test_link_repos_in_dir_skips_noise_dirs(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _git_dir(proj / "node_modules" / "pkg")  # 噪声目录内的 git 不导入
+    _git_dir(proj / "repo")
+    res = rm.link_repos_in_dir(WS, str(proj))
+    assert {x["name"] for x in res["imported"]} == {"repo"}
+
+
+def test_link_repos_in_dir_missing_path(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    with pytest.raises(ValueError):
+        rm.link_repos_in_dir(WS, str(tmp_path / "nope"))
+
+
+def test_unlink_repo_removes_record_not_files(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import read_linked_repos
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    rm.unlink_repo(WS, "ftoa")
+    assert read_linked_repos(_ws_dir(tmp_path)) == []  # 记录移除
+    assert target.exists() and (target / "README.md").exists()  # 源文件绝不删
+
+
+def test_unlink_repo_unknown_raises(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    with pytest.raises(ValueError):
+        rm.unlink_repo(WS, "nope")
+
+
+def test_list_repos_includes_linked(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    d = _repos_base(tmp_path) / "clone1"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()  # 私有克隆
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))  # 关联
+    views = {r["name"]: r for r in rm.list_repos(WS)}
+    assert set(views) == {"clone1", "ftoa"}
+    assert views["clone1"].get("linked") is not True  # 私有克隆非关联
+    assert views["ftoa"]["linked"] is True
+
+
+def test_list_repos_linked_plain_dir_no_git(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    rm.link_repo(WS, "data", str(plain))
+    views = {r["name"]: r for r in rm.list_repos(WS)}
+    assert views["data"]["source"]["kind"] == "linked"
+    assert "branch" not in views["data"]["source"]  # 无 .git 不推断分支
+
+
+def test_get_repo_finds_linked(tmp_path, monkeypatch):
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    view = rm.get_repo(WS, "ftoa")
+    assert view is not None and view["linked"] is True
+    assert rm.get_repo(WS, "unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_unlinks_linked_without_rmtree(tmp_path, monkeypatch):
+    from supernova_web.components.repo_manager import read_linked_repos
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    await rm.delete(WS, "ftoa")
+    assert read_linked_repos(_ws_dir(tmp_path)) == []  # 关联记录移除
+    assert target.exists()  # 源目录仍在（关联=仅取消引用，绝不删文件）

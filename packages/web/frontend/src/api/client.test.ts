@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler } from "./client";
+import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler, linkReposInDir } from "./client";
 
 // 构造符合 fetch Response 真实契约的 mock：text() 与 json() 都在。
 function res({ ok, status, body }: { ok: boolean; status: number; body: unknown }) {
@@ -56,6 +56,19 @@ describe("api client", () => {
     expect(captured.init?.method).toBe("POST");
     expect((captured.init?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
     expect(captured.init?.body).toBe(JSON.stringify({ type: "blackbox" }));
+  });
+
+  it("linkReposInDir POST /workspaces/<ws>/repos/link-dir 带 path", async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    (globalThis.fetch as any).mockImplementation((url: string, init: RequestInit) => {
+      captured = { url, init };
+      return Promise.resolve(res({ ok: true, status: 200, body: { imported: [], skipped: [] } }));
+    });
+    const r = await linkReposInDir("ws1", { path: "/app/repos/frontend" });
+    expect(captured.url).toBe("/api/workspaces/ws1/repos/link-dir");
+    expect(captured.init?.method).toBe("POST");
+    expect(captured.init?.body).toBe(JSON.stringify({ path: "/app/repos/frontend" }));
+    expect(r).toMatchObject({ imported: [], skipped: [] });
   });
 });
 

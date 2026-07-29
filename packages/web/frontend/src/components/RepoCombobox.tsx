@@ -26,6 +26,8 @@ export interface RepoComboboxProps {
   emptyText?: string;
   /** group 为空时的分组标签 */
   ungroupedLabel?: string;
+  /** 关联仓库（按路径关联、共享/只读）的标记文案 */
+  linkedLabel?: string;
 }
 
 export function RepoCombobox({
@@ -36,6 +38,7 @@ export function RepoCombobox({
   searchPlaceholder = "Search...",
   emptyText = "No match",
   ungroupedLabel = "Ungrouped",
+  linkedLabel = "Linked",
 }: RepoComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -99,11 +102,15 @@ export function RepoCombobox({
                         )}
                       />
                       <span>{base}</span>
-                      {r.source?.url && (
+                      {r.linked ? (
+                        <span className="ml-auto shrink-0 rounded border border-cyan/40 px-1 text-xs text-cyan">
+                          {linkedLabel}
+                        </span>
+                      ) : r.source?.url ? (
                         <span className="ml-auto truncate text-xs text-muted-foreground">
                           {r.source.url}
                         </span>
-                      )}
+                      ) : null}
                     </CommandItem>
                   );
                 })}
