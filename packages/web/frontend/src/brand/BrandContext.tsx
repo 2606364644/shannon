@@ -34,7 +34,16 @@ const BrandContext = createContext<BrandContextValue>({
 export function BrandProvider({ children }: { children: ReactNode }) {
   const { data } = useSystemStatus();
   const serverBrand = data?.brand_name?.trim() || DEFAULT_BRAND;
-  const [brand, setBrandState] = useState<string>(serverBrand);
+  // 初始品牌名优先继承后端注入的 document.title(生产 index.html 已注入生效品牌名),
+  // 避免 React 挂载时用默认值把 document.title 覆盖回 "Supernova"(Loading 闪烁;且 /login 页
+  // system-status 401 拿不到 brand 时会恒显默认)。document.title 为空(dev / 无注入)回落默认。
+  const [brand, setBrandState] = useState<string>(() => {
+    if (typeof document !== "undefined") {
+      const injected = document.title.trim();
+      if (injected) return injected;
+    }
+    return serverBrand;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 服务器真相追踪:初始跟随 system-status;改名后乐观领先,直到下次 system-status 刷新。

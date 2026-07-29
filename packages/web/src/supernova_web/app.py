@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import html
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from starlette.staticfiles import StaticFiles
 
+from .api.system_status import resolve_brand_name
 from .config import get_config
 
 
@@ -243,6 +246,31 @@ def _reconcile_repo_meta(app: FastAPI) -> None:
             continue
 
 
+_INDEX_CACHE: dict[str, tuple[float, str]] = {}
+_TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _render_index_html(index_html: Path, brand: str) -> str:
+    """读 index.html，把首个 <title> 注入为当前生效品牌名(已 HTML 转义)。
+
+    消除 SPA 刷新时标签页「先显 index.html 硬编码 Supernova、再被前端 JS 异步改写」的
+    跳变:浏览器拿到 HTML 时 title 即为生效品牌名(运行时改名后即时反映)。文件内容按
+    mtime 缓存——SPA fallback 是 catch-all,深度路由每次命中都要返 index.html,避免每请求
+    读盘 + 正则;title 段每次现替换(brand 随运行时改名变)。brand 经 BrandingStore.validate
+    只限长度/非空、不限字符,故必须 HTML 转义防破坏 <title> / 注入。
+    """
+    key = str(index_html.resolve())
+    mtime = index_html.stat().st_mtime
+    cached = _INDEX_CACHE.get(key)
+    if cached is None or cached[0] != mtime:
+        cached = (mtime, index_html.read_text("utf-8"))
+        _INDEX_CACHE[key] = cached
+    template = cached[1]
+    if _TITLE_RE.search(template):
+        return _TITLE_RE.sub(f"<title>{html.escape(brand)}</title>", template, count=1)
+    return template
+
+
 def _mount_frontend(app: FastAPI, cfg) -> None:
     """挂载前端 SPA 静态托管（生产/集成模式）。
 
@@ -261,12 +289,18 @@ def _mount_frontend(app: FastAPI, cfg) -> None:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
+    # SPA 入口 index.html 每次必重新验证:注入的 title(品牌名)随运行时改名变,且杜绝浏览器
+    # 启发式缓存陈旧 HTML(改名后 F5 仍显旧 title)。带 hash 的 /assets/* 仍可长缓存。
+    no_cache = {"cache-control": "no-cache"}
+
     @app.get("/")
-    async def _spa_root():
-        return FileResponse(index_html)
+    async def _spa_root(request: Request):
+        return HTMLResponse(
+            _render_index_html(index_html, resolve_brand_name(request)), headers=no_cache
+        )
 
     @app.get("/{full_path:path}")
-    async def _spa_fallback(full_path: str):
+    async def _spa_fallback(full_path: str, request: Request):
         candidate = (dist / full_path).resolve()
         try:
             candidate.relative_to(dist_resolved)
@@ -274,7 +308,9 @@ def _mount_frontend(app: FastAPI, cfg) -> None:
             raise HTTPException(status_code=404)
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index_html)
+        return HTMLResponse(
+            _render_index_html(index_html, resolve_brand_name(request)), headers=no_cache
+        )
 
 
 def create_app(overrides: dict | None = None) -> FastAPI:
