@@ -206,6 +206,13 @@ class AnthropicProvider(BaseProvider):
         if self.type == "anthropic_api":
             if self.config.api_key:
                 sdk_env["ANTHROPIC_API_KEY"] = self.config.api_key
+            # auth_token / base_url 显式注入（glm-anthropic 走 token、无 api_key）：
+            # 不能只靠下方 PASSTHROUGH 从进程 env 兜——worker env 无 ANTHROPIC_* 时
+            # CLI 子进程 0 凭据 → "Not logged in"（2026-07-30 web 引擎错配根因之一）。
+            if self.config.auth_token:
+                sdk_env["ANTHROPIC_AUTH_TOKEN"] = self.config.auth_token
+            if self.config.base_url:
+                sdk_env["ANTHROPIC_BASE_URL"] = self.config.base_url
         elif self.type == "bedrock":
             sdk_env["CLAUDE_CODE_USE_BEDROCK"] = "1"
             if self.config.region:

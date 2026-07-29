@@ -87,3 +87,21 @@ def test_resolve_max_turns_default(monkeypatch):
     monkeypatch.delenv("CLAUDE_MAX_TURNS", raising=False)
     p = _make()
     assert p._resolve_max_turns(None) == 200  # 默认 200
+
+
+# —— anthropic_api 认证注入：auth_token / base_url 须显式注入 sdk_env，
+#    不能只靠 PASSTHROUGH 从进程 env 兜（否则 worker env 无 ANTHROPIC_* 时
+#    CLI 子进程拿不到凭据 → "Not logged in"，2026-07-30 web 引擎错配根因之一）——
+
+def test_anthropic_api_injects_auth_token_and_base_url_from_config(monkeypatch):
+    """config.auth_token/base_url 应显式注入 sdk_env（glm-anthropic 走 token、无 api_key）。
+
+    回归锚点：进程 env 无 ANTHROPIC_AUTH_TOKEN 时，若只靠 PASSTHROUGH 透传，
+    CLI 子进程 0 凭据 → "Not logged in · Please run /login"。
+    """
+    for var in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    p = _make({"auth_token": "glm-token-xxx", "base_url": "https://open.bigmodel.cn/api/anthropic"})
+    env = p._build_sdk_env()
+    assert env.get("ANTHROPIC_AUTH_TOKEN") == "glm-token-xxx"
+    assert env.get("ANTHROPIC_BASE_URL") == "https://open.bigmodel.cn/api/anthropic"

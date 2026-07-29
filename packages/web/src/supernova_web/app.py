@@ -11,10 +11,16 @@ from starlette.staticfiles import StaticFiles
 
 from .api.system_status import resolve_brand_name
 from .config import get_config
+from supernova_core.config.env_loader import load_env
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 启动时加载 profile 凭证（对齐 worker runner.main / CLI blackbox·combined main.py
+    # 首行 load_env）。不加载则 scan_manager.build_provider_config() 读不到 profile 里的
+    # SUPERNOVA_AI_PROVIDER（只在 .env.profiles/<profile>.env，docker env_file 不注入）→
+    # 回落默认 anthropic_api → worker 跑 CLI 但无凭据 → 每轮 "Not logged in"（2026-07-30 根因）。
+    load_env()
     # auth: 启动 seed 预置账号 + 周期清理过期 session
     from .auth.seed import seed_users
     import asyncio

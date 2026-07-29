@@ -45,6 +45,42 @@ async def _validate_anthropic(api_key: str) -> None:
         ) from exc
 
 
+async def _validate_anthropic_bearer(auth_token: str, base_url: str) -> None:
+    """POST a minimal request to an Anthropic-compatible endpoint using a Bearer token.
+
+    glm-anthropic 等第三方网关用 ANTHROPIC_AUTH_TOKEN（Authorization: Bearer）+
+    ANTHROPIC_BASE_URL 重定向，无第一方 api_key；与 _validate_anthropic 的 x-api-key
+    路径并列。非鉴权状态码（400 未知 model 等）视为 auth 通过、放行（对齐
+    openai_compatible 语义）。
+    """
+    url = f"{base_url.rstrip('/')}/v1/messages"
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {auth_token}",
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=_ANTHROPIC_TEST_BODY,
+            )
+        if resp.status_code in (401, 403):
+            raise PentestError(
+                f"Anthropic-compatible API auth_token rejected (HTTP {resp.status_code})",
+                category="preflight",
+                retryable=False,
+                error_code=ErrorCode.AUTH_FAILED,
+            )
+    except httpx.ConnectError as exc:
+        raise PentestError(
+            f"Cannot reach Anthropic-compatible API at {base_url}: {exc}",
+            category="preflight",
+            retryable=True,
+            error_code=ErrorCode.AUTH_FAILED,
+        ) from exc
+
+
 async def _validate_bedrock() -> None:
     """Call STS GetCallerIdentity to verify AWS credentials."""
     try:
@@ -132,14 +168,21 @@ async def validate_credentials(
     Unknown providers are silently skipped (graceful degradation).
     """
     if provider == "anthropic_api":
-        if not api_key:
+        if api_key:
+            await _validate_anthropic(api_key)
+        elif auth_token and base_url:
+            # glm-anthropic 走 ANTHROPIC_AUTH_TOKEN（Bearer）+ ANTHROPIC_BASE_URL 重定向。
+            await _validate_anthropic_bearer(auth_token, base_url)
+        else:
+            # 二者皆无 = 引擎/profile 配置错配（如 web 不 load_env → 回落 anthropic_api
+            # 但 worker 是 openai profile、无 ANTHROPIC_* 凭据）→ fail-fast，不静默放行。
             raise PentestError(
-                "Anthropic API key is required but not provided",
+                "anthropic_api 需要 api_key 或 (auth_token + base_url)；"
+                "二者皆无通常是引擎/profile 配置错配",
                 category="preflight",
                 retryable=False,
                 error_code=ErrorCode.AUTH_FAILED,
             )
-        await _validate_anthropic(api_key)
     elif provider == "bedrock":
         await _validate_bedrock()
     elif provider == "vertex":

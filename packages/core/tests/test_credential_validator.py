@@ -42,6 +42,53 @@ class TestValidateAnthropic:
                 await validate_credentials("anthropic_api", api_key="sk-ant-forbidden")
             assert exc_info.value.error_code == ErrorCode.AUTH_FAILED
 
+    @pytest.mark.asyncio
+    async def test_valid_auth_token(self):
+        """glm-anthropic 走 ANTHROPIC_AUTH_TOKEN（Bearer），无 api_key —— 也应可预检。
+
+        回归锚点：2026-07-30 web 引擎错配，预检因 auth_token 被跳过（activities.py
+        条件 + 本函数只认 api_key）→ 放行后满屏 "Not logged in"。
+        """
+        mock_client = AsyncMock()
+        mock_response = MagicMock(status_code=200)
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await validate_credentials(
+                "anthropic_api",
+                auth_token="glm-bearer-token",
+                base_url="https://open.bigmodel.cn/api/anthropic",
+            )
+        # POST {base_url}/v1/messages with Authorization: Bearer
+        mock_client.post.assert_called_once()
+        assert mock_client.post.call_args[0][0] == "https://open.bigmodel.cn/api/anthropic/v1/messages"
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer glm-bearer-token"
+
+    @pytest.mark.asyncio
+    async def test_invalid_auth_token(self):
+        mock_client = AsyncMock()
+        mock_response = MagicMock(status_code=401)
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(PentestError) as exc_info:
+                await validate_credentials(
+                    "anthropic_api",
+                    auth_token="bad",
+                    base_url="https://open.bigmodel.cn/api/anthropic",
+                )
+            assert exc_info.value.error_code == ErrorCode.AUTH_FAILED
+
+    @pytest.mark.asyncio
+    async def test_no_credential_raises(self):
+        """anthropic_api 既无 api_key 也无 auth_token（web 错配全空）→ fail-fast，不静默放行。"""
+        with pytest.raises(PentestError) as exc_info:
+            await validate_credentials("anthropic_api")
+        assert exc_info.value.error_code == ErrorCode.AUTH_FAILED
+
 
 class TestValidateBedrock:
     @pytest.mark.asyncio

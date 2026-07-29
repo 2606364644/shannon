@@ -29,6 +29,15 @@ def _reset_config():
     cfg_mod.get_config.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_load_env(monkeypatch):
+    """web lifespan startup 调 load_env()（对齐 worker runner.main 首行 load_env）；
+    测试 stub 之，避免依赖真实 .env.profiles/<profile>.env（对齐 worker test_runner mock 范式）。
+    """
+    from supernova_web import app as app_mod
+    monkeypatch.setattr(app_mod, "load_env", lambda *a, **k: "test-profile")
+
+
 @pytest.fixture
 def app_with_ws(tmp_workspaces, monkeypatch):
     """create_app() 持单例，且让 get_config().workspaces_dir == tmp_workspaces。

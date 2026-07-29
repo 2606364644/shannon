@@ -648,14 +648,16 @@ async def run_credential_check(input: ActivityInput) -> None:
                 config = ProviderConfig(**input.provider_config)
             else:
                 config = build_provider_config(api_key=input.api_key or None)
-            if config.api_key or config.type != "anthropic_api":
-                await validate_credentials(
-                    config.type,
-                    api_key=config.api_key,
-                    base_url=config.base_url,
-                    auth_token=config.auth_token,
-                    model=config.large_model or config.medium_model or config.model,
-                )
+            # 不再对「anthropic_api + 无 api_key」特殊跳过：glm-anthropic 走 auth_token
+            # （validate_credentials 新增 Bearer 预检分支），凭据全空（web 不 load_env 错配）
+            # 由 validate_credentials fail-fast。避免静默放行后 worker 满屏 "Not logged in"。
+            await validate_credentials(
+                config.type,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                auth_token=config.auth_token,
+                model=config.large_model or config.medium_model or config.model,
+            )
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
