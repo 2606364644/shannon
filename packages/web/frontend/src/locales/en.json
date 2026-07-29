@@ -93,6 +93,7 @@
     "collapse": "Collapse ▾",
     "ungrouped": "Ungrouped",
     "linkedBadge": "Linked",
+    "countLinked": "{{count}} linked",
     "unlink": "Unlink",
     "updating": "Updating {{name}}",
     "updateAria": "Update {{name}}",
@@ -107,9 +108,9 @@
       "actions": "Actions"
     },
     "states": {
-      "ready": "✓ Ready",
-      "failed": "✗ Failed",
-      "stale": "⚠ Incomplete",
+      "ready": "Ready",
+      "failed": "Failed",
+      "stale": "Incomplete",
       "cloning": "Cloning",
       "pulling": "Pulling"
     },
