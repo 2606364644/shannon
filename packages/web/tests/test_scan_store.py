@@ -42,10 +42,13 @@ def test_create_scan_lands_in_scans_subdir(tmp_path):
 
 
 def test_create_scan_id_format(tmp_path):
-    """scan_id = YYYYMMDD-HHMMSS（本地时区紧凑秒级）。"""
+    """scan_id = <repo>-YYYYMMDD-HHMMSS（仓库名前缀 + 本地时区紧凑秒级）。"""
     store = ScanStore(tmp_path)
-    scan_id, _ = store.create_scan("WS", "u", "/x")
-    assert len(scan_id) == 15 and scan_id[8] == "-"
+    scan_id, _ = store.create_scan("WS", "u", "/code/NodeGoat")
+    # 形如 NodeGoat-20260729-171759
+    assert scan_id.startswith("NodeGoat-")
+    ts = scan_id[len("NodeGoat-"):]
+    assert len(ts) == 15 and ts[8] == "-"  # YYYYMMDD-HHMMSS
 
 
 def test_create_scan_same_second_collision(monkeypatch, tmp_path):
@@ -56,11 +59,20 @@ def test_create_scan_same_second_collision(monkeypatch, tmp_path):
     store = ScanStore(tmp_path)
     id1, _ = store.create_scan("WS", "u", "/x")
     id2, _ = store.create_scan("WS", "u", "/x")
-    assert id1 == "20260727-143000"
-    assert id2 == "20260727-143000-2"
+    assert id1 == "x-20260727-143000"
+    assert id2 == "x-20260727-143000-2"
     # 第三个 -3
     id3, _ = store.create_scan("WS", "u", "/x")
-    assert id3 == "20260727-143000-3"
+    assert id3 == "x-20260727-143000-3"
+
+
+def test_create_scan_repo_name_prefix(tmp_path):
+    """scan_id 以仓库名（repo_path basename）为前缀；空 repo_path fallback 'repo'。"""
+    store = ScanStore(tmp_path)
+    sid_repo, _ = store.create_scan("WS", "u", "/code/NodeGoat")
+    assert sid_repo.startswith("NodeGoat-")
+    sid_empty, _ = store.create_scan("WS", "u", "")
+    assert sid_empty.startswith("repo-")
 
 
 # ── list_scans（双源）────────────────────────────────────────────────────────

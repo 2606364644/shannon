@@ -16,6 +16,7 @@ workspace_path=scan_dir，产物自然落 scan 子目录（worker 零改动）�
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -31,6 +32,15 @@ from .workspaces_indexer import _compute_status, _to_unix
 def _now_local() -> datetime:
     """scan_id 时间戳取本地时区 now（抽函数便于测试 monkeypatch 同秒碰撞）。"""
     return datetime.now()
+
+
+def _repo_label(repo_path: str) -> str:
+    """从 repo_path 派生仓库名标签（scan_id 前缀）：basename 合法化为目录名/标识符安全
+    字符——连续的路径分隔符 / 空白 / 点 -> 单个 '-'，去首尾 '-'，空 fallback 'repo'。
+    对齐 core _default_workspace_name 的 hostname 推导（Path.name.replace('.', '-')）。"""
+    name = Path(repo_path).name
+    label = re.sub(r"[/\\\s.]+", "-", name).strip("-")
+    return label or "repo"
 
 
 def resolve_workflow_id(ws: str, scan_dir: Path, scan_id: str) -> str:
@@ -185,11 +195,11 @@ class ScanStore:
                     scan_type: str = "whitebox") -> tuple[str, Path]:
         """在 ws 内建新 scan_id 目录 + session.json（不复位 resume；重扫=新 scan）。
 
-        返回 (scan_id, scan_dir)。scan_id = YYYYMMDD-HHMMSS，同秒碰撞 -2/-3。
+        返回 (scan_id, scan_dir)。scan_id = <repo>-YYYYMMDD-HHMMSS，同秒碰撞 -2/-3。
         """
         ws_dir = self._dir / ws
         scans_dir = ws_dir / "scans"
-        scan_id = self._gen_scan_id(scans_dir)
+        scan_id = self._gen_scan_id(scans_dir, repo_path)
         # SessionManager(scans_dir) 复用 create_workspace：建 scans/<scan_id>/session.json。
         # core 零改动；幂等（session.json 已存在则不覆盖），但 scan_id 经碰撞规避保证新。
         mgr = SessionManager(scans_dir)
@@ -197,9 +207,10 @@ class ScanStore:
             web_url=web_url, repo_path=repo_path, name=scan_id, scan_type=scan_type)
         return scan_id, scan_dir
 
-    def _gen_scan_id(self, scans_dir: Path) -> str:
-        """scan_id = YYYYMMDD-HHMMSS（本地时区紧凑秒级，无冒号）；同秒碰撞 -2/-3..."""
-        base = _now_local().strftime("%Y%m%d-%H%M%S")
+    def _gen_scan_id(self, scans_dir: Path, repo_path: str) -> str:
+        """scan_id = <repo>-YYYYMMDD-HHMMSS（仓库名前缀 + 本地时区紧凑秒级）；同秒碰撞 -2/-3...
+        仓库名前缀让扫描目录一眼可辨（对齐 legacy NodeGoat_<ts> 可读性），取代纯日期 scan_id。"""
+        base = f"{_repo_label(repo_path)}-{_now_local().strftime('%Y%m%d-%H%M%S')}"
         scan_id = base
         i = 2
         while (scans_dir / scan_id / "session.json").exists():
