@@ -11,7 +11,8 @@ def test_system_status_shape(authed_client):
     # 顶层字段
     assert body["ai_provider"] in {"claude", "openai"}
     assert body["browser_engine"] in {"agent-browser", "playwright"}
-    assert body["version"].startswith("supernova-web")
+    # 版本字标前缀跟随品牌名(改名后不再残留 "supernova"):形如 "<brand_name> <ver>"
+    assert body["version"].startswith(body["brand_name"])
     # 品牌名(左上角字标数据源,默认 Supernova,经 SUPERNOVA_WEB_BRAND_NAME 可覆盖)
     assert body["brand_name"]
     # git 子对象(拆分:二进制存在 / GitLab 凭据已配置,两个独立信号)

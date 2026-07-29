@@ -31,7 +31,7 @@ const okBody = {
   browser_engine: "agent-browser",
   temporal: { enabled: true, host: "localhost:7233", last_status: "connected", last_error: null },
   git: { binary_available: true, credentials_configured: true },
-  version: "supernova-web 0.1.0",
+  version: "Supernova 0.1.0",
   brand_name: "Supernova",
 };
 
@@ -63,11 +63,11 @@ afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 describe("SettingsPage", () => {
-  it("渲染三分区 eyebrow（个人化/系统/关于）", async () => {
+  it("渲染各分区 eyebrow（品牌/个人化/系统）", async () => {
     renderWithTheme(<SettingsPage />);
     expect(await screen.findByText("个人化")).toBeInTheDocument();
     expect(screen.getByText("系统")).toBeInTheDocument();
-    expect(screen.getByText("关于")).toBeInTheDocument();
+    expect(screen.queryByText("关于")).not.toBeInTheDocument();
   });
 
   it("状态面板渲染各字段(ai_provider/temporal/version)", async () => {
@@ -75,7 +75,7 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByText("claude")).toBeInTheDocument());
     expect(screen.getByText("agent-browser")).toBeInTheDocument();
     expect(screen.getByText("localhost:7233")).toBeInTheDocument();
-    expect(screen.getByText("supernova-web 0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("Supernova 0.1.0")).toBeInTheDocument();
     // git 拆成两个独立信号(二进制 / GitLab 凭据)
     expect(screen.getByText("已装")).toBeInTheDocument();
     expect(screen.getByText("已配置")).toBeInTheDocument();
@@ -126,15 +126,15 @@ describe("SettingsPage i18n", () => {
     });
   });
 
-  it("中文渲染页标题与三分区 eyebrow", async () => {
+  it("中文渲染页标题与各分区 eyebrow", async () => {
     renderWithTheme(<SettingsPage />);
     expect(await screen.findByText("设置")).toBeInTheDocument();
     expect(screen.getByText("个人化")).toBeInTheDocument();
     expect(screen.getByText("系统")).toBeInTheDocument();
-    expect(screen.getByText("关于")).toBeInTheDocument();
+    expect(screen.queryByText("关于")).not.toBeInTheDocument();
   });
 
-  it("切英文后 eyebrow 变 Personalization/System/About", async () => {
+  it("切英文后 eyebrow 变 Personalization/System", async () => {
     renderWithTheme(<SettingsPage />);
     await screen.findByText("设置");
     await act(async () => {
@@ -142,7 +142,7 @@ describe("SettingsPage i18n", () => {
     });
     expect(await screen.findByText("Personalization")).toBeInTheDocument();
     expect(screen.getByText("System")).toBeInTheDocument();
-    expect(screen.getByText("About")).toBeInTheDocument();
+    expect(screen.queryByText("About")).not.toBeInTheDocument();
   });
 });
 

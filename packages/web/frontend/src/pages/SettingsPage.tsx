@@ -307,18 +307,6 @@ export function SettingsPage() {
         </Card>
       </Section>
 
-      {/* ▍关于：单段身份说明，版本信息已在系统面板 */}
-      <Section eyebrow={t("settings.section.about")}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-semibold tracking-tight text-base">{t("settings.aboutTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm leading-relaxed text-muted-foreground">
-            {t("settings.aboutDesc")}
-          </CardContent>
-        </Card>
-      </Section>
-
       <ChangePasswordDialog open={cpOpen} onOpenChange={setCpOpen} onChanged={refreshUser} />
     </div>
   );

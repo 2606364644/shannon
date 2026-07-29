@@ -412,8 +412,7 @@
     "section": {
       "branding": "Branding",
       "personalization": "Personalization",
-      "system": "System",
-      "about": "About"
+      "system": "System"
     },
     "themeTitle": "Theme",
     "themeDark": "Dark",
@@ -424,9 +423,6 @@
     "accountSecurityHint": "Change your sign-in password",
     "changePasswordBtn": "Change password",
     "statusTitle": "System status",
-    "aboutTitle": "About Supernova",
-    "aboutDesc": "Supernova is a code security scanning platform: white-box taint-chain analysis and black-box penetration over your repositories, producing reproducible vulnerability reports.",
-    "aboutVersionLabel": "Version",
     "fields": {
       "aiProvider": "AI engine",
       "browserEngine": "Browser engine",

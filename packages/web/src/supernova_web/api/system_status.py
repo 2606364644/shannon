@@ -48,6 +48,9 @@ async def system_status(request: Request) -> dict:
         ver = version("supernova-web")
     except PackageNotFoundError:
         ver = "unknown"
+    # 平台品牌名(左上角字标数据源)。优先级:branding.json 运行时覆盖 >
+    # SUPERNOVA_WEB_BRAND_NAME env > 默认 "Supernova";管理员可在设置页改名。
+    brand_name = resolve_brand_name(request)
     return {
         "ai_provider": os.environ.get("SUPERNOVA_AI_PROVIDER", "claude"),
         "browser_engine": os.environ.get("SUPERNOVA_BROWSER_ENGINE", "agent-browser"),
@@ -61,8 +64,7 @@ async def system_status(request: Request) -> dict:
             "binary_available": cfg.git_binary_available,
             "credentials_configured": bool(cfg.gitlab_user and cfg.gitlab_token),
         },
-        "version": f"supernova-web {ver}",
-        # 平台品牌名(左上角字标数据源)。优先级:branding.json 运行时覆盖 >
-        # SUPERNOVA_WEB_BRAND_NAME env > 默认 "Supernova";管理员可在设置页改名。
-        "brand_name": resolve_brand_name(request),
+        # 版本字标前缀同步跟随品牌名,避免管理员改名后版本仍残留 "supernova" 字样。
+        "version": f"{brand_name} {ver}",
+        "brand_name": brand_name,
     }

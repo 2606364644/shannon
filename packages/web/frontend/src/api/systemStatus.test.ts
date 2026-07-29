@@ -11,7 +11,7 @@ const okBody = {
   browser_engine: "agent-browser",
   temporal: { enabled: true, host: "localhost:7233", last_status: "connected", last_error: null },
   git: { binary_available: true, credentials_configured: true },
-  version: "supernova-web 0.1.0",
+  version: "Supernova 0.1.0",
   brand_name: "Supernova",
 };
 
@@ -30,7 +30,7 @@ describe("useSystemStatus", () => {
     await waitFor(() => expect(result.current.data).not.toBeNull());
     expect(result.current.data?.ai_provider).toBe("claude");
     expect(result.current.data?.temporal.last_status).toBe("connected");
-    expect(result.current.data?.version).toBe("supernova-web 0.1.0");
+    expect(result.current.data?.version).toBe("Supernova 0.1.0");
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
   });

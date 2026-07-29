@@ -412,8 +412,7 @@
     "section": {
       "branding": "品牌",
       "personalization": "个人化",
-      "system": "系统",
-      "about": "关于"
+      "system": "系统"
     },
     "themeTitle": "主题",
     "themeDark": "深色",
@@ -424,9 +423,6 @@
     "accountSecurityHint": "修改登录密码",
     "changePasswordBtn": "修改密码",
     "statusTitle": "系统状态",
-    "aboutTitle": "关于 Supernova",
-    "aboutDesc": "Supernova 是代码安全扫描平台：对仓库做白盒污点链分析与黑盒渗透，产出可复现的漏洞报告。",
-    "aboutVersionLabel": "版本",
     "fields": {
       "aiProvider": "AI 引擎",
       "browserEngine": "浏览器引擎",
