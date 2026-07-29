@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Play, RefreshCw, Trash2, Eye } from "lucide-react";
+import { Ban, Play, RefreshCw, Trash2, Eye } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -197,7 +197,7 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
           </Button>
           {isRunning && (
             <Button size="sm" variant="ghost" onClick={() => setPending("cancel")} disabled={busy}>
-              {t("common.cancel")}
+              <Ban className="size-3.5" /> {t("common.cancel")}
             </Button>
           )}
           <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setPending("delete")} disabled={busy}>
