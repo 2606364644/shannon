@@ -397,7 +397,8 @@
     "viewAll": "查看全部 →",
     "empty": {
       "title": "还没有扫描",
-      "hint": "新建一个扫描开始"
+      "hint": "新建一个扫描开始",
+      "noWorkspaceHint": "还没有工作区，先创建一个工作区再开始扫描"
     },
     "errors": {
       "loadFailed": "Dashboard 加载失败：{{error}}"

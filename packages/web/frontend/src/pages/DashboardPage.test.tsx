@@ -4,12 +4,15 @@ import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
 
-// mock listAllScans（跨 ws 聚合）+ cancelScan（admin 操作列）+ useAuth（admin/user gate）。
-const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+// mock listAllScans（跨 ws 聚合）+ cancelScan（admin 操作列）+ useAuth（admin/user gate）
+// + apiGet（DashboardPage 拉 /workspaces 判 admin 无 ws 空态）。apiGetMock hoisted 供 beforeEach 默认 []。
+const { mockUseAuth, apiGetMock } = vi.hoisted(() => ({ mockUseAuth: vi.fn(), apiGetMock: vi.fn() }));
 vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
 vi.mock("@/api/client", () => ({
   listAllScans: vi.fn(),
   cancelScan: vi.fn(),
+  createWorkspace: vi.fn(),
+  apiGet: apiGetMock,
 }));
 
 const mockScans = [
@@ -26,6 +29,8 @@ function renderPage() {
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // apiGet 默认无工作区（admin 无 ws 空态测试在此默认上跑；有 ws 场景逐测试覆写）。
+    apiGetMock.mockResolvedValue([]);
     // 默认普通用户（admin 操作列不渲染）；admin describe 内 beforeEach 覆写为 admin。
     mockUseAuth.mockReturnValue({ user: userUser });
     // jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
@@ -105,6 +110,26 @@ describe("DashboardPage admin 操作列（spec 2026-07-27 下线 WorkspaceListPa
     const confirm = await screen.findByRole("button", { name: /^确认$/ });
     fireEvent.click(confirm);
     await waitFor(() => expect(cancelScan).toHaveBeenCalledWith("ws-a", "s1"));
+  });
+
+  it("admin 无任何工作区：空态渲染「新建工作区」入口（解锁创建——入口原本只在 ws 内 Switcher，无 ws 时进不去）", async () => {
+    const { listAllScans, apiGet } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([]); // 无扫描
+    (apiGet as any).mockResolvedValue([]); // 无工作区
+    renderPage();
+    // workspace.create.button = 「新建工作区」
+    await waitFor(() => expect(screen.getByRole("button", { name: /新建工作区/ })).toBeInTheDocument());
+    // 不显示「新建扫描」死按钮（admin 无 ws 点了也选不了 ws → 死锁）
+    expect(screen.queryByRole("link", { name: /新建扫描/ })).not.toBeInTheDocument();
+  });
+
+  it("admin 有工作区但无扫描：空态仍是「新建扫描」（不误显创建入口）", async () => {
+    const { listAllScans, apiGet } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([]);
+    (apiGet as any).mockResolvedValue([{ name: "ws-x" }]); // 有工作区
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("link", { name: /新建扫描/ })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /新建工作区/ })).not.toBeInTheDocument();
   });
 
   it("普通用户:无操作列（admin gate，体验不降级）", async () => {

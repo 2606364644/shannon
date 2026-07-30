@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatRow } from "@/components/StatRow";
 import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/Empty";
+import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
 import { ScanFilters, DEFAULT_SCAN_FILTERS, useScanFilters } from "@/components/ScanFilters";
-import { listAllScans, cancelScan, type CancelResult } from "@/api/client";
-import type { ScanSummary } from "@/api/types";
+import { listAllScans, cancelScan, apiGet, type CancelResult } from "@/api/client";
+import type { ScanSummary, Workspace } from "@/api/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fmtCost } from "@/utils/currency";
 import { useAsync } from "@/lib/useAsync";
@@ -39,8 +40,12 @@ export function DashboardPage() {
   const { t } = useTranslation();
   // 跨 ws 扫描聚合(IA 重设计 §3,GET /api/scans)。每项注入 workspace 字段供表格「归属工作区」列消费。
   const { data, loading, refresh } = useAsync(listAllScans, []);
+  // admin 无 ws 空态判断：拉一次用户可见 ws 列表（与 ScanNewPage 同源 /workspaces）。
+  // CreateWorkspaceDialog 唯一入口在 ws 内 Switcher（/p/:ws），无 ws 时进不去 → 着陆空态补创建入口解锁。
+  const { data: workspaces, loading: wsLoading } = useAsync(() => apiGet<Workspace[]>("/workspaces"), []);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const nav = useNavigate();
   // admin 操作列：取消 running scan（spec 2026-07-27，下线 WorkspaceListPage 后取消并入 Dashboard）。
   const [pending, setPending] = useState<ScanSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,7 +75,7 @@ export function DashboardPage() {
   const totalCost = filtered.reduce((a, s) => a + (s.total_cost_usd ?? 0), 0);
   const currency = filtered.find((s) => s.cost_currency)?.cost_currency;
 
-  if (loading && data.length === 0) {
+  if ((loading || wsLoading) && data.length === 0) {
     return (
       <div className="space-y-2">
         {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
@@ -78,6 +83,15 @@ export function DashboardPage() {
     );
   }
   if (data.length === 0) {
+    // admin 且无任何工作区：创建入口本只在 ws 内 Switcher（/p/:ws）里，无 ws 时进不去 →
+    // 在着陆空态补「新建工作区」，否则 admin 死锁（新建扫描要求先选 ws，无 ws 无法选）。
+    if (isAdmin && workspaces.length === 0) {
+      return (
+        <Empty title={t("dashboard.empty.title")} hint={t("dashboard.empty.noWorkspaceHint")}>
+          <CreateWorkspaceDialog onCreated={(name) => nav(`/p/${name}`)} />
+        </Empty>
+      );
+    }
     return (
       <Empty title={t("dashboard.empty.title")} hint={t("dashboard.empty.hint")}>
         <Button variant="cta" asChild><Link to="/scan/new">{t("dashboard.newScan")}</Link></Button>

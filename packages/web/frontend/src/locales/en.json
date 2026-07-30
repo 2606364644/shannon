@@ -397,7 +397,8 @@
     "viewAll": "View all →",
     "empty": {
       "title": "No scans yet",
-      "hint": "Create a scan to start"
+      "hint": "Create a scan to start",
+      "noWorkspaceHint": "No workspaces yet — create one to start scanning"
     },
     "errors": {
       "loadFailed": "Dashboard load failed: {{error}}"
