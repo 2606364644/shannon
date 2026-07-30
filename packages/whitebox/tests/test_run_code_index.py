@@ -6,6 +6,7 @@ from temporalio.exceptions import ApplicationError as ApplicationFailure
 
 from supernova_whitebox.pipeline.activities import run_code_index, _get_paths
 from supernova_whitebox.pipeline.shared import ActivityInput
+from supernova_core.utils.paths import WHITEBOX_SUBDIR
 
 
 @pytest.mark.asyncio
@@ -118,6 +119,30 @@ def test_get_paths_routes_deliverables_to_whitebox_subdir(tmp_path):
 
     assert deliverables.name == "whitebox"
     assert deliverables.parent.name == "deliverables"
+
+
+def test_get_paths_prefers_workspace_path_for_web_scan(tmp_path):
+    """web 扫描下 deliverables 必须落 ActivityInput.workspace_path（=scan_dir），
+    而非 resolve_deliverables_path(workspace_name) 的平铺目录。
+
+    根因（2026-07-30 端到端暴露）：WhiteboxScanWorkflow 已算 workspace_path=event_file.parent
+    （web = scan_dir）传入 ActivityInput，但 _get_paths 无视它、改用 workspace_name 算
+    workspaces/<scan_id>/deliverables，与 web DeliverablesReader 读的 scan_dir/deliverables
+    分裂 → 前端 0 漏洞（产物真实存在 40+ 条却显示空）。_get_paths 须尊重 workspace_path。
+    """
+    # web scan_dir（<ws>/scans/<scan_id>）与 workspace_name=scan_id 的平铺落点是不同目录。
+    scan_dir = tmp_path / "workspaces" / "__legacy__" / "scans" / "NodeGoat-x"
+    scan_dir.mkdir(parents=True)
+    inp = ActivityInput(
+        repo_path=str(tmp_path / "repos" / "NodeGoat"),
+        workspace_name="NodeGoat-x",          # = scan_id（_get_paths 旧平铺落点）
+        workspace_path=str(scan_dir),          # web: event_file.parent
+        deliverables_subdir="deliverables",
+    )
+
+    _, deliverables, _ = _get_paths(inp)
+
+    assert deliverables == scan_dir / "deliverables" / WHITEBOX_SUBDIR
 
 
 @pytest.mark.asyncio

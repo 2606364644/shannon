@@ -42,11 +42,20 @@ logger = logging.getLogger(__name__)
 def _get_paths(input: ActivityInput) -> tuple[Path, Path, Path]:
     from supernova_core.utils.paths import WHITEBOX_SUBDIR
 
-    deliverables = resolve_deliverables_path(
-        repo_path=input.repo_path,
-        deliverables_subdir=input.deliverables_subdir,
-        workspace_name=input.workspace_name,
-    )
+    # workspace_path（web=event_file.parent=scan_dir；CLI=repo.parent/workspaces/<ws>）由
+    # WhiteboxScanWorkflow 算好传入（workflows.py C1 Phase B）。优先用它作 deliverables 根，
+    # 使产物落 scan_dir，与 web DeliverablesReader / get_workspace_vuln_counts 读取口径对齐——
+    # 修 2026-07-30 分裂：_get_paths 旧用 resolve_deliverables_path(workspace_name=scan_id) 落
+    # workspaces/<scan_id>/ 平铺目录，web 在 scan_dir/deliverables 读不到 → 前端 0 漏洞。
+    # 无 workspace_path（activity 被直接调用、不经 workflow）回落 resolve_deliverables_path。
+    if input.workspace_path:
+        deliverables = Path(input.workspace_path) / input.deliverables_subdir
+    else:
+        deliverables = resolve_deliverables_path(
+            repo_path=input.repo_path,
+            deliverables_subdir=input.deliverables_subdir,
+            workspace_name=input.workspace_name,
+        )
     # 白盒产物隔离到 deliverables/whitebox/（与黑盒 blackbox/ 对称）。
     # 写侧永远落新结构；黑盒读白盒 queue 走 resolve_track_deliverable fallback。
     deliverables = deliverables / WHITEBOX_SUBDIR
