@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -302,6 +303,39 @@ class ScanStore:
         if (ws_dir / "session.json").exists() and self._legacy_scan_id(ws_dir) == scan_id:
             return ws_dir
         return None
+
+    # ws 级保留项（非 scan 产物）：删 legacy 根 scan 时保留，勿 rmtree 整个 ws 根。
+    # workspace.json=config.yaml=ws 级元数据；scans=其他新 scan 子目录；repos=P2 仓库隔离目录。
+    _WS_LEVEL_KEEP = frozenset({"workspace.json", "config.yaml", "scans", "repos"})
+
+    def delete_scan(self, ws: str, scan_id: str) -> bool:
+        """删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE 真删）。
+
+        源① scans/<scan_id>/（新模型）：rmtree 整个独立 scan 目录（含产物）。
+        源② legacy ws 根 scan（迁移残留）：ws 根同时是 workspace 容器，不能 rmtree 整目录——
+        仅删 scan 产物，保留 ws 级（_WS_LEVEL_KEEP）。
+
+        scan 不存在 / 路径越界（..///） -> False（端点据此返 404）；成功 -> True。
+        复用 get_scan_dir 的路径校验 + 双源定位，删除范围与定位口径一致。
+        """
+        scan_dir = self.get_scan_dir(ws, scan_id)
+        if scan_dir is None:
+            return False
+        scans_root = self._dir / ws / "scans"
+        if scan_dir.parent == scans_root:
+            # 源①：独立 scan 子目录，整删（含 session.json/events.ndjson/deliverables/agents/...）。
+            shutil.rmtree(scan_dir)
+        else:
+            # 源② legacy ws 根：删 scan 产物，保留 ws 级元数据 / 其他 scan / repo。
+            # 迁移机制通常已把根 scan 搬进 __legacy__/scans/（变源①），此处仅边缘残留。
+            for entry in scan_dir.iterdir():
+                if entry.name in self._WS_LEVEL_KEEP:
+                    continue
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+        return True
 
     def latest_scan(self, ws: str) -> Path | None:
         """ws 内「最新」scan 目录（spec §5.2 shim 用）：active 优先，否则 max created_at。

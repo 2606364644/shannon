@@ -81,10 +81,11 @@ export const createWorkspace = (name: string) =>
 export const deleteWorkspace = (ws: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encodeURIComponent(ws)}`);
 export type CancelResult = { cancelled: string; via?: string; was_dead?: boolean };
-// ws-scan 解耦：cancelScan 一律走 scan-scoped（DELETE /api/workspaces/{ws}/scans/{scanId}）。
-// ws 列表行只有 ws 名、无 scan_id -> 用 cancelActiveScan 先 listScans 解析出在跑的 scan 再取消。
+// ws-scan 解耦：cancelScan 走 scan-scoped POST /cancel（动作型 POST，对齐 resume POST；
+// DELETE /scans/{id} 已让位给真删除）。ws 列表行只有 ws 名、无 scan_id -> 用 cancelActiveScan
+// 先 listScans 解析出在跑的 scan 再取消。
 export function cancelScan(ws: string, scanId: string): Promise<CancelResult> {
-  return apiDelete<CancelResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
+  return apiPost<CancelResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/cancel`, {});
 }
 
 /** 取消该 ws 正在跑的 scan（ws 列表行用：无 scan_id，先 listScans 找 active/latest running，再 scan-scoped 取消）。

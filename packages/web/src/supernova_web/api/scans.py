@@ -178,8 +178,30 @@ async def scan_events(ws: str, scan_id: str, request: Request, _: User = Depends
 
 
 @router.delete("/{ws}/scans/{scan_id}")
+async def delete_scan(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
+    """删除单个 scan（真删目录，spec §5.1 DELETE）。
+
+    DELETE 语义=删资源（同 delete_workspace）；取消走 POST /{ws}/scans/{scan_id}/cancel。
+    running scan -> 409（先取消再删，避免删在跑 workflow 的目录致状态不一致）；不存在 -> 404。
+    """
+    from supernova_web.components.scan_manager import ScanRunning
+    sm = request.app.state.scan_manager
+    try:
+        result = await sm.delete(ws, scan_id)
+    except ScanRunning as e:
+        raise HTTPException(409, str(e))
+    if result is None:
+        raise HTTPException(404, "scan not found")
+    return result
+
+
+@router.post("/{ws}/scans/{scan_id}/cancel")
 async def cancel_scan(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
-    from supernova_web.components.scan_manager import TooManyScans
+    """取消 scan（动作型 POST，对齐 resume POST 子路径风格）。
+
+    web 自起 -> handle.cancel；host 在跑 -> cancel.requested；已死 -> 标 cancelled。
+    不存在 -> 404。
+    """
     sm = request.app.state.scan_manager
     result = await sm.cancel(ws, scan_id)
     if result is None:

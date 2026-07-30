@@ -138,13 +138,13 @@ describe("ScanList 卡片操作按钮按 status 显隐", () => {
 });
 
 describe("ScanList 操作调 API + 列表刷新", () => {
-  it("取消 running scan -> DELETE scan-scoped -> 刷新列表", async () => {
-    const deleteCalls: string[] = [];
+  it("取消 running scan -> POST cancel scan-scoped -> 刷新列表", async () => {
+    const cancelCalls: string[] = [];
     server.use(
       http.get("/api/workspaces/:ws/scans", () => { listCalls++; return HttpResponse.json([running]); }),
-      http.delete("/api/workspaces/:ws/scans/:scanId", ({ params }) => {
-        deleteCalls.push(`${params.ws}/${params.scanId}`);
-        return HttpResponse.json({ deleted: params.scanId as string });
+      http.post("/api/workspaces/:ws/scans/:scanId/cancel", ({ params }) => {
+        cancelCalls.push(`${params.ws}/${params.scanId}`);
+        return HttpResponse.json({ cancelled: params.scanId as string });
       }),
     );
     renderList();
@@ -153,9 +153,9 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     // 点卡片「取消」-> Dialog 开
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(await screen.findByText(/取消扫描 s1/)).toBeInTheDocument();
-    // 点「确认」-> DELETE
+    // 点「确认」-> POST cancel
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
-    await waitFor(() => expect(deleteCalls).toEqual(["ws/s1"]));
+    await waitFor(() => expect(cancelCalls).toEqual(["ws/s1"]));
     // 刷新：listScans 再拉一次
     await waitFor(() => expect(listCalls).toBeGreaterThan(listCallsBefore));
   });

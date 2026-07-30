@@ -289,3 +289,77 @@ def test_scan_summary_workflow_id_prefers_ndjson_header(tmp_path):
     s = store.list_scans("WS1")[0]
     assert s.workflow_id == "sentinel_dashboard_20260721-201435"
     assert s.workflow_id != f"WS1-{new_id}"  # 不是算的 web scheme
+
+
+# ── delete_scan（双源删除）────────────────────────────────────────────────────
+
+def test_delete_scan_new_scan_removes_dir(tmp_path):
+    """源① scans/<id>/：delete_scan 后整个 scan 目录消失，list_scans 不再返回。"""
+    store = ScanStore(tmp_path)
+    new_id, scan_dir = store.create_scan("WS", "u", "/x")
+    # 写点产物，确认整目录删干净
+    (scan_dir / "deliverables").mkdir()
+    (scan_dir / "events.ndjson").write_text('{"type":"scan_end"}\n')
+    assert store.delete_scan("WS", new_id) is True
+    assert not scan_dir.exists()
+    assert store.get_scan_dir("WS", new_id) is None
+    assert store.list_scans("WS") == []
+
+
+def test_delete_scan_unknown_returns_false(tmp_path):
+    """scan 不存在 -> 返回 False（不抛，端点据此 404）。"""
+    store = ScanStore(tmp_path)
+    store.create_scan("WS", "u", "/x")
+    assert store.delete_scan("WS", "nonexistent") is False
+
+
+def test_delete_scan_rejects_traversal(tmp_path):
+    """路径校验同 get_scan_dir：scan_id 含 ../// -> False（防越界删其他目录）。"""
+    store = ScanStore(tmp_path)
+    store.create_scan("WS", "u", "/x")
+    assert store.delete_scan("WS", "..") is False
+    assert store.delete_scan("WS", "foo/bar") is False
+    assert store.delete_scan("WS", "") is False
+
+
+def test_delete_scan_legacy_root_removes_products_keeps_ws_shell(tmp_path):
+    """源② legacy ws 根 scan：删 scan 产物（session.json/events.ndjson/deliverables），
+    保留 ws 壳 + ws 级元数据（workspace.json/config.yaml）+ 其他新 scan（scans/）+ repo。
+
+    legacy scan 产物散落 ws 根，但 ws 根同时是 workspace 容器——删 scan 不能 rmtree 整个 ws
+    （会连带删 workspace.json / 其他 scan / repo）。迁移机制通常已把根 scan 搬进 __legacy__/scans/
+    （变源①），源②仅残留于迁移跳过（损坏 session / 带 config.yaml 的 ws）的边缘情况。
+    """
+    from supernova_web.components.scan_store import write_workspace_meta
+    store = ScanStore(tmp_path)
+    ws_dir = tmp_path / "WS"
+    ws_dir.mkdir()
+    # ws 级元数据 + 其他新 scan 子目录 + ws 级配置（必须保留）
+    write_workspace_meta(ws_dir, name="WS", owner="admin")
+    other = ws_dir / "scans" / "other-20260730-120000"
+    other.mkdir(parents=True)
+    (other / "session.json").write_text(
+        json.dumps({"status": "completed", "created_at": 1780003600.0}))
+    (ws_dir / "config.yaml").write_text("ai: x")
+    (ws_dir / "repos").mkdir()
+    # legacy scan 产物（必须删）
+    _make_legacy_root_scan(ws_dir, created_at=1780000000.0)
+    (ws_dir / "events.ndjson").write_text('{"type":"scan_end"}\n')
+    (ws_dir / "deliverables").mkdir()
+    legacy_id = store._legacy_scan_id(ws_dir)
+
+    assert store.delete_scan("WS", legacy_id) is True
+    # scan 产物已删
+    assert not (ws_dir / "session.json").exists()
+    assert not (ws_dir / "events.ndjson").exists()
+    assert not (ws_dir / "deliverables").exists()
+    # ws 壳 + ws 级元数据 + 其他 scan + repo 保留
+    assert ws_dir.exists()
+    assert (ws_dir / "workspace.json").exists()
+    assert (ws_dir / "config.yaml").exists()
+    assert (ws_dir / "repos").exists()
+    assert (other / "session.json").exists()
+    # legacy scan 不再列出（其他新 scan 仍在）
+    ids = [s.scan_id for s in store.list_scans("WS")]
+    assert legacy_id not in ids
+    assert "other-20260730-120000" in ids

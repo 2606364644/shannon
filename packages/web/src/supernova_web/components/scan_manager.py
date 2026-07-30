@@ -33,6 +33,16 @@ class TooManyScans(Exception):
         super().__init__(f"已有扫描在跑（并发上限 {limit}）")
 
 
+class ScanRunning(Exception):
+    """删除 running scan 被拒（应先 cancel 再删，对齐 delete_workspace 删 ws 前要求无 running scan）。
+
+    删在跑 workflow 的目录会致 _watch describe 不存在的 workflow / max_concurrent 槽位泄漏。
+    """
+    def __init__(self, scan_id: str) -> None:
+        self.scan_id = scan_id
+        super().__init__(f"扫描正在运行，请先取消再删除：{scan_id}")
+
+
 # resume 放行的状态：已停未完成（worker 中途停止、有部分进度可续）。
 # completed/failed（已结束）/ cancelled（用户主动停）/ running（在跑，resume 会重复提交）
 # -> 不可 resume，用重扫（POST /api/scan 起新 scan_id，旧记录保留）。
@@ -292,6 +302,27 @@ class ScanManager:
             return {"cancelled": scan_id, "via": "signal"}
         await self._mark_cancelled(scan_dir)
         return {"cancelled": scan_id, "was_dead": True}
+
+    async def delete(self, ws: str, scan_id: str) -> dict | None:
+        """删除单个 scan（真删目录，spec §5.1 DELETE）。
+
+        running scan -> ScanRunning（端点转 409，先 cancel 再删，避免删在跑 workflow 的目录致
+        _watch describe 不存在的 workflow / max_concurrent 槽位泄漏）；不存在 -> None（端点 404）。
+        删除范围由 ScanStore.delete_scan 决定（源①整删 scans/<id>/，源② legacy 根仅删产物保 ws 壳）。
+        """
+        scan_dir = self._store.get_scan_dir(ws, scan_id)
+        if scan_dir is None:
+            return None
+        mgr = SessionManager(scan_dir.parent)
+        if _compute_status(scan_dir, mgr.get_status(scan_dir)) == "running":
+            raise ScanRunning(scan_id)
+        # 防御：清残留登记（非 running 时 _watch finally 通常已清，此处兜底防异常路径泄漏）。
+        scan_key = (ws, scan_id)
+        self._handles.pop(scan_key, None)
+        self._tasks.pop(scan_key, None)
+        self._active_reqs.pop(scan_key, None)
+        self._store.delete_scan(ws, scan_id)
+        return {"deleted": scan_id}
 
     def _mark_owner(self, scan_dir: Path, owner: str) -> None:
         """标 scan session.json owner(web/host)。best-effort:子进程 MetricsTracker 用

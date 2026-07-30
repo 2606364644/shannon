@@ -26,11 +26,13 @@ def _csrf(c):
 
 
 class FakeSM:
-    """隔离 scan_manager（免 temporal），记录 resume/cancel 调用。"""
+    """隔离 scan_manager（免 temporal），记录 resume/cancel/delete 调用。"""
     def __init__(self):
         self.resumed = []
         self.cancelled = []
+        self.deleted = []
         self.resume_exc = None
+        self.delete_exc = None
 
     async def resume(self, ws, scan_id):
         if self.resume_exc:
@@ -41,6 +43,12 @@ class FakeSM:
     async def cancel(self, ws, scan_id=None):
         self.cancelled.append((ws, scan_id))
         return {"cancelled": scan_id if scan_id else ws}
+
+    async def delete(self, ws, scan_id):
+        if self.delete_exc:
+            raise self.delete_exc
+        self.deleted.append((ws, scan_id))
+        return None if scan_id == "nope" else {"deleted": scan_id}
 
     def active_pids(self):
         return {}
@@ -155,12 +163,13 @@ def test_resume_unknown_scan_404(authed_client, app_with_ws, tmp_workspaces):
 
 
 def test_cancel_scan_by_id(authed_client, app_with_ws, tmp_workspaces):
+    """POST /scans/{id}/cancel 取消（DELETE 端点已让位给真删）。"""
     _make_scan(tmp_workspaces, "WS", scan_id="s1", status="running")
     fake = FakeSM()
     app_with_ws.state.scan_manager = fake
     tok = _csrf(authed_client)
-    r = authed_client.delete("/api/workspaces/WS/scans/s1",
-                             headers={"X-CSRF-Token": tok})
+    r = authed_client.post("/api/workspaces/WS/scans/s1/cancel",
+                           headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
     assert fake.cancelled == [("WS", "s1")]
 
@@ -183,10 +192,45 @@ def test_cancel_scan_passes_through_via_signal(authed_client, app_with_ws, tmp_w
     fake = HostSM()
     app_with_ws.state.scan_manager = fake
     tok = _csrf(authed_client)
-    r = authed_client.delete("/api/workspaces/WS/scans/s1", headers={"X-CSRF-Token": tok})
+    r = authed_client.post("/api/workspaces/WS/scans/s1/cancel", headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
     assert r.json() == {"cancelled": "s1", "via": "signal"}
     assert fake.cancelled == [("WS", "s1")]
+
+
+# ── delete（真删，spec §5.1 DELETE）─────────────────────────────────────────
+
+def test_delete_scan_by_id(authed_client, app_with_ws, tmp_workspaces):
+    """DELETE /scans/{id} 真删（调 sm.delete），返 {deleted:id}。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="completed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/s1", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json() == {"deleted": "s1"}
+    assert fake.deleted == [("WS", "s1")]
+
+
+def test_delete_running_scan_409(authed_client, app_with_ws, tmp_workspaces):
+    """running scan 删除 -> 409（先取消再删，对齐 delete_workspace 删 ws 前 running 检查）。"""
+    from supernova_web.components.scan_manager import ScanRunning
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="running")
+    fake = FakeSM()
+    fake.delete_exc = ScanRunning("s1")
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/s1", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 409
+
+
+def test_delete_unknown_scan_404(authed_client, app_with_ws, tmp_workspaces):
+    """scan 不存在 -> sm.delete 返 None -> 404。"""
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/nope", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 404
 
 
 # ── shim 已彻底移除（scan-scoped 是唯一取消路径）──────────────────────────────

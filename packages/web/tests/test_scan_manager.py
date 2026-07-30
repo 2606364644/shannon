@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from supernova_web.models import PathSource, RepoSource, ScanRequest
-from supernova_web.components.scan_manager import ScanManager, TemporalUnavailable, TooManyScans
+from supernova_web.components.scan_manager import ScanManager, ScanRunning, TemporalUnavailable, TooManyScans
 
 
 async def _ok():
@@ -377,3 +377,50 @@ async def test_correlation_config_name_traversal_rejected(tmp_path, monkeypatch)
     _patch_temporal_ok(monkeypatch, mgr)
     with pytest.raises(ValueError):
         await mgr.start(ScanRequest(type="correlation", config_name="../evil"))
+
+
+# ── delete: 真删目录（spec §5.1 DELETE）──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_delete_completed_scan_removes_dir(tmp_path):
+    """非 running scan 删除：调 ScanStore.delete_scan 真删目录，返 {deleted:id}。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_scan_dir(tmp_path, "ws", scan_id="s1", status="completed")
+    result = await mgr.delete("ws", "s1")
+    assert result == {"deleted": "s1"}
+    assert not scan_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_running_scan_raises_scan_running(tmp_path):
+    """running scan 删除被拒 -> ScanRunning（端点转 409，先 cancel 再删）。
+
+    对齐 delete_workspace：删在跑 workflow 的目录会致 _watch 描述不存在的 workflow / 槽位泄漏。
+    """
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_scan_dir(tmp_path, "ws", scan_id="s1", status="running")
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh -> running
+    with pytest.raises(ScanRunning):
+        await mgr.delete("ws", "s1")
+    assert scan_dir.exists()  # 未删
+
+
+@pytest.mark.asyncio
+async def test_delete_unknown_returns_none(tmp_path):
+    """scan 不存在 -> None（端点据此 404）。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    _make_scan_dir(tmp_path, "ws", scan_id="s1")
+    assert await mgr.delete("ws", "nope") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_clears_stale_registrations(tmp_path):
+    """删除成功后清理残留 _handles/_active_reqs（防御：非 running 时 _watch finally 通常已清）。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    _make_scan_dir(tmp_path, "ws", scan_id="s1", status="completed")
+    scan_key = ("ws", "s1")
+    mgr._handles[scan_key] = MagicMock()
+    mgr._active_reqs[scan_key] = ScanRequest(type="whitebox", url="u")
+    await mgr.delete("ws", "s1")
+    assert scan_key not in mgr._handles
+    assert scan_key not in mgr._active_reqs
