@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .passwords import hash_password
 from .store import AuthStore
 
 
@@ -33,3 +34,28 @@ def seed_users(store: AuthStore, yaml_path: str) -> int:
         )
         created += 1
     return created
+
+
+def bootstrap_default_admin(
+    store: AuthStore,
+    *,
+    username: str,
+    password: str,
+    enabled: bool = True,
+    must_change: bool = True,
+) -> int:
+    """库内无任何 admin 时，建一个默认 admin（密码经 bcrypt hash）。
+
+    全新部署（configs/users.yaml 缺失或空）启动时由 app lifespan 调用，使新环境开箱即有
+    一个可登录的 admin。已有 admin（含 users.yaml seed 出来的）→ no-op，绝不覆盖真实部署。
+    返回新建数（0 或 1）。
+
+    注意：密码长度不受 NEW_PASSWORD_MIN_LEN 约束——该约束只作用于 API create/reset/change
+    路由；bootstrap 与 seed 一样直插 DB（store.create_user），默认密码 123456（6 位）可建。
+    """
+    if not enabled or not password or not username:
+        return 0
+    if store.count_admins() > 0:
+        return 0
+    store.create_user(username, hash_password(password), role="admin", must_change=must_change)
+    return 1

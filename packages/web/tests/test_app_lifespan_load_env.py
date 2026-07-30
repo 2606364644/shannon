@@ -23,3 +23,21 @@ def test_lifespan_loads_profile_env(app_with_ws):
         with TestClient(app_with_ws):
             pass
     mock_le.assert_called_once()
+
+
+def test_lifespan_bootstraps_default_admin_when_no_seed_file(app_with_ws):
+    """全新部署（无 users.yaml）启动 lifespan → bootstrap 自动建 admin/123456（must_change=True）。
+
+    隔离 bootstrap 路径：把 users_seed_file 指向不存在的路径（seed no-op），证明不依赖
+    configs/users.yaml 也能并箱出可登录 admin。已有 admin 时 no-op 由单元测试覆盖。
+    """
+    from supernova_web.auth.passwords import verify_password
+    app_with_ws.state.config.users_seed_file = "/nonexistent/absent-users.yaml"
+    with TestClient(app_with_ws):
+        pass  # 触发 lifespan startup
+    store = app_with_ws.state.auth_store
+    admin = store.get_user_by_username("admin")
+    assert admin is not None
+    assert admin.role == "admin"
+    assert admin.must_change_password is True
+    assert verify_password("123456", store.get_password_hash("admin"))

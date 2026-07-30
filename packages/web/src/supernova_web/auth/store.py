@@ -176,6 +176,11 @@ class AuthStore:
             cur = c.execute("DELETE FROM workspace_members WHERE workspace_name=?", (ws_name,))
             return cur.rowcount
 
+    def count_admins(self) -> int:
+        with self._conn() as c:
+            row = c.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()
+        return int(row[0]) if row else 0
+
     def list_all_users(self) -> list["User"]:
         with self._conn() as c:
             rows = c.execute(

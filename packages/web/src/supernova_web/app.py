@@ -22,9 +22,22 @@ async def lifespan(app: FastAPI):
     # 回落默认 anthropic_api → worker 跑 CLI 但无凭据 → 每轮 "Not logged in"（2026-07-30 根因）。
     load_env()
     # auth: 启动 seed 预置账号 + 周期清理过期 session
-    from .auth.seed import seed_users
+    from .auth.seed import seed_users, bootstrap_default_admin
     import asyncio
     seed_users(app.state.auth_store, app.state.config.users_seed_file)
+    # 全新部署（无 users.yaml / 空库）兜底：库内无 admin 时建默认 admin/123456
+    # （must_change=True 强制首登改密）。已有 admin（含 seed 出来的）→ no-op。
+    if bootstrap_default_admin(
+        app.state.auth_store,
+        username=app.state.config.default_admin_username,
+        password=app.state.config.default_admin_password,
+        enabled=app.state.config.bootstrap_default_admin_enabled,
+    ):
+        import logging
+        logging.getLogger("supernova_web").warning(
+            "Bootstrapped default admin %r with default password — change it on first login.",
+            app.state.config.default_admin_username,
+        )
 
     async def _purge_loop():
         while True:

@@ -35,6 +35,15 @@ class WebConfig:
         # 生产 HTTPS 直接经 env=1 强制，或由 scheme 自动判断。
         self.cookie_secure = os.environ.get("SUPERNOVA_WEB_COOKIE_SECURE", "0") not in ("0", "false", "False")
         self.users_seed_file = os.environ.get("SUPERNOVA_WEB_USERS_SEED", "configs/users.yaml")
+        # 默认 admin bootstrap：全新部署（users.yaml 缺失/空）启动时若库内无 admin，
+        # 自动建 admin/<默认密码>（must_change=True 强制首登改密）。生产可经
+        # SUPERNOVA_WEB_BOOTSTRAP_DEFAULT_ADMIN=0 关闭。默认密码 123456 绕过 API 的
+        # 8 位长度限制（bootstrap 与 seed 同走 store.create_user 直插 DB）。
+        self.bootstrap_default_admin_enabled = os.environ.get(
+            "SUPERNOVA_WEB_BOOTSTRAP_DEFAULT_ADMIN", "1"
+        ) not in ("0", "false", "False")
+        self.default_admin_username = os.environ.get("SUPERNOVA_WEB_DEFAULT_ADMIN_USERNAME", "admin")
+        self.default_admin_password = os.environ.get("SUPERNOVA_WEB_DEFAULT_ADMIN_PASSWORD", "123456")
 
     @property
     def workspaces_dir(self) -> Path:
