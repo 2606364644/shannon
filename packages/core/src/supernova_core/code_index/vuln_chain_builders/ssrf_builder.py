@@ -15,7 +15,11 @@ from supernova_core.code_index.chain_verdict import (
     judge_chain_verdict,
 )
 from supernova_core.code_index.models import ParameterSource
-from supernova_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
+from supernova_core.code_index.parameter_models import (
+    ParameterPropagationGraph,
+    SinkCallSite,
+    SinkCategory,
+)
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.models.queue_schemas import SsrfVulnerability
 
@@ -37,6 +41,17 @@ async def build_ssrf_findings(
     # findings + double LLM cost). Gap A fix.
     candidates = [c for c in candidates
                   if c.source_type != ParameterSource.STORAGE.value]
+    # Open-redirect sinks (category=REDIRECT, e.g. res.redirect(url)) are a
+    # browser-side 302 (OWASP A10), NOT a server-side request forgery. Their url
+    # slot matches _SSRF_SLOTS so they'd otherwise be mislabeled URL_Manipulation,
+    # polluting the ssrf bucket and breaking dual-track dedup (LLM track labels
+    # these Open_Redirect -> merger dedup key differs -> duplicate finding).
+    if sink_call_sites:
+        candidates = [
+            c for c in candidates
+            if not (scs := sink_call_sites.get(c.sink_call_site_id))
+            or scs.category != SinkCategory.REDIRECT
+        ]
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[SsrfVulnerability] = []
     for i, chain in enumerate(candidates, start=1):

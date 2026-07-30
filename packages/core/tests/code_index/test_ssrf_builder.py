@@ -164,3 +164,35 @@ async def test_build_ssrf_accepts_sink_call_sites_param():
         pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
     assert isinstance(findings, list)
     assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_ssrf_excludes_open_redirect_sink():
+    """Open-redirect sinks (category=REDIRECT, e.g. res.redirect(url)) must NOT
+    be reported by the SSRF track. A redirect is a browser-side 302 (OWASP A10),
+    not a server-side request forgery; routing it as SSRF pollutes the ssrf bucket
+    and breaks dual-track dedup (LLM track labels these Open_Redirect, GitNexus
+    hardcodes URL_Manipulation -> merger dedup key differs -> duplicate finding).
+    """
+    sid = "app.py:proxy:fetch:5:0"
+    redirect_sink = SinkCallSite(
+        id=sid, caller_id="app.py:proxy", callee_name="redirect",
+        callee_receiver="res", category=SinkCategory.REDIRECT,
+        sink_subtype="open_redirect", file_path="app.py", line=72, column=10,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL, expression="req.query.url",
+            is_entry_hint=True)],
+        rule_id="ts-res-redirect",
+    )
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow()], language_coverage=["javascript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"https://evil.com/",'
+                '"evidence_chain":"url->redirect","mismatch_reason":"no allowlist",'
+                '"confidence":"high"}')
+
+    findings = await build_ssrf_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: redirect_sink})
+    assert findings == [], "open-redirect sink must not be reported as SSRF"
