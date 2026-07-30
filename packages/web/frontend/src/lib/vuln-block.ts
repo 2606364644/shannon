@@ -112,7 +112,12 @@ export function parseVulnBlock(raw: string): ParsedVulnBlock {
   const hm = /^### ([A-Z]+(?:-[A-Z]+)+-\d+)\s*[—:：-]?\s*(.*)$/.exec(firstLine);
   const fallbackTitle = firstLine.replace(/^###\s+/, "");
   const id = hm?.[1] ?? fallbackTitle;
-  const prefix = id === fallbackTitle ? "" : (/^([A-Z]+)-/.exec(id)?.[1] ?? "");
+  // prefix 取类前缀：hm 命中标准 vuln heading 时从 id（=hm[1]）提取；hm 未命中（非标准
+  // 标题、id 退化为整行文本）时为空。旧实现用 `id === fallbackTitle` 判断，会误伤纯 ID
+  // 标题——### XSS-VULN-01 无描述时 id 与 fallbackTitle 都等于纯 ID → 判等 → prefix=""
+  // → 该类漏洞全归空 prefix 组，报告页类型卡显示 0、还多出一张无标识的空组卡片。改以
+  // hm 是否命中为准（回归 NodeGoat-20260729-194022 报告页「inject=6 / 其他 0 / 34 卡片」）。
+  const prefix = hm ? (/^([A-Z]+)-/.exec(id)?.[1] ?? "") : "";
   let title = hm?.[2] ?? fallbackTitle;
   const starred = /★/.test(title);
   title = title.replace(/★.*$/, "").trim();

@@ -484,3 +484,42 @@ describe("GitNexus 轨 ID 兼容（双轨隔离设计，-GN- 须保留，不统�
     expect(b.prefix).toBe("AUTH");
   });
 });
+
+describe("parseVulnBlock · 纯 ID 标题 prefix 提取（回归 NodeGoat 报告页「34 卡片 + 类型卡 0」）", () => {
+  // 现场 NodeGoat-20260729-194022：报告生成层格式不一致——INJ 标题带 ` — 描述`，
+  // XSS/AUTH/AUTHZ/SSRF 标题是纯 ID（### XSS-VULN-01 行尾即换行、无描述）。
+  // 旧 parseVulnBlock 用 `id === fallbackTitle ? ""` 判 prefix：纯 ID 标题下 id 与
+  // fallbackTitle 都等于纯 ID → 判等 → prefix="" → 34 个漏洞全归空 prefix 组，
+  // TypeSummaryCards 把空 prefix 组渲染成无标识「34 卡片」，类型卡只剩 INJ=6、其余 0。
+
+  it("纯 ID 标题（无描述）→ prefix 正确取类前缀，非空串", () => {
+    const b = parseVulnBlock("### XSS-VULN-01\n- **Verdict:** vulnerable");
+    expect(b.id).toBe("XSS-VULN-01");
+    expect(b.prefix).toBe("XSS");
+  });
+
+  it("带描述标题 → prefix 仍正确（不回归）", () => {
+    const b = parseVulnBlock("### INJ-VULN-01 — eval RCE\n- **Verdict:** vulnerable");
+    expect(b.id).toBe("INJ-VULN-01");
+    expect(b.prefix).toBe("INJ");
+  });
+
+  it("splitByVulnBlocks 纯 ID + 带描述混合 → 各类 prefix 正确、无空串组", () => {
+    const md = [
+      "## Injection Vulnerabilities",
+      "### INJ-VULN-01 — eval RCE",
+      "- **Verdict:** vulnerable",
+      "",
+      "## Cross-Site Scripting (XSS)",
+      "### XSS-VULN-01",
+      "- **Verdict:** vulnerable",
+      "### XSS-VULN-02",
+      "- **Verdict:** vulnerable",
+    ].join("\n");
+    const segs = splitByVulnBlocks(md);
+    const byPrefix: Record<string, number> = {};
+    for (const s of segs)
+      if (s.type === "vuln") byPrefix[s.block.prefix] = (byPrefix[s.block.prefix] || 0) + 1;
+    expect(byPrefix).toEqual({ INJ: 1, XSS: 2 });
+  });
+});
