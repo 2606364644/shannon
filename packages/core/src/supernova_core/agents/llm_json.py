@@ -79,3 +79,31 @@ def _extract_json_payload(text: str) -> str | None:
             continue
     # 都不合法：回退 object 子串（旧行为，调用方 loads 失败再各自 fallback）。
     return obj_sub
+
+
+def repair_json_arguments(args: str | None) -> str | None:
+    """把可能非法的 tool_call ``arguments`` 串修成**合法 JSON 串**；修不好返 ``None``。
+
+    第三方 openai 兼容端点（火山方舟 ARK 等）消费侧校验「tool_call.function.arguments
+    必须是合法 JSON」，而 GLM 等模型偶发吐残缺/markdown 围栏的 arguments；openai-agents
+    的 Chat Completions 模式无状态全量重发，会把这条非法 assistant message 原样塞回 history
+    再次发送 → 端点 400 ``Invalid request body``。
+
+    本函数复用 ``_extract_json_payload``（处理 markdown 围栏 / 首末括号子串），但
+    ``_extract_json_payload`` 在「子串仍非法」时为向后兼容会返回 ``obj_sub``（非 None），
+    故这里对返回值**再 ``json.loads`` 验证一次**——只有能真正 parse 的才算修好，否则 None。
+
+    两道防线共用（DRY）：
+    - 防线1 ``bridge._on_invoke_set``：修不好 → 返错误串让模型重发、不收空数据；
+    - 防线2 ``providers_openai`` 发包前清洗：修不好 → 兜底 ``"{}"`` 止血 400。
+    """
+    if not isinstance(args, str) or not args.strip():
+        return None
+    candidate = _extract_json_payload(args)
+    if candidate is None:
+        return None
+    try:
+        json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return candidate

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 
+from supernova_core.agents.llm_json import repair_json_arguments
 from supernova_core.collectors.base import CollectorBase, DuplicateCallError, SectionSchema
 
 
@@ -33,24 +34,28 @@ def _make_openai_function_tool(collector: CollectorBase, schema: SectionSchema):
 
     if schema.mode == "append":
         async def _on_invoke_append(ctx, input_json: str) -> str:
-            try:
-                payload = json.loads(input_json) if input_json else {}
-            except json.JSONDecodeError:
-                payload = {}
-            collector.append_section(tool_name, payload)
+            # 非法 JSON（GLM 偶发残缺/markdown 围栏）→ repair 修；修不好返错让模型重发，
+            # 不静默兜底 {} 收空数据（旧逻辑既收空、又让非法串毒化 history 致端点 400）。
+            repaired = repair_json_arguments(input_json)
+            if repaired is None:
+                return (f"{tool_name}: ERROR — arguments is not valid JSON. "
+                        f"Resend {tool_name} with valid JSON matching the schema.")
+            collector.append_section(tool_name, json.loads(repaired))
             items = collector.get_all().get(schema.section_key, [])
             return f"{tool_name}: recorded ({len(items)} total)"
 
         on_invoke = _on_invoke_append
     else:
         async def _on_invoke_set(ctx, input_json: str) -> str:
-            # ctx 不用（collector 经闭包）；input_json 是模型输出的 JSON 串
+            # ctx 不用（collector 经闭包）；input_json 是模型输出的 JSON 串。
+            # 非法 JSON（GLM 偶发残缺/markdown 围栏）→ repair 修；修不好返错让模型重发，
+            # 不静默兜底 {} 收空数据（旧逻辑既收空、又让非法串毒化 history 致端点 400）。
+            repaired = repair_json_arguments(input_json)
+            if repaired is None:
+                return (f"{tool_name}: ERROR — arguments is not valid JSON. "
+                        f"Resend {tool_name} with valid JSON matching the schema.")
             try:
-                payload = json.loads(input_json) if input_json else {}
-            except json.JSONDecodeError:
-                payload = {}
-            try:
-                collector.set_section(tool_name, payload)
+                collector.set_section(tool_name, json.loads(repaired))
             except DuplicateCallError:
                 return f"{tool_name}: DuplicateError — already called; first call wins"
             return f"{tool_name}: recorded"

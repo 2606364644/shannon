@@ -9,7 +9,7 @@ import asyncio
 import json
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from agents import (
     Agent,
@@ -23,6 +23,7 @@ from agents import (
 from openai import AsyncOpenAI
 
 from .narration import narration_directive
+from .llm_json import repair_json_arguments
 from .openai_output_schema import (
     StructuredOutputParseError,
     _extract_json_payload,
@@ -39,6 +40,68 @@ if TYPE_CHECKING:
     from supernova_core.collectors.base import CollectorBase
 
 _tracing_disabled = False
+
+
+class _AttrProxy:
+    """透传 wrapper：``__getattr__`` 转发到 target，仅覆盖 overrides 中的属性。
+
+    用于包装 ``AsyncOpenAI`` client：透传所有属性（``base_url`` / ``models`` / ...），
+    仅拦截 ``chat.completions.create`` 在发包前清洗 tool_call 非法 arguments。
+    ``__getattr__`` 全透传，避免漏转发破坏 SDK（trace 取 ``base_url`` 等）。
+    """
+
+    def __init__(self, target: Any, overrides: dict[str, Any]):
+        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "_overrides", overrides)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._target, name)
+
+
+def _sanitize_messages(messages: list[dict]) -> list[dict]:
+    """原地清洗 messages：把 assistant tool_call 的非法 JSON arguments 修好或兜底 ``"{}"``。
+
+    第三方 openai 兼容端点（火山方舟 ARK 等）消费侧校验 ``tool_call.function.arguments``
+    必须是合法 JSON；GLM 偶发吐残缺/markdown 串，openai-agents 的 Chat Completions 模式
+    无状态全量重发，会把它原样塞回 history 再次发送 → 端点 400 ``Invalid request body``。
+    本函数在请求发出前把非法串修好（复用 ``repair_json_arguments``），修不好兜底 ``"{}"``
+    （探针确认 ARK 接受 ``{}``）止血 400。合法 arguments 与无 tool_calls 的消息原样不动。
+
+    与防线1（``bridge._on_invoke_set`` 在工具层让模型重发）互补：这里只管发包不 400，
+    不负责语义对错（参考 "Your LLM JSON Is Valid — And Still Wrong"）。
+    """
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                continue
+            args = fn.get("arguments")
+            if not isinstance(args, str) or not args.strip():
+                continue
+            repaired = repair_json_arguments(args)
+            fn["arguments"] = repaired if repaired is not None else "{}"
+    return messages
+
+
+def _wrap_client_for_argument_sanitize(client: AsyncOpenAI) -> Any:
+    """返回 client 的代理：透传所有属性，仅 ``chat.completions.create`` 发包前清洗 messages。"""
+    original_create = client.chat.completions.create
+
+    async def _sanitized_create(*args: Any, **kwargs: Any) -> Any:
+        messages = kwargs.get("messages")
+        if messages is not None:
+            kwargs["messages"] = _sanitize_messages(messages)
+        return await original_create(*args, **kwargs)
+
+    completions_proxy = _AttrProxy(client.chat.completions, {"create": _sanitized_create})
+    chat_proxy = _AttrProxy(client.chat, {"completions": completions_proxy})
+    return _AttrProxy(client, {"chat": chat_proxy})
 
 
 class OpenAIProvider(BaseProvider):
@@ -67,7 +130,7 @@ class OpenAIProvider(BaseProvider):
                 kwargs["base_url"] = self.config.base_url
             if self.type == "litellm_router" and self.config.auth_token:
                 kwargs["api_key"] = self.config.auth_token
-            self._client = AsyncOpenAI(**kwargs)
+            self._client = _wrap_client_for_argument_sanitize(AsyncOpenAI(**kwargs))
         return self._client
 
     def _max_turns(self) -> int:

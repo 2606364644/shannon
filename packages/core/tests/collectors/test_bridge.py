@@ -66,6 +66,70 @@ async def test_openai_tool_duplicate_returns_error_string_not_raise():
     assert collector.get_all() == {"alpha": {"x": "first"}}
 
 
+@pytest.mark.asyncio
+async def test_openai_tool_invalid_json_arguments_returns_error_not_silent():
+    """非法 JSON arguments → 返错误串让模型重发，不静默兜底收空数据。
+
+    回归真机 hr-20260730-014845 pre-recon Turn 44：GLM 吐残缺 arguments，旧逻辑
+    兜底 {} 返 recorded → 既收空数据、又让非法串毒化 history 致 ARK 400。
+    """
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    # 截断的 arguments（缺右括号）
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), '{"x":')
+    assert "not valid JSON" in str(result)
+    assert collector.get_all() == {}          # 未收空数据
+
+
+@pytest.mark.asyncio
+async def test_openai_tool_garbage_arguments_returns_error():
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), "not json at all")
+    assert "not valid JSON" in str(result)
+    assert collector.get_all() == {}
+
+
+@pytest.mark.asyncio
+async def test_openai_tool_empty_arguments_returns_error():
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), "")
+    assert "not valid JSON" in str(result)
+    assert collector.get_all() == {}
+
+
+@pytest.mark.asyncio
+async def test_openai_tool_markdown_fenced_arguments_repaired_and_recorded():
+    """markdown 围栏包裹的 arguments 被 repair 修复后正常收集（不浪费一轮、不返错）。"""
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(
+        RunContextWrapper(context=None), "```json\n{\"x\": \"v\"}\n```")
+    assert "recorded" in str(result)
+    assert collector.get_all() == {"alpha": {"x": "v"}}
+
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_invalid_json_returns_error_not_append():
+    """append 模式同样：非法 arguments 不 append、返错让模型重发。"""
+    from agents import RunContextWrapper
+
+    collector = _append_collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), '{"x":')
+    assert "not valid JSON" in str(result)
+    assert collector.get_all() == {}
+
+
 # ---------- claude ----------
 
 @pytest.mark.asyncio
