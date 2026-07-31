@@ -25,6 +25,11 @@ const WS_LIST = [
   { name: "ws2", scan_type: "blackbox", status: "completed", created_at: 0 },
 ];
 
+// 黑盒「复用白盒结果」候选 fixture：ws1 内一条已完成的白盒扫描。
+const WB_SCANS = [
+  { scan_id: "20260731-1200", scan_type: "whitebox", status: "completed", created_at: 1722400000, vuln_count: 3, is_running: false, workflow_id: "ws1-foo-20260731-1200" },
+];
+
 const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
 const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
 
@@ -32,6 +37,8 @@ const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json(WS_LIST)),
   // P2: repo 已迁到 ws 内——默认空列表，repo 相关用例各自 server.use 注入。
   http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([])),
+  // 黑盒复用候选：默认该 ws 无 whitebox 扫描（驱动智能默认退到 repo 模式）。
+  http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -79,47 +86,51 @@ async function selectWorkspace(name: string) {
   await selectOption("选择 workspace", name);
 }
 
-// repo 模式下 selectedRepo 的 Combobox 在「代码源」StepGroup 内。
-// StepGroup 内有两个 combobox（sourceKind Select + repo Combobox），取最后一个 = repo。
-// P2: ws Select 在另一个 StepGroup（"目标信息"/"工作区"）——全文档扫描 .at(-1) 会拿到 ws
-// Select，故必须用 within(scope) 把搜索限定在「代码源」组内。
-function repoCombobox() {
-  const step = screen.getByText("代码源").closest<HTMLElement>(".rounded-lg")!;
+// RepoCombobox 在某 StepGroup 内：白盒 Step2="代码源"，黑盒 repo 模式 Step3="代码上下文"。
+// ws Select 在另一个 StepGroup（"工作区"）——按 step 标题 scope 避开它。
+function repoComboboxIn(stepTitle: string) {
+  const step = screen.getByText(stepTitle).closest<HTMLElement>(".rounded-lg")!;
   return within(step).getAllByRole("combobox").at(-1)!;
 }
 
-function selectRepoOption(optionName: RegExp | string) {
-  const trigger = repoCombobox();
+function selectRepoOption(stepTitle: string, optionName: RegExp | string) {
+  const trigger = repoComboboxIn(stepTitle);
   fireEvent.click(trigger);
   return screen.findByRole("option", { name: optionName }).then((opt) => {
     fireEvent.click(opt);
   });
 }
 
-// 默认 sourceKind=repo；这里：先选 ws → 切 path → 填齐 path + url，让提交可用。
-// P2 起：所有提交类用例必须先选 ws（提交 body workspace 必填）。
-async function fillValidPath() {
+// 黑盒分段开关按钮（"复用白盒结果" / "指定仓库"），按文案取。
+function segButton(label: RegExp | string) {
+  return screen.getByRole("button", { name: label });
+}
+
+// 入口已收窄为 repo-only：白盒提交类用例统一注入 ready 仓库 + 选 ws + 选 repo + 填 url。
+async function fillValidRepo() {
+  server.use(
+    http.get("/api/workspaces/:ws/repos", () =>
+      HttpResponse.json([
+        { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+      ]),
+    ),
+  );
   await selectWorkspace("ws1");
-  await selectOption(/已下载仓库/, "本地路径");
-  fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
+  await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
+  await selectRepoOption("代码源", /foo/);
   fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
 }
 
 describe("ScanNewPage", () => {
-  it("默认白盒：未选 ws 显提示，选 ws 后显仓库选择器 + 添加按钮；切黑盒显 reuse", async () => {
+  it("默认白盒：未选 ws 显提示，选 ws 后显仓库选择器 + 添加按钮", async () => {
     renderPage();
     // ws 未选 → 显「请先选择 workspace」提示，无「+ 添加新仓库」按钮
     expect(screen.getByText(/请先选择 workspace/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /\+ 添加新仓库/ })).toBeNull();
-    // 黑盒专属复选框默认不出现
-    expect(screen.queryByText(/复用最新白盒/)).toBeNull();
     // 选 ws1 → 提示消失，仓库 picker + 添加按钮出现
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.queryByText(/请先选择 workspace/)).toBeNull());
     expect(screen.getByRole("button", { name: /\+ 添加新仓库/ })).toBeInTheDocument();
-    // 切到黑盒 → reuse 复选框出现（--latest 软默认陷阱标注）
-    clickTab("黑盒");
-    expect(screen.getByText(/复用最新白盒/)).toBeInTheDocument();
   });
 
   // === P2 新增：ws 下拉渲染 + 选 ws 驱动 listRepos(<ws>) ===
@@ -142,7 +153,6 @@ describe("ScanNewPage", () => {
     fireEvent.click(screen.getByRole("option", { name: "ws1" }));
     await waitFor(() => expect(repoCalls).toContain("ws1"));
     // 选 ws2 → 再触发 listRepos("ws2")（refetch on workspace change）
-    // trigger 现在显示选中值 "ws1"，重新打开选 ws2
     fireEvent.click(screen.getByText("ws1").closest("button")!);
     fireEvent.click(await screen.findByRole("option", { name: "ws2" }));
     await waitFor(() => expect(repoCalls).toContain("ws2"));
@@ -156,18 +166,11 @@ describe("ScanNewPage", () => {
     expect(screen.queryByText(/\+ 添加新仓库/)).toBeNull();
   });
 
-  it("黑盒 --latest 陷阱：reuse 复选框旁有可追溯说明（不勾选=standalone）", () => {
-    renderPage();
-    clickTab("黑盒");
-    expect(screen.getByText(/--latest/)).toBeInTheDocument();
-    expect(screen.getByText(/standalone/)).toBeInTheDocument();
-  });
-
   it("提交 400 → toast 提示 Temporal 未就绪", async () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 400 })));
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    await fillValidPath();
+    await fillValidRepo();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/Temporal/i)));
   });
@@ -176,7 +179,7 @@ describe("ScanNewPage", () => {
     server.use(http.post("/api/scan", () => new HttpResponse(null, { status: 409 })));
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    await fillValidPath();
+    await fillValidRepo();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.stringMatching(/并发扫描超限/)));
   });
@@ -192,7 +195,7 @@ describe("ScanNewPage", () => {
     );
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    await fillValidPath();
+    await fillValidRepo();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalled());
     const arg = (spy.mock.calls[0] as string[])[0];
@@ -207,7 +210,7 @@ describe("ScanNewPage", () => {
     );
     const spy = vi.spyOn(toast, "error");
     renderPage();
-    await fillValidPath();
+    await fillValidRepo();
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(spy).toHaveBeenCalled());
     const arg = (spy.mock.calls[0] as string[])[0];
@@ -215,45 +218,12 @@ describe("ScanNewPage", () => {
     expect(arg).not.toContain("{");
   });
 
-  it("path 模式显「📁 浏览」trigger", async () => {
-    renderPage();
-    await selectOption(/已下载仓库/, "本地路径");
-    expect(screen.getByRole("button", { name: /📁 浏览/ })).toBeInTheDocument();
-  });
-
-  it("点「📁 浏览」→ 打开文件浏览器 → 显目录 entry", async () => {
-    server.use(
-      http.get("/api/fs/browse", () =>
-        HttpResponse.json({
-          path: "/",
-          parent: null,
-          entries: [{ name: "code", type: "dir" }],
-        }),
-      ),
-    );
-    renderPage();
-    await selectOption(/已下载仓库/, "本地路径");
-    fireEvent.click(screen.getByRole("button", { name: /📁 浏览/ }));
-    // FileSystemPicker Dialog 打开（title 默认"选择代码目录"）
-    await waitFor(() => expect(screen.getByText("选择代码目录")).toBeInTheDocument());
-    expect(screen.getByText("code")).toBeInTheDocument();
-  });
-
-  it("未选 ws + repo 默认未选 → 提交 disabled；选 ws + path 填齐 → enabled", async () => {
+  it("未选 ws + repo 默认未选 → 提交 disabled；选 ws + repo + url → enabled", async () => {
     renderPage();
     // 默认：未选 ws → disabled
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
-    await fillValidPath();
+    await fillValidRepo();
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled();
-  });
-
-  it("path 非绝对 → 红字 + 提交 disabled", async () => {
-    renderPage();
-    await selectWorkspace("ws1");
-    await selectOption(/已下载仓库/, "本地路径");
-    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "relative/path" } });
-    expect(screen.getByText(/需为绝对路径/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
   });
 
   it("扫描页无 events.css 遗留 class（浅色主题不断裂）", () => {
@@ -285,7 +255,7 @@ describe("ScanNewPage", () => {
     // 选 ws1 → listRepos(ws1) 拉到 foo → 仓库 combobox 显选中短名 foo
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoCombobox()).toHaveTextContent("foo"),
+      expect(repoComboboxIn("代码源")).toHaveTextContent("foo"),
     );
     // 填 url 提交
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
@@ -316,7 +286,7 @@ describe("ScanNewPage", () => {
     // 先选 ws1 → repo picker 出现 → 手选 bar
     await selectWorkspace("ws1");
     await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-    await selectRepoOption(/bar/);
+    await selectRepoOption("代码源", /bar/);
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
       target: { value: "http://example.com" },
     });
@@ -341,7 +311,7 @@ describe("ScanNewPage", () => {
     renderPage("/scan/new?repo=wip");
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoCombobox()).toHaveTextContent("wip"),
+      expect(repoComboboxIn("代码源")).toHaveTextContent("wip"),
     );
     // 状态=cloning → CloneProgress 渲染"clone 中"
     await waitFor(() => expect(screen.getByText(/clone 中/)).toBeInTheDocument());
@@ -358,27 +328,43 @@ describe("ScanNewPage", () => {
     renderPage("/scan/new?repo=broken");
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoCombobox()).toHaveTextContent("broken"),
+      expect(repoComboboxIn("代码源")).toHaveTextContent("broken"),
     );
     expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
 
-  it("白盒 URL 可选：不填 url + path 填齐 + 选 ws → 可提交", async () => {
+  it("白盒 URL 可选：不填 url + 选 repo + 选 ws → 可提交", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+        ]),
+      ),
+    );
     renderPage();
     await selectWorkspace("ws1");
-    await selectOption(/已下载仓库/, "本地路径");
-    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
-    // 白盒扫本地代码，url 仅作黑盒 --latest 匹配锚点 → 不填也能提交
+    await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
+    await selectRepoOption("代码源", /foo/);
+    // 白盒扫仓库代码，url 仅作关联锚点 → 不填也能提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
   });
 
-  it("黑盒 URL 必填：不填 url → disabled；填齐 → enabled", async () => {
+  it("黑盒 URL 必填：无白盒结果→默认 repo 模式，不填 url → disabled；填齐 → enabled", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+        ]),
+      ),
+    );
     renderPage();
     clickTab("黑盒");
     await selectWorkspace("ws1");
-    await selectOption(/已下载仓库/, "本地路径");
-    fireEvent.change(screen.getByPlaceholderText(/root\/code\/foo/), { target: { value: "/root/code/foo" } });
-    // 黑盒扫运行中服务 → url 必填，不填时提交 disabled（黑盒按钮文案为"开始渗透"）
+    // 无白盒扫描 → 智能默认退到 repo 模式（指定仓库分段 pressed）
+    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
+    await selectRepoOption("代码上下文", /foo/);
+    // 黑盒 url 必填 → 不填时提交 disabled
     expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
@@ -414,24 +400,95 @@ describe("ScanNewPage", () => {
   });
 });
 
+// === 黑盒「复用白盒结果 / 指定仓库」分段开关 ===
+describe("ScanNewPage 黑盒代码上下文分段开关", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("ws 有白盒扫描 → 默认 reuse 模式 + 自动选最新 + buildBody 发 reuse_whitebox_scan_id（无 source）", async () => {
+    let captured: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1" }, { status: 202 });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    // 有白盒扫描 → 默认 reuse 模式
+    await waitFor(() => expect(segButton(/复用白盒结果/)).toHaveAttribute("aria-pressed", "true"));
+    // 自动选最新一条 → trigger 显其 workflow_id
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.reuse_whitebox_scan_id).toBe("20260731-1200");
+    expect(captured!.source).toBeUndefined();
+  });
+
+  it("切到「指定仓库」→ buildBody 发 source.repo（无 reuse_whitebox_scan_id）", async () => {
+    let captured: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "bar", state: "ready", source: { kind: "git", url: "https://gitlab.example/bar.git" } },
+        ]),
+      ),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1" }, { status: 202 });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(segButton(/复用白盒结果/)).toHaveAttribute("aria-pressed", "true"));
+    // 手动切到「指定仓库」
+    fireEvent.click(segButton(/指定仓库/));
+    await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
+    await selectRepoOption("代码上下文", /bar/);
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect((captured!.source as { kind: string; value: string })?.kind).toBe("repo");
+    expect((captured!.source as { kind: string; value: string })?.value).toBe("bar");
+    expect(captured!.reuse_whitebox_scan_id).toBeUndefined();
+  });
+
+  it("ws 无白盒扫描 → 默认退到「指定仓库」+ 不显复用空态", async () => {
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    // 默认 /scans 空 → 智能默认退到 repo 模式
+    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.queryByText(/还没有白盒扫描结果/)).toBeNull();
+  });
+
+  it("无白盒扫描时手切回「复用白盒结果」→ 显空态引导 + 提交 disabled", async () => {
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(segButton(/复用白盒结果/));
+    expect(await screen.findByText(/还没有白盒扫描结果/)).toBeInTheDocument();
+    // 无可选白盒扫描 → 提交 disabled（即便填了 url）
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
+  });
+});
+
 describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("侧栏标题中性化（muted），不铺 coral 块级底色", () => {
+  it("右侧信息侧栏已移除（白盒无「审计范围」，黑盒无「攻击面」）", () => {
     renderPage();
-    const cap = screen.getByText("审计范围");
-    expect(cap.className).toMatch(/text-muted-foreground/);
-    expect(cap.className).not.toMatch(/text-primary/);
-  });
-
-  it("侧栏信息卡中性浮起（bg-secondary + border-border），coral 不铺块级底色", () => {
-    renderPage();
-    const card = screen.getByText("分析方式").closest(".rounded-lg");
-    expect(card?.className).toMatch(/bg-secondary/);
-    expect(card?.className).toMatch(/border-border/);
-    // coral(primary) 仅作点缀：不铺侧栏卡块级底色/描边
-    expect(card?.className).not.toMatch(/bg-primary/);
-    expect(card?.className).not.toMatch(/border-primary/);
+    expect(screen.queryByText("审计范围")).toBeNull();
+    clickTab("黑盒");
+    expect(screen.queryByText("攻击面")).toBeNull();
   });
 
   it("底部操作栏用 bg-card（去 secondary 灰堆叠）", () => {

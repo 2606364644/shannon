@@ -237,12 +237,15 @@ export interface DeliverablesSummary {
 
 export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
-  source?: { kind: "repo" | "path"; value: string };
+  // 扫描入口已收窄为「工作区已下载仓库」——本地路径入口移除（source.kind 恒为 repo）。
+  source?: { kind: "repo"; value: string };
   url?: string;
-  // final-review C2: 字段名必须与 backend ScanRequest (models.py:25) 一致 = `workspace`。
+  // final-review C2: 字段名必须与 backend ScanRequest (models.py) 一致 = `workspace`。
   // pydantic v2 默认不容未知键, 旧 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422。
   workspace?: string;
-  reuse_latest_whitebox?: boolean;
+  // 黑盒「复用白盒结果」：指定要复用的白盒 scan_id（工作区内某个 whitebox scan）。
+  // 不复用时改走 source.repo（指定仓库代码上下文）——二选一，由前端 reuseMode 决定。
+  reuse_whitebox_scan_id?: string;
   config_yaml?: string;
   config_name?: string;
 }

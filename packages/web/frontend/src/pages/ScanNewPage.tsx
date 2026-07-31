@@ -13,12 +13,17 @@ import { Card } from "@/components/ui/card";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
+/** 黑盒「代码上下文」二选一：复用某次白盒结果 / 指定仓库代码。 */
+type BlackboxReuseMode = "reuse" | "repo";
+
 export interface FormState {
-  sourceKind: "repo" | "path";
+  /** 仓库代码源（白盒必选；黑盒 repo 模式必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
   selectedRepo: string;
-  sourceValue: string;
   url: string;
-  reuseLatest: boolean;
+  /** 黑盒 Step3 模式开关（白盒忽略）。 */
+  reuseMode: BlackboxReuseMode;
+  /** reuse 模式下选中的白盒 scan_id。 */
+  reuseScanId: string;
   yaml: string;
 }
 
@@ -27,22 +32,26 @@ export interface FormState {
  * P2 (2026-07-26): `workspace` 来自父组件显式选定的 workspace（替代 pre-P1 的
  * 自动生成/可选 wsName 字段）。扫描目标 ws 必须是用户可访问的已有 ws（P1 已过滤）。
  *
- * final-review C2: 字段名必须与 backend `ScanRequest` (models.py:25) 一致 = `workspace`。
+ * final-review C2: 字段名必须与 backend `ScanRequest` (models.py) 一致 = `workspace`。
  * pydantic v2 默认不容未知键, 发 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422
  * （P2 final-review 抓到的 prod-blocking bug: 每个前端扫描提交都 422）。
+ *
+ * 入口收窄（2026-07-31）：source 恒为 repo（已无本地路径）；黑盒二选一——
+ *   reuse 模式发 reuse_whitebox_scan_id（不带 source），repo 模式发 source.repo。
  */
 function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
-  const source = f.sourceKind === "repo"
-    ? { kind: "repo" as const, value: f.selectedRepo }
-    : { kind: "path" as const, value: f.sourceValue };
-  const body: ScanRequest = {
-    type,
-    source,
-    url: f.url || undefined,
-    workspace: workspace || undefined,
-  };
-  if (type === "blackbox") body.reuse_latest_whitebox = f.reuseLatest;
+  const body: ScanRequest = { type, url: f.url || undefined, workspace: workspace || undefined };
+  if (type === "whitebox") {
+    body.source = { kind: "repo", value: f.selectedRepo };
+    return body;
+  }
+  // blackbox
+  if (f.reuseMode === "reuse") {
+    body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
+  } else {
+    body.source = { kind: "repo", value: f.selectedRepo };
+  }
   return body;
 }
 
@@ -57,10 +66,9 @@ function renderError(e: ApiError, t: TFunction): string {
   return t("scan.errors.submitFailed", { status: e.status });
 }
 
-function validateSource(kind: "repo" | "path", selectedRepo: string, pathValue: string, t: TFunction): string | null {
-  if (kind === "repo") return selectedRepo ? null : t("scan.errors.selectRepo");
-  if (!pathValue.trim()) return t("scan.errors.sourceEmpty");
-  return /^(\/|[A-Za-z]:[\\/])/.test(pathValue) ? null : t("scan.errors.absolutePath");
+/** 仓库校验：白盒 / 黑盒 repo 模式必选仓库。本地路径入口已移除——不再校验绝对路径。 */
+function validateSource(selectedRepo: string, t: TFunction): string | null {
+  return selectedRepo ? null : t("scan.errors.selectRepo");
 }
 
 function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
@@ -72,12 +80,6 @@ function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
   return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
-/** 侧栏信息卡片数据 */
-interface SidebarItem {
-  title: string;
-  content: React.ReactNode;
-}
-
 export function ScanNewPage() {
   const { t } = useTranslation();
   const nav = useNavigate();
@@ -86,11 +88,10 @@ export function ScanNewPage() {
   const presetWs = params.get("workspace");
   const [type, setType] = useState<ScanType>("whitebox");
   const [f, setF] = useState<FormState>({
-    sourceKind: "repo",
     selectedRepo: "",
-    sourceValue: "",
     url: "",
-    reuseLatest: false,
+    reuseMode: "reuse",
+    reuseScanId: "",
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
@@ -103,7 +104,7 @@ export function ScanNewPage() {
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
 
   useEffect(() => {
-    if (presetRepo) set({ sourceKind: "repo", selectedRepo: presetRepo });
+    if (presetRepo) set({ selectedRepo: presetRepo });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetRepo]);
 
@@ -115,13 +116,17 @@ export function ScanNewPage() {
       .finally(() => setWsLoading(false));
   }, []);
 
-  const sourceErr = validateSource(f.sourceKind, f.selectedRepo, f.sourceValue, t);
-  const urlErr = validateUrl(f.url, type, t);
   const isCorrelation = type === "correlation";
-  // 提交校验：source 合法 + url 合法 + workspace 已选（联动模式不需要 ws/source）
+  // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + (reuse:scanId | repo) + ws。
+  const needRepo = isCorrelation ? false : type === "whitebox" || f.reuseMode === "repo";
+  const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
+  const reuseErr = type === "blackbox" && f.reuseMode === "reuse" && !f.reuseScanId
+    ? t("scan.errors.selectReuseScan")
+    : null;
+  const urlErr = validateUrl(f.url, type, t);
   const isValid = isCorrelation
     ? !yamlErr
-    : !sourceErr && !urlErr && !!workspace;
+    : !sourceErr && !reuseErr && !urlErr && !!workspace;
 
   async function onSubmit() {
     if (type === "correlation" && yamlErr) {
@@ -141,35 +146,6 @@ export function ScanNewPage() {
     }
   }
 
-  // —— 侧栏内容（按扫描类型差异化） ——
-  const sidebarItems: SidebarItem[] = type === "correlation" ? [] : type === "whitebox" ? [
-    {
-      title: t("scan.sidebar.scanType"),
-      content: <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold bg-cyan/10 text-cyan">{t("scan.tabs.whitebox")}</span>,
-    },
-    {
-      title: t("scan.sidebar.checks"),
-      content: <div className="text-xs leading-relaxed">SQL 注入 · XSS · SSRF · 认证/授权</div>,
-    },
-    {
-      title: t("scan.sidebar.method"),
-      content: <div className="text-[11.5px] leading-relaxed">📖 静态代码分析<br />🔗 数据流追踪<br />🤖 AI 辅助判定</div>,
-    },
-  ] : [
-    {
-      title: t("scan.sidebar.scanType"),
-      content: <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold bg-orange/10 text-orange">{t("scan.tabs.blackbox")}</span>,
-    },
-    {
-      title: t("scan.sidebar.surface"),
-      content: <div className="text-[11.5px] leading-relaxed">浏览器自动化探索<br />表单 / API 端点发现<br />认证绕过尝试<br />注入 / XSS / SSRF 探测</div>,
-    },
-    {
-      title: t("scan.sidebar.method"),
-      content: <div className="text-[11.5px] leading-relaxed">🌐 浏览器交互<br />🕵️ 动态探针注入<br />🤖 AI 攻击链生成</div>,
-    },
-  ];
-
   const subtitleKey = type === "whitebox" ? "scan.subtitleWhitebox" : type === "blackbox" ? "scan.subtitleBlackbox" : "scan.subtitleCorrelation";
   const submitLabel = type === "blackbox" ? t("scan.submitBlackbox") : t("scan.submit");
   const footerHint = type === "blackbox" ? t("scan.footerHintBlackbox") : t("scan.footerHintWhitebox");
@@ -179,7 +155,7 @@ export function ScanNewPage() {
       {/* 页面标题 */}
       <PageHeader title={t("scan.title")} subtitle={t(subtitleKey)} />
 
-      {/* 整张卡片：Tabs + 双栏 + 底部操作 */}
+      {/* 整张卡片：Tabs + 单栏表单 + 底部操作（侧栏已移除——信息内化进步骤） */}
       <Card className="overflow-hidden">
         {/* 自定义 Tabs 条（替换 shadcn Tabs，融入卡片） */}
         <div className="flex border-b border-border bg-secondary">
@@ -201,11 +177,10 @@ export function ScanNewPage() {
           ))}
         </div>
 
-        {/* 双栏：表单 + 侧栏（correlation 除外，单栏铺满） */}
-        <div className={type === "correlation" ? "" : "grid grid-cols-[1fr_260px]"}>
-          {/* 左栏：表单 */}
-          <div className="p-5">
-            {type === "correlation" ? (
+        {/* 单栏表单（correlation 铺满 yaml 编辑器；白/黑盒约束 max-w-2xl 保可读密度） */}
+        <div className="p-5">
+          <div className={isCorrelation ? "" : "max-w-2xl"}>
+            {isCorrelation ? (
               <div className="space-y-3">
                 <YamlEditor
                   value={f.yaml}
@@ -222,6 +197,7 @@ export function ScanNewPage() {
                 f={f}
                 set={set}
                 sourceErr={sourceErr}
+                reuseErr={reuseErr}
                 urlErr={urlErr}
                 workspace={workspace}
                 wsList={wsList}
@@ -230,40 +206,10 @@ export function ScanNewPage() {
               />
             )}
           </div>
-
-          {/* 右栏：信息侧栏 */}
-          {type !== "correlation" && (
-            <div className="p-5 border-l border-border bg-card flex flex-col gap-2.5">
-              <div className="text-[11px] font-semibold text-muted-foreground mb-0.5">
-                {type === "whitebox" ? t("scan.sidebar.whiteboxTitle") : t("scan.sidebar.blackboxTitle")}
-              </div>
-              {sidebarItems.map((item, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-border bg-secondary p-3"
-                >
-                  <div className="text-[11px] text-muted-foreground mb-1">{item.title}</div>
-                  {item.content}
-                </div>
-              ))}
-              {type === "blackbox" && (
-                <div className="rounded-lg border border-orange/20 bg-orange/[0.06] p-2.5 mt-0.5">
-                  <div className="text-[11px] text-orange font-medium mb-0.5">{t("scan.sidebar.blackboxWarning")}</div>
-                  <div className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.sidebar.blackboxWarningDesc")}</div>
-                </div>
-              )}
-              {type === "whitebox" && (
-                <div className="rounded-lg border border-yellow/15 bg-yellow/[0.06] p-2.5 mt-0.5">
-                  <div className="text-[11px] text-yellow font-medium mb-0.5">{t("scan.sidebar.whiteboxHint")}</div>
-                  <div className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.sidebar.whiteboxHintDesc")}</div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* 底部操作栏 */}
-        {type !== "correlation" && (
+        {!isCorrelation && (
           <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
             <Button variant="cta" onClick={onSubmit} disabled={!isValid || submitting}>
               {submitLabel}
@@ -274,7 +220,7 @@ export function ScanNewPage() {
       </Card>
 
       {/* correlation 提交按钮（不在卡片底部栏内，因为无侧栏） */}
-      {type === "correlation" && (
+      {isCorrelation && (
         <>
           <Button variant="cta" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
             {submitLabel}
