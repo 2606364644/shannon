@@ -56,15 +56,7 @@ MODIFY the existing file `{{DELIVERABLES_PATH}}/comprehensive_security_assessmen
 
 1. ADDING these sections at the top:
 
-# 安全评估报告
-
-## 执行摘要
-- 目标: {{WEB_URL}}
-- 评估日期: {current date}
-- 范围: {{VULN_CLASSES_TESTED}}
-- 利用情况: {{EXPLOITATION}}
-
-## 按漏洞类型汇总
+{{REPORT_HEADER_BLOCK}}
 
 {For each vulnerability type below, count ONLY standalone single-point vulnerability cards in the report body — headings matching `### PREFIX-VULN-NN` or `### PREFIX-GN-NN`. DO NOT count defects that appear only inside the `## 攻击链` section (llm-chain-N); those are multi-step chain findings, counted separately in their own section, NOT as single-point vulns. If a type has zero single-point cards, write Count: 0 and note that any findings for that type live in the 攻击链 section.}
 
@@ -94,7 +86,7 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
      NOTE: these sections will contain vulnerability lists with IDs matching pattern `### [TYPE]-VULN-[NUMBER]`
      * `# [Type] {{REPORT_VULN_HEADING}}`
      * `## {{REPORT_VULN_SUBHEADING}}`
-     * `## 攻击链（多步利用路径）` — deterministically rendered from attack_chains.json; preserve as-is, do NOT clean or modify
+     * `{{ATTACK_CHAIN_HEADING}}` — deterministically rendered from attack_chains.json; preserve as-is, do NOT clean or modify
 {{REPORT_FILTER_RULES}}
    - REMOVE ANY OTHER SECTIONS (even if they contain vulnerability IDs), such as:
      * `## Potential Vulnerabilities (Validation Blocked)` (All agents)

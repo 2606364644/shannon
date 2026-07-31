@@ -23,6 +23,34 @@ def strip_conditional_blocks(text: str, has_web_url: bool) -> str:
     return text
 
 
+# report-executive 标题块 / 攻击链章节标题（zh/en，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
+# 含 {{WEB_URL}} 等占位符——_interpolate 注入后再由后续 replace 解析。
+_REPORT_HEADER_BLOCK = {
+    "zh": (
+        "# 安全评估报告\n\n"
+        "## 执行摘要\n"
+        "- 目标: {{WEB_URL}}\n"
+        "- 评估日期: {current date}\n"
+        "- 范围: {{VULN_CLASSES_TESTED}}\n"
+        "- 利用情况: {{EXPLOITATION}}\n\n"
+        "## 按漏洞类型汇总"
+    ),
+    "en": (
+        "# Security Assessment Report\n\n"
+        "## Executive Summary\n"
+        "- Target: {{WEB_URL}}\n"
+        "- Assessment Date: {current date}\n"
+        "- Scope: {{VULN_CLASSES_TESTED}}\n"
+        "- Exploitation: {{EXPLOITATION}}\n\n"
+        "## Summary by Vulnerability Type"
+    ),
+}
+_ATTACK_CHAIN_HEADING = {
+    "zh": "## 攻击链（多步利用路径）",
+    "en": "## Attack Chains (Multi-step Exploitation Paths)",
+}
+
+
 class PromptManager:
     def __init__(self, prompts_dir: Path):
         self.prompts_dir = prompts_dir
@@ -89,6 +117,9 @@ class PromptManager:
         template_name: str = "",
     ) -> str:
         result = template
+        # report-executive 双语标题块（注入的块含 {{WEB_URL}} 等占位符，由后续 replace 解析）
+        result = result.replace("{{REPORT_HEADER_BLOCK}}", _REPORT_HEADER_BLOCK[current_lang()])
+        result = result.replace("{{ATTACK_CHAIN_HEADING}}", _ATTACK_CHAIN_HEADING[current_lang()])
         result = result.replace("{{WEB_URL}}", variables.get("web_url", ""))
         result = result.replace("{{REPO_PATH}}", variables.get("repo_path", ""))
         result = result.replace("{{DELIVERABLES_PATH}}", variables.get("deliverables_path", ""))
@@ -256,17 +287,30 @@ class PromptManager:
         （## 攻击链 章节 / llm-chain-N）里发现的缺陷【不计入】此处——它们在攻击链
         章节单独体现，避免「单点漏洞总数」与「类型汇总」口径脱节。
         """
+        lang = current_lang()
         lines = []
         for vc in vuln_classes:
             label = vc.replace("-", " ").title()
-            lines.append(
-                f"### {label}\n"
-                f"Count: {{只数本报告正文 ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN 或 PREFIX-GN-NN，属于 {label} 类）的数量。"
-                f"攻击链（## 攻击链 / llm-chain-N）里发现的缺陷【不计入】此处——它们单独成章。"
-                f"若该类无单点卡片，写 0}}\n"
-                f"Severity range: {{仅基于上述单点卡片的 range；无单点卡片则 N/A}}\n"
-                f"Key findings: {{1-2 句，仅概述单点卡片；勿混入攻击链内容}}"
-            )
+            if lang == "zh":
+                lines.append(
+                    f"### {label}\n"
+                    f"Count: {{只数本报告正文 ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN 或 PREFIX-GN-NN，属于 {label} 类）的数量。"
+                    f"攻击链（## 攻击链 / llm-chain-N）里发现的缺陷【不计入】此处——它们单独成章。"
+                    f"若该类无单点卡片，写 0}}\n"
+                    f"Severity range: {{仅基于上述单点卡片的 range；无单点卡片则 N/A}}\n"
+                    f"Key findings: {{1-2 句，仅概述单点卡片；勿混入攻击链内容}}"
+                )
+            else:
+                lines.append(
+                    f"### {label}\n"
+                    f"Count: {{count ONLY standalone single-point vulnerability cards in the report body "
+                    f"(IDs like PREFIX-VULN-NN or PREFIX-GN-NN, of the {label} class). "
+                    f"Defects found only inside the attack-chain section (## Attack Chains / llm-chain-N) "
+                    f"are NOT counted here — they are listed in their own section. "
+                    f"If this class has zero single-point cards, write 0}}\n"
+                    f"Severity range: {{range based only on the single-point cards above; N/A if none}}\n"
+                    f"Key findings: {{1-2 sentences, summarizing only single-point cards; do not mix in attack-chain content}}"
+                )
         return "\n\n".join(lines)
 
     def _build_auth_context(self, config: DistributedConfig) -> str:
