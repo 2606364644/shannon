@@ -1,6 +1,14 @@
 """vuln renderer TDD — 5 vuln class 共用 render_vuln。"""
+import pytest
+
 from supernova_core.renderers._helpers import placeholder, render_table
 from supernova_core.renderers.vuln import render_vuln
+
+
+@pytest.fixture(autouse=True)
+def _en_lang_default(monkeypatch):
+    """断言基于英文渲染（i18n 前行为）；默认 en。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
 
 
 def test_all_missing_renders_placeholders_per_class():
@@ -88,3 +96,14 @@ def test_safe_vectors_str_elements_skipped():
 def test_blind_spots_as_str_does_not_crash():
     md = render_vuln("auth", {"blind_spots": "prose"})
     assert "## 5. Analysis Constraints and Blind Spots" in md
+
+
+def test_render_vuln_zh_titles_and_sections(monkeypatch):
+    """zh 模式：标题 + section 标题为中文。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    md = render_vuln("injection", {})
+    assert "# 注入分析报告" in md
+    assert "## 1. 执行摘要" in md
+    assert "## 2. 主要漏洞模式" in md
+    assert "## 5. 分析约束与盲区" in md
+    assert "Executive Summary" not in md
