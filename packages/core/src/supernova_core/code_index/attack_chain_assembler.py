@@ -17,7 +17,33 @@ from __future__ import annotations
 
 import logging
 
+from supernova_core.i18n import Messages
+
 logger = logging.getLogger(__name__)
+
+# 攻击链模板双语文案（zh/en 可配，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
+_M = Messages({
+    "stored_xss_name": {
+        "zh": "通过 {join} 的存储型 XSS：{w} → {x}",
+        "en": "Stored XSS via {join}: {w} → {x}",
+    },
+    "stored_xss_desc": {
+        "zh": "用户输入写入 {join}（注入），渲染时未转义（xss）。",
+        "en": "User input written to {join} (injection) and rendered unescaped (xss).",
+    },
+    "step_write": {"zh": "写入 {join}：{ev}", "en": "write to {join}: {ev}"},
+    "step_stored": {"zh": "已存储数据", "en": "stored data"},
+    "step_render": {"zh": "渲染：{ev}", "en": "rendered: {ev}"},
+    "idor_name": {
+        "zh": "IDOR 链（{n} 个缺归属校验的对象 ID 端点）",
+        "en": "IDOR chain ({n} object-id endpoints lacking ownership)",
+    },
+    "idor_desc": {
+        "zh": "多个对象 ID 参数化端点缺少归属校验。",
+        "en": "Multiple object-id-parameterized endpoints missing ownership validation.",
+    },
+    "step_missing_owner": {"zh": "缺少归属校验：{ev}", "en": "missing ownership: {ev}"},
+})
 
 
 def _endpoint_of(finding: dict) -> str:
@@ -75,18 +101,22 @@ def assemble_attack_chains(
         if write and _endpoint_of(write) and _endpoint_of(xf) and _endpoint_of(write) != _endpoint_of(xf):
             chains.append({
                 "id": f"gn-stored-xss-{len(chains)+1}",
-                "name": f"Stored XSS via {join}: {_endpoint_of(write)} → {_endpoint_of(xf)}",
-                "description": f"User input written to {join} (injection) and rendered unescaped (xss).",
+                "name": _M.get("stored_xss_name", join=join,
+                               w=_endpoint_of(write), x=_endpoint_of(xf)),
+                "description": _M.get("stored_xss_desc", join=join),
                 "vuln_type": "xss",
                 "severity": "high",
                 "confidence": "confirmed",
                 "steps": [
                     {"order": 1, "phase": "input", "endpoint": _endpoint_of(write),
-                     "method": "-", "description": f"write to {join}: {write.get('evidence_chain','')}"},
+                     "method": "-",
+                     "description": _M.get("step_write", join=join,
+                                           ev=write.get('evidence_chain', ''))},
                     {"order": 2, "phase": "storage", "endpoint": join, "method": "-",
-                     "description": "stored data"},
+                     "description": _M.get("step_stored")},
                     {"order": 3, "phase": "render", "endpoint": _endpoint_of(xf),
-                     "method": "-", "description": f"rendered: {xf.get('evidence_chain','')}"},
+                     "method": "-",
+                     "description": _M.get("step_render", ev=xf.get('evidence_chain', ''))},
                 ],
             })
 
@@ -97,14 +127,15 @@ def assemble_attack_chains(
     if len(authz) >= 2:
         chains.append({
             "id": f"gn-idor-chain-{len(chains)+1}",
-            "name": f"IDOR chain ({len(authz)} object-id endpoints lacking ownership)",
-            "description": "Multiple object-id-parameterized endpoints missing ownership validation.",
+            "name": _M.get("idor_name", n=len(authz)),
+            "description": _M.get("idor_desc"),
             "vuln_type": "authz",
             "severity": "high",
             "confidence": "probable",
             "steps": [
                 {"order": i+1, "phase": "authorization", "endpoint": _endpoint_of(f),
-                 "method": "-", "description": f"missing ownership: {f.get('evidence_chain','')}"}
+                 "method": "-",
+                 "description": _M.get("step_missing_owner", ev=f.get('evidence_chain', ''))}
                 for i, f in enumerate(authz[:4])
             ],
         })

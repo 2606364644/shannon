@@ -59,3 +59,27 @@ class TestBuildAttackChains:
         )
         chains = await build_attack_chains(framework_result, frontend_result, logging.getLogger())
         assert len(chains) == 2  # 1 IDOR + 1 XSS
+
+    @pytest.mark.asyncio
+    async def test_builds_xss_chain_zh_lang(self, monkeypatch):
+        monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+        framework_result = FrameworkAnalysisResult()
+        frontend_result = FrontendAnalysisResult(
+            xss_chains=[XssAttackChain("/input", "/api/data", "/view", "DataView", "high")],
+        )
+        chains = await build_attack_chains(framework_result, frontend_result, logging.getLogger())
+        assert chains
+        assert "存储型 XSS" in chains[0].name
+        assert "用户访问" in chains[0].steps[0].description
+
+    @pytest.mark.asyncio
+    async def test_builds_xss_chain_en_lang(self, monkeypatch):
+        monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+        framework_result = FrameworkAnalysisResult()
+        frontend_result = FrontendAnalysisResult(
+            xss_chains=[XssAttackChain("/input", "/api/data", "/view", "DataView", "high")],
+        )
+        chains = await build_attack_chains(framework_result, frontend_result, logging.getLogger())
+        assert chains
+        assert "Stored XSS" in chains[0].name
+        assert "User navigates" in chains[0].steps[0].description
