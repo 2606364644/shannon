@@ -2,6 +2,7 @@ import logging
 import re
 from pathlib import Path
 
+from supernova_core.i18n import current_lang
 from supernova_core.models.agents import BROWSER_SESSION_MAPPING
 from supernova_core.models.config import Authentication, DistributedConfig, Rule
 from supernova_core.models.errors import ErrorCode, PentestError
@@ -70,6 +71,12 @@ class PromptManager:
                 )
             if include_path.exists():
                 return include_path.read_text(encoding="utf-8")
+            # lang-aware fallback: <stem>.<lang>.txt（如 _output-language.zh.txt）
+            lang_variant = include_path.with_name(
+                f"{include_path.stem}.{current_lang()}.txt"
+            )
+            if lang_variant.exists():
+                return lang_variant.read_text(encoding="utf-8")
             return ""
 
         return include_re.sub(replace_include, content)
