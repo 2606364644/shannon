@@ -44,8 +44,20 @@ def _repo_label(repo_path: str) -> str:
     return label or "repo"
 
 
+def _strip_ws_prefix(ws: str, value: str) -> str:
+    """剥展示名的 {ws}- 前缀：web scheme 真实 workflow_id {ws}-{scan_id} -> 展示名 {scan_id}
+    （前端任务名不带工作区名，ws 上下文前端已知 / 跨 ws 表格另有独立 ws 列）；
+    CLI scheme workspace_name 不以 {ws}- 开头 -> 不剥，原样。"""
+    prefix = f"{ws}-"
+    return value[len(prefix):] if value.startswith(prefix) else value
+
+
 def resolve_workflow_id(ws: str, scan_dir: Path, scan_id: str) -> str:
-    """temporal workflow_id（前端「扫描任务名」展示，替代纯日期 scan_id）。
+    """前端「扫描任务名」展示名（= 真实 temporal workflow_id 剥 {ws}- 前缀）。
+
+    真实 temporal workflow_id 仍是 {ws}-{scan_id}[-resume-N]（scan_manager 提交 / worker 写
+    ndjson / resume 命名空间不变）；本函数返回**展示用**名——剥掉开头的 {ws}- 前缀，即
+    {scan_id}[-resume-N]（= {repo}-{时间戳}），让任务名不再重复带工作区名。
 
     优先读 scan_dir/events.ndjson 首行 WorkflowHeader.workflow_id —— 真实 temporal id 的
     single source of truth：CLI/legacy scan 的 workflow_id = workspace_name（CLI scheme，如
@@ -58,7 +70,7 @@ def resolve_workflow_id(ws: str, scan_dir: Path, scan_id: str) -> str:
     """
     wf = _read_workflow_id_from_ndjson(scan_dir)
     if wf:
-        return wf
+        return _strip_ws_prefix(ws, wf)
     n = 0
     session_file = scan_dir / "session.json"
     if session_file.exists():
@@ -70,7 +82,8 @@ def resolve_workflow_id(ws: str, scan_dir: Path, scan_id: str) -> str:
         except (json.JSONDecodeError, OSError):
             n = 0
     base = f"{ws}-{scan_id}"
-    return f"{base}-resume-{n}" if n > 0 else base
+    raw = f"{base}-resume-{n}" if n > 0 else base
+    return _strip_ws_prefix(ws, raw)
 
 
 def _read_workflow_id_from_ndjson(scan_dir: Path) -> str | None:

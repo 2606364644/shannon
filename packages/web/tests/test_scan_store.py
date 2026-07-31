@@ -247,28 +247,28 @@ def test_scan_summary_running_when_heartbeat_fresh(tmp_path):
 # ── workflow_id（前端任务名展示）──────────────────────────────────────────────
 
 def test_scan_summary_workflow_id(tmp_path):
-    """workflow_id = {ws}-{scan_id}[-resume-N]（读 resumeAttempts 算 N）。"""
+    """展示名 workflow_id = {scan_id}[-resume-N]（剥 {ws}- 前缀，任务名不带工作区名）。"""
     store = ScanStore(tmp_path)
     new_id, scan_dir = store.create_scan("WS1", "u", "/x")
     s = store.list_scans("WS1")[0]
-    # 首次（无 resumeAttempts）-> {ws}-{scan_id}
-    assert s.workflow_id == f"WS1-{new_id}"
-    assert s.as_dict()["workflow_id"] == f"WS1-{new_id}"
-    # 写 resumeAttempts（模拟已 resume 1 次）-> 加 -resume-1
+    # 首次（无 resumeAttempts）：展示名剥 {ws}- 前缀 -> {scan_id}
+    assert s.workflow_id == new_id
+    assert s.as_dict()["workflow_id"] == new_id
+    # 写 resumeAttempts（模拟已 resume 1 次）-> 加 -resume-1（ws 前缀仍剥）
     sess = json.loads((scan_dir / "session.json").read_text())
     sess["resumeAttempts"] = [{"at": 1}]
     (scan_dir / "session.json").write_text(json.dumps(sess))
     s2 = store.list_scans("WS1")[0]
-    assert s2.workflow_id == f"WS1-{new_id}-resume-1"
+    assert s2.workflow_id == f"{new_id}-resume-1"
 
 
 def test_scan_summary_workflow_id_legacy(tmp_path):
-    """legacy ws 根 scan 的 workflow_id = {ws}-{legacy_id}（读 ws 根 session.json）。"""
+    """legacy ws 根 scan 展示名 = {legacy_id}（剥 {ws}- 前缀）。"""
     store = ScanStore(tmp_path)
     _make_legacy_root_scan(tmp_path / "WS2", created_at=1780000000.0)
     s = store.list_scans("WS2")[0]
     legacy_id = store._legacy_scan_id(tmp_path / "WS2")
-    assert s.workflow_id == f"WS2-{legacy_id}"
+    assert s.workflow_id == legacy_id
 
 
 def test_scan_summary_workflow_id_prefers_ndjson_header(tmp_path):
@@ -289,6 +289,26 @@ def test_scan_summary_workflow_id_prefers_ndjson_header(tmp_path):
     s = store.list_scans("WS1")[0]
     assert s.workflow_id == "sentinel_dashboard_20260721-201435"
     assert s.workflow_id != f"WS1-{new_id}"  # 不是算的 web scheme
+
+
+def test_resolve_workflow_id_strips_ws_prefix(tmp_path):
+    """展示层 resolve_workflow_id 剥 {ws}- 前缀：web scheme 真实 id {ws}-{scan_id} -> 展示名
+    {scan_id}（前端任务名不再带工作区名——ws 上下文前端已知 / 跨 ws 表格另有独立 ws 列）；
+    CLI scheme workspace_name 不以 {ws}- 开头 -> 不误剥，原样返回。真实 temporal id 不变。"""
+    from supernova_web.components.scan_store import resolve_workflow_id
+    store = ScanStore(tmp_path)
+    new_id, scan_dir = store.create_scan("WS1", "u", "/code/NodeGoat")
+    # fallback（无 ndjson）：真实 id {ws}-{scan_id} -> 展示名 {scan_id}
+    assert resolve_workflow_id("WS1", scan_dir, new_id) == new_id
+    # ndjson web scheme：真实 id {ws}-{scan_id} -> 展示名 {scan_id}
+    (scan_dir / "events.ndjson").write_text(
+        json.dumps({"type": "WorkflowHeader", "workflow_id": f"WS1-{new_id}"}) + "\n")
+    assert resolve_workflow_id("WS1", scan_dir, new_id) == new_id
+    # CLI scheme workspace_name：不以 {ws}- 开头 -> 不误剥，原样
+    (scan_dir / "events.ndjson").write_text(
+        json.dumps({"type": "WorkflowHeader",
+                    "workflow_id": "sentinel_dashboard_20260721-201435"}) + "\n")
+    assert resolve_workflow_id("WS1", scan_dir, new_id) == "sentinel_dashboard_20260721-201435"
 
 
 # ── delete_scan（双源删除）────────────────────────────────────────────────────
