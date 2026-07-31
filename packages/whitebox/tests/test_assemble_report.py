@@ -137,3 +137,73 @@ async def test_assemble_report_no_longer_appends_attack_chains(tmp_path, monkeyp
 
     report = (deliverables / "comprehensive_security_assessment_report.md").read_text(encoding="utf-8")
     assert "## 攻击链" not in report  # assemble 不再碰攻击链
+
+
+async def test_render_attack_chains_zh_labels(tmp_path):
+    """render_attack_chains 默认 zh：中文标签。"""
+    import json
+    from supernova_core.services.report_assembler import ReportAssembler
+
+    d = tmp_path / "deliverables"
+    d.mkdir()
+    (d / "attack_chains.json").write_text(json.dumps({"chains": [
+        {"id": "c1", "name": "n", "vuln_type": "xss", "severity": "high",
+         "confidence": "confirmed",
+         "steps": [{"order": 1, "endpoint": "/x", "method": "GET", "description": "d"}]},
+    ]}), encoding="utf-8")
+    out = await ReportAssembler.render_attack_chains(d)
+    assert "## 攻击链（多步利用路径）" in out
+    assert "- **类型:**" in out
+    assert "- **步骤:**" in out
+
+
+async def test_render_attack_chains_en_labels(tmp_path, monkeypatch):
+    """en 模式：英文标签。"""
+    import json
+    from supernova_core.services.report_assembler import ReportAssembler
+
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+    d = tmp_path / "deliverables"
+    d.mkdir()
+    (d / "attack_chains.json").write_text(json.dumps({"chains": [
+        {"id": "c1", "name": "n", "vuln_type": "xss", "severity": "high",
+         "confidence": "confirmed",
+         "steps": [{"order": 1, "endpoint": "/x", "method": "GET", "description": "d"}]},
+    ]}), encoding="utf-8")
+    out = await ReportAssembler.render_attack_chains(d)
+    assert "## Attack Chains" in out
+    assert "- **Type:**" in out
+    assert "- **Steps:**" in out
+    assert "## 攻击链" not in out
+
+
+async def test_inject_model_info_zh_anchor(tmp_path):
+    """中文锚点（## 执行摘要 / - 评估日期:）后注入中文 Model 行。"""
+    import json
+    from supernova_core.services.report_assembler import ReportAssembler
+
+    report = tmp_path / "report.md"
+    report.write_text("# 安全评估报告\n\n## 执行摘要\n\n- 评估日期: 2026-07-31\n\n正文\n",
+                      encoding="utf-8")
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"metrics": {"agents": {"a": {"model": "glm-5.2"}}}}),
+                       encoding="utf-8")
+    await ReportAssembler.inject_model_info(report, session)
+    assert "- **模型:** glm-5.2" in report.read_text(encoding="utf-8")
+
+
+async def test_inject_model_info_en_anchor(tmp_path, monkeypatch):
+    """en 模式：英文锚点 + 英文 Model 标签。"""
+    import json
+    from supernova_core.services.report_assembler import ReportAssembler
+
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+    report = tmp_path / "report.md"
+    report.write_text(
+        "# Security Assessment Report\n\n## Executive Summary\n\n- Assessment Date: 2026-07-31\n\nbody\n",
+        encoding="utf-8")
+    session = tmp_path / "session.json"
+    session.write_text(json.dumps({"metrics": {"agents": {"a": {"model": "glm-5.2"}}}}),
+                       encoding="utf-8")
+    await ReportAssembler.inject_model_info(report, session)
+    assert "- **Model:** glm-5.2" in report.read_text(encoding="utf-8")

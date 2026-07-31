@@ -2,7 +2,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+from supernova_core.i18n import Messages, current_lang
 from supernova_core.utils.file_io import async_path_exists, async_read_file, async_write_file
+
+# 报告渲染标签双语（zh/en 可配，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
+_M = Messages({
+    "chain_section_h2": {"zh": "## 攻击链（多步利用路径）",
+                         "en": "## Attack Chains (Multi-step Exploitation Paths)"},
+    "label_type": {"zh": "- **类型:**", "en": "- **Type:**"},
+    "label_severity": {"zh": "- **严重程度:**", "en": "- **Severity:**"},
+    "label_confidence": {"zh": "- **置信度:**", "en": "- **Confidence:**"},
+    "label_steps": {"zh": "- **步骤:**", "en": "- **Steps:**"},
+    "model_label": {"zh": "- **模型:**", "en": "- **Model:**"},
+    "exec_summary_h2": {"zh": "## 执行摘要", "en": "## Executive Summary"},
+    "assessment_date_label": {"zh": "- 评估日期:", "en": "- Assessment Date:"},
+})
 
 
 class ReportAssembler:
@@ -57,7 +71,7 @@ class ReportAssembler:
             "",
             "---",
             "",
-            "## 攻击链（多步利用路径）",
+            _M.get("chain_section_h2"),
             "",
         ]
         for i, chain in enumerate(chains, start=1):
@@ -73,10 +87,10 @@ class ReportAssembler:
             if desc:
                 lines.append(f"{desc}")
                 lines.append("")
-            lines.append(f"- **类型:** {vuln_type}")
-            lines.append(f"- **严重程度:** {severity}")
-            lines.append(f"- **置信度:** {confidence}")
-            lines.append(f"- **步骤:**")
+            lines.append(f"{_M.get('label_type')} {vuln_type}")
+            lines.append(f"{_M.get('label_severity')} {severity}")
+            lines.append(f"{_M.get('label_confidence')} {confidence}")
+            lines.append(_M.get("label_steps"))
             for step in chain.get("steps", []):
                 order = step.get("order", "")
                 endpoint = step.get("endpoint", "")
@@ -112,21 +126,31 @@ class ReportAssembler:
         if not await async_path_exists(report_path):
             return
 
-        model_line = f"- **Model:** {', '.join(sorted(models))}"
+        model_line = f"{_M.get('model_label')} {', '.join(sorted(models))}"
         content = await async_read_file(report_path)
         lines = content.split("\n")
         new_lines: list[str] = []
         inserted = False
 
+        # 双语锚点：当前 lang 优先，另一 lang 兜底（向后兼容旧报告的中英混排）
+        date_anchors = [_M.get("assessment_date_label")]
+        exec_anchors = [_M.get("exec_summary_h2")]
+        if current_lang() == "zh":
+            date_anchors.append("- Assessment Date:")
+            exec_anchors.append("## Executive Summary")
+        else:
+            date_anchors.append("- 评估日期:")
+            exec_anchors.append("## 执行摘要")
+
         for line in lines:
             new_lines.append(line)
-            if not inserted and "- Assessment Date:" in line:
+            if not inserted and any(a in line for a in date_anchors):
                 new_lines.append(model_line)
                 inserted = True
 
         if not inserted:
             for i, line in enumerate(new_lines):
-                if line.strip() == "## Executive Summary":
+                if any(h in line.strip() for h in exec_anchors):
                     new_lines.insert(i + 1, model_line)
                     inserted = True
                     break
