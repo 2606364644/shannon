@@ -202,6 +202,89 @@ describe("MarkdownView", () => {
     expect(kvKeys).not.toContain("SSRF");
   });
 
+  it("Notes 段落降级为「注释 aside」（coral 左规 + eyebrow + 更小正文），不再按全尺寸 <p> 抢主发现权重", () => {
+    // 后端 findings_renderer 把 notes 写成独立段落 `**备注:** <长文本>`（前导 \n 与 kv 列表分开），
+    // 原本按全尺寸 prose <p> 渲染——又长又抢眼。改造后命中备注标签 → 注释 aside（视觉降级）。
+    const md = `# 报告
+
+## Injection
+
+### INJ-VULN-01: eval RCE
+
+- **verdict:** vulnerable
+
+**备注:** affected_routes: ['GET /api/x', 'POST /api/y']; authentication_required: false. 这是一段很长的补充说明，含路由清单与置信度 caveat。
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    const notes = container.querySelector('[data-testid="vuln-notes"]');
+    expect(notes).not.toBeNull();
+    // eyebrow（源标签去冒号）+ 正文内容完整保留
+    expect(notes?.textContent).toContain("备注");
+    expect(notes?.textContent).toContain("affected_routes");
+    expect(notes?.textContent).toContain("authentication_required: false");
+    // 降级视觉权重的结构性证据：coral 左规 + 暖纸底 + 更小更柔的正文
+    expect(notes).toHaveClass("border-primary/30");
+    expect(notes).toHaveClass("bg-muted/40");
+    const body = notes?.querySelector("div + div");
+    expect(body).toHaveClass("text-foreground/70");
+    expect(body).toHaveClass("text-[12.5px]");
+    // 不再渲染成普通 <p>（旧的全尺寸段落）
+    const card = screen.getByTestId("vuln-card");
+    expect(card.querySelectorAll("p").length).toBe(0);
+  });
+
+  it("普通 bold-led 段落不被误判为 notes（仅捕获 备注/Notes 标签）", () => {
+    const md = `# 报告
+
+## Injection
+
+### INJ-VULN-01: eval RCE
+
+- **verdict:** vulnerable
+
+**摘要:** 这是普通加粗段落，不应被降级为 notes aside。
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    expect(container.querySelector('[data-testid="vuln-notes"]')).toBeNull();
+    // 仍是普通 <p>（未被重构成 aside）
+    expect(container.querySelectorAll("p").length).toBeGreaterThan(0);
+  });
+
+  it("末条 notes 紧跟 `---` 被 Setext 解析成 <h2> 也命中 aside（综合报告真实结构）", () => {
+    // 真实根因：综合报告用 `---` 分隔漏洞条目，每类「最后一条」漏洞的 notes 行紧跟 `---`（无空行），
+    // markdown 按 Setext 把 `**Notes:** 文本\n---` 解析成 <h2> 标题（又大又粗，且不走 <p> 通路）。
+    // 工厂同时覆盖 <p> 与 <h1>~<h6> → 两条路都降级为 aside。
+    const md = `# 报告
+
+## Cross-Site Scripting (XSS)
+
+### XSS-VULN-02
+
+**Summary:**
+- **Vulnerable Location:** startDate on /api/report-relation/logs
+- **Verdict:** vulnerable
+
+**Notes:** 认证要求：所有 .regex() 验证路由均有认证中间件。无 CSP 头，XSS payload 无约束。
+---
+
+## Authentication Vulnerabilities
+
+### AUTH-VULN-01
+
+**Summary:**
+- **Source Endpoint:** ALL /api/*
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    const notes = container.querySelector('[data-testid="vuln-notes"]');
+    expect(notes).not.toBeNull();
+    expect(notes?.textContent).toContain("认证要求");
+    // 关键回归断言：notes 不再残留为 <h2> 标题（Setext 副作用）
+    const h2Notes = Array.from(container.querySelectorAll("h2")).some((h) =>
+      /认证要求/.test(h.textContent ?? ""),
+    );
+    expect(h2Notes).toBe(false);
+  });
+
   it("vuln 块的 witness_payload 代码完整展示（直接渲染，不折叠丢信息）", () => {
     render(<MarkdownView markdown={MD} />);
     const card = screen.getByTestId("vuln-card");

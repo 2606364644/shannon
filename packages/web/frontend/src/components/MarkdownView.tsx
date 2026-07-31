@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement, type MouseEvent } from "react";
+import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement, type MouseEvent, type ElementType } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
@@ -164,6 +164,67 @@ function flatten(node: ReactNode): string {
   return "";
 }
 
+/** 检测「Notes/备注 标签开头」的块：首元素为 <strong> 且文本 = 备注标签（zh「备注」/ en「Notes」）。
+ *  命中返回 {eyebrow, val}；否则 null（交还默认渲染）。冒号可半/全角、可省。 */
+function notesFromChildren(children: ReactNode): { eyebrow: string; val: ReactNode[] } | null {
+  const kids = Array.isArray(children) ? children : [children];
+  const firstStrongIdx = kids.findIndex(
+    (k) => typeof k !== "string" && (k as ReactElement)?.type === "strong",
+  );
+  if (firstStrongIdx === -1) return null;
+  // strong 必须在块首（其前只允许空白串），避免误伤「正文中段加粗 + 备注」之类。
+  if (!kids.slice(0, firstStrongIdx).every((k) => typeof k === "string" && /^\s*$/.test(k)))
+    return null;
+  const strongEl = kids[firstStrongIdx] as ReactElement<{ children?: ReactNode }>;
+  const rawLabel = flatten(strongEl.props.children);
+  if (!/^(备注|Notes)[:：]?\s*$/i.test(rawLabel.trim())) return null;
+  const restKids = kids.slice(firstStrongIdx + 1);
+  const val: ReactNode[] = [];
+  let trimming = true;
+  for (const k of restKids) {
+    if (trimming && typeof k === "string" && /^\s*$/.test(k)) continue;
+    if (trimming && typeof k === "string") {
+      val.push(k.replace(/^\s+/, ""));
+      trimming = false;
+    } else {
+      val.push(k);
+      trimming = false;
+    }
+  }
+  // eyebrow 用源标签去冒号（en「Notes」经 uppercase class 显成 NOTES，zh「备注」原样）。
+  return { eyebrow: rawLabel.replace(/[:：]\s*$/, "").trim(), val };
+}
+
+/** 把 Notes 块降级成「注释 aside」：coral 左规 + 暖纸底 + eyebrow + 更小更柔的正文，
+ *  明示「补充参考」、不与主发现争视觉权重。被 Setext 解析成标题的 notes 也走这里。 */
+function renderNotesAside(props: Record<string, unknown>, eyebrow: string, val: ReactNode[]) {
+  return (
+    <aside
+      {...props}
+      data-testid="vuln-notes"
+      className="mt-3 rounded-md border-l-2 border-primary/30 bg-muted/40 px-3 py-2"
+    >
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        {eyebrow}
+      </div>
+      <div className="text-[12.5px] leading-[1.65] break-words text-foreground/70">{val}</div>
+    </aside>
+  );
+}
+
+/** 块级元素工厂：若块是 Notes 标签开头 → 注释 aside；否则按原 Tag 渲染（保留 id 等 props）。
+ *  覆盖 <p> 与 <h1>~<h6>：独立段落 `**备注:** 文本` 走 <p>；但综合报告用 `---` 分隔漏洞条目，
+ *  每类「最后一条」漏洞的 notes 行紧跟 `---`（无空行），会被 markdown 按 Setext 解析成 <h2>
+ *  标题（所以原本又大又粗）。两条路都接住 → 统一降级为 aside。 */
+function notesBlockFor(tag: ElementType) {
+  return function NotesBlock({ children, ...props }: { children?: ReactNode; [k: string]: unknown }) {
+    const r = notesFromChildren(children);
+    if (r) return renderNotesAside(props, r.eyebrow, r.val);
+    const Tag = tag;
+    return <Tag {...props}>{children}</Tag>;
+  };
+}
+
 /** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / pre 复制按钮）。
  *  工厂接收 t：复制按钮文案随语言切换（react-markdown 的 components 项不订阅 i18n，
  *  靠外层 MarkdownView 的 useTranslation 触发重渲染、传入最新 t）。 */
@@ -212,6 +273,14 @@ function makeProseComponents(t: TFunction) {
     }
     return <li {...props}>{children}</li>;
   },
+  // Notes 段落 / Setect 标题 → 注释 aside（见模块级 notesBlockFor 注释）。
+  p: notesBlockFor("p"),
+  h1: notesBlockFor("h1"),
+  h2: notesBlockFor("h2"),
+  h3: notesBlockFor("h3"),
+  h4: notesBlockFor("h4"),
+  h5: notesBlockFor("h5"),
+  h6: notesBlockFor("h6"),
   // block code：仅渲染 <code>（含 hljs language-xxx class），装饰交给 pre
   code: ({ className, children, ...props }: { className?: string; children?: ReactNode; [k: string]: unknown }) => (
     <code {...props} className={`font-mono ${className ?? ""}`}>{children}</code>
