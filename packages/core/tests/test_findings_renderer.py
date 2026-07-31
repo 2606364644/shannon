@@ -22,6 +22,13 @@ from supernova_core.services.findings_renderer import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _en_lang_default(monkeypatch):
+    """现有断言基于英文渲染（i18n 前的行为），默认 en。
+    zh 行为由显式 setenv("zh") 的测试覆盖。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+
+
 def test_render_injection_entry_full():
     vuln = InjectionVulnerability(
         ID="INJECTION-VULN-001",
@@ -453,3 +460,34 @@ async def test_render_findings_with_subdirs_reads_legacy_queue_at_root(tmp_path)
     bb_findings = root / BLACKBOX_SUBDIR / "injection_findings.md"
     assert bb_findings.exists()
     assert "### INJECTION-LEGACY" in bb_findings.read_text()
+
+
+def test_render_injection_entry_zh_labels(monkeypatch):
+    """zh 模式：漏洞卡标签为中文。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    vuln = InjectionVulnerability(
+        ID="INJECTION-VULN-ZH", vulnerability_type="SQL Injection",
+        externally_exploitable=True, confidence="high",
+        sink_call="sqlite3.execute", notes="测试备注",
+    )
+    result = render_injection_entry(vuln)
+    assert "**摘要:**" in result
+    assert "**Sink 调用:** sqlite3.execute" in result
+    assert "**备注:** 测试备注" in result
+    assert "Summary" not in result
+
+
+@pytest.mark.asyncio
+async def test_render_findings_zh_heading_and_none_found(tmp_path, monkeypatch):
+    """zh 模式：章节标题 + none_found 为中文。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "xss_exploitation_queue.json").write_text(
+        VulnerabilityQueue(vulnerabilities=[]).model_dump_json()
+    )
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+    findings = (deliverables / "xss_findings.md").read_text()
+    assert "## 跨站脚本 (XSS)" in findings
+    assert "未发现 XSS 漏洞。" in findings
+    assert "免责声明" in findings

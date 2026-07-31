@@ -5,6 +5,12 @@ from pathlib import Path
 from supernova_core.models.queue_schemas import InjectionVulnerability, VulnerabilityQueue
 
 
+@pytest.fixture(autouse=True)
+def _en_lang_default(monkeypatch):
+    """断言基于英文渲染（i18n 前行为）；默认 en。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+
+
 @pytest.mark.asyncio
 async def test_render_findings_activity_generates_findings(tmp_path):
     """Integration test: render_findings activity should produce findings MD from queue JSON."""
