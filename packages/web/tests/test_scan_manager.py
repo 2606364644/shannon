@@ -151,16 +151,6 @@ async def test_start_same_ws_two_scans_not_mutually_exclusive(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_blackbox_not_implemented_phase_c(tmp_path, monkeypatch):
-    """blackbox C1 化留 Phase C: start 对 blackbox raise NotImplementedError."""
-    mgr = ScanManager(tmp_path, tmp_path / "repos", None, max_concurrent=2)
-    _patch_temporal_ok(monkeypatch, mgr)
-    _patch_client(monkeypatch)
-    with pytest.raises(NotImplementedError, match="Phase C"):
-        await mgr.start(ScanRequest(type="blackbox", url="u", workspace="BB"))
-
-
-@pytest.mark.asyncio
 async def test_concurrency_limit_raises(tmp_path, monkeypatch):
     mgr = ScanManager(tmp_path, tmp_path / "r", None, max_concurrent=1)
     _patch_temporal_ok(monkeypatch, mgr)

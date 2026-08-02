@@ -5,7 +5,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import i18n from "@/i18n";
-import { ScanNewPage } from "./ScanNewPage";
+import { ScanNewPage, buildAuthPayload, validateAuth, type AuthFormState } from "./ScanNewPage";
 
 // Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
 vi.mock("@monaco-editor/react", () => ({
@@ -99,11 +99,6 @@ function selectRepoOption(stepTitle: string, optionName: RegExp | string) {
   return screen.findByRole("option", { name: optionName }).then((opt) => {
     fireEvent.click(opt);
   });
-}
-
-// 黑盒分段开关按钮（"复用白盒结果" / "指定仓库"），按文案取。
-function segButton(label: RegExp | string) {
-  return screen.getByRole("button", { name: label });
 }
 
 // 入口已收窄为 repo-only：白盒提交类用例统一注入 ready 仓库 + 选 ws + 选 repo + 填 url。
@@ -349,27 +344,6 @@ describe("ScanNewPage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
   });
 
-  it("黑盒 URL 必填：无白盒结果→默认 repo 模式，不填 url → disabled；填齐 → enabled", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/repos", () =>
-        HttpResponse.json([
-          { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
-        ]),
-      ),
-    );
-    renderPage();
-    clickTab("黑盒");
-    await selectWorkspace("ws1");
-    // 无白盒扫描 → 智能默认退到 repo 模式（指定仓库分段 pressed）
-    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
-    await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-    await selectRepoOption("代码上下文", /foo/);
-    // 黑盒 url 必填 → 不填时提交 disabled
-    expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
-    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
-  });
-
   // === 无可用工作区空态提示（普通用户提示联系管理员 / admin 提示新建工作区） ===
   it("普通用户无 ws → 显「联系管理员」提示，不显 admin 文案；下拉显空态项", async () => {
     server.use(http.get("/api/workspaces", () => HttpResponse.json([])));
@@ -400,11 +374,11 @@ describe("ScanNewPage", () => {
   });
 });
 
-// === 黑盒「复用白盒结果 / 指定仓库」分段开关 ===
-describe("ScanNewPage 黑盒代码上下文分段开关", () => {
+// === 黑盒「复用白盒结果」（恒复用——exploitation-only，无 repo/standalone 分支）===
+describe("ScanNewPage 黑盒代码上下文（恒复用白盒）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("ws 有白盒扫描 → 默认 reuse 模式 + 自动选最新 + buildBody 发 reuse_whitebox_scan_id（无 source）", async () => {
+  it("ws 有白盒扫描 → 自动选最新；不填 url → disabled，填齐 → enabled；buildBody 发 reuse_whitebox_scan_id（无 source）", async () => {
     let captured: Record<string, unknown> | undefined;
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
@@ -416,10 +390,10 @@ describe("ScanNewPage 黑盒代码上下文分段开关", () => {
     renderPage();
     clickTab("黑盒");
     await selectWorkspace("ws1");
-    // 有白盒扫描 → 默认 reuse 模式
-    await waitFor(() => expect(segButton(/复用白盒结果/)).toHaveAttribute("aria-pressed", "true"));
-    // 自动选最新一条 → trigger 显其 workflow_id
+    // 有白盒扫描 → 自动选最新一条 → trigger 显其 workflow_id
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    // reuseScanId 已自动选，但 url 必填 → 不填时提交 disabled
+    expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
@@ -428,54 +402,15 @@ describe("ScanNewPage 黑盒代码上下文分段开关", () => {
     expect(captured!.source).toBeUndefined();
   });
 
-  it("切到「指定仓库」→ buildBody 发 source.repo（无 reuse_whitebox_scan_id）", async () => {
-    let captured: Record<string, unknown> | undefined;
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
-      http.get("/api/workspaces/:ws/repos", () =>
-        HttpResponse.json([
-          { name: "bar", state: "ready", source: { kind: "git", url: "https://gitlab.example/bar.git" } },
-        ]),
-      ),
-      http.post("/api/scan", async ({ request }) => {
-        captured = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json({ workspace: "ws1" }, { status: 202 });
-      }),
-    );
+  it("ws 无白盒扫描 → 显复用空态引导 + 不显仓库选择器；填 url 仍 disabled（reuseScanId 必填）", async () => {
     renderPage();
     clickTab("黑盒");
     await selectWorkspace("ws1");
-    await waitFor(() => expect(segButton(/复用白盒结果/)).toHaveAttribute("aria-pressed", "true"));
-    // 手动切到「指定仓库」
-    fireEvent.click(segButton(/指定仓库/));
-    await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-    await selectRepoOption("代码上下文", /bar/);
-    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
-    await waitFor(() => expect(captured).toBeDefined());
-    expect((captured!.source as { kind: string; value: string })?.kind).toBe("repo");
-    expect((captured!.source as { kind: string; value: string })?.value).toBe("bar");
-    expect(captured!.reuse_whitebox_scan_id).toBeUndefined();
-  });
-
-  it("ws 无白盒扫描 → 默认退到「指定仓库」+ 不显复用空态", async () => {
-    renderPage();
-    clickTab("黑盒");
-    await selectWorkspace("ws1");
-    // 默认 /scans 空 → 智能默认退到 repo 模式
-    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
-    expect(screen.queryByText(/还没有白盒扫描结果/)).toBeNull();
-  });
-
-  it("无白盒扫描时手切回「复用白盒结果」→ 显空态引导 + 提交 disabled", async () => {
-    renderPage();
-    clickTab("黑盒");
-    await selectWorkspace("ws1");
-    await waitFor(() => expect(segButton(/指定仓库/)).toHaveAttribute("aria-pressed", "true"));
-    fireEvent.click(segButton(/复用白盒结果/));
+    // 默认 /scans 空 → 黑盒恒复用白盒，无白盒则显空态（不退到 repo）
     expect(await screen.findByText(/还没有白盒扫描结果/)).toBeInTheDocument();
-    // 无可选白盒扫描 → 提交 disabled（即便填了 url）
+    // 无 repo 选择器（不再有「指定仓库」分支）
+    expect(screen.queryByRole("button", { name: /\+ 添加新仓库/ })).toBeNull();
+    // 即便填 url，reuseScanId 必填不可满足 → 提交 disabled
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
   });
@@ -496,5 +431,47 @@ describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调
     const footer = screen.getByRole("button", { name: /开始扫描/ }).parentElement;
     expect(footer?.className).not.toMatch(/bg-secondary/);
     expect(footer?.className).toMatch(/bg-card/);
+  });
+});
+
+// === 黑盒登录配置：buildAuthPayload（AuthFormState → ScanAuthentication 契约转换）+ validateAuth ===
+describe("黑盒登录 buildAuthPayload / validateAuth", () => {
+  const base: AuthFormState = {
+    enabled: true, loginType: "form", loginUrl: "https://x/login", username: "admin",
+    password: "pw", totpSecret: "T", emailLoginEnabled: false, emailAddress: "",
+    emailPassword: "", emailTotp: "", loginFlow: "a\nb", scType: "url_contains", scValue: "/dashboard",
+  };
+  // t 只回 key（断言用 key 本身，不依赖 i18n 文案）
+  const t = ((k: string) => k) as never;
+
+  it("buildAuthPayload → ScanAuthentication（snake_case + login_flow 按行 split）", () => {
+    const p = buildAuthPayload({ ...base });
+    expect(p.login_type).toBe("form");
+    expect(p.login_url).toBe("https://x/login");
+    expect(p.credentials).toEqual({ username: "admin", password: "pw", totp_secret: "T" });
+    expect(p.success_condition).toEqual({ type: "url_contains", value: "/dashboard" });
+    expect(p.login_flow).toEqual(["a", "b"]);
+  });
+
+  it("loginFlow 全空行 → 不发 login_flow 字段", () => {
+    const p = buildAuthPayload({ ...base, loginFlow: "  \n \n" });
+    expect(p.login_flow).toBeUndefined();
+  });
+
+  it("emailLogin 启用 → credentials.email_login 含 address/password/totp_secret", () => {
+    const p = buildAuthPayload({ ...base, emailLoginEnabled: true, emailAddress: "a@b", emailPassword: "ep", emailTotp: "et" });
+    expect(p.credentials.email_login).toEqual({ address: "a@b", password: "ep", totp_secret: "et" });
+  });
+
+  it("validateAuth: disabled → null（不校验）", () => {
+    expect(validateAuth({ ...base, enabled: false }, t)).toBeNull();
+  });
+
+  it("validateAuth: enabled 缺 loginUrl → authLoginUrlEmpty", () => {
+    expect(validateAuth({ ...base, loginUrl: "" }, t)).toBe("scan.errors.authLoginUrlEmpty");
+  });
+
+  it("validateAuth: enabled loginUrl 非 http(s) → authLoginUrl", () => {
+    expect(validateAuth({ ...base, loginUrl: "ftp://x" }, t)).toBe("scan.errors.authLoginUrl");
   });
 });

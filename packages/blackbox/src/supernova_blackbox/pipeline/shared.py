@@ -17,6 +17,9 @@ class BlackboxPipelineInput(BasePipelineInput):
     workspaces_root: str | None = None  # sandbox 外（CLI/worker）解析的 workspaces 根绝对路径（sandbox 内禁 os.getenv/Path.cwd）
     # P3c 阶段 1：provider 配置穿线（Phase C 黑盒 C1 化时由 scan_manager 填；CLI 兜底 None）。
     provider_config: dict | None = None
+    # C1 Phase B（黑盒 web 化）：web 提交端塞 events.ndjson 路径（env 不跨容器）。
+    # None=CLI 路径（run_scan 外层 wire_web_event_file 注入 env 兜底），对齐 whitebox PipelineInput.event_file。
+    event_file: str | None = None
 
 
 @dataclass
@@ -54,6 +57,8 @@ class BlackboxActivityInput:
     info_level: str = "info"          # "info" | "warning"（rich 着色：cyan/yellow）
     # P3c 阶段 1：provider 配置穿线（Phase C 黑盒 workflow 灌入）。
     provider_config: dict | None = None
+    # C1 Phase B：web 路径 setup_display 透传到 AuditSession.initialize→StructuredEventRenderer。
+    event_file: str | None = None
 
 
 @dataclass

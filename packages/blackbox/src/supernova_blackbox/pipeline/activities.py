@@ -24,11 +24,100 @@ from supernova_blackbox.services.exploitation_checker import QueueValidationResu
 
 
 def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
+    # C1 Phase B（黑盒 web 化）：workspace_path（web=event_file.parent=scan_dir）由
+    # BlackboxScanWorkflow 算好传入（workflows.py C1 Phase B）。优先用它作 deliverables 根，
+    # 使产物落 scan_dir，与 web DeliverablesReader 读取口径对齐——对齐 whitebox _get_paths
+    # （activities.py:42-61，2026-07-30 修过同类分裂：旧 resolve_deliverables_path(workspace_name=
+    # scan_id) 落 workspaces/<scan_id>/ 平铺目录，web 在 scan_dir/deliverables 读不到 → 0 漏洞）。
+    # 无 workspace_path（activity 被直接调用、不经 workflow）回落 resolve_deliverables_path。
+    if input.workspace_path:
+        return Path(input.workspace_path) / input.deliverables_subdir
     return resolve_deliverables_path(
         repo_path=input.repo_path,
         deliverables_subdir=input.deliverables_subdir,
         workspace_name=input.workspace_name,
     )
+
+
+# C1 Phase B（黑盒 web 化）：这两个 activity 仅 worker 容器路径调用（BlackboxScanWorkflow 接入）；
+# CLI run_scan 不调用（CLI 自行 inline AuditSession/heartbeat，零改动）。setup_display 注入进程
+# 全局 AuditSession 使后续 activity 的 get_audit_session() 可用；finalize_summary 写 scan_end 事件
+# + 清理全局 session。直采 core audit 体系（whitebox 的 supernova_whitebox.audit.* 是 core shim）。
+
+
+@activity.defn
+async def setup_display(input: BlackboxActivityInput) -> None:
+    """C1 前导 activity（黑盒 web 化）：构造 headless core AuditSession + 注入 event_file。
+
+    worker 容器无 TTY，用 use_rich=False + Console()（自动检测非 TTY → 纯文本）。
+    AuditSession.initialize(workflow_id, event_file=input.event_file) → WorkflowLogger 挂
+    StructuredEventRenderer 写 events.ndjson（web live 页可见）。参照 whitebox setup_display
+   （activities.py:1760-1807），但全用 core import（whitebox audit.* 仅 core 的 compat shim）。
+    """
+    from rich.console import Console
+    from supernova_core.logging import configure_logging
+    from supernova_core.logging.log_bus import LogBus
+    from supernova_core.models.metrics import SessionMetadata
+    from supernova_core.audit.session import AuditSession
+    from supernova_core.audit.session_registry import set_audit_session
+    from supernova_core.runtime.heartbeat import start_heartbeat
+
+    if input.workspace_path:
+        ws_path = Path(input.workspace_path)
+    else:
+        ws_path = (
+            Path(input.repo_path).parent / "workspaces"
+            / (input.workspace_name or "scan"))
+    meta = SessionMetadata(
+        id=input.workspace_name or ws_path.name,
+        web_url=input.web_url,
+        repo_path=input.repo_path,
+        output_path=str(ws_path.parent),
+    )
+    # per-scan diagnostic.log（worker 容器入口挂 LogBusHandler；幂等，对齐 whitebox setup_display）。
+    configure_logging(log_dir=ws_path / "logs")
+    console = Console()  # auto-detects non-TTY in pipes -> plain text per event
+    session = AuditSession(meta, use_rich=False, console=console)
+    await session.initialize(workflow_id=meta.id, event_file=input.event_file)
+    # attach 把散落 getLogger 诊断汇入 dispatcher（起 drain task），否则裸 logger 走 lastResort stderr。
+    await LogBus.attach(session.dispatcher)
+    set_audit_session(session)
+    # heartbeat 由 daemon 线程持续写 <ws>/heartbeat，finalize_summary 停止（终态自停兜底）。
+    await start_heartbeat(ws_path)
+
+
+@activity.defn
+async def finalize_summary(input: BlackboxActivityInput, summary: dict) -> None:
+    """C1 后置 activity（黑盒 web 化）：log_workflow_complete（→ StructuredEventRenderer 写 scan_end
+    事件）+ 清 AuditSession/heartbeat。summary 由 workflow 从 self._state 构建（等价 whitebox
+    finalize_summary activities.py:1810-1844）。CLI 路径不调用。
+    """
+    from supernova_core.logging.log_bus import LogBus
+    from supernova_core.models.audit import WorkflowSummary
+    from supernova_core.audit.session_registry import (
+        NullAuditSession, clear_audit_session, get_audit_session,
+    )
+    from supernova_core.runtime.heartbeat import stop_heartbeat
+
+    session = get_audit_session()
+    if not isinstance(session, NullAuditSession):
+        # cost/cost_currency 取 session.get_metrics()（MetricsTracker 累积所有 agent，完整），
+        # 非 summary dict（其 total_cost 来自 workflow state.agent_metrics，可能残缺）。对齐 whitebox。
+        final_metrics = await session.get_metrics() or {}
+        ws = WorkflowSummary(
+            status=summary.get("status", "failed"),
+            total_duration_ms=summary.get("total_duration_ms", 0),
+            total_cost_usd=final_metrics.get("total_cost_usd") or 0.0,
+            cost_currency=final_metrics.get("cost_currency") or "USD",
+            completed_agents=summary.get("completed_agents", []),
+            agent_metrics=summary.get("agent_metrics", {}),
+            error=summary.get("error"),
+        )
+        # final flush（dispatch 余下 LogEvent）在 log_workflow_complete 关闭 workflow_logger 之前。
+        await LogBus.drain_and_detach()
+        await session.log_workflow_complete(ws)
+    await stop_heartbeat()  # 停 heartbeat daemon（启动于 setup_display）；终态自停兜底
+    clear_audit_session()
 
 
 @activity.defn
@@ -118,73 +207,6 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
                 retryable=False,
                 error_code=ErrorCode.AUTH_LOGIN_FAILED,
             )
-    except PentestError as e:
-        await tool_audit_logger.close(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
-        await session.end_agent(agent_name.value, AgentEndResult(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
-            attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
-    except Exception as e:
-        await tool_audit_logger.close(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
-        await session.end_agent(agent_name.value, AgentEndResult(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
-            attempt_number=attempt, error=str(e)))
-        await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
-        error_type, retryable = classify_error_for_temporal(e)
-        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
-
-
-@activity.defn
-async def run_recon(input: BlackboxActivityInput) -> dict:
-    from supernova_core.audit.session_registry import get_audit_session
-    from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
-    from supernova_core.models.audit import AgentEndResult
-
-    agent_name = AgentName.RECON_BLACKBOX
-    attempt = activity.info().attempt
-    max_attempts = retry_for(agent_retry_category(agent_name.value)).maximum_attempts
-    session = get_audit_session()
-    tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
-    agent_start = time.monotonic()
-    try:
-        from supernova_blackbox.agents.recon_executor import ReconExecutor
-
-        deliverables = _get_deliverables_path(input)
-        deliverables.mkdir(parents=True, exist_ok=True)
-        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
-        prompt_manager = PromptManager(prompts_dir)
-        executor = AgentExecutor(prompt_manager)
-        recon = ReconExecutor(executor)
-
-        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
-        await tool_audit_logger.initialize()
-        metrics = await recon.execute(
-            workspace_path=deliverables.parent,
-            deliverables_path=deliverables,
-            web_url=input.web_url,
-            config_path=input.config_path,
-            api_key=input.api_key,
-            pipeline_testing=input.pipeline_testing_mode,
-            tool_audit_logger=tool_audit_logger,
-        )
-        await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
-        await session.end_agent(agent_name.value, AgentEndResult(
-            success=True,
-            duration_ms=metrics.duration_ms,
-            cost_usd=metrics.cost_usd or 0.0,
-            cost_currency=metrics.cost_currency,
-            attempt_number=attempt,
-            model=metrics.model,
-            input_tokens=metrics.input_tokens,
-            output_tokens=metrics.output_tokens,
-            cache_read_tokens=metrics.cache_read_tokens,
-            cache_creation_tokens=metrics.cache_creation_tokens,
-        ))
-        return metrics.model_dump()
     except PentestError as e:
         await tool_audit_logger.close(
             success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
@@ -330,7 +352,13 @@ async def validate_exploitation_queue(input: BlackboxActivityInput) -> QueueVali
     """
     from supernova_blackbox.services.exploitation_checker import ExploitationChecker
     try:
-        deliverables = _get_deliverables_path(input)
+        # 根因 1 修复：查白盒 queue 的根 = repo_path/deliverables_subdir（白盒产物所在），
+        # 而非黑盒自己 _get_deliverables_path（workspace_path/deliverables_subdir，空）。
+        # standalone（无 repo_path）回落 _get_deliverables_path。
+        deliverables = (
+            Path(input.repo_path) / input.deliverables_subdir
+            if input.repo_path else _get_deliverables_path(input)
+        )
         return await ExploitationChecker.validate_queue(
             vuln_type=input.vuln_type,
             deliverables_path=deliverables,
@@ -357,6 +385,12 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
     agent_start = time.monotonic()
     try:
         deliverables = _get_deliverables_path(input)
+        # 对齐 assemble_report / finalize_report：黑盒报告落 deliverables/blackbox/。
+        # report-executive prompt 假设 assemble 已在 {{DELIVERABLES_PATH}} 下拼好报告等它
+        # Edit、validator 也校验同一路径。若传顶层 deliverables，agent 在顶层找不到
+        # blackbox/ 里的拼接报告 → 发散自建、写错位置 → Missing deliverable（重试到死）。
+        bb = blackbox_dir(deliverables)
+        bb.mkdir(parents=True, exist_ok=True)
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
@@ -365,9 +399,9 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
         await tool_audit_logger.initialize()
         metrics = await executor.execute(
             agent_name=agent_name,
-            repo_path=str(deliverables),
+            repo_path=str(bb),
             web_url=input.web_url,
-            deliverables_path=str(deliverables),
+            deliverables_path=str(bb),
             config_path=input.config_path,
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
@@ -430,31 +464,6 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
-
-
-@activity.defn
-async def generate_poc_report(input: BlackboxActivityInput) -> None:
-    """报告增强：生成 curl/Burp PoC md（黑盒）。失败不阻塞主报告。"""
-    import logging
-    log = logging.getLogger(__name__)
-    try:
-        from supernova_core.services.poc_generator import PoCGenerator
-        from supernova_core.models.config import ALL_VULN_CLASSES
-        from supernova_core.utils.paths import blackbox_dir
-
-        deliverables = _get_deliverables_path(input)
-        bb = blackbox_dir(deliverables)
-        bb.mkdir(parents=True, exist_ok=True)
-        await PoCGenerator.generate(
-            deliverables_dir=bb,
-            vuln_classes=list(ALL_VULN_CLASSES),
-            target_url=(input.web_url or None),
-            track="blackbox",
-            repo_path=input.repo_path,
-            api_key=input.api_key,
-        )
-    except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
-        log.warning("poc: blackbox generate_poc_report failed (non-blocking): %s", exc)
 
 
 @activity.defn

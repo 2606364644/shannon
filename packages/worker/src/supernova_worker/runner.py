@@ -35,12 +35,13 @@ from supernova_whitebox.pipeline.activities import (
 )
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
 from supernova_blackbox.pipeline.activities import (
-    run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
+    run_blackbox_preflight, run_blackbox_auth_validation,
     run_exploit_agent, validate_exploitation_queue, assemble_report as bb_assemble_report,
-    run_report_agent, finalize_report, generate_poc_report as bb_generate_poc_report,
+    run_report_agent, finalize_report,
     log_phase_start_activity as bb_log_phase_start, log_phase_complete_activity as bb_log_phase_complete,
     log_info_activity as bb_log_info, load_correlation_context, resolve_blackbox_engine,
     detect_whitebox_results, write_engine_config_for_session, cleanup_engine_configs,
+    setup_display as bb_setup_display, finalize_summary as bb_finalize_summary,
 )
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
@@ -82,12 +83,13 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
         task_queue=WEB_TASK_QUEUE_BLACKBOX,
         workflows=[BlackboxScanWorkflow],
         activities=[
-            run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
+            run_blackbox_preflight, run_blackbox_auth_validation,
             run_exploit_agent, validate_exploitation_queue, bb_assemble_report,
-            run_report_agent, finalize_report, bb_generate_poc_report,
+            run_report_agent, finalize_report,
             bb_log_phase_start, bb_log_phase_complete, bb_log_info,
             load_correlation_context, resolve_blackbox_engine, detect_whitebox_results,
             write_engine_config_for_session, cleanup_engine_configs,
+            bb_setup_display, bb_finalize_summary,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(

@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 from temporalio.exceptions import CancelledError
 
 from supernova_core.models.agents import AgentName, ALL_VULN_CLASSES
@@ -80,8 +81,20 @@ class BlackboxScanWorkflow:
 
         selected_classes: list[str] = input.vuln_classes or list(ALL_VULN_CLASSES)
 
-        # Compute workspace_path consistent with whitebox (workspaces/<name>/)
-        if input.workspace_name:
+        # C1 Phase B（黑盒 web 化）：event_file 非 None = web 提交（worker 路径），调迁移
+        # activity（setup_display/finalize_summary）；None = CLI 路径，run_scan 外层已
+        # set_audit_session/heartbeat/log_workflow_complete，workflow 内不重复（守 CLI 零改动）。
+        # 对齐 whitebox workflows.py:97-101 is_worker_path 门控。
+        is_worker_path = input.event_file is not None
+
+        # Compute workspace_path so activities know where to write 产物（heartbeat/deliverables/
+        # workflow.log/session）。WEB 路径（event_file 非 None）：用 event_file 同目录（= scan_dir，
+        # web scan_manager 创建的 workspaces/<ws>/scans/<scan_id>/），与 web 判活（heartbeat）/
+        # DeliverablesReader 读取对齐——修历史分裂（产物原落 ws_root/workspace_name 平铺，web 读不到）。
+        # CLI 路径（无 event_file）：走 ws_root/workspace_name（与旧 resolve_deliverables_path 同路径）。
+        if input.event_file:
+            workspace_path = str(Path(input.event_file).parent)
+        elif input.workspace_name:
             workspace_path = str(ws_root / input.workspace_name)
         else:
             workspace_path = input.repo_path
@@ -96,12 +109,23 @@ class BlackboxScanWorkflow:
             api_key=input.api_key,
             workspace_path=workspace_path,
             correlated_workspace=input.correlated_workspace,
+            event_file=input.event_file,
         )
 
         retry_policy = retry_for(
             "standard",
             "testing" if input.pipeline_testing_mode else (input.retry_profile or "production"),
         )
+
+        # C1 Phase B：worker 路径前导 setup_display（注入 AuditSession + event_file + heartbeat），
+        # 必须在首个 activity 前挂 StructuredEventRenderer，否则 preflight/auth 阶段事件不落盘。
+        # CLI 路径跳过（外层 run_scan 已 set_audit_session/heartbeat）。对齐 whitebox:144-149。
+        if is_worker_path:
+            await workflow.execute_activity(
+                activities.setup_display, act_input,
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=retry_for("standard"),
+            )
 
         await workflow.execute_activity(
             activities.log_phase_start_activity,
@@ -140,13 +164,19 @@ class BlackboxScanWorkflow:
             )
 
         try:
-            # Resolve deliverables path using shared utility
-            deliverables = resolve_deliverables_path(
-                repo_path=input.repo_path,
-                deliverables_subdir=input.deliverables_subdir,
-                workspace_name=input.workspace_name,
-                workspaces_root=ws_root,
-            )
+            # C1 Phase B：deliverables 落点优先 workspace_path（web=scan_dir/deliverables_subdir），
+            # 与 _get_deliverables_path（activities.py）+ web DeliverablesReader 读取口径对齐。
+            # CLI 路径 workspace_path 上方已算（ws_root/workspace_name，与旧 resolve_deliverables_path
+            # 同路径，零回归）；兜底分支防 standalone（无 repo 无 ws）workspace_path 为空。
+            if workspace_path:
+                deliverables = Path(workspace_path) / input.deliverables_subdir
+            else:
+                deliverables = resolve_deliverables_path(
+                    repo_path=input.repo_path,
+                    deliverables_subdir=input.deliverables_subdir,
+                    workspace_name=input.workspace_name,
+                    workspaces_root=ws_root,
+                )
 
             # B2: 当指定关联 workspace 时，加载其 topology/boundaries 作为 exploitation 上下文。
             # ws_root 由 sandbox 外（CLI/worker）解析后经 input 传入（honors SUPERNOVA_WORKER_ROOT +
@@ -172,9 +202,17 @@ class BlackboxScanWorkflow:
                 if (input.correlated_workspace and corr_ws_path is not None)
                 else None
             )
+            # 根因 1 修复：读白盒 queue 的根 = repo_path/deliverables_subdir（白盒 scan_dir/
+            # deliverables，白盒产物所在），而非黑盒自己 deliverables（workspace_path/
+            # deliverables_subdir，空）——否则 exploitation 5 类全 queue_file_not_found skip。
+            # standalone（无 repo_path）回落黑盒自己 deliverables（detect 必返 False → 1.2 fail-fast）。
+            wb_queue_root = (
+                str(Path(input.repo_path) / input.deliverables_subdir)
+                if input.repo_path else str(deliverables)
+            )
             wb = await workflow.execute_activity(
                 activities.detect_whitebox_results,
-                args=[str(deliverables), selected_classes, corr_dlv_path],
+                args=[wb_queue_root, selected_classes, corr_dlv_path],
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=retry_for("log"),
             )
@@ -205,39 +243,24 @@ class BlackboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     BlackboxActivityInput(**{**act_input.__dict__,
-                       "info_message": f"Whitebox results detected at {deliverables} for classes: {found_classes} — skipping RECON_BLACKBOX",
+                       "info_message": f"Whitebox results detected at {wb_queue_root} for classes: {found_classes} — skipping RECON_BLACKBOX",
                        "info_level": "info"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
                 )
             else:
-                await workflow.execute_activity(
-                    activities.log_info_activity,
-                    BlackboxActivityInput(**{**act_input.__dict__,
-                       "info_message": f"No whitebox results found at {deliverables} — running RECON_BLACKBOX from scratch. Tip: pass --repo <path> to reuse whitebox scan results.",
-                       "info_level": "warning"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
+                # 对齐 TS validateDeliverablesExist：黑盒 = 白盒下游 exploitation-only，不独立发现漏洞
+                # （TS 黑盒本身无 recon/analysis 阶段，强制要求白盒产物，standalone hard fail）。
+                # 无白盒产物 → fail-fast（recon 阶段已于阶段 2 删除，黑盒恒复用白盒）。PentestError
+                # 被 workflow except 捕获 → state.status=failed + return；is_worker_path 时 _finalize_web 写 scan_end + failed。
+                raise PentestError(
+                    "Blackbox scan requires existing whitebox scan deliverables "
+                    f"(recon_deliverable.md + non-empty *_exploitation_queue.json) under "
+                    f"{wb_queue_root}/{WHITEBOX_SUBDIR}/. Run a whitebox scan first or reuse its "
+                    "results. Blackbox is exploitation-only and does not run recon.",
+                    "whitebox",
+                    error_code=ErrorCode.DELIVERABLE_NOT_FOUND,
                 )
-
-            if not has_whitebox_results and AgentName.RECON_BLACKBOX.value not in self._state.completed_agents:
-                await workflow.execute_activity(
-                    activities.log_phase_start_activity,
-                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "recon-blackbox"}),
-                    start_to_close_timeout=timedelta(seconds=10),
-                    retry_policy=retry_for("log"),
-                )
-                self._state.current_phase = "recon-blackbox"
-                self._state.current_agent = AgentName.RECON_BLACKBOX.value
-                recon_input = BlackboxActivityInput(**{**act_input.__dict__})
-                metrics = await workflow.execute_activity(
-                    activities.run_recon, recon_input,
-                    start_to_close_timeout=timedelta(hours=2),
-                    retry_policy=retry_policy,
-                )
-                self._state.completed_agents.append(AgentName.RECON_BLACKBOX.value)
-                self._state.agent_metrics[AgentName.RECON_BLACKBOX.value] = metrics
-                self._state.current_agent = None
 
             if input.exploit:
                 await workflow.execute_activity(
@@ -407,18 +430,6 @@ class BlackboxScanWorkflow:
                 retry_policy=retry_policy,
             )
 
-            # === 报告增强：生成 PoC md（失败由 activity 吞掉） ===
-            try:
-                # §8 契约硬化:PoC 非关键报告增强,timeout/ActivityError 绝不阻塞主流程
-                # (activity 内 try/except 抓不到 Temporal runtime cancel)。
-                await workflow.execute_activity(
-                    activities.generate_poc_report, act_input,
-                    start_to_close_timeout=timedelta(minutes=20),
-                    retry_policy=retry_for("poc"),
-                )
-            except Exception:  # noqa: BLE001 — PoC 任何失败(含 ActivityError)只降级
-                pass
-
             # Set final status based on failure tracking
             if self._state.failed_agents:
                 self._state.status = "failed"
@@ -428,6 +439,13 @@ class BlackboxScanWorkflow:
             else:
                 self._state.status = "completed"
             self._state.current_phase = None
+            if is_worker_path:
+                try:
+                    await self._finalize_web(act_input)
+                except Exception:
+                    # 根因 2 加固：落 traceback（不再销毁现场）；仍 best-effort 不阻塞 return
+                    # （web _watch finally 兜底补 scan_end）。
+                    logger.exception("blackbox _finalize_web failed (best-effort)")
             return self._state
         except CancelledError:
             self._state.status = "cancelled"
@@ -442,6 +460,13 @@ class BlackboxScanWorkflow:
             if not self._state.errors:
                 self._state.errors.append(f"{type(e).__name__}: {e}")
             self._state.current_phase = None
+            if is_worker_path:
+                try:
+                    await self._finalize_web(act_input)
+                except Exception:
+                    # 根因 2 加固：落 traceback（不再销毁现场）；仍 best-effort 不阻塞 return
+                    # （web _watch finally 兜底补 scan_end）。
+                    logger.exception("blackbox _finalize_web failed (best-effort)")
             return self._state
         finally:
             cleanup_settings()
@@ -453,12 +478,62 @@ class BlackboxScanWorkflow:
                     await workflow.execute_activity(
                         activities.cleanup_engine_configs,
                         args=[input.repo_path, engine_name],
-                        start_to_close_timeout=timedelta(seconds=15),
-                        retry_policy=retry_for("log"),
+                        # 根因 3：cleanup 对 N session 串行 cleanup_processes（单 session 最坏 ~24s），
+                        # 15s 不够；retry 会把同一次超时放大 3×。120s 覆盖串行 + maximum_attempts=1
+                        # （cleanup 幂等，残留 config 下次覆盖，失败由 except 吞不阻断收尾）。
+                        start_to_close_timeout=timedelta(seconds=120),
+                        retry_policy=RetryPolicy(maximum_attempts=1),
                     )
                 except Exception:
                     pass  # best-effort cleanup，失败不阻断 workflow 收尾
             cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
+
+    def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
+        """构造 finalize_summary 用的 summary dict（success/failed 路径共用，DRY）。
+
+        对齐 whitebox _build_finalize_summary（whitebox/workflows.py:67-88）：agent_metrics 消毒成
+        AgentMetricsSummary（只 duration_ms + cost_usd 等 JSON-safe 字段），丢弃 structured_output
+        富字段。根因 2（ghost-scan）：裸 dict(self._state.agent_metrics) 含 model_dump 残留的非 JSON
+        原生对象 → temporal activity 参数编码失败 → 异常被吞 → finalize_summary 不执行 → scan_end
+        不写 / heartbeat 不停 / session 永远 running。status 取 self._state.status（调用方已设）；
+        error 取已记录首个 error，无则回落 error_fallback。
+        """
+        from supernova_core.models.audit import AgentMetricsSummary
+        return {
+            "status": self._state.status,
+            "total_duration_ms": int((workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+            "total_cost_usd": sum((m.get("cost_usd") or 0.0) for m in self._state.agent_metrics.values()),
+            "completed_agents": list(self._state.completed_agents),
+            "agent_metrics": {
+                name: AgentMetricsSummary(
+                    duration_ms=int(m.get("duration_ms", 0) or 0),
+                    cost_usd=m.get("cost_usd"),
+                )
+                for name, m in self._state.agent_metrics.items()
+            },
+            "error": (self._state.errors[0] if self._state.errors else error_fallback),
+        }
+
+    async def _finalize_web(self, act_input: BlackboxActivityInput) -> None:
+        """C1 Phase B（黑盒 web 化）：worker 路径收尾——调 finalize_summary 写 scan_end 事件 +
+        清 AuditSession/heartbeat。仅 is_worker_path 调用（CLI 路径不调，run_scan 外层收尾）。
+        summary 经 _build_finalize_summary 消毒（根因 2）。调用处包 best-effort try/except，
+        防 finalize 失败阻塞 return（web _watch finally 兜底补 scan_end）。"""
+        # 构造与 execute_activity 分离：构造失败时降级最小 summary 继续调度 activity，
+        # 保证 scan_end/heartbeat 一定收尾（ghost-scan 兜底）。
+        try:
+            summary = self._build_finalize_summary()
+        except Exception:
+            logger.exception("blackbox _build_finalize_summary failed; using minimal summary")
+            summary = {
+                "status": self._state.status,
+                "completed_agents": list(self._state.completed_agents),
+            }
+        await workflow.execute_activity(
+            activities.finalize_summary, args=[act_input, summary],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=retry_for("log"),
+        )
 
     @workflow.query(name="PipelineProgress")
     def pipeline_progress(self) -> PipelineProgress:

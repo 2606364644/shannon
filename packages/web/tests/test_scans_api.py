@@ -102,6 +102,17 @@ def test_scan_report(authed_client, tmp_workspaces):
     assert authed_client.get("/api/workspaces/WS/scans/s1/report").text == "# 综合报告"
 
 
+def test_scan_report_blackbox_track(authed_client, tmp_workspaces):
+    """黑盒扫描报告落在 deliverables/blackbox/。read() 默认 track 必须自动推断到
+    blackbox(对齐 summary/read_poc),否则 report_for 按默认 whitebox track 找不到
+    -> FileNotFoundError -> 500（regression: repo-20260802-154427 报告页加载失败）。"""
+    scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1", scan_type="blackbox")
+    dl = scan_dir / "deliverables" / "blackbox"
+    dl.mkdir(parents=True)
+    (dl / "comprehensive_security_assessment_report.md").write_text("# 黑盒综合报告")
+    assert authed_client.get("/api/workspaces/WS/scans/s1/report").text == "# 黑盒综合报告"
+
+
 def test_scan_logs(authed_client, tmp_workspaces):
     scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1")
     (scan_dir / "workflow.log").write_text("wf")

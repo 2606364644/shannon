@@ -77,23 +77,6 @@ def test_start_shows_whitebox_completion_message():
     assert "injection" in result.output
 
 
-def test_start_shows_standalone_completion_message():
-    """When no whitebox results, completion message should say standalone."""
-    async def fake_run_scan(input, temporal_address, use_rich=False):
-        return BlackboxPipelineState(status="completed")
-
-    with (
-        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("supernova_blackbox.cli.main.find_latest_workspace", return_value=None),
-        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
-    ):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["start", "--url", "http://example.com"])
-
-    assert result.exit_code == 0
-    assert "standalone" in result.output
-
-
 def test_start_shows_error_on_failure():
     """When scan fails, CLI should show error and exit 1."""
     async def fake_run_scan(input, temporal_address, use_rich=False):
@@ -280,33 +263,6 @@ def test_start_defaults_to_latest_when_no_flags(tmp_path, monkeypatch):
     )
     # 应该走 latest 路径（非交互 URL 匹配）
     assert "Found white-box results" in result.output
-
-
-def test_start_defaults_to_standalone_when_no_whitebox(tmp_path, monkeypatch):
-    """无白盒 workspace 时，默认不传 flag 应退化为 standalone（不报错）。"""
-    monkeypatch.chdir(tmp_path)
-
-    captured_input = None
-
-    async def fake_run_scan(input, temporal_address, use_rich=False):
-        nonlocal captured_input
-        captured_input = input
-        return BlackboxPipelineState(status="completed")
-
-    env_patch = _patch_env_profile()
-    with (
-        env_patch[0], env_patch[1],
-        patch("supernova_blackbox.cli.main.ensure_infra", new_callable=AsyncMock),
-        patch("supernova_blackbox.worker.run_scan", side_effect=fake_run_scan),
-    ):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["start", "--url", "https://myapp.com"])
-
-    assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert captured_input is not None
-    # 软默认：找不到白盒 → standalone，workspace_name 为 None（worker 自建 session）
-    assert captured_input.workspace_name is None
-    assert "standalone" in result.output.lower()
 
 
 def test_latest_no_workspaces(tmp_path, monkeypatch):

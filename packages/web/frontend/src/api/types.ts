@@ -235,6 +235,24 @@ export interface DeliverablesSummary {
   notes?: { injection_has_no_queue?: boolean };
 }
 
+/** 黑盒登录配置（对齐 core Authentication schema：models/config.py:29-45）。
+ *  字段名（snake_case）与后端 pydantic 模型一致——scan_manager Authentication.model_validate 校验。*/
+export interface ScanAuthentication {
+  login_type: "form" | "sso" | "api" | "basic";
+  login_url: string;
+  credentials: {
+    username: string;
+    password?: string;
+    totp_secret?: string;
+    email_login?: { address: string; password: string; totp_secret?: string };
+  };
+  login_flow?: string[];
+  success_condition: {
+    type: "url_contains" | "element_present" | "url_equals_exactly" | "text_contains";
+    value: string;
+  };
+}
+
 export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
   // 扫描入口已收窄为「工作区已下载仓库」——本地路径入口移除（source.kind 恒为 repo）。
@@ -244,8 +262,11 @@ export interface ScanRequest {
   // pydantic v2 默认不容未知键, 旧 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422。
   workspace?: string;
   // 黑盒「复用白盒结果」：指定要复用的白盒 scan_id（工作区内某个 whitebox scan）。
-  // 不复用时改走 source.repo（指定仓库代码上下文）——二选一，由前端 reuseMode 决定。
+  // 黑盒恒复用白盒结果（exploitation-only），此字段必填；无 repo/standalone 分支。
   reuse_whitebox_scan_id?: string;
+  // 黑盒登录配置（仅 blackbox + auth.enabled 时发送）。后端写 scan-config.yaml → blackbox workflow
+  // config_path → run_blackbox_auth_validation（agent-browser 登录 + auth-state 落盘）。
+  authentication?: ScanAuthentication;
   config_yaml?: string;
   config_name?: string;
 }

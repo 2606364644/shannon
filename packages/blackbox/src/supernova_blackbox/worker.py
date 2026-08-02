@@ -8,13 +8,11 @@ from temporalio.worker import Worker
 from .pipeline.activities import (
     run_blackbox_preflight,
     run_blackbox_auth_validation,
-    run_recon,
     run_exploit_agent,
     validate_exploitation_queue,
     assemble_report,
     run_report_agent,
     finalize_report,
-    generate_poc_report,
     log_phase_start_activity,
     log_phase_complete_activity,
     log_info_activity,
@@ -23,6 +21,8 @@ from .pipeline.activities import (
     detect_whitebox_results,
     write_engine_config_for_session,
     cleanup_engine_configs,
+    setup_display,
+    finalize_summary,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
 from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
@@ -133,15 +133,15 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         task_queue=task_queue,
         workflows=[BlackboxScanWorkflow],
         activities=[
-            run_blackbox_preflight, run_blackbox_auth_validation, run_recon,
+            run_blackbox_preflight, run_blackbox_auth_validation,
             run_exploit_agent, validate_exploitation_queue, assemble_report, run_report_agent,
             finalize_report,
-            generate_poc_report,
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,
             load_correlation_context,
             resolve_blackbox_engine, detect_whitebox_results, write_engine_config_for_session,
             cleanup_engine_configs,
+            setup_display, finalize_summary,
         ],
         graceful_shutdown_timeout=timedelta(seconds=10),
     )

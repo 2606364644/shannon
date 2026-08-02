@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import type { ScanRequest, ScanResponse, Workspace } from "../api/types";
+import type { ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
@@ -13,17 +13,80 @@ import { Card } from "@/components/ui/card";
 
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
-/** 黑盒「代码上下文」二选一：复用某次白盒结果 / 指定仓库代码。 */
-type BlackboxReuseMode = "reuse" | "repo";
+export type LoginType = "form" | "sso" | "api" | "basic";
+export type SuccessConditionType = "url_contains" | "element_present" | "url_equals_exactly" | "text_contains";
+
+/** 黑盒登录配置表单态（独立于 ScanAuthentication 契约：含 enabled 开关 + emailLoginEnabled
+ *  + loginFlow 多行文本；buildBody 时 buildAuthPayload 转成 ScanAuthentication）。 */
+export interface AuthFormState {
+  enabled: boolean;
+  loginType: LoginType;
+  loginUrl: string;
+  username: string;
+  password: string;
+  totpSecret: string;
+  emailLoginEnabled: boolean;
+  emailAddress: string;
+  emailPassword: string;
+  emailTotp: string;
+  loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
+  scType: SuccessConditionType;
+  scValue: string;
+}
+
+const DEFAULT_AUTH: AuthFormState = {
+  enabled: false,
+  loginType: "form",
+  loginUrl: "",
+  username: "",
+  password: "",
+  totpSecret: "",
+  emailLoginEnabled: false,
+  emailAddress: "",
+  emailPassword: "",
+  emailTotp: "",
+  loginFlow: "",
+  scType: "url_contains",
+  scValue: "",
+};
+
+/** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。 */
+export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
+  const credentials: ScanAuthentication["credentials"] = { username: a.username.trim() };
+  if (a.password) credentials.password = a.password;
+  if (a.totpSecret.trim()) credentials.totp_secret = a.totpSecret.trim();
+  if (a.emailLoginEnabled) {
+    credentials.email_login = { address: a.emailAddress.trim(), password: a.emailPassword };
+    if (a.emailTotp.trim()) credentials.email_login.totp_secret = a.emailTotp.trim();
+  }
+  const payload: ScanAuthentication = {
+    login_type: a.loginType,
+    login_url: a.loginUrl.trim(),
+    credentials,
+    success_condition: { type: a.scType, value: a.scValue.trim() },
+  };
+  const flow = a.loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (flow.length) payload.login_flow = flow;
+  return payload;
+}
+
+export function validateAuth(a: AuthFormState, t: TFunction): string | null {
+  if (!a.enabled) return null;
+  if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
+  if (!/^https?:\/\//.test(a.loginUrl.trim())) return t("scan.errors.authLoginUrl");
+  if (!a.username.trim()) return t("scan.errors.authUsername");
+  if (!a.scValue.trim()) return t("scan.errors.authScValue");
+  return null;
+}
 
 export interface FormState {
-  /** 仓库代码源（白盒必选；黑盒 repo 模式必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
+  /** 仓库代码源（白盒必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
   selectedRepo: string;
   url: string;
-  /** 黑盒 Step3 模式开关（白盒忽略）。 */
-  reuseMode: BlackboxReuseMode;
-  /** reuse 模式下选中的白盒 scan_id。 */
+  /** 黑盒必填：要复用的白盒 scan_id。黑盒恒复用白盒结果（exploitation-only），无独立 repo 模式。 */
   reuseScanId: string;
+  /** 黑盒登录配置（仅 blackbox 用；whitebox/correlation 忽略）。 */
+  auth: AuthFormState;
   yaml: string;
 }
 
@@ -36,8 +99,8 @@ export interface FormState {
  * pydantic v2 默认不容未知键, 发 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422
  * （P2 final-review 抓到的 prod-blocking bug: 每个前端扫描提交都 422）。
  *
- * 入口收窄（2026-07-31）：source 恒为 repo（已无本地路径）；黑盒二选一——
- *   reuse 模式发 reuse_whitebox_scan_id（不带 source），repo 模式发 source.repo。
+ * 入口收窄（2026-08-01，阶段 2）：黑盒 = 白盒下游 exploitation-only，恒复用白盒结果——
+ *   恒发 reuse_whitebox_scan_id（必填，前端校验拦空），不再有 repo/standalone 分支。source 仅白盒用。
  */
 function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
@@ -46,11 +109,10 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
     body.source = { kind: "repo", value: f.selectedRepo };
     return body;
   }
-  // blackbox
-  if (f.reuseMode === "reuse") {
-    body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
-  } else {
-    body.source = { kind: "repo", value: f.selectedRepo };
+  // blackbox：恒复用白盒结果（exploitation-only）。reuseScanId 由前端校验保证非空（提交按钮 disabled）。
+  body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
+  if (f.auth.enabled) {
+    body.authentication = buildAuthPayload(f.auth);
   }
   return body;
 }
@@ -90,8 +152,8 @@ export function ScanNewPage() {
   const [f, setF] = useState<FormState>({
     selectedRepo: "",
     url: "",
-    reuseMode: "reuse",
     reuseScanId: "",
+    auth: DEFAULT_AUTH,
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
@@ -117,16 +179,17 @@ export function ScanNewPage() {
   }, []);
 
   const isCorrelation = type === "correlation";
-  // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + (reuse:scanId | repo) + ws。
-  const needRepo = isCorrelation ? false : type === "whitebox" || f.reuseMode === "repo";
+  // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + reuseScanId(必填) + ws（恒复用白盒，无 repo 模式）。
+  const needRepo = isCorrelation ? false : type === "whitebox";
   const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
-  const reuseErr = type === "blackbox" && f.reuseMode === "reuse" && !f.reuseScanId
+  const reuseErr = type === "blackbox" && !f.reuseScanId
     ? t("scan.errors.selectReuseScan")
     : null;
   const urlErr = validateUrl(f.url, type, t);
+  const authErr = type === "blackbox" ? validateAuth(f.auth, t) : null;
   const isValid = isCorrelation
     ? !yamlErr
-    : !sourceErr && !reuseErr && !urlErr && !!workspace;
+    : !sourceErr && !reuseErr && !urlErr && !authErr && !!workspace;
 
   async function onSubmit() {
     if (type === "correlation" && yamlErr) {
@@ -199,6 +262,7 @@ export function ScanNewPage() {
                 sourceErr={sourceErr}
                 reuseErr={reuseErr}
                 urlErr={urlErr}
+                authErr={authErr}
                 workspace={workspace}
                 wsList={wsList}
                 onWorkspaceChange={setWorkspace}

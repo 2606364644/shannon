@@ -139,7 +139,10 @@ class ScanManager:
                 handle = await self._submit_whitebox(
                     target, ws, scan_id, scan_dir, event_file, req.url or "")
             elif req.type == "blackbox":
-                raise NotImplementedError("blackbox C1 化留 Phase C(本 plan 白盒聚焦)")
+                config_path, repo_path = await self._resolve_blackbox_inputs(
+                    req, ws, scan_dir, target)
+                handle = await self._submit_blackbox(
+                    repo_path, ws, scan_id, scan_dir, event_file, req.url or "", config_path)
             else:
                 raise ValueError(f"correlation 暂未 C1 化: {req.type}")
         except BaseException:
@@ -194,8 +197,20 @@ class ScanManager:
         scan_key = (ws, scan_id)
         self._active_reqs[scan_key] = req
         try:
-            handle = await self._submit_whitebox(
-                repo_path, ws, scan_id, scan_dir, event_file, web_url)
+            if scan_type == "blackbox":
+                # resume 黑盒：config_path 从 scan_dir/scan-config.yaml 回填（原 auth 配置）。
+                # ⚠️ 已知缺陷：reuse 模式下 create_scan 未存 wb_scan_dir，repo_path 从 session
+                # 读为空串 → workflow detect_whitebox_results=False → fail-fast（阶段 2 删了
+                # standalone 兜底，原「降级 standalone recon」语义已不存在）。即黑盒 reuse scan
+                # 当前无法 resume；需让 session 落 reuse_whitebox_scan_id 后在此重解析 wb_scan_dir
+                # （plan 范围外，待后续）。repo_path or None 归一空串。
+                cfg = scan_dir / "scan-config.yaml"
+                config_path = str(cfg) if cfg.exists() else None
+                handle = await self._submit_blackbox(
+                    repo_path or None, ws, scan_id, scan_dir, event_file, web_url, config_path)
+            else:
+                handle = await self._submit_whitebox(
+                    repo_path, ws, scan_id, scan_dir, event_file, web_url)
         except BaseException:
             self._active_reqs.pop(scan_key, None)
             raise
@@ -228,6 +243,79 @@ class ScanManager:
         )
         # 提交成功后锚定 submitted_at(scan_liveness 提交宽限门据此判冷启动窗口, 防误杀).
         # 失败分支(start_workflow 抛)不会到达此处 -> 提交失败不写 submitted_at.
+        self._mark_submitted_at(scan_dir)
+        return handle
+
+    async def _resolve_blackbox_inputs(
+        self, req: ScanRequest, ws: str, scan_dir: Path, target: str | None,
+    ) -> tuple[str | None, str | None]:
+        """解析黑盒提交的 config_path(登录 YAML) + repo_path(复用白盒 / 指定仓库 / standalone)。
+
+        config_path: req.authentication 非空 → Authentication.model_validate 校验 → dump 成
+          {authentication: {...}} YAML 写 scan_dir/scan-config.yaml（blackbox workflow
+          `if input.config_path:` 据此跑 run_blackbox_auth_validation）。校验失败 raise ValueError。
+        repo_path: req.reuse_whitebox_scan_id → 该白盒 scan_dir 作 repo_path
+          （detect_whitebox_results 在 Path(repo_path)/deliverables 找白盒 queue；wb scan_dir/
+          deliverables 即白盒产物落点，blackbox 自身产物靠 workspace_path 另落 bb scan_dir）；
+          否则 target（req.source.repo 经 _resolve_inputs 解析）；standalone（无 reuse 无 source）→ None。
+        """
+        import yaml
+        from supernova_core.models.config import Authentication
+
+        config_path: str | None = None
+        if req.authentication:
+            try:
+                auth = Authentication.model_validate(req.authentication)
+            except Exception as exc:
+                raise ValueError(f"登录配置无效: {exc}") from exc
+            payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
+            cfg_file = scan_dir / "scan-config.yaml"
+            cfg_file.write_text(
+                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+                encoding="utf-8")
+            config_path = str(cfg_file)
+
+        # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，无 standalone/repo 兜底。
+        # model_validator 已在请求层拦 reuse 缺失；此处工作层独立兜底（不依赖 pydantic，防 model 层被误改）。
+        if not req.reuse_whitebox_scan_id:
+            raise ValueError("blackbox 扫描必须复用白盒结果（reuse_whitebox_scan_id）")
+        wb_scan_dir = self._store.get_scan_dir(ws, req.reuse_whitebox_scan_id)
+        if wb_scan_dir is None:
+            raise ValueError(f"要复用的白盒扫描不存在: {req.reuse_whitebox_scan_id}")
+        repo_path: str | None = str(wb_scan_dir)
+        return config_path, repo_path
+
+    async def _submit_blackbox(
+        self, repo_path: str | None, ws: str, scan_id: str, scan_dir: Path,
+        event_file: Path, web_url: str, config_path: str | None,
+    ) -> Any:
+        """提交黑盒 scan 到 supernova-bb-web queue。参照 _submit_whitebox。
+
+        BlackboxPipelineInput.event_file 非 None → workflow 走 worker 路径（setup_display 注入
+        StructuredEventRenderer 写 events.ndjson，web live 页可见）。workspaces_root 用 web 已知
+        的 self._workspaces_dir（worker 容器共享同 volume，路径一致）。
+        """
+        from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
+        from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
+
+        client = await Client.connect(self._temporal_address())
+        workflow_id = self._resolve_workflow_id(ws, scan_id)
+        provider_config = self._resolve_provider_config(ws)
+        inp = BlackboxPipelineInput(
+            web_url=web_url,
+            repo_path=repo_path,
+            workspace_name=scan_id,
+            config_path=config_path,
+            event_file=str(event_file),
+            provider_config=provider_config,
+            workspaces_root=str(self._workspaces_dir),
+            exploit=True,
+        )
+        handle = await client.start_workflow(
+            BlackboxScanWorkflow.run, inp, id=workflow_id,
+            task_queue=WEB_TASK_QUEUE_BLACKBOX,
+        )
         self._mark_submitted_at(scan_dir)
         return handle
 

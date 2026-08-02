@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { RepoCombobox } from "./RepoCombobox";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos, listScans } from "@/api/client";
 import type { Repo, ScanSummary, Workspace } from "@/api/types";
-import type { FormState } from "../pages/ScanNewPage";
+import type { FormState, AuthFormState, LoginType, SuccessConditionType } from "../pages/ScanNewPage";
 import { useAuth } from "@/auth/AuthContext";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Info } from "lucide-react";
 
 interface Props {
   type: "whitebox" | "blackbox";
@@ -21,6 +24,8 @@ interface Props {
   /** 黑盒 reuse 模式下未选白盒扫描的提示（仅 blackbox + reuse 模式传入）。 */
   reuseErr: string | null;
   urlErr: string | null;
+  /** 黑盒登录配置校验错误（仅 blackbox 传入）。 */
+  authErr: string | null;
   /** P2: 选定的目标 workspace——驱动 listRepos(ws) / listScans(ws) 与子组件 ws 参数 */
   workspace: string;
   /** P2: 用户可见的 ws 列表（P1 后端已过滤）——供下拉选项 */
@@ -57,6 +62,146 @@ function StepGroup({ step, title, tag, tagClass, children }: {
   );
 }
 
+/** 黑盒 Step4 登录配置区：Switch 启用 → 展开完整 Authentication schema 字段（对齐 core
+ *  Authentication：login_type/login_url/credentials[username/password/totp/email_login]/login_flow
+ *  /success_condition）。字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。
+ *  服从既有设计语言：StepGroup 容器 + 现有 Input/Label/Select/Switch/Checkbox，不引入新视觉。 */
+function AuthFields({ auth, setAuth, authErr }: {
+  auth: AuthFormState;
+  setAuth: (patch: Partial<AuthFormState>) => void;
+  authErr: string | null;
+}) {
+  const { t } = useTranslation();
+  if (!auth.enabled) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
+          <Switch checked={false} onCheckedChange={(v) => setAuth({ enabled: v })} />
+        </div>
+        <div className="text-xs text-muted-foreground">{t("scan.auth.enableHint")}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
+        <Switch checked onCheckedChange={(v) => setAuth({ enabled: v })} />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
+        <Select value={auth.loginType} onValueChange={(v) => setAuth({ loginType: v as LoginType })}>
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(["form", "sso", "api", "basic"] as const).map((v) => (
+              <SelectItem key={v} value={v}>{t(`scan.auth.loginType.${v}`)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
+        <Input
+          value={auth.loginUrl}
+          onChange={(e) => setAuth({ loginUrl: e.target.value })}
+          placeholder="https://example.com/login"
+          className="font-mono"
+        />
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-2.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("scan.auth.credentialsGroup")}
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
+            <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
+            <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[11px] text-muted-foreground">
+            {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
+          </Label>
+          <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
+            <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
+          </label>
+          {auth.emailLoginEnabled && (
+            <div className="space-y-2 pl-6">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
+                  <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
+                  <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span></Label>
+                <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-2.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("scan.auth.successGroup")}
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.scTypeLabel")}</Label>
+            <Select value={auth.scType} onValueChange={(v) => setAuth({ scType: v as SuccessConditionType })}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(["url_contains", "element_present", "url_equals_exactly", "text_contains"] as const).map((v) => (
+                  <SelectItem key={v} value={v}>{t(`scan.auth.scType.${v}`)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.scValueLabel")}</Label>
+            <Input value={auth.scValue} onChange={(e) => setAuth({ scValue: e.target.value })} className="font-mono" />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1.5 border-t border-border pt-2.5">
+        <Label className="text-xs font-medium">
+          {t("scan.auth.loginFlowLabel")} <span className="font-normal text-muted-foreground">({t("scan.auth.optional")})</span>
+        </Label>
+        <Textarea
+          value={auth.loginFlow}
+          onChange={(e) => setAuth({ loginFlow: e.target.value })}
+          rows={3}
+          placeholder={t("scan.auth.loginFlowHint")}
+          className="font-mono text-xs"
+        />
+      </div>
+
+      {authErr && <div className="text-destructive text-xs">{authErr}</div>}
+      <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
+        <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+        <span>{t("scan.auth.infoNote")}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ScanFormFields({
   type,
   f,
@@ -64,6 +209,7 @@ export function ScanFormFields({
   sourceErr,
   reuseErr,
   urlErr,
+  authErr,
   workspace,
   wsList,
   onWorkspaceChange,
@@ -79,8 +225,6 @@ export function ScanFormFields({
   // 标记「候选已为哪个 ws 加载完成」——smart-default 据此判断，避免依赖 wbLoading（effect 同帧
   // 读到旧值导致提前翻转：ws 刚选定时 listScans 的 setWbLoading(true) 尚未提交）。
   const [wbLoadedFor, setWbLoadedFor] = useState<string | null>(null);
-  // 用户是否手动切过 reuse 模式——未切过时允许「无白盒结果 → 自动退到 repo」的智能默认。
-  const modeTouchedRef = useRef(false);
 
   // P2: repo 列表按选定 ws 拉取——ws 未选时不发起（路径无意义）
   useEffect(() => {
@@ -111,23 +255,14 @@ export function ScanFormFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, workspace]);
 
-  // 智能默认：reuse 模式下若该 ws 确无白盒结果（且用户未手动切过），自动退到 repo，避免默认落空态。
-  // 必须等「候选已为当前 ws 加载完」才判——否则切黑盒 tab 时尚未选 ws / 候选未到位会过早翻转。
+  // 默认选最新一条白盒（listScans 倒序，[0] = 最新）——复用「最新白盒」直觉，但显式可选。
+  // wbLoadedFor===workspace 守卫：等候选确为当前 ws 加载完才选，避免 ws 切换瞬间旧候选误选。
   useEffect(() => {
-    if (type !== "blackbox" || modeTouchedRef.current || !workspace) return;
-    if (wbLoadedFor === workspace && wbScans.length === 0 && f.reuseMode === "reuse") {
-      set({ reuseMode: "repo" });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, workspace, wbLoadedFor, wbScans.length, f.reuseMode]);
-
-  // 进入 reuse 模式时默认选最新一条白盒（listScans 倒序，[0] = 最新）——复用「最新白盒」直觉，但显式可选。
-  useEffect(() => {
-    if (type === "blackbox" && f.reuseMode === "reuse" && !f.reuseScanId && wbScans.length > 0) {
+    if (type === "blackbox" && !f.reuseScanId && wbLoadedFor === workspace && wbScans.length > 0) {
       set({ reuseScanId: wbScans[0].scan_id });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, f.reuseMode, f.reuseScanId, wbScans]);
+  }, [type, f.reuseScanId, wbScans, wbLoadedFor, workspace]);
 
   const selectedRepoState = repos.find((r) => r.name === f.selectedRepo)?.state;
 
@@ -241,76 +376,54 @@ export function ScanFormFields({
         {workspaceField}
       </StepGroup>
 
-      <StepGroup step={3} title={t("scan.steps.codeContext")} tag={t("scan.tags.auxiliary")} tagClass="text-[10px] text-muted-foreground font-normal">
-        {/* 分段开关：复用白盒结果（主）/ 指定仓库（次）—— mutually exclusive */}
-        <div
-          role="group"
-          aria-label={t("scan.fields.codeContextMode")}
-          className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full"
-        >
-          {([["reuse", t("scan.fields.reuseWhitebox")], ["repo", t("scan.fields.pickRepo")]] as const).map(([v, label]) => {
-            const active = f.reuseMode === v;
-            return (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={active}
-                onClick={() => { modeTouchedRef.current = true; set({ reuseMode: v }); }}
-                className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {f.reuseMode === "reuse" ? (
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
-            {wbScans.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground leading-relaxed">
-                {workspace
-                  ? t("scan.fields.reuseEmpty")
-                  : t("scan.fields.selectWsFirst")}
-              </div>
-            ) : (
-              <>
-                <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {wbScans.map((s, i) => (
-                      <SelectItem key={s.scan_id} value={s.scan_id}>
-                        <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
-                        {i === 0 && (
-                          <span className="ml-1.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-primary">
-                            {t("scan.fields.latestBadge")}
-                          </span>
-                        )}
-                        <span className="ml-1.5 text-[11px] text-muted-foreground">
-                          · {String(s.status)} · {s.vuln_count} {t("scan.fields.vulnsUnit")}
+      <StepGroup step={3} title={t("scan.steps.codeContext")} tag={t("scan.tags.required")} tagClass="text-[10px] text-destructive font-medium">
+        {/* 黑盒恒复用白盒结果（exploitation-only）——无 repo/standalone 分支。 */}
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
+          {wbScans.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground leading-relaxed">
+              {workspace
+                ? t("scan.fields.reuseEmpty")
+                : t("scan.fields.selectWsFirst")}
+            </div>
+          ) : (
+            <>
+              <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {wbScans.map((s, i) => (
+                    <SelectItem key={s.scan_id} value={s.scan_id}>
+                      <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
+                      {i === 0 && (
+                        <span className="ml-1.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-primary">
+                          {t("scan.fields.latestBadge")}
                         </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="text-[11px] text-muted-foreground">
-                  {t("scan.fields.reuseCount", { count: wbScans.length })}
-                </div>
-              </>
-            )}
-            {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
-            {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
-          </div>
-        ) : (
-          <>
-            {repoPicker}
-            {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
-          </>
-        )}
+                      )}
+                      <span className="ml-1.5 text-[11px] text-muted-foreground">
+                        · {String(s.status)} · {s.vuln_count} {t("scan.fields.vulnsUnit")}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="text-[11px] text-muted-foreground">
+                {t("scan.fields.reuseCount", { count: wbScans.length })}
+              </div>
+            </>
+          )}
+          {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
+          {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
+        </div>
+      </StepGroup>
+
+      <StepGroup step={4} title={t("scan.steps.auth")} tag={t("scan.tags.optional")} tagClass="text-[10px] text-muted-foreground font-normal">
+        <AuthFields
+          auth={f.auth}
+          setAuth={(patch) => set({ auth: { ...f.auth, ...patch } })}
+          authErr={authErr}
+        />
       </StepGroup>
     </div>
   );

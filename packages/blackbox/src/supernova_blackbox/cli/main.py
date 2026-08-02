@@ -87,9 +87,8 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
             # 软默认无 deliverables → 静默 standalone
         elif latest:
             # 显式 --latest 但无任何白盒 workspace → 报错
-            click.echo("No white-box workspaces found. Run a white-box scan first.")
+            click.echo("No white-box workspaces found. Run a whitebox scan first.")
             raise SystemExit(1)
-
     repo_path_resolved = str(Path(repo).resolve()) if repo else None
     # workspaces 根在 sandbox 外解析（workflow sandbox 禁 os.getenv/Path.cwd），经 input 传入
     from supernova_core.utils.paths import resolve_workspaces_dir
@@ -156,11 +155,9 @@ def start(url, repo, output, workspace, latest, config_path, vuln_classes, no_ex
         click.echo("Scan cancelled.")
         raise SystemExit(130)
     elif result.status == "completed":
-        if result.has_whitebox_results:
-            classes = result.found_whitebox_classes
-            click.echo(f"Scan completed (leveraged whitebox results for: {', '.join(classes)})")
-        else:
-            click.echo("Scan completed (standalone — no whitebox results found)")
+        # exploitation-only：completed 蕴含 has_whitebox_results（无白盒产物 workflow 已 fail-fast）
+        classes = result.found_whitebox_classes
+        click.echo(f"Scan completed (leveraged whitebox results for: {', '.join(classes)})")
     else:
         error_msg = result.errors[-1] if result.errors else "unknown error"
         click.echo(f"Scan failed: {error_msg}")

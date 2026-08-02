@@ -138,8 +138,12 @@ class DeliverablesReader:
                     out.append(f"agents/{f.name}")
         return out
 
-    def read(self, filename: str, track: str = WHITEBOX_SUBDIR) -> dict | list | str:
-        p = resolve_track_deliverable(self._deliverables, track, filename)
+    def read(self, filename: str, track: str | None = None) -> dict | list | str:
+        # track=None(未指定,如 report_for)→ 像 summary/read_poc 那样按目录布局自动推断,
+        # 否则黑盒扫描报告落在 blackbox/ 却按默认 whitebox track 找不到 -> 500。
+        # 显式传 track(如 deliverables_file_for 从路由 query param)时尊重之。
+        resolved = self._infer_track() if track is None else track
+        p = resolve_track_deliverable(self._deliverables, resolved, filename)
         if not p.exists():
             raise FileNotFoundError(filename)
         text = p.read_text("utf-8")

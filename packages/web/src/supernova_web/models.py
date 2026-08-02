@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class PathSource(BaseModel):
@@ -27,12 +27,34 @@ class ScanRequest(BaseModel):
     workspace: str | None = None
     reuse_latest: bool = False
     # 黑盒「复用白盒结果」：要复用的白盒 scan_id（工作区内某 whitebox scan）。
-    # 黑盒 C1 提交仍为 Phase C stub（scan_manager.start NotImplementedError），此处仅落契约。
+    # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，model_validator
+    # （_blackbox_requires_reuse）强制 reuse_whitebox_scan_id 必填 + 禁 source。
     reuse_whitebox_scan_id: str | None = None
+    # 黑盒登录配置（结构化 dict，对齐 core Authentication schema：login_type/login_url/credentials
+    # /login_flow/success_condition）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
+    authentication: dict | None = None
     # correlation 专用
     config_name: str | None = None
     config_content: str | None = None
     save_as: str | None = None
+
+    @model_validator(mode="after")
+    def _blackbox_requires_reuse(self) -> "ScanRequest":
+        """黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，禁 standalone/repo。
+
+        黑盒必须有 reuse_whitebox_scan_id，且禁 source（防 API 直传 repo/path 绕过前端）。
+        whitebox/correlation 不约束。非法 → ValidationError → FastAPI 422。
+        """
+        if self.type == "blackbox":
+            if not self.reuse_whitebox_scan_id:
+                raise ValueError(
+                    "blackbox 扫描必须复用白盒结果（reuse_whitebox_scan_id），请先跑白盒扫描"
+                )
+            if self.source is not None:
+                raise ValueError(
+                    "blackbox 扫描不支持 source（恒复用白盒结果），请改用 reuse_whitebox_scan_id"
+                )
+        return self
 
 
 class ScanAccepted(BaseModel):

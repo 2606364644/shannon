@@ -309,12 +309,9 @@
       "wsEmptyOption": "暂无可用的工作区",
       "wsEmptyHintUser": "你还没有被加入任何工作区，请联系管理员将你加入后再创建扫描。",
       "wsEmptyHintAdmin": "还没有工作区，请先在工作区切换器中新建一个工作区。",
-      "codeContextMode": "代码上下文来源",
-      "reuseWhitebox": "复用白盒结果",
-      "pickRepo": "指定仓库",
       "reuseSelectLabel": "选择白盒扫描",
       "reuseSelectPlaceholder": "选择要复用的白盒扫描",
-      "reuseEmpty": "该工作区还没有白盒扫描结果——先跑一次白盒，或切到「指定仓库」从源码独立发起。",
+      "reuseEmpty": "该工作区还没有白盒扫描结果——黑盒需先跑一次白盒，再复用其结果（exploitation-only，不独立发现漏洞）。",
       "reuseCount": "该工作区共 {{count}} 个白盒扫描结果",
       "latestBadge": "最新",
       "vulnsUnit": "个漏洞",
@@ -345,7 +342,11 @@
       "selectRepo": "请选择仓库",
       "selectReuseScan": "请选择要复用的白盒扫描",
       "urlScheme": "目标 URL 需以 http(s):// 开头",
-      "urlEmpty": "目标 URL 不能为空"
+      "urlEmpty": "目标 URL 不能为空",
+      "authLoginUrlEmpty": "请填写登录地址",
+      "authLoginUrl": "登录地址需以 http(s):// 开头",
+      "authUsername": "请填写用户名",
+      "authScValue": "请填写登录成功的匹配值"
     },
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
@@ -359,12 +360,42 @@
       "target": "目标信息",
       "targetService": "目标服务",
       "codeContext": "代码上下文",
-      "workspace": "工作区"
+      "workspace": "工作区",
+      "auth": "认证登录"
     },
     "tags": {
       "localAudit": "本地审计",
       "required": "必填",
-      "auxiliary": "辅助分析"
+      "auxiliary": "辅助分析",
+      "optional": "可选"
+    },
+    "auth": {
+      "enableLabel": "需要登录",
+      "enableHint": "目标无需登录时保持关闭；agent-browser 会在扫描前按下方配置完成登录并持久化会话。",
+      "loginTypeLabel": "登录方式",
+      "loginType": { "form": "表单登录", "sso": "单点登录（SSO）", "api": "API Token", "basic": "HTTP Basic" },
+      "loginUrlLabel": "登录地址",
+      "credentialsGroup": "凭据",
+      "username": "用户名",
+      "password": "密码",
+      "totpSecret": "TOTP 密钥",
+      "optional": "可选",
+      "emailLoginToggle": "邮箱登录（如需邮件验证）",
+      "emailAddress": "邮箱地址",
+      "emailPassword": "邮箱密码",
+      "emailTotp": "邮箱 TOTP 密钥",
+      "successGroup": "登录成功判定",
+      "scTypeLabel": "条件类型",
+      "scType": {
+        "url_contains": "URL 包含",
+        "element_present": "页面出现元素",
+        "url_equals_exactly": "URL 完全匹配",
+        "text_contains": "页面包含文本"
+      },
+      "scValueLabel": "匹配值",
+      "loginFlowLabel": "登录步骤",
+      "loginFlowHint": "每行一步（可选，如：访问登录页 / 填写用户名 / 填写密码 / 提交）",
+      "infoNote": "登录态会持久化到 auth-state，验证通过后供后续扫描阶段复用。"
     }
   },
   "dashboard": {
