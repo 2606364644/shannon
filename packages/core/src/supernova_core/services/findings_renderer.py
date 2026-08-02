@@ -28,6 +28,7 @@ _M = Messages({
     "summary": {"zh": "**摘要:**", "en": "**Summary:**"},
     "notes": {"zh": "**备注:**", "en": "**Notes:**"},
     "vulnerable_location": {"zh": "脆弱位置", "en": "Vulnerable Location"},
+    "source_detail": {"zh": "来源详情", "en": "Source Detail"},
     "verdict": {"zh": "判定", "en": "Verdict"},
     "witness_payload": {"zh": "见证载荷", "en": "Witness Payload"},
     "sink_call": {"zh": "Sink 调用", "en": "Sink Call"},
@@ -101,11 +102,21 @@ def render_injection_entry(vuln: InjectionVulnerability) -> str:
     if vuln.source or vuln.path:
         location = f"{vuln.source or 'N/A'} → {vuln.path or 'N/A'}"
         lines.append(f"{_label('vulnerable_location')} {location}")
-    if vuln.sink_call:
+    if vuln.source_detail:
+        lines.append(f"{_label('source_detail')} {vuln.source_detail}")
+    # sink:优先 LLM 实际输出的 sink_function,回退旧 sink_call(语义相同)
+    if vuln.sink_function:
+        lines.append(f"{_label('sink_function')} {vuln.sink_function}")
+    elif vuln.sink_call:
         lines.append(f"{_label('sink_call')} {vuln.sink_call}")
+    if vuln.render_context:
+        lines.append(f"{_label('render_context')} {vuln.render_context}")
     if vuln.concat_occurrences:
         lines.append(f"{_label('concat_occurrences')} {vuln.concat_occurrences}")
-    if vuln.sanitization_observed:
+    # 编码/sanitizer:优先 LLM 输出的 encoding_observed,回退旧 sanitization_observed
+    if vuln.encoding_observed:
+        lines.append(f"{_label('encoding_observed')} {vuln.encoding_observed}")
+    elif vuln.sanitization_observed:
         lines.append(f"{_label('sanitization_observed')} {vuln.sanitization_observed}")
     if vuln.verdict:
         lines.append(f"{_label('verdict')} {vuln.verdict}")
@@ -306,7 +317,8 @@ class FindingsRenderer:
             heading = _M.get(class_cfg.heading)
             try:
                 content = await async_read_file(queue_path)
-                parsed = VulnerabilityQueue.parse_lenient(content)
+                parsed = VulnerabilityQueue.parse_lenient(
+                    content, vuln_class=_vuln_class)
             except Exception as exc:  # noqa: BLE001 — isolate this class
                 logger.warning("queue %s unreadable: %s", class_cfg.queue_file, exc)
                 await async_write_file(findings_path, "\n".join([

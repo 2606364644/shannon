@@ -68,6 +68,32 @@ def test_render_injection_entry_minimal():
     assert "Notes" not in result
 
 
+def test_render_injection_entry_llm_output_fields():
+    """LLM 实际输出的 injection vuln(携带 sink_function/render_context/encoding_observed/
+    source_detail 等 XSS 风格字段)必须正确渲染并显示 sink_function。
+
+    回归 crAPI-20260731:injection vuln agent 输出 XSS 风格字段,smart-union 把 entry
+    误判为 XssVulnerability,render_injection_entry 访问 vuln.sink_call 时 AttributeError
+    → 整章渲染为 'render error' 占位。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01",
+        vulnerability_type="SQLi",
+        externally_exploitable=True,
+        confidence="needs_review",
+        source="coupon_code @ services/workshop/crapi/shop/views.py:379",
+        source_detail="request.data['coupon_code']",
+        sink_function="cursor.execute",
+        encoding_observed="None",
+        verdict="vulnerable",
+        witness_payload="' UNION SELECT version()--",
+    )
+    result = render_injection_entry(vuln)
+    assert "### INJ-VULN-01" in result
+    assert "cursor.execute" in result  # sink_function rendered
+    assert "vulnerable" in result
+    assert "' UNION SELECT version()--" in result
+
+
 def test_render_xss_entry_full():
     vuln = XssVulnerability(
         ID="XSS-VULN-001",
@@ -491,3 +517,41 @@ async def test_render_findings_zh_heading_and_none_found(tmp_path, monkeypatch):
     assert "## 跨站脚本 (XSS)" in findings
     assert "未发现 XSS 漏洞。" in findings
     assert "免责声明" in findings
+
+
+@pytest.mark.asyncio
+async def test_render_findings_injection_llm_queue_no_render_error(tmp_path):
+    """端到端:injection queue 含 LLM 风格字段(sink_function/render_context/...) →
+    injection_findings.md 无 'render error' 占位,含完整卡片。
+
+    回归 crAPI-20260731:injection 7 张卡片全部显示 '### INJ-VULN-0X — render error',
+    而底层 queue 数据完整正确(根因:smart-union 把 injection entry 误判为
+    XssVulnerability,render_injection_entry 访问 sink_call 崩)。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    content = json.dumps({"vulnerabilities": [
+        {"ID": "INJ-VULN-01", "vulnerability_type": "SQLi",
+         "externally_exploitable": True, "confidence": "needs_review",
+         "source": "coupon_code @ services/workshop/crapi/shop/views.py:379",
+         "source_detail": "request.data['coupon_code']",
+         "sink_function": "cursor.execute",
+         "encoding_observed": None, "render_context": None,
+         "verdict": "vulnerable",
+         "witness_payload": "' UNION SELECT version()--"},
+        {"ID": "INJ-VULN-02", "vulnerability_type": "NoSQLi",
+         "externally_exploitable": True, "confidence": "needs_review",
+         "source": "coupon_code @ coupon_controller.go:77",
+         "sink_function": "Collection.FindOne",
+         "verdict": "vulnerable",
+         "witness_payload": '{"coupon_code":{"$ne":null}}'},
+    ]})
+    (deliverables / "injection_exploitation_queue.json").write_text(content)
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    findings = (deliverables / "injection_findings.md").read_text()
+    assert "### INJ-VULN-01" in findings
+    assert "### INJ-VULN-02" in findings
+    assert "render error" not in findings.lower()
+    assert "cursor.execute" in findings
+    assert "Collection.FindOne" in findings

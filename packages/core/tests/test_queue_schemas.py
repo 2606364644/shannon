@@ -190,3 +190,83 @@ def test_parse_lenient_never_raises_on_non_str_input():
         assert len(result.queue.vulnerabilities) == 0
         assert result.warnings  # some warning surfaced
 
+
+# --- regression: crAPI-20260731 injection 渲染为"渲染错误"占位 ---
+# injection vuln agent 输出的字段是 XSS 风格(sink_function/render_context/...),
+# smart-union 把它误判为 XssVulnerability → render_injection_entry 访问 sink_call 崩。
+# parse_lenient 必须支持按 class 强制解析成对应子类型。
+
+def _injection_entry_with_llm_fields():
+    """真实 crAPI injection queue 的 entry 形态:LLM 输出 XSS 风格字段。"""
+    return {
+        "ID": "INJ-VULN-01",
+        "vulnerability_type": "SQLi",
+        "externally_exploitable": True,
+        "confidence": "needs_review",
+        "source": "coupon_code @ services/workshop/crapi/shop/views.py:379",
+        "source_detail": "request.data[\"coupon_code\"]",
+        "sink_function": "cursor.execute",
+        "render_context": None,
+        "encoding_observed": None,
+        "verdict": "vulnerable",
+        "mismatch_reason": "string concat into SQL value slot, no parameterization",
+        "witness_payload": "{\"coupon_code\": \"' UNION SELECT version()-- \"}",
+    }
+
+
+def test_parse_lenient_with_vuln_class_forces_injection_subtype():
+    """vuln_class='injection' 时,entry 必须解析成 InjectionVulnerability
+    (而非 smart-union 误判的 XssVulnerability)。"""
+    content = json.dumps({"vulnerabilities": [_injection_entry_with_llm_fields()]})
+    result = VulnerabilityQueue.parse_lenient(content, vuln_class="injection")
+    assert len(result.queue.vulnerabilities) == 1
+    assert isinstance(result.queue.vulnerabilities[0], InjectionVulnerability)
+
+
+def test_parse_lenient_without_vuln_class_backward_compatible():
+    """不传 vuln_class 时:entry 仍被解析(不丢、不崩),通用字段可访问——
+    向后兼容契约(poc_generator/queue_merge/blackbox checker 等通用调用者只读
+    BaseVulnerability 字段,不依赖具体子类型)。
+
+    具体子类型由 smart-union 决定、不绑定(字段对齐后默认也会选 InjectionVulnerability,
+    但这是 smart-union ties 行为,可能随 pydantic 版本变);稳定的类型保证只在传
+    vuln_class 时提供(见 test_parse_lenient_with_vuln_class_forces_injection_subtype)。"""
+    content = json.dumps({"vulnerabilities": [_injection_entry_with_llm_fields()]})
+    result = VulnerabilityQueue.parse_lenient(content)  # 不传 class
+    assert len(result.queue.vulnerabilities) == 1  # 不丢
+    v = result.queue.vulnerabilities[0]
+    assert v.ID == "INJ-VULN-01"  # 通用字段可访问,不崩
+    assert v.verdict == "vulnerable"
+
+
+def test_parse_lenient_vuln_class_unknown_falls_back_to_union():
+    """未知 vuln_class 应回落到通用 Union 行为(不崩)。"""
+    content = json.dumps({"vulnerabilities": [_injection_entry_with_llm_fields()]})
+    result = VulnerabilityQueue.parse_lenient(content, vuln_class="bogus")
+    assert len(result.queue.vulnerabilities) == 1  # 仍解析,不丢
+
+
+def test_injection_vulnerability_accepts_llm_output_fields():
+    """InjectionVulnerability 必须接受 LLM 实际输出的 XSS 风格字段
+    (sink_function/render_context/encoding_observed/source_detail),
+    否则按-class parse 后这些信息会被 pydantic 丢弃。"""
+    v = InjectionVulnerability(
+        ID="INJ-VULN-01",
+        vulnerability_type="SQLi",
+        externally_exploitable=True,
+        confidence="high",
+        source="coupon_code @ views.py:379",
+        source_detail="request.data['coupon_code']",
+        sink_function="cursor.execute",
+        render_context="SQL_VALUE",
+        encoding_observed="None",
+        verdict="vulnerable",
+        witness_payload="' UNION SELECT version()--",
+    )
+    assert v.sink_function == "cursor.execute"
+    assert v.source_detail == "request.data['coupon_code']"
+    assert v.render_context == "SQL_VALUE"
+    assert v.encoding_observed == "None"
+    # 旧字段仍保留(兼容 GitNexus 轨未来输出 / 现有测试)
+    assert v.sink_call is None
+

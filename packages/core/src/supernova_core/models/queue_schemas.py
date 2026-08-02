@@ -16,16 +16,23 @@ class BaseVulnerability(BaseModel):
     merge_source: str | None = None
 
 class InjectionVulnerability(BaseVulnerability):
+    # LLM 轨实际输出字段(injection vuln agent 与 xss 共用同一套输出 schema,
+    # 故字段名是 XSS 风格——见 collectors/vuln.py)。
     source: str | None = None
-    combined_sources: str | None = None
+    source_detail: str | None = None
     path: str | None = None
+    sink_function: str | None = None
+    render_context: str | None = None
+    encoding_observed: str | None = None
+    verdict: str | None = None
+    mismatch_reason: str | None = None
+    witness_payload: str | None = None
+    # 旧字段保留兼容(GitNexus 轨未来可能输出;当前 LLM 不产出)。
+    combined_sources: str | None = None
     sink_call: str | None = None
     slot_type: str | None = None
     sanitization_observed: str | None = None
     concat_occurrences: str | None = None
-    verdict: str | None = None
-    mismatch_reason: str | None = None
-    witness_payload: str | None = None
 
 class XssVulnerability(BaseVulnerability):
     source: str | None = None
@@ -72,6 +79,19 @@ Vulnerability = Union[InjectionVulnerability, XssVulnerability, AuthVulnerabilit
 # pydantic 2: bare typing.Union has no .model_validate — use a TypeAdapter.
 _VulnerabilityAdapter = TypeAdapter(Vulnerability)
 
+# 按 vuln_class 强制解析的子类 adapter——规避 smart-union 在字段重叠时误判类型
+# (injection 与 xss 共用 LLM 输出 schema,injection entry 会被误判为 XssVulnerability →
+# render_injection_entry 访问 sink_call 崩 → 整章"渲染错误"占位)。
+# 调用方已知 queue 的 class 时(如 findings_renderer 按 CLASS_CONFIG key 遍历)应传
+# vuln_class 用对应子类解析,而非让通用 Union 猜类型。
+_CLASS_ADAPTERS: dict[str, TypeAdapter] = {
+    "injection": TypeAdapter(InjectionVulnerability),
+    "xss": TypeAdapter(XssVulnerability),
+    "auth": TypeAdapter(AuthVulnerability),
+    "ssrf": TypeAdapter(SsrfVulnerability),
+    "authz": TypeAdapter(AuthzVulnerability),
+}
+
 
 @dataclass
 class LenientParseResult:
@@ -90,7 +110,9 @@ class VulnerabilityQueue(BaseModel):
     vulnerabilities: list[Vulnerability] = []
 
     @classmethod
-    def parse_lenient(cls, content: str) -> LenientParseResult:
+    def parse_lenient(
+        cls, content: str, vuln_class: str | None = None
+    ) -> LenientParseResult:
         """Tolerantly parse a queue file, absorbing legacy/hand-written forms.
 
         Never raises. Supported forms:
@@ -99,6 +121,15 @@ class VulnerabilityQueue(BaseModel):
         - {...} without "vulnerabilities"        -> object_no_key (empty)
         - invalid JSON                           -> invalid_json (empty)
         Per-entry schema failures are dropped (recorded in warnings).
+
+        ``vuln_class``: when the caller knows which class a queue belongs to
+        (e.g. ``injection_exploitation_queue.json`` → ``"injection"``), pass it to
+        force each entry into the matching subtype via ``_CLASS_ADAPTERS`` instead of
+        letting the bare ``Vulnerability`` Union smart-guess. This is required because
+        injection and xss share the same LLM output schema, so smart-union misclassifies
+        injection entries as ``XssVulnerability``. ``None`` (default) preserves the
+        legacy union-guess behaviour for the many callers that parse mixed/unknown queues.
+        Unknown class names fall back to union parsing with a warning.
         """
         warnings: list[str] = []
 
@@ -137,6 +168,15 @@ class VulnerabilityQueue(BaseModel):
             )
 
         # --- Validate entries individually, drop malformed ---
+        # 已知 vuln_class → 用对应子类 adapter(规避 smart-union 误判);否则通用 Union。
+        if vuln_class and vuln_class in _CLASS_ADAPTERS:
+            adapter = _CLASS_ADAPTERS[vuln_class]
+        else:
+            adapter = _VulnerabilityAdapter
+            if vuln_class:
+                warnings.append(
+                    f"unknown vuln_class {vuln_class!r}; fell back to union parsing"
+                )
         vulns: list[Vulnerability] = []
         dropped = 0
         for entry in entries:
@@ -144,7 +184,7 @@ class VulnerabilityQueue(BaseModel):
                 dropped += 1
                 continue
             try:
-                vulns.append(_VulnerabilityAdapter.validate_python(entry))
+                vulns.append(adapter.validate_python(entry))
             except Exception:
                 dropped += 1
         if dropped:
