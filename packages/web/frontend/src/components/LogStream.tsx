@@ -13,7 +13,9 @@ const CAT_CLASS: Partial<Record<EventCategory, string>> = {
 };
 
 function tsClock(ts: string): string {
-  const m = /T(\d{2}:\d{2}:\d{2})/.exec(ts);
+  // 生产 ndjson ts = "2026-07-31 10:53:53"（空格分隔）；亦兼容 ISO "…T10:53:53…"。
+  // 只取 HH:MM:SS 喂 .log-ts 窄列——完整串会溢出被 ellipsis 截断、时间不可见。
+  const m = /[T ](\d{2}:\d{2}:\d{2})/.exec(ts);
   return m ? m[1] : ts;
 }
 
@@ -171,7 +173,8 @@ const VIRTUAL_THRESHOLD = 500;
  *  - data-type 保留 type 身份（hover tooltip + 测试 hook），替代旧版裸 type 名文本。 */
 function LogRow({ e, style }: { e: NdjsonEvent; style?: CSSProperties }) {
   const { icon, tag, body, metrics } = describe(e);
-  const title = metrics ? `${body}  ${metrics}` : body;
+  // hover title 带完整 ts：窄列只显 HH:MM:SS，悬停看完整 "2026-07-31 10:53:53"。
+  const title = [e.ts, body, metrics].filter(Boolean).join("  ");
   return (
     <div style={style} className={`log-row ${rowClass(e)}`} data-type={e.type} title={title}>
       <span className="log-gutter" aria-hidden />

@@ -37,6 +37,20 @@ describe("LogStream", () => {
     expect(types).toEqual(["PhaseEvent", "AgentEvent", "ErrorEvent"]);
   });
 
+  // ── tsClock 必须兼容生产 ndjson 的空格分隔 ts（非仅 ISO T 分隔）──
+  // 真实 events.ndjson 的 ts = "2026-07-31 10:53:53"（空格分隔，非 ISO "T"）。
+  // 若正则只认 T，fallback 返回完整串塞进窄 .log-ts 列被 ellipsis 截断 → 时间不可见
+  // （crAPI live 页实测：每行日期时间全被挤没）。这里精确断言列文本 == HH:MM:SS。
+  it("时间戳列提取 HH:MM:SS（兼容生产空格分隔格式，非仅 ISO）", () => {
+    const ev: NdjsonEvent = {
+      ts: "2026-07-31 10:53:53", category: "PHASE", type: "PhaseEvent",
+      phase: "recon", event: "start", steps: [], step_intents: [],
+    };
+    const { container } = render(<LogStream events={[ev]} />);
+    const tsEl = container.querySelector(".log-ts");
+    expect(tsEl?.textContent ?? "").toBe("10:53:53");
+  });
+
   it("events > 500 切 react-window 虚拟滚动（结构断言：行仍按 category 上色）", () => {
     const big: NdjsonEvent[] = Array.from({ length: 600 }, (_, i) => ({
       ts: "2026-07-02T09:44:01.000Z", category: i % 2 === 0 ? "PHASE" : "ERROR",

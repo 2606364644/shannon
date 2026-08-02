@@ -19,7 +19,7 @@ describe("DashboardPanel", () => {
     render(<DashboardPanel state={state} elapsedMs={134000} />);
     expect(screen.getByText(/vulnerability-analysis/)).toBeInTheDocument();
     expect(screen.getByText(/1\/2/)).toBeInTheDocument();       // completed/total units
-    expect(screen.getByText(/02:14/)).toBeInTheDocument();       // 134000ms → 02:14
+    expect(screen.getByText(/2m 14s/)).toBeInTheDocument();       // 134000ms → 2m 14s
     expect(screen.getByText(/\$0\.50/)).toBeInTheDocument();
   });
   it("运行中 agent 行：spinner + name + turn + last_action", () => {

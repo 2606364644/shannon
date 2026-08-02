@@ -4,9 +4,13 @@ import { fmtCost } from "../utils/currency";
 
 function fmtMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  if (h > 0) return `${h}h ${pad2(m)}m ${pad2(s)}s`;
+  if (m > 0) return `${m}m ${pad2(s)}s`;
+  return `${s}s`;
 }
 
 const UNIT_STATUS_CLS: Record<string, string> = {

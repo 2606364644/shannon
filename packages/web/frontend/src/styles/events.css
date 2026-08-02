@@ -91,7 +91,9 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
    signature = 左侧 2px 事件色边（currentColor），扫一眼凭色密度感知阶段。 === */
 .log-row {
   display: grid;
-  grid-template-columns: 2px 56px 14px 50px minmax(0, 1fr) auto;
+  /* ts 列 64px：HH:MM:SS（8 字符）在 IBM Plex Mono text-xs 下 ≈57.6px，56px 会截断。
+     完整日期时间串（"2026-07-31 10:53:53"）交由 tsClock 削成 HH:MM:SS，hover title 看全文。 */
+  grid-template-columns: 2px 64px 14px 50px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
   line-height: 20px;
