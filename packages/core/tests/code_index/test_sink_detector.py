@@ -249,10 +249,11 @@ class TestSinkRuleLibrary:
             "ts-fetch", "ts-innerhtml", "ts-knex-raw", "ts-orm-model-query",
             "ts-res-redirect",
             "ts-sequelize-query",
-            # 补充(vuln-range 三项目反哺):RestTemplate SSRF / vm / Pug / Angular XSS / needle
+            # 补充(vuln-range 三项目反哺):RestTemplate SSRF / vm / Pug / Angular XSS / needle / marked
             "java-resttemplate-exchange", "java-resttemplate-getforobject",
             "ts-pug-compile", "ts-vm-runincontext",
             "ts-bypass-security-trust-html", "ts-needle-get",
+            "ts-marked-render",
             # sink 硬规则增强(Task 3+4):Java 全类别补齐 + execute 双语义
             "java-resttemplate-postforentity", "java-response-sendredirect",
             "java-url-openconnection", "java-httpclient-execute",

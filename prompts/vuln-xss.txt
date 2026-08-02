@@ -149,6 +149,8 @@ Read {{DELIVERABLES_PATH}}/pre_recon_deliverable.md section ##9. XSS Sinks and R
 
 **Note on server-rendered templates:** Pay special attention to template render calls (`ctx.render`, `res.render`) where template context variables originate from URL query parameters (`ctx.query.*`). These are reflected XSS candidates even when the injection agent has already analyzed SSTI for the same template — the xss agent provides independent render-context analysis (e.g., `JSON.stringify()` inside a `<script>` tag does not escape `</script>`, making it unsafe for JAVASCRIPT_STRING context).
 
+**Note on markdown / HTML-rendering sinks (actively seek these — do NOT rely solely on the pre_recon sink list):** Template-function calls and unescaped-output filters that render user data as raw HTML are XSS sinks even though they look like formatting helpers. Actively grep for: markdown libraries (`marked`, `showdown`, `markdown-it`, `remarkable`), template helper-call forms (`{{ marked(doc.memo) }}`), unescaped filters (`|safe`, `|raw`, `<%- %>`, `{{{ }}}`), `v-html`, `dangerouslySetInnerHTML`. Each is a sink to analyze — and when the data round-trips through a database read, it is Stored XSS.
+
 ### **2) Trace Each Sink Backward (Backward Taint Analysis)**
 For each pending item in your todo list (managed via TodoWrite tool), trace the origin of the data variable backward from the sink through the application logic. Your goal is to find either a valid sanitizer or an untrusted source. Mark each todo item as completed after you've fully analyzed that sink.
 
@@ -157,6 +159,7 @@ For each pending item in your todo list (managed via TodoWrite tool), trace the 
     1.  **Context Match:** Is the function the correct type for the sink's specific render context? (e.g., HTML Entity Encoding for an `HTML_BODY` sink). Refer to the rules in Step 5.
     2.  **Mutation Check:** Have any string concatenations or other mutations occurred *between* this sanitizer and the sink?
   - If the sanitizer is a **correct match** AND there have been **no intermediate mutations**, this path is **SAFE**. You must stop tracing this path, document it as secure, and proceed to the next path.
+  - **Markdown / HTML-rendering libraries are NOT valid sanitizers (CRITICAL — do not early-terminate):** Rendering helpers such as `marked`, `showdown`, `markdown-it`, or `remarkable` emit raw HTML; they are **sinks, not defenses**. Their `sanitize` / `sanitize: true` option is unreliable in older releases (e.g. `marked < 0.7`) — markdown syntax bypasses it (`[x](javascript:alert(1))`, `![x](javascript:...)`, `<<img src=x onerror=alert(1)>`). When you encounter such a library during the backward trace, do NOT treat it as a context-matched sanitizer and do NOT early-terminate; keep tracing to the source and report the path.
 
 - **Path Forking:** If a variable at a sink can be populated from multiple code paths (e.g., from different branches of an `if/else` statement), you must trace **every path** backward independently. Each unique route is a separate "Data Flow Path" to be analyzed.
 

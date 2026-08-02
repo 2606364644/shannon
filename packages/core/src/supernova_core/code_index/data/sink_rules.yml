@@ -602,6 +602,18 @@ rules:
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: template_expr}]
 
+  # --- Node.js markdown 渲染 XSS(NodeGoat memos 反哺:marked@0.3.5 sanitize 可绕过)---
+  # 匹配代码内直接调用 marked(req.body.x) → res.send(html)。模板内 {{ marked() }}
+  # 由 LLM 轨覆盖(sink_detector 基于 AST 不扫 .html 模板文件)。
+  - rule_id: ts-marked-render
+    languages: [typescript, javascript]
+    callee: marked
+    receiver_pattern: null
+    category: xss
+    sink_subtype: xss_markdown
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
   # --- Angular 显式 bypass XSS(juice-shop 10 处 bypassSecurityTrustHtml)---
   # 显式 sink(开发者主动 bypass sanitizer,不像 innerHTML 到处都是 → 误报低)。
   # needs_review 交 LLM 确认数据可控;即使前端组件非 entry point,也作 sink 标记供 LLM 轨用。

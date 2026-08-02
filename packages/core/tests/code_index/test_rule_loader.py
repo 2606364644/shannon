@@ -94,3 +94,16 @@ def test_build_sink_candidates_receivers_any_absent_is_none():
     ]})
     assert groups[0].receivers_any is None
     assert groups[1].receivers_any == ("knex", "db")
+
+
+def test_markdown_render_sink_rule_loaded():
+    """P2(NodeGoat memos 反哺):marked 渲染调用是 code-level XSS sink(代码内
+    marked(req.body.x)),确定性规则库须覆盖。注:模板内 {{marked()}} 由 LLM 轨
+    覆盖(sink_detector 基于 AST 不扫模板)。"""
+    from supernova_core.code_index.parameter_models import SinkCategory
+
+    rules = {r.rule_id: r for r in sink_detector.DEFAULT_RULES}
+    assert "ts-marked-render" in rules
+    marked = rules["ts-marked-render"]
+    assert marked.callee == "marked"
+    assert marked.category == SinkCategory.XSS
