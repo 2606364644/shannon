@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 from supernova_core.models.agents import AgentName
 from supernova_core.models.metrics import AgentMetrics
 from supernova_blackbox.agents.exploit_executor import ExploitExecutor
-from supernova_blackbox.agents.recon_executor import ReconExecutor
 
 
 @pytest.fixture
@@ -51,50 +50,6 @@ async def test_exploit_executor_reads_queue(mock_repo):
     call_kwargs = mock_executor.execute.call_args
     assert call_kwargs.kwargs["agent_name"] == AgentName.INJECTION_EXPLOIT
     assert "vulnerability_entries" in call_kwargs.kwargs.get("prompt_variables", {})
-
-
-@pytest.mark.asyncio
-async def test_recon_executor_delegates(mock_repo):
-    repo, deliverables = mock_repo
-    (deliverables / "recon_deliverable.md").write_text("# Recon")
-
-    mock_executor = AsyncMock()
-    mock_executor.execute.return_value = AgentMetrics(duration_ms=2000, cost_usd=0.02, num_turns=5)
-
-    recon = ReconExecutor(mock_executor)
-    metrics = await recon.execute(
-        workspace_path=repo,
-        deliverables_path=deliverables,
-        web_url="https://example.com",
-    )
-    assert isinstance(metrics, AgentMetrics)
-    mock_executor.execute.assert_called_once_with(
-        agent_name=AgentName.RECON_BLACKBOX,
-        repo_path=str(deliverables),
-        web_url="https://example.com",
-        deliverables_path=str(deliverables),
-        config_path=None,
-        api_key=None,
-        pipeline_testing=False,
-        audit_logger=None,
-        tool_audit_logger=None,
-    )
-
-
-@pytest.mark.asyncio
-async def test_recon_executor_forwards_audit_logger(mock_repo):
-    repo, deliverables = mock_repo
-    mock_executor = AsyncMock()
-    mock_executor.execute.return_value = AgentMetrics(duration_ms=1, cost_usd=0.0, num_turns=1)
-    recon = ReconExecutor(mock_executor)
-    sentinel = object()
-    await recon.execute(
-        workspace_path=repo,
-        deliverables_path=deliverables,
-        web_url="https://example.com",
-        audit_logger=sentinel,
-    )
-    assert mock_executor.execute.call_args.kwargs["audit_logger"] is sentinel
 
 
 @pytest.mark.asyncio

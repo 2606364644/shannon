@@ -14,7 +14,6 @@
 
 | 模块 | 说明 |
 |------|------|
-| `agents/recon_executor.py` | 黑盒侦察 Agent 执行器 |
 | `agents/exploit_executor.py` | 漏洞利用 Agent 执行器 |
 | `services/report_assembler.py` | 综合安全评估报告组装 |
 | `services/exploitation_checker.py` | 漏洞利用结果验证 |
