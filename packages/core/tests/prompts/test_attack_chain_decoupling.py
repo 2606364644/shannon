@@ -34,6 +34,22 @@ def test_attack_chain_pipeline_does_not_feed_gitnexus_to_llm_prompt():
     assert "exploitation_queue" in content
 
 
+def test_attack_chain_prompt_includes_output_language(monkeypatch):
+    """回归：attack-chain.txt 必须经 @include 注入输出语言指令。
+
+    历史 bug（2026-08-03）：i18n 化时漏给 attack-chain.txt 补 _output-language，
+    导致 LLM 攻击链正文（name/description/steps）全英文，而渲染层标题/标签已双语
+    —— 报告里攻击链章节标题「## 攻击链（多步利用路径）」是中文，正文却是英文。
+    5 个 vuln-*.txt 均已 include，attack-chain.txt 须对齐。
+    """
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    from supernova_core.prompts.manager import PromptManager
+
+    content = (PROMPTS_DIR / "attack-chain.txt").read_text("utf-8")
+    resolved = PromptManager(PROMPTS_DIR)._process_includes(content, PROMPTS_DIR)
+    assert "简体中文" in resolved  # zh 语言指令经 include 注入
+
+
 def test_assembler_only_reads_gitnexus_own_output():
     """assembler 读 gitnexus_queue（确定性层自己产物），不反向喂 LLM 轨。"""
     import inspect

@@ -155,3 +155,53 @@ def test_has_correlation_results_no_queue(tmp_path: Path):
 def test_has_correlation_results_empty_vuln_classes(tmp_path: Path):
     """vuln_classes 为空 → False（短路）。"""
     assert has_correlation_results(tmp_path, []) is False
+
+
+# --------------------------------------------------------------------------- #
+# detect_whitebox_results — recon_deliverable.md 存在性（对齐 TS validateDeliverablesExist）
+# --------------------------------------------------------------------------- #
+# TS validateDeliverablesExist（activities.ts:1330）在 queue 校验前先校验 recon_deliverable.md
+# 存在，缺即 nonRetryable fail。recon 是全局攻击面情报（exploit agent 读它拿 API inventory /
+# input vectors / 技术栈），缺失则 exploit 失明。PY 曾只校验 queue 不校验 recon（言行不一的 bug：
+# workflow 错误消息写了 recon_deliverable.md 但实际没查）。此处补齐对齐 TS。
+@pytest.mark.asyncio
+async def test_detect_whitebox_results_reports_recon_present(tmp_path: Path):
+    """recon_deliverable.md 存在（新结构 whitebox/）→ has_recon_deliverable=True。"""
+    dlv = tmp_path / "deliverables"
+    _write_queue(dlv / "whitebox" / "injection_exploitation_queue.json")
+    (dlv / "whitebox" / "recon_deliverable.md").write_text("# recon")
+
+    result = await detect_whitebox_results(str(dlv), ["injection"], None)
+
+    assert result.get("has_recon_deliverable") is True
+
+
+@pytest.mark.asyncio
+async def test_detect_whitebox_results_reports_recon_absent(tmp_path: Path):
+    """queue 非空但缺 recon_deliverable.md → has_recon_deliverable=False。
+
+    对齐 TS validateDeliverablesExist：recon 缺即 fail（即使 queue 非空）。
+    """
+    dlv = tmp_path / "deliverables"
+    _write_queue(dlv / "whitebox" / "injection_exploitation_queue.json")
+    # 故意不写 recon_deliverable.md
+
+    result = await detect_whitebox_results(str(dlv), ["injection"], None)
+
+    assert result["has_whitebox_results"] is True  # queue 在
+    assert result.get("has_recon_deliverable") is False  # 但 recon 缺
+
+
+@pytest.mark.asyncio
+async def test_detect_whitebox_results_recon_legacy_root(tmp_path: Path):
+    """老结构: recon_deliverable.md 在 deliverables 根（fallback）→ has_recon_deliverable=True。
+
+    与 queue 的 fallback 同构（resolve_track_deliverable 先 whitebox/ 再根）。
+    """
+    dlv = tmp_path / "deliverables"
+    _write_queue(dlv / "injection_exploitation_queue.json")  # queue 在根
+    (dlv / "recon_deliverable.md").write_text("# recon")  # recon 也在根
+
+    result = await detect_whitebox_results(str(dlv), ["injection"], None)
+
+    assert result.get("has_recon_deliverable") is True

@@ -30,6 +30,7 @@ class AgentName(str, Enum):
     VALIDATE_AUTH = "validate-authentication"
     CROSS_REPO_CORRELATION = "cross-repo-correlation"
     ATTACK_CHAIN = "attack-chain"
+    ENDPOINT_VERIFY = "endpoint-verify"  # spec 2026-08-03 黑盒端点 live 验证
 
 class AgentDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -53,7 +54,7 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         name=AgentName.RECON,
         display_name="Recon agent",
         prerequisites=[AgentName.PRE_RECON],
-        prompt_template="recon",
+        prompt_template="recon-static",
         deliverable_filename="recon_deliverable.md",
     ),
     AgentName.INJECTION_VULN: AgentDefinition(
@@ -167,6 +168,14 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,   # 产 queue（attack_chains_llm_queue.json），不产 md
         model_tier="medium",
     ),
+    AgentName.ENDPOINT_VERIFY: AgentDefinition(
+        name=AgentName.ENDPOINT_VERIFY,
+        display_name="Endpoint Live Verification (Black-Box)",
+        prerequisites=[],  # 黑盒 exploitation 内阶段,不参与白盒 DAG
+        prompt_template="blackbox-endpoint-verify",
+        deliverable_filename=None,  # 产 endpoint_verify.json(activity 自落盘 blackbox/),非 md
+        model_tier="medium",
+    ),
 }
 
 ALL_VULN_CLASSES: list[VulnType] = ["injection", "xss", "auth", "ssrf", "authz"]
@@ -196,4 +205,5 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "validate-authentication": "pre-recon",
     "cross-repo-correlation": "correlation",
     AgentName.ATTACK_CHAIN: "attack-chain",
+    "endpoint-verify": "endpoint-verify",
 }

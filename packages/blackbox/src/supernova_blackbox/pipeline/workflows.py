@@ -218,6 +218,9 @@ class BlackboxScanWorkflow:
             )
             has_whitebox_results: bool = wb["has_whitebox_results"]
             found_classes: list[str] = wb["found_classes"]
+            # 对齐 TS validateDeliverablesExist：recon_deliverable.md 存在性（攻击面情报完整性）。
+            # .get(..., True) 向后兼容旧 activity（不返回此字段时不阻塞）。
+            has_recon_deliverable: bool = wb.get("has_recon_deliverable", True)
             self._state.has_whitebox_results = has_whitebox_results
             self._state.found_whitebox_classes = found_classes
 
@@ -237,6 +240,20 @@ class BlackboxScanWorkflow:
                        "info_level": "info"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
+                )
+
+            # 对齐 TS validateDeliverablesExist（activities.ts:1330）：recon_deliverable.md 缺失即
+            # nonRetryable fail（即使 queue 非空）。recon 是全局攻击面情报（API inventory / input
+            # vectors / 技术栈），缺失则 exploit agent 失明。此前错误消息写了 recon 但未真校验。
+            if not has_recon_deliverable:
+                raise PentestError(
+                    "Blackbox scan requires whitebox recon_deliverable.md (attack-surface "
+                    f"intelligence) under {wb_queue_root}/{WHITEBOX_SUBDIR}/. It is missing — "
+                    "exploit agents would run blind without API inventory / input vectors. "
+                    "Re-run the whitebox scan (its recon phase produces recon_deliverable.md) "
+                    "before reusing its results.",
+                    "whitebox",
+                    error_code=ErrorCode.DELIVERABLE_NOT_FOUND,
                 )
 
             if has_whitebox_results:
@@ -271,6 +288,17 @@ class BlackboxScanWorkflow:
                 )
                 self._state.current_phase = "exploitation"
                 self._state.current_agent = "pipelines"
+                # spec 2026-08-03: 端点 live 验证(exploitation 前)。读白盒端点 + auth-state,
+                # 验证 live + 路由转发前缀探测,产 blackbox/endpoint_verify.json。功能性失败 →
+                # 降级(activity 内部吞异常返 endpoint_verify=None,不 raise),exploit 全打(零回归)。
+                # 无 web_url(黑盒无 live target)→ 跳过(exploit 照打)。maximum_attempts=1:增强
+                # 功能不重试(失败=现状)。exploit 衔接(读 endpoint_verify.json)见 ExploitExecutor。
+                if input.web_url:
+                    await workflow.execute_activity(
+                        activities.run_endpoint_verify, act_input,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        retry_policy=RetryPolicy(maximum_attempts=1),
+                    )
                 # Queue gating: validate queue files before scheduling exploit agents
                 validation_results = []
                 exploit_tasks = []

@@ -32,14 +32,13 @@ def resolve_template_name(
     """决定 agent 实际使用的 prompt template 名。
 
     - 显式 prompt_override 优先(不被覆盖)。
-    - recon agent 在无 live web target(离线/纯静态)时回退到 recon-static,
-      对齐原始 shannon runner.ts:189 的 promptOverride 思路。
     - 其余情况用 AGENTS 字典里的默认 prompt_template。
+    - spec 2026-08-03 白盒去动态:RECON 的 prompt_template 已固定为 recon-static
+      (纯静态,只要仓库就开扫),不再按 web_url 分叉动态/静态。web_url 参数保留为
+      兼容签名(逻辑层不再使用);动态 live 侦察职责移交黑盒端点验证 agent。
     """
     if prompt_override:
         return prompt_override
-    if agent_name == AgentName.RECON and not web_url:
-        return "recon-static"
     return default_template
 
 

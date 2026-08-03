@@ -9,6 +9,7 @@ from .pipeline.activities import (
     run_blackbox_preflight,
     run_blackbox_auth_validation,
     run_exploit_agent,
+    run_endpoint_verify,
     validate_exploitation_queue,
     assemble_report,
     run_report_agent,
@@ -134,7 +135,8 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
         workflows=[BlackboxScanWorkflow],
         activities=[
             run_blackbox_preflight, run_blackbox_auth_validation,
-            run_exploit_agent, validate_exploitation_queue, assemble_report, run_report_agent,
+            run_exploit_agent, run_endpoint_verify,
+            validate_exploitation_queue, assemble_report, run_report_agent,
             finalize_report,
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,

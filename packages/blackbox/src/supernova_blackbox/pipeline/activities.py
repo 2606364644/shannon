@@ -298,6 +298,65 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
 
 
 @activity.defn
+async def run_endpoint_verify(input: BlackboxActivityInput) -> dict:
+    """spec 2026-08-03: 端点 live 验证 agent。读白盒端点清单 + auth-state(AgentExecutor
+    基层注入),对每端点做 live 验证 + 路由转发前缀探测,产 endpoint_verify.json 到 blackbox/。
+
+    功能性失败(agent 崩/超时/LLM 不可用/无产出) → 返回 degraded(endpoint_verify=None),
+    workflow 据此降级 exploit 全打(不 raise / 不重试 / 不中断)。endpoint_verify 是增强
+    功能,失败=现状行为(零回归),故不浪费 budget 重试。"""
+    from supernova_core.audit.session_registry import get_audit_session
+    from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from supernova_core.models.audit import AgentEndResult
+    from supernova_core.models.agents import ALL_VULN_CLASSES
+
+    agent_name = AgentName.ENDPOINT_VERIFY
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
+    agent_start = time.monotonic()
+    try:
+        from supernova_blackbox.agents.endpoint_verify_executor import EndpointVerifyExecutor
+
+        deliverables = _get_deliverables_path(input)
+        prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+        prompt_manager = PromptManager(prompts_dir)
+        executor = AgentExecutor(prompt_manager)
+        verifier = EndpointVerifyExecutor(executor)
+
+        await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
+        await tool_audit_logger.initialize()
+        result = await verifier.execute(
+            deliverables_path=deliverables,
+            workspace_path=deliverables.parent,
+            web_url=input.web_url,
+            vuln_classes=list(ALL_VULN_CLASSES),
+            config_path=input.config_path,
+            api_key=input.api_key,
+            pipeline_testing=input.pipeline_testing_mode,
+            tool_audit_logger=tool_audit_logger,
+        )
+        dur_ms = int((time.monotonic() - agent_start) * 1000)
+        await tool_audit_logger.close(success=True, duration_ms=dur_ms)
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=True,
+            duration_ms=result.get("duration_ms", dur_ms) if isinstance(result, dict) else dur_ms,
+            cost_usd=(result.get("cost_usd") or 0.0) if isinstance(result, dict) else 0.0,
+            cost_currency=result.get("cost_currency") if isinstance(result, dict) else None,
+            attempt_number=attempt,
+        ))
+        return result
+    except Exception as e:
+        dur_ms = int((time.monotonic() - agent_start) * 1000)
+        await tool_audit_logger.close(success=False, duration_ms=dur_ms)
+        await session.end_agent(agent_name.value, AgentEndResult(
+            success=False, duration_ms=dur_ms, cost_usd=0.0,
+            attempt_number=attempt, error=str(e)))
+        # 降级:不 raise,返回 degraded。exploit 据此全打(零回归)。
+        return {"endpoint_verify": None, "reason": f"{type(e).__name__}: {e}"}
+
+
+@activity.defn
 async def assemble_report(input: BlackboxActivityInput) -> None:
     try:
         from supernova_core.services.report_assembler import ReportAssembler
@@ -566,7 +625,13 @@ async def detect_whitebox_results(
     复刻原 workflow run() 的 has_valid_whitebox_results + §6.2 correlation 检测逻辑：
     单仓无结果才查关联（ADD 语义，任一有效即 skip recon）。state 更新与 log 留在
     workflow 侧（用返回值驱动）。corr 路径由 workflow 在 sandbox 外拼好后以 str 传入。
-    返回 {has_whitebox_results, found_classes, corr_classes}。
+    返回 {has_whitebox_results, found_classes, corr_classes, has_recon_deliverable}。
+
+    对齐 TS validateDeliverablesExist（activities.ts:1330）：recon_deliverable.md 是全局攻击面
+    情报（exploit agent 读它拿 API inventory / input vectors / 技术栈），缺失则 exploit 失明。
+    TS 在 queue 校验前先校验 recon 存在，缺即 nonRetryable fail。此处只报告 has_recon_deliverable
+    （单仓；corr 不补 recon——exploit agent 从单仓 wb_queue_root 读 recon，corr 只补 queue 候选），
+    fail-fast 决策留 workflow（与 has_whitebox_results 同构）。
     """
     from supernova_core.utils.paths import (
         has_valid_whitebox_results,
@@ -588,10 +653,13 @@ async def detect_whitebox_results(
             if has_valid_whitebox_results(
                 resolve_track_deliverable(corr_dlv, WHITEBOX_SUBDIR, f"{vt}_exploitation_queue.json"))
         ]
+    has_recon_deliverable = resolve_track_deliverable(
+        dlv, WHITEBOX_SUBDIR, "recon_deliverable.md").exists()
     return {
         "has_whitebox_results": bool(found_classes or corr_classes),
         "found_classes": found_classes,
         "corr_classes": corr_classes,
+        "has_recon_deliverable": has_recon_deliverable,
     }
 
 

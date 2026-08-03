@@ -21,6 +21,7 @@ Identify multi-step combination chains:
 
 @include(shared/_target.txt)
 @include(shared/_code-path-rules.txt)
+@include(shared/_output-language.txt)
 
 <context>
 Recon deliverable: `{{DELIVERABLES_PATH}}/recon_deliverable.md`

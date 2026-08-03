@@ -1,0 +1,28 @@
+<endpoint_verify_hint>
+**Endpoint Live Verification Results (spec 2026-08-03)**
+
+A pre-exploit verification phase already probed every white-box endpoint against the live
+target. The results are in the block below. **If the block is EMPTY, no verification was
+performed** (degraded / no web_url / the verify agent failed) — exploit normally as if no
+verification existed (current behavior, zero regression).
+
+For EACH vulnerability in your queue, look up its endpoint in the map (key = `METHOD /path`)
+and apply:
+
+- **`live`** → the endpoint is reachable at runtime. Use `resolved_path` as the actual
+  target path for your requests — it may differ from the source path when route-forwarding
+  was discovered (e.g. source `/api/users` → resolved `/v2/app/api/users`). Exploit normally.
+- **`not_live`** → the endpoint is NOT exposed at runtime (404 on the source path AND all
+  route-prefix variants). SKIP exploitation of this finding — it cannot be reached on the
+  live target. Record `not_live` in your evidence; do not waste budget probing a dead route.
+- **`param_invalid`** → the route exists (non-404) but rejected the probe's parameters.
+  Adjust your parameters and exploit normally.
+- **no matching entry** → treat as unknown / live; exploit normally.
+
+When in doubt about an endpoint's reachability, default to exploiting it (false-negative is
+worse than a wasted probe on a dead route).
+
+<endpoint_verify>
+{{ENDPOINT_VERIFY}}
+</endpoint_verify>
+</endpoint_verify_hint>

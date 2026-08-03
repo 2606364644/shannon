@@ -1,6 +1,6 @@
 """Plan 2 / Task 5 — recon prompt host-rendered conversion assertions.
 
-锁定 prompts/recon.txt + prompts/recon-static.txt:
+锁定 prompts/recon-static.txt（spec 2026-08-03 白盒去动态:动态 recon.txt 已删）:
 - 不再指示 agent self-Write recon_deliverable.md（Write-tool / "synthesize into a
   Markdown report" 模式 gone）;
 - 带 MANDATORY 9 set_* 工具指令 + <deliverable_tools> 块;
@@ -14,7 +14,7 @@ from pathlib import Path
 
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
-RECON_PROMPTS = ["recon.txt", "recon-static.txt"]
+RECON_PROMPTS = ["recon-static.txt"]
 
 # 9 工具(8 one-shot + 1 append)
 SET_TOOLS = (
