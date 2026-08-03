@@ -92,6 +92,19 @@ def test_auth_context_with_form_login(prompts_dir):
     assert "Login URL: https://example.com/login" in context
 
 
+def test_auth_context_includes_password(prompts_dir):
+    # Regression: password must reach the agent via AUTH_CONTEXT even when the
+    # config has no login_flow. Without this, a standard form-login config
+    # (only credentials.username/password) leaves validate-authentication with
+    # the username but no password, so the agent hallucinates one and the scan
+    # fails at auth-validation with AUTH_LOGIN_FAILED.
+    manager = PromptManager(prompts_dir)
+    auth = _make_auth()
+    config = _make_dist_config(authentication=auth)
+    context = manager._build_auth_context(config)
+    assert "pass123" in context
+
+
 def test_auth_context_with_totp(prompts_dir):
     manager = PromptManager(prompts_dir)
     auth = _make_auth(totp_secret="JBSWY3DPEHPK3PXP")

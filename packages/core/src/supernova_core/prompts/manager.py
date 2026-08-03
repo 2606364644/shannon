@@ -317,12 +317,19 @@ class PromptManager:
         if not config.authentication:
             return "No authentication configured - unauthenticated testing only"
         auth = config.authentication
+        creds = auth.credentials
         lines = [
             f"- Login type: {auth.login_type.upper()}",
-            f"- Username: {auth.credentials.username}",
-            f"- Login URL: {auth.login_url}",
+            f"- Username: {creds.username}",
         ]
-        if auth.credentials.totp_secret:
+        # Password must reach the agent even without a login_flow, otherwise a
+        # standard form-login config leaves validate-authentication with no
+        # password to submit (AUTH_LOGIN_FAILED). login_flow's $password is the
+        # other injection path; this covers the no-login_flow case.
+        if creds.password:
+            lines.append(f"- Password: {creds.password}")
+        lines.append(f"- Login URL: {auth.login_url}")
+        if creds.totp_secret:
             lines.append("- MFA: TOTP enabled")
         return "\n".join(lines)
 
