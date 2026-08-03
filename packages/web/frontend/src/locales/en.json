@@ -302,7 +302,6 @@
       "reuse": "Reuse",
       "urlLabel": "Target URL",
       "urlOptionalSuffix": " (optional)",
-      "urlHint": "Optional; helps associate this scan with its target address",
       "wsSelectLabel": "Target workspace",
       "wsSelectPlaceholder": "Select workspace",
       "selectWsFirst": "Select a workspace first (repos are scoped per-ws)",
@@ -319,7 +318,6 @@
       "browse": "📁 Browse",
       "yamlValid": "yaml valid",
       "yamlInvalid": "⚠ {{error}}",
-      "optional": "Optional",
       "blackboxUrlHint": "Running web service URL, must start with http:// or https://"
     },
     "repo": {
@@ -357,7 +355,6 @@
     "footerHintBlackbox": "Verify the target URL before submitting",
     "steps": {
       "source": "Code Source",
-      "target": "Target Info",
       "targetService": "Target Service",
       "codeContext": "Code Context",
       "workspace": "Workspace",

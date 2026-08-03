@@ -302,7 +302,6 @@
       "reuse": "复用",
       "urlLabel": "目标 URL",
       "urlOptionalSuffix": "（可选）",
-      "urlHint": "可选；填了便于关联本次扫描的目标地址",
       "wsSelectLabel": "目标 workspace",
       "wsSelectPlaceholder": "选择 workspace",
       "selectWsFirst": "请先选择 workspace（仓库列表按 ws 隔离）",
@@ -319,7 +318,6 @@
       "browse": "📁 浏览",
       "yamlValid": "yaml 合法",
       "yamlInvalid": "⚠ {{error}}",
-      "optional": "可选",
       "blackboxUrlHint": "运行中的 Web 服务地址，必须以 http:// 或 https:// 开头"
     },
     "repo": {
@@ -357,7 +355,6 @@
     "footerHintBlackbox": "确认目标 URL 正确后提交",
     "steps": {
       "source": "代码源",
-      "target": "目标信息",
       "targetService": "目标服务",
       "codeContext": "代码上下文",
       "workspace": "工作区",

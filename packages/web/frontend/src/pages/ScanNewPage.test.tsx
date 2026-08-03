@@ -101,7 +101,7 @@ function selectRepoOption(stepTitle: string, optionName: RegExp | string) {
   });
 }
 
-// 入口已收窄为 repo-only：白盒提交类用例统一注入 ready 仓库 + 选 ws + 选 repo + 填 url。
+// 入口已收窄为 repo-only + 白盒去动态（无 URL 输入）：白盒提交类用例统一注入 ready 仓库 + 选 ws + 选 repo。
 async function fillValidRepo() {
   server.use(
     http.get("/api/workspaces/:ws/repos", () =>
@@ -113,7 +113,6 @@ async function fillValidRepo() {
   await selectWorkspace("ws1");
   await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
   await selectRepoOption("代码源", /foo/);
-  fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
 }
 
 describe("ScanNewPage", () => {
@@ -213,7 +212,7 @@ describe("ScanNewPage", () => {
     expect(arg).not.toContain("{");
   });
 
-  it("未选 ws + repo 默认未选 → 提交 disabled；选 ws + repo + url → enabled", async () => {
+  it("未选 ws + repo 默认未选 → 提交 disabled；选 ws + repo → enabled", async () => {
     renderPage();
     // 默认：未选 ws → disabled
     expect(screen.getByRole("button", { name: /开始扫描/ })).toBeDisabled();
@@ -252,10 +251,7 @@ describe("ScanNewPage", () => {
     await waitFor(() =>
       expect(repoComboboxIn("代码源")).toHaveTextContent("foo"),
     );
-    // 填 url 提交
-    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
-      target: { value: "http://example.com" },
-    });
+    // 白盒去动态（无 URL 输入）→ 选 ws + 预选 repo 即 enabled，直接提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(captured).toBeDefined());
@@ -282,9 +278,7 @@ describe("ScanNewPage", () => {
     await selectWorkspace("ws1");
     await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
     await selectRepoOption("代码源", /bar/);
-    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), {
-      target: { value: "http://example.com" },
-    });
+    // 白盒去动态（无 URL 输入）→ 选 ws + repo 即 enabled
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
     await waitFor(() => expect(captured).toBeDefined());
@@ -328,7 +322,7 @@ describe("ScanNewPage", () => {
     expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
 
-  it("白盒 URL 可选：不填 url + 选 repo + 选 ws → 可提交", async () => {
+  it("白盒去动态无 URL 输入：选 repo + 选 ws → 可提交（无需目标地址）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/repos", () =>
         HttpResponse.json([
@@ -340,7 +334,7 @@ describe("ScanNewPage", () => {
     await selectWorkspace("ws1");
     await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
     await selectRepoOption("代码源", /foo/);
-    // 白盒扫仓库代码，url 仅作关联锚点 → 不填也能提交
+    // 白盒已去动态（recon 固定静态）→ 无 URL 输入框，选 ws + repo 即可提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
   });
 

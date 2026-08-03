@@ -319,7 +319,9 @@ export function ScanFormFields({
     </div>
   );
 
-  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源（仅仓库）→ Step 3 目标地址（可选）——
+  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源（仅仓库）——
+  // 白盒已去动态（recon 固定静态，见 f2c64c8b）——纯离线源码审计，无目标 URL 输入；web_url 仅留作
+  // 后端兼容签名（逻辑层不再使用），前端不再采集。
   // IA 不变量：repo 列表按 ws 隔离（listRepos(workspace)），故「选工作区」必须在「选仓库」之上。
   if (type === "whitebox") {
     return (
@@ -331,18 +333,6 @@ export function ScanFormFields({
         <StepGroup step={2} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
           {repoPicker}
           {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
-        </StepGroup>
-
-        <StepGroup step={3} title={t("scan.steps.target")}>
-          <div className="space-y-1.5">
-            <Label htmlFor="url" className="text-xs font-medium">
-              {t("scan.fields.urlLabel")}
-              <span className="font-normal text-muted-foreground"> — {t("scan.fields.optional")}</span>
-            </Label>
-            <Input id="url" value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder={t("scan.fields.urlPlaceholder")} className="font-mono" />
-            {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
-            {!f.url && <div className="text-xs text-muted-foreground">{t("scan.fields.urlHint")}</div>}
-          </div>
         </StepGroup>
       </div>
     );
