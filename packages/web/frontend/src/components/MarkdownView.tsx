@@ -556,7 +556,6 @@ export function MarkdownView({ markdown }: { markdown: string }) {
   // TOC 树：把 level-3（漏洞/攻击链条目）挂到最近的 level<=2 父章节下，做成可折叠树。
   const tocTree = useMemo(() => {
     const tree: { item: TocItem; children: TocItem[] }[] = [];
-    const childToParent: Record<string, string> = {};
     let cur: { item: TocItem; children: TocItem[] } | null = null;
     for (const it of tocItems) {
       if (it.level <= 2) {
@@ -564,10 +563,9 @@ export function MarkdownView({ markdown }: { markdown: string }) {
         tree.push(cur);
       } else if (cur) {
         cur.children.push(it);
-        childToParent[it.id] = cur.item.id;
       }
     }
-    return { tree, childToParent };
+    return tree;
   }, [tocItems]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const toggleSection = (id: string) =>
@@ -577,7 +575,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       else next.add(id);
       return next;
     });
-  const tocSectionIds = tocTree.tree.filter((n) => n.children.length > 0).map((n) => n.item.id);
+  const tocSectionIds = tocTree.filter((n) => n.children.length > 0).map((n) => n.item.id);
   const tocAllCollapsed = tocSectionIds.length > 0 && tocSectionIds.every((id) => collapsedSections.has(id));
   // 默认折叠：首次构建出目录树时，把所有带子条目的章节收起（用户后续手动操作不受影响）。
   const tocCollapseInited = useRef(false);
@@ -586,18 +584,11 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     tocCollapseInited.current = true;
     setCollapsedSections(new Set(tocSectionIds));
   }, [tocSectionIds]);
-  // scroll-spy 命中折叠章节内的条目时，自动展开该章节（保证高亮可见）。
-  useEffect(() => {
-    if (!activeId) return;
-    const parent = tocTree.childToParent[activeId];
-    if (!parent) return;
-    setCollapsedSections((prev) => {
-      if (!prev.has(parent)) return prev;
-      const next = new Set(prev);
-      next.delete(parent);
-      return next;
-    });
-  }, [activeId, tocTree.childToParent]);
+  // ★ 不再随 scroll-spy 自动展开章节。旧实现「命中折叠章节内条目时自动展开该章节」会
+  //   累积：用户向下滚动浏览报告，每经过一个同级章节就展开一个且不再折叠，滚到下方时
+  //   上方同级章节全被展开（用户报告「展开下方目录，上方折叠目录也跟着展开」）。
+  //   现改为只高亮当前命中条目的父标题（见下方 `active` 计算），章节展开/折叠完全由
+  //   用户手动控制--折叠的保持折叠，不被动跟着展开。
 
   const twoCol = tocItems.length >= 2;
 
@@ -678,10 +669,14 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               </div>
             </div>
             <ul className="max-h-[calc(100vh-3rem)] space-y-0.5 overflow-y-auto pr-1">
-              {tocTree.tree.map((node) => {
+              {tocTree.map((node) => {
                 const hasKids = node.children.length > 0;
                 const collapsed = collapsedSections.has(node.item.id);
-                const active = node.item.id === activeId;
+                // active：章节自身命中，或其任一子条目命中。折叠章节下子条目不可见时，
+                // 父标题高亮仍能提示「当前所在章节」--替代旧自动展开（见上方说明）。
+                const active =
+                  node.item.id === activeId ||
+                  node.children.some((c) => c.id === activeId);
                 return (
                   <li key={node.item.id}>
                     <div className="flex items-center gap-0.5">
