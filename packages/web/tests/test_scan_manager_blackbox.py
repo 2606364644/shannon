@@ -191,7 +191,7 @@ async def test_resume_blackbox_reuse_resolves_repo_path(tmp_path, monkeypatch):
     wb_scan_id, wb_scan_dir = sm._store.create_scan(
         "ws-a", "https://t.example", "/r", "whitebox")
     bb_scan_id, bb_scan_dir = sm._store.create_scan(
-        "ws-a", "https://t.example", "", "blackbox")
+        "ws-a", "https://t.example", "", "blackbox", lineage=wb_scan_id)
     # 模拟 start 后落地的 reuse_whitebox_scan_id（resume 的输入）
     SessionManager(bb_scan_dir.parent).update_session(bb_scan_dir, {
         "reuse_whitebox_scan_id": wb_scan_id,
@@ -221,3 +221,34 @@ async def test_resume_blackbox_reuse_resolves_repo_path(tmp_path, monkeypatch):
 
     # repo_path 重解析为白盒 scan_dir（非空/非 None），workflow detect_whitebox_results 命中
     assert captured["inp"].repo_path == str(wb_scan_dir)
+
+
+@pytest.mark.asyncio
+async def test_start_blackbox_scan_id_encodes_whitebox_lineage(tmp_path, monkeypatch):
+    """start 黑盒:scan_id = <wb_scan_id>~1,血缘前缀来自 reuse_whitebox_scan_id。"""
+    from unittest.mock import AsyncMock, MagicMock
+    from supernova_web.components.scan_manager import ScanManager
+    from supernova_web.models import ScanRequest
+
+    sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
+    monkeypatch.setattr(sm, "_check_temporal", AsyncMock(return_value=None))
+    mock_handle = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.start_workflow = AsyncMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                        AsyncMock(return_value=mock_client))
+    monkeypatch.setattr(ScanManager, "_watch", AsyncMock(return_value=None))  # 避免 _watch 死循环
+
+    # 先建白盒 scan 作 reuse 源（真实 wb_scan_id = NodeGoat-<ts>）
+    wb_scan_id, _ = sm._store.create_scan(
+        "WS1", "http://e", "/code/NodeGoat", "whitebox")
+
+    ws, scan_id = await sm.start(ScanRequest(
+        type="blackbox", url="http://e", workspace="WS1",
+        reuse_whitebox_scan_id=wb_scan_id))
+
+    assert scan_id == f"{wb_scan_id}~1"
+    # session 仍持久化 reuse_whitebox_scan_id（resume 靠它重解析 wb_scan_dir）
+    import json
+    sess = json.loads((tmp_path / "WS1" / "scans" / scan_id / "session.json").read_text())
+    assert sess.get("reuse_whitebox_scan_id") == wb_scan_id

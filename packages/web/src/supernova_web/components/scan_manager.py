@@ -82,6 +82,8 @@ class ScanManager:
         self._ws_config_store = ws_config_store
         # T3: ScanStore 复用 core SessionManager 做 scan 读写（core 零改动）。
         self._store = ScanStore(self._workspaces_dir)
+        # 串行化黑盒 create_scan，保证 <wb>~<N> 序号分配原子（防并发同白盒争同序号）。
+        self._create_scan_lock = asyncio.Lock()
 
     # ---- 公共 API ----
     def active_pids(self) -> dict[str, int]:
@@ -126,9 +128,28 @@ class ScanManager:
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
-        # T3: ScanStore 建 scan_id 目录 + session.json（ws 根不再写 session.json）。
-        scan_id, scan_dir = self._store.create_scan(
-            ws, req.url or "", target or "", req.type)
+
+        # 黑盒:提前解析白盒血缘作 scan_id 前缀（<wb_scan_id>~<N>）。_resolve_blackbox_inputs
+        # 仍负责 config_path + repo_path（需 scan_dir，在 create_scan 后），此处只提前拿 lineage
+        # 喂 _gen_scan_id；reuse 校验与 _resolve_blackbox_inputs 幂等重复，可接受。
+        lineage: str | None = None
+        if req.type == "blackbox":
+            if not req.reuse_whitebox_scan_id:
+                raise ValueError("blackbox 扫描必须复用白盒结果（reuse_whitebox_scan_id）")
+            if self._store.get_scan_dir(ws, req.reuse_whitebox_scan_id) is None:
+                raise ValueError(f"要复用的白盒扫描不存在: {req.reuse_whitebox_scan_id}")
+            lineage = req.reuse_whitebox_scan_id
+
+        # 黑盒 create_scan 在锁内，保证 ~<N> 序号分配原子（防并发同白盒争同序号）；
+        # 白盒无序号竞态，不加锁。
+        if req.type == "blackbox":
+            async with self._create_scan_lock:
+                scan_id, scan_dir = self._store.create_scan(
+                    ws, req.url or "", target or "", req.type, lineage=lineage)
+        else:
+            # T3: ScanStore 建 scan_id 目录 + session.json（ws 根不再写 session.json）。
+            scan_id, scan_dir = self._store.create_scan(
+                ws, req.url or "", target or "", req.type)
         self._mark_owner(scan_dir, "web")
         event_file = scan_dir / "events.ndjson"
         scan_key = (ws, scan_id)
