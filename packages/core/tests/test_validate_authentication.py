@@ -396,6 +396,54 @@ async def test_auth_validation_structured_output_failure_out_of_band(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_auth_validation_structured_failure_but_state_has_cookies(tmp_path):
+    """LLM fills login_success=False but auth-state has cookies → trust objective evidence.
+
+    Regression (~2 blackbox scan): GLM under CLI protocol-level structured output
+    (--json_schema) occasionally fills login_success=false even when the browser
+    actually logged in — natural-language turns report success AND auth-state.json is
+    saved with cookies. The objective auth-state (cookies saved this run) must override
+    the LLM's mis-filled boolean, otherwise a genuinely successful login is
+    misclassified as AUTH_LOGIN_FAILED and the whole scan fails. Mirror of
+    test_auth_validation_structured_success_but_missing_state_file (which catches the
+    opposite lie).
+    """
+    state_file = tmp_path / "auth-state.json"
+
+    async def fake_execute(**kwargs):
+        # Agent actually logged in and saved a valid state with a cookie...
+        state_file.write_text(json.dumps({
+            "cookies": [{"name": "connect.sid", "value": "abc"}],
+            "origins": [],
+        }))
+        # ...but the structured-output field was mis-filled as failure (no detail),
+        # exactly like the GLM --json_schema misclassification observed in ~2.
+        return AgentMetrics(
+            duration_ms=5000,
+            structured_output={"login_success": False},
+        )
+
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin"}
+
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=mock_pm,
+            executor=mock_executor,
+        )
+
+    # Objective cookies override the LLM's mis-filled login_success=false
+    assert result.success is True
+
+
+@pytest.mark.asyncio
 async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
     """When structured output is None, fall back to verify_auth_state."""
     state_file = tmp_path / "auth-state.json"

@@ -145,6 +145,16 @@ async def validate_authentication(
         if verdict.get("login_success"):
             return await verify_auth_state(state_file)
         else:
+            # LLM reports failure. But GLM (and similar) under CLI protocol-level
+            # structured output (--json_schema) occasionally mis-fill login_success=false
+            # while the browser actually logged in — natural-language turns report
+            # success AND auth-state.json is saved with cookies. Re-check the objective
+            # auth-state: a state saved this run with cookies/origins means the browser
+            # really did authenticate, so trust that evidence over the mis-filled boolean
+            # (avoids misclassifying a genuine success as AUTH_LOGIN_FAILED → scan fail).
+            state_result = await verify_auth_state(state_file)
+            if state_result.success:
+                return state_result
             failure_point = verdict.get("failure_point", "out_of_band")
             failure_detail = verdict.get("failure_detail", "Login failed without diagnostic")
             return AuthValidationResult(
