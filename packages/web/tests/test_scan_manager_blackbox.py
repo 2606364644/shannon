@@ -136,3 +136,88 @@ async def test_resolve_blackbox_inputs_invalid_authentication_raises(tmp_path):
     })
     with pytest.raises(ValueError):
         await sm._resolve_blackbox_inputs(req, "ws-a", scan_dir, target=None)
+
+
+async def test_start_blackbox_persists_reuse_whitebox_scan_id(tmp_path, monkeypatch):
+    """start blackbox 把 reuse_whitebox_scan_id 落 session.json，供 resume 重解析 wb_scan_dir。
+
+    修 reuse resume fail-fast 的前提：create_scan 第三参 target="" → session.repo_path 读空；
+    resume 需凭 reuse_whitebox_scan_id 重定位白盒产物，故 start 必须先持久化该字段。
+    """
+    from supernova_core.session import SessionManager
+    from supernova_web.components.scan_manager import ScanManager
+    from supernova_web.models import ScanRequest
+
+    sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
+    wb_scan_id, _ = sm._store.create_scan(
+        "ws-a", "https://t.example", "/r", "whitebox")
+
+    # mock temporal 提交 + _check_temporal + _watch（避免 _watch task 死循环）
+    async def fake_connect(addr):
+        class FakeClient:
+            async def start_workflow(self, fn, inp, **kw):
+                return object()
+        return FakeClient()
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect", fake_connect)
+
+    async def noop_check(self):
+        return None
+    monkeypatch.setattr(ScanManager, "_check_temporal", noop_check)
+
+    async def noop_watch(self, *a, **kw):
+        return None
+    monkeypatch.setattr(ScanManager, "_watch", noop_watch)
+
+    req = ScanRequest(type="blackbox", url="https://t.example", workspace="ws-a",
+                      reuse_whitebox_scan_id=wb_scan_id)
+    ws, scan_id = await sm.start(req)
+
+    bb_scan_dir = sm._store.get_scan_dir(ws, scan_id)
+    data = SessionManager(bb_scan_dir.parent).get_session_data(bb_scan_dir)
+    assert data.get("reuse_whitebox_scan_id") == wb_scan_id
+
+
+async def test_resume_blackbox_reuse_resolves_repo_path(tmp_path, monkeypatch):
+    """resume reuse 黑盒：凭 session.reuse_whitebox_scan_id 重解析 wb_scan_dir 作 repo_path。
+
+    修 fail-fast：原 resume 读 session.repo_path（create 时 target=""）= 空串 → workflow
+    detect_whitebox_results=False → PentestError fail-fast。现 resume 用 reuse_id 重定位白盒
+    产物目录（随 workspaces_dir 配置，不存绝对路径）。
+    """
+    from supernova_core.session import SessionManager
+    from supernova_web.components.scan_manager import ScanManager
+
+    sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
+    wb_scan_id, wb_scan_dir = sm._store.create_scan(
+        "ws-a", "https://t.example", "/r", "whitebox")
+    bb_scan_id, bb_scan_dir = sm._store.create_scan(
+        "ws-a", "https://t.example", "", "blackbox")
+    # 模拟 start 后落地的 reuse_whitebox_scan_id（resume 的输入）
+    SessionManager(bb_scan_dir.parent).update_session(bb_scan_dir, {
+        "reuse_whitebox_scan_id": wb_scan_id,
+    })
+
+    captured: dict = {}
+
+    async def fake_connect(addr):
+        class FakeClient:
+            async def start_workflow(self, fn, inp, **kw):
+                captured["inp"] = inp
+                return object()
+        return FakeClient()
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect", fake_connect)
+
+    async def noop_check(self):
+        return None
+    monkeypatch.setattr(ScanManager, "_check_temporal", noop_check)
+    monkeypatch.setattr("supernova_web.components.scan_manager._compute_status",
+                        lambda scan_dir, s: "interrupted")
+
+    async def noop_watch(self, *a, **kw):
+        return None
+    monkeypatch.setattr(ScanManager, "_watch", noop_watch)
+
+    await sm.resume("ws-a", bb_scan_id)
+
+    # repo_path 重解析为白盒 scan_dir（非空/非 None），workflow detect_whitebox_results 命中
+    assert captured["inp"].repo_path == str(wb_scan_dir)

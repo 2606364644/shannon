@@ -143,6 +143,11 @@ class ScanManager:
                     req, ws, scan_dir, target)
                 handle = await self._submit_blackbox(
                     repo_path, ws, scan_id, scan_dir, event_file, req.url or "", config_path)
+                # 持久化 reuse_whitebox_scan_id 供 resume 重解析 wb_scan_dir（修 reuse resume
+                # fail-fast：create_scan 第三参 target="" → session.repo_path 读空，resume 需凭
+                # reuse_id 重定位白盒产物目录，不存易失的绝对路径）。
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"reuse_whitebox_scan_id": req.reuse_whitebox_scan_id})
             else:
                 raise ValueError(f"correlation 暂未 C1 化: {req.type}")
         except BaseException:
@@ -176,6 +181,9 @@ class ScanManager:
         repo_path = data.get("repo_path") or ""
         web_url = data.get("web_url") or ""
         scan_type = mgr.get_scan_type(scan_dir) or "whitebox"
+        # blackbox reuse：凭 session.reuse_whitebox_scan_id 重解析 wb_scan_dir（修 reuse resume
+        # fail-fast：create_scan target="" → repo_path 读空 → workflow detect_whitebox_results=False）。
+        reuse_whitebox_scan_id = data.get("reuse_whitebox_scan_id")
         # 递增 resumeAttempts -> _resolve_workflow_id 算 -resume-N 后缀
         attempts = data.get("resumeAttempts") or []
         if not isinstance(attempts, list):
@@ -192,20 +200,27 @@ class ScanManager:
         event_file = scan_dir / "events.ndjson"
         self._strip_trailing_scan_end(event_file)
 
-        # 重构 ScanRequest 供 _active_reqs（active_repo_sources 判引用用）
-        req = ScanRequest(type=scan_type, url=web_url or None, workspace=ws)
+        # 重构 ScanRequest 供 _active_reqs（active_repo_sources 判引用用）。blackbox 必须带
+        # reuse_whitebox_scan_id 过 model_validator（_blackbox_requires_reuse），否则 ValidationError。
+        req_kwargs: dict = dict(type=scan_type, url=web_url or None, workspace=ws)
+        if scan_type == "blackbox" and reuse_whitebox_scan_id:
+            req_kwargs["reuse_whitebox_scan_id"] = reuse_whitebox_scan_id
+        req = ScanRequest(**req_kwargs)
         scan_key = (ws, scan_id)
         self._active_reqs[scan_key] = req
         try:
             if scan_type == "blackbox":
                 # resume 黑盒：config_path 从 scan_dir/scan-config.yaml 回填（原 auth 配置）。
-                # ⚠️ 已知缺陷：reuse 模式下 create_scan 未存 wb_scan_dir，repo_path 从 session
-                # 读为空串 → workflow detect_whitebox_results=False → fail-fast（阶段 2 删了
-                # standalone 兜底，原「降级 standalone recon」语义已不存在）。即黑盒 reuse scan
-                # 当前无法 resume；需让 session 落 reuse_whitebox_scan_id 后在此重解析 wb_scan_dir
-                # （plan 范围外，待后续）。repo_path or None 归一空串。
                 cfg = scan_dir / "scan-config.yaml"
                 config_path = str(cfg) if cfg.exists() else None
+                # reuse 黑盒：凭 reuse_whitebox_scan_id 重解析 wb_scan_dir 作 repo_path（修 fail-fast：
+                # start 已落 reuse_id；此处对齐 _resolve_blackbox_inputs 的 get_scan_dir 口径，
+                # 随 workspaces_dir 配置走，不存易失绝对路径）。无 reuse_id（legacy）回落 repo_path。
+                if reuse_whitebox_scan_id:
+                    wb_scan_dir = self._store.get_scan_dir(ws, reuse_whitebox_scan_id)
+                    if wb_scan_dir is None:
+                        raise ValueError(f"要复用的白盒扫描已不存在: {reuse_whitebox_scan_id}")
+                    repo_path = str(wb_scan_dir)
                 handle = await self._submit_blackbox(
                     repo_path or None, ws, scan_id, scan_dir, event_file, web_url, config_path)
             else:
