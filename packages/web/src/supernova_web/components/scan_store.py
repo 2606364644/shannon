@@ -206,14 +206,18 @@ class ScanStore:
 
     # ---- 创建 ----
     def create_scan(self, ws: str, web_url: str, repo_path: str,
-                    scan_type: str = "whitebox") -> tuple[str, Path]:
+                    scan_type: str = "whitebox",
+                    lineage: str | None = None) -> tuple[str, Path]:
         """在 ws 内建新 scan_id 目录 + session.json（不复位 resume；重扫=新 scan）。
 
-        返回 (scan_id, scan_dir)。scan_id = <repo>-YYYYMMDD-HHMMSS，同秒碰撞 -2/-3。
+        返回 (scan_id, scan_dir)。
+        - whitebox/correlation: scan_id = <repo>-YYYYMMDD-HHMMSS，同秒碰撞 -2/-3。
+        - blackbox: scan_id = <wb_scan_id>~<N>（lineage=白盒 scan_id，N=该白盒已有黑盒序号，
+          per-ws 单调）。lineage 仅 blackbox 用，白盒忽略。
         """
         ws_dir = self._dir / ws
         scans_dir = ws_dir / "scans"
-        scan_id = self._gen_scan_id(scans_dir, repo_path)
+        scan_id = self._gen_scan_id(scans_dir, repo_path, scan_type, lineage)
         # SessionManager(scans_dir) 复用 create_workspace：建 scans/<scan_id>/session.json。
         # core 零改动；幂等（session.json 已存在则不覆盖），但 scan_id 经碰撞规避保证新。
         mgr = SessionManager(scans_dir)
@@ -221,9 +225,26 @@ class ScanStore:
             web_url=web_url, repo_path=repo_path, name=scan_id, scan_type=scan_type)
         return scan_id, scan_dir
 
-    def _gen_scan_id(self, scans_dir: Path, repo_path: str) -> str:
-        """scan_id = <repo>-YYYYMMDD-HHMMSS（仓库名前缀 + 本地时区紧凑秒级）；同秒碰撞 -2/-3...
-        仓库名前缀让扫描目录一眼可辨（对齐 legacy NodeGoat_<ts> 可读性），取代纯日期 scan_id。"""
+    def _gen_scan_id(self, scans_dir: Path, repo_path: str,
+                     scan_type: str = "whitebox",
+                     lineage: str | None = None) -> str:
+        """生成 scan_id。
+
+        blackbox: <wb_scan_id>~<N>（整段白盒 scan_id 作血缘前缀 + per-ws 单调序号；
+          lineage=wb_scan_id 必填）。序号并发由 ScanManager 的 create_scan lock 串行化，
+          此处 while-exists 兜底防同序号目录竞态。
+        whitebox/correlation（默认）: <repo>-YYYYMMDD-HHMMSS（仓库名前缀 + 本地时区紧凑秒级）；
+          同秒碰撞 -2/-3。仓库名前缀让扫描目录一眼可辨（对齐 legacy NodeGoat_<ts> 可读性）。
+        """
+        if scan_type == "blackbox":
+            if not lineage:
+                raise ValueError("blackbox scan_id 需要 lineage（=白盒 scan_id）")
+            n = self._next_blackbox_seq(scans_dir, lineage)
+            scan_id = f"{lineage}~{n}"
+            while (scans_dir / scan_id / "session.json").exists():
+                n += 1
+                scan_id = f"{lineage}~{n}"
+            return scan_id
         base = f"{_repo_label(repo_path)}-{_now_local().strftime('%Y%m%d-%H%M%S')}"
         scan_id = base
         i = 2
@@ -231,6 +252,21 @@ class ScanStore:
             scan_id = f"{base}-{i}"
             i += 1
         return scan_id
+
+    def _next_blackbox_seq(self, scans_dir: Path, lineage: str) -> int:
+        """数 scans_dir 下 {lineage}~<N> 已有黑盒序号，返回 max+1（从 1 起）。
+
+        lineage 含 '-'，故用 re.escape；匹配锚定末尾（~<N>$，防 repo 名含 lineage
+        前缀的误匹配）。scans_dir 不存在时返回 1（首个黑盒）。
+        """
+        pat = re.compile(re.escape(lineage) + r"~(\d+)$")
+        existing: list[int] = []
+        if scans_dir.is_dir():
+            for entry in scans_dir.iterdir():
+                m = pat.match(entry.name)
+                if m:
+                    existing.append(int(m.group(1)))
+        return (max(existing) + 1) if existing else 1
 
     # ---- 列举（双源）----
     def _scan_entries(self, ws: str) -> list[tuple[str, Path]]:

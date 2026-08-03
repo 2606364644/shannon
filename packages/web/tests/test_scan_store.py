@@ -383,3 +383,34 @@ def test_delete_scan_legacy_root_removes_products_keeps_ws_shell(tmp_path):
     ids = [s.scan_id for s in store.list_scans("WS")]
     assert legacy_id not in ids
     assert "other-20260730-120000" in ids
+
+
+# ── blackbox scan_id（白盒血缘前缀 <wb>~<N>）──────────────────────────────────
+
+def test_create_scan_blackbox_uses_lineage_prefix_with_seq(tmp_path):
+    """黑盒 scan_id = <wb_scan_id>~<N>:整段白盒 scan_id 作血缘前缀,序号从 1 起。"""
+    store = ScanStore(tmp_path)
+    wb = "NodeGoat-20260803-1200"
+    sid1, _ = store.create_scan("WS", "u", "", scan_type="blackbox", lineage=wb)
+    assert sid1 == "NodeGoat-20260803-1200~1"
+    sid2, _ = store.create_scan("WS", "u", "", scan_type="blackbox", lineage=wb)
+    assert sid2 == "NodeGoat-20260803-1200~2"
+    # 不同白盒独立序号空间
+    sid_other, _ = store.create_scan("WS", "u", "", scan_type="blackbox",
+                                     lineage="NodeGoat-20260804-0900")
+    assert sid_other == "NodeGoat-20260804-0900~1"
+
+
+def test_create_scan_whitebox_format_unchanged(tmp_path):
+    """回归保护:白盒 scan_id 格式不变(<repo>-YYYYMMDD-HHMMSS),不含 ~。"""
+    store = ScanStore(tmp_path)
+    sid, _ = store.create_scan("WS", "u", "/code/NodeGoat")  # 默认 whitebox,不传 lineage
+    assert sid.startswith("NodeGoat-")
+    assert "~" not in sid
+
+
+def test_create_scan_blackbox_requires_lineage(tmp_path):
+    """黑盒无 lineage → ValueError(黑盒恒复用白盒,lineage 必填,防御性校验)。"""
+    store = ScanStore(tmp_path)
+    with pytest.raises(ValueError):
+        store.create_scan("WS", "u", "", scan_type="blackbox", lineage=None)
