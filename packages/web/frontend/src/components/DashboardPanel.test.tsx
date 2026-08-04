@@ -63,9 +63,9 @@ describe("DashboardPanel", () => {
       total_units: 1,
     } as DashboardState;
     render(<DashboardPanel state={completedState} elapsedMs={0} />);
-    // 精确断言：顶栏的 agents 计数 span "agents 3/0"
+    // 精确断言：计数副标题的 Agent 计数 "Agent 3/0"
     // (completed_count=3, agents={} → 0 total；伴随字段无 3 不会假阳性)
-    expect(screen.getByText(/agents\s+3\/0/)).toBeInTheDocument();
+    expect(screen.getByText(/Agent\s+3\/0/)).toBeInTheDocument();
   });
 
   describe("i18n: 无运行中 agent 文案", () => {
@@ -81,6 +81,69 @@ describe("DashboardPanel", () => {
       i18n.changeLanguage("en");
       render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
       expect(screen.getByText(/No running agents/)).toBeInTheDocument();
+    });
+  });
+
+  // ── 问题 2：开始时间 / 总耗时 / 阶段耗时 / SSE 实时性指示 ──
+  describe("扩展展示：开始时间 / 总耗时 / 实时性", () => {
+    afterEach(() => i18n.changeLanguage("zh"));
+
+    it("传 startedAtMs 渲染开始时间（含年份，非 -）", () => {
+      const startedAtMs = Date.UTC(2026, 7, 4, 2, 49, 10);
+      render(<DashboardPanel state={emptyState()} elapsedMs={0} startedAtMs={startedAtMs} />);
+      expect(screen.getByText(/开始时间/)).toBeInTheDocument();
+      expect(screen.getByText(/2026/)).toBeInTheDocument();
+    });
+
+    it("未传 startedAtMs 时不渲染开始时间区块", () => {
+      render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
+      expect(screen.queryByText(/开始时间/)).not.toBeInTheDocument();
+    });
+
+    it("传 totalElapsedMs 渲染总耗时（与阶段耗时区分）", () => {
+      render(
+        <DashboardPanel
+          state={emptyState()} elapsedMs={5000} totalElapsedMs={3600000}
+        />,
+      );
+      // 阶段耗时 5000ms -> 5s；总耗时 3600000ms -> 1h 00m 00s
+      expect(screen.getByText(/5s/)).toBeInTheDocument();
+      expect(screen.getByText(/1h 00m 00s/)).toBeInTheDocument();
+    });
+
+    it("SSE 实时性：最后事件秒前 + 事件计数", () => {
+      const lastEventMs = Date.now() - 3000; // 3 秒前
+      render(
+        <DashboardPanel
+          state={emptyState()} elapsedMs={0}
+          lastEventMs={lastEventMs} eventsCount={42}
+        />,
+      );
+      // 最后事件 3 秒前
+      expect(screen.getByText(/3\s*秒前|3s ago/)).toBeInTheDocument();
+      // 事件计数
+      expect(screen.getByText(/42/)).toBeInTheDocument();
+    });
+
+    it("无 lastEventMs 时实时性降级（不显秒前，仅可能显计数）", () => {
+      render(
+        <DashboardPanel state={emptyState()} elapsedMs={0} eventsCount={0} />,
+      );
+      // 无 lastEventMs -> 无「秒前」文案
+      expect(screen.queryByText(/秒前|s ago/)).not.toBeInTheDocument();
+    });
+
+    it("切英文 label", () => {
+      i18n.changeLanguage("en");
+      const startedAtMs = Date.UTC(2026, 7, 4, 2, 49, 10);
+      render(
+        <DashboardPanel
+          state={emptyState()} elapsedMs={5000} totalElapsedMs={3600000}
+          startedAtMs={startedAtMs}
+        />,
+      );
+      expect(screen.getByText(/Started|Start time/i)).toBeInTheDocument();
+      expect(screen.getByText(/Total|Total time/i)).toBeInTheDocument();
     });
   });
 });

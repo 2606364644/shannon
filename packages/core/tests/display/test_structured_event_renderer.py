@@ -41,6 +41,61 @@ async def test_writes_phase_event_with_common_and_extra_fields(tmp_path: Path):
     assert row["steps"] == ["s1", "s2"]  # tuple -> list
 
 
+# ── P2（2026-08-04）：ts 时区归一化 ──
+# 历史 workflow_logger 用 format_log_time() 给 event.timestamp 赋值 = worker 容器 UTC 墙钟，
+# 格式 "2026-08-04 02:49:13"（无时区后缀）。前端 Date.parse 按浏览器本地时区解释 -> 8h 漂移。
+# _serialize 须把无时区 ts 归一化为 UTC ISO 带 Z（自描述时区，不依赖容器/浏览器时区）。
+@pytest.mark.asyncio
+async def test_serialize_normalizes_no_timezone_ts_to_utc_z(tmp_path: Path):
+    """无时区串（format_log_time 产物，worker 容器 UTC）-> 补 Z 当 UTC。"""
+    f = tmp_path / "events.ndjson"
+    r = StructuredEventRenderer(str(f))
+    ev = PhaseEvent(timestamp="2026-08-04 02:49:13", category="PHASE",
+                    phase="recon", event="start", steps=())
+    await r.render(ev)
+    await r.close()
+    row = _lines(f)[0]
+    assert row["ts"] == "2026-08-04T02:49:13Z"  # 空格->T + 补 Z
+
+
+@pytest.mark.asyncio
+async def test_serialize_keeps_z_timestamp_as_is(tmp_path: Path):
+    """带 Z 的 ISO ts 原样保留（已是 UTC，标准）。"""
+    f = tmp_path / "events.ndjson"
+    r = StructuredEventRenderer(str(f))
+    ev = PhaseEvent(timestamp="2026-08-04T02:49:13.789Z", category="PHASE",
+                    phase="recon", event="start", steps=())
+    await r.render(ev)
+    await r.close()
+    assert _lines(f)[0]["ts"] == "2026-08-04T02:49:13.789Z"
+
+
+@pytest.mark.asyncio
+async def test_serialize_normalizes_offset_timestamp_to_z(tmp_path: Path):
+    """带 +00:00 偏移的 ts -> 归一化为 Z（与 web 回退 _now_iso 产物对齐）。"""
+    f = tmp_path / "events.ndjson"
+    r = StructuredEventRenderer(str(f))
+    ev = PhaseEvent(timestamp="2026-08-04T02:49:13+00:00", category="PHASE",
+                    phase="recon", event="start", steps=())
+    await r.render(ev)
+    await r.close()
+    assert _lines(f)[0]["ts"] == "2026-08-04T02:49:13Z"
+
+
+@pytest.mark.asyncio
+async def test_scan_end_ts_also_normalized(tmp_path: Path):
+    """SummaryEvent 触发的 scan_end 行 ts 也归一化（无时区 -> Z）。"""
+    f = tmp_path / "events.ndjson"
+    r = StructuredEventRenderer(str(f))
+    await r.render(SummaryEvent(timestamp="2026-08-04 02:49:13", category="SUMMARY",
+                                status="completed", total_duration_ms=1000,
+                                total_cost_usd=0.5))
+    await r.close()
+    rows = _lines(f)
+    assert rows[1]["ts"] == "2026-08-04T02:49:13Z"
+    assert rows[1]["type"] == "scan_end"
+
+
 @pytest.mark.asyncio
 async def test_tool_call_parameters_any_serializable(tmp_path: Path):
     f = tmp_path / "events.ndjson"

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import i18n from "@/i18n";
 import LiveTab from "./LiveTab";
@@ -10,6 +10,17 @@ vi.mock("../../api/useEventSource", () => ({
   useEventSource: () => eventsState,
 }));
 
+// mock getScan 返回受控 SessionData（开始时间 / 总耗时 / cost 兜底数据源）。
+// scanEventsUrl 透传真实（仅拼 URL 字符串，无 IO）。
+const scanMetaState: { meta: any } = { meta: null };
+vi.mock("../../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../../api/client")>("../../api/client");
+  return {
+    ...actual,
+    getScan: () => Promise.resolve(scanMetaState.meta),
+  };
+});
+
 function renderLive() {
   return render(
     <MemoryRouter initialEntries={["/p/ws/scans/scan1/live"]}>
@@ -19,9 +30,10 @@ function renderLive() {
 }
 
 // jsdom navigator.language 默认 en，LanguageDetector 会把 i18n 切到 en；现有断言依赖中文渲染，逐测试钉回 zh。
-beforeEach(() => i18n.changeLanguage("zh"));
+beforeEach(() => { i18n.changeLanguage("zh"); scanMetaState.meta = null; });
 
 describe("LiveTab", () => {
+  afterEach(() => vi.useRealTimers()); // fake timers 不泄漏到后续测试
   it("渲染 DashboardPanel + LogStream 容器（aria-live）", () => {
     eventsState.events = [];
     eventsState.status = "open";
@@ -81,9 +93,9 @@ describe("LiveTab", () => {
     ];
     eventsState.status = "open";
     renderLive();
-    // 初始 tick 即 5000ms → "00:05"
+    // 初始 tick 即 ~5000ms -> "5s"（< 60s 显示秒）。waitFor 等 tick 生效。
     await waitFor(() => {
-      expect(screen.getByText(/00:0[0-9]/)).toBeInTheDocument();
+      expect(screen.getByText(/^5s$/)).toBeInTheDocument();
     });
   });
 
@@ -97,11 +109,97 @@ describe("LiveTab", () => {
     ];
     eventsState.status = "open";
     renderLive();
-    // DashboardPanel 渲染 current_phase（font-bold text-cyan 类名是 DashboardPanel phase 标签）
+    // DashboardPanel 渲染 current_phase（font-semibold text-primary 是头条 phase 标签）
     await waitFor(() => {
       const matches = screen.getAllByText(/vulnerability-analysis/);
-      expect(matches.some((el) => el.classList.contains("font-bold"))).toBe(true);
+      expect(matches.some((el) => el.classList.contains("font-semibold"))).toBe(true);
     });
+  });
+
+  // ── 问题 1：8h 时差修复（ts 归一化）──
+  it("elapsed 用无时区 ts（生产 ndjson）当 UTC 解析，不漂 8h", async () => {
+    // worker 容器 UTC 墙钟写 "YYYY-MM-DD HH:MM:SS"（无时区）。
+    // 5 秒前的 UTC 时刻，手写成无时区空格分隔串模拟生产 ndjson。
+    const past = new Date(Date.now() - 5000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const noTzTs = `${past.getUTCFullYear()}-${pad(past.getUTCMonth() + 1)}-${pad(past.getUTCDate())} ${pad(past.getUTCHours())}:${pad(past.getUTCMinutes())}:${pad(past.getUTCSeconds())}`;
+    eventsState.events = [
+      { type: "PhaseEvent", event: "start", phase: "recon", steps: [], step_intents: [], ts: noTzTs, category: "PHASE" },
+    ];
+    eventsState.status = "open";
+    renderLive();
+    // 5s 前的事件 -> elapsed ≈ 5s（非 8h+5s）。
+    await waitFor(() => {
+      expect(screen.getByText(/^5s$/)).toBeInTheDocument();
+    });
+    // 关键：绝不出现 "8h"（漂移标志）
+    expect(screen.queryByText(/8h/)).not.toBeInTheDocument();
+  });
+
+  // ── 问题 2：getScan 接通开始时间 / 总耗时 ──
+  it("getScan 返回 created_at -> 渲染开始时间 + 总耗时", async () => {
+    const startedUnix = Math.floor(Date.now() / 1000) - 10; // 10 秒前开始
+    scanMetaState.meta = { created_at: startedUnix, completed_at: null, metrics: {} };
+    eventsState.events = [];
+    eventsState.status = "open";
+    renderLive();
+    await waitFor(() => {
+      // 开始时间 label 出现
+      expect(screen.getByText(/开始时间/)).toBeInTheDocument();
+      // 总耗时 label 出现
+      expect(screen.getByText(/总耗时/)).toBeInTheDocument();
+    });
+  });
+
+  it("getScan 失败时降级（不阻塞 live 页，仍渲染 LogStream）", () => {
+    scanMetaState.meta = null;
+    eventsState.events = [];
+    eventsState.status = "open";
+    renderLive();
+    expect(document.querySelector('[aria-live="polite"]')).toBeInTheDocument();
+  });
+
+  // ── 问题 3：SSE 实时性指示 ──
+  it("渲染 SSE 连接态 + 最后事件秒前 + 事件计数", () => {
+    const pastTs = new Date(Date.now() - 4000).toISOString(); // 4 秒前
+    eventsState.events = [
+      { type: "PhaseEvent", event: "start", phase: "recon", steps: [], step_intents: [], ts: pastTs, category: "PHASE" },
+      { type: "AgentEvent", event: "start", agent_name: "recon", attempt: 1, ts: pastTs, category: "AGENT" },
+    ];
+    eventsState.status = "open";
+    renderLive();
+    expect(screen.getByText(/已连接/)).toBeInTheDocument();
+    // 事件计数 = 2（精确匹配 "事件 2" / "events 2"，避免 /2/ 误匹配 lastEvent 秒数）
+    expect(screen.getByText(/事件\s*2|events\s*2/)).toBeInTheDocument();
+  });
+
+  // ── 问题 4：扫描完成后阶段耗时停止计时（不再每秒增长）──
+  it("扫描完成后阶段耗时定格，不再计时（scan_end 时刻 - phaseStart）", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    // phase start 5 分钟前；scan_end completed 100s 前 -> 定格应为 200s = "3m 20s"。
+    // 走 endedCompleted 兜底（meta=null，不依赖后端 completed_at），验证 scan_end 一出现即停表。
+    scanMetaState.meta = null;
+    eventsState.events = [
+      { type: "PhaseEvent", event: "start", phase: "recon", steps: [], step_intents: [], ts: new Date(now - 300_000).toISOString(), category: "PHASE" },
+      { type: "scan_end", status: "completed", ts: new Date(now - 100_000).toISOString(), category: "CONTROL" },
+    ];
+    eventsState.status = "closed";
+
+    renderLive();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // 完成定格：elapsed = scan_end.ts - phaseStart = 200000ms = "3m 20s"。
+    // 若 bug（无完成守卫，tick = now - phaseStart），会显示 "5m 0s" 且持续增长。
+    expect(screen.getByText(/^3m 20s$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^5m/)).not.toBeInTheDocument();
+
+    // 推进 5s：定格则保持 "3m 20s"；若仍 tick 会增长到 "5m 5s"。
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(screen.getByText(/^3m 20s$/)).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });
 
