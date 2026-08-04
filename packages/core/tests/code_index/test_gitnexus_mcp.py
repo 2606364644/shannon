@@ -6,7 +6,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from supernova_core.code_index.gitnexus_mcp import GitNexusMCPClient, _parse_md_table
 
-
 class TestGitNexusMCPClient:
     def test_initial_state(self, tmp_path):
         client = GitNexusMCPClient(tmp_path)
@@ -322,3 +321,132 @@ class TestReadResource:
             raise RuntimeError("not found")
         client._send_request = boom
         assert await client.read_resource("any") == ""
+
+
+def _mock_proc_with_stderr(stderr_lines: list[bytes]):
+    """构造一个 mock 子进程: stdin/stdout/stderr 齐全, stderr 按序返回给定行后 EOF。
+
+    现有测试的 mock_proc 多半只配 stdin/stdout (stderr 缺失); stderr 接出后 start()
+    会读 stderr, 这些 mock 需要补 stderr 才不崩。本工厂统一构造。
+    """
+    mock_proc = MagicMock()
+    mock_proc.stdin = MagicMock()
+    mock_proc.stdin.drain = AsyncMock()
+    mock_proc.stdout = AsyncMock()
+    mock_proc.stdout.readline = AsyncMock(return_value=json.dumps({
+        "jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}
+    }).encode())
+    mock_proc.stderr = AsyncMock()
+    mock_proc.stderr.readline = AsyncMock(side_effect=stderr_lines)
+    mock_proc.wait = AsyncMock()
+    return mock_proc
+
+
+class TestStderrDrain:
+    """P0: GitNexus 子进程 stderr 必须转发到 logger, 不能 DEVNULL 吞掉。
+
+    生产里 run_code_index 卡死 45min, GitNexus 侧的 pino 日志/native 报错全被
+    stderr=DEVNULL 吞掉, 无从诊断。stderr 接出后, 卡死时至少能看到子进程侧发生了什么。
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_devnull_stderr(self, tmp_path):
+        """start() 必须用 PIPE 捕获 stderr, 不能 DEVNULL。"""
+        client = GitNexusMCPClient(tmp_path)
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+            mock_exec.return_value = _mock_proc_with_stderr([b""])
+            await client.start()
+            _, kwargs = mock_exec.call_args
+            assert kwargs.get("stderr") is asyncio.subprocess.PIPE
+            await client.stop()
+
+    @pytest.mark.asyncio
+    async def test_stderr_lines_forwarded_to_logger(self, tmp_path, caplog):
+        """子进程 stderr 行必须转发到 logger.warning, 带前缀可检索。"""
+        client = GitNexusMCPClient(tmp_path)
+        stderr_lines = [
+            b'{"level":30,"msg":"GitNexus: MCP server starting"}\n',
+            b'Error: native module load failed\n',
+            b"",  # EOF
+        ]
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+            mock_exec.return_value = _mock_proc_with_stderr(stderr_lines)
+            with caplog.at_level("WARNING", logger="supernova_core.code_index.gitnexus_mcp"):
+                await client.start()
+                # 等 stderr reader task 消费完行(它后台跑, 给它一点时间)
+                for _ in range(20):
+                    if client._stderr_task is None or client._stderr_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+            await client.stop()
+        assert "GitNexus MCP stderr" in caplog.text
+        assert "native module load failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_stop_cancels_stderr_task(self, tmp_path):
+        """stop() 必须取消后台 stderr reader, 不留孤儿 task。"""
+        client = GitNexusMCPClient(tmp_path)
+        # stderr 永不 EOF (readline 阻塞), 模拟子进程长期活着
+        blocking = AsyncMock()
+        blocking.readline = AsyncMock(side_effect=lambda: asyncio.Event().wait())  # 永不返回
+        mock_proc = MagicMock()
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.stdout.readline = AsyncMock(return_value=json.dumps({
+            "jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}
+        }).encode())
+        mock_proc.stderr = blocking
+        mock_proc.terminate = MagicMock()
+        mock_proc.wait = AsyncMock()
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec") as mock_exec:
+            mock_exec.return_value = mock_proc
+            await client.start()
+            assert client._stderr_task is not None and not client._stderr_task.done()
+            await client.stop()
+            # stop 后 stderr task 必须已结束(取消或自然完成), 不是 pending
+            assert client._stderr_task is None or client._stderr_task.done()
+
+
+class TestStartAndWriteTimeout:
+    """P1: create_subprocess_exec 与 stdin.drain 必须有超时, 不能裸 await。
+
+    生产 Attempt 1 卡死 44min: MCP_READ_TIMEOUT(30s) 只罩住 stdout.readline,
+    create_subprocess_exec(fork/exec 阶段) 与 stdin.drain(写阻塞) 是裸 await,
+    子进程启动偶发卡死时这两处无限期挂起, 只能靠外层 45min activity timeout 兜底。
+    加超时后偶发卡死 30s 内自拔 -> activity 重试, 不再空等。
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_timeout_on_slow_spawn(self, tmp_path):
+        """create_subprocess_exec 永不返回时, start() 必须在 MCP_START_TIMEOUT 内超时抛错。"""
+
+        async def never_return(*args, **kwargs):
+            await asyncio.Event().wait()  # 永不返回
+
+        client = GitNexusMCPClient(tmp_path)
+        with patch("supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec", side_effect=never_return):
+            with patch("supernova_core.code_index.gitnexus_mcp.MCP_START_TIMEOUT", 0.05):
+                with pytest.raises((asyncio.TimeoutError, ConnectionError)):
+                    await asyncio.wait_for(client.start(), timeout=2)
+
+    @pytest.mark.asyncio
+    async def test_send_request_drain_timeout(self, tmp_path):
+        """stdin.drain 永不返回时, _send_request 必须在 MCP_WRITE_TIMEOUT 内超时抛 ConnectionError。"""
+        client = GitNexusMCPClient(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdin = MagicMock()
+
+        async def never_drain():
+            await asyncio.Event().wait()  # 永不返回
+
+        mock_proc.stdin.drain = never_drain
+        mock_proc.stdin.write = MagicMock()
+        mock_proc.stdout = AsyncMock()
+        client._process = mock_proc
+
+        with patch("supernova_core.code_index.gitnexus_mcp.MCP_WRITE_TIMEOUT", 0.05):
+            with pytest.raises(ConnectionError, match="timed out|drain|write"):
+                await asyncio.wait_for(
+                    client._send_request("tools/call", {}), timeout=2)
+

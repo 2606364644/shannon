@@ -15,6 +15,15 @@ MCP_READ_TIMEOUT = 30
 # Grace period after SIGTERM before escalating to SIGKILL when stopping the
 # MCP subprocess. See GitNexusMCPClient.stop().
 MCP_STOP_TIMEOUT = 5
+# Timeout for spawning the gitnexus mcp subprocess (fork/exec 阶段)。create_subprocess_exec
+# 裸 await 无超时:子进程启动偶发卡死(node 冷启动/pipe 建立 race)时无限期挂起,只能靠外层
+# activity start_to_close_timeout 兜底 -- 2026-08-04 delivery 扫描 Attempt 1 卡死 44min 的盲区。
+# 加超时后偶发卡死在此窗口内自拔 -> activity 重试,不再空等到 45min。
+MCP_START_TIMEOUT = 30
+# Timeout for flushing a JSON-RPC request to the subprocess stdin。stdin.drain() 在子进程
+# 停止消费 stdin(pipe 缓冲满/僵死)时阻塞,裸 await 同上无超时。与 MCP_READ_TIMEOUT 对称
+# 罩住「写」侧,补齐 stdio 读写双向超时。
+MCP_WRITE_TIMEOUT = 10
 
 
 def _parse_md_table(markdown: str) -> list[dict]:
@@ -59,19 +68,53 @@ class GitNexusMCPClient:
         self.repo_root = repo_root
         self._process: asyncio.subprocess.Process | None = None
         self._request_id = 0
+        self._stderr_task: asyncio.Task | None = None
+
+    async def _drain_stderr(self) -> None:
+        """后台读 GitNexus 子进程 stderr 行 -> logger.warning。
+
+        GitNexus 的 pino 结构化日志 + native 模块报错都走 stderr;之前 stderr=DEVNULL
+        把它们全吞了,子进程卡死/报错时 workflow.log 里看不到任何 GitNexus 侧信息
+        (2026-08-04 delivery 扫描卡死 44min,GitNexus 侧发生了什么全不可见)。reader
+        自身出错不影响主流程(诊断辅助),任何异常都静默退出。
+        """
+        proc = self._process
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break  # EOF
+                text = line.decode(errors="replace").rstrip()
+                if text:
+                    logger.warning("GitNexus MCP stderr: %s", text)
+        except Exception as exc:
+            logger.debug("GitNexus MCP stderr drain ended: %s", exc)
 
     async def start(self) -> None:
         """Start the gitnexus mcp subprocess and send initialize."""
         # NOTE: `gitnexus mcp` does NOT accept --repo. It discovers all
         # indexed repos from the global registry (~/.gitnexus/registry.json).
         # The repo must be indexed via `gitnexus analyze` BEFORE starting MCP.
-        self._process = await asyncio.create_subprocess_exec(
-            "gitnexus", "mcp",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            limit=4 * 1024 * 1024,  # readline 默认 64KB 限制会崩全量 cypher；提到 4MB
-        )
+        try:
+            self._process = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    "gitnexus", "mcp",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    # 不再 DEVNULL:接出 GitNexus pino 日志 + native 报错,卡死时有诊断。
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=4 * 1024 * 1024,  # readline 默认 64KB 限制会崩全量 cypher；提到 4MB
+                ),
+                timeout=MCP_START_TIMEOUT,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectionError(
+                f"GitNexus MCP subprocess spawn timed out after {MCP_START_TIMEOUT}s"
+            ) from exc
+        # 后台转发 stderr -> logger(见 _drain_stderr)。
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
         # Send MCP initialize request
         await self._send_request("initialize", {
             "protocolVersion": self.MCP_PROTOCOL_VERSION,
@@ -91,6 +134,14 @@ class GitNexusMCPClient:
         CancelledError long after the real failure. Bound the wait and force-kill.
         """
         if self._process:
+            # 先停 stderr reader,避免读正在关闭的 pipe。
+            if self._stderr_task is not None and not self._stderr_task.done():
+                self._stderr_task.cancel()
+                try:
+                    await self._stderr_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                self._stderr_task = None
             self._process.terminate()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=MCP_STOP_TIMEOUT)
@@ -146,6 +197,19 @@ class GitNexusMCPClient:
                 parts.append(item["text"])
         return "\n".join(parts)
 
+    async def _flush_stdin(self) -> None:
+        """drain stdin 带超时;写阻塞(子进程不消费 stdin)时快速失败而非无限挂起。
+
+        与 _send_request 的 stdout.readline 超时(MCP_READ_TIMEOUT)对称,补齐 stdio
+        「写」侧超时 -- 裸 await stdin.drain() 是 2026-08-04 卡死的盲区之一。
+        """
+        try:
+            await asyncio.wait_for(self._process.stdin.drain(), timeout=MCP_WRITE_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise ConnectionError(
+                f"GitNexus MCP stdin write timed out after {MCP_WRITE_TIMEOUT}s"
+            )
+
     async def _send_request(self, method: str, params: dict) -> dict:
         """Send a JSON-RPC request and read the response."""
         if self._process is None:
@@ -160,7 +224,7 @@ class GitNexusMCPClient:
 
         line = json.dumps(request) + "\n"
         self._process.stdin.write(line.encode())
-        await self._process.stdin.drain()
+        await self._flush_stdin()
 
         try:
             response_line = await asyncio.wait_for(
@@ -193,7 +257,7 @@ class GitNexusMCPClient:
         }
         line = json.dumps(notification) + "\n"
         self._process.stdin.write(line.encode())
-        await self._process.stdin.drain()
+        await self._flush_stdin()
 
     async def __aenter__(self):
         await self.start()
