@@ -44,3 +44,10 @@ Rules:
 - Set `notes` to the candidate source ("dominance" or "framework").
 - If there are zero candidates, emit {"vulnerabilities": []}.
 </output_format>
+
+<externally_exploitable_semantics>
+**`externally_exploitable` is a REACHABILITY TAG, not an authentication requirement.**
+- `true` = the endpoint is exposed to the public internet (reachable from outside via the app's nginx / API gateway). **Requiring login does NOT make it `false`** — an external attacker who holds any valid credential (or obtains one via an auth flaw) can still reach it. IDOR candidates are exercised through an authenticated session; if the endpoint itself is publicly exposed, set `true`.
+- `false` = the endpoint is reachable only from an internal network / cross-service; an external attacker cannot reach it from the public internet at all.
+- **"Requires login" ≠ `false`.** `authentication_required` and network reachability are two independent dimensions — a public API that requires login is still `externally_exploitable=true`. Do NOT infer `false` from "the attack needs a logged-in user"; that confuses authentication with reachability and drops PoCs for real public-facing IDORs.
+</externally_exploitable_semantics>

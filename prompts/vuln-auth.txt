@@ -115,6 +115,13 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 	}
 </exploitation_queue_format>
 
+<externally_exploitable_semantics>
+**`externally_exploitable` is a REACHABILITY TAG, not an authentication requirement.**
+- `true` = the endpoint is exposed to the public internet (reachable from outside via the app's nginx / API gateway). **Requiring login does NOT make it `false`** — an external attacker can still reach it, and an auth flaw is precisely how an attacker obtains or bypasses the login. Authentication flaws (brute-force, credential stuffing, session hijacking, reset-flow abuse) are by definition exercised against public-facing endpoints; if the endpoint is publicly exposed, set `true`.
+- `false` = the endpoint is reachable only from an internal network / cross-service; an external attacker cannot reach it from the public internet at all.
+- **"Requires login" ≠ `false`.** `authentication_required` and network reachability are two independent dimensions — a public API that requires login is still `externally_exploitable=true`. Do NOT infer `false` from "the endpoint needs authentication"; that confuses authentication with reachability and drops PoCs for real public-facing auth flaws.
+</externally_exploitable_semantics>
+
 </data_format_specifications>
 
 <methodology_and_domain_expertise>

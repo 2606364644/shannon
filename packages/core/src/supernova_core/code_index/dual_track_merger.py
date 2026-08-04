@@ -24,11 +24,45 @@ _SINK_FIELDS = ("sink_call", "sink_function", "vulnerable_parameter")
 _DANGER_KEYWORDS = ("none", "missing", "no ", "auto-generated", "absent")
 
 
+def _normalize_endpoint(endpoint: object) -> str | None:
+    """Normalize an HTTP endpoint string for cross-track dedup.
+
+    Uppercases the method and strips the query string + trailing slash, so the
+    two tracks' phrasings of the same IDOR endpoint collapse to one key. Returns
+    None when the endpoint is absent/blank (caller falls back to the strict key).
+    """
+    if not isinstance(endpoint, str):
+        return None
+    endpoint = endpoint.strip()
+    if not endpoint:
+        return None
+    parts = endpoint.split(None, 1)
+    if len(parts) == 2:
+        method, raw_path = parts[0].upper(), parts[1]
+    else:
+        method, raw_path = "", parts[0]
+    path = raw_path.split("?", 1)[0].rstrip("/") or "/"
+    return f"{method} {path}".strip()
+
+
 def _finding_key(finding: Vulnerability) -> tuple:
-    """Build a cross-class dedup key from vulnerability type, location, and sink."""
+    """Build a cross-track dedup key from vulnerability type, location, and sink.
+
+    Horizontal authz (IDOR) is deduped by normalized endpoint ALONE: the two
+    tracks describe the same IDOR with different code locations (LLM points at
+    the service layer; GitNexus at controller+service), so a location-bearing key
+    would never collapse them. Other classes keep the strict type+location+sink
+    key to avoid merging distinct problems. If a Horizontal finding lacks an
+    endpoint, fall back to the strict key (cannot endpoint-dedup blindly).
+    """
+    vtype = getattr(finding, "vulnerability_type", None)
+    if vtype == "Horizontal":
+        norm = _normalize_endpoint(getattr(finding, "endpoint", None))
+        if norm:
+            return ("Horizontal", norm)
     loc = tuple(getattr(finding, field, None) for field in _LOCATION_FIELDS)
     sink = tuple(getattr(finding, field, None) for field in _SINK_FIELDS)
-    return (getattr(finding, "vulnerability_type", None), loc, sink)
+    return (vtype, loc, sink)
 
 
 def _is_vulnerable(finding: Vulnerability) -> bool:
@@ -38,6 +72,24 @@ def _is_vulnerable(finding: Vulnerability) -> bool:
     return bool(getattr(finding, "externally_exploitable", False))
 
 
+_AUTHZ_VULN_TYPES = frozenset({"Horizontal", "Vertical", "Context_Workflow"})
+
+
+def _authz_ee_or(llm: Vulnerability, gitnexus: Vulnerability) -> bool | None:
+    """both 分支 ee OR, 仅限 authz 三类。
+
+    authz 的 externally_exploitable 是 LLM 主观判 (prompt 未定义语义时易误判为
+    "需登录 → 不可外部利用 → False"); 用 GitNexus 轨 OR 兜底纠错。非 authz 类返回
+    None → 调用方不覆写, 保持 base ee (inj/xss/ssrf 跨服务可达性是客观事实, base
+    权威, 不该被 OR 翻转 — 守 test_both_track_vulnerable_keeps_reachability_from_llm_base)。
+    """
+    if getattr(llm, "vulnerability_type", None) in _AUTHZ_VULN_TYPES:
+        return bool(getattr(llm, "externally_exploitable", False)) or bool(
+            getattr(gitnexus, "externally_exploitable", False)
+        )
+    return None
+
+
 def _clone_with_merge_fields(
     finding: Vulnerability,
     *,
@@ -45,16 +97,21 @@ def _clone_with_merge_fields(
     confidence: str,
     vulnerable: bool,
     evidence_chain: str | None = None,
+    externally_exploitable_override: bool | None = None,
 ) -> Vulnerability:
     data = finding.model_dump()
     data["merge_source"] = merge_source
     data["confidence"] = confidence
-    # Spec 改动 3′: do NOT overwrite externally_exploitable — it is a reachability
-    # tag (true = public-internet; false = internal / cross-service), NOT part of
-    # the verdict. Preserve the base finding's tag. The both/llm-only branches use
-    # an LLM-track finding as base (reachability authority); the gitnexus-only
-    # branch uses the GitNexus finding. The `vulnerable` param still drives the
-    # `verdict` rewrite below.
+    # Spec 改动 3′: externally_exploitable is a reachability tag (true =
+    # public-internet; false = internal / cross-service), NOT part of the verdict
+    # — do NOT recompute it from the verdict-OR. The both/llm-only branches use an
+    # LLM-track finding as base (reachability authority); the gitnexus-only branch
+    # uses the GitNexus finding. The `vulnerable` param still drives the `verdict`
+    # rewrite below.
+    # Spec 2026-08-04 改动 B (per-class): authz 三类 both 分支取 ee OR (LLM 主观判
+    # 需 GitNexus 兜底, 见 _authz_ee_or); 非 authz 类不传 override → 保持 base。
+    if externally_exploitable_override is not None:
+        data["externally_exploitable"] = externally_exploitable_override
     if evidence_chain and not data.get("evidence_chain"):
         data["evidence_chain"] = evidence_chain
     if data.get("verdict") is not None:
@@ -108,6 +165,7 @@ def merge_dual_track_queues(
                     confidence="high",
                     vulnerable=vulnerable,
                     evidence_chain=evidence_chain,
+                    externally_exploitable_override=_authz_ee_or(llm, gitnexus),
                 )
             )
         elif llm is not None:

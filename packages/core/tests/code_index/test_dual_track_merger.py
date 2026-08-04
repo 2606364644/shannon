@@ -154,3 +154,88 @@ def test_both_track_vulnerable_keeps_reachability_from_llm_base():
     assert len(merged) == 1
     assert merged[0].externally_exploitable is False
     assert merged[0].verdict == "vulnerable"  # verdict is still the OR result
+
+
+# --- Spec 2026-08-04 authz dual-track ee/dedup ---
+# 改动 C: Horizontal 同端点两轨 (location 表述不同) 应按端点合并成 both。
+# 改动 B (per-class): authz 三类 (Horizontal/Vertical/Context_Workflow) both 分支
+# externally_exploitable 取 OR (兜底 LLM ee 误判); inj/xss/ssrf 保持 "ee 来自 base"
+# (上面 test_both_track_vulnerable_keeps_reachability_from_llm_base 锁定)。
+
+def _authz_h(ID, endpoint, externally_exploitable, vuln_code_loc="svc.ts:1", **kw):
+    """AuthzVulnerability of type Horizontal (the LLM/GitNexus IDOR overlap class)."""
+    return AuthzVulnerability(
+        ID=ID,
+        vulnerability_type="Horizontal",
+        externally_exploitable=externally_exploitable,
+        confidence="high",
+        endpoint=endpoint,
+        vulnerable_code_location=vuln_code_loc,
+        **kw,
+    )
+
+
+def test_horizontal_same_endpoint_different_location_merges():
+    # 真机根因: LLM 指 service 层 location, GitNexus 指 controller+service location,
+    # endpoint 完全一致。按端点去重 → 合并 1 条 both + high。
+    llm = [_authz_h("AUTHZ-VULN-03", "GET /api/order/detail", False,
+                    vuln_code_loc="service/order.ts:296")]
+    gn = [_authz_h("AUTHZ-GN-EXPLORE-03", "GET /api/order/detail", True,
+                   vuln_code_loc="controller/order.ts:54 + service/order.ts:296")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "both"
+    assert out[0].confidence == "high"
+
+
+def test_horizontal_both_ee_or_true_when_either_true():
+    # per-class OR 兜底: LLM 误判 ee=False, GitNexus 正确 ee=True → 合并 ee=True
+    # (authz ee 是 LLM 主观判, prompt 没定义时易误判; 用 GitNexus 纠错)。
+    llm = [_authz_h("L1", "GET /api/x", externally_exploitable=False)]
+    gn = [_authz_h("G1", "GET /api/x", externally_exploitable=True)]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].externally_exploitable is True
+
+
+def test_horizontal_both_ee_false_when_both_false():
+    llm = [_authz_h("L1", "GET /api/x", externally_exploitable=False)]
+    gn = [_authz_h("G1", "GET /api/x", externally_exploitable=False)]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].externally_exploitable is False
+
+
+def test_vertical_same_endpoint_different_location_not_endpoint_merged():
+    # Vertical/Context 只 LLM 产, 不在端点去重范围 → location 不同 → 保持各自条目。
+    def _v(ID, loc):
+        return AuthzVulnerability(
+            ID=ID, vulnerability_type="Vertical", externally_exploitable=True,
+            confidence="high", endpoint="POST /api/admin/users",
+            vulnerable_code_location=loc,
+        )
+    llm = [_v("L1", "admin.ts:10")]
+    gn = [_v("G1", "admin.ts:20")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 2
+
+
+def test_horizontal_missing_endpoint_falls_back_to_strict_key():
+    # endpoint 缺失 → 不能按端点去重 → fallback 严格 key (location 不同 → 不合并)。
+    llm = [AuthzVulnerability(ID="L1", vulnerability_type="Horizontal",
+                              externally_exploitable=True, confidence="high",
+                              vulnerable_code_location="a.ts:1")]
+    gn = [AuthzVulnerability(ID="G1", vulnerability_type="Horizontal",
+                             externally_exploitable=True, confidence="high",
+                             vulnerable_code_location="b.ts:2")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 2
+
+
+def test_horizontal_endpoint_normalization_collapses_variants():
+    # method 大小写 + trailing slash + query 差异 → 规范化为同一端点 → 合并。
+    llm = [_authz_h("L1", "get /api/x/", externally_exploitable=False)]
+    gn = [_authz_h("G1", "GET /api/x?foo=bar", externally_exploitable=True)]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "both"
