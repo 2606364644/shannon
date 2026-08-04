@@ -6,7 +6,8 @@ export type EventCategory =
   | "INFO" | "WARN" | "RESUME" | "SUMMARY" | "HEADER" | "GITNEXUS" | "CONTROL";
 
 interface CommonFields {
-  ts: string;          // ISO8601 UTC 毫秒
+  ts: string;          // 事件时间戳。历史 ndjson 为 worker 容器 UTC 墙钟 "YYYY-MM-DD HH:MM:SS"（无时区）；
+                       // P2 后新扫描为 UTC ISO8601 带 Z。前端经 utils/eventTs.parseEventTs 归一化当 UTC 解析。
   category: EventCategory;
 }
 
@@ -170,6 +171,10 @@ export interface SessionData {
   metrics?: SessionMetrics;
   session?: { status?: string; createdAt?: string; id?: string };  // 嵌套旧格式
   workflow_id?: string;  // temporal workflow 标识（ScanDetail header 任务名展示）
+  // 重跑预填用（_scan_detail 补返）：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
+  source_repo?: string | null;
+  reuse_whitebox_scan_id?: string | null;
+  authentication?: ScanAuthentication | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;

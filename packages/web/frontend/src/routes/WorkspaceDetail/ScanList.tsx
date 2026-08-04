@@ -15,7 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  listScans, cancelScan, deleteScan, resumeScan, ApiError,
+  listScans, cancelScan, deleteScan, resumeScan, getScan, ApiError,
 } from "@/api/client";
 import type { ScanSummary } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
@@ -122,10 +122,28 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
     }
   }
 
-  // 重跑 = 同 ws 新建扫描（spec §12.7：workspace 无再次扫描入口，只有新建扫描）。
-  // 跳 ScanNewPage 预填 ws，source 用户重选（贴合「新建扫描」心智）。
-  function onRerun() {
-    nav(`/scan/new?workspace=${encodeURIComponent(ws)}`);
+  // 重跑 = 同 ws 新建扫描（spec §12.7），按原扫描类型跳对应 tab 并预填相关数据。
+  // 调 getScan 拿原配置（白盒 source_repo / 黑盒 web_url+reuse+auth）-> location state 传 ScanNewPage 预填。
+  async function onRerun() {
+    setBusy(true);
+    try {
+      const detail = await getScan(ws, scan.scan_id);
+      const state: Record<string, unknown> = { type: scan.scan_type, workspace: ws };
+      if (scan.scan_type === "whitebox") {
+        if (detail.source_repo) state.repo = detail.source_repo;
+      } else if (scan.scan_type === "blackbox") {
+        if (detail.web_url) state.url = detail.web_url;
+        if (detail.reuse_whitebox_scan_id) state.reuseScanId = detail.reuse_whitebox_scan_id;
+        if (detail.authentication) state.auth = detail.authentication;
+      }
+      nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });
+    } catch {
+      // getScan 失败降级：只带 workspace 跳转（对齐旧现状），toast 提示用户手填。
+      toast.error(t("workspaceDetail.scans.rerunLoadFailed"));
+      nav(`/scan/new?workspace=${encodeURIComponent(ws)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function doAction() {
@@ -192,7 +210,7 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
               <Play className="size-3.5" /> {t("workspaceDetail.scans.resume")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={onRerun}>
+          <Button size="sm" variant="ghost" onClick={onRerun} disabled={busy}>
             <RefreshCw className="size-3.5" /> {t("workspaceDetail.scans.rerun")}
           </Button>
           {isRunning && (

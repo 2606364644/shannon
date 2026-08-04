@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
@@ -68,6 +68,37 @@ export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
   const flow = a.loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
   if (flow.length) payload.login_flow = flow;
   return payload;
+}
+
+/** ScanAuthentication -> AuthFormState（buildAuthPayload 的逆映射，供重跑预填黑盒登录配置）。 */
+export function authFromPayload(auth: ScanAuthentication): AuthFormState {
+  const c = auth.credentials ?? { username: "" };
+  const el = c.email_login;
+  return {
+    enabled: true,
+    loginType: auth.login_type ?? "form",
+    loginUrl: auth.login_url ?? "",
+    username: c.username ?? "",
+    password: c.password ?? "",
+    totpSecret: c.totp_secret ?? "",
+    emailLoginEnabled: !!el,
+    emailAddress: el?.address ?? "",
+    emailPassword: el?.password ?? "",
+    emailTotp: el?.totp_secret ?? "",
+    loginFlow: Array.isArray(auth.login_flow) ? auth.login_flow.join("\n") : "",
+    scType: auth.success_condition?.type ?? "url_contains",
+    scValue: auth.success_condition?.value ?? "",
+  };
+}
+
+/** 重跑预填数据（ScanList.onRerun 经 location.state 传入，优先于 query param）。 */
+export interface RerunPreset {
+  type?: ScanType;
+  workspace?: string;
+  repo?: string;
+  url?: string;
+  reuseScanId?: string;
+  auth?: ScanAuthentication;
 }
 
 export function validateAuth(a: AuthFormState, t: TFunction): string | null {
@@ -148,16 +179,18 @@ export function ScanNewPage() {
   const [params] = useSearchParams();
   const presetRepo = params.get("repo");
   const presetWs = params.get("workspace");
-  const [type, setType] = useState<ScanType>("whitebox");
+  // 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置（优先于 query param）。
+  const preset = (useLocation().state ?? {}) as RerunPreset;
+  const [type, setType] = useState<ScanType>(preset.type ?? "whitebox");
   const [f, setF] = useState<FormState>({
-    selectedRepo: "",
-    url: "",
-    reuseScanId: "",
-    auth: DEFAULT_AUTH,
+    selectedRepo: preset.repo ?? presetRepo ?? "",
+    url: preset.url ?? "",
+    reuseScanId: preset.reuseScanId ?? "",
+    auth: preset.auth ? authFromPayload(preset.auth) : DEFAULT_AUTH,
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
-  const [workspace, setWorkspace] = useState(presetWs ?? "");
+  const [workspace, setWorkspace] = useState(preset.workspace ?? presetWs ?? "");
   const [wsList, setWsList] = useState<Workspace[]>([]);
   // ws 列表加载中标志：初始 [] 与"加载完真的为空"都表现为 wsList=[]，需区分以防空态提示闪现
   const [wsLoading, setWsLoading] = useState(true);
@@ -267,6 +300,7 @@ export function ScanNewPage() {
                 wsList={wsList}
                 onWorkspaceChange={setWorkspace}
                 wsLoading={wsLoading}
+                presetReuseScanId={preset.reuseScanId}
               />
             )}
           </div>

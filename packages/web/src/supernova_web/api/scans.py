@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+from pathlib import Path
 
 from supernova_web.auth.dependencies import current_user, workspace_member
 from supernova_web.auth.models import User
@@ -79,7 +80,30 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "metrics": normalize_metrics(data.get("metrics", {})),
         "session": data.get("session", {}),
         "workflow_id": resolve_workflow_id(ws, scan_dir, scan_id),
+        # 重跑预填用：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
+        "source_repo": data.get("source_repo"),
+        "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
+        "authentication": _read_auth_config(scan_dir),
     }
+
+
+def _read_auth_config(scan_dir: Path) -> dict | None:
+    """读 scan_dir/scan-config.yaml 的 authentication（黑盒登录配置，供重跑预填）。
+
+    黑盒 _resolve_blackbox_inputs 在 req.authentication 非空时 dump 写入；无 auth 配置
+    （黑盒未启用登录）/ 白盒（无该文件）-> None。损坏 YAML -> None（best-effort，不阻塞详情）。
+    """
+    cfg = scan_dir / "scan-config.yaml"
+    if not cfg.exists():
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(cfg.read_text("utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("authentication"), dict):
+            return data["authentication"]
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 # ── 共享视图（scans.py 路由 + workspaces.py shim 转发共用）─────────────────────

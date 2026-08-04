@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +34,8 @@ interface Props {
   onWorkspaceChange: (ws: string) => void;
   /** ws 列表加载中（防首帧 [] 误判为空态闪现提示） */
   wsLoading: boolean;
+  /** 重跑预填的黑盒复用 scan_id（同 ws）；首帧保留预填值，不被 ws-change 清空 / 默认选最新覆盖。 */
+  presetReuseScanId?: string;
 }
 
 /** 步骤分组容器：圆角 + secondary 背景 + 边框 */
@@ -214,6 +216,7 @@ export function ScanFormFields({
   wsList,
   onWorkspaceChange,
   wsLoading,
+  presetReuseScanId,
 }: Props) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -236,12 +239,29 @@ export function ScanFormFields({
   }, [workspace, addOpen]);
 
   // 黑盒复用候选：按选定 ws 拉取其 whitebox scans。ws 切换 -> 旧 scan_id 失效，清空待重选。
+  // 重跑预填（presetReuseScanId）：首帧保留预填值（已在 f.reuseScanId），仅拉候选验证，
+  // 跳过清空与「默认选最新」；ws 切换后走原逻辑（预填仅对原 ws 一次性生效）。
+  const presetDoneRef = useRef(false);
   useEffect(() => {
     if (type !== "blackbox" || !workspace) {
       setWbScans([]);
       setWbLoadedFor(null);
       return;
     }
+    if (!presetDoneRef.current && presetReuseScanId) {
+      presetDoneRef.current = true;
+      listScans(workspace)
+        .then((all) => {
+          setWbScans(all.filter((s) => s.scan_type === "whitebox"));
+          setWbLoadedFor(workspace);
+        })
+        .catch(() => {
+          setWbScans([]);
+          setWbLoadedFor(workspace);
+        });
+      return;
+    }
+    presetDoneRef.current = true;
     set({ reuseScanId: "" });
     listScans(workspace)
       .then((all) => {

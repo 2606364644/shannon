@@ -92,6 +92,7 @@ async def test_start_lands_scan_in_scans_subdir(tmp_path, monkeypatch):
     assert not (tmp_path / "WOWN" / "session.json").exists()  # ws 根无 session.json
     sess = json.loads((scan_dir / "session.json").read_text())
     assert sess.get("owner") == "web"  # _mark_owner 标 scan session
+    assert sess.get("source_repo") == "/x"  # 白盒持久化 repo 名供重跑预填
 
 
 @pytest.mark.asyncio

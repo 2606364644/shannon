@@ -159,6 +159,10 @@ class ScanManager:
             if req.type == "whitebox":
                 handle = await self._submit_whitebox(
                     target, ws, scan_id, scan_dir, event_file, req.url or "")
+                # 持久化 repo 名（source.value，可为 group/repo）供重跑预填白盒仓库--
+                # repo_path 是绝对路径，前端 listRepos 返回的 Repo 无 path 字段无法反查 name。
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"source_repo": req.source.value if req.source else None})
             elif req.type == "blackbox":
                 config_path, repo_path = await self._resolve_blackbox_inputs(
                     req, ws, scan_dir, target)

@@ -9,6 +9,13 @@ import { ScanList } from "./ScanList";
 // toast 在 ScanList 用于操作反馈；隔离避免 sonner 全局副作用。
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
+// 捕获 useNavigate 调用以断言重跑的 location.state 预填（MemoryRouter 仍用 actual）。
+const { navMock } = vi.hoisted(() => ({ navMock: vi.fn() }));
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: () => navMock };
+});
+
 const running = {
   scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 1000,
   completed_at: null, vuln_count: 0, total_cost_usd: 1.5, cost_currency: "USD", is_running: true,
@@ -28,7 +35,7 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-beforeEach(() => { i18n.changeLanguage("zh"); listCalls = 0; });
+beforeEach(() => { i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear(); });
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -192,14 +199,57 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     await waitFor(() => expect(resumeCalls).toEqual(["ws/s3"]));
   });
 
-  it("重跑 -> 跳 /scan/new?workspace=<ws>", async () => {
-    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+  it("重跑（黑盒）-> getScan 拿配置 -> 跳 /scan/new 并预填 location state", async () => {
+    const auth = {
+      login_type: "form", login_url: "http://t.example/login",
+      credentials: { username: "admin" },
+      success_condition: { type: "url_contains", value: "welcome" },
+    };
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ scan_type: "blackbox", web_url: "http://t.example",
+          reuse_whitebox_scan_id: "wb-1", authentication: auth })),
+    );
     renderList();
     await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
-    // navigate 到 /scan/new?workspace=ws（MemoryRouter 无该路由 -> 不渲染，但 location 已变）
-    // 验证方式：重跑按钮点击后列表组件不再渲染（导航离开）。用 queryByText 守 s2 消失。
-    await waitFor(() => expect(screen.queryByText("扫描任务")).not.toBeInTheDocument());
+    await waitFor(() => expect(navMock).toHaveBeenCalled());
+    expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
+      state: { type: "blackbox", workspace: "ws", url: "http://t.example",
+        reuseScanId: "wb-1", auth },
+    });
+  });
+
+  it("重跑（白盒）-> 预填 source_repo", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([interrupted])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ scan_type: "whitebox", source_repo: "group/repo-a" })),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("s3")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
+    await waitFor(() => expect(navMock).toHaveBeenCalled());
+    expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
+      state: { type: "whitebox", workspace: "ws", repo: "group/repo-a" },
+    });
+  });
+
+  it("重跑 getScan 失败 -> 降级跳转（无 state）+ toast 提示", async () => {
+    const { toast } = await import("sonner");
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 })),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
+    await waitFor(() => expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws"));
+    // 降级：仅 path 参数，无 state。
+    expect(navMock.mock.calls.some(([p, o]) => p === "/scan/new?workspace=ws" && !o)).toBe(true);
+    expect(toast.error).toHaveBeenCalled();
   });
 });
 

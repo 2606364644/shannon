@@ -55,9 +55,9 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-function renderPage(initialPath = "/scan/new") {
+function renderPage(initialPath = "/scan/new", state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
+    <MemoryRouter initialEntries={[state ? { pathname: initialPath, state } : initialPath]}>
       <ScanNewPage />
     </MemoryRouter>,
   );
@@ -407,6 +407,54 @@ describe("ScanNewPage 黑盒代码上下文（恒复用白盒）", () => {
     // 即便填 url，reuseScanId 必填不可满足 → 提交 disabled
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
+  });
+});
+
+// === 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置 ===
+describe("ScanNewPage 重跑预填（location.state）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  it("白盒：state -> tab 白盒 + ws 选中 + repo 选中", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+      ])),
+    );
+    renderPage("/scan/new", { type: "whitebox", workspace: "ws1", repo: "foo" });
+    expect(screen.getByRole("tab", { name: "白盒" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
+  });
+
+  it("黑盒：state -> tab 黑盒 + url/reuse/auth 预填", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
+    const auth = {
+      login_type: "form", login_url: "http://t.example/login",
+      credentials: { username: "admin", password: "pw" },
+      success_condition: { type: "url_contains", value: "welcome" },
+    };
+    renderPage("/scan/new", { type: "blackbox", workspace: "ws1", url: "http://t.example",
+      reuseScanId: "20260731-1200", auth });
+    expect(screen.getByRole("tab", { name: "黑盒" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
+    expect(screen.getByDisplayValue("http://t.example")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    // auth 预填（enabled=true -> 登录配置展开，login_url/username 已填）
+    expect(screen.getByDisplayValue("http://t.example/login")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("admin")).toBeInTheDocument();
+  });
+
+  it("黑盒 reuseScanId 预填保留：多条候选时选中预填的而非默认最新", async () => {
+    const wbScans = [
+      { scan_id: "wb-new", scan_type: "whitebox", status: "completed", created_at: 9999, vuln_count: 0, is_running: false, workflow_id: "ws1-wb-new" },
+      { scan_id: "wb-old", scan_type: "whitebox", status: "completed", created_at: 1111, vuln_count: 0, is_running: false, workflow_id: "ws1-wb-old" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(wbScans)));
+    renderPage("/scan/new", { type: "blackbox", workspace: "ws1", reuseScanId: "wb-old" });
+    await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ws1-wb-old/)).toBeInTheDocument());
+    // 预填 wb-old 保留，未被「默认选最新 wb-new」覆盖
+    expect(screen.queryByText(/ws1-wb-new/)).not.toBeInTheDocument();
   });
 });
 

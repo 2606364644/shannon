@@ -67,13 +67,49 @@ def test_list_scans(authed_client, tmp_workspaces):
 
 def test_get_scan_detail(authed_client, tmp_workspaces):
     _make_scan(tmp_workspaces, "WS", scan_id="s1", status="completed",
-               repo_path="/code/x")
+               repo_path="/code/x", source_repo="group/repo-a")
     r = authed_client.get("/api/workspaces/WS/scans/s1")
     assert r.status_code == 200
     d = r.json()
     assert d["repo_path"] == "/code/x"
     assert d["scan_type"] == "whitebox"
     assert d["status"] == "completed"
+    # 重跑预填字段：白盒 source_repo；无 scan-config.yaml -> authentication None
+    assert d["source_repo"] == "group/repo-a"
+    assert d["reuse_whitebox_scan_id"] is None
+    assert d["authentication"] is None
+
+
+def test_get_scan_detail_rerun_preset_blackbox(authed_client, tmp_workspaces):
+    """黑盒 _scan_detail 返 reuse_whitebox_scan_id + authentication（读 scan-config.yaml）。"""
+    bb_dir = _make_scan(tmp_workspaces, "WS", scan_id="bb1", scan_type="blackbox",
+                        reuse_whitebox_scan_id="wb1")
+    (bb_dir / "scan-config.yaml").write_text("""authentication:
+  login_type: form
+  login_url: http://t/login
+  credentials:
+    username: admin
+    password: pw
+  success_condition:
+    type: url_contains
+    value: welcome
+""", encoding="utf-8")
+    r = authed_client.get("/api/workspaces/WS/scans/bb1")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["reuse_whitebox_scan_id"] == "wb1"
+    auth = d["authentication"]
+    assert auth["login_type"] == "form"
+    assert auth["login_url"] == "http://t/login"
+    assert auth["credentials"]["username"] == "admin"
+
+
+def test_get_scan_detail_no_auth_config(authed_client, tmp_workspaces):
+    """黑盒无 scan-config.yaml（未启用登录）-> authentication None，不阻塞详情。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="bb2", scan_type="blackbox")
+    r = authed_client.get("/api/workspaces/WS/scans/bb2")
+    assert r.status_code == 200
+    assert r.json()["authentication"] is None
 
 
 def test_get_scan_404_unknown(authed_client, tmp_workspaces):
