@@ -1,8 +1,14 @@
-# supernova-py 重构版相比原始 TS 版的安全扫描效果优化
+# supernova-py 相比 TS 版：安全扫描效果优化（踩坑叙事版）
 
 > 对比对象：`/root/shannon`（TypeScript 原始版，下称 **TS 版**） vs `/root/shannon-py`（Python 重构版，下称 **PY 版**，分支 `feat/fork-py`）。
 > 范围：**白盒 / 黑盒安全扫描的检测效果**（召回、准确率、覆盖面、产物可用性），不含纯工程重构。
-> 写法：每条优化按「踩到什么坑 → 怎么改的 → 验证有没有用」组织，不灌水。
+> 写法：每条优化按「踩到什么坑 → 怎么排查到根因 → 怎么改的 → 验证有没有用」组织，不灌水。
+>
+> **本文定位**：是 [`scan-effectiveness-gains-vs-ts.md`](./scan-effectiveness-gains-vs-ts.md)（主文档·能力对照矩阵）的**叙事版**——两份**同主题**（都是安全扫描效果），**不同写法**：
+> - **主文档** = 能力矩阵（W1-W10 / B1-B5 / P1 编号 + 验证状态三档 + 诚实边界），交付 / 汇报口径；
+> - **本文** = 每个优化「踩到什么坑 → 怎么排查 → 怎么改 → 验证」的**体感叙事**，读故事口径。
+>
+> 同一批优化点，两份各取一个角度；本文每章末尾标了对应的主文档能力点编号方便互查。§6 稳定性是其中一个章节（让确定性轨在大仓上跑完的工程，主文档 §8.5 外链到此），不是全文核心。二阶存储机制深析见 [`second-order-storage-taint-mechanism.md`](./second-order-storage-taint-mechanism.md)；目录索引见 [`README.md`](./README.md)。
 
 ---
 
@@ -10,9 +16,7 @@
 
 TS 版的检测链路从头到尾**只有一条腿**：每个漏洞类（injection / xss / ssrf / auth / authz）各跑一个 LLM agent，agent 自己读 recon、自己 grep、自己派 Task 子代理追 source→sink 链，自己下 verdict。没有代码索引、没有 sink/source 规则、没有 taint 图、没有 AST、没有任何确定性兜底（全仓 grep `taint|sink_rule|parameter_graph|code_index` 在 `apps/worker/src` 零命中确定性引擎代码）。召回全押在「这一个 agent 这一轮有没有盯到」上。
 
-这意味着两个先天弱点：**单点召回**（agent 漏了就彻底漏了，没有第二来源交叉验证）和**单仓视角**（微服务架构下跨服务数据流、跨仓信任边界完全盲区）。
-
-PY 版的优化主线就是围绕这两点展开的。
+这意味着两个先天弱点：**单点召回**（agent 漏了就彻底漏了，没有第二来源交叉验证）和**单仓视角**（微服务架构下跨服务数据流、跨仓信任边界完全盲区）。PY 版的优化主线就是围绕这两点展开的。
 
 ---
 
@@ -28,13 +32,15 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 - **GitNexus 轨**：代码索引（`build_code_index_with_gitnexus`）→ sink/source 规则 + taint 传播图（`parameter_graph.json`）→ `vuln_chain_builders/*_builder.py` 提候选链 → `chain_verdict.py` 跑**轻量 LLM 单次判定**（`run_claude_prompt` 结构化输出，非 agent）→ 产 `<vuln>_gitnexus_queue.json`。
 - **合并器** `dual_track_merger.py::merge_dual_track_queues`：按 `(vuln_type, location, sink)` 去重，**verdict 取并集 OR**——任一轨判 vulnerable 即最终 vulnerable。两轨都报 = `merge_source="both"` / `confidence="high"`；单轨报 = `needs_review`。
 
-铁律：两条腿**链来源不同**（LLM 轨自主探索 vs GitNexus 确定性产链），互不喂数据，所以 OR 才成立——确定性轨挂了 LLM 轨照跑，反之亦然。
+铁律：两条腿**链来源不同**（LLM 轨自主探索 vs GitNexus 确定性产链），互不喂数据，所以 OR 才成立——确定性轨挂了 LLM 轨照跑，反之亦然。这是项目最核心的架构不变量（CLAUDE.md §1）。
 
 ### 验证有没有用
 - `chain_verdict.py` 头部明确定位 GitNexus 轨是 **cross-validation / blind-spot fill，不约束 LLM 轨自由分析**。
 - `merge_dual_track_queues` 的 OR 语义经单测锁定（`_is_vulnerable(llm) or _is_vulnerable(gitnexus)`，`dual_track_merger.py:100`）。
 - 真机收益见下文各子项（authz 0→21、NodeGoat 三类 0→N）——这些本来 LLM 轨要么漏要么整段超时归零，是确定性轨兜回来的。
 - **诚实标注**：双轨的战略价值是「漏报对账 + 任一轨挂了不归零」，代价是 token 翻倍（初期明确不省 token 换少漏）。可配置开关 `SUPERNOVA_LLM_TRACK_ENABLED` 支持关 LLM 轨走纯确定性兜底（token 紧张档）。
+
+→ 能力点 **W1 / W10**、合并器 / 降级 / 开关语义的矩阵陈述见 [主文档 §2](./scan-effectiveness-gains-vs-ts.md)。
 
 ---
 
@@ -52,6 +58,8 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 
 **验证**：`test_sink_detector.py` + `test_rule_loader.py` 74 测试绿；`ts-orm-model-query` 规则对 `dbConfig.trip.query` 整链 receiver 命中实测通过。真机重扫 sentinel_dashboard 验 `code_index.json` 的 `sink_call_sites` 从空壳变硬规则 sink 待跑。
 
+→ 能力点 **W2 / W3** 见 [主文档 §3](./scan-effectiveness-gains-vs-ts.md)。
+
 ### 2.2 source 补召回 + intra-first taint（修 NodeGoat 三类全空）
 
 **坑**：NodeGoat（Express/JS）扫描 injection/xss/ssrf **三类 GitNexus 轨全空**（`taint_flows=0`）。根因是 `detect_entry_points` 把路由归到注册处 `index.js`，handler 不在 entry_point 里 → `source_detector` 漏扫 handler 内的 source（`eval(req.body.preTax)` 这类）→ `source_points=1` → handler 不进调用链 → `propagate_backward` 丢弃 intra 结果 → 0 flow。
@@ -61,6 +69,8 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 - `chain_propagator.py::produce_intra_first_taint_flows`：对含 sink 函数直接产**单步 intra TaintFlow**（不经 chain），`merge_taint_flows` 按 `(entry, param, sink)` 去重、intra-first 优先。
 
 **验证**：`test_source_discovery_llm`(13) + `test_intra_first_taint_flow`(7) = 20 绿；pipeline 锚点 `test_pipeline_intra_first_rescues_handler_not_in_entry_point` 绿。真机 NodeGoat 冒烟验 `parameter_graph.taint_flows` 0→N 待跑。
+
+→ 能力点 **W5** 见 [主文档 §4.3](./scan-effectiveness-gains-vs-ts.md)。
 
 ### 2.3 调用链下沉到 GitNexus 原生 process trace（authz 0→21）
 
@@ -72,6 +82,8 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 - authz 的 `find_unguarded_sink_paths` 四处改：entry 过滤含 process entry、放宽 route 守卫、sink 扫全链替 terminal、ownership 扫 entry→sink 段。
 
 **验证**：89 测试绿。**真机硬收益：authz 候选 0→21**（statement_template_svr，process trace 下沉后实测），chains 不再空壳，readline 不崩。这是确定性轨兜底价值最硬的一笔证据。
+
+→ 能力点 **W6 / W7** 见 [主文档 §4.1](./scan-effectiveness-gains-vs-ts.md)。
 
 ### 2.4 SSRF taint 断链 + 超时跳过 fallback（修 sentinel_dashboard SSRF=0）
 
@@ -85,6 +97,8 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 
 **验证**：`test_taint_timeout_fallback.py`(6) + 回归 208 绿。真机重扫验 ssrf>0 待跑。**影响面**：「sink 参数是局部变量对象」的跨函数 taint 链此前全丢——SSRF（httpClient.execute / OkHttpClient）、部分 SQL/命令注入（参数经 String.format 构造后传入）都受影响。
 
+→ 能力点 **W8** 见 [主文档 §4.4](./scan-effectiveness-gains-vs-ts.md)。
+
 ### 2.5 二阶存储中转双轨（stored XSS / 二阶 SQLi 系统性漏报）
 
 **坑**：同服务二阶漏洞——write 端做了净化但 read 端信任存储数据直接进 sink——双轨都系统性漏。GitNexus 轨的规则层和 `chain_propagator` **没有「存储中转」概念**（source_rules 无 storage-read / sink_rules 无 storage-write / propagator 只连单跳）；LLM 轨 `vuln-*.txt` 有 cross-service sink 规则但无系统「存储 write/read 二阶追链」方法论。
@@ -95,6 +109,8 @@ TS 版召回 100% 押在一个 vuln agent 上。agent 受上下文窗口、注�
 - 双轨：GitNexus ⑤ 字面量 token（db/config/cache/file，关轨兜底）+ LLM 轨二阶方法论（开轨增强），verdict OR。
 
 **验证**：8 task TDD 全完成，24/24 测试绿；集成 gap 修了（`extract_candidate_chains` 按 sink 路由不看 source_type 致 STORAGE 链被单 hop + 二阶 builder 双重 emit，commit `2bbd2947` 加 `source_type != STORAGE` 过滤）。真机 sentinel_dashboard 关轨重扫验 2ND-GN 非空待跑。
+
+→ 能力点 **W4** 要点见 [主文档 §4.5](./scan-effectiveness-gains-vs-ts.md)；完整分析逻辑见 [`second-order-storage-taint-mechanism.md`](./second-order-storage-taint-mechanism.md)。
 
 ---
 
@@ -113,6 +129,8 @@ authz 加了自己的「GitNexus 风格」轨（`authz_gitnexus_track.py` + `aut
 - process trace 下沉后 **authz 0→21**（见 2.3），就是这条轨跑出来的。
 - 修了一个致命的静默丢数据 bug：authz 探索分支 agent 产了 4 个 IDOR 候选（LLM turn 明说「34 条路由发现 4 个 IDOR 候选」），但 `authz_gitnexus_queue.json` 落地 **0 条**——根因是探索 prompt schema 没 ID 字段，`parse_lenient` 把缺必填 ID 的条目全丢了且不报。修法：`_parse_gitnexus_verdict_output` parse 前补序列化 ID + 读 `warnings` 打日志。`test_run_authz_gitnexus_judge.py` 6 passed 2 xfailed。**真机 hr_20260713 实测 4→0 → 修复后不再丢**。
 
+→ 能力点 **W6**（authz IDOR）见 [主文档 §4.2](./scan-effectiveness-gains-vs-ts.md)。
+
 ---
 
 ## 4. 跨仓微服务关联（多仓拓扑 + 信任边界 + 跨服务数据流）
@@ -125,6 +143,8 @@ TS 版**单仓扫描**——`PipelineInput.repoPath` 是单一绝对路径，全
 
 ### 验证有没有用
 cross-repo 全套 34 测试绿（orchestrator / correlation / blackbox_reuse / blackbox_flag），final review Ready-to-merge。真机 multi-repo 冒烟待跑。**这是覆盖面的硬扩展**——TS 版连多仓输入都不支持，谈不上跨服务召回。
+
+→ 能力点 **W9** 见 [主文档 §5](./scan-effectiveness-gains-vs-ts.md)。
 
 ---
 
@@ -142,11 +162,13 @@ TS 版的 PoC 散在 exploit 阶段的自由格式 `*_exploitation_evidence.md` 
 ### 验证有没有用
 `scripts/generate_poc.py` 对 invite_code_center 历史 session **实测产出 11 个 curl PoC**（XSS×2 / AUTHZ×4 / SSRF×1 + 变体）。`test_poc_generator.py` 测试套件落地。白盒/黑盒 workflow 端到端冒烟待跑。**产物质量直接拉满**——从「markdown 里抠 curl」到「一键产出可复用 curl + Burp raw 包」。
 
+→ 能力点 **P1** 见 [主文档 §7](./scan-effectiveness-gains-vs-ts.md)。
+
 ---
 
 ## 6. 稳定性优化：让确定性轨在大仓上能跑完（间接保召回）
 
-这一组不直接提召回，但解决一个致命问题：**确定性轨在大仓上整段超时失败 = 这条腿直接归零 = 双轨退化成 TS 单轨**。所以是召回的前提。
+> 这一节和上面 1-5 节一样属于安全效果优化的配套，但角度不同：它**不直接提召回**，解决的是「确定性轨在大仓上整段超时失败 = 这条腿直接归零 = 双轨退化成 TS 单轨」这个致命问题。所以是召回的前提，主文档 §8.5 把它外链到此。双引擎（claude-agent-sdk / openai-agents）能力对齐、cost 计费也属此类工程，不在此展开。
 
 ### 6.1 chunk token 阈值按模型 context 自适应
 
@@ -164,7 +186,13 @@ TS 版的 PoC 散在 exploit 阶段的自由格式 `*_exploitation_evidence.md` 
 
 **验证**：`test_llm_chunking.py`(9) + sink/source discovery 文件级新测试全绿。真机 kol 冒烟待跑。
 
-> **Koa + Sequelize 后端治本**（trip_1784270506）：同类稳定性问题的延伸——source_rules 对 TS 只有 Express `req.*` 无 Koa `ctx.*`（141 controller 里 104 用 ctx.*、0 用 req.*），sink_rules 漏 `Trip.query`/`dbConfig.trip.query`，discovery 各 120s timeout 串行累加撞 20min 墙。治本：source 加 5 条 Koa 规则、sink 加 `ts-orm-model-query`、候选层扩 Koa 解构、timeout 推荐 360s。source Koa 3 + sink 3 + discovery 5 新用例全绿，真机端到端待跑。
+### 6.3 Koa + Sequelize 后端治本（trip_1784270506）
+
+**坑**：同类稳定性问题的延伸——`source_rules` 对 TS 只有 Express `req.*` 无 Koa `ctx.*`（141 controller 里 104 用 ctx.*、0 用 req.*），`sink_rules` 漏 `Trip.query`/`dbConfig.trip.query`，discovery 各 120s timeout 串行累加撞 20min 墙。
+
+**改法**：source 加 5 条 Koa 规则、sink 加 `ts-orm-model-query`、候选层扩 Koa 解构、timeout 推荐 360s。
+
+**验证**：source Koa 3 + sink 3 + discovery 5 新用例全绿，真机端到端待跑。
 
 ---
 
@@ -175,6 +203,8 @@ TS 版**没有独立黑盒**——只有白盒 + exploitation（白盒发现后�
 
 ### 验证有没有用
 `test_endpoint_verify.py` 13 测试 + 全量 55 绿。**诚实说**：黑盒这块两边实际安全检测效果基本相当（都 exploitation-only），PY 唯一比 TS 多的是 TS 黑盒那个 `checkAuthzCoverage` 确定性对账兜底（recon 端点全集 − queue − safe_vectors = 漏判端点，纯数据减法写进报告标「authz 未测请人工复核」），PY 黑盒只有 queue 内部 coverage_renderer（universe=queue 非真实攻击面）。这道兜底是 advisory（提漏检可见性/合规可审计性，不提召回），优先级中低。
+
+→ 黑盒 exploitation 全链（B1-B5：endpoint 验证 / auth 客观校验 / verdict 4 层校验 / coverage 盲区 / 血缘溯源）见 [主文档 §6](./scan-effectiveness-gains-vs-ts.md)。
 
 ---
 
@@ -192,9 +222,11 @@ TS 版**没有独立黑盒**——只有白盒 + exploitation（白盒发现后�
 | SSRF taint 断链 fallback | 召回 | sentinel_dashboard SSRF=0 根因定位+修（真机待重扫） |
 
 **诚实边界：**
-- sink 规则补齐、二阶存储双轨、chunk threshold、文件级聚合、Koa/SSRF 治本——**测试全绿但真机冒烟多数待人工跑**。文档不把「测试绿」当「真机已验」。
+- sink 规则补齐、二阶存储双轨、chunk threshold、文件级聚合、Koa/SSRF 治本——**测试全绿但真机冒烟多数待人工跑**。本文不把「测试绿」当「真机已验」。
 - 黑盒安全效果两边基本相当，PY 黑盒 authz 对账兜底反而比 TS 少一道（advisory，非召回下降）。
 - 双轨代价是 token 翻倍（初期明确不省 token 换少漏）；可配关 LLM 轨走纯确定性兜底。
 - 双引擎（claude-agent-sdk / openai-agents）是工程能力对齐，**不算扫描效果优化**，本文不展开。
+
+→ 完整的诚实边界与反向差距（含 TS Pro `checkAuthzCoverage`、双账号 baseline 共同缺失等）见 [主文档 §8](./scan-effectiveness-gains-vs-ts.md)。
 
 > 一句话：PY 版相比 TS 版的核心增量是**给单轨纯 LLM 加了一条确定性兜底腿并把它真正跑通**（authz 0→21、NodeGoat 0→N、SSRF 断链修复是硬证据），外加**跨仓视角**和**结构化 PoC 产物**两个 TS 版完全没有的能力。确定性轨的多数召回增强目前是「测试绿 + 真机冒烟待跑」状态，真机全量验证是下一步。
