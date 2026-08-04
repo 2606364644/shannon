@@ -206,7 +206,6 @@ export function ReposTab({ workspace: wsProp }: Props) {
           <div className="space-y-3">
             {groups.map((g) => {
               const isCollapsed = collapsed.has(g.name);
-              const linkedCount = g.repos.filter((r) => r.linked).length;
               return (
                 <Card key={g.name} className="overflow-hidden p-0">
                   <button
@@ -217,15 +216,7 @@ export function ReposTab({ workspace: wsProp }: Props) {
                   >
                     <span className="font-medium">{g.name}</span>
                     <span className="text-sm tabular-nums text-muted-foreground">
-                      ({g.repos.length}
-                      {linkedCount > 0 && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="text-cyan">·{linkedCount}</span>
-                          </TooltipTrigger>
-                          <TooltipContent>{t("repos.countLinked", { count: linkedCount })}</TooltipContent>
-                        </Tooltip>
-                      )})
+                      ({g.repos.length})
                     </span>
                     <ChevronDown className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", isCollapsed && "-rotate-90")} />
                   </button>
