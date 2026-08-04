@@ -154,3 +154,125 @@ async def test_reconcile_reason_mentions_worker_not_started(tmp_path):
     assert wrote is True
     line = json.loads((ws_dir / "events.ndjson").read_text(encoding="utf-8").strip())
     assert "worker 容器可能未启动" in line["stderr_tail"]
+
+
+def _running_workflow_client(monkeypatch, status):
+    """patch temporalio.client.Client.connect 返回 fake client,其 workflow handle
+    describe() 返回给定 status。用于 reconcile 的 temporal workflow 状态校验测试。"""
+    import temporalio.client
+
+    class _Desc:
+        pass
+    _Desc.status = status
+    class _Handle:
+        async def describe(self):
+            return _Desc()
+    class _FakeClient:
+        def get_workflow_handle(self, workflow_id):
+            return _Handle()
+    async def _fake_connect(addr):
+        return _FakeClient()
+    monkeypatch.setattr(temporalio.client.Client, "connect", _fake_connect)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_when_workflow_running(tmp_path, monkeypatch):
+    """并发排队超提交宽限 + 无 heartbeat,但 temporal workflow 仍 RUNNING → 不判孤儿。
+
+    对症(2026-08-04):两个白盒 scan 并发,第二个在 worker 队列排队 >120s(被第一个占着),
+    提交宽限失效 + 期间无 heartbeat → 被 reconcile 误判 interrupted(终态不可逆),
+    而 workflow 实际仍 RUNNING、scan 后来正常跑(成幽灵 scan)。查 temporal 见 RUNNING 即不干预。
+    """
+    import temporalio.client
+
+    scan_dir = tmp_path / "workspaces" / "ws1" / "scans" / "NodeGoat-20260804-102704"
+    scan_dir.mkdir(parents=True)
+    old = time.time() - 3600
+    (scan_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": old,  # 提交已久 → 超宽限
+    }), encoding="utf-8")
+    # 无 heartbeat + 无 scan_end + 超宽限 → 旧逻辑必判孤儿;新逻辑查 temporal RUNNING 应跳过
+
+    _running_workflow_client(monkeypatch, temporalio.client.WorkflowExecutionStatus.RUNNING)
+
+    wrote = await reconcile_orphaned(scan_dir, is_running=False)
+    assert wrote is False
+    assert not (scan_dir / "events.ndjson").exists()
+    sess = json.loads((scan_dir / "session.json").read_text("utf-8"))
+    assert sess["status"] == "running"  # 未被改成 interrupted
+
+
+@pytest.mark.asyncio
+async def test_reconcile_orphan_when_workflow_terminal(tmp_path, monkeypatch):
+    """workflow 已终态(FAILED 等)→ 回退 heartbeat 逻辑,stale + 超宽限则照常判孤儿。
+
+    确保新增的 RUNNING 检查只在 RUNNING 时跳过:workflow 已结束(worker 不再推进,heartbeat
+    必 stale)时仍按原逻辑收尾,不破坏真孤儿对账。
+    """
+    import temporalio.client
+
+    scan_dir = tmp_path / "workspaces" / "ws1" / "scans" / "dead-20260804"
+    scan_dir.mkdir(parents=True)
+    old = time.time() - 3600
+    (scan_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": old,
+    }), encoding="utf-8")
+
+    _running_workflow_client(monkeypatch, temporalio.client.WorkflowExecutionStatus.FAILED)
+
+    wrote = await reconcile_orphaned(scan_dir, is_running=False)
+    assert wrote is True  # 终态 + stale → 回退判孤儿
+    line = json.loads((scan_dir / "events.ndjson").read_text("utf-8").strip())
+    assert line["status"] == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_orphan_when_temporal_unreachable(tmp_path, monkeypatch):
+    """temporal 不可达 → 回退 heartbeat 逻辑(fail-safe:真孤儿仍收尾,不因查不到而放任)。
+
+    兼容 host CLI scan:其无 temporal workflow,get_workflow_handle 会抛 → 同此回退路径,
+    靠 heartbeat 判活(heartbeat fresh 则 skip,见 test_orphan_recently_active_skip)。
+    """
+    import temporalio.client
+
+    scan_dir = tmp_path / "workspaces" / "ws1" / "scans" / "hostscan-20260804"
+    scan_dir.mkdir(parents=True)
+    old = time.time() - 3600
+    (scan_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": old,
+    }), encoding="utf-8")
+
+    async def _connect_raises(addr):
+        raise RuntimeError("temporal unreachable")
+    monkeypatch.setattr(temporalio.client.Client, "connect", _connect_raises)
+
+    wrote = await reconcile_orphaned(scan_dir, is_running=False)
+    assert wrote is True  # temporal 不可达 + stale → 回退判孤儿
+
+
+@pytest.mark.asyncio
+async def test_reconcile_orphan_when_temporal_query_slow(tmp_path, monkeypatch):
+    """temporal 查询超时(connect/describe 卡)→ 回退判孤儿，且不阻塞 reconcile。
+
+    守 /events 端点：reconcile 每次 poll 同步 await，Client.connect 无内置超时，temporal
+    抖动时可卡数十秒。限时后超时即回退(视同查不到 → heartbeat 逻辑)，真孤儿仍收尾，
+    且 live 页 SSE 不会被卡死。
+    """
+    import asyncio
+    import temporalio.client
+
+    scan_dir = tmp_path / "workspaces" / "ws1" / "scans" / "slow-20260804"
+    scan_dir.mkdir(parents=True)
+    old = time.time() - 3600
+    (scan_dir / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": old,
+    }), encoding="utf-8")
+
+    async def _connect_hang(addr):
+        await asyncio.sleep(60)  # 模拟 temporal 卡死(connect 无返回)
+    monkeypatch.setattr(temporalio.client.Client, "connect", _connect_hang)
+    # 压低限时阈值，测试不等 60s(验证 wait_for 超时生效)
+    monkeypatch.setenv("SUPERNOVA_RECONCILE_TEMPORAL_TIMEOUT_SECONDS", "0.1")
+
+    wrote = await reconcile_orphaned(scan_dir, is_running=False)
+    assert wrote is True  # 超时 → 回退判孤儿

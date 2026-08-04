@@ -7,12 +7,15 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
+from temporalio.client import Client, WorkflowExecutionStatus
 
 from supernova_core.session import SessionManager
 
@@ -57,6 +60,74 @@ async def _write_scan_end(event_file: Path, status: str,
         await fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _temporal_address() -> str:
+    """temporal 地址（与 scan_manager._temporal_address 同口径）。web 容器内 temporal 在
+    compose 服务名 `temporal` 上（非 localhost），靠 env SUPERNOVA_TEMPORAL_HOST:PORT。"""
+    host = os.environ.get("SUPERNOVA_TEMPORAL_HOST", "localhost")
+    port = int(os.environ.get("SUPERNOVA_TEMPORAL_PORT", "7233"))
+    return f"{host}:{port}"
+
+
+def _workflow_id_from_scan_dir(scan_dir: Path) -> str | None:
+    """从 scan_dir 反推 temporal workflow_id = {ws}-{scan_id}[-resume-N]。
+
+    scan_dir = <workspaces>/<ws>/scans/<scan_id>（T3 1:N 结构）。非此结构（legacy 平铺 ws 根
+    scan、或 default/ logs/ 等辅助目录）→ None，上层据此回退纯 heartbeat 判活。
+    resume 后缀读 session.json resumeAttempts（与 scan_manager._resolve_workflow_id 同口径）。
+    """
+    scans_dir = scan_dir.parent
+    if scans_dir.name != "scans":  # legacy 根 scan / 辅助目录 → 无可靠 workflow_id
+        return None
+    ws = scans_dir.parent.name
+    scan_id = scan_dir.name
+    n = 0
+    session_file = scan_dir / "session.json"
+    if session_file.exists():
+        try:
+            att = json.loads(session_file.read_text("utf-8")).get("resumeAttempts") or []
+            if isinstance(att, list):
+                n = len(att)
+        except (OSError, ValueError):
+            n = 0
+    return f"{ws}-{scan_id}-resume-{n}" if n else f"{ws}-{scan_id}"
+
+
+def _temporal_query_timeout() -> float:
+    """reconcile 查 temporal workflow 状态的限时(秒)。Client.connect 无内置连接超时，而
+    reconcile 在 /events 每次 poll 路径同步 await——temporal 抖动时 connect 可卡数十秒(OS
+    TCP 超时)，不限时会让 live 页 SSE 阻塞。默认 5s(正常 connect+describe <1s，5s 容抖动)。"""
+    return float(os.environ.get("SUPERNOVA_RECONCILE_TEMPORAL_TIMEOUT_SECONDS", "5"))
+
+
+async def _workflow_still_running(scan_dir: Path) -> bool:
+    """scan 对应 temporal workflow 是否仍 RUNNING。
+
+    RUNNING = workflow 已提交、尚未终态，**含 worker 还未 poll 到 task 的排队阶段**——这正是
+    「并发排队超 120s 提交宽限」的合法存活态，绝非孤儿。查到 RUNNING 即不干预（对症幽灵 scan）。
+
+    整个查询(connect + describe)经 asyncio.wait_for 限时（见 _temporal_query_timeout）：Client.connect
+    无内置超时，而 reconcile 在 /events 每次 poll 同步 await，temporal 抖动时卡死会阻塞 live 页 SSE。
+
+    降级：无法反推 workflow_id / 查询超时 / temporal 不可达 / workflow 不存在（host CLI scan 无 temporal
+    workflow、或 workflow 已被回收）→ 一律返 False，回退上层 heartbeat 判活（保持原行为：既不
+    误杀活 scan，也不放任真死 scan）。temporal 查询 best-effort，异常绝不阻塞 reconcile。
+    """
+    workflow_id = _workflow_id_from_scan_dir(scan_dir)
+    if workflow_id is None:
+        return False
+
+    async def _probe() -> bool:
+        client = await Client.connect(_temporal_address())
+        desc = await client.get_workflow_handle(workflow_id).describe()
+        return desc.status == WorkflowExecutionStatus.RUNNING
+
+    try:
+        return await asyncio.wait_for(_probe(), timeout=_temporal_query_timeout())
+    except Exception:
+        # 超时 / 断连 / workflow 不存在 → 保守回退，不据「查不到」误判
+        return False
+
+
 async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
     """若 ws 是孤儿（非完成/失败 + 不存活 + 无 scan_end），补写 scan_end + 标 session 完成。
 
@@ -74,6 +145,14 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
         # 触发 reconcile 误判 interrupted」(hr_1784014329 即此, _status_of 终态优先致误杀不可逆)。
         # 回归:kol_mapping_service_20260708-193139(host CLI 起的活 scan)被误判即缺 heartbeat 门。
         if is_scan_alive(ws_dir):
+            return False
+
+        # temporal workflow 仍 RUNNING（含 worker 队列排队等执行的阶段）→ scan 绝非孤儿，
+        # 不写 scan_end。对症并发排队超提交宽限被误判 interrupted（2026-08-04 幽灵 scan）：
+        # 第二个白盒 scan 被第一个占着 worker，排队 >120s 期间无 heartbeat，旧逻辑据 heartbeat
+        # stale 误判；workflow RUNNING 是比 heartbeat 更可靠的「已提交存活」信号——heartbeat 仅
+        # 反映 worker 是否已开始执行，不反映「已提交、排队中」的合法存活态。
+        if await _workflow_still_running(ws_dir):
             return False
 
         mgr = SessionManager(ws_dir.parent)
