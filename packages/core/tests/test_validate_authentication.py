@@ -603,3 +603,119 @@ async def test_executor_raises_when_deliverables_path_missing(tmp_path):
             repo_path=str(tmp_path / "repo"),
         )
 
+
+# --- 多身份 preflight 登录循环 (子项目2 T4) ---
+
+@pytest.mark.asyncio
+async def test_multi_identity_login_loop_writes_manifest(tmp_path):
+    """accounts 非空时，每个 identity 各登录一次，产 identity-manifest.json。"""
+    from supernova_core.models.config import Config, Authentication, Credentials, Account
+    from supernova_core.services.validate_authentication import load_identity_manifest
+
+    async def fake_execute(**kwargs):
+        sf = kwargs["prompt_variables"]["AUTH_STATE_FILE"]
+        Path(sf).write_text(json.dumps({"cookies": [{"name": "s"}], "origins": []}))
+        from supernova_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=100, structured_output={"login_success": True})
+
+    mock_executor = MagicMock(); mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    cfg = Config(authentication=Authentication(login_type="form", login_url="https://x/login",
+        credentials=Credentials(username="userA", password="p")),
+        accounts=[
+            Account(id="victim-b", role="user", tier="low", credentials=Credentials(username="userB")),
+            Account(id="admin-1", role="admin", tier="high", credentials=Credentials(username="admin")),
+        ])
+    with patch("supernova_core.config.parser.parse_config", return_value=cfg), \
+         patch("supernova_core.config.parser.distribute_config",
+               return_value=MagicMock(authentication=cfg.authentication, accounts=cfg.accounts)):
+        result = await validate_authentication(
+            web_url="https://x", config_path="/c.yaml", workspace_path=str(tmp_path),
+            prompt_manager=mock_pm, executor=mock_executor)
+    assert result.success is True
+    assert mock_executor.execute.call_count == 3  # primary + 2 accounts
+    manifest = load_identity_manifest(tmp_path)
+    assert manifest is not None
+    ids = {r.account_id for r in manifest.identities}
+    assert ids == {"primary", "victim-b", "admin-1"}
+    assert all(r.available for r in manifest.identities)
+    # 每个 identity 落不同 auth-state 文件
+    call_paths = [c.kwargs["prompt_variables"]["AUTH_STATE_FILE"] for c in mock_executor.execute.call_args_list]
+    assert len(set(call_paths)) == 3
+
+
+@pytest.mark.asyncio
+async def test_victim_failure_degrades_but_scan_continues(tmp_path):
+    """victim/baseline 登录失败 → available=False，整体仍 success（不 fail-fast）。"""
+    from supernova_core.models.config import Config, Authentication, Credentials, Account
+    from supernova_core.services.validate_authentication import load_identity_manifest
+    async def fake_execute(**kwargs):
+        sf = kwargs["prompt_variables"]["AUTH_STATE_FILE"]
+        Path(sf).write_text(json.dumps({"cookies":[{}],"origins":[]}))
+        ok = "victim-b" not in sf  # victim 那次失败
+        from supernova_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=10, structured_output={"login_success": ok})
+    me = MagicMock(); me.execute = AsyncMock(side_effect=fake_execute); mp = MagicMock()
+    cfg = Config(authentication=Authentication(login_type="form", login_url="https://x/l",
+        credentials=Credentials(username="u")), accounts=[
+        Account(id="victim-b", role="user", tier="low", credentials=Credentials(username="v"))])
+    with patch("supernova_core.config.parser.parse_config", return_value=cfg), \
+         patch("supernova_core.config.parser.distribute_config",
+               return_value=MagicMock(authentication=cfg.authentication, accounts=cfg.accounts)):
+        r = await validate_authentication(web_url="https://x", config_path="/c.yaml",
+            workspace_path=str(tmp_path), prompt_manager=mp, executor=me)
+    assert r.success is True  # victim 死不拖垮
+    manifest = load_identity_manifest(tmp_path)
+    vic = [x for x in manifest.identities if x.account_id == "victim-b"][0]
+    assert vic.available is False
+
+
+@pytest.mark.asyncio
+async def test_primary_failure_is_fail_fast(tmp_path):
+    """primary(attacker) 登录失败 → success=False，扫描终止信号。"""
+    from supernova_core.models.config import Config, Authentication, Credentials, Account
+    async def fake_execute(**kwargs):
+        from supernova_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=10, structured_output={"login_success": False,
+            "failure_point":"username_or_password","failure_detail":"bad"})
+    me = MagicMock(); me.execute = AsyncMock(side_effect=fake_execute); mp = MagicMock()
+    cfg = Config(authentication=Authentication(login_type="form", login_url="https://x/l",
+        credentials=Credentials(username="u")), accounts=[
+        Account(id="v", role="user", tier="low", credentials=Credentials(username="v2"))])
+    with patch("supernova_core.config.parser.parse_config", return_value=cfg), \
+         patch("supernova_core.config.parser.distribute_config",
+               return_value=MagicMock(authentication=cfg.authentication, accounts=cfg.accounts)):
+        r = await validate_authentication(web_url="https://x", config_path="/c.yaml",
+            workspace_path=str(tmp_path), prompt_manager=mp, executor=me)
+    assert r.success is False
+    assert me.execute.call_count == 1  # primary 一失败就停，不登 victim
+
+
+@pytest.mark.asyncio
+async def test_no_accounts_skips_manifest_byte_identical(tmp_path):
+    """Step 7 regression: 无 accounts 时不落 identity-manifest.json (byte-identical with pre-T4)."""
+    from supernova_core.models.config import Config, Authentication, Credentials
+    from supernova_core.services.validate_authentication import load_identity_manifest
+
+    async def fake_execute(**kwargs):
+        sf = kwargs["prompt_variables"]["AUTH_STATE_FILE"]
+        Path(sf).write_text(json.dumps({"cookies": [{"name": "s"}], "origins": []}))
+        from supernova_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=100, structured_output={"login_success": True})
+
+    mock_executor = MagicMock(); mock_executor.execute = AsyncMock(side_effect=fake_execute)
+    mock_pm = MagicMock()
+    cfg = Config(authentication=Authentication(login_type="form", login_url="https://x/login",
+        credentials=Credentials(username="userA", password="p")))
+    with patch("supernova_core.config.parser.parse_config", return_value=cfg), \
+         patch("supernova_core.config.parser.distribute_config",
+               return_value=MagicMock(authentication=cfg.authentication, accounts=[])):
+        result = await validate_authentication(
+            web_url="https://x", config_path="/c.yaml", workspace_path=str(tmp_path),
+            prompt_manager=mock_pm, executor=mock_executor)
+    assert result.success is True
+    assert mock_executor.execute.call_count == 1
+    # 关键 byte-identical 不变量：无 accounts → 无 manifest
+    assert (tmp_path / "identity-manifest.json").exists() is False
+    assert load_identity_manifest(tmp_path) is None
+
