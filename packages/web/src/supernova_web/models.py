@@ -61,15 +61,21 @@ class ScanRequest(BaseModel):
 
     @model_validator(mode="after")
     def _auth_profile_xor_inline(self) -> "ScanRequest":
-        """blackbox:auth_profile_id+auth_credential_id 与 authentication 二选一。"""
+        """blackbox 登录三模式互斥校验（子项目2 T10 放宽）。
+
+        - profile_id 单独     = 多身份模式（scan_manager 展开所有 credentials → accounts[]）；
+        - profile_id + cred_id = 单角色模式（现状，scan_manager 展开该 credential）；
+        - inline authentication 单独 = 内联登录（现状）；
+        - profile_id + inline authentication = 非法（互斥）；
+        - cred_id 无 profile_id = 非法（cred_id 必须依附 profile）。
+        """
         if self.type == "blackbox":
-            has_profile = self.auth_profile_id or self.auth_credential_id
+            has_profile = self.auth_profile_id is not None
+            has_cred = self.auth_credential_id is not None
             has_inline = self.authentication is not None
-            if has_profile and has_inline:
+            if (has_profile or has_cred) and has_inline:
                 raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
-            if self.auth_profile_id and not self.auth_credential_id:
-                raise ValueError("选认证档案时必须同时指定 auth_credential_id")
-            if self.auth_credential_id and not self.auth_profile_id:
+            if has_cred and not has_profile:
                 raise ValueError("选认证档案时必须同时指定 auth_profile_id")
         return self
 

@@ -63,3 +63,100 @@ async def test_resolve_blackbox_credential_missing_raises(tmp_path):
     scan_dir.mkdir(parents=True)
     with pytest.raises(ValueError, match="角色凭据不存在"):
         await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_expands_all_credentials_multi_identity(tmp_path):
+    """子项目2 T10：profile_id 无 cred_id → 多身份展开。
+
+    选首个 low tier 作 primary（attacker），其余进 accounts[]（含 tier 标签）。
+    cred_admin(admin)/cred_u1(user)/cred_u2(user) → primary=cred_u1（首个 low），
+    accounts=[cred_admin(high), cred_u2(low)]。
+    """
+    import yaml
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    store.write("ws1", [AuthProfile(
+        id="prof_1", name="NG", login_url="http://t/", login_type="form",
+        login_flow=["成功标志:/dashboard"],
+        credentials=[
+            AuthProfileCredential(id="cred_admin", role="admin", username="admin", password="pw"),
+            AuthProfileCredential(id="cred_u1", role="user", username="u1", password="pw"),
+            AuthProfileCredential(id="cred_u2", role="user", username="u2", password="pw"),
+        ])])
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1",
+                      auth_profile_id="prof_1")  # 无 cred_id = 多身份模式
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    config_path, _ = await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+    assert config_path is not None
+    body = (scan_dir / "scan-config.yaml").read_text("utf-8")
+    cfg = yaml.safe_load(body)
+    assert "accounts" in cfg and len(cfg["accounts"]) == 2  # 其余 2 个（primary 进 authentication）
+    tiers = {a["id"]: a["tier"] for a in cfg["accounts"]}
+    assert tiers["cred_admin"] == "high"
+    # primary = 首个 low = cred_u1（不进 accounts）；cred_u2 在 accounts 中为 low
+    assert "cred_u1" not in tiers  # primary 不在 accounts
+    assert tiers["cred_u2"] == "low"
+    # authentication 应为 primary(cred_u1) 展开的单 credentials Authentication
+    assert cfg["authentication"]["credentials"]["username"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_multi_identity_all_high_falls_back_to_first(tmp_path):
+    """无 low tier 时 primary 回落到首个 credential（兜底，不抛错）。"""
+    import yaml
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    store.write("ws1", [AuthProfile(
+        id="prof_1", name="NG", login_url="http://t/", login_type="form",
+        credentials=[
+            AuthProfileCredential(id="cred_a1", role="admin", username="a1", password="pw"),
+            AuthProfileCredential(id="cred_a2", role="admin", username="a2", password="pw"),
+        ])])
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1", auth_profile_id="prof_1")
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    config_path, _ = await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+    body = (scan_dir / "scan-config.yaml").read_text("utf-8")
+    cfg = yaml.safe_load(body)
+    # 全 high → primary 回落首个(cred_a1) → accounts 只剩 cred_a2
+    assert len(cfg["accounts"]) == 1
+    assert cfg["accounts"][0]["id"] == "cred_a2"
+    assert cfg["authentication"]["credentials"]["username"] == "a1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_multi_identity_profile_missing_raises(tmp_path):
+    """多身份模式（无 cred_id）下选不存在的档案 → ValueError。"""
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1",
+                      auth_profile_id="prof_missing")
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    with pytest.raises(ValueError, match="认证档案不存在"):
+        await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_multi_identity_no_store_raises(tmp_path):
+    """多身份模式但 auth_profile_store 未注入 → RuntimeError（对齐单角色分支口径）。"""
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock())  # 无 auth_profile_store
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1", auth_profile_id="prof_1")
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="auth_profile_store 未注入"):
+        await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)

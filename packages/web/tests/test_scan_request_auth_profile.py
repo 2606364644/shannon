@@ -28,6 +28,19 @@ def test_blackbox_both_profile_and_inline_rejected():
                             "credentials": {"username": "a"}})
 
 
-def test_blackbox_profile_without_credential_rejected():
+def test_auth_profile_id_without_credential_id_is_valid_multi_identity():
+    """只给 profile_id（无 cred_id）= 多身份模式，应合法。
+
+    子项目2 T10：放宽原"_auth_profile_id 必须配 cred_id"硬约束——profile_id 单独
+    即合法（scan_manager 展开所有 credentials 为 accounts[]）；profile_id + cred_id
+    仍合法（单角色，现状）；profile_id + inline authentication 仍非法（互斥）。
+    """
+    req = _bb(auth_profile_id="prof_1")
+    assert req.auth_profile_id == "prof_1"
+    assert req.auth_credential_id is None
+
+
+def test_blackbox_credential_id_without_profile_rejected():
+    """cred_id 无 profile_id 仍非法（cred_id 必须依附 profile）。"""
     with pytest.raises(ValidationError):
-        _bb(auth_profile_id="prof_1")  # 缺 auth_credential_id
+        _bb(auth_credential_id="cred_a")

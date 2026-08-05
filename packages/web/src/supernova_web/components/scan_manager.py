@@ -333,8 +333,11 @@ class ScanManager:
         from supernova_core.models.config import Authentication
 
         config_path: str | None = None
-        # 选已保存档案:展开该角色 → Authentication(scan-config.yaml 明文,core 合流点约束)
-        # 与下方 inline authentication 互斥(model_validator _auth_profile_xor_inline 已保证二选一)。
+        # 选已保存档案：两互斥子模式（model_validator _auth_profile_xor_inline 已保证互斥）：
+        #   - profile_id + cred_id = 单角色（现状）：展开该 credential → authentication；
+        #   - profile_id 单独       = 多身份（子项目2 T10）：展开所有 credentials →
+        #     authentication(primary=首个 low) + accounts[](其余 identity 含 tier 标签)。
+        # 与下方 inline authentication 互斥。
         if req.auth_profile_id and req.auth_credential_id:
             if self._auth_profile_store is None:
                 raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
@@ -347,6 +350,47 @@ class ScanManager:
             from .auth_profile_store import credential_to_authentication
             auth = credential_to_authentication(profile, cred)
             payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
+            cfg_file = scan_dir / "scan-config.yaml"
+            cfg_file.write_text(
+                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+                encoding="utf-8")
+            config_path = str(cfg_file)
+        elif req.auth_profile_id:
+            # 多身份模式（子项目2 T10）：展开所有 credentials → authentication + accounts[]。
+            if self._auth_profile_store is None:
+                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
+            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
+            if profile is None:
+                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            from supernova_core.utils.authz_identity import derive_privilege_tier
+            from .auth_profile_store import credential_to_authentication
+            # high_priv_names 硬编码（plan 作者认可简化；env 化推迟）。
+            high_priv_names = ["admin"]
+            creds = profile.credentials
+
+            def _tier_of(c):
+                return derive_privilege_tier(c.role, high_priv_names)
+
+            # primary = 首个 low（无 low 回落首个，兜底防全 high 时无 primary）。
+            lows = [c for c in creds if _tier_of(c) == "low"]
+            primary = lows[0] if lows else (creds[0] if creds else None)
+            if primary is None:
+                raise ValueError(f"认证档案无凭据: {req.auth_profile_id}")
+            primary_auth = credential_to_authentication(profile, primary)
+            accounts = []
+            for c in creds:
+                if c.id == primary.id:
+                    continue
+                accounts.append({
+                    "id": c.id,
+                    "role": c.role,
+                    "tier": _tier_of(c),
+                    "credentials": {"username": c.username, "password": c.password},
+                })
+            payload = {
+                "authentication": primary_auth.model_dump(exclude_none=True, mode="json"),
+                "accounts": accounts,
+            }
             cfg_file = scan_dir / "scan-config.yaml"
             cfg_file.write_text(
                 yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
