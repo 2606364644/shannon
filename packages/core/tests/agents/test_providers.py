@@ -786,12 +786,12 @@ class TestOpenAIProvider:
 
 
 class TestOpenAISubagentMaxTurns:
-    """B2: openai 子代理 max_turns 默认 40（对称主 agent _max_turns()）。"""
+    """B2: openai 子代理 max_turns 默认 100（对称主 agent _max_turns()）。"""
 
-    def test_default_is_40(self, monkeypatch):
+    def test_default_is_100(self, monkeypatch):
         monkeypatch.delenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", raising=False)
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible"))
-        assert provider._subagent_max_turns() == 40
+        assert provider._subagent_max_turns() == 100
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", "60")

@@ -142,11 +142,11 @@ class OpenAIProvider(BaseProvider):
     def _subagent_max_turns(self) -> int:
         # 子代理（Task 委派）max_turns。结构层已硬限单层（子代理无 subagent_run
         # + 只读工具集 [read_file, glob, grep]），调大无递归风险，仅增单次 token。
-        # B2: 20→40,锚定更复杂的追链子任务。
+        # B2: 20→40,锚定更复杂的追链子任务；后续 40→100 给追第三方包源码等更长子任务。
         # P3c 阶段 0：self.config.subagent_max_turns 优先（None 回落 env）
         if self.config.subagent_max_turns is not None:
             return self.config.subagent_max_turns
-        return int(os.getenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", "40"))
+        return int(os.getenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", "100"))
 
     def _call_timeout(self) -> float:
         """call() stream 消费的 wall-clock 超时（秒）—— openai 引擎自补的超时兜底。
@@ -156,14 +156,14 @@ class OpenAIProvider(BaseProvider):
         deepseek 流式响应 stall（服务端/网络断流，TCP 未断）或 SDK 内部 await 卡住时，
         stream_events 永久 await、worker 静默 hang（2026-07-16 trip_1784167551：pre-recon
         卡死 50min，2h activity timeout 未到，live 页无日志更新）。超时 → asyncio.TimeoutError
-        → 外层 except → _classify_error 判 retryable → activity 重试。默认 1800s（30min，
+        → 外层 except → _classify_error 判 retryable → activity 重试。默认 2400s（40min，
         覆盖 pre-recon 等长 agent 的正常时长，仅兜底永久 hang，不误杀慢但正常的 run）。
 
-        P3c 阶段 0：self.config.call_timeout 优先（None 回落 env，默认 1800s）。
+        P3c 阶段 0：self.config.call_timeout 优先（None 回落 env，默认 2400s）。
         """
         if self.config.call_timeout is not None:
             return self.config.call_timeout
-        return float(os.getenv("SUPERNOVA_OPENAI_CALL_TIMEOUT", "1800"))
+        return float(os.getenv("SUPERNOVA_OPENAI_CALL_TIMEOUT", "2400"))
 
     def _instructions(self) -> str | None:
         """Part B: narration-language directive as the parent Agent's system message.

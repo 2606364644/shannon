@@ -36,7 +36,7 @@ def test_subagent_max_turns_falls_back_to_env(monkeypatch):
 
 def test_subagent_max_turns_default(monkeypatch):
     monkeypatch.delenv("SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS", raising=False)
-    assert _make()._subagent_max_turns() == 40
+    assert _make()._subagent_max_turns() == 100
 
 
 # —— _call_timeout（SUPERNOVA_OPENAI_CALL_TIMEOUT）——
@@ -52,4 +52,4 @@ def test_call_timeout_falls_back_to_env(monkeypatch):
 
 def test_call_timeout_default(monkeypatch):
     monkeypatch.delenv("SUPERNOVA_OPENAI_CALL_TIMEOUT", raising=False)
-    assert _make()._call_timeout() == 1800.0
+    assert _make()._call_timeout() == 2400.0
