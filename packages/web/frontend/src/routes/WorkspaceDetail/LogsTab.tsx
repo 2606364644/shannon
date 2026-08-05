@@ -92,9 +92,12 @@ export function LogsTab() {
   const lines = content.split(/\r?\n/).filter(Boolean);
   const big = lines.length > VIRTUAL_LINE_THRESHOLD;
 
+  // 自适应布局：grid 不强制满高，两栏各自 max-h（100dvh-14rem，与 LiveTab 同口径=TopBar+main py+scan header+tabs）
+  // + min-h-0 允许内滚。没选日志时右栏仅提示行（不触发 max-h）-> 容器塌缩 -> 整页不溢出、无外层滚动条；
+  // 选了日志后右栏顶 max-h 独立内滚。max-h 对 calc 误差高容忍（偏大仅上限松，不强制溢出）。
   return (
-    <div className="grid grid-cols-[240px_1fr] gap-4 h-[calc(100vh-180px)]">
-      <div className="border-r border-border overflow-y-auto pr-2">
+    <div className="grid grid-cols-[240px_1fr] gap-4">
+      <div className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-y-auto border-r border-border pr-2">
         {filesLoading && <Skeleton className="h-4 w-full" />}
         {filesErr && <ErrorState message={filesErr} />}
         {!filesLoading && !filesErr && files.length === 0 && (
@@ -112,7 +115,7 @@ export function LogsTab() {
           </button>
         ))}
       </div>
-      <div ref={viewportRef} className="overflow-auto h-full">
+      <div ref={viewportRef} className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-auto">
         {!sel && <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.selectHint")}</div>}
         {sel && contentErr && <ErrorState message={contentErr} />}
         {sel && !contentErr && isJsonl && big ? (

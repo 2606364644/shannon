@@ -136,32 +136,37 @@ export default function LiveTab() {
   const finalCost = isCompleted ? (meta?.metrics?.total_cost_usd ?? null) : null;
   const finalCostCurrency = meta?.metrics?.cost_currency ?? null;
 
+  // 自适应控制台布局：根 max-h（100dvh-14rem，与 LogsTab 同口径=TopBar+main py+scan header+tabs）封顶，
+  // 不再强制满高 -> 内容少时不溢出视口、无外层滚动条；指标卡/提示框 shrink-0 钉住，LogStream fill 撑满
+  // 中间剩余空间，事件多时 flex-1 min-h-0 压缩独立 tail 内滚。max-h 对 calc 误差高容忍（偏大仅上限松）。
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="flex max-h-[calc(100dvh-14rem)] min-h-[320px] flex-col gap-3">
+      <div className="flex shrink-0 items-center justify-between">
         <Badge variant="outline" className={`gap-1 ${sm.cls}`}>
           <span aria-hidden>●</span>{t(sm.labelKey)}
         </Badge>
       </div>
-      <DashboardPanel
-        state={state}
-        elapsedMs={elapsed}
-        startedAtMs={startedAtMs}
-        totalElapsedMs={totalElapsed}
-        completedAtMs={completedAtMs}
-        finalCost={finalCost}
-        finalCostCurrency={finalCostCurrency}
-        lastEventMs={lastEventMs}
-        eventsCount={events.length}
-      />
-      <LogStream events={events} />
+      <div className="shrink-0">
+        <DashboardPanel
+          state={state}
+          elapsedMs={elapsed}
+          startedAtMs={startedAtMs}
+          totalElapsedMs={totalElapsed}
+          completedAtMs={completedAtMs}
+          finalCost={finalCost}
+          finalCostCurrency={finalCostCurrency}
+          lastEventMs={lastEventMs}
+          eventsCount={events.length}
+        />
+      </div>
+      <LogStream events={events} fill />
       {stalled && (
-        <div role="status" className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
+        <div role="status" className="shrink-0 rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
           {t("workspaceDetail.live.stalledHint")}
         </div>
       )}
       {endedCompleted && (
-        <div role="status" className="flex items-center gap-3 rounded-md border border-border bg-card p-3 text-sm">
+        <div role="status" className="flex shrink-0 items-center gap-3 rounded-md border border-border bg-card p-3 text-sm">
           <span className="text-cyan">{t("workspaceDetail.live.endedTitle")}</span>
           <span className="text-muted-foreground">{t("workspaceDetail.live.endedHint")}</span>
           <Button size="sm" variant="outline" onClick={() => navigate(`/p/${workspace}/scans/${scanId}/report`)}>
@@ -170,7 +175,7 @@ export default function LiveTab() {
         </div>
       )}
       {endedFailed && (
-        <div role="status" className="space-y-2 rounded-md border border-yellow/40 bg-card p-3 text-sm">
+        <div role="status" className="shrink-0 space-y-2 rounded-md border border-yellow/40 bg-card p-3 text-sm">
           <div className="flex items-center gap-2">
             <span className="text-yellow font-medium">
               {t(END_LABEL[scanEnd!.status] ?? "workspaceDetail.live.endIncomplete")}（{scanEnd!.status}）
