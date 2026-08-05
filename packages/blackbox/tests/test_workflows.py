@@ -191,6 +191,124 @@ def test_exploit_tasks_unpacking_arity_matches_construction():
     )
 
 
+def test_auth_validation_and_exploit_share_workspace_path_for_manifest(tmp_path):
+    """子项目2 T9 回归：run_blackbox_auth_validation 写 identity-manifest.json 到
+    input.workspace_path（经 validate_authentication），run_exploit_agent 经
+    exploit_executor 读 load_identity_manifest(deliverables.parent)。两者必须指向
+    同一目录，否则 manifest 路径分叉 → exploit 阶段 IDENTITY_CONTEXT 恒空 →
+    多身份越权对比失明（authz-exploit 退化成单身份扫描，silent failure）。
+
+    锁定链路（三段，缺一即路径分叉）：
+      (A) activities.run_blackbox_auth_validation → validate_authentication(workspace_path=input.workspace_path)
+      (B) activities.run_exploit_agent → deliverables = _get_deliverables_path(input);
+          exploit.execute(workspace_path=deliverables.parent)
+      (C) _get_deliverables_path(input).parent == Path(input.workspace_path)
+
+    若 (A) 改成 workspace_path=deliverables.parent 或别的变量、或 (B) 改成 workspace_path=别的
+    路径、或 _get_deliverables_path 不再以 input.workspace_path 为根，本测试 FAIL。
+    """
+    import ast
+    from supernova_blackbox.pipeline import activities as acts
+    from supernova_blackbox.pipeline.activities import _get_deliverables_path
+    from supernova_blackbox.pipeline.shared import BlackboxActivityInput
+
+    tree = ast.parse(Path(acts.__file__).read_text())
+
+    def _fn(name: str) -> ast.AsyncFunctionDef:
+        f = next(
+            (n for n in tree.body
+             if isinstance(n, ast.AsyncFunctionDef) and n.name == name),
+            None,
+        )
+        assert f is not None, f"activities.py 缺少 {name} 定义（本测试失效）"
+        return f
+
+    def _kwarg(call_node: ast.Call, kw_name: str) -> ast.expr | None:
+        if not isinstance(call_node, ast.Call):
+            return None
+        for kw in call_node.keywords:
+            if kw.arg == kw_name:
+                return kw.value
+        return None
+
+    # ── (A) run_blackbox_auth_validation 调 validate_authentication(workspace_path=input.workspace_path[or ""]) ──
+    auth_fn = _fn("run_blackbox_auth_validation")
+    auth_calls = [
+        n for n in ast.walk(auth_fn)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "validate_authentication"
+    ]
+    assert auth_calls, "run_blackbox_auth_validation 必须调 validate_authentication"
+    wp_value = _kwarg(auth_calls[0], "workspace_path")
+    assert wp_value is not None, (
+        "validate_authentication 必须经 workspace_path= 关键字传参；"
+        "改回位置参数会让本测试失效（且使调用点隐式依赖参数顺序，易踩）。"
+    )
+    # 接受 `input.workspace_path` 或 `input.workspace_path or ""`
+    operands = wp_value.values if isinstance(wp_value, ast.BoolOp) else [wp_value]
+    assert any(
+        isinstance(o, ast.Attribute)
+        and isinstance(o.value, ast.Name)
+        and o.value.id == "input"
+        and o.attr == "workspace_path"
+        for o in operands
+    ), (
+        "validate_authentication(workspace_path=...) 必须引用 input.workspace_path "
+        f"（现 {ast.dump(wp_value)}）；改成别的变量会让 manifest 写盘目录与 workflow 传入分叉"
+    )
+
+    # ── (B) run_exploit_agent 调 exploit.execute(workspace_path=deliverables.parent) ──
+    exploit_fn = _fn("run_exploit_agent")
+    # (B.1) deliverables = _get_deliverables_path(input) 赋值存在
+    has_deliverables_assign = any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "deliverables" for t in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "_get_deliverables_path"
+        for node in ast.walk(exploit_fn)
+    )
+    assert has_deliverables_assign, (
+        "run_exploit_agent 必须有 deliverables = _get_deliverables_path(input) 赋值；"
+        "改了变量名或换路径源会让 manifest 读盘目录与 auth 阶段写盘目录分叉"
+    )
+    # (B.2) exploit.execute(workspace_path=deliverables.parent)
+    exploit_calls = [
+        n for n in ast.walk(exploit_fn)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "execute"
+        and isinstance(n.func.value, ast.Name)
+        and n.func.value.id == "exploit"
+    ]
+    assert exploit_calls, "run_exploit_agent 必须调 exploit.execute(...)"
+    wp_value = _kwarg(exploit_calls[0], "workspace_path")
+    assert wp_value is not None \
+        and isinstance(wp_value, ast.Attribute) \
+        and wp_value.attr == "parent" \
+        and isinstance(wp_value.value, ast.Name) \
+        and wp_value.value.id == "deliverables", (
+        "exploit.execute 必须经 workspace_path=deliverables.parent 传参 "
+        f"（现 {ast.dump(wp_value) if wp_value else '缺 kwarg'}）；"
+        "改别的路径源会让 manifest 读盘 != 写盘"
+    )
+
+    # ── (C) 功能性核对：_get_deliverables_path(input).parent == Path(input.workspace_path) ──
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    inp = BlackboxActivityInput(
+        web_url="http://target/",
+        repo_path=str(tmp_path / "repo"),
+        workspace_path=str(ws),
+    )
+    deliverables = _get_deliverables_path(inp)
+    assert deliverables.parent == ws, (
+        "_get_deliverables_path(input).parent 必须 == Path(input.workspace_path)；"
+        f"现 {deliverables.parent} != {ws} → manifest 写 {ws}/ 读 {deliverables.parent}/，分叉"
+    )
+
+
 class TestBlackboxBrowserEngineIntegration:
     """Test browser engine resolution logic used by BlackboxScanWorkflow."""
 
