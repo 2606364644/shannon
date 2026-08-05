@@ -1,0 +1,66 @@
+# futunn.com (富途牛牛) 扫描配置 - shannon-py 黑盒用
+# 由原始 TS 项目 apps/worker/configs/futunn.yaml 平移; schema 经重构后完整保留
+# (shannon_core.models.config: Authentication.login_flow + Rules.avoid)。
+# 消费链: parse_config -> run_blackbox_auth_validation(浏览器执行 login_flow)
+#         + prompts/manager.build_login_instructions(注入登录指令)。
+# 用法: uv run shannon-blackbox start -c configs/futunn.yaml \
+#         --url https://www.futunn.com/ --repo <repo> -w <workspace>
+#
+# 登录流程: OA登录(autoweb) -> 开户获取HK测试账号密码 -> 用测试账号登录富途牛牛
+# 引擎: agent-browser (默认)。login_flow 保持自然语言步骤(对齐 TS 原版 agent 即兴执行
+#        模式); 仅将原版 "page.evaluate" (playwright 术语) 改为引擎中性的
+#        "browser JavaScript eval", 让 agent-browser 的 agent 顺畅对应到 eval 工具。
+
+description: "富途牛牛 Web 端 - 通过 OA 登录后开户获取测试账号，再用测试账号登录富途"
+
+authentication:
+  login_type: form
+  # 起始页面是 OA 登录页，登录后自动跳转到账户管理页
+  login_url: "https://test.passport.futuoa.com/site/login.html?returnUrl=http://test-tools.futuoa.com/accountmanage"
+  credentials:
+    username: "autoweb"
+    password: "autoweb"  # 浏览器输入明文，页面 JS 自动 RSA 加密
+  login_flow:
+    # === Phase 1: OA Login ===
+    - "Navigate to the OA login page"
+    - "Wait for the login form to load completely"
+    - "Enter $username in the username/nick input field"
+    - "Enter $password in the password input field"
+    - "Click the login or submit button"
+    - "Wait for the page to redirect to test-tools.futuoa.com/accountmanage"
+
+    # === Phase 2: Open Account - call the HK account creation API in browser context ===
+    - "On the account management page, use the browser JavaScript eval to send an async POST request to http://test-tools.futuoa.com/api/submit (await fetch inside the eval)"
+    - "Set request headers: Content-Type: application/json, futu-x-csrf-token to the value of the futu-csrf cookie (read from document.cookie inside the eval)"
+    - 'Send request body: {"id":27,"req_data":"{\"method\":\"Individual\",\"old_new\":\"1\",\"account_region\":\"hk\",\"account_status\":\"2\",\"account_broker\":\"hk\",\"source\":\"test_tools\",\"account_type\":[\"margin\"],\"is_universal\":\"1\",\"username\":\"autoweb\"}"}'
+    - "Parse the JSON response, then parse the nested JSON string in data.data. Extract the account number and password from the message field formatted as: 开户成功，HK号：ACCOUNT_NUMBER，密码：PASSWORD. Remember these values for the next step"
+
+    # === Phase 3: Login to futunn with the newly created account ===
+    - "Navigate to https://passport.futunn.com/?target=https%3A%2F%2Fmobile.futunn.com%2F&type=login&lang=zh-hk"
+    - "Wait for the futunn login form to load completely"
+    - "Enter the extracted account number in the account/phone/email input field"
+    - "Enter the extracted password in the password input field"
+    - "Click the login or submit button"
+    - "Wait for the page to redirect and verify it has landed on mobile.futunn.com"
+
+  success_condition:
+    type: url_contains
+    value: "mobile.futunn.com"
+
+rules:
+  avoid:
+    - description: "Do not test the OA passport authentication system"
+      type: subdomain
+      value: "test-passport"
+
+    - description: "Do not test the account management tool"
+      type: subdomain
+      value: "test-tools"
+
+    - description: "Do not test the futunn passport login system itself"
+      type: subdomain
+      value: "passport"
+
+    - description: "Skip logout to preserve the authenticated session"
+      type: url_path
+      value: "/logout"

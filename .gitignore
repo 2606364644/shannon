@@ -22,6 +22,9 @@ uv.lock
 .env.bak.*
 configs/moomoo.yaml
 configs/*.yaml
+# 例外: 黑盒扫描登录配置(非程序自身配置,需入库供 worker/agent 使用)
+!configs/futunn.yaml
+!configs/moomoo.yaml
 
 # 本地环境适配 / 运行时数据（不入 git）
 /docker-compose.override.yml
