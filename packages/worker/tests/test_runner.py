@@ -58,6 +58,56 @@ async def test_run_worker_connects_and_registers_two_workers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_worker_registers_all_defined_activities(monkeypatch):
+    """护栏：wb/bb 常驻 Worker 必须注册 activities 模块里所有 @activity.defn。
+
+    根因(2026-08-05 NodeGoat 黑盒 scan failed)：spec 2026-08-03 新增 run_endpoint_verify
+    时只同步了 CLI blackbox/worker.py，漏改 Web 常驻 runner.py → 网页发起的黑盒扫描
+    exploitation 阶段调 run_endpoint_verify 时 temporalio NotFoundError → 整条 workflow
+    FAILED。既有的 ``len(activities) >= N`` 弱数量断言拦不住单点漏注(17 vs 18 都 ≥10)，
+    改精确集合比对。注册的是真实函数对象，读 __name__ 即 defn 名(bb_assemble_report 等
+    import 别名自动解析回 assemble_report——@activity.defn 无显式 name=，defn 名 == 函数名)。
+    一次覆盖 wb+bb 双 Worker，顺带防 whitebox 侧同类漏注。
+    """
+    from pathlib import Path
+    from supernova_worker.runner import run_worker
+    from supernova_whitebox.pipeline import activities as wb_activities
+    from supernova_blackbox.pipeline import activities as bb_activities
+    from supernova_core.testing.activity_registration import _activity_def_names
+
+    monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
+    mock_client = AsyncMock()
+    wb_worker = MagicMock()
+    wb_worker.run = AsyncMock(return_value=None)
+    bb_worker = MagicMock()
+    bb_worker.run = AsyncMock(return_value=None)
+
+    with (
+        patch("supernova_worker.runner.Client.connect",
+              AsyncMock(return_value=mock_client)),
+        patch("supernova_worker.runner.Worker",
+              side_effect=[wb_worker, bb_worker]) as mock_worker_cls,
+    ):
+        await run_worker("temporal:7233")
+
+    wb_call, bb_call = mock_worker_cls.call_args_list
+    wb_registered = {getattr(f, "__name__", f) for f in wb_call.kwargs["activities"]}
+    bb_registered = {getattr(f, "__name__", f) for f in bb_call.kwargs["activities"]}
+
+    wb_expected = _activity_def_names(
+        Path(wb_activities.__file__).read_text(encoding="utf-8"))
+    bb_expected = _activity_def_names(
+        Path(bb_activities.__file__).read_text(encoding="utf-8"))
+
+    assert wb_registered == wb_expected, (
+        f"whitebox worker 注册不一致：missing={sorted(wb_expected - wb_registered)}, "
+        f"extra={sorted(wb_registered - wb_expected)}")
+    assert bb_registered == bb_expected, (
+        f"blackbox worker 注册不一致：missing={sorted(bb_expected - bb_registered)}, "
+        f"extra={sorted(bb_registered - bb_expected)}")
+
+
+@pytest.mark.asyncio
 async def test_run_worker_propagates_connect_failure():
     """temporal 连不上时 run_worker 抛错（fail-fast，不静默吞）。"""
     from supernova_worker.runner import run_worker
