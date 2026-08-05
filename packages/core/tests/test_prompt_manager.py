@@ -707,3 +707,85 @@ def test_vuln_summary_subsections_counts_only_single_point_cards() -> None:
     assert "### Injection" in out
     assert "### Xss" in out
 
+
+# ---------------------------------------------------------------------------
+# build_identity_context (子项目2 T7: 黑盒多身份越权对比)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def identity_prompts_dir(tmp_path):
+    """Write the _identities.txt partial into a tmp prompts dir (mirror login_prompts_dir)."""
+    shared = tmp_path / "shared"
+    shared.mkdir(parents=True)
+    (shared / "_identities.txt").write_text(
+        "<identity_set>\n"
+        "You have MULTIPLE authenticated sessions available (one per identity).\n"
+        "For each identity, restore its saved session before acting as that identity:\n\n"
+        "{{IDENTITY_SESSION_ROWS}}\n\n"
+        "<comparison_protocol>\n"
+        "Pairwise comparison matrix (attacker vs baseline) for authorization testing:\n"
+        "{{IDENTITY_COMPARISON_PAIRS}}\n\n"
+        "Rules:\n"
+        "- VERTICAL (low attacker × high baseline): high-baseline session establishes the admin-only\n"
+        "  capability; if low-attacker session can reach equivalent capability ⇒ EXPLOITED.\n"
+        "- HORIZONTAL (low ↔ low): victim session reads ITS OWN private resource as baseline;\n"
+        "  if attacker session reads same resource and data matches victim baseline ⇒ EXPLOITED.\n"
+        "- NO BASELINE available for a direction (victim/baseline unavailable) ⇒ that \"successful access\"\n"
+        "  MUST be reported as status=potential, NEVER exploited.\n"
+        "</comparison_protocol>\n"
+        "</identity_set>",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_build_identity_context_renders_multi_identity(identity_prompts_dir):
+    from supernova_core.services.validate_authentication import (
+        IdentityManifest,
+        IdentityRecord,
+    )
+    from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
+
+    pm = PromptManager(str(identity_prompts_dir))
+    manifest = IdentityManifest(identities=[
+        IdentityRecord("primary", "user", "low", "auth-state.json", True),
+        IdentityRecord("victim-b", "user", "low", "auth-state-victim-b.json", True),
+        IdentityRecord("admin-1", "admin", "high", "auth-state-admin-1.json", True),
+    ])
+    engine = AgentBrowserEngine()
+    ctx = pm.build_identity_context(manifest, engine)
+    assert "primary" in ctx and "victim-b" in ctx and "admin-1" in ctx
+    assert "state load" in ctx  # auth_load_command 嵌入
+    assert "vertical" in ctx and "horizontal" in ctx  # 比较协议矩阵
+
+
+def test_build_identity_context_empty_when_no_manifest(tmp_path):
+    pm = PromptManager(str(tmp_path))
+    assert pm.build_identity_context(None, None) == ""
+
+
+def test_build_identity_context_empty_when_single_available(tmp_path):
+    """<2 available identities ⇒ "" (single-identity keeps the shared-session prompt)."""
+    from supernova_core.services.validate_authentication import (
+        IdentityManifest,
+        IdentityRecord,
+    )
+    pm = PromptManager(str(tmp_path))
+    manifest = IdentityManifest(identities=[
+        IdentityRecord("primary", "user", "low", "auth-state.json", True),
+        IdentityRecord("victim-b", "user", "low", "auth-state-victim-b.json", False),
+    ])
+    assert pm.build_identity_context(manifest, None) == ""
+
+
+def test_identity_context_token_interpolated_via_interpolate(prompts_dir):
+    """{{IDENTITY_CONTEXT}} is substituted by _interpolate from variables; empty ⇒ vanish."""
+    (prompts_dir / "idctx.txt").write_text("BEFORE{{IDENTITY_CONTEXT}}AFTER", encoding="utf-8")
+    manager = PromptManager(prompts_dir)
+    result = manager.load_sync("idctx", {"web_url": "", "IDENTITY_CONTEXT": "X"})
+    assert "BEFOREXAFTER" == result
+    # Empty / missing ⇒ token vanishes
+    result_empty = manager.load_sync("idctx", {"web_url": ""})
+    assert "BEFOREAFTER" == result_empty
+

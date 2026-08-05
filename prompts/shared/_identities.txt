@@ -1,0 +1,19 @@
+<identity_set>
+You have MULTIPLE authenticated sessions available (one per identity).
+For each identity, restore its saved session before acting as that identity:
+
+{{IDENTITY_SESSION_ROWS}}
+
+<comparison_protocol>
+Pairwise comparison matrix (attacker vs baseline) for authorization testing:
+{{IDENTITY_COMPARISON_PAIRS}}
+
+Rules:
+- VERTICAL (low attacker × high baseline): high-baseline session establishes the admin-only
+  capability; if low-attacker session can reach equivalent capability ⇒ EXPLOITED.
+- HORIZONTAL (low ↔ low): victim session reads ITS OWN private resource as baseline;
+  if attacker session reads same resource and data matches victim baseline ⇒ EXPLOITED.
+- NO BASELINE available for a direction (victim/baseline unavailable) ⇒ that "successful access"
+  MUST be reported as status=potential, NEVER exploited.
+</comparison_protocol>
+</identity_set>

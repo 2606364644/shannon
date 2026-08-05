@@ -125,6 +125,10 @@ class PromptManager:
         result = result.replace("{{DELIVERABLES_PATH}}", variables.get("deliverables_path", ""))
         result = result.replace("{{SCRATCHPAD_PATH}}", variables.get("scratchpad_path", ""))
 
+        # 子项目2 T7: 多身份越权对比 context。executor 在 prompt_variables 里注入
+        # IDENTITY_CONTEXT=build_identity_context(...)（见 Task 8）；<2 身份时为 "" ⇒ token 消失。
+        result = result.replace("{{IDENTITY_CONTEXT}}", variables.get("IDENTITY_CONTEXT", ""))
+
         # Resolve browser session ID (backward compat: fall back to playwright_session)
         session_id = (
             variables.get("browser_session_id")
@@ -391,3 +395,67 @@ class PromptManager:
             login_instructions = login_instructions.replace("{{totp_secret}}", creds.totp_secret)
 
         return login_instructions
+
+    def build_identity_context(self, manifest, engine) -> str:
+        """Render the multi-identity comparison partial (子项目2 T7).
+
+        - ``manifest is None`` or fewer than 2 *available* identities ⇒ return ""
+          (single-identity scans keep the existing shared-session prompt).
+        - ≥2 available ⇒ read ``shared/_identities.txt`` and substitute the
+          session rows + comparison-pair matrix into the partial. The returned
+          string is fed by Task 8 into the authz-exploit prompt via the
+          ``{{IDENTITY_CONTEXT}}`` placeholder (resolved in :meth:`_interpolate`).
+
+        Note: this reads the partial directly and substitutes ``{{...}}`` tokens
+        manually — it is NOT loaded through the ``@include`` mechanism.
+        """
+        from supernova_core.utils.authz_identity import build_comparison_matrix
+        from supernova_core.services.playwright_config_writer import get_identity_session_id
+        from supernova_core.models.config import Account, Credentials
+
+        if manifest is None:
+            return ""
+        available = [r for r in manifest.identities if r.available]
+        if len(available) < 2:
+            return ""  # 单身份走 _shared-session，不注入 identity context
+
+        # Feed build_comparison_matrix via Account objects built from IdentityRecords.
+        accounts = [
+            Account(
+                id=r.account_id,
+                credentials=Credentials(username=r.account_id),
+                role=r.role,
+                tier=r.tier,
+            )
+            for r in available
+        ]
+
+        rows = []
+        for r in available:
+            # Primary identity keeps the base authz-exploit session id (no suffix);
+            # other identities get a per-account session slot.
+            sid = (
+                "authz-exploit"
+                if r.account_id == "primary"
+                else get_identity_session_id("authz-exploit", r.account_id)
+            )
+            if engine is not None:
+                load = engine.auth_load_command(sid, r.auth_state_file)
+            else:
+                load = f"state load {r.auth_state_file}"
+            rows.append(
+                f"- identity={r.account_id} role={r.role} tier={r.tier} session={sid} | {load}"
+            )
+
+        pairs = build_comparison_matrix(accounts)
+        pair_lines = [
+            f"- {p.kind}: attacker={p.attacker_id} baseline={p.baseline_id}" for p in pairs
+        ]
+
+        template_path = Path(self.prompts_dir) / "shared" / "_identities.txt"
+        template = template_path.read_text(encoding="utf-8")
+        template = template.replace("{{IDENTITY_SESSION_ROWS}}", "\n".join(rows))
+        template = template.replace(
+            "{{IDENTITY_COMPARISON_PAIRS}}", "\n".join(pair_lines) or "(none)"
+        )
+        return template
