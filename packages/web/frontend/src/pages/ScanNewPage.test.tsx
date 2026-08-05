@@ -503,6 +503,119 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     // 不显 ProfilePicker 的「选择认证档案」placeholder
     expect(screen.queryByText("选择认证档案")).toBeNull();
   });
+
+  // inline 模式：Step4 突破 max-w-2xl 成全宽双列--右列 InlineAuthFields 显「登录参数」eyebrow，
+  // 字段移至右侧空白处而非纵向堆叠撑高 Step4（2026-08-05）。
+  it("inline 模式：字段移至右侧双列（显「登录参数」eyebrow）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    // inline 模式（默认 source）-> 右列 InlineAuthFields 渲染「登录参数」eyebrow
+    expect(screen.getByText("登录参数")).toBeInTheDocument();
+    // 既有 inline 字段仍在（loginUrl placeholder）
+    expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
+  });
+});
+
+// === inline 临时填写 -> 保存为认证档案（2026-08-05）===
+// 用户意图：临时填写区既能直接运行（开始渗透），也能保存成档案复用；保存入口与填写区在一起（非弹窗）。
+describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  // Label 与 Input 同处 space-y-1 div（InlineAuthFields 凭据区结构）；Label 无 htmlFor，按文本定位 input。
+  function inputByLabel(labelText: RegExp | string) {
+    const label = screen.getByText(labelText);
+    return label.parentElement?.querySelector("input") as HTMLInputElement;
+  }
+
+  // 通用：黑盒 + 选 ws1 + 填 url + 启用登录（inline 默认）+ 填 loginUrl/username/password/totp
+  async function fillInlineAuth() {
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
+    fireEvent.change(inputByLabel("密码"), { target: { value: "pw" } });
+    fireEvent.change(inputByLabel(/TOTP 密钥/), { target: { value: "T" } });
+  }
+
+  it("保存：body 含 login_url/totp + 自动切 profile 选中新建档案", async () => {
+    let created: Record<string, unknown> | undefined;
+    const NEW_PROFILE = {
+      id: "prof_new", name: "NG 后台", login_url: "http://t/login", login_type: "form",
+      credentials: [{ id: "cred_new", role: "admin", username: "alice", verify_status: { state: "unverified" } }],
+    };
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/workspaces/:ws/auth-profiles", async ({ request }) => {
+        created = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(NEW_PROFILE);
+      }),
+      // 保存后 ProfilePicker mount + refreshSignal 触发重拉 -> 返回含新建档案的列表
+      http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json([NEW_PROFILE])),
+    );
+    await fillInlineAuth();
+    // 点「保存为认证档案」展开（loginUrl+username 已填 -> 按钮可点）
+    fireEvent.click(screen.getByRole("button", { name: "保存为认证档案" }));
+    // 展开表单：填档案名（角色默认 admin）
+    await waitFor(() => expect(screen.getByPlaceholderText(/NG 管理后台/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/NG 管理后台/), { target: { value: "NG 后台" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存为认证档案" }));
+    await waitFor(() => expect(created).toBeDefined());
+    // body 断言：字段一一映射，totp_secret 保留
+    expect(created!.name).toBe("NG 后台");
+    expect(created!.login_url).toBe("http://t/login");
+    expect(created!.login_type).toBe("form");
+    const creds = created!.credentials as Record<string, unknown>[];
+    expect(creds[0].username).toBe("alice");
+    expect(creds[0].password).toBe("pw");
+    expect(creds[0].totp_secret).toBe("T");
+    expect(creds[0].role).toBe("admin");
+    // 自动切 profile 模式 + 选中：ProfilePicker 档案 Select 显新档案名，角色 Select 显 "admin · alice"
+    await waitFor(() => expect(screen.getByText("NG 后台")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/admin · alice/)).toBeInTheDocument());
+  });
+
+  it("保存：档案名重复 422 -> toast 错误，保留展开可重试", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/workspaces/:ws/auth-profiles", () =>
+        HttpResponse.json({ detail: "档案名已存在" }, { status: 422 })),
+    );
+    const spy = vi.spyOn(toast, "error");
+    await fillInlineAuth();
+    fireEvent.click(screen.getByRole("button", { name: "保存为认证档案" }));
+    await waitFor(() => expect(screen.getByPlaceholderText(/NG 管理后台/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/NG 管理后台/), { target: { value: "dup" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存为认证档案" }));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    // 仍保留展开态（档案名输入框仍在，可改名重试）
+    expect(screen.getByPlaceholderText(/NG 管理后台/)).toBeInTheDocument();
+  });
+
+  it("保存：未填登录地址/用户名 -> 展开按钮 disabled + 常驻提示（不发请求）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    // 未填 loginUrl/username -> 保存按钮 disabled + 显「请先填写登录地址和用户名」提示
+    const saveBtn = screen.getByRole("button", { name: "保存为认证档案" });
+    expect(saveBtn).toBeDisabled();
+    expect(screen.getByText(/请先填写登录地址和用户名/)).toBeInTheDocument();
+  });
 });
 
 // === 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置 ===
