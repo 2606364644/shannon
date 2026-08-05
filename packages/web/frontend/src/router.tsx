@@ -13,6 +13,7 @@ import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
 import LiveTab from "./routes/WorkspaceDetail/LiveTab";
 import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
 import WsSettingsTab from "./routes/WorkspaceDetail/WsSettingsTab";
+import { AuthProfilesPage } from "./pages/AuthProfilesPage";
 import { getScan, listScans } from "./api/client";
 import { AppShell } from "./components/layout/AppShell";
 import { DevComponentsPage } from "./pages/DevComponentsPage";
@@ -82,6 +83,7 @@ export const router = createBrowserRouter([
           // ws 级 tab（仓库/配置）保留在 ws 概览下
           { path: "repos", element: <ReposTab /> },
           { path: "settings", element: <WsSettingsTab /> },
+          { path: "auth-profiles", element: <AuthProfilesPage /> },
           // 旧 ws-scoped scan tab 路由 -> redirect 到 latest scan 对应 tab（过渡期 shim）
           { path: "overview", element: <LegacyWsTabRedirect tab="overview" /> },
           { path: "report", element: <LegacyWsTabRedirect tab="report" /> },

@@ -1,0 +1,128 @@
+// Task 11: AuthProfilesPage CRUD(list + 新建/编辑对话框 + 删除)。
+// Harness mirrors OverviewTab.test.tsx(msw + MemoryRouter + <Route> + i18n.changeLanguage("zh"));
+// brief 的 selector 简化对双 "新建档案" 按钮(工具栏 + 对话框提交)无法消歧, 改用 within(dialog)。
+// GET handler 改为有状态(POST 后追加), 反映真实后端语义——否则提交后 refresh 仍返初始列表。
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup, within, act } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import i18n from "@/i18n";
+import { AuthProfilesPage } from "./AuthProfilesPage";
+import type { AuthProfile } from "@/api/types";
+
+const initial: AuthProfile[] = [
+  {
+    id: "prof_1",
+    name: "NG",
+    login_url: "http://t/",
+    login_type: "form",
+    credentials: [
+      { id: "cred_a", role: "admin", username: "admin", password: "••••",
+        verify_status: { state: "unverified" } },
+    ],
+  },
+];
+let profiles: AuthProfile[];
+
+const server = setupServer(
+  http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(profiles)),
+  http.post("/api/workspaces/:ws/auth-profiles", async ({ request }) => {
+    const b = (await request.json()) as {
+      name?: string;
+      login_url?: string;
+      login_type?: string;
+      credentials?: Array<{ role?: string; username?: string }>;
+    };
+    const newProfile: AuthProfile = {
+      id: "prof_new",
+      name: b.name ?? "",
+      login_url: b.login_url ?? "",
+      login_type: (b.login_type ?? "form") as "form" | "sso" | "api" | "basic",
+      credentials: [{
+        id: "cred_new",
+        role: b.credentials?.[0]?.role ?? "admin",
+        username: b.credentials?.[0]?.username ?? "",
+        verify_status: { state: "unverified" },
+      }],
+    };
+    profiles = [...profiles, newProfile];
+    return HttpResponse.json(newProfile);
+  }),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// jsdom navigator.language 默认 en, LanguageDetector 会把 i18n 切到 en; 现有断言依赖中文渲染, 钉回 zh。
+beforeEach(() => {
+  i18n.changeLanguage("zh");
+  profiles = [...initial];
+});
+afterEach(() => { server.resetHandlers(); cleanup(); if (vi.isFakeTimers()) vi.useRealTimers(); });
+afterAll(() => server.close());
+
+function renderPage(ws = "ws1") {
+  return render(
+    <MemoryRouter initialEntries={[`/p/${ws}/auth-profiles`]}>
+      <Routes>
+        <Route path="/p/:workspace/auth-profiles" element={<AuthProfilesPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("AuthProfilesPage", () => {
+  it("渲染档案列表", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+  });
+
+  it("新建档案提交后刷新列表", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    // 此时对话框未开, "新建档案" 仅工具栏按钮一个匹配
+    fireEvent.click(screen.getByText("新建档案"));
+    fireEvent.change(screen.getByLabelText("档案名"), { target: { value: "App2" } });
+    fireEvent.change(screen.getByLabelText("登录地址"), { target: { value: "http://x/" } });
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "u" } });
+    // 对话框开后: 工具栏按钮 + DialogTitle + 提交按钮三处都是 "新建档案" 文案。
+    // scope 到 dialog 内, 用 role=button + name 精确取提交按钮(排除 DialogTitle)。
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "新建档案" }));
+    await waitFor(() => expect(screen.getByText("App2")).toBeInTheDocument());
+  });
+
+  // Task 12: 凭据「测试登录」触发 testCredential → 轮询 getVerifyStatus → 显示成功徽章。
+  // 轮询策略:用 vi.useFakeTimers() + advanceTimersByTimeAsync(3000) 加速(避免 3s 真等待)。
+  // 已有同模式先例:useWorkspaces.test.tsx / LiveTab.test.tsx(fake timers + msw fetch 走 microtask 正常解析)。
+  it("测试登录触发轮询并显示成功徽章", async () => {
+    let testCalls = 0;
+    server.use(
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/credentials/:cid/test", () => {
+        testCalls++;
+        // 模拟后端持久化 verify_status:测试触发后,下次 GET list 返回 success 状态。
+        profiles = [{
+          ...initial[0],
+          credentials: [{
+            ...initial[0].credentials[0],
+            verify_status: { state: "success", last_verified_at: "2026-08-05T00:00:00Z" },
+          }],
+        }];
+        return HttpResponse.json({ workflow_id: "wf-1", probe_dir: "/p" });
+      }),
+      http.get("/api/workspaces/:ws/auth-profiles/:pid/credentials/:cid/verify-status", () =>
+        HttpResponse.json({ state: "success", last_verified_at: "2026-08-05T00:00:00Z" })),
+    );
+    renderPage();
+    // 初始 list 加载(real timers):凭据行可见 + 默认「未验证」徽章
+    await waitFor(() => expect(screen.getByText(/admin · admin/)).toBeInTheDocument());
+    expect(screen.getByText("未验证")).toBeInTheDocument();
+    // 切到 fake timers 后再点按钮:onTest 内部 setTimeout(3000) 受 fake timer 控
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByText("测试登录"));
+    // 推进 3000ms:触发首次轮询 → getVerifyStatus 解析 → onChanged → refresh → 重新 GET list 返 success
+    // advanceTimersByTimeAsync 递归 flush microtasks(msw fetch + React setState 都在其内完成)
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText("已验证")).toBeInTheDocument();
+    expect(testCalls).toBe(1);
+  });
+});

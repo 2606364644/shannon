@@ -5,7 +5,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import i18n from "@/i18n";
-import { ScanNewPage, buildAuthPayload, validateAuth, type AuthFormState } from "./ScanNewPage";
+import { ScanNewPage, buildAuthPayload, validateAuth, presetToAuthState, type AuthFormState } from "./ScanNewPage";
 
 // Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
 vi.mock("@monaco-editor/react", () => ({
@@ -410,6 +410,101 @@ describe("ScanNewPage 黑盒代码上下文（恒复用白盒）", () => {
   });
 });
 
+// === auth-profile-vault Task 14：profile 模式（选档案+角色，buildBody 发 auth_profile_id+auth_credential_id） ===
+describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  const PROFILE_FIXTURE = [
+    {
+      id: "prof_1", name: "NG", login_url: "http://t/", login_type: "form",
+      credentials: [{
+        id: "cred_a", role: "admin", username: "a",
+        verify_status: { state: "unverified" as const },
+      }],
+    },
+  ];
+
+  // 黑盒 profile 模式：选档案+角色 → buildBody 发 auth_profile_id+auth_credential_id，无 authentication。
+  it("profile 模式发 auth_profile_id + auth_credential_id（无 authentication）", async () => {
+    let posted: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
+      http.post("/api/scan", async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    // wbScans 已 fixture → 等待 reuse 自动选最新（说明 listScans 已返回，ws 已选定）
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    // 黑盒 url 必填
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    // 启用登录（Step4 顶部 Switch）
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    // 默认 source=inline → 切到 profile（source Select trigger 显「临时填写」）
+    await selectOption("临时填写", "使用档案");
+    // ProfilePicker mount → 等档案 Select 出现（trigger 显 placeholder「选择认证档案」）
+    await waitFor(() => expect(screen.getByText("选择认证档案")).toBeInTheDocument());
+    // 选档案 NG（trigger 显 placeholder「选择认证档案」；NG 是 listAuthProfiles 返回的 profile.name）
+    await selectOption("选择认证档案", "NG");
+    // 选档案后角色 Select 出现（trigger 显 placeholder「选择登录角色」）
+    await waitFor(() => expect(screen.getByText("选择登录角色")).toBeInTheDocument());
+    await selectOption("选择登录角色", /admin · a/);
+    // 提交应 enabled → 点提交
+    await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(posted).toBeDefined());
+    expect(posted!.auth_profile_id).toBe("prof_1");
+    expect(posted!.auth_credential_id).toBe("cred_a");
+    // 与 inline 互斥——profile 模式不发 authentication
+    expect(posted!.authentication).toBeUndefined();
+    // reuse 白盒 scan_id 仍带
+    expect(posted!.reuse_whitebox_scan_id).toBe("20260731-1200");
+  });
+
+  // profile 模式但未选角色 → 校验拦空，提交 disabled。
+  it("profile 模式选档案未选角色 → 提交 disabled（validateAuth 拦空）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await selectOption("临时填写", "使用档案");
+    await waitFor(() => expect(screen.getByText("选择认证档案")).toBeInTheDocument());
+    await selectOption("选择认证档案", "NG");
+    // 选了档案但未选角色 → 提交仍 disabled（validateAuth 返 selectCredential）
+    expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
+  });
+
+  // inline 模式（默认）打开 auth 后仍能正常展开既有字段——回归保底（不破坏旧流程）。
+  it("inline 模式（默认 source）：启用后显既有 login_url 输入（不破坏旧流程）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    // 默认 source=inline → 显既有 inline 字段（login_url placeholder https://example.com/login）
+    expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
+    // 不显 ProfilePicker 的「选择认证档案」placeholder
+    expect(screen.queryByText("选择认证档案")).toBeNull();
+  });
+});
+
 // === 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置 ===
 describe("ScanNewPage 重跑预填（location.state）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
@@ -478,7 +573,8 @@ describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调
 // === 黑盒登录配置：buildAuthPayload（AuthFormState → ScanAuthentication 契约转换）+ validateAuth ===
 describe("黑盒登录 buildAuthPayload / validateAuth", () => {
   const base: AuthFormState = {
-    enabled: true, loginType: "form", loginUrl: "https://x/login", username: "admin",
+    enabled: true, source: "inline", profileId: "", credentialId: "",
+    loginType: "form", loginUrl: "https://x/login", username: "admin",
     password: "pw", totpSecret: "T", emailLoginEnabled: false, emailAddress: "",
     emailPassword: "", emailTotp: "", loginFlow: "a\nb",
   };
@@ -513,5 +609,49 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
 
   it("validateAuth: enabled loginUrl 非 http(s) → authLoginUrl", () => {
     expect(validateAuth({ ...base, loginUrl: "ftp://x" }, t)).toBe("scan.errors.authLoginUrl");
+  });
+
+  // === auth-profile-vault Task 14：profile 模式校验 ===
+  it("validateAuth: profile 模式缺 profileId → authProfileRequired", () => {
+    expect(validateAuth({ ...base, source: "profile", profileId: "", credentialId: "" }, t))
+      .toBe("scan.errors.authProfileRequired");
+  });
+
+  it("validateAuth: profile 模式有 profileId 缺 credentialId → authCredentialRequired", () => {
+    expect(validateAuth({ ...base, source: "profile", profileId: "p1", credentialId: "" }, t))
+      .toBe("scan.errors.authCredentialRequired");
+  });
+
+  it("validateAuth: profile 模式 profileId+credentialId 齐 → null", () => {
+    expect(validateAuth({ ...base, source: "profile", profileId: "p1", credentialId: "c1" }, t))
+      .toBeNull();
+  });
+
+  it("presetToAuthState: authProfileId 非空 → source=profile + ids（auth 不读）", () => {
+    const state = presetToAuthState({
+      authProfileId: "p1", authCredentialId: "c1",
+      // 故意同时给 auth:inline——profile 优先，应忽略
+      auth: { login_type: "form", login_url: "http://x", credentials: { username: "u" } },
+    });
+    expect(state.enabled).toBe(true);
+    expect(state.source).toBe("profile");
+    expect(state.profileId).toBe("p1");
+    expect(state.credentialId).toBe("c1");
+  });
+
+  it("presetToAuthState: 仅 auth（inline）→ source=inline + authFromPayload", () => {
+    const state = presetToAuthState({
+      auth: { login_type: "form", login_url: "http://x/l", credentials: { username: "u", password: "p" } },
+    });
+    expect(state.enabled).toBe(true);
+    expect(state.source).toBe("inline");
+    expect(state.loginUrl).toBe("http://x/l");
+    expect(state.username).toBe("u");
+  });
+
+  it("presetToAuthState: 空 preset → DEFAULT_AUTH（disabled, inline）", () => {
+    const state = presetToAuthState({});
+    expect(state.enabled).toBe(false);
+    expect(state.source).toBe("inline");
   });
 });

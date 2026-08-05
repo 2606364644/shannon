@@ -16,9 +16,21 @@ type ScanType = "whitebox" | "blackbox" | "correlation";
 export type LoginType = "form" | "sso" | "api" | "basic";
 
 /** 黑盒登录配置表单态（独立于 ScanAuthentication 契约：含 enabled 开关 + emailLoginEnabled
- *  + loginFlow 多行文本；buildBody 时 buildAuthPayload 转成 ScanAuthentication）。 */
+ *  + loginFlow 多行文本；buildBody 时 buildAuthPayload 转成 ScanAuthentication）。
+ *
+ *  auth-profile-vault（Task 14）：enabled=true 时按 `source` 切换两条来源——
+ *    - "inline"：临时手填（即下方 loginType/loginUrl/credentials/loginFlow），buildBody 发 `authentication`。
+ *    - "profile"：复用工作区已验证档案（profileId + credentialId 指向某条 profile.credentials[] 角色），
+ *      buildBody 发 `auth_profile_id` + `auth_credential_id`（与 `authentication` 互斥，后端 Task 7 XOR 校验）。
+ *  enabled=false 时 source 无意义（关闭即不登录）。 */
 export interface AuthFormState {
   enabled: boolean;
+  /** enabled=true 时的来源分支（disabled 模式下无意义，默认 inline 保留兼容）。 */
+  source: "inline" | "profile";
+  /** profile 模式：选定的认证档案 id（GET /workspaces/{ws}/auth-profiles 列表中一项）。 */
+  profileId: string;
+  /** profile 模式：选定档案下的某个角色凭据 id（profile.credentials[] 中一项）。 */
+  credentialId: string;
   loginType: LoginType;
   loginUrl: string;
   username: string;
@@ -33,6 +45,9 @@ export interface AuthFormState {
 
 const DEFAULT_AUTH: AuthFormState = {
   enabled: false,
+  source: "inline",
+  profileId: "",
+  credentialId: "",
   loginType: "form",
   loginUrl: "",
   username: "",
@@ -64,12 +79,16 @@ export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
   return payload;
 }
 
-/** ScanAuthentication -> AuthFormState（buildAuthPayload 的逆映射，供重跑预填黑盒登录配置）。 */
+/** ScanAuthentication -> AuthFormState（buildAuthPayload 的逆映射，供重跑预填黑盒登录配置）。
+ *  始终返回 inline 模式（auth-profile-vault Task 14：profile 模式由 presetToAuthState 单独判定）。 */
 export function authFromPayload(auth: ScanAuthentication): AuthFormState {
   const c = auth.credentials ?? { username: "" };
   const el = c.email_login;
   return {
     enabled: true,
+    source: "inline",
+    profileId: "",
+    credentialId: "",
     loginType: auth.login_type ?? "form",
     loginUrl: auth.login_url ?? "",
     username: c.username ?? "",
@@ -90,11 +109,41 @@ export interface RerunPreset {
   repo?: string;
   url?: string;
   reuseScanId?: string;
+  /** inline 模式登录配置（旧字段，与 authProfileId 互斥）。 */
   auth?: ScanAuthentication;
+  /** profile 模式（auth-profile-vault Task 14）：原扫描使用了某条认证档案+角色，
+   *  重跑时预填到 source=profile 分支。后端 _scan_detail 暂未返此字段（前端先就位）。 */
+  authProfileId?: string;
+  authCredentialId?: string;
+}
+
+/** RerunPreset → AuthFormState：profile 模式（authProfileId 非空）优先于 inline（auth）。
+ *  与 buildBody 的 XOR 一致：profile 模式仅发 auth_profile_id/auth_credential_id，
+ *  inline 模式仅发 authentication。 */
+export function presetToAuthState(preset: RerunPreset): AuthFormState {
+  if (preset.authProfileId) {
+    return {
+      ...DEFAULT_AUTH,
+      enabled: true,
+      source: "profile",
+      profileId: preset.authProfileId,
+      credentialId: preset.authCredentialId ?? "",
+    };
+  }
+  if (preset.auth) return authFromPayload(preset.auth);
+  return DEFAULT_AUTH;
 }
 
 export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   if (!a.enabled) return null;
+  // profile 模式：必须选定档案 + 角色（角色必填——后端 Task 7 XOR 校验挡单边）。
+  // 错误文案用 scan.errors.auth{Profile,Credential}Required（与 ProfilePicker 的
+  // SelectValue placeholder「选择认证档案/选择登录角色」不同文本，避免 getByText 多义）。
+  if (a.source === "profile") {
+    if (!a.profileId) return t("scan.errors.authProfileRequired");
+    if (!a.credentialId) return t("scan.errors.authCredentialRequired");
+    return null;
+  }
   if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
   if (!/^https?:\/\//.test(a.loginUrl.trim())) return t("scan.errors.authLoginUrl");
   if (!a.username.trim()) return t("scan.errors.authUsername");
@@ -134,7 +183,14 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
   // blackbox：恒复用白盒结果（exploitation-only）。reuseScanId 由前端校验保证非空（提交按钮 disabled）。
   body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
   if (f.auth.enabled) {
-    body.authentication = buildAuthPayload(f.auth);
+    // auth-profile-vault（Task 14）：profile 模式发档案+角色 id（后端 Task 8 展开），
+    // inline 模式发 authentication（旧行为）。二者互斥（后端 Task 7 XOR 校验）。
+    if (f.auth.source === "profile") {
+      body.auth_profile_id = f.auth.profileId || undefined;
+      body.auth_credential_id = f.auth.credentialId || undefined;
+    } else {
+      body.authentication = buildAuthPayload(f.auth);
+    }
   }
   return body;
 }
@@ -177,7 +233,7 @@ export function ScanNewPage() {
     selectedRepo: preset.repo ?? presetRepo ?? "",
     url: preset.url ?? "",
     reuseScanId: preset.reuseScanId ?? "",
-    auth: preset.auth ? authFromPayload(preset.auth) : DEFAULT_AUTH,
+    auth: presetToAuthState(preset),
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）

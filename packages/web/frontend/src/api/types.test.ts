@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { NdjsonEvent, Workspace, Vulnerability } from "./types";
+import type { AuthProfile, NdjsonEvent, ScanRequest, Workspace, Vulnerability } from "./types";
 
 describe("NdjsonEvent", () => {
   it("PhaseEvent has common + phase fields", () => {
@@ -47,5 +47,21 @@ describe("NdjsonEvent", () => {
       created_at: 1719890000,
     };
     expect(ws.scan_type).toBe("whitebox");
+  });
+});
+
+describe("auth profile types", () => {
+  it("AuthProfile 形状", () => {
+    const p: AuthProfile = {
+      id: "prof_1", name: "NG", login_url: "http://t/", login_type: "form",
+      login_flow: ["x"], credentials: [
+        { id: "cred_a", role: "admin", username: "admin", password: "••••",
+          verify_status: { state: "unverified" } }],
+    };
+    expect(p.credentials[0].verify_status.state).toBe("unverified");
+  });
+  it("ScanRequest 接受 auth_profile_id", () => {
+    const r: ScanRequest = { type: "blackbox", auth_profile_id: "p", auth_credential_id: "c" };
+    expect(r.auth_profile_id).toBe("p");
   });
 });

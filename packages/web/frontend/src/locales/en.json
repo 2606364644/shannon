@@ -342,7 +342,9 @@
       "urlEmpty": "Target URL cannot be empty",
       "authLoginUrlEmpty": "Please fill in the login URL",
       "authLoginUrl": "Login URL must start with http(s)://",
-      "authUsername": "Please fill in the username"
+      "authUsername": "Please fill in the username",
+      "authProfileRequired": "Please select an auth profile",
+      "authCredentialRequired": "Please select a login role"
     },
     "title": "New Scan",
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
@@ -367,6 +369,7 @@
     "auth": {
       "enableLabel": "Login required",
       "enableHint": "Keep off when the target needs no login; agent-browser will log in before scanning per the settings below and persist the session.",
+      "sourceLabel": "Source",
       "loginTypeLabel": "Login method",
       "loginType": { "form": "Form login", "sso": "Single Sign-On (SSO)", "api": "API Token", "basic": "HTTP Basic" },
       "loginUrlLabel": "Login URL",
@@ -745,5 +748,33 @@
       "saveFailed": "Save failed, please retry",
       "saveFailedStatus": "Save failed ({{status}})"
     }
+  },
+  "authProfiles": {
+    "title": "Authentication",
+    "openLabel": "Auth",
+    "empty": "No auth profiles yet. Click \"New\".",
+    "create": "New profile",
+    "edit": "Edit",
+    "delete": "Delete",
+    "name": "Profile name",
+    "loginUrl": "Login URL",
+    "loginType": "Login type",
+    "loginFlow": "Login steps (one per line)",
+    "credentials": "Role credentials",
+    "role": "Role",
+    "username": "Username",
+    "password": "Password",
+    "totpSecret": "TOTP secret",
+    "addCredential": "Add role",
+    "test": "Test login",
+    "testing": "Logging in…",
+    "testHint": "Performs a real login (takes ~tens of seconds up to 2 minutes)",
+    "verify": { "unverified": "Unverified", "success": "Verified", "failed": "Verification failed" },
+    "createFailed": "Create failed",
+    "deleted": "Deleted",
+    "selectProfile": "Select auth profile",
+    "selectCredential": "Select login role",
+    "sourceInline": "Enter temporarily",
+    "sourceProfile": "Use profile"
   }
 }

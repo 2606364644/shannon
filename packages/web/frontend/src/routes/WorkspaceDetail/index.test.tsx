@@ -65,6 +65,7 @@ function renderAt(initialPath: string) {
           <Route index element={<div>scanlist-content</div>} />
           <Route path="repos" element={<div>repos-content</div>} />
           <Route path="settings" element={<div>settings-content</div>} />
+          <Route path="auth-profiles" element={<div>auth-profiles-content</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -95,6 +96,16 @@ describe("WorkspaceDetail ws 概览", () => {
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.click(screen.getByRole("link", { name: /仓库/ }));
     await waitFor(() => expect(screen.getByText("repos-content")).toBeInTheDocument());
+  });
+
+  it("渲染认证管理入口 + 导航到 auth-profiles", async () => {
+    renderAt("/p/ws");
+    // header 显「认证」入口（aria-label = authProfiles.openLabel）
+    const authLink = await screen.findByRole("link", { name: "认证" });
+    expect(authLink).toBeInTheDocument();
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(authLink);
+    await waitFor(() => expect(screen.getByText("auth-profiles-content")).toBeInTheDocument());
   });
 
   it("返回列表链接渲染（中文）", () => {

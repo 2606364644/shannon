@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, Link } from "react-router-dom";
-import { ArrowLeft, Settings, FolderGit2, Pin } from "lucide-react";
+import { ArrowLeft, Settings, FolderGit2, Pin, KeyRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,13 @@ export default function WorkspaceDetail() {
               <Button variant="outline" asChild>
                 <Link to="repos" aria-label={t("workspaceDetail.tabs.repos")} title={t("workspaceDetail.tabs.repos")}>
                   <FolderGit2 className="size-4" /> {t("workspaceDetail.tabs.repos")}
+                </Link>
+              </Button>
+            )}
+            {workspace && (
+              <Button variant="outline" asChild>
+                <Link to="auth-profiles" aria-label={t("authProfiles.openLabel")} title={t("authProfiles.openLabel")}>
+                  <KeyRound className="size-4" /> {t("authProfiles.openLabel")}
                 </Link>
               </Button>
             )}

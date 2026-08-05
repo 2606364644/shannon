@@ -17,7 +17,7 @@ import {
 import {
   listScans, cancelScan, deleteScan, resumeScan, getScan, ApiError,
 } from "@/api/client";
-import type { ScanSummary } from "@/api/types";
+import type { ScanSummary, SessionData } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
 
 // 终态集（spec §5.1 resume 仅非终态放行，终态 422）。interrupted 等属未完成可恢复。
@@ -135,6 +135,12 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
         if (detail.web_url) state.url = detail.web_url;
         if (detail.reuse_whitebox_scan_id) state.reuseScanId = detail.reuse_whitebox_scan_id;
         if (detail.authentication) state.auth = detail.authentication;
+        // auth-profile-vault（Task 14）：profile 模式预填（后端 _scan_detail 暂未返此字段，
+        // 前端先就位——后端补返 auth_profile_id+auth_credential_id 时自动生效）。
+        if ((detail as SessionData).auth_profile_id) {
+          state.authProfileId = (detail as SessionData).auth_profile_id ?? undefined;
+          state.authCredentialId = (detail as SessionData).auth_credential_id ?? undefined;
+        }
       }
       nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });
     } catch {

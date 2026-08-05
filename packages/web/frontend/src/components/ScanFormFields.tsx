@@ -11,7 +11,8 @@ import { RepoCombobox } from "./RepoCombobox";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos, listScans } from "@/api/client";
-import type { Repo, ScanSummary, Workspace } from "@/api/types";
+import { listAuthProfiles } from "@/api/authProfiles";
+import type { Repo, ScanSummary, Workspace, AuthProfile } from "@/api/types";
 import type { FormState, AuthFormState, LoginType } from "../pages/ScanNewPage";
 import { useAuth } from "@/auth/AuthContext";
 import { AlertCircle, Info } from "lucide-react";
@@ -67,11 +68,18 @@ function StepGroup({ step, title, tag, tagClass, children }: {
 /** 黑盒 Step4 登录配置区：Switch 启用 → 展开完整 Authentication schema 字段（对齐 core
  *  Authentication：login_type/login_url/credentials[username/password/totp/email_login]/login_flow）。
  *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。
+ *
+ *  auth-profile-vault（Task 14）：展开块顶部增「登录来源」Select——
+ *    - inline（临时填写）：下方既有 loginType/loginUrl/credentials/loginFlow 字段（旧行为）。
+ *    - profile（使用档案）：改显 ProfilePicker（档案 Select → 角色 Select），buildBody 发
+ *      auth_profile_id+auth_credential_id（与 inline 的 authentication 互斥）。
  *  服从既有设计语言：StepGroup 容器 + 现有 Input/Label/Select/Switch/Checkbox，不引入新视觉。 */
-function AuthFields({ auth, setAuth, authErr }: {
+function AuthFields({ auth, setAuth, authErr, workspace }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   authErr: string | null;
+  /** ProfilePicker 拉档案的 workspace scope（auth-profiles 按 ws 隔离）。 */
+  workspace: string;
 }) {
   const { t } = useTranslation();
   if (!auth.enabled) {
@@ -92,91 +100,194 @@ function AuthFields({ auth, setAuth, authErr }: {
         <Switch checked onCheckedChange={(v) => setAuth({ enabled: v })} />
       </div>
 
+      {/* 登录来源：inline（临时填写，旧行为）/ profile（使用档案，Task 14）。
+          disabled 用 enabled=false 表达——折叠即关闭，故 Select 仅两态。 */}
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
-        <Select value={auth.loginType} onValueChange={(v) => setAuth({ loginType: v as LoginType })}>
+        <Label className="text-xs font-medium">{t("scan.auth.sourceLabel")}</Label>
+        <Select value={auth.source} onValueChange={(v) => setAuth({ source: v as "inline" | "profile" })}>
           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {(["form", "sso", "api", "basic"] as const).map((v) => (
-              <SelectItem key={v} value={v}>{t(`scan.auth.loginType.${v}`)}</SelectItem>
-            ))}
+            <SelectItem value="inline">{t("authProfiles.sourceInline")}</SelectItem>
+            <SelectItem value="profile">{t("authProfiles.sourceProfile")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
-        <Input
-          value={auth.loginUrl}
-          onChange={(e) => setAuth({ loginUrl: e.target.value })}
-          placeholder="https://example.com/login"
-          className="font-mono"
-        />
-      </div>
 
-      <div className="space-y-2 border-t border-border pt-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("scan.auth.credentialsGroup")}
-        </span>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
-            <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
+      {auth.source === "profile" ? (
+        <ProfilePicker auth={auth} setAuth={setAuth} workspace={workspace} />
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
+            <Select value={auth.loginType} onValueChange={(v) => setAuth({ loginType: v as LoginType })}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(["form", "sso", "api", "basic"] as const).map((v) => (
+                  <SelectItem key={v} value={v}>{t(`scan.auth.loginType.${v}`)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-            <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
+            <Input
+              value={auth.loginUrl}
+              onChange={(e) => setAuth({ loginUrl: e.target.value })}
+              placeholder="https://example.com/login"
+              className="font-mono"
+            />
           </div>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">
-            {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
-          </Label>
-          <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
-        </div>
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
-            <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
-          </label>
-          {auth.emailLoginEnabled && (
-            <div className="space-y-2 pl-6">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
-                  <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
-                  <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
-                </div>
+
+          <div className="space-y-2 border-t border-border pt-2.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("scan.auth.credentialsGroup")}
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
+                <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span></Label>
-                <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
+                <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
+                <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
               </div>
             </div>
-          )}
-        </div>
-      </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">
+                {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
+              </Label>
+              <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
+                <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
+              </label>
+              {auth.emailLoginEnabled && (
+                <div className="space-y-2 pl-6">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
+                      <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
+                      <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span></Label>
+                    <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
-      <div className="space-y-1.5 border-t border-border pt-2.5">
-        <Label className="text-xs font-medium">
-          {t("scan.auth.loginFlowLabel")} <span className="font-normal text-muted-foreground">({t("scan.auth.optional")})</span>
-        </Label>
-        <Textarea
-          value={auth.loginFlow}
-          onChange={(e) => setAuth({ loginFlow: e.target.value })}
-          rows={3}
-          placeholder={t("scan.auth.loginFlowHint")}
-          className="font-mono text-xs"
-        />
-      </div>
+          <div className="space-y-1.5 border-t border-border pt-2.5">
+            <Label className="text-xs font-medium">
+              {t("scan.auth.loginFlowLabel")} <span className="font-normal text-muted-foreground">({t("scan.auth.optional")})</span>
+            </Label>
+            <Textarea
+              value={auth.loginFlow}
+              onChange={(e) => setAuth({ loginFlow: e.target.value })}
+              rows={3}
+              placeholder={t("scan.auth.loginFlowHint")}
+              className="font-mono text-xs"
+            />
+          </div>
+        </>
+      )}
 
       {authErr && <div className="text-destructive text-xs">{authErr}</div>}
       <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
         <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
         <span>{t("scan.auth.infoNote")}</span>
       </div>
+    </div>
+  );
+}
+
+/** profile 模式：档案 Select → 角色 Select（Task 14）。
+ *  - 档案列表来自 listAuthProfiles(ws)（ws 隔离；ws 未选时不发请求，显示「先选工作区」提示）。
+ *  - 选定档案后从 profile.credentials[] 渲染角色 Select（label: role · username，对齐 CredentialRow）。
+ *  - 切档案 → 清空 credentialId（防残留旧角色 id 指向新档案里不存在的角色）。 */
+function ProfilePicker({ auth, setAuth, workspace }: {
+  auth: AuthFormState;
+  setAuth: (patch: Partial<AuthFormState>) => void;
+  workspace: string;
+}) {
+  const { t } = useTranslation();
+  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (!workspace) {
+      setProfiles([]);
+      setLoading(false);
+      setLoadFailed(false);
+      return;
+    }
+    setLoading(true);
+    setLoadFailed(false);
+    listAuthProfiles(workspace)
+      .then((list) => setProfiles(list))
+      .catch(() => {
+        setProfiles([]);
+        setLoadFailed(true);
+      })
+      .finally(() => setLoading(false));
+  }, [workspace]);
+
+  const selected = profiles.find((p) => p.id === auth.profileId);
+  const creds = selected?.credentials ?? [];
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1.5">
+        <Label className="text-xs font-medium">{t("authProfiles.name")}</Label>
+        {!workspace ? (
+          <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+        ) : loading ? (
+          <div className="text-xs text-muted-foreground">{t("common.loading")}</div>
+        ) : profiles.length === 0 ? (
+          <div className="text-xs text-muted-foreground">
+            {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
+          </div>
+        ) : (
+          <Select
+            value={auth.profileId}
+            onValueChange={(v) => setAuth({ profileId: v, credentialId: "" })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("authProfiles.selectProfile")} />
+            </SelectTrigger>
+            <SelectContent>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+      {auth.profileId && creds.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">{t("authProfiles.role")}</Label>
+          <Select value={auth.credentialId} onValueChange={(v) => setAuth({ credentialId: v })}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("authProfiles.selectCredential")} />
+            </SelectTrigger>
+            <SelectContent>
+              {creds.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  <span className="font-mono">{c.role} · {c.username}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 }
@@ -410,6 +521,7 @@ export function ScanFormFields({
           auth={f.auth}
           setAuth={(patch) => set({ auth: { ...f.auth, ...patch } })}
           authErr={authErr}
+          workspace={workspace}
         />
       </StepGroup>
     </div>

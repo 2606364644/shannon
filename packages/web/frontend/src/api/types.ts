@@ -175,6 +175,10 @@ export interface SessionData {
   source_repo?: string | null;
   reuse_whitebox_scan_id?: string | null;
   authentication?: ScanAuthentication | null;
+  // auth-profile-vault（Task 14）：profile 模式重跑预填——后端 _scan_detail 暂未返此字段，
+  // 前端先就位（补返时自动生效）。与 authentication 互斥。
+  auth_profile_id?: string | null;
+  auth_credential_id?: string | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;
@@ -254,6 +258,35 @@ export interface ScanAuthentication {
   login_flow?: string[];
 }
 
+// === 认证档案库（auth-profile-vault, Task 10 契约）===
+// 对齐 backend auth_profile_store / auth_profiles.py 响应 payload。
+export type VerifyState = "unverified" | "success" | "failed";
+export interface VerifyStatus {
+  state: VerifyState;
+  failure_point?: "username_or_password" | "totp_secret" | "out_of_band";
+  failure_detail?: string;
+  last_verified_at?: string;
+}
+export interface AuthProfileCredential {
+  id: string;
+  role: string;
+  username: string;
+  password?: string;        // GET 返 "••••" if 有值（后端不回传明文）
+  totp_secret?: string;
+  email_login?: { address: string; password?: string; totp_secret?: string };
+  verify_status: VerifyStatus;
+}
+export interface AuthProfile {
+  id: string;
+  name: string;
+  login_url: string;
+  login_type: "form" | "sso" | "api" | "basic";
+  login_flow?: string[];
+  credentials: AuthProfileCredential[];
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
   // 扫描入口已收窄为「工作区已下载仓库」——本地路径入口移除（source.kind 恒为 repo）。
@@ -268,6 +301,11 @@ export interface ScanRequest {
   // 黑盒登录配置（仅 blackbox + auth.enabled 时发送）。后端写 scan-config.yaml → blackbox workflow
   // config_path → run_blackbox_auth_validation（agent-browser 登录 + auth-state 落盘）。
   authentication?: ScanAuthentication;
+  // 认证档案库（auth-profile-vault）：黑盒复用已验证的登录档案，免每次手填。
+  // 后端按 auth_profile_id 加载档案、按 auth_credential_id 选 credentials[] 中某个角色。
+  // 与上方 `authentication?` 互斥（档案库优先；二者全无时黑盒按 unauthenticated 处理）。
+  auth_profile_id?: string;
+  auth_credential_id?: string;
   config_yaml?: string;
   config_name?: string;
 }

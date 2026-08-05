@@ -342,7 +342,9 @@
       "urlEmpty": "目标 URL 不能为空",
       "authLoginUrlEmpty": "请填写登录地址",
       "authLoginUrl": "登录地址需以 http(s):// 开头",
-      "authUsername": "请填写用户名"
+      "authUsername": "请填写用户名",
+      "authProfileRequired": "请选择认证档案",
+      "authCredentialRequired": "请选择登录角色"
     },
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
@@ -367,6 +369,7 @@
     "auth": {
       "enableLabel": "需要登录",
       "enableHint": "目标无需登录时保持关闭；agent-browser 会在扫描前按下方配置完成登录并持久化会话。",
+      "sourceLabel": "登录来源",
       "loginTypeLabel": "登录方式",
       "loginType": { "form": "表单登录", "sso": "单点登录（SSO）", "api": "API Token", "basic": "HTTP Basic" },
       "loginUrlLabel": "登录地址",
@@ -745,5 +748,33 @@
       "saveFailed": "保存失败，请重试",
       "saveFailedStatus": "保存失败（{{status}}）"
     }
+  },
+  "authProfiles": {
+    "title": "认证管理",
+    "openLabel": "认证",
+    "empty": "暂无认证档案,点击「新建」",
+    "create": "新建档案",
+    "edit": "编辑",
+    "delete": "删除",
+    "name": "档案名",
+    "loginUrl": "登录地址",
+    "loginType": "登录类型",
+    "loginFlow": "登录步骤(每行一步)",
+    "credentials": "角色凭据",
+    "role": "角色",
+    "username": "用户名",
+    "password": "密码",
+    "totpSecret": "TOTP 密钥",
+    "addCredential": "添加角色",
+    "test": "测试登录",
+    "testing": "正在登录…",
+    "testHint": "将真实登录一次(约几十秒~2 分钟)",
+    "verify": { "unverified": "未验证", "success": "已验证", "failed": "验证失败" },
+    "createFailed": "新建失败",
+    "deleted": "已删除",
+    "selectProfile": "选择认证档案",
+    "selectCredential": "选择登录角色",
+    "sourceInline": "临时填写",
+    "sourceProfile": "使用档案"
   }
 }
