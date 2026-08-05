@@ -36,6 +36,7 @@ from supernova_whitebox.pipeline.activities import (
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
 from supernova_blackbox.pipeline.activities import (
     run_blackbox_preflight, run_blackbox_auth_validation,
+    run_auth_validation_probe,
     run_exploit_agent, run_endpoint_verify, validate_exploitation_queue, assemble_report as bb_assemble_report,
     run_report_agent, finalize_report,
     log_phase_start_activity as bb_log_phase_start, log_phase_complete_activity as bb_log_phase_complete,
@@ -84,6 +85,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
         workflows=[BlackboxScanWorkflow],
         activities=[
             run_blackbox_preflight, run_blackbox_auth_validation,
+            run_auth_validation_probe,
             run_exploit_agent, run_endpoint_verify, validate_exploitation_queue, bb_assemble_report,
             run_report_agent, finalize_report,
             bb_log_phase_start, bb_log_phase_complete, bb_log_info,

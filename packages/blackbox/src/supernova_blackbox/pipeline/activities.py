@@ -19,6 +19,11 @@ from supernova_core.utils.paths import (
     resolve_deliverables_path,
 )
 
+from supernova_core.services.validate_authentication import (
+    validate_authentication,
+    AuthValidationResult,
+)
+
 from .shared import BlackboxActivityInput
 from supernova_blackbox.services.exploitation_checker import QueueValidationResult
 
@@ -704,3 +709,34 @@ async def cleanup_engine_configs(repo_path: str, engine_name: str) -> None:
     for session_id in session_ids:
         engine.cleanup_config(repo_path, session_id=session_id)
     engine.cleanup_config(repo_path)
+
+
+@activity.defn
+async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidationResult:
+    """独立认证验证探针:驱动 validate_authentication 真实登录,失败不抛异常(降级返回)。
+
+    与 run_blackbox_auth_validation 区别:后者在扫描流程内,失败抛 ApplicationFailure
+    触发 fail-fast;本探针供"认证管理页 测试登录"独立入口,失败只回失败点不触发扫描。
+    AuditSession 不依赖:validate_authentication/AgentExecutor 不触 get_audit_session
+    (无 session 时 log_phase_start 落 NullAuditSession 安全 no-op),故无需 setup_display。
+    透传 validate_authentication 的 result(其内置 no-structured-output → success=False 映射)。
+    """
+    prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+    executor = AgentExecutor(prompt_manager)
+    try:
+        return await validate_authentication(
+            web_url=input.web_url,
+            config_path=input.config_path,
+            workspace_path=input.workspace_path or "",
+            prompt_manager=prompt_manager,
+            executor=executor,
+            api_key=input.api_key,
+        )
+    except Exception as e:
+        # 降级:不 raise(仿 run_endpoint_verify activities.py:349-356)
+        return AuthValidationResult(
+            success=False,
+            failure_point="out_of_band",
+            failure_detail=f"{type(e).__name__}: {e}",
+        )
