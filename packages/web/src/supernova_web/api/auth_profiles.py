@@ -49,11 +49,10 @@ async def create_profile(ws: str, payload: dict, request: Request,
 
 @router.get("/{ws}/auth-profiles/{pid}")
 async def get_profile(ws: str, pid: str, request: Request, user=Depends(workspace_member)):
-    p = _store(request).get(ws, pid)
-    if p is None:
-        raise HTTPException(404, "认证档案不存在")
-    # 脱敏:取 read_masked 中匹配
+    # 单次脱敏读 + 按 id 匹配:防 get 与 read_masked 之间档案被删致 masked=None.model_dump() 500。
     masked = next((m for m in _store(request).read_masked(ws) if m.id == pid), None)
+    if masked is None:
+        raise HTTPException(404, "认证档案不存在")
     return masked.model_dump(mode="json")
 
 
@@ -90,7 +89,12 @@ async def update_profile(ws: str, pid: str, payload: dict, request: Request,
                         setattr(el, f, v)
                 c.email_login = el
         else:  # 新增 credential
-            existing.credentials.append(AuthProfileCredential(**{"id": "", **{k: v for k, v in c_in.items() if k != "id"}}))
+            # 显式 allow-list 过滤客户端键:未知键 → pydantic ValidationError → 500(缺陷)。
+            # 只接收模型已知字段,防客户端塞 __class__ 等脏键致 500/注入。
+            _cred_fields = ("role", "username", "password", "totp_secret",
+                            "email_login", "verify_status")
+            filtered = {k: v for k, v in c_in.items() if k in _cred_fields}
+            existing.credentials.append(AuthProfileCredential(id="", **filtered))
     store.upsert_profile(ws, existing)
     return {"ok": True}
 

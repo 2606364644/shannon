@@ -472,13 +472,30 @@ class ScanManager:
 
         try/finally 包裹:即使 Temporal fetch / set_verify_status 抛错,明文 probe 目录也必清
         （否则 scan-config.yaml 含明文密码会滞留磁盘至下次 worker 重启）。
+
+        守护(2026-08-05 fix-wave):probe_dir 必须 resolve 到 workspaces/<ws>/auth-probes/ 下,
+        workflow_id 必须以 authval-<ws>- 开头。二者均在校验失败时 ValueError(不 rmtree),
+        防最低权限 workspace_member 经 verify-status 端点任意删路径 / 跨 ws 读结果。
         """
         import shutil
+        from pathlib import Path
         from datetime import datetime, timezone
         from .auth_profile_store import VerifyStatus
 
         if self._auth_profile_store is None:
             raise RuntimeError("auth_profile_store 未注入，无法回填认证验证结果")
+        # 守护①:probe_dir 必须在 workspaces/<ws>/auth-probes/ 下(防任意路径删除)。
+        # get_workflow_handle(bogus_id).result() 对不存在 workflow 抛错 → finally 必跑,
+        # 故纯 client-side 校验是唯一防线(不允许靠 Temporal 抛错触发 rmtree)。
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        resolved_probe = Path(probe_dir).resolve()
+        if not resolved_probe.is_relative_to(allowed_parent):
+            raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
+        # 守护②:workflow_id 必须绑本 ws(start_auth_validation 产 authval-<ws>-probe-<uuid8>),
+        # 防 ws-A 成员读 ws-B 的 auth 验证 workflow 结果(跨 ws 信息泄露)。
+        if not workflow_id.startswith(f"authval-{ws}-"):
+            raise ValueError(
+                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
         try:
             client = await Client.connect(self._temporal_address())
             raw = await client.get_workflow_handle(workflow_id).result()
@@ -498,7 +515,8 @@ class ScanManager:
             self._auth_profile_store.set_verify_status(ws, profile_id, cred_id, status)
             return status
         finally:
-            shutil.rmtree(probe_dir, ignore_errors=True)  # 明文 probe 目录必清:fetch/回填抛错也清
+            # 用 resolved_probe(已校验在 allowed_parent 下)清,防 TOCTOU 改原始 probe_dir 串。
+            shutil.rmtree(resolved_probe, ignore_errors=True)  # 明文 probe 目录必清:fetch/回填抛错也清
 
     def _resolve_provider_config(self, ws: str) -> dict:
         """P3c 阶段 2：per-ws 解析（ws_config_store）；None -> 全局 env 兜底（阶段1/CLI）。

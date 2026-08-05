@@ -76,3 +76,54 @@ async def test_test_endpoint_starts_workflow(tmp_path, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["workflow_id"] == "wf-xyz"
     sm.start_auth_validation.assert_awaited_once_with("ws1", pid, cred_id)
+
+
+def test_get_profile_does_single_masked_read(tmp_path, monkeypatch):
+    """IMPORTANT 1 回归:get_profile 合并成单次 read_masked 查找,防两次读之间档案被删
+    致 masked=None.model_dump() → 500(get 与 read_masked 之间的 TOCTOU race)。
+    """
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"}]}).json()["id"]
+    # spy read_masked:确认 get 路径只调一次(合并后),且不调 get()
+    call_count = {"read_masked": 0, "get": 0}
+    orig_read_masked = store.read_masked
+    orig_get = store.get
+
+    def counting_read_masked(ws):
+        call_count["read_masked"] += 1
+        return orig_read_masked(ws)
+
+    def counting_get(ws, pid):
+        call_count["get"] += 1
+        return orig_get(ws, pid)
+
+    monkeypatch.setattr(store, "read_masked", counting_read_masked)
+    monkeypatch.setattr(store, "get", counting_get)
+    r = c.get(f"/api/workspaces/ws1/auth-profiles/{pid}")
+    assert r.status_code == 200, r.text
+    assert call_count["read_masked"] == 1  # 单次合并读
+    assert call_count["get"] == 0  # 不再走分离的 get()
+    # 不存在的 pid → 404(不 500)
+    assert c.get("/api/workspaces/ws1/auth-profiles/nope").status_code == 404
+
+
+def test_update_profile_new_credential_with_unknown_key_does_not_500(tmp_path):
+    """IMPORTANT 2 回归:update_profile 新增 credential 时未知客户端键不再致
+    pydantic ValidationError → 500(allow-list 过滤后忽略未知键,凭据正常建)。
+    """
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"}]}).json()["id"]
+    # 带 __class__ / 任意未知键的新 credential:不再 500
+    r = c.put(f"/api/workspaces/ws1/auth-profiles/{pid}", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "user", "username": "u2", "password": "pw2",
+                         "__class__": "malicious", "unknown_key": "drop-me"}]})
+    assert r.status_code == 200, r.text
+    # 新 credential 被建(未知键被 allow-list 过滤)
+    prof = store.read("ws1")[0]
+    roles = {c.role for c in prof.credentials}
+    assert "user" in roles
