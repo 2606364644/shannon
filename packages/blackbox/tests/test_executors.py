@@ -230,3 +230,72 @@ async def test_exploit_executor_no_longer_injects_auth_state_file(mock_repo):
     pv = mock_executor.execute.call_args.kwargs.get("prompt_variables") or {}
     assert "AUTH_STATE_FILE" not in pv, \
         "AUTH_STATE_FILE 应由 AgentExecutor 基层注入，exploit_executor 不再显式传"
+
+
+# ---------------------------------------------------------------------------
+# 子项目2 T8: authz-exploit 读 identity-manifest + 注入 IDENTITY_CONTEXT
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_authz_exploit_injects_identity_context_when_manifest_present(mock_repo, tmp_path):
+    """identity-manifest.json 存在且 ≥2 available 身份 → authz-exploit 注入 IDENTITY_CONTEXT。
+
+    Executor 复用底层 AgentExecutor.prompt_manager（对齐 run_blackbox_auth_validation
+    的 prompts_dir 解析口径），调 build_identity_context 渲染 _identities.txt partial。
+    """
+    from supernova_core.prompts.manager import PromptManager
+
+    repo, deliverables = mock_repo
+    # 写 manifest 到 workspace_path（= deliverables.parent）
+    (deliverables.parent / "identity-manifest.json").write_text(json.dumps({"identities": [
+        {"account_id": "primary", "role": "user", "tier": "low",
+         "auth_state_file": "auth-state.json", "available": True},
+        {"account_id": "victim-b", "role": "user", "tier": "low",
+         "auth_state_file": "auth-state-victim-b.json", "available": True},
+        {"account_id": "admin-1", "role": "admin", "tier": "high",
+         "auth_state_file": "auth-state-admin-1.json", "available": True},
+    ]}))
+    # 配真实 PromptManager（指向含 _identities.txt partial 的 tmp prompts 目录，
+    # 对齐 packages/core/tests/test_prompt_manager.py 的 identity_prompts_dir fixture）
+    prompts_dir = tmp_path / "prompts"
+    shared = prompts_dir / "shared"
+    shared.mkdir(parents=True)
+    (shared / "_identities.txt").write_text(
+        "<identity_set>\n{{IDENTITY_SESSION_ROWS}}\n{{IDENTITY_COMPARISON_PAIRS}}\n</identity_set>",
+        encoding="utf-8",
+    )
+
+    mock_executor = AsyncMock()
+    mock_executor.execute.return_value = AgentMetrics(duration_ms=10)
+    mock_executor.prompt_manager = PromptManager(prompts_dir)
+    ex = ExploitExecutor(mock_executor)
+
+    await ex.execute(
+        agent_name=AgentName.AUTHZ_EXPLOIT, vuln_type="authz",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="https://x",
+    )
+    pv = mock_executor.execute.call_args.kwargs.get("prompt_variables", {})
+    assert "IDENTITY_CONTEXT" in pv, "authz-exploit 应注入 IDENTITY_CONTEXT"
+    assert "victim-b" in pv["IDENTITY_CONTEXT"], "manifest 中 victim-b 应进入 identity context"
+    # 守卫不变:AUTH_STATE_FILE 仍由 AgentExecutor 基层注入,exploit_executor 不显式传
+    assert "AUTH_STATE_FILE" not in pv
+
+
+@pytest.mark.asyncio
+async def test_authz_exploit_no_identity_context_when_single_identity(mock_repo):
+    """无 manifest 文件(单身份扫描)→ IDENTITY_CONTEXT 注入空串,authz-exploit 行为不变。"""
+    repo, deliverables = mock_repo
+    mock_executor = AsyncMock()
+    mock_executor.execute.return_value = AgentMetrics(duration_ms=10)
+    ex = ExploitExecutor(mock_executor)
+    await ex.execute(
+        agent_name=AgentName.AUTHZ_EXPLOIT, vuln_type="authz",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="https://x",
+    )
+    pv = mock_executor.execute.call_args.kwargs.get("prompt_variables", {})
+    assert pv.get("IDENTITY_CONTEXT", "") == ""  # 单身份不注入
+    # AUTH_STATE_FILE 仍不在此显式注入(守卫不变)
+    assert "AUTH_STATE_FILE" not in pv
