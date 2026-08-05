@@ -50,3 +50,17 @@ async def test_initialize_no_event_file_no_env_no_renderer(tmp_path, monkeypatch
     types = [type(r).__name__ for r in logger._dispatcher._renderers]
     assert "StructuredEventRenderer" not in types
     await logger.close()
+
+
+@pytest.mark.asyncio
+async def test_initialize_starts_drain_so_events_reach_workflow_log(tmp_path):
+    """initialize 必须起 drain、close 必须排空——否则解耦后 dispatch 入队无人
+    消费, workflow.log / events.ndjson 全空(扫描零日志)。risk-scoring 卡死修复的
+    接线契约(2026-08-05 multi-scan-concurrency-fix §3.1)。"""
+    logger = _make_logger(tmp_path)
+    await logger.initialize()
+    await logger.log_step("risk-scoring", "risk-scoring", "start")
+    await logger.close()
+    log_path = tmp_path / "wf-test" / "workflow.log"
+    content = log_path.read_text()
+    assert "risk-scoring" in content, "事件未落盘——drain 未启动或 close 未排空"

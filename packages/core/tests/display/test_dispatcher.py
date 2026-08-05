@@ -15,17 +15,21 @@ class _RecordingRenderer:
 async def test_dispatch_fans_out_to_all_renderers():
     r1, r2 = _RecordingRenderer(), _RecordingRenderer()
     dispatcher = DisplayDispatcher([r1, r2])
+    await dispatcher.start()
     evt = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
     await dispatcher.dispatch(evt)
+    await dispatcher.close()
     assert r1.events == [evt]
     assert r2.events == [evt]
 
 
 async def test_dispatch_with_no_renderers_is_noop():
     dispatcher = DisplayDispatcher([])
+    await dispatcher.start()
     evt = PhaseEvent(timestamp="t", category="PHASE", phase="recon", event="start")
     # Must not raise
     await dispatcher.dispatch(evt)
+    await dispatcher.close()
 
 
 class _OrderRecordingRenderer:
@@ -44,7 +48,9 @@ async def test_dispatch_serializes_concurrent_events():
     log: list[str] = []
     r = _OrderRecordingRenderer(log, "A")
     d = DisplayDispatcher([r])
+    await d.start()
     ev = PhaseEvent(timestamp="t", category="PHASE", phase="p", event="start")
     await asyncio.gather(d.dispatch(ev), d.dispatch(ev))
-    # No start should appear before the previous end -> no interleaving
+    await d.close()
+    # 单 drain task 串行 render → 不交错（解耦后由单消费者保证，非锁）
     assert log == ["start-A", "end-A", "start-A", "end-A"]

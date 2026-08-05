@@ -89,7 +89,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${SUPERNOVA_WORKER_CPUS:-2}'
+          cpus: '${SUPERNOVA_WORKER_CPUS:-8}'
           memory: '${SUPERNOVA_WORKER_MEMORY:-4g}'
     restart: unless-stopped
 

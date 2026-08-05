@@ -93,6 +93,10 @@ class WorkflowLogger:
             from supernova_core.display.structured_event_renderer import StructuredEventRenderer
             renderers.append(StructuredEventRenderer(web_event_file))
         self._dispatcher = DisplayDispatcher(renderers)
+        # 解耦(2026-08-05 multi-scan-concurrency-fix):dispatch 非阻塞入队,需先起
+        # drain task 消费,否则所有事件堆积不入盘(workflow.log/events.ndjson 全空)。
+        # 必须在 WorkflowHeader 首事件 dispatch 之前 start。
+        await self._dispatcher.start()
 
         ws = workflow_id or self._meta.id
         mode = self._meta.web_url or "offline (source code analysis)"
@@ -294,6 +298,9 @@ class WorkflowLogger:
         # LiveDashboardRenderer）目前无 close 方法 → getattr 取不到就跳过，行为不变。
         # 必须在关 stream 之前做，避免 renderer 持有的引用在 stream 关闭后失效。
         if self._dispatcher is not None:
+            # 解耦收尾(2026-08-05):先排空队列(graceful——不丢已入队事件)再 cancel
+            # drain,必须在关 stream/renderer 句柄之前,否则 drain 仍在写已关闭的句柄。
+            await self._dispatcher.close()
             for r in getattr(self._dispatcher, "_renderers", []):
                 close_fn = getattr(r, "close", None)
                 if close_fn is not None:

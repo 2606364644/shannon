@@ -107,6 +107,23 @@ POC_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
+# risk-scoring activity(确定性 plan())专用:短重试。
+# run_risk_scoring 读 code_index/parameter_graph 跑 plan()——确定性、幂等、毫秒级
+# (NodeGoat 112 次循环 events.ndjson 实测 duration_ms=3)。track_step 进入时曾同步
+# await dispatcher.dispatch(日志写盘),多 scan 并发 + 磁盘 iowait 时 dispatch 排队
+# 等 aiofiles 共享线程池 → 5min start_to_close 超时。套 PRODUCTION_RETRY(max 8 +
+# 5min backoff)会把单次超时放大成 ~26min 静默卡死(2026-08-05 NodeGoat 实测,plan()
+# 实际仅 3ms)。日志解耦(dispatcher 队列化,2026-08-05-multi-scan-concurrency-fix)
+# 已治本移除阻塞源;此处短重试 max 3 为止血——即使极端情况超时也不再被放大,
+# 与 code-index/poc 同构。
+RISK_SCORING_RETRY = RetryPolicy(
+    maximum_attempts=3,
+    initial_interval=timedelta(seconds=10),
+    maximum_interval=timedelta(minutes=1),
+    backoff_coefficient=2.0,
+    non_retryable_error_types=NON_RETRYABLE,
+)
+
 
 def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     """Select a retry policy by mode name.
@@ -121,7 +138,7 @@ def get_retry_policy(mode: str | None = None) -> RetryPolicy:
     return profiles.get(mode or "production", PRODUCTION_RETRY)
 
 
-Category = Literal["standard", "vuln", "log", "preflight", "auth-validation", "code-index", "gitnexus-verdict", "poc"]
+Category = Literal["standard", "vuln", "log", "preflight", "auth-validation", "code-index", "gitnexus-verdict", "poc", "risk-scoring"]
 
 
 def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
@@ -135,6 +152,7 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
     - preflight / auth-validation: 现有短 tier。
     - gitnexus-verdict: 多轮 verdict agent,有界 GITNEXUS_VERDICT_RETRY。
     - poc:      PoC 报告增强,短 POC_RETRY(防幂等超时被放大,同 code-index 理)。
+    - risk-scoring: 确定性 plan() 轨,短 RISK_SCORING_RETRY(防幂等超时被放大,同 code-index/poc 理)。
     """
     if category == "standard":
         return get_retry_policy(mode)
@@ -152,6 +170,8 @@ def retry_for(category: Category, mode: str | None = None) -> RetryPolicy:
         return GITNEXUS_VERDICT_RETRY
     if category == "poc":
         return POC_RETRY
+    if category == "risk-scoring":
+        return RISK_SCORING_RETRY
     raise ValueError(f"unknown activity category: {category!r}")
 
 

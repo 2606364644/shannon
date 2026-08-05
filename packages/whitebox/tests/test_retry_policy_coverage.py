@@ -110,6 +110,31 @@ def test_generate_poc_report_uses_bounded_poc_retry():
         )
 
 
+def test_run_risk_scoring_uses_bounded_risk_scoring_retry():
+    """run_risk_scoring 必须 retry_for('risk-scoring'),不能用 'standard'。
+
+    'standard' = PRODUCTION_RETRY(maximum_attempts=8) 会把 risk-scoring 的
+    start_to_close_timeout(5min,幂等——plan() 是确定性计算)放大成 ~26min 卡死
+    (2026-08-05 NodeGoat 实测:plan() 实际仅 3ms,卡在 track_step 进入时的日志
+    写盘;日志解耦已治本移除阻塞源,此短重试止血)。AST 锚点防止改回 'standard'。
+    """
+    source = WORKFLOW_FILE.read_text()
+    calls = _execute_activity_calls(source)
+    risk_calls = [
+        c for c in calls
+        if c.args
+        and isinstance(c.args[0], ast.Attribute)
+        and c.args[0].attr == "run_risk_scoring"
+    ]
+    assert risk_calls, "run_risk_scoring 的 execute_activity 未找到 — 锚点接线坏了"
+    for call in risk_calls:
+        category = _retry_for_category(call)
+        assert category == "risk-scoring", (
+            f"run_risk_scoring 必须 retry_for('risk-scoring'),当前是 {category!r}"
+            f"(PRODUCTION_RETRY max 8 会放大超时)"
+        )
+
+
 def _poc_call_nearest_try_swallows(source: str) -> tuple[bool, bool]:
     """(found, swallows):found=generate_poc_report execute_activity 调用存在;
     swallows=该调用的*最近*包裹 Try 的 except 处理不 re-raise(吞掉异常)。

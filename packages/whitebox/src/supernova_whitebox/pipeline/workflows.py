@@ -329,7 +329,7 @@ class WhiteboxScanWorkflow:
             risk_result = await workflow.execute_activity(
                 activities.run_risk_scoring, act_input,
                 start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=retry_for("standard"),
+                retry_policy=retry_for("risk-scoring"),
             )
             self._state.audit_plan_stats = risk_result
 
