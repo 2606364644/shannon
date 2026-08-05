@@ -79,6 +79,13 @@ export function DashboardPanel({
 
   const lastEventLabel = fmtLastEventAgo(lastEventMs, t);
 
+  // 计数可见性：进度仅 total_units>0 显（否则 0/0 像 bug）；Agent 仅 agents 非空显；
+  // 事件计数恒显（最稳的活跃信号）。分隔符按前置项条件渲染，避免悬空 ·。
+  const agentTotal = Object.keys(state.agents).length;
+  const showProgress = state.total_units > 0;
+  const showAgent = agentTotal > 0;
+  const hasCounter = showProgress || showAgent;
+
   return (
     <div className="rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
       {/* 头条：现在在干什么（phase，coral 主角）+ 是否在动（实时脉冲 + 相对时间） */}
@@ -96,14 +103,16 @@ export function DashboardPanel({
 
       {/* 计数副标题：进度 · Agent · 事件（flex-wrap，窄屏可换行） */}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-muted-foreground">
-        <span>{t("dashboard.progress")} {state.completed_units}/{state.total_units}</span>
-        <span aria-hidden className="opacity-40">·</span>
-        <span>Agent {state.completed_count}/{Object.keys(state.agents).length}</span>
+        {showProgress && (
+          <span>{t("dashboard.progress")} {state.completed_units}/{state.total_units}</span>
+        )}
+        {showProgress && showAgent && <span aria-hidden className="opacity-40">·</span>}
+        {showAgent && (
+          <span>Agent {state.completed_count}/{agentTotal}</span>
+        )}
+        {eventsCount != null && hasCounter && <span aria-hidden className="opacity-40">·</span>}
         {eventsCount != null && (
-          <>
-            <span aria-hidden className="opacity-40">·</span>
-            <span>{t("dashboard.eventsCount")} {eventsCount}</span>
-          </>
+          <span>{t("dashboard.eventsCount")} {eventsCount}</span>
         )}
       </div>
 
@@ -139,16 +148,17 @@ export function DashboardPanel({
           })}
         </div>
       )}
-      <div className="mt-2 space-y-0.5">
-        {running.map((a) => (
-          <div key={a.name} className="font-mono text-xs">
-            <span className="supernova-spinner" aria-hidden /> {a.name}{" "}
-            <span className="text-muted-foreground">t{a.turn}</span>{" "}
-            {a.last_action_detail ?? a.last_action ?? ""}
-          </div>
-        ))}
-        {running.length === 0 && <div className="text-xs text-muted-foreground">{t("dashboard.noRunningAgents")}</div>}
-      </div>
+      {running.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {running.map((a) => (
+            <div key={a.name} className="font-mono text-xs">
+              <span className="supernova-spinner" aria-hidden /> {a.name}{" "}
+              <span className="text-muted-foreground">t{a.turn}</span>{" "}
+              {a.last_action_detail ?? a.last_action ?? ""}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

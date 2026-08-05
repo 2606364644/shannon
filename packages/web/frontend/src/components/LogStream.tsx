@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { FixedSizeList } from "react-window";
 import type { NdjsonEvent, EventCategory } from "../api/types";
@@ -191,13 +191,28 @@ function VirtualRow({ index, style, data }: { index: number; style: CSSPropertie
   return <LogRow e={data[index]} style={style} />;
 }
 
-export function LogStream({ events }: { events: NdjsonEvent[] }) {
+export function LogStream({ events, fill }: { events: NdjsonEvent[]; fill?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<FixedSizeList>(null);
+  const virtual = events.length > VIRTUAL_THRESHOLD;
+
+  // react-window FixedSizeList 需要像素高度。测容器内容区高（clientHeight 减 p-2 上下 padding 共 16px），
+  // 容器随视口弹性变化时（fill 模式）实时跟随。jsdom 无 ResizeObserver → guard 跳过、回退初值
+  // （测试只验渲染与不崩，不验像素布局，故回退值不影响断言）。
+  const [listH, setListH] = useState(300);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setListH(Math.max(1, Math.floor(el.clientHeight) - 16));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // 自动滚底：新事件到达时滚到最底行
   useEffect(() => {
-    if (events.length > VIRTUAL_THRESHOLD) {
+    if (virtual) {
       listRef.current?.scrollToItem(events.length - 1, "end");
     } else if (containerRef.current) {
       // requestAnimationFrame 确保 DOM 已更新再滚底（浏览器真实环境生效；
@@ -208,14 +223,23 @@ export function LogStream({ events }: { events: NdjsonEvent[] }) {
         }
       });
     }
-  }, [events]);
+  }, [events, virtual]);
 
-  if (events.length > VIRTUAL_THRESHOLD) {
-    return (
-      <div className="h-[400px] overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs" aria-live="polite">
+  // fill：撑满 flex 父级剩余空间（实时页控制台布局，min-h-0 允许被上方指标卡压缩并自身滚动，
+  // 让整页只剩这一条滚动条）。非 fill（默认，DevComponentsPage）：独立固定面板，min-h/max-h 自带滚动。
+  const sizeCls = fill ? "flex-1 min-h-0" : "min-h-[160px] max-h-[480px]";
+  return (
+    <div
+      ref={containerRef}
+      className={`rounded-md border border-border bg-background p-2 font-mono text-xs ${sizeCls} ${
+        virtual ? "overflow-hidden" : "overflow-y-auto"
+      }`}
+      aria-live="polite"
+    >
+      {virtual ? (
         <FixedSizeList
           ref={listRef}
-          height={400}
+          height={listH}
           width="100%"
           itemCount={events.length}
           itemSize={ROW_HEIGHT}
@@ -223,14 +247,11 @@ export function LogStream({ events }: { events: NdjsonEvent[] }) {
         >
           {VirtualRow}
         </FixedSizeList>
-      </div>
-    );
-  }
-  return (
-    <div ref={containerRef} className="max-h-[480px] space-y-0 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs" aria-live="polite">
-      {events.map((e, i) => (
-        <LogRow key={i} e={e} />
-      ))}
+      ) : (
+        events.map((e, i) => (
+          <LogRow key={i} e={e} />
+        ))
+      )}
     </div>
   );
 }

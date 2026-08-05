@@ -49,38 +49,52 @@ describe("DashboardPanel", () => {
     expect(screen.getByText(/^injection$/)).toBeInTheDocument();
   });
 
-  it("agents 完成计数渲染 completed_count（顶栏 agents N/M）", () => {
-    // 选不包含 "3" 的伴随字段：total_cost=0（不是 0.30），step 0/1（不含 3），elapsed 0
-    const completedState = {
+  it("Agent 计数：agents 非空显 N/M；空时隐藏（不再显 Agent 0/0）", () => {
+    // 非空：2 agents, completed_count=1 → "Agent 1/2"
+    const withAgents = {
       ...emptyState(),
       current_phase: "recon",
       phase_units: ["discover"],
       unit_status: {},
       unit_intent: {},
-      completed_count: 3,
+      completed_count: 1,
       total_cost: 0,
       completed_units: 0,
       total_units: 1,
     } as DashboardState;
-    render(<DashboardPanel state={completedState} elapsedMs={0} />);
-    // 精确断言：计数副标题的 Agent 计数 "Agent 3/0"
-    // (completed_count=3, agents={} → 0 total；伴随字段无 3 不会假阳性)
-    expect(screen.getByText(/Agent\s+3\/0/)).toBeInTheDocument();
+    (withAgents as any).agents = {
+      "pre-recon": { name: "pre-recon", status: "done", attempt: 1, turn: 0, last_action: null, last_action_detail: null, last_turn_text: null, duration_ms: null, cost_usd: null, error: null },
+      recon: { name: "recon", status: "running", attempt: 1, turn: 0, last_action: null, last_action_detail: null, last_turn_text: null, duration_ms: null, cost_usd: null, error: null },
+    };
+    const { rerender } = render(<DashboardPanel state={withAgents} elapsedMs={0} />);
+    expect(screen.getByText(/Agent\s+1\/2/)).toBeInTheDocument();
+    // 空 agents：Agent 计数整段隐藏，不再显 "Agent 0/0"
+    rerender(<DashboardPanel state={emptyState()} elapsedMs={0} />);
+    expect(screen.queryByText(/Agent\s+0\/0/)).not.toBeInTheDocument();
   });
 
-  describe("i18n: 无运行中 agent 文案", () => {
+  it("进度 0/0 隐藏：total_units=0 时不显进度（仅显事件计数）", () => {
+    // emptyState: total_units=0, agents={} → 进度与 Agent 都不显，只剩事件
+    render(<DashboardPanel state={emptyState()} elapsedMs={0} eventsCount={5} />);
+    // 不显 "进度 0/0"（progress 文案 + 0/0）
+    expect(screen.queryByText(/0\/0/)).not.toBeInTheDocument();
+    // 事件计数仍显
+    expect(screen.getByText(/5/)).toBeInTheDocument();
+  });
+
+  describe("i18n: 「无运行中 agent」文案已移除", () => {
     afterEach(() => i18n.changeLanguage("zh"));
 
-    it("中文", () => {
+    it("中文：无 running agent 时不显该文案", () => {
       i18n.changeLanguage("zh");
       render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
-      expect(screen.getByText(/无运行中 agent/)).toBeInTheDocument();
+      expect(screen.queryByText(/无运行中 agent/)).not.toBeInTheDocument();
     });
 
-    it("切英文", () => {
+    it("英文：不显 No running agents", () => {
       i18n.changeLanguage("en");
       render(<DashboardPanel state={emptyState()} elapsedMs={0} />);
-      expect(screen.getByText(/No running agents/)).toBeInTheDocument();
+      expect(screen.queryByText(/No running agents/)).not.toBeInTheDocument();
     });
   });
 

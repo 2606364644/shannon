@@ -80,15 +80,19 @@ export function dashboardReducer(state: DashboardState, event: NdjsonEvent): Das
     case "PhaseEvent": {
       if (event.event === "start") {
         // 对齐 core：intents = {n: i for n,i in zip(steps, step_intents) if i}
+        // 守卫：steps/step_intents 可能缺失（畸形/降级事件），裸 [..undefined] 会抛
+        // TypeError → .reduce 整批中断 → state 冻结在 emptyState（live 页恒显 0/0）。
+        const steps = Array.isArray(event.steps) ? event.steps : [];
+        const stepIntents = Array.isArray(event.step_intents) ? event.step_intents : [];
         const intents: Record<string, string> = {};
-        for (let i = 0; i < event.steps.length; i++) {
-          const it = event.step_intents[i];
-          if (it) intents[event.steps[i]] = it;
+        for (let i = 0; i < steps.length; i++) {
+          const it = stepIntents[i];
+          if (it) intents[steps[i]] = it;
         }
         next = {
           ...state,
           current_phase: event.phase,
-          phase_units: [...event.steps],
+          phase_units: [...steps],
           unit_status: {},
           unit_intent: intents,
         };

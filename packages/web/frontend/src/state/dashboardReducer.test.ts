@@ -29,6 +29,22 @@ describe("dashboardReducer — 对齐 core DashboardState.apply", () => {
     expect(s.completed_units).toBe(0);
   });
 
+  it("PhaseEvent start 缺 steps/step_intents 不崩（守 state 不冻结成 0/0）", () => {
+    // 完全缺 steps + step_intents
+    const s1 = dashboardReducer(emptyState(), ev({
+      type: "PhaseEvent", category: "PHASE", phase: "recon", event: "start",
+    }));
+    expect(s1.current_phase).toBe("recon");
+    expect(s1.phase_units).toEqual([]);
+    expect(s1.total_units).toBe(0);
+    // 有 steps 但缺 step_intents
+    const s2 = dashboardReducer(emptyState(), ev({
+      type: "PhaseEvent", category: "PHASE", phase: "recon", event: "start", steps: ["a", "b"],
+    }));
+    expect(s2.phase_units).toEqual(["a", "b"]);
+    expect(s2.unit_intent).toEqual({});
+  });
+
   it("PhaseEvent complete: 保留 units", () => {
     const s1 = dashboardReducer(emptyState(), ev({
       type: "PhaseEvent", category: "PHASE", phase: "recon", event: "start",
