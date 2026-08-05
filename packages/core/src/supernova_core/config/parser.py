@@ -25,6 +25,8 @@ DANGEROUS_PATTERNS: list[re.Pattern] = [
     re.compile(r"file:", re.IGNORECASE),
 ]
 
+_ACCOUNT_ID_RE = re.compile(r"^[a-z0-9-]+$")
+
 def _check_dangerous_patterns(value: str, field: str) -> None:
     for pattern in DANGEROUS_PATTERNS:
         if pattern.search(value):
@@ -43,6 +45,39 @@ def _validate_config_security(config: Config) -> None:
     if config.authentication:
         _check_dangerous_patterns(config.authentication.login_url, "authentication.login_url")
         _check_dangerous_patterns(config.authentication.credentials.username, "credentials.username")
+
+def _validate_accounts(config: Config) -> None:
+    """Validate multi-identity ``accounts`` (子项目2 T1).
+
+    Each account shares the top-level ``authentication`` (login_url/login_flow)
+    as the shared login surface, so ``accounts`` without ``authentication`` is
+    meaningless and rejected. Account ids must be lowercase slugs (^[a-z0-9-]+$)
+    and unique.
+    """
+    seen: set[str] = set()
+    if config.accounts and config.authentication is None:
+        raise PentestError(
+            "accounts requires top-level authentication (shared login_url/login_flow)",
+            "config",
+            error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
+        )
+    for i, acct in enumerate(config.accounts):
+        if not _ACCOUNT_ID_RE.match(acct.id):
+            raise PentestError(
+                f"accounts[{i}].id '{acct.id}' must match ^[a-z0-9-]+$",
+                "config",
+                error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
+                context={"index": i, "id": acct.id},
+            )
+        if acct.id in seen:
+            raise PentestError(
+                f"accounts[{i}].id '{acct.id}' is duplicate",
+                "config",
+                error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
+                context={"duplicate_id": acct.id},
+            )
+        seen.add(acct.id)
+        _check_dangerous_patterns(acct.credentials.username, f"accounts[{i}].credentials.username")
 
 def _validate_login_flow(authentication: Authentication) -> None:
     """Validate login_flow steps for length and dangerous patterns."""
@@ -230,6 +265,7 @@ def parse_config(config_path: str) -> Config:
     if config.rules:
         _validate_url_path_rules(config.rules.avoid, "avoid")
         _validate_url_path_rules(config.rules.focus, "focus")
+    _validate_accounts(config)
 
     return config
 
@@ -250,6 +286,7 @@ def distribute_config(config: Config | None) -> DistributedConfig:
         report=config.report or ReportConfig(),
         rules_of_engagement=config.rules_of_engagement or "",
         authentication=config.authentication,
+        accounts=config.accounts,
     )
 
 def parse_multi_repo_config(path: str | Path) -> "MultiRepoConfig":

@@ -436,3 +436,59 @@ rules:
 """)
         config = parse_config(config_path)
         assert config.rules.avoid[0].type == "url_path"
+
+
+# ---------------------------------------------------------------------------
+# Multi-identity accounts (子项目2 T1)
+# ---------------------------------------------------------------------------
+
+def test_parse_config_valid_accounts(tmp_path):
+    from supernova_core.config.parser import parse_config
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials: { username: userA, password: "***" }
+accounts:
+  - id: victim-b
+    role: user
+    tier: low
+    credentials: { username: userB, password: "***" }
+  - id: admin-1
+    role: admin
+    tier: high
+    credentials: { username: admin, password: "***" }
+""")
+    config = parse_config(config_path)
+    assert len(config.accounts) == 2
+    assert config.accounts[0].tier == "low"
+
+def test_parse_config_rejects_bad_account_slug(tmp_path):
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://x/login
+  credentials: { username: u, password: p }
+accounts:
+  - { id: "Bad ID!", role: user, tier: low, credentials: { username: u2 } }
+""")
+    with pytest.raises(PentestError, match="must match"):
+        parse_config(config_path)
+
+def test_parse_config_rejects_duplicate_account_id(tmp_path):
+    config_path = _write_config(tmp_path, """
+authentication: { login_type: form, login_url: https://x/login, credentials: { username: u, password: p } }
+accounts:
+  - { id: dup, role: user, tier: low, credentials: { username: a } }
+  - { id: dup, role: admin, tier: high, credentials: { username: b } }
+""")
+    with pytest.raises(PentestError, match="duplicate"):
+        parse_config(config_path)
+
+def test_parse_config_rejects_accounts_without_authentication(tmp_path):
+    config_path = _write_config(tmp_path, """
+accounts:
+  - { id: a1, role: user, tier: low, credentials: { username: u } }
+""")
+    with pytest.raises(PentestError, match="authentication"):
+        parse_config(config_path)

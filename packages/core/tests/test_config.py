@@ -112,3 +112,24 @@ def test_config_rejects_unknown_vuln_class():
     assert "foo" in msg
     for legal in ("injection", "xss", "auth", "authz", "ssrf"):
         assert legal in msg
+
+
+def test_account_model_construction():
+    from supernova_core.models.config import Account, AccountTier, Credentials
+    acct = Account(
+        id="victim-b", credentials=Credentials(username="userB", password="x"),
+        role="user", tier="low",
+    )
+    assert acct.id == "victim-b"
+    assert acct.tier == "low"
+
+def test_config_has_accounts_default_empty():
+    from supernova_core.models.config import Config
+    c = Config()
+    assert c.accounts == []
+
+def test_config_with_accounts():
+    from supernova_core.models.config import Config, Account, Credentials
+    c = Config(accounts=[Account(id="a1", credentials=Credentials(username="u"), role="admin", tier="high")])
+    assert len(c.accounts) == 1
+    assert c.accounts[0].tier == "high"

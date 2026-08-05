@@ -16,6 +16,7 @@ class Rules(BaseModel):
 VulnClass = Literal["injection", "xss", "auth", "authz", "ssrf"]
 Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
+AccountTier = Literal["high", "low"]
 
 class ReportConfig(BaseModel):
     min_severity: Severity | None = None
@@ -39,6 +40,12 @@ class Authentication(BaseModel):
     credentials: Credentials
     login_flow: list[str] | None = None
 
+class Account(BaseModel):
+    id: str
+    credentials: Credentials
+    role: str | None = None
+    tier: AccountTier
+
 class PipelineConfig(BaseModel):
     retry_preset: Literal["default", "subscription"] | None = None
     max_concurrent_pipelines: int | None = None
@@ -52,12 +59,14 @@ class DistributedConfig(BaseModel):
     report: ReportConfig
     rules_of_engagement: str
     authentication: Authentication | None = None
+    accounts: list[Account] = []
 
 BrowserEngineType = Literal["playwright", "agent-browser"]
 
 class Config(BaseModel):
     rules: Rules | None = None
     authentication: Authentication | None = None
+    accounts: list[Account] = []
     pipeline: PipelineConfig | None = None
     description: str | None = None
     vuln_classes: list[VulnClass] | None = None
