@@ -30,6 +30,10 @@ class VerifyStatus(BaseModel):
     failure_point: str | None = None  # username_or_password | totp_secret | out_of_band
     failure_detail: str | None = None
     last_verified_at: str | None = None
+    # 块3c：最近一次验证的 probe 目录 + workflow_id。verify-log 读它定位过程记录；下次"测试登录"
+    # 覆盖时清旧 probe 防堆积。可选（旧档案/未验证过无此字段）。
+    probe_dir: str | None = None
+    workflow_id: str | None = None
 
 
 class EmailLoginCred(BaseModel):

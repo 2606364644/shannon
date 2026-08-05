@@ -25,7 +25,7 @@ describe("ReposTab", () => {
       </AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
-    // "添加仓库" 入口存在（i18n mock → key 字符串）
+    // "新建仓库" 入口存在（i18n mock → key 字符串）
     expect(screen.getByText("repos.addRepo")).toBeTruthy();
   });
 

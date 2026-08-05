@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Trash2, Pencil } from "lucide-react";
 import { listAuthProfiles, deleteAuthProfile } from "@/api/authProfiles";
 import type { AuthProfile } from "@/api/types";
 import { Card } from "@/components/ui/card";
@@ -57,7 +57,7 @@ export function AuthProfilesPage() {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">{t("authProfiles.title")}</h3>
         <Button variant="cta" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" /> {t("authProfiles.create")}
+          {t("authProfiles.create")}
         </Button>
       </div>
       {loading ? <Skeleton className="h-20 w-full" />

@@ -795,9 +795,17 @@
     "verify": {
       "unverified": "未验证",
       "success": "已验证",
-      "failed": "验证失败"
+      "failed": "验证失败",
+      "viewProcess": "查看过程",
+      "hideProcess": "收起",
+      "process": "登录过程",
+      "noLog": "暂无过程记录"
     },
     "createFailed": "新建失败",
+    "created": "已创建",
+    "save": "保存",
+    "saved": "已保存",
+    "saveFailed": "保存失败",
     "deleted": "已删除",
     "selectProfile": "选择认证档案",
     "selectCredential": "选择登录角色",

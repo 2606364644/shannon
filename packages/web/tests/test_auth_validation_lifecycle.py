@@ -46,19 +46,57 @@ async def test_start_auth_validation_writes_probe_yaml_and_starts_workflow(tmp_p
     assert probe_yamls, "probe scan-config.yaml 应被写"
     body = probe_yamls[0].read_text("utf-8")
     assert "authentication" in body and "admin" in body and "pw" in body
+    # 块1c：event_file 必须穿线进 BlackboxAuthValidationInput（启用 agent 过程落盘）。
+    sent_inp = ClientCls.connect.return_value.start_workflow.call_args.args[1]
+    assert sent_inp.event_file is not None, "应传 event_file 启用过程落盘"
+    assert sent_inp.event_file.endswith("events.ndjson")
+    assert "auth-probes" in sent_inp.event_file
 
 
 @pytest.mark.asyncio
-async def test_get_result_backfills_verify_status_and_deletes_probe(tmp_path):
+async def test_start_auth_validation_cleans_previous_probe(tmp_path):
+    """块3c: 同 (profile,cred) 上次验证留了旧 probe（VerifyStatus.probe_dir 记录）,下次"测试
+    登录"先删旧 probe 再建新——防 auth-probes/ 无限堆积（每次验证一个 probe-<uuid8>）。"""
+    store = _store(tmp_path)
+    # 预置旧 probe + VerifyStatus 指向它（模拟上次验证后留的产物）
+    old_probe = tmp_path / "ws1" / "auth-probes" / "probe-old"
+    old_probe.mkdir(parents=True)
+    (old_probe / "events.ndjson").write_text('{"old":1}', "utf-8")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="failed", probe_dir=str(old_probe), workflow_id="authval-ws1-probe-old"))
+    mgr = _mgr(tmp_path, store)
+    fake_handle = MagicMock()
+    fake_handle.id = "wf-new"
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch("supernova_web.components.scan_manager.validate_authentication", create=True):
+        ClientCls.connect = AsyncMock(return_value=MagicMock(
+            start_workflow=AsyncMock(return_value=fake_handle)))
+        await mgr.start_auth_validation("ws1", "prof_1", "cred_a")
+    # 旧 probe 被覆盖清理（防堆积）
+    assert not old_probe.exists(), "旧 probe 应被覆盖清理"
+    # 只剩新 probe（新 probe-<uuid8>）
+    new_probes = [p for p in (tmp_path / "ws1" / "auth-probes").iterdir() if p.is_dir()]
+    assert len(new_probes) == 1, "应只剩新 probe（旧的已清）"
+
+
+@pytest.mark.asyncio
+async def test_get_result_backfills_and_keeps_events_deletes_only_config(tmp_path):
+    """块3a: get_result 回填 verify_status 后,只删明文 scan-config.yaml（密码卫生）,
+    保留 events.ndjson + auth-state.json 供 verify-log 回看/诊断（spec 块3）。"""
     store = _store(tmp_path)
     mgr = _mgr(tmp_path, store)
-    # 预置一个 probe 目录(模拟 start 已写)
+    # 预置一个 probe 目录(模拟 start 已写 + 过程产物已落盘)
     probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-1"
     probe_dir.mkdir(parents=True)
     (probe_dir / "scan-config.yaml").write_text("authentication: {}", "utf-8")
+    (probe_dir / "events.ndjson").write_text('{"event":"agent_step"}\n', "utf-8")
+    (probe_dir / "auth-state.json").write_text('{"cookies":[]}', "utf-8")
+    from temporalio.client import WorkflowExecutionStatus
+    desc = MagicMock(status=WorkflowExecutionStatus.COMPLETED)
     with patch("supernova_web.components.scan_manager.Client") as ClientCls:
         ClientCls.connect = AsyncMock(return_value=MagicMock(
             get_workflow_handle=MagicMock(return_value=MagicMock(
+                describe=AsyncMock(return_value=desc),
                 result=AsyncMock(return_value=AuthValidationResult(
                     success=False, failure_point="username_or_password", failure_detail="bad pw"))))))
         status = await mgr.get_auth_validation_result(
@@ -70,8 +108,64 @@ async def test_get_result_backfills_verify_status_and_deletes_probe(tmp_path):
     # 回填进 store
     cred = store.read("ws1")[0].credentials[0]
     assert cred.verify_status.state == "failed"
-    # probe 目录被删
-    assert not probe_dir.exists()
+    # 块3c：回填 probe_dir/workflow_id（verify-log 定位 + 下次覆盖清理）
+    assert cred.verify_status.probe_dir == str(probe_dir)
+    assert cred.verify_status.workflow_id == "authval-ws1-probe-1"
+    # 块3a：明文 scan-config 必删（密码卫生）;events/auth-state 保留供回看;probe_dir 仍在
+    assert not (probe_dir / "scan-config.yaml").exists()
+    assert (probe_dir / "events.ndjson").exists(), "events.ndjson 应保留供回看"
+    assert (probe_dir / "auth-state.json").exists(), "auth-state.json 应保留供诊断"
+    assert probe_dir.exists(), "probe_dir 应保留（只删 config）"
+
+
+@pytest.mark.asyncio
+async def test_get_result_pending_when_workflow_running(tmp_path):
+    """块2: workflow 仍 RUNNING → get_result 抛 AuthValidationPending（端点转 503,前端继续轮询）,
+    且绝不阻塞调 result()——修轮询超时误判（workflow 跑 >前端轮询上限时,成功被显示成失败）。"""
+    from temporalio.client import WorkflowExecutionStatus
+    from supernova_web.components.scan_manager import AuthValidationPending
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-run"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "scan-config.yaml").write_text("authentication: {}", "utf-8")
+    desc = MagicMock(status=WorkflowExecutionStatus.RUNNING)
+    result_mock = AsyncMock(return_value=AuthValidationResult(success=True))
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=MagicMock(
+            get_workflow_handle=MagicMock(return_value=MagicMock(
+                describe=AsyncMock(return_value=desc),
+                result=result_mock))))
+        with pytest.raises(AuthValidationPending):
+            await mgr.get_auth_validation_result(
+                "ws1", workflow_id="authval-ws1-probe-run", probe_dir=str(probe_dir),
+                profile_id="prof_1", cred_id="cred_a",
+            )
+    # RUNNING 时绝不阻塞等 result()（修轮询误判核心）
+    result_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_result_success_when_completed(tmp_path):
+    """块2: workflow COMPLETED + result.success=True → VerifyStatus(success)。覆盖终态 success
+    分支（backfills 测 failed,此处补 success,防 success 分支 regression）。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-ok"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "scan-config.yaml").write_text("authentication: {}", "utf-8")
+    desc = MagicMock(status=WorkflowExecutionStatus.COMPLETED)
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=MagicMock(
+            get_workflow_handle=MagicMock(return_value=MagicMock(
+                describe=AsyncMock(return_value=desc),
+                result=AsyncMock(return_value=AuthValidationResult(success=True))))))
+        status = await mgr.get_auth_validation_result(
+            "ws1", workflow_id="authval-ws1-probe-ok", probe_dir=str(probe_dir),
+            profile_id="prof_1", cred_id="cred_a",
+        )
+    assert status.state == "success"
 
 
 @pytest.mark.asyncio
@@ -94,8 +188,8 @@ async def test_get_result_deletes_probe_dir_even_when_result_fetch_raises(tmp_pa
                 "ws1", workflow_id="authval-ws1-probe-err", probe_dir=str(probe_dir),
                 profile_id="prof_1", cred_id="cred_a",
             )
-    # 明文 probe 目录必清:即便 fetch 抛错（防明文密码滞留磁盘）
-    assert not probe_dir.exists()
+    # 块3a：明文 scan-config 必删（密码卫生）即便 fetch 抛错;probe_dir 可留（保留诊断产物）
+    assert not (probe_dir / "scan-config.yaml").exists(), "明文 config 必清防密码滞留"
 
 
 @pytest.mark.asyncio
@@ -170,3 +264,61 @@ async def test_get_result_rejects_workflow_id_not_bound_to_ws(tmp_path):
                 probe_dir=str(probe_dir),
                 profile_id="prof_1", cred_id="cred_a",
             )
+
+
+# ---- 块3b: verify-log（读 events.ndjson 过程记录）----
+
+
+@pytest.mark.asyncio
+async def test_get_auth_validation_log_returns_all_events(tmp_path):
+    """块3b: get_auth_validation_log 读 probe_dir/events.ndjson 全量事件（事后回看）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-log"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "events.ndjson").write_text(
+        '{"i":1,"msg":"navigate"}\n{"i":2,"msg":"fill"}\n{"i":3,"msg":"submit"}\n', "utf-8")
+    events = await mgr.get_auth_validation_log(
+        "ws1", workflow_id="authval-ws1-probe-log", probe_dir=str(probe_dir))
+    assert len(events) == 3
+    assert events[0]["msg"] == "navigate"
+    assert events[2]["msg"] == "submit"
+
+
+@pytest.mark.asyncio
+async def test_get_auth_validation_log_tail_n(tmp_path):
+    """块3b: tail=N 取末 N 条（实时观看只取末尾,减传输）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-tail"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "events.ndjson").write_text(
+        "\n".join(f'{{"i":{i}}}' for i in range(1, 6)) + "\n", "utf-8")
+    events = await mgr.get_auth_validation_log(
+        "ws1", workflow_id="authval-ws1-probe-tail", probe_dir=str(probe_dir), tail=2)
+    assert [e["i"] for e in events] == [4, 5]
+
+
+@pytest.mark.asyncio
+async def test_get_auth_validation_log_rejects_out_of_containment(tmp_path):
+    """块3b: verify-log 复用越界守护——probe_dir 越界 → ValueError（防任意路径读 events）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    evil_dir = tmp_path / "evil"
+    evil_dir.mkdir()
+    (evil_dir / "events.ndjson").write_text('{"secret":"leak"}', "utf-8")
+    with pytest.raises(ValueError, match="probe_dir 越界"):
+        await mgr.get_auth_validation_log(
+            "ws1", workflow_id="authval-ws1-probe-evil", probe_dir=str(evil_dir))
+
+
+@pytest.mark.asyncio
+async def test_get_auth_validation_log_missing_file_returns_empty(tmp_path):
+    """块3b: events.ndjson 不存在（workflow 未落盘/未跑完）→ 返回 [] 而非抛错（前端显示暂无记录）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-empty"
+    probe_dir.mkdir(parents=True)
+    events = await mgr.get_auth_validation_log(
+        "ws1", workflow_id="authval-ws1-probe-empty", probe_dir=str(probe_dir))
+    assert events == []

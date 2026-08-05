@@ -795,9 +795,17 @@
     "verify": {
       "unverified": "Unverified",
       "success": "Verified",
-      "failed": "Verification failed"
+      "failed": "Verification failed",
+      "viewProcess": "View process",
+      "hideProcess": "Hide",
+      "process": "Login process",
+      "noLog": "No process log yet"
     },
     "createFailed": "Create failed",
+    "created": "Created",
+    "save": "Save",
+    "saved": "Saved",
+    "saveFailed": "Save failed",
     "deleted": "Deleted",
     "selectProfile": "Select auth profile",
     "selectCredential": "Select login role",

@@ -78,6 +78,37 @@ async def test_test_endpoint_starts_workflow(tmp_path, monkeypatch):
     sm.start_auth_validation.assert_awaited_once_with("ws1", pid, cred_id)
 
 
+@pytest.mark.asyncio
+async def test_verify_log_endpoint_returns_events(tmp_path):
+    """块3b: GET verify-log 读 events.ndjson → {events: [...]}。tail 透传到 scan_manager。"""
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"}]}).json()["id"]
+    cred_id = store.read("ws1")[0].credentials[0].id
+    sm = c.app.state.scan_manager
+    sm.get_auth_validation_log = AsyncMock(return_value=[{"i": 1, "msg": "navigate"}])
+    r = c.get(
+        f"/api/workspaces/ws1/auth-profiles/{pid}/credentials/{cred_id}/verify-log",
+        params={"workflow_id": "authval-ws1-probe-1", "probe_dir": "/p/probe", "tail": 5})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"events": [{"i": 1, "msg": "navigate"}]}
+    sm.get_auth_validation_log.assert_awaited_once_with(
+        "ws1", "authval-ws1-probe-1", "/p/probe", tail=5)
+
+
+@pytest.mark.asyncio
+async def test_verify_log_endpoint_out_of_containment_is_403(tmp_path):
+    """块3b: 越界守护 ValueError → 403（拒绝），非 503（暂不可用语义）。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.get_auth_validation_log = AsyncMock(side_effect=ValueError("probe_dir 越界"))
+    r = c.get(
+        "/api/workspaces/ws1/auth-profiles/prof_x/credentials/cred_y/verify-log",
+        params={"workflow_id": "authval-ws1-probe-1", "probe_dir": "/evil"})
+    assert r.status_code == 403
+
+
 def test_get_profile_does_single_masked_read(tmp_path, monkeypatch):
     """IMPORTANT 1 回归:get_profile 合并成单次 read_masked 查找,防两次读之间档案被删
     致 masked=None.model_dump() → 500(get 与 read_masked 之间的 TOCTOU race)。

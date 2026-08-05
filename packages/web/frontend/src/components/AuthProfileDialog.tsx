@@ -46,7 +46,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !loginUrl.trim() || !username.trim()) {
-      toast.error(t("authProfiles.createFailed"));
+      toast.error(t(editing ? "authProfiles.saveFailed" : "authProfiles.createFailed"));
       return;
     }
     setBusy(true);
@@ -69,10 +69,10 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
       };
       if (editing) await updateAuthProfile(ws, editing.id, body);
       else await createAuthProfile(ws, body);
-      toast.success(t("authProfiles.create"));
+      toast.success(t(editing ? "authProfiles.saved" : "authProfiles.created"));
       reset(); onSaved(); onOpenChange(false);
     } catch (e) {
-      toast.error(apiErrorMessage(e, t("authProfiles.createFailed")));
+      toast.error(apiErrorMessage(e, t(editing ? "authProfiles.saveFailed" : "authProfiles.createFailed")));
     } finally {
       setBusy(false);
     }
@@ -123,7 +123,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" disabled={busy}>{busy ? "…" : t("authProfiles.create")}</Button>
+            <Button type="submit" disabled={busy}>{busy ? "…" : t(editing ? "authProfiles.save" : "authProfiles.create")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

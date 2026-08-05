@@ -266,6 +266,9 @@ export interface VerifyStatus {
   failure_point?: "username_or_password" | "totp_secret" | "out_of_band";
   failure_detail?: string;
   last_verified_at?: string;
+  // 块3c：最近一次验证的 probe 目录 + workflow_id（verify-log 定位 + 下次覆盖清理）。
+  probe_dir?: string;
+  workflow_id?: string;
 }
 export interface AuthProfileCredential {
   id: string;

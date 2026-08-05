@@ -32,6 +32,9 @@ class BlackboxAuthValidationInput(BasePipelineInput):
     """
     web_url: str = ""
     workspace_path: str | None = None
+    # 块1（认证验证可观测性）：probe events.ndjson 落点，透传 setup_display 写 agent 登录过程。
+    # None=未启用可观测性（CLI 直调等），setup_display 拿到 None 不挂 StructuredEventRenderer。
+    event_file: str | None = None
 
 
 @dataclass

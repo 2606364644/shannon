@@ -125,3 +125,19 @@ async def verify_status(ws: str, pid: str, cid: str, workflow_id: str,
     except Exception as e:
         raise HTTPException(503, f"验证结果暂时不可用,请重试: {e}")
     return status.model_dump(mode="json")
+
+
+@router.get("/{ws}/auth-profiles/{pid}/credentials/{cid}/verify-log")
+async def verify_log(ws: str, pid: str, cid: str, workflow_id: str, probe_dir: str,
+                     request: Request, tail: int | None = None,
+                     user=Depends(workspace_member)):
+    """读验证过程 events.ndjson（块3b，过程可见）。tail=N 取末 N 条（实时观看），默认全量（回看）。
+    越界守护 ValueError → 403（拒绝，非暂不可用）；其他异常 → 503。"""
+    try:
+        events = await request.app.state.scan_manager.get_auth_validation_log(
+            ws, workflow_id, probe_dir, tail=tail)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    except Exception as e:
+        raise HTTPException(503, f"验证日志暂时不可用: {e}")
+    return {"events": events}

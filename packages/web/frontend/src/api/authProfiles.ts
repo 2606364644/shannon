@@ -34,3 +34,12 @@ export const getVerifyStatus = (
   apiGet<VerifyStatus>(
     `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/verify-status`
     + `?workflow_id=${enc(workflowId)}&probe_dir=${enc(probeDir)}`);
+
+// 块3b：读验证过程 events.ndjson（agent 登录每步）。tail=N 实时观看末尾，省略=全量回看。
+export const getVerifyLog = (
+  ws: string, pid: string, cid: string, workflowId: string, probeDir: string, tail?: number,
+) =>
+  apiGet<{ events: Array<Record<string, unknown>> }>(
+    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/verify-log`
+    + `?workflow_id=${enc(workflowId)}&probe_dir=${enc(probeDir)}`
+    + (tail != null ? `&tail=${tail}` : ""));

@@ -597,15 +597,41 @@ class AuthValidationWorkflow:
             config_path=input.config_path,
             workspace_path=input.workspace_path,
             api_key=input.api_key,
+            event_file=input.event_file,
         )
-        await workflow.execute_activity(
-            activities.log_phase_start_activity,
-            BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
-            start_to_close_timeout=timedelta(seconds=10),
-            retry_policy=retry_for("log"),
-        )
-        return await workflow.execute_activity(
-            activities.run_auth_validation_probe, act_input,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=retry_for("auth-validation"),
-        )
+        # 块1（认证验证可观测性）：setup_display 挂 AuditSession + StructuredEventRenderer 写
+        # events.ndjson（agent 登录每步落盘）。event_file=None（CLI 直调）则不挂 renderer，setup_display
+        # 照跑挂 NullAuditSession 兜底。setup_display 自身失败不阻塞验证（降级无 events，spec 风险），
+        # 故 try/except 吞掉；但成功后 finalize 必跑（停 heartbeat，否则 daemon 线程泄漏）。
+        display_ok = False
+        try:
+            await workflow.execute_activity(
+                activities.setup_display, act_input,
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=retry_for("log"),
+            )
+            display_ok = True
+        except Exception:
+            pass  # 验证照跑（无 events），NullAuditSession 兜底后续 log_phase
+        try:
+            await workflow.execute_activity(
+                activities.log_phase_start_activity,
+                BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_for("log"),
+            )
+            return await workflow.execute_activity(
+                activities.run_auth_validation_probe, act_input,
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=retry_for("auth-validation"),
+            )
+        finally:
+            if display_ok:
+                # finalize_summary：drain LogBus + log_workflow_complete + 停 heartbeat + 清 session。
+                # summary 最小集（auth-validation 无 agent_metrics 聚合，finalize_summary 容错 .get 读）。
+                await workflow.execute_activity(
+                    activities.finalize_summary,
+                    args=[act_input, {"status": "completed"}],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=retry_for("log"),
+                )

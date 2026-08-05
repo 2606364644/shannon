@@ -43,6 +43,16 @@ class ScanRunning(Exception):
         super().__init__(f"扫描正在运行，请先取消再删除：{scan_id}")
 
 
+class AuthValidationPending(Exception):
+    """认证验证 workflow 仍在运行，结果未就绪（块2：get_result 非阻塞查询）。
+
+    verify-status 端点 catch 后转 503，前端继续轮询——修轮询超时误判：workflow 实测跑 88–153s
+    而前端轮询上限 120s，阻塞 result() 致 HTTP 挂死 → 成功被显示成失败。改 describe() 非阻塞：
+    RUNNING → 抛本异常（秒级返回）；终态 → result()（已就绪不阻塞）。对前端 "running" 与
+    "Temporal down" 都是 "继续轮询"，故端点统一 503 不细分。
+    """
+
+
 # resume 放行的状态：已停未完成（worker 中途停止、有部分进度可续）。
 # completed/failed（已结束）/ cancelled（用户主动停）/ running（在跑，resume 会重复提交）
 # -> 不可 resume，用重扫（POST /api/scan 起新 scan_id，旧记录保留）。
@@ -475,6 +485,15 @@ class ScanManager:
         cred = next((c for c in profile.credentials if c.id == cred_id), None)
         if cred is None:
             raise ValueError(f"角色凭据不存在: {cred_id}")
+        # 块3c：覆盖清理——同 (profile,cred) 上次验证留的旧 probe（VerifyStatus.probe_dir）删掉，
+        # 防 auth-probes/ 无限堆积（每次验证一个 probe-<uuid8>）。越界守护：只删 auth-probes 下的
+        # （VerifyStatus 若被污染指向任意路径，不删——容器以 root 跑，防任意路径删除）。
+        if cred.verify_status.probe_dir:
+            import shutil
+            old_probe = Path(cred.verify_status.probe_dir).resolve()
+            allowed = (self._workspaces_dir / ws / "auth-probes").resolve()
+            if old_probe.is_relative_to(allowed):
+                shutil.rmtree(old_probe, ignore_errors=True)
         probe_id = f"probe-{uuid4().hex[:8]}"
         probe_dir = self._workspaces_dir / ws / "auth-probes" / probe_id
         probe_dir.mkdir(parents=True, exist_ok=True)
@@ -497,6 +516,9 @@ class ScanManager:
             config_path=str(cfg_file),
             workspace_path=str(probe_dir),
             api_key=api_key,
+            # 块1c：event_file 落点 = probe_dir/events.ndjson。workflow 经 setup_display 把
+            # agent 登录每步写此文件（验证过程可见），verify-log 端点读它回看/实时观看。
+            event_file=str(probe_dir / "events.ndjson"),
         )
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,
@@ -521,7 +543,6 @@ class ScanManager:
         workflow_id 必须以 authval-<ws>- 开头。二者均在校验失败时 ValueError(不 rmtree),
         防最低权限 workspace_member 经 verify-status 端点任意删路径 / 跨 ws 读结果。
         """
-        import shutil
         from pathlib import Path
         from datetime import datetime, timezone
         from .auth_profile_store import VerifyStatus
@@ -542,12 +563,21 @@ class ScanManager:
                 f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
         try:
             client = await Client.connect(self._temporal_address())
-            raw = await client.get_workflow_handle(workflow_id).result()
+            handle = client.get_workflow_handle(workflow_id)
+            # 块2：describe() 非阻塞查状态；RUNNING → 抛 AuthValidationPending（端点转 503，
+            # 前端继续轮询），绝不阻塞 result()——修轮询超时误判（workflow 跑 88–153s > 前端 120s
+            # 上限，阻塞 result() 致 HTTP 挂死 → COMPLETED+success 被 UI 误判 failed）。终态才 result()。
+            from temporalio.client import WorkflowExecutionStatus
+            desc = await handle.describe()
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                raise AuthValidationPending(f"验证 workflow 仍在运行: {workflow_id}")
+            raw = await handle.result()
             # AuthValidationResult 经 Temporal 序列化:本 SDK 下为实例,dict 模式防御 SDK 差异。
             success = raw.get("success") if isinstance(raw, dict) else getattr(raw, "success", False)
             now = datetime.now(timezone.utc).isoformat()
             if success:
-                status = VerifyStatus(state="success", last_verified_at=now)
+                status = VerifyStatus(state="success", last_verified_at=now,
+                                      probe_dir=probe_dir, workflow_id=workflow_id)
             else:
                 fp = (raw.get("failure_point") if isinstance(raw, dict)
                       else getattr(raw, "failure_point", None)) or "out_of_band"
@@ -555,12 +585,52 @@ class ScanManager:
                       else getattr(raw, "failure_detail", None))
                 status = VerifyStatus(
                     state="failed", failure_point=fp, failure_detail=fd, last_verified_at=now,
+                    probe_dir=probe_dir, workflow_id=workflow_id,
                 )
             self._auth_profile_store.set_verify_status(ws, profile_id, cred_id, status)
             return status
         finally:
-            # 用 resolved_probe(已校验在 allowed_parent 下)清,防 TOCTOU 改原始 probe_dir 串。
-            shutil.rmtree(resolved_probe, ignore_errors=True)  # 明文 probe 目录必清:fetch/回填抛错也清
+            # 块3a：收窄清理——只删明文 scan-config.yaml（密码卫生），保留 events.ndjson +
+            # auth-state.json 供 verify-log 回看/诊断（spec 块3）。整目录 rmtree 会清掉刚落的
+            # 过程记录。用 resolved_probe（已校验在 allowed_parent 下）防 TOCTOU 改原始 probe_dir 串。
+            cfg = resolved_probe / "scan-config.yaml"
+            if cfg.exists():
+                try:
+                    cfg.unlink()
+                except OSError:
+                    pass
+
+    async def get_auth_validation_log(
+        self, ws: str, workflow_id: str, probe_dir: str, tail: int | None = None,
+    ) -> list[dict]:
+        """读 probe_dir/events.ndjson 验证过程记录（块3b）。越界守护同 get_result（probe_dir
+        须在 workspaces/<ws>/auth-probes/ 下、workflow_id 须 authval-<ws>- 开头，防任意路径读 /
+        跨 ws 读 events）。tail=N 取末 N 条（实时观看减传输）;默认全量（事后回看）。文件不存在 →
+        []（workflow 未跑/未落盘，前端显示暂无记录）。非法 JSON 行容错跳过。
+        """
+        import json
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        resolved_probe = Path(probe_dir).resolve()
+        if not resolved_probe.is_relative_to(allowed_parent):
+            raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
+        if not workflow_id.startswith(f"authval-{ws}-"):
+            raise ValueError(
+                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
+        events_file = resolved_probe / "events.ndjson"
+        if not events_file.exists():
+            return []
+        lines = [ln for ln in events_file.read_text("utf-8").splitlines() if ln.strip()]
+        if tail is not None and tail > 0:
+            lines = lines[-tail:]
+        out: list[dict] = []
+        for ln in lines:
+            try:
+                parsed = json.loads(ln)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(parsed, dict):
+                out.append(parsed)
+        return out
 
     def _resolve_provider_config(self, ws: str) -> dict:
         """P3c 阶段 2：per-ws 解析（ws_config_store）；None -> 全局 env 兜底（阶段1/CLI）。
