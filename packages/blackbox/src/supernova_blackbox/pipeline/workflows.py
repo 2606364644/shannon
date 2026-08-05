@@ -5,7 +5,7 @@ from pathlib import Path
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import CancelledError
+from temporalio.exceptions import ApplicationError, CancelledError
 
 from supernova_core.models.agents import AgentName, ALL_VULN_CLASSES
 from supernova_core.utils.paths import (
@@ -15,7 +15,7 @@ from supernova_core.utils.paths import (
     WHITEBOX_SUBDIR,
 )
 
-from .shared import BlackboxActivityInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
+from .shared import BlackboxActivityInput, BlackboxAuthValidationInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ with workflow.unsafe.imports_passed_through():
     from supernova_core.services.playwright_config_writer import (
         get_session_id,
     )
-    from supernova_core.services.validate_authentication import cleanup_auth_state_sync
+    from supernova_core.services.validate_authentication import cleanup_auth_state_sync, AuthValidationResult
     from supernova_core.models.retry import retry_for
     from supernova_core.models.errors import PentestError, ErrorCode, classify_error_for_temporal
 
@@ -574,4 +574,38 @@ class BlackboxScanWorkflow:
             current_agent=self._state.current_agent,
             completed_agents=self._state.completed_agents,
             status=self._state.status,
+        )
+
+
+@workflow.defn
+class AuthValidationWorkflow:
+    """独立认证验证 workflow(认证管理页"测试登录"):只跑 auth 段,不跑扫描。
+
+    不能复用 BlackboxScanWorkflow:后者强依赖白盒产物(workflows.py:248-280 无白盒 queue
+    抛 DELIVERABLE_NOT_FOUND fail-fast)。本 workflow 仅 log_phase + probe + 返回 result。
+    """
+
+    @workflow.run
+    async def run(self, input: BlackboxAuthValidationInput) -> AuthValidationResult:
+        if not input.web_url:
+            # non_retryable: 输入校验错误重试无意义(输入不变),对齐 whitebox/workflows.py:475
+            # fail-fast 模式;plain ValueError 默认 retryable → workflow task 无限重试,
+            # execute_workflow 永久挂起(真机 web "测试登录"漏传 web_url 会卡死)。
+            raise ApplicationError("BlackboxAuthValidationInput.web_url is required", non_retryable=True)
+        act_input = BlackboxActivityInput(
+            web_url=input.web_url,
+            config_path=input.config_path,
+            workspace_path=input.workspace_path,
+            api_key=input.api_key,
+        )
+        await workflow.execute_activity(
+            activities.log_phase_start_activity,
+            BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
+            start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=retry_for("log"),
+        )
+        return await workflow.execute_activity(
+            activities.run_auth_validation_probe, act_input,
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=retry_for("auth-validation"),
         )

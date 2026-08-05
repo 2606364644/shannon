@@ -23,6 +23,18 @@ class BlackboxPipelineInput(BasePipelineInput):
 
 
 @dataclass
+class BlackboxAuthValidationInput(BasePipelineInput):
+    """AuthValidationWorkflow 入参(独立认证验证探针,非扫描流程)。
+
+    仅承载探针所需:web_url(=login_url)+ config_path(probe scan-config.yaml)+
+    workspace_path(probe 目录,auth-state.json 落点)+ api_key。不跑扫描其余步骤。
+    字段需有默认值(BasePipelineInput 字段均有默认,dataclass 不允许 default 后非 default)。
+    """
+    web_url: str = ""
+    workspace_path: str | None = None
+
+
+@dataclass
 class BlackboxPipelineState:
     status: str = "running"
     current_phase: str | None = None

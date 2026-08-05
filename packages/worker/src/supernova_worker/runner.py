@@ -33,7 +33,7 @@ from supernova_whitebox.pipeline.activities import (
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
     setup_display, finalize_summary,
 )
-from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
+from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow, AuthValidationWorkflow
 from supernova_blackbox.pipeline.activities import (
     run_blackbox_preflight, run_blackbox_auth_validation,
     run_auth_validation_probe,
@@ -82,7 +82,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
     bb_worker = Worker(
         client=client,
         task_queue=WEB_TASK_QUEUE_BLACKBOX,
-        workflows=[BlackboxScanWorkflow],
+        workflows=[BlackboxScanWorkflow, AuthValidationWorkflow],
         activities=[
             run_blackbox_preflight, run_blackbox_auth_validation,
             run_auth_validation_probe,
