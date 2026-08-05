@@ -67,7 +67,8 @@ class ScanManager:
 
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
                  max_concurrent: int = 1, scan_timeout: float = 0.0,
-                 ws_config_store: Any = None) -> None:
+                 ws_config_store: Any = None,
+                 auth_profile_store: Any = None) -> None:
         self._workspaces_dir = Path(workspaces_dir)
         self._repos_dir = Path(repos_dir)
         self._config_store = config_store
@@ -80,6 +81,9 @@ class ScanManager:
         self._active_reqs: dict[tuple[str, str], ScanRequest] = {}
         # P3c 阶段 2：per-ws 配置解析（None=CLI/旧测试兜底，走全局 env）
         self._ws_config_store = ws_config_store
+        # 认证档案库（Task 4）：认证管理页"测试登录"探针读写 verify_status 的 store;
+        # None=旧测试/CLI 兜底（不调 start_auth_validation 即不影响既有流程）。
+        self._auth_profile_store = auth_profile_store
         # T3: ScanStore 复用 core SessionManager 做 scan 读写（core 零改动）。
         self._store = ScanStore(self._workspaces_dir)
         # 串行化黑盒 create_scan，保证 <wb>~<N> 序号分配原子（防并发同白盒争同序号）。
@@ -106,6 +110,29 @@ class ScanManager:
     async def reap_zombies(self) -> None:
         """lifespan 启动时扫无主子进程。C1 后 web 无子进程 -> no-op."""
         return None
+
+    def reap_stale_probes(self) -> int:
+        """启动期清所有 ws 的 auth-probes/*/ 残留(worker 异常残留的明文 probe 目录)。
+
+        验证是即时操作(test → 取 result → 删),无长期运行态;启动时残留 = 上次 worker
+        崩溃。整目录删(含明文 scan-config.yaml)。返清理数量。
+        """
+        import shutil
+        n = 0
+        if not self._workspaces_dir.is_dir():
+            return 0
+        for ws_dir in self._workspaces_dir.iterdir():
+            probes = ws_dir / "auth-probes"
+            if probes.is_dir():
+                for probe in probes.iterdir():
+                    if probe.is_dir():
+                        shutil.rmtree(probe, ignore_errors=True)
+                        n += 1
+                try:
+                    probes.rmdir()  # 空了删父目录
+                except OSError:
+                    pass
+        return n
 
     async def start(self, req: ScanRequest) -> tuple[str, str]:
         """T3: 提交新 scan -> (ws, scan_id)。
@@ -291,9 +318,12 @@ class ScanManager:
     ) -> tuple[str | None, str | None]:
         """解析黑盒提交的 config_path(登录 YAML) + repo_path(复用白盒 / 指定仓库 / standalone)。
 
-        config_path: req.authentication 非空 → Authentication.model_validate 校验 → dump 成
-          {authentication: {...}} YAML 写 scan_dir/scan-config.yaml（blackbox workflow
-          `if input.config_path:` 据此跑 run_blackbox_auth_validation）。校验失败 raise ValueError。
+        config_path(两互斥分支,model_validator _auth_profile_xor_inline 保证二选一):
+          - req.auth_profile_id+auth_credential_id → AuthProfileStore.get 展开该角色 →
+            credential_to_authentication → dump 成 {authentication: {...}} YAML 写 scan_dir/
+            scan-config.yaml(明文,core 合流点 parse_config 直读 YAML 的约束)。档案/角色缺失 raise ValueError。
+          - req.authentication(inline dict) → Authentication.model_validate 校验 → 同样 dump 写 YAML。
+          blackbox workflow `if input.config_path:` 据此跑 run_blackbox_auth_validation。校验失败 raise ValueError。
         repo_path: req.reuse_whitebox_scan_id → 该白盒 scan_dir 作 repo_path
           （detect_whitebox_results 在 Path(repo_path)/deliverables 找白盒 queue；wb scan_dir/
           deliverables 即白盒产物落点，blackbox 自身产物靠 workspace_path 另落 bb scan_dir）；
@@ -303,7 +333,26 @@ class ScanManager:
         from supernova_core.models.config import Authentication
 
         config_path: str | None = None
-        if req.authentication:
+        # 选已保存档案:展开该角色 → Authentication(scan-config.yaml 明文,core 合流点约束)
+        # 与下方 inline authentication 互斥(model_validator _auth_profile_xor_inline 已保证二选一)。
+        if req.auth_profile_id and req.auth_credential_id:
+            if self._auth_profile_store is None:
+                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
+            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
+            if profile is None:
+                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            cred = next((c for c in profile.credentials if c.id == req.auth_credential_id), None)
+            if cred is None:
+                raise ValueError(f"角色凭据不存在: {req.auth_credential_id}")
+            from .auth_profile_store import credential_to_authentication
+            auth = credential_to_authentication(profile, cred)
+            payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
+            cfg_file = scan_dir / "scan-config.yaml"
+            cfg_file.write_text(
+                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+                encoding="utf-8")
+            config_path = str(cfg_file)
+        elif req.authentication:
             try:
                 auth = Authentication.model_validate(req.authentication)
             except Exception as exc:
@@ -358,6 +407,98 @@ class ScanManager:
         )
         self._mark_submitted_at(scan_dir)
         return handle
+
+    async def start_auth_validation(self, ws: str, profile_id: str, cred_id: str) -> dict:
+        """认证管理页"测试登录":写 probe scan-config.yaml + 起 AuthValidationWorkflow。
+
+        probe 目录 = workspaces/<ws>/auth-probes/probe-<uuid8>，内含明文 scan-config.yaml
+        （core 合流点 parse_config 直读 YAML，无对象通道——明文债收窄到此目录，get_result 后删）。
+        workflow_id = authval-<ws>-probe-<uuid8>（与扫描 workflow namespace 隔离）。
+        返 {workflow_id, probe_dir} dict（前端轮询 verify-status 端点需两者）。
+        """
+        import yaml
+        from uuid import uuid4
+        from supernova_blackbox.pipeline.shared import BlackboxAuthValidationInput
+        from supernova_blackbox.pipeline.workflows import AuthValidationWorkflow
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
+        from .auth_profile_store import credential_to_authentication
+
+        if self._auth_profile_store is None:
+            raise RuntimeError("auth_profile_store 未注入，无法启动认证验证探针")
+        profile = self._auth_profile_store.get(ws, profile_id)
+        if profile is None:
+            raise ValueError(f"认证档案不存在: {profile_id}")
+        cred = next((c for c in profile.credentials if c.id == cred_id), None)
+        if cred is None:
+            raise ValueError(f"角色凭据不存在: {cred_id}")
+        probe_id = f"probe-{uuid4().hex[:8]}"
+        probe_dir = self._workspaces_dir / ws / "auth-probes" / probe_id
+        probe_dir.mkdir(parents=True, exist_ok=True)
+        auth = credential_to_authentication(profile, cred)
+        cfg_file = probe_dir / "scan-config.yaml"
+        cfg_file.write_text(
+            yaml.safe_dump({"authentication": auth.model_dump(exclude_none=True, mode="json")},
+                           allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        client = await Client.connect(self._temporal_address())
+        # _resolve_provider_config 在 ws_config_store 非None 时会 validate_ws_config；
+        # 探针不应因 per-ws provider 配置异常而阻塞（api_key 是可选的，活动层有 env 兜底）。
+        try:
+            api_key = self._resolve_provider_config(ws).get("api_key")
+        except Exception:
+            api_key = None
+        inp = BlackboxAuthValidationInput(
+            web_url=profile.login_url,
+            config_path=str(cfg_file),
+            workspace_path=str(probe_dir),
+            api_key=api_key,
+        )
+        handle = await client.start_workflow(
+            AuthValidationWorkflow.run, inp,
+            id=f"authval-{ws}-{probe_id}", task_queue=WEB_TASK_QUEUE_BLACKBOX,
+        )
+        return {"workflow_id": handle.id, "probe_dir": str(probe_dir)}
+
+    async def get_auth_validation_result(
+        self, ws: str, workflow_id: str, probe_dir: str,
+        profile_id: str, cred_id: str,
+    ) -> "VerifyStatus":
+        """取 workflow result → 回填 verify_status → 删 probe 目录(含明文 YAML)。
+
+        Temporal SDK 对 dataclass result 反序列化为实例（Task 2 实测），但保持双模解析
+        （dict 兜底）以防御 SDK 版本差异。失败时 failure_point 缺失回落 out_of_band
+        （对齐 validate_authentication.AUTH_VALIDATION_SCHEMA 的 enum）。
+
+        try/finally 包裹:即使 Temporal fetch / set_verify_status 抛错,明文 probe 目录也必清
+        （否则 scan-config.yaml 含明文密码会滞留磁盘至下次 worker 重启）。
+        """
+        import shutil
+        from datetime import datetime, timezone
+        from .auth_profile_store import VerifyStatus
+
+        if self._auth_profile_store is None:
+            raise RuntimeError("auth_profile_store 未注入，无法回填认证验证结果")
+        try:
+            client = await Client.connect(self._temporal_address())
+            raw = await client.get_workflow_handle(workflow_id).result()
+            # AuthValidationResult 经 Temporal 序列化:本 SDK 下为实例,dict 模式防御 SDK 差异。
+            success = raw.get("success") if isinstance(raw, dict) else getattr(raw, "success", False)
+            now = datetime.now(timezone.utc).isoformat()
+            if success:
+                status = VerifyStatus(state="success", last_verified_at=now)
+            else:
+                fp = (raw.get("failure_point") if isinstance(raw, dict)
+                      else getattr(raw, "failure_point", None)) or "out_of_band"
+                fd = (raw.get("failure_detail") if isinstance(raw, dict)
+                      else getattr(raw, "failure_detail", None))
+                status = VerifyStatus(
+                    state="failed", failure_point=fp, failure_detail=fd, last_verified_at=now,
+                )
+            self._auth_profile_store.set_verify_status(ws, profile_id, cred_id, status)
+            return status
+        finally:
+            shutil.rmtree(probe_dir, ignore_errors=True)  # 明文 probe 目录必清:fetch/回填抛错也清
 
     def _resolve_provider_config(self, ws: str) -> dict:
         """P3c 阶段 2：per-ws 解析（ws_config_store）；None -> 全局 env 兜底（阶段1/CLI）。

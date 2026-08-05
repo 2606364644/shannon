@@ -33,6 +33,9 @@ class ScanRequest(BaseModel):
     # 黑盒登录配置（结构化 dict，对齐 core Authentication schema：login_type/login_url/credentials
     # /login_flow）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
     authentication: dict | None = None
+    # 黑盒选已保存档案/角色(与 inline authentication 二选一):scan_manager 展开成单 credentials。
+    auth_profile_id: str | None = None
+    auth_credential_id: str | None = None
     # correlation 专用
     config_name: str | None = None
     config_content: str | None = None
@@ -54,6 +57,20 @@ class ScanRequest(BaseModel):
                 raise ValueError(
                     "blackbox 扫描不支持 source（恒复用白盒结果），请改用 reuse_whitebox_scan_id"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _auth_profile_xor_inline(self) -> "ScanRequest":
+        """blackbox:auth_profile_id+auth_credential_id 与 authentication 二选一。"""
+        if self.type == "blackbox":
+            has_profile = self.auth_profile_id or self.auth_credential_id
+            has_inline = self.authentication is not None
+            if has_profile and has_inline:
+                raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
+            if self.auth_profile_id and not self.auth_credential_id:
+                raise ValueError("选认证档案时必须同时指定 auth_credential_id")
+            if self.auth_credential_id and not self.auth_profile_id:
+                raise ValueError("选认证档案时必须同时指定 auth_profile_id")
         return self
 
 

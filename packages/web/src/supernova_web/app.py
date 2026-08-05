@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI):
     _migrate_legacy_workspace_members(app)
     _reconcile_repo_meta(app)
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
+    # 清上次 worker 异常残留的认证 probe 目录(含明文凭据 YAML)
+    app.state.scan_manager.reap_stale_probes()
     yield
     app.state._purge_task.cancel()
     # shutdown（任务 9 接入 ScanManager 取消在途扫描后填充）
@@ -428,12 +430,14 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.scan_manager import ScanManager
     from .components.credential_vault import CredentialVault
     from .components.ws_config_store import WsConfigStore
-    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding
+    from .components.auth_profile_store import AuthProfileStore
+    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
     app.state.credential_vault = CredentialVault(cfg.master_key_file)
     app.state.ws_config_store = WsConfigStore(cfg.workspaces_dir, app.state.credential_vault)
+    app.state.auth_profile_store = AuthProfileStore(cfg.workspaces_dir, app.state.credential_vault)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
     # 品牌名运行时覆盖存储(设置页改名):branding.json 落盘,system_status 解析优先读。
     app.state.branding_store = BrandingStore(cfg.workspaces_dir)
@@ -445,7 +449,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.state.scan_manager = overrides.get("scan_manager") or ScanManager(
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
         max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout,
-        ws_config_store=app.state.ws_config_store)
+        ws_config_store=app.state.ws_config_store,
+        auth_profile_store=app.state.auth_profile_store)
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
         cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
@@ -462,6 +467,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(members.router, dependencies=_require_auth)
     app.include_router(ws_config.router, dependencies=_require_auth)
     app.include_router(users.router, dependencies=_require_auth)
+    app.include_router(auth_profiles.router, dependencies=_require_auth)
     # branding:GET 需登录(任意角色可看当前名),PUT 需 admin(route 内 require_admin)。
     app.include_router(branding.router, dependencies=_require_auth)
 
