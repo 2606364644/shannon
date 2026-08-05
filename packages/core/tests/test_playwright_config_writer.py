@@ -137,3 +137,22 @@ class TestFacadeDelegation:
         flag = engine.session_flag("my-session")
         assert flag.startswith("-s=")
         assert "my-session" in flag
+
+
+# ---------------------------------------------------------------------------
+# Multi-identity authz: per-identity browser session ids (子项目2 T5)
+# ---------------------------------------------------------------------------
+
+
+class TestGetIdentitySessionId:
+    def test_get_identity_session_id_appends_account(self):
+        from supernova_core.services.playwright_config_writer import get_identity_session_id
+        assert get_identity_session_id("authz-exploit", "victim-b") == "agent-authz-victim-b"
+
+    def test_get_identity_session_id_default_base(self):
+        from supernova_core.services.playwright_config_writer import get_identity_session_id
+        assert get_identity_session_id("unknown-agent", "admin-1") == "default-admin-1"
+
+    def test_get_session_id_unchanged(self):
+        from supernova_core.services.playwright_config_writer import get_session_id
+        assert get_session_id("authz-exploit") == "agent-authz"

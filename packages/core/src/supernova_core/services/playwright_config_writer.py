@@ -31,6 +31,12 @@ def get_session_id(agent_name: str) -> str:
     return AGENT_SESSION_MAPPING.get(agent_name, "default")
 
 
+def get_identity_session_id(agent_name: str, account_id: str) -> str:
+    """Browser session id for a specific identity slot (multi-identity authz)."""
+    base = AGENT_SESSION_MAPPING.get(agent_name, "default")
+    return f"{base}-{account_id}"
+
+
 # ---------------------------------------------------------------------------
 # Facade functions – delegate to the engine
 # ---------------------------------------------------------------------------
