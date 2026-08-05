@@ -729,6 +729,10 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
             web_url=input.web_url,
             config_path=input.config_path,
             workspace_path=input.workspace_path or "",
+            # 必传 deliverables_path:executor 已删 repo fallback(f1abf69d),
+            # 不传则 raise ValueError。对齐 run_blackbox_auth_validation(:191)。
+            # input.workspace_path=probe_dir 非空 → 落 probe_dir/<subdir>。
+            deliverables_path=str(_get_deliverables_path(input)),
             prompt_manager=prompt_manager,
             executor=executor,
             api_key=input.api_key,

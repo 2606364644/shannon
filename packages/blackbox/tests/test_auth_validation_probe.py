@@ -64,4 +64,5 @@ async def test_probe_calls_validate_with_prompt_manager_and_executor():
     assert kwargs["web_url"] == "http://target/"
     assert kwargs["config_path"] == "/c.yaml"
     assert kwargs["workspace_path"] == "/wp"
+    assert kwargs["deliverables_path"]  # 必传(对齐 run_blackbox_auth_validation;f1abf69d 删 fallback 后漏传会 raise)
     assert "prompt_manager" in kwargs and "executor" in kwargs  # 必传,非 None
