@@ -39,22 +39,23 @@ class AuthValidationResult:
     failure_detail: str | None = None
 
 
-def auth_state_path(workspace_path: str | Path) -> Path:
-    return Path(workspace_path) / "auth-state.json"
+def auth_state_path(workspace_path: str | Path, account_id: str | None = None) -> Path:
+    name = "auth-state.json" if account_id is None else f"auth-state-{account_id}.json"
+    return Path(workspace_path) / name
 
 
 async def cleanup_auth_state(workspace_path: str | Path) -> None:
-    state_file = auth_state_path(workspace_path)
-    if await async_path_exists(state_file):
-        import aiofiles.os
-        await aiofiles.os.remove(state_file)
+    import glob as _glob
+    import aiofiles.os
+    for f in _glob.glob(str(Path(workspace_path) / "auth-state*.json")):
+        await aiofiles.os.remove(f)
 
 
 def cleanup_auth_state_sync(workspace_path: str | Path) -> None:
     """Synchronous version of cleanup_auth_state for use in workflow finally blocks."""
-    state_file = auth_state_path(workspace_path)
-    if state_file.exists():
-        state_file.unlink()
+    import glob as _glob
+    for f in _glob.glob(str(Path(workspace_path) / "auth-state*.json")):
+        Path(f).unlink(missing_ok=True)
 
 
 async def verify_auth_state(state_file: Path) -> AuthValidationResult:

@@ -23,6 +23,19 @@ def test_auth_state_path_accepts_path_object():
     assert auth_state_path(Path("/tmp/ws")) == Path("/tmp/ws/auth-state.json")
 
 
+def test_auth_state_path_default_is_primary():
+    from supernova_core.services.validate_authentication import auth_state_path
+    assert auth_state_path("/ws").name == "auth-state.json"
+
+def test_auth_state_path_with_account_id():
+    from supernova_core.services.validate_authentication import auth_state_path
+    assert auth_state_path("/ws", "victim-b").name == "auth-state-victim-b.json"
+
+def test_auth_state_path_primary_explicit():
+    from supernova_core.services.validate_authentication import auth_state_path
+    assert auth_state_path("/ws", None).name == "auth-state.json"
+
+
 # --- verify_auth_state tests ---
 
 @pytest.mark.asyncio
@@ -98,6 +111,33 @@ async def test_cleanup_removes_existing_file(tmp_path):
 async def test_cleanup_noop_when_no_file(tmp_path):
     await cleanup_auth_state(tmp_path)
     # Should not raise
+
+
+def test_cleanup_auth_state_sync_removes_all_identity_files(tmp_path):
+    from supernova_core.services.validate_authentication import cleanup_auth_state_sync
+    (tmp_path / "auth-state.json").write_text("{}")
+    (tmp_path / "auth-state-victim-b.json").write_text("{}")
+    (tmp_path / "auth-state-admin-1.json").write_text("{}")
+    (tmp_path / "other.json").write_text("{}")
+    cleanup_auth_state_sync(str(tmp_path))
+    assert not (tmp_path / "auth-state.json").exists()
+    assert not (tmp_path / "auth-state-victim-b.json").exists()
+    assert not (tmp_path / "auth-state-admin-1.json").exists()
+    assert (tmp_path / "other.json").exists()  # 不误删
+
+
+@pytest.mark.asyncio
+async def test_cleanup_auth_state_removes_all_identity_files(tmp_path):
+    """Async cleanup must also glob all identity files (parity with sync)."""
+    (tmp_path / "auth-state.json").write_text("{}")
+    (tmp_path / "auth-state-victim-b.json").write_text("{}")
+    (tmp_path / "auth-state-admin-1.json").write_text("{}")
+    (tmp_path / "other.json").write_text("{}")
+    await cleanup_auth_state(tmp_path)
+    assert not (tmp_path / "auth-state.json").exists()
+    assert not (tmp_path / "auth-state-victim-b.json").exists()
+    assert not (tmp_path / "auth-state-admin-1.json").exists()
+    assert (tmp_path / "other.json").exists()  # 不误删
 
 
 # --- validate_authentication integration tests ---
