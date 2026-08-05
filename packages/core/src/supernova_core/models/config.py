@@ -22,10 +22,6 @@ class ReportConfig(BaseModel):
     min_confidence: Confidence | None = None
     guidance: str | None = None
 
-class SuccessCondition(BaseModel):
-    type: Literal["url_contains", "element_present", "url_equals_exactly", "text_contains"]
-    value: str
-
 class EmailLogin(BaseModel):
     address: str
     password: str
@@ -42,7 +38,6 @@ class Authentication(BaseModel):
     login_url: str
     credentials: Credentials
     login_flow: list[str] | None = None
-    success_condition: SuccessCondition
 
 class PipelineConfig(BaseModel):
     retry_preset: Literal["default", "subscription"] | None = None

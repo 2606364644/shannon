@@ -13,7 +13,6 @@ from .config import (
     RuleType,
     Rules,
     Severity,
-    SuccessCondition,
     VulnClass,
 )
 from .deliverables import DELIVERABLE_FILENAMES, DeliverableType
@@ -72,7 +71,6 @@ __all__ = [
     "SessionMetadata",
     "Severity",
     "SsrfVulnerability",
-    "SuccessCondition",
     "VulnClass",
     "VulnType",
     "VulnerabilityQueue",

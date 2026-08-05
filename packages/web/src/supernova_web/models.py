@@ -31,7 +31,7 @@ class ScanRequest(BaseModel):
     # （_blackbox_requires_reuse）强制 reuse_whitebox_scan_id 必填 + 禁 source。
     reuse_whitebox_scan_id: str | None = None
     # 黑盒登录配置（结构化 dict，对齐 core Authentication schema：login_type/login_url/credentials
-    # /login_flow/success_condition）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
+    # /login_flow）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
     authentication: dict | None = None
     # correlation 专用
     config_name: str | None = None

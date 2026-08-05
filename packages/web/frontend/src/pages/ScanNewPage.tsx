@@ -14,7 +14,6 @@ import { Card } from "@/components/ui/card";
 type ScanType = "whitebox" | "blackbox" | "correlation";
 
 export type LoginType = "form" | "sso" | "api" | "basic";
-export type SuccessConditionType = "url_contains" | "element_present" | "url_equals_exactly" | "text_contains";
 
 /** 黑盒登录配置表单态（独立于 ScanAuthentication 契约：含 enabled 开关 + emailLoginEnabled
  *  + loginFlow 多行文本；buildBody 时 buildAuthPayload 转成 ScanAuthentication）。 */
@@ -30,8 +29,6 @@ export interface AuthFormState {
   emailPassword: string;
   emailTotp: string;
   loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
-  scType: SuccessConditionType;
-  scValue: string;
 }
 
 const DEFAULT_AUTH: AuthFormState = {
@@ -46,8 +43,6 @@ const DEFAULT_AUTH: AuthFormState = {
   emailPassword: "",
   emailTotp: "",
   loginFlow: "",
-  scType: "url_contains",
-  scValue: "",
 };
 
 /** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。 */
@@ -63,7 +58,6 @@ export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
     login_type: a.loginType,
     login_url: a.loginUrl.trim(),
     credentials,
-    success_condition: { type: a.scType, value: a.scValue.trim() },
   };
   const flow = a.loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
   if (flow.length) payload.login_flow = flow;
@@ -86,8 +80,6 @@ export function authFromPayload(auth: ScanAuthentication): AuthFormState {
     emailPassword: el?.password ?? "",
     emailTotp: el?.totp_secret ?? "",
     loginFlow: Array.isArray(auth.login_flow) ? auth.login_flow.join("\n") : "",
-    scType: auth.success_condition?.type ?? "url_contains",
-    scValue: auth.success_condition?.value ?? "",
   };
 }
 
@@ -106,7 +98,6 @@ export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
   if (!/^https?:\/\//.test(a.loginUrl.trim())) return t("scan.errors.authLoginUrl");
   if (!a.username.trim()) return t("scan.errors.authUsername");
-  if (!a.scValue.trim()) return t("scan.errors.authScValue");
   return null;
 }
 

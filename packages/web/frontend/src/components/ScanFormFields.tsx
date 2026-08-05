@@ -12,7 +12,7 @@ import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos, listScans } from "@/api/client";
 import type { Repo, ScanSummary, Workspace } from "@/api/types";
-import type { FormState, AuthFormState, LoginType, SuccessConditionType } from "../pages/ScanNewPage";
+import type { FormState, AuthFormState, LoginType } from "../pages/ScanNewPage";
 import { useAuth } from "@/auth/AuthContext";
 import { AlertCircle, Info } from "lucide-react";
 
@@ -65,8 +65,8 @@ function StepGroup({ step, title, tag, tagClass, children }: {
 }
 
 /** 黑盒 Step4 登录配置区：Switch 启用 → 展开完整 Authentication schema 字段（对齐 core
- *  Authentication：login_type/login_url/credentials[username/password/totp/email_login]/login_flow
- *  /success_condition）。字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。
+ *  Authentication：login_type/login_url/credentials[username/password/totp/email_login]/login_flow）。
+ *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。
  *  服从既有设计语言：StepGroup 容器 + 现有 Input/Label/Select/Switch/Checkbox，不引入新视觉。 */
 function AuthFields({ auth, setAuth, authErr }: {
   auth: AuthFormState;
@@ -156,29 +156,6 @@ function AuthFields({ auth, setAuth, authErr }: {
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="space-y-2 border-t border-border pt-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("scan.auth.successGroup")}
-        </span>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.scTypeLabel")}</Label>
-            <Select value={auth.scType} onValueChange={(v) => setAuth({ scType: v as SuccessConditionType })}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(["url_contains", "element_present", "url_equals_exactly", "text_contains"] as const).map((v) => (
-                  <SelectItem key={v} value={v}>{t(`scan.auth.scType.${v}`)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.scValueLabel")}</Label>
-            <Input value={auth.scValue} onChange={(e) => setAuth({ scValue: e.target.value })} className="font-mono" />
-          </div>
         </div>
       </div>
 

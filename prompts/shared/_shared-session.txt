@@ -8,8 +8,9 @@ Restore it before doing anything else — run this exact command:
 
   {{AUTH_LOAD_COMMAND}}
 
-Then run verification (per the success_condition in your authentication
-config) to confirm the restored session is still valid:
+Then run verification (URL moved off the login page, no auth error, authenticated
+content visible — or any success indicator described in your login_flow) to confirm
+the restored session is still valid:
 
 - If verification passes → SKIP the login flow below entirely and
   proceed with your primary task. You are authenticated.

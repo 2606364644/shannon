@@ -57,8 +57,7 @@ description: "My target web application"
 | `login_type` | "form" \| "sso" \| "api" \| "basic" | 是 | - | 登录类型 |
 | `login_url` | string | 是 | - | 登录页面 URL |
 | `credentials` | Credentials | 是 | - | 认证凭据 |
-| `login_flow` | list[string] \| null | 否 | null | 登录流程步骤 |
-| `success_condition` | SuccessCondition | 是 | - | 登录成功判定条件 |
+| `login_flow` | list[string] \| null | 否 | null | 登录流程步骤（可在步骤中以自然语言描述登录成功标志，供 agent 判定） |
 
 ### Credentials（凭据）
 
@@ -67,13 +66,6 @@ description: "My target web application"
 | `username` | string | 是 | - | 用户名 |
 | `password` | string \| null | 否 | null | 密码 |
 | `totp_secret` | string \| null | 否 | null | TOTP 密钥（2FA） |
-
-### SuccessCondition（登录成功判定）
-
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `type` | "url_contains" \| "element_present" \| "url_equals_exactly" \| "text_contains" | 是 | - | 判定方式 |
-| `value` | string | 是 | - | 判定值 |
 
 ### PipelineConfig（流水线配置）
 
@@ -117,7 +109,7 @@ rules:
 
 支持四种登录类型：
 
-- **form**：传统表单登录，需要 `login_url` + `credentials` + `success_condition`
+- **form**：传统表单登录，需要 `login_url` + `credentials`
 - **sso**：SSO 单点登录
 - **api**：API 密钥认证
 - **basic**：HTTP Basic 认证
@@ -126,16 +118,7 @@ rules:
 
 对于复杂的登录流程，可以通过 `login_flow` 字段描述登录步骤。该字段是一个字符串列表，按顺序定义登录过程的各个阶段。
 
-### success_condition
-
-登录成功后有四种判定方式：
-
-| 类型 | 说明 |
-|---|---|
-| `url_contains` | 登录后 URL 包含指定字符串 |
-| `url_equals_exactly` | 登录后 URL 完全匹配 |
-| `element_present` | 页面中存在指定元素 |
-| `text_contains` | 页面文本包含指定内容 |
+**登录成功判定**：在 `login_flow` 步骤中以自然语言描述成功标志即可（例如 "登录成功标志：URL 应跳转到 /dashboard，或页面出现 Welcome"）。validate-authentication agent 据此判定；不写成功标志时，agent 综合 URL 跳转、页面内容、认证 cookie 自行判定。不再需要单独的 `success_condition` 字段。
 
 ## 漏洞类型和报告配置
 
@@ -205,9 +188,6 @@ authentication:
     - "Fill password field"
     - "Submit form"
     - "Enter TOTP code if prompted"
-  success_condition:
-    type: url_contains
-    value: /dashboard
 
 pipeline:
   retry_preset: default

@@ -126,23 +126,6 @@ class ReportConfig(BaseModel)
 
 ---
 
-#### `SuccessCondition`
-
-文件路径: `packages/core/src/supernova_core/models/config.py`
-
-```python
-class SuccessCondition(BaseModel)
-```
-
-| 字段 | 类型 | 默认值 |
-|------|------|--------|
-| `type` | `Literal["url_contains", "element_present", "url_equals_exactly", "text_contains"]` | （必填） |
-| `value` | `str` | （必填） |
-
-认证成功的判断条件。
-
----
-
 #### `Credentials`
 
 文件路径: `packages/core/src/supernova_core/models/config.py`
@@ -175,9 +158,10 @@ class Authentication(BaseModel)
 | `login_url` | `str` | （必填） |
 | `credentials` | `Credentials` | （必填） |
 | `login_flow` | `list[str] \| None` | `None` |
-| `success_condition` | `SuccessCondition` | （必填） |
 
-目标系统的认证配置。
+目标系统的认证配置。`login_flow` 可在步骤中以自然语言描述登录成功标志
+（如"URL 应跳转到 /dashboard"），供 validate-authentication agent 判定；不写则由
+agent 综合页面状态自行判定。
 
 ---
 

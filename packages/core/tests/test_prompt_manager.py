@@ -45,7 +45,6 @@ from supernova_core.models.config import (
     Credentials,
     DistributedConfig,
     ReportConfig,
-    SuccessCondition,
 )
 
 
@@ -70,7 +69,6 @@ def _make_auth(login_flow=None, **cred_overrides) -> Authentication:
         login_type="form",
         login_url="https://example.com/login",
         credentials=Credentials(**cred_defaults),
-        success_condition=SuccessCondition(type="url_contains", value="/dashboard"),
         login_flow=login_flow,
     )
 
@@ -172,7 +170,6 @@ def test_build_login_instructions_sso_type(login_prompts_dir):
         login_type="sso",
         login_url="https://example.com/login",
         credentials=Credentials(username="admin", password="pass123"),
-        success_condition=SuccessCondition(type="url_contains", value="/dashboard"),
         login_flow=["Click SSO button", "Enter $username"],
     )
     result = manager.build_login_instructions(auth)

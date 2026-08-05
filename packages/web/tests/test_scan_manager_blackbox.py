@@ -67,7 +67,6 @@ async def test_resolve_blackbox_inputs_writes_auth_yaml(tmp_path):
         "login_type": "form",
         "login_url": "https://t.example/login",
         "credentials": {"username": "admin", "password": "pw"},
-        "success_condition": {"type": "url_contains", "value": "/dashboard"},
     })
     config_path, repo_path = await sm._resolve_blackbox_inputs(req, "ws-a", scan_dir, target=None)
 
@@ -75,7 +74,7 @@ async def test_resolve_blackbox_inputs_writes_auth_yaml(tmp_path):
     parsed = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
     assert parsed["authentication"]["login_type"] == "form"
     assert parsed["authentication"]["credentials"]["username"] == "admin"
-    assert parsed["authentication"]["success_condition"]["value"] == "/dashboard"
+    assert "success_condition" not in parsed["authentication"]  # D1: 字段已删，model_dump 不写
     assert repo_path == str(wb_scan_dir)  # 黑盒恒复用白盒 → repo_path = wb scan_dir
 
 
@@ -132,7 +131,6 @@ async def test_resolve_blackbox_inputs_invalid_authentication_raises(tmp_path):
         "login_type": "INVALID_TYPE",  # 非 Literal["form","sso","api","basic"]
         "login_url": "https://t.example/login",
         "credentials": {"username": "x"},
-        "success_condition": {"type": "url_contains", "value": "/d"},
     })
     with pytest.raises(ValueError):
         await sm._resolve_blackbox_inputs(req, "ws-a", scan_dir, target=None)

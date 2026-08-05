@@ -342,8 +342,7 @@
       "urlEmpty": "目标 URL 不能为空",
       "authLoginUrlEmpty": "请填写登录地址",
       "authLoginUrl": "登录地址需以 http(s):// 开头",
-      "authUsername": "请填写用户名",
-      "authScValue": "请填写登录成功的匹配值"
+      "authUsername": "请填写用户名"
     },
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
@@ -380,15 +379,6 @@
       "emailAddress": "邮箱地址",
       "emailPassword": "邮箱密码",
       "emailTotp": "邮箱 TOTP 密钥",
-      "successGroup": "登录成功判定",
-      "scTypeLabel": "条件类型",
-      "scType": {
-        "url_contains": "URL 包含",
-        "element_present": "页面出现元素",
-        "url_equals_exactly": "URL 完全匹配",
-        "text_contains": "页面包含文本"
-      },
-      "scValueLabel": "匹配值",
       "loginFlowLabel": "登录步骤",
       "loginFlowHint": "每行一步（可选，如：访问登录页 / 填写用户名 / 填写密码 / 提交）",
       "infoNote": "登录态会持久化到 auth-state，验证通过后供后续扫描阶段复用。"

@@ -58,7 +58,13 @@ def cleanup_auth_state_sync(workspace_path: str | Path) -> None:
 
 
 async def verify_auth_state(state_file: Path) -> AuthValidationResult:
-    """Verify the auth-state.json file was saved correctly."""
+    """Verify the auth-state.json file was saved correctly.
+
+    Not used for login-success arbitration since D3 (2026-08-05): the structured
+    ``login_success`` verdict is trusted directly. Retained as a structural /
+    diagnostic check over the saved storageState (cookies + localStorage) that the
+    validate-authentication agent publishes for downstream exploit-agent reuse.
+    """
     if not await async_path_exists(state_file):
         return AuthValidationResult(
             success=False,
@@ -139,29 +145,27 @@ async def validate_authentication(
         tool_audit_logger=tool_audit_logger,
     )
 
-    # 4. Classify structured output
+    # 4. Trust the structured login_success verdict (D3, 2026-08-05).
+    # The model's structured output is authoritative. We deliberately do NOT cross-check
+    # auth-state.json cookies: cookie presence is a weak signal (CSRF / anonymous
+    # session / rate-limit / bot cookies are set on the login page regardless of login
+    # outcome), so a cookie "override" manufactured false positives (scanning while
+    # unauthenticated → silent miss of every login-gated vuln). Trusting the field turns
+    # the residual risk into visible false negatives (scan halts, retryable) instead.
     if metrics.structured_output is not None:
         verdict = metrics.structured_output
         if verdict.get("login_success"):
-            return await verify_auth_state(state_file)
-        else:
-            # LLM reports failure. But GLM (and similar) under CLI protocol-level
-            # structured output (--json_schema) occasionally mis-fill login_success=false
-            # while the browser actually logged in — natural-language turns report
-            # success AND auth-state.json is saved with cookies. Re-check the objective
-            # auth-state: a state saved this run with cookies/origins means the browser
-            # really did authenticate, so trust that evidence over the mis-filled boolean
-            # (avoids misclassifying a genuine success as AUTH_LOGIN_FAILED → scan fail).
-            state_result = await verify_auth_state(state_file)
-            if state_result.success:
-                return state_result
-            failure_point = verdict.get("failure_point", "out_of_band")
-            failure_detail = verdict.get("failure_detail", "Login failed without diagnostic")
-            return AuthValidationResult(
-                success=False,
-                failure_point=failure_point,
-                failure_detail=failure_detail,
-            )
+            return AuthValidationResult(success=True)
+        return AuthValidationResult(
+            success=False,
+            failure_point=verdict.get("failure_point", "out_of_band"),
+            failure_detail=verdict.get("failure_detail", "Login failed without diagnostic"),
+        )
 
-    # 5. Fallback: if no structured output, rely on auth-state verification
-    return await verify_auth_state(state_file)
+    # 5. No structured output → provider anomaly. Fail-fast rather than guessing via
+    # cookies (rare; 0 occurrences across 72 probe runs on both engines).
+    return AuthValidationResult(
+        success=False,
+        failure_point="out_of_band",
+        failure_detail="Auth agent returned no structured login_success verdict",
+    )

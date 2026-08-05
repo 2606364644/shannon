@@ -43,10 +43,11 @@ Execute the login flow based on the login_type specified in the configuration:
 <success_verification>
 After completing the login flow, verify successful authentication:
 
-1. **Check Success Condition:**
-   - IF success_condition.type == "url_contains": Verify current URL contains the specified value
-   - IF success_condition.type == "url_equals_exactly": Verify current URL exactly matches the specified value
-   - IF success_condition.type == "element_present": Verify the specified element exists on the page
+1. **Check Success Indicators:**
+   - If the login_flow steps above describe a success indicator (e.g. "URL should
+     redirect to /dashboard" or "page should show Welcome"), verify that indicator.
+   - Otherwise judge holistically: current URL moved away from the login page, no
+     authentication error is shown, and authenticated user content is visible.
 
 2. **Confirm Authentication State:**
    - Page should NOT be on a login screen

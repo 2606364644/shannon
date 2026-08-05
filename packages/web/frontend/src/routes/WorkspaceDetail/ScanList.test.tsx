@@ -203,7 +203,6 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     const auth = {
       login_type: "form", login_url: "http://t.example/login",
       credentials: { username: "admin" },
-      success_condition: { type: "url_contains", value: "welcome" },
     };
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),

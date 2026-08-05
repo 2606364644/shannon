@@ -12,7 +12,6 @@ from supernova_core.models.config import (
     EmailLogin,
     Rule,
     Rules,
-    SuccessCondition,
 )
 from supernova_core.models.errors import PentestError, ErrorCode
 
@@ -52,7 +51,7 @@ def test_parse_url_path_without_slash(tmp_path):
 def test_distribute_config_none():
     d = distribute_config(None)
     assert d.description == ""
-    assert len(d.vuln_classes) == 6
+    assert len(d.vuln_classes) == 5  # inj/xss/auth/authz/ssrf (misconfig 裁剪,见 memory)
     assert d.exploit is True
 
 def test_distribute_config_full():
@@ -83,9 +82,6 @@ authentication:
     password: pass123
   login_flow:
     - "{long_step}"
-  success_condition:
-    type: url_contains
-    value: /dashboard
 """)
     with pytest.raises(PentestError, match="login_flow step 1 exceeds 500 characters"):
         parse_config(config_path)
@@ -102,9 +98,6 @@ authentication:
     password: pass123
   login_flow:
     - "Click the <script>alert(1)</script> button"
-  success_condition:
-    type: url_contains
-    value: /dashboard
 """)
     with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
         parse_config(config_path)
@@ -121,9 +114,6 @@ authentication:
     password: pass123
   login_flow:
     - "Navigate to ../../etc/passwd"
-  success_condition:
-    type: url_contains
-    value: /dashboard
 """)
     with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
         parse_config(config_path)
@@ -142,9 +132,6 @@ authentication:
     - "Navigate to login page"
     - "Enter $username in username field"
     - "Click submit"
-  success_condition:
-    type: url_contains
-    value: /dashboard
 """)
     config = parse_config(config_path)
     assert config.authentication is not None
@@ -160,9 +147,6 @@ authentication:
   credentials:
     username: admin
     password: pass123
-  success_condition:
-    type: url_contains
-    value: /dashboard
 """)
     config = parse_config(config_path)
     assert config.authentication is not None
@@ -180,12 +164,30 @@ authentication:
     password: pass123
   login_flow:
     - "Navigate to javascript:alert(1)"
+""")
+    with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
+        parse_config(config_path)
+
+
+def test_legacy_success_condition_ignored(tmp_path):
+    """D1 (2026-08-05): success_condition was removed. A legacy scan-config.yaml that
+    still carries a success_condition block must parse without error (pydantic ignores
+    unknown fields) — old user configs keep working, the dead field is silently dropped.
+    Locks the backward-compat behavior so a future extra='forbid' won't break configs."""
+    config_path = _write_config(tmp_path, """
+authentication:
+  login_type: form
+  login_url: https://example.com/login
+  credentials:
+    username: admin
+    password: pass123
   success_condition:
     type: url_contains
     value: /dashboard
 """)
-    with pytest.raises(PentestError, match="login_flow step 1 contains potentially dangerous pattern"):
-        parse_config(config_path)
+    config = parse_config(config_path)
+    assert config.authentication is not None
+    assert not hasattr(config.authentication, "success_condition")
 
 
 
@@ -223,10 +225,6 @@ class TestSanitizeAuthentication:
                 password="  pass123  ",
                 totp_secret="  SECRET  ",
             ),
-            success_condition=SuccessCondition(
-                type="url_contains",
-                value="  /dashboard  ",
-            ),
         )
         defaults.update(overrides)
         return Authentication(**defaults)
@@ -238,7 +236,6 @@ class TestSanitizeAuthentication:
         assert sanitized.credentials.username == "admin"
         assert sanitized.credentials.password == "pass123"
         assert sanitized.credentials.totp_secret == "SECRET"
-        assert sanitized.success_condition.value == "/dashboard"
 
     def test_password_none(self):
         auth = self._make_auth(
@@ -320,14 +317,11 @@ class TestSanitizeRaw:
             "login_type": " FORM ",
             "login_url": "  https://example.com  ",
             "credentials": {"username": " admin "},
-            "success_condition": {"type": " URL_CONTAINS ", "value": " /ok "},
         }
         result = _sanitize_raw_auth(auth)
         assert result["login_type"] == "form"
         assert result["login_url"] == "https://example.com"
         assert result["credentials"]["username"] == "admin"
-        assert result["success_condition"]["type"] == "url_contains"
-        assert result["success_condition"]["value"] == "/ok"
 
     def test_raw_auth_login_flow_stripped(self):
         from supernova_core.config.parser import _sanitize_raw_auth
@@ -335,7 +329,6 @@ class TestSanitizeRaw:
             "login_type": "form",
             "login_url": "https://example.com",
             "credentials": {"username": "admin"},
-            "success_condition": {"type": "url_contains", "value": "/ok"},
             "login_flow": ["  step one  ", "  step two  "],
         }
         result = _sanitize_raw_auth(auth)
@@ -354,7 +347,6 @@ class TestSanitizeRaw:
                     "totp_secret": "  KEY  ",
                 },
             },
-            "success_condition": {"type": "url_contains", "value": "/ok"},
         }
         result = _sanitize_raw_auth(auth)
         el = result["credentials"]["email_login"]
@@ -369,7 +361,6 @@ class TestSanitizeRaw:
                 "login_type": "FORM",
                 "login_url": "  https://example.com  ",
                 "credentials": {"username": " admin "},
-                "success_condition": {"type": "URL_CONTAINS", "value": " /ok "},
             },
             "rules": {
                 "avoid": [{"description": "  test  ", "type": " URL_PATH ", "value": " /admin "}],
@@ -399,15 +390,11 @@ authentication:
   credentials:
     username: "  admin  "
     password: "  pass123  "
-  success_condition:
-    type: url_contains
-    value: "  /dashboard  "
 """)
         config = parse_config(config_path)
         assert config.authentication.login_url == "https://example.com/login"
         assert config.authentication.credentials.username == "admin"
         assert config.authentication.credentials.password == "pass123"
-        assert config.authentication.success_condition.value == "/dashboard"
 
     def test_config_with_whitespace_rules_stripped(self, tmp_path):
         config_path = _write_config(tmp_path, """
@@ -435,13 +422,9 @@ authentication:
   credentials:
     username: admin
     password: pass123
-  success_condition:
-    type: URL_CONTAINS
-    value: /dashboard
 """)
         config = parse_config(config_path)
         assert config.authentication.login_type == "form"
-        assert config.authentication.success_condition.type == "url_contains"
 
     def test_config_with_uppercase_rule_type_normalized(self, tmp_path):
         config_path = _write_config(tmp_path, """

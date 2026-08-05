@@ -431,7 +431,6 @@ describe("ScanNewPage 重跑预填（location.state）", () => {
     const auth = {
       login_type: "form", login_url: "http://t.example/login",
       credentials: { username: "admin", password: "pw" },
-      success_condition: { type: "url_contains", value: "welcome" },
     };
     renderPage("/scan/new", { type: "blackbox", workspace: "ws1", url: "http://t.example",
       reuseScanId: "20260731-1200", auth });
@@ -481,7 +480,7 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
   const base: AuthFormState = {
     enabled: true, loginType: "form", loginUrl: "https://x/login", username: "admin",
     password: "pw", totpSecret: "T", emailLoginEnabled: false, emailAddress: "",
-    emailPassword: "", emailTotp: "", loginFlow: "a\nb", scType: "url_contains", scValue: "/dashboard",
+    emailPassword: "", emailTotp: "", loginFlow: "a\nb",
   };
   // t 只回 key（断言用 key 本身，不依赖 i18n 文案）
   const t = ((k: string) => k) as never;
@@ -491,7 +490,6 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
     expect(p.login_type).toBe("form");
     expect(p.login_url).toBe("https://x/login");
     expect(p.credentials).toEqual({ username: "admin", password: "pw", totp_secret: "T" });
-    expect(p.success_condition).toEqual({ type: "url_contains", value: "/dashboard" });
     expect(p.login_flow).toEqual(["a", "b"]);
   });
 

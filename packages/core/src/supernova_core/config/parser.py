@@ -13,7 +13,6 @@ from supernova_core.models.config import (
     ReportConfig,
     Rule,
     Rules,
-    SuccessCondition,
     VulnClass,
 )
 from supernova_core.models.errors import ErrorCode, PentestError
@@ -97,10 +96,6 @@ def _sanitize_authentication(auth: Authentication) -> Authentication:
             email_login=email_login,
         ),
         login_flow=[s.strip() for s in auth.login_flow] if auth.login_flow else None,
-        success_condition=SuccessCondition(
-            type=auth.success_condition.type.strip().lower(),
-            value=auth.success_condition.value.strip(),
-        ),
     )
 
 
@@ -160,16 +155,6 @@ def _sanitize_raw_auth(auth: dict) -> dict:
     lf = auth.get("login_flow")
     if isinstance(lf, list):
         auth["login_flow"] = [s.strip() if isinstance(s, str) else s for s in lf]
-    sc = auth.get("success_condition")
-    if isinstance(sc, dict):
-        for field in ("type", "value"):
-            v = sc.get(field)
-            if isinstance(v, str):
-                sc[field] = v.strip()
-        # lowercase type for Literal validation
-        sct = sc.get("type")
-        if isinstance(sct, str):
-            sc["type"] = sct.lower()
     return auth
 
 

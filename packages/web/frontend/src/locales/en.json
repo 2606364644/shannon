@@ -342,8 +342,7 @@
       "urlEmpty": "Target URL cannot be empty",
       "authLoginUrlEmpty": "Please fill in the login URL",
       "authLoginUrl": "Login URL must start with http(s)://",
-      "authUsername": "Please fill in the username",
-      "authScValue": "Please fill in the success match value"
+      "authUsername": "Please fill in the username"
     },
     "title": "New Scan",
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
@@ -380,15 +379,6 @@
       "emailAddress": "Email address",
       "emailPassword": "Email password",
       "emailTotp": "Email TOTP secret",
-      "successGroup": "Login success check",
-      "scTypeLabel": "Condition type",
-      "scType": {
-        "url_contains": "URL contains",
-        "element_present": "Element present",
-        "url_equals_exactly": "URL equals exactly",
-        "text_contains": "Page text contains"
-      },
-      "scValueLabel": "Match value",
       "loginFlowLabel": "Login steps",
       "loginFlowHint": "One step per line (optional, e.g. open login page / fill username / fill password / submit)",
       "infoNote": "The session is persisted to auth-state and reused by later scan phases once login is verified."

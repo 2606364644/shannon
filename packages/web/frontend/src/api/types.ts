@@ -252,10 +252,6 @@ export interface ScanAuthentication {
     email_login?: { address: string; password: string; totp_secret?: string };
   };
   login_flow?: string[];
-  success_condition: {
-    type: "url_contains" | "element_present" | "url_equals_exactly" | "text_contains";
-    value: string;
-  };
 }
 
 export interface ScanRequest {

@@ -155,7 +155,7 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
             "origins": [],
         }))
         from supernova_core.models.metrics import AgentMetrics
-        return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
+        return AgentMetrics(duration_ms=5000, structured_output={"login_success": True})
 
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(side_effect=fake_execute)
@@ -183,7 +183,7 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
 
 @pytest.mark.asyncio
 async def test_auth_validation_detects_missing_state_file(tmp_path):
-    """When executor runs but no auth-state.json is saved, return failure."""
+    """D3: no structured output → failure (fail-fast, no auth-state fallback)."""
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(return_value=AgentMetrics(duration_ms=5000))
     mock_pm = MagicMock()
@@ -207,7 +207,7 @@ async def test_auth_validation_detects_missing_state_file(tmp_path):
 
 @pytest.mark.asyncio
 async def test_auth_validation_verifies_state_content(tmp_path):
-    """When executor runs and valid auth-state is saved, return success."""
+    """D3: structured login_success=True → success (state still saved for reuse)."""
     state_file = tmp_path / "auth-state.json"
     # Simulate agent writing the file during executor.execute
     async def fake_execute(**kwargs):
@@ -216,7 +216,7 @@ async def test_auth_validation_verifies_state_content(tmp_path):
             "origins": [],
         }))
         from supernova_core.models.metrics import AgentMetrics
-        return AgentMetrics(duration_ms=5000)  # Fallback path: no structured_output
+        return AgentMetrics(duration_ms=5000, structured_output={"login_success": True})
 
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(side_effect=fake_execute)
@@ -397,16 +397,11 @@ async def test_auth_validation_structured_output_failure_out_of_band(tmp_path):
 
 @pytest.mark.asyncio
 async def test_auth_validation_structured_failure_but_state_has_cookies(tmp_path):
-    """LLM fills login_success=False but auth-state has cookies → trust objective evidence.
+    """D3: login_success=False fails even when auth-state.json holds a cookie.
 
-    Regression (~2 blackbox scan): GLM under CLI protocol-level structured output
-    (--json_schema) occasionally fills login_success=false even when the browser
-    actually logged in — natural-language turns report success AND auth-state.json is
-    saved with cookies. The objective auth-state (cookies saved this run) must override
-    the LLM's mis-filled boolean, otherwise a genuinely successful login is
-    misclassified as AUTH_LOGIN_FAILED and the whole scan fails. Mirror of
-    test_auth_validation_structured_success_but_missing_state_file (which catches the
-    opposite lie).
+    Cookie presence is a weak signal (CSRF / anonymous session / rate-limit / bot
+    cookies are set on the login page before any successful login), so it no longer
+    overrides the model's structured verdict. A failure verdict → failure, period.
     """
     state_file = tmp_path / "auth-state.json"
 
@@ -439,13 +434,13 @@ async def test_auth_validation_structured_failure_but_state_has_cookies(tmp_path
             executor=mock_executor,
         )
 
-    # Objective cookies override the LLM's mis-filled login_success=false
-    assert result.success is True
+    # D3: trust the structured field over cookies — failure holds even with a cookie
+    assert result.success is False
 
 
 @pytest.mark.asyncio
 async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
-    """When structured output is None, fall back to verify_auth_state."""
+    """D3: no structured output → fail-fast (do not fall back to auth-state)."""
     state_file = tmp_path / "auth-state.json"
 
     async def fake_execute(**kwargs):
@@ -473,13 +468,19 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
             executor=mock_executor,
         )
 
-    # Falls back to verify_auth_state, which checks the file
-    assert result.success is True
+    # D3: no structured output is a provider anomaly → fail-fast (no cookie fallback)
+    assert result.success is False
+    assert result.failure_point == "out_of_band"
 
 
 @pytest.mark.asyncio
 async def test_auth_validation_structured_success_but_missing_state_file(tmp_path):
-    """Agent claims login_success=True via structured output but fails to write auth state."""
+    """D3: login_success=True is trusted directly — no auth-state file re-check.
+
+    The structured verdict is authoritative; we no longer reverse-override a success by
+    re-checking auth-state.json (which turned genuine sessionStorage / in-memory token
+    logins into false negatives).
+    """
     async def fake_execute(**kwargs):
         # Agent returns success but does NOT write the state file
         return AgentMetrics(
@@ -503,9 +504,8 @@ async def test_auth_validation_structured_success_but_missing_state_file(tmp_pat
             executor=mock_executor,
         )
 
-    # Double-verification catches the lie: structured output says success but file is missing
-    assert result.success is False
-    assert result.failure_point == "out_of_band"
+    # D3: structured login_success=True is trusted; no auth-state file re-check
+    assert result.success is True
 
 
 # --- deliverables_path forwarding (不再 fallback 到 repo) ---
@@ -520,7 +520,7 @@ async def test_auth_validation_forwards_deliverables_path(tmp_path):
 
     async def fake_execute(**kwargs):
         state_file.write_text(json.dumps({"cookies": [{"name": "s", "value": "v"}]}))
-        return AgentMetrics(duration_ms=5000)
+        return AgentMetrics(duration_ms=5000, structured_output={"login_success": True})
 
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(side_effect=fake_execute)

@@ -72,7 +72,7 @@ def test_credentials_without_email_login():
     assert creds.email_login is None
 
 def test_authentication_with_email_login():
-    from supernova_core.models.config import Authentication, Credentials, EmailLogin, SuccessCondition
+    from supernova_core.models.config import Authentication, Credentials, EmailLogin
     auth = Authentication(
         login_type="form",
         login_url="https://example.com/login",
@@ -81,7 +81,6 @@ def test_authentication_with_email_login():
             password="pass123",
             email_login=EmailLogin(address="admin@corp.com", password="email-pass"),
         ),
-        success_condition=SuccessCondition(type="url_contains", value="/dashboard"),
     )
     assert auth.credentials.email_login.address == "admin@corp.com"
 
