@@ -442,18 +442,18 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     // 黑盒 url 必填
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    // 启用登录（Step4 顶部 Switch）
+    // 启用登录（认证默认折叠——先展开再开 Switch）
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
-    // 默认 source=inline → 切到 profile（source Select trigger 显「临时填写」）
-    await selectOption("临时填写", "使用档案");
-    // ProfilePicker mount → 等档案 Select 出现（trigger 显 placeholder「选择认证档案」）
-    await waitFor(() => expect(screen.getByText("选择认证档案")).toBeInTheDocument());
-    // 选档案 NG（trigger 显 placeholder「选择认证档案」；NG 是 listAuthProfiles 返回的 profile.name）
-    await selectOption("选择认证档案", "NG");
-    // 选档案后角色 Select 出现（trigger 显 placeholder「选择登录角色」）
-    await waitFor(() => expect(screen.getByText("选择登录角色")).toBeInTheDocument());
-    await selectOption("选择登录角色", /admin · a/);
+    // 切到 profile（来源 segmented button「使用档案」，替代旧 Select）
+    fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
+    // 等档案卡出现（左列卡片 button，accessible name 以档案名 NG 开头）→ 选 NG
+    await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^NG/ }));
+    // 选档案后右列角色行出现（button name 含 "role · username"）→ 选 admin
+    await waitFor(() => expect(screen.getByRole("button", { name: /admin · a/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /admin · a/ }));
     // 提交应 enabled → 点提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始渗透/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
@@ -477,11 +477,12 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
-    await selectOption("临时填写", "使用档案");
-    await waitFor(() => expect(screen.getByText("选择认证档案")).toBeInTheDocument());
-    await selectOption("选择认证档案", "NG");
+    fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^NG/ }));
     // 选了档案但未选角色 → 提交仍 disabled（validateAuth 返 selectCredential）
     expect(screen.getByRole("button", { name: /开始渗透/ })).toBeDisabled();
   });
@@ -496,6 +497,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // 默认 source=inline → 显既有 inline 字段（login_url placeholder https://example.com/login）
@@ -513,10 +515,11 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
-    // inline 模式（默认 source）-> 右列 InlineAuthFields 渲染「登录参数」eyebrow
-    expect(screen.getByText("登录参数")).toBeInTheDocument();
+    // inline 模式（默认 source）-> 双列分组「登录入口」eyebrow
+    expect(screen.getByText("登录入口")).toBeInTheDocument();
     // 既有 inline 字段仍在（loginUrl placeholder）
     expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
   });
@@ -540,6 +543,8 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    // 认证默认折叠——先展开再启用登录
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
@@ -580,9 +585,9 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     expect(creds[0].password).toBe("pw");
     expect(creds[0].totp_secret).toBe("T");
     expect(creds[0].role).toBe("admin");
-    // 自动切 profile 模式 + 选中：ProfilePicker 档案 Select 显新档案名，角色 Select 显 "admin · alice"
-    await waitFor(() => expect(screen.getByText("NG 后台")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/admin · alice/)).toBeInTheDocument());
+    // 自动切 profile 模式 + 选中：档案卡 + 右栏详情都显档案名（getAllByText），角色行显 "admin · alice"
+    await waitFor(() => expect(screen.getAllByText("NG 后台").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole("button", { name: /admin · alice/ })).toBeInTheDocument());
   });
 
   it("保存：档案名重复 422 -> toast 错误，保留展开可重试", async () => {
@@ -609,6 +614,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // 未填 loginUrl/username -> 保存按钮 disabled + 显「请先填写登录地址和用户名」提示

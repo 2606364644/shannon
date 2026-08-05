@@ -84,10 +84,10 @@
       "ready": "Ready",
       "cloning": "Cloning"
     },
-    "addRepo": "+ Add repository",
+    "addRepo": "New repository",
     "searchPlaceholder": "Search repositories",
     "loading": "Loading…",
-    "empty": "No repositories yet. Click \"+ Add repository\" to clone one.",
+    "empty": "No repositories yet. Click \"New repository\" to clone one.",
     "noMatch": "No matching repositories.",
     "expand": "Expand ▸",
     "collapse": "Collapse ▾",
@@ -317,7 +317,10 @@
       "browse": "📁 Browse",
       "yamlValid": "yaml valid",
       "yamlInvalid": "⚠ {{error}}",
-      "blackboxUrlHint": "Running web service URL, must start with http:// or https://"
+      "blackboxUrlHint": "Running web service URL, must start with http:// or https://",
+      "targetHint": "Address of the running web service",
+      "contextLabel": "Scan context",
+      "contextHint": "Reuse a whitebox result as code context"
     },
     "repo": {
       "selectPlaceholder": "Select a repository",
@@ -377,7 +380,12 @@
       "saveSuccess": "Saved as auth profile",
       "saveNeedFields": "Fill in login URL and username first",
       "loginTypeLabel": "Login method",
-      "loginType": { "form": "Form login", "sso": "Single Sign-On (SSO)", "api": "API Token", "basic": "HTTP Basic" },
+      "loginType": {
+        "form": "Form login",
+        "sso": "Single Sign-On (SSO)",
+        "api": "API Token",
+        "basic": "HTTP Basic"
+      },
       "loginUrlLabel": "Login URL",
       "credentialsGroup": "Credentials",
       "username": "Username",
@@ -390,7 +398,16 @@
       "emailTotp": "Email TOTP secret",
       "loginFlowLabel": "Login steps",
       "loginFlowHint": "One step per line (optional, e.g. open login page / fill username / fill password / submit)",
-      "infoNote": "The session is persisted to auth-state and reused by later scan phases once login is verified."
+      "infoNote": "The session is persisted to auth-state and reused by later scan phases once login is verified.",
+      "configure": "Configure login",
+      "collapse": "Collapse",
+      "statusUnauth": "Currently: scanning unauthenticated",
+      "statusEnabled": "Currently: login enabled",
+      "entryGroup": "Login entry",
+      "selectProfileLabel": "Select profile",
+      "selectRole": "Log in as which role",
+      "profileRoleHint": "Will actually log in once with the selected role to persist the session; verification status comes from the profile library's latest test login.",
+      "selectProfileHint": "Select a profile on the left to see its login URL, type, and each role's verification status"
     }
   },
   "dashboard": {
@@ -775,12 +792,22 @@
     "test": "Test login",
     "testing": "Logging in…",
     "testHint": "Performs a real login (takes ~tens of seconds up to 2 minutes)",
-    "verify": { "unverified": "Unverified", "success": "Verified", "failed": "Verification failed" },
+    "verify": {
+      "unverified": "Unverified",
+      "success": "Verified",
+      "failed": "Verification failed"
+    },
     "createFailed": "Create failed",
     "deleted": "Deleted",
     "selectProfile": "Select auth profile",
     "selectCredential": "Select login role",
     "sourceInline": "Enter temporarily",
-    "sourceProfile": "Use profile"
+    "sourceProfile": "Use profile",
+    "overall": {
+      "success": "Available",
+      "failed": "Unavailable",
+      "unverified": "Unverified"
+    },
+    "rolesUnit": "roles"
   }
 }

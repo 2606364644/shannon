@@ -13,7 +13,7 @@ import { CloneProgress } from "./CloneProgress";
 import { listRepos, listScans } from "@/api/client";
 import { listAuthProfiles, createAuthProfile } from "@/api/authProfiles";
 import type { Repo, ScanSummary, Workspace, AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
-import type { FormState, AuthFormState, LoginType } from "../pages/ScanNewPage";
+import type { FormState, AuthFormState } from "../pages/ScanNewPage";
 import { useAuth } from "@/auth/AuthContext";
 import { apiErrorMessage } from "@/lib/apiError";
 import { toast } from "sonner";
@@ -48,6 +48,23 @@ function authToProfileBody(auth: AuthFormState, name: string, role: string): Par
   };
 }
 
+/** 验证状态 → 徽章样式 + 图标（与 CredentialRow 同色系：success=绿✓ / failed=红✗ / unverified=黄●）。 */
+function verifyBadge(st: VerifyState): { cls: string; icon: string } {
+  return st === "success" ? { cls: "border-green/40 text-green", icon: "✓" }
+    : st === "failed" ? { cls: "border-red/40 text-red", icon: "✗" }
+    : { cls: "border-yellow/40 text-yellow", icon: "●" };
+}
+/** 档案整体状态：任一角色 success→可用；否则任一 failed→不可用；否则未验证。 */
+function overallState(creds: AuthProfileCredential[]): VerifyState {
+  if (creds.some((c) => c.verify_status?.state === "success")) return "success";
+  if (creds.some((c) => c.verify_status?.state === "failed")) return "failed";
+  return "unverified";
+}
+/** login_url → host（档案卡显示用；解析失败回落原值）。 */
+function hostOf(url: string): string {
+  try { return new URL(url).host; } catch { return url; }
+}
+
 interface Props {
   type: "whitebox" | "blackbox";
   f: FormState;
@@ -70,13 +87,12 @@ interface Props {
   presetReuseScanId?: string;
 }
 
-/** 步骤分组容器：圆角 + secondary 背景 + 边框 */
+/** 步骤分组容器：圆角 + secondary 背景 + 边框（仅白盒用；黑盒已改为轻分区） */
 function StepGroup({ step, title, tag, tagClass, className, children }: {
   step: number;
   title: string;
   tag?: string;
   tagClass?: string;
-  /** 根容器附加 class（如 max-w-2xl 限宽--黑盒 inline 模式 Step4 全宽时，Step1-3 仍限宽） */
   className?: string;
   children: React.ReactNode;
 }) {
@@ -98,61 +114,60 @@ function StepGroup({ step, title, tag, tagClass, className, children }: {
   );
 }
 
-/** 黑盒 Step4 登录配置区。auth-profile-vault（Task 14）后拆为两块，服从既有设计语言
- *  （StepGroup 容器 + 现有 Input/Label/Select/Switch/Checkbox，不引入新视觉）：
- *    - AuthControls：启用开关 + 登录来源 Select（inline 临时填写 / profile 使用档案）。
- *        profile 模式在此显 ProfilePicker；inline 模式此处仅作控制，字段交给 InlineAuthFields。
- *    - InlineAuthFields：inline 模式的完整 Authentication schema 字段（login_type / login_url /
- *        credentials[username/password/totp/email_login] / login_flow），对齐 core Authentication。
- *
- *  布局（2026-08-05）：inline 模式不再纵向堆叠撑高 Step4——Step4 突破 max-w-2xl 成全宽双列卡片，
- *    左列=AuthControls（开关/来源/提示），右列=InlineAuthFields（凭据/登录步骤），利用右侧空白。
- *    非 inline（关闭 / profile）保持 max-w-2xl 单栏：profile 仅两个 Select，无需展宽。 */
-function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal }: {
+/** 黑盒登录配置区。重排后（2026-08-06）结构：
+ *    - 顶部 Switch「需要登录」（enabled=false 时仅显开关 + 提示）。
+ *    - enabled=true 时显来源 segmented（临时填写 / 使用档案）+ 对方面板：
+ *        inline → InlineAuthFields（双列：登录入口 / 凭据）。
+ *        profile → ProfilePicker（双列：档案卡列表 / 选中档案详情+角色）。
+ *  外层（ScanFormFields 黑盒分支）用 authExpanded 控制整块折叠/展开，默认折叠成一行。 */
+function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProfileSaved }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   authErr: string | null;
-  /** ProfilePicker 拉档案的 workspace scope（auth-profiles 按 ws 隔离）。 */
   workspace: string;
-  /** 透传 ProfilePicker：外部保存新档案后递增触发重拉。 */
   refreshSignal: number;
+  onProfileSaved: (profile: AuthProfile) => void;
 }) {
   const { t } = useTranslation();
-  if (!auth.enabled) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
-          <Switch checked={false} onCheckedChange={(v) => setAuth({ enabled: v })} />
-        </div>
-        <div className="text-xs text-muted-foreground">{t("scan.auth.enableHint")}</div>
-      </div>
-    );
-  }
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
-        <Switch checked onCheckedChange={(v) => setAuth({ enabled: v })} />
+        <Switch checked={auth.enabled} onCheckedChange={(v) => setAuth({ enabled: v })} />
       </div>
 
-      {/* 登录来源：inline（临时填写，旧行为）/ profile（使用档案，Task 14）。
-          disabled 用 enabled=false 表达——折叠即关闭，故 Select 仅两态。 */}
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("scan.auth.sourceLabel")}</Label>
-        <Select value={auth.source} onValueChange={(v) => setAuth({ source: v as "inline" | "profile" })}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inline">{t("authProfiles.sourceInline")}</SelectItem>
-            <SelectItem value="profile">{t("authProfiles.sourceProfile")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {!auth.enabled ? (
+        <div className="text-xs text-muted-foreground">{t("scan.auth.enableHint")}</div>
+      ) : (
+        <>
+          {/* 来源 segmented（替代旧 Select）：临时填写 / 使用档案 */}
+          <div className="inline-flex rounded-lg bg-secondary p-1 gap-1">
+            {(["inline", "profile"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setAuth({ source: s })}
+                aria-pressed={auth.source === s}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  auth.source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t(`authProfiles.source${s === "inline" ? "Inline" : "Profile"}`)}
+              </button>
+            ))}
+          </div>
 
-      {auth.source === "profile" && <ProfilePicker auth={auth} setAuth={setAuth} workspace={workspace} refreshSignal={refreshSignal} />}
+          {auth.source === "profile" ? (
+            <ProfilePicker auth={auth} setAuth={setAuth} workspace={workspace} refreshSignal={refreshSignal} />
+          ) : (
+            <InlineAuthFields auth={auth} setAuth={setAuth} authErr={authErr} ws={workspace} onProfileSaved={onProfileSaved} />
+          )}
 
-      {/* profile 模式校验错误贴 ProfilePicker 显；inline 模式错误交 InlineAuthFields 显，避免左右重复。 */}
-      {auth.source === "profile" && authErr && <div className="text-destructive text-xs">{authErr}</div>}
+          {/* profile 模式校验错误贴 ProfilePicker 显；inline 模式错误交 InlineAuthFields 显，避免左右重复。 */}
+          {auth.source === "profile" && authErr && <div className="text-destructive text-xs">{authErr}</div>}
+        </>
+      )}
+
       <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
         <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
         <span>{t("scan.auth.infoNote")}</span>
@@ -239,92 +254,103 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
   );
 }
 
-/** inline 模式字段块（登录方式 / 登录地址 / 凭据 / 登录步骤）--渲染在 Step4 全宽双列的右列。
- *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。
- *  底部接 SaveAsProfileInline：把当前填的临时配置存成工作区档案（保存能力与填写区在一起）。 */
+/** inline 模式字段块——双列布局（2026-08-06 重排）：
+ *    左列「登录入口」：登录方式 button-group + 登录地址。
+ *    右列「凭据」：用户名 / 密码 / TOTP / 邮箱登录（checkbox 展开）。
+ *  下方全宽：登录步骤（可选）+ 校验错误 + 「保存为认证档案」。
+ *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。 */
 function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   authErr: string | null;
-  /** 保存为档案的 workspace scope（auth-profiles 按 ws 隔离）。 */
   ws: string;
-  /** 保存成功回调：父级切 profile 模式 + 刷新 ProfilePicker + 选中新建档案。 */
   onProfileSaved: (profile: AuthProfile) => void;
 }) {
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {t("scan.auth.inlineFieldsTitle")}
-      </span>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
-        <Select value={auth.loginType} onValueChange={(v) => setAuth({ loginType: v as LoginType })}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {(["form", "sso", "api", "basic"] as const).map((v) => (
-              <SelectItem key={v} value={v}>{t(`scan.auth.loginType.${v}`)}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
-        <Input
-          value={auth.loginUrl}
-          onChange={(e) => setAuth({ loginUrl: e.target.value })}
-          placeholder="https://example.com/login"
-          className="font-mono"
-        />
-      </div>
-
-      <div className="space-y-2 border-t border-border pt-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("scan.auth.credentialsGroup")}
-        </span>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
-            <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-            <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
-          </div>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">
-            {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
-          </Label>
-          <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
-        </div>
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
-            <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
-          </label>
-          {auth.emailLoginEnabled && (
-            <div className="space-y-2 pl-6">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
-                  <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
-                  <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span></Label>
-                <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+        {/* 左：登录入口 */}
+        <div className="space-y-3 rounded-lg border border-border bg-secondary p-3">
+          <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.entryGroup")}</span>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
+            <div className="inline-flex flex-wrap gap-1 rounded-lg bg-background p-1">
+              {(["form", "sso", "api", "basic"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setAuth({ loginType: v })}
+                  aria-pressed={auth.loginType === v}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    auth.loginType === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t(`scan.auth.loginType.${v}`)}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
+            <Input
+              value={auth.loginUrl}
+              onChange={(e) => setAuth({ loginUrl: e.target.value })}
+              placeholder="https://example.com/login"
+              className="font-mono"
+            />
+          </div>
+        </div>
+
+        {/* 右：凭据 */}
+        <div className="space-y-2.5 rounded-lg border border-border bg-secondary p-3">
+          <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.credentialsGroup")}</span>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
+              <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
+              <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">
+              {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
+            </Label>
+            <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
+              <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
+            </label>
+            {auth.emailLoginEnabled && (
+              <div className="space-y-2 pl-6">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
+                    <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
+                    <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">
+                    {t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span>
+                  </Label>
+                  <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="space-y-1.5 border-t border-border pt-2.5">
+      <div className="space-y-1.5">
         <Label className="text-xs font-medium">
           {t("scan.auth.loginFlowLabel")} <span className="font-normal text-muted-foreground">({t("scan.auth.optional")})</span>
         </Label>
@@ -339,7 +365,7 @@ function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
 
       {authErr && <div className="text-destructive text-xs">{authErr}</div>}
 
-      {/* 保存为档案：与临时填写同处右列，存成工作区档案供以后 profile 模式复用（ws 未选时禁用提示）。 */}
+      {/* 保存为档案：与临时填写同处，存成工作区档案供以后 profile 模式复用（ws 未选时禁用提示）。 */}
       <div className="border-t border-border pt-2.5">
         {ws ? (
           <SaveAsProfileInline auth={auth} ws={ws} onSaved={onProfileSaved} />
@@ -350,15 +376,16 @@ function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
     </div>
   );
 }
-/** profile 模式：档案 Select -> 角色 Select（Task 14）。
+
+/** profile 模式：档案卡列表 → 选中档案详情 + 角色单选（Task 14 + 2026-08-06 重排）。
  *  - 档案列表来自 listAuthProfiles(ws)（ws 隔离；ws 未选时不发请求，显示「先选工作区」提示）。
- *  - 选定档案后从 profile.credentials[] 渲染角色 Select（label: role · username，对齐 CredentialRow）。
+ *  - 左列档案卡：名字 + host + 角色数 + 整体验证徽章（可用/不可用/未验证）。点选 → setAuth({profileId})。
+ *  - 右列详情：选中档案 login_url + 类型；角色行（role · username + 各自验证徽章），点选 → setAuth({credentialId})。
  *  - 切档案 → 清空 credentialId（防残留旧角色 id 指向新档案里不存在的角色）。 */
 function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   workspace: string;
-  /** 外部保存新档案后递增 -> 触发重拉（否则新建档案不在选项里）。 */
   refreshSignal: number;
 }) {
   const { t } = useTranslation();
@@ -385,51 +412,115 @@ function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
   }, [workspace, refreshSignal]);
 
   const selected = profiles.find((p) => p.id === auth.profileId);
-  const creds = selected?.credentials ?? [];
+
+  if (!workspace) {
+    return <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>;
+  }
+  if (loading) {
+    return <div className="text-xs text-muted-foreground">{t("common.loading")}</div>;
+  }
 
   return (
-    <div className="space-y-2">
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">{t("authProfiles.name")}</Label>
-        {!workspace ? (
-          <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
-        ) : loading ? (
-          <div className="text-xs text-muted-foreground">{t("common.loading")}</div>
-        ) : profiles.length === 0 ? (
-          <div className="text-xs text-muted-foreground">
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
+      {/* 左：档案卡列表 */}
+      <div className="space-y-2">
+        <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.selectProfileLabel")}</span>
+        {profiles.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
             {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
           </div>
         ) : (
-          <Select
-            value={auth.profileId}
-            onValueChange={(v) => setAuth({ profileId: v, credentialId: "" })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t("authProfiles.selectProfile")} />
-            </SelectTrigger>
-            <SelectContent>
-              {profiles.map((p) => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          profiles.map((p) => {
+            const ov = overallState(p.credentials);
+            const ob = verifyBadge(ov);
+            const sel = p.id === auth.profileId;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setAuth({ profileId: p.id, credentialId: "" })}
+                aria-pressed={sel}
+                className={`w-full text-left rounded-lg border p-3 transition-colors flex flex-col gap-1.5 ${
+                  sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold">{p.name}</span>
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${ob.cls}`}>
+                    <span aria-hidden>{ob.icon}</span>
+                    {t(`authProfiles.overall.${ov}`)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                  <span>{hostOf(p.login_url)}</span>
+                  <span>·</span>
+                  <span>{p.credentials.length} {t("authProfiles.credentials")}</span>
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
-      {auth.profileId && creds.length > 0 && (
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">{t("authProfiles.role")}</Label>
-          <Select value={auth.credentialId} onValueChange={(v) => setAuth({ credentialId: v })}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t("authProfiles.selectCredential")} />
-            </SelectTrigger>
-            <SelectContent>
-              {creds.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  <span className="font-mono">{c.role} · {c.username}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+      {/* 右：选中档案详情 + 角色单选 */}
+      {selected ? (
+        <div className="space-y-3 rounded-lg border border-border bg-secondary p-3.5">
+          <div>
+            <div className="text-[14px] font-semibold">{selected.name}</div>
+            <div className="flex items-center gap-2 text-xs mt-1.5">
+              <span className="font-mono text-muted-foreground">{selected.login_url}</span>
+              <span className="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                {t(`scan.auth.loginType.${selected.login_type}`)}
+              </span>
+            </div>
+          </div>
+          <div className="border-t border-border" />
+          <div>
+            <div className="text-[11px] font-semibold text-muted-foreground mb-2">{t("scan.auth.selectRole")}</div>
+            <div className="space-y-2">
+              {selected.credentials.map((c) => {
+                const st = c.verify_status?.state ?? "unverified";
+                const b = verifyBadge(st);
+                const sel = c.id === auth.credentialId;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setAuth({ credentialId: c.id })}
+                    aria-pressed={sel}
+                    className={`w-full flex items-center gap-2.5 rounded-lg border p-2.5 transition-colors text-left ${
+                      sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded-full border-2 flex-none flex items-center justify-center ${sel ? "border-primary" : "border-input"}`}>
+                      {sel && <span className="w-2 h-2 rounded-full bg-primary" />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[13px] font-medium font-mono">
+                        {c.role} <span className="font-normal text-muted-foreground">· {c.username}</span>
+                      </span>
+                      {st === "failed" && c.verify_status?.failure_detail && (
+                        <div className="text-[11px] text-red/80 mt-0.5">{c.verify_status.failure_detail}</div>
+                      )}
+                    </div>
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold flex-none ${b.cls}`}>
+                      <span aria-hidden>{b.icon}</span>
+                      {t(`authProfiles.verify.${st}`)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="border-t border-border" />
+          <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
+            <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <span>{t("scan.auth.profileRoleHint")}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-border bg-card p-4 text-xs text-muted-foreground">
+          {t("scan.auth.selectProfileHint")}
         </div>
       )}
     </div>
@@ -463,6 +554,9 @@ export function ScanFormFields({
   // ProfilePicker 刷新信号：inline 保存为新档案后递增 -> 触发重拉（须在所有 early return 之前，
   // 守 hooks 规则--白盒提前 return 不跳过此 useState）。onProfileSaved 在黑盒区定义（用 setAuth）。
   const [profileRefresh, setProfileRefresh] = useState(0);
+  // 黑盒认证折叠态：默认跟随 auth.enabled（重跑预填 enabled=true → 自动展开，露出预填配置）。
+  // 须在白盒 early return 之前（守 hooks 规则）。
+  const [authExpanded, setAuthExpanded] = useState(() => f.auth.enabled);
 
   // P2: repo 列表按选定 ws 拉取——ws 未选时不发起（路径无意义）
   useEffect(() => {
@@ -550,9 +644,8 @@ export function ScanFormFields({
 
   // —— 共用：workspace 选择器（P2: 替代原自由文本 wsName + 自动派生 + 冲突检测） ——
   const wsEmpty = !wsLoading && wsList.length === 0;
-  const workspaceField = (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
+  const wsSelectInner = (
+    <>
       <Select value={workspace} onValueChange={onWorkspaceChange}>
         <SelectTrigger className="w-full font-mono">
           <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
@@ -571,6 +664,12 @@ export function ScanFormFields({
           <span>{t(isAdmin ? "scan.fields.wsEmptyHintAdmin" : "scan.fields.wsEmptyHintUser")}</span>
         </div>
       )}
+    </>
+  );
+  const workspaceField = (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
+      {wsSelectInner}
     </div>
   );
 
@@ -593,11 +692,10 @@ export function ScanFormFields({
     );
   }
 
-  // —— 黑盒布局：Step 1 目标服务 → Step 2 工作区 → Step 3 代码上下文（复用白盒结果 / 指定仓库 二选一）——
-  // IA 不变量：repo 与白盒 scan 均按工作区隔离，「选工作区」必须在「选源」之上；URL 是黑盒主输入，保持 Step 1。
-  // inline 模式（enabled + source=inline）时 Step4 突破 max-w-2xl 成全宽双列--Step1-3 仍 max-w-2xl 紧凑，
-  // Step4 左列=AuthControls / 右列=InlineAuthFields，利用右侧空白避免纵向撑高（2026-08-05）。
-  const isInlineAuth = f.auth.enabled && f.auth.source === "inline";
+  // —— 黑盒布局（2026-08-06 重排）：目标服务 + 扫描上下文（工作区与复用白盒合并）+ 认证（默认折叠）。
+  //   旧版 4 个等重 StepGroup（目标 / 工作区 / 代码上下文 / 认证）平铺显繁琐；新版按"必填核心 +
+  //   可选增强"重排，去掉圆形步骤徽章与多余嵌套，认证默认折叠成一行（点「配置登录」展开）。
+  // IA 不变量：repo 与白盒 scan 均按工作区隔离；URL 是黑盒主输入，保持在最上。
   const setAuth = (patch: Partial<AuthFormState>) => set({ auth: { ...f.auth, ...patch } });
   // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 递增 refreshSignal 触发 ProfilePicker 重拉。
   const onProfileSaved = (profile: AuthProfile) => {
@@ -605,44 +703,46 @@ export function ScanFormFields({
     setProfileRefresh((n) => n + 1);
   };
   return (
-    <div className="flex flex-col gap-3.5">
-      <StepGroup
-        step={1}
-        title={t("scan.steps.targetService")}
-        tag={t("scan.tags.required")}
-        tagClass="text-[10px] text-destructive font-medium"
-        className="max-w-2xl w-full"
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor="url" className="text-xs font-medium">{t("scan.fields.urlLabel")}</Label>
-          <Input
-            id="url"
-            value={f.url}
-            onChange={(e) => set({ url: e.target.value })}
-            placeholder={t("scan.fields.urlPlaceholder")}
-            className="font-mono border-orange/30"
-          />
-          {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
-          <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
+    <div className="flex flex-col gap-5">
+      {/* 目标服务 */}
+      <section className="space-y-2">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-[13px] font-semibold">{t("scan.steps.targetService")}</h3>
+          <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
+          <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.targetHint")}</span>
         </div>
-      </StepGroup>
+        <Input
+          id="url"
+          value={f.url}
+          onChange={(e) => set({ url: e.target.value })}
+          placeholder={t("scan.fields.urlPlaceholder")}
+          className="font-mono border-orange/30"
+        />
+        {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
+        <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
+      </section>
 
-      <StepGroup step={2} title={t("scan.steps.workspace")} className="max-w-2xl w-full">
-        {workspaceField}
-      </StepGroup>
+      <div className="border-t border-border" />
 
-      <StepGroup step={3} title={t("scan.steps.codeContext")} tag={t("scan.tags.required")} tagClass="text-[10px] text-destructive font-medium" className="max-w-2xl w-full">
-        {/* 黑盒恒复用白盒结果（exploitation-only）——无 repo/standalone 分支。 */}
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
-          {wbScans.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground leading-relaxed">
-              {workspace
-                ? t("scan.fields.reuseEmpty")
-                : t("scan.fields.selectWsFirst")}
-            </div>
-          ) : (
-            <>
+      {/* 扫描上下文：工作区 + 复用白盒（并排一条链） */}
+      <section className="space-y-2.5">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-[13px] font-semibold">{t("scan.fields.contextLabel")}</h3>
+          <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
+          <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.contextHint")}</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
+            {wsSelectInner}
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
+            {wbScans.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground leading-relaxed">
+                {workspace ? t("scan.fields.reuseEmpty") : t("scan.fields.selectWsFirst")}
+              </div>
+            ) : (
               <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
@@ -663,29 +763,46 @@ export function ScanFormFields({
                   ))}
                 </SelectContent>
               </Select>
-              <div className="text-[11px] text-muted-foreground">
-                {t("scan.fields.reuseCount", { count: wbScans.length })}
-              </div>
-            </>
-          )}
-          {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
-          {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
-        </div>
-      </StepGroup>
-
-      {!isInlineAuth && (
-        <StepGroup step={4} title={t("scan.steps.auth")} tag={t("scan.tags.optional")} tagClass="text-[10px] text-muted-foreground font-normal" className="max-w-2xl w-full">
-          <AuthControls auth={f.auth} setAuth={setAuth} authErr={authErr} workspace={workspace} refreshSignal={profileRefresh} />
-        </StepGroup>
-      )}
-      {isInlineAuth && (
-        <StepGroup step={4} title={t("scan.steps.auth")} tag={t("scan.tags.optional")} tagClass="text-[10px] text-muted-foreground font-normal">
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,42rem)_minmax(0,1fr)] gap-5 items-start">
-            <AuthControls auth={f.auth} setAuth={setAuth} authErr={authErr} workspace={workspace} refreshSignal={profileRefresh} />
-            <InlineAuthFields auth={f.auth} setAuth={setAuth} authErr={authErr} ws={workspace} onProfileSaved={onProfileSaved} />
+            )}
+            {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
+            {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
           </div>
-        </StepGroup>
-      )}
+        </div>
+      </section>
+
+      <div className="border-t border-border" />
+
+      {/* 认证登录（可选，默认折叠成一行） */}
+      <section>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h3>
+              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                {t("scan.tags.optional")}
+              </span>
+            </div>
+            <div className="text-[11.5px] text-muted-foreground mt-0.5">
+              {f.auth.enabled ? t("scan.auth.statusEnabled") : t("scan.auth.statusUnauth")}
+            </div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => setAuthExpanded((v) => !v)}>
+            {authExpanded ? t("scan.auth.collapse") : t("scan.auth.configure")}
+          </Button>
+        </div>
+        {authExpanded && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <AuthControls
+              auth={f.auth}
+              setAuth={setAuth}
+              authErr={authErr}
+              workspace={workspace}
+              refreshSignal={profileRefresh}
+              onProfileSaved={onProfileSaved}
+            />
+          </div>
+        )}
+      </section>
     </div>
   );
 }

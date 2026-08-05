@@ -259,8 +259,6 @@ export function ScanNewPage() {
   }, []);
 
   const isCorrelation = type === "correlation";
-  // inline 模式 Step4 全宽双列（AuthControls + InlineAuthFields），容器放宽利用右侧空白。
-  const isBlackboxInline = type === "blackbox" && f.auth.enabled && f.auth.source === "inline";
   // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + reuseScanId(必填) + ws（恒复用白盒，无 repo 模式）。
   const needRepo = isCorrelation ? false : type === "whitebox";
   const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
@@ -322,10 +320,9 @@ export function ScanNewPage() {
           ))}
         </div>
 
-        {/* 单栏表单（correlation 铺满 yaml 编辑器；白/黑盒 max-w-2xl 保可读密度；
-            黑盒 inline 登录例外--Step4 全宽双列利用右侧空白，容器放宽到 w-full） */}
+        {/* 单栏表单（correlation 铺满 yaml 编辑器；白/黑盒 max-w-2xl 保可读密度） */}
         <div className="p-5">
-          <div className={isCorrelation ? "" : isBlackboxInline ? "w-full" : "max-w-2xl"}>
+          <div className={isCorrelation ? "" : "max-w-2xl"}>
             {isCorrelation ? (
               <div className="space-y-3">
                 <YamlEditor

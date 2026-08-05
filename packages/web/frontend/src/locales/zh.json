@@ -84,10 +84,10 @@
       "ready": "就绪",
       "cloning": "克隆中"
     },
-    "addRepo": "+ 添加仓库",
+    "addRepo": "新建仓库",
     "searchPlaceholder": "搜索仓库名",
     "loading": "加载中…",
-    "empty": "暂无仓库。点「+ 添加仓库」clone 一个。",
+    "empty": "暂无仓库。点「新建仓库」clone 一个。",
     "noMatch": "无匹配仓库。",
     "expand": "展开 ▸",
     "collapse": "折叠 ▾",
@@ -317,7 +317,10 @@
       "browse": "📁 浏览",
       "yamlValid": "yaml 合法",
       "yamlInvalid": "⚠ {{error}}",
-      "blackboxUrlHint": "运行中的 Web 服务地址，必须以 http:// 或 https:// 开头"
+      "blackboxUrlHint": "运行中的 Web 服务地址，必须以 http:// 或 https:// 开头",
+      "targetHint": "运行中的 Web 服务地址",
+      "contextLabel": "扫描上下文",
+      "contextHint": "复用一个白盒结果作为代码上下文"
     },
     "repo": {
       "selectPlaceholder": "选择仓库",
@@ -377,7 +380,12 @@
       "saveSuccess": "已保存为认证档案",
       "saveNeedFields": "请先填写登录地址和用户名",
       "loginTypeLabel": "登录方式",
-      "loginType": { "form": "表单登录", "sso": "单点登录（SSO）", "api": "API Token", "basic": "HTTP Basic" },
+      "loginType": {
+        "form": "表单登录",
+        "sso": "单点登录（SSO）",
+        "api": "API Token",
+        "basic": "HTTP Basic"
+      },
       "loginUrlLabel": "登录地址",
       "credentialsGroup": "凭据",
       "username": "用户名",
@@ -390,7 +398,16 @@
       "emailTotp": "邮箱 TOTP 密钥",
       "loginFlowLabel": "登录步骤",
       "loginFlowHint": "每行一步（可选，如：访问登录页 / 填写用户名 / 填写密码 / 提交）",
-      "infoNote": "登录态会持久化到 auth-state，验证通过后供后续扫描阶段复用。"
+      "infoNote": "登录态会持久化到 auth-state，验证通过后供后续扫描阶段复用。",
+      "configure": "配置登录",
+      "collapse": "收起",
+      "statusUnauth": "当前：以未登录状态扫描",
+      "statusEnabled": "当前：已启用登录",
+      "entryGroup": "登录入口",
+      "selectProfileLabel": "选择档案",
+      "selectRole": "以哪个角色登录",
+      "profileRoleHint": "将以所选角色真实登录一次以持久化会话；验证状态来自档案库最近一次「测试登录」。",
+      "selectProfileHint": "选择左侧档案查看其登录地址、类型与各角色验证状态"
     }
   },
   "dashboard": {
@@ -775,12 +792,22 @@
     "test": "测试登录",
     "testing": "正在登录…",
     "testHint": "将真实登录一次(约几十秒~2 分钟)",
-    "verify": { "unverified": "未验证", "success": "已验证", "failed": "验证失败" },
+    "verify": {
+      "unverified": "未验证",
+      "success": "已验证",
+      "failed": "验证失败"
+    },
     "createFailed": "新建失败",
     "deleted": "已删除",
     "selectProfile": "选择认证档案",
     "selectCredential": "选择登录角色",
     "sourceInline": "临时填写",
-    "sourceProfile": "使用档案"
+    "sourceProfile": "使用档案",
+    "overall": {
+      "success": "可用",
+      "failed": "不可用",
+      "unverified": "未验证"
+    },
+    "rolesUnit": "角色"
   }
 }
