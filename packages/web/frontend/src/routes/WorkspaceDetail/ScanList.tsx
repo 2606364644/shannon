@@ -136,10 +136,10 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
         if (detail.reuse_whitebox_scan_id) state.reuseScanId = detail.reuse_whitebox_scan_id;
         if (detail.authentication) state.auth = detail.authentication;
         // auth-profile-vault（Task 14）：profile 模式预填（后端 _scan_detail 暂未返此字段，
-        // 前端先就位——后端补返 auth_profile_id+auth_credential_id 时自动生效）。
+        // 前端先就位——后端补返 auth_profile_id+auth_credential_ids 时自动生效）。
         if ((detail as SessionData).auth_profile_id) {
           state.authProfileId = (detail as SessionData).auth_profile_id ?? undefined;
-          state.authCredentialId = (detail as SessionData).auth_credential_id ?? undefined;
+          state.authCredentialIds = (detail as SessionData).auth_credential_ids ?? undefined;
         }
       }
       nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });

@@ -442,9 +442,8 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     // 黑盒 url 必填
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    // 启用登录（认证默认折叠——先展开再开 Switch）
+    // 启用登录（点「配置登录」展开即开启——对齐 preview）
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // 切到 profile（来源 segmented button「使用档案」）
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
@@ -477,7 +476,6 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
@@ -513,7 +511,6 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /^multi/ })).toBeInTheDocument());
@@ -539,7 +536,6 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // 默认 source=inline → 下方块显既有 inline 字段（login_url placeholder https://example.com/login）
     expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
@@ -557,7 +553,6 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // inline 模式（默认 source）-> 下方块标题 + 凭据卡 eyebrow 都含「登录入口」（getAllByText 多处命中）
     expect(screen.getAllByText("登录入口").length).toBeGreaterThan(0);
@@ -586,9 +581,8 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
-    // 认证默认折叠——先展开再启用登录
+    // 认证默认折叠——点「配置登录」展开即开启
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("角色"), { target: { value: "admin" } });
@@ -656,7 +650,6 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
     // 未填 loginUrl/username -> 保存按钮 disabled + 显「请先填写登录地址和用户名」提示
     const saveBtn = screen.getByRole("button", { name: "保存为认证档案" });

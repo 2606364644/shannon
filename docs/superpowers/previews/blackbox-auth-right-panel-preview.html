@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>黑盒认证 · 拆分布局交互预览</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  darkMode: ['class'],
+  theme: { extend: {
+    fontFamily: { sans: ['"IBM Plex Sans"','system-ui','sans-serif'], mono: ['"IBM Plex Mono"','ui-monospace','monospace'] },
+    colors: {
+      border: 'hsl(34 5% 20%)', input: 'hsl(34 5% 20%)', ring: 'hsl(15 60% 56%)',
+      background: 'hsl(34 7% 10%)', foreground: 'hsl(36 10% 91%)',
+      primary: { DEFAULT: 'hsl(15 60% 56%)', foreground: 'hsl(34 7% 10%)' },
+      secondary: { DEFAULT: 'hsl(34 5% 16%)', foreground: 'hsl(36 10% 91%)' },
+      muted: { DEFAULT: 'hsl(34 5% 16%)', foreground: 'hsl(36 5% 62%)' },
+      destructive: { DEFAULT: 'hsl(5 62% 56%)', foreground: 'hsl(34 7% 10%)' },
+      card: { DEFAULT: 'hsl(34 5% 13%)', foreground: 'hsl(36 10% 91%)' },
+      orange: 'hsl(24 75% 62%)', green: 'hsl(142 50% 56%)', yellow: 'hsl(38 75% 60%)', red: 'hsl(5 62% 60%)',
+    },
+    borderRadius: { lg: '12px', md: '11px', sm: '10px' },
+  }}
+}
+</script>
+<style>
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: hsl(34 7% 10%); color: hsl(36 10% 91%); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn .18s ease-out both; }
+  @media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }
+  .shadow-card { box-shadow: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / .25), 0 1px 2px hsl(0 0% 0% / .2); }
+  .shadow-cta { box-shadow: 0 1px 2px hsl(0 0% 0% / .30), 0 6px 16px -6px hsl(15 70% 45% / .35); }
+  .hairline { border: 1px solid hsl(34 5% 20%); }
+  .field { background: hsl(34 5% 16%); border: 1px solid hsl(34 5% 20%); border-radius: 11px; }
+  .seg-on { background: hsl(34 5% 13%); color: hsl(36 10% 91%); box-shadow: 0 1px 2px hsl(0 0% 0%/.2); }
+  .seg-off { color: hsl(36 5% 62%); } .seg-off:hover { color: hsl(36 10% 91%); }
+  .label-xs { font-size: 11px; color: hsl(36 5% 62%); }
+  .cap { font-size: 10.5px; }
+  .coral-bar { width: 3px; height: 12px; border-radius: 99px; background: hsl(15 60% 56%); display:inline-block; }
+  .btn { cursor: pointer; transition: all .15s; }
+  .hidden-anim { display: none !important; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[1200px] px-6 py-6">
+
+  <!-- 说明条 -->
+  <div class="mb-4 rounded-lg hairline bg-card p-4 shadow-card">
+    <div class="flex items-center gap-2 mb-1.5"><span class="coral-bar"></span><h1 class="text-sm font-semibold">黑盒认证 · 拆分布局（可交互）</h1></div>
+    <p class="text-xs text-muted-foreground leading-relaxed">
+      点下方「配置登录」按钮真实展开/收起。认证拆成两块：<b class="text-foreground">核心</b>(开关/来源/入口/凭据)放右栏，<b class="text-foreground">增强</b>(邮箱/步骤/存档)放下方横向三栏。目标一屏填完不滚动。
+    </p>
+  </div>
+
+  <!-- 页面标题 -->
+  <div class="mb-4"><h2 class="text-lg font-semibold">新建扫描</h2><p class="text-xs text-muted-foreground mt-0.5">对白盒审计结果进行黑盒验证（exploitation-only）</p></div>
+
+  <!-- Card -->
+  <div class="rounded-lg hairline bg-card overflow-hidden shadow-card">
+    <!-- Tabs -->
+    <div class="flex border-b border-border bg-secondary">
+      <button class="px-5 py-2.5 text-sm font-medium text-muted-foreground">白盒审计</button>
+      <button class="px-5 py-2.5 text-sm font-medium border-b-2 border-primary text-primary">黑盒验证</button>
+      <button class="px-5 py-2.5 text-sm font-medium text-muted-foreground">关联分析</button>
+    </div>
+
+    <div class="p-5 space-y-5" id="formArea">
+      <!-- 上层：左表单 + 右核心(展开时) -->
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,42rem)_minmax(0,1fr)] gap-8 items-start">
+        <!-- 左栏表单 -->
+        <div class="flex flex-col gap-5">
+          <section class="space-y-2">
+            <div class="flex items-baseline gap-2"><h3 class="text-[13px] font-semibold">目标服务</h3><span class="text-[10.5px] font-medium text-destructive">必填</span><span class="ml-auto text-[11.5px] text-muted-foreground">待验证的运行中服务</span></div>
+            <input class="w-full font-mono text-sm field px-3 py-2" style="border-color:hsl(24 75% 62% / .4)" value="http://demo.testfire.net" />
+            <div class="text-xs text-muted-foreground">黑盒扫描将访问此地址进行漏洞验证</div>
+          </section>
+          <div class="border-t border-border"></div>
+          <section class="space-y-2.5">
+            <div class="flex items-baseline gap-2"><h3 class="text-[13px] font-semibold">扫描上下文</h3><span class="text-[10.5px] font-medium text-destructive">必填</span><span class="ml-auto text-[11.5px] text-muted-foreground">工作区与复用白盒结果</span></div>
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-3">
+              <div class="space-y-1.5"><div class="label-xs font-medium">工作区</div><div class="field px-3 py-2 text-sm font-mono flex items-center justify-between"><span>nodegoat-ws</span><span class="text-muted-foreground">▾</span></div></div>
+              <div class="space-y-1.5"><div class="label-xs font-medium">复用白盒结果</div><div class="field px-3 py-2 text-sm flex items-center justify-between"><span class="font-mono text-xs">nodegoat-ws-20260806 <span class="ml-1 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-primary">最新</span></span><span class="text-muted-foreground">▾</span></div></div>
+            </div>
+          </section>
+          <div class="border-t border-border"></div>
+          <!-- 认证行 -->
+          <section>
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2"><h3 class="text-[13px] font-semibold">认证登录</h3><span class="rounded-full bg-secondary px-2 py-0.5 cap font-semibold text-muted-foreground">可选</span></div>
+                <div class="text-[11.5px] text-muted-foreground mt-0.5" id="authStatus">未配置 · 以未登录状态验证</div>
+              </div>
+              <button id="toggleBtn" class="btn text-xs font-medium px-3 py-1.5 rounded-md hairline bg-card hover:bg-secondary">配置登录</button>
+            </div>
+          </section>
+        </div>
+
+        <!-- 右栏：折叠时空 / 展开时核心 -->
+        <div id="rightCol" class="hidden lg:block">
+          <div id="rightPlaceholder" class="h-full min-h-[14rem] rounded-lg border border-dashed border-border/50 flex items-center justify-center"><span class="text-[11px] text-muted-foreground/50">点「配置登录」在此展开核心配置</span></div>
+          <div id="rightCore" class="hidden-anim fade-in space-y-3">
+            <div class="flex items-center gap-2"><span class="coral-bar"></span><h4 class="text-[13px] font-semibold">认证登录</h4></div>
+            <div class="flex items-center justify-between gap-3"><span class="text-xs font-medium">需要登录</span><span class="inline-flex h-5 w-9 items-center rounded-full bg-primary px-0.5 justify-end"><span class="h-4 w-4 rounded-full bg-primary-foreground"></span></span></div>
+            <!-- 来源切换（可交互：临时填写 / 使用档案） -->
+            <div class="inline-flex items-center gap-1 rounded-lg hairline bg-muted/40 p-1 w-full">
+              <button id="srcInline" class="seg-on flex-1 px-3 py-1.5 rounded-md text-xs font-medium">临时填写</button>
+              <button id="srcProfile" class="seg-off flex-1 px-3 py-1.5 rounded-md text-xs font-medium">使用档案</button>
+            </div>
+
+            <!-- ===== 临时填写模式：右栏增强 ===== -->
+            <div id="inlineRight" class="border-t border-border pt-3 space-y-3">
+              <div class="space-y-1.5">
+                <div class="label-xs font-medium">登录步骤 <span class="font-normal">(可选)</span></div>
+                <textarea class="w-full font-mono text-xs field px-2 py-1.5 resize-none" rows="3">1. POST /doLogin 带 jsessid
+2. 校验 302 → /bank/main</textarea>
+              </div>
+              <div class="space-y-1.5">
+                <div class="label-xs font-medium">存为档案</div>
+                <div class="flex items-center gap-2">
+                  <input class="flex-1 min-w-0 text-xs field px-2.5 py-1.5" placeholder="档案名" />
+                  <button class="btn shrink-0 text-xs font-medium px-3 py-1.5 rounded-md bg-card hairline hover:bg-secondary text-muted-foreground">保存</button>
+                </div>
+                <div class="text-[10.5px] text-muted-foreground leading-relaxed">角色取凭据区填写值，保存为工作区档案供复用。</div>
+              </div>
+            </div>
+
+            <!-- ===== 档案模式：右栏 = 选中档案摘要 + 提示 ===== -->
+            <div id="profileRight" class="hidden-anim border-t border-border pt-3 space-y-3">
+              <div class="space-y-1.5">
+                <div class="label-xs font-medium">已选档案</div>
+                <div class="rounded-lg hairline bg-secondary p-3 space-y-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[13px] font-semibold">testfire-prod</span>
+                    <span class="inline-flex items-center gap-1 rounded-full border border-green/40 text-green px-2 py-0.5 text-[10.5px] font-semibold"><span aria-hidden>✓</span>可用</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                    <span>demo.testfire.net</span><span>·</span><span>2 个角色</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[11px] pt-1">
+                    <span class="font-mono text-muted-foreground">https://demo.testfire.net/doLogin</span>
+                    <span class="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">表单</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-start gap-1.5 text-[10.5px] text-muted-foreground leading-relaxed">
+                <span class="text-primary mt-0.5 flex-shrink-0">ⓘ</span>
+                <span>从下方档案列表选择档案与登录角色，角色凭据来自已验证档案。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 临时填写模式：下方核心（登录入口 + 凭据） ===== -->
+      <div id="bottomEnhance" class="hidden-anim fade-in border-t border-border pt-4">
+        <div class="flex items-center gap-2 mb-3"><span class="coral-bar"></span><h4 class="text-[12px] font-semibold text-muted-foreground">认证核心</h4><span class="cap text-muted-foreground">登录入口与凭据</span></div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <!-- 登录入口 -->
+          <div class="space-y-2 rounded-lg hairline bg-secondary p-3">
+            <div class="flex items-center gap-1.5"><span class="coral-bar" style="height:10px"></span><span class="label-xs font-semibold">登录入口</span></div>
+            <div class="inline-flex flex-wrap gap-1 rounded-lg hairline bg-muted/40 p-1">
+              <button class="seg-on px-2.5 py-1 rounded-md text-xs font-medium">表单</button>
+              <button class="seg-off px-2.5 py-1 rounded-md text-xs font-medium">SSO</button>
+              <button class="seg-off px-2.5 py-1 rounded-md text-xs font-medium">API</button>
+              <button class="seg-off px-2.5 py-1 rounded-md text-xs font-medium">Basic</button>
+            </div>
+            <input class="w-full font-mono text-xs field px-2.5 py-1.5" value="https://demo.testfire.net/doLogin" />
+          </div>
+          <!-- 凭据 -->
+          <div class="space-y-2 rounded-lg hairline bg-secondary p-3">
+            <div class="flex items-center gap-1.5"><span class="coral-bar" style="height:10px"></span><span class="label-xs font-semibold">凭据</span></div>
+            <div class="grid grid-cols-3 gap-2">
+              <input class="w-full text-xs field px-2.5 py-1.5" placeholder="角色" value="admin" />
+              <input class="w-full text-xs field px-2.5 py-1.5" placeholder="用户名" value="admin" />
+              <input type="password" class="w-full text-xs field px-2.5 py-1.5" placeholder="密码" value="••••••••" />
+            </div>
+            <input class="w-full font-mono text-xs field px-2.5 py-1.5" placeholder="TOTP 密钥（可选）" />
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 档案模式：下方 = 档案卡列表 + 选中档案详情/角色单选 ===== -->
+      <div id="bottomProfile" class="hidden-anim fade-in border-t border-border pt-4">
+        <div class="flex items-center gap-2 mb-3"><span class="coral-bar"></span><h4 class="text-[12px] font-semibold text-muted-foreground">选择认证档案</h4><span class="cap text-muted-foreground">从工作区已验证档案选取</span></div>
+        <div class="grid grid-cols-1 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
+          <!-- 左：档案卡列表 -->
+          <div class="space-y-2">
+            <div class="label-xs font-medium">档案列表</div>
+            <button class="w-full text-left rounded-lg border-2 border-primary bg-primary/5 shadow-sm p-3 flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <span class="text-[13px] font-semibold">testfire-prod</span>
+                <span class="inline-flex items-center gap-1 rounded-full border border-green/40 text-green px-2 py-0.5 text-[10.5px] font-semibold"><span aria-hidden>✓</span>可用</span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"><span>demo.testfire.net</span><span>·</span><span>2 个角色</span></div>
+            </button>
+            <button class="w-full text-left rounded-lg border border-border bg-card hover:border-foreground/20 p-3 flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <span class="text-[13px] font-semibold">staging-user</span>
+                <span class="inline-flex items-center gap-1 rounded-full border border-yellow/40 text-yellow px-2 py-0.5 text-[10.5px] font-semibold"><span aria-hidden>●</span>未验证</span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"><span>staging.testfire.net</span><span>·</span><span>1 个角色</span></div>
+            </button>
+            <button class="w-full text-left rounded-lg border border-border bg-card hover:border-foreground/20 p-3 flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <span class="text-[13px] font-semibold">legacy-admin</span>
+                <span class="inline-flex items-center gap-1 rounded-full border border-red/40 text-red px-2 py-0.5 text-[10.5px] font-semibold"><span aria-hidden>✗</span>不可用</span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"><span>old.testfire.net</span><span>·</span><span>3 个角色</span></div>
+            </button>
+          </div>
+
+          <!-- 右：选中档案详情 + 角色单选 -->
+          <div class="space-y-3 rounded-lg hairline bg-secondary p-3.5">
+            <div>
+              <div class="text-[14px] font-semibold">testfire-prod</div>
+              <div class="flex items-center gap-2 text-xs mt-1.5">
+                <span class="font-mono text-muted-foreground">https://demo.testfire.net/doLogin</span>
+                <span class="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">表单</span>
+              </div>
+            </div>
+            <div class="border-t border-border"></div>
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="label-xs font-medium">选择登录角色 <span class="font-normal text-muted-foreground">（可多选，默认全选）</span></div>
+                <button id="toggleAllRoles" class="text-[10.5px] font-medium text-primary hover:underline">取消全选</button>
+              </div>
+              <div class="space-y-2" id="roleList">
+                <button data-role="admin" class="role-row w-full flex items-center gap-2.5 rounded-lg border-2 border-primary bg-primary/5 shadow-sm p-2.5 text-left">
+                  <span class="role-check w-4 h-4 rounded border-2 border-primary bg-primary flex-none flex items-center justify-center"><svg class="w-3 h-3 text-primary-foreground" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  <div class="flex-1 min-w-0"><span class="text-[13px] font-medium font-mono">admin <span class="font-normal text-muted-foreground">· admin</span></span></div>
+                  <span class="inline-flex items-center gap-1 rounded-full border border-green/40 text-green px-2 py-0.5 text-[10.5px] font-semibold flex-none"><span aria-hidden>✓</span>已验证</span>
+                </button>
+                <button data-role="user" class="role-row w-full flex items-center gap-2.5 rounded-lg border-2 border-primary bg-primary/5 shadow-sm p-2.5 text-left">
+                  <span class="role-check w-4 h-4 rounded border-2 border-primary bg-primary flex-none flex items-center justify-center"><svg class="w-3 h-3 text-primary-foreground" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                  <div class="flex-1 min-w-0"><span class="text-[13px] font-medium font-mono">user <span class="font-normal text-muted-foreground">· jsmith</span></span></div>
+                  <span class="inline-flex items-center gap-1 rounded-full border border-yellow/40 text-yellow px-2 py-0.5 text-[10.5px] font-semibold flex-none"><span aria-hidden>●</span>未验证</span>
+                </button>
+              </div>
+              <div class="mt-2 text-[10.5px] text-muted-foreground">已选 <span id="roleCount">2</span> / 2 个角色，扫描将以各角色凭据分别验证。</div>
+            </div>
+            <div class="border-t border-border"></div>
+            <div class="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
+              <span class="text-primary mt-0.5 flex-shrink-0">ⓘ</span>
+              <span>角色凭据来自档案，将以其已验证状态参与扫描。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    <!-- 底部操作 -->
+    <div class="flex items-center justify-between px-5 py-3.5 border-t border-border bg-background">
+      <button class="btn text-sm font-semibold px-4 py-2 rounded-md bg-primary text-primary-foreground shadow-cta">开始黑盒验证</button>
+      <span class="text-xs text-muted-foreground">扫描结果实时推送</span>
+    </div>
+  </div>
+
+  <!-- 提示 -->
+  <div class="mt-4 text-center text-[11px] text-muted-foreground">↑ 点「配置登录」展开 · 展开后点「临时填写 / 使用档案」切换两个模式</div>
+</div>
+
+<script>
+  let expanded = false;
+  let mode = 'inline'; // 'inline' | 'profile'
+  const btn = document.getElementById('toggleBtn');
+  const status = document.getElementById('authStatus');
+  const ph = document.getElementById('rightPlaceholder');
+  const core = document.getElementById('rightCore');
+  const enh = document.getElementById('bottomEnhance');
+  const profBottom = document.getElementById('bottomProfile');
+  const inlineRight = document.getElementById('inlineRight');
+  const profileRight = document.getElementById('profileRight');
+  const srcInline = document.getElementById('srcInline');
+  const srcProfile = document.getElementById('srcProfile');
+
+  function applyMode() {
+    if (mode === 'inline') {
+      srcInline.className = 'seg-on flex-1 px-3 py-1.5 rounded-md text-xs font-medium';
+      srcProfile.className = 'seg-off flex-1 px-3 py-1.5 rounded-md text-xs font-medium';
+      inlineRight.classList.remove('hidden-anim');
+      profileRight.classList.add('hidden-anim');
+      enh.classList.remove('hidden-anim');
+      profBottom.classList.add('hidden-anim');
+      status.textContent = '已配置 · 临时填写 · form 登录';
+    } else {
+      srcInline.className = 'seg-off flex-1 px-3 py-1.5 rounded-md text-xs font-medium';
+      srcProfile.className = 'seg-on flex-1 px-3 py-1.5 rounded-md text-xs font-medium';
+      inlineRight.classList.add('hidden-anim');
+      profileRight.classList.remove('hidden-anim');
+      enh.classList.add('hidden-anim');
+      profBottom.classList.remove('hidden-anim');
+      profBottom.classList.remove('fade-in'); void profBottom.offsetWidth; profBottom.classList.add('fade-in');
+      status.textContent = '已配置 · 使用档案 · testfire-prod / admin';
+    }
+  }
+
+  srcInline.addEventListener('click', () => { mode = 'inline'; applyMode(); });
+  srcProfile.addEventListener('click', () => { mode = 'profile'; applyMode(); });
+
+  btn.addEventListener('click', () => {
+    expanded = !expanded;
+    if (expanded) {
+      btn.textContent = '收起';
+      ph.classList.add('hidden-anim');
+      core.classList.remove('hidden-anim');
+      core.classList.remove('fade-in'); void core.offsetWidth; core.classList.add('fade-in');
+      applyMode();
+    } else {
+      btn.textContent = '配置登录';
+      status.textContent = '未配置 · 以未登录状态验证';
+      ph.classList.remove('hidden-anim');
+      core.classList.add('hidden-anim');
+      enh.classList.add('hidden-anim');
+      profBottom.classList.add('hidden-anim');
+    }
+  });
+
+  // ===== 档案模式：角色多选（默认全选） =====
+  const roleRows = Array.from(document.querySelectorAll('.role-row'));
+  const roleCountEl = document.getElementById('roleCount');
+  const toggleAllBtn = document.getElementById('toggleAllRoles');
+  const checkSvg = '<svg class="w-3 h-3 text-primary-foreground" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function updateRoleUI() {
+    const selected = roleRows.filter(r => r.dataset.selected !== 'false');
+    roleCountEl.textContent = selected.length;
+    toggleAllBtn.textContent = selected.length === roleRows.length ? '取消全选' : '全选';
+  }
+  function setRowSelected(row, sel) {
+    row.dataset.selected = sel ? 'true' : 'false';
+    const check = row.querySelector('.role-check');
+    if (sel) {
+      row.className = 'role-row w-full flex items-center gap-2.5 rounded-lg border-2 border-primary bg-primary/5 shadow-sm p-2.5 text-left';
+      check.className = 'role-check w-4 h-4 rounded border-2 border-primary bg-primary flex-none flex items-center justify-center';
+      check.innerHTML = checkSvg;
+    } else {
+      row.className = 'role-row w-full flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-foreground/20 p-2.5 text-left';
+      check.className = 'role-check w-4 h-4 rounded border-2 border-input flex-none';
+      check.innerHTML = '';
+    }
+  }
+  // 默认全选
+  roleRows.forEach(r => { r.dataset.selected = 'true'; r.addEventListener('click', () => {
+    setRowSelected(r, r.dataset.selected === 'false');
+    updateRoleUI();
+  }); });
+  toggleAllBtn.addEventListener('click', () => {
+    const allSelected = roleRows.every(r => r.dataset.selected !== 'false');
+    roleRows.forEach(r => setRowSelected(r, !allSelected));
+    updateRoleUI();
+  });
+  updateRoleUI();
+</script>
+
+</body>
+</html>

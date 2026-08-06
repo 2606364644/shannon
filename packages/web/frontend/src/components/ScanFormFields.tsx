@@ -867,7 +867,18 @@ export function ScanFormFields({
                   {f.auth.enabled ? t("scan.auth.statusEnabled") : t("scan.auth.statusUnauth")}
                 </div>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => setAuthExpanded((v) => !v)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // 对齐 preview：点「配置登录」= 开启 + 展开（露出右栏核心 + 下方凭据块）。
+                  // enabled 与 expanded 解耦——收起保留 enabled（仅隐 UI），Switch 在展开态可关。
+                  const next = !authExpanded;
+                  setAuthExpanded(next);
+                  if (next && !f.auth.enabled) set({ auth: { ...f.auth, enabled: true } });
+                }}
+              >
                 {authExpanded ? t("scan.auth.collapse") : t("scan.auth.configure")}
               </Button>
             </div>
