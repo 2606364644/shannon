@@ -48,6 +48,7 @@ def _render_exploit_deliverable(vc, data, deliverables_path):
 
     valid_ids: set[str] = set()
     id_to_type: dict[str, str] = {}
+    id_to_title: dict[str, str] = {}
     if deliverables_path is not None:
         queue_path = Path(deliverables_path) / f"{vc}_exploitation_queue.json"
         if queue_path.exists():
@@ -60,8 +61,11 @@ def _render_exploit_deliverable(vc, data, deliverables_path):
                     if vid:
                         valid_ids.add(vid)
                         id_to_type[vid] = getattr(v, "vulnerability_type", vc)
+                        title = getattr(v, "title", None)
+                        if title:
+                            id_to_title[vid] = title
             except (json.JSONDecodeError, OSError):
                 pass
     entries = (data or {}).get("verdicts", []) if isinstance(data, dict) else (data or [])
     validation = validate_exploit_verdicts(entries, valid_ids)
-    return render_exploit(vc, validation, id_to_type)
+    return render_exploit(vc, validation, id_to_type, id_to_title)

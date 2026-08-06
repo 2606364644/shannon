@@ -170,6 +170,7 @@ def _vuln_output_schema(agent_name: AgentName) -> dict | None:
                         "vulnerability_type",
                         "externally_exploitable",
                         "confidence",
+                        "title",
                     ],
                     "additionalProperties": True,
                 },

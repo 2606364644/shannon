@@ -99,7 +99,7 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
      * False positives sections
      * any intros in the sections
      * any counts in the sections
-   - Preserve exact vulnerability IDs (`### [TYPE]-VULN-NN:`); if the title after the colon is only a short category label rather than a descriptive phrase, rewrite it to a concise human-readable descriptor derived from the finding's Vulnerable location and Overview.
+   - Preserve exact vulnerability IDs: every finding heading is now `### [TYPE]-VULN-NN: <title>` or `### [TYPE]-GN-NN: <title>` (the orchestrator already appends a one-line title after the ID). NEVER alter or drop the ID prefix (`[TYPE]-VULN-NN` / `[TYPE]-GN-NN`) — only the text after the colon is editable. If that title is missing (a bare `### [TYPE]-VULN-NN` with no colon) or is only a short category label (e.g., `SSTI`, `Reflected`) rather than a descriptive phrase, rewrite it (via Edit) to a concise human-readable descriptor derived from the finding's Vulnerable location and Overview, keeping the `### ID: ` prefix intact.
    - NEVER delete per-class vulnerability evidence: preserve every vulnerability ID (`### [TYPE]-VULN-NN` / `### [TYPE]-GN-NN`), code snippets, commands, file paths, line numbers, HTTP methods/status, and URLs exactly as the orchestrator assembled them. Cleanup only removes the meta-sections listed above (Recommendations/Conclusion/Summary/etc.) — never the evidence inside a kept section.
 
 4. Combine the content:

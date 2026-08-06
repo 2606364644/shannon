@@ -68,6 +68,7 @@ async def build_injection_findings(
             vulnerability_type="injection",
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
+            title=verdict.title,
             source=_source_text(chain),
             path=verdict.evidence_chain,
             sink_call=chain.sink_call_site_id,

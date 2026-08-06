@@ -183,6 +183,47 @@ def test_render_ssrf_entry_full():
     assert "**Missing Defense:** No URL allowlist" in result
 
 
+# --- title 字段（spec 2026-08-06）：### ID: title ---
+
+def test_render_injection_entry_with_title():
+    """有 title → 渲染 ### ID: title。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        title="PostgreSQL SQL Injection via Coupon Validation",
+    )
+    result = render_injection_entry(vuln)
+    assert result.startswith("### INJ-VULN-01: PostgreSQL SQL Injection via Coupon Validation")
+
+
+def test_render_injection_entry_without_title_is_bare():
+    """无 title → 渲染裸 ### ID（冒号都不留，留给 report-executive 第二道补）。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-02", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+    )
+    result = render_injection_entry(vuln)
+    assert result.startswith("### INJ-VULN-02\n")
+
+
+@pytest.mark.parametrize("cls,render_fn,vtype", [
+    (InjectionVulnerability, render_injection_entry, "SQLi"),
+    (XssVulnerability, render_xss_entry, "Reflected"),
+    (SsrfVulnerability, render_ssrf_entry, "SSRF"),
+    (AuthVulnerability, render_auth_entry, "Auth"),
+    (AuthzVulnerability, render_authz_entry, "IDOR"),
+])
+def test_all_render_functions_append_title_when_present(cls, render_fn, vtype):
+    """5 个 render 函数都在有 title 时拼 ### ID: title。"""
+    vuln = cls(
+        ID="X-VULN-01", vulnerability_type=vtype,
+        externally_exploitable=True, confidence="high",
+        title="descriptive one-liner",
+    )
+    result = render_fn(vuln)
+    assert result.startswith("### X-VULN-01: descriptive one-liner")
+
+
 
 
 def test_filter_by_confidence():

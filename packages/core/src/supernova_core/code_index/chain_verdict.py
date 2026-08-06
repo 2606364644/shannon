@@ -49,8 +49,9 @@ CHAIN_VERDICT_SCHEMA: dict = {
         "evidence_chain": {"type": "string"},
         "mismatch_reason": {"type": ["string", "null"]},
         "confidence": {"type": "string"},
+        "title": {"type": ["string", "null"]},
     },
-    "required": ["verdict", "evidence_chain"],
+    "required": ["verdict", "evidence_chain", "title"],
 }
 
 logger = logging.getLogger(__name__)
@@ -81,9 +82,12 @@ Rules:
 - A defense is effective ONLY if it matches the slot/render_context AND no concat after.
 - Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
 - Be decisive: return vulnerable OR safe.
+- Give a one-line descriptive "title" encoding the vulnerability category + where it lives
+  (e.g., "SQL Injection via coupon_code in /shop/apply-coupon"). Required for EVERY chain,
+  vulnerable or safe (both enter the queue); never a bare category label.
 
 Respond with a compact JSON object ONLY:
-{{"verdict":"safe|vulnerable","witness_payload":"<minimal>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low"}}
+{{"verdict":"safe|vulnerable","witness_payload":"<minimal>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>"}}
 """
 
 
@@ -111,10 +115,20 @@ class ChainVerdict:
     evidence_chain: str
     mismatch_reason: str | None
     confidence: str
+    title: str | None = None
 
 
 def _slot_value(slot) -> str:
     return slot.value if hasattr(slot, "value") else str(slot)
+
+
+def _fallback_title(candidate: "CandidateChain") -> str:
+    """Deterministic descriptive title when the LLM pass fails / returns no title.
+
+    Best-effort: ``<vuln_class> via <source_param> -> <sink>`` — encodes category +
+    where it lives so the finding is never title-less (the second-pass report
+    cleanup can still rewrite it)."""
+    return f"{candidate.vuln_class} via {candidate.source_param} -> {candidate.sink_call_site_id}"
 
 
 def _category_value(category) -> str:
@@ -278,6 +292,7 @@ async def judge_chain_verdict(
             evidence_chain=f"{candidate.source_param} -> {candidate.sink_call_site_id} (llm-pass-failed, needs_review)",
             mismatch_reason="llm chain-verdict pass failed; needs human/LLM-track review",
             confidence="low",
+            title=_fallback_title(candidate),
         )
 
     try:
@@ -293,8 +308,10 @@ async def judge_chain_verdict(
             evidence_chain=f"{candidate.source_param} -> {candidate.sink_call_site_id} (unparseable-llm, needs_review)",
             mismatch_reason="llm chain-verdict pass returned unparseable output; needs review",
             confidence="low",
+            title=_fallback_title(candidate),
         )
 
+    title = data.get("title")
     return ChainVerdict(
         verdict=str(data.get("verdict", "safe")).strip().lower(),
         witness_payload=data.get("witness_payload"),
@@ -302,4 +319,5 @@ async def judge_chain_verdict(
                            or f"{candidate.source_param} -> {candidate.sink_call_site_id}"),
         mismatch_reason=data.get("mismatch_reason"),
         confidence=str(data.get("confidence", "medium")).strip().lower(),
+        title=str(title).strip() if isinstance(title, str) and title.strip() else None,
     )

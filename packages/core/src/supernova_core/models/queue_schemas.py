@@ -9,6 +9,9 @@ class BaseVulnerability(BaseModel):
     vulnerability_type: str
     externally_exploitable: bool
     confidence: str
+    # 一句话概括标题（spec 2026-08-06）：报告 ### ID: title 的 title SSOT。
+    # 可选以兼容旧 queue；vuln agent 的 _vuln_output_schema 把它加进 required 强制新数据必给。
+    title: str | None = None
     notes: str | None = None
     # Spec §4.1 dual-track merge fields. All are optional for backward compatibility.
     source_track: str | None = None

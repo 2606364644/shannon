@@ -67,6 +67,7 @@ async def build_ssrf_findings(
             vulnerability_type="URL_Manipulation",
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
+            title=verdict.title,
             source_endpoint=chain.entry_point_id,  # best-effort; renderer tolerant
             vulnerable_parameter=chain.source_param,
             vulnerable_code_location=chain.sink_call_site_id,

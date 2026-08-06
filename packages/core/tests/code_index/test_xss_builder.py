@@ -200,3 +200,22 @@ async def test_build_xss_findings_progress_cb_none_no_raise():
     findings = await build_xss_findings(
         pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
     assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_xss_finding_carries_title():
+    """chain verdict 的 title 透传到 XssVulnerability.title。"""
+    sid = "app.py:h:innerHTML:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("generic", source="q", sink_id=sid)],
+        language_coverage=["typescript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"><script>","evidence_chain":'
+                '"q->innerHTML","mismatch_reason":"no encoding","confidence":"high",'
+                '"title":"Reflected XSS via q param into innerHTML"}')
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+    assert findings[0].title == "Reflected XSS via q param into innerHTML"

@@ -239,3 +239,35 @@ def test_horizontal_endpoint_normalization_collapses_variants():
     out = merge_dual_track_queues(llm, gn, mode="verdict")
     assert len(out) == 1
     assert out[0].merge_source == "both"
+
+
+# --- 漏洞 title 字段三分支流转（spec 2026-08-06）---
+# merger 经 model_dump→model_validate 透传 title，无需改逻辑。base=both/llm-only
+# 取 LLM 轨 title；gitnexus-only 取 GitNexus 轨 title。
+
+def test_both_branch_keeps_llm_track_title():
+    """both 分支 base=llm → title 取 LLM 轨 title。"""
+    llm = [_inj("L1", "vulnerable", source="q", sink_call="db.exec",
+                title="LLM SQLi title")]
+    gn = [_inj("G1", "vulnerable", source="q", sink_call="db.exec",
+               title="GN SQLi title")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "both"
+    assert out[0].title == "LLM SQLi title"
+
+
+def test_llm_only_branch_keeps_llm_track_title():
+    llm = [_inj("L1", "vulnerable", title="LLM-only title")]
+    out = merge_dual_track_queues(llm, [], mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "llm-only"
+    assert out[0].title == "LLM-only title"
+
+
+def test_gitnexus_only_branch_keeps_gitnexus_track_title():
+    gn = [_inj("G1", "vulnerable", title="GN-only title")]
+    out = merge_dual_track_queues([], gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "gitnexus-only"
+    assert out[0].title == "GN-only title"

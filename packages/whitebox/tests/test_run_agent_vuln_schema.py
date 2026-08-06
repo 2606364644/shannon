@@ -40,8 +40,10 @@ class TestVulnOutputSchema:
         assert "vulnerabilities" in schema["properties"]
         assert "vulnerabilities" in schema["required"]
         items = schema["properties"]["vulnerabilities"]["items"]
+        # title（spec 2026-08-06）：强制 vuln agent 必给一句话描述性标题（新数据必填）。
         assert set(items["required"]) == {
             "ID", "vulnerability_type", "externally_exploitable", "confidence",
+            "title",
         }
 
     @pytest.mark.parametrize("agent", [

@@ -98,7 +98,9 @@ class VulnClassConfig:
 
 
 def render_injection_entry(vuln: InjectionVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", _M.get("summary")]
+    # title（spec 2026-08-06）：有 title 拼 ### ID: title；无 title 裸 ### ID（留给 report-executive 第二道补）。
+    heading = f"### {vuln.ID}: {vuln.title}" if vuln.title else f"### {vuln.ID}"
+    lines = [heading, "", _M.get("summary")]
     if vuln.source or vuln.path:
         location = f"{vuln.source or 'N/A'} → {vuln.path or 'N/A'}"
         lines.append(f"{_label('vulnerable_location')} {location}")
@@ -129,7 +131,9 @@ def render_injection_entry(vuln: InjectionVulnerability) -> str:
 
 
 def render_xss_entry(vuln: XssVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", _M.get("summary")]
+    # title（spec 2026-08-06）：有 title 拼 ### ID: title；无 title 裸 ### ID（留给 report-executive 第二道补）。
+    heading = f"### {vuln.ID}: {vuln.title}" if vuln.title else f"### {vuln.ID}"
+    lines = [heading, "", _M.get("summary")]
     if vuln.source or vuln.path:
         location = f"{vuln.source or 'N/A'} → {vuln.path or 'N/A'}"
         lines.append(f"{_label('vulnerable_location')} {location}")
@@ -150,7 +154,9 @@ def render_xss_entry(vuln: XssVulnerability) -> str:
 
 
 def render_auth_entry(vuln: AuthVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", _M.get("summary")]
+    # title（spec 2026-08-06）：有 title 拼 ### ID: title；无 title 裸 ### ID（留给 report-executive 第二道补）。
+    heading = f"### {vuln.ID}: {vuln.title}" if vuln.title else f"### {vuln.ID}"
+    lines = [heading, "", _M.get("summary")]
     if vuln.source_endpoint:
         lines.append(f"{_label('source_endpoint')} {vuln.source_endpoint}")
     if vuln.vulnerable_code_location:
@@ -168,7 +174,9 @@ def render_auth_entry(vuln: AuthVulnerability) -> str:
 
 
 def render_authz_entry(vuln: AuthzVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", _M.get("summary")]
+    # title（spec 2026-08-06）：有 title 拼 ### ID: title；无 title 裸 ### ID（留给 report-executive 第二道补）。
+    heading = f"### {vuln.ID}: {vuln.title}" if vuln.title else f"### {vuln.ID}"
+    lines = [heading, "", _M.get("summary")]
     if vuln.endpoint:
         lines.append(f"{_label('endpoint')} {vuln.endpoint}")
     if vuln.vulnerable_code_location:
@@ -190,7 +198,9 @@ def render_authz_entry(vuln: AuthzVulnerability) -> str:
 
 
 def render_ssrf_entry(vuln: SsrfVulnerability) -> str:
-    lines = [f"### {vuln.ID}", "", _M.get("summary")]
+    # title（spec 2026-08-06）：有 title 拼 ### ID: title；无 title 裸 ### ID（留给 report-executive 第二道补）。
+    heading = f"### {vuln.ID}: {vuln.title}" if vuln.title else f"### {vuln.ID}"
+    lines = [heading, "", _M.get("summary")]
     if vuln.source_endpoint:
         lines.append(f"{_label('source_endpoint')} {vuln.source_endpoint}")
     if vuln.vulnerable_parameter:

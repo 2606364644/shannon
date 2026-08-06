@@ -175,6 +175,7 @@ async def build_xss_findings(
             vulnerability_type="Stored" if is_stored else "Reflected",
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
+            title=verdict.title,
             source=f"{chain.source_param} ({chain.entry_point_id})",
             source_detail=verdict.evidence_chain,
             path=verdict.evidence_chain,

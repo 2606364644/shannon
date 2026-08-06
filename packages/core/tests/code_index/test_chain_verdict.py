@@ -1,6 +1,7 @@
 import pytest
 
 from supernova_core.code_index.chain_verdict import (
+    CHAIN_VERDICT_SCHEMA,
     CandidateChain,
     extract_candidate_chains,
     judge_chain_verdict,
@@ -241,3 +242,58 @@ async def test_judge_chain_verdict_prompt_includes_sink_expressions_and_intermed
     await judge_chain_verdict(chain, llm_client=fake_llm)
     assert "'sel ' + q" in captured["prompt"]            # sink_expressions 进 prompt
     assert "raw" in captured["prompt"] and "esc" in captured["prompt"]   # intermediate_vars 进 steps_repr
+
+
+# --- title 字段（spec 2026-08-06）：chain verdict 产描述性标题 ---
+
+def test_chain_verdict_schema_includes_title():
+    """CHAIN_VERDICT_SCHEMA 含 title（string|null）—— LLM 输出契约。"""
+    assert "title" in CHAIN_VERDICT_SCHEMA["properties"]
+    assert "null" in CHAIN_VERDICT_SCHEMA["properties"]["title"]["type"]
+
+
+def test_chain_verdict_dataclass_has_title_field():
+    """ChainVerdict dataclass 含 title，缺省 None。"""
+    cv = ChainVerdict(
+        verdict="vulnerable", witness_payload="'", evidence_chain="q->db",
+        mismatch_reason="concat", confidence="high",
+    )
+    assert cv.title is None
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_parses_title_from_llm():
+    """LLM 输出 JSON 含 title → ChainVerdict.title 解析出来。"""
+    chain = CandidateChain(
+        vuln_class="injection", flow_id="f1", entry_point_id="ep",
+        source_param="q", source_type="query", sink_call_site_id="db.execute:1",
+        sink_slot="sql_value", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="backward",
+        post_sanitize_concat=True,
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q -> db.execute(L1)","mismatch_reason":"concat into sql value slot",'
+                '"confidence":"high","title":"SQL Injection via search q param"}')
+
+    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    assert verdict.title == "SQL Injection via search q param"
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_title_none_when_llm_omits():
+    """LLM 不返 title（旧/兜底分支）→ ChainVerdict.title=None，不崩。"""
+    chain = CandidateChain(
+        vuln_class="ssrf", flow_id="f1", entry_point_id="ep",
+        source_param="url", source_type="query", sink_call_site_id="fetch:1",
+        sink_slot="url", propagation_steps=[], sanitizer_annotations=[],
+        direction_hint="backward", post_sanitize_concat=False,
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":"url->fetch",'
+                '"mismatch_reason":null,"confidence":"high"}')
+
+    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    assert verdict.title is None

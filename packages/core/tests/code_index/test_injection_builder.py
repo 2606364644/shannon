@@ -200,3 +200,20 @@ async def test_build_injection_accepts_sink_call_sites_param():
         pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
     assert isinstance(findings, list)
     assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_injection_finding_carries_title():
+    """chain verdict 的 title 透传到 InjectionVulnerability.title。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value", steps=[_step("concat")])],
+        language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec","mismatch_reason":"concat","confidence":"high",'
+                '"title":"SQL Injection via q param"}')
+
+    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    assert findings[0].title == "SQL Injection via q param"

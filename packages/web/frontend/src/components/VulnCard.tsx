@@ -46,7 +46,7 @@ export function VulnCard({ v }: { v: Vulnerability }) {
         }}
       >
         <span className="font-bold text-red">{v.ID}</span>
-        <span>{v.vulnerability_type}</span>
+        <span>{v.title || v.vulnerability_type}</span>
         {v.externally_exploitable && (
           <Badge variant="outline" className="border-red/40 text-red">● {t("vuln.reachable")}</Badge>
         )}

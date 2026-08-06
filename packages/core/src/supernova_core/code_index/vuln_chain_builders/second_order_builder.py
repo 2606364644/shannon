@@ -140,6 +140,7 @@ async def build_second_order_findings(
             vulnerability_type=f"second_order_{vc}",
             externally_exploitable=True,   # reachability tag; refined per-route in activity
             confidence=read_verdict.confidence,
+            title=read_verdict.title,
             source=(
                 f"storage read {cand.read.expression} "
                 f"({cand.read.file_path}:{cand.read.line})"

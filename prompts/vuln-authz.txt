@@ -149,6 +149,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 **Structure:** The `vulnerability` JSON object MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability (e.g., AUTHZ-VULN-01)",
+		"title": "one-line descriptive name encoding the authz flaw + endpoint (e.g., 'IDOR: DELETE /api/Feedbacks/:id without ownership check'). NOT a bare label like 'Horizontal'.",
 		"vulnerability_type": "Horizontal | Vertical | Context_Workflow",
 		"externally_exploitable": true | false,
 		"endpoint": "HTTP_METHOD /path/to/endpoint",

@@ -58,6 +58,18 @@ describe("VulnCard", () => {
     expect(screen.getByText(/URL_Manipulation/)).toBeInTheDocument();
   });
 
+  it("title 存在时展示 title 而非 vulnerability_type（spec 2026-08-06）", () => {
+    render(<VulnCard v={{ ...base, title: "SSRF via webhook_url in /api/webhooks" }} />);
+    expect(screen.getByText(/SSRF via webhook_url/)).toBeInTheDocument();
+    // title 存在时不再展示裸 vulnerability_type
+    expect(screen.queryByText(/URL_Manipulation/)).not.toBeInTheDocument();
+  });
+
+  it("title 为空时退化到 vulnerability_type", () => {
+    render(<VulnCard v={{ ...base, title: undefined }} />);
+    expect(screen.getByText(/URL_Manipulation/)).toBeInTheDocument();
+  });
+
   it("externally_exploitable=true → 可达 ● 徽章 + red 边框语义", () => {
     const { container } = render(<VulnCard v={{ ...base, externally_exploitable: true }} />);
     expect(screen.getByText(/可达/)).toBeInTheDocument();

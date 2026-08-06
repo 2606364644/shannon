@@ -196,3 +196,30 @@ async def test_build_ssrf_excludes_open_redirect_sink():
     findings = await build_ssrf_findings(
         pgraph, llm_client=fake_llm, sink_call_sites={sid: redirect_sink})
     assert findings == [], "open-redirect sink must not be reported as SSRF"
+
+
+@pytest.mark.asyncio
+async def test_build_ssrf_finding_carries_title():
+    """chain verdict 的 title 透传到 SsrfVulnerability.title。"""
+    from supernova_core.code_index.parameter_models import (
+        ParameterPropagationGraph, TaintFlow,
+    )
+    from supernova_core.code_index.models import ParameterSource
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[TaintFlow(
+            flow_id="app.py:proxy:1#app.py:proxy:fetch:5:0",
+            entry_point_id="app.py:proxy:1", source_param="url",
+            source_type=ParameterSource.QUERY_PARAM,
+            sink_call_site_id="app.py:proxy:fetch:5:0",
+            sink_slot="url", propagation_steps=[],
+        )],
+        language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"http://127.0.0.1/",'
+                '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+                '"confidence":"high","title":"SSRF via url param in /proxy"}')
+
+    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    assert findings[0].title == "SSRF via url param in /proxy"

@@ -246,6 +246,76 @@ def test_parse_lenient_vuln_class_unknown_falls_back_to_union():
     assert len(result.queue.vulnerabilities) == 1  # 仍解析,不丢
 
 
+# --- 漏洞 title 字段（spec 2026-08-06）：报告一句话概括标题 SSOT ---
+
+def test_base_vulnerability_title_defaults_none():
+    """title 可选，缺省 None（兼容旧数据 / 无 title 条目）。"""
+    v = BaseVulnerability(
+        ID="INJ-VULN-01",
+        vulnerability_type="SQLi",
+        externally_exploitable=True,
+        confidence="high",
+    )
+    assert v.title is None
+
+
+def test_base_vulnerability_title_settable():
+    v = BaseVulnerability(
+        ID="INJ-VULN-01",
+        vulnerability_type="SQLi",
+        externally_exploitable=True,
+        confidence="high",
+        title="PostgreSQL SQL Injection via Coupon Validation",
+    )
+    assert v.title == "PostgreSQL SQL Injection via Coupon Validation"
+
+
+def test_title_json_roundtrip():
+    """title 进 model_dump_json，反序列化后保留。"""
+    v = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        title="SQLi via search q param",
+    )
+    data = json.loads(v.model_dump_json())
+    assert data["title"] == "SQLi via search q param"
+    back = InjectionVulnerability.model_validate(data)
+    assert back.title == "SQLi via search q param"
+
+
+def test_parse_lenient_legacy_queue_without_title_keeps_title_none():
+    """旧 queue JSON 无 title 字段 → parse_lenient 不崩，title=None。"""
+    content = json.dumps({"vulnerabilities": [
+        {"ID": "INJ-1", "vulnerability_type": "SQLi",
+         "externally_exploitable": True, "confidence": "high"},
+    ]})
+    result = VulnerabilityQueue.parse_lenient(content, vuln_class="injection")
+    assert len(result.queue.vulnerabilities) == 1
+    assert result.queue.vulnerabilities[0].title is None
+
+
+def test_parse_lenient_preserves_title_when_present():
+    """新 queue JSON 含 title → parse_lenient 保留 title。"""
+    content = json.dumps({"vulnerabilities": [
+        {"ID": "INJ-1", "vulnerability_type": "SQLi",
+         "externally_exploitable": True, "confidence": "high",
+         "title": "SQLi in /search via q"},
+    ]})
+    result = VulnerabilityQueue.parse_lenient(content, vuln_class="injection")
+    assert result.queue.vulnerabilities[0].title == "SQLi in /search via q"
+
+
+def test_title_inherited_by_all_subclasses():
+    """5 个子类都继承 title（无需各自声明）。"""
+    for cls in (InjectionVulnerability, XssVulnerability, SsrfVulnerability,
+                AuthVulnerability, AuthzVulnerability):
+        v = cls(
+            ID="X-1", vulnerability_type="t", externally_exploitable=True,
+            confidence="high", title="desc",
+        )
+        assert v.title == "desc", f"{cls.__name__} 未继承 title"
+
+
 def test_injection_vulnerability_accepts_llm_output_fields():
     """InjectionVulnerability 必须接受 LLM 实际输出的 XSS 风格字段
     (sink_function/render_context/encoding_observed/source_detail),

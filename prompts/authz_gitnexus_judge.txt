@@ -23,6 +23,7 @@ Respond with a JSON object of exactly this shape (no prose outside JSON):
   "vulnerabilities": [
     {
       "ID": "AUTHZ-GN-NN",
+      "title": "one-line descriptive name encoding the IDOR flaw + endpoint (e.g., 'IDOR: DELETE /api/Feedbacks/:id without ownership check'). NOT a bare label.",
       "vulnerability_type": "Horizontal",
       "externally_exploitable": true,
       "endpoint": "DELETE /api/Feedbacks/:id",

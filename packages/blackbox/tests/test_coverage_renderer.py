@@ -231,3 +231,34 @@ async def test_close_coverage_gaps_reads_queue_from_whitebox_writes_evidence_to_
     assert "INJ-VULN-2" in results[0].uncovered_ids
     # 未覆盖节写到 blackbox/ 的 evidence
     assert "Unverified" in (dlv / "blackbox" / "injection_exploitation_evidence.md").read_text()
+
+
+def test_render_unverified_section_appends_title_when_present():
+    """queue 条目带 title → 未覆盖节渲染 ### ID: title（spec 2026-08-06）。"""
+    from supernova_core.models.queue_schemas import AuthVulnerability
+    queue = _queue(AuthVulnerability(
+        ID="AUTH-VULN-08", vulnerability_type="Transport_Exposure",
+        externally_exploitable=True, confidence="high",
+        title="Missing Cache-Control on auth responses",
+    ))
+    result = CoverageResult(
+        vuln_class="auth", total=1,
+        covered_ids=frozenset(), uncovered_ids=frozenset({"AUTH-VULN-08"}),
+    )
+    section = render_unverified_section(result, queue)
+    assert "### AUTH-VULN-08: Missing Cache-Control on auth responses" in section
+
+
+def test_render_unverified_section_bare_id_when_no_title():
+    """queue 条目无 title → 未覆盖节渲染裸 ### ID。"""
+    from supernova_core.models.queue_schemas import AuthVulnerability
+    queue = _queue(AuthVulnerability(
+        ID="AUTH-VULN-08", vulnerability_type="Transport_Exposure",
+        externally_exploitable=True, confidence="high",
+    ))
+    result = CoverageResult(
+        vuln_class="auth", total=1,
+        covered_ids=frozenset(), uncovered_ids=frozenset({"AUTH-VULN-08"}),
+    )
+    section = render_unverified_section(result, queue)
+    assert "### AUTH-VULN-08\n" in section

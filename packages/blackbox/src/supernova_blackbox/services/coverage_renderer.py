@@ -75,7 +75,8 @@ def render_unverified_section(result: CoverageResult, queue: VulnerabilityQueue)
     ]
     for vid in sorted(result.uncovered_ids):
         v = by_id.get(vid)
-        lines.append(f"### {vid}")
+        title = v.title if v is not None else None
+        lines.append(f"### {vid}: {title}" if title else f"### {vid}")
         if v is not None:
             for label, attr in fields:
                 val = getattr(v, attr, None)
