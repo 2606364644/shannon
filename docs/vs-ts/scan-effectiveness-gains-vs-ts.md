@@ -109,6 +109,8 @@ TS 版 `apps/worker/src/` 全仓 grep `gitnexus | parameter_graph | sink_rules |
 
 **效果验证**：⏳ 能力就位，NodeGoat 三类 0→N 待真机验证。
 
+> 完整场景复盘（四步根因链 + 方案取舍 + 实测效果）见 [`intra-first-taint-mechanism.md`](./intra-first-taint-mechanism.md)。
+
 ### 4.3 SSRF taint 断链修复（W8）
 
 **解决的问题**：「sink 参数是局部变量对象」（如 `httpClient.execute(request)`，真正污点在背后构造的 `ip`/`port`）的跨函数 taint 链**全丢**；超时的 sink 函数被整段跳过而非断链保留。受影响的不止 SSRF，还有参数经 `String.format` 构造后传入的部分 SQL/命令注入。
