@@ -78,3 +78,183 @@ def test_credential_to_authentication_aligns_core_schema(tmp_path):
     assert auth.credentials.password == "pw"
     assert auth.credentials.email_login.address == "a@x.com"
     assert auth.login_flow == ["打开登录页", "成功标志:URL 含 /dashboard"]
+
+
+# ---------------------------------------------------------------------------
+# 系统级档案（scope=system，存 .system 段，所有 ws 共享）—— configs/*.yaml seed
+# ---------------------------------------------------------------------------
+
+def _system_profile():
+    return AuthProfile(
+        id="prof_sys", name="futunn", login_url="http://sys/", login_type="form",
+        login_flow=["系统登录"],
+        credentials=[AuthProfileCredential(id="cred_s", role="primary",
+                                           username="sysuser", password="syspw")],
+    )
+
+
+def test_auth_profile_scope_defaults_to_workspace():
+    # 向后兼容：旧档案（无 scope）默认 workspace
+    p = AuthProfile(id="x", name="n", login_url="u", login_type="form",
+                    credentials=[AuthProfileCredential(id="c", role="r", username="u")])
+    assert p.scope == "workspace"
+
+
+def test_get_falls_back_to_system_profile(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_system_profile()])  # 直接落盘到系统段
+    # ws1 无该档案 → 透明 fallback 到 .system
+    got = store.get("ws1", "prof_sys")
+    assert got is not None
+    assert got.scope == "system"
+    assert got.name == "futunn"
+
+
+def test_get_prefers_workspace_profile_over_system(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    # ws 与 .system 同 id，name 不同以区分来源
+    ws_prof = AuthProfile(id="prof_dup", name="ws-side", login_url="http://w/",
+                          login_type="form",
+                          credentials=[AuthProfileCredential(id="c", role="r", username="u")])
+    sys_prof = AuthProfile(id="prof_dup", name="sys-side", login_url="http://s/",
+                           login_type="form", scope="system",
+                           credentials=[AuthProfileCredential(id="c", role="r", username="u")])
+    store.write("ws1", [ws_prof])
+    store.write(".system", [sys_prof])
+    got = store.get("ws1", "prof_dup")
+    assert got.scope == "workspace"
+    assert got.name == "ws-side"
+
+
+def test_read_merges_system_profiles(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write("ws1", [_profile()])              # ws 档案
+    store.write(".system", [_system_profile()])   # 系统档案
+    profiles = store.read("ws1")
+    by_name = {p.name: p for p in profiles}
+    assert "NodeGoat" in by_name      # ws
+    assert "futunn" in by_name        # system（合并进来了）
+    assert by_name["NodeGoat"].scope == "workspace"
+    assert by_name["futunn"].scope == "system"
+
+
+def test_read_system_segment_not_self_merged(tmp_path):
+    # 防递归：read(".system") 只返回系统段自身，不再合并一次系统
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_system_profile()])
+    profiles = store.read(".system")
+    assert len(profiles) == 1
+
+
+def test_read_masked_masks_system_profiles(tmp_path):
+    # 系统档案在 GET 响应同样脱敏（不泄明文密码）
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_system_profile()])
+    masked = store.read_masked("ws1")
+    sys_cred = next(p for p in masked if p.name == "futunn").credentials[0]
+    assert sys_cred.password == "••••"
+
+
+# ---------------------------------------------------------------------------
+# seed_from_config：configs/*.yaml → 系统级档案
+# ---------------------------------------------------------------------------
+
+_MINIMAL_AUTH_CONFIG = """\
+authentication:
+  login_type: form
+  login_url: "http://example.com/login"
+  credentials:
+    username: "autoweb"
+    password: "autoweb"
+  login_flow:
+    - "Navigate to the login page"
+    - "Enter $username in the username field"
+"""
+
+
+def _write_config(configs_dir: Path, name: str, body: str) -> None:
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / name).write_text(body, "utf-8")
+
+
+def test_seed_from_config_seeds_system_profile(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    configs = tmp_path / "configs"
+    _write_config(configs, "futunn.yaml", _MINIMAL_AUTH_CONFIG)
+    n = store.seed_from_config(configs)
+    assert n == 1
+    sys_profiles = store.read(".system")
+    assert len(sys_profiles) == 1
+    p = sys_profiles[0]
+    assert p.name == "futunn"
+    assert p.scope == "system"
+    assert p.login_type == "form"
+    assert p.login_url == "http://example.com/login"
+    assert p.login_flow == ["Navigate to the login page",
+                            "Enter $username in the username field"]
+    assert p.credentials[0].role == "primary"
+    assert p.credentials[0].username == "autoweb"
+    assert p.credentials[0].password == "autoweb"   # 加密落盘后读回解密还原
+
+
+def test_seed_skips_existing_by_name(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    configs = tmp_path / "configs"
+    _write_config(configs, "futunn.yaml", _MINIMAL_AUTH_CONFIG)
+    assert store.seed_from_config(configs) == 1
+    # 二次 seed：.system 已有同名 futunn → 跳过，不覆盖、不重复
+    assert store.seed_from_config(configs) == 0
+    assert len(store.read(".system")) == 1
+
+
+def test_seed_skips_no_authentication_yaml(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    configs = tmp_path / "configs"
+    _write_config(configs, "noauth.yaml", "description: only desc\n")
+    n = store.seed_from_config(configs)
+    assert n == 0
+    assert store.read(".system") == []
+
+
+def test_seed_excludes_multi_and_users_yaml(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    configs = tmp_path / "configs"
+    _write_config(configs, "web-multi-demo.yaml", _MINIMAL_AUTH_CONFIG)
+    _write_config(configs, "users.yaml", _MINIMAL_AUTH_CONFIG)
+    _write_config(configs, "users.yaml.example", _MINIMAL_AUTH_CONFIG)
+    _write_config(configs, "futunn.yaml", _MINIMAL_AUTH_CONFIG)
+    n = store.seed_from_config(configs)
+    assert n == 1  # 仅 futunn；web-multi-* / users* 全排除
+    names = {p.name for p in store.read(".system")}
+    assert names == {"futunn"}
+
+
+# ---------------------------------------------------------------------------
+# set_verify_status 对称化：系统档案写回 .system，不在 ws 创副本
+# ---------------------------------------------------------------------------
+
+def test_set_verify_status_writes_back_to_system_for_system_profile(tmp_path):
+    # 系统档案的 verify_status 应写回 .system，不在 ws 创副本
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_system_profile()])  # prof_sys / cred_s
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    # 从 ws1 视角调（模拟 scan_manager 验证系统档案：store.get 透明 fallback 命中 .system）
+    store.set_verify_status("ws1", "prof_sys", "cred_s", VerifyStatus(state="success"))
+    # ws1 段无副本被创建
+    assert store.read("ws1") == [] or all(p.scope == "system" for p in store.read("ws1"))
+    assert store._read_segment("ws1") == []
+    # .system 段已更新
+    sys_p = store.read(".system")[0]
+    assert sys_p.credentials[0].verify_status.state == "success"
+
+
+def test_set_verify_status_writes_ws_profile_in_ws(tmp_path):
+    # 回归：ws 档案 verify_status 仍写回 ws 段
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write("ws1", [_profile()])  # prof_1 / cred_a
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(state="success"))
+    ws_p = store._read_segment("ws1")[0]
+    assert ws_p.credentials[0].verify_status.state == "success"
+    # .system 段无副作用
+    assert store._read_segment(".system") == []

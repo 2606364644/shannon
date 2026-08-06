@@ -295,3 +295,16 @@ def test_list_row_has_aggregation_fields(tmp_workspaces):
     assert "scan_count" in row
     assert "latest_status" in row
     assert "latest_created_at" in row
+
+
+def test_list_workspaces_skips_dot_dir(tmp_workspaces):
+    # .system 段即便被 out-of-band 放了 workspace.json，也不得出现在 ws 列表
+    from supernova_web.components.scan_store import write_workspace_meta
+    sys_dir = tmp_workspaces / ".system"
+    sys_dir.mkdir(parents=True)
+    write_workspace_meta(sys_dir, name=".system", owner="sys")
+    _make_ws(tmp_workspaces, "realws")
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    names = {r["name"] for r in rows}
+    assert ".system" not in names
+    assert "realws" in names

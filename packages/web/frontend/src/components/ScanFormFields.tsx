@@ -87,6 +87,17 @@ interface Props {
   presetReuseScanId?: string;
 }
 
+/** 分组小标题：coral 竖条 eyebrow（复用 settings Section 的视觉语言，适配中文卡内分组——
+ *  去 uppercase/tracking-wider，仅保留 coral 竖条 + 小号 semibold 标签拉层次）。 */
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
+      <span className="text-[11px] font-semibold text-muted-foreground">{children}</span>
+    </div>
+  );
+}
+
 /** 步骤分组容器：圆角 + secondary 背景 + 边框（仅白盒用；黑盒已改为轻分区） */
 function StepGroup({ step, title, tag, tagClass, className, children }: {
   step: number;
@@ -141,7 +152,7 @@ function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProf
       ) : (
         <>
           {/* 来源 segmented（替代旧 Select）：临时填写 / 使用档案 */}
-          <div className="inline-flex rounded-lg bg-secondary p-1 gap-1">
+          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
             {(["inline", "profile"] as const).map((s) => (
               <button
                 key={s}
@@ -231,10 +242,8 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
     );
   }
   return (
-    <form onSubmit={onSave} className="space-y-2 rounded-lg border border-dashed border-border bg-card p-2.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {t("scan.auth.saveAsProfile")}
-      </span>
+    <form onSubmit={onSave} className="space-y-2 rounded-lg border border-border bg-card p-2.5">
+      <GroupLabel>{t("scan.auth.saveAsProfile")}</GroupLabel>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">{t("authProfiles.name")}</Label>
@@ -272,10 +281,10 @@ function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
         {/* 左：登录入口 */}
         <div className="space-y-3 rounded-lg border border-border bg-secondary p-3">
-          <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.entryGroup")}</span>
+          <GroupLabel>{t("scan.auth.entryGroup")}</GroupLabel>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
-            <div className="inline-flex flex-wrap gap-1 rounded-lg bg-background p-1">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
               {(["form", "sso", "api", "basic"] as const).map((v) => (
                 <button
                   key={v}
@@ -304,7 +313,7 @@ function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
 
         {/* 右：凭据 */}
         <div className="space-y-2.5 rounded-lg border border-border bg-secondary p-3">
-          <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.credentialsGroup")}</span>
+          <GroupLabel>{t("scan.auth.credentialsGroup")}</GroupLabel>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
@@ -424,7 +433,7 @@ function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
       {/* 左：档案卡列表 */}
       <div className="space-y-2">
-        <span className="text-[11px] font-semibold text-muted-foreground">{t("scan.auth.selectProfileLabel")}</span>
+        <GroupLabel>{t("scan.auth.selectProfileLabel")}</GroupLabel>
         {profiles.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
             {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
@@ -446,6 +455,14 @@ function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
               >
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-semibold">{p.name}</span>
+                  {p.scope === "system" && (
+                    <span
+                      className="inline-flex items-center rounded-full border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                      title={t("authProfiles.systemHint")}
+                    >
+                      {t("authProfiles.systemBadge")}
+                    </span>
+                  )}
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${ob.cls}`}>
                     <span aria-hidden>{ob.icon}</span>
                     {t(`authProfiles.overall.${ov}`)}
@@ -476,7 +493,9 @@ function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
           </div>
           <div className="border-t border-border" />
           <div>
-            <div className="text-[11px] font-semibold text-muted-foreground mb-2">{t("scan.auth.selectRole")}</div>
+            <div className="mb-2">
+              <GroupLabel>{t("scan.auth.selectRole")}</GroupLabel>
+            </div>
             <div className="space-y-2">
               {selected.credentials.map((c) => {
                 const st = c.verify_status?.state ?? "unverified";

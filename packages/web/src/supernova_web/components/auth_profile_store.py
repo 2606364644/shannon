@@ -20,6 +20,10 @@ from supernova_core.models.config import Authentication, Credentials, EmailLogin
 from supernova_web.components.credential_vault import CredentialVault
 
 AUTH_PROFILES_FILENAME = "auth-profiles.yaml"
+# 保留 workspace 段：系统级档案（configs/*.yaml seed 产物）落此，所有 ws 共享。
+# 用户不可创建 . 开头的 ws（API 层 create_workspace 拒 + indexer 跳过 dot-dir），
+# 故 .system 不会与用户 ws 碰撞。store 内部 _validate_ws_segment 仍放行 .system。
+SYSTEM_WS = ".system"
 MASKED = "••••"
 # 显式敏感路径(credential 级 + email_login 级)
 _CRED_SECRET_FIELDS = ("password", "totp_secret")
@@ -61,6 +65,10 @@ class AuthProfile(BaseModel):
     credentials: list[AuthProfileCredential]
     created_at: str | None = None
     updated_at: str | None = None
+    # 档案归属段：workspace（该 ws 私有）| system（.system 段，所有 ws 共享、只读，
+    # 由 configs/*.yaml 启动 seed 产出）。向后兼容：旧档案默认 workspace。
+    # scope 由存储位置权威决定（_read_segment 按段标记），落盘值仅供 round-trip。
+    scope: Literal["workspace", "system"] = "workspace"
 
 
 def _validate_ws_segment(ws: str) -> None:
@@ -132,8 +140,10 @@ class AuthProfileStore:
             raise ValueError("invalid workspace name")
         return p
 
-    def read(self, ws: str) -> list[AuthProfile]:
-        """读 + 解密 → list[AuthProfile](内存明文)。"""
+    def _read_segment(self, ws: str) -> list[AuthProfile]:
+        """纯段读取（不合并）：该 ws 文件内的档案，scope 按存储位置标记
+        （.system 段 → system，其余 → workspace）。所有写方法用本方法，避免合并版
+        把系统档案错误持久化到 ws 文件。"""
         path = self._path(ws)
         if not path.exists():
             return []
@@ -141,7 +151,20 @@ class AuthProfileStore:
         for prof in data:
             for cred in prof.get("credentials") or []:
                 _decrypt_credential(cred, self._vault)
-        return [AuthProfile.model_validate(p) for p in data]
+        profiles = [AuthProfile.model_validate(p) for p in data]
+        seg_scope = "system" if ws == SYSTEM_WS else "workspace"
+        for p in profiles:
+            p.scope = seg_scope
+        return profiles
+
+    def read(self, ws: str) -> list[AuthProfile]:
+        """读 + 解密 → list[AuthProfile]（内存明文）。合并系统档案：返回 ws 段
+        （scope=workspace）+ .system 段（scope=system，所有 ws 共享）。
+        read('.system') 只返回系统段自身（不自合并，防内容翻倍/递归）。"""
+        profiles = self._read_segment(ws)
+        if ws != SYSTEM_WS:
+            profiles = profiles + self._read_segment(SYSTEM_WS)
+        return profiles
 
     def read_masked(self, ws: str) -> list[AuthProfile]:
         """读 + 解密 + 脱敏 → GET 响应态(敏感字段 MASKED if 值 else None)。"""
@@ -176,7 +199,7 @@ class AuthProfileStore:
         return datetime.now(timezone.utc).isoformat()
 
     def upsert_profile(self, ws: str, profile: AuthProfile) -> AuthProfile:
-        profiles = self.read(ws)
+        profiles = self._read_segment(ws)
         if not profile.id:
             profile.id = f"prof_{uuid4().hex[:10]}"
         profile.updated_at = self._now()
@@ -190,7 +213,7 @@ class AuthProfileStore:
         return profile
 
     def delete_profile(self, ws: str, profile_id: str) -> bool:
-        profiles = self.read(ws)
+        profiles = self._read_segment(ws)
         rest = [p for p in profiles if p.id != profile_id]
         if len(rest) == len(profiles):
             return False
@@ -199,7 +222,7 @@ class AuthProfileStore:
 
     def apply_update(self, ws: str, profile_id: str, cred_id: str, **fields) -> None:
         """更新某 credential 的非敏感字段;空串 secret = 不改(保留原密文)。"""
-        profiles = self.read(ws)
+        profiles = self._read_segment(ws)
         for p in profiles:
             if p.id != profile_id:
                 continue
@@ -216,10 +239,75 @@ class AuthProfileStore:
         self.write(ws, profiles)
 
     def set_verify_status(self, ws: str, profile_id: str, cred_id: str, status: VerifyStatus) -> None:
-        profiles = self.read(ws)
+        # resolve 档案归属段：ws 段优先，miss → .system。写回原 source，使系统档案的
+        # verify_status 更新落 .system（不在 ws 创副本）。scan_manager 透传 ws 调用即可。
+        profiles = self._read_segment(ws)
+        source_ws = ws if any(p.id == profile_id for p in profiles) else None
+        if source_ws is None and ws != SYSTEM_WS:
+            sys_profiles = self._read_segment(SYSTEM_WS)
+            if any(p.id == profile_id for p in sys_profiles):
+                profiles, source_ws = sys_profiles, SYSTEM_WS
+        if source_ws is None:
+            return  # 两段都找不到 → 静默（对齐原行为：找不到不报错）
         for p in profiles:
             if p.id == profile_id:
                 for c in p.credentials:
                     if c.id == cred_id:
                         c.verify_status = status
-        self.write(ws, profiles)
+        self.write(source_ws, profiles)
+
+    def seed_from_config(self, configs_dir: Path) -> int:
+        """扫 configs/*.yaml，把 authentication 段 seed 成系统级档案（.system 段，所有
+        ws 共享、只读）。排除 web-multi-*（multi-repo 配置）与 users*（凭据文件）。按
+        name 去重：.system 内已有同名则跳过（不覆盖）。无 authentication 段 / parse 失败
+        → 跳过（DEBUG log，不阻断启动）。返回实际 seed 数。"""
+        import logging
+        log = logging.getLogger("supernova_web")
+        configs_dir = Path(configs_dir)
+        if not configs_dir.is_dir():
+            return 0
+        existing_names = {p.name for p in self._read_segment(SYSTEM_WS)}
+        seeded = 0
+        for cfg_path in sorted(configs_dir.glob("*.yaml")):
+            stem = cfg_path.stem
+            if stem.startswith("web-multi-") or stem.startswith("users"):
+                continue
+            if stem in existing_names:
+                continue
+            try:
+                from supernova_core.config.parser import parse_config
+                cfg = parse_config(str(cfg_path))
+            except Exception as e:  # parse/validation 失败 → 跳过，不阻断启动
+                log.debug("auth-profile seed: skip %s (parse failed: %s)", cfg_path.name, e)
+                continue
+            if not cfg.authentication:
+                log.debug("auth-profile seed: skip %s (no authentication section)", cfg_path.name)
+                continue
+            cred = cfg.authentication.credentials
+            email_login = None
+            if cred.email_login:
+                email_login = EmailLoginCred(
+                    address=cred.email_login.address,
+                    password=cred.email_login.password,
+                    totp_secret=cred.email_login.totp_secret,
+                )
+            profile = AuthProfile(
+                id="",
+                name=stem,
+                login_url=cfg.authentication.login_url,
+                login_type=cfg.authentication.login_type,
+                login_flow=cfg.authentication.login_flow,
+                scope="system",
+                credentials=[AuthProfileCredential(
+                    id="",
+                    role="primary",
+                    username=cred.username,
+                    password=cred.password,
+                    totp_secret=cred.totp_secret,
+                    email_login=email_login,
+                )],
+            )
+            self.upsert_profile(SYSTEM_WS, profile)
+            existing_names.add(stem)
+            seeded += 1
+        return seeded

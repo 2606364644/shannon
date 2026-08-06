@@ -811,6 +811,8 @@
     "selectCredential": "Select login role",
     "sourceInline": "Enter temporarily",
     "sourceProfile": "Use profile",
+    "systemBadge": "System",
+    "systemHint": "System profile is read-only (source: configs)",
     "overall": {
       "success": "Available",
       "failed": "Unavailable",

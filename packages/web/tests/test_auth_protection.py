@@ -65,3 +65,25 @@ def test_startup_seeds_users(tmp_path, tmp_workspaces, monkeypatch):
     with TestClient(app):  # 触发 lifespan startup → seed
         pass
     assert app.state.auth_store.get_user_by_username("admin") is not None
+
+
+def test_startup_seeds_system_auth_profiles(tmp_path, tmp_workspaces, monkeypatch):
+    # configs/*.yaml 的 authentication 段 → 启动 seed 成系统档案（.system 段）
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    (configs / "demo.yaml").write_text(
+        'authentication:\n  login_type: form\n  login_url: "http://x/l"\n'
+        '  credentials:\n    username: "u"\n    password: "p"\n'
+        '  login_flow:\n    - "step one"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPERNOVA_CONFIGS_DIR", str(configs))
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    from supernova_core.utils.paths import resolve_workspaces_dir
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    assert resolve_workspaces_dir() == tmp_workspaces
+    app = create_app()
+    with TestClient(app):  # 触发 lifespan → seed configs → .system
+        pass
+    names = {p.name for p in app.state.auth_profile_store.read(".system")}
+    assert "demo" in names

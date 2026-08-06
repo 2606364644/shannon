@@ -33,3 +33,10 @@ def test_removed_shim_report_now_404(authed_client, tmp_workspaces):
     """旧 GET /{ws}/report shim 已移除 -> 404。"""
     _ws(tmp_workspaces, "A")
     assert authed_client.get("/api/workspaces/A/report").status_code == 404
+
+
+def test_create_workspace_rejects_dot_prefixed_name(authed_client):
+    # .system / .foo 等点前缀名是保留段（系统档案存储），不可创建，防路径碰撞
+    for bad in [".system", ".foo"]:
+        r = authed_client.post("/api/workspaces", json={"name": bad})
+        assert r.status_code == 422, (bad, r.status_code, r.text)

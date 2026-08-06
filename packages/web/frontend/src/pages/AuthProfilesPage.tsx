@@ -70,7 +70,17 @@ export function AuthProfilesPage() {
             <TableHead></TableHead></TableRow></TableHeader>
             <TableBody>{profiles.map((p) => (
               <TableRow key={p.id}>
-                <TableCell className="font-mono">{p.name}</TableCell>
+                <TableCell className="font-mono">
+                  {p.name}
+                  {p.scope === "system" && (
+                    <span
+                      className="ml-2 inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground align-middle"
+                      title={t("authProfiles.systemHint")}
+                    >
+                      {t("authProfiles.systemBadge")}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="font-mono text-xs">{p.login_url}</TableCell>
                 <TableCell>
                   <div className="space-y-2">
@@ -80,12 +90,16 @@ export function AuthProfilesPage() {
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button variant="ghost" size="icon" aria-label={t("authProfiles.edit")} onClick={() => setEditTarget(p)}>
-                    <Pencil className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" aria-label={t("authProfiles.delete")} onClick={() => setDelTarget(p)}>
-                    <Trash2 className="size-4" />
-                  </Button>
+                  {p.scope !== "system" && (
+                    <>
+                      <Button variant="ghost" size="icon" aria-label={t("authProfiles.edit")} onClick={() => setEditTarget(p)}>
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" aria-label={t("authProfiles.delete")} onClick={() => setDelTarget(p)}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>))}</TableBody></Table></Card>}
 

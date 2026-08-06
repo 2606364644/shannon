@@ -125,4 +125,26 @@ describe("AuthProfilesPage", () => {
     expect(screen.getByText("已验证")).toBeInTheDocument();
     expect(testCalls).toBe(1);
   });
+
+  // 系统档案（configs seed，scope=system）：只读——隐藏编辑/删除按钮 + 显示系统徽章。
+  // 后端已有 403 硬守卫；前端隐藏按钮是 UX（避免无意义操作 + 明确只读来源）。
+  it("系统档案隐藏编辑/删除按钮并显示系统徽章", async () => {
+    profiles = [
+      { ...initial[0], id: "prof_ws", name: "ws-prof", scope: "workspace" },
+      {
+        ...initial[0], id: "prof_sys", name: "sys-prof", scope: "system",
+        credentials: [{
+          id: "cred_s", role: "primary", username: "u", password: "••••",
+          verify_status: { state: "unverified" },
+        }],
+      },
+    ];
+    renderPage();
+    await waitFor(() => expect(screen.getByText("sys-prof")).toBeInTheDocument());
+    // 仅 ws-prof 行渲染编辑/删除按钮（系统行隐藏）
+    expect(screen.getAllByLabelText("编辑")).toHaveLength(1);
+    expect(screen.getAllByLabelText("删除")).toHaveLength(1);
+    // 系统档案显示来源徽章
+    expect(screen.getByText("系统")).toBeInTheDocument();
+  });
 });

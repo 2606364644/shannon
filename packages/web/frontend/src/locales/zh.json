@@ -811,6 +811,8 @@
     "selectCredential": "选择登录角色",
     "sourceInline": "临时填写",
     "sourceProfile": "使用档案",
+    "systemBadge": "系统",
+    "systemHint": "系统档案只读（来源：configs）",
     "overall": {
       "success": "可用",
       "failed": "不可用",

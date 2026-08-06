@@ -63,6 +63,8 @@ async def update_profile(ws: str, pid: str, payload: dict, request: Request,
     existing = store.get(ws, pid)
     if existing is None:
         raise HTTPException(404, "认证档案不存在")
+    if existing.scope == "system":
+        raise HTTPException(403, "系统档案只读，请修改 configs 文件后重启")
     # profile 级字段覆盖
     existing.name = payload.get("name", existing.name)
     existing.login_url = payload.get("login_url", existing.login_url)
@@ -102,7 +104,13 @@ async def update_profile(ws: str, pid: str, payload: dict, request: Request,
 @router.delete("/{ws}/auth-profiles/{pid}")
 async def delete_profile(ws: str, pid: str, request: Request,
                          user=Depends(workspace_manager)):
-    if not _store(request).delete_profile(ws, pid):
+    store = _store(request)
+    existing = store.get(ws, pid)
+    if existing is None:
+        raise HTTPException(404, "认证档案不存在")
+    if existing.scope == "system":
+        raise HTTPException(403, "系统档案只读，请修改 configs 文件后重启")
+    if not store.delete_profile(ws, pid):
         raise HTTPException(404, "认证档案不存在")
     return {"ok": True}
 

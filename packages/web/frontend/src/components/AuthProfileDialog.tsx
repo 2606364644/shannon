@@ -37,6 +37,9 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   const [username, setUsername] = useState(editing?.credentials[0]?.username ?? "");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  // 系统档案只读防御：editing 正常不会是 system（列表已隐藏 Edit 按钮），此处兜底——
+  // 万一外部直接传入 system editing，禁提交，与后端 403 一致。
+  const readOnly = editing?.scope === "system";
 
   function reset() {
     setName(""); setLoginUrl(""); setLoginType("form"); setLoginFlow("");
@@ -45,6 +48,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (readOnly) return;
     if (!name.trim() || !loginUrl.trim() || !username.trim()) {
       toast.error(t(editing ? "authProfiles.saveFailed" : "authProfiles.createFailed"));
       return;
@@ -123,7 +127,9 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" disabled={busy}>{busy ? "…" : t(editing ? "authProfiles.save" : "authProfiles.create")}</Button>
+            {!readOnly && (
+              <Button type="submit" disabled={busy}>{busy ? "…" : t(editing ? "authProfiles.save" : "authProfiles.create")}</Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

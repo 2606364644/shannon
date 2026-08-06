@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 from supernova_web.api import auth_profiles
 from supernova_web.auth.dependencies import current_user, workspace_member, workspace_manager
-from supernova_web.components.auth_profile_store import AuthProfileStore
+from supernova_web.components.auth_profile_store import (
+    AuthProfileStore, AuthProfile, AuthProfileCredential,
+)
 from supernova_web.components.credential_vault import CredentialVault
 
 
@@ -158,3 +160,35 @@ def test_update_profile_new_credential_with_unknown_key_does_not_500(tmp_path):
     prof = store.read("ws1")[0]
     roles = {c.role for c in prof.credentials}
     assert "user" in roles
+
+
+# ---------------------------------------------------------------------------
+# 系统档案只读守卫：PUT/DELETE scope=system 档案 → 403
+# ---------------------------------------------------------------------------
+
+def _seed_system_profile(store):
+    store.write(".system", [AuthProfile(
+        id="prof_sys", name="futunn", login_url="http://s/", login_type="form",
+        scope="system",
+        credentials=[AuthProfileCredential(id="cred_s", role="primary",
+                                           username="u", password="p")])])
+
+
+def test_update_system_profile_forbidden(tmp_path):
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)
+    r = c.put("/api/workspaces/ws1/auth-profiles/prof_sys", json={
+        "name": "futunn2", "login_url": "http://s/", "login_type": "form",
+        "credentials": [{"role": "primary", "username": "u"}]})
+    assert r.status_code == 403
+    # 未污染 ws1（系统档案不该被复制进 ws 段）
+    assert store._read_segment("ws1") == []
+
+
+def test_delete_system_profile_forbidden(tmp_path):
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)
+    r = c.delete("/api/workspaces/ws1/auth-profiles/prof_sys")
+    assert r.status_code == 403
+    # 系统档案仍在
+    assert any(p.id == "prof_sys" for p in store.read(".system"))

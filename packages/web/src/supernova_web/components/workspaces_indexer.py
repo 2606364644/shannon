@@ -108,6 +108,8 @@ class WorkspacesIndexer:
         for ws_dir in sorted(self._dir.iterdir()):
             if not ws_dir.is_dir():
                 continue
+            if ws_dir.name.startswith("."):
+                continue  # 保留段（.system 等）不进 ws 列表，对齐 app.py dot-dir 约定
             meta = read_workspace_meta(ws_dir)
             if meta is None:
                 continue  # 非 ws（无 workspace.json 且无 session.json）

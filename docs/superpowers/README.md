@@ -83,6 +83,10 @@
 - [blackbox-exploit-outcome-field-mapping](plans/2026-06-29-blackbox-exploit-outcome-field-mapping.md) / [spec](specs/2026-06-29-blackbox-exploit-outcome-field-mapping-design.md) — 黑盒 exploit AgentOutcome 字段映射 🔧
 - [blackbox-exploit-structured-output](plans/2026-06-29-blackbox-exploit-structured-output.md) / [spec](specs/2026-06-29-blackbox-exploit-structured-output-design.md) — 黑盒 exploit 产物结构化校验护栏
 
+### 认证档案 auth-profile
+- [auth-profile-vault](specs/2026-08-05-auth-profile-vault-design.md) — per-ws 加密档案库 + 独立验证 + 黑盒扫描复用 🔧
+- [auth-profile-system-seed](specs/2026-08-06-auth-profile-system-seed-design.md) — configs/*.yaml 启动 seed 成全局共享系统档案（store 透明 fallback + .system 保留段）📐
+
 ### audit / attribution
 - [audit-session-agent-attribution](plans/2026-06-22-audit-session-agent-attribution.md) / [spec](specs/2026-06-22-audit-session-agent-attribution-design.md) — AuditSession 归因 race 🔧
 

@@ -60,6 +60,18 @@ async def lifespan(app: FastAPI):
     _migrate_legacy_workspace_members(app)
     _reconcile_repo_meta(app)
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
+    # 启动把 configs/*.yaml 的 authentication 段 seed 成全局共享系统档案（.system 段，
+    # 所有 ws 可见、只读，以 configs 文件为唯一真相源）。seed_from_config 内部对单个
+    # 文件 parse 失败/无 authentication 段已容错；此处再兜一层防意外阻断启动。
+    try:
+        seeded = app.state.auth_profile_store.seed_from_config(app.state.config.configs_dir)
+        if seeded:
+            import logging
+            logging.getLogger("supernova_web").info(
+                "Seeded %d system auth profile(s) from configs/.", seeded)
+    except Exception:
+        import logging
+        logging.getLogger("supernova_web").exception("auth-profile seed failed; continuing startup")
     # 清上次 worker 异常残留的认证 probe 目录(含明文凭据 YAML)
     app.state.scan_manager.reap_stale_probes()
     yield

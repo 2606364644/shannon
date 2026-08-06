@@ -188,6 +188,7 @@ export interface Vulnerability {
   vulnerability_type: string;
   externally_exploitable: boolean;
   confidence?: string;
+  title?: string;            // 一句话描述性标题（spec 2026-08-06）；空时退化 vulnerability_type
   source_endpoint?: string;
   vulnerable_code_location?: string;
   vulnerable_parameter?: string;
@@ -288,6 +289,7 @@ export interface AuthProfile {
   credentials: AuthProfileCredential[];
   created_at?: string;
   updated_at?: string;
+  scope?: "workspace" | "system";  // system = configs seed 的全局共享只读档案
 }
 
 export interface ScanRequest {

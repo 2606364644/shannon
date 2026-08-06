@@ -37,6 +37,9 @@ async def create_workspace(body: CreateWorkspaceIn, request: Request,
     """
     from supernova_web.components.scan_store import write_workspace_meta
     ws = body.name
+    if ws.startswith("."):
+        # 点前缀是系统保留段（.system 存全局共享档案），拒防路径碰撞 + UI 混淆
+        raise HTTPException(422, "workspace 名不可以点开头")
     ws_dir = request.app.state.config.workspaces_dir / ws
     if ws_dir.exists():
         raise HTTPException(409, "workspace already exists")
