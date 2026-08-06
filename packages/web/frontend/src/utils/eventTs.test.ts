@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseEventTs } from "./eventTs";
+import { parseEventTs, fmtClock, fmtLocalFull } from "./eventTs";
 
 // 铁证背景（2026-08-04 delivery-20260804-024910）：
 // worker 容器时区=UTC（compose 未设 TZ），format_log_time() 用 datetime.now() 写 ndjson ts，
@@ -49,5 +49,39 @@ describe("parseEventTs - 时区归一化", () => {
 
   it("空串/null 安全返回 NaN", () => {
     expect(Number.isNaN(parseEventTs(null as unknown as string))).toBe(true);
+  });
+});
+
+// fmtClock / fmtLocalFull：把 parseEventTs 产出的 UTC epoch 渲染成浏览器本地时区可读串。
+//
+// 背景（2026-08-06 hk-user-view live 页日志行时差）：
+// LogStream 窄列旧 tsClock 只正则抠 ts 的 HH:MM:SS 原样显示 = worker 容器 UTC 墙钟，
+// 对 UTC+8 用户差 8h（04:20:20 实为本地 12:20:20）。ts 经 _normalize_ts 已带 Z（自描述 UTC），
+// 但 tsClock 不解析时区、直接显 UTC 时分秒 -> 误导。修复：tsClock 走 parseEventTs -> epoch ->
+// fmtClock 渲染本地时区。这里测纯函数（传固定 timeZone，硬断言，不依赖运行环境时区）。
+describe("fmtClock / fmtLocalFull - UTC epoch -> 本地时区可读串", () => {
+  // UTC 2026-08-06 04:20:20（用户报告的"不对"的那个 UTC 时刻）
+  const ms = Date.UTC(2026, 7, 6, 4, 20, 20);
+
+  it("fmtClock 固定 Asia/Shanghai：UTC 04:20:20 -> CST 12:20:20", () => {
+    expect(fmtClock(ms, "Asia/Shanghai")).toBe("12:20:20");
+  });
+
+  it("fmtClock 固定 UTC：04:20:20 -> 04:20:20（不漂移）", () => {
+    expect(fmtClock(ms, "UTC")).toBe("04:20:20");
+  });
+
+  it("fmtClock 输出恒为 HH:MM:SS（24h，无 AM/PM）", () => {
+    expect(fmtClock(ms, "Asia/Shanghai")).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it("fmtLocalFull 固定 Asia/Shanghai 含本地日期 + 12:20:20", () => {
+    const s = fmtLocalFull(ms, "Asia/Shanghai");
+    expect(s).toContain("2026");
+    expect(s).toContain("12:20:20");
+  });
+
+  it("fmtLocalFull 固定 UTC 含 04:20:20（不漂移）", () => {
+    expect(fmtLocalFull(ms, "UTC")).toContain("04:20:20");
   });
 });

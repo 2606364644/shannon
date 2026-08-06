@@ -7,6 +7,7 @@ import { apiGet, scanLogsPath } from "../../api/client";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Skeleton } from "../../components/ui/skeleton";
+import { parseEventTs, fmtLocalFull } from "../../utils/eventTs";
 
 // 按行数（而非字符数）判阈值：spec/log-prose 谈论的是行计数，大日志=多行。
 // 5000 行覆盖典型 workflow.log / activity_failures.log（数百~数千行），同时避免
@@ -15,6 +16,15 @@ const VIRTUAL_LINE_THRESHOLD = 5000;
 const ROW_HEIGHT = 20;
 
 type LogEv = { ts?: string; type?: string; message?: string; tool_name?: string };
+
+// ev.ts -> browser-local full datetime. Raw ts is worker-UTC (or "t1" placeholder
+// in tests); parseEventTs -> epoch -> fmtLocalFull. NaN (placeholder/non-date) falls
+// back to the raw string so log rows never show "Invalid Date".
+function fmtEvTs(ts?: string): string {
+  if (!ts) return "";
+  const ms = parseEventTs(ts);
+  return Number.isNaN(ms) ? ts : fmtLocalFull(ms);
+}
 
 // Row 提到模块作用域 + memo：避免每次父组件渲染时重新定义 Row，导致 FixedSizeList
 // 重新渲染所有可见行（react-window 用 children 引用相等性判断是否复用行）。
@@ -29,7 +39,7 @@ const Row = memo(function Row({ index, style, data }: {
   if (ev) {
     return (
       <div style={style} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">
-        [{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
+        [{fmtEvTs(ev.ts)}] {ev.type} {ev.message ?? ev.tool_name ?? ""}
       </div>
     );
   }
@@ -92,12 +102,11 @@ export function LogsTab() {
   const lines = content.split(/\r?\n/).filter(Boolean);
   const big = lines.length > VIRTUAL_LINE_THRESHOLD;
 
-  // 自适应布局：grid 不强制满高，两栏各自 max-h（100dvh-14rem，与 LiveTab 同口径=TopBar+main py+scan header+tabs）
-  // + min-h-0 允许内滚。没选日志时右栏仅提示行（不触发 max-h）-> 容器塌缩 -> 整页不溢出、无外层滚动条；
-  // 选了日志后右栏顶 max-h 独立内滚。max-h 对 calc 误差高容忍（偏大仅上限松，不强制溢出）。
+  // 布局：grid h-full 吃 ScanDetail 的 flex-1 tab 容器（live/logs 走 flex 链），grid-rows-1 让单行撑满，
+  // 两栏 h-full min-h-0 + overflow 各自内滚。不再用 max-h 固定算式（旧版窄屏 header 换行/矮视口下溢出）。
   return (
-    <div className="grid grid-cols-[240px_1fr] gap-4">
-      <div className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-y-auto border-r border-border pr-2">
+    <div className="grid h-full grid-cols-[240px_1fr] grid-rows-1 gap-4">
+      <div className="h-full min-h-0 overflow-y-auto border-r border-border pr-2">
         {filesLoading && <Skeleton className="h-4 w-full" />}
         {filesErr && <ErrorState message={filesErr} />}
         {!filesLoading && !filesErr && files.length === 0 && (
@@ -115,7 +124,7 @@ export function LogsTab() {
           </button>
         ))}
       </div>
-      <div ref={viewportRef} className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-auto">
+      <div ref={viewportRef} className="h-full min-h-0 overflow-auto">
         {!sel && <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.selectHint")}</div>}
         {sel && contentErr && <ErrorState message={contentErr} />}
         {sel && !contentErr && isJsonl && big ? (
@@ -127,7 +136,7 @@ export function LogsTab() {
           lines.map((l, i) => {
             let ev: LogEv | null = null;
             try { ev = JSON.parse(l); } catch { /* 非 JSON */ }
-            if (ev) return <div key={i} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{ev.ts}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
+            if (ev) return <div key={i} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{fmtEvTs(ev.ts)}] {ev.type} {ev.message ?? ev.tool_name ?? ""}</div>;
             return <div key={i} className="text-sm text-muted-foreground">{l}</div>;
           })
         ) : (

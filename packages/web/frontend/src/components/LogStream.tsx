@@ -4,6 +4,7 @@ import { FixedSizeList } from "react-window";
 import type { NdjsonEvent, EventCategory } from "../api/types";
 import { humanizeToolCall, firstNonemptyLine } from "../state/formatters";
 import { fmtCost } from "../utils/currency";
+import { parseEventTs, fmtClock } from "../utils/eventTs";
 
 const CAT_CLASS: Partial<Record<EventCategory, string>> = {
   PHASE: "ev-phase", STEP: "ev-info", AGENT: "ev-agent", TOOL: "ev-tool",
@@ -13,10 +14,12 @@ const CAT_CLASS: Partial<Record<EventCategory, string>> = {
 };
 
 function tsClock(ts: string): string {
-  // 生产 ndjson ts = "2026-07-31 10:53:53"（空格分隔）；亦兼容 ISO "…T10:53:53…"。
-  // 只取 HH:MM:SS 喂 .log-ts 窄列——完整串会溢出被 ellipsis 截断、时间不可见。
-  const m = /[T ](\d{2}:\d{2}:\d{2})/.exec(ts);
-  return m ? m[1] : ts;
+  // ts 经 parseEventTs -> UTC epoch -> fmtClock 渲染浏览器本地时区时分秒。
+  // 旧实现只正则抠 ts 的 HH:MM:SS 原样显示 = worker 容器 UTC 墙钟，对 UTC+8 用户差 8h
+  // （2026-08-06 hk-user-view live 页日志行 04:20:20 实为本地 12:20:20）。
+  // 占位符 / 异常 ts（parseEventTs 返 NaN，如测试 "t1"）回退原串，不阻断渲染。
+  const ms = parseEventTs(ts);
+  return Number.isNaN(ms) ? ts : fmtClock(ms);
 }
 
 // ── helpers ──

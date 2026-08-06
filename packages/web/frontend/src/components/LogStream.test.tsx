@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { LogStream } from "./LogStream";
 import type { NdjsonEvent } from "../api/types";
 
@@ -29,7 +29,11 @@ describe("LogStream", () => {
 
   it("每行含时间戳 + data-type + 摘要", () => {
     const { container } = render(<LogStream events={events} />);
-    expect(screen.getByText(/09:44:01/)).toBeInTheDocument();
+    // 时间戳经 parseEventTs->fmtClock 渲染为浏览器本地时区 HH:MM:SS（值随环境时区，
+    // 在 CST 为 17:44:01；转换正确性由 eventTs.test.ts fmtClock 固定时区单测保证）。
+    const tsCells = container.querySelectorAll(".log-ts");
+    expect(tsCells.length).toBe(3);
+    expect(tsCells[0].textContent ?? "").toMatch(/^\d{2}:\d{2}:\d{2}$/);
     const rows = container.querySelectorAll(".log-row");
     expect(rows.length).toBe(3);
     // type 身份经 data-type 属性承载（显示列已换成短语义标签）
@@ -48,7 +52,9 @@ describe("LogStream", () => {
     };
     const { container } = render(<LogStream events={[ev]} />);
     const tsEl = container.querySelector(".log-ts");
-    expect(tsEl?.textContent ?? "").toBe("10:53:53");
+    // 本地化后值随浏览器时区（CST 环境 18:53:53，非裸 UTC 10:53:53）；锁 HH:MM:SS 格式，
+    // 空格分隔 ts 的解析由 parseEventTs 保证（当 UTC），转换正确性由 fmtClock 单测保证。
+    expect(tsEl?.textContent ?? "").toMatch(/^\d{2}:\d{2}:\d{2}$/);
   });
 
   it("events > 500 切 react-window 虚拟滚动（结构断言：行仍按 category 上色）", () => {

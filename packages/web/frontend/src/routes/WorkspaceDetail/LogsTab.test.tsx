@@ -52,6 +52,26 @@ describe("LogsTab", () => {
     await waitFor(() => expect(screen.getByText(/hello/)).toBeInTheDocument());
   });
 
+  it("日志行 ts 渲染为本地时区（真实 UTC ts 不显 Invalid Date）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("file")) {
+          return HttpResponse.json({ content: JSON.stringify({ ts: "2026-08-06T04:20:20Z", type: "AgentEvent", message: "scanning" }) });
+        }
+        return HttpResponse.json({ files: ["recon.log"] });
+      }),
+    );
+    const { container } = renderAt("/p/ws/scans/scan1/logs");
+    await waitFor(() => expect(screen.getByText("recon.log")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("recon.log"));
+    await waitFor(() => expect(screen.getByText(/scanning/)).toBeInTheDocument());
+    // 真实 UTC ts 经 fmtEvTs 本地化（parseEventTs->fmtLocalFull），不出现 Invalid Date
+    expect(container.textContent ?? "").not.toContain("Invalid Date");
+    // 含 HH:MM:SS 时分秒（值随浏览器时区，CST 环境 12:20:20，非裸 UTC 04:20:20）
+    expect(container.textContent ?? "").toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
   it(".log 行数跨阈值 → 虚拟滚动（FixedSizeList 挂载 + 大文件提示）", async () => {
     // 6000 行短行：按行计数跨阈值（5000），按字符数远低于旧 100k 阈值。
     // 旧实现（按字符 100k）不会虚拟化 → 此测试在旧实现下 RED。

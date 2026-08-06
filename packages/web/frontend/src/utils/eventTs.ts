@@ -28,3 +28,30 @@ export function parseEventTs(ts: string | null | undefined): number {
   const iso = ts.replace(" ", "T") + "Z";
   return Date.parse(iso);
 }
+
+/**
+ * UTC epoch 毫秒 -> HH:MM:SS（浏览器本地时区）。
+ *
+ * 供 LogStream 窄列 tsClock 用：旧 tsClock 只正则抠 ts 的 HH:MM:SS 原样显示 = worker
+ * 容器 UTC 墙钟，对 UTC+8 用户差 8h（见 2026-08-06 hk-user-view live 页日志行时差）。
+ * 经 parseEventTs -> epoch -> 本函数渲染本地时区时分秒，消除漂移。
+ *
+ * @param timeZone 可选，测试传固定时区（"Asia/Shanghai"/"UTC"）做硬断言；不传 = 浏览器本地。
+ */
+export function fmtClock(ms: number, timeZone?: string): string {
+  return new Date(ms).toLocaleTimeString(undefined, {
+    timeZone,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+/**
+ * UTC epoch 毫秒 -> 完整本地日期时间（浏览器本地时区），供 LogsTab 行首 [{ts}] 用。
+ * @param timeZone 可选，测试传固定时区硬断言；不传 = 浏览器本地。
+ */
+export function fmtLocalFull(ms: number, timeZone?: string): string {
+  return new Date(ms).toLocaleString(undefined, { timeZone, hour12: false });
+}
