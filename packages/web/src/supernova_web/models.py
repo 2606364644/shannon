@@ -33,9 +33,15 @@ class ScanRequest(BaseModel):
     # 黑盒登录配置（结构化 dict，对齐 core Authentication schema：login_type/login_url/credentials
     # /login_flow）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
     authentication: dict | None = None
-    # 黑盒选已保存档案/角色(与 inline authentication 二选一):scan_manager 展开成单 credentials。
+    # 黑盒选已保存档案/角色(与 inline authentication 二选一):scan_manager 展开成 credentials。
+    # 三模式（model_validator _auth_profile_xor_inline 保证互斥）：
+    #   - profile_id 单独          = 全角色模式（展开档案所有 credentials → accounts[]，多身份验证）；
+    #   - profile_id + cred_ids[]  = 子集模式（展开选中的 credentials → accounts[]，默认前端全选）；
+    #   - profile_id + cred_id     = 单角色模式（旧契约，向后兼容；展开该 credential → 单 authentication）。
     auth_profile_id: str | None = None
     auth_credential_id: str | None = None
+    # 多角色子集（2026-08-06）：profile 模式选多个角色，空=全选该档案所有角色。
+    auth_credential_ids: list[str] | None = None
     # correlation 专用
     config_name: str | None = None
     config_content: str | None = None
@@ -61,22 +67,24 @@ class ScanRequest(BaseModel):
 
     @model_validator(mode="after")
     def _auth_profile_xor_inline(self) -> "ScanRequest":
-        """blackbox 登录三模式互斥校验（子项目2 T10 放宽）。
+        """blackbox 登录模式互斥校验（2026-08-06 多角色子集）。
 
-        - profile_id 单独     = 多身份模式（scan_manager 展开所有 credentials → accounts[]）；
-        - profile_id + cred_id = 单角色模式（现状，scan_manager 展开该 credential）；
-        - inline authentication 单独 = 内联登录（现状）；
-        - profile_id + inline authentication = 非法（互斥）；
-        - cred_id 无 profile_id = 非法（cred_id 必须依附 profile）。
+        - profile_id 单独          = 全角色模式（scan_manager 展开所有 credentials → accounts[]）；
+        - profile_id + cred_ids[]  = 子集模式（展开选中的 credentials → accounts[]，默认前端全选）；
+        - profile_id + cred_id     = 单角色模式（旧契约，向后兼容）；
+        - inline authentication    = 内联登录（现状）；
+        - profile_id + inline      = 非法（互斥）；
+        - cred_id 或 cred_ids 无 profile_id = 非法（必须依附 profile）。
         """
         if self.type == "blackbox":
             has_profile = self.auth_profile_id is not None
             has_cred = self.auth_credential_id is not None
+            has_cred_ids = self.auth_credential_ids is not None
             has_inline = self.authentication is not None
-            if (has_profile or has_cred) and has_inline:
+            if (has_profile or has_cred or has_cred_ids) and has_inline:
                 raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
-            if has_cred and not has_profile:
-                raise ValueError("选认证档案时必须同时指定 auth_profile_id")
+            if (has_cred or has_cred_ids) and not has_profile:
+                raise ValueError("选认证档案角色时必须同时指定 auth_profile_id")
         return self
 
 

@@ -343,45 +343,34 @@ class ScanManager:
         from supernova_core.models.config import Authentication
 
         config_path: str | None = None
-        # 选已保存档案：两互斥子模式（model_validator _auth_profile_xor_inline 已保证互斥）：
-        #   - profile_id + cred_id = 单角色（现状）：展开该 credential → authentication；
-        #   - profile_id 单独       = 多身份（子项目2 T10）：展开所有 credentials →
-        #     authentication(primary=首个 low) + accounts[](其余 identity 含 tier 标签)。
+        # 选已保存档案：三互斥子模式（model_validator _auth_profile_xor_inline 已保证互斥）：
+        #   - profile_id + cred_ids[] = 子集（2026-08-06）：展开选中的 credentials → accounts[]；
+        #   - profile_id + cred_id     = 单角色（旧契约，向后兼容）：展开该 credential → 单 authentication；
+        #   - profile_id 单独          = 全角色（子项目2 T10）：展开所有 credentials → accounts[]。
+        # 子集与全角色共用「credentials 列表 → primary + accounts[] payload」逻辑（_expand_multi_identity）。
         # 与下方 inline authentication 互斥。
-        if req.auth_profile_id and req.auth_credential_id:
-            if self._auth_profile_store is None:
-                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
-            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
-            if profile is None:
-                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
-            cred = next((c for c in profile.credentials if c.id == req.auth_credential_id), None)
-            if cred is None:
-                raise ValueError(f"角色凭据不存在: {req.auth_credential_id}")
-            from .auth_profile_store import credential_to_authentication
-            auth = credential_to_authentication(profile, cred)
-            payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
+        from .auth_profile_store import credential_to_authentication
+
+        def _dump_auth_payload(payload: dict) -> str:
             cfg_file = scan_dir / "scan-config.yaml"
             cfg_file.write_text(
                 yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
                 encoding="utf-8")
-            config_path = str(cfg_file)
-        elif req.auth_profile_id:
-            # 多身份模式（子项目2 T10）：展开所有 credentials → authentication + accounts[]。
-            if self._auth_profile_store is None:
-                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
-            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
-            if profile is None:
-                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            return str(cfg_file)
+
+        def _expand_multi_identity(profile, creds: list) -> str:
+            """多身份展开：creds 列表 → authentication(primary=首个low) + accounts[](其余)。
+
+            子集模式与全角色模式共用：调用方负责筛 creds 子集（子集）或传全量（全角色）。
+            primary = 首个 low（无 low 回落首个，兜底防全 high 时无 primary）。
+            """
             from supernova_core.utils.authz_identity import derive_privilege_tier
-            from .auth_profile_store import credential_to_authentication
             # high_priv_names 硬编码（plan 作者认可简化；env 化推迟）。
             high_priv_names = ["admin"]
-            creds = profile.credentials
 
             def _tier_of(c):
                 return derive_privilege_tier(c.role, high_priv_names)
 
-            # primary = 首个 low（无 low 回落首个，兜底防全 high 时无 primary）。
             lows = [c for c in creds if _tier_of(c) == "low"]
             primary = lows[0] if lows else (creds[0] if creds else None)
             if primary is None:
@@ -401,22 +390,48 @@ class ScanManager:
                 "authentication": primary_auth.model_dump(exclude_none=True, mode="json"),
                 "accounts": accounts,
             }
-            cfg_file = scan_dir / "scan-config.yaml"
-            cfg_file.write_text(
-                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
-                encoding="utf-8")
-            config_path = str(cfg_file)
+            return _dump_auth_payload(payload)
+
+        if req.auth_profile_id and req.auth_credential_ids:
+            # 子集模式（2026-08-06）：展开选中的 credentials → accounts[]（默认前端全选）。
+            if self._auth_profile_store is None:
+                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
+            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
+            if profile is None:
+                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            selected_ids = set(req.auth_credential_ids)
+            selected = [c for c in profile.credentials if c.id in selected_ids]
+            if not selected:
+                raise ValueError(f"选中的角色凭据不存在: {req.auth_credential_ids}")
+            config_path = _expand_multi_identity(profile, selected)
+        elif req.auth_profile_id and req.auth_credential_id:
+            # 单角色模式（旧契约，向后兼容）：展开该 credential → 单 authentication。
+            if self._auth_profile_store is None:
+                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
+            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
+            if profile is None:
+                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            cred = next((c for c in profile.credentials if c.id == req.auth_credential_id), None)
+            if cred is None:
+                raise ValueError(f"角色凭据不存在: {req.auth_credential_id}")
+            auth = credential_to_authentication(profile, cred)
+            config_path = _dump_auth_payload(
+                {"authentication": auth.model_dump(exclude_none=True, mode="json")})
+        elif req.auth_profile_id:
+            # 全角色模式（子项目2 T10）：展开所有 credentials → accounts[]。
+            if self._auth_profile_store is None:
+                raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
+            profile = self._auth_profile_store.get(ws, req.auth_profile_id)
+            if profile is None:
+                raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
+            config_path = _expand_multi_identity(profile, profile.credentials)
         elif req.authentication:
             try:
                 auth = Authentication.model_validate(req.authentication)
             except Exception as exc:
                 raise ValueError(f"登录配置无效: {exc}") from exc
-            payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
-            cfg_file = scan_dir / "scan-config.yaml"
-            cfg_file.write_text(
-                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
-                encoding="utf-8")
-            config_path = str(cfg_file)
+            config_path = _dump_auth_payload(
+                {"authentication": auth.model_dump(exclude_none=True, mode="json")})
 
         # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，无 standalone/repo 兜底。
         # model_validator 已在请求层拦 reuse 缺失；此处工作层独立兜底（不依赖 pydantic，防 model 层被误改）。

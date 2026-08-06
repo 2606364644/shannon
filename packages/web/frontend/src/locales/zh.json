@@ -372,8 +372,6 @@
     "auth": {
       "enableLabel": "需要登录",
       "enableHint": "目标无需登录时保持关闭；agent-browser 会在扫描前按下方配置完成登录并持久化会话。",
-      "sourceLabel": "登录来源",
-      "inlineFieldsTitle": "登录参数",
       "saveAsProfile": "保存为认证档案",
       "saveAsProfileHint": "将当前填写的登录配置存为工作区档案，以后可在「使用档案」模式直接复用。",
       "profileNamePlaceholder": "如：NG 管理后台",
@@ -392,10 +390,6 @@
       "password": "密码",
       "totpSecret": "TOTP 密钥",
       "optional": "可选",
-      "emailLoginToggle": "邮箱登录（如需邮件验证）",
-      "emailAddress": "邮箱地址",
-      "emailPassword": "邮箱密码",
-      "emailTotp": "邮箱 TOTP 密钥",
       "loginFlowLabel": "登录步骤",
       "loginFlowHint": "每行一步（可选，如：访问登录页 / 填写用户名 / 填写密码 / 提交）",
       "infoNote": "登录态会持久化到 auth-state，验证通过后供后续扫描阶段复用。",
@@ -407,7 +401,15 @@
       "selectProfileLabel": "选择档案",
       "selectRole": "以哪个角色登录",
       "profileRoleHint": "将以所选角色真实登录一次以持久化会话；验证状态来自档案库最近一次「测试登录」。",
-      "selectProfileHint": "选择左侧档案查看其登录地址、类型与各角色验证状态"
+      "selectProfileHint": "选择左侧档案查看其登录地址、类型与各角色验证状态",
+      "role": "角色",
+      "selectAllRoles": "全选",
+      "deselectAllRoles": "取消全选",
+      "rolesSelected": "已选 {{n}} / {{m}} 个角色，扫描将以各角色凭据分别验证。",
+      "multiRoleHint": "从下方档案列表选择档案与登录角色，角色凭据来自已验证档案。",
+      "selectedProfile": "已选档案",
+      "expandHint": "点「配置登录」在此展开核心配置",
+      "multiRoleDefaultAll": "可多选，默认全选"
     }
   },
   "dashboard": {

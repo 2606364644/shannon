@@ -44,3 +44,24 @@ def test_blackbox_credential_id_without_profile_rejected():
     """cred_id 无 profile_id 仍非法（cred_id 必须依附 profile）。"""
     with pytest.raises(ValidationError):
         _bb(auth_credential_id="cred_a")
+
+
+def test_blackbox_credential_ids_subset_with_profile_ok():
+    """2026-08-06 子集模式：profile_id + cred_ids[] 合法（多角色子集）。"""
+    r = _bb(auth_profile_id="prof_1", auth_credential_ids=["cred_a", "cred_b"])
+    assert r.auth_profile_id == "prof_1"
+    assert r.auth_credential_ids == ["cred_a", "cred_b"]
+
+
+def test_blackbox_credential_ids_without_profile_rejected():
+    """cred_ids 无 profile_id 非法（必须依附 profile）。"""
+    with pytest.raises(ValidationError):
+        _bb(auth_credential_ids=["cred_a"])
+
+
+def test_blackbox_credential_ids_with_inline_rejected():
+    """cred_ids + inline authentication 仍非法（互斥）。"""
+    with pytest.raises(ValidationError):
+        _bb(auth_profile_id="prof_1", auth_credential_ids=["cred_a"],
+            authentication={"login_type": "form", "login_url": "http://t/",
+                            "credentials": {"username": "a"}})

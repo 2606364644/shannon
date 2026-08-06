@@ -178,7 +178,8 @@ export interface SessionData {
   // auth-profile-vault（Task 14）：profile 模式重跑预填——后端 _scan_detail 暂未返此字段，
   // 前端先就位（补返时自动生效）。与 authentication 互斥。
   auth_profile_id?: string | null;
-  auth_credential_id?: string | null;
+  // 多角色子集（2026-08-06）：profile 模式选多个角色，空=全选该档案所有角色。
+  auth_credential_ids?: string[] | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;
@@ -307,10 +308,10 @@ export interface ScanRequest {
   // config_path → run_blackbox_auth_validation（agent-browser 登录 + auth-state 落盘）。
   authentication?: ScanAuthentication;
   // 认证档案库（auth-profile-vault）：黑盒复用已验证的登录档案，免每次手填。
-  // 后端按 auth_profile_id 加载档案、按 auth_credential_id 选 credentials[] 中某个角色。
-  // 与上方 `authentication?` 互斥（档案库优先；二者全无时黑盒按 unauthenticated 处理）。
+  // 后端按 auth_profile_id 加载档案、按 auth_credential_ids 选 credentials[] 中哪些角色
+  // （空=全选该档案所有角色）。与上方 `authentication?` 互斥（二者全无时黑盒按 unauthenticated 处理）。
   auth_profile_id?: string;
-  auth_credential_id?: string;
+  auth_credential_ids?: string[];
   config_yaml?: string;
   config_name?: string;
 }

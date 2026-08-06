@@ -6,7 +6,6 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { RepoCombobox } from "./RepoCombobox";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
@@ -20,23 +19,16 @@ import { toast } from "sonner";
 import { AlertCircle, Info } from "lucide-react";
 
 /** AuthFormState（inline 临时填写）-> AuthProfile 创建 body（保存为档案）。
- *  字段一一映射，完整保留 totp_secret + email_login（不丢字段）；credential id 占位（后端分配），
- *  verify_status=unverified（新建档案未经验证）。name + role 由调用方补（inline 无此概念）。 */
-function authToProfileBody(auth: AuthFormState, name: string, role: string): Partial<AuthProfile> {
+ *  微调（2026-08-06）：删 email_login（inline 不再采集）；role 从 auth.role 取（凭据填写时即指定，
+ *  非存档时设置）；credential id 占位（后端分配），verify_status=unverified（新建未经验证）。 */
+function authToProfileBody(auth: AuthFormState, name: string): Partial<AuthProfile> {
   const cred: AuthProfileCredential = {
     id: "",
-    role,
+    role: auth.role.trim() || "admin",
     username: auth.username.trim(),
     verify_status: { state: "unverified" as VerifyState },
     ...(auth.password ? { password: auth.password } : {}),
     ...(auth.totpSecret.trim() ? { totp_secret: auth.totpSecret.trim() } : {}),
-    ...(auth.emailLoginEnabled ? {
-      email_login: {
-        address: auth.emailAddress.trim(),
-        ...(auth.emailPassword ? { password: auth.emailPassword } : {}),
-        ...(auth.emailTotp.trim() ? { totp_secret: auth.emailTotp.trim() } : {}),
-      },
-    } : {}),
   };
   const flow = auth.loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
   return {
@@ -125,13 +117,13 @@ function StepGroup({ step, title, tag, tagClass, className, children }: {
   );
 }
 
-/** 黑盒登录配置区。重排后（2026-08-06）结构：
- *    - 顶部 Switch「需要登录」（enabled=false 时仅显开关 + 提示）。
- *    - enabled=true 时显来源 segmented（临时填写 / 使用档案）+ 对方面板：
- *        inline → InlineAuthFields（双列：登录入口 / 凭据）。
- *        profile → ProfilePicker（双列：档案卡列表 / 选中档案详情+角色）。
- *  外层（ScanFormFields 黑盒分支）用 authExpanded 控制整块折叠/展开，默认折叠成一行。 */
-function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProfileSaved }: {
+/** 右栏认证核心（2026-08-06 重排，对齐 preview HTML #rightCore）：
+ *    coral 竖条标题 + Switch「需要登录」+ 来源 segmented（临时填写 / 使用档案）+ 模式右栏内容。
+ *  - enabled=false 时仅显 Switch + 提示。
+ *  - inline 模式右栏：登录步骤（textarea）+ 存为档案（档案名+保存一行）。
+ *  - profile 模式右栏：已选档案摘要卡 + 提示。
+ *  顶格对齐左栏「目标服务」（grid items-start，折叠态占位与展开态核心互斥显隐）。 */
+function RightAuthCore({ auth, setAuth, authErr, workspace, refreshSignal, onProfileSaved }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   authErr: string | null;
@@ -141,7 +133,11 @@ function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProf
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 fade-in">
+      <div className="flex items-center gap-2">
+        <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
+        <h4 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h4>
+      </div>
       <div className="flex items-center justify-between gap-3">
         <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
         <Switch checked={auth.enabled} onCheckedChange={(v) => setAuth({ enabled: v })} />
@@ -151,15 +147,15 @@ function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProf
         <div className="text-xs text-muted-foreground">{t("scan.auth.enableHint")}</div>
       ) : (
         <>
-          {/* 来源 segmented（替代旧 Select）：临时填写 / 使用档案 */}
-          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+          {/* 来源 segmented（临时填写 / 使用档案） */}
+          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
             {(["inline", "profile"] as const).map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => setAuth({ source: s })}
                 aria-pressed={auth.source === s}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                   auth.source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -168,13 +164,13 @@ function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProf
             ))}
           </div>
 
-          {auth.source === "profile" ? (
-            <ProfilePicker auth={auth} setAuth={setAuth} workspace={workspace} refreshSignal={refreshSignal} />
+          {/* 模式右栏内容 */}
+          {auth.source === "inline" ? (
+            <InlineRightEnhance auth={auth} setAuth={setAuth} ws={workspace} onProfileSaved={onProfileSaved} />
           ) : (
-            <InlineAuthFields auth={auth} setAuth={setAuth} authErr={authErr} ws={workspace} onProfileSaved={onProfileSaved} />
+            <ProfileRightSummary auth={auth} workspace={workspace} refreshSignal={refreshSignal} />
           )}
-
-          {/* profile 模式校验错误贴 ProfilePicker 显；inline 模式错误交 InlineAuthFields 显，避免左右重复。 */}
+          {/* profile 模式校验错误贴下方档案块显；inline 模式错误交下方 inline 块显。 */}
           {auth.source === "profile" && authErr && <div className="text-destructive text-xs">{authErr}</div>}
         </>
       )}
@@ -187,21 +183,106 @@ function AuthControls({ auth, setAuth, authErr, workspace, refreshSignal, onProf
   );
 }
 
-/** inline 模式「保存为档案」区--与临时填写字段同处右列底部，非独立对话框（用户意图：保存能力与
- *  填写区在一起，既能直接运行也能保存）。展开后填档案名 + 角色（默认 admin），提交调
- *  createAuthProfile，成功后 onSaved(新档案) 回调让父级切 profile 模式并选中。
- *  - 复用 authToProfileBody（完整保留 totp_secret + email_login，不丢字段）。
- *  - 保存前置校验：loginUrl + username 必填（profile 必备），缺则 toast 拦截不发请求。
- *  - ws 内 name 唯一（后端 422）-> 失败 toast 提示「档案名已存在」。 */
+/** inline 模式右栏增强（对齐 preview #inlineRight）：登录步骤 + 存为档案（档案名+保存一行）。
+ *  角色取凭据区填写值（auth.role），保存入口与填写区在一起（非弹窗）。 */
+function InlineRightEnhance({ auth, setAuth, ws, onProfileSaved }: {
+  auth: AuthFormState;
+  setAuth: (patch: Partial<AuthFormState>) => void;
+  ws: string;
+  onProfileSaved: (profile: AuthProfile) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="border-t border-border pt-3 space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-[11px] font-medium text-muted-foreground">
+          {t("scan.auth.loginFlowLabel")} <span className="font-normal">({t("scan.auth.optional")})</span>
+        </Label>
+        <Textarea
+          value={auth.loginFlow}
+          onChange={(e) => setAuth({ loginFlow: e.target.value })}
+          rows={3}
+          placeholder={t("scan.auth.loginFlowHint")}
+          className="font-mono text-xs"
+        />
+      </div>
+      {ws ? (
+        <SaveAsProfileInline auth={auth} ws={ws} onSaved={onProfileSaved} />
+      ) : (
+        <div className="text-[11px] text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+      )}
+    </div>
+  );
+}
+
+/** profile 模式右栏摘要（对齐 preview #profileRight）：已选档案卡 + 提示。 */
+function ProfileRightSummary({ auth, workspace, refreshSignal }: {
+  auth: AuthFormState;
+  workspace: string;
+  refreshSignal: number;
+}) {
+  const { t } = useTranslation();
+  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
+  useEffect(() => {
+    if (!workspace || !auth.profileId) {
+      setProfiles([]);
+      return;
+    }
+    listAuthProfiles(workspace).then(setProfiles).catch(() => setProfiles([]));
+  }, [workspace, auth.profileId, refreshSignal]);
+  const selected = profiles.find((p) => p.id === auth.profileId);
+  if (!selected) {
+    return (
+      <div className="border-t border-border pt-3 space-y-3">
+        <div className="text-[11px] text-muted-foreground">{t("scan.auth.selectProfileHint")}</div>
+      </div>
+    );
+  }
+  const ov = overallState(selected.credentials);
+  const ob = verifyBadge(ov);
+  return (
+    <div className="border-t border-border pt-3 space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-[11px] font-medium text-muted-foreground">{t("scan.auth.selectedProfile")}</Label>
+        <div className="rounded-lg border border-border bg-secondary p-3 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] font-semibold">{selected.name}</span>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${ob.cls}`}>
+              <span aria-hidden>{ob.icon}</span>
+              {t(`authProfiles.overall.${ov}`)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+            <span>{hostOf(selected.login_url)}</span>
+            <span>·</span>
+            <span>{selected.credentials.length} {t("authProfiles.credentials")}</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] pt-1">
+            <span className="font-mono text-muted-foreground">{selected.login_url}</span>
+            <span className="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {t(`scan.auth.loginType.${selected.login_type}`)}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-start gap-1.5 text-[10.5px] text-muted-foreground leading-relaxed">
+        <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-primary" />
+        <span>{t("scan.auth.multiRoleHint")}</span>
+      </div>
+    </div>
+  );
+}
+
+/** inline 模式「保存为档案」--与临时填写右栏同处，展开后填档案名（角色取凭据区 auth.role），
+ *  提交调 createAuthProfile，成功后 onSaved(新档案) 回调让父级切 profile 模式并选中。
+ *  保存前置校验：loginUrl + username 必填（profile 必备），缺则 toast 拦截不发请求。 */
 function SaveAsProfileInline({ auth, ws, onSaved }: {
   auth: AuthFormState;
   ws: string;
   onSaved: (profile: AuthProfile) => void;
 }) {
   const { t } = useTranslation();
-  const [show, setShow] = useState(false);
   const [name, setName] = useState("");
-  const [role, setRole] = useState("admin");
   const [busy, setBusy] = useState(false);
 
   async function onSave(e: React.FormEvent) {
@@ -213,9 +294,8 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const profile = await createAuthProfile(ws, authToProfileBody(auth, name, role));
+      const profile = await createAuthProfile(ws, authToProfileBody(auth, name));
       toast.success(t("scan.auth.saveSuccess"));
-      setShow(false);
       setName("");
       onSaved(profile);
     } catch (err) {
@@ -225,62 +305,52 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
     }
   }
 
-  // 保存前置：loginUrl + username 必填（档案 credential 必备）。未填则展开按钮禁用 + 常驻提示，
-  // 避免用户展开填完档案名才在提交时被告知缺字段（早反馈）。onSave 保留同校验作双保险。
+  // 保存前置：loginUrl + username 必填（档案 credential 必备）。未填则按钮禁用 + 常驻提示。
   const canSave = !!auth.loginUrl.trim() && !!auth.username.trim();
 
-  if (!show) {
-    return (
-      <div className="space-y-1">
-        <Button type="button" variant="ghost" size="sm" onClick={() => setShow(true)} disabled={!canSave}>
-          {t("scan.auth.saveAsProfile")}
-        </Button>
-        {!canSave && (
-          <div className="text-[11px] text-muted-foreground">{t("scan.auth.saveNeedFields")}</div>
-        )}
-      </div>
-    );
-  }
   return (
-    <form onSubmit={onSave} className="space-y-2 rounded-lg border border-border bg-card p-2.5">
-      <GroupLabel>{t("scan.auth.saveAsProfile")}</GroupLabel>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">{t("authProfiles.name")}</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("scan.auth.profileNamePlaceholder")} required autoFocus />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">{t("authProfiles.role")}</Label>
-          <Input value={role} onChange={(e) => setRole(e.target.value)} />
-        </div>
-      </div>
-      <div className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.auth.saveAsProfileHint")}</div>
+    <form onSubmit={onSave} className="space-y-1.5">
+      <Label className="text-[11px] font-medium text-muted-foreground">{t("scan.auth.saveAsProfile")}</Label>
       <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={busy}>{busy ? "…" : t("scan.auth.saveAsProfile")}</Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setShow(false)}>{t("common.cancel")}</Button>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("scan.auth.profileNamePlaceholder")}
+          className="flex-1 min-w-0 text-xs"
+          required
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={!canSave || busy} className="shrink-0 text-xs">
+          {busy ? "…" : t("scan.auth.saveAsProfile")}
+        </Button>
       </div>
+      {!canSave ? (
+        <div className="text-[10.5px] text-muted-foreground leading-relaxed">{t("scan.auth.saveNeedFields")}</div>
+      ) : (
+        <div className="text-[10.5px] text-muted-foreground leading-relaxed">{t("scan.auth.saveAsProfileHint")}</div>
+      )}
     </form>
   );
 }
 
-/** inline 模式字段块——双列布局（2026-08-06 重排）：
- *    左列「登录入口」：登录方式 button-group + 登录地址。
- *    右列「凭据」：用户名 / 密码 / TOTP / 邮箱登录（checkbox 展开）。
- *  下方全宽：登录步骤（可选）+ 校验错误 + 「保存为认证档案」。
+/** inline 模式下方核心块（对齐 preview #bottomEnhance）：登录入口 + 凭据 横向两卡。
+ *  凭据区含角色/用户名/密码三列（微调2：填写时即指定角色）+ TOTP。删邮箱登录。
  *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。 */
-function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
+function BottomInlineBlock({ auth, setAuth, authErr }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   authErr: string | null;
-  ws: string;
-  onProfileSaved: (profile: AuthProfile) => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-        {/* 左：登录入口 */}
-        <div className="space-y-3 rounded-lg border border-border bg-secondary p-3">
+    <div className="fade-in border-t border-border pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
+        <h4 className="text-[12px] font-semibold text-muted-foreground">{t("scan.auth.entryGroup")}</h4>
+        <span className="text-[10.5px] text-muted-foreground">{t("scan.auth.credentialsGroup")}</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* 登录入口 */}
+        <div className="space-y-2 rounded-lg border border-border bg-secondary p-3">
           <GroupLabel>{t("scan.auth.entryGroup")}</GroupLabel>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
@@ -306,92 +376,46 @@ function InlineAuthFields({ auth, setAuth, authErr, ws, onProfileSaved }: {
               value={auth.loginUrl}
               onChange={(e) => setAuth({ loginUrl: e.target.value })}
               placeholder="https://example.com/login"
-              className="font-mono"
+              className="font-mono text-xs"
             />
           </div>
         </div>
 
-        {/* 右：凭据 */}
+        {/* 凭据：角色/用户名/密码 三列 + TOTP（微调2：角色并入凭据区；删邮箱登录） */}
         <div className="space-y-2.5 rounded-lg border border-border bg-secondary p-3">
           <GroupLabel>{t("scan.auth.credentialsGroup")}</GroupLabel>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.role")}</Label>
+              <Input value={auth.role} onChange={(e) => setAuth({ role: e.target.value })} className="text-xs" />
+            </div>
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
-              <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} />
+              <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} className="text-xs" />
             </div>
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-              <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} />
+              <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} className="text-xs" />
             </div>
           </div>
           <div className="space-y-1">
             <Label className="text-[11px] text-muted-foreground">
               {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
             </Label>
-            <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <Checkbox checked={auth.emailLoginEnabled} onCheckedChange={(v) => setAuth({ emailLoginEnabled: v === true })} />
-              <span className="text-xs">{t("scan.auth.emailLoginToggle")}</span>
-            </label>
-            {auth.emailLoginEnabled && (
-              <div className="space-y-2 pl-6">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailAddress")}</Label>
-                    <Input value={auth.emailAddress} onChange={(e) => setAuth({ emailAddress: e.target.value })} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">{t("scan.auth.emailPassword")}</Label>
-                    <Input type="password" value={auth.emailPassword} onChange={(e) => setAuth({ emailPassword: e.target.value })} />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">
-                    {t("scan.auth.emailTotp")} <span className="font-normal">({t("scan.auth.optional")})</span>
-                  </Label>
-                  <Input value={auth.emailTotp} onChange={(e) => setAuth({ emailTotp: e.target.value })} className="font-mono" />
-                </div>
-              </div>
-            )}
+            <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono text-xs" />
           </div>
         </div>
       </div>
-
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium">
-          {t("scan.auth.loginFlowLabel")} <span className="font-normal text-muted-foreground">({t("scan.auth.optional")})</span>
-        </Label>
-        <Textarea
-          value={auth.loginFlow}
-          onChange={(e) => setAuth({ loginFlow: e.target.value })}
-          rows={3}
-          placeholder={t("scan.auth.loginFlowHint")}
-          className="font-mono text-xs"
-        />
-      </div>
-
-      {authErr && <div className="text-destructive text-xs">{authErr}</div>}
-
-      {/* 保存为档案：与临时填写同处，存成工作区档案供以后 profile 模式复用（ws 未选时禁用提示）。 */}
-      <div className="border-t border-border pt-2.5">
-        {ws ? (
-          <SaveAsProfileInline auth={auth} ws={ws} onSaved={onProfileSaved} />
-        ) : (
-          <div className="text-[11px] text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
-        )}
-      </div>
+      {authErr && <div className="text-destructive text-xs mt-2">{authErr}</div>}
     </div>
   );
 }
 
-/** profile 模式：档案卡列表 → 选中档案详情 + 角色单选（Task 14 + 2026-08-06 重排）。
- *  - 档案列表来自 listAuthProfiles(ws)（ws 隔离；ws 未选时不发请求，显示「先选工作区」提示）。
- *  - 左列档案卡：名字 + host + 角色数 + 整体验证徽章（可用/不可用/未验证）。点选 → setAuth({profileId})。
- *  - 右列详情：选中档案 login_url + 类型；角色行（role · username + 各自验证徽章），点选 → setAuth({credentialId})。
- *  - 切档案 → 清空 credentialId（防残留旧角色 id 指向新档案里不存在的角色）。 */
-function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
+/** profile 模式下方块（对齐 preview #bottomProfile，角色单选→多选 2026-08-06）：
+ *    左列档案卡列表（点选 → setAuth({profileId, credentialIds=全选})）
+ *    右列选中档案详情 + 角色多选（复选框，默认全选，全选/取消全选切换 + 计数）。
+ *  切档案 → 默认全选新档案所有角色（防残留旧角色 id 指向新档案里不存在的角色）。 */
+function BottomProfileBlock({ auth, setAuth, workspace, refreshSignal }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
   workspace: string;
@@ -429,119 +453,153 @@ function ProfilePicker({ auth, setAuth, workspace, refreshSignal }: {
     return <div className="text-xs text-muted-foreground">{t("common.loading")}</div>;
   }
 
+  const toggleRole = (id: string) => {
+    const has = auth.credentialIds.includes(id);
+    setAuth({ credentialIds: has ? auth.credentialIds.filter((x) => x !== id) : [...auth.credentialIds, id] });
+  };
+  const allSelected = !!selected && selected.credentials.every((c) => auth.credentialIds.includes(c.id));
+  const toggleAll = () => {
+    if (!selected) return;
+    setAuth({ credentialIds: allSelected ? [] : selected.credentials.map((c) => c.id) });
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
-      {/* 左：档案卡列表 */}
-      <div className="space-y-2">
-        <GroupLabel>{t("scan.auth.selectProfileLabel")}</GroupLabel>
-        {profiles.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
-            {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
+    <div className="fade-in border-t border-border pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
+        <h4 className="text-[12px] font-semibold text-muted-foreground">{t("scan.auth.selectProfileLabel")}</h4>
+        <span className="text-[10.5px] text-muted-foreground">{t("scan.auth.selectProfileHint")}</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
+        {/* 左：档案卡列表 */}
+        <div className="space-y-2">
+          <GroupLabel>{t("scan.auth.selectProfileLabel")}</GroupLabel>
+          {profiles.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
+              {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
+            </div>
+          ) : (
+            profiles.map((p) => {
+              const ov = overallState(p.credentials);
+              const ob = verifyBadge(ov);
+              const sel = p.id === auth.profileId;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setAuth({ profileId: p.id, credentialIds: p.credentials.map((c) => c.id) })}
+                  aria-pressed={sel}
+                  className={`w-full text-left rounded-lg border p-3 transition-colors flex flex-col gap-1.5 ${
+                    sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-semibold">{p.name}</span>
+                    {p.scope === "system" && (
+                      <span
+                        className="inline-flex items-center rounded-full border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                        title={t("authProfiles.systemHint")}
+                      >
+                        {t("authProfiles.systemBadge")}
+                      </span>
+                    )}
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${ob.cls}`}>
+                      <span aria-hidden>{ob.icon}</span>
+                      {t(`authProfiles.overall.${ov}`)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                    <span>{hostOf(p.login_url)}</span>
+                    <span>·</span>
+                    <span>{p.credentials.length} {t("authProfiles.credentials")}</span>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        {/* 右：选中档案详情 + 角色多选 */}
+        {selected ? (
+          <div className="space-y-3 rounded-lg border border-border bg-secondary p-3.5">
+            <div>
+              <div className="text-[14px] font-semibold">{selected.name}</div>
+              <div className="flex items-center gap-2 text-xs mt-1.5">
+                <span className="font-mono text-muted-foreground">{selected.login_url}</span>
+                <span className="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                  {t(`scan.auth.loginType.${selected.login_type}`)}
+                </span>
+              </div>
+            </div>
+            <div className="border-t border-border" />
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] font-semibold text-muted-foreground">
+                  {t("scan.auth.selectRole")}
+                  <span className="font-normal text-muted-foreground">（{t("scan.auth.multiRoleDefaultAll")}）</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="text-[10.5px] font-medium text-primary hover:underline"
+                >
+                  {allSelected ? t("scan.auth.deselectAllRoles") : t("scan.auth.selectAllRoles")}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {selected.credentials.map((c) => {
+                  const st = c.verify_status?.state ?? "unverified";
+                  const b = verifyBadge(st);
+                  const sel = auth.credentialIds.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => toggleRole(c.id)}
+                      aria-pressed={sel}
+                      className={`w-full flex items-center gap-2.5 rounded-lg border p-2.5 transition-colors text-left ${
+                        sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
+                      }`}
+                    >
+                      <span className={`w-4 h-4 rounded border-2 flex-none flex items-center justify-center ${sel ? "border-primary bg-primary" : "border-input"}`}>
+                        {sel && (
+                          <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 12 12" fill="none">
+                            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[13px] font-medium font-mono">
+                          {c.role} <span className="font-normal text-muted-foreground">· {c.username}</span>
+                        </span>
+                        {st === "failed" && c.verify_status?.failure_detail && (
+                          <div className="text-[11px] text-red/80 mt-0.5">{c.verify_status.failure_detail}</div>
+                        )}
+                      </div>
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold flex-none ${b.cls}`}>
+                        <span aria-hidden>{b.icon}</span>
+                        {t(`authProfiles.verify.${st}`)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-[10.5px] text-muted-foreground">
+                {t("scan.auth.rolesSelected", { n: auth.credentialIds.length, m: selected.credentials.length })}
+              </div>
+            </div>
+            <div className="border-t border-border" />
+            <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
+              <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <span>{t("scan.auth.profileRoleHint")}</span>
+            </div>
           </div>
         ) : (
-          profiles.map((p) => {
-            const ov = overallState(p.credentials);
-            const ob = verifyBadge(ov);
-            const sel = p.id === auth.profileId;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setAuth({ profileId: p.id, credentialId: "" })}
-                aria-pressed={sel}
-                className={`w-full text-left rounded-lg border p-3 transition-colors flex flex-col gap-1.5 ${
-                  sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-semibold">{p.name}</span>
-                  {p.scope === "system" && (
-                    <span
-                      className="inline-flex items-center rounded-full border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
-                      title={t("authProfiles.systemHint")}
-                    >
-                      {t("authProfiles.systemBadge")}
-                    </span>
-                  )}
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${ob.cls}`}>
-                    <span aria-hidden>{ob.icon}</span>
-                    {t(`authProfiles.overall.${ov}`)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
-                  <span>{hostOf(p.login_url)}</span>
-                  <span>·</span>
-                  <span>{p.credentials.length} {t("authProfiles.credentials")}</span>
-                </div>
-              </button>
-            );
-          })
+          <div className="rounded-lg border border-dashed border-border bg-card p-4 text-xs text-muted-foreground">
+            {t("scan.auth.selectProfileHint")}
+          </div>
         )}
       </div>
-
-      {/* 右：选中档案详情 + 角色单选 */}
-      {selected ? (
-        <div className="space-y-3 rounded-lg border border-border bg-secondary p-3.5">
-          <div>
-            <div className="text-[14px] font-semibold">{selected.name}</div>
-            <div className="flex items-center gap-2 text-xs mt-1.5">
-              <span className="font-mono text-muted-foreground">{selected.login_url}</span>
-              <span className="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                {t(`scan.auth.loginType.${selected.login_type}`)}
-              </span>
-            </div>
-          </div>
-          <div className="border-t border-border" />
-          <div>
-            <div className="mb-2">
-              <GroupLabel>{t("scan.auth.selectRole")}</GroupLabel>
-            </div>
-            <div className="space-y-2">
-              {selected.credentials.map((c) => {
-                const st = c.verify_status?.state ?? "unverified";
-                const b = verifyBadge(st);
-                const sel = c.id === auth.credentialId;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setAuth({ credentialId: c.id })}
-                    aria-pressed={sel}
-                    className={`w-full flex items-center gap-2.5 rounded-lg border p-2.5 transition-colors text-left ${
-                      sel ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card hover:border-foreground/20"
-                    }`}
-                  >
-                    <span className={`w-4 h-4 rounded-full border-2 flex-none flex items-center justify-center ${sel ? "border-primary" : "border-input"}`}>
-                      {sel && <span className="w-2 h-2 rounded-full bg-primary" />}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[13px] font-medium font-mono">
-                        {c.role} <span className="font-normal text-muted-foreground">· {c.username}</span>
-                      </span>
-                      {st === "failed" && c.verify_status?.failure_detail && (
-                        <div className="text-[11px] text-red/80 mt-0.5">{c.verify_status.failure_detail}</div>
-                      )}
-                    </div>
-                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold flex-none ${b.cls}`}>
-                      <span aria-hidden>{b.icon}</span>
-                      {t(`authProfiles.verify.${st}`)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="border-t border-border" />
-          <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
-            <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-            <span>{t("scan.auth.profileRoleHint")}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-dashed border-border bg-card p-4 text-xs text-muted-foreground">
-          {t("scan.auth.selectProfileHint")}
-        </div>
-      )}
     </div>
   );
 }
@@ -711,107 +769,115 @@ export function ScanFormFields({
     );
   }
 
-  // —— 黑盒布局（2026-08-06 重排）：目标服务 + 扫描上下文（工作区与复用白盒合并）+ 认证（默认折叠）。
-  //   旧版 4 个等重 StepGroup（目标 / 工作区 / 代码上下文 / 认证）平铺显繁琐；新版按"必填核心 +
-  //   可选增强"重排，去掉圆形步骤徽章与多余嵌套，认证默认折叠成一行（点「配置登录」展开）。
+  // —— 黑盒布局（2026-08-06 重排，对齐 preview HTML）：左表单 + 右核心 + 下方横向，一屏装下不滚动。
+  //   折叠态：右栏虚线占位 + 认证行一行；展开态：右栏核心顶格对齐目标服务 + 下方横向铺开。
+  //   认证拆两块——核心（开关/来源/入口/凭据）+ 增强（步骤/存档 或 档案摘要）。
   // IA 不变量：repo 与白盒 scan 均按工作区隔离；URL 是黑盒主输入，保持在最上。
   const setAuth = (patch: Partial<AuthFormState>) => set({ auth: { ...f.auth, ...patch } });
-  // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 递增 refreshSignal 触发 ProfilePicker 重拉。
+  // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 默认全选其角色 + 递增 refreshSignal 触发重拉。
   const onProfileSaved = (profile: AuthProfile) => {
-    setAuth({ source: "profile", profileId: profile.id, credentialId: profile.credentials[0]?.id ?? "" });
+    setAuth({ source: "profile", profileId: profile.id, credentialIds: profile.credentials.map((c) => c.id) });
     setProfileRefresh((n) => n + 1);
   };
   return (
-    <div className="flex flex-col gap-5">
-      {/* 目标服务 */}
-      <section className="space-y-2">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-semibold">{t("scan.steps.targetService")}</h3>
-          <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
-          <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.targetHint")}</span>
-        </div>
-        <Input
-          id="url"
-          value={f.url}
-          onChange={(e) => set({ url: e.target.value })}
-          placeholder={t("scan.fields.urlPlaceholder")}
-          className="font-mono border-orange/30"
-        />
-        {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
-        <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
-      </section>
+    <div className="space-y-5">
+      {/* 上层：左表单 + 右核心(展开时) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,42rem)_minmax(0,1fr)] gap-8 items-start">
+        {/* 左栏表单 */}
+        <div className="flex flex-col gap-5">
+          {/* 目标服务 */}
+          <section className="space-y-2">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-[13px] font-semibold">{t("scan.steps.targetService")}</h3>
+              <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
+              <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.targetHint")}</span>
+            </div>
+            <Input
+              id="url"
+              value={f.url}
+              onChange={(e) => set({ url: e.target.value })}
+              placeholder={t("scan.fields.urlPlaceholder")}
+              className="font-mono border-orange/30"
+            />
+            {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
+            <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
+          </section>
 
-      <div className="border-t border-border" />
+          <div className="border-t border-border" />
 
-      {/* 扫描上下文：工作区 + 复用白盒（并排一条链） */}
-      <section className="space-y-2.5">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-semibold">{t("scan.fields.contextLabel")}</h3>
-          <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
-          <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.contextHint")}</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
-            {wsSelectInner}
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
-            {wbScans.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground leading-relaxed">
-                {workspace ? t("scan.fields.reuseEmpty") : t("scan.fields.selectWsFirst")}
+          {/* 扫描上下文：工作区 + 复用白盒（并排一条链） */}
+          <section className="space-y-2.5">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-[13px] font-semibold">{t("scan.fields.contextLabel")}</h3>
+              <span className="text-[10.5px] font-medium text-destructive">{t("scan.tags.required")}</span>
+              <span className="ml-auto text-[11.5px] text-muted-foreground">{t("scan.fields.contextHint")}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
+                {wsSelectInner}
               </div>
-            ) : (
-              <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {wbScans.map((s, i) => (
-                    <SelectItem key={s.scan_id} value={s.scan_id}>
-                      <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
-                      {i === 0 && (
-                        <span className="ml-1.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-primary">
-                          {t("scan.fields.latestBadge")}
-                        </span>
-                      )}
-                      <span className="ml-1.5 text-[11px] text-muted-foreground">
-                        · {String(s.status)} · {s.vuln_count} {t("scan.fields.vulnsUnit")}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
-            {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
-          </div>
-        </div>
-      </section>
-
-      <div className="border-t border-border" />
-
-      {/* 认证登录（可选，默认折叠成一行） */}
-      <section>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h3>
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                {t("scan.tags.optional")}
-              </span>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">{t("scan.fields.reuseSelectLabel")}</Label>
+                {wbScans.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground leading-relaxed">
+                    {workspace ? t("scan.fields.reuseEmpty") : t("scan.fields.selectWsFirst")}
+                  </div>
+                ) : (
+                  <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {wbScans.map((s, i) => (
+                        <SelectItem key={s.scan_id} value={s.scan_id}>
+                          <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
+                          {i === 0 && (
+                            <span className="ml-1.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-primary">
+                              {t("scan.fields.latestBadge")}
+                            </span>
+                          )}
+                          <span className="ml-1.5 text-[11px] text-muted-foreground">
+                            · {String(s.status)} · {s.vuln_count} {t("scan.fields.vulnsUnit")}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {/* 有候选却没选才提示；无候选时上方空态盒已说明，不再重复「请选择」红字。 */}
+                {wbScans.length > 0 && reuseErr && <div className="text-destructive text-xs">{reuseErr}</div>}
+              </div>
             </div>
-            <div className="text-[11.5px] text-muted-foreground mt-0.5">
-              {f.auth.enabled ? t("scan.auth.statusEnabled") : t("scan.auth.statusUnauth")}
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* 认证行（折叠态：标题+状态+「配置登录」按钮一行） */}
+          <section>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h3>
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                    {t("scan.tags.optional")}
+                  </span>
+                </div>
+                <div className="text-[11.5px] text-muted-foreground mt-0.5">
+                  {f.auth.enabled ? t("scan.auth.statusEnabled") : t("scan.auth.statusUnauth")}
+                </div>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setAuthExpanded((v) => !v)}>
+                {authExpanded ? t("scan.auth.collapse") : t("scan.auth.configure")}
+              </Button>
             </div>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setAuthExpanded((v) => !v)}>
-            {authExpanded ? t("scan.auth.collapse") : t("scan.auth.configure")}
-          </Button>
+          </section>
         </div>
-        {authExpanded && (
-          <div className="mt-4 pt-4 border-t border-border">
-            <AuthControls
+
+        {/* 右栏：折叠=虚线占位 / 展开=核心（顶格对齐目标服务） */}
+        <div className="hidden lg:block">
+          {authExpanded ? (
+            <RightAuthCore
               auth={f.auth}
               setAuth={setAuth}
               authErr={authErr}
@@ -819,9 +885,22 @@ export function ScanFormFields({
               refreshSignal={profileRefresh}
               onProfileSaved={onProfileSaved}
             />
-          </div>
-        )}
-      </section>
+          ) : (
+            <div className="h-full min-h-[14rem] rounded-lg border border-dashed border-border/50 flex items-center justify-center">
+              <span className="text-[11px] text-muted-foreground/50">{t("scan.auth.expandHint")}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 下方横向（展开时显：inline=登录入口+凭据 / profile=档案卡列表+详情+角色多选） */}
+      {authExpanded && f.auth.enabled && (
+        f.auth.source === "profile" ? (
+          <BottomProfileBlock auth={f.auth} setAuth={setAuth} workspace={workspace} refreshSignal={profileRefresh} />
+        ) : (
+          <BottomInlineBlock auth={f.auth} setAuth={setAuth} authErr={authErr} />
+        )
+      )}
     </div>
   );
 }

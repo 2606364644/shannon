@@ -20,8 +20,8 @@ export type LoginType = "form" | "sso" | "api" | "basic";
  *
  *  auth-profile-vault（Task 14）：enabled=true 时按 `source` 切换两条来源——
  *    - "inline"：临时手填（即下方 loginType/loginUrl/credentials/loginFlow），buildBody 发 `authentication`。
- *    - "profile"：复用工作区已验证档案（profileId + credentialId 指向某条 profile.credentials[] 角色），
- *      buildBody 发 `auth_profile_id` + `auth_credential_id`（与 `authentication` 互斥，后端 Task 7 XOR 校验）。
+ *    - "profile"：复用工作区已验证档案（profileId + credentialIds 指向 profile.credentials[] 哪些角色），
+ *      buildBody 发 `auth_profile_id` + `auth_credential_ids`（与 `authentication` 互斥，后端 Task 7 XOR 校验）。
  *  enabled=false 时 source 无意义（关闭即不登录）。 */
 export interface AuthFormState {
   enabled: boolean;
@@ -29,17 +29,15 @@ export interface AuthFormState {
   source: "inline" | "profile";
   /** profile 模式：选定的认证档案 id（GET /workspaces/{ws}/auth-profiles 列表中一项）。 */
   profileId: string;
-  /** profile 模式：选定档案下的某个角色凭据 id（profile.credentials[] 中一项）。 */
-  credentialId: string;
+  /** profile 模式：选定档案下哪些角色凭据 id（profile.credentials[] 子集；空=后端全选，前端默认全选）。 */
+  credentialIds: string[];
   loginType: LoginType;
   loginUrl: string;
+  /** inline 凭据区角色（保存为档案时用；inline 提交不发，core 单 credentials schema 无 role）。 */
+  role: string;
   username: string;
   password: string;
   totpSecret: string;
-  emailLoginEnabled: boolean;
-  emailAddress: string;
-  emailPassword: string;
-  emailTotp: string;
   loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
 }
 
@@ -47,28 +45,22 @@ const DEFAULT_AUTH: AuthFormState = {
   enabled: false,
   source: "inline",
   profileId: "",
-  credentialId: "",
+  credentialIds: [],
   loginType: "form",
   loginUrl: "",
+  role: "admin",
   username: "",
   password: "",
   totpSecret: "",
-  emailLoginEnabled: false,
-  emailAddress: "",
-  emailPassword: "",
-  emailTotp: "",
   loginFlow: "",
 };
 
-/** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。 */
+/** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。
+ *  微调（2026-08-06）：inline 模式不再采集 email_login（删邮箱登录框）；role 仅用于存档不发。 */
 export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
   const credentials: ScanAuthentication["credentials"] = { username: a.username.trim() };
   if (a.password) credentials.password = a.password;
   if (a.totpSecret.trim()) credentials.totp_secret = a.totpSecret.trim();
-  if (a.emailLoginEnabled) {
-    credentials.email_login = { address: a.emailAddress.trim(), password: a.emailPassword };
-    if (a.emailTotp.trim()) credentials.email_login.totp_secret = a.emailTotp.trim();
-  }
   const payload: ScanAuthentication = {
     login_type: a.loginType,
     login_url: a.loginUrl.trim(),
@@ -83,21 +75,17 @@ export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
  *  始终返回 inline 模式（auth-profile-vault Task 14：profile 模式由 presetToAuthState 单独判定）。 */
 export function authFromPayload(auth: ScanAuthentication): AuthFormState {
   const c = auth.credentials ?? { username: "" };
-  const el = c.email_login;
   return {
     enabled: true,
     source: "inline",
     profileId: "",
-    credentialId: "",
+    credentialIds: [],
     loginType: auth.login_type ?? "form",
     loginUrl: auth.login_url ?? "",
+    role: "admin",
     username: c.username ?? "",
     password: c.password ?? "",
     totpSecret: c.totp_secret ?? "",
-    emailLoginEnabled: !!el,
-    emailAddress: el?.address ?? "",
-    emailPassword: el?.password ?? "",
-    emailTotp: el?.totp_secret ?? "",
     loginFlow: Array.isArray(auth.login_flow) ? auth.login_flow.join("\n") : "",
   };
 }
@@ -114,12 +102,12 @@ export interface RerunPreset {
   /** profile 模式（auth-profile-vault Task 14）：原扫描使用了某条认证档案+角色，
    *  重跑时预填到 source=profile 分支。后端 _scan_detail 暂未返此字段（前端先就位）。 */
   authProfileId?: string;
-  authCredentialId?: string;
+  authCredentialIds?: string[];
 }
 
 /** RerunPreset → AuthFormState：profile 模式（authProfileId 非空）优先于 inline（auth）。
- *  与 buildBody 的 XOR 一致：profile 模式仅发 auth_profile_id/auth_credential_id，
- *  inline 模式仅发 authentication。 */
+ *  与 buildBody 一致：profile 模式发 auth_profile_id + auth_credential_ids（空数组=后端全选），
+ *  inline 模式发 authentication。 */
 export function presetToAuthState(preset: RerunPreset): AuthFormState {
   if (preset.authProfileId) {
     return {
@@ -127,7 +115,7 @@ export function presetToAuthState(preset: RerunPreset): AuthFormState {
       enabled: true,
       source: "profile",
       profileId: preset.authProfileId,
-      credentialId: preset.authCredentialId ?? "",
+      credentialIds: preset.authCredentialIds ?? [],
     };
   }
   if (preset.auth) return authFromPayload(preset.auth);
@@ -136,12 +124,12 @@ export function presetToAuthState(preset: RerunPreset): AuthFormState {
 
 export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   if (!a.enabled) return null;
-  // profile 模式：必须选定档案 + 角色（角色必填——后端 Task 7 XOR 校验挡单边）。
+  // profile 模式：必须选定档案 + 至少一个角色（前端默认全选；取消全选则拦空）。
   // 错误文案用 scan.errors.auth{Profile,Credential}Required（与 ProfilePicker 的
   // SelectValue placeholder「选择认证档案/选择登录角色」不同文本，避免 getByText 多义）。
   if (a.source === "profile") {
     if (!a.profileId) return t("scan.errors.authProfileRequired");
-    if (!a.credentialId) return t("scan.errors.authCredentialRequired");
+    if (!a.credentialIds.length) return t("scan.errors.authCredentialRequired");
     return null;
   }
   if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
@@ -183,11 +171,12 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
   // blackbox：恒复用白盒结果（exploitation-only）。reuseScanId 由前端校验保证非空（提交按钮 disabled）。
   body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
   if (f.auth.enabled) {
-    // auth-profile-vault（Task 14）：profile 模式发档案+角色 id（后端 Task 8 展开），
+    // auth-profile-vault（Task 14）：profile 模式发档案+角色 ids（后端 Task 8 展开），
     // inline 模式发 authentication（旧行为）。二者互斥（后端 Task 7 XOR 校验）。
+    // 多角色子集（2026-08-06）：credentialIds 空数组不发 = 后端全选该档案所有角色。
     if (f.auth.source === "profile") {
       body.auth_profile_id = f.auth.profileId || undefined;
-      body.auth_credential_id = f.auth.credentialId || undefined;
+      body.auth_credential_ids = f.auth.credentialIds.length ? f.auth.credentialIds : undefined;
     } else {
       body.authentication = buildAuthPayload(f.auth);
     }
@@ -320,9 +309,10 @@ export function ScanNewPage() {
           ))}
         </div>
 
-        {/* 单栏表单（correlation 铺满 yaml 编辑器；白/黑盒 max-w-2xl 保可读密度） */}
+        {/* 表单区：白盒单栏保 max-w-2xl 可读密度；黑盒双栏 grid（左 42rem + 右 1fr）需满宽，
+            卡 max-w-2xl(672px) 会让右栏核心/占位被挤没（对齐 preview HTML 表单区无宽度限制）。 */}
         <div className="p-5">
-          <div className={isCorrelation ? "" : "max-w-2xl"}>
+          <div className={type === "whitebox" ? "max-w-2xl" : ""}>
             {isCorrelation ? (
               <div className="space-y-3">
                 <YamlEditor

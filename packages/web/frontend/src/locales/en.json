@@ -372,8 +372,6 @@
     "auth": {
       "enableLabel": "Login required",
       "enableHint": "Keep off when the target needs no login; agent-browser will log in before scanning per the settings below and persist the session.",
-      "sourceLabel": "Source",
-      "inlineFieldsTitle": "Login parameters",
       "saveAsProfile": "Save as auth profile",
       "saveAsProfileHint": "Save the current login configuration as a workspace profile for reuse in \"Use profile\" mode.",
       "profileNamePlaceholder": "e.g. NG admin portal",
@@ -392,10 +390,6 @@
       "password": "Password",
       "totpSecret": "TOTP secret",
       "optional": "optional",
-      "emailLoginToggle": "Email login (if email verification is needed)",
-      "emailAddress": "Email address",
-      "emailPassword": "Email password",
-      "emailTotp": "Email TOTP secret",
       "loginFlowLabel": "Login steps",
       "loginFlowHint": "One step per line (optional, e.g. open login page / fill username / fill password / submit)",
       "infoNote": "The session is persisted to auth-state and reused by later scan phases once login is verified.",
@@ -407,7 +401,15 @@
       "selectProfileLabel": "Select profile",
       "selectRole": "Log in as which role",
       "profileRoleHint": "Will actually log in once with the selected role to persist the session; verification status comes from the profile library's latest test login.",
-      "selectProfileHint": "Select a profile on the left to see its login URL, type, and each role's verification status"
+      "selectProfileHint": "Select a profile on the left to see its login URL, type, and each role's verification status",
+      "role": "Role",
+      "selectAllRoles": "Select all",
+      "deselectAllRoles": "Deselect all",
+      "rolesSelected": "{{n}} / {{m}} roles selected; scan will validate with each role's credentials.",
+      "multiRoleHint": "Pick a profile and roles below; role credentials come from the verified profile.",
+      "selectedProfile": "Selected profile",
+      "expandHint": "Click \"Configure login\" to expand core config here",
+      "multiRoleDefaultAll": "multi-select, all by default"
     }
   },
   "dashboard": {

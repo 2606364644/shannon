@@ -150,7 +150,7 @@ async def test_resolve_blackbox_multi_identity_profile_missing_raises(tmp_path):
 
 @pytest.mark.asyncio
 async def test_resolve_blackbox_multi_identity_no_store_raises(tmp_path):
-    """多身份模式但 auth_profile_store 未注入 → RuntimeError（对齐单角色分支口径）。"""
+    """多身份模式（无 cred_id）但 auth_profile_store 未注入 → RuntimeError（对齐单角色分支口径）。"""
     mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock())  # 无 auth_profile_store
     req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1", auth_profile_id="prof_1")
     wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
@@ -159,4 +159,79 @@ async def test_resolve_blackbox_multi_identity_no_store_raises(tmp_path):
     scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
     scan_dir.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="auth_profile_store 未注入"):
+        await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_expands_credential_ids_subset(tmp_path):
+    """2026-08-06 多角色子集：profile_id + cred_ids[] → accounts[] 只含选中的角色。
+
+    cred_admin(admin)/cred_u1(user)/cred_u2(user)，选 [cred_admin, cred_u1]：
+    primary = 首个 low = cred_u1；accounts = [cred_admin(high)]；cred_u2 不出现。
+    """
+    import yaml
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    store.write("ws1", [AuthProfile(
+        id="prof_1", name="NG", login_url="http://t/", login_type="form",
+        credentials=[
+            AuthProfileCredential(id="cred_admin", role="admin", username="admin", password="pw"),
+            AuthProfileCredential(id="cred_u1", role="user", username="u1", password="pw"),
+            AuthProfileCredential(id="cred_u2", role="user", username="u2", password="pw"),
+        ])])
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1",
+                      auth_profile_id="prof_1",
+                      auth_credential_ids=["cred_admin", "cred_u1"])  # 选 2/3
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    config_path, _ = await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+    assert config_path is not None
+    body = (scan_dir / "scan-config.yaml").read_text("utf-8")
+    cfg = yaml.safe_load(body)
+    # 选中 2 个 → primary 进 authentication，剩 1 个进 accounts
+    assert "accounts" in cfg and len(cfg["accounts"]) == 1
+    acct_ids = {a["id"] for a in cfg["accounts"]}
+    assert acct_ids == {"cred_admin"}  # cred_u2 未选，不出现
+    assert cfg["authentication"]["credentials"]["username"] == "u1"  # primary = 首个 low
+    # 未选中的 cred_u2 完全不在 YAML
+    assert "cred_u2" not in body
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_credential_ids_missing_raises(tmp_path):
+    """子集模式：选中的 cred_ids 全不存在 → ValueError（无选中凭据）。"""
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    store.write("ws1", [AuthProfile(
+        id="prof_1", name="NG", login_url="http://t/", login_type="form",
+        credentials=[AuthProfileCredential(id="cred_a", role="admin", username="admin", password="pw")])])
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1",
+                      auth_profile_id="prof_1",
+                      auth_credential_ids=["cred_missing"])
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    with pytest.raises(ValueError, match="选中的角色凭据不存在"):
+        await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_blackbox_credential_ids_subset_profile_missing_raises(tmp_path):
+    """子集模式：档案不存在 → ValueError（对齐全角色/单角色分支口径）。"""
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1",
+                      auth_profile_id="prof_missing",
+                      auth_credential_ids=["cred_a"])
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    with pytest.raises(ValueError, match="认证档案不存在"):
         await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)

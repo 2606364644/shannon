@@ -61,7 +61,7 @@ describe("auth profile types", () => {
     expect(p.credentials[0].verify_status.state).toBe("unverified");
   });
   it("ScanRequest 接受 auth_profile_id", () => {
-    const r: ScanRequest = { type: "blackbox", auth_profile_id: "p", auth_credential_id: "c" };
+    const r: ScanRequest = { type: "blackbox", auth_profile_id: "p", auth_credential_ids: ["c"] };
     expect(r.auth_profile_id).toBe("p");
   });
 });
