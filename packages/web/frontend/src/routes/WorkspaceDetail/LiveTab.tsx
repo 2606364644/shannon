@@ -136,11 +136,11 @@ export default function LiveTab() {
   const finalCost = isCompleted ? (meta?.metrics?.total_cost_usd ?? null) : null;
   const finalCostCurrency = meta?.metrics?.cost_currency ?? null;
 
-  // 自适应控制台布局：根 max-h（100dvh-14rem，与 LogsTab 同口径=TopBar+main py+scan header+tabs）封顶，
-  // 不再强制满高 -> 内容少时不溢出视口、无外层滚动条；指标卡/提示框 shrink-0 钉住，LogStream fill 撑满
-  // 中间剩余空间，事件多时 flex-1 min-h-0 压缩独立 tail 内滚。max-h 对 calc 误差高容忍（偏大仅上限松）。
+  // 控制台布局：根 h-full 吃 ScanDetail 的 flex-1 tab 容器（live/logs 走 flex 链，ScanDetail 高度已按视口定），
+  // 指标卡/提示框 shrink-0 钉住，LogStream fill(flex-1 min-h-0) 撑满中间剩余 + 事件多时自身 tail 内滚。
+  // 不再用 max-h[min-320] 固定算式（旧版窄屏 header 换行/矮视口下溢出视口）——高度由 flex 链动态决定。
   return (
-    <div className="flex max-h-[calc(100dvh-14rem)] min-h-[320px] flex-col gap-3">
+    <div className="flex h-full flex-col gap-3">
       <div className="flex shrink-0 items-center justify-between">
         <Badge variant="outline" className={`gap-1 ${sm.cls}`}>
           <span aria-hidden>●</span>{t(sm.labelKey)}

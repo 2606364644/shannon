@@ -47,9 +47,15 @@ export default function ScanDetail() {
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
 
+  // live/logs tab：根容器走 flex 链，高度 = 视口 - 固定的 TopBar(h-12=3rem) + main(py-5=2.5rem) = 5.5rem
+  // （这俩不换行、精确可靠，非对 header 的估值）；header/tabs 用 shrink-0 保持自然高（窄屏 flex-wrap 换行
+  // 也由 flex 自动吸收），Outlet 容器 flex-1 min-h-0 吃剩余空间 -> tab 内容动态填满、不溢出视口、无外层滚动条。
+  // 其余 tab（overview/report/deliverables）保持 space-y-4 流式（依赖 window 滚，如 ReportTab TOC scroll-spy）。
+  const isFlexLayout = current === "live" || current === "logs";
+
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
+    <div className={isFlexLayout ? "flex h-[calc(100dvh-5.5rem)] flex-col gap-4" : "space-y-4"}>
+      <div className={`space-y-2${isFlexLayout ? " shrink-0" : ""}`}>
         <Link
           to={`/p/${workspace}`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"
@@ -75,7 +81,7 @@ export default function ScanDetail() {
         </div>
       </div>
       <Tabs value={current} onValueChange={(v) => navigate(v)}>
-        <div data-testid="scan-tabs-sticky" className="sticky top-12 z-30 print:static">
+        <div data-testid="scan-tabs-sticky" className={`sticky top-12 z-30 print:static${isFlexLayout ? " shrink-0" : ""}`}>
           <TabsList>
             {SCAN_TABS.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
@@ -83,7 +89,7 @@ export default function ScanDetail() {
           </TabsList>
         </div>
       </Tabs>
-      <div><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
+      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
     </div>
   );
 }
