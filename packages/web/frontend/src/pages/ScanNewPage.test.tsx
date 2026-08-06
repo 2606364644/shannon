@@ -86,6 +86,12 @@ async function selectWorkspace(name: string) {
   await selectOption("选择 workspace", name);
 }
 
+// #1 单一 disclosure（展开即启用）：「需要登录」Switch 已移除，改用状态文案探测 enabled
+// （statusEnabled=「当前：已启用登录」/ statusUnauth=「当前：以未登录状态扫描」随 enabled 翻转）。
+async function expectAuthEnabled() {
+  await waitFor(() => expect(screen.getByText(/已启用登录/)).toBeInTheDocument());
+}
+
 // RepoCombobox 在某 StepGroup 内：白盒 Step2="代码源"，黑盒 repo 模式 Step3="代码上下文"。
 // ws Select 在另一个 StepGroup（"工作区"）——按 step 标题 scope 避开它。
 function repoComboboxIn(stepTitle: string) {
@@ -444,7 +450,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     // 启用登录（点「配置登录」展开即开启——对齐 preview）
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     // 切到 profile（来源 segmented button「使用档案」）
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     // 等档案卡出现（左列卡片 button，accessible name 以档案名 NG 开头）→ 选 NG
@@ -476,7 +482,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /^NG/ }));
@@ -511,7 +517,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /^multi/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /^multi/ }));
@@ -536,7 +542,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     // 默认 source=inline → 下方块显既有 inline 字段（login_url placeholder https://example.com/login）
     expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
     // inline 模式不显 ProfilePicker 的「选择档案」标题
@@ -553,7 +559,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     // inline 模式（默认 source）-> 下方块标题 + 凭据卡 eyebrow 都含「登录入口」（getAllByText 多处命中）
     expect(screen.getAllByText("登录入口").length).toBeGreaterThan(0);
     // 既有 inline 字段仍在（loginUrl placeholder）
@@ -583,7 +589,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     // 认证默认折叠——点「配置登录」展开即开启
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("角色"), { target: { value: "admin" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
@@ -650,11 +656,162 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
-    await waitFor(() => expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true"));
+    await expectAuthEnabled();
     // 未填 loginUrl/username -> 保存按钮 disabled + 显「请先填写登录地址和用户名」提示
     const saveBtn = screen.getByRole("button", { name: "保存为认证档案" });
     expect(saveBtn).toBeDisabled();
     expect(screen.getByText(/请先填写登录地址和用户名/)).toBeInTheDocument();
+  });
+});
+
+// === #1 单一 disclosure（展开即启用）：展开即开、收起即关（停用但留草稿）；冗余「需要登录」Switch 移除 ===
+describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  // inline 凭据区按 label 定位 input（Label + Input 同处 space-y-1 div，Label 无 htmlFor）。
+  function inputByLabel(labelText: RegExp | string) {
+    const label = screen.getByText(labelText);
+    return label.parentElement?.querySelector("input") as HTMLInputElement;
+  }
+
+  // 通用前置：黑盒 + 选 ws1 + 填 url + 等 reuse 候选就绪。
+  async function setupBlackbox() {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+  }
+
+  it("收起 = 停用但留草稿：状态回「未登录」、配置块隐藏、再展开 loginUrl 仍在", async () => {
+    await setupBlackbox();
+    // 展开 + 填 loginUrl（产生草稿）
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    // 收起 → enabled=false：状态回未登录、凭据块隐藏
+    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
+    await waitFor(() => expect(screen.getByText(/未登录状态扫描/)).toBeInTheDocument());
+    expect(screen.queryByPlaceholderText("https://example.com/login")).toBeNull();
+    // 再展开 → 草稿恢复（loginUrl 未丢）
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    expect(screen.getByDisplayValue("http://t/login")).toBeInTheDocument();
+  });
+
+  it("收起后提交不发 authentication（buildBody 受 enabled 控制，不因曾配置而发）", async () => {
+    let posted: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/scan", async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    // 展开 + 填有效 inline 凭据（loginUrl + username 使 validateAuth 通过——否则提交 disabled 测不到「发了」）
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
+    // 收起（停用）→ 提交：enabled=false 故 buildBody 不带 auth
+    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(posted).toBeDefined());
+    expect(posted!.authentication).toBeUndefined();
+    expect(posted!.auth_profile_id).toBeUndefined();
+  });
+
+  it("草稿存在时收起态按钮显「已配置」标记（折叠不丢配置的可见信号）", async () => {
+    await setupBlackbox();
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    // 收起 → 草稿仍在 → 按钮显「已配置」标记
+    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
+    expect(screen.getByRole("button", { name: /已配置/ })).toBeInTheDocument();
+  });
+
+  it("「需要登录」冗余开关已移除（展开即启用，单一 disclosure）", async () => {
+    await setupBlackbox();
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    // 不再有独立「需要登录」Switch
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+});
+
+// === #2 inline 多角色：主账号（authentication）+ 附加角色（auth_accounts），多身份对比 ===
+describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_accounts）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  // 主账号字段（BottomInlineBlock 内 Label 无 htmlFor）按文本定位 input。
+  function inputByLabel(labelText: RegExp | string) {
+    const label = screen.getByText(labelText);
+    return label.parentElement?.querySelector("input") as HTMLInputElement;
+  }
+
+  it("添加附加角色 → 提交发 auth_accounts（附加）+ authentication（主账号）", async () => {
+    let posted: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/scan", async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    // 主账号（add 之前只有主账号「用户名」标签，inputByLabel 安全不歧义）
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    fireEvent.change(inputByLabel("用户名"), { target: { value: "admin" } });
+    fireEvent.change(inputByLabel("密码"), { target: { value: "pw" } });
+    // 添加附加角色 → CredentialRows 行（htmlFor 标签，getAllByLabelText 取）
+    fireEvent.click(screen.getByRole("button", { name: /添加角色/ }));
+    fireEvent.change(screen.getAllByLabelText("角色")[0], { target: { value: "user" } });
+    fireEvent.change(screen.getAllByLabelText("用户名")[0], { target: { value: "bob" } });
+    fireEvent.change(screen.getAllByLabelText("密码")[0], { target: { value: "bobpw" } });
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(posted).toBeDefined());
+    const p = posted as { authentication: { credentials: { username: string } }; auth_accounts?: { role: string; username: string; password: string }[] };
+    expect(p.authentication.credentials.username).toBe("admin");  // 主账号
+    expect(p.auth_accounts).toEqual([
+      expect.objectContaining({ role: "user", username: "bob", password: "bobpw" }),
+    ]);
+  });
+
+  it("未添加附加角色 → 提交不发 auth_accounts（单角色向后兼容）", async () => {
+    let posted: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.post("/api/scan", async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
+      }),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
+    fireEvent.change(screen.getByText("用户名").parentElement!.querySelector("input")!, { target: { value: "admin" } });
+    fireEvent.change(screen.getByText("密码").parentElement!.querySelector("input")!, { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
+    await waitFor(() => expect(posted).toBeDefined());
+    expect((posted as Record<string, unknown>).auth_accounts).toBeUndefined();
   });
 });
 
@@ -729,7 +886,7 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
   const base: AuthFormState = {
     enabled: true, source: "inline", profileId: "", credentialIds: [],
     loginType: "form", loginUrl: "https://x/login", role: "admin", username: "admin",
-    password: "pw", totpSecret: "T", loginFlow: "a\nb",
+    password: "pw", totpSecret: "T", accounts: [], loginFlow: "a\nb",
   };
   // t 只回 key（断言用 key 本身，不依赖 i18n 文案）
   const t = ((k: string) => k) as never;

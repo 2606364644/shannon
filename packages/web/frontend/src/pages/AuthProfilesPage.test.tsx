@@ -91,6 +91,66 @@ describe("AuthProfilesPage", () => {
     await waitFor(() => expect(screen.getByText("App2")).toBeInTheDocument());
   });
 
+  it("新建多角色档案：添加 2 行角色 → 提交 credentials 含 2 条（role/username 各异）", async () => {
+    let posted: Record<string, unknown> | undefined;
+    server.use(http.post("/api/workspaces/:ws/auth-profiles", async ({ request }) => {
+      posted = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        id: "p2", name: "M", login_url: "http://t/", login_type: "form",
+        credentials: [
+          { id: "c1", role: "admin", username: "a", verify_status: { state: "unverified" } },
+          { id: "c2", role: "user", username: "u", verify_status: { state: "unverified" } },
+        ],
+      });
+    }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("新建档案"));
+    fireEvent.change(screen.getByLabelText("档案名"), { target: { value: "M" } });
+    fireEvent.change(screen.getByLabelText("登录地址"), { target: { value: "http://t/" } });
+    // 第一行（角色默认 admin）填用户名
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "a" } });
+    // 添加第二行 + 填角色 user / 用户名 u
+    fireEvent.click(screen.getByRole("button", { name: /添加角色/ }));
+    fireEvent.change(screen.getAllByLabelText("角色")[1], { target: { value: "user" } });
+    fireEvent.change(screen.getAllByLabelText("用户名")[1], { target: { value: "u" } });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "新建档案" }));
+    await waitFor(() => expect(posted).toBeDefined());
+    const creds = (posted as { credentials: { role: string; username: string }[] }).credentials;
+    expect(creds.length).toBe(2);
+    expect(creds.map((c) => c.role)).toEqual(["admin", "user"]);
+    expect(creds.map((c) => c.username)).toEqual(["a", "u"]);
+  });
+
+  it("编辑多角色档案：预填全量角色 + 提交 PUT 透传 id 全量（不丢角色）", async () => {
+    let putBody: Record<string, unknown> | undefined;
+    profiles = [{
+      ...initial[0],
+      credentials: [
+        { id: "cred_a", role: "admin", username: "admin", password: "••••", verify_status: { state: "unverified" } },
+        { id: "cred_b", role: "user", username: "u", password: "••••", verify_status: { state: "unverified" } },
+      ],
+    }];
+    server.use(http.put("/api/workspaces/:ws/auth-profiles/:pid", async ({ request }) => {
+      putBody = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({ ok: true });
+    }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("编辑"));
+    const dialog = await screen.findByRole("dialog");
+    // 预填全量角色（用户名 admin + u）
+    const userInputs = within(dialog).getAllByLabelText("用户名");
+    expect(userInputs.map((i) => (i as HTMLInputElement).value)).toEqual(["admin", "u"]);
+    // 提交 → PUT credentials 含 2 条，id 透传（password 留空 = 保留原值）
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(putBody).toBeDefined());
+    const creds = (putBody as { credentials: { id: string; role: string }[] }).credentials;
+    expect(creds.length).toBe(2);
+    expect(creds.map((c) => c.id)).toEqual(["cred_a", "cred_b"]);
+  });
+
   // Task 12: 凭据「测试登录」触发 testCredential → 轮询 getVerifyStatus → 显示成功徽章。
   // 轮询策略:用 vi.useFakeTimers() + advanceTimersByTimeAsync(3000) 加速(避免 3s 真等待)。
   // 已有同模式先例:useWorkspaces.test.tsx / LiveTab.test.tsx(fake timers + msw fetch 走 microtask 正常解析)。

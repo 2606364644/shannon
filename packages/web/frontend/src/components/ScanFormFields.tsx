@@ -4,9 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RepoCombobox } from "./RepoCombobox";
+import { CredentialRows } from "./auth/CredentialRows";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
 import { listRepos, listScans } from "@/api/client";
@@ -117,9 +117,8 @@ function StepGroup({ step, title, tag, tagClass, className, children }: {
   );
 }
 
-/** 右栏认证核心（2026-08-06 重排，对齐 preview HTML #rightCore）：
- *    coral 竖条标题 + Switch「需要登录」+ 来源 segmented（临时填写 / 使用档案）+ 模式右栏内容。
- *  - enabled=false 时仅显 Switch + 提示。
+/** 右栏认证核心（仅在 f.auth.enabled=展开 时挂载；#1 单一 disclosure：展开即启用）：
+ *    coral 竖条标题 + 来源 segmented（临时填写 / 使用档案）+ 模式右栏内容。
  *  - inline 模式右栏：登录步骤（textarea）+ 存为档案（档案名+保存一行）。
  *  - profile 模式右栏：已选档案摘要卡 + 提示。
  *  顶格对齐左栏「目标服务」（grid items-start，折叠态占位与展开态核心互斥显隐）。 */
@@ -138,42 +137,31 @@ function RightAuthCore({ auth, setAuth, authErr, workspace, refreshSignal, onPro
         <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
         <h4 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h4>
       </div>
-      <div className="flex items-center justify-between gap-3">
-        <Label className="text-xs font-medium">{t("scan.auth.enableLabel")}</Label>
-        <Switch checked={auth.enabled} onCheckedChange={(v) => setAuth({ enabled: v })} />
+      {/* 来源 segmented（临时填写 / 使用档案） */}
+      <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
+        {(["inline", "profile"] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setAuth({ source: s })}
+            aria-pressed={auth.source === s}
+            className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              auth.source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t(`authProfiles.source${s === "inline" ? "Inline" : "Profile"}`)}
+          </button>
+        ))}
       </div>
 
-      {!auth.enabled ? (
-        <div className="text-xs text-muted-foreground">{t("scan.auth.enableHint")}</div>
+      {/* 模式右栏内容 */}
+      {auth.source === "inline" ? (
+        <InlineRightEnhance auth={auth} setAuth={setAuth} ws={workspace} onProfileSaved={onProfileSaved} />
       ) : (
-        <>
-          {/* 来源 segmented（临时填写 / 使用档案） */}
-          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
-            {(["inline", "profile"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setAuth({ source: s })}
-                aria-pressed={auth.source === s}
-                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  auth.source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t(`authProfiles.source${s === "inline" ? "Inline" : "Profile"}`)}
-              </button>
-            ))}
-          </div>
-
-          {/* 模式右栏内容 */}
-          {auth.source === "inline" ? (
-            <InlineRightEnhance auth={auth} setAuth={setAuth} ws={workspace} onProfileSaved={onProfileSaved} />
-          ) : (
-            <ProfileRightSummary auth={auth} workspace={workspace} refreshSignal={refreshSignal} />
-          )}
-          {/* profile 模式校验错误贴下方档案块显；inline 模式错误交下方 inline 块显。 */}
-          {auth.source === "profile" && authErr && <div className="text-destructive text-xs">{authErr}</div>}
-        </>
+        <ProfileRightSummary auth={auth} workspace={workspace} refreshSignal={refreshSignal} />
       )}
+      {/* profile 模式校验错误贴下方档案块显；inline 模式错误交下方 inline 块显。 */}
+      {auth.source === "profile" && authErr && <div className="text-destructive text-xs">{authErr}</div>}
 
       <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
         <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
@@ -406,6 +394,11 @@ function BottomInlineBlock({ auth, setAuth, authErr }: {
           </div>
         </div>
       </div>
+      {/* #2 附加角色（多身份对比）：CredentialRows，空态只显「+ 添加角色」，非空 → buildBody 发 auth_accounts */}
+      <div className="space-y-2">
+        <GroupLabel>{t("scan.auth.extraRoles")}</GroupLabel>
+        <CredentialRows value={auth.accounts} onChange={(next) => setAuth({ accounts: next })} allowMulti showTotp />
+      </div>
       {authErr && <div className="text-destructive text-xs mt-2">{authErr}</div>}
     </div>
   );
@@ -631,9 +624,6 @@ export function ScanFormFields({
   // ProfilePicker 刷新信号：inline 保存为新档案后递增 -> 触发重拉（须在所有 early return 之前，
   // 守 hooks 规则--白盒提前 return 不跳过此 useState）。onProfileSaved 在黑盒区定义（用 setAuth）。
   const [profileRefresh, setProfileRefresh] = useState(0);
-  // 黑盒认证折叠态：默认跟随 auth.enabled（重跑预填 enabled=true → 自动展开，露出预填配置）。
-  // 须在白盒 early return 之前（守 hooks 规则）。
-  const [authExpanded, setAuthExpanded] = useState(() => f.auth.enabled);
 
   // P2: repo 列表按选定 ws 拉取——ws 未选时不发起（路径无意义）
   useEffect(() => {
@@ -779,6 +769,10 @@ export function ScanFormFields({
     setAuth({ source: "profile", profileId: profile.id, credentialIds: profile.credentials.map((c) => c.id) });
     setProfileRefresh((n) => n + 1);
   };
+  // #1 单一 disclosure：收起态若有草稿（任意 inline 字段已填 / 已选档案），按钮显「已配置」标记——
+  // 折叠不再清字段，标记告诉用户「配置还在、只是当前未启用」。role 默认 admin 不算草稿信号。
+  const hasAuthDraft = !!(f.auth.loginUrl.trim() || f.auth.username.trim() || f.auth.password.trim()
+    || f.auth.totpSecret.trim() || f.auth.loginFlow.trim() || f.auth.profileId);
   return (
     <div className="space-y-5">
       {/* 上层：左表单 + 右核心(展开时) */}
@@ -871,15 +865,11 @@ export function ScanFormFields({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  // 对齐 preview：点「配置登录」= 开启 + 展开（露出右栏核心 + 下方凭据块）。
-                  // enabled 与 expanded 解耦——收起保留 enabled（仅隐 UI），Switch 在展开态可关。
-                  const next = !authExpanded;
-                  setAuthExpanded(next);
-                  if (next && !f.auth.enabled) set({ auth: { ...f.auth, enabled: true } });
-                }}
+                onClick={() => setAuth({ enabled: !f.auth.enabled })}
               >
-                {authExpanded ? t("scan.auth.collapse") : t("scan.auth.configure")}
+                {f.auth.enabled
+                  ? t("scan.auth.collapse")
+                  : hasAuthDraft ? t("scan.auth.configureDraft") : t("scan.auth.configure")}
               </Button>
             </div>
           </section>
@@ -887,7 +877,7 @@ export function ScanFormFields({
 
         {/* 右栏：折叠=虚线占位 / 展开=核心（顶格对齐目标服务） */}
         <div className="hidden lg:block">
-          {authExpanded ? (
+          {f.auth.enabled ? (
             <RightAuthCore
               auth={f.auth}
               setAuth={setAuth}
@@ -905,7 +895,7 @@ export function ScanFormFields({
       </div>
 
       {/* 下方横向（展开时显：inline=登录入口+凭据 / profile=档案卡列表+详情+角色多选） */}
-      {authExpanded && f.auth.enabled && (
+      {f.auth.enabled && (
         f.auth.source === "profile" ? (
           <BottomProfileBlock auth={f.auth} setAuth={setAuth} workspace={workspace} refreshSignal={profileRefresh} />
         ) : (

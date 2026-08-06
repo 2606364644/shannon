@@ -346,6 +346,7 @@
       "authLoginUrlEmpty": "Please fill in the login URL",
       "authLoginUrl": "Login URL must start with http(s)://",
       "authUsername": "Please fill in the username",
+      "authAccountIncomplete": "Extra roles need both username and password",
       "authProfileRequired": "Please select an auth profile",
       "authCredentialRequired": "Please select a login role"
     },
@@ -370,8 +371,6 @@
       "optional": "Optional"
     },
     "auth": {
-      "enableLabel": "Login required",
-      "enableHint": "Keep off when the target needs no login; agent-browser will log in before scanning per the settings below and persist the session.",
       "saveAsProfile": "Save as auth profile",
       "saveAsProfileHint": "Save the current login configuration as a workspace profile for reuse in \"Use profile\" mode.",
       "profileNamePlaceholder": "e.g. NG admin portal",
@@ -394,6 +393,7 @@
       "loginFlowHint": "One step per line (optional, e.g. open login page / fill username / fill password / submit)",
       "infoNote": "The session is persisted to auth-state and reused by later scan phases once login is verified.",
       "configure": "Configure login",
+      "configureDraft": "Configure login · configured",
       "collapse": "Collapse",
       "statusUnauth": "Currently: scanning unauthenticated",
       "statusEnabled": "Currently: login enabled",
@@ -403,6 +403,9 @@
       "profileRoleHint": "Will actually log in once with the selected role to persist the session; verification status comes from the profile library's latest test login.",
       "selectProfileHint": "Select a profile on the left to see its login URL, type, and each role's verification status",
       "role": "Role",
+      "addRole": "+ Add role",
+      "extraRoles": "Extra roles (multi-identity)",
+      "removeRole": "Remove role",
       "selectAllRoles": "Select all",
       "deselectAllRoles": "Deselect all",
       "rolesSelected": "{{n}} / {{m}} roles selected; scan will validate with each role's credentials.",

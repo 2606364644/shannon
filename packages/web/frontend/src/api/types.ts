@@ -312,6 +312,9 @@ export interface ScanRequest {
   // （空=全选该档案所有角色）。与上方 `authentication?` 互斥（二者全无时黑盒按 unauthenticated 处理）。
   auth_profile_id?: string;
   auth_credential_ids?: string[];
+  // inline 多角色附加账号（#2，2026-08-07）：与 authentication 同存，每条 {role,username,password,totp_secret?}。
+  // 后端 scan_manager 展开成 accounts[]（多身份对比）；仅 inline 模式（authentication 存在）时合法。
+  auth_accounts?: { role: string; username: string; password: string; totp_secret?: string }[];
   config_yaml?: string;
   config_name?: string;
 }

@@ -15,6 +15,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { createAuthProfile, updateAuthProfile } from "@/api/authProfiles";
 import { apiErrorMessage } from "@/lib/apiError";
 import type { AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
+import { CredentialRows, type CredentialDraft } from "./auth/CredentialRows";
 
 type LoginType = "form" | "sso" | "api" | "basic";
 const LOGIN_TYPES: LoginType[] = ["form", "sso", "api", "basic"];
@@ -33,9 +34,16 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   const [loginUrl, setLoginUrl] = useState(editing?.login_url ?? "");
   const [loginType, setLoginType] = useState<LoginType>(editing?.login_type ?? "form");
   const [loginFlow, setLoginFlow] = useState((editing?.login_flow ?? []).join("\n"));
-  const [role, setRole] = useState(editing?.credentials[0]?.role ?? "admin");
-  const [username, setUsername] = useState(editing?.credentials[0]?.username ?? "");
-  const [password, setPassword] = useState("");
+  // 多角色凭据草稿（2026-08-07 #2）：编辑态加载全量 credentials（password/totp 留空=保留原值，
+  // 不回显脱敏密文）；新建态一行默认 admin。
+  const [drafts, setDrafts] = useState<CredentialDraft[]>(() => {
+    if (editing && editing.credentials.length) {
+      return editing.credentials.map((c) => ({
+        id: c.id, role: c.role, username: c.username, password: "", totpSecret: "",
+      }));
+    }
+    return [{ role: "admin", username: "", password: "", totpSecret: "" }];
+  });
   const [busy, setBusy] = useState(false);
   // 系统档案只读防御：editing 正常不会是 system（列表已隐藏 Edit 按钮），此处兜底——
   // 万一外部直接传入 system editing，禁提交，与后端 403 一致。
@@ -43,33 +51,34 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
 
   function reset() {
     setName(""); setLoginUrl(""); setLoginType("form"); setLoginFlow("");
-    setRole("admin"); setUsername(""); setPassword("");
+    setDrafts([{ role: "admin", username: "", password: "", totpSecret: "" }]);
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (readOnly) return;
-    if (!name.trim() || !loginUrl.trim() || !username.trim()) {
+    if (!name.trim() || !loginUrl.trim() || drafts.some((d) => !d.username.trim())) {
       toast.error(t(editing ? "authProfiles.saveFailed" : "authProfiles.createFailed"));
       return;
     }
     setBusy(true);
     try {
       const flow = loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
-      // 凭据 POST 时 id 占位(后端分配真实 id);编辑时透传原 id。
-      const cred: AuthProfileCredential = {
-        id: editing?.credentials[0]?.id ?? "",
-        role,
-        username: username.trim(),
+      // 多角色：每条 draft → credential（编辑透传原 id；password/totp 空=保留/不发）。
+      const credentials: AuthProfileCredential[] = drafts.map((d) => ({
+        id: d.id ?? "",
+        role: d.role.trim() || "admin",
+        username: d.username.trim(),
         verify_status: { state: "unverified" as VerifyState },
-        ...(password ? { password } : {}),
-      };
+        ...(d.password ? { password: d.password } : {}),
+        ...(d.totpSecret.trim() ? { totp_secret: d.totpSecret.trim() } : {}),
+      }));
       const body: Partial<AuthProfile> = {
         name: name.trim(),
         login_url: loginUrl.trim(),
         login_type: loginType,
         ...(flow.length ? { login_flow: flow } : {}),
-        credentials: [cred],
+        credentials,
       };
       if (editing) await updateAuthProfile(ws, editing.id, body);
       else await createAuthProfile(ws, body);
@@ -110,21 +119,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
             <Label htmlFor="ap-flow">{t("authProfiles.loginFlow")}</Label>
             <Textarea id="ap-flow" value={loginFlow} onChange={(e) => setLoginFlow(e.target.value)} rows={3} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-role">{t("authProfiles.role")}</Label>
-              <Input id="ap-role" value={role} onChange={(e) => setRole(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-user">{t("authProfiles.username")}</Label>
-              <Input id="ap-user" value={username} onChange={(e) => setUsername(e.target.value)} required />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-pw">{t("authProfiles.password")}</Label>
-            <Input id="ap-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder={editing ? "••••" : ""} />
-          </div>
+          <CredentialRows value={drafts} onChange={setDrafts} allowMulti showTotp />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
             {!readOnly && (

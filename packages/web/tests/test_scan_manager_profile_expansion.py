@@ -221,6 +221,32 @@ async def test_resolve_blackbox_credential_ids_missing_raises(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_resolve_blackbox_multi_identity_accounts_carry_totp(tmp_path):
+    """非 primary account 透传 totp_secret（2026-08-07 §3.4，多角色 2FA 不丢）。"""
+    import yaml
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    store.write("ws1", [AuthProfile(
+        id="prof_1", name="NG", login_url="http://t/", login_type="form",
+        credentials=[
+            AuthProfileCredential(id="cred_u1", role="user", username="u1", password="pw"),
+            AuthProfileCredential(id="cred_admin", role="admin", username="adm",
+                                  password="pw", totp_secret="TOTP"),
+        ])])
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1", auth_profile_id="prof_1")
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+    cfg = yaml.safe_load((scan_dir / "scan-config.yaml").read_text("utf-8"))
+    # primary = 首个 low = cred_u1；cred_admin 进 accounts 且带 totp_secret
+    acct = next(a for a in cfg["accounts"] if a["id"] == "cred_admin")
+    assert acct["credentials"]["totp_secret"] == "TOTP"
+
+
+@pytest.mark.asyncio
 async def test_resolve_blackbox_credential_ids_subset_profile_missing_raises(tmp_path):
     """子集模式：档案不存在 → ValueError（对齐全角色/单角色分支口径）。"""
     store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))

@@ -97,6 +97,11 @@ async def update_profile(ws: str, pid: str, payload: dict, request: Request,
                             "email_login", "verify_status")
             filtered = {k: v for k, v in c_in.items() if k in _cred_fields}
             existing.credentials.append(AuthProfileCredential(id="", **filtered))
+    # 全量 diff（2026-08-07 多角色编辑删角色）：payload 显式带 credentials[] 时视为完整目标列表，
+    # existing 有但 payload 没有的 id → 删除；本轮新增（id 空）保留。不带 credentials 键 → 不动（兼容局部更新）。
+    if "credentials" in payload:
+        keep_ids = {c_in.get("id") for c_in in payload.get("credentials", []) if c_in.get("id")}
+        existing.credentials = [c for c in existing.credentials if c.id in keep_ids or not c.id]
     store.upsert_profile(ws, existing)
     return {"ok": True}
 

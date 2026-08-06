@@ -78,6 +78,44 @@ async def test_resolve_blackbox_inputs_writes_auth_yaml(tmp_path):
     assert repo_path == str(wb_scan_dir)  # 黑盒恒复用白盒 → repo_path = wb scan_dir
 
 
+async def test_resolve_blackbox_inputs_inline_auth_accounts_expands(tmp_path):
+    """inline 多角色：authentication + auth_accounts → scan-config.yaml 含 accounts[]
+    （id=角色 slug、tier=derive_privilege_tier、totp_secret 透传）。"""
+    import yaml
+    from supernova_web.components.scan_manager import ScanManager
+    from supernova_web.models import ScanRequest
+
+    sm = ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
+    wb_scan_id, _wb_scan_dir = sm._store.create_scan(
+        "ws-a", "https://t.example", "/r", "whitebox")
+    scan_dir = tmp_path / "ws-a" / "scans" / "s1"
+    scan_dir.mkdir(parents=True)
+    req = ScanRequest(
+        type="blackbox", url="https://t.example", workspace="ws-a",
+        reuse_whitebox_scan_id=wb_scan_id,
+        authentication={"login_type": "form", "login_url": "https://t.example/login",
+                        "credentials": {"username": "admin", "password": "pw"}},
+        auth_accounts=[
+            {"role": "user", "username": "bob", "password": "bobpw"},
+            {"role": "admin", "username": "admin2", "password": "a2", "totp_secret": "T"},
+        ],
+    )
+    await sm._resolve_blackbox_inputs(req, "ws-a", scan_dir, target=None)
+    parsed = yaml.safe_load((scan_dir / "scan-config.yaml").read_text(encoding="utf-8"))
+    # primary authentication 仍在
+    assert parsed["authentication"]["credentials"]["username"] == "admin"
+    # accounts[] 展开：id=角色 slug、tier 推导（admin=high / user=low）、totp 透传
+    accounts = parsed.get("accounts")
+    assert accounts is not None, "accounts[] 未展开"
+    by_role = {a["role"]: a for a in accounts}
+    assert set(by_role) == {"user", "admin"}
+    assert by_role["user"]["id"] == "user"
+    assert by_role["user"]["tier"] == "low"
+    assert by_role["user"]["credentials"] == {"username": "bob", "password": "bobpw"}
+    assert by_role["admin"]["tier"] == "high"
+    assert by_role["admin"]["credentials"]["totp_secret"] == "T"
+
+
 async def test_resolve_blackbox_inputs_reuse_whitebox_scan(tmp_path):
     """reuse_whitebox_scan_id → 该白盒 scan_dir 作 repo_path（detect_whitebox_results 复用源）。"""
     from supernova_web.components.scan_manager import ScanManager

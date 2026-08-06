@@ -380,11 +380,14 @@ class ScanManager:
             for c in creds:
                 if c.id == primary.id:
                     continue
+                creds_d = {"username": c.username, "password": c.password}
+                if getattr(c, "totp_secret", None):
+                    creds_d["totp_secret"] = c.totp_secret
                 accounts.append({
                     "id": c.id,
                     "role": c.role,
                     "tier": _tier_of(c),
-                    "credentials": {"username": c.username, "password": c.password},
+                    "credentials": creds_d,
                 })
             payload = {
                 "authentication": primary_auth.model_dump(exclude_none=True, mode="json"),
@@ -430,8 +433,36 @@ class ScanManager:
                 auth = Authentication.model_validate(req.authentication)
             except Exception as exc:
                 raise ValueError(f"登录配置无效: {exc}") from exc
-            config_path = _dump_auth_payload(
-                {"authentication": auth.model_dump(exclude_none=True, mode="json")})
+            payload = {"authentication": auth.model_dump(exclude_none=True, mode="json")}
+            # inline 多角色（2026-08-07）：auth_accounts 非空 → 展开 accounts[]（id=角色 slug 去重、
+            # tier=derive_privilege_tier、totp_secret 透传）。形状对齐 profile 模式 _expand_multi_identity。
+            if req.auth_accounts:
+                from supernova_core.utils.authz_identity import derive_privilege_tier
+                used_ids: set[str] = set()
+                accounts = []
+                for acc in req.auth_accounts:
+                    role = (acc.get("role") or "").strip() or "role"
+                    base = "".join(ch if ch.isalnum() else "-" for ch in role.lower())
+                    while "--" in base:
+                        base = base.replace("--", "-")
+                    base = base.strip("-") or "role"
+                    slug = base
+                    n = 2
+                    while slug in used_ids:
+                        slug = f"{base}-{n}"
+                        n += 1
+                    used_ids.add(slug)
+                    creds = {"username": acc.get("username", ""), "password": acc.get("password", "")}
+                    if acc.get("totp_secret"):
+                        creds["totp_secret"] = acc["totp_secret"]
+                    accounts.append({
+                        "id": slug,
+                        "role": role,
+                        "tier": derive_privilege_tier(role, ["admin"]),
+                        "credentials": creds,
+                    })
+                payload["accounts"] = accounts
+            config_path = _dump_auth_payload(payload)
 
         # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，无 standalone/repo 兜底。
         # model_validator 已在请求层拦 reuse 缺失；此处工作层独立兜底（不依赖 pydantic，防 model 层被误改）。

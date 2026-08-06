@@ -7,6 +7,7 @@ import type { ScanRequest, ScanResponse, Workspace, ScanAuthentication } from ".
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
+import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -38,6 +39,8 @@ export interface AuthFormState {
   username: string;
   password: string;
   totpSecret: string;
+  /** inline 多角色附加角色（#2）：空数组=单角色；非空 → buildBody 发 auth_accounts（多身份对比）。 */
+  accounts: CredentialDraft[];
   loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
 }
 
@@ -52,6 +55,7 @@ const DEFAULT_AUTH: AuthFormState = {
   username: "",
   password: "",
   totpSecret: "",
+  accounts: [],
   loginFlow: "",
 };
 
@@ -86,6 +90,7 @@ export function authFromPayload(auth: ScanAuthentication): AuthFormState {
     username: c.username ?? "",
     password: c.password ?? "",
     totpSecret: c.totp_secret ?? "",
+    accounts: [],
     loginFlow: Array.isArray(auth.login_flow) ? auth.login_flow.join("\n") : "",
   };
 }
@@ -135,6 +140,10 @@ export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
   if (!/^https?:\/\//.test(a.loginUrl.trim())) return t("scan.errors.authLoginUrl");
   if (!a.username.trim()) return t("scan.errors.authUsername");
+  // #2 附加角色：每条须用户名 + 密码（可登录），否则拦空。
+  for (const acc of a.accounts) {
+    if (!acc.username.trim() || !acc.password) return t("scan.errors.authAccountIncomplete");
+  }
   return null;
 }
 
@@ -179,6 +188,15 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
       body.auth_credential_ids = f.auth.credentialIds.length ? f.auth.credentialIds : undefined;
     } else {
       body.authentication = buildAuthPayload(f.auth);
+      // #2 inline 多角色附加账号 → auth_accounts（后端 scan_manager 展开成 accounts[]）。
+      if (f.auth.accounts.length) {
+        body.auth_accounts = f.auth.accounts.map((acc) => ({
+          role: acc.role.trim() || "role",
+          username: acc.username.trim(),
+          password: acc.password,
+          ...(acc.totpSecret.trim() ? { totp_secret: acc.totpSecret.trim() } : {}),
+        }));
+      }
     }
   }
   return body;

@@ -62,6 +62,25 @@ def test_put_empty_secret_keeps_existing(tmp_path):
     assert cred.password == "pw"  # 保留
 
 
+def test_put_omitted_credential_is_deleted(tmp_path):
+    """PUT 全量 diff：payload 不含的已有 credential id 被删（编辑态删角色）。"""
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [
+            {"role": "admin", "username": "admin", "password": "pw"},
+            {"role": "user", "username": "user1", "password": "pw2"},
+        ]}).json()["id"]
+    creds = c.get(f"/api/workspaces/ws1/auth-profiles/{pid}").json()["credentials"]
+    admin_id = next(cr["id"] for cr in creds if cr["role"] == "admin")
+    # PUT 只保留 admin（omit user）→ user 应被删
+    c.put(f"/api/workspaces/ws1/auth-profiles/{pid}", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"id": admin_id, "role": "admin", "username": "admin", "password": ""}]})
+    stored = store.read("ws1")[0].credentials
+    assert {cr.role for cr in stored} == {"admin"}  # user 被删
+
+
 @pytest.mark.asyncio
 async def test_test_endpoint_starts_workflow(tmp_path, monkeypatch):
     c, store = _client(tmp_path)

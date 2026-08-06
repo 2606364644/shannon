@@ -4,7 +4,7 @@
 
 ## 目标
 
-让「认证档案新建/编辑」与「黑盒扫描页临时填写」两处认证凭据录入**支持多角色多账号**，并**统一为同一套录入组件与视觉语言**。顺带彻底删除从未生效的死字段 `email_login`。
+让「认证档案新建/编辑」与「黑盒扫描页临时填写」两处认证凭据录入**支持多角色多账号**，并**统一为同一套录入组件与视觉语言**。顺带彻底删除从未生效的死字段 `email_login`。同时把黑盒页认证区收敛为**单一 disclosure（展开即启用）**，消除冗余的「需要登录」开关。
 
 ## 背景与现状（关键事实）
 
@@ -25,7 +25,7 @@
 | `Segmented` | 通用 segmented（`bg-muted/40` hairline track + active `bg-card shadow-sm`） | 统一 `SettingsPage.tsx:38-72` `ThemeSegmented` 与黑盒页两处内联 segmented |
 | `CredentialRows` | 多角色增删行：每行 角色/用户名/密码/可选 TOTP/删除；底部「+ 添加角色」 | 新建 |
 
-`CredentialRows` props：`value: CredentialDraft[]`、`onChange`、`allowMulti: boolean`、`showTotp: boolean`。
+`CredentialRows` props：`value: CredentialDraft[]`、`onChange`、`allowMulti: boolean`、`showTotp: boolean`。TOTP 默认每行折叠（行内「+ 二步验证」展开），避免无 2FA 的角色白占整行。
 
 ### 2. 两处消费（统一）
 
@@ -38,9 +38,19 @@
 
 **黑盒页 `ScanFormFields`**：
 - 内联 `GroupLabel` / source-loginType segmented / inline 凭据三列 → 替换为共享组件
-- **inline 临时填写升级多角色**（`CredentialRows allowMulti`）
+- **inline 临时填写升级多角色**（`CredentialRows allowMulti`）；底部对齐 profile 模式给「已添加 N 个角色，将分别验证」计数
+- 角色→tier 提示：行内标注 `admin` = 高权、其余按低权（后端 `derive_privilege_tier` 现仅认 `admin`），避免操作者误以为自定义 role 名跑的是高权对比
 - 「保存为档案」(`SaveAsProfileInline`) 同步存多角色 `credentials[]`
 - profile 模式角色多选（`BottomProfileBlock`）**不动**（那是「选已建档案角色」，语义与「录入」不同）
+
+**黑盒认证区单一 disclosure（展开即启用，scan 页专属）**：
+
+当前 `authExpanded`（UI 展开）与 `auth.enabled`（提交是否带 auth）是**双状态、双控件**——`配置登录/收起` 按钮 + `RightAuthCore` 内 `需要登录` Switch。问题：不需要登录根本不会展开，展开已隐含「要登录」，Switch 冗余；且「收起保留 enabled」是 footgun（UI 藏起、提交却仍带登录）。
+
+- **目标**：单一 disclosure，**展开 == 启用**。删 `RightAuthCore` 内 `需要登录` Switch；`authExpanded` 整个并入 `auth.enabled`（保留 `enabled`——它是 `buildBody` 的判据）。
+- **收起 = 停用但留草稿**：`收起` 置 `enabled=false`，**不清** `AuthFormState` 字段（role/username/password/totp/loginUrl/loginFlow 全留），再展开恢复原值。collapsed 态若草稿非空，按钮给存稿标记（如 `配置登录 · 已配置` 或小圆点），提示「有存稿、当前未启用」。
+- **不变量**：重跑预填 `enabled=true` → 自动展开露出预填配置（现有 `useState(() => f.auth.enabled)` 行为保留）；`buildBody` 仍 `if (f.auth.enabled)` 才发 auth；`BottomProfileBlock`（profile 选取）与档案页 Dialog（无展开/折叠概念）不涉及。
+- **测试点**：收起后 `buildBody` 不带 auth 字段；再展开字段值不变；collapsed 有草稿时按钮显标记；rerun `enabled=true` 自动展开。
 
 ### 3. 后端改动
 

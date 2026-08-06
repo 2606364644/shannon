@@ -33,6 +33,9 @@ class ScanRequest(BaseModel):
     # 黑盒登录配置（结构化 dict，对齐 core Authentication schema：login_type/login_url/credentials
     # /login_flow）。scan_manager 内 Authentication.model_validate 校验 + 写 config YAML。
     authentication: dict | None = None
+    # inline 多角色附加账号（2026-08-07）：与 authentication 同存，scan_manager 展开成 accounts[]。
+    # 每条 {role, username, password, totp_secret?}；validator 保证仅 authentication 存在时合法。
+    auth_accounts: list[dict] | None = None
     # 黑盒选已保存档案/角色(与 inline authentication 二选一):scan_manager 展开成 credentials。
     # 三模式（model_validator _auth_profile_xor_inline 保证互斥）：
     #   - profile_id 单独          = 全角色模式（展开档案所有 credentials → accounts[]，多身份验证）；
@@ -81,7 +84,11 @@ class ScanRequest(BaseModel):
             has_cred = self.auth_credential_id is not None
             has_cred_ids = self.auth_credential_ids is not None
             has_inline = self.authentication is not None
-            if (has_profile or has_cred or has_cred_ids) and has_inline:
+            has_accounts = self.auth_accounts is not None
+            # auth_accounts 属 inline 侧：仅与 authentication 同存（inline 多角色附加账号）。
+            if has_accounts and not has_inline:
+                raise ValueError("auth_accounts 必须与 authentication 同时提供（内联多角色附加账号）")
+            if (has_profile or has_cred or has_cred_ids) and (has_inline or has_accounts):
                 raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
             if (has_cred or has_cred_ids) and not has_profile:
                 raise ValueError("选认证档案角色时必须同时指定 auth_profile_id")

@@ -65,3 +65,26 @@ def test_blackbox_credential_ids_with_inline_rejected():
         _bb(auth_profile_id="prof_1", auth_credential_ids=["cred_a"],
             authentication={"login_type": "form", "login_url": "http://t/",
                             "credentials": {"username": "a"}})
+
+
+def test_blackbox_auth_accounts_with_authentication_ok():
+    """inline 多角色：auth_accounts（附加角色）与 authentication 同时提供，合法。"""
+    r = _bb(authentication={"login_type": "form", "login_url": "http://t/",
+                            "credentials": {"username": "a"}},
+            auth_accounts=[{"role": "user", "username": "b", "password": "pw"}])
+    assert r.auth_accounts == [{"role": "user", "username": "b", "password": "pw"}]
+
+
+def test_blackbox_auth_accounts_without_authentication_rejected():
+    """auth_accounts 必须依附 authentication（inline 多角色附加账号），单独发非法。"""
+    with pytest.raises(ValidationError):
+        _bb(auth_accounts=[{"role": "user", "username": "b", "password": "pw"}])
+
+
+def test_blackbox_auth_accounts_with_profile_rejected():
+    """auth_accounts 属 inline 侧，与认证档案互斥。"""
+    with pytest.raises(ValidationError):
+        _bb(auth_profile_id="prof_1",
+            authentication={"login_type": "form", "login_url": "http://t/",
+                            "credentials": {"username": "a"}},
+            auth_accounts=[{"role": "user", "username": "b"}])
