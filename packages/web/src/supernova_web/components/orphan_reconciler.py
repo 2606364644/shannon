@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -20,6 +21,8 @@ from temporalio.client import Client, WorkflowExecutionStatus
 from supernova_core.session import SessionManager
 
 from .scan_liveness import is_scan_alive
+
+_log = logging.getLogger(__name__)
 
 # activity_failures.log 尾部截断长度（与 scan_manager.stderr_tail 对齐）
 _TAIL_BYTES = 2048
@@ -123,8 +126,11 @@ async def _workflow_still_running(scan_dir: Path) -> bool:
 
     try:
         return await asyncio.wait_for(_probe(), timeout=_temporal_query_timeout())
-    except Exception:
-        # 超时 / 断连 / workflow 不存在 → 保守回退，不据「查不到」误判
+    except Exception as e:
+        # 超时 / 断连 / workflow 不存在 -> 保守回退，不据「查不到」误判。
+        # L3：此前静默吞，致惰性 reconcile 失效无从排查（2026-08-06 hk-user-view 卡 running
+        # 疑点即此）。补 debug 日志：记 workflow_id + 异常类型，让 reconcile 决策链可观测。
+        _log.debug("reconcile _workflow_still_running fallback (wf=%s): %r", workflow_id, e)
         return False
 
 
@@ -134,6 +140,7 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
     返回是否实际写了 scan_end。任何异常都不应阻塞调用方（启动 / 请求），故内部兜底。
     """
     try:
+        _log.debug("reconcile_orphaned enter: %s is_running=%s", ws_dir.name, is_running)
         session_file = ws_dir / "session.json"
         if not session_file.exists():
             return False  # 非 scan 工作区（如 default/ logs/ 等辅助目录）
@@ -179,7 +186,11 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
             "completed_at": time.time(),
             "status": "interrupted",
         })
+        _log.info("reconcile_orphaned reaped orphan scan: %s (wrote scan_end=interrupted)", ws_dir.name)
         return True
     except Exception:
-        # 对账是兜底增强，绝不因单 ws 异常拖垮启动或请求
+        # 对账是兜底增强，绝不因单 ws 异常拖垮启动或请求。
+        # L3：此前 bare except 静默吞所有异常（含真实 bug），致惰性 reconcile 失效无从排查
+        # （2026-08-06 hk-user-view 卡 running 疑点）。改 logger.exception 记录，不再静默。
+        _log.exception("reconcile_orphaned failed for %s", ws_dir)
         return False

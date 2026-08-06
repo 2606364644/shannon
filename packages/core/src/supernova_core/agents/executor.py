@@ -42,6 +42,27 @@ def resolve_template_name(
     return default_template
 
 
+def _result_cost_context(result) -> dict:
+    """失败路径 raise PentestError 时携带 result 的 cost/tokens，供 activities 失败
+    分支记进 metrics（修 error path cost 归 0——失败 agent 也记已产生的真实 LLM 消耗）。
+
+    成功路径走 AgentMetrics（见 execute 末尾）；失败路径 raise PentestError 原本丢弃了
+    result.cost，现经 PentestError.context 桥接到 activities 的 except PentestError →
+    end_agent → metrics。tokens 可能为 None（provider 异常路径未提），各 token 字段回落 None。
+    """
+    tokens = result.tokens
+    return {
+        "cost_usd": result.cost,
+        "cost_currency": result.cost_currency,
+        "model": result.model,
+        "num_turns": result.turns,
+        "input_tokens": tokens.input_tokens if tokens else None,
+        "output_tokens": tokens.output_tokens if tokens else None,
+        "cache_read_tokens": tokens.cache_read_input_tokens if tokens else None,
+        "cache_creation_tokens": tokens.cache_creation_input_tokens if tokens else None,
+    }
+
+
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
         self.prompt_manager = prompt_manager
@@ -134,6 +155,7 @@ class AgentExecutor:
                 "billing",
                 retryable=True,
                 error_code=ErrorCode.SPENDING_CAP_REACHED,
+                context=_result_cost_context(result),
             )
 
         if not result.success:
@@ -151,6 +173,7 @@ class AgentExecutor:
                 "validation",
                 retryable=result.retryable,
                 error_code=error_code,
+                context=_result_cost_context(result),
             )
 
         queue_filename = get_queue_filename(agent_name)

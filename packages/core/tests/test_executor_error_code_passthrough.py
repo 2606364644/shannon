@@ -31,17 +31,20 @@ def _patch_runtime(monkeypatch, tmp_path):
     return deliverables, exec_mod.AgentExecutor(pm)
 
 
-def _stub_result(*, error_code):
+def _stub_result(*, error_code, cost=0.0, cost_currency="USD", tokens=None,
+                 model="stub", turns=1):
     class _R:
-        success = False
-        turns = 1
-        cost = 0.0
         text = ""
         error = "structured output parse failed"
         retryable = True
-        model = "stub"
         stop_reason = "end_turn"
     r = _R()
+    r.success = False
+    r.turns = turns
+    r.cost = cost
+    r.cost_currency = cost_currency
+    r.tokens = tokens
+    r.model = model
     r.error_code = error_code
     return r
 
@@ -97,3 +100,34 @@ def test_executor_keeps_agent_execution_failed_for_none_code(tmp_path, monkeypat
             skip_artifact_postprocess=True,
         ))
     assert exc.value.error_code == ErrorCode.AGENT_EXECUTION_FAILED
+
+
+def test_executor_pentest_error_carries_cost_context_on_failure(tmp_path, monkeypatch):
+    """L2：agent 失败（not result.success）raise PentestError 时，result.cost/tokens 经
+    context 携带，供 activities 失败路径记进 metrics（修 error path cost 归 0）。"""
+    from supernova_core.agents.runner import TokenUsage
+    deliverables, ax = _patch_runtime(monkeypatch, tmp_path)
+    tokens = TokenUsage(input_tokens=1234, output_tokens=567)
+
+    async def fake_run(**kw):
+        await asyncio.sleep(0)
+        return _stub_result(
+            error_code=ErrorCode.AGENT_EXECUTION_FAILED,
+            cost=0.1234, cost_currency="CNY", tokens=tokens,
+            model="glm-5.2", turns=3,
+        )
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    with pytest.raises(PentestError) as exc:
+        _run(ax.execute(
+            agent_name=exec_mod.AgentName.INJECTION_VULN,
+            repo_path=str(deliverables), deliverables_path=str(deliverables),
+            skip_artifact_postprocess=True,
+        ))
+    ctx = exc.value.context
+    assert ctx["cost_usd"] == 0.1234
+    assert ctx["cost_currency"] == "CNY"
+    assert ctx["model"] == "glm-5.2"
+    assert ctx["num_turns"] == 3
+    assert ctx["input_tokens"] == 1234
+    assert ctx["output_tokens"] == 567

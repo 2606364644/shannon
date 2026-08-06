@@ -19,7 +19,7 @@ from supernova_core.models.errors import (
 )
 from supernova_core.models.metrics import AgentMetrics
 from supernova_core.models.retry import agent_retry_category, retry_for
-from supernova_core.runtime.heartbeat import start_heartbeat, stop_heartbeat
+from supernova_core.runtime.heartbeat import stop_heartbeat
 from supernova_core.utils.atomic_write import atomic_write_json
 from supernova_core.utils.paths import resolve_deliverables_path
 from supernova_core.utils.credential_validator import validate_credentials
@@ -32,6 +32,10 @@ from supernova_core.config.concurrency import is_gitnexus_llm_enabled
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
 from supernova_whitebox.audit.session import AuditSession
+from supernova_core.audit.session_recovery import (
+    build_headless_audit_session,
+    ensure_audit_session,
+)
 
 from .shared import ActivityInput
 from .step_intents import intent_for
@@ -81,6 +85,7 @@ def _to_endpoint(d: dict):
 @activity.defn
 async def run_preflight(input: ActivityInput) -> None:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         async with get_audit_session().track_step("setup", "preflight", intent=intent_for("preflight")):
             # Config parsing validation
@@ -183,8 +188,9 @@ def _vuln_output_schema(agent_name: AgentName) -> dict | None:
 @activity.defn
 async def run_agent(input: ActivityInput) -> dict:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     from supernova_whitebox.audit.session_tool_audit_logger import SessionToolAuditLogger
-    from supernova_core.models.audit import AgentEndResult
+    from supernova_core.models.audit import AgentEndResult, end_result_from_pentest_error
 
     agent_name = AgentName(input.agent_name or input.workspace_name)
     attempt = activity.info().attempt
@@ -246,11 +252,13 @@ async def run_agent(input: ActivityInput) -> dict:
         ))
         return metrics.model_dump()
     except PentestError as e:
-        await tool_audit_logger.close(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000))
-        await session.end_agent(agent_name.value, AgentEndResult(
-            success=False, duration_ms=int((time.monotonic() - agent_start) * 1000), cost_usd=0.0,
-            attempt_number=attempt, error=str(e)))
+        dur_ms = int((time.monotonic() - agent_start) * 1000)
+        await tool_audit_logger.close(success=False, duration_ms=dur_ms)
+        # 失败 agent 也记 cost：从 PentestError.context 取 executor 携带的真实消耗
+        # （修 error path cost 归 0），取不到回落 0（非 executor raise）。
+        await session.end_agent(
+            agent_name.value,
+            end_result_from_pentest_error(e, duration_ms=dur_ms, attempt_number=attempt))
         await session.log_error(
             e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         # classify + OUTPUT_VALIDATION 独立 cap(对齐 TS MAX_OUTPUT_VALIDATION_RETRIES=3):
@@ -361,6 +369,7 @@ async def _build_vuln_prompt_variables(
 async def log_phase_start_activity(input: ActivityInput, steps: list[str] | None = None,
                                    intents: list[str] | None = None) -> None:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_start(
         phase, steps=tuple(steps or ()), step_intents=tuple(intents or ()))
@@ -376,6 +385,7 @@ async def log_phase_complete_activity(input: ActivityInput) -> None:
     phase-start event emitted by ``log_phase_start_activity``.
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     phase = input.phase or input.workspace_name or "unknown"
     await get_audit_session().log_phase_complete(phase)
 
@@ -395,6 +405,7 @@ def _entry_points_brief(http_route_count: int, entry_point_total: int) -> str:
 @activity.defn
 async def log_info_activity(input: ActivityInput) -> None:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         await get_audit_session().log_info(input.info_message, input.info_level)
     except Exception:
@@ -465,6 +476,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
     executor.execute (no git checkpoint, no validator, no auto queue write).
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     from supernova_core.code_index.authz_gitnexus_track import build_authz_gitnexus_track
     from supernova_core.models.queue_schemas import VulnerabilityQueue
 
@@ -648,6 +660,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
 async def run_credential_check(input: ActivityInput) -> None:
 
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         async with get_audit_session().track_step("setup", "credential-check", intent=intent_for("credential-check")):
             # P3c 阶段 1：web 穿线优先（input.provider_config），CLI 兜底 build from env。
@@ -679,6 +692,7 @@ async def run_credential_check(input: ActivityInput) -> None:
 @activity.defn
 async def run_code_index(input: ActivityInput) -> dict:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         import logging
         from supernova_core.code_index import build_code_index_with_gitnexus, write_index_files
@@ -822,6 +836,7 @@ async def run_code_index(input: ActivityInput) -> dict:
 async def run_entry_point_fusion(input: ActivityInput) -> dict:
     """Merge deterministic entry points with LLM-discovered entry points."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index import run_entry_point_fusion as _fusion
 
@@ -844,6 +859,7 @@ async def run_entry_point_fusion(input: ActivityInput) -> dict:
 @activity.defn
 async def run_save_adjudication(input: ActivityInput) -> dict:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index import save_adjudication
 
@@ -864,6 +880,7 @@ async def run_save_adjudication(input: ActivityInput) -> dict:
 async def run_merge_sink_reports(input: ActivityInput) -> dict:
     """Merge deterministic sinks with LLM-discovered sinks from pre-recon."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index.sink_merger import merge_sink_reports
         from supernova_core.code_index.parameter_models import SinkCallSite
@@ -911,6 +928,7 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
     """Merge LLM-track and GitNexus-track vulnerability queues."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
         from supernova_core.code_index.gitnexus_track_status import read_track_status
@@ -1007,6 +1025,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
 async def run_risk_scoring(input: ActivityInput) -> dict:
     """Score call chains and produce tiered audit plan."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index.models import CodeIndex
         from supernova_core.code_index.parameter_models import ParameterPropagationGraph
@@ -1075,6 +1094,7 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 @activity.defn
 async def render_findings(input: ActivityInput) -> None:
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.services.findings_renderer import FindingsRenderer
         from supernova_core.config.parser import parse_config
@@ -1105,6 +1125,7 @@ async def assemble_report(input: ActivityInput) -> None:
     inject_gitnexus_track_status activity 注入（同样 report-executive 之后）。
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.services.report_assembler import ReportAssembler
 
@@ -1366,6 +1387,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     per_class empty, no gitnexus queues written, merger falls back to llm-only.
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.code_index.models import CodeIndex
         from supernova_core.code_index.parameter_models import (
@@ -1548,6 +1570,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
 async def run_framework_analysis(input: ActivityInput) -> dict:
     """Detect auto-REST frameworks, infer endpoints, write deliverable."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.services.framework_analyzer import analyze_frameworks
 
@@ -1578,6 +1601,7 @@ async def run_framework_analysis(input: ActivityInput) -> dict:
 async def run_frontend_mapping(input: ActivityInput) -> dict:
     """Map frontend routes to API calls, identify XSS chains, write deliverable."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.services.frontend_mapper import map_frontend_routes
 
@@ -1607,6 +1631,7 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
 async def run_route_chain_building(input: ActivityInput) -> dict:
     """Build route chain map from framework + frontend analysis results."""
     from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
         from supernova_core.services.framework_analyzer import FrameworkAnalysisResult
         from supernova_core.services.frontend_mapper import FrontendAnalysisResult, XssAttackChain, FrontendRoute
@@ -1770,42 +1795,11 @@ async def setup_display(input: ActivityInput) -> None:
     SessionMetadata.output_path 取 workspace_path 的父目录（workspaces dir），id 取
     workspace_name，使 generate_audit_path = workspaces/<session> = workspace_path（与 CLI
     run_scan 的 meta 语义一致：audit 产物落 session 目录下）。
-    """
-    from rich.console import Console
-    from supernova_core.models.metrics import SessionMetadata
-    from supernova_core.logging import configure_logging
-    from supernova_whitebox.audit.session import AuditSession
-    from supernova_whitebox.audit.session_registry import set_audit_session
 
-    if input.workspace_path:
-        ws_path = Path(input.workspace_path)
-    else:
-        ws_path = (
-            Path(input.repo_path).parent / "workspaces"
-            / (input.workspace_name or "scan"))
-    meta = SessionMetadata(
-        id=input.workspace_name or ws_path.name,
-        web_url=input.web_url,
-        repo_path=input.repo_path,
-        output_path=str(ws_path.parent),
-    )
-    # 裂痕四修复: worker 容器入口挂 LogBusHandler + per-scan diagnostic.log。
-    # CLI 路径 main.py 已配；worker 路径此前漏配 → LogEvent 走 lastResort stderr,
-    # live 页/events.ndjson 无诊断行、不产 diagnostic.log。幂等(setup.py:57-65)。
-    configure_logging(log_dir=ws_path / "logs")
-    console = Console()  # auto-detects non-TTY in pipes -> plain text per event
-    session = AuditSession(meta, use_rich=False, console=console)
-    await session.initialize(workflow_id=meta.id, event_file=input.event_file)
-    # 统一日志总线：attach 把散落 getLogger 诊断汇入 dispatcher（起 drain task），对齐
-    # display_lifecycle.run_with_display headless 分支（非 rich 同样 attach）。
-    # 不 attach 则 activity 内裸 getLogger 诊断不进 dispatcher → 漏 workflow.log/events.ndjson。
-    await LogBus.attach(session.dispatcher)
-    set_audit_session(session)
-    # heartbeat 由主线 activity 启动(非 background activity): worker max_concurrent_workflow_tasks=1
-    # (AuditSession 全局单例所致)下 background fire-and-forget activity 被 poll 到却不 dispatch
-    # handler → heartbeat 永不写(2026-07-23 hr_1784788700 回归, test_workflow_heartbeat_execution).
-    # daemon 线程持续写 <ws>/heartbeat, finalize_summary 停止(daemon 终态自停兜底).
-    await start_heartbeat(ws_path)
+    构造逻辑抽到 core ``build_headless_audit_session``，与 ``ensure_audit_session``（worker
+    重启后可观测恢复）共用--见 session_recovery.py。
+    """
+    await build_headless_audit_session(input)
 
 
 @activity.defn
@@ -1820,6 +1814,7 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
         NullAuditSession, clear_audit_session, get_audit_session,
     )
 
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     session = get_audit_session()
     if not isinstance(session, NullAuditSession):
         # cost / cost_currency 取 session.get_metrics()(MetricsTracker 累积所有 agent,完整),

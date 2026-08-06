@@ -4,7 +4,9 @@ from supernova_core.models.audit import (
     AgentMetricsSummary,
     WorkflowSummary,
     ResumeInfo,
+    end_result_from_pentest_error,
 )
+from supernova_core.models.errors import PentestError
 
 
 def test_agent_end_result_defaults():
@@ -121,3 +123,36 @@ def test_audit_types_cost_currency_default_usd():
                         completed_agents=[], agent_metrics={})
     assert s.cost_currency == "USD"
     assert s.total_input_tokens == 0
+
+
+def test_end_result_from_pentest_error_carries_cost_context():
+    """L3：PentestError.context 携带的 cost（executor L2 塞入）→ AgentEndResult，
+    供 activities 失败分支记进 metrics（修 error path cost 归 0）。"""
+    e = PentestError("boom", "validation", context={
+        "cost_usd": 0.5, "cost_currency": "CNY", "model": "glm-5.2",
+        "num_turns": 3, "input_tokens": 100, "output_tokens": 50,
+        "cache_read_tokens": 10, "cache_creation_tokens": 5,
+    })
+    r = end_result_from_pentest_error(e, duration_ms=1234, attempt_number=2)
+    assert r.success is False
+    assert r.duration_ms == 1234
+    assert r.attempt_number == 2
+    assert r.cost_usd == 0.5
+    assert r.cost_currency == "CNY"
+    assert r.model == "glm-5.2"
+    assert r.num_turns == 3
+    assert r.input_tokens == 100
+    assert r.output_tokens == 50
+    assert r.cache_read_tokens == 10
+    assert r.cache_creation_tokens == 5
+    assert r.error == "boom"
+
+
+def test_end_result_from_pentest_error_defaults_zero_when_no_context():
+    """非 executor raise（无 context，如纯 IO probe 异常）→ cost 回落 0（真无法知道）。"""
+    e = PentestError("io fail", "validation")  # 无 context → 默认 {}
+    r = end_result_from_pentest_error(e, duration_ms=100, attempt_number=1)
+    assert r.cost_usd == 0.0
+    assert r.cost_currency == "USD"
+    assert r.model is None
+    assert r.num_turns is None

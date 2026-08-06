@@ -155,3 +155,44 @@ async def test_step_intent_flows_end_to_end_from_registry(tmp_path: Path):
     # FileLogRenderer._step renders intent as " — {intent}" on the [STEP] line.
     assert f"[STEP] adjudication:" in wf
     assert f" — {intent}" in wf
+
+
+async def test_run_agent_failure_records_cost_from_pentest_error(tmp_path, monkeypatch):
+    """L3: agent 失败（except PentestError）时，end_agent 从 PentestError.context 取
+    executor 携带的 cost——失败 agent 也记真实消耗（修 error path cost 归 0）。"""
+    from temporalio.exceptions import ApplicationError as ApplicationFailure
+
+    meta = SessionMetadata(id="s1", web_url="https://example.com", output_path=str(tmp_path))
+    session = AuditSession(meta)
+    await session.initialize()
+    # 固定 workflow_id，让 set/get_audit_session 解析到同一 key（否则返回 NullAuditSession
+    # 的 no-op end_agent，spy 不会被调）。set 必须在 activity.info patch 之后。
+    monkeypatch.setattr("temporalio.activity.info",
+                        lambda: MagicMock(attempt=1, workflow_id="test-wf"))
+    set_audit_session(session)
+    end_spy = AsyncMock()
+    monkeypatch.setattr(session, "end_agent", end_spy)
+    try:
+        from supernova_whitebox.pipeline import activities as act_mod
+        fake_executor = MagicMock()
+        fake_executor.execute = AsyncMock(side_effect=PentestError(
+            "boom", "validation",
+            context={"cost_usd": 0.5, "cost_currency": "CNY", "model": "glm-5.2",
+                     "num_turns": 3, "input_tokens": 100, "output_tokens": 50,
+                     "cache_read_tokens": 10, "cache_creation_tokens": 5}))
+        with patch.object(act_mod, "AgentExecutor", return_value=fake_executor):
+            with pytest.raises(ApplicationFailure):
+                await act_mod.run_agent(ActivityInput(
+                    repo_path=str(tmp_path), workspace_name="injection-vuln"))
+        # 失败 agent 也记 context 携带的 cost（不再是硬编码 0.0）
+        assert end_spy.called
+        result = end_spy.call_args.args[1]  # end_agent(name, AgentEndResult)
+        assert result.success is False
+        assert result.cost_usd == 0.5
+        assert result.cost_currency == "CNY"
+        assert result.model == "glm-5.2"
+        assert result.num_turns == 3
+        assert result.input_tokens == 100
+    finally:
+        clear_audit_session()
+        await session.close()

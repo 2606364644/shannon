@@ -130,6 +130,14 @@ class OpenAIProvider(BaseProvider):
                 kwargs["base_url"] = self.config.base_url
             if self.type == "litellm_router" and self.config.auth_token:
                 kwargs["api_key"] = self.config.auth_token
+            # L4: HTTP 层超时/重试熔断（区别于 _call_timeout 的整 stream wall-clock 兜底）。
+            # openai 引擎是 in-process SDK，缺 claude CLI 子进程那层 HTTP 超时兜底（CLAUDE.md §2）；
+            # AsyncOpenAI 默认 600s/2 次，单次 /chat/completions 请求 stall 时 SDK 内部按 600s 等待
+            # + 重试放大、worker 线程长 sleeping。env 驱动保守默认 300s/1：单次请求熔断 + 限重试，
+            # stall 时更快抛 timeout -> _classify_error 判 retryable -> activity 重试，不静默 hang。
+            # （非本次 OOM 真根因——OOM 是内存；本加固防 stall 类 hang，防御性。）
+            kwargs["timeout"] = float(os.getenv("SUPERNOVA_OPENAI_HTTP_TIMEOUT", "300"))
+            kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "1"))
             self._client = _wrap_client_for_argument_sanitize(AsyncOpenAI(**kwargs))
         return self._client
 
@@ -282,6 +290,7 @@ class OpenAIProvider(BaseProvider):
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
+        streaming = None  # SDK RunResultStreaming，供 error path（_handle_error/MaxTurnsExceeded）提累积 usage
         try:
             # collector → 本引擎原生工具（FunctionTool list，经 bridge 构造）。
             # engine-agnostic：caller 只传 CollectorBase，provider 各自经 bridge 构造。
@@ -301,6 +310,7 @@ class OpenAIProvider(BaseProvider):
                     context=ToolContext(cwd=cwd, subagent_run=self._make_subagent_runner(model, cwd)),
                     max_turns=max_turns or self._max_turns(),
                 )
+                streaming = result  # alias 供 error path 提累积 usage（run_streamed 已返回）
 
                 async def _consume_stream() -> None:
                     async for event in result.stream_events():
@@ -315,8 +325,10 @@ class OpenAIProvider(BaseProvider):
                 run_result = result
             except MaxTurnsExceeded:
                 await stream_collector.close()
-                # 无可用 RunResult，构造一个最小结果对象
-                run_result = _MaxTurnsStub(stream_collector.text)
+                # result（run_streamed 返回）的 context_wrapper.usage 已累积到超轮数的 token
+                # （SDK 无清零），用它算 cost（弃旧 _MaxTurnsStub 硬编码 0 usage）。
+                mt_usage = streaming.context_wrapper.usage if streaming is not None else None
+                run_result = _MaxTurnsStub(stream_collector.text, mt_usage)
                 stop_reason = "max_turns"
 
             duration = int((time.time() - start_time) * 1000)
@@ -351,9 +363,12 @@ class OpenAIProvider(BaseProvider):
             return result
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
-            return self._handle_error(e, duration, model)
+            return self._handle_error(e, duration, model, run_result=streaming)
 
-    def _handle_error(self, error: Exception, duration: int, model: str) -> ClaudeRunResult:
+    def _handle_error(
+        self, error: Exception, duration: int, model: str,
+        run_result: Any = None,
+    ) -> ClaudeRunResult:
         error_code, retryable = self._classify_error(error)
         # StructuredOutputParseError 走 ErrorCode enum（供 executor isinstance 守卫透传 →
         # classify_error_for_temporal Level 1 匹配 OUTPUT_VALIDATION_FAILED）；其他错误
@@ -361,12 +376,27 @@ class OpenAIProvider(BaseProvider):
         # AGENT_EXECUTION_FAILED 现有行为，避免破坏 RateLimit/Timeout 分类）。
         if isinstance(error, StructuredOutputParseError):
             error_code = ErrorCode.OUTPUT_VALIDATION_FAILED
+        # 异常时尽量从已累积的 usage 算 cost（修 error path cost 归 0）：stream 消费中途
+        # 失败时 context_wrapper.usage 已累积已完成部分（SDK 无清零）。run_result 不可用
+        # （调用前失败，如 build_agent 抛）→ cost 回落 0。
+        cost, cost_currency = 0.0, "USD"
+        if run_result is not None:
+            # error path 防御：usage 结构异常（SDK 异常形态 / 非数值字段）→ cost 回落 0，
+            # 不让 _handle_error 二次崩溃（它已是 error path 最后防线）。
+            try:
+                from .openai_result_mapper import _usage_from
+                from .pricing import compute_cost
+                cost_amount = compute_cost(model, _usage_from(run_result))
+                cost, cost_currency = cost_amount.cost, cost_amount.currency
+            except (TypeError, AttributeError, ValueError):
+                pass
         return ClaudeRunResult(
             text="",
             success=False,
             duration=duration,
             turns=0,
-            cost=0.0,
+            cost=cost,
+            cost_currency=cost_currency,
             model=model,
             error=str(error),
             error_code=error_code,
@@ -416,16 +446,25 @@ class OpenAIProvider(BaseProvider):
 
 
 class _MaxTurnsStub:
-    """MaxTurnsExceeded 时无 RunResult，伪造一个只含 final_output 的对象供 map_run_result 使用。"""
+    """MaxTurnsExceeded 时伪造一个含 final_output + usage 的对象供 map_run_result 使用。
 
-    def __init__(self, text: str):
-        class _CW:
+    usage 来自真实 result.context_wrapper.usage（SDK 在超轮数时已累积，无清零）；
+    None 时回落 0（无 result 可用）。final_output 用 stream_collector 累积文本
+    （超轮时 SDK result.final_output 不完整）。
+    """
+
+    def __init__(self, text: str, usage: Any = None):
+        self.final_output = text
+        if usage is None:
             class _U:
                 input_tokens = 0
                 output_tokens = 0
             usage = _U()
-        self.final_output = text
+
+        class _CW:
+            pass
         self.context_wrapper = _CW()
+        self.context_wrapper.usage = usage
 
 
 class _ReparsedRunResult:

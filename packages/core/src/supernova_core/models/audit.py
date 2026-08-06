@@ -1,6 +1,9 @@
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from supernova_core.models.errors import PentestError
 
 
 class AgentEndResult(BaseModel):
@@ -18,6 +21,33 @@ class AgentEndResult(BaseModel):
     output_tokens: int | None = None
     cache_read_tokens: int | None = None
     cache_creation_tokens: int | None = None
+
+
+def end_result_from_pentest_error(
+    e: "PentestError", duration_ms: int, attempt_number: int,
+) -> AgentEndResult:
+    """失败路径构造 AgentEndResult：从 PentestError.context 取 executor 携带的 cost
+    （修 error path cost 归 0），取不到回落 0（非 executor raise，如纯 IO probe 异常）。
+
+    executor（core AgentExecutor / 黑盒 ExploitExecutor）失败 raise PentestError 时，
+    _result_cost_context 把 result.cost/tokens 塞 context；activities 的 except
+    PentestError 经此 helper 构造 end_agent 的 AgentEndResult，让失败 agent 也记真实消耗。
+    """
+    ctx = getattr(e, "context", None) or {}
+    return AgentEndResult(
+        success=False,
+        duration_ms=duration_ms,
+        cost_usd=ctx.get("cost_usd", 0.0),
+        cost_currency=ctx.get("cost_currency", "USD"),
+        attempt_number=attempt_number,
+        model=ctx.get("model"),
+        num_turns=ctx.get("num_turns"),
+        input_tokens=ctx.get("input_tokens"),
+        output_tokens=ctx.get("output_tokens"),
+        cache_read_tokens=ctx.get("cache_read_tokens"),
+        cache_creation_tokens=ctx.get("cache_creation_tokens"),
+        error=str(e),
+    )
 
 
 class AgentLogDetails(BaseModel):
