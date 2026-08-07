@@ -1,7 +1,7 @@
 // 认证档案 新建/编辑 对话框。镜像 CreateUserDialog.tsx 范式
 // (open/onOpenChange/onSaved、busy、reset on close、<form onSubmit>)。
 // 字段: 档案名 / login_url / login_type(Select)/ login_flow(Textarea)
-// + 初始 credential(role / username / password / totp_secret 折叠)。
+// + 初始 credential(role / username / password 折叠)。
 // 提交调 createAuthProfile / updateAuthProfile。
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -34,15 +34,15 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   const [loginUrl, setLoginUrl] = useState(editing?.login_url ?? "");
   const [loginType, setLoginType] = useState<LoginType>(editing?.login_type ?? "form");
   const [loginFlow, setLoginFlow] = useState((editing?.login_flow ?? []).join("\n"));
-  // 多角色凭据草稿（2026-08-07 #2）：编辑态加载全量 credentials（password/totp 留空=保留原值，
-  // 不回显脱敏密文）；新建态一行默认 admin。
+  // 多角色凭据草稿：编辑态加载全量 credentials（password 留空=保留原值，不回显脱敏密文）；
+  // 新建态一行默认 admin。
   const [drafts, setDrafts] = useState<CredentialDraft[]>(() => {
     if (editing && editing.credentials.length) {
       return editing.credentials.map((c) => ({
-        id: c.id, role: c.role, username: c.username, password: "", totpSecret: "",
+        id: c.id, role: c.role, username: c.username, password: "",
       }));
     }
-    return [{ role: "admin", username: "", password: "", totpSecret: "" }];
+    return [{ role: "admin", username: "", password: "" }];
   });
   const [busy, setBusy] = useState(false);
   // 系统档案只读防御：editing 正常不会是 system（列表已隐藏 Edit 按钮），此处兜底——
@@ -51,7 +51,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
 
   function reset() {
     setName(""); setLoginUrl(""); setLoginType("form"); setLoginFlow("");
-    setDrafts([{ role: "admin", username: "", password: "", totpSecret: "" }]);
+    setDrafts([{ role: "admin", username: "", password: "" }]);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -64,14 +64,13 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
     setBusy(true);
     try {
       const flow = loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
-      // 多角色：每条 draft → credential（编辑透传原 id；password/totp 空=保留/不发）。
+      // 多角色：每条 draft → credential（编辑透传原 id；password 空=保留/不发）。
       const credentials: AuthProfileCredential[] = drafts.map((d) => ({
         id: d.id ?? "",
         role: d.role.trim() || "admin",
         username: d.username.trim(),
         verify_status: { state: "unverified" as VerifyState },
         ...(d.password ? { password: d.password } : {}),
-        ...(d.totpSecret.trim() ? { totp_secret: d.totpSecret.trim() } : {}),
       }));
       const body: Partial<AuthProfile> = {
         name: name.trim(),
@@ -119,7 +118,7 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
             <Label htmlFor="ap-flow">{t("authProfiles.loginFlow")}</Label>
             <Textarea id="ap-flow" value={loginFlow} onChange={(e) => setLoginFlow(e.target.value)} rows={3} />
           </div>
-          <CredentialRows value={drafts} onChange={setDrafts} allowMulti showTotp />
+          <CredentialRows value={drafts} onChange={setDrafts} allowMulti />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
             {!readOnly && (

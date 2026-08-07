@@ -19,24 +19,23 @@ import { toast } from "sonner";
 import { AlertCircle, Info } from "lucide-react";
 
 /** AuthFormState（inline 临时填写）-> AuthProfile 创建 body（保存为档案）。
- *  微调（2026-08-06）：删 email_login（inline 不再采集）；role 从 auth.role 取（凭据填写时即指定，
- *  非存档时设置）；credential id 占位（后端分配），verify_status=unverified（新建未经验证）。 */
+ *  保存全部角色（auth.accounts）为多角色 credential——档案本支持 credentials[]，完整存档多身份配置。
+ *  credential id 占位（后端分配），verify_status=unverified（新建未经验证）。 */
 function authToProfileBody(auth: AuthFormState, name: string): Partial<AuthProfile> {
-  const cred: AuthProfileCredential = {
+  const credentials: AuthProfileCredential[] = auth.accounts.map((a) => ({
     id: "",
-    role: auth.role.trim() || "admin",
-    username: auth.username.trim(),
+    role: a.role.trim() || "admin",
+    username: a.username.trim(),
     verify_status: { state: "unverified" as VerifyState },
-    ...(auth.password ? { password: auth.password } : {}),
-    ...(auth.totpSecret.trim() ? { totp_secret: auth.totpSecret.trim() } : {}),
-  };
+    ...(a.password ? { password: a.password } : {}),
+  }));
   const flow = auth.loginFlow.split("\n").map((s) => s.trim()).filter(Boolean);
   return {
     name: name.trim(),
     login_url: auth.loginUrl.trim(),
     login_type: auth.loginType,
     ...(flow.length ? { login_flow: flow } : {}),
-    credentials: [cred],
+    credentials,
   };
 }
 
@@ -172,7 +171,7 @@ function RightAuthCore({ auth, setAuth, authErr, workspace, refreshSignal, onPro
 }
 
 /** inline 模式右栏增强（对齐 preview #inlineRight）：登录步骤 + 存为档案（档案名+保存一行）。
- *  角色取凭据区填写值（auth.role），保存入口与填写区在一起（非弹窗）。 */
+ *  角色取凭据区 primary 填写值（accounts[0].role），保存入口与填写区在一起（非弹窗）。 */
 function InlineRightEnhance({ auth, setAuth, ws, onProfileSaved }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
@@ -261,9 +260,9 @@ function ProfileRightSummary({ auth, workspace, refreshSignal }: {
   );
 }
 
-/** inline 模式「保存为档案」--与临时填写右栏同处，展开后填档案名（角色取凭据区 auth.role），
+/** inline 模式「保存为档案」--与临时填写右栏同处，展开后填档案名（角色取凭据区 accounts[0].role），
  *  提交调 createAuthProfile，成功后 onSaved(新档案) 回调让父级切 profile 模式并选中。
- *  保存前置校验：loginUrl + username 必填（profile 必备），缺则 toast 拦截不发请求。 */
+ *  保存前置校验：loginUrl + primary username 必填（profile 必备），缺则 toast 拦截不发请求。 */
 function SaveAsProfileInline({ auth, ws, onSaved }: {
   auth: AuthFormState;
   ws: string;
@@ -275,7 +274,7 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!auth.loginUrl.trim() || !auth.username.trim()) {
+    if (!auth.loginUrl.trim() || !auth.accounts[0]?.username.trim()) {
       toast.error(t("scan.auth.saveNeedFields"));
       return;
     }
@@ -293,8 +292,8 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
     }
   }
 
-  // 保存前置：loginUrl + username 必填（档案 credential 必备）。未填则按钮禁用 + 常驻提示。
-  const canSave = !!auth.loginUrl.trim() && !!auth.username.trim();
+  // 保存前置：loginUrl + primary username 必填（档案 credential 必备）。未填则按钮禁用 + 常驻提示。
+  const canSave = !!auth.loginUrl.trim() && !!auth.accounts[0]?.username.trim();
 
   return (
     <form onSubmit={onSave} className="space-y-1.5">
@@ -320,9 +319,8 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
   );
 }
 
-/** inline 模式下方核心块（对齐 preview #bottomEnhance）：登录入口 + 凭据 横向两卡。
- *  凭据区含角色/用户名/密码三列（微调2：填写时即指定角色）+ TOTP。删邮箱登录。
- *  字段经 setAuth 回写 FormState.auth；buildBody 转 ScanAuthentication 发后端。 */
+/** inline 模式下方核心块：登录入口（全宽）+ 凭据区（全宽 CredentialRows，含 primary accounts[0] 与附加角色）。
+ *  字段经 setAuth 回写 FormState.auth.accounts；buildBody 转 ScanAuthentication 发后端。 */
 function BottomInlineBlock({ auth, setAuth, authErr }: {
   auth: AuthFormState;
   setAuth: (patch: Partial<AuthFormState>) => void;
@@ -330,74 +328,48 @@ function BottomInlineBlock({ auth, setAuth, authErr }: {
 }) {
   const { t } = useTranslation();
   return (
-    <div className="fade-in border-t border-border pt-4">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
-        <h4 className="text-[12px] font-semibold text-muted-foreground">{t("scan.auth.entryGroup")}</h4>
-        <span className="text-[10.5px] text-muted-foreground">{t("scan.auth.credentialsGroup")}</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* 登录入口 */}
-        <div className="space-y-2 rounded-lg border border-border bg-secondary p-3">
-          <GroupLabel>{t("scan.auth.entryGroup")}</GroupLabel>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-              {(["form", "sso", "api", "basic"] as const).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setAuth({ loginType: v })}
-                  aria-pressed={auth.loginType === v}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    auth.loginType === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t(`scan.auth.loginType.${v}`)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
-            <Input
-              value={auth.loginUrl}
-              onChange={(e) => setAuth({ loginUrl: e.target.value })}
-              placeholder="https://example.com/login"
-              className="font-mono text-xs"
-            />
+    <div className="fade-in border-t border-border pt-4 space-y-3">
+      {/* 登录入口（全宽） */}
+      <div className="rounded-lg border border-border bg-secondary p-3 space-y-2">
+        <GroupLabel>{t("scan.auth.entryGroup")}</GroupLabel>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">{t("scan.auth.loginTypeLabel")}</Label>
+          <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+            {(["form", "sso", "api", "basic"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setAuth({ loginType: v })}
+                aria-pressed={auth.loginType === v}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  auth.loginType === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t(`scan.auth.loginType.${v}`)}
+              </button>
+            ))}
           </div>
         </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">{t("scan.auth.loginUrlLabel")}</Label>
+          <Input
+            value={auth.loginUrl}
+            onChange={(e) => setAuth({ loginUrl: e.target.value })}
+            placeholder="https://example.com/login"
+            className="font-mono text-xs"
+          />
+        </div>
+      </div>
 
-        {/* 凭据：角色/用户名/密码 三列 + TOTP（微调2：角色并入凭据区；删邮箱登录） */}
-        <div className="space-y-2.5 rounded-lg border border-border bg-secondary p-3">
-          <GroupLabel>{t("scan.auth.credentialsGroup")}</GroupLabel>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.role")}</Label>
-              <Input value={auth.role} onChange={(e) => setAuth({ role: e.target.value })} className="text-xs" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
-              <Input value={auth.username} onChange={(e) => setAuth({ username: e.target.value })} className="text-xs" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-              <Input type="password" value={auth.password} onChange={(e) => setAuth({ password: e.target.value })} className="text-xs" />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">
-              {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
-            </Label>
-            <Input value={auth.totpSecret} onChange={(e) => setAuth({ totpSecret: e.target.value })} className="font-mono text-xs" />
-          </div>
-        </div>
-      </div>
-      {/* #2 附加角色（多身份对比）：CredentialRows，空态只显「+ 添加角色」，非空 → buildBody 发 auth_accounts */}
+      {/* 凭据（全宽，所有角色同框同尺寸；accounts[0]=primary 不可删，附加角色可删） */}
       <div className="space-y-2">
-        <GroupLabel>{t("scan.auth.extraRoles")}</GroupLabel>
-        <CredentialRows value={auth.accounts} onChange={(next) => setAuth({ accounts: next })} allowMulti showTotp />
+        <GroupLabel>{t("scan.auth.credentialsGroup")}</GroupLabel>
+        <CredentialRows
+          value={auth.accounts}
+          onChange={(next) => setAuth({ accounts: next })}
+          allowMulti
+          lockFirstRow
+        />
       </div>
       {authErr && <div className="text-destructive text-xs mt-2">{authErr}</div>}
     </div>
@@ -770,9 +742,9 @@ export function ScanFormFields({
     setProfileRefresh((n) => n + 1);
   };
   // #1 单一 disclosure：收起态若有草稿（任意 inline 字段已填 / 已选档案），按钮显「已配置」标记——
-  // 折叠不再清字段，标记告诉用户「配置还在、只是当前未启用」。role 默认 admin 不算草稿信号。
-  const hasAuthDraft = !!(f.auth.loginUrl.trim() || f.auth.username.trim() || f.auth.password.trim()
-    || f.auth.totpSecret.trim() || f.auth.loginFlow.trim() || f.auth.profileId);
+  // 折叠不再清字段，标记告诉用户「配置还在、只是当前未启用」。primary 默认 role="admin" 不算草稿信号。
+  const hasAuthDraft = !!(f.auth.loginUrl.trim() || f.auth.loginFlow.trim() || f.auth.profileId
+    || f.auth.accounts.some((a) => a.username.trim() || a.password.trim()));
   return (
     <div className="space-y-5">
       {/* 上层：左表单 + 右核心(展开时) */}

@@ -5,13 +5,12 @@ import { Button } from "@/components/ui/button";
 
 /** 多角色凭据录入草稿（前端内部态，scan 页 inline + 档案 dialog 共用）。
  *  - 新建 id 空（后端分配）；编辑 id 透传原值。
- *  - password 空串 = 不改（编辑态）；totpSecret 空串 = 无。 */
+ *  - password 空串 = 不改（编辑态）。 */
 export interface CredentialDraft {
   id?: string;
   role: string;
   username: string;
   password: string;
-  totpSecret: string;
 }
 
 interface Props {
@@ -19,13 +18,15 @@ interface Props {
   onChange: (next: CredentialDraft[]) => void;
   /** true = 多角色（显「+ 添加角色」+ 每行删除，最少 1 行）；false = 单行只录。 */
   allowMulti: boolean;
-  /** true = 每行显 TOTP 字段；false = 隐藏。 */
-  showTotp: boolean;
+  /** true = 锁定首行（value[0]）不可删——scan 页 inline 用以保护 primary 凭据恒在 index 0。
+   *  档案 dialog 不传（所有角色都可删，只要 length>1）。 */
+  lockFirstRow?: boolean;
 }
 
-/** 多角色凭据增删行（2026-08-07 #2）：每行 角色/用户名/密码/可选 TOTP/删除；底部「+ 添加角色」。
- *  受控组件——值与变更全由父级管；本组件不持状态（草稿存在父级 AuthFormState / dialog state）。 */
-export function CredentialRows({ value, onChange, allowMulti, showTotp }: Props) {
+/** 多角色凭据增删行：每行 角色/用户名/密码/删除；底部「+ 添加角色」。
+ *  受控组件——值与变更全由父级管；本组件不持状态（草稿存在父级 AuthFormState / dialog state）。
+ *  add() 只 append（不 unshift），保证 value[0] 恒为 primary（lockFirstRow 时不可删）。 */
+export function CredentialRows({ value, onChange, allowMulti, lockFirstRow }: Props) {
   const { t } = useTranslation();
 
   function update(i: number, patch: Partial<CredentialDraft>) {
@@ -34,7 +35,7 @@ export function CredentialRows({ value, onChange, allowMulti, showTotp }: Props)
     onChange(next);
   }
   function add() {
-    onChange([...value, { role: "", username: "", password: "", totpSecret: "" }]);
+    onChange([...value, { role: "", username: "", password: "" }]);
   }
   function remove(i: number) {
     onChange(value.filter((_, idx) => idx !== i));
@@ -58,15 +59,7 @@ export function CredentialRows({ value, onChange, allowMulti, showTotp }: Props)
               <Input id={`cr-pw-${i}`} type="password" value={d.password} onChange={(e) => update(i, { password: e.target.value })} className="text-xs" />
             </div>
           </div>
-          {showTotp && (
-            <div className="space-y-1">
-              <Label htmlFor={`cr-totp-${i}`} className="text-[11px] text-muted-foreground">
-                {t("scan.auth.totpSecret")} <span className="font-normal">({t("scan.auth.optional")})</span>
-              </Label>
-              <Input id={`cr-totp-${i}`} value={d.totpSecret} onChange={(e) => update(i, { totpSecret: e.target.value })} className="font-mono text-xs" />
-            </div>
-          )}
-          {allowMulti && value.length > 1 && (
+          {allowMulti && value.length > 1 && !(lockFirstRow && i === 0) && (
             <Button type="button" variant="ghost" size="sm" onClick={() => remove(i)} className="text-xs h-7">
               {t("scan.auth.removeRole")}
             </Button>

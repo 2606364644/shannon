@@ -34,12 +34,8 @@ export interface AuthFormState {
   credentialIds: string[];
   loginType: LoginType;
   loginUrl: string;
-  /** inline 凭据区角色（保存为档案时用；inline 提交不发，core 单 credentials schema 无 role）。 */
-  role: string;
-  username: string;
-  password: string;
-  totpSecret: string;
-  /** inline 多角色附加角色（#2）：空数组=单角色；非空 → buildBody 发 auth_accounts（多身份对比）。 */
+  /** inline 凭据（统一多角色）：accounts[0]=primary（不可删，默认 role="admin"）→ buildAuthPayload 发
+   *  authentication.credentials；accounts.slice(1)=附加角色 → buildBody 发 auth_accounts（多身份对比）。 */
   accounts: CredentialDraft[];
   loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
 }
@@ -51,20 +47,16 @@ const DEFAULT_AUTH: AuthFormState = {
   credentialIds: [],
   loginType: "form",
   loginUrl: "",
-  role: "admin",
-  username: "",
-  password: "",
-  totpSecret: "",
-  accounts: [],
+  accounts: [{ role: "admin", username: "", password: "" }],
   loginFlow: "",
 };
 
 /** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。
  *  微调（2026-08-06）：inline 模式不再采集 email_login（删邮箱登录框）；role 仅用于存档不发。 */
 export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
-  const credentials: ScanAuthentication["credentials"] = { username: a.username.trim() };
-  if (a.password) credentials.password = a.password;
-  if (a.totpSecret.trim()) credentials.totp_secret = a.totpSecret.trim();
+  const primary = a.accounts[0];
+  const credentials: ScanAuthentication["credentials"] = { username: (primary?.username ?? "").trim() };
+  if (primary?.password) credentials.password = primary.password;
   const payload: ScanAuthentication = {
     login_type: a.loginType,
     login_url: a.loginUrl.trim(),
@@ -86,11 +78,7 @@ export function authFromPayload(auth: ScanAuthentication): AuthFormState {
     credentialIds: [],
     loginType: auth.login_type ?? "form",
     loginUrl: auth.login_url ?? "",
-    role: "admin",
-    username: c.username ?? "",
-    password: c.password ?? "",
-    totpSecret: c.totp_secret ?? "",
-    accounts: [],
+    accounts: [{ role: "admin", username: c.username ?? "", password: c.password ?? "" }],
     loginFlow: Array.isArray(auth.login_flow) ? auth.login_flow.join("\n") : "",
   };
 }
@@ -139,9 +127,10 @@ export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   }
   if (!a.loginUrl.trim()) return t("scan.errors.authLoginUrlEmpty");
   if (!/^https?:\/\//.test(a.loginUrl.trim())) return t("scan.errors.authLoginUrl");
-  if (!a.username.trim()) return t("scan.errors.authUsername");
-  // #2 附加角色：每条须用户名 + 密码（可登录），否则拦空。
-  for (const acc of a.accounts) {
+  // primary（accounts[0]）须用户名；附加角色（slice(1)）每条须用户名 + 密码（可登录），否则拦空。
+  const primary = a.accounts[0];
+  if (!primary || !primary.username.trim()) return t("scan.errors.authUsername");
+  for (const acc of a.accounts.slice(1)) {
     if (!acc.username.trim() || !acc.password) return t("scan.errors.authAccountIncomplete");
   }
   return null;
@@ -188,13 +177,14 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
       body.auth_credential_ids = f.auth.credentialIds.length ? f.auth.credentialIds : undefined;
     } else {
       body.authentication = buildAuthPayload(f.auth);
-      // #2 inline 多角色附加账号 → auth_accounts（后端 scan_manager 展开成 accounts[]）。
-      if (f.auth.accounts.length) {
-        body.auth_accounts = f.auth.accounts.map((acc) => ({
+      // 附加角色（accounts.slice(1)）→ auth_accounts（后端 scan_manager 展开成 accounts[]）。
+      // guard 用 slice(1) 后长度：accounts[0] 恒为 primary，若用 accounts.length 会发空 auth_accounts:[]。
+      const extra = f.auth.accounts.slice(1);
+      if (extra.length) {
+        body.auth_accounts = extra.map((acc) => ({
           role: acc.role.trim() || "role",
           username: acc.username.trim(),
           password: acc.password,
-          ...(acc.totpSecret.trim() ? { totp_secret: acc.totpSecret.trim() } : {}),
         }));
       }
     }

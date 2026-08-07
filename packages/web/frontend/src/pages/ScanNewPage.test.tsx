@@ -580,7 +580,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     return label.parentElement?.querySelector("input") as HTMLInputElement;
   }
 
-  // 通用：黑盒 + 选 ws1 + 填 url + 启用登录（inline 默认）+ 填 loginUrl/role/username/password/totp
+  // 通用：黑盒 + 选 ws1 + 填 url + 启用登录（inline 默认）+ 填 loginUrl/role/username/password
   async function fillInlineAuth() {
     renderPage();
     clickTab("黑盒");
@@ -594,10 +594,9 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     fireEvent.change(inputByLabel("角色"), { target: { value: "admin" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
     fireEvent.change(inputByLabel("密码"), { target: { value: "pw" } });
-    fireEvent.change(inputByLabel(/TOTP 密钥/), { target: { value: "T" } });
   }
 
-  it("保存：body 含 login_url/totp/role + 自动切 profile 选中新建档案", async () => {
+  it("保存：body 含 login_url/role + 自动切 profile 选中新建档案", async () => {
     let created: Record<string, unknown> | undefined;
     const NEW_PROFILE = {
       id: "prof_new", name: "NG 后台", login_url: "http://t/login", login_type: "form",
@@ -618,14 +617,13 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     fireEvent.change(nameInput, { target: { value: "NG 后台" } });
     fireEvent.click(screen.getByRole("button", { name: "保存为认证档案" }));
     await waitFor(() => expect(created).toBeDefined());
-    // body 断言：字段一一映射，totp_secret 保留，role 取凭据区填写值
+    // body 断言：字段一一映射，role 取凭据区填写值
     expect(created!.name).toBe("NG 后台");
     expect(created!.login_url).toBe("http://t/login");
     expect(created!.login_type).toBe("form");
     const creds = created!.credentials as Record<string, unknown>[];
     expect(creds[0].username).toBe("alice");
     expect(creds[0].password).toBe("pw");
-    expect(creds[0].totp_secret).toBe("T");
     expect(creds[0].role).toBe("admin");
     // 自动切 profile 模式 + 选中：档案卡 + 右栏摘要都显档案名（getAllByText），角色行显 "admin · alice"
     await waitFor(() => expect(screen.getAllByText("NG 后台").length).toBeGreaterThan(0));
@@ -776,11 +774,11 @@ describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_account
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "admin" } });
     fireEvent.change(inputByLabel("密码"), { target: { value: "pw" } });
-    // 添加附加角色 → CredentialRows 行（htmlFor 标签，getAllByLabelText 取）
+    // 添加附加角色 → CredentialRows 多一行（primary 占 [0]，附加角色 [1]）
     fireEvent.click(screen.getByRole("button", { name: /添加角色/ }));
-    fireEvent.change(screen.getAllByLabelText("角色")[0], { target: { value: "user" } });
-    fireEvent.change(screen.getAllByLabelText("用户名")[0], { target: { value: "bob" } });
-    fireEvent.change(screen.getAllByLabelText("密码")[0], { target: { value: "bobpw" } });
+    fireEvent.change(screen.getAllByLabelText("角色")[1], { target: { value: "user" } });
+    fireEvent.change(screen.getAllByLabelText("用户名")[1], { target: { value: "bob" } });
+    fireEvent.change(screen.getAllByLabelText("密码")[1], { target: { value: "bobpw" } });
     fireEvent.click(screen.getByRole("button", { name: /开始渗透/ }));
     await waitFor(() => expect(posted).toBeDefined());
     const p = posted as { authentication: { credentials: { username: string } }; auth_accounts?: { role: string; username: string; password: string }[] };
@@ -885,8 +883,8 @@ describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调
 describe("黑盒登录 buildAuthPayload / validateAuth", () => {
   const base: AuthFormState = {
     enabled: true, source: "inline", profileId: "", credentialIds: [],
-    loginType: "form", loginUrl: "https://x/login", role: "admin", username: "admin",
-    password: "pw", totpSecret: "T", accounts: [], loginFlow: "a\nb",
+    loginType: "form", loginUrl: "https://x/login",
+    accounts: [{ role: "admin", username: "admin", password: "pw" }], loginFlow: "a\nb",
   };
   // t 只回 key（断言用 key 本身，不依赖 i18n 文案）
   const t = ((k: string) => k) as never;
@@ -895,7 +893,7 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
     const p = buildAuthPayload({ ...base });
     expect(p.login_type).toBe("form");
     expect(p.login_url).toBe("https://x/login");
-    expect(p.credentials).toEqual({ username: "admin", password: "pw", totp_secret: "T" });
+    expect(p.credentials).toEqual({ username: "admin", password: "pw" });
     expect(p.login_flow).toEqual(["a", "b"]);
   });
 
@@ -919,6 +917,19 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
 
   it("validateAuth: enabled loginUrl 非 http(s) → authLoginUrl", () => {
     expect(validateAuth({ ...base, loginUrl: "ftp://x" }, t)).toBe("scan.errors.authLoginUrl");
+  });
+
+  it("validateAuth: primary（accounts[0]）缺用户名 → authUsername", () => {
+    expect(validateAuth({ ...base, accounts: [
+      { role: "admin", username: "", password: "pw" },
+    ] }, t)).toBe("scan.errors.authUsername");
+  });
+
+  it("validateAuth: 附加角色缺用户名/密码 → authAccountIncomplete", () => {
+    expect(validateAuth({ ...base, accounts: [
+      { role: "admin", username: "admin", password: "pw" },
+      { role: "user", username: "", password: "" },
+    ] }, t)).toBe("scan.errors.authAccountIncomplete");
   });
 
   // === auth-profile-vault Task 14：profile 模式校验（多角色子集 2026-08-06） ===
@@ -956,7 +967,7 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
     expect(state.enabled).toBe(true);
     expect(state.source).toBe("inline");
     expect(state.loginUrl).toBe("http://x/l");
-    expect(state.username).toBe("u");
+    expect(state.accounts[0]?.username).toBe("u");
   });
 
   it("presetToAuthState: 空 preset → DEFAULT_AUTH（disabled, inline）", () => {
