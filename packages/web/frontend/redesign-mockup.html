@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="zh" class="">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>黑盒认证 · 凭据体系重设计 — supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============ DSF tokens (mirror src/styles/tokens.css) ============ */
+:root {
+  --background: 34 7% 10%;
+  --foreground: 36 10% 91%;
+  --card: 34 5% 13%;
+  --card-2: 34 6% 15.5%;
+  --primary: 15 60% 56%;
+  --primary-fg: 34 7% 10%;
+  --secondary: 34 5% 16%;
+  --muted: 34 5% 16%;
+  --muted-fg: 36 5% 62%;
+  --accent: 34 5% 18%;
+  --destructive: 5 62% 56%;
+  --border: 34 5% 21%;
+  --border-soft: 34 5% 18%;
+  /* status (warm severity) */
+  --s-green: 142 50% 56%;
+  --s-red: 5 62% 60%;
+  --s-amber: 38 75% 60%;
+  /* identity palette — jewel tones, deliberately off the severity gradient */
+  --id-1: 190 70% 60%;   /* cyan   */
+  --id-2: 265 68% 73%;   /* violet */
+  --id-3: 172 58% 54%;   /* teal   */
+  --id-4: 225 70% 71%;   /* indigo */
+  --id-5: 330 70% 73%;   /* pink   */
+  --radius: 12px;
+  --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
+  color-scheme: dark;
+}
+.light {
+  --background: 40 32% 95%;
+  --foreground: 30 26% 18%;
+  --card: 38 28% 97%;
+  --card-2: 39 30% 94%;
+  --primary: 15 58% 50%;
+  --primary-fg: 0 0% 100%;
+  --secondary: 40 32% 91%;
+  --muted: 40 32% 91%;
+  --muted-fg: 34 30% 38%;
+  --accent: 40 36% 84%;
+  --destructive: 5 58% 46%;
+  --border: 36 44% 78%;
+  --border-soft: 36 40% 84%;
+  --s-green: 142 40% 32%;
+  --s-red: 5 58% 44%;
+  --s-amber: 36 70% 36%;
+  --id-1: 190 65% 32%;
+  --id-2: 265 50% 44%;
+  --id-3: 172 52% 28%;
+  --id-4: 225 55% 42%;
+  --id-5: 330 52% 40%;
+  --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background .25s ease, color .25s ease;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 120px; }
+
+/* —— top bar —— */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 28px;
+  background: hsl(var(--background) / 0.82);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid hsl(var(--border));
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.brand .dot { width: 10px; height: 10px; border-radius: 3px; background: hsl(var(--primary)); box-shadow: 0 0 12px hsl(var(--primary) / .6); }
+.brand small { color: hsl(var(--muted-fg)); font-weight: 400; font-size: 12px; }
+.spacer { flex: 1; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: hsl(var(--secondary)); color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border)); border-radius: 999px;
+  padding: 6px 12px; font: 500 12px/1 "IBM Plex Sans"; cursor: pointer;
+  transition: border-color .15s;
+}
+.theme-toggle:hover { border-color: hsl(var(--primary) / .6); }
+
+/* —— hero / thesis —— */
+.hero { padding: 56px 0 40px; max-width: 760px; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600; color: hsl(var(--muted-fg));
+  letter-spacing: 0;
+}
+.eyebrow::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: hsl(var(--primary)); }
+.hero h1 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-weight: 600; font-size: 34px; line-height: 1.15; letter-spacing: -0.01em;
+  margin: 16px 0 14px;
+}
+.hero h1 em { font-style: normal; color: hsl(var(--primary)); }
+.hero p.lead { color: hsl(var(--muted-fg)); font-size: 15.5px; max-width: 62ch; margin: 0; }
+
+/* —— section scaffold —— */
+.section { margin-top: 64px; }
+.section > .eyebrow { margin-bottom: 6px; }
+.section h2 {
+  font-family: "IBM Plex Sans"; font-weight: 600; font-size: 19px;
+  margin: 6px 0 4px; letter-spacing: -0.005em;
+}
+.section .desc { color: hsl(var(--muted-fg)); font-size: 13.5px; max-width: 70ch; margin: 0 0 22px; }
+.stage {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 22px;
+}
+.stage-tight { padding: 0; overflow: hidden; }
+.stage h4 { /* label inside a wide stage */ }
+
+/* —— shared atoms —— */
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid hsl(var(--border)); border-radius: 999px;
+  padding: 2px 9px; font-size: 10.5px; font-weight: 600; line-height: 1.5;
+  background: hsl(var(--secondary) / .5);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 12.5px/1 "IBM Plex Sans"; cursor: pointer;
+  border-radius: 8px; padding: 8px 14px; border: 1px solid transparent;
+  transition: transform .12s ease, background .15s, border-color .15s;
+}
+.btn:active { transform: translateY(1px); }
+.btn-cta { background: hsl(var(--primary)); color: hsl(var(--primary-fg)); box-shadow: 0 1px 2px hsl(0 0% 0%/.3), 0 6px 16px -6px hsl(15 70% 45% / .35); }
+.btn-cta:hover { box-shadow: 0 2px 4px hsl(0 0% 0%/.3), 0 10px 22px -6px hsl(15 75% 50% / .45); }
+.btn-outline { background: hsl(var(--card)); color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
+.btn-outline:hover { border-color: hsl(var(--primary) / .6); }
+.btn-ghost { background: transparent; color: hsl(var(--muted-fg)); }
+.btn-ghost:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+.btn-sm { padding: 5px 10px; font-size: 11.5px; border-radius: 7px; }
+.corner-note { font-size: 11px; color: hsl(var(--muted-fg)); }
+
+/* —— token strip —— */
+.tok-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.tok { display: flex; flex-direction: column; gap: 6px; }
+.tok .sw { width: 54px; height: 54px; border-radius: 10px; border: 1px solid hsl(var(--border)); }
+.tok small { font: 500 10px/1.2 "IBM Plex Mono"; color: hsl(var(--muted-fg)); white-space: nowrap; }
+.tokgrp-label { font-size: 11px; font-weight: 600; color: hsl(var(--muted-fg)); margin: 0 0 10px; }
+
+/* —— eyebrow header used inside panels —— */
+.panel-eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.panel-eyebrow .bar { width: 3px; height: 13px; border-radius: 2px; background: hsl(var(--primary)); }
+.panel-eyebrow .t { font-size: 12px; font-weight: 600; }
+.panel-eyebrow .hint { margin-left: auto; font-size: 11px; color: hsl(var(--muted-fg)); }
+
+/* ============================================================
+   IDENTITY CARD — the signature component
+   ============================================================ */
+.idcard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 3px 1fr auto;
+  gap: 0;
+  background: hsl(var(--card-2));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color .15s, transform .12s;
+}
+.idcard:hover { border-color: hsl(var(--foreground) / .2); }
+.idcard .rail { background: hsl(var(--id)); align-self: stretch; }
+.idcard .body { padding: 11px 13px; min-width: 0; }
+.idcard .top { display: flex; align-items: center; gap: 8px; }
+.idcard .chip {
+  font: 600 10px/1 "IBM Plex Mono";
+  color: hsl(var(--id));
+  background: hsl(var(--id) / .12);
+  border: 1px solid hsl(var(--id) / .3);
+  border-radius: 5px;
+  padding: 3px 5px;
+  letter-spacing: .02em;
+}
+.idcard .role { font-size: 13.5px; font-weight: 600; letter-spacing: -0.003em; }
+.idcard .handle { font: 400 11.5px/1.35 "IBM Plex Mono"; color: hsl(var(--muted-fg)); margin-top: 2px; }
+.idcard .actions { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 6px; }
+
+/* status pip + label (uses ONLY severity colors — never identity color) */
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+.status .pip { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.status.ok   .pip { background: hsl(var(--s-green)); box-shadow: 0 0 0 3px hsl(var(--s-green) / .18); }
+.status.bad  .pip { background: hsl(var(--s-red));   box-shadow: 0 0 0 3px hsl(var(--s-red) / .18); }
+.status.idle .pip { background: hsl(var(--s-amber)); box-shadow: 0 0 0 3px hsl(var(--s-amber) / .18); }
+.status.ok   { color: hsl(var(--s-green)); }
+.status.bad  { color: hsl(var(--s-red)); }
+.status.idle { color: hsl(var(--s-amber)); }
+
+.idcard .fail-detail {
+  grid-column: 2 / 4;
+  margin: 8px 13px 12px;
+  border-left: 2px solid hsl(var(--s-red) / .6);
+  background: hsl(var(--s-red) / .08);
+  color: hsl(var(--s-red) / .9);
+  font-size: 11.5px; line-height: 1.5;
+  padding: 7px 10px; border-radius: 0 6px 6px 0;
+}
+
+/* ============================================================
+   COMPARISON ROSTER — 附加角色（多身份对比）
+   ============================================================ */
+.roster-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.roster-head .bar { width: 3px; height: 14px; border-radius: 2px; background: hsl(var(--primary)); }
+.roster-head .t { font-size: 13px; font-weight: 600; }
+.roster-head .add { margin-left: auto; }
+.roster-intent {
+  display: flex; gap: 8px; align-items: flex-start;
+  color: hsl(var(--muted-fg)); font-size: 12px; margin: 0 0 14px;
+}
+.roster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 10px; }
+.roster-empty {
+  border: 1px dashed hsl(var(--border));
+  border-radius: 10px;
+  padding: 18px; text-align: center;
+  color: hsl(var(--muted-fg)); font-size: 12.5px;
+}
+.vs { color: hsl(var(--muted-fg)); font: 500 10.5px/1 "IBM Plex Mono"; }
+
+/* ============================================================
+   CREDENTIALS MANAGEMENT PAGE (认证管理) — profile cards
+   ============================================================ */
+.prof-card {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  overflow: hidden;
+}
+.prof-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px; }
+.prof-head .pname { font-size: 15px; font-weight: 600; }
+.prof-head .pmeta { margin-left: 2px; font: 400 11.5px/1.4 "IBM Plex Mono"; color: hsl(var(--muted-fg)); }
+.prof-head .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.prof-divider { height: 1px; background: hsl(var(--border)); }
+.prof-body { padding: 16px 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 10px; }
+.prof-foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid hsl(var(--border-soft)); background: hsl(var(--card-2) / .5); }
+.pagebar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.pagebar h3 { font-size: 16px; font-weight: 600; margin: 0; }
+
+/* ============================================================
+   SCAN PAGE — reorganized auth panel
+   ============================================================ */
+.scanframe { display: grid; grid-template-columns: minmax(0, 38rem); gap: 26px; }
+@media (min-width: 980px) { .scanframe { grid-template-columns: minmax(0,34rem) minmax(0,1fr); align-items: start; } }
+.field-label { font-size: 11.5px; font-weight: 500; color: hsl(var(--muted-fg)); margin-bottom: 6px; display:block; }
+.input {
+  width: 100%; background: hsl(var(--background)); color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border)); border-radius: 8px;
+  padding: 8px 11px; font: 13px/1.4 "IBM Plex Mono";
+}
+.input:focus { outline: none; border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / .18); }
+.textarea { font: 12px/1.5 "IBM Plex Mono"; min-height: 64px; resize: vertical; }
+.segmented { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(var(--secondary) / .5); }
+.segmented button {
+  border: 0; background: transparent; cursor: pointer;
+  font: 500 12px/1 "IBM Plex Sans"; color: hsl(var(--muted-fg));
+  padding: 7px 14px; border-radius: 6px; transition: background .15s, color .15s;
+}
+.segmented button[aria-pressed="true"] { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: var(--shadow-card); }
+
+.auth-panel { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card-2) / .35); padding: 18px; }
+.auth-panel .grp + .grp { margin-top: 18px; padding-top: 18px; border-top: 1px solid hsl(var(--border-soft)); }
+.two { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.entry-types { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(var(--secondary) / .5); }
+.entry-types button { border:0; background:transparent; cursor:pointer; font:500 11.5px/1 "IBM Plex Sans"; color:hsl(var(--muted-fg)); padding:6px 11px; border-radius:6px; }
+.entry-types button[aria-pressed="true"] { background:hsl(var(--card)); color:hsl(var(--foreground)); box-shadow: var(--shadow-card); }
+
+.collapsible-head { display:flex; align-items:center; gap:12px; padding: 14px 16px; border:1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); }
+.collapsible-head .titles { min-width: 0; }
+.collapsible-head .titles .t { font-size: 13.5px; font-weight: 600; display:flex; align-items:center; gap:8px; }
+.collapsible-head .titles .s { font-size: 11.5px; color: hsl(var(--muted-fg)); margin-top: 2px; }
+
+/* scan page real layout: left form + right core (top row), then full-width bottom */
+.scanreal-top { display:grid; grid-template-columns:1fr; gap:24px; }
+@media (min-width:1000px){ .scanreal-top { grid-template-columns:minmax(0,32rem) minmax(0,1fr); gap:30px; align-items:start; } }
+.scan-bottom { margin-top:26px; padding-top:26px; border-top:1px dashed hsl(var(--border)); }
+
+/* editable primary identity card (inputs live inside the card body) */
+.idcard.editable .body { padding:13px 14px; }
+
+/* selectable identity card (profile-mode role multi-select): coral = selection, rail = identity */
+.idcard.sel { cursor:pointer; width:100%; }
+.idcard.sel[aria-pressed="true"] { border-color:hsl(var(--primary)); background:hsl(var(--primary) / .06); box-shadow:0 0 0 1px hsl(var(--primary) / .25); }
+.idcard.sel .check { width:16px; height:16px; border-radius:5px; border:2px solid hsl(var(--border)); display:inline-flex; align-items:center; justify-content:center; flex:none; }
+.idcard.sel[aria-pressed="true"] .check { background:hsl(var(--primary)); border-color:hsl(var(--primary)); }
+.idcard.sel .check svg { width:10px; height:10px; display:block; }
+
+/* structured verify-log timeline (replaces raw JSON.stringify) */
+.idlog { grid-column:2 / 4; margin:2px 13px 13px; border:1px solid hsl(var(--border)); border-radius:8px; background:hsl(var(--background) / .55); padding:10px 12px 8px; }
+.idlog .lh { font:600 11px/1 "IBM Plex Sans"; color:hsl(var(--muted-fg)); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.idlog .lh .b { width:3px;height:11px;border-radius:2px;background:hsl(var(--primary)); }
+.idlog ol { list-style:none; margin:0; padding:0; }
+.idlog li { display:grid; grid-template-columns:12px 60px 1fr auto; gap:9px; align-items:center; font:11.5px/1.5 "IBM Plex Mono"; padding:2.5px 0; }
+.idlog li .mk { width:9px;height:9px;border-radius:50%; }
+.idlog li .mk.ok{ background:hsl(var(--s-green)); } .idlog li .mk.bad{ background:hsl(var(--s-red)); }
+.idlog li .ts { color:hsl(var(--muted-fg)); }
+.idlog li .code { color:hsl(var(--muted-fg)); font-size:10.5px; }
+.idlog li.fail .body { color:hsl(var(--s-red)); }
+
+/* mode toggle visibility */
+.mode-only { display:none; }
+[data-mode="inline"] .inline-only { display:block; }
+[data-mode="profile"] .profile-only { display:block; }
+
+/* before/after notes */
+.bna { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 760px){ .bna { grid-template-columns: 1fr 1fr; } }
+.bna .card { border:1px solid hsl(var(--border)); border-radius: 10px; padding: 14px 16px; background: hsl(var(--card-2) / .4); }
+.bna h5 { margin: 0 0 8px; font-size: 12px; font-weight: 600; display:flex; align-items:center; gap:8px; }
+.bna h5.was { color: hsl(var(--muted-fg)); }
+.bna h5.now { color: hsl(var(--primary)); }
+.bna ul { margin: 0; padding-left: 18px; }
+.bna li { font-size: 12.5px; color: hsl(var(--muted-fg)); margin-bottom: 5px; line-height: 1.5; }
+.bna li b { color: hsl(var(--foreground)); font-weight: 600; }
+
+/* fade-in */
+@keyframes fadeUp { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
+.fade { animation: fadeUp .4s ease both; }
+@media (prefers-reduced-motion: reduce) { .fade { animation: none; } html { scroll-behavior:auto; } }
+
+a:focus-visible, button:focus-visible, .input:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> supernova <small>· 黑盒认证 / 凭据体系重设计</small></div>
+  <div class="spacer"></div>
+  <button class="theme-toggle" id="themeBtn" aria-pressed="false">◑ 切换深 / 浅</button>
+</div>
+
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <span class="eyebrow">设计提案 · 黑盒扫描认证 + 凭据管理</span>
+    <h1>把「填账号密码」变成<em>编排一组测试身份</em>。</h1>
+    <p class="lead">黑盒认证的真正价值不是“能登录”，而是<em>以多个身份登录并比对可访问范围</em>——这是发现 IDOR / 越权的手段。当前页面把多角色当成普通表单行堆在底部，意图完全隐形。本次重设计把每个凭据升格为一张<strong>身份卡</strong>，把附加角色组织成一条<strong>对比阵容</strong>，并把凭据管理页从拥挤的表格改成<strong>档案卡</strong>。</p>
+  </header>
+
+  <!-- ============ TOKENS ============ -->
+  <section class="section">
+    <span class="eyebrow">01 · 设计系统</span>
+    <h2>沿用既有 DSF，只新增一个「身份色板」</h2>
+    <p class="desc">不另起炉灶。主色仍是 coral、字族仍是 IBM Plex、深 / 浅双主题与 12px 圆角不变。唯一新增的是 5 色身份色板——刻意选在冷色 / 宝石色调，避开既有暖色 severity 梯度（红 / 橙 / 黄 / 琥珀 / 绿），这样「身份」与「验证状态」永远不会撞色。</p>
+    <div class="stage">
+      <p class="tokgrp-label">主色 + 状态（既有，不动）</p>
+      <div class="tok-row" style="margin-bottom:22px">
+        <div class="tok"><div class="sw" style="background:hsl(var(--primary))"></div><small>coral · primary</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--s-green))"></div><small>已验证</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--s-red))"></div><small>验证失败</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--s-amber))"></div><small>未验证</small></div>
+      </div>
+      <p class="tokgrp-label">身份色板（新增 · 仅用于身份卡的左侧色轨 / 序号芯片）</p>
+      <div class="tok-row">
+        <div class="tok"><div class="sw" style="background:hsl(var(--id-1))"></div><small>id-1 cyan</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--id-2))"></div><small>id-2 violet</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--id-3))"></div><small>id-3 teal</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--id-4))"></div><small>id-4 indigo</small></div>
+        <div class="tok"><div class="sw" style="background:hsl(var(--id-5))"></div><small>id-5 pink</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ IDENTITY CARD ============ -->
+  <section class="section">
+    <span class="eyebrow">02 · 签名组件</span>
+    <h2>身份卡 Identity Card</h2>
+    <p class="desc">每个凭据 = 一个被测身份。左侧 3px 身份色轨一眼区分「这是第几个身份」；角色名是卡片标题（权限层级最关键），用户名以等宽字体作副标题（操作员控制台的 handle 语汇）；验证状态用独立的 ✓ / ✗ / ● 信号，颜色只来自 severity，与身份色绝不混用。</p>
+    <div class="stage">
+      <div class="roster-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        <!-- unverified -->
+        <div class="idcard" style="--id:var(--id-1)">
+          <div class="rail"></div>
+          <div class="body">
+            <div class="top"><span class="chip mono">01</span><span class="role">超级管理员</span></div>
+            <div class="handle mono">@alice.admin</div>
+          </div>
+          <div class="actions"><span class="status idle"><span class="pip"></span>未验证</span></div>
+        </div>
+        <!-- success -->
+        <div class="idcard" style="--id:var(--id-2)">
+          <div class="rail"></div>
+          <div class="body">
+            <div class="top"><span class="chip mono">02</span><span class="role">运营经理</span></div>
+            <div class="handle mono">@bob.ops</div>
+          </div>
+          <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+        </div>
+        <!-- failed with detail -->
+        <div class="idcard" style="--id:var(--id-3)">
+          <div class="rail"></div>
+          <div class="body">
+            <div class="top"><span class="chip mono">03</span><span class="role">普通用户</span></div>
+            <div class="handle mono">@carol.user</div>
+          </div>
+          <div class="actions"><span class="status bad"><span class="pip"></span>验证失败</span></div>
+          <div class="fail-detail">登录步骤 3 超时：未在 60s 内检测到跳转后的登录态 cookie。检查登录步骤顺序或 TOTP。</div>
+        </div>
+      </div>
+      <p class="corner-note" style="margin-top:16px">解剖：色轨(身份) · 序号芯片(身份) · 角色名 · @handle · 状态信号(severity) · 失败详情内嵌。两个独立色彩通道，各司其职。</p>
+    </div>
+  </section>
+
+  <!-- ============ COMPARISON ROSTER ============ -->
+  <section class="section">
+    <span class="eyebrow">03 · 附加角色（多身份对比）</span>
+    <h2>对比阵容 Roster</h2>
+    <p class="desc">替换原「+ 添加角色」的垂直表单堆叠。表头直接点明意图——<em>分别登录、比对可访问范围</em>，让 IDOR 测试目的不再隐形。身份卡横排成阵容，靠色轨形成视觉节奏；空态不再是孤独的加号，而是一句邀请。</p>
+    <div class="stage">
+      <div class="roster-head">
+        <span class="bar"></span><span class="t">多身份对比</span>
+        <span class="pill">3 个身份</span>
+        <button class="btn btn-outline btn-sm add">＋ 添加身份</button>
+      </div>
+      <p class="roster-intent">将以这些身份分别真实登录一次，比对各自可访问的接口与数据范围——用于发现 IDOR / 水平越权 / 垂直越权。</p>
+      <div class="roster-grid fade">
+        <div class="idcard" style="--id:var(--id-1)">
+          <div class="rail"></div>
+          <div class="body"><div class="top"><span class="chip mono">01</span><span class="role">超级管理员</span></div><div class="handle mono">@alice.admin</div></div>
+          <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+        </div>
+        <div class="idcard" style="--id:var(--id-2)">
+          <div class="rail"></div>
+          <div class="body"><div class="top"><span class="chip mono">02</span><span class="role">运营经理</span></div><div class="handle mono">@bob.ops</div></div>
+          <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+        </div>
+        <div class="idcard" style="--id:var(--id-3)">
+          <div class="rail"></div>
+          <div class="body"><div class="top"><span class="chip mono">03</span><span class="role">普通用户</span></div><div class="handle mono">@carol.user</div></div>
+          <div class="actions"><span class="status idle"><span class="pip"></span>未验证</span></div>
+        </div>
+      </div>
+
+      <div style="height:18px"></div>
+      <p class="tokgrp-label" style="margin-bottom:8px">空态（无附加角色）</p>
+      <div class="roster-empty">还没有附加身份。<strong style="color:hsl(var(--primary))">＋ 添加身份</strong>，加入一个权限更低的角色，开始比对访问范围。</div>
+    </div>
+  </section>
+
+  <!-- ============ CREDENTIALS MANAGEMENT PAGE ============ -->
+  <section class="section">
+    <span class="eyebrow">04 · 凭据页面（认证管理）</span>
+    <h2>从「挤一张表」到「档案卡」</h2>
+    <p class="desc">原 AuthProfilesPage 是一张扁平表格：档案名 / 登录地址 / 角色凭据三列，而「角色凭据」单元格里又塞着状态徽章 + 测试按钮 + 可展开日志——表格与富内容相互打架。重设计为<strong>档案卡</strong>：一张档案 = 一种登录方式，卡内身份阵容平铺，每个身份有自己的验证状态与测试入口，富内容终于有地方呼吸。</p>
+    <div class="stage stage-tight">
+      <div style="padding:18px 22px 0">
+        <div class="pagebar">
+          <h3>认证管理</h3>
+          <span class="pill mono">2 个档案</span>
+          <span style="margin-left:auto"></span>
+          <button class="btn btn-cta btn-sm">＋ 新建档案</button>
+        </div>
+      </div>
+
+      <!-- profile 1 -->
+      <div class="prof-card" style="margin:0 22px 16px">
+        <div class="prof-head">
+          <div>
+            <div class="pname">NodeGoat 后台</div>
+            <div class="pmeta">login.example.com <span style="opacity:.5">·</span> 3 个身份</div>
+          </div>
+          <div class="right">
+            <span class="pill">表单登录</span>
+            <span class="status ok"><span class="pip"></span>可用</span>
+          </div>
+        </div>
+        <div class="prof-divider"></div>
+        <div class="prof-body">
+          <div class="idcard" style="--id:var(--id-1)">
+            <div class="rail"></div>
+            <div class="body"><div class="top"><span class="chip mono">01</span><span class="role">超级管理员</span></div><div class="handle mono">@alice.admin</div></div>
+            <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+          </div>
+          <div class="idcard" style="--id:var(--id-2)">
+            <div class="rail"></div>
+            <div class="body"><div class="top"><span class="chip mono">02</span><span class="role">运营经理</span></div><div class="handle mono">@bob.ops</div></div>
+            <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+          </div>
+          <div class="idcard" style="--id:var(--id-3)">
+            <div class="rail"></div>
+            <div class="body"><div class="top"><span class="chip mono">03</span><span class="role">普通用户</span></div><div class="handle mono">@carol.user</div></div>
+            <div class="actions"><button class="btn btn-outline btn-sm">测试登录</button></div>
+          </div>
+        </div>
+        <div class="prof-foot">
+          <button class="btn btn-ghost btn-sm">编辑</button>
+          <button class="btn btn-ghost btn-sm">删除</button>
+        </div>
+      </div>
+
+      <!-- profile 2 (system, read-only, one failed) -->
+      <div class="prof-card" style="margin:0 22px 22px">
+        <div class="prof-head">
+          <div>
+            <div class="pname">Juice Shop <span class="pill mono" title="系统档案只读（来源：configs）">系统</span></div>
+            <div class="pmeta">juice-shop.local:3000 <span style="opacity:.5">·</span> 2 个身份</div>
+          </div>
+          <div class="right">
+            <span class="pill">表单登录</span>
+            <span class="status bad"><span class="pip"></span>不可用</span>
+          </div>
+        </div>
+        <div class="prof-divider"></div>
+        <div class="prof-body">
+          <div class="idcard" style="--id:var(--id-4)">
+            <div class="rail"></div>
+            <div class="body"><div class="top"><span class="chip mono">01</span><span class="role">admin</span></div><div class="handle mono">@admin</div></div>
+            <div class="actions"><span class="status bad"><span class="pip"></span>验证失败</span></div>
+            <div class="fail-detail">账号被锁：连续 5 次密码错误。等待解锁后重试。</div>
+            <div class="idlog">
+              <div class="lh"><span class="b"></span>登录过程 <span style="margin-left:auto;color:hsl(var(--muted-fg));font-weight:400;cursor:pointer">收起</span></div>
+              <ol>
+                <li><span class="mk ok"></span><span class="ts">14:32:01</span><span class="body">GET /login</span><span class="code">200</span></li>
+                <li><span class="mk ok"></span><span class="ts">14:32:02</span><span class="body">填写 admin / 提交</span><span class="code">—</span></li>
+                <li class="fail"><span class="mk bad"></span><span class="ts">14:32:03</span><span class="body">POST /api/auth/login · 密码错误 (5/5)</span><span class="code">401</span></li>
+                <li class="fail"><span class="mk bad"></span><span class="ts">14:32:04</span><span class="body">账号已锁定，停止重试</span><span class="code">423</span></li>
+              </ol>
+            </div>
+          </div>
+          <div class="idcard" style="--id:var(--id-5)">
+            <div class="rail"></div>
+            <div class="body"><div class="top"><span class="chip mono">02</span><span class="role">customer</span></div><div class="handle mono">@guest@b2b.com</div></div>
+            <div class="actions"><span class="status idle"><span class="pip"></span>未验证</span></div>
+          </div>
+        </div>
+        <div class="prof-foot"><span class="corner-note" style="margin-right:auto">系统档案只读，编辑入口已禁用</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCAN PAGE AUTH AREA (structure preserved, restyled) ============ -->
+  <section class="section" id="scanPage" data-mode="inline">
+    <span class="eyebrow">05 · 黑盒扫描页 · 认证区</span>
+    <h2>沿用三段布局，只换皮肤</h2>
+    <p class="desc">结构<strong>不动</strong>——仍是「左栏目标 / 上下文 + 右栏认证核心 + 底部横向」三段（与现状代码一致）。只把凭据行换成<strong>身份卡</strong>、附加角色换成<strong>对比阵容</strong>、profile 模式的角色多选换成<strong>可选身份卡</strong>。点下方「临时填写 / 使用档案」切换两种模式的右栏与底部区块。</p>
+    <div class="stage">
+      <div class="scanreal-top">
+        <!-- LEFT: target / context / auth header (unchanged) -->
+        <div>
+          <div style="margin-bottom:16px">
+            <div class="panel-eyebrow"><span class="bar"></span><span class="t">目标服务</span><span class="hint">必填</span></div>
+            <input class="input" value="https://target.example.com" style="border-color:hsl(var(--s-amber) / .35)" />
+            <div class="corner-note" style="margin-top:6px">运行中的 Web 服务地址，必须以 http:// 或 https:// 开头</div>
+          </div>
+          <div style="height:1px;background:hsl(var(--border));margin:14px 0"></div>
+          <div>
+            <div class="panel-eyebrow"><span class="bar"></span><span class="t">扫描上下文</span><span class="hint">必填 · 复用一个白盒结果</span></div>
+            <div class="two">
+              <div><label class="field-label">目标 workspace</label><input class="input" value="pentest-ng" /></div>
+              <div><label class="field-label">复用白盒扫描</label><input class="input" value="scan_8f3a · 最新" /></div>
+            </div>
+          </div>
+          <div style="height:1px;background:hsl(var(--border));margin:16px 0"></div>
+          <div class="collapsible-head">
+            <div class="titles">
+              <div class="t">认证登录 <span class="pill">可选</span></div>
+              <div class="s">当前：已启用登录 · 3 个身份待比对</div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="margin-left:auto">收起</button>
+          </div>
+        </div>
+
+        <!-- RIGHT: auth core — source segmented + (inline: flow+save | profile: summary) -->
+        <div class="fade">
+          <div class="panel-eyebrow"><span class="bar"></span><span class="t">认证登录</span></div>
+          <div class="segmented mode-switch" style="width:100%;margin-bottom:14px">
+            <button style="flex:1" aria-pressed="true" data-target="inline">临时填写</button>
+            <button style="flex:1" aria-pressed="false" data-target="profile">使用档案</button>
+          </div>
+
+          <!-- inline right: login flow + save-as-profile -->
+          <div class="inline-only mode-only">
+            <label class="field-label">登录步骤 <span style="color:hsl(var(--muted-fg))">（可选）</span></label>
+            <textarea class="input textarea" placeholder="每行一步&#10;访问登录页&#10;填写用户名&#10;填写密码&#10;提交"></textarea>
+            <div style="height:1px;background:hsl(var(--border-soft));margin:14px 0"></div>
+            <label class="field-label">保存为认证档案（以后可在「使用档案」模式复用）</label>
+            <div style="display:flex;gap:8px">
+              <input class="input" placeholder="如：NG 管理后台" style="flex:1" />
+              <button class="btn btn-outline btn-sm">保存为认证档案</button>
+            </div>
+          </div>
+
+          <!-- profile right: selected profile summary -->
+          <div class="profile-only mode-only">
+            <label class="field-label">已选档案</label>
+            <div class="prof-card" style="box-shadow:none">
+              <div class="prof-head" style="padding:12px 14px">
+                <div>
+                  <div class="pname" style="font-size:13.5px">NodeGoat 后台</div>
+                  <div class="pmeta">login.example.com · 表单登录 · 3 身份</div>
+                </div>
+                <span class="status ok" style="margin-left:auto"><span class="pip"></span>可用</span>
+              </div>
+            </div>
+            <p class="roster-intent" style="margin:10px 0 0"><span style="color:hsl(var(--primary))">ⓘ</span> 从底部档案列表选择档案与登录角色，角色凭据来自已验证档案。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTTOM (full width) — switches with mode -->
+      <div class="scan-bottom">
+        <!-- ===== INLINE BOTTOM: entry ‖ primary identity, then roster ===== -->
+        <div class="inline-only mode-only">
+          <div class="two" style="gap:12px;align-items:start;margin-bottom:14px">
+            <!-- 登录入口 -->
+            <div class="auth-panel" style="padding:14px">
+              <div class="panel-eyebrow"><span class="bar"></span><span class="t">登录入口</span></div>
+              <label class="field-label">登录方式</label>
+              <div class="entry-types" style="margin-bottom:10px">
+                <button aria-pressed="true">表单登录</button>
+                <button aria-pressed="false">SSO</button>
+                <button aria-pressed="false">API Token</button>
+                <button aria-pressed="false">HTTP Basic</button>
+              </div>
+              <label class="field-label">登录地址</label>
+              <input class="input" value="https://target.example.com/login" />
+            </div>
+            <!-- 主身份卡 (editable) -->
+            <div>
+              <div class="panel-eyebrow"><span class="bar"></span><span class="t">凭据 · 主身份</span></div>
+              <div class="idcard editable" style="--id:var(--id-1)">
+                <div class="rail"></div>
+                <div class="body">
+                  <div class="two" style="gap:8px">
+                    <div><label class="field-label">角色</label><input class="input" value="超级管理员" /></div>
+                    <div><label class="field-label">用户名</label><input class="input" value="alice.admin" /></div>
+                  </div>
+                  <div class="two" style="gap:8px;margin-top:8px">
+                    <div><label class="field-label">密码</label><input class="input" type="password" value="••••••••" /></div>
+                    <div><label class="field-label">TOTP <span style="color:hsl(var(--muted-fg))">（可选）</span></label><input class="input" placeholder="JBSWY3DP…" /></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 附加角色 roster -->
+          <div class="roster-head">
+            <span class="bar"></span><span class="t">附加角色 · 多身份对比</span>
+            <span class="pill">2</span>
+            <button class="btn btn-outline btn-sm add" style="margin-left:auto">＋ 添加身份</button>
+          </div>
+          <p class="roster-intent" style="margin-bottom:10px">这些身份会分别真实登录，与主身份比对可访问范围——用于发现 IDOR / 越权。</p>
+          <div class="roster-grid">
+            <div class="idcard" style="--id:var(--id-2)">
+              <div class="rail"></div>
+              <div class="body"><div class="top"><span class="chip mono">02</span><span class="role">运营经理</span></div><div class="handle mono">@bob.ops</div></div>
+              <div class="actions"><button class="btn btn-ghost btn-sm">删除</button></div>
+            </div>
+            <div class="idcard" style="--id:var(--id-3)">
+              <div class="rail"></div>
+              <div class="body"><div class="top"><span class="chip mono">03</span><span class="role">普通用户</span></div><div class="handle mono">@carol.user</div></div>
+              <div class="actions"><button class="btn btn-ghost btn-sm">删除</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== PROFILE BOTTOM: list ‖ detail + selectable identity cards ===== -->
+        <div class="profile-only mode-only">
+          <div style="display:grid;grid-template-columns:1fr;gap:16px" class="prof-split">
+            <!-- left: profile cards -->
+            <div>
+              <div class="panel-eyebrow"><span class="bar"></span><span class="t">选择档案</span></div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <button type="button" class="prof-card" style="text-align:left;border-color:hsl(var(--primary));background:hsl(var(--primary)/.05);box-shadow:0 0 0 1px hsl(var(--primary)/.25)">
+                  <div class="prof-head" style="padding:12px 14px">
+                    <div><div class="pname" style="font-size:13.5px">NodeGoat 后台</div><div class="pmeta">login.example.com · 3 身份</div></div>
+                    <span class="status ok" style="margin-left:auto"><span class="pip"></span>可用</span>
+                  </div>
+                </button>
+                <button type="button" class="prof-card" style="text-align:left">
+                  <div class="prof-head" style="padding:12px 14px">
+                    <div><div class="pname" style="font-size:13.5px">Juice Shop <span class="pill mono">系统</span></div><div class="pmeta">juice-shop.local:3000 · 2 身份</div></div>
+                    <span class="status bad" style="margin-left:auto"><span class="pip"></span>不可用</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+            <!-- right: selected detail + role multi-select (selectable identity cards) -->
+            <div class="auth-panel" style="padding:16px">
+              <div class="pname" style="font-size:14px;margin-bottom:2px">NodeGoat 后台</div>
+              <div class="pmeta" style="margin-bottom:12px">https://target.example.com/login · 表单登录</div>
+              <div class="panel-eyebrow" style="margin-bottom:10px"><span class="bar"></span><span class="t">以哪些身份登录</span><span class="hint">默认全选 · 可多选</span></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="idcard sel" style="--id:var(--id-1)" aria-pressed="true">
+                  <div class="rail"></div>
+                  <div class="body"><div class="top"><span class="check"><svg viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="hsl(var(--primary-fg))" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="role">超级管理员</span><span class="handle mono" style="margin-left:8px;margin-top:0">@alice.admin</span></div></div>
+                  <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+                </div>
+                <div class="idcard sel" style="--id:var(--id-2)" aria-pressed="true">
+                  <div class="rail"></div>
+                  <div class="body"><div class="top"><span class="check"><svg viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="hsl(var(--primary-fg))" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="role">运营经理</span><span class="handle mono" style="margin-left:8px;margin-top:0">@bob.ops</span></div></div>
+                  <div class="actions"><span class="status ok"><span class="pip"></span>已验证</span></div>
+                </div>
+                <div class="idcard sel" style="--id:var(--id-3)" aria-pressed="false">
+                  <div class="rail"></div>
+                  <div class="body"><div class="top"><span class="check"></span><span class="role">普通用户</span><span class="handle mono" style="margin-left:8px;margin-top:0">@carol.user</span></div></div>
+                  <div class="actions"><span class="status idle"><span class="pip"></span>未验证</span></div>
+                </div>
+              </div>
+              <div class="corner-note" style="margin-top:10px">已选 2 / 3 个角色，扫描将以各角色凭据分别验证。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BEFORE / AFTER ============ -->
+  <section class="section">
+    <span class="eyebrow">06 · 改动小结</span>
+    <h2>什么变了，为什么</h2>
+    <div class="bna">
+      <div class="card">
+        <h5 class="was">原状（问题）</h5>
+        <ul>
+          <li>多角色 = 底部一行行<b>同质表单</b>，「+ 添加角色」，IDOR 测试<b>意图隐形</b>。</li>
+          <li>认证配置散落<b>三处</b>（右栏核心 + 底部横向 + 折叠头），登录方式在左、凭据在右、步骤在右栏。</li>
+          <li>认证管理页是<b>扁平表格</b>，状态徽章 / 测试按钮 / 可展开日志全挤进一个单元格。</li>
+          <li>验证失败日志是<b>裸 JSON.stringify</b>，未设计。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h5 class="now">重设计（解法）</h5>
+        <ul>
+          <li>每个凭据升格为<b>身份卡</b>：色轨区分身份、角色名作标题、状态信号独立，意图一目了然。</li>
+          <li>附加角色组织成<b>对比阵容</b>，表头直接说「分别登录、比对访问范围」。</li>
+          <li>扫描页<b>沿三段布局不动</b>，只把凭据行换身份卡、附加角色换对比阵容、角色多选换可选身份卡。</li>
+          <li>认证管理页改<b>档案卡</b>，身份阵容平铺，富内容有呼吸空间。</li>
+          <li>验证失败日志从裸 JSON 改为<b>步骤时间线</b>，每步状态码 / 耗时一目了然。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="corner-note" style="margin-top:18px">实现层面：身份卡是共享组件，扫描页 inline 附加角色 + 档案 dialog 凭据行 + 管理页凭据展示三处复用；既有契约（CredentialDraft、AuthProfileCredential、buildAuthPayload、auth_accounts）与全部测试不变，仅替换展示层。</p>
+  </section>
+
+</div>
+
+<script>
+  const btn = document.getElementById('themeBtn');
+  const setTheme = (light) => {
+    document.documentElement.classList.toggle('light', light);
+    btn.setAttribute('aria-pressed', String(light));
+  };
+  btn.addEventListener('click', () => setTheme(!document.documentElement.classList.contains('light')));
+  // generic segmented toggle (entry types, source, etc.)
+  const wireSegmented = (sel) => document.querySelectorAll(sel).forEach(seg => {
+    seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+    }));
+  });
+  wireSegmented('.segmented:not(.mode-switch)');
+  wireSegmented('.entry-types');
+  // scan-page mode switch: sets data-mode on the section → swaps right core + bottom
+  document.querySelectorAll('.mode-switch button').forEach(b => b.addEventListener('click', () => {
+    document.querySelector('.mode-switch').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    document.getElementById('scanPage').setAttribute('data-mode', b.dataset.target);
+  }));
+  // selectable identity cards (profile-mode role multi-select)
+  document.querySelectorAll('.idcard.sel').forEach(c => c.addEventListener('click', () => {
+    c.setAttribute('aria-pressed', c.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+  }));
+</script>
+</body>
+</html>
