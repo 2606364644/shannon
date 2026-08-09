@@ -681,7 +681,7 @@
   },
   "wsConfig": {
     "title": "Workspace Config",
-    "subtitle": "Override global provider config; empty fields fall back to global defaults.",
+    "subtitle": "Override the global provider config. Empty fields inherit the global default; overridden fields are highlighted.",
     "fields": {
       "aiProvider": "AI Provider",
       "apiKey": "API Key",
@@ -695,10 +695,41 @@
       "gitlabUser": "GitLab User",
       "gitlabToken": "GitLab Token"
     },
-    "gitSection": "Git credentials (for cloning repos; blank falls back to global)",
+    "sections": {
+      "engine": { "title": "AI engine & credentials", "desc": "Pick the AI engine that drives scans, and set its auth and endpoint." },
+      "models": { "title": "Models", "desc": "Tiered by activity cost; any tier left empty falls back to the general model." },
+      "runtime": { "title": "Runtime", "desc": "Tune the agent turn budget and thinking mode." },
+      "git": { "title": "Git access", "desc": "Credentials for cloning repos; blank falls back to global." }
+    },
+    "tiers": {
+      "small": "Light · recon / indexing",
+      "medium": "Standard · analysis",
+      "large": "Heavy · deep vuln work",
+      "fallback": "General fallback model (used when a tier is unset)"
+    },
+    "provenance": {
+      "inherit": "inherits global",
+      "override": "overridden",
+      "set": "configured",
+      "unset": "not configured"
+    },
+    "providerNote": {
+      "bedrock": "Bedrock region is set via global env and cannot be overridden per workspace.",
+      "vertex": "Vertex project_id / region is set via global env and cannot be overridden per workspace."
+    },
+    "summary": {
+      "overridden": "{{count}} overridden",
+      "none": "All inheriting global defaults"
+    },
+    "reset": "Reset to inherit",
+    "readonlyBanner": "You are read-only on this workspace; admin or manager role is required to edit.",
+    "dirtyHint": "Unsaved changes",
+    "discard": "Discard changes",
+    "loadFailed": "Failed to load config",
+    "retry": "Retry",
     "apiKey": {
       "configured": "Configured (••••), leave blank to keep",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured (blank = fall back to global)"
     },
     "gitToken": {
       "configured": "Configured (••••), leave blank to keep",
@@ -711,7 +742,7 @@
       "saveFailed": "Save failed",
       "invalid": "Invalid configuration"
     },
-    "fallbackHint": "Blank = fall back to global default",
+    "fallbackHint": "Inherit global (blank = fall back to default)",
     "openSettings": "Workspace config"
   },
   "users": {
