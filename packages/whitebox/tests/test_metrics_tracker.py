@@ -309,3 +309,23 @@ async def test_phases_backward_compatible_missing_field(tmp_path: Path):
     metrics = tracker.get_metrics()
     # Should not crash; phases defaults to empty
     assert metrics.get("phases", {}) == {}
+
+
+async def test_end_agent_clears_error_on_success(tmp_path: Path):
+    """spec 2026-08-08 bug2: 同一 agent 先失败（error）再成功 → error 残留清除（None）。
+
+    修复前 ``if result.error`` 守护导致 success 时不清 error → attempt-1 失败的 error
+    残留到 attempt-2 成功后（session.json report success:true + 旧 error 共存 → live 红标）。"""
+    meta = _make_meta(tmp_path)
+    tracker = MetricsTracker(meta)
+    await tracker.initialize()
+    tracker.start_agent("report", 1)
+    await tracker.end_agent("report", AgentEndResult(
+        success=False, duration_ms=1000, cost_usd=0.01, error="attempt-1 failed"))
+    # attempt-2 成功（report agent 重试成功）
+    await tracker.end_agent("report", AgentEndResult(
+        success=True, duration_ms=2000, cost_usd=0.02, error=None))
+    data = _read_session_json(tmp_path)
+    assert data["metrics"]["agents"]["report"]["success"] is True
+    assert data["metrics"]["agents"]["report"].get("error") is None, (
+        "success 后 error 应清除（修复前残留 attempt-1 的 error）")

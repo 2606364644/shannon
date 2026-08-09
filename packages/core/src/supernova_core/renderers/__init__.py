@@ -3,7 +3,7 @@ from supernova_core.renderers.pre_recon import render_pre_recon
 __all__ = ["render_pre_recon", "render_deliverable"]
 
 
-def render_deliverable(agent_name, data: dict, deliverables_path=None) -> "str | None":
+def render_deliverable(agent_name, data: dict, deliverables_path=None, queue_root=None) -> "str | None":
     """按 agent 分发 renderer。
 
     - Plan 1: pre-recon 走 render_pre_recon。
@@ -35,11 +35,11 @@ def render_deliverable(agent_name, data: dict, deliverables_path=None) -> "str |
         return render_vuln(vc, data)
     if isinstance(agent_name, AgentName) and agent_name.value.endswith("-exploit"):
         vc = agent_name.value.removesuffix("-exploit")
-        return _render_exploit_deliverable(vc, data, deliverables_path)
+        return _render_exploit_deliverable(vc, data, deliverables_path, queue_root)
     return None
 
 
-def _render_exploit_deliverable(vc, data, deliverables_path):
+def _render_exploit_deliverable(vc, data, deliverables_path, queue_root=None):
     import json
     from pathlib import Path
 
@@ -50,7 +50,14 @@ def _render_exploit_deliverable(vc, data, deliverables_path):
     id_to_type: dict[str, str] = {}
     id_to_title: dict[str, str] = {}
     if deliverables_path is not None:
-        queue_path = Path(deliverables_path) / f"{vc}_exploitation_queue.json"
+        from supernova_core.utils.paths import resolve_track_deliverable, WHITEBOX_SUBDIR
+
+        # 读 queue 的根：queue_root 优先（黑盒 = 白盒 repo_path/deliverables，queue 在
+        # whitebox/ 子目录）；缺省回落 deliverables_path（whitebox：已含 whitebox/ 或平铺）。
+        # resolve_track_deliverable 双路径 fallback 让两种结构都命中（spec 2026-08-08 根因修复：
+        # 黑盒 exploit 链读 queue 用对白盒根，不再读黑盒自己空目录导致 valid_ids 空）。
+        read_root = queue_root if queue_root is not None else deliverables_path
+        queue_path = resolve_track_deliverable(Path(read_root), WHITEBOX_SUBDIR, f"{vc}_exploitation_queue.json")
         if queue_path.exists():
             try:
                 from supernova_core.models.queue_schemas import VulnerabilityQueue

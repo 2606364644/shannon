@@ -84,6 +84,7 @@ class AgentExecutor:
         max_turns: int | None = None,
         skip_artifact_postprocess: bool = False,
         provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
+        queue_root: str | None = None,   # spec 2026-08-08：读 queue 的根（黑盒=白盒 repo_path/deliverables），透传到 render_deliverable
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -191,7 +192,7 @@ class AgentExecutor:
         # TS agent-execution.ts:295-297 writeDeliverable。render_deliverable 对无
         # collector 的 agent 返 None → 跳过写盘(self-Write 路径不动)。
         if not skip_artifact_postprocess and collector is not None:
-            md = render_deliverable(agent_name, collector.get_all(), deliverables)
+            md = render_deliverable(agent_name, collector.get_all(), deliverables, queue_root=queue_root)
             if md is not None:
                 (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
 

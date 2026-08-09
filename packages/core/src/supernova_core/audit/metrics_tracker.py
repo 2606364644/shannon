@@ -102,9 +102,10 @@ class MetricsTracker:
             "output_tokens": result.output_tokens or 0,
             "cache_read_tokens": result.cache_read_tokens or 0,
             "cache_creation_tokens": result.cache_creation_tokens or 0,
+            # 始终覆盖 error（spec 2026-08-08 bug2）：success 时 result.error=None 清除
+            # attempt-1 残留的 error，避免 session.json success:true + 旧 error 共存（live 红标）。
+            "error": result.error,
         })
-        if result.error:
-            agents[agent_name]["error"] = result.error
 
         self._data["metrics"]["total_duration_ms"] += result.duration_ms
         self._data["metrics"]["total_cost_usd"] += result.cost_usd
