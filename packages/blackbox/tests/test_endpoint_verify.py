@@ -133,6 +133,10 @@ async def test_execute_degrades_when_no_structured_output(tmp_path):
 
     assert result["endpoint_verify"] is None  # 降级
     assert not (dlv / "blackbox" / "endpoint_verify.json").exists()  # 不写盘
+    # 降级 dict 须含 cost_currency:run_endpoint_verify 成功分支用 result.get("cost_currency")
+    # 构造 AgentEndResult(cost_currency: str),降级 dict 缺 key → .get() 得 None → Pydantic 校验崩
+    # (真机 NodeGoat 扫描 endpoint-verify failed 的直接根因)。
+    assert result["cost_currency"] == "USD"
 
 
 @pytest.mark.asyncio
@@ -150,6 +154,8 @@ async def test_execute_degrades_when_no_endpoints(tmp_path):
 
     assert result["endpoint_verify"] is None
     stub_executor.execute.assert_not_called()  # 无端点不调 agent
+    # 降级 dict 须含 cost_currency(同上,activities 成功分支 .get() 取,缺 key 则校验崩)。
+    assert result["cost_currency"] == "USD"
 
 
 # ─── B6: prompt 契约(回归守卫) ─────────────────────────────────────────────────
@@ -180,7 +186,7 @@ def _build_exploit_chain_mocks(call_order: list, endpoint_verify_return: dict) -
     @activity.defn
     async def setup_display(i): pass
     @activity.defn
-    async def log_phase_start_activity(i): pass
+    async def log_phase_start_activity(i, steps=None, intents=None): pass
     @activity.defn
     async def run_blackbox_preflight(i): pass
     @activity.defn
@@ -214,13 +220,15 @@ def _build_exploit_chain_mocks(call_order: list, endpoint_verify_return: dict) -
     @activity.defn
     async def cleanup_engine_configs(rp, eng): pass
     @activity.defn
+    async def cleanup_auth_state_activity(ws): pass
+    @activity.defn
     async def finalize_summary(i, summary): pass
     return [setup_display, log_phase_start_activity, run_blackbox_preflight,
             resolve_blackbox_engine, detect_whitebox_results, log_info_activity,
             run_endpoint_verify, validate_exploitation_queue,
             write_engine_config_for_session, run_exploit_agent,
             assemble_report, run_report_agent, finalize_report,
-            cleanup_engine_configs, finalize_summary]
+            cleanup_engine_configs, cleanup_auth_state_activity, finalize_summary]
 
 
 async def _run_workflow(acts, inp, wid, tq):

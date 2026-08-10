@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthContext";
+import { BrandProvider } from "@/brand/BrandContext";
 import { ThemeProvider } from "@/lib/theme-context";
 import i18n from "@/i18n";
 import LoginPage from "./LoginPage";
@@ -9,13 +10,15 @@ import { THEME_KEY } from "@/lib/theme";
 
 function wrap() {
   return render(
-    <AuthProvider>
-      <ThemeProvider>
-        <MemoryRouter initialEntries={["/login"]}>
-          <Routes><Route path="/login" element={<LoginPage />} /></Routes>
-        </MemoryRouter>
-      </ThemeProvider>
-    </AuthProvider>
+    <BrandProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <MemoryRouter initialEntries={["/login"]}>
+            <Routes><Route path="/login" element={<LoginPage />} /></Routes>
+          </MemoryRouter>
+        </ThemeProvider>
+      </AuthProvider>
+    </BrandProvider>
   );
 }
 
@@ -25,6 +28,7 @@ describe("LoginPage", () => {
   beforeEach(() => {
     i18n.changeLanguage("zh");
     localStorage.clear();
+    document.title = "";
     document.documentElement.classList.remove("dark", "light");
   });
   afterEach(() => i18n.changeLanguage("zh"));
@@ -69,5 +73,16 @@ describe("LoginPage", () => {
     await waitFor(() => expect(screen.getByText("欢迎回来")).toBeTruthy());
     const root = container.firstElementChild;
     expect(root?.className ?? "").not.toMatch(/\blight\b/);
+  });
+
+  it("左品牌区字标跟随注入的品牌名（非硬编码 Supernova）", async () => {
+    // 模拟生产 index.html：后端 _render_index_html 已把生效品牌名注入 <title>
+    // （BrandProvider 初始 state 继承 document.title，未登录 /login 页 system-status 401 也能拿到）。
+    document.title = "ft-codesec";
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    wrap();
+    await waitFor(() => expect(screen.getByText("欢迎回来")).toBeTruthy());
+    // 左品牌区字标 = 注入的品牌名，而非硬编码 "Supernova"
+    expect(screen.getByText("ft-codesec")).toBeTruthy();
   });
 });

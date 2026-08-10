@@ -8,6 +8,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
+import { Toaster } from "@/components/ui/sonner";
 import { AuthProfilesPage } from "./AuthProfilesPage";
 import type { AuthProfile } from "@/api/types";
 
@@ -66,6 +67,7 @@ function renderPage(ws = "ws1") {
       <Routes>
         <Route path="/p/:workspace/auth-profiles" element={<AuthProfilesPage />} />
       </Routes>
+      <Toaster />
     </MemoryRouter>,
   );
 }
@@ -206,5 +208,71 @@ describe("AuthProfilesPage", () => {
     expect(screen.getAllByLabelText("删除")).toHaveLength(1);
     // 系统档案显示来源徽章
     expect(screen.getByText("系统")).toBeInTheDocument();
+  });
+
+  // fork：系统档案「复制到工作区」→ ws 可编辑副本
+  it("系统档案显示「复制到工作区」按钮，ws 档案不显示", async () => {
+    profiles = [
+      { ...initial[0], id: "prof_ws", name: "ws-prof", scope: "workspace" },
+      {
+        ...initial[0], id: "prof_sys", name: "sys-prof", scope: "system",
+        credentials: [{
+          id: "cred_s", role: "primary", username: "u", password: "••••",
+          verify_status: { state: "unverified" },
+        }],
+      },
+    ];
+    renderPage();
+    await waitFor(() => expect(screen.getByText("sys-prof")).toBeInTheDocument());
+    // 系统行有「复制到工作区」按钮
+    expect(screen.getByRole("button", { name: /复制到工作区/ })).toBeInTheDocument();
+  });
+
+  it("点「复制到工作区」fork 成功 → 该行变可编辑（系统徽章消失、编辑出现）", async () => {
+    server.use(
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/fork", () => {
+        // fork 后 GET list 返 ws 副本（scope=workspace，无系统徽章）
+        profiles = [{
+          ...initial[0], id: "prof_sys", name: "sys-prof", scope: "workspace",
+          credentials: [{
+            id: "cred_new", role: "primary", username: "u", password: "••••",
+            verify_status: { state: "unverified" },
+          }],
+        }];
+        return HttpResponse.json(profiles[0]);
+      }),
+    );
+    profiles = [{
+      ...initial[0], id: "prof_sys", name: "sys-prof", scope: "system",
+      credentials: [{
+        id: "cred_s", role: "primary", username: "u", password: "••••",
+        verify_status: { state: "unverified" },
+      }],
+    }];
+    renderPage();
+    await waitFor(() => expect(screen.getByText("sys-prof")).toBeInTheDocument());
+    expect(screen.getByText("系统")).toBeInTheDocument();   // 初始系统徽章
+    fireEvent.click(screen.getByRole("button", { name: /复制到工作区/ }));
+    // fork 后刷新：编辑按钮出现，系统徽章消失
+    await waitFor(() => expect(screen.getByLabelText("编辑")).toBeInTheDocument());
+    expect(screen.queryByText("系统")).not.toBeInTheDocument();
+  });
+
+  it("重复 fork 409 → toast「已复制到本工作区」（非失败）", async () => {
+    server.use(
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/fork", () =>
+        HttpResponse.json({ detail: "已复制到本工作区" }, { status: 409 })),
+    );
+    profiles = [{
+      ...initial[0], id: "prof_sys", name: "sys-prof", scope: "system",
+      credentials: [{
+        id: "cred_s", role: "primary", username: "u", password: "••••",
+        verify_status: { state: "unverified" },
+      }],
+    }];
+    renderPage();
+    await waitFor(() => expect(screen.getByText("sys-prof")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /复制到工作区/ }));
+    await waitFor(() => expect(screen.getByText("已复制到本工作区")).toBeInTheDocument());
   });
 });

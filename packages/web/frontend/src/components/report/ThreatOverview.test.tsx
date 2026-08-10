@@ -58,13 +58,6 @@ describe("ThreatOverview", () => {
     expect(container.querySelector('[data-testid="threat-legend-Low"]')).not.toBeNull();
   });
 
-  it("Top3 渲染 vid chip + 描述文本", () => {
-    const { container } = render(<ThreatOverview stats={makeStats()} />);
-    const top = container.querySelector('[data-testid="threat-toprisk"]');
-    expect(top?.textContent).toContain("INJ-VULN-01");
-    expect(top?.textContent).toContain("服务端 RCE");
-  });
-
   it("attackChainCount > 0 时渲染可点 button + 图标 + 数字 + 攻击链 label", () => {
     const { getByRole } = render(<ThreatOverview stats={makeStats({ attackChainCount: 13 })} />);
     const btn = getByRole("button", { name: /攻击链/ });
@@ -110,7 +103,6 @@ describe("ThreatOverview", () => {
     expect(container.textContent).toContain("Single-point vulns");
     expect(container.textContent).toContain("Public reachable");
     expect(container.textContent).toContain("By severity distribution");
-    expect(container.textContent).toContain("Priority fixes");
     // section aria-label 英文
     expect(container.querySelector('[data-testid="threat-overview"]')).toHaveAttribute("aria-label", "Threat overview");
   });

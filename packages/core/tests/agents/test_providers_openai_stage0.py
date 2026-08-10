@@ -20,7 +20,7 @@ def test_max_turns_falls_back_to_env(monkeypatch):
 
 def test_max_turns_default(monkeypatch):
     monkeypatch.delenv("SUPERNOVA_OPENAI_MAX_TURNS", raising=False)
-    assert _make()._max_turns() == 200
+    assert _make()._max_turns() == 10000
 
 
 # —— _subagent_max_turns（SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS）——

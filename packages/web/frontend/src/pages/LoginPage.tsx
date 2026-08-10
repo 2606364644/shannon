@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/auth/AuthContext";
+import { useBrand } from "@/brand/BrandContext";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ const GRADIENT = "linear-gradient(155deg, #2E2520 0%, #4A2E22 55%, #6B3A26 100%)
 export default function LoginPage() {
   const { t } = useTranslation();
   const { user, login } = useAuth();
+  const brand = useBrand();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const [username, setUsername] = useState("");
@@ -56,7 +58,7 @@ export default function LoginPage() {
         >
           ✦
         </div>
-        <div className="text-2xl font-semibold tracking-tight" style={SERIF}>Supernova</div>
+        <div className="text-2xl font-semibold tracking-tight" style={SERIF}>{brand}</div>
         <div className="text-sm opacity-70">{t("auth.tagline")}</div>
       </div>
       {/* 右表单 */}

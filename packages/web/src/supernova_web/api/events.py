@@ -63,3 +63,39 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def build_verify_events_response(
+    ndjson: Path, last_event_id: int | None = None,
+) -> StreamingResponse:
+    """构造 auth 验证过程 SSE（tail ndjson + 遇 scan_end 关流）。
+
+    与 build_scan_events_response 同源（EventTailer + scan_end sentinel），但**无孤儿对账**
+    ——auth 验证是独立短 workflow（AuthValidationWorkflow），其 scan_end 由 finalize_summary
+    写；worker 崩溃致 scan_end 缺失时，前端 useEventSource 的 onerror 重连 + verify-status
+    轮询兜底（spec §8 降级）。last_event_id 支持 Last-Event-ID 断点续传。
+    """
+    async def gen():
+        queue: asyncio.Queue = asyncio.Queue()
+        tailer = EventTailer(ndjson)
+
+        async def on_event(data: dict, event_id: int):
+            await queue.put(EventTailer.encode_sse(data, event_id))
+            if data.get("type") == "scan_end":
+                await queue.put(None)  # sentinel：关流
+
+        task = asyncio.create_task(tailer.tail(on_event, last_event_id=last_event_id))
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            task.cancel()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

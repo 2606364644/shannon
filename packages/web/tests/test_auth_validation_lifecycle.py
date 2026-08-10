@@ -322,3 +322,62 @@ async def test_get_auth_validation_log_missing_file_returns_empty(tmp_path):
     events = await mgr.get_auth_validation_log(
         "ws1", workflow_id="authval-ws1-probe-empty", probe_dir=str(probe_dir))
     assert events == []
+
+
+# ---- verify-events SSE（实时过程流，块4）----
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_events_path_returns_ndjson_path(tmp_path):
+    """verify-events 守卫：合法 probe_dir/workflow_id → 返回 resolved events.ndjson Path。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-ev"
+    probe_dir.mkdir(parents=True)
+    ndjson = await mgr.auth_validation_events_path(
+        "ws1", workflow_id="authval-ws1-probe-ev", probe_dir=str(probe_dir))
+    assert ndjson == probe_dir.resolve() / "events.ndjson"
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_events_path_rejects_out_of_containment(tmp_path):
+    """verify-events 守卫①：probe_dir 越界 → ValueError（防任意路径读 events，对齐 verify-log）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    evil_dir = tmp_path / "evil"
+    evil_dir.mkdir()
+    with pytest.raises(ValueError, match="probe_dir 越界"):
+        await mgr.auth_validation_events_path(
+            "ws1", workflow_id="authval-ws1-probe-evil", probe_dir=str(evil_dir))
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_events_path_rejects_bad_workflow_id(tmp_path):
+    """verify-events 守卫②：workflow_id 不绑本 ws → ValueError（防跨 ws 读 events）。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-x"
+    probe_dir.mkdir(parents=True)
+    with pytest.raises(ValueError, match="workflow_id 越界"):
+        await mgr.auth_validation_events_path(
+            "ws1", workflow_id="authval-ws2-probe-x", probe_dir=str(probe_dir))
+
+
+@pytest.mark.asyncio
+async def test_build_verify_events_response_streams_until_scan_end(tmp_path):
+    """verify-events SSE：tail events.ndjson，逐事件编码 SSE frame，遇 scan_end 关流终止。"""
+    from supernova_web.api.events import build_verify_events_response
+
+    ndjson = tmp_path / "events.ndjson"
+    ndjson.write_text(
+        '{"type":"PhaseEvent","event":"start","phase":"auth-validation"}\n'
+        '{"type":"scan_end","status":"completed"}\n', "utf-8")
+    response = await build_verify_events_response(ndjson)
+    assert response.media_type == "text/event-stream"
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+    assert "PhaseEvent" in body
+    assert "scan_end" in body
+

@@ -19,7 +19,7 @@ from supernova_core.models.retry import (
 class TestGetRetryPolicy:
     def test_production_profile(self):
         policy = get_retry_policy("production")
-        assert policy.maximum_attempts == 50
+        assert policy.maximum_attempts == 3
         assert policy.initial_interval == timedelta(minutes=5)
         assert policy.maximum_interval == timedelta(minutes=30)
         assert policy.backoff_coefficient == 2.0
@@ -38,16 +38,16 @@ class TestGetRetryPolicy:
 
     def test_unknown_defaults_to_production(self):
         policy = get_retry_policy("unknown_mode")
-        assert policy.maximum_attempts == 50
+        assert policy.maximum_attempts == 3
 
     def test_none_defaults_to_production(self):
         policy = get_retry_policy(None)
-        assert policy.maximum_attempts == 50
+        assert policy.maximum_attempts == 3
 
 
 class TestVulnRetry:
     def test_vuln_retry_params(self):
-        assert VULN_RETRY.maximum_attempts == 8
+        assert VULN_RETRY.maximum_attempts == 3
         assert VULN_RETRY.initial_interval == timedelta(minutes=1)
         assert VULN_RETRY.maximum_interval == timedelta(minutes=5)
         assert VULN_RETRY.backoff_coefficient == 2.0

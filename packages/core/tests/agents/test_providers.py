@@ -699,7 +699,7 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(ProviderConfig(type="openai_compatible", api_key="k"))
         code, retryable = provider._classify_error(TimeoutError("request timed out"))
         assert code == "TimeoutError"
-        assert retryable is True
+        assert retryable is False  # 整体超时(CALL_TIMEOUT)确定性,non_retryable
 
     def test_classify_error_auth(self):
         from supernova_core.agents.providers_openai import OpenAIProvider
@@ -1644,14 +1644,14 @@ class TestTierModelEnvVarIntegration:
 
 
 class TestBuildOptionsMaxTurns:
-    """L2 (precondition): _build_options sets max_turns (default 200, env-overridable)."""
+    """L2 (precondition): _build_options sets max_turns (default 10000, env-overridable)."""
 
     def test_default_max_turns(self):
         config = ProviderConfig(type="anthropic_api")
         provider = AnthropicProvider(config)
         with patch.dict(os.environ, {}, clear=True):
             options = provider._build_options(cwd="/tmp", model="claude-sonnet-4-6")
-        assert options.max_turns == 200
+        assert options.max_turns == 10000
 
     def test_env_override_max_turns(self):
         config = ProviderConfig(type="anthropic_api")

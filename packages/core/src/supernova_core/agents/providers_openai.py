@@ -37,6 +37,7 @@ from .tool_audit_logger import ToolAuditLogger
 from .tools_openai import ToolContext, build_tools
 
 if TYPE_CHECKING:
+    from supernova_core.agents.progress_tool import ProgressSpec
     from supernova_core.collectors.base import CollectorBase
 
 _tracing_disabled = False
@@ -137,15 +138,17 @@ class OpenAIProvider(BaseProvider):
             # stall 时更快抛 timeout -> _classify_error 判 retryable -> activity 重试，不静默 hang。
             # （非本次 OOM 真根因——OOM 是内存；本加固防 stall 类 hang，防御性。）
             kwargs["timeout"] = float(os.getenv("SUPERNOVA_OPENAI_HTTP_TIMEOUT", "300"))
-            kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "1"))
+            kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "3"))
             self._client = _wrap_client_for_argument_sanitize(AsyncOpenAI(**kwargs))
         return self._client
 
     def _max_turns(self) -> int:
+        # 默认 10000 对齐原始 TS shannon（claude-executor.ts: maxTurns:10_000）：仅作 runaway
+        # 硬兜底，成本兜底靠 spending cap（utils/billing，同 TS）。
         # P3c 阶段 0：self.config.max_turns 优先（None 回落 env）
         if self.config.max_turns is not None:
             return self.config.max_turns
-        return int(os.getenv("SUPERNOVA_OPENAI_MAX_TURNS", "200"))
+        return int(os.getenv("SUPERNOVA_OPENAI_MAX_TURNS", "10000"))
 
     def _subagent_max_turns(self) -> int:
         # 子代理（Task 委派）max_turns。结构层已硬限单层（子代理无 subagent_run
@@ -287,17 +290,16 @@ class OpenAIProvider(BaseProvider):
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
         collector: "CollectorBase | None" = None,
+        progress: "ProgressSpec | None" = None,
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
         streaming = None  # SDK RunResultStreaming，供 error path（_handle_error/MaxTurnsExceeded）提累积 usage
         try:
-            # collector → 本引擎原生工具（FunctionTool list，经 bridge 构造）。
-            # engine-agnostic：caller 只传 CollectorBase，provider 各自经 bridge 构造。
-            extra_tools = None
-            if collector is not None:
-                from supernova_core.collectors.bridge import build_openai_tools
-                extra_tools = build_openai_tools(collector)
+            # collector + progress → 本引擎原生工具（FunctionTool list）。
+            # engine-agnostic：caller 只传 CollectorBase/ProgressSpec，provider 经 compose 组装。
+            from supernova_core.agents.progress_tool import compose_openai_extra_tools
+            extra_tools = compose_openai_extra_tools(collector, progress) or None
             agent = self.build_agent(model, output_format, extra_tools=extra_tools)
             # stream_collector 收 openai stream events（与 CollectorBase 无关，避免与
             # 上面的 collector 参数命名冲突）。
@@ -425,9 +427,12 @@ class OpenAIProvider(BaseProvider):
         # 速率限制 → 可重试
         if "rate" in error_msg or "limit" in error_msg or error_type == "ratelimiterror":
             return ("RateLimitError", True)
-        # 超时 → 可重试
+        # 超时 → 不可重试:openai 引擎整体超时=CALL_TIMEOUT(40min wall-clock),失控/stall agent
+        # 再跑照样超时,重试只放大成 40min×N 卡死。transient 单请求超时已由 client max_retries
+        # 在 HTTP 层兜底(3 次),到这层的 timeout 都是整体级。claude 引擎超时走共享
+        # classify_error_for_temporal(仍 retryable),两引擎路径独立、互不影响。
         if "timeout" in error_msg or error_type in ("timeouterror", "timeoutexception", "connecttimeout"):
-            return ("TimeoutError", True)
+            return ("TimeoutError", False)
         # 服务不可用 → 可重试
         if "unavailable" in error_msg or "503" in error_msg or "502" in error_msg or "504" in error_msg or error_type == "serviceunavailable":
             return ("ServiceUnavailableError", True)

@@ -27,6 +27,7 @@ from .runner import ClaudeRunResult, ProviderConfig, TokenUsage
 from .tool_audit_logger import ToolAuditLogger
 
 if TYPE_CHECKING:
+    from supernova_core.agents.progress_tool import ProgressSpec
     from supernova_core.collectors.base import CollectorBase
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class AnthropicProvider(BaseProvider):
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
         collector: "CollectorBase | None" = None,
+        progress: "ProgressSpec | None" = None,
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -96,6 +98,8 @@ class AnthropicProvider(BaseProvider):
             deliverables_subdir: 产物子目录
             collector: 可选的结构化工具收集器；非空时经 bridge 构造 in-process
                 MCP server（set_* 工具）+ allowed_tools 注入 ClaudeAgentOptions。
+            progress: 可选的进度工具规格（log_milestone）；非空时追加一个 in-process
+                MCP server，驱动认证验证进度步骤条。
 
         Returns:
             ClaudeRunResult: 执行结果
@@ -104,21 +108,17 @@ class AnthropicProvider(BaseProvider):
         model = self._get_model(model_tier)
 
         try:
-            # collector → 本引擎原生工具（in-process MCP server + allowed_tools 白名单）。
-            # engine-agnostic：caller 只传 CollectorBase，provider 各自经 bridge 构造。
-            mcp_server = None
-            allowed_tools = None
-            if collector is not None:
-                from supernova_core.collectors.bridge import build_claude_mcp_server
-                mcp_server = build_claude_mcp_server(collector)
-                allowed_tools = collector.tool_names()
+            # collector + progress → 本引擎原生工具（in-process MCP servers + allowed_tools 白名单）。
+            # engine-agnostic：caller 只传 CollectorBase/ProgressSpec，provider 经 compose 组装。
+            from supernova_core.agents.progress_tool import compose_claude_mcp
+            mcp_servers, allowed_tools = compose_claude_mcp(collector, progress)
 
             # 构建 SDK 配置
             options = self._build_options(
                 cwd, model, output_format,
                 max_turns_override=max_turns,
-                mcp_server=mcp_server,
-                allowed_tools=allowed_tools,
+                mcp_servers=mcp_servers or None,
+                allowed_tools=allowed_tools or None,
             )
 
             # 执行调用
@@ -265,15 +265,17 @@ class AnthropicProvider(BaseProvider):
         return sdk_env
 
     def _resolve_max_turns(self, max_turns_override: int | None) -> int:
-        """解析 max_turns，优先级：vuln 外部 override > P3c config > CLAUDE_MAX_TURNS env > 200。
+        """解析 max_turns，优先级：vuln 外部 override > P3c config > CLAUDE_MAX_TURNS env > 10000。
 
+        默认 10000 对齐原始 TS shannon（claude-executor.ts: maxTurns:10_000）：max_turns 仅作
+        runaway 硬兜底、不限制正常长任务；成本兜底靠 spending cap（utils/billing，同 TS）。
         提取为纯函数便于阶段 0 测试（原内联在 _build_options:276）。
         """
         if max_turns_override is not None:
             return max_turns_override
         if self.config.max_turns is not None:
             return self.config.max_turns
-        return int(os.getenv("CLAUDE_MAX_TURNS", "200"))
+        return int(os.getenv("CLAUDE_MAX_TURNS", "10000"))
 
     def _build_options(
         self,
@@ -281,7 +283,7 @@ class AnthropicProvider(BaseProvider):
         model: str,
         output_format: dict | None = None,
         max_turns_override: int | None = None,
-        mcp_server=None,
+        mcp_servers: dict | None = None,
         allowed_tools: list[str] | None = None,
     ) -> ClaudeAgentOptions:
         """构建 ClaudeAgentOptions"""
@@ -328,16 +330,15 @@ class AnthropicProvider(BaseProvider):
                 "append": directive,
             }
 
-        # collector → in-process MCP server（set_* 工具，经 bridge 构造）+ allowed_tools
-        # 白名单（collector.tool_names()）。allowed_tools 的作用是让 SDK MCP server 注册的
-        # set_* 工具被发现/可调用（不传则这些 collector 工具对 agent 不可见）。在
+        # in-process MCP servers（collector 的 set_* 工具 + progress 的 log_milestone，
+        # 经 compose_claude_mcp 组装成 dict）+ allowed_tools 白名单。allowed_tools 让 SDK
+        # MCP server 注册的工具被发现/可调用（不传则这些工具对 agent 不可见）。在
         # bypassPermissions 模式下,内置工具(Bash/Read/Grep 等)不受 allowed_tools 限制、
         # 仍可用 —— Task 6 真机探针(scripts/validate_glm_mcp_tool_probe.py)实测 GLM 同时
         # 调 Bash/Read 与 7 个 set_* 工具,旧注释「不传 allowed_tools CLI 默认全放行会漏调
-        # set_*」的因果模型是错的。engine-agnostic:collector 是 CollectorBase,bridge 翻译
-        # 成 SdkMcpTool。
-        if mcp_server is not None:
-            options.mcp_servers = {"shannon-collector": mcp_server}
+        # set_*」的因果模型是错的。
+        if mcp_servers:
+            options.mcp_servers = dict(mcp_servers)
         if allowed_tools:
             options.allowed_tools = list(allowed_tools)
 

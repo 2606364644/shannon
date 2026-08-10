@@ -6,7 +6,7 @@
 run_agent activity 的 2h start_to_close_timeout 未到，temporal 不介入，用户 50min 只见
 "没日志"。根因：openai 引擎是 in-process SDK，缺 claude CLI 子进程那层 HTTP 超时兜底
 （见 CLAUDE.md §2「CLI 运行时 vs 纯框架」）。修：call() 给 stream 消费包 asyncio.wait_for，
-超时 → _classify_error 判 retryable → activity 重试，不再静默永久 hang。
+超时 → _classify_error 判 non_retryable(整体超时确定性,重试只放大)→ activity 不重试,但不再静默永久 hang。
 """
 import asyncio
 from unittest.mock import MagicMock
@@ -46,4 +46,4 @@ async def test_call_streaming_stall_times_out_not_hang(monkeypatch):
         timeout=10)
 
     assert ret.success is False
-    assert ret.retryable is True
+    assert ret.retryable is False  # 整体超时确定性 → non_retryable,不再放大重试

@@ -1,6 +1,8 @@
-// Task 12 + 块4: 凭据行 = 状态徽章 + 「测试登录」+ verify-status 轮询 + 展开看过程(verify-log)。
-// 流程:点测试登录 → testCredential → 每 pollMs 轮询 getVerifyStatus(503=running 继续,块2 非阻塞)
-//       → 完成按 state toast + onChanged refresh。展开(失败默认/手动)拉 getVerifyLog 显示 agent 登录每步。
+// 块4: 凭据行 = 状态徽章 + 「测试登录」+ 实时过程（步骤条 + 日志）。
+// 流程: 点测试登录 → testCredential 返本次 {workflow_id, probe_dir} → 挂 VerifyLivePanel 接
+//   verify-events SSE（步骤条 + 实时日志）→ scan_end 时拉一次 verify-status 落终态 + refresh。
+// 本次 run 的 {workflow_id, probe_dir} 只喂给实时面板（修旧 bug：原绑 credential.verify_status
+// 上一次 run 旧数据）。事后回看（无 liveRun）走 verify-log review 面板。
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -9,46 +11,46 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { testCredential, getVerifyStatus, getVerifyLog } from "@/api/authProfiles";
 import type { AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
-import { ApiError } from "@/api/client";
 import { apiErrorMessage } from "@/lib/apiError";
-
-// 块2: 覆盖 workflow 最长实测 ~153s（60 次 × 3s = 180s）。配合后端非阻塞 describe,
-// 每次轮询秒级返回,不再因 120s 上限把 COMPLETED+success 误判 failed。
-const MAX_POLLS = 60;
-const DEFAULT_POLL_MS = 3000;
+import { VerifyLivePanel } from "./VerifyLivePanel";
 
 interface Props {
   ws: string;
   profile: AuthProfile;
   credential: AuthProfileCredential;
   onChanged: () => void;
-  /** 轮询间隔 ms,默认 3000(生产 ~180s 上限);测试可注入小值。 */
-  pollMs?: number;
 }
 
-export function CredentialRow({ ws, profile, credential, onChanged, pollMs = DEFAULT_POLL_MS }: Props) {
+interface LiveRun {
+  workflowId: string;
+  probeDir: string;
+  runKey: number;   // 每 test 递增 → VerifyLivePanel key 变 → 重挂载 fresh state
+}
+
+export function CredentialRow({ ws, profile, credential, onChanged }: Props) {
   const { t } = useTranslation();
   const [testing, setTesting] = useState(false);
+  const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
   const st: VerifyState = credential.verify_status?.state ?? "unverified";
   const vs = credential.verify_status;
   const probeDir = vs?.probe_dir;
   const workflowId = vs?.workflow_id;
   const hasLog = !!(probeDir && workflowId);
-  // 块4: 失败默认展开（用户最想看失败过程）;成功/unverified 折叠,手动展开。
+  // review 面板（事后回看）：失败默认展开；成功/unverified 折叠，手动展开。仅无 liveRun 时用。
   const [expanded, setExpanded] = useState(st === "failed");
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
 
-  // 块4: 展开且有 probe_dir/workflow_id 时拉 verify-log 显示 agent 登录每步。
+  // review 面板：展开且有 probe_dir/workflow_id 时拉 verify-log 显示 agent 登录每步。
   useEffect(() => {
-    if (!expanded || !probeDir || !workflowId) return;
-    let cancelled = false;
-    getVerifyLog(ws, profile.id, credential.id, workflowId, probeDir)
-      .then((r) => { if (!cancelled) setEvents(r.events); })
-      .catch(() => { if (!cancelled) setEvents([]); });
-    return () => { cancelled = true; };
-    // 依赖派生字符串（probeDir/workflowId）非 vs 对象,避免 refresh 新引用重触发。
+    if (expanded && !liveRun && probeDir && workflowId) {
+      let cancelled = false;
+      getVerifyLog(ws, profile.id, credential.id, workflowId, probeDir)
+        .then((r) => { if (!cancelled) setEvents(r.events); })
+        .catch(() => { if (!cancelled) setEvents([]); });
+      return () => { cancelled = true; };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, probeDir, workflowId, ws, profile.id, credential.id]);
+  }, [expanded, liveRun, probeDir, workflowId, ws, profile.id, credential.id]);
 
   const badgeCls =
     st === "success" ? "border-green/40 text-green"
@@ -60,30 +62,25 @@ export function CredentialRow({ ws, profile, credential, onChanged, pollMs = DEF
     setTesting(true);
     try {
       const { workflow_id, probe_dir } = await testCredential(ws, profile.id, credential.id);
-      for (let i = 0; i < MAX_POLLS; i++) {
-        await new Promise((r) => setTimeout(r, pollMs));
-        try {
-          const s = await getVerifyStatus(ws, profile.id, credential.id, workflow_id, probe_dir);
-          // 200 = verify 完成(后端已落盘);按 state 分别 toast
-          if (s.state === "success") toast.success(t("authProfiles.verify.success"));
-          else toast.error(t("authProfiles.verify.failed"));
-          onChanged();
-          setTesting(false);
-          return;
-        } catch (e) {
-          // 503 = workflow 仍 RUNNING(块2 非阻塞),继续轮询;其它 ApiError = 真实失败,停止 + toast
-          if (e instanceof ApiError && e.status === 503) continue;
-          toast.error(apiErrorMessage(e, t("authProfiles.verify.failed")));
-          setTesting(false);
-          return;
-        }
-      }
-      // 超出轮询上限仍 503:判失败
-      toast.error(t("authProfiles.verify.failed"));
-      setTesting(false);
+      // 挂实时面板（SSE 步骤条 + 日志）；runKey 递增确保新 run fresh state。
+      setLiveRun({ workflowId: workflow_id, probeDir: probe_dir, runKey: Date.now() });
     } catch (e) {
-      // testCredential 本身失败(网络 / 4xx / 5xx)
+      // testCredential 本身失败（网络 / 4xx / 5xx）
       toast.error(apiErrorMessage(e, t("authProfiles.verify.failed")));
+      setTesting(false);
+    }
+  }
+
+  // scan_end 观测到 → 拉一次终态 verify-status（落盘 + refresh）+ toast。
+  async function handleComplete(workflowId: string, probeDir: string) {
+    try {
+      const s = await getVerifyStatus(ws, profile.id, credential.id, workflowId, probeDir);
+      if (s.state === "success") toast.success(t("authProfiles.verify.success"));
+      else toast.error(t("authProfiles.verify.failed"));
+    } catch (e) {
+      toast.error(apiErrorMessage(e, t("authProfiles.verify.failed")));
+    } finally {
+      onChanged();
       setTesting(false);
     }
   }
@@ -100,7 +97,7 @@ export function CredentialRow({ ws, profile, credential, onChanged, pollMs = DEF
         >
           {credential.role} · {credential.username}
         </span>
-        {hasLog && (
+        {!liveRun && hasLog && (
           <Button
             size="sm"
             variant="ghost"
@@ -128,7 +125,20 @@ export function CredentialRow({ ws, profile, credential, onChanged, pollMs = DEF
           {credential.verify_status.failure_detail}
         </p>
       )}
-      {expanded && hasLog && (
+      {/* 实时过程面板（本次 run 的 SSE 步骤条 + 日志）；测试中/刚测完都挂载，key=runKey 每 test fresh */}
+      {liveRun && (
+        <VerifyLivePanel
+          key={liveRun.runKey}
+          ws={ws}
+          pid={profile.id}
+          cid={credential.id}
+          workflowId={liveRun.workflowId}
+          probeDir={liveRun.probeDir}
+          onComplete={handleComplete}
+        />
+      )}
+      {/* 事后回看 review 面板（无 liveRun + 展开 + 有旧 run 记录时） */}
+      {!liveRun && expanded && hasLog && (
         <div className="rounded border border-border bg-muted/30 p-2">
           <p className="mb-1 text-xs font-medium text-muted-foreground">
             {t("authProfiles.verify.process")}

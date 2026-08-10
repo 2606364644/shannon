@@ -19,6 +19,16 @@ This runs as a preflight check for our AI pentester. The user supplies credentia
 {{LOGIN_INSTRUCTIONS}}
 </login_instructions>
 
+<progress>
+Report each completed login phase by calling the `log_milestone` tool with the matching step, so progress is visible in real time. Call it exactly once per phase, in order, immediately after that phase completes:
+- After navigating to / arriving at the login page: `log_milestone(step="navigate")`
+- After entering all credentials (username / password / captcha / TOTP): `log_milestone(step="fill_credentials")`
+- After submitting the login form: `log_milestone(step="submit")`
+- After confirming the authenticated session (cookies / session established): `log_milestone(step="verify_session")`
+
+On any rejection, stop — do not call later milestones.
+</progress>
+
 <publish_session>
 After verification confirms login_success, save the authenticated browser session so the rest of the pipeline can reuse it instead of logging in again:
 

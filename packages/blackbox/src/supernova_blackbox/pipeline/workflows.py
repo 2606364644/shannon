@@ -8,6 +8,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError, CancelledError
 
 from supernova_core.models.agents import AgentName, ALL_VULN_CLASSES
+from supernova_core.agents.progress_tool import AUTH_VALIDATION_PROGRESS
 from supernova_core.utils.paths import (
     resolve_deliverables_path,
     has_valid_whitebox_results,
@@ -56,7 +57,7 @@ with workflow.unsafe.imports_passed_through():
     from supernova_core.services.playwright_config_writer import (
         get_session_id,
     )
-    from supernova_core.services.validate_authentication import cleanup_auth_state_sync, AuthValidationResult
+    from supernova_core.services.validate_authentication import AuthValidationResult
     from supernova_core.models.retry import retry_for
     from supernova_core.models.errors import PentestError, ErrorCode, classify_error_for_temporal
 
@@ -129,7 +130,11 @@ class BlackboxScanWorkflow:
 
         await workflow.execute_activity(
             activities.log_phase_start_activity,
-            BlackboxActivityInput(**{**act_input.__dict__, "phase": "preflight"}),
+            args=[
+                BlackboxActivityInput(**{**act_input.__dict__, "phase": "preflight"}),
+                [],
+                [],
+            ],
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=retry_for("log"),
         )
@@ -153,7 +158,11 @@ class BlackboxScanWorkflow:
         if input.config_path:
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
+                args=[
+                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
+                    [],
+                    [],
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
@@ -282,7 +291,11 @@ class BlackboxScanWorkflow:
             if input.exploit:
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
-                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "exploitation"}),
+                    args=[
+                        BlackboxActivityInput(**{**act_input.__dict__, "phase": "exploitation"}),
+                        [],
+                        [],
+                    ],
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
                 )
@@ -428,7 +441,11 @@ class BlackboxScanWorkflow:
 
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                BlackboxActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
+                args=[
+                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
+                    [],
+                    [],
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
@@ -514,7 +531,15 @@ class BlackboxScanWorkflow:
                     )
                 except Exception:
                     pass  # best-effort cleanup，失败不阻断 workflow 收尾
-            cleanup_auth_state_sync(act_input.workspace_path or input.repo_path)
+            try:
+                await workflow.execute_activity(
+                    activities.cleanup_auth_state_activity,
+                    args=[act_input.workspace_path or input.repo_path],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+            except Exception:
+                pass  # best-effort cleanup，失败不阻断 workflow 收尾
 
     def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
         """构造 finalize_summary 用的 summary dict（success/failed 路径共用，DRY）。
@@ -614,9 +639,17 @@ class AuthValidationWorkflow:
         except Exception:
             pass  # 验证照跑（无 events），NullAuditSession 兜底后续 log_phase
         try:
+            # 声明 auth-validation 阶段的 4 步（步骤条）：step key 与 log_milestone 工具同源
+            # （AUTH_VALIDATION_PROGRESS），reducer 按 name 匹配推进。steps/intents 经
+            # log_phase_start_activity 透传到 PhaseEvent(steps=...)。
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
-                BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
+                args=[
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                                             "phase": AUTH_VALIDATION_PROGRESS.phase}),
+                    list(AUTH_VALIDATION_PROGRESS.step_keys),
+                    [s.intent for s in AUTH_VALIDATION_PROGRESS.steps],
+                ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )

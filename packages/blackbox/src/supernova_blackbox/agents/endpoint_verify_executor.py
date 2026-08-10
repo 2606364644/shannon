@@ -86,7 +86,8 @@ class EndpointVerifyExecutor:
         """
         manifest = await self._collect_endpoint_manifest(deliverables_path, vuln_classes)
         if not manifest:
-            return {"endpoint_verify": None, "reason": "no whitebox endpoints"}
+            return {"endpoint_verify": None, "reason": "no whitebox endpoints",
+                    "duration_ms": 0, "cost_usd": 0.0, "cost_currency": "USD"}
         metrics = await self._executor.execute(
             agent_name=AgentName.ENDPOINT_VERIFY,
             repo_path=str(deliverables_path),
@@ -105,7 +106,9 @@ class EndpointVerifyExecutor:
             tool_audit_logger=tool_audit_logger,
         )
         if not metrics.structured_output:
-            return {"endpoint_verify": None, "reason": "agent produced no structured output"}
+            return {"endpoint_verify": None, "reason": "agent produced no structured output",
+                    "duration_ms": metrics.duration_ms, "cost_usd": metrics.cost_usd,
+                    "cost_currency": metrics.cost_currency}
         out_path = blackbox_dir(deliverables_path) / ENDPOINT_VERIFY_FILENAME
         out_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(out_path, metrics.structured_output)

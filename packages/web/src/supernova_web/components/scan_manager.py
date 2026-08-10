@@ -13,6 +13,7 @@ import aiofiles
 from temporalio.client import Client
 
 from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
+from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 from supernova_core.session import SessionManager
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
@@ -317,6 +318,7 @@ class ScanManager:
         handle = await client.start_workflow(
             WhiteboxScanWorkflow.run, inp, id=workflow_id,
             task_queue=WEB_TASK_QUEUE_WHITEBOX,
+            run_timeout=workflow_run_timeout(),
         )
         # 提交成功后锚定 submitted_at(scan_liveness 提交宽限门据此判冷启动窗口, 防误杀).
         # 失败分支(start_workflow 抛)不会到达此处 -> 提交失败不写 submitted_at.
@@ -504,6 +506,7 @@ class ScanManager:
         handle = await client.start_workflow(
             BlackboxScanWorkflow.run, inp, id=workflow_id,
             task_queue=WEB_TASK_QUEUE_BLACKBOX,
+            run_timeout=workflow_run_timeout(),
         )
         self._mark_submitted_at(scan_dir)
         return handle
@@ -677,6 +680,26 @@ class ScanManager:
             if isinstance(parsed, dict):
                 out.append(parsed)
         return out
+
+    async def auth_validation_events_path(
+        self, ws: str, workflow_id: str, probe_dir: str,
+    ) -> Path:
+        """verify-events SSE 的落点解析 + 越界守护（块4）。
+
+        复用 get_auth_validation_log 的两道守护（probe_dir 须在 workspaces/<ws>/auth-probes/
+        下、workflow_id 须 authval-<ws>- 开头，防任意路径读 / 跨 ws 读 events），返回 resolved
+        ``events.ndjson`` Path（文件可能尚未落盘——EventTailer 会等它出现）。守护失败 ValueError
+        （端点转 403）。
+        """
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        resolved_probe = Path(probe_dir).resolve()
+        if not resolved_probe.is_relative_to(allowed_parent):
+            raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
+        if not workflow_id.startswith(f"authval-{ws}-"):
+            raise ValueError(
+                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
+        return resolved_probe / "events.ndjson"
+
 
     def _resolve_provider_config(self, ws: str) -> dict:
         """P3c 阶段 2：per-ws 解析（ws_config_store）；None -> 全局 env 兜底（阶段1/CLI）。

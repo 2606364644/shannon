@@ -1,4 +1,7 @@
-"""P3c 阶段 2：ws config API（GET 脱敏 / PUT 写入 + 鉴权）。"""
+"""ws config API：env 文本契约（GET 渲染 env_text / PUT parse+全量覆盖+掩码保留+warnings）。
+
+spec: docs/superpowers/specs/2026-08-10-ws-config-env-textarea-design.md
+"""
 import pytest
 from starlette.testclient import TestClient
 from supernova_web.app import create_app
@@ -18,7 +21,6 @@ def _app(tmp_workspaces, monkeypatch):
     (app.state.config.workspaces_dir / "ws-a").mkdir()
     st.add_workspace_member("ws-a", st.get_user_by_username("alice").id, "manager")
     st.add_workspace_member("ws-a", st.get_user_by_username("bob").id, "member")
-    # carol 不加入 ws-a（非成员）
     return app
 
 
@@ -34,101 +36,146 @@ def _csrf(c):
     return c.get("/api/auth/csrf").json()["csrf_token"]
 
 
-# ---- 基本用例（admin，authed_client 直通）----
+# ---- GET / 基本读写 ----
 
 def test_get_config_empty_ws(authed_client, tmp_workspaces):
-    """空 ws → 全 None（脱敏 api_key=None）。"""
+    """空 ws → 空 env 文本。"""
     (tmp_workspaces / "ws-a").mkdir()
     r = authed_client.get("/api/workspaces/ws-a/config")
     assert r.status_code == 200
-    prov = r.json()["provider"]
-    assert prov["api_key"] is None
-    assert prov["ai_provider"] is None
+    assert r.json()["env_text"] == ""
 
 
 def test_put_then_get_masks_api_key(authed_client, tmp_workspaces):
-    """写入 api_key → GET 返 '••••'（脱敏，非明文）。"""
+    """写入 → GET 凭据掩码、非凭据明文。"""
     (tmp_workspaces / "ws-a").mkdir()
     tok = _csrf(authed_client)
     r = authed_client.put("/api/workspaces/ws-a/config", json={
-        "provider": {"ai_provider": "openai_compatible", "api_key": "sk-secret", "base_url": "http://x"}
+        "env_text": ("SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+                     "SUPERNOVA_OPENAI_API_KEY=sk-secret\n"
+                     "SUPERNOVA_OPENAI_BASE_URL=http://x\n"),
     }, headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
-    g = authed_client.get("/api/workspaces/ws-a/config").json()["provider"]
-    assert g["api_key"] == "••••"        # 脱敏
-    assert g["ai_provider"] == "openai_compatible"
-    assert g["base_url"] == "http://x"
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "SUPERNOVA_OPENAI_API_KEY=••••" in env_text
+    assert "sk-secret" not in env_text
+    assert "SUPERNOVA_OPENAI_BASE_URL=http://x" in env_text
+    assert "SUPERNOVA_AI_PROVIDER=openai_compatible" in env_text
 
 
-def test_put_empty_api_key_keeps_existing(authed_client, tmp_workspaces):
-    """api_key 空串/缺省 = 不改（保留原值）。"""
+# ---- 全量覆盖 + 凭据智能保留 ----
+
+def test_put_full_overwrite_clears_unset_fields(authed_client, tmp_workspaces):
+    """全量覆盖:第二次没写 base_url → 清空。"""
     (tmp_workspaces / "ws-a").mkdir()
     tok = _csrf(authed_client)
-    authed_client.put("/api/workspaces/ws-a/config",
-                      json={"provider": {"api_key": "sk-orig"}},
-                      headers={"X-CSRF-Token": tok})
-    authed_client.put("/api/workspaces/ws-a/config",
-                      json={"provider": {"api_key": "", "model": "m"}},
-                      headers={"X-CSRF-Token": tok})
-    g = authed_client.get("/api/workspaces/ws-a/config").json()["provider"]
-    assert g["api_key"] == "••••"
-    assert g["model"] == "m"
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\nSUPERNOVA_OPENAI_BASE_URL=http://x\n",
+    }, headers={"X-CSRF-Token": tok})
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\n",
+    }, headers={"X-CSRF-Token": tok})
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "BASE_URL" not in env_text
+
+
+def test_put_masked_credential_kept(authed_client, app_with_ws, tmp_workspaces):
+    """掩码=不改:api_key=•••• + 改 base_url → api_key 保留原值(读 store 明文)。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": ("SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+                     "SUPERNOVA_OPENAI_API_KEY=sk-orig\n"
+                     "SUPERNOVA_OPENAI_BASE_URL=http://x\n"),
+    }, headers={"X-CSRF-Token": tok})
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": ("SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+                     "SUPERNOVA_OPENAI_API_KEY=••••\n"
+                     "SUPERNOVA_OPENAI_BASE_URL=http://y\n"),
+    }, headers={"X-CSRF-Token": tok})
+    store = app_with_ws.state.ws_config_store
+    cfg = store.read("ws-a")
+    assert cfg.provider.api_key == "sk-orig"   # 保留
+    assert cfg.provider.base_url == "http://y"  # 更新
+
+
+def test_put_deleted_credential_line_clears(authed_client, app_with_ws, tmp_workspaces):
+    """删凭据行 → 清空(全量覆盖语义)。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\nSUPERNOVA_OPENAI_API_KEY=sk-orig\n",
+    }, headers={"X-CSRF-Token": tok})
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\n",
+    }, headers={"X-CSRF-Token": tok})
+    assert app_with_ws.state.ws_config_store.read("ws-a").provider.api_key is None
+
+
+# ---- warnings（进程级 / 未知 key，不阻塞）----
+
+def test_put_returns_warnings(authed_client, tmp_workspaces):
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": ("SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+                     "SUPERNOVA_MAX_CONCURRENT=8\n"
+                     "BOGUS_KEY=x\n"),
+    }, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    w = r.json()["warnings"]
+    assert w["ineffective"] == ["SUPERNOVA_MAX_CONCURRENT"]
+    assert w["unknown"] == ["BOGUS_KEY"]
+
+
+# ---- 422 ----
+
+def test_put_invalid_env_line_422(authed_client, tmp_workspaces):
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "NO_EQUALS_HERE\n",
+    }, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
 
 
 def test_put_unknown_provider_422(authed_client, tmp_workspaces):
     (tmp_workspaces / "ws-a").mkdir()
     tok = _csrf(authed_client)
-    r = authed_client.put("/api/workspaces/ws-a/config",
-                          json={"provider": {"ai_provider": "bogus"}},
-                          headers={"X-CSRF-Token": tok})
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=bogus\n",
+    }, headers={"X-CSRF-Token": tok})
     assert r.status_code == 422
 
 
-# ---- 鉴权用例（多用户）----
+# ---- 鉴权 ----
 
 def test_get_non_member_403(_app):
     """carol 非 ws-a 成员 → GET 403。"""
     c = _login(_app, "carol")
-    r = c.get("/api/workspaces/ws-a/config")
-    assert r.status_code == 403
+    assert c.get("/api/workspaces/ws-a/config").status_code == 403
 
 
 def test_put_non_manager_403(_app):
-    """bob 是 ws-a 的 member（非 manager）→ PUT 403。"""
+    """bob 是 member（非 manager）→ PUT 403。"""
     c = _login(_app, "bob")
     tok = _csrf(c)
     r = c.put("/api/workspaces/ws-a/config",
-              json={"provider": {"ai_provider": "openai_compatible"}},
+              json={"env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\n"},
               headers={"X-CSRF-Token": tok})
     assert r.status_code == 403
 
 
-# ---- P3c 阶段 4：git 段（GET 脱敏 / PUT）----
+# ---- git 段 ----
 
 def test_put_then_get_masks_gitlab_token(authed_client, tmp_workspaces):
-    """写 git 凭据 → GET 返 gitlab_token 脱敏。"""
     (tmp_workspaces / "ws-a").mkdir()
     tok = _csrf(authed_client)
     r = authed_client.put("/api/workspaces/ws-a/config", json={
-        "provider": {},
-        "git": {"gitlab_user": "bot-a", "gitlab_token": "glpat-secret"},
+        "env_text": "GITLAB_USER=bot-a\nGITLAB_TOKEN=glpat-secret\n",
     }, headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
-    g = authed_client.get("/api/workspaces/ws-a/config").json()["git"]
-    assert g["gitlab_user"] == "bot-a"
-    assert g["gitlab_token"] == "••••"     # 脱敏
-
-
-def test_put_empty_gitlab_token_keeps_existing(authed_client, tmp_workspaces):
-    """gitlab_token 空串/缺省 = 不改（保留原值）。"""
-    (tmp_workspaces / "ws-a").mkdir()
-    tok = _csrf(authed_client)
-    authed_client.put("/api/workspaces/ws-a/config", json={
-        "provider": {}, "git": {"gitlab_token": "glpat-orig"},
-    }, headers={"X-CSRF-Token": tok})
-    authed_client.put("/api/workspaces/ws-a/config", json={
-        "provider": {}, "git": {"gitlab_user": "bot-a"},   # 不带 token
-    }, headers={"X-CSRF-Token": tok})
-    g = authed_client.get("/api/workspaces/ws-a/config").json()["git"]
-    assert g["gitlab_token"] == "••••"     # 保留原值
-    assert g["gitlab_user"] == "bot-a"
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "GITLAB_USER=bot-a" in env_text
+    assert "GITLAB_TOKEN=••••" in env_text
+    assert "glpat-secret" not in env_text

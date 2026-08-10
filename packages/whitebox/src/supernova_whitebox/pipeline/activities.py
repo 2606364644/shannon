@@ -1838,3 +1838,23 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
         await session.log_workflow_complete(ws)
     await stop_heartbeat()  # 停 heartbeat daemon(启动于 setup_display); 终态自停兜底
     clear_audit_session()
+
+
+@activity.defn
+async def cleanup_auth_state_activity(workspace_path: str) -> None:
+    """finally 收尾: 清理 auth-state*.json（glob 文件 I/O，sandbox 禁 workflow 直调）。
+
+    workflow finally 原裸调 cleanup_auth_state_sync（glob.glob）→ 抛
+    RestrictedWorkflowAccessError → WorkflowTask 反复 TimedOut → scan failed（与
+    blackbox 同根因：带 auth config 的扫描登录后生成 auth-state.json，finally 走 cleanup 触发）。
+    挪进 activity（worker 进程，不受 workflow sandbox 限制）。best-effort，失败由 workflow
+    侧 try/except 吞掉不阻断收尾。对齐 blackbox cleanup_auth_state_activity。
+    """
+    from supernova_core.services.validate_authentication import cleanup_auth_state
+
+    if not workspace_path:
+        return
+    try:
+        await cleanup_auth_state(workspace_path)
+    except Exception:  # noqa: BLE001 - best-effort cleanup
+        pass

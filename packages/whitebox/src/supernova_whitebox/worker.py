@@ -10,6 +10,7 @@ from temporalio.worker import Worker
 
 from supernova_core.display.structured_event_renderer import wire_web_event_file
 from supernova_core.models.audit import WorkflowSummary, AgentMetricsSummary
+from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 
 from .pipeline.activities import (
     render_findings,
@@ -40,6 +41,7 @@ from .pipeline.activities import (
     log_info_activity,
     setup_display,
     finalize_summary,
+    cleanup_auth_state_activity,
 )
 from .pipeline.workflows import WhiteboxScanWorkflow
 from .pipeline.shared import PipelineInput, PipelineState
@@ -204,6 +206,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
             log_phase_start_activity, log_phase_complete_activity,
             log_info_activity,
             setup_display, finalize_summary,
+            cleanup_auth_state_activity,
         ],
         graceful_shutdown_timeout=timedelta(seconds=10),
     )
@@ -351,6 +354,7 @@ async def run_scan(input: PipelineInput, temporal_address: str = "localhost:7233
                         input,
                         id=workflow_id,
                         task_queue=task_queue,
+                        run_timeout=workflow_run_timeout(),
                     )
                     try:
                         # progress_type=None: Rich 仪表盘已负责进度展示，不重复 poll 打印。

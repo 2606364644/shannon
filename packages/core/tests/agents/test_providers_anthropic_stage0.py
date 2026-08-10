@@ -86,7 +86,7 @@ def test_resolve_max_turns_falls_back_to_env(monkeypatch):
 def test_resolve_max_turns_default(monkeypatch):
     monkeypatch.delenv("CLAUDE_MAX_TURNS", raising=False)
     p = _make()
-    assert p._resolve_max_turns(None) == 200  # 默认 200
+    assert p._resolve_max_turns(None) == 10000  # 默认 10000（对齐原始 TS shannon）
 
 
 # —— anthropic_api 认证注入：auth_token / base_url 须显式注入 sdk_env，

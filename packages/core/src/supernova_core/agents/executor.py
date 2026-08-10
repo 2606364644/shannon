@@ -12,6 +12,7 @@ from supernova_core.utils.billing import is_spending_cap_behavior
 
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.validators import get_queue_filename, validate_deliverable
+from supernova_core.agents.progress_tool import make_progress
 from supernova_core.collectors import make_collector
 from supernova_core.git_manager import GitManager
 from supernova_core.prompts.manager import PromptManager
@@ -131,6 +132,9 @@ class AgentExecutor:
         # collector 接 set_* → host renderer 确定性渲染 md(对齐 TS)。其余 agent
         # make_collector 返 None(无 collector 通道,走 self-Write,不改行为)。
         collector = make_collector(agent_name)
+        # progress（log_milestone 里程碑工具）：仅 validate-authentication agent 获得，
+        # 驱动认证验证的进度步骤条。镜像 collector 通道，双引擎对称注入（progress_tool）。
+        progress = make_progress(agent_name)
 
         start_time = time.monotonic()
         result = await run_claude_prompt(
@@ -144,6 +148,7 @@ class AgentExecutor:
             tool_audit_logger=tool_audit_logger,
             max_turns=max_turns,
             collector=collector,
+            progress=progress,
             provider_config=provider_config,   # P3c 阶段 1
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)

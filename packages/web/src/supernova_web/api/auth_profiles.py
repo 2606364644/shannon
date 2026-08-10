@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from supernova_web.auth.dependencies import workspace_member, workspace_manager
 from supernova_web.components.auth_profile_store import (
     AuthProfileStore, AuthProfile, AuthProfileCredential, EmailLoginCred,
-    _CRED_SECRET_FIELDS,
+    AlreadyForked, _CRED_SECRET_FIELDS,
 )
 
 router = APIRouter(prefix="/api/workspaces", tags=["auth-profiles"])
@@ -120,6 +120,27 @@ async def delete_profile(ws: str, pid: str, request: Request,
     return {"ok": True}
 
 
+@router.post("/{ws}/auth-profiles/{pid}/fork")
+async def fork_profile(ws: str, pid: str, request: Request,
+                       user=Depends(workspace_manager)):
+    """把系统档案 fork 成本工作区可编辑副本（保留系统 profile.id，ws-priority 覆盖）。
+    ws 段已有同 id 副本 → 409；ws 档案（系统段无该 id）→ 422；不存在 → 404。
+
+    注：fork_from_system 内部封装「ws 段已有同 id → AlreadyForked」，故放前判 409；
+    None 后再用 get 区分 422（ws 档案）vs 404（不存在）—— 避免 get 的 ws-priority 在
+    已 fork 时把 409 误判成 422。"""
+    store = _store(request)
+    try:
+        forked = store.fork_from_system(ws, pid)
+    except AlreadyForked:
+        raise HTTPException(409, "已复制到本工作区")
+    if forked is None:
+        if store.get(ws, pid) is not None:
+            raise HTTPException(422, "该档案已在工作区，可直接编辑")
+        raise HTTPException(404, "认证档案不存在")
+    return next(m for m in store.read_masked(ws) if m.id == forked.id).model_dump(mode="json")
+
+
 @router.post("/{ws}/auth-profiles/{pid}/credentials/{cid}/test")
 async def test_credential(ws: str, pid: str, cid: str, request: Request,
                           user=Depends(workspace_member)):
@@ -154,3 +175,22 @@ async def verify_log(ws: str, pid: str, cid: str, workflow_id: str, probe_dir: s
     except Exception as e:
         raise HTTPException(503, f"验证日志暂时不可用: {e}")
     return {"events": events}
+
+
+@router.get("/{ws}/auth-profiles/{pid}/credentials/{cid}/verify-events")
+async def verify_events(ws: str, pid: str, cid: str, workflow_id: str, probe_dir: str,
+                        request: Request, user=Depends(workspace_member)):
+    """验证过程 SSE 实时流（块4，步骤条 + 实时日志）。tail probe_dir/events.ndjson，遇 scan_end
+    关流。越界守护 ValueError → 403。Last-Event-ID 头支持断点续传。"""
+    from supernova_web.api.events import build_verify_events_response
+
+    try:
+        ndjson = await request.app.state.scan_manager.auth_validation_events_path(
+            ws, workflow_id, probe_dir)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    except Exception as e:
+        raise HTTPException(503, f"验证过程流暂时不可用: {e}")
+    last = request.headers.get("last-event-id")
+    last_offset = int(last) if last else None
+    return await build_verify_events_response(ndjson, last_event_id=last_offset)

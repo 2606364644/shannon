@@ -30,6 +30,7 @@ FORBIDDEN_FUNCS = {
     "sync_code_path_deny_rules",  # 写 ~/.claude/settings.json，须挪进 activity
     "has_valid_whitebox_results", # 读 queue 文件，须挪进 detect_whitebox_results activity
     "has_correlation_results",    # 读 correlation queue，须挪进 detect_whitebox_results activity
+    "cleanup_auth_state_sync",    # glob 文件 I/O(auth-state*.json),须挪进 cleanup_auth_state activity
 }
 # 属性形式的不安全 API：(模块名, 属性名)；同时覆盖 os.environ[...] 与 os.getenv(...)/Path.cwd()
 FORBIDDEN_ATTRS = {("os", "getenv"), ("os", "environ"), ("Path", "cwd")}
@@ -201,5 +202,22 @@ def test_worker_registers_blackbox_config_activity(activity_name):
     count = worker_src.count(activity_name)
     assert count >= 2, (
         f"{activity_name} 在 worker.py 仅出现 {count} 次，预期 >= 2"
+        "（import 一处 + activities 列表一处）。"
+    )
+
+
+def test_worker_registers_cleanup_auth_state_activity():
+    """防回归：cleanup_auth_state activity 必须在 worker.py 注册（import + activities 列表）。
+
+    cleanup_auth_state_sync 用 glob.glob 清理 auth-state*.json，workflow sandbox 内直调抛
+    RestrictedWorkflowAccessError → WorkflowTask 反复 TimedOut → 整个 scan failed（真机
+    NodeGoat 黑盒扫描的直接死因：带 auth config 的扫描 finally 走 cleanup 触发）。挪进 activity
+    后须在 worker 注册，否则 Temporal 找不到 activity 实现而崩溃。见
+    temporalio-activity-worker-registration 教训（新 activity 三处同步，注册易漏）。
+    """
+    worker_src = WORKER_FILE.read_text()
+    count = worker_src.count("cleanup_auth_state")
+    assert count >= 2, (
+        f"cleanup_auth_state 在 worker.py 仅出现 {count} 次，预期 >= 2"
         "（import 一处 + activities 列表一处）。"
     )

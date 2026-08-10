@@ -8,7 +8,7 @@
 >
 > 对比对象：`/root/shannon`（TypeScript 原始版，下称 **TS 版**，`main` 分支）vs `/root/shannon-py`（Python 重构版，下称 **PY 版**，分支 `feat/fork-py`）。
 >
-> 本文档定位：**以图为主的「扫描效果设计总览」**——把 PY 重构里直接影响「能扫出什么、扫得多准、扫得多全」的设计（双轨、补召回、组合漏洞、黑盒多角色账号验证、跨仓、PoC）用架构图串成一张全景，回答「这些设计长什么样、怎么连起来、对扫描效果意味着什么」。引擎抽象（§1）与 cost 计费（§8）作为支撑扫描跑通与核算的底座一并收录。
+> 本文档定位：**以图为主的「扫描效果设计总览」**——把 PY 重构里直接影响「能扫出什么、扫得多准、扫得多全」的设计（双轨、补召回、组合漏洞、黑盒多角色账号验证、跨仓、PoC）用架构图串成一张全景，回答「这些设计长什么样、怎么连起来、对扫描效果意味着什么」。引擎抽象与 cost 计费作为支撑扫描跑通与核算的底座，一并收录。
 >
 > 验证口径沿用主文档：✅ 真机已验 / ⏳ 待真机。效果验证状态标对应能力点编号（W/B/P）。架构不变量见 [`../../CLAUDE.md`](../../CLAUDE.md) §1-§2。与同目录其它文档分工见 [`README.md`](./README.md)。
 
@@ -20,7 +20,7 @@ TS 版只有单一轨：每个漏洞类跑一个 LLM agent，自己读 recon、�
 
 PY 重构的核心就是给这条单轨加一条确定性兜底轨，并围绕这条新轨把整件事做成一个可演进的设计：
 
-- **双轨 verdict OR**——确定性轨和 LLM 轨各跑各的，合并器取并集，任一轨挂掉不归零；
+- **双轨判定取并集（verdict OR）**——确定性轨和 LLM 轨各跑各的，合并器取并集，任一条挂掉，另一条的结果还在；
 - **多层补召回**——确定性这条新轨不是装上就灵，规则不全、链会断、大仓会超时，要一层层补；
 - **双引擎可互换**——底座抽象成 `BaseProvider`，claude-agent-sdk 和 openai-agents 同一份 prompt 都能跑；
 - **组合漏洞**——stored XSS / 二阶 SQLi 这种跨函数、跨存储介质的链，用存储中转 join 程序化召回；
@@ -39,26 +39,26 @@ PY 重构的核心就是给这条单轨加一条确定性兜底轨，并围绕�
         │                                                                       │
         ▼                                                                       ▼
 ┌───────────────────────┐                                           ┌────────────────────────┐
-│   白盒双轨（§2-§3）    │                                           │  黑盒 exploitation（§4） │
+│   白盒双轨             │                                           │  黑盒 exploitation       │
 │                       │                                           │                        │
 │  GitNexus 确定性轨     │  verdict OR  │  LLM 轨（纯 LLM，TS 式）      │  exploitation-only      │
-│  + 多层补召回（§3）    │◄────────────►│  vuln-*.txt agent           │  + endpoint_verify      │
-│  + 组合漏洞（§3⑥）     │              │  自给自足                   │  + 多角色账号验证（§4）   │
+│  + 多层补召回          │◄────────────►│  vuln-*.txt agent           │  + endpoint_verify      │
+│  + 组合漏洞            │              │  自给自足                   │  + 多角色账号验证         │
 └───────────┬───────────┘              └──────────────┬──────────────┘  └───────────┬────────────┘
             │          exploitation_queue.json 文件桥接  │                             │
             └──────────────────────┬─────────────────────┘                             │
                                    ▼                                                   │
                        ┌────────────────────────┐    externally_exploitable==True      │
-                       │  PoC 产物化（§6）       │◄───────────────────────────────────┘
+                       │  PoC 产物化             │◄───────────────────────────────────┘
                        │  curl + Burp raw       │
                        └───────────┬────────────┘
                                    ▼
                        ┌────────────────────────┐
-                       │  报告 + cost 计费（§8）  │
+                       │  报告 + cost 计费        │
                        └────────────────────────┘
 
-        全程经双引擎抽象（§1）：SUPERNOVA_AI_PROVIDER 切 claude-agent-sdk / openai-agents，业务层不感知
-        跨仓（§7）：multi-repo 编排 + 跨仓关联 agent，TS 单仓 → PY 多仓拓扑
+        全程经双引擎抽象：SUPERNOVA_AI_PROVIDER 切 claude-agent-sdk / openai-agents，业务层不感知
+        跨仓：multi-repo 编排 + 跨仓关联 agent，TS 单仓 → PY 多仓拓扑
 ```
 
 ---
@@ -114,7 +114,7 @@ Task 5（`feat/fork-py`）已把对齐落实：openai 引擎经 `tools_openai/ta
 
 ---
 
-## 2. 双轨设计：确定性轨 + LLM 轨，verdict OR ★核心不变量
+## 2. 双轨设计：确定性轨 + LLM 轨，判定取并集（verdict OR）★核心不变量
 
 这是 PY 相对 TS 最核心的增量，也是项目最重要的架构不变量（CLAUDE.md §1）。
 
@@ -158,13 +158,13 @@ Task 5（`feat/fork-py`）已把对齐落实：openai 引擎经 `tools_openai/ta
 
 **OR 为什么成立（铁律）**：两轨链来源不同（确定性产链 vs LLM 自主探索），互不喂数据——确定性轨挂了 LLM 轨照跑，反之亦然。所以合并时取并集：LLM 轨或 GitNexus 轨任一判 vulnerable，结果就判 vulnerable。一旦把确定性产物喂进 LLM 轨 prompt，LLM 轨就会依赖确定性层（而确定性层经常超时、不可用），独立性就破了。这条铁律有专门测试锁定——禁止 LLM 轨 prompt 引用任何确定性产物。
 
-**`externally_exploitable` 是可达性标签，不是 verdict**：true=公网可达 / false=内部或跨服务，它不能被 verdict 覆写。authz 三类各自的可达性按类取 OR，守住 inj 的跨服务语义。
+**`externally_exploitable` 是可达性标签，不是判定结论（verdict）**：true 代表公网可达，false 代表内部或跨服务，它不能被判定结论覆写。authz 三类各自的可达性按类取 OR，守住 inj 的跨服务语义。
 
 **双轨可配置**：一个开关（`SUPERNOVA_LLM_TRACK_ENABLED`，默认开）控制 LLM 轨。关掉时只关 inj/xss/ssrf 的 taint agent，由 GitNexus 主干兜底；但 pre-recon / recon / authz / auth 的 LLM 全保留——这几样 GitNexus 做不了，关了会失明。所以语义是「token 紧张走纯确定性兜底，token 宽裕开双轨 OR」。
 
 **代价**：token 翻倍——初期就是拿 token 换少漏，不省钱。
 
-> 效果与真机硬证据（authz 0→21 正是确定性轨独立兜回、LLM 轨整段超时归零的场景）见 [主文档 §2 / §4.1](./scan-effectiveness-gains-vs-ts.md)（W1 / W6-W7）。合并器 OR 语义、降级、开关的踩坑叙事见 [叙事版 §1](./refactor-scan-optimization-vs-ts.md)。
+> 实际效果和真机证据见[主文档](./scan-effectiveness-gains-vs-ts.md)——authz 漏洞从 0 增加到 21，正是确定性轨独立兜回、而 LLM 轨整段超时归零的那个场景。合并器的 OR 语义、降级和开关的取舍，在[叙事版](./refactor-scan-optimization-vs-ts.md)里有详细展开。
 
 ---
 
@@ -197,10 +197,10 @@ Task 5（`feat/fork-py`）已把对齐落实：openai 引擎经 `tools_openai/ta
 |---|---|---|---|
 | ① | **sink 规则匹配** | TS sink 靠 prompt 文本清单，漏 grep 就漏报 | W2 ⏳ |
 | ② | **LLM 补召回（软 sink）** | 规则盲区类（NoSQL、log4j、框架特有 sink） | W3 ⏳ |
-| ③ | **source 补召回 + intra-first taint** | handler 不入链 → 整类全空（NodeGoat 三类 0 flow） | W5 ⏳（NodeGoat 0→N） |
+| ③ | **source 补召回 + 函数内首跳污点（intra-first taint）** | handler 不入链 → 整类全空（NodeGoat 三类 0 flow） | W5 ⏳（NodeGoat 0→N） |
 | ④ | **调用链下沉 process trace** | 自造 BFS 拼空壳链、cypher LIMIT 撞 readline 崩 | W6/W7 ✅ **authz 0→21** |
-| ⑤ | **SSRF 断链 fallback** | 「sink 参数是局部变量对象」跨函数链全丢 + 超时整段丢 | W8 ⏳ |
-| ⑥ | **二阶存储 join（组合漏洞）** | stored XSS / 二阶 SQLi 双轨系统性漏 | W4 ⏳ |
+| ⑤ | **SSRF 断链回退（fallback）** | 「sink 参数是局部变量对象」跨函数链全丢 + 超时整段丢 | W8 ⏳ |
+| ⑥ | **二阶存储拼接（join，组合漏洞）** | stored XSS / 二阶 SQLi 双轨系统性漏 | W4 ⏳ |
 
 **② 候选筛选**：规则没命中的可疑调用，先按语言 + 接收者精确筛一遍，再决定要不要送 LLM——替掉旧版模糊的子串匹配，少送噪音。
 
@@ -228,9 +228,9 @@ PY 引入三个抽象把这条链程序化接上：
 
 双轨协同：GitNexus ⑥ 走字面量 token（关轨兜底），LLM 轨走二阶方法论（开轨增强），verdict OR。守铁律 A——确定性产物不喂 LLM 轨。
 
-> 完整分析逻辑（谁写锚点 / 产物 / 谁用 / 判定模型 / 四介质覆盖 / table-name 推断）见 [`second-order-storage-taint-mechanism.md`](./second-order-storage-taint-mechanism.md)。踩坑叙事见 [叙事版 §2.5](./refactor-scan-optimization-vs-ts.md)。
+> 想了解完整的分析逻辑——谁写锚点、产物、谁用、判定模型、四种介质怎么覆盖、表名（table-name）怎么推断——可以看 [`second-order-storage-taint-mechanism.md`](./second-order-storage-taint-mechanism.md)。这条链的踩坑排查在[叙事版](./refactor-scan-optimization-vs-ts.md)里。
 
-> ③ 的四步根因链见 [`intra-first-taint-mechanism.md`](./intra-first-taint-mechanism.md)；其余各层踩坑叙事见 [叙事版 §2](./refactor-scan-optimization-vs-ts.md)。
+> 第 ③ 层的四步根因链，在 [`intra-first-taint-mechanism.md`](./intra-first-taint-mechanism.md) 里有展开；其余各层的踩坑排查见[叙事版](./refactor-scan-optimization-vs-ts.md)。
 
 ---
 
@@ -261,7 +261,7 @@ PY 引入三个抽象把这条链程序化接上：
 - **存储分两层**：每个 workspace 一份本地档案，再加一份全局共享的系统档案；敏感字段加密。
 - **取档案透明回落**：先查本地，查不到自动找全局，使用者不用关心档案在哪。
 - **系统档案只读**：全局档案不许改删，防误覆盖。
-- **scan-config 必须明文**：它是上下层合流点（core 不解密），靠权限 + 用后即删兜底。
+- **scan-config 必须明文**：它是上下层的合流点（core 不解密），只能靠文件权限和扫描结束后立即删除来降低风险。
 
 ### 4.2 为什么多角色账号能让越权判定更可信（核心）
 
@@ -287,7 +287,7 @@ PY 引入三个抽象把这条链程序化接上：
 - **角色分高低权**：admin 当守方（baseline），其余当攻方。
 - **对比矩阵**：垂直 = 攻方对守方；水平 = 攻方之间两两互攻。
 - **怎么判越权**：水平（IDOR）——攻方拿到和受害者 baseline 一样的数据，就是越权（跨用户私有数据，硬证据）；垂直——低权账号够到 admin-only 端点，就是越权。
-- **铁律**：没有 baseline 撑腰，一律只记 POTENTIAL，不算 EXPLOITED——比单账号更严。
+- **铁律**：没有 baseline 撑腰，一律只记 POTENTIAL（疑似），不算 EXPLOITED（已证实利用）——比单账号更严。
 - **向后兼容**：只配一个角色 → 全走 POTENTIAL（= 现状）；不配 → 和今天一样。
 
 ### 4.3 与 TS 的差异
@@ -300,17 +300,17 @@ PY 引入三个抽象把这条链程序化接上：
 | 多身份 authz | 有设计（`2026-06-14-authz-multi-account-design.md`）从未落地，零 commit | core `Account` 模型 + `derive_privilege_tier` + 多身份登录循环 + authz-exploit 多 session 协议 |
 | 独立验证入口 | 无 | `AuthValidationWorkflow` + 可观测性（events.ndjson + verify-log） |
 
-> 效果对照见 [主文档 §6](./scan-effectiveness-gains-vs-ts.md)（B1-B5）；黑盒 vs TS 能力对比见 [叙事版 §7](./refactor-scan-optimization-vs-ts.md)。
+> 黑盒相对 TS 的实际效果对照，见[主文档](./scan-effectiveness-gains-vs-ts.md)；黑盒和 TS 的能力逐项对比，见[叙事版](./refactor-scan-optimization-vs-ts.md)。
 
 ---
 
 ## 5. 攻击链构造：把单点漏洞串成多步攻击路径
 
-上面 §2-§3 产出的都是**单点漏洞卡**（这个 source→sink 有没有漏洞）。但真实攻击是多步的——攻击者先写入、再触发渲染、最后窃取数据。攻击链构造就是把单点卡串成「攻击者视角的多步故事」，跟组合漏洞（§3.1，召回层）、PoC（§6，产物层）是三个不同层次：
+上面 §2-§3 产出的都是**单点漏洞卡**（判断某条 source→sink 到底有没有漏洞）。但真实攻击是多步的——攻击者先写入、再触发渲染、最后窃取数据。攻击链构造就是把单点卡串成「攻击者视角的多步故事」。它和组合漏洞、PoC 是三个不同层次：
 
-- **组合漏洞**（§3.1）= 召回层，把 write→存储→read→sink 这条链**召回**成一个 finding；
-- **攻击链**（本节）= 展示层，把多个 finding **串**成多步攻击路径，进报告「攻击链」章节；
-- **PoC**（§6）= 产物层，把可利用漏洞**变**成 curl/Burp 包。
+- **组合漏洞**是召回层，把 write→存储→read→sink 这条链**召回**成一个漏洞项；
+- **攻击链**（本节）是展示层，把多个漏洞项**串**成多步攻击路径，进报告的「攻击链」章节；
+- **PoC**是产物层，把可利用漏洞**变**成 curl/Burp 包。
 
 攻击链本身也是双轨结构——GitNexus 确定性组装 + LLM 攻击链 agent，merge 后进 `attack_chains.json`：
 
@@ -334,7 +334,7 @@ PY 引入三个抽象把这条链程序化接上：
 
 **双轨铁律照守**：组装只读两轨各自的产物做合并，不反向喂 LLM 轨 prompt（CLAUDE.md §1）。两步组装 + 渲染都非 fatal——增强报告，不阻塞扫描（attack chains 挂了单点漏洞卡照常出）。
 
-> 文件：`packages/core/src/supernova_core/code_index/attack_chain_assembler.py`（GitNexus 组装）、`services/route_chain_builder.py`（框架/前端组装）、`services/report_assembler.py:48`（`render_attack_chains`）；wiring：`whitebox/pipeline/activities.py:1721`（`run_attack_chain_assembly_v2`）→ `workflows.py:497`。攻击链汇总口径修复见 [叙事版](./refactor-scan-optimization-vs-ts.md)。
+> 涉及的文件：`attack_chain_assembler.py` 负责 GitNexus 组装，`route_chain_builder.py` 负责框架和前端组装，`report_assembler.py` 里的 `render_attack_chains` 负责渲染。接线点是 `activities.py` 的 `run_attack_chain_assembly_v2`，连到 `workflows.py`。攻击链汇总口径的修复细节见[叙事版](./refactor-scan-optimization-vs-ts.md)。
 
 ---
 
@@ -356,7 +356,7 @@ TS 的 PoC 散在 exploit 阶段的自由格式 markdown 里，没结构化 Burp
 
 效果验证：✅ 真机对历史 session 实测产出 11 个 curl PoC（XSS×2 / AUTHZ×4 / SSRF×1 + 变体）。
 
-> 文件：`packages/core/src/supernova_core/services/poc_generator.py`（`PoCGenerator`、`to_curl`、`to_burp_raw`、`classify_confidence`）；wiring：`whitebox/pipeline/activities.py:1220`（`generate_poc_report`）→ `workflows.py:604`。叙事见 [叙事版 §5](./refactor-scan-optimization-vs-ts.md)（P1）。
+> 涉及的文件：`poc_generator.py` 里有 `PoCGenerator`、`to_curl`、`to_burp_raw`、`classify_confidence`。接线点是 `activities.py` 的 `generate_poc_report`，连到 `workflows.py`。这条的排查过程在[叙事版](./refactor-scan-optimization-vs-ts.md)里。
 
 ---
 
@@ -387,7 +387,7 @@ TS 的 PoC 散在 exploit 阶段的自由格式 markdown 里，没结构化 Burp
 
 TS 的 `PipelineInput.repoPath` 是单一绝对路径，不支持多仓输入，跨服务数据流和跨仓信任边界是纯盲区（`vuln-authz.txt` 自己都写了 "Untraced Microservice Calls... could not be analyzed without their source code"）。PY 做声明式 multi-repo 编排 + 跨仓关联 agent，推断服务拓扑、信任边界、跨服务候选数据流；黑盒侧加载拓扑做 gateway 层验证。关联 agent 在编排器进程内跑（非 Temporal activity，规避 child-workflow 负担），per-edge 用 `asyncio.Semaphore(3)` 并发 + 单边 try/except 隔离。这是覆盖面的硬扩展。
 
-> 效果对照见 [主文档 §5](./scan-effectiveness-gains-vs-ts.md)（W9）；叙事见 [叙事版 §4](./refactor-scan-optimization-vs-ts.md)。
+> 跨仓的实际效果对照见[主文档](./scan-effectiveness-gains-vs-ts.md)；排查过程见[叙事版](./refactor-scan-optimization-vs-ts.md)。
 
 ---
 
@@ -425,7 +425,7 @@ TS 的 `PipelineInput.repoPath` 是单一绝对路径，不支持多仓输入，
 
 TS 的 cost 靠 SDK 返回，双引擎不对称、未知模型容易假估算。PY 双引擎统一自算 + per-profile 定价，消除不对称：claude 和 openai 都经 `agents/pricing.py::compute_cost(model, usage)` 按 token 用量 × 价目表算，claude 不再读 SDK 的 `total_cost_usd`。价目表 per-profile 化，切 profile 即切定价。
 
-> 详见 spec `docs/superpowers/specs/2026-07-09-per-profile-cost-pricing-design.md`（CLAUDE.md §4）。
+> 详细设计见[这份 spec](../../superpowers/specs/2026-07-09-per-profile-cost-pricing-design.md)，CLAUDE.md §4 也有概述。
 
 ---
 
@@ -433,19 +433,24 @@ TS 的 cost 靠 SDK 返回，双引擎不对称、未知模型容易假估算。
 
 PY 重构里直接影响扫描效果的架构不变量，改动前必读（CLAUDE.md §1-§2）：
 
-1. **双轨独立性**（§2）：GitNexus 轨与 LLM 轨链来源不同、互不喂数据，只在合并器 verdict OR 交汇。不要把确定性层产物喂进 LLM 轨 prompt（`tests/prompts/test_static_dataflow_hints_decoupling.py` 锁定）。
-2. **`externally_exploitable` 是可达性标签**（§2）：true=公网 / false=内部或跨服务，不能被 verdict 覆写。
-3. **LLM 轨纯 LLM 自给自足**（§2/§3）：补召回只动 GitNexus 轨自己接 LLM，不破坏双轨独立性。
-4. **双引擎可互换**（§1）：两引擎流程一致、prompt 不改。不要「切到 glm-anthropic 了事」丢 openai 引擎，也别让 openai 退化成单 agent 使两引擎行为分叉。openai 自维护工具是 SDK 哲学差异，不可消除，别当退化去「修」。
-5. **`SUPERNOVA_LLM_TRACK_ENABLED=0` 语义收窄**（§2）：只关 inj/xss/ssrf 的 taint agent；pre-recon/recon/authz/auth 的 LLM 全保留（GitNexus 做不了）。
-6. **`scan-config.yaml` 明文边界**（§4）：持久化层加密，但 per-scan `scan-config.yaml` 必须明文（core 合流点，`parse_config` 不解密）；明文债靠 0600 权限 + 用后即删缓解。
-7. **多身份判定铁律**（§4）：EXPLOITED 必须有 baseline 对比佐证；无 baseline 一律 POTENTIAL。
-8. **组合漏洞 token 边界**（§3.1）：只有字面量 token 能静态 join，动态/拼接 token 留给 LLM 轨，静态解析不了的不硬连——误连比漏报更糟。
+1. **双轨独立性**：GitNexus 轨与 LLM 轨链来源不同、互不喂数据，只在合并器按判定取并集（verdict OR）交汇。不要把确定性层产物喂进 LLM 轨 prompt（`tests/prompts/test_static_dataflow_hints_decoupling.py` 锁定）。
+2. **`externally_exploitable` 是可达性标签**：true=公网 / false=内部或跨服务，不能被判定结论（verdict）覆写。
+3. **LLM 轨纯 LLM 自给自足**：补召回只动 GitNexus 轨自己接 LLM，不破坏双轨独立性。
+4. **双引擎可互换**：两引擎流程一致、prompt 不改。不要「切到 glm-anthropic 了事」丢 openai 引擎，也别让 openai 退化成单 agent 使两引擎行为分叉。openai 自维护工具是 SDK 哲学差异，不可消除，别当退化去「修」。
+5. **`SUPERNOVA_LLM_TRACK_ENABLED=0` 语义收窄**：只关 inj/xss/ssrf 的 taint agent；pre-recon/recon/authz/auth 的 LLM 全保留（GitNexus 做不了）。
+6. **`scan-config.yaml` 明文边界**：持久化层是加密的，但单次扫描用的 `scan-config.yaml` 必须明文——它是 core 的合流点，`parse_config` 不解密。这个明文风险靠 0600 文件权限和扫描结束后立即删除来缓解。
+7. **多身份判定铁律**：EXPLOITED 必须有 baseline 对比佐证；无 baseline 一律 POTENTIAL。
+8. **组合漏洞 token 边界**：只有字面量 token 能静态拼接（join），动态/拼接 token 留给 LLM 轨，静态解析不了的不硬连——误连比漏报更糟。
 
 ---
 
 ## 10. 一句话总结
 
-PY 重构的扫描效果核心是给 TS 的单轨纯 LLM 加一条确定性兜底轨并把它真正跑通：双轨 verdict OR（§2）保召回对账和鲁棒性，多层补召回（§3）让确定性轨能落地，组合漏洞二阶 join（§3.1）补 stored XSS / 二阶 SQLi 系统性漏报，双引擎抽象（§1）让 claude/openai 可互换，黑盒多角色账号验证（§4）把单账号越权从「枚举 ID 猜测」变成「baseline 对比硬证据」，攻击链构造（§5）把单点漏洞串成多步攻击路径，PoC 产物化（§6）把「markdown 抠 curl」变成「一键 curl + Burp raw」，跨仓关联（§7）打开 TS 单仓盲区，per-profile cost 计费（§8）消除双引擎不对称。所有设计受一组铁律约束（§9），最核心的是双轨独立性——确定性产物绝不喂 LLM 轨 prompt。
+PY 重构的扫描效果核心，是给 TS 的单轨纯 LLM 加一条确定性兜底轨并把它真正跑通：双轨判定取并集，保住召回对账和鲁棒性；多层补召回让确定性轨真正能落地；组合漏洞的二阶存储拼接，补上 stored XSS / 二阶 SQLi 的系统性漏报；双引擎抽象让 claude/openai 可互换；黑盒多角色账号验证把单账号越权从「枚举 ID 猜测」变成「baseline 对比硬证据」；攻击链构造把单点漏洞串成多步攻击路径；PoC 产物化把「markdown 抠 curl」变成「一键 curl + Burp raw」；跨仓关联打开 TS 的单仓盲区；per-profile cost 计费消除双引擎不对称。所有设计受一组铁律约束，最核心的是双轨独立性——确定性产物绝不喂 LLM 轨 prompt。
 
-> 各设计点的安全效果与真机验证状态见 [主文档能力矩阵](./scan-effectiveness-gains-vs-ts.md)；踩坑排查过程见 [叙事版](./refactor-scan-optimization-vs-ts.md)；目录索引见 [`README.md`](./README.md)；完整设计架构（含仓库分层、authz 深度 agent 轨）见母文档 [`py-redesign-architecture.md`](./py-redesign-architecture.md)。
+> 想继续深入，可以接着看：
+>
+> - 各设计点的安全效果和真机验证状态——[主文档的能力矩阵](./scan-effectiveness-gains-vs-ts.md)；
+> - 每条设计背后的踩坑排查过程——[叙事版](./refactor-scan-optimization-vs-ts.md)；
+> - 这一组文档的目录索引——[`README.md`](./README.md)；
+> - 完整的设计架构（含仓库分层、authz 深度 agent 轨）——母文档 [`py-redesign-architecture.md`](./py-redesign-architecture.md)。

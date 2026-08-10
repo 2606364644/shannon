@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Trash2, Pencil } from "lucide-react";
-import { listAuthProfiles, deleteAuthProfile } from "@/api/authProfiles";
+import { Trash2, Pencil, Copy } from "lucide-react";
+import { listAuthProfiles, deleteAuthProfile, forkProfile } from "@/api/authProfiles";
+import { ApiError } from "@/api/client";
 import type { AuthProfile } from "@/api/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,21 @@ export function AuthProfilesPage() {
     }
   }
 
+  async function onFork(p: AuthProfile) {
+    if (!workspace) return;
+    try {
+      await forkProfile(workspace, p.id);
+      toast.success(t("authProfiles.forkSuccess"));
+      void refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.info(t("authProfiles.forkAlready"));
+      } else {
+        toast.error(t("authProfiles.forkFailed"));
+      }
+    }
+  }
+
   if (!workspace) return null;
   return (
     <div className="space-y-4">
@@ -90,6 +106,11 @@ export function AuthProfilesPage() {
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
+                  {p.scope === "system" && (
+                    <Button variant="ghost" size="icon" aria-label={t("authProfiles.forkLabel")} onClick={() => onFork(p)}>
+                      <Copy className="size-4" />
+                    </Button>
+                  )}
                   {p.scope !== "system" && (
                     <>
                       <Button variant="ghost" size="icon" aria-label={t("authProfiles.edit")} onClick={() => setEditTarget(p)}>

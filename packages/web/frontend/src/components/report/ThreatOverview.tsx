@@ -8,7 +8,9 @@ const SEV_ORDER: Severity[] = ["Critical", "High", "Medium", "Low"];
 
 /**
  * 威胁概览条（对齐设计稿 report-a `.threat`，配色换纯 severity）。
- * 三列：总数大数字 | severity 堆叠条 + 4 色图例 | 建议优先处置 Top3。
+ * 两列：总数大数字 | severity 堆叠条 + 4 色图例。
+ * 「建议优先处置」Top3 右列已移除——与下方 exec-summary-hero 重复展示同一份
+ * topRisks，且 hero 默认展开 5 条长叙述时右列纯冗余。优先项统一由 hero 承载。
  */
 export function ThreatOverview({ stats }: { stats: ReportStats }) {
   const { t } = useTranslation();
@@ -18,7 +20,7 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
     <section
       data-testid="threat-overview"
       aria-label={t("report.ariaLabel")}
-      className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)] md:grid-cols-[200px_1fr_280px]"
+      className="grid grid-cols-1 overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)] md:grid-cols-[200px_1fr]"
     >
       {/* 左：单点漏洞总数（+ 攻击链计数，M>0 时） */}
       <div className="flex flex-col justify-center border-border p-4 md:border-r">
@@ -104,27 +106,6 @@ export function ThreatOverview({ stats }: { stats: ReportStats }) {
             </span>
           ))}
         </div>
-      </div>
-
-      {/* 右：优先处置 Top3 */}
-      <div className="flex flex-col gap-1.5 border-border p-4 md:border-l">
-        <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-wide text-red">
-          {t("report.priorityTop")}
-        </div>
-        {stats.topRisks.map((r) => (
-          <div
-            key={r.vulnIds[0] ?? r.text}
-            data-testid="threat-toprisk"
-            className="flex items-center gap-2 text-[12.5px]"
-          >
-            {r.vulnIds.length > 0 && (
-              <span className="shrink-0 whitespace-nowrap rounded-sm border border-red/30 bg-red/10 px-1.5 py-0.5 font-mono text-[11px] text-red">
-                {r.vulnIds.join("/")}
-              </span>
-            )}
-            <span className="truncate">{r.text}</span>
-          </div>
-        ))}
       </div>
     </section>
   );

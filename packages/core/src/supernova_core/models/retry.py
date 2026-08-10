@@ -27,11 +27,11 @@ AUTH_VALIDATION_RETRY = RetryPolicy(
 )
 
 PRODUCTION_RETRY = RetryPolicy(
-    # max 8(2026-07-20 从 50 下调):pre-recon/recon/report 等单次 LLM agent 跑满
+    # max 3(2026-08-10 从 8 下调,8 是 2026-07-20 从 50 下调):LLM agent 整体超时是确定性
     # ~6min,max 50 会把任何 transient/确定性失败放大成 ~5h 卡死 + 巨量 token
     # (sentinel_dashboard recon 确定性 schema 违规被重试 50×6min 实测)。对齐
-    # VULN_RETRY(8) 哲学;确定性错误另经 SchemaMismatchError non-retryable fail-fast。
-    maximum_attempts=8,
+    # code_index/poc/risk-scoring 的 max 3 哲学;确定性错误另经 SchemaMismatchError non-retryable fail-fast。
+    maximum_attempts=3,
     initial_interval=timedelta(minutes=5),
     maximum_interval=timedelta(minutes=30),
     backoff_coefficient=2.0,
@@ -55,11 +55,12 @@ SUBSCRIPTION_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
-# vuln agent 专用:per-vt fan-out 下封顶 ~20min,有意分歧于 TS PRODUCTION_RETRY。
+# vuln agent 专用:per-vt fan-out 下封顶,有意分歧于 TS PRODUCTION_RETRY。
+# max 3(2026-08-10 从 8 下调,对齐 PRODUCTION_RETRY):确定性超时不放大,transient 给 3 次。
 # 详见 docs/superpowers/specs/2026-06-22-retry-policy-alignment-design.md §2.3
 # 及 2026-06-28-llm-track-vuln-parity-restoration-design.md §4.3。
 VULN_RETRY = RetryPolicy(
-    maximum_attempts=8,
+    maximum_attempts=3,
     initial_interval=timedelta(minutes=1),
     maximum_interval=timedelta(minutes=5),
     backoff_coefficient=2.0,

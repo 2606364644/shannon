@@ -398,9 +398,11 @@
       "statusEnabled": "当前：已启用登录",
       "entryGroup": "登录入口",
       "selectProfileLabel": "选择档案",
+      "profileListLabel": "档案列表",
+      "selectProfileCaption": "从工作区已验证档案选取",
+      "selectProfilePlaceholder": "请在左侧选择档案",
       "selectRole": "以哪个角色登录",
       "profileRoleHint": "将以所选角色真实登录一次以持久化会话；验证状态来自档案库最近一次「测试登录」。",
-      "selectProfileHint": "选择左侧档案查看其登录地址、类型与各角色验证状态",
       "role": "角色",
       "addRole": "+ 添加角色",
       "removeRole": "删除该角色",
@@ -667,7 +669,6 @@
     "attackChainHint": "攻击链：多个单点漏洞串联成多步利用路径。点击查看完整路径。",
     "publicReachable": "公网可达",
     "bySeverity": "按 severity 分布",
-    "priorityTop": "⚡ 建议优先处置",
     "typeSummaryAria": "按漏洞类型汇总"
   },
   "theme": {
@@ -681,7 +682,8 @@
   },
   "wsConfig": {
     "title": "工作区配置",
-    "subtitle": "覆盖全局 provider 配置；留空字段回落全局默认。",
+    "subtitle": "直接填 env 文本（KEY=value）覆盖全局 provider 配置；未写的字段回落全局默认。",
+    "envText": "AI 配置（env 文本）",
     "fields": {
       "aiProvider": "AI 引擎",
       "apiKey": "API 密钥",
@@ -710,6 +712,10 @@
       "forbidden": "无权修改配置",
       "saveFailed": "保存失败",
       "invalid": "配置不合法"
+    },
+    "warnings": {
+      "ineffective": "以下为进程级配置，ws 不生效（需在全局 .env 配置）",
+      "unknown": "已忽略未知 key"
     },
     "fallbackHint": "留空 = 回落全局默认",
     "openSettings": "工作区配置"
@@ -815,6 +821,10 @@
     "sourceProfile": "使用档案",
     "systemBadge": "系统",
     "systemHint": "系统档案只读（来源：configs）",
+    "forkLabel": "复制到工作区",
+    "forkSuccess": "已复制到工作区，可编辑",
+    "forkAlready": "已复制到本工作区",
+    "forkFailed": "复制失败",
     "overall": {
       "success": "可用",
       "failed": "不可用",

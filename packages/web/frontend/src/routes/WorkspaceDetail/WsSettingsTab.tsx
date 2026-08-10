@@ -3,51 +3,34 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAuth } from "@/auth/AuthContext";
-import { getWsConfig, putWsConfig, type WsProviderFields, type WsGitFields } from "@/api/wsConfig";
+import { getWsConfig, putWsConfig, type WsConfigWarnings } from "@/api/wsConfig";
 import { getMembers } from "@/api/members";
 import type { Member } from "@/api/members";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
-const EMPTY: WsProviderFields = {
-  ai_provider: null, api_key: null, base_url: null, model: null,
-  small_model: null, medium_model: null, large_model: null,
-  max_turns: null, adaptive_thinking: null,
-};
-
-const EMPTY_GIT: WsGitFields = { gitlab_user: null, gitlab_token: null };
-
-// 合法 provider 名（与后端 PROVIDER_SETTINGS 键一致）
-const PROVIDERS = ["anthropic_api", "openai_compatible", "bedrock", "vertex", "litellm_router"];
-
-// 文本字段（均为 string|null），map 渲染；max_turns(number) 与 adaptive_thinking(bool) 单独处理。
-const TEXT_FIELDS: { key: keyof WsProviderFields; labelKey: string }[] = [
-  { key: "base_url", labelKey: "baseUrl" },
-  { key: "model", labelKey: "model" },
-  { key: "small_model", labelKey: "smallModel" },
-  { key: "medium_model", labelKey: "mediumModel" },
-  { key: "large_model", labelKey: "largeModel" },
-];
+const PLACEHOLDER = [
+  "SUPERNOVA_AI_PROVIDER=openai_compatible",
+  "SUPERNOVA_OPENAI_API_KEY=...",
+  "SUPERNOVA_OPENAI_BASE_URL=https://...",
+  "SUPERNOVA_LARGE_MODEL=...",
+].join("\n");
 
 export default function WsSettingsTab() {
   const { workspace: ws = "" } = useParams<{ workspace: string }>();
   const { t } = useTranslation();
   const { user } = useAuth();
-  const [cfg, setCfg] = useState<WsProviderFields>(EMPTY);
+  const [envText, setEnvText] = useState("");
+  const [warnings, setWarnings] = useState<WsConfigWarnings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [apiKeyInput, setApiKeyInput] = useState(""); // password 框，空=不改
-  const [gitCfg, setGitCfg] = useState<WsGitFields>(EMPTY_GIT);
-  const [gitlabTokenInput, setGitlabTokenInput] = useState(""); // password 框，空=不改
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    getWsConfig(ws).then((r) => { setCfg(r.provider); setGitCfg(r.git ?? EMPTY_GIT); setLoaded(true); })
+    getWsConfig(ws).then((r) => { setEnvText(r.env_text); setLoaded(true); })
       .catch(() => setLoaded(true));
     getMembers(ws).then((r) => setMembers(r.members)).catch(() => {});
   }, [ws]);
@@ -58,22 +41,15 @@ export default function WsSettingsTab() {
 
   async function onSave() {
     setBusy(true);
+    setWarnings(null);
     try {
-      await putWsConfig(ws, {
-        provider: {
-          ...cfg,
-          api_key: apiKeyInput || undefined, // 空=不发（后端保原值）
-        },
-        git: {
-          gitlab_user: gitCfg.gitlab_user,
-          gitlab_token: gitlabTokenInput || undefined, // 空=不发（后端保原值）
-        },
-      });
-      setApiKeyInput("");
-      setGitlabTokenInput("");
+      const r = await putWsConfig(ws, envText);
+      // 保存后用后端渲染的 env 文本重置（凭据回填掩码、清空字段落实）
       const fresh = await getWsConfig(ws);
-      setCfg(fresh.provider);
-      setGitCfg(fresh.git ?? EMPTY_GIT);
+      setEnvText(fresh.env_text);
+      if (r.warnings && (r.warnings.ineffective.length || r.warnings.unknown.length)) {
+        setWarnings(r.warnings);
+      }
       toast.success(t("wsConfig.saved"));
     } catch (e) {
       const status = e instanceof ApiError ? e.status : 0;
@@ -93,53 +69,27 @@ export default function WsSettingsTab() {
       <CardContent className="max-w-xl space-y-4">
         <p className="text-sm text-muted-foreground">{t("wsConfig.subtitle")}</p>
         <div className="space-y-2">
-          <Label>{t("wsConfig.fields.aiProvider")}</Label>
-          <Select value={cfg.ai_provider ?? "__unset__"} disabled={!canEdit}
-                  onValueChange={(v) => setCfg({ ...cfg, ai_provider: v === "__unset__" ? null : v })}>
-            <SelectTrigger><SelectValue placeholder={t("wsConfig.fallbackHint")} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__unset__">{t("wsConfig.fallbackHint")}</SelectItem>
-              {PROVIDERS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Label htmlFor="ws-env-text">{t("wsConfig.envText")}</Label>
+          <Textarea
+            id="ws-env-text"
+            aria-label={t("wsConfig.envText")}
+            className="font-mono text-sm min-h-[280px]"
+            value={envText}
+            disabled={!canEdit}
+            placeholder={PLACEHOLDER}
+            onChange={(e) => setEnvText(e.target.value)}
+          />
         </div>
-        <div className="space-y-2">
-          <Label>{t("wsConfig.fields.apiKey")}</Label>
-          <Input type="password" value={apiKeyInput} disabled={!canEdit}
-                 placeholder={cfg.api_key ? t("wsConfig.apiKey.configured") : t("wsConfig.apiKey.notConfigured")}
-                 onChange={(e) => setApiKeyInput(e.target.value)} />
-        </div>
-        {TEXT_FIELDS.map(({ key, labelKey }) => (
-          <div className="space-y-2" key={key}>
-            <Label>{t(`wsConfig.fields.${labelKey}`)}</Label>
-            <Input value={(cfg[key] as string) ?? ""} disabled={!canEdit}
-                   onChange={(e) => setCfg({ ...cfg, [key]: e.target.value || null })} />
+        {warnings && (
+          <div className="space-y-1 text-sm text-amber-600 dark:text-amber-500">
+            {warnings.ineffective.length > 0 && (
+              <p>{t("wsConfig.warnings.ineffective")}: {warnings.ineffective.join(", ")}</p>
+            )}
+            {warnings.unknown.length > 0 && (
+              <p>{t("wsConfig.warnings.unknown")}: {warnings.unknown.join(", ")}</p>
+            )}
           </div>
-        ))}
-        <div className="space-y-2">
-          <Label>{t("wsConfig.fields.maxTurns")}</Label>
-          <Input type="number" value={cfg.max_turns ?? ""} disabled={!canEdit}
-                 onChange={(e) => setCfg({ ...cfg, max_turns: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch checked={cfg.adaptive_thinking ?? false} disabled={!canEdit}
-                  onCheckedChange={(v) => setCfg({ ...cfg, adaptive_thinking: v })} />
-          <Label>{t("wsConfig.fields.adaptiveThinking")}</Label>
-        </div>
-        <div className="border-t pt-4">
-          <p className="text-sm font-medium">{t("wsConfig.gitSection")}</p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="ws-gitlab-user">{t("wsConfig.fields.gitlabUser")}</Label>
-          <Input id="ws-gitlab-user" value={gitCfg.gitlab_user ?? ""} disabled={!canEdit}
-                 onChange={(e) => setGitCfg({ ...gitCfg, gitlab_user: e.target.value || null })} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="ws-gitlab-token">{t("wsConfig.fields.gitlabToken")}</Label>
-          <Input id="ws-gitlab-token" type="password" value={gitlabTokenInput} disabled={!canEdit}
-                 placeholder={gitCfg.gitlab_token ? t("wsConfig.gitToken.configured") : t("wsConfig.gitToken.notConfigured")}
-                 onChange={(e) => setGitlabTokenInput(e.target.value)} />
-        </div>
+        )}
         {canEdit && (
           <Button onClick={onSave} disabled={busy}>{t("wsConfig.save")}</Button>
         )}

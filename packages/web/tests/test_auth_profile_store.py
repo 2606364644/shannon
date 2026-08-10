@@ -1,11 +1,13 @@
 """AuthProfileStore:读写 + 显式路径加密/解密 + 嵌套 email_login + 脱敏 + 空串保留。"""
 from pathlib import Path
 
+import pytest
 import yaml
 
 from supernova_web.components.credential_vault import CredentialVault
 from supernova_web.components.auth_profile_store import (
     AuthProfileStore, AuthProfile, AuthProfileCredential, EmailLoginCred,
+    VerifyStatus, AlreadyForked,
     credential_to_authentication,
 )
 
@@ -258,3 +260,114 @@ def test_set_verify_status_writes_ws_profile_in_ws(tmp_path):
     assert ws_p.credentials[0].verify_status.state == "success"
     # .system 段无副作用
     assert store._read_segment(".system") == []
+
+
+# ---------------------------------------------------------------------------
+# fork：read(ws) 按 profile.id 去重（ws 段覆盖 .system 同 id，不重复显示）
+# ---------------------------------------------------------------------------
+
+def test_read_dedups_by_id_ws_overrides_system(tmp_path):
+    # fork 场景：ws 段与 .system 段同 id（ws 副本覆盖系统原型）。
+    # read(ws) 该 id 只出现一次（ws 副本，scope=workspace），不重复系统原型。
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    ws_prof = AuthProfile(id="prof_dup", name="ws-side", login_url="http://w/",
+                          login_type="form",
+                          credentials=[AuthProfileCredential(id="c", role="r", username="u")])
+    sys_prof = AuthProfile(id="prof_dup", name="sys-side", login_url="http://s/",
+                           login_type="form", scope="system",
+                           credentials=[AuthProfileCredential(id="c", role="r", username="u")])
+    store.write("ws1", [ws_prof])
+    store.write(".system", [sys_prof])
+    profiles = store.read("ws1")
+    dups = [p for p in profiles if p.id == "prof_dup"]
+    assert len(dups) == 1                  # 不重复
+    assert dups[0].scope == "workspace"    # ws 副本优先
+    assert dups[0].name == "ws-side"
+
+
+# ---------------------------------------------------------------------------
+# fork：fork_from_system 把 .system 档案 fork 成 ws 段可编辑副本
+# ---------------------------------------------------------------------------
+
+def _verified_system_profile():
+    """系统档案，credential 已验证成功 —— 证明 fork 后 verify_status 被重置。"""
+    return AuthProfile(
+        id="prof_sys", name="futunn", login_url="http://sys/", login_type="form",
+        login_flow=["系统登录"], scope="system",
+        credentials=[AuthProfileCredential(
+            id="cred_s", role="primary", username="sysuser", password="syspw",
+            email_login=EmailLoginCred(address="s@x.com", password="epw"),
+            verify_status=VerifyStatus(state="success", last_verified_at="2026-01-01T00:00:00Z"))])
+
+
+def test_fork_from_system_creates_editable_ws_copy(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_verified_system_profile()])
+    forked = store.fork_from_system("ws1", "prof_sys")
+    assert forked is not None
+    assert forked.scope == "workspace"
+    assert forked.id == "prof_sys"                       # profile.id 保留系统原 id
+    c = forked.credentials[0]
+    assert c.username == "sysuser"                       # 凭据明文相等
+    assert c.password == "syspw"
+    assert c.email_login.password == "epw"
+    assert c.id != "cred_s"                              # credential.id 重新生成
+    assert c.verify_status.state == "unverified"         # verify_status 重置
+    assert c.verify_status.last_verified_at is None
+    # 落盘到 ws 段（fork 副本已持久化，非仅内存）
+    ws_seg = store._read_segment("ws1")
+    assert any(p.id == "prof_sys" for p in ws_seg)
+
+
+def test_fork_from_system_already_forked_raises(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_verified_system_profile()])
+    store.fork_from_system("ws1", "prof_sys")   # 第一次 fork
+    # ws 段已有同 id → 第二次 fork 拒绝（防覆盖用户已编辑的副本）
+    with pytest.raises(AlreadyForked):
+        store.fork_from_system("ws1", "prof_sys")
+
+
+def test_fork_from_system_unknown_profile_returns_none(tmp_path):
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_verified_system_profile()])
+    # 系统段无该 id → None
+    assert store.fork_from_system("ws1", "nope") is None
+    # 未创建任何 ws 副本
+    assert store._read_segment("ws1") == []
+
+
+def test_get_after_fork_returns_ws_copy(tmp_path):
+    # fork 后 get(ws, id) ws-priority 命中 ws 副本（不破现有不变量）
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_verified_system_profile()])
+    store.fork_from_system("ws1", "prof_sys")
+    got = store.get("ws1", "prof_sys")
+    assert got is not None
+    assert got.scope == "workspace"
+
+
+def test_delete_fork_copy_reverts_to_system_view(tmp_path):
+    # 删 ws 副本 → read(ws) 回到 system 原型视图（自然撤销 fork）
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_verified_system_profile()])
+    store.fork_from_system("ws1", "prof_sys")
+    assert store.delete_profile("ws1", "prof_sys")
+    assert not any(p.id == "prof_sys" for p in store._read_segment("ws1"))
+    view = store.read("ws1")
+    dups = [p for p in view if p.id == "prof_sys"]
+    assert len(dups) == 1
+    assert dups[0].scope == "system"
+
+
+def test_set_verify_status_on_fork_copy_writes_ws_not_system(tmp_path):
+    # fork 副本 set_verify_status → 写回 ws 段，.system 原型不动（副本独立）
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    store.write(".system", [_system_profile()])   # prof_sys/cred_s 默认 unverified
+    forked = store.fork_from_system("ws1", "prof_sys")
+    ws_cred_id = forked.credentials[0].id
+    store.set_verify_status("ws1", "prof_sys", ws_cred_id, VerifyStatus(state="success"))
+    ws_p = store._read_segment("ws1")[0]
+    assert ws_p.credentials[0].verify_status.state == "success"        # ws 副本已更新
+    sys_p = store._read_segment(".system")[0]
+    assert sys_p.credentials[0].verify_status.state == "unverified"    # 系统原型未动

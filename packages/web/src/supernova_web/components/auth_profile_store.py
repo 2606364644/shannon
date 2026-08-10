@@ -71,6 +71,10 @@ class AuthProfile(BaseModel):
     scope: Literal["workspace", "system"] = "workspace"
 
 
+class AlreadyForked(Exception):
+    """fork_from_system 时目标 ws 段已有同 profile.id（副本已存在），拒绝覆盖。"""
+
+
 def _validate_ws_segment(ws: str) -> None:
     if not ws or "/" in ws or ws in (".", ".."):
         raise ValueError("invalid workspace name")
@@ -160,11 +164,13 @@ class AuthProfileStore:
     def read(self, ws: str) -> list[AuthProfile]:
         """读 + 解密 → list[AuthProfile]（内存明文）。合并系统档案：返回 ws 段
         （scope=workspace）+ .system 段（scope=system，所有 ws 共享）。
-        read('.system') 只返回系统段自身（不自合并，防内容翻倍/递归）。"""
-        profiles = self._read_segment(ws)
-        if ws != SYSTEM_WS:
-            profiles = profiles + self._read_segment(SYSTEM_WS)
-        return profiles
+        read('.system') 只返回系统段自身（不自合并，防内容翻倍/递归）。
+        按 profile.id 去重：ws 段覆盖 .system 段同 id（fork 副本覆盖系统原型，不重复显示）。"""
+        ws_profiles = self._read_segment(ws)
+        if ws == SYSTEM_WS:
+            return ws_profiles
+        ws_ids = {p.id for p in ws_profiles}
+        return ws_profiles + [p for p in self._read_segment(SYSTEM_WS) if p.id not in ws_ids]
 
     def read_masked(self, ws: str) -> list[AuthProfile]:
         """读 + 解密 + 脱敏 → GET 响应态(敏感字段 MASKED if 值 else None)。"""
@@ -255,6 +261,27 @@ class AuthProfileStore:
                     if c.id == cred_id:
                         c.verify_status = status
         self.write(source_ws, profiles)
+
+    def fork_from_system(self, ws: str, profile_id: str) -> AuthProfile | None:
+        """把 .system 段系统档案 fork 成 ws 段可编辑副本。返回 fork 后 ws 副本；
+        系统段无该 id → None。
+
+        profile.id 保留系统原 id（ws-priority 覆盖系统原型）；credential.id 重新生成
+        （独立实体，避免跨段 id 冲突）；verify_status 重置 unverified（fork 意在改，
+        旧验证态不可信）。凭据明文经 _read_segment 解密后 model_copy，upsert→write 重新加密落盘。"""
+        sys_profile = next((p for p in self._read_segment(SYSTEM_WS) if p.id == profile_id), None)
+        if sys_profile is None:
+            return None
+        if any(p.id == profile_id for p in self._read_segment(ws)):
+            raise AlreadyForked(profile_id)   # ws 段已有同 id 副本 → 拒绝覆盖
+        forked = sys_profile.model_copy(deep=True)
+        forked.scope = "workspace"
+        forked.created_at = None
+        forked.updated_at = None
+        for c in forked.credentials:
+            c.id = ""                          # 重新生成 cred id（独立实体）
+            c.verify_status = VerifyStatus()   # 重置 unverified
+        return self.upsert_profile(ws, forked)  # profile.id 非空 → 保留
 
     def seed_from_config(self, configs_dir: Path) -> int:
         """扫 configs/*.yaml，把 authentication 段 seed 成系统级档案（.system 段，所有

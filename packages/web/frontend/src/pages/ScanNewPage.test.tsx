@@ -470,6 +470,49 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     expect(posted!.reuse_whitebox_scan_id).toBe("20260731-1200");
   });
 
+  // 回归：profile 模式「选择档案」分区标题只渲染一次——顶部标题行一处；左列小标签应为「档案列表」
+  // （对齐 preview blackbox-auth-right-panel.html:187,191），而非误用同一 selectProfileLabel 造成两行重复。
+  it("profile 模式「选择档案」标题唯一（左列小标签不重复分区标题）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
+    // 等档案卡出现（BottomProfileBlock 已挂载：顶部标题行 + 左列小标签都渲染）
+    await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
+    // 顶部分区标题「选择档案」应唯一——左列小标签是「档案列表」，不再重复
+    expect(screen.getAllByText("选择档案")).toHaveLength(1);
+  });
+
+  // 回归：profile 模式未选档案时，提示句「选择左侧档案查看…」不在右栏摘要、下方顶部 hint、
+  // 下方右列占位三处同句重复——三处应各司其职（对齐 preview:150,187），而非共用 selectProfileHint。
+  it("profile 模式未选档案时提示句不三处重复", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
+      http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
+    );
+    renderPage();
+    clickTab("黑盒");
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
+    await expectAuthEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
+    // 等档案卡出现但**不点选**——保持未选档案态
+    await waitFor(() => expect(screen.getByRole("button", { name: /^NG/ })).toBeInTheDocument());
+    // 旧实现三处共用 selectProfileHint（「选择左侧档案查看…」），此处断言其最多出现 1 次
+    const hint = "选择左侧档案查看其登录地址、类型与各角色验证状态";
+    expect(screen.queryAllByText(hint).length).toBeLessThanOrEqual(1);
+  });
+
   // profile 模式：取消全选后无角色 → 校验拦空，提交 disabled。
   it("profile 模式取消全选角色 → 提交 disabled（validateAuth 拦空）", async () => {
     server.use(

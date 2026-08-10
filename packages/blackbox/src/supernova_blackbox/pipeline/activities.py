@@ -520,11 +520,14 @@ async def finalize_report(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
-async def log_phase_start_activity(input: BlackboxActivityInput) -> None:
+async def log_phase_start_activity(input: BlackboxActivityInput,
+                                   steps: list[str] | None = None,
+                                   intents: list[str] | None = None) -> None:
     from supernova_core.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     phase = input.phase or input.workspace_name or "unknown"
-    await get_audit_session().log_phase_start(phase)
+    await get_audit_session().log_phase_start(
+        phase, steps=tuple(steps or ()), step_intents=tuple(intents or ()))
 
 
 @activity.defn
@@ -704,20 +707,57 @@ async def cleanup_engine_configs(repo_path: str, engine_name: str) -> None:
 
 
 @activity.defn
+async def cleanup_auth_state_activity(workspace_path: str) -> None:
+    """finally 收尾: 清理 auth-state*.json（glob 文件 I/O，sandbox 禁 workflow 直调）。
+
+    workflow finally 原裸调 cleanup_auth_state_sync（glob.glob）→ 抛
+    RestrictedWorkflowAccessError → WorkflowTask 反复 TimedOut → 整个 scan failed（真机
+    NodeGoat 黑盒扫描直接死因：带 auth config 的扫描登录后生成 auth-state.json，finally
+    走 cleanup 触发）。挪进 activity（worker 进程，不受 workflow sandbox 限制）。best-effort，
+    失败由 workflow 侧 try/except 吞掉不阻断收尾（auth-state 残留下次覆盖，无副作用）。
+    """
+    from supernova_core.services.validate_authentication import cleanup_auth_state
+
+    if not workspace_path:
+        return
+    try:
+        await cleanup_auth_state(workspace_path)
+    except Exception:  # noqa: BLE001 - best-effort cleanup
+        pass
+
+
+@activity.defn
 async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidationResult:
     """独立认证验证探针:驱动 validate_authentication 真实登录,失败不抛异常(降级返回)。
 
     与 run_blackbox_auth_validation 区别:后者在扫描流程内,失败抛 ApplicationFailure
     触发 fail-fast;本探针供"认证管理页 测试登录"独立入口,失败只回失败点不触发扫描。
-    AuditSession 不依赖:validate_authentication/AgentExecutor 不触 get_audit_session
-    (无 session 时 log_phase_start 落 NullAuditSession 安全 no-op),故无需 setup_display。
-    透传 validate_authentication 的 result(其内置 no-structured-output → success=False 映射)。
+
+    可观测性(对齐 run_blackbox_auth_validation):setup_display 已由 workflow 在本探针前
+    调用并注册 AuditSession,故此处理 get_audit_session() 拿到真实 session → 接
+    SessionToolAuditLogger(透传给 validate_authentication,使 agent 的 tool call / LLM
+    turn 落 events.ndjson)+ start_agent/end_agent(发 AgentEvent)。这是"测试登录过程
+    实时可见"的前提——否则 events.ndjson 只有 PhaseEvent/SummaryEvent,前端看不到过程。
+    session 未注册(setup_display 失败)时 get_audit_session 返 NullAuditSession,no-op 安全。
     """
+    from supernova_core.audit.session_registry import get_audit_session
+    from supernova_core.audit.session_tool_audit_logger import SessionToolAuditLogger
+    from supernova_core.models.audit import AgentEndResult, end_result_from_pentest_error
+
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
+    agent_name = AgentName.VALIDATE_AUTH
+    attempt = activity.info().attempt
+    session = get_audit_session()
+    tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
+    agent_start = time.monotonic()
+    await session.start_agent(agent_name.value, f"agent={agent_name.value}", attempt=attempt)
+    await tool_audit_logger.initialize()
+
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
     executor = AgentExecutor(prompt_manager)
     try:
-        return await validate_authentication(
+        result = await validate_authentication(
             web_url=input.web_url,
             config_path=input.config_path,
             workspace_path=input.workspace_path or "",
@@ -728,11 +768,29 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
             prompt_manager=prompt_manager,
             executor=executor,
             api_key=input.api_key,
+            tool_audit_logger=tool_audit_logger,
         )
     except Exception as e:
-        # 降级:不 raise(仿 run_endpoint_verify activities.py:349-356)
+        # 降级:不 raise(仿 run_endpoint_verify activities.py:349-356),但照常收尾可观测性
+        dur_ms = int((time.monotonic() - agent_start) * 1000)
+        await tool_audit_logger.close(success=False, duration_ms=dur_ms)
+        if isinstance(e, PentestError):
+            # 失败 agent 也记 cost:PentestError.context 携带 executor 真实消耗(对齐 :195-205)
+            await session.end_agent(
+                agent_name.value,
+                end_result_from_pentest_error(e, duration_ms=dur_ms, attempt_number=attempt))
+        else:
+            await session.end_agent(agent_name.value, AgentEndResult(
+                success=False, duration_ms=dur_ms, cost_usd=0.0,
+                attempt_number=attempt, error=str(e)))
         return AuthValidationResult(
             success=False,
             failure_point="out_of_band",
             failure_detail=f"{type(e).__name__}: {e}",
         )
+    dur_ms = int((time.monotonic() - agent_start) * 1000)
+    await tool_audit_logger.close(success=result.success, duration_ms=dur_ms)
+    await session.end_agent(agent_name.value, AgentEndResult(
+        success=result.success, duration_ms=dur_ms, cost_usd=0.0, attempt_number=attempt))
+    return result
+

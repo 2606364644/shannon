@@ -1,32 +1,22 @@
 import { apiGet, apiPut } from "./client";
 
-export interface WsProviderFields {
-  ai_provider: string | null;
-  api_key: string | null; // GET 返 "••••"（已配置）或 null
-  base_url: string | null;
-  model: string | null;
-  small_model: string | null;
-  medium_model: string | null;
-  large_model: string | null;
-  max_turns: number | null;
-  adaptive_thinking: boolean | null;
+// ws 配置 = env 文本（KEY=value）。config.yaml 是后端 SSOT，前端只见 env 文本。
+// spec: docs/superpowers/specs/2026-08-10-ws-config-env-textarea-design.md
+export interface WsConfigResponse {
+  env_text: string;
 }
-export interface WsGitFields {
-  gitlab_user: string | null;
-  gitlab_token: string | null; // GET 返 "••••"（已配置）或 null
+export interface WsConfigWarnings {
+  ineffective: string[]; // 进程级 key（ws 不生效，需全局配）
+  unknown: string[]; // 未知 key
 }
-export interface WsConfig {
-  provider: WsProviderFields;
-  git?: WsGitFields; // P3c 阶段 4
+export interface WsConfigPutResult {
+  ok: boolean;
+  warnings: WsConfigWarnings;
 }
-export type WsConfigInput = {
-  provider: Partial<WsProviderFields>;
-  git?: { gitlab_user?: string | null; gitlab_token?: string | null };
-};
 
 const enc = encodeURIComponent;
 
 export const getWsConfig = (ws: string) =>
-  apiGet<WsConfig>(`/workspaces/${enc(ws)}/config`);
-export const putWsConfig = (ws: string, body: WsConfigInput) =>
-  apiPut(`/workspaces/${enc(ws)}/config`, body);
+  apiGet<WsConfigResponse>(`/workspaces/${enc(ws)}/config`);
+export const putWsConfig = (ws: string, env_text: string) =>
+  apiPut<WsConfigPutResult>(`/workspaces/${enc(ws)}/config`, { env_text });

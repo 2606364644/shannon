@@ -6,6 +6,7 @@ from supernova_core.models.errors import classify_error_for_temporal
 if TYPE_CHECKING:
     from supernova_core.logging.activity_logger import ActivityLogger
     from supernova_core.agents.tool_audit_logger import ToolAuditLogger
+    from supernova_core.agents.progress_tool import ProgressSpec
     from supernova_core.collectors.base import CollectorBase
 
 
@@ -126,6 +127,7 @@ async def run_claude_prompt(
     tool_audit_logger: "ToolAuditLogger | None" = None,
     max_turns: int | None = None,
     collector: "CollectorBase | None" = None,
+    progress: "ProgressSpec | None" = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -181,6 +183,7 @@ async def run_claude_prompt(
             audit_logger=active_tool_logger,
             max_turns=max_turns,
             collector=collector,
+            progress=progress,
         )
 
         # 5. 检查花费上限行为

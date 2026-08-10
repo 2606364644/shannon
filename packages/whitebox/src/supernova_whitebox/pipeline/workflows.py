@@ -57,7 +57,6 @@ def _decide_gitnexus_failfast(statuses: dict, llm_track_enabled: bool) -> list[s
 with workflow.unsafe.imports_passed_through():
     from . import activities
     from supernova_core.services.settings_writer import sync_code_path_deny_rules, cleanup_settings
-    from supernova_core.services.validate_authentication import cleanup_auth_state_sync
     from supernova_core.models.retry import retry_for
     from supernova_core.models.errors import classify_error_for_temporal
 
@@ -666,7 +665,15 @@ class WhiteboxScanWorkflow:
             raise
         finally:
             cleanup_settings()
-            cleanup_auth_state_sync(workspace_path)
+            try:
+                await workflow.execute_activity(
+                    activities.cleanup_auth_state_activity,
+                    args=[workspace_path],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+            except Exception:
+                pass  # best-effort cleanup，失败不阻断 workflow 收尾
 
     @workflow.query(name="PipelineProgress")
     def pipeline_progress(self) -> PipelineProgress:

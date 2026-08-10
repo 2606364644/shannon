@@ -398,9 +398,11 @@
       "statusEnabled": "Currently: login enabled",
       "entryGroup": "Login entry",
       "selectProfileLabel": "Select profile",
+      "profileListLabel": "Profile list",
+      "selectProfileCaption": "Pick from workspace's verified profiles",
+      "selectProfilePlaceholder": "Select a profile on the left",
       "selectRole": "Log in as which role",
       "profileRoleHint": "Will actually log in once with the selected role to persist the session; verification status comes from the profile library's latest test login.",
-      "selectProfileHint": "Select a profile on the left to see its login URL, type, and each role's verification status",
       "role": "Role",
       "addRole": "+ Add role",
       "removeRole": "Remove role",
@@ -667,7 +669,6 @@
     "attackChainHint": "Attack chain: single-point vulns chained into a multi-step exploit path. Click to view.",
     "publicReachable": "Public reachable",
     "bySeverity": "By severity distribution",
-    "priorityTop": "⚡ Priority fixes",
     "typeSummaryAria": "Summary by vulnerability type"
   },
   "theme": {
@@ -681,7 +682,8 @@
   },
   "wsConfig": {
     "title": "Workspace Config",
-    "subtitle": "Override global provider config; empty fields fall back to global defaults.",
+    "subtitle": "Edit env text (KEY=value) to override global provider config; unwritten keys fall back to global defaults.",
+    "envText": "AI config (env text)",
     "fields": {
       "aiProvider": "AI Provider",
       "apiKey": "API Key",
@@ -710,6 +712,10 @@
       "forbidden": "No permission to modify config",
       "saveFailed": "Save failed",
       "invalid": "Invalid configuration"
+    },
+    "warnings": {
+      "ineffective": "Process-level keys, not effective per-workspace (set in global .env)",
+      "unknown": "Ignored unknown keys"
     },
     "fallbackHint": "Blank = fall back to global default",
     "openSettings": "Workspace config"
@@ -815,6 +821,10 @@
     "sourceProfile": "Use profile",
     "systemBadge": "System",
     "systemHint": "System profile is read-only (source: configs)",
+    "forkLabel": "Copy to workspace",
+    "forkSuccess": "Copied to workspace, editable",
+    "forkAlready": "Already copied to this workspace",
+    "forkFailed": "Copy failed",
     "overall": {
       "success": "Available",
       "failed": "Unavailable",

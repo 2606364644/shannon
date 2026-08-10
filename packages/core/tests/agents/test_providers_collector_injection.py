@@ -30,20 +30,43 @@ def _make_anthropic_provider():
     return AnthropicProvider(ProviderConfig(type="anthropic_api"))
 
 
-# ---------- claude: _build_options 注入 mcp_server + allowed_tools ----------
+# ---------- claude: _build_options 注入 mcp_servers dict + allowed_tools ----------
 
-def test_anthropic_build_options_injects_mcp_server_and_allowed_tools():
+def test_anthropic_build_options_injects_collector_mcp_server_and_allowed_tools():
     provider = _make_anthropic_provider()
     collector = _collector()
     mcp = build_claude_mcp_server(collector)
     allowed = collector.tool_names()
     options = provider._build_options(
-        cwd="/tmp", model="claude-sonnet-5", mcp_server=mcp, allowed_tools=allowed,
+        cwd="/tmp", model="claude-sonnet-5",
+        mcp_servers={"shannon-collector": mcp}, allowed_tools=allowed,
     )
     assert "shannon-collector" in options.mcp_servers
     assert options.mcp_servers["shannon-collector"] is mcp
     assert "set_executive_summary" in options.allowed_tools
     assert len(options.allowed_tools) == 7
+
+
+def test_anthropic_build_options_injects_progress_server_alongside_collector():
+    """progress（log_milestone）作为第二个 in-process MCP server 注入，与 collector 并存。"""
+    from supernova_core.agents.progress_tool import (
+        AUTH_VALIDATION_PROGRESS, build_claude_progress_server,
+    )
+
+    provider = _make_anthropic_provider()
+    collector = _collector()
+    servers = {
+        "shannon-collector": build_claude_mcp_server(collector),
+        "supernova-progress": build_claude_progress_server(AUTH_VALIDATION_PROGRESS),
+    }
+    allowed = collector.tool_names() + ["log_milestone"]
+    options = provider._build_options(
+        cwd="/tmp", model="claude-sonnet-5",
+        mcp_servers=servers, allowed_tools=allowed,
+    )
+    assert set(options.mcp_servers.keys()) == {"shannon-collector", "supernova-progress"}
+    assert "log_milestone" in options.allowed_tools
+    assert "set_executive_summary" in options.allowed_tools   # collector 工具仍在
 
 
 def test_anthropic_build_options_without_collector_leaves_mcp_empty():

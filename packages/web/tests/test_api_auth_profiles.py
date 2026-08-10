@@ -130,6 +130,18 @@ async def test_verify_log_endpoint_out_of_containment_is_403(tmp_path):
     assert r.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_verify_events_endpoint_out_of_containment_is_403(tmp_path):
+    """块4: verify-events SSE 越界守护 ValueError → 403（与 verify-log 同语义）。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.auth_validation_events_path = AsyncMock(side_effect=ValueError("probe_dir 越界"))
+    r = c.get(
+        "/api/workspaces/ws1/auth-profiles/prof_x/credentials/cred_y/verify-events",
+        params={"workflow_id": "authval-ws1-probe-1", "probe_dir": "/evil"})
+    assert r.status_code == 403
+
+
 def test_get_profile_does_single_masked_read(tmp_path, monkeypatch):
     """IMPORTANT 1 回归:get_profile 合并成单次 read_masked 查找,防两次读之间档案被删
     致 masked=None.model_dump() → 500(get 与 read_masked 之间的 TOCTOU race)。
@@ -211,3 +223,60 @@ def test_delete_system_profile_forbidden(tmp_path):
     assert r.status_code == 403
     # 系统档案仍在
     assert any(p.id == "prof_sys" for p in store.read(".system"))
+
+
+# ---------------------------------------------------------------------------
+# fork 端点：POST /{ws}/auth-profiles/{pid}/fork —— 系统档案 → ws 可编辑副本
+# ---------------------------------------------------------------------------
+
+def test_fork_endpoint_creates_ws_copy(tmp_path):
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)   # .system 有 prof_sys
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_sys/fork")
+    assert r.status_code == 200, r.text
+    forked = r.json()
+    assert forked["id"] == "prof_sys"
+    assert forked["scope"] == "workspace"
+    assert forked["credentials"][0]["password"] == "••••"   # masked 返回
+    # ws 段已持久化副本
+    assert any(p.id == "prof_sys" for p in store._read_segment("ws1"))
+
+
+def test_fork_endpoint_ws_profile_is_422(tmp_path):
+    # ws 档案（非系统）fork → 422（已在工作区，可直接编辑）
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"}]}).json()["id"]
+    r = c.post(f"/api/workspaces/ws1/auth-profiles/{pid}/fork")
+    assert r.status_code == 422
+
+
+def test_fork_endpoint_duplicate_is_409(tmp_path):
+    # 重复 fork → 409（已复制到本工作区）
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)
+    assert c.post("/api/workspaces/ws1/auth-profiles/prof_sys/fork").status_code == 200
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_sys/fork")
+    assert r.status_code == 409
+
+
+def test_fork_endpoint_unknown_profile_is_404(tmp_path):
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)
+    r = c.post("/api/workspaces/ws1/auth-profiles/nope/fork")
+    assert r.status_code == 404
+
+
+def test_fork_endpoint_requires_workspace_manager(tmp_path):
+    # fork 是改操作 → workspace_manager 拒 → 403
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)
+
+    def deny():
+        from fastapi import HTTPException
+        raise HTTPException(403, "forbidden")
+
+    c.app.dependency_overrides[workspace_manager] = deny
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_sys/fork")
+    assert r.status_code == 403

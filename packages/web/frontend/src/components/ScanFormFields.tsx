@@ -221,7 +221,7 @@ function ProfileRightSummary({ auth, workspace, refreshSignal }: {
   if (!selected) {
     return (
       <div className="border-t border-border pt-3 space-y-3">
-        <div className="text-[11px] text-muted-foreground">{t("scan.auth.selectProfileHint")}</div>
+        <div className="text-[11px] text-muted-foreground">{t("scan.auth.multiRoleHint")}</div>
       </div>
     );
   }
@@ -433,12 +433,12 @@ function BottomProfileBlock({ auth, setAuth, workspace, refreshSignal }: {
       <div className="flex items-center gap-2 mb-3">
         <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
         <h4 className="text-[12px] font-semibold text-muted-foreground">{t("scan.auth.selectProfileLabel")}</h4>
-        <span className="text-[10.5px] text-muted-foreground">{t("scan.auth.selectProfileHint")}</span>
+        <span className="text-[10.5px] text-muted-foreground">{t("scan.auth.selectProfileCaption")}</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-4 items-start">
         {/* 左：档案卡列表 */}
         <div className="space-y-2">
-          <GroupLabel>{t("scan.auth.selectProfileLabel")}</GroupLabel>
+          <GroupLabel>{t("scan.auth.profileListLabel")}</GroupLabel>
           {profiles.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
               {loadFailed ? t("common.loadFailed") : t("authProfiles.empty")}
@@ -561,7 +561,7 @@ function BottomProfileBlock({ auth, setAuth, workspace, refreshSignal }: {
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-border bg-card p-4 text-xs text-muted-foreground">
-            {t("scan.auth.selectProfileHint")}
+            {t("scan.auth.selectProfilePlaceholder")}
           </div>
         )}
       </div>

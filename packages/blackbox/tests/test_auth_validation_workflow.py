@@ -1,4 +1,6 @@
 """AuthValidationWorkflow 编排:log_phase(auth-validation) → probe → 透传 result。"""
+import json
+
 import pytest
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
@@ -15,7 +17,7 @@ async def test_workflow_orchestration_returns_probe_result():
     phases = []
 
     @activity.defn
-    async def log_phase_start_activity(i):
+    async def log_phase_start_activity(i, steps=None, intents=None):
         phases.append(getattr(i, "phase", None) or (i.get("phase") if isinstance(i, dict) else None))
 
     @activity.defn
@@ -50,9 +52,52 @@ async def test_workflow_orchestration_returns_probe_result():
 
 
 @pytest.mark.asyncio
+async def test_workflow_declares_four_progress_steps():
+    """步骤条前提：AuthValidationWorkflow 经 log_phase_start_activity 声明 4 步 PhaseEvent
+    （navigate/fill_credentials/submit/verify_session），与 log_milestone 工具的 step key 同源。"""
+    declared = []
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        phase = getattr(i, "phase", None) or (i.get("phase") if isinstance(i, dict) else None)
+        declared.append((phase, list(steps or [])))
+
+    @activity.defn
+    async def setup_display(i):
+        pass
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        pass
+
+    inp = BlackboxAuthValidationInput(
+        web_url="http://target/", config_path="/c.yaml", workspace_path="/wp"
+    )
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client, task_queue="tq-steps",
+            workflows=[AuthValidationWorkflow],
+            activities=[log_phase_start_activity, setup_display,
+                        run_auth_validation_probe, finalize_summary],
+        ):
+            await env.client.execute_workflow(
+                AuthValidationWorkflow.run, inp, id="w-steps", task_queue="tq-steps"
+            )
+    # auth-validation 阶段声明了 4 步
+    assert declared, "workflow 必须调 log_phase_start_activity"
+    phase, steps = declared[0]
+    assert phase == "auth-validation"
+    assert steps == ["navigate", "fill_credentials", "submit", "verify_session"]
+
+
+@pytest.mark.asyncio
 async def test_workflow_requires_web_url():
     @activity.defn
-    async def log_phase_start_activity(i):
+    async def log_phase_start_activity(i, steps=None, intents=None):
         pass
 
     @activity.defn
@@ -85,7 +130,7 @@ async def test_workflow_runs_setup_display_and_finalize_for_observability():
     calls = []
 
     @activity.defn
-    async def log_phase_start_activity(i):
+    async def log_phase_start_activity(i, steps=None, intents=None):
         calls.append(("log_phase", getattr(i, "phase", None)))
 
     @activity.defn
@@ -139,7 +184,7 @@ async def test_workflow_writes_events_file_via_real_setup_display(tmp_path):
     event_file = tmp_path / "events.ndjson"
 
     @activity.defn
-    async def log_phase_start_activity(i):
+    async def log_phase_start_activity(i, steps=None, intents=None):
         pass
 
     @activity.defn
@@ -164,3 +209,48 @@ async def test_workflow_writes_events_file_via_real_setup_display(tmp_path):
     assert result.success is True
     assert event_file.exists(), "events.ndjson 应被 setup_display 创建"
     assert event_file.read_text("utf-8").strip(), "events.ndjson 不应为空"
+
+
+@pytest.mark.asyncio
+async def test_probe_wires_agent_observability(tmp_path, monkeypatch):
+    """块2: standalone run_auth_validation_probe 必须接可观测性——传 tool_audit_logger 给
+    validate_authentication（→ agent tool call 落 events.ndjson）+ 调 start_agent/end_agent
+    （→ AgentEvent 落盘）。否则测试登录过程对前端完全不可见（只有 PhaseEvent/SummaryEvent）。
+
+    真实 setup_display（注册 session 写 event_file）+ 真实 probe + mock validate_authentication
+    （只验接线，agent 真实动作留真机）。
+    """
+    event_file = tmp_path / "events.ndjson"
+    captured: dict = {}
+
+    async def fake_validate(**kwargs):
+        captured["tool_audit_logger"] = kwargs.get("tool_audit_logger")
+        return AuthValidationResult(success=True)
+
+    monkeypatch.setattr(activities, "validate_authentication", fake_validate)
+
+    inp = BlackboxAuthValidationInput(
+        web_url="http://target/", config_path="/c.yaml",
+        workspace_path=str(tmp_path), event_file=str(event_file),
+    )
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client, task_queue="tq-probe-obs",
+            workflows=[AuthValidationWorkflow],
+            activities=[activities.log_phase_start_activity,
+                        activities.setup_display,
+                        activities.run_auth_validation_probe,
+                        activities.finalize_summary],
+        ):
+            result = await env.client.execute_workflow(
+                AuthValidationWorkflow.run, inp, id="w-probe-obs", task_queue="tq-probe-obs",
+            )
+
+    assert result.success is True
+    # probe 把 tool_audit_logger 透传给 validate_authentication（→ ToolCallEvent 落盘通道）
+    assert captured.get("tool_audit_logger") is not None
+    # start_agent/end_agent → AgentEvent(start) + AgentEvent(end) 落 events.ndjson
+    events = [json.loads(ln) for ln in event_file.read_text("utf-8").splitlines() if ln.strip()]
+    agent_events = [e for e in events if e.get("type") == "AgentEvent"]
+    assert any(e.get("event") == "start" for e in agent_events)
+    assert any(e.get("event") == "end" for e in agent_events)

@@ -25,6 +25,8 @@ export const updateAuthProfile = (ws: string, pid: string, body: Partial<AuthPro
   apiPut<{ ok: true }>(`/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}`, body);
 export const deleteAuthProfile = (ws: string, pid: string) =>
   apiDelete<{ ok: true }>(`/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}`);
+export const forkProfile = (ws: string, pid: string) =>
+  apiPost<AuthProfile>(`/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/fork`, {});
 export const testCredential = (ws: string, pid: string, cid: string) =>
   apiPost<{ workflow_id: string; probe_dir: string }>(
     `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/test`, {});
@@ -43,3 +45,11 @@ export const getVerifyLog = (
     `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/verify-log`
     + `?workflow_id=${enc(workflowId)}&probe_dir=${enc(probeDir)}`
     + (tail != null ? `&tail=${tail}` : ""));
+
+// 块4：验证过程 SSE 实时流 URL（tail probe_dir/events.ndjson，遇 scan_end 关流）——喂 EventSource。
+export const verifyEventsUrl = (
+  ws: string, pid: string, cid: string, workflowId: string, probeDir: string,
+) =>
+  `/api/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/verify-events`
+  + `?workflow_id=${enc(workflowId)}&probe_dir=${enc(probeDir)}`;
+
