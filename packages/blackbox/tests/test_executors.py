@@ -299,3 +299,39 @@ async def test_authz_exploit_no_identity_context_when_single_identity(mock_repo)
     assert pv.get("IDENTITY_CONTEXT", "") == ""  # 单身份不注入
     # AUTH_STATE_FILE 仍不在此显式注入(守卫不变)
     assert "AUTH_STATE_FILE" not in pv
+
+
+# ---------------------------------------------------------------------------
+# spec 2026-08-08 黑盒 exploit queue 读取根修复：queue_root 分离读/写根
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_exploit_executor_reads_queue_from_queue_root(tmp_path):
+    """黑盒根因修复：queue 在 queue_root/whitebox/（= 白盒 repo_path/deliverables），
+    deliverables_path 是黑盒自己的空目录。vulnerability_entries 必须来自 queue_root
+    （而非 deliverables_path），且 queue_root 透传到底层 executor.execute（供 renderer
+    读 queue 建 valid_ids——这是现场 valid_ids 空导致真实 verdict 全被 L2 拒的根因）。"""
+    queue_root = tmp_path / "whitebox-root"
+    (queue_root / "whitebox").mkdir(parents=True)
+    (queue_root / "whitebox" / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [
+            {"ID": "INJ-VULN-01", "vulnerability_type": "SQLi",
+             "externally_exploitable": True, "confidence": "high"}]}))
+    deliverables = tmp_path / "deliverables"  # 黑盒产物落点（空，无 queue）
+    deliverables.mkdir()
+
+    stub_executor = MagicMock()
+    stub_executor.execute = AsyncMock(
+        return_value=AgentMetrics(duration_ms=10, cost_usd=0.0, num_turns=1, model="stub"))
+    ex = ExploitExecutor(stub_executor)
+    await ex.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT, vuln_type="injection",
+        workspace_path=tmp_path, deliverables_path=deliverables, web_url="https://x.com",
+        queue_root=queue_root,
+    )
+    pv = stub_executor.execute.call_args.kwargs.get("prompt_variables", {})
+    assert "vulnerability_entries" in pv, "queue_root 下 queue 应注入 vulnerability_entries"
+    assert "INJ-VULN-01" in pv["vulnerability_entries"]
+    # queue_root 透传到底层 executor（→ renderer 读 queue 建 valid_ids）
+    assert stub_executor.execute.call_args.kwargs.get("queue_root") == str(queue_root)

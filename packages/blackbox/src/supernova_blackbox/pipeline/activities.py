@@ -232,6 +232,11 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
         from supernova_blackbox.agents.exploit_executor import ExploitExecutor
 
         deliverables = _get_deliverables_path(input)
+        # spec 2026-08-08 根因修复：exploit 读 queue 用白盒根（repo_path/deliverables_subdir，
+        # queue 在其 whitebox/ 子目录），而非黑盒自己 deliverables（空目录）。与 gating
+        # validate_exploitation_queue 读根对齐。standalone（无 repo_path）回落 None →
+        # exploit_executor 回落 deliverables_path（保持原行为）。
+        queue_root = Path(input.repo_path) / input.deliverables_subdir if input.repo_path else None
         prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
         prompt_manager = PromptManager(prompts_dir)
         executor = AgentExecutor(prompt_manager)
@@ -250,6 +255,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
             correlation_context=input.correlation_context,
+            queue_root=queue_root,
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -333,7 +339,7 @@ async def run_endpoint_verify(input: BlackboxActivityInput) -> dict:
             success=True,
             duration_ms=result.get("duration_ms", dur_ms) if isinstance(result, dict) else dur_ms,
             cost_usd=(result.get("cost_usd") or 0.0) if isinstance(result, dict) else 0.0,
-            cost_currency=result.get("cost_currency") if isinstance(result, dict) else None,
+            cost_currency=(result.get("cost_currency") if isinstance(result, dict) else None) or "USD",
             attempt_number=attempt,
         ))
         return result

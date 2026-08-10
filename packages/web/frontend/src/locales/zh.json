@@ -697,10 +697,41 @@
       "gitlabUser": "GitLab 用户",
       "gitlabToken": "GitLab Token"
     },
-    "gitSection": "Git 凭据（clone 仓库用，留空回落全局）",
+    "sections": {
+      "engine": { "title": "AI 引擎与凭据", "desc": "选择驱动扫描的 AI 引擎，并配置鉴权与端点。" },
+      "models": { "title": "模型", "desc": "按活动开销分档；未设置的档位回落到通用模型。" },
+      "runtime": { "title": "运行时", "desc": "调整 agent 的最大轮数与思维模式。" },
+      "git": { "title": "Git 访问", "desc": "clone 仓库用的凭据，留空回落全局。" }
+    },
+    "tiers": {
+      "small": "轻量 · 侦察 / 索引",
+      "medium": "常规 · 分析",
+      "large": "重度 · 漏洞深挖",
+      "fallback": "通用回落模型（档位未设置时使用）"
+    },
+    "provenance": {
+      "inherit": "继承全局",
+      "override": "已覆盖",
+      "set": "已配置",
+      "unset": "未配置"
+    },
+    "providerNote": {
+      "bedrock": "Bedrock 的 region 在全局环境变量配置，工作区不可覆盖。",
+      "vertex": "Vertex 的 project_id / region 在全局环境变量配置，工作区不可覆盖。"
+    },
+    "summary": {
+      "overridden": "已覆盖 {{count}} 项",
+      "none": "全部继承全局默认"
+    },
+    "reset": "重置为继承",
+    "readonlyBanner": "你对此工作区为只读，需管理员或管理者权限才能修改。",
+    "dirtyHint": "有未保存的更改",
+    "discard": "放弃更改",
+    "loadFailed": "加载配置失败",
+    "retry": "重试",
     "apiKey": {
       "configured": "已配置（••••），留空不改",
-      "notConfigured": "未配置"
+      "notConfigured": "未配置（留空回落全局）"
     },
     "gitToken": {
       "configured": "已配置（••••），留空不改",

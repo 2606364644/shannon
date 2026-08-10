@@ -28,6 +28,12 @@ import json
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _en_lang_default(monkeypatch):
+    """断言基于英文渲染（对齐 renderers/test_render_deliverable_exploit.py 的 en 默认）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+
+
 # ── FakeResult:覆盖 executor 读取的全部字段 ───────────────────────────
 class FakeResult:
     """对齐 AgentExecutionResult 字段(executor.py:191-202 + is_spending_cap 早退)。"""
@@ -211,3 +217,49 @@ async def test_injection_vuln_skipped_all_sections_md_written_no_raise(monkeypat
     queue_file = deliverables / "injection_exploitation_queue.json"
     assert queue_file.exists()
     assert json.loads(queue_file.read_text(encoding="utf-8")) == queue_payload
+
+
+@pytest.mark.asyncio
+async def test_injection_exploit_renders_evidence_using_queue_root(monkeypatch, tmp_path):
+    """黑盒根因修复 e2e（spec 2026-08-08）：exploit agent 经真实 AgentExecutor 渲染 evidence，
+    queue_root（= 白盒根）透传到 render_deliverable → valid_ids 来自 queue_root/whitebox/ →
+    真实 verdict 进 accepted → evidence.md 含该 ID。证明 queue_root 经 executor → renderer 全链透传
+    （现场回归点：修复前 deliverables_path 空目录 → valid_ids 空 → 真实 verdict 全被 L2 拒）。"""
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    deliverables = tmp_path / "deliverables"  # 黑盒产物落点（空，无 queue）
+
+    queue_root = tmp_path / "whitebox-root"  # 白盒根：queue 在 whitebox/ 子目录
+    (queue_root / "whitebox").mkdir(parents=True)
+    (queue_root / "whitebox" / "injection_exploitation_queue.json").write_text(json.dumps(
+        {"vulnerabilities": [
+            {"ID": "INJ-VULN-01", "vulnerability_type": "SQLi",
+             "externally_exploitable": True, "confidence": "high"}]}))
+
+    async def fake_run(**kw):
+        collector = kw.get("collector")
+        # 模拟 agent 经 add_exploit 工具注入 verdict（vulnerability_id 在 queue 中）
+        if collector is not None:
+            collector.append_section("add_exploit", {
+                "vulnerability_id": "INJ-VULN-01", "status": "exploited", "severity": "critical",
+                "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"})
+        return FakeResult(structured_output=None)
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    executor = _patch_executor_env(monkeypatch, tmp_path)
+
+    await executor.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT,
+        repo_path=str(repo),
+        deliverables_path=str(deliverables),
+        queue_root=str(queue_root),
+    )
+
+    evidence = deliverables / "injection_exploitation_evidence.md"
+    assert evidence.exists(), "evidence.md 应由 renderer 渲染落盘"
+    md = evidence.read_text(encoding="utf-8")
+    assert "## Successfully Exploited" in md
+    assert "INJ-VULN-01" in md  # queue_root 透传 → valid_ids 含 INJ-VULN-01 → verdict 进 accepted
