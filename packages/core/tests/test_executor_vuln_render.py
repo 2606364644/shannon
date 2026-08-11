@@ -263,3 +263,48 @@ async def test_injection_exploit_renders_evidence_using_queue_root(monkeypatch, 
     md = evidence.read_text(encoding="utf-8")
     assert "## Successfully Exploited" in md
     assert "INJ-VULN-01" in md  # queue_root 透传 → valid_ids 含 INJ-VULN-01 → verdict 进 accepted
+
+
+@pytest.mark.asyncio
+async def test_injection_exploit_writes_verdicts_json(monkeypatch, tmp_path):
+    """exploit agent 跑完后 verdicts.json 落盘 deliverables/blackbox/（spec 2026-08-12）。
+    补全主线缺失产物：计数器数 exploited、coverage/PoC 读 accepted_ids。"""
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    deliverables = tmp_path / "deliverables"  # 黑盒产物落点
+
+    queue_root = tmp_path / "whitebox-root"  # 白盒根：queue 在 whitebox/ 子目录
+    (queue_root / "whitebox").mkdir(parents=True)
+    (queue_root / "whitebox" / "injection_exploitation_queue.json").write_text(json.dumps(
+        {"vulnerabilities": [
+            {"ID": "INJ-VULN-01", "vulnerability_type": "SQLi",
+             "externally_exploitable": True, "confidence": "high"}]}))
+
+    async def fake_run(**kw):
+        collector = kw.get("collector")
+        if collector is not None:
+            collector.append_section("add_exploit", {
+                "vulnerability_id": "INJ-VULN-01", "status": "exploited", "severity": "critical",
+                "impact": "i", "exploitation_steps": ["s"], "proof_of_impact": "p"})
+        return FakeResult(structured_output=None)
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    executor = _patch_executor_env(monkeypatch, tmp_path)
+
+    await executor.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT,
+        repo_path=str(repo),
+        deliverables_path=str(deliverables),
+        queue_root=str(queue_root),
+    )
+
+    verdicts_file = deliverables / "blackbox" / "injection_exploit_verdicts.json"
+    assert verdicts_file.exists(), "verdicts.json 应落盘 deliverables/blackbox/"
+    payload = json.loads(verdicts_file.read_text(encoding="utf-8"))
+    assert payload["vuln_class"] == "injection"
+    assert "INJ-VULN-01" in payload["accepted_ids"]
+    exploited = [v for v in payload["verdicts"] if v.get("status") == "exploited"]
+    assert len(exploited) == 1

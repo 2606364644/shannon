@@ -201,6 +201,19 @@ class AgentExecutor:
             if md is not None:
                 (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
 
+            # exploit agent 额外写结构化 verdicts.json（补全主线缺失产物，spec 2026-08-12）。
+            # 计数器数 exploited、coverage/PoC 读 accepted_ids；与 evidence.md 同源
+            # （build_exploit_verdicts_payload 复用 _build_exploit_validation）。
+            if isinstance(agent_name, AgentName) and agent_name.value.endswith("-exploit"):
+                from supernova_core.renderers import build_exploit_verdicts_payload
+                from supernova_core.utils.paths import blackbox_dir
+
+                vc = agent_name.value.removesuffix("-exploit")
+                payload = build_exploit_verdicts_payload(
+                    vc, collector.get_all(), deliverables, queue_root=queue_root)
+                atomic_write_json(
+                    blackbox_dir(deliverables) / f"{vc}_exploit_verdicts.json", payload)
+
         if not skip_artifact_postprocess:
             await validate_deliverable(deliverables, agent_name)
 
