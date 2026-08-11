@@ -113,7 +113,7 @@ Purpose: Defines the structure of the agent's final structured response.
 Structure: The vulnerability JSON object MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability json (XSS-VULN-XX)",
-		"title": "one-line descriptive name encoding the XSS type + where it lives (e.g., 'Reflected XSS via search q into innerHTML at /search'). NOT a bare label like 'Reflected'.",
+		"title": "一句话描述性标题，编码 XSS 类型 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 '反射型 XSS：搜索参数 q 注入 /search 的 innerHTML'。不要只写 'Reflected' 这种裸标签。",
 		"vulnerability_type": "Reflected | Stored | DOM-based",
 		"externally_exploitable": true | false,
 		"source": "The parameter, header, or storage mechanism (e.g., 'URL parameter: ?q', 'Cookie: session_id', 'localStorage key: user_prefs'). MUST be a SINGLE source — see Source Completeness Rule below.",

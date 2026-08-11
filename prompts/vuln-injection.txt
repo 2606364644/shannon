@@ -115,7 +115,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
   **Structure:** The `vulnerability` JSON object MUST follow this exact format:
 		{
 			"ID": "unique ID for each vulnerability (e.g., INJ-VULN-XX)",
-			"title": "one-line descriptive name encoding the vulnerability category + where it lives (e.g., 'SQL Injection via User Search (q param → raw query)'). NOT a bare category label like 'SQLi'.",
+			"title": "一句话描述性标题，编码漏洞类别 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'SQL 注入：用户搜索参数 q 进入原始查询'。不要只写 'SQLi' 这种裸标签。",
 			"vulnerability_type": "SQLi | CommandInjection | LFI | RFI | SSTI | PathTraversal | InsecureDeserialization",
 			"externally_exploitable": true | false,
 			"source": "param name & file:line. MUST be a SINGLE source — see Source Completeness Rule below.",

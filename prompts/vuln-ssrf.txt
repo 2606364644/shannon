@@ -101,7 +101,7 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 **Structure:** The `vulnerability` JSON object MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability json (SSRF-VULN-XX)",
-		"title": "one-line descriptive name encoding the SSRF type + where it lives (e.g., 'SSRF via webhook_url in /api/webhooks → internal metadata'). NOT a bare label like 'URL_Manipulation'.",
+		"title": "一句话描述性标题，编码 SSRF 类型 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'SSRF：/api/webhooks 的 webhook_url 可访问内部元数据'。不要只写 'URL_Manipulation' 这种裸标签。",
 		"vulnerability_type": "URL_Manipulation | Redirect_Abuse | Webhook_Injection | API_Proxy_Bypass | File_Fetch_Abuse | Service_Discovery | Open_Redirect",
 		"externally_exploitable": true | false,
 	  "source_endpoint": "{HTTP_METHOD} {endpoint_path}",

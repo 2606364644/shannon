@@ -149,7 +149,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 **Structure:** The `vulnerability` JSON object MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability (e.g., AUTHZ-VULN-01)",
-		"title": "one-line descriptive name encoding the authz flaw + endpoint (e.g., 'IDOR: DELETE /api/Feedbacks/:id without ownership check'). NOT a bare label like 'Horizontal'.",
+		"title": "一句话描述性标题，编码授权缺陷 + 端点，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'IDOR：DELETE /api/Feedbacks/:id 缺少归属校验'。不要只写 'Horizontal' 这种裸标签。",
 		"vulnerability_type": "Horizontal | Vertical | Context_Workflow",
 		"externally_exploitable": true | false,
 		"endpoint": "HTTP_METHOD /path/to/endpoint",

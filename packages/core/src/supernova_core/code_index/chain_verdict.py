@@ -37,6 +37,7 @@ from supernova_core.code_index.parameter_models import (
 )
 from supernova_core.code_index.sanitizer_library import annotate_sanitizers
 from supernova_core.agents.llm_json import _extract_json_payload
+from supernova_core.i18n import current_lang
 
 # Structured output schema：chain-verdict 轻量 LLM 判定，JSON object 根。
 # 对齐 ChainVerdict dataclass（verdict/witness_payload/evidence_chain/
@@ -62,6 +63,23 @@ _SSRF_SLOTS = {"url"}
 
 _DIRECTION = {"injection": "backward", "xss": "backward", "ssrf": "backward"}
 
+# title 指令按 narration 语言切换(zh 中文标题 / en 英文标题),与 vuln-*.txt 的 title
+# 语言约束对齐——避免 GitNexus 轨产出与 LLM 轨语言不一致的漏洞标题。
+_TITLE_DIRECTIVE = {
+    "zh": (
+        'Give a one-line descriptive "title" encoding the vulnerability category + where it lives '
+        '(e.g., "SQL 注入：/shop/apply-coupon 的 coupon_code 进入原始查询"). Required for EVERY chain, '
+        "vulnerable or safe (both enter the queue); never a bare category label. "
+        "用简体中文撰写标题,漏洞类型/参数/路径/端点保留英文。"
+    ),
+    "en": (
+        'Give a one-line descriptive "title" encoding the vulnerability category + where it lives '
+        '(e.g., "SQL Injection via coupon_code in /shop/apply-coupon"). Required for EVERY chain, '
+        "vulnerable or safe (both enter the queue); never a bare category label. "
+        "Write the title in English."
+    ),
+}
+
 # LLM pass prompt template (lightweight; full methodology stays in vuln-*.txt).
 _VERDICT_PROMPT = """You are a lightweight chain-verdict pass for the {vuln_class} GitNexus track.
 Given ONE candidate source->sink chain with deterministic sanitizer annotations,
@@ -82,9 +100,7 @@ Rules:
 - A defense is effective ONLY if it matches the slot/render_context AND no concat after.
 - Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
 - Be decisive: return vulnerable OR safe.
-- Give a one-line descriptive "title" encoding the vulnerability category + where it lives
-  (e.g., "SQL Injection via coupon_code in /shop/apply-coupon"). Required for EVERY chain,
-  vulnerable or safe (both enter the queue); never a bare category label.
+- {title_directive}
 
 Respond with a compact JSON object ONLY:
 {{"verdict":"safe|vulnerable","witness_payload":"<minimal>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>"}}
@@ -125,9 +141,11 @@ def _slot_value(slot) -> str:
 def _fallback_title(candidate: "CandidateChain") -> str:
     """Deterministic descriptive title when the LLM pass fails / returns no title.
 
-    Best-effort: ``<vuln_class> via <source_param> -> <sink>`` — encodes category +
-    where it lives so the finding is never title-less (the second-pass report
-    cleanup can still rewrite it)."""
+    Best-effort: ``<vuln_class> -> <source_param> -> <sink>``
+    (zh narration: ``<vuln_class>：<source> → <sink>``) — encodes category + where it lives
+    so the finding is never title-less (the second-pass report cleanup can still rewrite it)."""
+    if current_lang() == "zh":
+        return f"{candidate.vuln_class}：{candidate.source_param} → {candidate.sink_call_site_id}"
     return f"{candidate.vuln_class} via {candidate.source_param} -> {candidate.sink_call_site_id}"
 
 
@@ -280,6 +298,7 @@ async def judge_chain_verdict(
             for a in candidate.sanitizer_annotations
         ) or "(none)",
         post_sanitize_concat=str(candidate.post_sanitize_concat),
+        title_directive=_TITLE_DIRECTIVE[current_lang()],
     )
 
     try:

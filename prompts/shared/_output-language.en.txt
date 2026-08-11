@@ -1,6 +1,8 @@
 <output_language>
-Write all narrative and descriptive prose in English. The following technical
-identifiers MUST be kept in their original form, never translated:
+Write all narrative and descriptive prose in English — including the `title` field of each
+vulnerability in the exploitation queue: write every vulnerability title in English (e.g.,
+"Reflected XSS: search param q → /search innerHTML"). The following technical identifiers
+MUST be kept in their original form, never translated:
 - Vulnerability IDs (e.g. AUTH-VULN-01, INJ-VULN-02)
 - Code, commands, file paths and line numbers (e.g. server/app/controller/image.js:102)
 - HTTP methods and status codes (e.g. GET /api/fileProxyGet, HTTP 302)

@@ -64,8 +64,8 @@ Produce a JSON object (write to `{{DELIVERABLES_PATH}}/attack_chains_llm_queue.j
   "chains": [
     {
       "id": "llm-chain-1",
-      "name": "Stored XSS: POST /api/profile → GET /api/profile/:id render",
-      "description": "Profile bio stored unescaped, rendered on view endpoint",
+      "name": "存储型 XSS 攻击链：POST /api/profile 写入 → GET /api/profile/:id 渲染",
+      "description": "Profile 的 bio 字段未转义存储，在查看端点被渲染",
       "vuln_type": "xss",
       "severity": "high",
       "confidence": "probable",

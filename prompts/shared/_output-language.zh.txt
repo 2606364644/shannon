@@ -1,5 +1,5 @@
 <output_language>
-全部叙述性、描述性文字用简体中文撰写。以下技术标识必须保留英文原文,不得翻译:
+全部叙述性、描述性文字用简体中文撰写——包括漏洞队列(exploitation_queue)中每个漏洞的 title(标题)字段:漏洞标题用简体中文撰写,仅漏洞类型、参数名、路径、端点保留英文(如"反射型 XSS:搜索参数 q → /search innerHTML"、"IDOR:DELETE /api/Feedbacks/:id 缺少归属校验")。以下技术标识必须保留英文原文,不得翻译:
 - 漏洞编号(如 AUTH-VULN-01、INJ-VULN-02)
 - 代码、命令、文件路径与行号(如 server/app/controller/image.js:102)
 - HTTP 方法与状态码(如 GET /api/fileProxyGet、HTTP 302)
