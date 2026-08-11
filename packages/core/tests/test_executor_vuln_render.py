@@ -261,7 +261,7 @@ async def test_injection_exploit_renders_evidence_using_queue_root(monkeypatch, 
     evidence = deliverables / "injection_exploitation_evidence.md"
     assert evidence.exists(), "evidence.md 应由 renderer 渲染落盘"
     md = evidence.read_text(encoding="utf-8")
-    assert "## Successfully Exploited" in md
+    assert "## Successfully Exploited" not in md  # exploited 无 section 标题（2026-08-12）
     assert "INJ-VULN-01" in md  # queue_root 透传 → valid_ids 含 INJ-VULN-01 → verdict 进 accepted
 
 
