@@ -1,6 +1,6 @@
 from supernova_core.renderers.pre_recon import render_pre_recon
 
-__all__ = ["render_pre_recon", "render_deliverable"]
+__all__ = ["render_pre_recon", "render_deliverable", "build_exploit_verdicts_payload"]
 
 
 def render_deliverable(agent_name, data: dict, deliverables_path=None, queue_root=None) -> "str | None":
@@ -39,12 +39,17 @@ def render_deliverable(agent_name, data: dict, deliverables_path=None, queue_roo
     return None
 
 
-def _render_exploit_deliverable(vc, data, deliverables_path, queue_root=None):
+def _build_exploit_validation(vc, data, deliverables_path, queue_root=None):
+    """读 queue → validate，返回 (validation, id_to_type, id_to_title)。
+
+    抽自 _render_exploit_deliverable，供 md 渲染 + verdicts.json payload 构造共用
+    （spec 2026-08-12：renderer 保持纯函数，payload 构造复用同一 validation 源，
+    避免改 render_deliverable 公共签名牵连 ~16 个调用点）。
+    """
     import json
     from pathlib import Path
 
     from supernova_core.collectors.exploit import validate_exploit_verdicts
-    from supernova_core.renderers.exploit import render_exploit
 
     valid_ids: set[str] = set()
     id_to_type: dict[str, str] = {}
@@ -75,4 +80,38 @@ def _render_exploit_deliverable(vc, data, deliverables_path, queue_root=None):
                 pass
     entries = (data or {}).get("verdicts", []) if isinstance(data, dict) else (data or [])
     validation = validate_exploit_verdicts(entries, valid_ids)
+    return validation, id_to_type, id_to_title
+
+
+def _render_exploit_deliverable(vc, data, deliverables_path, queue_root=None):
+    from supernova_core.renderers.exploit import render_exploit
+
+    validation, id_to_type, id_to_title = _build_exploit_validation(
+        vc, data, deliverables_path, queue_root)
     return render_exploit(vc, validation, id_to_type, id_to_title)
+
+
+def build_exploit_verdicts_payload(vc, data, deliverables_path, queue_root=None) -> dict:
+    """构造 ``{vc}_exploit_verdicts.json`` payload（补全主线缺失产物，spec 2026-08-12）。
+
+    schema = {vuln_class, accepted_ids, verdicts, rejected}（孤儿消费者测试 schema 的超集）：
+    - accepted_ids：所有 accepted verdict 的 id（exploited+blocked+potential+other），
+      coverage/PoC 消费者读此字段（凡 accepted 即算覆盖）。
+    - verdicts：完整 accepted verdict（含 status），计数器据此数 exploited。
+    - rejected：[{id, reason}]（L1/L2/L3 拒因，调试可见性）。
+    复用 _build_exploit_validation → 与 evidence.md 渲染同源同口径。
+    """
+    validation, _, _ = _build_exploit_validation(vc, data, deliverables_path, queue_root)
+    return {
+        "vuln_class": vc,
+        "accepted_ids": [v.vulnerability_id for v in validation.accepted],
+        "verdicts": [v.model_dump() for v in validation.accepted],
+        "rejected": [
+            {
+                "id": (raw.get("vulnerability_id", "<unknown>")
+                       if isinstance(raw, dict) else "<unknown>"),
+                "reason": reason,
+            }
+            for raw, reason in validation.rejected
+        ],
+    }
