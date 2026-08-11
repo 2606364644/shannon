@@ -132,6 +132,13 @@ Structure: The vulnerability JSON object MUST follow this exact format:
 	}
 </exploitation_queue_format>
 
+<externally_exploitable_semantics>
+**`externally_exploitable` is a REACHABILITY TAG, not an authentication requirement.**
+- `true` = the endpoint is exposed to the public internet (reachable from outside via the app's nginx / API gateway). **Requiring login does NOT make it `false`** — an external attacker who holds any valid credential (or obtains one via an auth flaw) can still reach it. If the endpoint itself is publicly exposed, set `true`.
+- `false` = the endpoint is reachable only from an internal network / cross-service; an external attacker cannot reach it from the public internet at all.
+- **"Requires login" ≠ `false`.** `authentication_required` and network reachability are two independent dimensions — a public API that requires login is still `externally_exploitable=true`. Do NOT infer `false` from "the attack needs a logged-in user"; that confuses authentication with reachability and drops PoCs for real public-facing flaws.
+</externally_exploitable_semantics>
+
   **Source Completeness Rule:** When multiple user-controllable sources can reach the same sink, you MUST create a SEPARATE vulnerability entry for EACH source. Do NOT merge multiple sources into a single entry. For example, if both `ctx.query.bizEntity` (a URL parameter) and `ctx.user.uid` (session data) reach the same template sink, create two entries — one per source. Each entry must independently trace from its own source to the sink, with its own `authentication_required` and `accessible_routes`. The source with the easiest exploitability (e.g., URL parameter on an unauthenticated route) should appear FIRST in the queue.
 
 </data_format_specifications>

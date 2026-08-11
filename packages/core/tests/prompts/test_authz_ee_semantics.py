@@ -4,11 +4,12 @@
 真机根因 (delivery-20260804-024910): authz/auth prompt 从未定义 ee 语义, LLM 凭
 英文 "externally exploitable" 字面把它猜成 authentication_required 的反面 ——
 "需要登录 → 不可外部利用 → ee=False"。结果 20 条 authz 里 19 条 ee 误判 False,
-公网可达的授权漏洞全部丢失 PoC (PoCGenerator 唯一过滤条件是 ee==True)。
+公网可达的授权漏洞的 reachability 标签被错判 (当时 ee 还是 PoC 门控, 致丢失 PoC;
+2026-08-11 起 PoC 门控已与 ee 解耦 — 见 poc_generator.py, 但 ee 语义仍需正确)。
 
-对比 vuln-injection.txt:185-188 明确定义了 ee=reachability tag, 所以 inj/xss/ssrf
-的 ee 判得对、authz/auth 全错。本测试锁定: authz/auth 的 4 个 prompt 必须含 ee
-可达性语义定义, 防回归到"零定义"。
+对比 vuln-injection.txt:185-188 明确定义了 ee=reachability tag。本测试锁定:
+authz/auth 的 4 个 prompt 必须含 ee 可达性语义定义, 防回归到"零定义"。
+(xss/ssrf 的 ee 语义由 test_xss_ssrf_ee_semantics.py 锁定。)
 
 不违反 CLAUDE.md §1 铁律: 本次仅澄清结构化输出字段语义, 不引入确定性层产物、
 不 @include 确定性 hints (test_static_dataflow_hints_decoupling.py 不受影响)。

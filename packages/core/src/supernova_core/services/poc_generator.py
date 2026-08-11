@@ -370,14 +370,27 @@ def _extract_deterministic(
     )
 
 
-def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRequestSpec:
+def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRequestSpec | None:
     """用确定性 partial + LLM gap-fill({http_method,route_path,witness_payload}) 组装最终 spec。
 
     route 补回后重查 recon endpoints 得 auth_state。无 gap/缺 witness → 骨架 + 标注。
+    返回 None = LLM 明确跑过（gap 非 None）却四路 route 信号全无 → 纯非 HTTP 入口 →
+    调用方 skip（PoC 本就是 HTTP 请求包，非 HTTP 入口天然无 PoC）。gap=None（LLM 不可用
+    /未返回该 ID）保守降级骨架，不 skip——未必非 HTTP，可能只是没跑成。
     """
     g = gap or {}
+    # 不预判定——GitNexus 轨 source 是代码位置形态时 partial.method/path 为 None 但 route
+    # 在 controller 文件里（LLM gap-fill 能补出），故必须等 gap-fill 结果出来再判。
+    gap_route = g.get("route_path")
+    has_route = bool(
+        partial.method or partial.path
+        or getattr(partial.vuln, "endpoint", None)
+        or gap_route
+    )
+    if gap is not None and not has_route:
+        return None  # LLM 明确补不出 route → 纯非 HTTP 入口，skip
     method = partial.method or (g.get("http_method") or "GET")
-    path = partial.path or (g.get("route_path") or "/")
+    path = partial.path or (gap_route or "/")
     witness = partial.witness or g.get("witness_payload") or ""
     info = find_endpoint_info(endpoints, path)
     auth_st = derive_auth_state(info)
@@ -691,9 +704,9 @@ def render_poc_md(entries, host: str, track: str) -> str:
 
 
 def empty_poc_md(track: str) -> str:
-    """空表兜底：无 externally_exploitable 漏洞时调用。"""
+    """空表兜底：无 HTTP 入口漏洞（拼不出 HTTP PoC）时调用。"""
     track_cn = "白盒" if track == "whitebox" else "黑盒"
-    return f"# 可利用漏洞 PoC 集合（{track_cn}）\n\n本次扫描无 externally_exploitable 漏洞，未生成 PoC。\n"
+    return f"# 可利用漏洞 PoC 集合（{track_cn}）\n\n本次扫描无可生成 PoC 的 HTTP 漏洞，未生成 PoC。\n"
 
 
 # Task 7: generate() 主流程（编排 + 过滤 + LLM 仲裁 + 降级 + 读写）
@@ -904,13 +917,14 @@ class PoCGenerator:
                 logger.warning("poc: queue %s lenient: %s", vc, parsed.warnings)
             accepted = _load_accepted_ids(deliverables_dir, vc)
             for v in parsed.queue.vulnerabilities:
-                if not getattr(v, "externally_exploitable", False):
-                    continue
+                # ee 不再当 PoC 门控（对齐 prompts/vuln-*.txt 契约：
+                # "externally_exploitable is a REACHABILITY TAG, not an admission gate"）。
+                # 所有 vulnerable 漏洞都进生成流程；纯非 HTTP 入口在 _assemble 阶段 skip。
                 items.append((vc, v, accepted))
 
         total = len(items)
         track_cn = "白盒" if track == "whitebox" else "黑盒"
-        await _poc_progress(f"{track_cn} PoC: {total} 个 externally_exploitable 漏洞")
+        await _poc_progress(f"{track_cn} PoC: {total} 个可生成 PoC 的漏洞")
 
         entries: list[tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = []
         entries_by_idx: dict[int, tuple[str, Any, HttpRequestSpec | list[HttpRequestSpec]]] = {}
@@ -977,6 +991,9 @@ class PoCGenerator:
             for i, partial in gapped:
                 vid = getattr(partial.vuln, "ID", "?")
                 spec = _assemble(partial, gapmap.get(vid), endpoints)
+                if spec is None:
+                    await _poc_progress(f"{vid}  非 HTTP 入口,skip(拼不出 HTTP PoC)")
+                    continue  # 纯非 HTTP 入口：不入 entries，不写 checkpoint
                 entries_by_idx[i] = (partial.vuln_class, partial.vuln, spec)
                 ckpt_completed[vid] = {
                     "vuln_class": partial.vuln_class, "spec": _spec_to_ckpt(spec)}

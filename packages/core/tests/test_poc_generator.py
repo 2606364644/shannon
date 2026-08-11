@@ -367,7 +367,7 @@ def test_render_poc_md_authz_pair():
 
 def test_empty_poc_md():
     md = empty_poc_md("whitebox")
-    assert "无 externally_exploitable" in md
+    assert "无可生成 PoC 的 HTTP 漏洞" in md
 
 
 # Task 7: generate() 主流程
@@ -383,7 +383,7 @@ def _wb_queue(tmp_path):
             source="GET /api/users?id=1", witness_payload="' OR '1'='1",
         ),
         InjectionVulnerability(
-            ID="INJ-2", vulnerability_type="SQLi", externally_exploitable=False,  # 被过滤
+            ID="INJ-2", vulnerability_type="SQLi", externally_exploitable=False,  # ee=False 但有 HTTP 入口 → 仍生成
             confidence="low", source="GET /api/x?id=1", witness_payload="' OR 1=1",
         ),
     ])
@@ -392,7 +392,8 @@ def _wb_queue(tmp_path):
     return d
 
 
-async def test_generate_writes_poc_md_and_filters(tmp_path):
+async def test_generate_writes_poc_for_all_http_vulns(tmp_path):
+    """ee 不再当 PoC 门控:ee=False 但有 HTTP 入口(method+path+witness)的漏洞也生成 PoC。"""
     d = _wb_queue(tmp_path)
     out = await PoCGenerator.generate(
         deliverables_dir=d, vuln_classes=["injection"],
@@ -401,7 +402,7 @@ async def test_generate_writes_poc_md_and_filters(tmp_path):
     assert out.name == "exploitable_poc_collection.md"
     md = out.read_text(encoding="utf-8")
     assert "INJ-1" in md
-    assert "INJ-2" not in md  # externally_exploitable=False 被过滤
+    assert "INJ-2" in md  # ee=False 但有 HTTP 入口 → 仍生成(不再按 ee 过滤)
     assert "curl -i" in md
 
 
@@ -429,8 +430,8 @@ async def test_generate_emits_progress_via_audit_session(tmp_path, monkeypatch, 
         target_url="https://t.example.com", track="whitebox",
     )
     messages = info_calls
-    assert any("1 个 externally_exploitable" in m for m in messages), messages  # 开始行
-    assert any("(1/1)" in m and "INJ-1" in m for m in messages), messages       # 逐条进度
+    assert any("2 个可生成 PoC" in m for m in messages), messages  # 开始行(2 条都有 HTTP 入口)
+    assert any("(1/2)" in m and "INJ-1" in m for m in messages), messages       # 逐条进度
     assert any("PoC 完成" in m for m in messages), messages                    # 完成行
     assert out is not None
     # 改走 session 后，进度行不应再裸 print 到 stdout
@@ -439,16 +440,30 @@ async def test_generate_emits_progress_via_audit_session(tmp_path, monkeypatch, 
     assert "(1/1)" not in captured
 
 
-async def test_generate_empty_when_all_filtered(tmp_path):
-    d = _wb_queue(tmp_path)
-    # 全部改成不可达
+async def test_generate_empty_when_no_http_entry_point(tmp_path, monkeypatch):
+    """纯非 HTTP 入口(RPC/跨服务 sink:无 METHOD /path、无 endpoint、LLM 也补不出 route)→ skip → 空表。
+
+    PoC 是 HTTP 请求包,非 HTTP 入口天然拼不出;这类不入 entries。
+    """
+    d = tmp_path / "deliverables" / "whitebox"
+    d.mkdir(parents=True)
     q = VulnerabilityQueue(vulnerabilities=[
         InjectionVulnerability(ID="INJ-9", vulnerability_type="SQLi", externally_exploitable=False,
-                               confidence="low", source="GET /a?id=1", witness_payload="x"),
+                               confidence="low",
+                               source="protobuf field: user_sql_fragment (downstream RPC sink)",  # 非 HTTP,无 METHOD /path
+                               witness_payload=None, verdict="vulnerable"),
     ])
     (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
+    import supernova_core.services.poc_generator as mod
+
+    async def fake_run(prompt, **kw):  # LLM 也补不出 route(纯跨服务 sink 无 HTTP 路由)
+        return SimpleNamespace(success=True, structured_output={"items": [
+            {"ID": "INJ-9", "http_method": None, "route_path": None, "witness_payload": None}]},
+            error=None)
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+
     out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com", "whitebox")
-    assert "无 externally_exploitable" in out.read_text(encoding="utf-8")
+    assert "无可生成 PoC 的 HTTP 漏洞" in out.read_text(encoding="utf-8")
 
 
 async def test_generate_placeholder_host_when_target_empty(tmp_path):
