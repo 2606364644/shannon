@@ -326,6 +326,50 @@ class TestGetWorkspaceVulnCounts:
         ws = mgr.create_workspace("https://x.com", str(repo), name="ws")
         assert get_workspace_vuln_counts(ws) == {}
 
+    def test_counts_exploited_from_verdicts_json(self, tmp_path):
+        """黑盒 scan：verdicts.json 的 exploited verdict 计入 vuln_count（spec 2026-08-12）。
+        blocked/potential 不计；accepted_ids 含 3 条但 exploited 只 2 → 计 2。"""
+        from supernova_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="bb")
+        deliverables = ws / "deliverables" / "blackbox"
+        deliverables.mkdir(parents=True)
+        (deliverables / "injection_exploit_verdicts.json").write_text(
+            json.dumps({
+                "vuln_class": "injection",
+                "accepted_ids": ["INJ-1", "INJ-2", "INJ-3"],
+                "verdicts": [
+                    {"vulnerability_id": "INJ-1", "status": "exploited"},
+                    {"vulnerability_id": "INJ-2", "status": "blocked_by_security"},
+                    {"vulnerability_id": "INJ-3", "status": "exploited"},
+                ],
+                "rejected": []}), encoding="utf-8")
+        assert get_workspace_vuln_counts(ws) == {"injection": 2}
+
+    def test_verdicts_and_queue_do_not_collide(self, tmp_path):
+        """同 class 的 queue(白盒) 与 verdicts(黑盒) 共存时累加不互吞（用 +=）。
+        实际同 scan 不共存，此测锁 += 语义防未来回归。"""
+        from supernova_core.session import SessionManager
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mgr = SessionManager(tmp_path / "workspaces")
+        ws = mgr.create_workspace("https://x.com", str(repo), name="mix")
+        deliverables = ws / "deliverables"
+        deliverables.mkdir(parents=True)
+        (deliverables / "injection_exploitation_queue.json").write_text(
+            json.dumps({"vulnerabilities": [
+                {"title": "A"}, {"title": "B"}]}), encoding="utf-8")  # 白盒 2 条
+        (deliverables / "blackbox").mkdir()
+        (deliverables / "blackbox" / "injection_exploit_verdicts.json").write_text(
+            json.dumps({"vuln_class": "injection", "accepted_ids": ["INJ-1"],
+                        "verdicts": [{"vulnerability_id": "INJ-1", "status": "exploited"}],
+                        "rejected": []}), encoding="utf-8")  # 黑盒 exploited 1
+        assert get_workspace_vuln_counts(ws) == {"injection": 3}  # 2 (queue) + 1 (exploited)
+
 
 class TestGetWorkspaceAge:
     def test_returns_age_string(self, tmp_path):

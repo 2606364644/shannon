@@ -123,6 +123,9 @@ def get_workspace_vuln_counts(workspace_path: Path) -> dict[str, int]:
     Scans the deliverables dir recursively so it finds queue files under either
     the legacy top-level layout (``deliverables/<cls>_exploitation_queue.json``)
     or the production track-scoped layout (``deliverables/{whitebox,blackbox}/...``).
+
+    黑盒 scan 数 ``*_exploit_verdicts.json`` 的 exploited verdict（成功 exploit 数，
+    spec 2026-08-12）；与白盒 queue 不同 stem，同 scan 不共存 → 不碰撞，用 += 保险。
     """
     deliverables_dir = deliverables_dir_for_workspace(workspace_path)
     counts: dict[str, int] = {}
@@ -141,6 +144,22 @@ def get_workspace_vuln_counts(workspace_path: Path) -> dict[str, int]:
                 counts[vuln_class] = len(vulns)
         except (json.JSONDecodeError, OSError):
             counts[vuln_class] = 0
+
+    # 黑盒：成功 exploit 数（status=exploited 的 verdict 计数，spec 2026-08-12）。
+    for f in sorted(deliverables_dir.rglob("*_exploit_verdicts.json")):
+        if not f.is_file():
+            continue
+        vuln_class = f.name.replace("_exploit_verdicts.json", "")
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            verdicts = data.get("verdicts", [])
+            exploited = sum(
+                1 for v in verdicts
+                if isinstance(v, dict) and v.get("status") == "exploited"
+            )
+            counts[vuln_class] = counts.get(vuln_class, 0) + exploited
+        except (json.JSONDecodeError, OSError):
+            pass
 
     return counts
 
