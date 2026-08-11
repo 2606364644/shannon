@@ -43,11 +43,13 @@ function authToProfileBody(auth: AuthFormState, name: string): Partial<AuthProfi
 function verifyBadge(st: VerifyState): { cls: string; icon: string } {
   return st === "success" ? { cls: "border-green/40 text-green", icon: "✓" }
     : st === "failed" ? { cls: "border-red/40 text-red", icon: "✗" }
+    : st === "running" ? { cls: "border-blue/40 text-blue", icon: "●" }
     : { cls: "border-yellow/40 text-yellow", icon: "●" };
 }
-/** 档案整体状态：任一角色 success→可用；否则任一 failed→不可用；否则未验证。 */
+/** 档案整体状态：任一 success→可用；否则任一 running→验证中；否则任一 failed→不可用；否则未验证。 */
 function overallState(creds: AuthProfileCredential[]): VerifyState {
   if (creds.some((c) => c.verify_status?.state === "success")) return "success";
+  if (creds.some((c) => c.verify_status?.state === "running")) return "running";
   if (creds.some((c) => c.verify_status?.state === "failed")) return "failed";
   return "unverified";
 }

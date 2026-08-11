@@ -38,6 +38,32 @@ class BlackboxAuthValidationInput(BasePipelineInput):
 
 
 @dataclass
+class BlackboxAuthValidationBatchItem:
+    """BatchAuthValidationWorkflow 单 cred 项（逐个独立验证一个角色能否登录，非越权对比）。
+
+    cred_id 是 web 层概念（回填 verify_status 的 key），透传到 workflow 供 batch_progress
+    query 返回 per-cred 进度；web_url/config_path/workspace_path/event_file 同单 cred 探针。
+    role 不入此结构（认证测试的 role 仅前端展示元数据，不影响 core 登录链路，spec §2）。
+    """
+    cred_id: str
+    web_url: str = ""
+    config_path: str | None = None
+    workspace_path: str | None = None
+    event_file: str | None = None
+
+
+@dataclass
+class BlackboxAuthValidationBatchInput(BasePipelineInput):
+    """BatchAuthValidationWorkflow 入参：档案级多选角色 → 串行逐个独立验证（spec §4.3）。
+
+    api_key 在 profile 级共享（同 provider）；items 各自独立 probe/events/workspace_path。
+    workflow 串行 for item（同时只一个 cred running，与 web 层 per-cred running 恢复契合）。
+    """
+    items: list[BlackboxAuthValidationBatchItem] = field(default_factory=list)
+    api_key: str | None = None
+
+
+@dataclass
 class BlackboxPipelineState:
     status: str = "running"
     current_phase: str | None = None

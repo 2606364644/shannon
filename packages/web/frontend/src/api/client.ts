@@ -123,6 +123,17 @@ export const linkReposInDir = (ws: string, body: { path: string }) =>
     `/workspaces/${encWs(ws)}/repos/link-dir`, body);
 export const deleteRepo = (ws: string, name: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}`);
+
+export type BatchDeleteResult = {
+  deleted: string[];
+  unlinked: string[];
+  skipped: { name: string; reason: string }[];
+};
+
+/** 批量删除/取消关联：私有克隆→删除目录，关联仓→取消关联（不删源文件）。
+ *  names 走 request body（非 path 段），含 group/repo 形态直接传字符串数组。 */
+export const deleteRepos = (ws: string, names: string[]) =>
+  apiPost<BatchDeleteResult>(`/workspaces/${encWs(ws)}/repos/batch-delete`, { names });
 export const pullRepo = (ws: string, name: string) =>
   apiPost<{ pulling: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}/pull`, {});
 export const checkoutRepo = (ws: string, name: string, branch: string) =>

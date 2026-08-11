@@ -14,6 +14,8 @@ import LiveTab from "./routes/WorkspaceDetail/LiveTab";
 import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
 import WsSettingsTab from "./routes/WorkspaceDetail/WsSettingsTab";
 import { AuthProfilesPage } from "./pages/AuthProfilesPage";
+import { AuthProfileTestPage } from "./pages/AuthProfileTestPage";
+import { VerifyProcessPage } from "./pages/VerifyProcessPage";
 import { getScan, listScans } from "./api/client";
 import { AppShell } from "./components/layout/AppShell";
 import { DevComponentsPage } from "./pages/DevComponentsPage";
@@ -84,6 +86,10 @@ export const router = createBrowserRouter([
           { path: "repos", element: <ReposTab /> },
           { path: "settings", element: <WsSettingsTab /> },
           { path: "auth-profiles", element: <AuthProfilesPage /> },
+          // 档案级认证测试页：多选角色 → 串行逐个独立验证。档案行「测试登录」按钮跳此路由。
+          { path: "auth-profiles/:pid", element: <AuthProfileTestPage /> },
+          // 认证过程页（新标签页打开）: 测试登录实时 + 最近一次回看。列表 chip 点击 window.open 此路由。
+          { path: "auth-profiles/:pid/credentials/:cid", element: <VerifyProcessPage /> },
           // 旧 ws-scoped scan tab 路由 -> redirect 到 latest scan 对应 tab（过渡期 shim）
           { path: "overview", element: <LegacyWsTabRedirect tab="overview" /> },
           { path: "report", element: <LegacyWsTabRedirect tab="report" /> },

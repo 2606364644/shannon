@@ -100,6 +100,51 @@ async def test_test_endpoint_starts_workflow(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_test_batch_endpoint_starts_workflow(tmp_path):
+    """POST test-batch:多选角色 → start_batch_auth_validation → 返 {workflow_id}(batch)。"""
+    c, store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"},
+                        {"role": "user", "username": "u1", "password": "pw"}]}).json()["id"]
+    sm = c.app.state.scan_manager
+    sm.start_batch_auth_validation = AsyncMock(
+        return_value={"workflow_id": "authval-batch-ws1-x"})
+    r = c.post(f"/api/workspaces/ws1/auth-profiles/{pid}/test-batch",
+               json={"cred_ids": ["c1", "c2"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["workflow_id"] == "authval-batch-ws1-x"
+    sm.start_batch_auth_validation.assert_awaited_once_with("ws1", pid, ["c1", "c2"])
+
+
+@pytest.mark.asyncio
+async def test_test_batch_endpoint_full_selection_no_body(tmp_path):
+    """POST test-batch 无 body / 空 cred_ids = 全选(start_batch 收到 None/[])。"""
+    c, _store = _client(tmp_path)
+    pid = c.post("/api/workspaces/ws1/auth-profiles", json={
+        "name": "NG", "login_url": "http://t/", "login_type": "form",
+        "credentials": [{"role": "admin", "username": "admin", "password": "pw"}]}).json()["id"]
+    sm = c.app.state.scan_manager
+    sm.start_batch_auth_validation = AsyncMock(return_value={"workflow_id": "wf-batch"})
+    r = c.post(f"/api/workspaces/ws1/auth-profiles/{pid}/test-batch")
+    assert r.status_code == 200, r.text
+    # 无 body → cred_ids 透传为 None(全选)
+    sm.start_batch_auth_validation.assert_awaited_once_with("ws1", pid, None)
+
+
+@pytest.mark.asyncio
+async def test_test_batch_endpoint_value_error_is_422(tmp_path):
+    """cred_id 越界 / profile 不存在等 ValueError → 422(客户端错误,非 500)。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.start_batch_auth_validation = AsyncMock(side_effect=ValueError("角色凭据不属于该档案: ['cred_evil']"))
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/test-batch",
+               json={"cred_ids": ["cred_evil"]})
+    assert r.status_code == 422
+    assert "不属于" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_verify_log_endpoint_returns_events(tmp_path):
     """块3b: GET verify-log 读 events.ndjson → {events: [...]}。tail 透传到 scan_manager。"""
     c, store = _client(tmp_path)

@@ -16,7 +16,7 @@ from supernova_core.utils.paths import (
     WHITEBOX_SUBDIR,
 )
 
-from .shared import BlackboxActivityInput, BlackboxAuthValidationInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
+from .shared import BlackboxActivityInput, BlackboxAuthValidationBatchInput, BlackboxAuthValidationInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
 
 logger = logging.getLogger(__name__)
 
@@ -668,3 +668,113 @@ class AuthValidationWorkflow:
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=retry_for("log"),
                 )
+
+
+@workflow.defn
+class BatchAuthValidationWorkflow:
+    """档案级批量认证验证（认证管理页"测试登录"多选角色）：串行 N 次 Branch A 单次登录。
+
+    语义（spec §2）：逐个独立验证每个选中角色能否登录（非越权对比）。与单 cred
+    AuthValidationWorkflow 区别：后者跑一个 cred 即返；本 workflow 串行跑 items 全部，失败 cred
+    仅标 failed 不阻断后续（对齐 validate_authentication Branch B 非 primary 失败不阻断语义）。
+    batch_progress query 返回 per-cred 进度供 web watcher 实时回填 verify_status（分层：web 层
+    query + 回填，blackbox activity 不调 web store）。
+
+    每个 cred 复用单 cred 同款编排：setup_display（挂 AuditSession 写该 cred events.ndjson）→
+    log_phase_start_activity（4 步 PhaseEvent）→ run_auth_validation_probe（Branch A 单次登录）
+    → finalize_summary（drain+收尾）。串行 = 同时只一个 cred running，与 per-cred running 恢复契合。
+    """
+
+    def __init__(self):
+        # cred_id -> {cred_id, state, failure_point?, failure_detail?}。query 返回此快照。
+        self._progress: dict[str, dict] = {}
+
+    @workflow.run
+    async def run(self, input: BlackboxAuthValidationBatchInput) -> list[dict]:
+        if not input.items:
+            raise ApplicationError(
+                "BlackboxAuthValidationBatchInput.items 必须非空", non_retryable=True)
+        results: list[dict] = []
+        for item in input.items:
+            if not item.web_url:
+                raise ApplicationError(
+                    f"item {item.cred_id} 缺 web_url", non_retryable=True)
+            self._progress[item.cred_id] = {"cred_id": item.cred_id, "state": "running"}
+            act_input = BlackboxActivityInput(
+                web_url=item.web_url,
+                config_path=item.config_path,
+                workspace_path=item.workspace_path,
+                api_key=input.api_key,
+                event_file=item.event_file,
+            )
+            # setup_display best-effort（失败不阻塞，降级无 events，NullAuditSession 兜底）；成功后
+            # finalize 必跑（停 heartbeat，否则 daemon 线程泄漏）。
+            display_ok = False
+            try:
+                await workflow.execute_activity(
+                    activities.setup_display, act_input,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=retry_for("log"),
+                )
+                display_ok = True
+            except Exception:
+                pass
+            result = None
+            try:
+                # 声明 4 步 PhaseEvent（步骤条）：step key 与 log_milestone 工具同源。
+                await workflow.execute_activity(
+                    activities.log_phase_start_activity,
+                    args=[
+                        BlackboxActivityInput(**{**act_input.__dict__,
+                                                 "phase": AUTH_VALIDATION_PROGRESS.phase}),
+                        list(AUTH_VALIDATION_PROGRESS.step_keys),
+                        [s.intent for s in AUTH_VALIDATION_PROGRESS.steps],
+                    ],
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
+                result = await workflow.execute_activity(
+                    activities.run_auth_validation_probe, act_input,
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry_for("auth-validation"),
+                )
+            except Exception as e:
+                # per-cred 异常隔离：某 cred activity 重试耗尽/抛错 → 标 failed，不阻断后续 cred
+                # （对齐 Branch B 非 primary 失败不阻断）。run_auth_validation_probe 自身降级返回不抛，
+                # 此 except 兜底 activity 框架级异常（non_retryable / 重试耗尽）。
+                result = AuthValidationResult(
+                    success=False, failure_point="out_of_band",
+                    failure_detail=f"{type(e).__name__}: {e}")
+            finally:
+                if display_ok:
+                    try:
+                        await workflow.execute_activity(
+                            activities.finalize_summary,
+                            args=[act_input, {"status": "completed"}],
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=retry_for("log"),
+                        )
+                    except Exception:
+                        pass  # finalize 失败不阻断下一个 cred（best-effort 收尾）
+            entry = {"cred_id": item.cred_id,
+                     "state": "success" if result and result.success else "failed"}
+            if not result or not result.success:
+                entry["failure_point"] = result.failure_point if result else "out_of_band"
+                entry["failure_detail"] = result.failure_detail if result else None
+            self._progress[item.cred_id] = entry
+            results.append(entry)
+        return results
+
+    @workflow.query(name="batch_progress")
+    def batch_progress(self) -> dict:
+        """返回各 cred 进度供 web watcher 回填 verify_status。
+
+        items 顺序与 input.items 一致（watcher 按 cred_id 取，顺序仅供诊断）；all_done=全部终态。
+        running/pending 的 cred 也在列表里（watcher 据此定位当前 running 那个）。
+        """
+        items = list(self._progress.values())
+        return {
+            "items": items,
+            "all_done": bool(items) and all(
+                it.get("state") in ("success", "failed") for it in items),
+        }

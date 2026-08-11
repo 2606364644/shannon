@@ -30,6 +30,12 @@ export const forkProfile = (ws: string, pid: string) =>
 export const testCredential = (ws: string, pid: string, cid: string) =>
   apiPost<{ workflow_id: string; probe_dir: string }>(
     `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/test`, {});
+// 档案级批量测试登录（多选角色 → 串行逐个独立验证）。credIds 省略/空 = 全选。返 batch workflow_id。
+export const testBatch = (ws: string, pid: string, credIds?: string[]) =>
+  apiPost<{ workflow_id: string }>(
+    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/test-batch`,
+    { cred_ids: credIds },
+  );
 export const getVerifyStatus = (
   ws: string, pid: string, cid: string, workflowId: string, probeDir: string,
 ) =>

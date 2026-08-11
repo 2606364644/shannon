@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PageHeader } from "@/components/PageHeader";
-import { StatRow } from "@/components/StatRow";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/Empty";
 import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
@@ -106,12 +106,17 @@ export function DashboardPage() {
         subtitle={t("dashboard.subtitle")}
         action={<Button variant="cta" asChild><Link to="/scan/new">{t("dashboard.newScan")}</Link></Button>}
       />
-      <StatRow stats={[
-        { label: t("dashboard.stats.running"), value: running.length, tone: "cyan" },
-        { label: t("dashboard.stats.completedToday"), value: completedToday.length, tone: "green" },
-        { label: t("dashboard.stats.totalVulns"), value: totalVulns },
-        { label: t("dashboard.stats.totalCost"), value: fmtCost(totalCost, currency) },
-      ]} />
+      {/* 汇总指标：对齐工作区 ScanCard / OverviewTab 视觉语言——font-mono 大号数字 + 小号 muted 标签，
+          单卡四格（窄屏两格）读作一块仪表盘。仅「累计漏洞」>0 染 --c-red（安全工具里「发现」是头条，
+          对齐 ScanCard 语义）；running/completed/cost 保持中性 foreground——StatusBadge 已传达成色，数字不重复着色。 */}
+      <Card className="p-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 font-mono sm:grid-cols-4">
+          <DashStat label={t("dashboard.stats.running")} value={running.length} />
+          <DashStat label={t("dashboard.stats.completedToday")} value={completedToday.length} />
+          <DashStat label={t("dashboard.stats.totalVulns")} value={totalVulns} highlight={totalVulns > 0} />
+          <DashStat label={t("dashboard.stats.totalCost")} value={fmtCost(totalCost, currency)} />
+        </div>
+      </Card>
 
       {running.length > 0 && (
         <section className="space-y-2">
@@ -159,8 +164,12 @@ export function DashboardPage() {
                 <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.workflow_id ?? s.scan_id}</Link></TableCell>
                 <TableCell className="font-mono"><Link to={`/p/${s.workspace}`} className="hover:text-primary">{s.workspace}</Link></TableCell>
                 <TableCell><Badge variant="outline">{s.scan_type}</Badge></TableCell>
-                <TableCell>{s.vuln_count ?? 0}</TableCell>
-                <TableCell>{s.total_cost_usd != null ? fmtCost(s.total_cost_usd, s.cost_currency) : "-"}</TableCell>
+                <TableCell>
+                  <span className={cn("font-mono", (s.vuln_count ?? 0) > 0 ? "text-red" : "text-foreground")}>
+                    {s.vuln_count ?? 0}
+                  </span>
+                </TableCell>
+                <TableCell className="font-mono">{s.total_cost_usd != null ? fmtCost(s.total_cost_usd, s.cost_currency) : "-"}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{fmtTime(s.created_at)}</TableCell>
                 {isAdmin && (
                   <TableCell className="w-px whitespace-nowrap">
@@ -199,6 +208,22 @@ export function DashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * 汇总大号指标格：对齐工作区 OverviewTab big-numbers（font-mono · text-2xl · font-bold）
+ * + ScanCard 的漏洞染红语义。highlight=true → 数字染 --c-red（发现即头条）；否则中性 foreground。
+ * 标签随 grid 的 font-mono 继承（与 OverviewTab big-numbers 卡一致）。
+ */
+function DashStat({ label, value, highlight = false }: { label: string; value: ReactNode; highlight?: boolean }) {
+  return (
+    <div>
+      <div className={cn("text-2xl font-bold leading-none", highlight ? "text-red" : "text-foreground")}>
+        {value}
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }

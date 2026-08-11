@@ -24,7 +24,7 @@ const MAX_BRAND = 32;
 /** 分区：coral 竖条 + eyebrow 小标题（uppercase tracking-wider）拉层次。 */
 function Section({ eyebrow, children }: { eyebrow: string; children: ReactNode }) {
   return (
-    <section className="space-y-3">
+    <section className="space-y-2">
       <div className="flex items-center gap-2">
         <span className="h-3.5 w-1 rounded-full bg-primary" aria-hidden />
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{eyebrow}</h2>
@@ -143,7 +143,7 @@ function BrandingCard() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="p-4 pb-3">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="font-semibold tracking-tight text-base">{t("branding.title")}</CardTitle>
           {!isAdmin && (
@@ -154,70 +154,72 @@ function BrandingCard() {
         </div>
         <p className="text-sm text-muted-foreground">{t("branding.desc")}</p>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* ▍live wordmark 预览：复刻 TopBar 字标观感，输入即时反映 */}
-        <div className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">{t("branding.preview")}</span>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
-            <BrandMark className="h-5 w-5 text-foreground" />
-            <span className="text-base font-semibold tracking-tight">{previewName}</span>
-          </div>
-        </div>
-
-        {isAdmin ? (
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between">
-              <Label htmlFor="brand-name-input" className="text-sm">{t("branding.fieldLabel")}</Label>
-              <span className={`text-xs tabular-nums ${overLimit ? "text-red" : "text-muted-foreground"}`}>
-                {t("branding.charCount", { count: trimmed.length, max: MAX_BRAND })}
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                id="brand-name-input"
-                value={draft}
-                maxLength={MAX_BRAND + 8}
-                placeholder={t("branding.placeholder")}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canSave) onSave();
-                }}
-                aria-invalid={overLimit}
-                className="max-w-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                onClick={onSave}
-                disabled={!canSave}
-                className="gap-1.5"
-                data-testid="brand-save"
-              >
-                {savedFlash ? <Check className="size-3.5" /> : null}
-                {t("branding.save")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onReset}
-                disabled={saving || !hasOverride}
-                className="gap-1.5 text-muted-foreground"
-                title={t("branding.reset")}
-              >
-                <RotateCcw className="size-3.5" />
-                {t("branding.reset")}
-              </Button>
-            </div>
-          </div>
-        ) : (
+      <CardContent className="p-4 pt-0">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:items-end">
+          {/* ▍live wordmark 预览：复刻 TopBar 字标观感，输入即时反映 */}
           <div className="space-y-1.5">
-            <Label className="text-sm text-muted-foreground">{t("branding.readOnlyHint")}</Label>
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
-              <span className="font-medium">{brand}</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("branding.preview")}</span>
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <BrandMark className="h-5 w-5 text-foreground" />
+              <span className="text-base font-semibold tracking-tight">{previewName}</span>
             </div>
           </div>
-        )}
+
+          {isAdmin ? (
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between">
+                <Label htmlFor="brand-name-input" className="text-sm">{t("branding.fieldLabel")}</Label>
+                <span className={`text-xs tabular-nums ${overLimit ? "text-red" : "text-muted-foreground"}`}>
+                  {t("branding.charCount", { count: trimmed.length, max: MAX_BRAND })}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="brand-name-input"
+                  value={draft}
+                  maxLength={MAX_BRAND + 8}
+                  placeholder={t("branding.placeholder")}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && canSave) onSave();
+                  }}
+                  aria-invalid={overLimit}
+                  className="min-w-0 max-w-xs flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onSave}
+                  disabled={!canSave}
+                  className="gap-1.5"
+                  data-testid="brand-save"
+                >
+                  {savedFlash ? <Check className="size-3.5" /> : null}
+                  {t("branding.save")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onReset}
+                  disabled={saving || !hasOverride}
+                  className="gap-1.5 text-muted-foreground"
+                  title={t("branding.reset")}
+                >
+                  <RotateCcw className="size-3.5" />
+                  {t("branding.reset")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label className="text-sm text-muted-foreground">{t("branding.readOnlyHint")}</Label>
+              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+                <span className="font-medium">{brand}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -230,82 +232,86 @@ export function SettingsPage() {
   const [cpOpen, setCpOpen] = useState(false);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
-      {/* ▍品牌 */}
-      <Section eyebrow={t("settings.section.branding")}>
-        <BrandingCard />
-      </Section>
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
+        <div className="space-y-5">
+          {/* ▍品牌 */}
+          <Section eyebrow={t("settings.section.branding")}>
+            <BrandingCard />
+          </Section>
 
-      {/* ▍个人化 */}
-      <Section eyebrow={t("settings.section.personalization")}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="font-semibold tracking-tight text-base">{t("settings.themeTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ThemeSegmented />
-            </CardContent>
-          </Card>
+          {/* ▍个人化 */}
+          <Section eyebrow={t("settings.section.personalization")}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Card>
+                <CardHeader className="p-4 pb-3">
+                  <CardTitle className="font-semibold tracking-tight text-base">{t("settings.themeTitle")}</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 pt-0">
+                  <ThemeSegmented />
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="font-semibold tracking-tight text-base">{t("settings.accountSecurityTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center gap-3 text-sm">
-              <span className="text-muted-foreground">{t("settings.accountSecurityHint")}</span>
-              {user?.must_change_password && (
-                <Badge variant="outline" className="border-amber/50 text-amber">{t("auth.mustChange.badgeShort")}</Badge>
-              )}
-              <Button variant="outline" size="sm" onClick={() => setCpOpen(true)} className="ml-auto">
-                {t("settings.changePasswordBtn")}
-              </Button>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader className="p-4 pb-3">
+                  <CardTitle className="font-semibold tracking-tight text-base">{t("settings.accountSecurityTitle")}</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-wrap items-center gap-3 p-4 pt-0 text-sm">
+                  <span className="text-muted-foreground">{t("settings.accountSecurityHint")}</span>
+                  {user?.must_change_password && (
+                    <Badge variant="outline" className="border-amber/50 text-amber">{t("auth.mustChange.badgeShort")}</Badge>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setCpOpen(true)} className="ml-auto">
+                    {t("settings.changePasswordBtn")}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </Section>
         </div>
-      </Section>
 
-      {/* ▍系统 */}
-      <Section eyebrow={t("settings.section.system")}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-semibold tracking-tight text-base">{t("settings.statusTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading && <Skeleton className="h-20 w-full" />}
-            {error && <ErrorState message={t("settings.errors.loadFailed", { error })} onRetry={refresh} />}
-            {data && (
-              <dl className="grid grid-cols-[140px_1fr] gap-y-2 font-mono text-sm">
-                <dt className="text-muted-foreground">{t("settings.fields.aiProvider")}</dt>
-                <dd>{data.ai_provider}</dd>
-                <dt className="text-muted-foreground">{t("settings.fields.browserEngine")}</dt>
-                <dd>{data.browser_engine}</dd>
-                <dt className="text-muted-foreground">Temporal</dt>
-                <dd className="flex items-center gap-2">
-                  {data.temporal.host}
-                  <Badge
-                    variant="outline"
-                    className={data.temporal.last_status === "connected" ? "border-green/40 text-green" : "border-red/40 text-red"}
-                  >
-                    {data.temporal.last_status}
-                  </Badge>
-                </dd>
-                <dt className="text-muted-foreground">{t("settings.fields.gitBinary")}</dt>
-                <dd>{data.git.binary_available ? t("settings.gitBinary.installed") : t("settings.gitBinary.missing")}</dd>
-                <dt className="text-muted-foreground">{t("settings.fields.gitCredentials")}</dt>
-                <dd>{data.git.credentials_configured ? t("settings.gitCredentials.configured") : t("settings.gitCredentials.notConfigured")}</dd>
-                <dt className="text-muted-foreground">{t("settings.fields.version")}</dt>
-                <dd>{data.version}</dd>
-              </dl>
-            )}
-            {data && (
-              <p className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">{t("settings.perWsHint")}</p>
-            )}
-          </CardContent>
-        </Card>
-      </Section>
+        {/* ▍系统 */}
+        <Section eyebrow={t("settings.section.system")}>
+          <Card>
+            <CardHeader className="p-4 pb-3">
+              <CardTitle className="font-semibold tracking-tight text-base">{t("settings.statusTitle")}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              {loading && <Skeleton className="h-20 w-full" />}
+              {error && <ErrorState message={t("settings.errors.loadFailed", { error })} onRetry={refresh} />}
+              {data && (
+                <dl className="grid grid-cols-[minmax(108px,auto)_1fr] gap-y-1.5 font-mono text-sm">
+                  <dt className="text-muted-foreground">{t("settings.fields.aiProvider")}</dt>
+                  <dd>{data.ai_provider}</dd>
+                  <dt className="text-muted-foreground">{t("settings.fields.browserEngine")}</dt>
+                  <dd>{data.browser_engine}</dd>
+                  <dt className="text-muted-foreground">Temporal</dt>
+                  <dd className="flex items-center gap-2">
+                    {data.temporal.host}
+                    <Badge
+                      variant="outline"
+                      className={data.temporal.last_status === "connected" ? "border-green/40 text-green" : "border-red/40 text-red"}
+                    >
+                      {data.temporal.last_status}
+                    </Badge>
+                  </dd>
+                  <dt className="text-muted-foreground">{t("settings.fields.gitBinary")}</dt>
+                  <dd>{data.git.binary_available ? t("settings.gitBinary.installed") : t("settings.gitBinary.missing")}</dd>
+                  <dt className="text-muted-foreground">{t("settings.fields.gitCredentials")}</dt>
+                  <dd className="break-words">{data.git.credentials_configured ? t("settings.gitCredentials.configured") : t("settings.gitCredentials.notConfigured")}</dd>
+                  <dt className="text-muted-foreground">{t("settings.fields.version")}</dt>
+                  <dd>{data.version}</dd>
+                </dl>
+              )}
+              {data && (
+                <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">{t("settings.perWsHint")}</p>
+              )}
+            </CardContent>
+          </Card>
+        </Section>
+      </div>
 
       <ChangePasswordDialog open={cpOpen} onOpenChange={setCpOpen} onChanged={refreshUser} />
     </div>

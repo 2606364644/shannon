@@ -262,7 +262,7 @@ export interface ScanAuthentication {
 
 // === 认证档案库（auth-profile-vault, Task 10 契约）===
 // 对齐 backend auth_profile_store / auth_profiles.py 响应 payload。
-export type VerifyState = "unverified" | "success" | "failed";
+export type VerifyState = "unverified" | "running" | "success" | "failed";
 export interface VerifyStatus {
   state: VerifyState;
   failure_point?: "username_or_password" | "totp_secret" | "out_of_band";

@@ -97,6 +97,7 @@
     "updating": "Updating {{name}}",
     "updateAria": "Update {{name}}",
     "deleteAria": "Delete {{name}}",
+    "unlinkAria": "Unlink {{name}}",
     "copyUrlAria": "Copy source URL of {{name}}",
     "table": {
       "name": "Name",
@@ -116,6 +117,20 @@
     "deleteDialog": {
       "title": "Delete repository",
       "desc": "Delete repository {{name}}? The code directory will be permanently removed."
+    },
+    "bulk": {
+      "selectAll": "Select all",
+      "selectRepo": "Select {{name}}",
+      "selected": "{{count}} selected",
+      "deleteSelected": "Delete selected",
+      "clear": "Clear selection",
+      "confirmTitle": "Delete selected repositories",
+      "confirmLinked": "Unlink {{count}} linked repos (remove reference only, source files kept).",
+      "confirmDelete": "Delete {{count}} repo directories. This cannot be undone.",
+      "confirmMixed": "Unlink {{linked}} linked repos (reference only), delete {{privateCount}} repo directories. This cannot be undone.",
+      "success": "{{done}} repo(s) deleted/unlinked",
+      "successWithSkipped": "{{done}} deleted/unlinked, {{skipped}} skipped",
+      "error": "Batch delete failed"
     },
     "errors": {
       "loadFailed": "Failed to load repository list",
@@ -821,6 +836,7 @@
     "delete": "Delete",
     "name": "Profile name",
     "loginUrl": "Login URL",
+    "copyUrlAria": "Copy login URL of {{name}}",
     "loginType": "Login type",
     "loginFlow": "Login steps (one per line)",
     "credentials": "Role credentials",
@@ -833,12 +849,32 @@
     "testHint": "Performs a real login (takes ~tens of seconds up to 2 minutes)",
     "verify": {
       "unverified": "Unverified",
+      "running": "Verifying…",
       "success": "Verified",
       "failed": "Verification failed",
       "viewProcess": "View process",
       "hideProcess": "Hide",
       "process": "Login process",
-      "noLog": "No process log yet"
+      "noLog": "No process log yet",
+      "alreadyRunning": "Verification in progress, please wait…"
+    },
+    "loadFailed": "Load failed",
+    "process": {
+      "back": "Back to auth profiles",
+      "notFound": "Credential not found",
+      "noRun": "No login attempt yet — click \"Test login\" above to start",
+      "openHint": "View {{role}} · {{user}} auth process (new tab)"
+    },
+    "testPage": {
+      "back": "Back to auth profiles",
+      "notFound": "Profile not found",
+      "noRoles": "No role credentials in this profile",
+      "start": "Test selected roles",
+      "starting": "Testing…",
+      "selected": "{{n}}/{{m}} roles selected",
+      "seeDetail": "View details",
+      "allDone": "All done",
+      "runningHint": "Verifying {{role}}·{{user}}…"
     },
     "createFailed": "Create failed",
     "created": "Created",
@@ -858,6 +894,7 @@
     "forkFailed": "Copy failed",
     "overall": {
       "success": "Available",
+      "running": "Verifying…",
       "failed": "Unavailable",
       "unverified": "Unverified"
     },

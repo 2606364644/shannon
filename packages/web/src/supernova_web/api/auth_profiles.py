@@ -148,6 +148,23 @@ async def test_credential(ws: str, pid: str, cid: str, request: Request,
     return await request.app.state.scan_manager.start_auth_validation(ws, pid, cid)
 
 
+@router.post("/{ws}/auth-profiles/{pid}/test-batch")
+async def test_batch(ws: str, pid: str, request: Request,
+                     body: dict | None = None, user=Depends(workspace_member)):
+    """档案级批量测试登录(多选角色 → 串行逐个独立验证每个角色能否登录,spec §2)。
+
+    body {cred_ids?: string[]}:空/省略 = 全选该档案所有角色。返 {workflow_id}(batch workflow)。
+    各 cred 实时过程仍走 per-cred verify-events 订阅(用 batch workflow_id + 该 cred probe_dir,
+    守护已放宽接受 authval-batch-{ws}- 前缀)。cred_id 越界 / profile 不存在等 ValueError → 422。
+    """
+    cred_ids = (body or {}).get("cred_ids")
+    try:
+        return await request.app.state.scan_manager.start_batch_auth_validation(
+            ws, pid, cred_ids)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
 @router.get("/{ws}/auth-profiles/{pid}/credentials/{cid}/verify-status")
 async def verify_status(ws: str, pid: str, cid: str, workflow_id: str,
                         probe_dir: str, request: Request,

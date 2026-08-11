@@ -80,6 +80,31 @@ async def test_start_auth_validation_cleans_previous_probe(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_start_auth_validation_writes_running_status(tmp_path):
+    """测试登录 workflow 启动后立即写 running 中间态——前端重载过程页时识别 running →
+    重连 SSE 恢复实时观测。workflow_id/probe_dir 与返回 dict 同源（handle.id），须满足
+    get_result 越界守护（authval-<ws>- 前缀 + auth-probes/ 下），否则前端重载后用这俩字段
+    轮询 verify-status 会被 403/ValueError 拒。"""
+    store = _store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    fake_handle = MagicMock()
+    fake_handle.id = "authval-ws1-probe-deadbeef"
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch("supernova_web.components.scan_manager.validate_authentication", create=True):
+        ClientCls.connect = AsyncMock(return_value=MagicMock(
+            start_workflow=AsyncMock(return_value=fake_handle)))
+        result = await mgr.start_auth_validation("ws1", "prof_1", "cred_a")
+    cred = store.read("ws1")[0].credentials[0]
+    assert cred.verify_status.state == "running"
+    # workflow_id/probe_dir 与返回 dict 同源（handle.id / str(probe_dir)）
+    assert cred.verify_status.workflow_id == result["workflow_id"] == "authval-ws1-probe-deadbeef"
+    assert cred.verify_status.probe_dir == result["probe_dir"]
+    # 满足 get_auth_validation_result 越界守护
+    assert cred.verify_status.workflow_id.startswith("authval-ws1-")
+    assert "auth-probes" in cred.verify_status.probe_dir
+
+
+@pytest.mark.asyncio
 async def test_get_result_backfills_and_keeps_events_deletes_only_config(tmp_path):
     """块3a: get_result 回填 verify_status 后,只删明文 scan-config.yaml（密码卫生）,
     保留 events.ndjson + auth-state.json 供 verify-log 回看/诊断（spec 块3）。"""
@@ -166,6 +191,35 @@ async def test_get_result_success_when_completed(tmp_path):
             profile_id="prof_1", cred_id="cred_a",
         )
     assert status.state == "success"
+
+
+@pytest.mark.asyncio
+async def test_get_result_overwrites_running_to_terminal(tmp_path):
+    """running 中间态在终态时被覆盖——预置 running（模拟 start 已写、workflow 现刚跑完）→
+    get_result(COMPLETED+failed) → state 从 running 被覆盖为 failed，无 running 残留
+    （防 worker 终态后前端仍误判进行中、按钮永久 disable）。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _store(tmp_path)
+    probe_dir = tmp_path / "ws1" / "auth-probes" / "probe-run2"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "scan-config.yaml").write_text("authentication: {}", "utf-8")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_dir), workflow_id="authval-ws1-probe-run2"))
+    mgr = _mgr(tmp_path, store)
+    desc = MagicMock(status=WorkflowExecutionStatus.COMPLETED)
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=MagicMock(
+            get_workflow_handle=MagicMock(return_value=MagicMock(
+                describe=AsyncMock(return_value=desc),
+                result=AsyncMock(return_value=AuthValidationResult(
+                    success=False, failure_point="username_or_password", failure_detail="bad"))))))
+        status = await mgr.get_auth_validation_result(
+            "ws1", workflow_id="authval-ws1-probe-run2", probe_dir=str(probe_dir),
+            profile_id="prof_1", cred_id="cred_a",
+        )
+    assert status.state == "failed"
+    cred = store.read("ws1")[0].credentials[0]
+    assert cred.verify_status.state == "failed", "running 须被终态覆盖，无残留"
 
 
 @pytest.mark.asyncio

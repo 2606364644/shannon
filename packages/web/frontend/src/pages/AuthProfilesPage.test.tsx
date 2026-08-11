@@ -3,7 +3,7 @@
 // brief 的 selector 简化对双 "新建档案" 按钮(工具栏 + 对话框提交)无法消歧, 改用 within(dialog)。
 // GET handler 改为有状态(POST 后追加), 反映真实后端语义——否则提交后 refresh 仍返初始列表。
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -151,41 +151,6 @@ describe("AuthProfilesPage", () => {
     const creds = (putBody as { credentials: { id: string; role: string }[] }).credentials;
     expect(creds.length).toBe(2);
     expect(creds.map((c) => c.id)).toEqual(["cred_a", "cred_b"]);
-  });
-
-  // Task 12: 凭据「测试登录」触发 testCredential → 轮询 getVerifyStatus → 显示成功徽章。
-  // 轮询策略:用 vi.useFakeTimers() + advanceTimersByTimeAsync(3000) 加速(避免 3s 真等待)。
-  // 已有同模式先例:useWorkspaces.test.tsx / LiveTab.test.tsx(fake timers + msw fetch 走 microtask 正常解析)。
-  it("测试登录触发轮询并显示成功徽章", async () => {
-    let testCalls = 0;
-    server.use(
-      http.post("/api/workspaces/:ws/auth-profiles/:pid/credentials/:cid/test", () => {
-        testCalls++;
-        // 模拟后端持久化 verify_status:测试触发后,下次 GET list 返回 success 状态。
-        profiles = [{
-          ...initial[0],
-          credentials: [{
-            ...initial[0].credentials[0],
-            verify_status: { state: "success", last_verified_at: "2026-08-05T00:00:00Z" },
-          }],
-        }];
-        return HttpResponse.json({ workflow_id: "wf-1", probe_dir: "/p" });
-      }),
-      http.get("/api/workspaces/:ws/auth-profiles/:pid/credentials/:cid/verify-status", () =>
-        HttpResponse.json({ state: "success", last_verified_at: "2026-08-05T00:00:00Z" })),
-    );
-    renderPage();
-    // 初始 list 加载(real timers):凭据行可见 + 默认「未验证」徽章
-    await waitFor(() => expect(screen.getByText(/admin · admin/)).toBeInTheDocument());
-    expect(screen.getByText("未验证")).toBeInTheDocument();
-    // 切到 fake timers 后再点按钮:onTest 内部 setTimeout(3000) 受 fake timer 控
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByText("测试登录"));
-    // 推进 3000ms:触发首次轮询 → getVerifyStatus 解析 → onChanged → refresh → 重新 GET list 返 success
-    // advanceTimersByTimeAsync 递归 flush microtasks(msw fetch + React setState 都在其内完成)
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(screen.getByText("已验证")).toBeInTheDocument();
-    expect(testCalls).toBe(1);
   });
 
   // 系统档案（configs seed，scope=system）：只读——隐藏编辑/删除按钮 + 显示系统徽章。

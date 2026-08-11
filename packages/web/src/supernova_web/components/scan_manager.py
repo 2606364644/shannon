@@ -573,7 +573,183 @@ class ScanManager:
             AuthValidationWorkflow.run, inp,
             id=f"authval-{ws}-{probe_id}", task_queue=WEB_TASK_QUEUE_BLACKBOX,
         )
+        # 写 running 中间态——前端重载过程页时识别 state=running → 重挂 VerifyLivePanel 重连 SSE
+        # 恢复实时观测（EventTailer 从头重放 events.ndjson 追上现实）。必须在 start_workflow 成功
+        # 之后写，避免 connect/start 抛错致 running 滞留；终态由 get_auth_validation_result 覆盖回填。
+        # workflow_id/probe_dir 与下方 return 同源，天然满足 get_auth_validation_result 的越界守护。
+        from .auth_profile_store import VerifyStatus
+        self._auth_profile_store.set_verify_status(
+            ws, profile_id, cred_id,
+            VerifyStatus(state="running", probe_dir=str(probe_dir), workflow_id=handle.id),
+        )
         return {"workflow_id": handle.id, "probe_dir": str(probe_dir)}
+
+    async def start_batch_auth_validation(self, ws: str, profile_id: str,
+                                          cred_ids: list[str] | None) -> dict:
+        """档案级批量认证验证(认证管理页"测试登录"多选角色):逐个独立验证每个选中角色能否登录。
+
+        语义(对齐 spec §2):串行 N 次 Branch A 单次登录(非越权对比)。为每个选中 cred 建独立
+        probe_dir + scan-config.yaml(role 不入 YAML)→ 起 BatchAuthValidationWorkflow(串行)→
+        写首 cred running verify_status(前端轮询 profile 定位 running 订阅其 verify-events)→
+        起 watcher 周期回填各 cred 终态。返回 {workflow_id}(batch workflow id)。
+
+        cred_ids None/空 = 全选;cred_ids 子集 = 仅选中。cred_id 越界守护:必须属该 pid profile
+        (防注入任意 id 越界)。各 cred 覆盖清理旧 probe(复用单 cred 覆盖逻辑,防 auth-probes/ 堆积)。
+        """
+        import shutil
+        import yaml
+        from uuid import uuid4
+        from supernova_blackbox.pipeline.shared import (
+            BlackboxAuthValidationBatchInput, BlackboxAuthValidationBatchItem)
+        from supernova_blackbox.pipeline.workflows import BatchAuthValidationWorkflow
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
+        from .auth_profile_store import credential_to_authentication, VerifyStatus
+
+        if self._auth_profile_store is None:
+            raise RuntimeError("auth_profile_store 未注入，无法启动批量认证验证")
+        profile = self._auth_profile_store.get(ws, profile_id)
+        if profile is None:
+            raise ValueError(f"认证档案不存在: {profile_id}")
+        valid_ids = {c.id for c in profile.credentials}
+        if cred_ids:
+            bad = [i for i in cred_ids if i not in valid_ids]
+            if bad:
+                raise ValueError(f"角色凭据不属于该档案: {bad}")
+            selected = [c for c in profile.credentials if c.id in set(cred_ids)]
+        else:
+            selected = list(profile.credentials)
+        if not selected:
+            raise ValueError("未选择任何角色凭据")
+        # 各 cred 覆盖清旧 probe + 建 probe_dir + 写 scan-config.yaml(role 不入 YAML)
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        items: list = []
+        cred_probe_map: dict[str, dict] = {}
+        for cred in selected:
+            if cred.verify_status.probe_dir:
+                old_probe = Path(cred.verify_status.probe_dir).resolve()
+                if old_probe.is_relative_to(allowed_parent):
+                    shutil.rmtree(old_probe, ignore_errors=True)
+            probe_id = f"probe-{uuid4().hex[:8]}"
+            probe_dir = self._workspaces_dir / ws / "auth-probes" / probe_id
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            auth = credential_to_authentication(profile, cred)
+            cfg_file = probe_dir / "scan-config.yaml"
+            cfg_file.write_text(
+                yaml.safe_dump({"authentication": auth.model_dump(exclude_none=True, mode="json")},
+                               allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            items.append(BlackboxAuthValidationBatchItem(
+                cred_id=cred.id,
+                web_url=profile.login_url,
+                config_path=str(cfg_file),
+                workspace_path=str(probe_dir),
+                event_file=str(probe_dir / "events.ndjson"),
+            ))
+            cred_probe_map[cred.id] = {"probe_dir": str(probe_dir)}
+        try:
+            api_key = self._resolve_provider_config(ws).get("api_key")
+        except Exception:
+            api_key = None
+        inp = BlackboxAuthValidationBatchInput(items=items, api_key=api_key)
+        client = await Client.connect(self._temporal_address())
+        batch_wf_id = f"authval-batch-{ws}-{uuid4().hex[:8]}"
+        handle = await client.start_workflow(
+            BatchAuthValidationWorkflow.run, inp,
+            id=batch_wf_id, task_queue=WEB_TASK_QUEUE_BLACKBOX,
+        )
+        # 写首 cred running —— 前端轮询 profile 定位 running → 订阅其 verify-events 实时观测。
+        # 其余 cred 保持 unverified,watcher 在各 cred 终态时回填(避免一次写全 running 致前端误判并发)。
+        first = selected[0]
+        self._auth_profile_store.set_verify_status(
+            ws, profile_id, first.id,
+            VerifyStatus(state="running", probe_dir=cred_probe_map[first.id]["probe_dir"],
+                         workflow_id=handle.id),
+        )
+        # 起 watcher(Slice 3):周期 query batch_progress → 回填各 cred 终态 verify_status + 删其
+        # scan-config(保留 events.ndjson)。fire-and-forget;watcher 全终态后自退。
+        asyncio.create_task(self._watch_batch_progress(
+            ws, profile_id, handle.id, cred_probe_map))
+        return {"workflow_id": handle.id}
+
+    async def _watch_batch_progress(self, ws: str, profile_id: str, workflow_id: str,
+                                    cred_probe_map: dict[str, dict]) -> None:
+        """批量认证验证 watcher:周期(~2s)query batch_progress → 回填各 cred verify_status。
+
+        分层(spec §4.4):blackbox activity 不调 web store;web 层本 watcher 周期 query temporal
+        workflow 的 batch_progress handler,发现某 cred 刚终态 → set_verify_status + 删该 cred
+        scan-config.yaml(密码卫生,保留 events.ndjson 供回看)+ probe_dir 越界守护。running 的 cred
+        写 running verify_status(前端轮询 profile 定位 running 订阅其 verify-events)。全部终态
+        (all_done)→ 退出。fire-and-forget(start_batch 起 asyncio.create_task)。
+        """
+        from supernova_blackbox.pipeline.workflows import BatchAuthValidationWorkflow
+
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        backfilled: set[str] = set()
+        try:
+            client = await Client.connect(self._temporal_address())
+            handle = client.get_workflow_handle(workflow_id)
+            while True:
+                progress = await handle.query(BatchAuthValidationWorkflow.batch_progress)
+                for item in progress.get("items", []):
+                    cred_id = item.get("cred_id")
+                    if not cred_id or cred_id not in cred_probe_map:
+                        continue  # 未追踪的 cred(防回填意外实体)
+                    state = item.get("state")
+                    probe_dir = cred_probe_map[cred_id]["probe_dir"]
+                    if state in ("success", "failed"):
+                        if cred_id in backfilled:
+                            continue
+                        self._apply_batch_cred_terminal(
+                            ws, profile_id, cred_id, item, probe_dir, workflow_id, allowed_parent)
+                        backfilled.add(cred_id)
+                    elif state == "running":
+                        # 首 cred 已在 start 写 running;后续 cred 在前一个终态后变 running → 补写
+                        self._ensure_batch_cred_running(
+                            ws, profile_id, cred_id, probe_dir, workflow_id)
+                if progress.get("all_done"):
+                    break
+                await asyncio.sleep(2)
+        except Exception:
+            pass  # best-effort:Temporal 不可用/query 抛错不致 web 崩(前端轮询 profile 兜底)
+
+    def _apply_batch_cred_terminal(self, ws: str, profile_id: str, cred_id: str, item: dict,
+                                   probe_dir: str, workflow_id: str, allowed_parent: Path) -> None:
+        """回填某 cred 终态 verify_status + 删其 scan-config(密码卫生)。越界 probe_dir 不动。"""
+        from .auth_profile_store import VerifyStatus
+        resolved = Path(probe_dir).resolve()
+        if not resolved.is_relative_to(allowed_parent):
+            return  # 越界守护:不回填不删(防 map 污染致任意路径删除)
+        status = VerifyStatus(
+            state="success" if item.get("state") == "success" else "failed",
+            failure_point=item.get("failure_point"),
+            failure_detail=item.get("failure_detail"),
+            last_verified_at=datetime.now(timezone.utc).isoformat(),
+            probe_dir=probe_dir,
+            workflow_id=workflow_id,
+        )
+        self._auth_profile_store.set_verify_status(ws, profile_id, cred_id, status)
+        cfg = resolved / "scan-config.yaml"
+        if cfg.exists():
+            try:
+                cfg.unlink()
+            except Exception:
+                pass
+
+    def _ensure_batch_cred_running(self, ws: str, profile_id: str, cred_id: str,
+                                   probe_dir: str, workflow_id: str) -> None:
+        """running 的 cred 若仍 unverified → 写 running(前端定位 running 订阅其 events)。
+        幂等:已 running/终态不覆盖(首 cred start 已写;终态 watcher 已回填)。"""
+        from .auth_profile_store import VerifyStatus
+        profile = self._auth_profile_store.get(ws, profile_id)
+        if profile is None:
+            return
+        cred = next((c for c in profile.credentials if c.id == cred_id), None)
+        if cred is None or cred.verify_status.state != "unverified":
+            return  # 已 running/终态 → 不覆盖
+        self._auth_profile_store.set_verify_status(
+            ws, profile_id, cred_id,
+            VerifyStatus(state="running", probe_dir=probe_dir, workflow_id=workflow_id))
 
     async def get_auth_validation_result(
         self, ws: str, workflow_id: str, probe_dir: str,
@@ -607,9 +783,9 @@ class ScanManager:
             raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
         # 守护②:workflow_id 必须绑本 ws(start_auth_validation 产 authval-<ws>-probe-<uuid8>),
         # 防 ws-A 成员读 ws-B 的 auth 验证 workflow 结果(跨 ws 信息泄露)。
-        if not workflow_id.startswith(f"authval-{ws}-"):
+        if not workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
             raise ValueError(
-                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
+                f"workflow_id 越界(必须以 authval-{ws}- 或 authval-batch-{ws}- 开头): {workflow_id}")
         try:
             client = await Client.connect(self._temporal_address())
             handle = client.get_workflow_handle(workflow_id)
@@ -662,9 +838,9 @@ class ScanManager:
         resolved_probe = Path(probe_dir).resolve()
         if not resolved_probe.is_relative_to(allowed_parent):
             raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
-        if not workflow_id.startswith(f"authval-{ws}-"):
+        if not workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
             raise ValueError(
-                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
+                f"workflow_id 越界(必须以 authval-{ws}- 或 authval-batch-{ws}- 开头): {workflow_id}")
         events_file = resolved_probe / "events.ndjson"
         if not events_file.exists():
             return []
@@ -695,9 +871,9 @@ class ScanManager:
         resolved_probe = Path(probe_dir).resolve()
         if not resolved_probe.is_relative_to(allowed_parent):
             raise ValueError(f"probe_dir 越界(必须在 {allowed_parent} 下): {probe_dir}")
-        if not workflow_id.startswith(f"authval-{ws}-"):
+        if not workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
             raise ValueError(
-                f"workflow_id 越界(必须以 authval-{ws}- 开头): {workflow_id}")
+                f"workflow_id 越界(必须以 authval-{ws}- 或 authval-batch-{ws}- 开头): {workflow_id}")
         return resolved_probe / "events.ndjson"
 
 

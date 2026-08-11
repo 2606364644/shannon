@@ -30,7 +30,9 @@ _CRED_SECRET_FIELDS = ("password", "totp_secret")
 
 
 class VerifyStatus(BaseModel):
-    state: Literal["unverified", "success", "failed"] = "unverified"
+    # "running" = 测试登录 workflow 已起、未到终态（前端重载过程页时识别它 → 重连 SSE 恢复实时观测）。
+    # start_auth_validation 启动 workflow 后写 running；get_auth_validation_result 终态覆盖为 success/failed。
+    state: Literal["unverified", "running", "success", "failed"] = "unverified"
     failure_point: str | None = None  # username_or_password | totp_secret | out_of_band
     failure_detail: str | None = None
     last_verified_at: str | None = None
