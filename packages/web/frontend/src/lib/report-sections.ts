@@ -57,10 +57,14 @@ export function splitAttackChainSection(md: string): AttackChainSplit | null {
   }
   if (startIdx === -1) return null;
 
-  // 攻击链章节结束于下一个 `## ` 二级标题，或文档结尾
+  // 攻击链章节结束于下一个同级 `## ` 或更高级 `# ` 标题（进入新顶层报告区），或文档结尾。
+  // 仅认 `## ` 会漏：evidence 区以 `# 一级标题`（如「# 注入利用报告」）开新大节，当其下
+  // exploited 条目直接 `### VULN` 而无 `## ` 子标题时，攻击链章节会一路吞到文档尾，
+  // 把整片 evidence 拖进 sectionMd → singleVulnMd(=before+after) 无任何 `### VULN`
+  // → 单点漏洞计数归零（回归 NodeGoat-20260811-165637~1：删「## 已成功利用」后 total=0）。
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) {
+    if (/^#{1,2}\s/.test(lines[i])) {
       endIdx = i;
       break;
     }

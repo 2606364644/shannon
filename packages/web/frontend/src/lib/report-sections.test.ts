@@ -129,6 +129,42 @@ describe("splitAttackChainSection", () => {
     expect(reassembled).toContain("llm-chain-1");
     expect(reassembled).toContain("附录");
   });
+
+  it("回归：攻击链后跟 # 一级 evidence 区（无 ## 子标题）→ evidence 不被吞进 sectionMd", () => {
+    // NodeGoat-20260811-165637~1 回归：renderer 去掉「## 已成功利用」section 标题后，
+    // exploited 条目直接 `### VULN`，攻击链（## 二级）之后无任何 ## 二级标题。攻击链章节
+    // 必须在遇到 `# 注入利用报告`（一级，新顶层报告区）时结束——否则 endIdx 滑到文档尾，
+    // 整片 evidence 被吞进 sectionMd，singleVulnMd(=before+after) 零个 `### VULN` → 报告页
+    // 漏洞计数归零。
+    const md = [
+      "# 安全评估报告",
+      "",
+      "## 执行摘要",
+      "摘要",
+      "",
+      "## 攻击链（多步利用路径）",
+      "未生成独立攻击链",
+      "",
+      "---",
+      "",
+      "# 注入利用报告",
+      "",
+      "### INJ-VULN-01: RCE via eval",
+      "- **严重程度:** critical",
+      "- **利用步骤:**",
+      "  1. 注册账户",
+      "  2. 发送 eval payload",
+    ].join("\n");
+    const r = splitAttackChainSection(md);
+    expect(r).not.toBeNull();
+    // evidence 没被吞进攻击链 section
+    expect(r!.sectionMd).not.toContain("INJ-VULN-01");
+    expect(r!.sectionMd).not.toContain("# 注入利用报告");
+    // evidence 在 before+after（MarkdownView 的 singleVulnMd 拼接来源）里 → 计数非零
+    const singleVulnMd = r!.before + r!.after;
+    expect(singleVulnMd).toContain("### INJ-VULN-01");
+    expect(singleVulnMd).toContain("注册账户");
+  });
 });
 
 // —— PoC 章节切分 / 解析（spec 2026-07-24 §3.1）——
