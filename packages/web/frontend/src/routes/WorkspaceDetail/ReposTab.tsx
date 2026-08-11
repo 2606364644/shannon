@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { listRepos, deleteRepo, pullRepo, ApiError } from "@/api/client";
+import { listRepos, deleteRepo, deleteRepos, pullRepo, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import type { Repo, RepoState } from "@/api/types";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { StatRow, type StatItem } from "@/components/StatRow";
 import { ChevronDown, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Trash2, Unlink } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -101,9 +102,11 @@ export function ReposTab({ workspace: wsProp }: Props) {
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const pullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -139,6 +142,46 @@ export function ReposTab({ workspace: wsProp }: Props) {
     } finally {
       setBusy(false);
       setPendingDelete(null);
+    }
+  }
+
+  function toggleSelect(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function toggleSelectGroup(g: Group) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const names = g.repos.map((r) => r.name);
+      const allSelected = names.length > 0 && names.every((n) => next.has(n));
+      if (allSelected) names.forEach((n) => next.delete(n));
+      else names.forEach((n) => next.add(n));
+      return next;
+    });
+  }
+
+  async function doBulkDelete() {
+    try {
+      setBusy(true);
+      const res = await deleteRepos(workspace, [...selected]);
+      const done = res.deleted.length + res.unlinked.length;
+      if (res.skipped.length > 0) {
+        toast.warning(t("repos.bulk.successWithSkipped", { done, skipped: res.skipped.length }));
+      } else {
+        toast.success(t("repos.bulk.success", { done }));
+      }
+      setSelected(new Set());
+      await refresh();
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(t("repos.bulk.error"));
+    } finally {
+      setBusy(false);
+      setPendingBulkDelete(false);
     }
   }
 
@@ -181,6 +224,13 @@ export function ReposTab({ workspace: wsProp }: Props) {
     ];
   }, [repos, t]);
 
+  // 批量删除确认框文案：按选中仓库的 linked/私有 分类计数
+  const selectedLinkedCount = useMemo(
+    () => repos.filter((r) => selected.has(r.name) && r.linked).length,
+    [repos, selected],
+  );
+  const selectedPrivateCount = selected.size - selectedLinkedCount;
+
   return (
     <TooltipProvider>
       <div className="space-y-4">
@@ -195,6 +245,19 @@ export function ReposTab({ workspace: wsProp }: Props) {
             aria-label={t("repos.searchPlaceholder")}
           />
         </div>
+
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <span className="text-sm text-muted-foreground">{t("repos.bulk.selected", { count: selected.size })}</span>
+            <Button size="sm" variant="destructive" onClick={() => setPendingBulkDelete(true)}>
+              <Trash2 className="size-3.5" />
+              {t("repos.bulk.deleteSelected")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              {t("repos.bulk.clear")}
+            </Button>
+          </div>
+        )}
 
         {loading ? (
           <div className="text-sm text-muted-foreground">{t("repos.loading")}</div>
@@ -225,12 +288,21 @@ export function ReposTab({ workspace: wsProp }: Props) {
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-t border-border hover:bg-transparent">
-                          <TableHead className="w-72 py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">{t("repos.table.name")}</TableHead>
+                          <TableHead className="w-72 py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                aria-label={t("repos.bulk.selectAll")}
+                                checked={g.repos.length > 0 && g.repos.every((r) => selected.has(r.name))}
+                                onCheckedChange={() => toggleSelectGroup(g)}
+                              />
+                              {t("repos.table.name")}
+                            </div>
+                          </TableHead>
                           <TableHead className="py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.source")}</TableHead>
                           <TableHead className="w-28 py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.branch")}</TableHead>
                           <TableHead className="w-20 whitespace-nowrap py-2.5 px-3 text-right text-xs font-medium text-muted-foreground">{t("repos.table.size")}</TableHead>
                           <TableHead className="w-36 whitespace-nowrap py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.state")}</TableHead>
-                          <TableHead className="w-36 whitespace-nowrap py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
+                          <TableHead className="w-28 whitespace-nowrap py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -243,6 +315,11 @@ export function ReposTab({ workspace: wsProp }: Props) {
                               <TableCell className="relative py-2.5 pl-4 pr-3">
                                 {accent && <span className={cn("absolute inset-y-0 left-0 w-0.5", accent)} aria-hidden />}
                                 <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    aria-label={t("repos.bulk.selectRepo", { name: r.name })}
+                                    checked={selected.has(r.name)}
+                                    onCheckedChange={() => toggleSelect(r.name)}
+                                  />
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium">
@@ -289,31 +366,41 @@ export function ReposTab({ workspace: wsProp }: Props) {
                               <TableCell className="whitespace-nowrap py-2.5 px-3">
                                 <StateBadge ws={workspace} repo={r} />
                               </TableCell>
-                              <TableCell className="whitespace-nowrap py-2.5 px-3 text-center">
-                                <span className="inline-flex gap-1">
-                                  {/* 关联仓库只读：隐藏更新(pull)——共享路径下 pull 会跨 ws 干扰 */}
+                              {/* 操作列统一 icon-only ghost 按钮（对齐 AuthProfilesPage）：
+                                  纯图标不占文字宽度，永不被 w-28 列宽截断 → 不产生横向滚动条。
+                                  clone 行：更新 + 删除；linked 行：取消关联（共享路径 pull 会跨 ws 干扰，隐藏更新）。 */}
+                              <TableCell className="py-2.5 px-3 text-center">
+                                <span className="inline-flex justify-center gap-1">
                                   {!r.linked && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      aria-label={t("repos.updateAria", { name: r.name })}
-                                      onClick={() => doPull(r.name)}
-                                    >
-                                      <RefreshCw className="size-3.5" />
-                                      {t("common.update")}
-                                    </Button>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          aria-label={t("repos.updateAria", { name: r.name })}
+                                          onClick={() => doPull(r.name)}
+                                        >
+                                          <RefreshCw className="size-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>{t("common.update")}</TooltipContent>
+                                    </Tooltip>
                                   )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-destructive hover:bg-destructive/10"
-                                    aria-label={t("repos.deleteAria", { name: r.name })}
-                                    onClick={() => setPendingDelete(r.name)}
-                                  >
-                                    {/* 关联仓库：取消关联（仅移除引用，不删源文件） */}
-                                    {r.linked ? <Unlink className="size-3.5" /> : <Trash2 className="size-3.5" />}
-                                    {r.linked ? t("repos.unlink") : t("common.delete")}
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="text-destructive hover:bg-destructive/10"
+                                        aria-label={t(r.linked ? "repos.unlinkAria" : "repos.deleteAria", { name: r.name })}
+                                        onClick={() => setPendingDelete(r.name)}
+                                      >
+                                        {/* 关联仓库：取消关联（仅移除引用，不删源文件） */}
+                                        {r.linked ? <Unlink className="size-4" /> : <Trash2 className="size-4" />}
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{r.linked ? t("repos.unlink") : t("common.delete")}</TooltipContent>
+                                  </Tooltip>
                                 </span>
                               </TableCell>
                             </TableRow>
@@ -340,6 +427,25 @@ export function ReposTab({ workspace: wsProp }: Props) {
             <DialogFooter>
               <Button variant="ghost" onClick={() => setPendingDelete(null)}>{t("common.cancel")}</Button>
               <Button variant="destructive" disabled={busy} onClick={doDelete}>{t("common.confirm")}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={pendingBulkDelete} onOpenChange={(o) => !o && setPendingBulkDelete(false)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("repos.bulk.confirmTitle")}</DialogTitle>
+              <DialogDescription>
+                {selectedLinkedCount > 0 && selectedPrivateCount > 0
+                  ? t("repos.bulk.confirmMixed", { linked: selectedLinkedCount, privateCount: selectedPrivateCount })
+                  : selectedLinkedCount > 0
+                    ? t("repos.bulk.confirmLinked", { count: selectedLinkedCount })
+                    : t("repos.bulk.confirmDelete", { count: selectedPrivateCount })}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setPendingBulkDelete(false)}>{t("common.cancel")}</Button>
+              <Button variant="destructive" disabled={busy} onClick={doBulkDelete}>{t("common.confirm")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

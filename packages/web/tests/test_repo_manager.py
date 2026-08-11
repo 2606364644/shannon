@@ -127,6 +127,46 @@ async def test_clone_with_group(tmp_path, monkeypatch, fake_clone_ok):
     assert json.loads(meta_path.read_text())["state"] == "ready"
 
 
+@pytest.mark.asyncio
+async def test_clone_real_git_succeeds(tmp_path, monkeypatch):
+    """真 git clone（非 mock _build_clone_argv）：clone 本地 bare 仓库到 target 必须成功。
+
+    回归：旧版 clone() 在 git clone 之前先 ``target.mkdir`` 并在 target 内预写
+    ``.supernova-repo.json``，使 target 非空，git clone 报
+    ``destination path ... already exists and is not an empty directory``（rc=128）→ state=failed。
+    现有测试全部 mock 掉 _build_clone_argv（假脚本不检查目录是否非空），漏掉了 git
+    「目标目录必须不存在或完全为空」的硬约束——此测试用真 git 覆盖该约束。
+    """
+    import subprocess
+    # 造一个本地 bare 源仓库并塞一个 commit（file:// 无需凭据，绕开 _inject_auth）
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)],
+                   check=True, capture_output=True)
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
+    (work / "README.md").write_text("hello")
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(work), "commit", "-qm", "init"], check=True)
+    subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "main"],
+                   check=True, capture_output=True)
+
+    rm = _rm(tmp_path, monkeypatch)
+    name = await rm.clone(WS, f"file://{origin}", None, None, None)
+    assert name == "origin"  # repo_name 取末段 origin.git → origin
+    task = rm._jobs.get((WS, name))
+    if task is not None:
+        await task
+
+    target = _repos_base(tmp_path) / "origin"
+    assert (target / ".git").exists(), "git clone 未真正执行（target 缺 .git）"
+    assert (target / "README.md").read_text() == "hello"
+    meta = json.loads((target / ".supernova-repo.json").read_text())
+    assert meta["state"] == "ready", f"clone 失败：last_error={meta.get('last_error')!r}"
+
+
 def test_list_repos_groups(tmp_path, monkeypatch):
     """分组目录下的真仓库识别为 group/repo；分组目录本身不当仓库；同名跨组不冲突。"""
     rm = _rm(tmp_path, monkeypatch)
@@ -570,3 +610,66 @@ async def test_delete_unlinks_linked_without_rmtree(tmp_path, monkeypatch):
     await rm.delete(WS, "ftoa")
     assert read_linked_repos(_ws_dir(tmp_path)) == []  # 关联记录移除
     assert target.exists()  # 源目录仍在（关联=仅取消引用，绝不删文件）
+
+
+# ---- 批量删除归类（delete_one）----
+# delete_one 是批量删除端点的逐项归类器：复用 delete 的分叉（linked→unlink 不删源、
+# 私有→rmtree），返回结构化结果（deleted/unlinked/busy/not_found）供端点收集 skipped。
+
+
+@pytest.mark.asyncio
+async def test_delete_one_private_clone_deleted(tmp_path, monkeypatch):
+    """delete_one 私有克隆 → 'deleted'，目录被 rmtree。"""
+    rm = _rm(tmp_path, monkeypatch)
+    d = _repos_base(tmp_path) / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    assert await rm.delete_one(WS, "foo") == "deleted"
+    assert not d.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_one_grouped_private_clone_deleted(tmp_path, monkeypatch):
+    """delete_one 分组私有克隆 group/repo → 'deleted'。"""
+    rm = _rm(tmp_path, monkeypatch)
+    d = _repos_base(tmp_path) / "frontend" / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    assert await rm.delete_one(WS, "frontend/foo") == "deleted"
+    assert not d.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_one_linked_unlinked_keeps_files(tmp_path, monkeypatch):
+    """delete_one 关联仓 → 'unlinked'：源文件保留、linked 记录移除。"""
+    from supernova_web.components.repo_manager import read_linked_repos
+    rm = _rm(tmp_path, monkeypatch)
+    target = _make_real_repo(tmp_path)
+    rm.link_repo(WS, "ftoa", str(target))
+    assert await rm.delete_one(WS, "ftoa") == "unlinked"
+    assert read_linked_repos(_ws_dir(tmp_path)) == []
+    assert target.exists() and (target / "README.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_one_not_found(tmp_path, monkeypatch):
+    """delete_one 既非关联、文件系统也无仓库目录 → 'not_found'，无副作用。"""
+    rm = _rm(tmp_path, monkeypatch)
+    assert await rm.delete_one(WS, "ghost") == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_delete_one_busy(tmp_path, monkeypatch):
+    """delete_one 仓库在 _jobs（clone/pull 中）→ 'busy'，目录不动。"""
+    rm = _rm(tmp_path, monkeypatch)
+    d = _repos_base(tmp_path) / "foo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    rm._jobs[(WS, "foo")] = asyncio.create_task(asyncio.sleep(10))
+    try:
+        assert await rm.delete_one(WS, "foo") == "busy"
+        assert d.exists()  # 未删
+    finally:
+        t = rm._jobs.pop((WS, "foo"), None)
+        if t:
+            t.cancel()

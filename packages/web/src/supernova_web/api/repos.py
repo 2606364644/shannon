@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from supernova_web.auth.dependencies import require_admin, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
-from supernova_web.components.repo_manager import TooManyClones
+from supernova_web.components.repo_manager import TooManyClones, _validate_repo_name
 
 router = APIRouter(prefix="/api/workspaces", tags=["repos"])
 
@@ -59,6 +59,59 @@ async def link_repos_in_dir(ws: str, body: LinkDirBody, request: Request,
         return rm.link_repos_in_dir(ws, body.path)
     except ValueError as e:  # 路径不存在 / 非目录
         raise HTTPException(422, str(e))
+
+
+# 批量删除/取消关联单次上限（防超大请求体遍历过久）
+BATCH_DELETE_MAX_NAMES = 200
+
+
+class BatchDeleteBody(BaseModel):
+    names: list[str]
+
+
+@router.post("/{ws}/repos/batch-delete", status_code=200)
+async def batch_delete_repos(ws: str, body: BatchDeleteBody, request: Request,
+                             _: User = Depends(workspace_member)):
+    """批量删除/取消关联：私有克隆→rmtree，关联仓→unlink（不删源文件）。
+    部分被在跑 scan 引用 / clone-pull 忙碌 / 不存在 → 跳过并收集 skipped（对齐 link-dir）。
+    返回 ``{"deleted": [...], "unlinked": [...], "skipped": [{"name","reason"}]}``。"""
+    # 去重（保序）
+    seen: set[str] = set()
+    names: list[str] = []
+    for n in body.names:
+        if n not in seen:
+            seen.add(n)
+            names.append(n)
+    if not names:
+        raise HTTPException(422, "names 不能为空")
+    if len(names) > BATCH_DELETE_MAX_NAMES:
+        raise HTTPException(422, f"单次最多 {BATCH_DELETE_MAX_NAMES} 个仓库")
+    # 路径穿越防线：逐项校验，任一非法 → 422 拒整批（恶意 name 不得混入处理流）
+    for n in names:
+        try:
+            _validate_repo_name(n)
+        except ValueError:
+            raise HTTPException(422, f"非法仓库名：{n!r}")
+
+    rm = request.app.state.repo_manager
+    sm = request.app.state.scan_manager
+    busy_sources = sm.active_repo_sources()  # 一次性快照（避免分次检查窗口）
+
+    deleted: list[str] = []
+    unlinked: list[str] = []
+    skipped: list[dict] = []
+    for name in names:
+        if (ws, name) in busy_sources:
+            skipped.append({"name": name, "reason": "scanning"})
+            continue
+        outcome = await rm.delete_one(ws, name)
+        if outcome == "deleted":
+            deleted.append(name)
+        elif outcome == "unlinked":
+            unlinked.append(name)
+        else:  # busy / not_found
+            skipped.append({"name": name, "reason": outcome})
+    return {"deleted": deleted, "unlinked": unlinked, "skipped": skipped}
 
 
 # 仓库名可为 group/repo（含 '/'），故用 {name:path} 吃整段路径。带后缀的具体路由

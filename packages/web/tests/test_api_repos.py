@@ -279,3 +279,139 @@ def test_link_dir_bad_path_422(tmp_path, monkeypatch):
     r = client.post(f"{BASE}/link-dir", json={"path": str(tmp_path / "nope")},
                     headers={"X-CSRF-Token": tok})
     assert r.status_code == 422
+
+
+# ---- 批量删除/取消关联 API（POST /repos/batch-delete）----
+# 一个端点同时承担「批量物理删除」（私有克隆）和「批量取消关联」（linked 仓）——
+# 复用 RepoManager.delete_one 的自动分叉。部分被占用则跳过、收集 skipped（对齐 link-dir）。
+
+def test_batch_delete_mixed_classifies_deleted_and_unlinked(tmp_path, monkeypatch):
+    """混合提交：私有克隆→deleted（目录 rmtree），关联仓→unlinked（源文件保留）。"""
+    target = _ext_repo(tmp_path, "linked-src")
+    (target / "README.md").write_text("x")
+    app = _app(tmp_path, monkeypatch, {"foo": "ready", "bar": "ready"})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo", "bar", "ftoa"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["deleted"]) == {"foo", "bar"}
+    assert body["unlinked"] == ["ftoa"]
+    assert body["skipped"] == []
+    # 私有克隆目录被删；关联源文件保留
+    assert not (tmp_path / "workspaces" / WS / "repos" / "foo").exists()
+    assert target.exists() and (target / "README.md").exists()
+
+
+def test_batch_delete_skips_scanning(tmp_path, monkeypatch):
+    """部分仓库被在跑 scan 引用（active_repo_sources）→ skipped(scanning)，其余成功。"""
+    app = _app(tmp_path, monkeypatch, {"foo": "ready", "bar": "ready"})
+    monkeypatch.setattr(app.state.scan_manager, "active_repo_sources",
+                        lambda: {(WS, "foo")})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo", "bar"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["deleted"] == ["bar"]
+    assert {"name": "foo", "reason": "scanning"} in body["skipped"]
+
+
+def test_batch_delete_skips_not_found(tmp_path, monkeypatch):
+    """不存在的 name → skipped(not_found)。返回 200（而非 404）也隐含证明 POST
+    /repos/batch-delete 命中了本端点——若被 create_repo(POST /repos) 吞会因缺 git_url
+    报 422 field required，拿不到这个 200 + skipped 结构。"""
+    app = _app(tmp_path, monkeypatch, {"foo": "ready"})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo", "ghost"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["deleted"] == ["foo"]
+    assert {"name": "ghost", "reason": "not_found"} in body["skipped"]
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_skips_busy(tmp_path, monkeypatch):
+    """部分仓库在 _jobs（clone/pull 中）→ skipped(busy)，其余成功（async：注入 task 需 loop）。"""
+    import asyncio
+    import httpx
+    app = _app(tmp_path, monkeypatch, {"foo": "ready", "bar": "ready"})
+    app.state.repo_manager._jobs[(WS, "foo")] = asyncio.create_task(asyncio.sleep(10))
+    from supernova_web.auth.csrf import generate_csrf_token
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username("tester") is None:
+        store.create_user("tester", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    tok = generate_csrf_token()
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t",
+                                     cookies={"sn-sid": sid, "sn-csrf": tok}) as c:
+            r = await c.post(f"{BASE}/batch-delete", json={"names": ["foo", "bar"]},
+                             headers={"X-CSRF-Token": tok})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["deleted"] == ["bar"]
+        assert {"name": "foo", "reason": "busy"} in body["skipped"]
+    finally:
+        t = app.state.repo_manager._jobs.pop((WS, "foo"), None)
+        if t:
+            t.cancel()
+
+
+def test_batch_delete_path_traversal_422(tmp_path, monkeypatch):
+    """路径穿越 name → 422 拒整批（绝不进处理流），合法的 foo 也不被删。"""
+    app = _app(tmp_path, monkeypatch, {"foo": "ready"})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo", "../evil"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+    assert (tmp_path / "workspaces" / WS / "repos" / "foo").exists()  # 整批拒绝
+
+
+def test_batch_delete_empty_422(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": []},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+
+
+def test_batch_delete_too_many_422(tmp_path, monkeypatch):
+    """超出单次上限 → 422（远超 200 的合理上限即触发）。"""
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    tok = _csrf(client)
+    too_many = [f"r{i}" for i in range(1000)]
+    r = client.post(f"{BASE}/batch-delete", json={"names": too_many},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+
+
+def test_batch_delete_deduplicates(tmp_path, monkeypatch):
+    """重复 name 去重，结果里每项只出现一次。"""
+    app = _app(tmp_path, monkeypatch, {"foo": "ready"})
+    client = _authed(app)
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo", "foo"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json()["deleted"] == ["foo"]
+
+
+def test_batch_delete_non_member_403(tmp_path, monkeypatch):
+    """非 ws 成员（user 角色且非 admin）→ workspace_member 拒 403。"""
+    app = _app(tmp_path, monkeypatch, {"foo": "ready"})
+    client = _authed_as(app, "outsider", "user")
+    tok = _csrf(client)
+    r = client.post(f"{BASE}/batch-delete", json={"names": ["foo"]},
+                    headers={"X-CSRF-Token": tok})
+    assert r.status_code == 403

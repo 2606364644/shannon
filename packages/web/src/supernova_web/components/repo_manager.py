@@ -156,6 +156,9 @@ class RepoManager:
         self._max_concurrent = max(1, max_concurrent)
         self._sem = asyncio.Semaphore(self._max_concurrent)
         self._jobs: dict[tuple[str, str], asyncio.Task] = {}
+        # 内存登记正在跑的 job 阶段（"cloning"/"pulling"），供 _repo_view 在 target 尚无
+        # ready meta 时显示准确状态。与 _jobs 同生命周期（task finally 一并 pop）。
+        self._job_phase: dict[tuple[str, str], str] = {}
 
     # ---- ws 解析 + 校验 ----
     def _repos_root(self, ws: str) -> Path:
@@ -240,12 +243,18 @@ class RepoManager:
         return None
 
     def _repo_view(self, ws: str, name: str) -> dict:
-        self._ensure_meta(ws, name)  # 读时自愈：运行期拷入的仓库补 meta
+        busy = self.is_busy(ws, name)
+        # busy 时仓库正被 git 改（.git/config 可能半写、含注入凭据的 url）——不读不补 meta，
+        # 避免与 _clone_task 竞态写 + 误把 cloning 判成 ready。
+        if not busy:
+            self._ensure_meta(ws, name)  # 读时自愈：运行期拷入的仓库补 meta
         meta = self._read_meta(ws, name)
         state = meta.get("state", "ready")
-        # stale：磁盘 cloning/pulling 但内存无 job → 重启后未完成
-        if state in ("cloning", "pulling") and not self.is_busy(ws, name):
-            state = "stale"
+        if busy:
+            # 内存有 job → 正在 clone/pull，覆盖磁盘 meta（clone 期间 target 尚无 ready meta）
+            state = self._job_phase.get((ws, name), "cloning")
+        elif state in ("cloning", "pulling"):
+            state = "stale"  # 磁盘标 cloning/pulling 但内存无 job → 重启后未完成
         group = name.split("/", 1)[0] if "/" in name else None
         view = {"name": name, "group": group, **meta, "state": state}
         # 出站兜底：source.url 剥离 userinfo，防止历史/手动写入的带凭据 URL 泄露给前端
@@ -328,9 +337,14 @@ class RepoManager:
             raise ValueError(f"仓库已存在：{final_name}（可改用更新 pull）")
         if len(self._jobs) >= self._max_concurrent:
             raise TooManyClones(self._max_concurrent)
+        # git clone 要求目标目录不存在或完全为空——只创建空 target，绝不预写 meta 进去。
+        # 旧版在此预写 .supernova-repo.json 使 target 非空，git clone 必报 rc=128
+        # 「destination path ... already exists and is not an empty directory」，clone 功能
+        # 100% 不可用。cloning 期间：进度 ndjson 由 git 创建 target 后经 stderr drain 写入；
+        # 列表可见性靠 .git（git init 后存在）+ is_busy（_repo_view 覆盖 state=cloning）。
+        # source（url/branch/commit）在 clone 成功后由 _clone_task 落盘 ready meta。
         target.mkdir(parents=True, exist_ok=False)
-        self._write_meta(ws, final_name, source={"kind": "git", "url": strip_credentials(url), "branch": branch, "commit": commit},
-                         cloned_at=_now_iso(), state="cloning", last_error=None)
+        self._job_phase[(ws, final_name)] = "cloning"
         task = asyncio.create_task(self._clone_task(ws, final_name, url, branch, commit, target))
         self._jobs[(ws, final_name)] = task
         return final_name
@@ -358,11 +372,14 @@ class RepoManager:
                             return
                     head = await self._head_commit(target)
                     self._write_meta(ws, name, state="ready", last_pull_at=_now_iso(),
+                                     cloned_at=_now_iso(),
                                      size_bytes=_dir_size(target),
-                                     source={**self._read_meta(ws, name).get("source", {}), "commit": head})
+                                     source={"kind": "git", "url": strip_credentials(url),
+                                             "branch": branch, "commit": head})
                     await self._append_event(ws, name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
         finally:
             self._jobs.pop((ws, name), None)
+            self._job_phase.pop((ws, name), None)
 
     async def pull(self, ws: str, name: str) -> None:
         target = self._repo_dir(ws, name)
@@ -371,6 +388,7 @@ class RepoManager:
         if (ws, name) in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
         self._write_meta(ws, name, state="pulling")
+        self._job_phase[(ws, name)] = "pulling"
         task = asyncio.create_task(self._pull_task(ws, name, target))
         self._jobs[(ws, name)] = task
 
@@ -389,6 +407,7 @@ class RepoManager:
                     self._mark_failed(ws, name, "pull 失败")
         finally:
             self._jobs.pop((ws, name), None)
+            self._job_phase.pop((ws, name), None)
 
     # ---- checkout / delete ----
     async def checkout(self, ws: str, name: str, branch: str) -> None:
@@ -424,6 +443,29 @@ class RepoManager:
         # 仅删除真仓库目录（有 .git 或 meta），绝不 rmtree 分组目录（含多个子仓库）
         if target.is_dir() and _is_repo(target):
             shutil.rmtree(target, ignore_errors=False)
+
+    async def delete_one(self, ws: str, name: str) -> str:
+        """批量删除的逐项归类器：复用 ``delete`` 的分叉（linked→unlink 不删源、私有→rmtree），
+        返回 ``'deleted' | 'unlinked' | 'busy' | 'not_found'`` 供批量端点收集 skipped。
+
+        与单条 ``delete`` 的区别仅在归类：``delete`` 对不存在目录静默无操作、对忙碌抛
+        ``ValueError``；``delete_one`` 把这两种显式归为 ``'not_found'`` / ``'busy'``，不抛，
+        使批量场景能逐项继续、收集跳过原因。
+        """
+        _validate_repo_name(name)
+        if (ws, name) in self._jobs:
+            return "busy"
+        linked = self._is_linked(ws, name)
+        target_exists = False
+        try:
+            target = self._repo_dir(ws, name)
+            target_exists = target.is_dir() and _is_repo(target)
+        except ValueError:
+            target_exists = False
+        if not linked and not target_exists:
+            return "not_found"
+        await self.delete(ws, name)
+        return "unlinked" if linked else "deleted"
 
     # ---- 关联仓库（linked repos）----
     def link_repo(self, ws: str, name: str, path: str) -> dict:
@@ -574,6 +616,10 @@ class RepoManager:
         return rc == 0
 
     def _mark_failed(self, ws: str, name: str, msg: str) -> None:
+        # 容错：git clone 失败（认证/网络/源不存在）在某些 git 版本下会删除它创建的 target，
+        # 此时需重建目录以落 failed meta + clone_end 事件，让失败项可见、可删、可重试。
+        repo = self._repo_dir(ws, name)
+        repo.mkdir(parents=True, exist_ok=True)
         self._write_meta(ws, name, state="failed", last_error=msg, last_pull_at=_now_iso())
         # clone_end 失败事件（同步写，task 内调用）
         f = self._repo_dir(ws, name) / "clone.ndjson"
