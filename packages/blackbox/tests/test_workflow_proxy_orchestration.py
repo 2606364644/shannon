@@ -13,6 +13,20 @@ this test is INCOMPLETE-LOCALLY by design — it is REPORTED as
 NOT faked GREEN. The orchestration EDITS are additionally guarded by code
 inspection (reviewer) + the registration test (test_host_proxy_registration.py,
 which IS locally verifiable).
+
+Mock coverage (re-walked for test input: web_url+event_file+exploit set,
+no config_path, no correlated_workspace):
+  REACHED & MOCKED — setup_display, log_phase_start_activity (preflight/
+    exploitation/reporting), run_host_proxy_setup, run_blackbox_preflight,
+    resolve_blackbox_engine, detect_whitebox_results, log_info_activity
+    (multiple sites), run_endpoint_verify, validate_exploitation_queue,
+    write_engine_config_for_session, run_exploit_agent, assemble_report,
+    run_report_agent, finalize_report, finalize_summary, cleanup_engine_configs,
+    cleanup_auth_state_activity, stop_host_proxy
+  SKIPPED (no need to mock) — run_blackbox_auth_validation + auth-validation
+    log_phase (config_path=None), load_correlation_context
+    (correlated_workspace=None), corr-classes log_info_activity (mock returns
+    corr_classes=[]), invalid-queue log_info_activity (mock returns valid=True)
 """
 import pytest
 from temporalio import activity
@@ -49,6 +63,13 @@ def _build_proxy_chain_mocks(call_order: list, proxy_url_return: str) -> list:
     @activity.defn
     async def log_info_activity(i): pass
     @activity.defn
+    async def run_endpoint_verify(i):
+        # web_url=set → workflow reaches L323 run_endpoint_verify. Return shape
+        # mimics the degradation path (the workflow does not consume the return
+        # value — it's just awaited; activity writes endpoint_verify.json itself).
+        call_order.append("endpoint_verify")
+        return {"endpoint_verify": None, "cost_currency": "USD"}
+    @activity.defn
     async def validate_exploitation_queue(i) -> QueueValidationResult:
         call_order.append("validate")
         return QueueValidationResult(valid=True, reason="ok", vuln_count=1)
@@ -77,6 +98,7 @@ def _build_proxy_chain_mocks(call_order: list, proxy_url_return: str) -> list:
     return [setup_display, log_phase_start_activity, run_host_proxy_setup,
             run_blackbox_preflight, resolve_blackbox_engine,
             detect_whitebox_results, log_info_activity,
+            run_endpoint_verify,
             validate_exploitation_queue, write_engine_config_for_session,
             run_exploit_agent, assemble_report, run_report_agent,
             finalize_report, cleanup_engine_configs,
