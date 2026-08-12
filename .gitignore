@@ -40,6 +40,10 @@ configs/*.yaml
 /.claude/plans/
 .vscode/settings.json
 
+# 浏览器引擎本地状态（agent-browser / playwright-cli 运行时产物，不入库）
+.playwright-cli/
+.agent-browser/
+
 # superpowers brainstorm 本地设计协作 mockups（不入库）
 .superpowers/
 repos.zip
