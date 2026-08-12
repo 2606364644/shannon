@@ -11,16 +11,26 @@ import httpx
 from supernova_core.models.errors import ErrorCode, PentestError
 
 
-def resolve_host(url: str) -> str | None:
-    """DNS-resolve the hostname in *url* and return the pinned IP (string).
+def resolve_host(
+    url: str, host_mappings: dict[str, str] | None = None
+) -> str | None:
+    """Resolve the hostname in *url* and return the pinned IP (string).
 
-    Returns ``None`` on resolution failure.
+    If *host_mappings* is provided and the URL's hostname is present in it,
+    the mapped IP is returned directly without touching DNS (this lets an
+    internal domain that won't resolve via public DNS still be pinned to a
+    configured IP). Otherwise the hostname is resolved via ``getaddrinfo``.
+
+    Returns ``None`` on resolution failure (gaierror / OSError).
     """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    # 命中映射 → 直接返回映射 IP，跳过 DNS（内网域名 DNS 解析失败兜底）
+    if host_mappings and hostname in host_mappings:
+        return host_mappings[hostname]
     try:
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
-            return None
         addrinfos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _type, _proto, _canon, sockaddr in addrinfos:
             return sockaddr[0]
@@ -41,11 +51,16 @@ def check_loopback(ip: str) -> bool:
     return addr.is_loopback or addr.is_unspecified
 
 
-def resolve_and_pin_host(url: str) -> tuple[str, str]:
-    """Resolve DNS, run safety checks, and return ``(pinned_ip, original_host)``.
+def resolve_and_pin_host(
+    url: str, host_mappings: dict[str, str] | None = None
+) -> tuple[str, str]:
+    """Resolve DNS (or use *host_mappings*), run safety checks, and return
+    ``(pinned_ip, original_host)``.
 
     Raises ``PentestError(TARGET_UNREACHABLE)`` if the resolved IP is unsafe
-    or DNS resolution fails.
+    or DNS resolution fails. The mapped IP still passes through
+    ``check_ssrf`` / ``check_loopback``, so mappings of 127.x / 169.254.x.x
+    are still blocked.
     """
     parsed = urlparse(url)
     original_host = parsed.hostname
@@ -57,7 +72,7 @@ def resolve_and_pin_host(url: str) -> tuple[str, str]:
             error_code=ErrorCode.TARGET_UNREACHABLE,
         )
 
-    pinned_ip = resolve_host(url)
+    pinned_ip = resolve_host(url, host_mappings=host_mappings)
     if pinned_ip is None:
         raise PentestError(
             f"Cannot resolve hostname for {url}",
@@ -121,12 +136,16 @@ async def check_url_reachable(
         return False
 
 
-def validate_target_url(url: str) -> str:
+def validate_target_url(
+    url: str, host_mappings: dict[str, str] | None = None
+) -> str:
     """Synchronous preflight gate: resolve -> SSRF check -> loopback check.
 
     Returns the pinned IP string for downstream DNS-rebinding protection.
+    *host_mappings* (optional) bypasses DNS for internal hostnames; the
+    mapped IP still goes through SSRF / loopback interception.
 
     Raises ``PentestError(TARGET_UNREACHABLE)`` on failure.
     """
-    pinned_ip, _host = resolve_and_pin_host(url)
+    pinned_ip, _host = resolve_and_pin_host(url, host_mappings=host_mappings)
     return pinned_ip
