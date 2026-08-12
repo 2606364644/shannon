@@ -264,3 +264,28 @@ def test_refresh_unknown_returns_404(tmp_path):
     c, _store = _client(tmp_path)
     r = c.post("/api/workspaces/ws1/host-profiles/host_nope/refresh")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 系统档案 refresh 守卫:scope=system → 403(与 PUT/DELETE 同语义)
+# refresh 内部调 upsert_profile(ws, profile) 会用系统 profile.id 写到 ws 段,
+# 致 ws-priority 阴影系统原型 + 后续 fork_from_system 误判 AlreadyForked。
+# 守卫:system 档案只读,必须 fork 后刷新副本。
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_refresh_system_profile_forbidden(tmp_path, monkeypatch):
+    async def fake_fetch(url, timeout=15):
+        return ([HostMapping(ip="10.0.0.1", host="updated.test")], [])
+    monkeypatch.setattr(
+        "supernova_web.components.host_profile_store.fetch_and_parse_hosts",
+        fake_fetch)
+    c, store = _client(tmp_path)
+    _seed_system_profile(store)  # .system 段,scope=system
+    r = c.post("/api/workspaces/ws1/host-profiles/host_sys/refresh")
+    assert r.status_code == 403
+    # 关键:ws 段未被污染(没静默 fork 出 ws 副本)
+    assert store._read_segment("ws1") == []
+    # 系统原型仍在,内容未变
+    sys_profiles = store.read(".system")
+    assert any(p.id == "host_sys" for p in sys_profiles)

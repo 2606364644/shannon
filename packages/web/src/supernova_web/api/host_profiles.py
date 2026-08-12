@@ -136,10 +136,17 @@ async def fork_profile(ws: str, pid: str, request: Request,
 @router.post("/{ws}/host-profiles/{pid}/refresh")
 async def refresh_profile(ws: str, pid: str, request: Request,
                           user=Depends(workspace_manager)):
-    """按 profile.source_url 重新拉取 → 更新 mappings + 落盘(best-effort,失败保留快照)。"""
+    """按 profile.source_url 重新拉取 → 更新 mappings + 落盘(best-effort,失败保留快照)。
+
+    系统档案(scope=system)只读:refresh 内部调 upsert_profile(ws, profile) 会用
+    系统 profile.id 写到 ws 段,致 ws-priority 阴影系统原型 + 后续 fork 误判
+    AlreadyForked —— 故 system 档案拒(必须 fork 后刷新副本),与 PUT/DELETE 同语义。
+    """
     store = _store(request)
-    if store.get(ws, pid) is None:
+    existing = store.get(ws, pid)
+    if existing is None:
         raise HTTPException(404, "HOST 档案不存在")
+    if existing.scope == "system":
+        raise HTTPException(403, "系统档案只读,请 fork 后刷新副本")
     refreshed = await store.refresh(ws, pid)
-    # refresh 内部 best-effort:None 仅在 profile 不存在时返回(已在上面守护)
     return refreshed.model_dump(mode="json")
