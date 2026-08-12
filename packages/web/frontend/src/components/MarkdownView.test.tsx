@@ -250,6 +250,60 @@ describe("MarkdownView", () => {
     expect(container.querySelectorAll("p").length).toBeGreaterThan(0);
   });
 
+  it("冗余的每类「已确认漏洞」h2 子标题降级为小标签（非 heading），并移出 TOC", () => {
+    // 真实根因：report-executive prompt 指示 LLM 保留 REPORT_VULN_SUBHEADING（=「已确认漏洞」），
+    // 它紧跟 `# <类> 漏洞利用报告` h1、漏洞卡片之前，与 h1 语义重复。降级为 <p> 小标签后：
+    // 不再是 heading、不进 TOC（TOC 只收 h1/h2 DOM）。
+    const md = `# 安全评估报告
+
+## 执行摘要
+
+正文。
+
+# Injection 漏洞利用报告
+
+## 已确认漏洞
+
+### INJ-VULN-01: eval RCE
+
+- **verdict:** vulnerable
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+
+    // 不再是 h2 标题
+    expect(screen.queryByRole("heading", { level: 2, name: "已确认漏洞" })).toBeNull();
+    // 降级为 <p> 小标签
+    const label = container.querySelector('[data-testid="vuln-subheading"]');
+    expect(label?.tagName).toBe("P");
+    expect(label?.textContent).toContain("已确认漏洞");
+    expect(label).toHaveClass("font-semibold");
+    // 合法 h2（执行摘要）不受影响，仍是 heading
+    expect(screen.getByRole("heading", { level: 2, name: "执行摘要" })).toBeInTheDocument();
+    // TOC 不含「已确认漏洞」
+    const toc = container.querySelector('[data-testid="toc"]');
+    expect(toc?.textContent ?? "").not.toContain("已确认漏洞");
+  });
+
+  it("英文「Confirmed Vulnerabilities」同样降级", () => {
+    const md = `# Report
+
+## Executive Summary
+
+body.
+
+# Injection Exploitation Report
+
+## Confirmed Vulnerabilities
+
+### INJ-VULN-01: eval RCE
+
+- **verdict:** vulnerable
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    expect(screen.queryByRole("heading", { level: 2, name: "Confirmed Vulnerabilities" })).toBeNull();
+    expect(container.querySelector('[data-testid="vuln-subheading"]')?.textContent).toContain("Confirmed");
+  });
+
   it("末条 notes 紧跟 `---` 被 Setext 解析成 <h2> 也命中 aside（综合报告真实结构）", () => {
     // 真实根因：综合报告用 `---` 分隔漏洞条目，每类「最后一条」漏洞的 notes 行紧跟 `---`（无空行），
     // markdown 按 Setext 把 `**Notes:** 文本\n---` 解析成 <h2> 标题（又大又粗，且不走 <p> 通路）。

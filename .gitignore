@@ -42,3 +42,4 @@ configs/*.yaml
 
 # superpowers brainstorm 本地设计协作 mockups（不入库）
 .superpowers/
+repos.zip

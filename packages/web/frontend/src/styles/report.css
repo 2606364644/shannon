@@ -87,6 +87,14 @@ html { scroll-behavior: smooth; }
   box-shadow: 0 1px 2px hsl(250 40% 2% / 0.35);
 }
 
+/* —— 流式正文（含黑盒利用步骤里的长 URL / payload token）折行不溢出卡片。
+   break-word 仅在容器已被约束时才折行；两栏 grid `1fr` 的内容列默认 min-width:auto，
+   长无空格 token 会撑宽列而非折行。anywhere 把 min-content 归零，强制按卡片宽度折行
+   （配合 MarkdownView 内容列的 min-w-0）。pre/表格各有专属规则，此处只管 p/li。 —— */
+.prose :is(p, li) {
+  overflow-wrap: anywhere;
+}
+
 /* —— block code 容器：换行不溢出（spec 2026-07-24 §3.3；长 URL / 无空格串也折行，不再横滚）—— */
 .prose pre {
   border-radius: var(--radius);

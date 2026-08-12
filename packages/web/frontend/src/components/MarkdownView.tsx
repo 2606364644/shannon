@@ -225,6 +225,33 @@ function notesBlockFor(tag: ElementType) {
   };
 }
 
+/** 冗余的每类「已确认漏洞」h2 子标题。report-executive prompt 指示 LLM 保留
+ *  REPORT_VULN_SUBHEADING（代码从不解析该占位符，LLM 逐字填成「已确认漏洞」/
+ *  「Confirmed Vulnerabilities」），它紧跟 `# <类> 漏洞利用报告` h1、漏洞卡片之前，
+ *  与 h1 语义重复。降级为安静的小标签（非 heading）：不再每类冒出大标题，也自动
+ *  从 TOC 移除（TOC 只收 h1/h2 DOM，<p> 不入选）。用户反馈：黑盒报告每类都有
+ *  「已确认漏洞」大标题冗余——「不做成标题，加粗就行」（2026-08-12）。 */
+const REDUNDANT_VULN_SUBHEADING_RE = /^已确认.*漏洞$|^confirmed\s+vulnerabilities$/i;
+
+/** h2 专用：先降级冗余的「已确认漏洞」子标题 → 小标签；再走 Notes aside；否则原样 h2。 */
+function h2Block({ children, ...props }: { children?: ReactNode; [k: string]: unknown }) {
+  if (REDUNDANT_VULN_SUBHEADING_RE.test(flatten(children).trim())) {
+    // 不沿用 h2 的 id（slug plugin 给 h2 加的锚点）——降级为 <p> 即脱离 TOC/锚跳，
+    // 避免点 TOC 跳到一个无信息的小标签。
+    return (
+      <p
+        data-testid="vuln-subheading"
+        className="mb-3 mt-4 text-xs font-semibold tracking-wide text-muted-foreground"
+      >
+        {children}
+      </p>
+    );
+  }
+  const r = notesFromChildren(children);
+  if (r) return renderNotesAside(props, r.eyebrow, r.val);
+  return <h2 {...props}>{children}</h2>;
+}
+
 /** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / pre 复制按钮）。
  *  工厂接收 t：复制按钮文案随语言切换（react-markdown 的 components 项不订阅 i18n，
  *  靠外层 MarkdownView 的 useTranslation 触发重渲染、传入最新 t）。 */
@@ -276,7 +303,7 @@ function makeProseComponents(t: TFunction) {
   // Notes 段落 / Setect 标题 → 注释 aside（见模块级 notesBlockFor 注释）。
   p: notesBlockFor("p"),
   h1: notesBlockFor("h1"),
-  h2: notesBlockFor("h2"),
+  h2: h2Block,
   h3: notesBlockFor("h3"),
   h4: notesBlockFor("h4"),
   h5: notesBlockFor("h5"),
@@ -746,7 +773,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
             </ul>
           </nav>
         )}
-        <div ref={contentRef} className="space-y-5">
+        <div ref={contentRef} className="min-w-0 space-y-5">
           {!twoCol && collapseAllCardsBtn && (
             <div className="mb-2 flex items-center justify-between gap-2 px-0.5 py-1">
               <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
