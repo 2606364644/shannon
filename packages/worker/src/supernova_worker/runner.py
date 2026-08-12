@@ -43,6 +43,7 @@ from supernova_blackbox.pipeline.activities import (
     log_info_activity as bb_log_info, load_correlation_context, resolve_blackbox_engine,
     detect_whitebox_results, write_engine_config_for_session, cleanup_engine_configs,
     setup_display as bb_setup_display, finalize_summary as bb_finalize_summary,
+    run_host_proxy_setup as bb_run_host_proxy_setup, stop_host_proxy as bb_stop_host_proxy,
 )
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
@@ -92,6 +93,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             load_correlation_context, resolve_blackbox_engine, detect_whitebox_results,
             write_engine_config_for_session, cleanup_engine_configs,
             bb_setup_display, bb_finalize_summary,
+            bb_run_host_proxy_setup, bb_stop_host_proxy,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(

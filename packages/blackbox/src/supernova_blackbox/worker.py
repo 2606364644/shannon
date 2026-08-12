@@ -26,6 +26,8 @@ from .pipeline.activities import (
     cleanup_auth_state_activity,
     setup_display,
     finalize_summary,
+    run_host_proxy_setup,
+    stop_host_proxy,
 )
 from .pipeline.workflows import BlackboxScanWorkflow
 from .pipeline.shared import BlackboxPipelineInput, BlackboxPipelineState
@@ -149,6 +151,7 @@ async def run_scan(input: BlackboxPipelineInput, temporal_address: str = "localh
             cleanup_engine_configs,
             cleanup_auth_state_activity,
             setup_display, finalize_summary,
+            run_host_proxy_setup, stop_host_proxy,
         ],
         graceful_shutdown_timeout=timedelta(seconds=10),
     )

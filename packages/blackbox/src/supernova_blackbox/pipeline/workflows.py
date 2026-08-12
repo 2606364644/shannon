@@ -111,6 +111,7 @@ class BlackboxScanWorkflow:
             workspace_path=workspace_path,
             correlated_workspace=input.correlated_workspace,
             event_file=input.event_file,
+            host_mappings=input.host_mappings or {},
         )
 
         retry_policy = retry_for(
@@ -138,6 +139,17 @@ class BlackboxScanWorkflow:
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=retry_for("log"),
         )
+        # per-scan host proxy（preflight 前起；空 host_mappings 返 "" 不影响现状）。
+        # proxy_url 注入 act_input，后续所有派生子 input 经 **act_input.__dict__ 继承，
+        # 供 exploit / endpoint_verify / report activity 的浏览器出口走 per-scan 代理。
+        proxy_url = await workflow.execute_activity(
+            activities.run_host_proxy_setup,
+            args=[act_input],
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+        if proxy_url:
+            act_input.proxy_url = proxy_url
         await workflow.execute_activity(
             activities.run_blackbox_preflight, act_input,
             start_to_close_timeout=timedelta(minutes=2),
@@ -348,7 +360,7 @@ class BlackboxScanWorkflow:
                         session_id = get_session_id(agent_name.value)
                         await workflow.execute_activity(
                             activities.write_engine_config_for_session,
-                            args=[input.repo_path, session_id, engine_name],
+                            args=[input.repo_path, session_id, engine_name, act_input.proxy_url],
                             start_to_close_timeout=timedelta(seconds=30),
                             retry_policy=retry_for("log"),
                         )
@@ -540,6 +552,19 @@ class BlackboxScanWorkflow:
                 )
             except Exception:
                 pass  # best-effort cleanup，失败不阻断 workflow 收尾
+            # per-scan host proxy 收尾（与 cleanup_auth_state 同模式：best-effort，
+            # 失败只 swallow）。仅在 act_input.proxy_url 已设（起过代理）时调；
+            # 空 host_mappings 路径 proxy_url 为 None → 跳过（零回归）。
+            if act_input.proxy_url:
+                try:
+                    await workflow.execute_activity(
+                        activities.stop_host_proxy,
+                        args=[act_input.proxy_url],
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=RetryPolicy(maximum_attempts=1),
+                    )
+                except Exception:
+                    pass  # best-effort，绝不阻断 workflow shutdown
 
     def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
         """构造 finalize_summary 用的 summary dict（success/failed 路径共用，DRY）。
