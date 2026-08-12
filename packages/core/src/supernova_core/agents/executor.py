@@ -86,6 +86,7 @@ class AgentExecutor:
         skip_artifact_postprocess: bool = False,
         provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
         queue_root: str | None = None,   # spec 2026-08-08：读 queue 的根（黑盒=白盒 repo_path/deliverables），透传到 render_deliverable
+        proxy_url: str | None = None,   # Task 4：per-scan 出口代理穿线（host_profile → CLI env / ToolContext）
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -113,6 +114,10 @@ class AgentExecutor:
             # partial"的 agent 生效；其余 manager strip block，no-op（spec §4）。
             "AUTH_STATE_FILE": str(auth_state_path(deliverables.parent)),
         }
+        # Task 4：per-scan 代理 URL 注入 variables，供浏览器 session_flag（Task 5
+        # manager L146）读 host_profile 代理。proxy_url=None 不写入键（backward-compat）。
+        if proxy_url:
+            variables["proxy_url"] = proxy_url
         if config:
             variables["browser_engine"] = config.browser_engine
         if prompt_variables:
@@ -151,6 +156,7 @@ class AgentExecutor:
             collector=collector,
             progress=progress,
             provider_config=provider_config,   # P3c 阶段 1
+            proxy_url=proxy_url,   # Task 4：per-scan 代理穿线到 provider
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 

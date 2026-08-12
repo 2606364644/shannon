@@ -128,6 +128,7 @@ async def run_claude_prompt(
     max_turns: int | None = None,
     collector: "CollectorBase | None" = None,
     progress: "ProgressSpec | None" = None,
+    proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → provider.call
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -184,6 +185,7 @@ async def run_claude_prompt(
             max_turns=max_turns,
             collector=collector,
             progress=progress,
+            proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
         )
 
         # 5. 检查花费上限行为

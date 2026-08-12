@@ -86,6 +86,7 @@ class AnthropicProvider(BaseProvider):
         max_turns: int | None = None,
         collector: "CollectorBase | None" = None,
         progress: "ProgressSpec | None" = None,
+        proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → CLI 子进程 env
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -119,6 +120,7 @@ class AnthropicProvider(BaseProvider):
                 max_turns_override=max_turns,
                 mcp_servers=mcp_servers or None,
                 allowed_tools=allowed_tools or None,
+                proxy_url=proxy_url,
             )
 
             # 执行调用
@@ -190,8 +192,13 @@ class AnthropicProvider(BaseProvider):
             duration = int((time.time() - start_time) * 1000)
             return self._handle_error(e, duration, model)
 
-    def _build_sdk_env(self) -> dict[str, str]:
-        """Build SDK subprocess environment variables (aligned with TS claude-executor.ts)."""
+    def _build_sdk_env(self, proxy_url: str | None = None) -> dict[str, str]:
+        """Build SDK subprocess environment variables (aligned with TS claude-executor.ts).
+
+        Task 4: ``proxy_url`` 非空时注入 HTTPS_PROXY/HTTP_PROXY + NO_PROXY(loopback)，
+        把 CLI 子进程 outbound 流量经 per-scan 代理（host_profile）。
+        ``proxy_url=None`` 不写入代理键（backward-compat 铁律）。
+        """
         sdk_env: dict[str, str] = {}
 
         # Base config —— P3c 阶段 0：self.config.max_output_tokens 优先（None 回落 env）
@@ -262,6 +269,14 @@ class AnthropicProvider(BaseProvider):
         if hasattr(os, "getuid") and os.getuid() == 0:
             sdk_env["IS_SANDBOX"] = "1"
 
+        # Task 4: per-scan 出口代理（host_profile）。NO_PROXY 仅保 loopback —— 未 mapped
+        # 的 host（LLM/temporal）经 HostResolverPlugin.resolve_dns 返 (None,None) → proxy.py
+        # 回落自身默认 DNS 仍可达，故无需枚举内部 host（见 Task 4 NO_PROXY resolution）。
+        if proxy_url:
+            sdk_env["HTTPS_PROXY"] = proxy_url
+            sdk_env["HTTP_PROXY"] = proxy_url
+            sdk_env["NO_PROXY"] = "127.0.0.1,localhost"
+
         return sdk_env
 
     def _resolve_max_turns(self, max_turns_override: int | None) -> int:
@@ -285,6 +300,7 @@ class AnthropicProvider(BaseProvider):
         max_turns_override: int | None = None,
         mcp_servers: dict | None = None,
         allowed_tools: list[str] | None = None,
+        proxy_url: str | None = None,
     ) -> ClaudeAgentOptions:
         """构建 ClaudeAgentOptions"""
         options = ClaudeAgentOptions(
@@ -312,7 +328,7 @@ class AnthropicProvider(BaseProvider):
             options.thinking = ThinkingConfigAdaptive(type="adaptive")
 
         # Environment variables via _build_sdk_env
-        options.env = self._build_sdk_env()
+        options.env = self._build_sdk_env(proxy_url=proxy_url)
 
         # 捕获 Claude CLI 子进程的真实 stderr。否则 SDK 会丢弃 stderr，
         # 用占位字符串掩盖失败原因。

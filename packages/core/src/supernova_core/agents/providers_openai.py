@@ -209,7 +209,7 @@ class OpenAIProvider(BaseProvider):
             output_type=None,
         )
 
-    def _make_subagent_runner(self, model: str, cwd: str):
+    def _make_subagent_runner(self, model: str, cwd: str, proxy_url: str | None = None):
         """构建子代理 runner：代码阅读 Agent（read/glob/grep）跑 prompt，返回 final_output。
 
         spec 改动 4a：对齐 Claude Code CLI 的 Task tool —— 父 agent 调用 `task`
@@ -217,6 +217,8 @@ class OpenAIProvider(BaseProvider):
         跑完返回其 final_output，保持父上下文精简。
 
         子代理 ToolContext 不注入 subagent_run（防嵌套递归）。
+        Task 4: ``proxy_url`` 透传给子代理 ToolContext（与主 agent 同一 per-scan 代理；
+        子代理工具集仅 read/glob/grep 当前不读 proxy_url，但保持对称注入供未来扩展）。
         """
         from .tools_openai.exec import grep
         from .tools_openai.fs import glob, read_file
@@ -236,7 +238,7 @@ class OpenAIProvider(BaseProvider):
             res = await Runner.run(
                 subagent,
                 input=prompt,
-                context=ToolContext(cwd=cwd),  # 子代理同 cwd，无 subagent_run（防递归）
+                context=ToolContext(cwd=cwd, proxy_url=proxy_url),  # 子代理同 cwd，无 subagent_run（防递归）
                 max_turns=max_turns,
             )
             return str(res.final_output)
@@ -291,6 +293,7 @@ class OpenAIProvider(BaseProvider):
         max_turns: int | None = None,
         collector: "CollectorBase | None" = None,
         progress: "ProgressSpec | None" = None,
+        proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → ToolContext（Task 2 工具读此字段）
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
@@ -309,7 +312,11 @@ class OpenAIProvider(BaseProvider):
                 result = Runner.run_streamed(
                     agent,
                     input=prompt,
-                    context=ToolContext(cwd=cwd, subagent_run=self._make_subagent_runner(model, cwd)),
+                    context=ToolContext(
+                        cwd=cwd,
+                        subagent_run=self._make_subagent_runner(model, cwd, proxy_url),
+                        proxy_url=proxy_url,
+                    ),
                     max_turns=max_turns or self._max_turns(),
                 )
                 streaming = result  # alias 供 error path 提累积 usage（run_streamed 已返回）

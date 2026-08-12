@@ -105,3 +105,34 @@ def test_anthropic_api_injects_auth_token_and_base_url_from_config(monkeypatch):
     env = p._build_sdk_env()
     assert env.get("ANTHROPIC_AUTH_TOKEN") == "glm-token-xxx"
     assert env.get("ANTHROPIC_BASE_URL") == "https://open.bigmodel.cn/api/anthropic"
+
+
+# —— Task 4: per-scan proxy_url 穿线 _build_sdk_env → CLI 子进程 env ——
+
+def test_build_sdk_env_injects_proxy_when_set(monkeypatch):
+    """proxy_url 非空 → sdk_env 含 HTTPS_PROXY/HTTP_PROXY + NO_PROXY(loopback)。
+
+    CLI 子进程经 env 拿出口代理；NO_PROXY 保 loopback 不被代理拦截本机服务。
+    未 mapped 的 host（LLM/temporal）经 HostResolverPlugin 返 (None,None) 回落代理
+    自身默认 DNS（仍可达），故 NO_PROXY 仅需 loopback，无需枚举内部 host（见 Task 4
+    NO_PROXY resolution）。
+    """
+    for var in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(var, raising=False)
+    p = _make()
+    env = p._build_sdk_env(proxy_url="http://127.0.0.1:9090")
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:9090"
+    assert env["HTTP_PROXY"] == "http://127.0.0.1:9090"
+    assert "127.0.0.1" in env["NO_PROXY"]
+    assert "localhost" in env["NO_PROXY"]
+
+
+def test_build_sdk_env_no_proxy_when_none(monkeypatch):
+    """proxy_url=None → sdk_env 不含 HTTPS_PROXY/HTTP_PROXY/NO_PROXY（向后兼容铁律）。"""
+    for var in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(var, raising=False)
+    p = _make()
+    env = p._build_sdk_env()
+    assert "HTTPS_PROXY" not in env
+    assert "HTTP_PROXY" not in env
+    assert "NO_PROXY" not in env
