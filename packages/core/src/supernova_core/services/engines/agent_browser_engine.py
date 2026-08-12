@@ -114,13 +114,20 @@ class AgentBrowserEngine:
         """PATH binary name for availability checks."""
         return "agent-browser"
 
-    def session_flag(self, session_id: str) -> str:
+    def session_flag(self, session_id: str, proxy_url: str | None = None) -> str:
         """Return the CLI flag string for session isolation.
 
         agent-browser uses space-separated ``--session <id>`` plus
         ``--profile`` for persistent Chrome profile (auth state auto-persists).
+
+        When *proxy_url* is provided, appends ``--proxy <url>`` so the Chrome
+        daemon routes traffic through the per-scan host-mapping proxy. Backward
+        compatible: ``proxy_url=None`` returns the pre-Task-5 flag verbatim.
         """
-        return f"--session {session_id} --profile .agent-browser/profiles/{session_id}"
+        flag = f"--session {session_id} --profile .agent-browser/profiles/{session_id}"
+        if proxy_url:
+            flag += f" --proxy {proxy_url}"
+        return flag
 
     def commands_reference(self) -> str:
         """Return agent-browser command reference text for prompt injection."""
@@ -148,12 +155,17 @@ class AgentBrowserEngine:
         self,
         source_dir: str,
         session_id: str | None = None,
+        proxy_url: str | None = None,
     ) -> dict:
         """Create profile directory structure for agent-browser.
 
         Creates ``.agent-browser/profiles/{session_id}/`` under *source_dir*.
         If *session_id* is ``None`` or ``"default"``, uses
         ``.agent-browser/profiles/default/``.
+
+        *proxy_url* is accepted for ``BrowserEngine`` Protocol conformance but
+        ignored — agent-browser routes proxy through its ``--proxy`` CLI flag
+        (see ``session_flag``), not through config files.
 
         Returns ``{"result": "wrote"|"skipped-existing", "configPath": str}``.
         """

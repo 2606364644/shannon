@@ -142,8 +142,15 @@ class PromptManager:
         # Legacy placeholder – kept so that existing templates still work
         result = result.replace("{{PLAYWRIGHT_SESSION}}", session_id)
 
-        # Engine-aware placeholders for updated templates
-        result = result.replace("{{BROWSER_SESSION_FLAG}}", engine.session_flag(session_id))
+        # Engine-aware placeholders for updated templates.
+        # Task 5: thread per-scan proxy_url into session_flag so agent-browser
+        # appends `--proxy <url>`. playwright's session_flag ignores it (proxy
+        # goes via launchOptions in write_config). proxy_url=None → no change.
+        proxy_url = variables.get("proxy_url")
+        result = result.replace(
+            "{{BROWSER_SESSION_FLAG}}",
+            engine.session_flag(session_id, proxy_url=proxy_url),
+        )
         result = result.replace("{{BROWSER_COMMANDS}}", engine.commands_reference())
 
         # Auth state save/load commands (engine-specific). Only emitted when an

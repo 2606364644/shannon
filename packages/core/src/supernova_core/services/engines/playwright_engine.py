@@ -67,11 +67,20 @@ Always pass -s=<session> to every command for session isolation."""
 # ---------------------------------------------------------------------------
 
 
-def _build_stealth_config(init_script_path: str, session_id: str | None = None) -> dict:
+def _build_stealth_config(
+    init_script_path: str,
+    session_id: str | None = None,
+    proxy_url: str | None = None,
+) -> dict:
     """Build Playwright stealth config dict.
 
     When *session_id* is provided, adds a session-specific ``storageState`` path
     so each agent gets isolated cookies/localStorage.
+
+    When *proxy_url* is provided, bakes it into ``launchOptions.proxy.server``
+    so the playwright-cli daemon launches Chrome with the per-scan host-mapping
+    proxy. Backward compatible: ``proxy_url=None`` omits the ``proxy`` key
+    entirely (no behavior change for non-proxied scans).
     """
     config: dict = {
         "browser": {
@@ -97,6 +106,8 @@ def _build_stealth_config(init_script_path: str, session_id: str | None = None) 
         config["browser"]["contextOptions"]["storageState"] = (
             f".playwright/state/{session_id}/storage.json"
         )
+    if proxy_url:
+        config["browser"]["launchOptions"]["proxy"] = {"server": proxy_url}
     return config
 
 
@@ -120,8 +131,14 @@ class PlaywrightEngine:
         """PATH binary name for availability checks."""
         return "playwright-cli"
 
-    def session_flag(self, session_id: str) -> str:
-        """Return the CLI flag string for session isolation."""
+    def session_flag(self, session_id: str, proxy_url: str | None = None) -> str:
+        """Return the CLI flag string for session isolation.
+
+        playwright-cli does NOT take a per-scan proxy via CLI flag — proxy is
+        configured via ``launchOptions.proxy`` in the stealth config written by
+        ``write_config``. *proxy_url* is therefore accepted (for ``BrowserEngine``
+        Protocol conformance + uniform ``manager.py`` call site) and ignored.
+        """
         return f"-s={session_id}"
 
     def commands_reference(self) -> str:
@@ -140,12 +157,21 @@ class PlaywrightEngine:
 
     # -- Config management ---------------------------------------------------
 
-    def write_config(self, source_dir: str, session_id: str | None = None) -> dict:
+    def write_config(
+        self,
+        source_dir: str,
+        session_id: str | None = None,
+        proxy_url: str | None = None,
+    ) -> dict:
         """Write Playwright stealth config under *source_dir*.
 
         When *session_id* is provided, writes a session-specific config file
         (e.g., ``.playwright/cli.config.agent-injection.json``) with isolated storage.
         When *session_id* is ``None`` or ``"default"``, writes the shared default config.
+
+        When *proxy_url* is provided, bakes it into the config's
+        ``launchOptions.proxy`` so playwright-cli launches Chrome through the
+        per-scan host-mapping proxy.
 
         Returns ``{"result": "wrote"|"skipped-existing", "configPath": str}``.
         """
@@ -170,7 +196,9 @@ class PlaywrightEngine:
             state_dir = playwright_dir / "state" / session_id
             state_dir.mkdir(parents=True, exist_ok=True)
 
-        config = _build_stealth_config(str(init_script_path), session_id=session_id)
+        config = _build_stealth_config(
+            str(init_script_path), session_id=session_id, proxy_url=proxy_url
+        )
         config_path.write_text(json.dumps(config, indent=2))
 
         return {"result": "wrote", "configPath": str(config_path)}

@@ -33,11 +33,16 @@ class BrowserEngine(Protocol):
         """
         ...
 
-    def session_flag(self, session_id: str) -> str:
+    def session_flag(self, session_id: str, proxy_url: str | None = None) -> str:
         """Return the CLI flag string for session isolation.
 
         For example, Playwright returns ``--session <session_id>``
         while AgentBrowser might return a different flag format.
+
+        When *proxy_url* is provided, engines that take a per-scan proxy via CLI
+        (e.g. agent-browser's ``--proxy <url>``) append it; engines that route
+        proxy through config (e.g. playwright via ``launchOptions.proxy``) ignore
+        this argument and emit the session flag unchanged.
         """
         ...
 
@@ -61,10 +66,15 @@ class BrowserEngine(Protocol):
         self,
         source_dir: str,
         session_id: str | None = None,
+        proxy_url: str | None = None,
     ) -> dict:
         """Write engine config files under *source_dir*.
 
         Returns ``{'result': 'wrote'|'skipped-existing', 'configPath': str}``.
+
+        When *proxy_url* is provided, config-based engines (playwright) bake it
+        into ``launchOptions.proxy``; CLI-flag engines (agent-browser) accept
+        and ignore it (proxy is routed via ``session_flag``).
         """
         ...
 
