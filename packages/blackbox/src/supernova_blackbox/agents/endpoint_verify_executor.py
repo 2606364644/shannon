@@ -76,6 +76,7 @@ class EndpointVerifyExecutor:
         pipeline_testing: bool = False,
         audit_logger: "ActivityLogger | None" = None,
         tool_audit_logger: "ToolAuditLogger | None" = None,
+        proxy_url: str | None = None,
     ) -> dict:
         """跑端点 live 验证 agent,产 endpoint_verify.json 到 blackbox/。
 
@@ -104,6 +105,7 @@ class EndpointVerifyExecutor:
             skip_artifact_postprocess=True,  # activity 自落盘 blackbox/,非顶层 queue
             audit_logger=audit_logger,
             tool_audit_logger=tool_audit_logger,
+            proxy_url=proxy_url,
         )
         if not metrics.structured_output:
             return {"endpoint_verify": None, "reason": "agent produced no structured output",

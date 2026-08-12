@@ -27,9 +27,20 @@ from supernova_core.audit.session_recovery import (
     build_headless_audit_session,
     ensure_audit_session,
 )
+from supernova_core.services.host_proxy import (
+    start_host_proxy,
+    stop_host_proxy as stop_host_proxy_func,
+    ProxyHandle,
+)
 
 from .shared import BlackboxActivityInput
 from supernova_blackbox.services.exploitation_checker import QueueValidationResult
+
+
+# Phase 2（HOST 档案）：per-scan 本地代理句柄注册表。
+# ``run_host_proxy_setup`` 写入（key=proxy_url），``stop_host_proxy`` pop 清理。
+# 模块级——同 worker 进程内 setup/stop activity 共享（Temporal activity 同 worker 进程内执行）。
+_PROXY_HANDLES: dict[str, ProxyHandle] = {}
 
 
 def _get_deliverables_path(input: BlackboxActivityInput) -> Path:
@@ -105,11 +116,52 @@ async def finalize_summary(input: BlackboxActivityInput, summary: dict) -> None:
 
 
 @activity.defn
+async def run_host_proxy_setup(input: BlackboxActivityInput) -> str:
+    """起 per-scan 本地代理（若 host_mappings 非空）。
+
+    Phase 2（HOST 档案）：把 HOST→IP 映射塞进 proxy.py 子进程的 DNS 插件，让黑盒所有
+    HTTP 出口统一走该代理。无映射（默认）返回 ``""``——扫描行为不变（backward compat）。
+    失败 raise ``ApplicationFailure``（fail-fast； mappings 非空却起不来代理 = 配置/环境
+    错，不应静默继续，否则扫描会落到错误的 IP 上）。
+    """
+    if not input.host_mappings:
+        return ""
+    try:
+        handle = await start_host_proxy(input.host_mappings)
+        _PROXY_HANDLES[handle.proxy_url] = handle
+        return handle.proxy_url
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def stop_host_proxy(proxy_url: str) -> None:
+    """best-effort 停代理（**绝不 raise**）。
+
+    cleanup activity——失败只 swallow，不阻断 finally 收尾（Temporal cleanup 失败会
+    让 workflow 卡在完成态）。空 url（未起代理）直接 return。
+    """
+    if not proxy_url:
+        return
+    handle = _PROXY_HANDLES.pop(proxy_url, None)
+    if handle:
+        try:
+            await stop_host_proxy_func(handle)
+        except Exception:  # noqa: BLE001 - cleanup best-effort，绝不 raise
+            pass
+
+
+@activity.defn
 async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
     try:
         # URL safety and reachability checks (mandatory for blackbox)
         if input.web_url:
-            pinned_ip = validate_target_url(input.web_url)
+            # Phase 2（HOST 档案）：host_mappings 优先（bypass DNS for 内部 hostname）。
+            pinned_ip = validate_target_url(input.web_url, host_mappings=input.host_mappings)
             reachable = await check_url_reachable(
                 input.web_url,
                 pinned_ip=pinned_ip,
@@ -256,6 +308,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             tool_audit_logger=tool_audit_logger,
             correlation_context=input.correlation_context,
             queue_root=queue_root,
+            proxy_url=input.proxy_url,
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -332,6 +385,7 @@ async def run_endpoint_verify(input: BlackboxActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
+            proxy_url=input.proxy_url,
         )
         dur_ms = int((time.monotonic() - agent_start) * 1000)
         await tool_audit_logger.close(success=True, duration_ms=dur_ms)
@@ -463,6 +517,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
             api_key=input.api_key,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
+            proxy_url=input.proxy_url,
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -672,18 +727,21 @@ async def detect_whitebox_results(
 @activity.defn
 async def write_engine_config_for_session(
     repo_path: str, session_id: str, engine_name: str,
+    proxy_url: str | None = None,
 ) -> None:
     """exploit 循环: 为每个 agent session 写浏览器 stealth config（文件 I/O，sandbox 禁）。
 
     engine_name 由 resolve_blackbox_engine 在 preflight 解析后经 workflow 透传——engine
     对象不可跨 workflow/activity 边界，故每次按 engine_name 重新 get_engine。
     write_config 幂等（wrote/skipped-existing），即便 exploit executor 内部也写无害。
+    proxy_url（Phase 2 HOST 档案）透传给 write_config，让 playwright launchOptions /
+    agent-browser --proxy 走 per-scan 代理；None=不启用代理（backward compat）。
     """
     from supernova_core.services.browser_engine import BrowserEngineFactory
     import supernova_core.services.engines  # noqa: F401 – registers engines
 
     engine = BrowserEngineFactory.get_engine(engine_name)
-    engine.write_config(repo_path, session_id=session_id)
+    engine.write_config(repo_path, session_id=session_id, proxy_url=proxy_url)
 
 
 @activity.defn
