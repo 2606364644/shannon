@@ -20,6 +20,9 @@ class BlackboxPipelineInput(BasePipelineInput):
     # C1 Phase B（黑盒 web 化）：web 提交端塞 events.ndjson 路径（env 不跨容器）。
     # None=CLI 路径（run_scan 外层 wire_web_event_file 注入 env 兜底），对齐 whitebox PipelineInput.event_file。
     event_file: str | None = None
+    # Phase 2（HOST 档案）：host→IP 映射（per-scan 代理消费），web 层 scan_manager 填。
+    # 空=未启用 HOST 档案；T7/T8 透传到 activity / sandbox /etc/hosts 注入。
+    host_mappings: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -100,6 +103,10 @@ class BlackboxActivityInput:
     provider_config: dict | None = None
     # C1 Phase B：web 路径 setup_display 透传到 AuditSession.initialize→StructuredEventRenderer。
     event_file: str | None = None
+    # Phase 2（HOST 档案）：per-activity 的 host→IP 映射 + 上游代理 URL。
+    # 由 workflow 从 BlackboxPipelineInput.host_mappings 透传；proxy_url 来自 scan_manager。
+    host_mappings: dict[str, str] = field(default_factory=dict)
+    proxy_url: str | None = None
 
 
 @dataclass
