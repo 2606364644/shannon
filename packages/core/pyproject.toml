@@ -21,6 +21,7 @@ dependencies = [
     "temporalio>=1.0",
     "watchdog>=4.0",
     "rich>=13.7.0",
+    "proxy.py>=2.4.10",
 ]
 
 [project.scripts]
