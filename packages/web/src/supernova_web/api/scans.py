@@ -9,6 +9,8 @@ GET /{ws}/events、api/scan.py 的 DELETE /api/scan/{ws}）转发到 latest scan
 """
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
@@ -76,6 +78,8 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "status": idx._status_of(scan_dir, mgr.get_status(scan_dir)),
         "created_at": _to_unix(mgr.get_created_at(scan_dir)),
         "completed_at": _to_unix(mgr.get_completed_at(scan_dir)),
+        # 服务端墙钟基准（unix 秒）：前端 offset 校正用，消除跨时钟「总耗时负数」根因。
+        "server_now": time.time(),
         "links": data.get("links", {}),
         "metrics": normalize_metrics(data.get("metrics", {})),
         "session": data.get("session", {}),

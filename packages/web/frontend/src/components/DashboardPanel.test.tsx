@@ -125,6 +125,18 @@ describe("DashboardPanel", () => {
       expect(screen.getByText(/1h 00m 00s/)).toBeInTheDocument();
     });
 
+    it("fmtMs 负数兜底为 0s（防御跨时钟残差，不显 -Xs）", () => {
+      render(
+        <DashboardPanel
+          state={emptyState()} elapsedMs={-1000} totalElapsedMs={-70000}
+        />,
+      );
+      // 两路负值都夹紧到 0s，不出现负数耗时串
+      // /^-\d/ 排除 current_phase 占位 "-"（null → "-"），只匹配 "-1s" 这类负数耗时
+      expect(screen.queryAllByText(/^-\d/)).toEqual([]);
+      expect(screen.getAllByText(/^0s$/).length).toBe(2);
+    });
+
     it("SSE 实时性：最后事件秒前 + 事件计数", () => {
       const lastEventMs = Date.now() - 3000; // 3 秒前
       render(

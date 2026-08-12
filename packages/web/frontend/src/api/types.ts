@@ -164,6 +164,9 @@ export interface SessionMetrics {
 
 export interface SessionData {
   web_url?: string; repo_path?: string; created_at?: number;
+  // 服务端墙钟基准（unix 秒）——_scan_detail 返 time.time()。前端用它做时钟 offset 校正
+  // （server_now*1000 - Date.now()），消除浏览器/服务端时钟不同步时「总耗时负数」的根因。
+  server_now?: number;
   scan_type?: string;
   status?: string;                // 顶层（可能未回写）
   completed_at?: number | null;

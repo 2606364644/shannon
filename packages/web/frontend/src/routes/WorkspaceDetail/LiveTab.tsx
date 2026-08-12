@@ -38,6 +38,17 @@ export default function LiveTab() {
   const [totalElapsed, setTotalElapsed] = useState(0);
   const [meta, setMeta] = useState<SessionData | null>(null);
   const lastApplied = useRef(0);
+  // 跨时钟 offset：服务端墙钟领先浏览器的毫秒数（getScan 采样 server_now - Date.now）。
+  // 前端 elapsed 不能裸用 Date.now() 减服务端 created_at/phaseStart——客户端与服务端时钟不同步
+  // 时会出负数（「总耗时从负数开始」）。serverNowMs() 把浏览器时钟对齐到服务端再相减，同源不负。
+  const clockOffsetMsRef = useRef(0);
+  const serverNowMs = () => Date.now() + clockOffsetMsRef.current;
+  // 每次 getScan 响应刷新 offset（服务端领先浏览器的毫秒数）。
+  const applyServerOffset = (s: SessionData | null) => {
+    if (s && typeof s.server_now === "number") {
+      clockOffsetMsRef.current = s.server_now * 1000 - Date.now();
+    }
+  };
 
   // 增量 fold（不动）
   useEffect(() => {
@@ -51,7 +62,11 @@ export default function LiveTab() {
     if (!workspace || !scanId) return;
     let cancelled = false;
     getScan(workspace, scanId)
-      .then((s) => { if (!cancelled) setMeta(s); })
+      .then((s) => {
+        if (cancelled) return;
+        applyServerOffset(s);
+        setMeta(s);
+      })
       .catch(() => { /* 降级：仅靠 SSE 数据，不阻塞 live 页 */ });
     return () => { cancelled = true; };
   }, [workspace, scanId]);
@@ -97,10 +112,10 @@ export default function LiveTab() {
     if (phaseStartMs == null || Number.isNaN(phaseStartMs)) { setElapsed(0); return; }
     // 扫描已完成：阶段耗时定格（completedAt/scan_end 时刻 - phaseStart），不再 tick。
     if (isCompleted) {
-      setElapsed((effectiveEndMs ?? Date.now()) - phaseStartMs);
+      setElapsed(Math.max(0, (effectiveEndMs ?? serverNowMs()) - phaseStartMs));
       return;
     }
-    const tick = () => setElapsed(Date.now() - phaseStartMs);
+    const tick = () => setElapsed(Math.max(0, serverNowMs() - phaseStartMs));
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
@@ -111,10 +126,10 @@ export default function LiveTab() {
     if (startedAtMs == null) { setTotalElapsed(0); return; }
     // 扫描已完成：总耗时定格（completedAt/scan_end 时刻 - createdAt），不再 tick。
     if (isCompleted) {
-      setTotalElapsed((effectiveEndMs ?? Date.now()) - startedAtMs);
+      setTotalElapsed(Math.max(0, (effectiveEndMs ?? serverNowMs()) - startedAtMs));
       return;
     }
-    const tick = () => setTotalElapsed(Date.now() - startedAtMs);
+    const tick = () => setTotalElapsed(Math.max(0, serverNowMs() - startedAtMs));
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
@@ -124,7 +139,7 @@ export default function LiveTab() {
   useEffect(() => {
     if (!endedCompleted || !workspace || !scanId) return;
     getScan(workspace, scanId)
-      .then((s) => setMeta(s))
+      .then((s) => { applyServerOffset(s); setMeta(s); })
       .catch(() => { /* 兜底失败不阻塞，沿用 SSE 累积 */ });
   }, [endedCompleted, workspace, scanId]);
 

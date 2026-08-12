@@ -388,6 +388,8 @@ def test_scan_detail_session_data_shape(authed_client, tmp_workspaces):
     assert d["repo_path"] == "/repo"
     assert d["status"] == "completed"
     assert isinstance(d["created_at"], (int, float))
+    # server_now：服务端墙钟基准（秒），供前端做跨时钟 offset 校正，消除「总耗时负数」根因。
+    assert isinstance(d["server_now"], (int, float))
     assert "recon" in d["metrics"]["phases"]
     assert "recon" in d["metrics"]["agents"]
     assert d["metrics"]["total_cost_usd"] == 1.5

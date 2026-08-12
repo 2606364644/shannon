@@ -151,6 +151,29 @@ describe("LiveTab", () => {
     });
   });
 
+  // ── 治本：跨时钟源相减校正（server_now offset）──
+  it("服务端时钟领先浏览器时，总耗时经 offset 校正显示真实正值", async () => {
+    vi.useFakeTimers();
+    const browserNowMs = Date.UTC(2026, 7, 12, 2, 49, 45);
+    vi.setSystemTime(browserNowMs);
+    const browserSec = Math.floor(browserNowMs / 1000);
+    // 服务端时钟领先浏览器 10s；扫描在服务端 5 秒前创建。真实总耗时 = 5s。
+    // 旧逻辑（裸 Date.now - created_at）= -5s；仅 fmtMs clamp = 0s（失真）；offset 校正 = 5s（正确）。
+    scanMetaState.meta = {
+      created_at: browserSec + 5, server_now: browserSec + 10,
+      completed_at: null, metrics: {},
+    };
+    eventsState.events = [];
+    eventsState.status = "open";
+    renderLive();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // 校正后总耗时 = 5s（非 -5s / 非 0s），且面板无任何负数耗时串
+    expect(screen.getByText(/^5s$/)).toBeInTheDocument();
+    // /^-\d/ 排除 current_phase 占位 "-"（null → "-"），只匹配 "-5s" 这类负数耗时
+    expect(screen.queryAllByText(/^-\d/)).toEqual([]);
+    vi.useRealTimers();
+  });
+
   it("getScan 失败时降级（不阻塞 live 页，仍渲染 LogStream）", () => {
     scanMetaState.meta = null;
     eventsState.events = [];

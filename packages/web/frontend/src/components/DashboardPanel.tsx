@@ -4,6 +4,7 @@ import type { DashboardState } from "../state/dashboardReducer";
 import { fmtCost } from "../utils/currency";
 
 function fmtMs(ms: number): string {
+  if (ms < 0) ms = 0; // 负耗时无意义（跨时钟残差/边界），夹紧到 0
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
