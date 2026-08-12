@@ -16,6 +16,10 @@ class ToolContext:
     cwd: str
     # spec 改动 4a：子代理委派 runner。provider 注入（关 chat_model+cwd）；测试可 mock。
     subagent_run: Callable[[str], Awaitable[str]] | None = None
+    # Task 2（黑盒 HOST 档案）：per-scan 出口代理 URL。None=不注入（向后兼容）。
+    # 由 executor（Task 4）从 host_profile 灌入；bash/web_fetch/web_search 读此字段
+    # 注入 HTTPS_PROXY/HTTP_PROXY/NO_PROXY env 或 httpx ``proxy=`` kwarg。
+    proxy_url: str | None = None
 
 
 def build_tools():

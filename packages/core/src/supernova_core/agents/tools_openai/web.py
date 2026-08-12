@@ -22,6 +22,18 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "...[truncated]"
 
 
+def _client_kwargs(proxy_url: str | None) -> dict:
+    """构造 httpx.AsyncClient kwargs：proxy_url 非空→加 ``proxy=``（httpx 0.28.x 单数）。
+
+    httpx 0.28.0 移除了复数 ``proxies=`` 参数；用错会在生产 raise TypeError。
+    proxy_url 为 None 时不加 proxy kwarg（向后兼容铁律）。
+    """
+    kw = {"timeout": 30, "follow_redirects": True}
+    if proxy_url:
+        kw["proxy"] = proxy_url
+    return kw
+
+
 async def _web_fetch_impl(
     ctx: RunContextWrapper[ToolContext],
     url: str,
@@ -34,7 +46,7 @@ async def _web_fetch_impl(
         max_length: Max characters to return (default 30000).
     """
     try:
-        client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+        client = httpx.AsyncClient(**_client_kwargs(ctx.context.proxy_url))
         try:
             resp = await client.get(url, headers={"User-Agent": "shannon-openai-engine/1.0"})
             resp.raise_for_status()
@@ -57,7 +69,7 @@ async def _web_search_impl(
         max_results: Max number of results (default 10).
     """
     try:
-        client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+        client = httpx.AsyncClient(**_client_kwargs(ctx.context.proxy_url))
         try:
             resp = await client.get(
                 "https://lite.duckduckgo.com/lite/",

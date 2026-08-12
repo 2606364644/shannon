@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 import subprocess
@@ -14,11 +15,30 @@ from . import ToolContext
 _MAX_OUTPUT = 30000
 _TRUNCATED = "...[truncated]"
 
+# 不走 per-scan 代理的目的地——loopback 本机服务（LLM / temporal / 子代理 IPC 等）。
+# per-scan 代理只拦截出公网的扫描流量；本机回路走代理会断内部通信。
+_NO_PROXY_LOOPBACK = "127.0.0.1,localhost"
+
 
 def _truncate(text: str) -> str:
     if len(text) > _MAX_OUTPUT:
         return text[:_MAX_OUTPUT] + _TRUNCATED
     return text
+
+
+def _build_proxy_env(proxy_url: str | None) -> dict[str, str] | None:
+    """构造子进程 env：proxy_url 非空→注入 HTTPS/HTTP_PROXY + NO_PROXY(loopback)。
+
+    proxy_url 为 None 时返 None，让 asyncio 继承父进程 env（向后兼容铁律）。
+    """
+    if not proxy_url:
+        return None
+    return {
+        **os.environ,
+        "HTTPS_PROXY": proxy_url,
+        "HTTP_PROXY": proxy_url,
+        "NO_PROXY": _NO_PROXY_LOOPBACK,
+    }
 
 
 async def _bash_impl(
@@ -34,10 +54,13 @@ async def _bash_impl(
     """
     cwd = ctx.context.cwd
     timeout = max(1, min(int(timeout), 600))
+    # proxy_url=None→env=None（继承 worker env，向后兼容）；非空→注入出口代理 env。
+    env = _build_proxy_env(ctx.context.proxy_url)
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=cwd,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
