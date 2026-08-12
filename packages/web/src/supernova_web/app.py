@@ -443,13 +443,15 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.credential_vault import CredentialVault
     from .components.ws_config_store import WsConfigStore
     from .components.auth_profile_store import AuthProfileStore
-    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles
+    from .components.host_profile_store import HostProfileStore
+    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles, host_profiles
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
     app.state.credential_vault = CredentialVault(cfg.master_key_file)
     app.state.ws_config_store = WsConfigStore(cfg.workspaces_dir, app.state.credential_vault)
     app.state.auth_profile_store = AuthProfileStore(cfg.workspaces_dir, app.state.credential_vault)
+    app.state.host_profile_store = HostProfileStore(cfg.workspaces_dir)
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
     # 品牌名运行时覆盖存储(设置页改名):branding.json 落盘,system_status 解析优先读。
     app.state.branding_store = BrandingStore(cfg.workspaces_dir)
@@ -462,7 +464,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
         cfg.workspaces_dir, cfg.repos_dir, app.state.config_store,
         max_concurrent=cfg.max_concurrent, scan_timeout=cfg.scan_timeout,
         ws_config_store=app.state.ws_config_store,
-        auth_profile_store=app.state.auth_profile_store)
+        auth_profile_store=app.state.auth_profile_store,
+        host_profile_store=app.state.host_profile_store)
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
         cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
 
@@ -480,6 +483,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(ws_config.router, dependencies=_require_auth)
     app.include_router(users.router, dependencies=_require_auth)
     app.include_router(auth_profiles.router, dependencies=_require_auth)
+    app.include_router(host_profiles.router, dependencies=_require_auth)
     # branding:GET 需登录(任意角色可看当前名),PUT 需 admin(route 内 require_admin)。
     app.include_router(branding.router, dependencies=_require_auth)
 

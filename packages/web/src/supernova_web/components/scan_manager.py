@@ -79,7 +79,8 @@ class ScanManager:
     def __init__(self, workspaces_dir: Path, repos_dir: Path, config_store: Any,
                  max_concurrent: int = 1, scan_timeout: float = 0.0,
                  ws_config_store: Any = None,
-                 auth_profile_store: Any = None) -> None:
+                 auth_profile_store: Any = None,
+                 host_profile_store: Any = None) -> None:
         self._workspaces_dir = Path(workspaces_dir)
         self._repos_dir = Path(repos_dir)
         self._config_store = config_store
@@ -95,6 +96,9 @@ class ScanManager:
         # 认证档案库（Task 4）：认证管理页"测试登录"探针读写 verify_status 的 store;
         # None=旧测试/CLI 兜底（不调 start_auth_validation 即不影响既有流程）。
         self._auth_profile_store = auth_profile_store
+        # HOST 档案库（Task 11 会用）：domain→IP 映射注入扫描前 resolve_host。
+        # None=旧测试/CLI 兜底（不影响既有流程）；T10 仅声明参数让 app 能 boot。
+        self.host_profile_store = host_profile_store
         # T3: ScanStore 复用 core SessionManager 做 scan 读写（core 零改动）。
         self._store = ScanStore(self._workspaces_dir)
         # 串行化黑盒 create_scan，保证 <wb>~<N> 序号分配原子（防并发同白盒争同序号）。
