@@ -137,6 +137,35 @@ def combined_dir(deliverables_dir: Path) -> Path:
     return deliverables_dir / COMBINED_SUBDIR
 
 
+BLACKBOX_RUNS_SUBDIR: str = "blackbox-runs"
+
+
+def blackbox_runs_dir(scan_dir: Path) -> Path:
+    """任务根下的 blackbox-runs/ 父目录（spec §4）。
+
+    scan_dir 是白盒任务根（workspaces/<session>），blackbox-runs/ 与 deliverables/
+    平级——每个黑盒 run 是其下 run-K/ 子目录。
+    """
+    return Path(scan_dir) / BLACKBOX_RUNS_SUBDIR
+
+
+def blackbox_run_dir(scan_dir: Path, run_id: str) -> Path:
+    """单个黑盒 run 子目录：scan_dir/blackbox-runs/{run_id}/。
+
+    run 拥有独立的 events.ndjson / session.json / deliverables/blackbox/。
+    """
+    return blackbox_runs_dir(scan_dir) / run_id
+
+
+def combined_run_dir(scan_dir: Path, run_id: str) -> Path:
+    """per-run 融合报告目录：scan_dir/combined/{run_id}/（spec §4/§9）。
+
+    与 blackbox-runs/ 平级的 combined/ 下按 run 隔离，存
+    ``combined_report.md``。
+    """
+    return Path(scan_dir) / COMBINED_SUBDIR / run_id
+
+
 def resolve_track_deliverable(deliverables_dir: Path, track: str, filename: str) -> Path:
     """读侧 fallback：先 deliverables_dir/{track}/filename（新结构），无则回退
     deliverables_dir/filename（老 workspace）。两者都不存在时返回新结构路径，

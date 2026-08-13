@@ -277,6 +277,15 @@ class TestTrackSubdirHelpers:
         assert WHITEBOX_SUBDIR == "whitebox"
         assert BLACKBOX_SUBDIR == "blackbox"
 
+    def test_blackbox_runs_helpers(self, tmp_path):
+        from supernova_core.utils.paths import (
+            BLACKBOX_RUNS_SUBDIR, blackbox_runs_dir, blackbox_run_dir, combined_run_dir)
+        scan_dir = tmp_path / "repo-ts"
+        assert BLACKBOX_RUNS_SUBDIR == "blackbox-runs"
+        assert blackbox_runs_dir(scan_dir) == scan_dir / "blackbox-runs"
+        assert blackbox_run_dir(scan_dir, "run-1") == scan_dir / "blackbox-runs" / "run-1"
+        assert combined_run_dir(scan_dir, "run-1") == scan_dir / "combined" / "run-1"
+
 
 class TestResolveTrackDeliverable:
     def test_prefers_new_track_subdir(self, tmp_path):
