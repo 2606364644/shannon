@@ -72,7 +72,7 @@ def ensure_global_admin_member(workspace_name: str, store: AuthStore) -> None:
 
 
 def ensure_global_admin_access(workspaces_dir: Path, store: AuthStore) -> None:
-    """Idempotently add canonical ``admin`` to every visible real workspace."""
+    """Idempotently add canonical ``admin`` to every non-system workspace directory."""
     admin = _global_admin(store)
     if admin is None or not workspaces_dir.is_dir():
         return
@@ -80,8 +80,7 @@ def ensure_global_admin_access(workspaces_dir: Path, store: AuthStore) -> None:
     for ws_dir in workspaces_dir.iterdir():
         if not ws_dir.is_dir() or ws_dir.name.startswith("."):
             continue
-        if _workspace_is_real(ws_dir):
-            store.add_workspace_member(ws_dir.name, admin.id, "manager")
+        store.add_workspace_member(ws_dir.name, admin.id, "manager")
 
 
 def ensure_all_user_workspaces(workspaces_dir: Path, store: AuthStore) -> None:

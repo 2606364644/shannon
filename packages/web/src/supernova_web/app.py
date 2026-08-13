@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     load_env()
     # auth: 启动 seed 预置账号 + 周期清理过期 session
     from .auth.seed import seed_users, bootstrap_default_admin
+    from .components.workspace_provisioner import ensure_all_user_workspaces
     import asyncio
     seed_users(app.state.auth_store, app.state.config.users_seed_file)
     # 全新部署（无 users.yaml / 空库）兜底：库内无 admin 时建默认 admin/123456
@@ -38,6 +39,8 @@ async def lifespan(app: FastAPI):
             "Bootstrapped default admin %r with default password — change it on first login.",
             app.state.config.default_admin_username,
         )
+    # 用户、seed/bootstrap 账号的同名工作区以及 canonical admin 成员关系都在启动时幂等补偿。
+    ensure_all_user_workspaces(app.state.config.workspaces_dir, app.state.auth_store)
 
     async def _purge_loop():
         while True:
@@ -111,22 +114,16 @@ async def _reconcile_orphaned_scans(app: FastAPI) -> None:
 
 
 def _migrate_legacy_workspace_members(app: FastAPI) -> None:
-    """把无成员记录的 legacy workspace 分配给所有 admin（manager），让 admin 能见/管。
-    已有成员记录的 workspace 不动（不重复分配、不覆盖）。"""
-    store = app.state.auth_store
-    admins = [u for u in store.list_all_users() if u.role == "admin"]
-    if not admins:
-        return
-    ws_dir = app.state.config.workspaces_dir
-    if not ws_dir.is_dir():
-        return
-    for d in ws_dir.iterdir():
-        if not d.is_dir():
-            continue
-        if store.list_workspace_members(d.name):
-            continue  # 已有成员，跳过
-        for a in admins:
-            store.add_workspace_member(d.name, a.id, "manager")
+    """将 canonical ``admin`` 幂等加入所有 legacy/真实 workspace。
+
+    普通成员和其他超管的既有成员关系保持不变；只有用户名正好为 ``admin`` 且角色仍为
+    ``admin`` 的账号获得默认全局 workspace 成员关系。"""
+    from .components.workspace_provisioner import ensure_global_admin_access
+
+    ensure_global_admin_access(
+        app.state.config.workspaces_dir,
+        app.state.auth_store,
+    )
 
 
 def _migrate_legacy_repos(app: FastAPI) -> None:

@@ -3,7 +3,7 @@ from starlette.testclient import TestClient
 from supernova_web.app import create_app
 
 
-def test_legacy_workspace_assigned_to_admins(tmp_workspaces, monkeypatch):
+def test_legacy_workspace_assigned_to_canonical_admin(tmp_workspaces, monkeypatch):
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     # tmp_workspaces 设 SUPERNOVA_WORKER_ROOT=tmp_path/"workspaces"，而
     # resolve_workspaces_dir() 会再追加 /"workspaces" -> 嵌套一层不存在的目录，
@@ -20,17 +20,48 @@ def test_legacy_workspace_assigned_to_admins(tmp_workspaces, monkeypatch):
     assert app.state.auth_store.get_workspace_member_role("legacy_ws", admin.id) == "manager"
 
 
-def test_workspace_with_members_not_reassigned(tmp_workspaces, monkeypatch):
+def test_workspace_with_members_gets_canonical_admin_without_reassigning_members(
+    tmp_workspaces, monkeypatch
+):
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     # 同上 rebase，使 workspaces_dir == tmp_workspaces。
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
     app = create_app()
     admin = app.state.auth_store.create_user("admin", "h", role="admin")
+    ops = app.state.auth_store.create_user("ops", "h", role="admin")
     alice = app.state.auth_store.create_user("alice", "h")
     (app.state.config.workspaces_dir / "ws1").mkdir()
     app.state.auth_store.add_workspace_member("ws1", alice.id, "manager")  # 已有成员
     with TestClient(app):
         pass
-    # admin 不被重复加（已有成员记录的不动）-- 验证仍只有 alice
     members = app.state.auth_store.list_workspace_members("ws1")
-    assert len(members) == 1 and members[0][1] == "alice"
+    assert app.state.auth_store.get_workspace_member_role("ws1", admin.id) == "manager"
+    assert app.state.auth_store.get_workspace_member_role("ws1", ops.id) is None
+    assert app.state.auth_store.get_workspace_member_role("ws1", alice.id) == "manager"
+    assert len(members) == 2
+
+
+def test_startup_provisions_historical_user_workspaces(tmp_workspaces, monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    app = create_app()
+    st = app.state.auth_store
+    admin = st.create_user("admin", "h", role="admin")
+    ops = st.create_user("ops", "h", role="admin")
+    alice = st.create_user("alice", "h")
+    ws = app.state.config.workspaces_dir / "existing"
+    ws.mkdir()
+    from supernova_web.components.scan_store import write_workspace_meta
+    write_workspace_meta(ws, name="existing", owner="seed")
+    st.add_workspace_member("existing", alice.id, "member")
+
+    with TestClient(app):
+        pass
+
+    assert (app.state.config.workspaces_dir / "alice" / "workspace.json").exists()
+    assert st.get_workspace_member_role("alice", alice.id) == "manager"
+    assert st.get_workspace_member_role("alice", admin.id) == "manager"
+    assert st.get_workspace_member_role("alice", ops.id) is None
+    assert st.get_workspace_member_role("existing", admin.id) == "manager"
+    assert st.get_workspace_member_role("existing", alice.id) == "member"
+    assert st.get_workspace_member_role("existing", ops.id) is None
