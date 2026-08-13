@@ -135,6 +135,7 @@ def _build_validate_auth_executor_kwargs(
     state_file: Path,
     audit_logger: "ActivityLogger | None",
     tool_audit_logger: "ToolAuditLogger | None",
+    proxy_url: str | None = None,
 ) -> dict:
     """Build the kwargs dict for one validate-authentication executor.execute call.
 
@@ -153,6 +154,7 @@ def _build_validate_auth_executor_kwargs(
         structured_output_schema=AUTH_VALIDATION_SCHEMA,
         audit_logger=audit_logger,
         tool_audit_logger=tool_audit_logger,
+        proxy_url=proxy_url,
     )
 
 
@@ -168,6 +170,7 @@ async def validate_authentication(
     api_key: str | None = None,
     audit_logger: "ActivityLogger | None" = None,
     tool_audit_logger: "ToolAuditLogger | None" = None,
+    proxy_url: str | None = None,
 ) -> AuthValidationResult:
     """Validate user-supplied credentials by running the validate-authentication agent.
 
@@ -209,6 +212,7 @@ async def validate_authentication(
                 deliverables_path=deliverables_path, api_key=api_key,
                 repo_path=repo_path, state_file=state_file,
                 audit_logger=audit_logger, tool_audit_logger=tool_audit_logger,
+                proxy_url=proxy_url,
             )
         )
 
@@ -260,6 +264,7 @@ async def validate_authentication(
                     deliverables_path=deliverables_path, api_key=api_key,
                     repo_path=repo_path, state_file=state_file,
                     audit_logger=audit_logger, tool_audit_logger=tool_audit_logger,
+                    proxy_url=proxy_url,
                 )
             )
             so = (metrics.structured_output or {}) if metrics and metrics.structured_output is not None else {}

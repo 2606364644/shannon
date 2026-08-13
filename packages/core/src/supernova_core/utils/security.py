@@ -105,17 +105,24 @@ async def check_url_reachable(
     timeout: int = 10,
     pinned_ip: str | None = None,
     original_host: str | None = None,
+    proxy_url: str | None = None,
 ) -> bool:
     """Return ``True`` when an HTTP HEAD to *url* succeeds (any HTTP response).
 
-    When *pinned_ip* and *original_host* are provided, the request connects
-    to the pinned IP directly with a ``Host`` header set to the original host.
-    This prevents DNS rebinding attacks.
+    With a per-scan HOST proxy, keep the original URL so the proxy preserves the
+    target hostname for HTTP Host and HTTPS SNI while its resolver applies the
+    snapshot.  Without a proxy, retain the legacy pinned-IP + Host-header path.
     """
     try:
         # verify=False is intentional: pentest targets often use self-signed certs
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
-            if pinned_ip and original_host:
+        client_kwargs = {"verify": False, "timeout": timeout}
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            if proxy_url:
+                # Proxy routing is the only path that preserves the original TLS SNI.
+                resp = await client.head(url, follow_redirects=False)
+            elif pinned_ip and original_host:
                 parsed = urlparse(url)
                 port_suffix = f":{parsed.port}" if parsed.port else ""
                 ip_url = url.replace(

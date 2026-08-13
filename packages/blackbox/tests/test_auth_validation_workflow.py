@@ -254,3 +254,64 @@ async def test_probe_wires_agent_observability(tmp_path, monkeypatch):
     agent_events = [e for e in events if e.get("type") == "AgentEvent"]
     assert any(e.get("event") == "start" for e in agent_events)
     assert any(e.get("event") == "end" for e in agent_events)
+
+
+@pytest.mark.asyncio
+async def test_workflow_auth_precheck_starts_and_cleans_host_proxy():
+    """独立组合 auth workflow 与黑盒 workflow 一样使用 HOST snapshot。"""
+    calls = []
+
+    def get(input_value, key):
+        return input_value.get(key) if isinstance(input_value, dict) else getattr(input_value, key)
+
+    @activity.defn
+    async def setup_display(i):
+        calls.append(("setup_display", get(i, "host_mappings"), get(i, "proxy_url")))
+
+    @activity.defn
+    async def run_host_proxy_setup(i):
+        calls.append(("setup_proxy", dict(get(i, "host_mappings"))))
+        return "http://127.0.0.1:19090"
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        calls.append(("phase", get(i, "proxy_url")))
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        calls.append(("probe", get(i, "proxy_url"), dict(get(i, "host_mappings"))))
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def stop_host_proxy(proxy_url):
+        calls.append(("stop_proxy", proxy_url))
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        calls.append(("finalize", get(i, "proxy_url")))
+
+    inp = BlackboxAuthValidationInput(
+        web_url="https://target.internal/",
+        config_path="/cfg.yaml",
+        workspace_path="/wp",
+        host_mappings={"target.internal": "10.0.0.2"},
+    )
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client,
+            task_queue="tq-auth-host",
+            workflows=[AuthValidationWorkflow],
+            activities=[setup_display, run_host_proxy_setup,
+                        log_phase_start_activity, run_auth_validation_probe,
+                        stop_host_proxy, finalize_summary],
+        ):
+            result = await env.client.execute_workflow(
+                AuthValidationWorkflow.run, inp, id="w-auth-host", task_queue="tq-auth-host",
+            )
+
+    assert result.success is True
+    assert ("setup_proxy", {"target.internal": "10.0.0.2"}) in calls
+    assert ("probe", "http://127.0.0.1:19090", {"target.internal": "10.0.0.2"}) in calls
+    assert ("stop_proxy", "http://127.0.0.1:19090") in calls
+    assert calls.index(next(c for c in calls if c[0] == "setup_proxy")) < \
+        calls.index(next(c for c in calls if c[0] == "probe"))

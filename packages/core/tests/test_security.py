@@ -110,3 +110,38 @@ class TestValidateTargetUrl:
             with pytest.raises(PentestError) as exc_info:
                 validate_target_url("https://unresolvable.invalid")
             assert exc_info.value.error_code == ErrorCode.TARGET_UNREACHABLE
+
+
+@pytest.mark.asyncio
+async def test_pinned_https_reachability_uses_scan_proxy_for_original_host(monkeypatch):
+    """When a HOST proxy exists, preflight must preserve URL host/SNI through it."""
+    import supernova_core.utils.security as security
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def head(self, url, **kwargs):
+            captured["url"] = url
+            captured["head_kwargs"] = kwargs
+            return object()
+
+    monkeypatch.setattr(security.httpx, "AsyncClient", FakeClient)
+
+    assert await security.check_url_reachable(
+        "https://internal.example/login",
+        pinned_ip="10.0.0.2",
+        original_host="internal.example",
+        proxy_url="http://127.0.0.1:19090",
+    ) is True
+    assert captured["client_kwargs"]["proxy"] == "http://127.0.0.1:19090"
+    assert captured["url"] == "https://internal.example/login"
+    assert captured["head_kwargs"]["follow_redirects"] is False

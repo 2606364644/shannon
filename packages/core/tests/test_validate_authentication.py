@@ -719,3 +719,30 @@ async def test_no_accounts_skips_manifest_byte_identical(tmp_path):
     assert (tmp_path / "identity-manifest.json").exists() is False
     assert load_identity_manifest(tmp_path) is None
 
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_forwards_proxy_url_to_executor(tmp_path):
+    """HOST proxy must reach the validate-authentication agent executor."""
+    from supernova_core.models.metrics import AgentMetrics
+
+    async def fake_execute(**kwargs):
+        return AgentMetrics(duration_ms=1, structured_output={"login_success": True})
+
+    executor = MagicMock()
+    executor.execute = AsyncMock(side_effect=fake_execute)
+    dist_config = MagicMock(authentication={"username": "admin"}, accounts=[])
+
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=dist_config):
+        result = await validate_authentication(
+            web_url="https://target.internal/login",
+            config_path="/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=MagicMock(),
+            executor=executor,
+            proxy_url="http://127.0.0.1:19090",
+        )
+
+    assert result.success is True
+    assert executor.execute.call_args.kwargs["proxy_url"] == "http://127.0.0.1:19090"

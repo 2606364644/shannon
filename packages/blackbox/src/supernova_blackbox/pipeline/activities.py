@@ -166,6 +166,7 @@ async def run_blackbox_preflight(input: BlackboxActivityInput) -> None:
                 input.web_url,
                 pinned_ip=pinned_ip,
                 original_host=urlparse(input.web_url).hostname,
+                proxy_url=input.proxy_url,
             )
             if not reachable:
                 raise PentestError(
@@ -231,6 +232,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             deliverables_path=str(deliverables),
             api_key=input.api_key,
             tool_audit_logger=tool_audit_logger,
+            proxy_url=input.proxy_url,
         )
         await tool_audit_logger.close(
             success=True, duration_ms=int((time.monotonic() - agent_start) * 1000))
@@ -810,7 +812,11 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
 
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     agent_name = AgentName.VALIDATE_AUTH
-    attempt = activity.info().attempt
+    try:
+        attempt = activity.info().attempt
+    except RuntimeError:
+        # Direct unit/CLI invocation has no Temporal activity context.
+        attempt = 1
     session = get_audit_session()
     tool_audit_logger = SessionToolAuditLogger(session, agent_name.value, attempt)
     agent_start = time.monotonic()
@@ -833,6 +839,7 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
             executor=executor,
             api_key=input.api_key,
             tool_audit_logger=tool_audit_logger,
+            proxy_url=input.proxy_url,
         )
     except Exception as e:
         # 降级:不 raise(仿 run_endpoint_verify activities.py:349-356),但照常收尾可观测性

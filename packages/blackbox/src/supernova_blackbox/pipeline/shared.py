@@ -38,6 +38,9 @@ class BlackboxAuthValidationInput(BasePipelineInput):
     # 块1（认证验证可观测性）：probe events.ndjson 落点，透传 setup_display 写 agent 登录过程。
     # None=未启用可观测性（CLI 直调等），setup_display 拿到 None 不挂 StructuredEventRenderer。
     event_file: str | None = None
+    # Combined auth precheck may run in its own workflow, but it must receive the
+    # same immutable HOST snapshot as the subsequent blackbox workflow.
+    host_mappings: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

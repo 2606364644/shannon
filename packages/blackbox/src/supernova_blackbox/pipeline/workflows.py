@@ -648,12 +648,14 @@ class AuthValidationWorkflow:
             workspace_path=input.workspace_path,
             api_key=input.api_key,
             event_file=input.event_file,
+            host_mappings=input.host_mappings or {},
         )
         # 块1（认证验证可观测性）：setup_display 挂 AuditSession + StructuredEventRenderer 写
         # events.ndjson（agent 登录每步落盘）。event_file=None（CLI 直调）则不挂 renderer，setup_display
         # 照跑挂 NullAuditSession 兜底。setup_display 自身失败不阻塞验证（降级无 events，spec 风险），
         # 故 try/except 吞掉；但成功后 finalize 必跑（停 heartbeat，否则 daemon 线程泄漏）。
         display_ok = False
+        proxy_url = ""
         try:
             await workflow.execute_activity(
                 activities.setup_display, act_input,
@@ -664,6 +666,14 @@ class AuthValidationWorkflow:
         except Exception:
             pass  # 验证照跑（无 events），NullAuditSession 兜底后续 log_phase
         try:
+            if act_input.host_mappings:
+                proxy_url = await workflow.execute_activity(
+                    activities.run_host_proxy_setup, act_input,
+                    start_to_close_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+                if proxy_url:
+                    act_input.proxy_url = proxy_url
             # 声明 auth-validation 阶段的 4 步（步骤条）：step key 与 log_milestone 工具同源
             # （AUTH_VALIDATION_PROGRESS），reducer 按 name 匹配推进。steps/intents 经
             # log_phase_start_activity 透传到 PhaseEvent(steps=...)。
@@ -684,6 +694,15 @@ class AuthValidationWorkflow:
                 retry_policy=retry_for("auth-validation"),
             )
         finally:
+            if proxy_url:
+                try:
+                    await workflow.execute_activity(
+                        activities.stop_host_proxy, proxy_url,
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=RetryPolicy(maximum_attempts=1),
+                    )
+                except Exception:
+                    pass
             if display_ok:
                 # finalize_summary：drain LogBus + log_workflow_complete + 停 heartbeat + 清 session。
                 # summary 最小集（auth-validation 无 agent_metrics 聚合，finalize_summary 容错 .get 读）。

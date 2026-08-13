@@ -66,3 +66,18 @@ async def test_probe_calls_validate_with_prompt_manager_and_executor():
     assert kwargs["workspace_path"] == "/wp"
     assert kwargs["deliverables_path"]  # 必传(对齐 run_blackbox_auth_validation;f1abf69d 删 fallback 后漏传会 raise)
     assert "prompt_manager" in kwargs and "executor" in kwargs  # 必传,非 None
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_probe_forwards_proxy_url(monkeypatch):
+    """独立 auth probe 也必须保留 proxy_url 语义（兼容 future HOST callers）。"""
+    from types import SimpleNamespace
+    monkeypatch.setattr("supernova_blackbox.pipeline.activities.activity.info", lambda: SimpleNamespace(attempt=1, workflow_id=""))
+    inp = _input()
+    inp.proxy_url = "http://127.0.0.1:19090"
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(return_value=AuthValidationResult(success=True)),
+    ) as validate:
+        await run_auth_validation_probe(inp)
+    assert validate.call_args.kwargs["proxy_url"] == "http://127.0.0.1:19090"
