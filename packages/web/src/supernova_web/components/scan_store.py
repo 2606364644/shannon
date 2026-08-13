@@ -35,6 +35,57 @@ def _now_local() -> datetime:
     return datetime.now()
 
 
+def _compute_progress_pct(status: str, combined: bool | None,
+                          bb_phase: str | None, data: dict) -> float:
+    """收起态粗略进度 0-100（spec §9.2 三阶段加权）。
+
+    组合扫描（combined=True）按三阶段加权：
+        precheck        → 0%（预验证期无 completed）
+        白盒中(pending) → 5 + 50 × (wb_completed / wb_expected)
+        黑盒中(running) → 55 + 45 × (bb_completed / bb_expected)
+        completed       → 100%
+        failed/skipped  → 0%（终态，非成功完成）
+    纯白盒/纯黑盒（combined 非 True）：completed / expected × 100（expected 缺失 → 0）。
+
+    收起态精度门槛低（用户不展开不细看），故除零保护 + 容错缺失字段。
+    """
+    if status == "completed":
+        return 100.0
+    if status in ("failed", "cancelled", "skipped"):
+        return 0.0
+
+    expected = data.get("expected_agents") or {} if isinstance(data, dict) else {}
+    completed = data.get("completed_agents") or [] if isinstance(data, dict) else []
+    completed_n = len(completed) if isinstance(completed, list) else 0
+
+    if combined is True:
+        # 三阶段加权（spec §9.2）：precheck 0-5% / 白盒 5-50% / 黑盒 55-45%。
+        wb_expected = expected.get("whitebox", 0) or 0
+        bb_expected = expected.get("blackbox", 0) or 0
+        # completed_agents 不分白盒/黑盒（累积），用 bb_phase 判当前阶段 + 白盒/黑盒 expected
+        # 拆分子（pending 期分子=白盒 agent 数；running 期分子需扣白盒 expected，算黑盒增量）。
+        if bb_phase == "precheck":
+            return 0.0
+        if bb_phase in ("pending", None):
+            # 白盒中：completed 中属白盒阶段的进度。completed_n 可能跨阶段累积，用 wb_expected 截断。
+            wb_done = min(completed_n, wb_expected) if wb_expected > 0 else 0
+            ratio = (wb_done / wb_expected) if wb_expected > 0 else 0.0
+            return round(5 + 50 * ratio, 1)
+        if bb_phase == "running":
+            # 黑盒中：白盒段已满 50% + 黑盒增量 45%。
+            bb_done = max(completed_n - wb_expected, 0) if bb_expected > 0 else 0
+            ratio = (bb_done / bb_expected) if bb_expected > 0 else 0.0
+            return round(55 + 45 * ratio, 1)
+        # bb_phase=completed 已在上面 status==completed 处理；其余（failed/skipped bb_phase）→ 0。
+        return 0.0
+
+    # 纯白盒/纯黑盒：completed / expected × 100。
+    wb_expected = expected.get("whitebox", 0) or 0
+    if wb_expected > 0:
+        return round(min(completed_n / wb_expected, 1.0) * 100, 1)
+    return 0.0
+
+
 def _repo_label(repo_path: str) -> str:
     """从 repo_path 派生仓库名标签（scan_id 前缀）：basename 合法化为目录名/标识符安全
     字符——连续的路径分隔符 / 空白 / 点 -> 单个 '-'，去首尾 '-'，空 fallback 'repo'。
@@ -163,6 +214,12 @@ class ScanSummary:
 
     含 indexer 旧 row 所需的全部 scan 级字段（vuln_counts/total_duration_ms/links/
     is_correlation），使 1 ws : N scans 后 ws 列表行能从 latest scan 聚合，兼容旧前端。
+
+    组合扫描字段（2026-08-13 Task 1，spec §6.2/§9.2）：
+    - combined：是否组合扫描（纯白盒/纯黑盒为 False/None）；
+    - bb_phase：组合扫描黑盒阶段（precheck/pending/running/completed/failed/skipped）；
+    - bb_reason：组合扫描失败/跳过原因；
+    - progress_pct：收起态粗略进度（0-100，spec §9.2 三阶段加权），由 list_scans 构建。
     """
     scan_id: str
     scan_type: str
@@ -178,6 +235,11 @@ class ScanSummary:
     is_running: bool
     is_correlation: bool
     workflow_id: str  # temporal workflow 标识 {ws}-{scan_id}[-resume-N]，前端任务名展示
+    # 组合扫描字段（默认值兼容纯白盒/纯黑盒：combined=False/None、bb_phase=None、progress_pct=0）。
+    combined: bool | None = None
+    bb_phase: str | None = None
+    bb_reason: str | None = None
+    progress_pct: float = 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -195,6 +257,10 @@ class ScanSummary:
             "is_running": self.is_running,
             "is_correlation": self.is_correlation,
             "workflow_id": self.workflow_id,
+            "combined": self.combined,
+            "bb_phase": self.bb_phase,
+            "bb_reason": self.bb_reason,
+            "progress_pct": self.progress_pct,
         }
 
 
@@ -312,6 +378,11 @@ class ScanStore:
             vuln_counts = {}
         scan_type = mgr.get_scan_type(scan_dir)
         links = data.get("links", {}) if isinstance(data, dict) else {}
+        # 组合扫描字段（spec §6.2）：从 session.json 读 combined/bb_phase/bb_reason。
+        combined = data.get("combined") if isinstance(data, dict) else None
+        bb_phase = data.get("bb_phase") if isinstance(data, dict) else None
+        bb_reason = data.get("bb_reason") if isinstance(data, dict) else None
+        progress_pct = _compute_progress_pct(status, combined, bb_phase, data)
         return ScanSummary(
             scan_id=scan_id,
             scan_type=scan_type,
@@ -327,6 +398,10 @@ class ScanStore:
             is_running=(status == "running"),
             is_correlation=(scan_type == "correlation"),
             workflow_id=resolve_workflow_id(ws, scan_dir, scan_id),
+            combined=bool(combined) if combined is not None else None,
+            bb_phase=bb_phase,
+            bb_reason=bb_reason,
+            progress_pct=progress_pct,
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

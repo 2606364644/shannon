@@ -940,6 +940,45 @@ class ScanManager:
         from supernova_core.agents.providers import build_provider_config
         return asdict(build_provider_config())
 
+    def _snapshot_auth_ref(self, req: ScanRequest) -> dict:
+        """认证明文不进 session.json（D2）。只存 profile_id（非敏感引用）；
+        inline 模式存 None——认证明文已在 scan-config.yaml（t0 dump），不重复存。"""
+        if req.auth_profile_id:
+            return {"profile_id": req.auth_profile_id,
+                    "cred_id": req.auth_credential_id,
+                    "cred_ids": req.auth_credential_ids}
+        return {"profile_id": None}  # inline 认证在 scan-config.yaml
+
+    def _compute_expected_agents(self, req: ScanRequest) -> dict:
+        """进度分母：预期白盒 agent 数（spec §9.5）。
+
+        返回 {"whitebox": N}（blackbox 部分在黑盒 submit 时补，见 Task 4——黑盒只 exploit
+        白盒发现的类，expected.blackbox 须等白盒 queue 已知才能算）。
+
+        口径（够准即可，收起态精度门槛低，spec §9.2/§9.5）：
+        - 白盒默认跑全部 5 vuln 类（inj/xss/ssrf/auth/authz）；
+        - SUPERNOVA_LLM_TRACK_ENABLED=0 时，taint 类（inj/xss/ssrf，DEGRADABLE_VULN_CLASSES）
+          的 vuln agent 关闭（GitNexus chain_verdict 主干兜底，非 vuln agent，不计入），
+          authz/auth 的 LLM 全保留；故关轨时 vuln agent 数减少。
+        - 固定骨架 agent：pre-recon + recon + attack-chain + report（与 vuln agent 无关，恒计）。
+
+        N = 4（骨架）+ vuln_agent_count（开轨 5 / 关轨 2）。
+        """
+        from supernova_core.config.concurrency import is_llm_track_enabled
+        from supernova_core.models.agents import ALL_VULN_CLASSES, DEGRADABLE_VULN_CLASSES
+
+        # 白盒默认全跑（web ScanRequest 无 vuln_classes 选择入口）。
+        selected = list(ALL_VULN_CLASSES)
+        if is_llm_track_enabled():
+            vuln_agent_count = len(selected)
+        else:
+            # 关轨：taint 类 vuln agent 关（GitNexus 兜底，非 vuln agent），仅 authz/auth 跑。
+            vuln_agent_count = sum(1 for vc in selected
+                                   if vc not in DEGRADABLE_VULN_CLASSES)
+        # 骨架 agent（恒跑，与 vuln 类选择 / LLM 轨无关）：pre-recon / recon / attack-chain / report。
+        skeleton = 4
+        return {"whitebox": skeleton + vuln_agent_count}
+
     def _resolve_workflow_id(self, ws: str, scan_id: str) -> str:
         """T3: 读 scan_dir/session.json top-level resumeAttempts, 算 -resume-N 后缀。
 

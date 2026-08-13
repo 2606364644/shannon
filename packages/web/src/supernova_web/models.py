@@ -75,30 +75,66 @@ class ScanRequest(BaseModel):
                 )
         return self
 
-    @model_validator(mode="after")
-    def _auth_profile_xor_inline(self) -> "ScanRequest":
-        """blackbox 登录模式互斥校验（2026-08-06 多角色子集）。
+    def _validate_auth_fields(self) -> None:
+        """共享认证字段互斥校验体（blackbox 与 whitebox 组合模式复用）。
 
+        三模式（profile 全角色 / 子集 / 单角色）与 inline authentication 互斥：
         - profile_id 单独          = 全角色模式（scan_manager 展开所有 credentials → accounts[]）；
         - profile_id + cred_ids[]  = 子集模式（展开选中的 credentials → accounts[]，默认前端全选）；
         - profile_id + cred_id     = 单角色模式（旧契约，向后兼容）；
         - inline authentication    = 内联登录（现状）；
         - profile_id + inline      = 非法（互斥）；
         - cred_id 或 cred_ids 无 profile_id = 非法（必须依附 profile）。
+        抛 ValueError（pydantic model_validator 转 ValidationError → FastAPI 422）。
+        """
+        has_profile = self.auth_profile_id is not None
+        has_cred = self.auth_credential_id is not None
+        has_cred_ids = self.auth_credential_ids is not None
+        has_inline = self.authentication is not None
+        has_accounts = self.auth_accounts is not None
+        # auth_accounts 属 inline 侧：仅与 authentication 同存（inline 多角色附加账号）。
+        if has_accounts and not has_inline:
+            raise ValueError("auth_accounts 必须与 authentication 同时提供（内联多角色附加账号）")
+        if (has_profile or has_cred or has_cred_ids) and (has_inline or has_accounts):
+            raise ValueError("登录配置不能同时指定认证档案与内联登录配置")
+        if (has_cred or has_cred_ids) and not has_profile:
+            raise ValueError("选认证档案角色时必须同时指定 auth_profile_id")
+
+    @model_validator(mode="after")
+    def _auth_profile_xor_inline(self) -> "ScanRequest":
+        """blackbox 登录模式互斥校验（2026-08-06 多角色子集）。
+
+        委托共享校验体 _validate_auth_fields（2026-08-13 抽出，供 whitebox 组合模式复用）。
+        纯黑盒行为字节不变（仅提取方法，规则与错误语义一致）。
         """
         if self.type == "blackbox":
-            has_profile = self.auth_profile_id is not None
-            has_cred = self.auth_credential_id is not None
-            has_cred_ids = self.auth_credential_ids is not None
-            has_inline = self.authentication is not None
-            has_accounts = self.auth_accounts is not None
-            # auth_accounts 属 inline 侧：仅与 authentication 同存（inline 多角色附加账号）。
-            if has_accounts and not has_inline:
-                raise ValueError("auth_accounts 必须与 authentication 同时提供（内联多角色附加账号）")
-            if (has_profile or has_cred or has_cred_ids) and (has_inline or has_accounts):
-                raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
-            if (has_cred or has_cred_ids) and not has_profile:
-                raise ValueError("选认证档案角色时必须同时指定 auth_profile_id")
+            self._validate_auth_fields()
+        return self
+
+    @model_validator(mode="after")
+    def _whitebox_combined_optional(self) -> "ScanRequest":
+        """whitebox 组合扫描认证校验（spec §6.1，2026-08-13）。
+
+        - type=="whitebox" 且带 url → 组合模式：认证字段走与黑盒相同的互斥校验
+          （_validate_auth_fields 复用，规则一致；认证字段可选，公开目标可不填）。
+        - type=="whitebox" 无 url 但有任一认证字段 → 非法（纯白盒禁认证，防误传）。
+        - type=="whitebox" 无 url 无认证 → 纯白盒（现状，零回归）。
+
+        不改 _blackbox_requires_reuse（纯黑盒入口仍强制 reuse_whitebox_scan_id；
+        组合扫描走白盒入口 + 接力）。
+        """
+        if self.type != "whitebox":
+            return self
+        has_any_auth = (self.authentication is not None or self.auth_accounts is not None
+                        or self.auth_profile_id is not None or self.auth_credential_id is not None
+                        or self.auth_credential_ids is not None)
+        if self.url:
+            # 组合模式：复用黑盒互斥校验（认证可选——公开目标可不填，故仅在有时校验互斥）。
+            self._validate_auth_fields()
+        else:
+            # 纯白盒：禁任何认证字段（防误传）。
+            if has_any_auth:
+                raise ValueError("纯白盒扫描不支持认证字段；如需登录扫描请填 url 走组合模式")
         return self
 
     @model_validator(mode="after")

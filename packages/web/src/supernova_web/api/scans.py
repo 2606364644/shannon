@@ -67,15 +67,19 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     from supernova_core.session import SessionManager
     from supernova_web.components.metrics_normalizer import normalize_metrics
     from supernova_web.components.workspaces_indexer import _to_unix
-    from supernova_web.components.scan_store import resolve_workflow_id
+    from supernova_web.components.scan_store import (
+        resolve_workflow_id, _compute_progress_pct)
     mgr = SessionManager(scan_dir.parent)
     data = mgr.get_session_data(scan_dir)
     idx = request.app.state.indexer
+    status = idx._status_of(scan_dir, mgr.get_status(scan_dir))
+    combined = data.get("combined")
+    bb_phase = data.get("bb_phase")
     return {
         "web_url": mgr.get_web_url(scan_dir),
         "repo_path": data.get("repo_path"),
         "scan_type": mgr.get_scan_type(scan_dir),
-        "status": idx._status_of(scan_dir, mgr.get_status(scan_dir)),
+        "status": status,
         "created_at": _to_unix(mgr.get_created_at(scan_dir)),
         "completed_at": _to_unix(mgr.get_completed_at(scan_dir)),
         # 服务端墙钟基准（unix 秒）：前端 offset 校正用，消除跨时钟「总耗时负数」根因。
@@ -88,6 +92,15 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "source_repo": data.get("source_repo"),
         "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
         "authentication": _read_auth_config(scan_dir),
+        # 组合扫描字段 + 进度（spec §6.2/§9.2，2026-08-13 Task 1）：
+        # combined/bb_phase/bb_reason 透传 session.json；progress_pct 三阶段加权预算；
+        # expected_agents/completed_agents 是进度分母/分子（list_scans 已透传，详情一并给）。
+        "combined": bool(combined) if combined is not None else None,
+        "bb_phase": bb_phase,
+        "bb_reason": data.get("bb_reason"),
+        "progress_pct": _compute_progress_pct(status, combined, bb_phase, data),
+        "expected_agents": data.get("expected_agents") or {},
+        "completed_agents": data.get("completed_agents") or [],
     }
 
 
