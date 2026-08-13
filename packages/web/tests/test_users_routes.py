@@ -67,7 +67,23 @@ def test_create_user_success(admin_client):
     r = c.post("/api/users", json={"username": "bob", "password": "bob-pw-1", "role": "user"},
                headers={"X-CSRF-Token": _csrf(c)})
     assert r.status_code == 200
-    assert app.state.auth_store.get_user_by_username("bob").must_change_password is True
+    bob = app.state.auth_store.get_user_by_username("bob")
+    admin = app.state.auth_store.get_user_by_username("admin")
+    assert bob.must_change_password is True
+    assert (app.state.config.workspaces_dir / "bob" / "workspace.json").exists()
+    assert app.state.auth_store.get_workspace_member_role("bob", bob.id) == "manager"
+    assert app.state.auth_store.get_workspace_member_role("bob", admin.id) == "manager"
+
+
+def test_create_user_does_not_add_other_admin_to_workspace(admin_client):
+    c, app = admin_client
+    ops = app.state.auth_store.create_user("ops", "h", role="admin")
+
+    r = c.post("/api/users", json={"username": "bob", "password": "bob-pw-1", "role": "user"},
+               headers={"X-CSRF-Token": _csrf(c)})
+
+    assert r.status_code == 200
+    assert app.state.auth_store.get_workspace_member_role("bob", ops.id) is None
 
 
 def test_create_user_dup_409(admin_client):
@@ -173,3 +189,29 @@ def test_create_user_requires_csrf(admin_client):
     c, app = admin_client
     r = c.post("/api/users", json={"username": "bob", "password": "x1234567", "role": "user"})
     assert r.status_code == 403
+
+
+def test_demoting_canonical_admin_clears_workspace_memberships(tmp_workspaces, monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    from supernova_core.utils.paths import resolve_workspaces_dir
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    assert resolve_workspaces_dir() == tmp_workspaces
+    app = create_app()
+    st = app.state.auth_store
+    admin = st.create_user("admin", hash_password("admin-pw"), role="admin")
+    ops = st.create_user("ops", hash_password("ops-pw"), role="admin")
+    from supernova_web.components.scan_store import write_workspace_meta
+    ws = tmp_workspaces / "ws-a"
+    ws.mkdir()
+    write_workspace_meta(ws, name="ws-a", owner="seed")
+    st.add_workspace_member("ws-a", admin.id, "manager")
+
+    c = TestClient(app)
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": "ops", "password": "ops-pw"},
+           headers={"X-CSRF-Token": tok})
+    r = c.patch(f"/api/users/{admin.id}", json={"role": "user"},
+                headers={"X-CSRF-Token": _csrf(c)})
+
+    assert r.status_code == 200
+    assert st.get_workspace_member_role("ws-a", admin.id) is None

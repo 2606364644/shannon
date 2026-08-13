@@ -199,6 +199,12 @@ class AuthStore:
             c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             c.execute("DELETE FROM users WHERE id=?", (user_id,))
 
+    def remove_user_from_workspaces(self, user_id: int) -> int:
+        """清理用户的全部工作区成员关系并返回删除条数。"""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM workspace_members WHERE user_id=?", (user_id,))
+            return cur.rowcount
+
     def update_role(self, user_id: int, role: str) -> None:
         with self._conn() as c:
             c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))

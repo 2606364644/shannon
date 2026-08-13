@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from supernova_web.auth.dependencies import current_user, require_admin, workspace_manager
-from supernova_web.components.workspace_provisioner import is_global_admin
+from supernova_web.components.workspace_provisioner import (
+    ensure_global_admin_member,
+    is_global_admin,
+)
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -46,7 +49,9 @@ async def create_workspace(body: CreateWorkspaceIn, request: Request,
         raise HTTPException(409, "workspace already exists")
     ws_dir.mkdir(parents=True)
     write_workspace_meta(ws_dir, name=ws, owner=user.username)
-    request.app.state.auth_store.add_workspace_member(ws, user.id, "manager")
+    store = request.app.state.auth_store
+    store.add_workspace_member(ws, user.id, "manager")
+    ensure_global_admin_member(ws, store)
     return {"name": ws}
 
 

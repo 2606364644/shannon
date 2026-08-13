@@ -105,3 +105,18 @@ def test_post_workspace_writes_workspace_json(_app):
     assert meta["owner"] == "admin"
     # ws 根不再写 session.json（scan 状态机下沉到 scans/<id>/）
     assert not (ws_dir / "session.json").exists()
+
+
+def test_other_admin_creates_workspace_and_canonical_admin_is_added(_app):
+    st = _app.state.auth_store
+    st.create_user("ops", hash_password("p"), role="admin")
+    c = _login(_app, "ops")
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+
+    r = c.post("/api/workspaces", json={"name": "ws-ops"}, headers={"X-CSRF-Token": tok})
+
+    assert r.status_code == 201
+    admin = st.get_user_by_username("admin")
+    ops = st.get_user_by_username("ops")
+    assert st.get_workspace_member_role("ws-ops", admin.id) == "manager"
+    assert st.get_workspace_member_role("ws-ops", ops.id) == "manager"

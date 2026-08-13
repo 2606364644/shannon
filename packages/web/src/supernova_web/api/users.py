@@ -9,7 +9,12 @@ from supernova_web.auth.csrf import verify_csrf
 from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
 from supernova_web.auth.passwords import NEW_PASSWORD_MIN_LEN, hash_password
-from supernova_web.components.workspace_provisioner import is_global_admin
+from supernova_web.components.workspace_provisioner import (
+    ensure_global_admin_access,
+    ensure_user_workspace,
+    is_global_admin,
+    is_safe_workspace_name,
+)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -81,8 +86,23 @@ async def create_user(body: CreateUserIn, request: Request, _: User = Depends(re
     store = request.app.state.auth_store
     if store.get_user_by_username(body.username) is not None:
         raise HTTPException(409, "username exists")
+    if not is_safe_workspace_name(body.username):
+        raise HTTPException(422, "invalid username for workspace")
+    workspaces_dir = request.app.state.config.workspaces_dir
+    if (workspaces_dir / body.username).exists():
+        raise HTTPException(409, "workspace already exists for username")
+
     u = store.create_user(body.username, hash_password(body.password),
                           role=body.role, must_change=True)
+    try:
+        ensure_user_workspace(workspaces_dir, store, u)
+        ensure_global_admin_access(workspaces_dir, store)
+    except FileExistsError:
+        store.delete_user(u.id)
+        raise HTTPException(409, "workspace already exists for username")
+    except (ValueError, OSError):
+        store.delete_user(u.id)
+        raise HTTPException(500, "failed to provision user workspace")
     return {"user": _user_out(u)}
 
 
@@ -113,7 +133,13 @@ async def update_role(user_id: int, body: UpdateRoleIn, request: Request,
         raise HTTPException(409, "cannot demote self")
     if target.role == "admin" and body.role != "admin" and _admin_count(store) <= 1:
         raise HTTPException(409, "cannot demote last admin")
+    previous_role = target.role
     store.update_role(user_id, body.role)
+    if target.username == "admin":
+        if body.role == "admin":
+            ensure_global_admin_access(request.app.state.config.workspaces_dir, store)
+        elif previous_role == "admin":
+            store.remove_user_from_workspaces(target.id)
     return {"ok": True}
 
 
