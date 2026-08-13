@@ -104,6 +104,10 @@ class ScanManager:
         self._store = ScanStore(self._workspaces_dir)
         # 串行化黑盒 create_scan，保证 <wb>~<N> 序号分配原子（防并发同白盒争同序号）。
         self._create_scan_lock = asyncio.Lock()
+        # 组合扫描接力编排 task（spec §7.2）：key=(ws, scan_id) → asyncio.Task。
+        # start 组合分支 asyncio.create_task(_combined_orchestrator) 登记；orchestrator
+        # finally 自 pop。用于 cancel/delete 时取消接力 + 诊断（fire-and-forget，不阻塞 start）。
+        self._orchestrator_tasks: dict[tuple[str, str], asyncio.Task] = {}
 
     # ---- 公共 API ----
     def active_pids(self) -> dict[str, int]:
@@ -206,6 +210,15 @@ class ScanManager:
                 # repo_path 是绝对路径，前端 listRepos 返回的 Repo 无 path 字段无法反查 name。
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"source_repo": req.source.value if req.source else None})
+                # 组合扫描接力（spec §7.2）：白盒 + url → 起 _combined_orchestrator 接力黑盒。
+                # 注：scan-config.yaml dump + session combined/bb_* 字段 + t0 预验证 由后续 task
+                # （Task 3）在同一分支补；本处仅在白盒 submit 成功后登记接力 task（fire-and-forget）。
+                # _run_blackbox_phase 读 scan-config.yaml（Task 3 dump）；未 dump 时真机会失败，
+                # 但单测在 fixture 直接建该文件。
+                if req.url:
+                    orch = asyncio.create_task(
+                        self._combined_orchestrator(scan_key, handle, scan_dir, req))
+                    self._orchestrator_tasks[scan_key] = orch
             elif req.type == "blackbox":
                 config_path, repo_path = await self._resolve_blackbox_inputs(
                     req, ws, scan_dir, target)
@@ -527,19 +540,24 @@ class ScanManager:
         self, repo_path: str | None, ws: str, scan_id: str, scan_dir: Path,
         event_file: Path, web_url: str, config_path: str | None,
         host_mappings: dict[str, str] | None = None,
+        workflow_id_suffix: str = "",
     ) -> Any:
         """提交黑盒 scan 到 supernova-bb-web queue。参照 _submit_whitebox。
 
         BlackboxPipelineInput.event_file 非 None → workflow 走 worker 路径（setup_display 注入
         StructuredEventRenderer 写 events.ndjson，web live 页可见）。workspaces_root 用 web 已知
         的 self._workspaces_dir（worker 容器共享同 volume，路径一致）。
+
+        workflow_id_suffix（spec §7.6，组合接力复用本方法的关键）：默认 ""（零回归，既有调用
+        workflow_id 不变）；组合接力首跑传 "-bb"、续跑传 "-bb-rerun-N"。不手写 chained 版
+        （原草案手写版漏传 host_mappings 等字段，重复造轮子——见 spec §5）。
         """
         from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
         from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
         from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
 
         client = await Client.connect(self._temporal_address())
-        workflow_id = self._resolve_workflow_id(ws, scan_id)
+        workflow_id = self._resolve_workflow_id(ws, scan_id) + workflow_id_suffix
         provider_config = self._resolve_provider_config(ws)
         inp = BlackboxPipelineInput(
             web_url=web_url,
@@ -1055,6 +1073,7 @@ class ScanManager:
         self._handles.pop(scan_key, None)
         self._tasks.pop(scan_key, None)
         self._active_reqs.pop(scan_key, None)
+        self._orchestrator_tasks.pop(scan_key, None)  # 组合接力 task（已 self-pop，兜底）
         self._store.delete_scan(ws, scan_id)
         return {"deleted": scan_id}
 
@@ -1293,3 +1312,144 @@ class ScanManager:
             break
         event_file.write_text(
             ("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
+
+    # ── 组合扫描接力编排（spec §7，Task 4）───────────────────────────────────
+
+    async def _combined_orchestrator(self, scan_key: tuple[str, str], wb_handle: Any,
+                                     scan_dir: Path, req: ScanRequest) -> None:
+        """组合接力编排（spec §7.2）：await 白盒完成 → _run_blackbox_phase；try/except/finally
+        统一经 _ensure_scan_end（幂等）收尾。
+
+        ws 取自 scan_key[0]（修原 bug #4：曾误用 scan_dir.parent.name 致跨 ws 错配；scan_dir
+        在 scans/<id>/ 下，parent.name 是 scan_id 非 ws）。fire-and-forget（start 起
+        asyncio.create_task）；finally 自 pop _orchestrator_tasks。
+
+        scan_end 不变量（spec §7.4）：成功路径黑盒 finalize 已写 scan_end → _ensure_scan_end
+        no-op；异常/跳过/提交失败 → _ensure_scan_end 补写防 _watch 永久 tail。绝不在此裸调
+        _write_scan_end（原草案 bug：成功路径写了第二条 scan_end）。
+        """
+        ws, scan_id = scan_key
+        try:
+            await wb_handle.result()
+            await self._run_blackbox_phase(
+                scan_dir, ws, scan_id, self._snapshot_auth_ref(req))
+        except Exception as exc:
+            # 接力任意阶段失败（白盒 result 抛 / 预检后黑盒提交抛 / 黑盒 result 抛 / 报告生成抛）
+            # → 标 bb_phase=failed + 原因；白盒报告（已落盘）保留。
+            await self._mark_bb(scan_dir, "failed", str(exc))
+        finally:
+            # 幂等收尾：成功路径黑盒已写 scan_end → no-op；异常/跳过 → 补写。
+            await self._ensure_scan_end(scan_dir)
+            self._orchestrator_tasks.pop(scan_key, None)
+
+    async def _run_blackbox_phase(self, scan_dir: Path, ws: str, scan_id: str,
+                                  auth_ref: dict) -> None:
+        """组合接力公共段（spec §7.3）：预检白盒产物 → 复用 _submit_blackbox（-bb 后缀）→
+        等黑盒 → 融合报告。
+
+        单目录接力的核心：repo_path/event_file/config_path 全指回白盒 scan_dir，黑盒产物落
+        scan_dir/deliverables/blackbox/（黑盒 workflow 零代码改动，spec §5）。本方法**不直接
+        写 scan_end**——收尾交 _combined_orchestrator 的 _ensure_scan_end（幂等）。
+
+        _generate_combined_report 由 Task 8 实现；本任务仅保留调用点（单测 mock 之）。
+        """
+        # 预检白盒产物（recon_deliverable.md + 至少一个非空 queue）。不全 → 跳过黑盒。
+        if not self._whitebox_deliverables_ready(scan_dir):
+            await self._mark_bb(scan_dir, "skipped", "白盒无可利用产物")
+            return
+        # 读 session 取黑盒目标 URL + HOST 映射（Task 3 在 start 组合分支 dump scan-config.yaml
+        # + 写 bb_url/bb_host_mappings 到 session）。bb_url 缺失回落 web_url。
+        session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+        bb_url = session.get("bb_url") or session.get("web_url") or ""
+        host_mappings = session.get("bb_host_mappings")
+        # 按白盒发现的非空 queue vuln 类补 expected_agents.blackbox（黑盒只 exploit 白盒发现的类，
+        # spec §9.5）：进度分母动态化，收起态百分比更准。
+        bb_expected = self._count_nonempty_queues(scan_dir)
+        if bb_expected > 0:
+            expected = dict(session.get("expected_agents") or {})
+            expected["blackbox"] = bb_expected
+            try:
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"expected_agents": expected})
+            except Exception:  # noqa: BLE001 - best-effort 进度分母，不阻塞接力
+                pass
+        # 复用 _submit_blackbox（spec §5：不手写 _submit_blackbox_chained，原草案手写版漏传
+        # host_mappings 等字段）。workflow_id_suffix="-bb"（spec §7.6）。
+        bb_handle = await self._submit_blackbox(
+            repo_path=str(scan_dir), ws=ws, scan_id=scan_id, scan_dir=scan_dir,
+            event_file=scan_dir / "events.ndjson", web_url=bb_url,
+            config_path=str(scan_dir / "scan-config.yaml"),
+            host_mappings=host_mappings, workflow_id_suffix="-bb")
+        await self._mark_bb(scan_dir, "running")
+        await bb_handle.result()
+        await self._generate_combined_report(scan_dir)  # Task 8 实现；融合报告 → deliverables/combined/
+        await self._mark_bb(scan_dir, "completed")
+
+    async def _generate_combined_report(self, scan_dir: Path) -> None:
+        """生成组合扫描融合报告（spec §10.2）→ deliverables/combined/combined_report.md。
+
+        **FORWARD REFERENCE — Task 8 实现**（本任务仅占位，保证 patch.object 能找到属性；
+        单测统一 mock 本方法，真机 e2e 在 Task 8 落地真实逻辑后才跑通）。vuln_class 交叉融合
+        白盒 queue + 黑盒 finding，复用 FindingsRenderer/ReportAssembler 读 queue 逻辑。
+        """
+        raise NotImplementedError(
+            "_generate_combined_report 由 Task 8 实现（spec §10.2）；"
+            "本占位仅为 forward-reference，单测应 mock 本方法")
+
+    async def _ensure_scan_end(self, scan_dir: Path, status: str = "completed") -> None:
+        """幂等收尾（spec §7.4，修原 bug）：events 无 scan_end 才补写。
+
+        成功路径黑盒 finalize 已写 scan_end → no-op（**不写第二条**，核心不变量）；
+        异常/跳过/提交失败 → 补写 scan_end 防 _watch 永久 tail（_watch 纯 tail 认 scan_end 退出）。
+        _watch 的 finally 兜底（"worker 未写 scan_end" 补写）仍作最后一道防线。
+        """
+        if self._has_scan_end(scan_dir / "events.ndjson"):
+            return
+        await self._write_scan_end(
+            scan_dir / "events.ndjson", status, 0, f"combined {status}", scan_dir=scan_dir)
+
+    def _whitebox_deliverables_ready(self, scan_dir: Path) -> bool:
+        """预检白盒产物可被黑盒利用（spec §7.3）：
+
+        True iff deliverables/whitebox/recon_deliverable.md 存在 AND 至少一个非空
+        {vt}_exploitation_queue.json（vulnerabilities 列表非空）。黑盒只 exploit 白盒发现的
+        类，缺其一则跳过黑盒（bb_phase=skipped）。
+        """
+        wb_dir = scan_dir / "deliverables" / "whitebox"
+        if not (wb_dir / "recon_deliverable.md").is_file():
+            return False
+        return self._count_nonempty_queues(scan_dir) > 0
+
+    def _count_nonempty_queues(self, scan_dir: Path) -> int:
+        """数 deliverables/whitebox/ 下非空的 {vt}_exploitation_queue.json 数（vulnerabilities
+        列表非空）。用于预检 + expected_agents.blackbox 分母（spec §9.5）。"""
+        wb_dir = scan_dir / "deliverables" / "whitebox"
+        if not wb_dir.is_dir():
+            return 0
+        n = 0
+        for qf in wb_dir.glob("*_exploitation_queue.json"):
+            try:
+                data = json.loads(qf.read_text("utf-8", errors="replace"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(data, dict) and isinstance(data.get("vulnerabilities"), list) \
+                    and len(data["vulnerabilities"]) > 0:
+                n += 1
+        return n
+
+    async def _mark_bb(self, scan_dir: Path, phase: str,
+                       reason: str | None = None) -> None:
+        """写 session.json 的 bb_phase（+ bb_reason）。phase 取自
+        {precheck, pending, running, completed, failed, skipped}（spec §9.2 分段）。
+
+        best-effort（对齐 _mark_owner / _mark_submitted_at 的 read-modify-write 模式，
+        经 SessionManager.update_session 合并，不覆盖其他 top-level key）。标记失败不阻塞接力。
+        """
+        data: dict = {"bb_phase": phase}
+        if reason is not None:
+            data["bb_reason"] = reason
+        try:
+            SessionManager(scan_dir.parent).update_session(scan_dir, data)
+        except Exception:  # noqa: BLE001 - 标记 best-effort，不阻塞接力
+            pass
+
