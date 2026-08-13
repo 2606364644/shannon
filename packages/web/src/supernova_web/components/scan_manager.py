@@ -1748,6 +1748,76 @@ class ScanManager:
             await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
 
+    async def _rerun_orchestrator(self, scan_key: tuple[str, str], scan_dir: Path,
+                                  ws: str, scan_id: str, auth_ref: dict,
+                                  run_id: str, suffix: str) -> None:
+        """run 版编排（spec §7.3，与 _rerun_blackbox_orchestrator 同构）：调
+        ``_run_blackbox_phase(run_id, suffix)`` → try/except/finally 经幂等
+        ``_ensure_scan_end`` 收尾。finally 自 pop ``_orchestrator_tasks``。
+
+        成功路径黑盒 finalize 已写 scan_end → ``_ensure_scan_end`` no-op；异常/提交失败
+        → 补写 scan_end 防 _watch 永久 tail。
+        """
+        final_status = "completed"
+        try:
+            await self._run_blackbox_phase(
+                scan_dir, ws, scan_id, auth_ref, run_id, workflow_id_suffix=suffix)
+        except Exception as exc:
+            final_status = "failed"
+            await self._mark_run(scan_dir, run_id, "failed",
+                                 reason=str(exc), status="failed")
+        finally:
+            await self._ensure_scan_end(scan_dir, status=final_status)
+            self._orchestrator_tasks.pop(scan_key, None)
+
+    async def _add_blackbox_run(self, ws: str, wb_scan_id: str,
+                                req: ScanRequest | None = None) -> str:
+        """给已有白盒任务加一个黑盒 run（spec §6/§7.1 #8 手动入口）。
+
+        流程：白盒产物就绪检查 → （req 给了认证则重 dump scan-config.yaml + 更新 bb_url/
+        bb_auth_ref）→ 串行分配 run-K（_create_scan_lock）→ 有认证则 _run_precheck（fail →
+        run 标 failed + 收尾，不起黑盒）→ fire-and-forget ``_rerun_orchestrator(run_id,
+        -bb-{K})``。返回 run_id。
+
+        req=None（沿用现盘 scan-config.yaml）：无 scan-config.yaml → 公开目标，跳过预验证。
+        """
+        scan_dir = self._store.get_scan_dir(ws, wb_scan_id)
+        if scan_dir is None:
+            raise ValueError("白盒任务不存在")
+        if not self._whitebox_deliverables_ready(scan_dir):
+            raise ValueError("白盒产物未就绪，不能加黑盒")
+        mgr = SessionManager(scan_dir.parent)
+        data = mgr.get_session_data(scan_dir)
+        cfg = scan_dir / "scan-config.yaml"
+        if req is not None:
+            await self._dump_auth_config(req, ws, scan_dir)
+            bb_url = req.url or data.get("bb_url") or data.get("web_url") or ""
+            mgr.update_session(scan_dir, {
+                "bb_url": bb_url,
+                "bb_auth_ref": self._snapshot_auth_ref(req),
+            })
+            data = mgr.get_session_data(scan_dir)  # 刷新（bb_url/bb_auth_ref 已写）
+        config_path = str(cfg) if cfg.exists() else None
+        bb_url = data.get("bb_url") or data.get("web_url") or ""
+        auth_ref = data.get("bb_auth_ref") or {"profile_id": None}
+        # 序号分配须串行（与 create_scan 同 lock 口径，防并发同序号）。
+        async with self._create_scan_lock:
+            run_id, _run_dir = self._store.create_blackbox_run(
+                ws, wb_scan_id, auth_ref=auth_ref)
+        k = int(run_id.split("-")[1])
+        if config_path and not await self._run_precheck(
+                scan_dir, ws, wb_scan_id, bb_url, config_path,
+                host_mappings=self._session_host_mappings(data)):
+            await self._mark_run(scan_dir, run_id, "failed",
+                                 reason="auth_failed", status="failed")
+            await self._ensure_scan_end(scan_dir, status="failed")
+            return run_id
+        scan_key = (ws, wb_scan_id)
+        self._orchestrator_tasks[scan_key] = asyncio.create_task(
+            self._rerun_orchestrator(
+                scan_key, scan_dir, ws, wb_scan_id, auth_ref, run_id, f"-bb-{k}"))
+        return run_id
+
     async def _run_precheck(self, scan_dir: Path, ws: str, scan_id: str,
                             web_url: str, config_path: str | None,
                             host_mappings: dict[str, str] | None = None) -> bool:
