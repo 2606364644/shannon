@@ -34,7 +34,8 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
     is_running = _compute_status(scan_dir, mgr.get_status(scan_dir)) == "running"
     if not is_running:
         from supernova_web.components.orphan_reconciler import reconcile_orphaned
-        await reconcile_orphaned(scan_dir, False)
+        await reconcile_orphaned(
+            scan_dir, False, scan_manager=request.app.state.scan_manager)
 
     last = request.headers.get("last-event-id")
     last_offset = int(last) if last else None

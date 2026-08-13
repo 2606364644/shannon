@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+
+_log = logging.getLogger(__name__)
 
 from temporalio.client import Client
 
@@ -1508,4 +1511,108 @@ class ScanManager:
             SessionManager(scan_dir.parent).update_session(scan_dir, data)
         except Exception:  # noqa: BLE001 - 标记 best-effort，不阻塞接力
             pass
+
+    # ── 组合扫描崩溃恢复（spec §7.5，Task 5）────────────────────────────────
+
+    async def _query_workflow_status(self, workflow_id: str) -> str | None:
+        """查 temporal workflow 执行状态，返状态名小写（'running'/'completed'/…）或 None。
+
+        None = 查询超时 / workflow 不存在 / temporal 不可达（best-effort，异常绝不阻塞
+        reconcile）。对齐 orphan_reconciler._workflow_still_running 的 describe() 查询模式，
+        但返完整状态名供 _reconcile_combined_scan 分支决策（completed vs running vs not-found）。
+        """
+        timeout = float(
+            os.environ.get("SUPERNOVA_RECONCILE_TEMPORAL_TIMEOUT_SECONDS", "5"))
+
+        async def _probe() -> str | None:
+            client = await Client.connect(self._temporal_address())
+            desc = await client.get_workflow_handle(workflow_id).describe()
+            return desc.status.name.lower()  # RUNNING→"running", COMPLETED→"completed"
+
+        try:
+            return await asyncio.wait_for(_probe(), timeout=timeout)
+        except Exception:  # noqa: BLE001 - 超时/断连/workflow 不存在 → None
+            return None
+
+    async def _reconcile_combined_scan(self, scan_dir: Path) -> None:
+        """进程重启后对组合扫描（combined=true）按 bb_phase 补接力/补报告/补 scan_end
+        （spec §7.5 崩溃恢复）。
+
+        组合接力是 scan_manager 进程内 asyncio task（非 Temporal durable），容器重启后
+        _combined_orchestrator 协程丢失 → session 卡 running 且 events 无 scan_end。本方法
+        在 orphan_reconciler 的 per-scan 恢复后被调用，按 bb_phase 分支恢复：
+
+        - precheck + authcheck workflow COMPLETED + 白盒 COMPLETED → 补 _run_blackbox_phase。
+        - pending + 白盒 workflow COMPLETED → 补 _run_blackbox_phase（接力）。
+        - running + 黑盒 workflow COMPLETED → 补 _generate_combined_report + _mark_bb(completed)。
+        - 任意 bb_phase + workflow 仍 RUNNING → 不干预（让 temporal 自然完成）。
+        - 任意 bb_phase + workflow 不活跃 + events 无 scan_end → _ensure_scan_end 补写。
+
+        **非组合扫描立即返回（零回归）**——纯白盒/纯黑盒恢复路径不受影响。
+
+        ws/scan_id 从 scan_dir 路径派生（<workspaces>/<ws>/scans/<scan_id>），与
+        orphan_reconciler._workflow_id_from_scan_dir 同口径（不用 scan_dir.parent.name——
+        那是 "scans" 非 ws，是原 bug #4 的根因）。
+        """
+        # 派生 ws/scan_id（与 _workflow_id_from_scan_dir 同口径，守 bug #4）
+        if scan_dir.parent.name != "scans":
+            return  # legacy 根 scan / 辅助目录 → 无可靠 ws/scan_id
+        ws = scan_dir.parent.parent.name
+        scan_id = scan_dir.name
+
+        session_file = scan_dir / "session.json"
+        if not session_file.exists():
+            return
+        try:
+            data = json.loads(session_file.read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not data.get("combined"):
+            return  # 非组合 → 零回归（纯白盒/纯黑盒恢复路径不受影响）
+
+        bb_phase = data.get("bb_phase")
+        auth_ref = data.get("bb_auth_ref") or {}
+        bb_rerun = int(data.get("bb_rerun_attempts") or 0)
+        wf_active = False  # 某分支发现 workflow 仍 RUNNING → True（跳过 scan_end 补写）
+
+        try:
+            if bb_phase in ("precheck", "pending"):
+                # precheck: 先确认 authcheck 已完成（仍跑 = 预验证进行中 → 不干预）。
+                if bb_phase == "precheck":
+                    auth_status = await self._query_workflow_status(
+                        f"{ws}-{scan_id}-authcheck")
+                    if auth_status == "running":
+                        wf_active = True
+                # 白盒 workflow 状态：completed → 补黑盒接力；running → 不干预。
+                if not wf_active:
+                    wb_status = await self._query_workflow_status(
+                        self._resolve_workflow_id(ws, scan_id))
+                    if wb_status == "running":
+                        wf_active = True
+                    elif wb_status == "completed":
+                        # 白盒完成 → 补黑盒接力（_run_blackbox_phase 内部预检产物 +
+                        # submit -bb workflow + 等结果 + 生成报告）。
+                        await self._run_blackbox_phase(
+                            scan_dir, ws, scan_id, auth_ref)
+
+            elif bb_phase == "running":
+                # 黑盒 workflow：首跑 -bb / 续跑 -bb-rerun-N（spec §7.6 + §11）。
+                suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
+                bb_status = await self._query_workflow_status(
+                    self._resolve_workflow_id(ws, scan_id) + suffix)
+                if bb_status == "running":
+                    wf_active = True
+                elif bb_status == "completed":
+                    # 黑盒完成 → 补融合报告 + 标 completed（接力最后一步崩溃补全）。
+                    await self._generate_combined_report(scan_dir)
+                    await self._mark_bb(scan_dir, "completed")
+
+            # failed/skipped/completed/None → 无需接力，只补 scan_end（fall-through）
+
+            # 任意状态：workflow 不活跃 + events 无 scan_end → 幂等补写（防 _watch/live
+            # 永久 tail）。workflow 仍活跃 → 跳过（让 temporal workflow 自然完成写 scan_end）。
+            if not wf_active:
+                await self._ensure_scan_end(scan_dir)
+        except Exception:  # noqa: BLE001 - reconcile 是兜底增强，绝不因单 scan 异常拖垮
+            _log.exception("_reconcile_combined_scan failed for %s", scan_dir)
 

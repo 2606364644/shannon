@@ -134,10 +134,17 @@ async def _workflow_still_running(scan_dir: Path) -> bool:
         return False
 
 
-async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
+async def reconcile_orphaned(ws_dir: Path, is_running: bool,
+                             scan_manager: object | None = None) -> bool:
     """若 ws 是孤儿（非完成/失败 + 不存活 + 无 scan_end），补写 scan_end + 标 session 完成。
 
-    返回是否实际写了 scan_end。任何异常都不应阻塞调用方（启动 / 请求），故内部兜底。
+    返回是否实际写了 scan_end（或对组合扫描委托了恢复）。任何异常都不应阻塞调用方
+    （启动 / 请求），故内部兜底。
+
+    scan_manager（spec §7.5，Task 5）：传入时，对 **组合扫描**（session.combined=true）
+    委托 ``scan_manager._reconcile_combined_scan``——按 bb_phase 补接力/补报告/补 scan_end，
+    **不**在此写 scan_end=interrupted（避免与组合接力 scan_end 双写冲突）。非组合扫描
+    行为不变（零回归）。scan_manager=None 时所有 scan 走原有 interrupted 路径。
     """
     try:
         _log.debug("reconcile_orphaned enter: %s is_running=%s", ws_dir.name, is_running)
@@ -170,6 +177,20 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool) -> bool:
         event_file = ws_dir / "events.ndjson"
         if _has_scan_end(event_file):
             return False  # 幂等：已有 scan_end（_watch 或 StructuredEventRenderer 已收尾）
+
+        # 组合扫描委托（spec §7.5，Task 5）：combined=true + 传了 scan_manager → 交给
+        # _reconcile_combined_scan 按 bb_phase 恢复（补接力/补报告/补 scan_end），不在此写
+        # interrupted（避免与接力 scan_end 双写）。非组合 → 走原有 interrupted 路径（零回归）。
+        if scan_manager is not None:
+            try:
+                combined = bool(json.loads(
+                    session_file.read_text("utf-8", errors="replace")).get("combined"))
+            except (OSError, ValueError):
+                combined = False
+            if combined:
+                await scan_manager._reconcile_combined_scan(ws_dir)  # type: ignore[attr-defined]
+                _log.info("reconcile_orphaned delegated combined scan: %s", ws_dir.name)
+                return True
 
         reason = ("扫描未检测到 worker 心跳——worker 容器可能未启动或已退出"
                   "（worker 应在扫描提交后数秒内写首个 heartbeat；持续无心跳请检查"

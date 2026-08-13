@@ -104,7 +104,8 @@ async def _reconcile_orphaned_scans(app: FastAPI) -> None:
             continue
         for _scan_id, scan_dir in store._scan_entries(ws_dir.name):
             try:
-                await reconcile_orphaned(scan_dir, False)
+                await reconcile_orphaned(
+                    scan_dir, False, scan_manager=app.state.scan_manager)
             except Exception:
                 continue
 
