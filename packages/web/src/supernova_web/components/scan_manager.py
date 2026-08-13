@@ -291,6 +291,69 @@ class ScanManager:
             raise TooManyScans(self._max_concurrent)
 
         data = mgr.get_session_data(scan_dir)
+        event_file = scan_dir / "events.ndjson"
+        scan_key = (ws, scan_id)
+
+        # ── 组合扫描 resume（spec §11.4）──────────────────────────────────────
+        # 读 session combined/bb_phase/bb_rerun_attempts 分阶段：
+        # - pending/precheck → 重交白盒（-resume-N）+ 重启完整 _combined_orchestrator（接力续跑）。
+        # - running → 黑盒 workflow 仍在 Temporal 跑 → re-attach handle + 仅做报告的编排 task。
+        # 零回归：仅 combined 真时触发；非组合走下方既有路径不变。
+        if data.get("combined"):
+            # 续跑前剥掉旧 scan_end（所有分支共享；否则 _watch 见旧 scan_end 立即退出）。
+            self._strip_trailing_scan_end(event_file)
+            bb_phase = data.get("bb_phase")
+            bb_rerun = int(data.get("bb_rerun_attempts") or 0)
+            mgr.update_session(scan_dir, {"status": "running", "completed_at": None})
+            # 重建 ScanRequest 供 _active_reqs（active_repo_sources 引用锁）+ 编排 task。
+            # auth 字段从 bb_auth_ref 回填（_snapshot_auth_ref 对称重建，供 _run_blackbox_phase）。
+            req = self._build_combined_resume_req(data, ws)
+            self._active_reqs[scan_key] = req
+
+            if bb_phase == "running":
+                # 黑盒 workflow 仍在 Temporal 跑（scan_manager 进程死了，Temporal 留活）→
+                # re-attach handle（get_workflow_handle，不重 submit——workflow_id 已固定）。
+                # workflow_id = _resolve_workflow_id + suffix（与 _reconcile_combined_scan 同口径；
+                # running 分支不递增 resumeAttempts，故 _resolve_workflow_id 算出与原提交一致的 id）。
+                suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
+                bb_wf_id = self._resolve_workflow_id(ws, scan_id) + suffix
+                try:
+                    client = await Client.connect(self._temporal_address())
+                    handle = client.get_workflow_handle(bb_wf_id)
+                except BaseException:
+                    self._active_reqs.pop(scan_key, None)
+                    raise
+                # 附仅做报告的编排 task（接力已发生、黑盒已 submit；只 await 完成 → 融合报告）。
+                orch = asyncio.create_task(
+                    self._combined_report_orchestrator(scan_key, handle, scan_dir))
+                self._orchestrator_tasks[scan_key] = orch
+            else:
+                # pending/precheck（白盒阶段中断）→ 重交白盒 workflow（-resume-N，复用
+                # _submit_whitebox）+ 重启完整 _combined_orchestrator（白盒完成后接力黑盒 + 报告）。
+                attempts = data.get("resumeAttempts") or []
+                if not isinstance(attempts, list):
+                    attempts = []
+                n = len(attempts) + 1
+                attempts = list(attempts) + [
+                    {"workflowId": f"{ws}-{scan_id}-resume-{n}", "ts": time.time()}]
+                mgr.update_session(scan_dir, {"resumeAttempts": attempts})
+                repo_path = data.get("repo_path") or ""
+                web_url = data.get("web_url") or ""
+                try:
+                    handle = await self._submit_whitebox(
+                        repo_path, ws, scan_id, scan_dir, event_file, web_url)
+                except BaseException:
+                    self._active_reqs.pop(scan_key, None)
+                    raise
+                orch = asyncio.create_task(
+                    self._combined_orchestrator(scan_key, handle, scan_dir, req))
+                self._orchestrator_tasks[scan_key] = orch
+            self._handles[scan_key] = handle
+            self._tasks[scan_key] = asyncio.create_task(
+                self._watch(scan_key, event_file, scan_dir))
+            return ws, scan_id
+
+        # ── 非组合：既有 resume 路径（零回归）──────────────────────────────────
         repo_path = data.get("repo_path") or ""
         web_url = data.get("web_url") or ""
         scan_type = mgr.get_scan_type(scan_dir) or "whitebox"
@@ -310,7 +373,6 @@ class ScanManager:
         # 续跑前剥掉旧 scan_end（中断时 orphan_reconciler/_watch 写的），否则 _watch 见旧
         # scan_end 立即退出，无法 tail 新 workflow。旧中断事件从 ndjson 末尾移除（session
         # 的 resumeAttempts 已记 resume 次数，历史可追溯）。
-        event_file = scan_dir / "events.ndjson"
         self._strip_trailing_scan_end(event_file)
 
         # 重构 ScanRequest 供 _active_reqs（active_repo_sources 判引用用）。blackbox 必须带
@@ -319,7 +381,6 @@ class ScanManager:
         if scan_type == "blackbox" and reuse_whitebox_scan_id:
             req_kwargs["reuse_whitebox_scan_id"] = reuse_whitebox_scan_id
         req = ScanRequest(**req_kwargs)
-        scan_key = (ws, scan_id)
         self._active_reqs[scan_key] = req
         try:
             if scan_type == "blackbox":
@@ -1067,6 +1128,18 @@ class ScanManager:
             return None  # scan 不存在 -> 404
 
         scan_key = (ws, scan_id)
+
+        # ── 组合扫描 cancel（spec §11.5）──────────────────────────────────────
+        # 按 bb_phase/bb_rerun_attempts 算 workflow_id → re-attach + handle.cancel()；
+        # orchestrator task 一并取消（防后台接力继续 submit 黑盒/写 scan_end 与终态竞争）。
+        # 零回归：仅 combined 真时触发；非组合走下方既有 ①②③ 轨不变。
+        try:
+            _combined = SessionManager(scan_dir.parent).get_session_data(scan_dir).get("combined")
+        except Exception:  # noqa: BLE001 - session 读失败 → 当非组合处理（零回归）
+            _combined = None
+        if _combined:
+            return await self._cancel_combined(ws, scan_id, scan_dir, scan_key)
+
         # ① web 自起: handle.cancel(temporal 原生) + _mark_cancelled 兜底标记.
         # 必须兜底: worker 的 workflow except CancelledError 分支不写 scan_end / 不更新
         # session(仅 try 正常完成分支调 finalize_summary)。web 不标 -> session 卡 running
@@ -1349,6 +1422,45 @@ class ScanManager:
 
     # ── 组合扫描接力编排（spec §7，Task 4）───────────────────────────────────
 
+    async def _cancel_combined(self, ws: str, scan_id: str, scan_dir: Path,
+                               scan_key: tuple[str, str]) -> dict:
+        """组合扫描 cancel（spec §11.5）：按 bb_phase/bb_rerun_attempts 算 workflow_id →
+        re-attach + handle.cancel()；orchestrator task 一并取消 + 标终态 cancelled。
+
+        workflow_id 算法（与 resume / _reconcile_combined_scan 同口径）：
+        - running + rerun=0 → {ws}-{scan_id}-bb；
+        - running + rerun=N>0 → {ws}-{scan_id}-bb-rerun-N；
+        - 其他（pending/precheck）→ {ws}-{scan_id}（白盒）。
+
+        orchestrator task（_orchestrator_tasks 登记）取消：防后台接力继续 submit 黑盒 / 写
+        scan_end 与 _mark_cancelled 终态竞争。_handles 同步清（白盒 handle 残留 running 阶段）。
+        Temporal 连接/cancel best-effort（不可达仍标 cancelled——对齐既有 cancel ③ 轨语义）。
+        """
+        data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+        bb_phase = data.get("bb_phase")
+        bb_rerun = int(data.get("bb_rerun_attempts") or 0)
+        # 算 workflow_id（与 resume running 分支同算法）
+        if bb_phase == "running":
+            suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
+        else:
+            suffix = ""
+        wf_id = self._resolve_workflow_id(ws, scan_id) + suffix
+        # 取消编排 task（fire-and-forget，不再 submit 黑盒 / 不与终态竞争）
+        orch = self._orchestrator_tasks.pop(scan_key, None)
+        if orch is not None and not orch.done():
+            orch.cancel()
+        # re-attach + handle.cancel()（best-effort；Temporal 不可达不阻断标终态）
+        try:
+            client = await Client.connect(self._temporal_address())
+            handle = client.get_workflow_handle(wf_id)
+            await handle.cancel()
+        except Exception:  # noqa: BLE001 - best-effort; temporal 不可达仍标 cancelled
+            pass
+        # 清残留 handle 登记（白盒 handle 在 running 阶段仍挂 _handles；对齐 delete 清理）
+        self._handles.pop(scan_key, None)
+        await self._mark_cancelled(scan_dir)
+        return {"cancelled": scan_id}
+
     async def _combined_orchestrator(self, scan_key: tuple[str, str], wb_handle: Any,
                                      scan_dir: Path, req: ScanRequest) -> None:
         """组合接力编排（spec §7.2）：await 白盒完成 → _run_blackbox_phase；try/except/finally
@@ -1375,6 +1487,48 @@ class ScanManager:
             # 幂等收尾：成功路径黑盒已写 scan_end → no-op；异常/跳过 → 补写。
             await self._ensure_scan_end(scan_dir)
             self._orchestrator_tasks.pop(scan_key, None)
+
+    async def _combined_report_orchestrator(self, scan_key: tuple[str, str],
+                                            bb_handle: Any, scan_dir: Path) -> None:
+        """仅做报告的组合编排（spec §11.4，resume bb_phase=running 分支）。
+
+        黑盒 workflow 已在跑（resume 前 submit 过，接力已发生），scan_manager 进程崩溃后
+        resume re-attach 了黑盒 handle。本 task 镜像 _combined_orchestrator 的「await handle →
+        生成报告」尾段，但不重 submit 黑盒（接力已完成 submit 阶段）：
+
+        await bb_handle.result() → _generate_combined_report → _mark_bb(completed)；
+        try/except/finally 经 _ensure_scan_end（幂等）收尾（与 _combined_orchestrator 同构）。
+        """
+        try:
+            await bb_handle.result()
+            await self._generate_combined_report(scan_dir)
+            await self._mark_bb(scan_dir, "completed")
+        except Exception as exc:
+            await self._mark_bb(scan_dir, "failed", str(exc))
+        finally:
+            await self._ensure_scan_end(scan_dir)
+            self._orchestrator_tasks.pop(scan_key, None)
+
+    def _build_combined_resume_req(self, data: dict, ws: str) -> ScanRequest:
+        """从 session data 重建组合扫描 ScanRequest（resume 编排 task 用）。
+
+        编排 task 读 req 的 url + _snapshot_auth_ref（auth 引用）。url 优先 bb_url（组合目标），
+        回落 web_url。auth 字段从 bb_auth_ref 对称重建（_snapshot_auth_ref 的逆），保证
+        _run_blackbox_phase 拿到与 start 时一致的 auth_ref dict。
+
+        type=whitebox + url → _whitebox_combined_optional 校验组合模式认证字段互斥（与 start 同）。
+        """
+        url = data.get("bb_url") or data.get("web_url")
+        req_kwargs: dict = dict(type="whitebox", url=url, workspace=ws)
+        auth_ref = data.get("bb_auth_ref") or {}
+        pid = auth_ref.get("profile_id")
+        if pid:
+            req_kwargs["auth_profile_id"] = pid
+            if auth_ref.get("cred_id"):
+                req_kwargs["auth_credential_id"] = auth_ref["cred_id"]
+            if auth_ref.get("cred_ids"):
+                req_kwargs["auth_credential_ids"] = auth_ref["cred_ids"]
+        return ScanRequest(**req_kwargs)
 
     async def _run_blackbox_phase(self, scan_dir: Path, ws: str, scan_id: str,
                                   auth_ref: dict) -> None:
