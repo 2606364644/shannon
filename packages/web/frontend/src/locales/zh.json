@@ -616,6 +616,15 @@
         "segStatusPending": "待接力",
         "segStatusFailed": "失败",
         "segStatusSkipped": "已跳过"
+      },
+      "runs": {
+        "view": "查看",
+        "select": "选择黑盒 run",
+        "latest": "最新",
+        "addBlackbox": "加黑盒扫描",
+        "addBlackboxDesc": "为该白盒结果新建一次黑盒 run",
+        "addedSuccess": "黑盒 run 已创建",
+        "addedFailed": "创建黑盒 run 失败：{{error}}"
       }
     },
     "errorBoundary": {

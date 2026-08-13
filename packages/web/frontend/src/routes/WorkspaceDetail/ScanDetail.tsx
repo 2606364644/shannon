@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet, useParams, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { Outlet, useParams, useLocation, useNavigate, Link, useSearchParams } from "react-router-dom";
+import { ArrowLeft, RefreshCw, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { getScan, scanEventsUrl, rerunBlackbox, ApiError } from "@/api/client";
+import { getScan, scanEventsUrl, rerunBlackbox, addBlackboxToWhitebox, ApiError } from "@/api/client";
 import { useEventSource } from "@/api/useEventSource";
 import type { SessionData, NdjsonEvent } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -178,6 +178,31 @@ export default function ScanDetail() {
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
   const isCombined = meta?.combined === true;
+  // 版本化黑盒 run（spec 2026-08-14 §5.2）：?run= 选中（默认 latest_bb_run），供 ReportTab/
+  // DeliverablesTab 按 run 切黑盒/融合产物。终端态白盒任务提供「加黑盒」入口（建下一个 run）。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const runs = meta?.bb_runs ?? [];
+  const selectedRun = searchParams.get("run") ?? meta?.latest_bb_run ?? null;
+  const [addBbOpen, setAddBbOpen] = useState(false);
+  const [addBbBusy, setAddBbBusy] = useState(false);
+  const whiteboxTerminal =
+    meta?.scan_type === "whitebox" && ["completed", "done"].includes(status);
+
+  const submitAddBlackbox = async () => {
+    if (!workspace || !scanId) return;
+    setAddBbBusy(true);
+    try {
+      const r = await addBlackboxToWhitebox(workspace, scanId, {});
+      toast.success(t("workspaceDetail.scans.runs.addedSuccess"));
+      setAddBbOpen(false);
+      setSearchParams({ run: r.run_id });
+      load();
+    } catch (e) {
+      toast.error(t("workspaceDetail.scans.runs.addedFailed", { error: (e as Error).message }));
+    } finally {
+      setAddBbBusy(false);
+    }
+  };
 
   // live/logs tab：根容器走 flex 链，高度 = 视口 - 固定的 TopBar(h-12=3rem) + main(py-5=2.5rem) = 5.5rem
   // （这俩不换行、精确可靠，非对 header 的估值）；header/tabs 用 shrink-0 保持自然高（窄屏 flex-wrap 换行
@@ -210,6 +235,30 @@ export default function ScanDetail() {
               )}
             </>
           )}
+          {/* 版本化黑盒 run 选择器（spec 2026-08-14 §5.2）：组合任务多 run 时切换查看。 */}
+          {isCombined && runs.length > 0 && (
+            <select
+              aria-label={t("workspaceDetail.scans.runs.select")}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={selectedRun ?? ""}
+              onChange={(e) => setSearchParams(e.target.value ? { run: e.target.value } : {})}
+            >
+              {runs.map((r) => (
+                <option key={r.run_id} value={r.run_id}>
+                  {r.run_id === meta?.latest_bb_run
+                    ? `${r.run_id} · ${t("workspaceDetail.scans.runs.latest")}`
+                    : r.run_id}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* 加黑盒入口（spec §6）：终端态白盒任务可新建黑盒 run（纯白盒→首个 run；
+              已 combined→下一个 run）。 */}
+          {whiteboxTerminal && (
+            <Button size="sm" variant="outline" onClick={() => setAddBbOpen(true)}>
+              <Plus className="size-3.5" /> {t("workspaceDetail.scans.runs.addBlackbox")}
+            </Button>
+          )}
         </div>
       </div>
       {/* 组合扫描两段时间线（spec §9/§11.3）：combined 时渲染；shrink-0 以兼容 live/logs flex 链。 */}
@@ -229,7 +278,26 @@ export default function ScanDetail() {
           </TabsList>
         </div>
       </Tabs>
-      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet /></ErrorBoundary></div>
+      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun }} /></ErrorBoundary></div>
+
+      {/* 加黑盒确认 Dialog（空 body = 无认证直连；后续可扩认证/HOST 选择） */}
+      <Dialog open={addBbOpen} onOpenChange={setAddBbOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workspaceDetail.scans.runs.addBlackbox")}</DialogTitle>
+            <DialogDescription>{t("workspaceDetail.scans.runs.addBlackboxDesc")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddBbOpen(false)} disabled={addBbBusy}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={submitAddBlackbox} disabled={addBbBusy}>
+              {addBbBusy && <RefreshCw className="mr-1 size-3.5 animate-spin" />}
+              {t("common.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

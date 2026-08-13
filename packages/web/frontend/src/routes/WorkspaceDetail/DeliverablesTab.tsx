@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGet, apiGetText, scanDeliverablesPath } from "../../api/client";
+import {
+  apiGet, apiGetText, scanDeliverablesPath, blackboxRunDeliverablesPath,
+} from "../../api/client";
 import type { DeliverablesSummary, DeliverablesFile } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { MarkdownView } from "../../components/MarkdownView";
@@ -20,6 +22,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 export function DeliverablesTab() {
   const { t } = useTranslation();
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
+  // 版本化 run（spec 2026-08-14）：selectedRun 非空时黑盒产物读该 run 的 deliverables。
+  const outletCtx = useOutletContext<{ selectedRun?: string | null }>();
+  const selectedRun = outletCtx?.selectedRun ?? null;
   const [data, setData] = useState<DeliverablesSummary | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,10 +35,13 @@ export function DeliverablesTab() {
     setData(null);
     setSel(null);
     setErr(null);
-    apiGet<DeliverablesSummary>(scanDeliverablesPath(workspace, scanId))
+    const path = selectedRun
+      ? blackboxRunDeliverablesPath(workspace, scanId, selectedRun)
+      : scanDeliverablesPath(workspace, scanId);
+    apiGet<DeliverablesSummary>(path)
       .then((d) => { setData(d); setLoading(false); })
       .catch((e: unknown) => { setData(null); setErr(String(e)); setLoading(false); });
-  }, [workspace, scanId]);
+  }, [workspace, scanId, selectedRun]);
 
   // 三态早返回（同 Task 9 模式）：err → ErrorState；loading → Skeleton；data → 主布局
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.loadError", { error: err })} />;
@@ -83,7 +91,7 @@ export function DeliverablesTab() {
         ) : (
           <FileTree files={data.files} onSelect={setSel} />
         )}
-        {sel && <FilePreview ws={workspace!} scanId={scanId!} file={sel} />}
+        {sel && <FilePreview ws={workspace!} scanId={scanId!} file={sel} runId={selectedRun} />}
       </div>
     </div>
   );
@@ -133,7 +141,9 @@ function CombinedBuckets({
   );
 }
 
-function FilePreview({ ws, scanId, file }: { ws: string; scanId: string; file: DeliverablesFile }) {
+function FilePreview({ ws, scanId, file, runId }: {
+  ws: string; scanId: string; file: DeliverablesFile; runId?: string | null;
+}) {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -141,11 +151,14 @@ function FilePreview({ ws, scanId, file }: { ws: string; scanId: string; file: D
     setContent("");
     setErr(null);
     if (file.kind === "md" || file.kind === "other_json" || file.kind.endsWith("_queue")) {
-      apiGetText(scanDeliverablesPath(ws, scanId, file.path))
+      const fp = runId
+        ? blackboxRunDeliverablesPath(ws, scanId, runId, file.path)
+        : scanDeliverablesPath(ws, scanId, file.path);
+      apiGetText(fp)
         .then(setContent)
         .catch((e) => { setContent(""); setErr(String(e)); });
     }
-  }, [ws, scanId, file.path]);
+  }, [ws, scanId, file.path, runId]);
   // 文件预览失败：局部 ErrorState（不整页崩，左侧 vuln grid 仍可用）
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.fileLoadError", { error: err })} />;
   if (file.kind === "empty_json") return <div className="text-sm text-muted-foreground">{t("workspaceDetail.deliverables.emptyJson")}</div>;

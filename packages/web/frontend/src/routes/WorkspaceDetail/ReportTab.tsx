@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGetText, getScan, scanReportPath } from "../../api/client";
+import { apiGetText, getScan, scanReportPath, blackboxRunReportPath } from "../../api/client";
 // useTranslation 在子组件 SingleReport/CombinedReport 内使用；顶层 ReportTab 仅路由态。
 import { MarkdownView } from "../../components/MarkdownView";
 import { ErrorState } from "../../components/ErrorState";
@@ -72,9 +72,12 @@ function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
   );
 }
 
-/** 组合：三子 tab，各拉对应 track 报告。 */
+/** 组合：三子 tab，各拉对应 track 报告。黑盒/融合子 tab 按 selectedRun（版本化 run，spec
+ * 2026-08-14）切到该 run 的 blackbox-runs/run-K 报告；白盒子 tab 仍 scan 级（共享）。 */
 function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
   const { t } = useTranslation();
+  const outletCtx = useOutletContext<{ selectedRun?: string | null }>();
+  const selectedRun = outletCtx?.selectedRun ?? null;
   const [track, setTrack] = useState<Track>("combined");
   const [md, setMd] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -84,10 +87,13 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
     setLoading(true);
     setErr(null);
     setMd("");
-    apiGetText(scanReportPath(ws, scanId, track))
+    const path = (selectedRun && (track === "blackbox" || track === "combined"))
+      ? blackboxRunReportPath(ws, scanId, selectedRun, track === "combined" ? "combined" : undefined)
+      : scanReportPath(ws, scanId, track);
+    apiGetText(path)
       .then((txt) => { setMd(txt); setLoading(false); })
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [ws, scanId, track]);
+  }, [ws, scanId, track, selectedRun]);
 
   return (
     <div className="space-y-3">
