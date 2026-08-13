@@ -11,13 +11,13 @@ import pytest
 
 @pytest.fixture
 def _authed_cookies(app_with_ws, monkeypatch):
-    """返 (app, cookies) 供 ASGITransport 用（admin tester，注入 session cookie）。"""
+    """返 (app, cookies) 供 ASGITransport 用（canonical admin，注入 session cookie）。"""
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     app = app_with_ws
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
-        store.create_user("tester", __import__("supernova_web.auth.passwords", fromlist=["hash_password"]).hash_password("test-pw"), role="admin")
-    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    if store.get_user_by_username("admin") is None:
+        store.create_user("admin", __import__("supernova_web.auth.passwords", fromlist=["hash_password"]).hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("admin").id)
     return app, {"sn-sid": sid}
 
 

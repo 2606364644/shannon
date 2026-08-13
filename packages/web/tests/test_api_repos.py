@@ -1,9 +1,8 @@
 """Legacy repos API tests, ported to ws-scoped routes (P2: /api/workspaces/{ws}/repos/...).
 
 T2 moved every repo route under the workspace context + added workspace_member authz.
-These cases cover repo CRUD/SSE behavior (not membership) — admin role bypasses the
-member check, so tester is created with role="admin" (see _authed). Membership-specific
-cases live in test_repos_routes_ws.py.
+These cases cover repo CRUD/SSE behavior (not membership) — canonical admin bypasses the
+member check. Membership-specific cases live in test_repos_routes_ws.py.
 """
 import json
 import pytest
@@ -44,16 +43,15 @@ def _app(tmp_path, monkeypatch, repos):
 def _authed(app):
     """构造已登录的 admin TestClient + 创建测试用户。返回 TestClient。
 
-    tester 取 admin 角色——admin 经 workspace_member 依赖时 bypass 成员检查，
-    使这些用例聚焦 repo CRUD/SSE 行为本身（成员鉴权另见 test_repos_routes_ws.py）。
+    使用 canonical admin，使这些用例聚焦 repo CRUD/SSE 行为本身（成员鉴权另见 test_repos_routes_ws.py）。
     """
     from supernova_web.auth.passwords import hash_password
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
-        store.create_user("tester", hash_password("test-pw"), role="admin")
+    if store.get_user_by_username("admin") is None:
+        store.create_user("admin", hash_password("test-pw"), role="admin")
     c = TestClient(app)
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
-    c.post("/api/auth/login", json={"username": "tester", "password": "test-pw"},
+    c.post("/api/auth/login", json={"username": "admin", "password": "test-pw"},
            headers={"X-CSRF-Token": tok})
     return c
 
@@ -113,9 +111,9 @@ async def test_delete_busy_409(tmp_path, monkeypatch):
     from supernova_web.auth.csrf import generate_csrf_token
     from supernova_web.auth.passwords import hash_password
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
-        store.create_user("tester", hash_password("test-pw"), role="admin")
-    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    if store.get_user_by_username("admin") is None:
+        store.create_user("admin", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("admin").id)
     tok = generate_csrf_token()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t",
@@ -133,10 +131,10 @@ async def test_sse_events(tmp_path, monkeypatch):
         + json.dumps({"ts": "t2", "type": "clone_end", "status": "ready"}) + "\n")
     # 直接生成 session 注入 cookie
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
+    if store.get_user_by_username("admin") is None:
         from supernova_web.auth.passwords import hash_password
-        store.create_user("tester", hash_password("test-pw"), role="admin")
-    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+        store.create_user("admin", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("admin").id)
     transport = httpx.ASGITransport(app=app)
     lines = []
     async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=5,
@@ -227,10 +225,10 @@ async def test_events_linked_empty_stream(tmp_path, monkeypatch):
     app = _app(tmp_path, monkeypatch, {})
     app.state.repo_manager.link_repo(WS, "ftoa", str(target))
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
+    if store.get_user_by_username("admin") is None:
         from supernova_web.auth.passwords import hash_password
-        store.create_user("tester", hash_password("test-pw"), role="admin")
-    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+        store.create_user("admin", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("admin").id)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=3,
                                  cookies={"sn-sid": sid}) as c:
@@ -345,9 +343,9 @@ async def test_batch_delete_skips_busy(tmp_path, monkeypatch):
     from supernova_web.auth.csrf import generate_csrf_token
     from supernova_web.auth.passwords import hash_password
     store = app.state.auth_store
-    if store.get_user_by_username("tester") is None:
-        store.create_user("tester", hash_password("test-pw"), role="admin")
-    sid = app.state.session_manager.create(store.get_user_by_username("tester").id)
+    if store.get_user_by_username("admin") is None:
+        store.create_user("admin", hash_password("test-pw"), role="admin")
+    sid = app.state.session_manager.create(store.get_user_by_username("admin").id)
     tok = generate_csrf_token()
     transport = httpx.ASGITransport(app=app)
     try:

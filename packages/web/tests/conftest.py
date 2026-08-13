@@ -61,19 +61,19 @@ def app_with_ws(tmp_workspaces, monkeypatch):
 
 @pytest.fixture
 def authed_client(app_with_ws, monkeypatch):
-    """已登录的 TestClient（用户 tester/test-pw），供需要鉴权的现有测试迁移用。
+    """已登录的 TestClient（canonical admin/admin-pw），供需要鉴权的现有测试迁移用。
 
     委托 app_with_ws（已有 remount + cookie_secure=0）；此处仅补「建用户 + 登录」。
     """
     from starlette.testclient import TestClient
     from supernova_web.auth.passwords import hash_password
     app = app_with_ws
-    app.state.auth_store.create_user("tester", hash_password("test-pw"), role="admin")
+    app.state.auth_store.create_user("admin", hash_password("test-pw"), role="admin")
     c = TestClient(app)
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
     c.post(
         "/api/auth/login",
-        json={"username": "tester", "password": "test-pw"},
+        json={"username": "admin", "password": "test-pw"},
         headers={"X-CSRF-Token": tok},
     )
     return c
