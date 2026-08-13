@@ -85,7 +85,7 @@ def ensure_global_admin_access(workspaces_dir: Path, store: AuthStore) -> None:
         return
 
     for ws_dir in workspaces_dir.iterdir():
-        if not ws_dir.is_dir() or ws_dir.name.startswith("."):
+        if not ws_dir.is_dir() or ws_dir.is_symlink() or ws_dir.name.startswith("."):
             continue
         store.ensure_workspace_member(ws_dir.name, admin.id, "manager")
 

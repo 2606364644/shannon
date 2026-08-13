@@ -106,7 +106,7 @@ class WorkspacesIndexer:
         if not self._dir.is_dir():
             return out
         for ws_dir in sorted(self._dir.iterdir()):
-            if not ws_dir.is_dir():
+            if not ws_dir.is_dir() or ws_dir.is_symlink():
                 continue
             if ws_dir.name.startswith("."):
                 continue  # 保留段（.system 等）不进 ws 列表，对齐 app.py dot-dir 约定

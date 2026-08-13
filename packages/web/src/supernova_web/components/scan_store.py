@@ -341,7 +341,7 @@ class ScanStore:
         源 ① scans/<id>/session.json（新模型）；源 ② ws 根 session.json（legacy）。
         """
         ws_dir = self._dir / ws
-        if not ws_dir.is_dir():
+        if not ws_dir.is_dir() or ws_dir.is_symlink():
             return []
         entries: list[tuple[str, Path, float]] = []  # (scan_id, scan_dir, created_at_unix)
         # 源 ①
@@ -424,6 +424,8 @@ class ScanStore:
             return scan_dir
         # 源 ② legacy ws 根（派生 legacy_id 匹配）
         ws_dir = self._dir / ws
+        if ws_dir.is_symlink():
+            return None
         if (ws_dir / "session.json").exists() and self._legacy_scan_id(ws_dir) == scan_id:
             return ws_dir
         return None

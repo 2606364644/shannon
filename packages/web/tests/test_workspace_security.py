@@ -66,3 +66,21 @@ def test_create_user_rolls_back_when_global_admin_reconciliation_fails(admin_cli
     assert response.status_code == 500
     assert app.state.auth_store.get_user_by_username("alice") is None
     assert not (app.state.config.workspaces_dir / "alice").exists()
+
+
+def test_symlink_workspace_is_not_listed_or_assigned(admin_client, tmp_workspaces, tmp_path):
+    client, app = admin_client
+    outside = tmp_path / "outside-workspace"
+    outside.mkdir()
+    (outside / "workspace.json").write_text(
+        '{"name":"outside-workspace","owner":"external"}'
+    )
+    link = tmp_workspaces / "linked"
+    link.symlink_to(outside, target_is_directory=True)
+
+    response = client.get("/api/workspaces")
+
+    assert response.status_code == 200
+    assert "linked" not in {row["name"] for row in response.json()}
+    admin = app.state.auth_store.get_user_by_username("admin")
+    assert app.state.auth_store.get_workspace_member_role("linked", admin.id) is None
