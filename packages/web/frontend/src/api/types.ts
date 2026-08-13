@@ -138,6 +138,13 @@ export interface ScanSummary {
   is_correlation?: boolean;
   // IA 重设计 §3：跨 ws 聚合（GET /api/scans）注入的归属工作区名。per-ws listScans 不返此字段。
   workspace?: string;
+  // 组合扫描（spec 2026-08-12 §6.2）：白盒+黑盒一键组合，scan_type 仍是 whitebox，靠 session.combined 标记。
+  // combined=true 时卡片收起显 progress_pct + 阶段名（bb_phase 映射），展开按需读 events 推步级。
+  // 纯白盒/纯黑盒不返这些字段 -> 可选，消费方 null-safe（非 combined 走原单段渲染，零回归）。
+  combined?: boolean;
+  bb_phase?: string;        // precheck | pending | running | completed | failed | skipped
+  bb_reason?: string;       // 失败/跳过原因（precheck fail / skipped 无产物 等）
+  progress_pct?: number;    // 后端预算（三阶段加权，spec §9.2）；前端只显示不重算
 }
 
 export interface SessionMetrics {

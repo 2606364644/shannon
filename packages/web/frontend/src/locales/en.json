@@ -585,6 +585,22 @@
         "created": "Created",
         "cost": "Cost",
         "vulns": "Vulns"
+      },
+      "combined": {
+        "expand": "Expand steps",
+        "collapse": "Collapse",
+        "phasePrecheck": "Prechecking",
+        "phasePending": "Whitebox scanning",
+        "phaseRunning": "Blackbox scanning",
+        "phaseCompleted": "Completed",
+        "phaseFailed": "Blackbox failed",
+        "phaseSkipped": "Blackbox skipped",
+        "phaseUnknown": "In progress",
+        "segmentWhitebox": "Whitebox",
+        "segmentBlackbox": "Blackbox",
+        "segmentBlackboxPending": "Blackbox (pending)",
+        "stepLevelTitle": "Step progress",
+        "noSteps": "No step events yet"
       }
     },
     "errorBoundary": {

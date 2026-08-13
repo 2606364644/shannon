@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Ban, Play, RefreshCw, Trash2, Eye } from "lucide-react";
+import { Ban, Play, RefreshCw, Trash2, Eye, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +15,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  listScans, cancelScan, deleteScan, resumeScan, getScan, ApiError,
+  listScans, cancelScan, deleteScan, resumeScan, getScan, scanEventsUrl, ApiError,
 } from "@/api/client";
-import type { ScanSummary, SessionData } from "@/api/types";
+import { useEventSource } from "@/api/useEventSource";
+import type { ScanSummary, SessionData, NdjsonEvent } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
+import { cn } from "@/lib/utils";
 
 // 终态集（spec §5.1 resume 仅非终态放行，终态 422）。interrupted 等属未完成可恢复。
 const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed"]);
@@ -26,6 +28,120 @@ const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed"]);
 function fmtTime(unix?: number | null): string {
   if (!unix) return "-";
   return new Date(unix * 1000).toLocaleString();
+}
+
+// === 组合扫描进度卡片（spec 2026-08-12-combined-wb-bb-scan §9）===
+// 收起态：progress_pct% + 进度条 + 阶段名（bb_phase 映射）——所有列表卡片轻量呈现。
+// 展开态：按需读 events.ndjson 推步级（PhaseEvent declared steps vs StepEvent complete）。
+// 非组合（combined!=true）卡片走原单段渲染，零回归。
+
+// bb_phase → i18n key（spec §6.2 状态机：precheck/pending/running/completed/failed/skipped）。
+const BB_PHASE_LABEL_KEY: Record<string, string> = {
+  precheck: "workspaceDetail.scans.combined.phasePrecheck",
+  pending: "workspaceDetail.scans.combined.phasePending",
+  running: "workspaceDetail.scans.combined.phaseRunning",
+  completed: "workspaceDetail.scans.combined.phaseCompleted",
+  failed: "workspaceDetail.scans.combined.phaseFailed",
+  skipped: "workspaceDetail.scans.combined.phaseSkipped",
+};
+
+/** 收起态：progress_pct + 进度条 + 阶段名。仅 combined 卡片渲染。 */
+function CombinedProgressBadge({ scan }: { scan: ScanSummary }) {
+  const { t } = useTranslation();
+  const pct = Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
+  const phaseKey = BB_PHASE_LABEL_KEY[scan.bb_phase ?? ""] ??
+    "workspaceDetail.scans.combined.phaseUnknown";
+  return (
+    <span className="inline-flex items-center gap-2" data-testid="combined-progress">
+      <span className="font-mono text-sm font-semibold leading-none">{pct}%</span>
+      <span
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          className="block h-full rounded-full bg-primary transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="text-xs text-muted-foreground">{t(phaseKey)}</span>
+    </span>
+  );
+}
+
+/** 单 phase 的步级进度（PhaseEvent(start) 声明 vs StepEvent(complete) 计数）。 */
+interface PhaseStepProgress {
+  total: number;
+  completed: number;
+}
+
+/** 从 events 推 phase→步级进度映射（保留插入顺序）。 */
+function derivePhaseSteps(events: NdjsonEvent[]): Array<[string, PhaseStepProgress]> {
+  const map = new Map<string, PhaseStepProgress>();
+  for (const ev of events) {
+    if (ev.type === "PhaseEvent" && ev.event === "start") {
+      // 同 phase 重入（白盒 phase 在黑盒段同名时按首次声明计），保留先入声明。
+      if (!map.has(ev.phase)) {
+        const steps = Array.isArray(ev.steps) ? ev.steps : [];
+        map.set(ev.phase, { total: steps.length, completed: 0 });
+      }
+    } else if (ev.type === "StepEvent" && ev.event === "complete") {
+      const p = map.get(ev.phase);
+      if (p) p.completed += 1;
+    }
+  }
+  return Array.from(map.entries());
+}
+
+/**
+ * 展开态：按需拉该 scan 的 events 推步级。仅展开时挂载（条件渲染）→
+ * useEventSource 仅在展开时建 SSE 连接，收起时卸载自动 close（on-demand，非 eager）。
+ * 分段靠 bb_phase（spec §9.4 D3）：bb_phase=pending 时只显白盒段；running 之后白盒+黑盒段都显。
+ */
+function CombinedStepTimeline({
+  ws, scanId, bbPhase,
+}: { ws: string; scanId: string; bbPhase?: string }) {
+  const { t } = useTranslation();
+  const { events } = useEventSource(scanEventsUrl(ws, scanId));
+  const phases = useMemo(() => derivePhaseSteps(events), [events]);
+
+  if (phases.length === 0) {
+    return (
+      <div className="mt-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+        {t("workspaceDetail.scans.combined.noSteps")}
+      </div>
+    );
+  }
+
+  // 黑盒段是否已开始：bb_phase ∈ running/completed/failed（pending/precheck/skipped = 黑盒未跑或跳过）。
+  const blackboxStarted = bbPhase === "running" || bbPhase === "completed" || bbPhase === "failed";
+
+  return (
+    <div className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
+      <div className="text-xs font-medium text-muted-foreground">
+        {t("workspaceDetail.scans.combined.stepLevelTitle")}
+      </div>
+      {phases.map(([phase, p]) => (
+        <div key={phase} className="flex items-center gap-2 text-xs">
+          <span className="font-mono text-muted-foreground">{phase}</span>
+          <span className="font-mono font-medium">{p.completed}/{p.total}</span>
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full rounded-full bg-primary/80"
+              style={{ width: `${p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0}%` }}
+            />
+          </span>
+        </div>
+      ))}
+      {!blackboxStarted && (
+        <div className="text-xs italic text-muted-foreground">
+          {t("workspaceDetail.scans.combined.segmentBlackboxPending")}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ScanList() {
@@ -97,6 +213,9 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<"cancel" | "delete" | null>(null);
+  // 组合扫描卡片展开/收起（按需读 events 推步级，spec §9.3）。
+  const [expanded, setExpanded] = useState(false);
+  const isCombined = scan.combined === true;
 
   const isRunning = scan.is_running || scan.status === "running";
   const isTerminal = TERMINAL.has(scan.status);
@@ -206,8 +325,25 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
             <span className="text-xs text-muted-foreground">{t("workspaceDetail.scans.card.created")}</span>
             <span className="font-mono text-sm text-muted-foreground">{fmtTime(scan.created_at)}</span>
           </span>
+          {isCombined && <CombinedProgressBadge scan={scan} />}
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          {isCombined && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-label={expanded
+                ? t("workspaceDetail.scans.combined.collapse")
+                : t("workspaceDetail.scans.combined.expand")}
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+              {expanded
+                ? t("workspaceDetail.scans.combined.collapse")
+                : t("workspaceDetail.scans.combined.expand")}
+            </Button>
+          )}
           <Button size="sm" variant="ghost" asChild>
             <Link to={`${scanPath}/${defaultTab}`}><Eye className="size-3.5" /> {t("workspaceDetail.scans.view")}</Link>
           </Button>
@@ -229,6 +365,12 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
           </Button>
         </div>
       </div>
+
+      {/* 组合扫描展开态：按需步级时间线（spec §9.3）。仅在 expanded 时挂载 →
+          useEventSource 仅此刻建 SSE，收起时卸载自动 close（on-demand，非 eager）。 */}
+      {isCombined && expanded && (
+        <CombinedStepTimeline ws={ws} scanId={scan.scan_id} bbPhase={scan.bb_phase} />
+      )}
 
       {/* 取消/删除确认 Dialog */}
       <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>

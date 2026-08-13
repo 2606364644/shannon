@@ -585,6 +585,22 @@
         "created": "创建时间",
         "cost": "花费",
         "vulns": "漏洞数"
+      },
+      "combined": {
+        "expand": "展开步级",
+        "collapse": "收起",
+        "phasePrecheck": "预验证中",
+        "phasePending": "白盒扫描中",
+        "phaseRunning": "黑盒扫描中",
+        "phaseCompleted": "已完成",
+        "phaseFailed": "黑盒失败",
+        "phaseSkipped": "已跳过黑盒",
+        "phaseUnknown": "进行中",
+        "segmentWhitebox": "白盒段",
+        "segmentBlackbox": "黑盒段",
+        "segmentBlackboxPending": "黑盒段（待接力）",
+        "stepLevelTitle": "步级进度",
+        "noSteps": "暂无步级事件"
       }
     },
     "errorBoundary": {
