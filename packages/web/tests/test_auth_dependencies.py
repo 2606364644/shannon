@@ -32,4 +32,3 @@ def test_require_admin_forbidden_for_user():
     with pytest.raises(HTTPException) as e:
         require_admin(_req(u))
     assert e.value.status_code == 403
-
