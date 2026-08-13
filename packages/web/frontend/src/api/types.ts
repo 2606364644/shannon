@@ -296,6 +296,23 @@ export interface AuthProfile {
   scope?: "workspace" | "system";  // system = configs seed 的全局共享只读档案
 }
 
+// === HOST 档案库（blackbox-host-profile, Task 9-11 契约）===
+// 对齐 backend host_profile_store / host_profiles.py 响应 payload。
+// mappings: domain→IP 的 hosts 映射，黑盒扫描时注入 agent-browser 代理 / DNS 覆盖。
+export interface HostMapping {
+  ip: string;
+  host: string;
+}
+export interface HostProfile {
+  id: string;
+  name: string;
+  source_url?: string | null;   // 生成来源的 /etc/hosts 风格文本 URL（null=手填）
+  mappings: HostMapping[];
+  scope?: "workspace" | "system";  // system = 全局共享只读档案（configs seed）
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ScanRequest {
   type: "whitebox" | "blackbox" | "correlation";
   // 扫描入口已收窄为「工作区已下载仓库」——本地路径入口移除（source.kind 恒为 repo）。
@@ -318,6 +335,10 @@ export interface ScanRequest {
   // inline 多角色附加账号（#2，2026-08-07）：与 authentication 同存，每条 {role,username,password,totp_secret?}。
   // 后端 scan_manager 展开成 accounts[]（多身份对比）；仅 inline 模式（authentication 存在）时合法。
   auth_accounts?: { role: string; username: string; password: string; totp_secret?: string }[];
+  // HOST 档案库（blackbox-host-profile）：黑盒扫描时用 host_profile_id 选档案注入 domain→IP 映射
+  // （agent-browser --proxy 覆盖 DNS），或 host_url 临时拉取一份 /etc/hosts 风格文本。
+  host_profile_id?: string;
+  host_url?: string;
   config_yaml?: string;
   config_name?: string;
 }
