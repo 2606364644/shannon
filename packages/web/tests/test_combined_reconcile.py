@@ -1,228 +1,169 @@
-"""组合扫描崩溃恢复（Task 5）：_reconcile_combined_scan 按 bb_phase 补接力/补报告/补 scan_end。
+"""组合扫描崩溃恢复（T11）：_reconcile_combined_scan 按 bb_runs[] 逐 run 补报告/补 scan_end。
 
-核心契约（spec §7.5 崩溃恢复）：
-- 非组合扫描 → 立即返回（零回归，纯白盒/纯黑盒恢复路径不变）。
-- bb_phase=pending + 白盒 workflow COMPLETED → 补 _run_blackbox_phase（接力）。
-- bb_phase=running + 黑盒 workflow COMPLETED → 补 _generate_combined_report（报告）。
-- 任意 bb_phase + events 无 scan_end + workflow 不活跃 → _ensure_scan_end 补写（幂等）。
-- workflow 仍 RUNNING → 不干预（不写 scan_end，让 temporal 自然完成）。
+核心契约（spec §7.5 崩溃恢复，版本化 run 模型）：
+- 非组合扫描 → 立即返回（零回归）。
+- 白盒 workflow 仍 RUNNING → 不干预（wf_active，不补 scan_end）。
+- 逐 run：非终态 run 探测其 -bb-{K} workflow——COMPLETED → 补 per-run 融合报告 +
+  _mark_run(completed)；RUNNING → wf_active（不干预）；其余 → fall-through 补 scan_end。
+- 取代旧 task-level bb_phase 分支（不再 reconcile 内 kickoff 黑盒；续跑由 resume/orchestrator）。
 """
+import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from supernova_web.components.scan_manager import ScanManager
+from supernova_web.components.scan_store import ScanStore
 
 
-# ── fixture ─────────────────────────────────────────────────────────────────
 @pytest.fixture
 def mgr(tmp_path):
-    """最小 ScanManager（workspaces_dir=tmp_path，不真连 temporal）。"""
     return ScanManager(workspaces_dir=tmp_path, repos_dir=tmp_path, config_store=object())
 
 
-def _make_scan_dir(tmp_path, ws="ws", scan_id="scan-1", *, combined=True,
-                   bb_phase="pending", bb_rerun_attempts=0, with_scan_end=False,
-                   whitebox_ready=False):
-    """建 scan_dir（<tmp>/<ws>/scans/<scan_id>/）+ session.json + events.ndjson。
+def _make_combined(tmp_path, ws="ws", scan_id="scan-1", *, with_scan_end=False):
+    """建组合 scan_dir（<tmp>/<ws>/scans/<scan_id>/）+ session.json + events.ndjson。
 
-    用 scans/ 层级结构（非平铺），保证 ws 从 scan_dir.parent.parent.name 正确派生
-    （不复现 bug #4：scan_dir.parent.name 是 "scans" 非 ws）。
+    combined=True（run 状态由 ScanStore.create_blackbox_run 写 bb_runs[]）。
     """
     scan_dir = tmp_path / ws / "scans" / scan_id
     scan_dir.mkdir(parents=True)
-    session = {
-        "scan_type": "whitebox", "status": "running",
-        "combined": combined, "bb_phase": bb_phase,
+    (scan_dir / "session.json").write_text(json.dumps({
+        "scan_type": "whitebox", "status": "running", "combined": True,
         "bb_url": "http://t/", "bb_auth_ref": {"profile_id": None},
-    }
-    if bb_rerun_attempts > 0:
-        session["bb_rerun_attempts"] = bb_rerun_attempts
-    (scan_dir / "session.json").write_text(json.dumps(session))
+    }))
     events = '{"type":"PhaseEvent","phase":"whitebox"}\n'
     if with_scan_end:
         events += '{"type":"scan_end","status":"completed"}\n'
     (scan_dir / "events.ndjson").write_text(events)
-    if whitebox_ready:
-        wb = scan_dir / "deliverables" / "whitebox"
-        wb.mkdir(parents=True)
-        (wb / "recon_deliverable.md").write_text("recon")
-        (wb / "injection_exploitation_queue.json").write_text(
-            '{"vulnerabilities":[{"id":1}]}')
     return scan_dir
 
 
 # ── 非组合扫描零回归 ───────────────────────────────────────────────────────
 async def test_non_combined_scan_returns_early(mgr, tmp_path):
-    """非组合扫描 → _reconcile_combined_scan 立即返回，不调任何组合方法（零回归）。"""
-    scan_dir = _make_scan_dir(tmp_path, combined=False)
-    with patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
-         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
+    """非组合扫描 → 立即返回，不调任何组合方法（零回归）。"""
+    scan_dir = _make_combined(tmp_path)
+    # 覆盖 session 为非 combined
+    (scan_dir / "session.json").write_text(json.dumps({
+        "scan_type": "whitebox", "status": "running"}))
+    with patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
          patch.object(mgr, "_query_workflow_status", new=AsyncMock()) as qs, \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
         await mgr._reconcile_combined_scan(scan_dir)
-        rbp.assert_not_awaited()
         gcr.assert_not_awaited()
         qs.assert_not_awaited()
         ese.assert_not_awaited()
 
 
-# ── bb_phase=pending + 白盒 COMPLETED → 补接力 ──────────────────────────────
-async def test_pending_whitebox_completed_kicks_blackbox(mgr, tmp_path):
-    """bb_phase=pending + 白盒 workflow COMPLETED → _run_blackbox_phase 被调（补接力）。
-
-    ws/scan_id 从 scan_dir 正确派生（非 scan_dir.parent.name bug）。
-    """
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending", whitebox_ready=True)
+# ── run 黑盒 COMPLETED → 补 per-run 报告 + 标 completed ──────────────────────
+async def test_reconcile_completed_run_generates_report(mgr, tmp_path):
+    """run-1 非终态 + 其 -bb-1 workflow COMPLETED → 补 _generate_combined_report(scan_dir,
+    run-1) + _mark_run(completed)；run 索引条目 status→completed。"""
+    scan_dir = _make_combined(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")  # run-1 非终态
     with patch.object(mgr, "_query_workflow_status",
                       new=AsyncMock(return_value="completed")) as qs, \
-         patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
-         patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()):
         await mgr._reconcile_combined_scan(scan_dir)
-        rbp.assert_awaited_once()
-        args = rbp.call_args.args
-        assert args[0] == scan_dir          # scan_dir
-        assert args[1] == "ws"              # ws（scan_dir.parent.parent.name，非 bug）
-        assert args[2] == "scan-1"          # scan_id
+    gcr.assert_awaited_with(scan_dir, "run-1")
+    runs = store.list_blackbox_runs("ws", "scan-1")
+    assert runs[-1]["status"] == "completed"
 
 
-# ── bb_phase=running + 黑盒 COMPLETED → 补报告 ──────────────────────────────
-async def test_running_blackbox_completed_generates_report(mgr, tmp_path):
-    """bb_phase=running + 黑盒 workflow COMPLETED → _generate_combined_report + _mark_bb(completed)。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="running")
-    with patch.object(mgr, "_query_workflow_status",
-                      new=AsyncMock(return_value="completed")), \
-         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
-         patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark:
-        await mgr._reconcile_combined_scan(scan_dir)
-        gcr.assert_awaited_once_with(scan_dir)
-        rbp.assert_not_awaited()
-        # 标 bb_phase=completed（报告补完 → 终态）
-        marked = [c.args for c in mark.call_args_list]
-        assert any(a[1] == "completed" for a in marked), \
-            f"期望 _mark_bb(scan_dir, 'completed')，实际: {marked}"
-
-
-# ── bb_phase=running + bb_rerun_attempts=2 → 查 -bb-rerun-2 workflow ─────────
-async def test_running_rerun_queries_rerun_workflow_id(mgr, tmp_path):
-    """bb_phase=running + bb_rerun_attempts=2 → _query_workflow_status 查
-    {ws}-{scan_id}-bb-rerun-2（非首跑 -bb）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="running", bb_rerun_attempts=2)
-    captured_ids = []
-
-    async def _capture(wf_id):
-        captured_ids.append(wf_id)
-        return "completed"
-
-    with patch.object(mgr, "_query_workflow_status", new=_capture), \
-         patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()):
-        await mgr._reconcile_combined_scan(scan_dir)
-    assert captured_ids == ["ws-scan-1-bb-rerun-2"], \
-        f"期望查 -bb-rerun-2 workflow，实际: {captured_ids}"
-
-
-# ── 白盒/黑盒仍 RUNNING → 不干预（不调接力/报告，不写 scan_end）─────────────
-async def test_pending_whitebox_running_no_intervention(mgr, tmp_path):
-    """bb_phase=pending + 白盒 RUNNING → 不调 _run_blackbox_phase + 不调 _ensure_scan_end
-    （workflow 仍活跃，让 temporal 自然完成）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending")
-    with patch.object(mgr, "_query_workflow_status",
-                      new=AsyncMock(return_value="running")), \
-         patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
-         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
-        await mgr._reconcile_combined_scan(scan_dir)
-        rbp.assert_not_awaited()
-        ese.assert_not_awaited()  # workflow 活跃 → 不补 scan_end
-
-
-async def test_running_blackbox_running_no_intervention(mgr, tmp_path):
-    """bb_phase=running + 黑盒 RUNNING → 不调 _generate_combined_report + 不写 scan_end。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="running")
+# ── run 黑盒 RUNNING → 不干预 ────────────────────────────────────────────────
+async def test_reconcile_running_run_no_intervention(mgr, tmp_path):
+    """run-1 + 其 workflow RUNNING → 不补报告、不补 scan_end（让 temporal 自然完成）。"""
+    scan_dir = _make_combined(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")
+    store.update_blackbox_run("ws", "scan-1", "run-1", phase="running", status="running")
     with patch.object(mgr, "_query_workflow_status",
                       new=AsyncMock(return_value="running")), \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
         await mgr._reconcile_combined_scan(scan_dir)
-        gcr.assert_not_awaited()
-        ese.assert_not_awaited()
+    gcr.assert_not_awaited()
+    ese.assert_not_awaited()  # wf_active → 不补 scan_end
 
 
-# ── events 无 scan_end + workflow 不活跃 → _ensure_scan_end 补写 ─────────────
-async def test_ensures_scan_end_when_absent(mgr, tmp_path):
-    """bb_phase=pending + 白盒 not-found + events 无 scan_end → _ensure_scan_end 补写。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending", with_scan_end=False)
+# ── 无活跃 workflow + 无 scan_end → _ensure_scan_end 补写 ────────────────────
+async def test_reconcile_ensures_scan_end_when_absent(mgr, tmp_path):
+    """无 run / 白盒 not-found + events 无 scan_end → _ensure_scan_end 补写。"""
+    scan_dir = _make_combined(tmp_path, with_scan_end=False)
     with patch.object(mgr, "_query_workflow_status",
                       new=AsyncMock(return_value=None)), \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
         await mgr._reconcile_combined_scan(scan_dir)
-        ese.assert_awaited_once_with(scan_dir)
+    ese.assert_awaited_once_with(scan_dir)
 
 
-# ── events 有 scan_end → _ensure_scan_end 幂等 no-op（不写第二条）────────────
-async def test_scan_end_present_no_double_write(mgr, tmp_path):
+# ── events 有 scan_end → 幂等 no-op ──────────────────────────────────────────
+async def test_reconcile_scan_end_present_no_double_write(mgr, tmp_path):
     """events 已有 scan_end → _write_scan_end 不被调（_ensure_scan_end 幂等 no-op）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="running", with_scan_end=True)
+    scan_dir = _make_combined(tmp_path, with_scan_end=True)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")
     with patch.object(mgr, "_query_workflow_status",
                       new=AsyncMock(return_value="completed")), \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()), \
          patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end:
         await mgr._reconcile_combined_scan(scan_dir)
-        ws_end.assert_not_awaited()  # 已有 scan_end → 幂等 no-op
+    ws_end.assert_not_awaited()
 
 
-# ── precheck 阶段：authcheck + 白盒完成 → 补接力 ────────────────────────────
-async def test_precheck_advances_when_authcheck_and_whitebox_completed(mgr, tmp_path):
-    """bb_phase=precheck + authcheck COMPLETED + 白盒 COMPLETED → 补 _run_blackbox_phase。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="precheck", whitebox_ready=True)
-    statuses = {"ws-scan-1-authcheck": "completed", "ws-scan-1": "completed"}
-
-    async def _qs(wf_id):
-        return statuses.get(wf_id)
-
-    with patch.object(mgr, "_query_workflow_status", new=_qs), \
-         patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp:
-        await mgr._reconcile_combined_scan(scan_dir)
-        rbp.assert_awaited_once()
-
-
-async def test_precheck_authcheck_running_no_intervention(mgr, tmp_path):
-    """bb_phase=precheck + authcheck RUNNING → 不干预（预验证仍跑）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="precheck")
-    statuses = {"ws-scan-1-authcheck": "running"}
-
-    async def _qs(wf_id):
-        return statuses.get(wf_id)
-
-    with patch.object(mgr, "_query_workflow_status", new=_qs), \
-         patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
+# ── reconcile 内部异常 → finally 仍补 scan_end ──────────────────────────────
+async def test_reconcile_report_raises_still_ensures_scan_end(mgr, tmp_path):
+    """_generate_combined_report raise → except 捕获 + finally _ensure_scan_end 补 scan_end。"""
+    scan_dir = _make_combined(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")
+    with patch.object(mgr, "_query_workflow_status",
+                      new=AsyncMock(return_value="completed")), \
+         patch.object(mgr, "_generate_combined_report",
+                      new=AsyncMock(side_effect=RuntimeError("report boom"))), \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
+        await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
+    ese.assert_awaited_once_with(scan_dir)
+
+
+# ── 逐 run：多 run 各自探测 ─────────────────────────────────────────────────
+async def test_reconcile_skips_terminal_runs(mgr, tmp_path):
+    """终态 run（completed/failed）跳过探测；只查非终态 run 的 workflow。"""
+    scan_dir = _make_combined(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")  # run-1
+    store.update_blackbox_run("ws", "scan-1", "run-1", status="failed", phase="failed")
+    store.create_blackbox_run("ws", "scan-1")  # run-2 非终态
+    queried = []
+
+    async def _qs(wf_id):
+        queried.append(wf_id)
+        return None  # 都 not-found
+
+    with patch.object(mgr, "_query_workflow_status", new=_qs), \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
+         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()):
         await mgr._reconcile_combined_scan(scan_dir)
-        rbp.assert_not_awaited()
-        ese.assert_not_awaited()
+    # 查白盒 base（ws-scan-1）+ run-2 的 -bb-2（run-1 终态跳过）
+    assert "ws-scan-1" in queried, f"应查白盒 base，实际: {queried}"
+    assert any(q.endswith("-bb-2") for q in queried), f"应查 run-2 的 -bb-2，实际: {queried}"
+    assert not any(q.endswith("-bb-1") for q in queried), "run-1 终态不应被查"
+    gcr.assert_not_awaited()
 
 
-# ── orphan_reconciler 接入：reconcile_orphaned 传 scan_manager → kick 组合恢复 ─
+# ── orphan_reconciler 接入：reconcile_orphaned → kick 组合恢复 ──────────────
 async def test_reconcile_orphaned_delegates_combined_to_scan_manager(tmp_path):
-    """reconcile_orphaned(scan_manager=mgr) 对组合孤儿 → 调 mgr._kick_combined_reconcile
-    （fire-and-forget，非阻塞；不直接写 scan_end=interrupted）。"""
-    from unittest.mock import MagicMock
     from supernova_web.components.orphan_reconciler import reconcile_orphaned
     scan_dir = tmp_path / "ws" / "scans" / "scan-1"
     scan_dir.mkdir(parents=True)
     (scan_dir / "session.json").write_text(json.dumps({
-        "scan_type": "whitebox", "status": "running",
-        "combined": True, "bb_phase": "pending",
-    }))
+        "scan_type": "whitebox", "status": "running", "combined": True}))
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent"}\n')
-
-    fake_mgr = MagicMock()  # scan_manager mock（_kick_combined_reconcile 是 sync 方法）
-    with patch("supernova_web.components.orphan_reconciler.is_scan_alive",
-               return_value=False), \
+    fake_mgr = MagicMock()
+    with patch("supernova_web.components.orphan_reconciler.is_scan_alive", return_value=False), \
          patch("supernova_web.components.orphan_reconciler._workflow_still_running",
                new=AsyncMock(return_value=False)):
         await reconcile_orphaned(scan_dir, False, scan_manager=fake_mgr)
@@ -230,74 +171,37 @@ async def test_reconcile_orphaned_delegates_combined_to_scan_manager(tmp_path):
 
 
 async def test_reconcile_orphaned_non_combined_writes_scan_end_as_before(tmp_path):
-    """非组合孤儿 → reconcile_orphaned 原有行为不变（写 scan_end=interrupted）。"""
-    from unittest.mock import MagicMock
     from supernova_web.components.orphan_reconciler import reconcile_orphaned, _has_scan_end
     scan_dir = tmp_path / "ws" / "scans" / "scan-1"
     scan_dir.mkdir(parents=True)
     (scan_dir / "session.json").write_text(json.dumps({
-        "scan_type": "whitebox", "status": "running",  # 无 combined 字段 → 非组合
-    }))
+        "scan_type": "whitebox", "status": "running"}))  # 无 combined → 非组合
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent"}\n')
-
     fake_mgr = MagicMock()
-    with patch("supernova_web.components.orphan_reconciler.is_scan_alive",
-               return_value=False), \
+    with patch("supernova_web.components.orphan_reconciler.is_scan_alive", return_value=False), \
          patch("supernova_web.components.orphan_reconciler._workflow_still_running",
                new=AsyncMock(return_value=False)):
         result = await reconcile_orphaned(scan_dir, False, scan_manager=fake_mgr)
-        assert result is True  # 写了 scan_end
+        assert result is True
         assert _has_scan_end(scan_dir / "events.ndjson")
-        fake_mgr._kick_combined_reconcile.assert_not_called()  # 非组合 → 不调
+        fake_mgr._kick_combined_reconcile.assert_not_called()
 
 
-# ── review fix #1: reconcile 内部异常 → finally 仍补 scan_end ──────────────
-async def test_reconcile_run_blackbox_phase_raises_still_ensures_scan_end(mgr, tmp_path):
-    """_run_blackbox_phase raise → except 捕获 + finally _ensure_scan_end 补 scan_end
-    （review fix #1：_ensure_scan_end 不在 try 内被跳过）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending", whitebox_ready=True)
-    with patch.object(mgr, "_query_workflow_status",
-                      new=AsyncMock(return_value="completed")), \
-         patch.object(mgr, "_run_blackbox_phase",
-                      new=AsyncMock(side_effect=RuntimeError("bb boom"))), \
-         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
-        await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
-        ese.assert_awaited_once_with(scan_dir)  # finally 补 scan_end
-
-
-async def test_reconcile_generate_report_raises_still_ensures_scan_end(mgr, tmp_path):
-    """_generate_combined_report raise（如 Task-8 NotImplementedError stub）→ finally
-    仍补 scan_end（review fix #1 的核心场景：Task 8 落地前 running 分历恢复不卡死）。"""
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="running")
-    with patch.object(mgr, "_query_workflow_status",
-                      new=AsyncMock(return_value="completed")), \
-         patch.object(mgr, "_generate_combined_report",
-                      new=AsyncMock(side_effect=NotImplementedError("Task 8 stub"))), \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()), \
-         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
-        await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
-        ese.assert_awaited_once_with(scan_dir)  # finally 补 scan_end
-
-
-# ── review fix #2: _kick_combined_reconcile 非阻塞 + 幂等 ───────────────────
+# ── _kick_combined_reconcile 非阻塞 + 幂等 ───────────────────────────────────
 async def test_kick_combined_reconcile_is_non_blocking_and_idempotent(mgr, tmp_path):
-    """_kick_combined_reconcile fire-and-forget（不阻塞调用方）+ 幂等（同 scan_key
-    不重复 fire）+ 完成后自清 _reconcile_tasks。"""
-    import asyncio
-    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending")
+    scan_dir = _make_combined(tmp_path)
     call_count = 0
 
     async def _slow_reconcile(sd):
         nonlocal call_count
         call_count += 1
-        await asyncio.sleep(0.05)  # 模拟耗时恢复
+        await asyncio.sleep(0.05)
 
     with patch.object(mgr, "_reconcile_combined_scan", new=_slow_reconcile):
-        mgr._kick_combined_reconcile(scan_dir)   # 非阻塞，立即返回
-        mgr._kick_combined_reconcile(scan_dir)   # 幂等：不重复 fire
-        assert call_count == 0                    # background task 尚未开始调度
+        mgr._kick_combined_reconcile(scan_dir)
+        mgr._kick_combined_reconcile(scan_dir)  # 幂等
+        assert call_count == 0
         assert ("ws", "scan-1") in mgr._reconcile_tasks
-        # 等 background task 完成
         await asyncio.gather(*mgr._reconcile_tasks.values())
-        assert call_count == 1                    # 只跑了一次（幂等）
-        assert ("ws", "scan-1") not in mgr._reconcile_tasks  # 自清
+        assert call_count == 1
+        assert ("ws", "scan-1") not in mgr._reconcile_tasks

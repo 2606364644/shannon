@@ -2000,44 +2000,30 @@ class ScanManager:
         if not data.get("combined"):
             return  # 非组合 → 零回归（纯白盒/纯黑盒恢复路径不受影响）
 
-        bb_phase = data.get("bb_phase")
-        auth_ref = data.get("bb_auth_ref") or {}
-        bb_rerun = int(data.get("bb_rerun_attempts") or 0)
-        wf_active = False  # 某分支发现 workflow 仍 RUNNING → True（跳过 scan_end 补写）
+        bb_runs = data.get("bb_runs") or []
+        wf_active = False  # 白盒或某 run 的 workflow 仍 RUNNING → 跳过 scan_end 补写
 
         try:
-            if bb_phase in ("precheck", "pending"):
-                # precheck: 先确认 authcheck 已完成（仍跑 = 预验证进行中 → 不干预）。
-                if bb_phase == "precheck":
-                    auth_status = await self._query_workflow_status(
-                        f"{ws}-{scan_id}-authcheck")
-                    if auth_status == "running":
-                        wf_active = True
-                # 白盒 workflow 状态：completed → 补黑盒接力；running → 不干预。
-                if not wf_active:
-                    wb_status = await self._query_workflow_status(
-                        self._resolve_workflow_id(ws, scan_id))
-                    if wb_status == "running":
-                        wf_active = True
-                    elif wb_status == "completed":
-                        # 白盒完成 → 补黑盒接力（_run_blackbox_phase 内部预检产物 +
-                        # submit -bb workflow + 等结果 + 生成报告）。
-                        await self._run_blackbox_phase(
-                            scan_dir, ws, scan_id, auth_ref)
-
-            elif bb_phase == "running":
-                # 黑盒 workflow：首跑 -bb / 续跑 -bb-rerun-N（spec §7.6 + §11）。
-                suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
+            # 白盒 workflow：仍 running → 不干预（让 temporal 自然完成写 scan_end）。
+            wb_status = await self._query_workflow_status(
+                self._resolve_workflow_id(ws, scan_id))
+            if wb_status == "running":
+                wf_active = True
+            # 版本化 run（spec §7.5）：逐 run 探测其 -bb-{K} workflow 状态兜底。
+            for r in bb_runs:
+                run_id = r.get("run_id")
+                if not run_id or r.get("status") in (
+                        "completed", "failed", "skipped", "cancelled"):
+                    continue
                 bb_status = await self._query_workflow_status(
-                    self._resolve_workflow_id(ws, scan_id) + suffix)
+                    self._resolve_run_workflow_id(ws, scan_id, run_id))
                 if bb_status == "running":
                     wf_active = True
                 elif bb_status == "completed":
-                    # 黑盒完成 → 补融合报告 + 标 completed（接力最后一步崩溃补全）。
-                    await self._generate_combined_report(scan_dir)
-                    await self._mark_bb(scan_dir, "completed")
-
-            # failed/skipped/completed/None → 无需接力，只补 scan_end（fall-through）
+                    # run 黑盒完成（接力最后一步崩溃）→ 补 per-run 融合报告 + 标 completed。
+                    await self._generate_combined_report(scan_dir, run_id)
+                    await self._mark_run(scan_dir, run_id, "completed", status="completed")
+                # 其余（None/不存在）→ fall-through 补 scan_end
         except Exception:  # noqa: BLE001 - reconcile 是兜底增强，绝不因单 scan 异常拖垮
             _log.exception("_reconcile_combined_scan failed for %s", scan_dir)
         finally:
