@@ -23,6 +23,7 @@
 - Modify: `packages/web/src/supernova_web/api/scan.py` — 启动扫描时只对 canonical admin 绕过成员检查。
 - Modify: `packages/web/tests/test_users_routes.py` — 用户创建与工作区成员关系、其他超管隔离测试。
 - Modify: `packages/web/tests/test_auth_dependencies.py` — canonical admin 与其他 admin 的成员鉴权测试。
+- Modify: `packages/web/tests/test_workspace_provisioning.py` — 角色切换时的成员清理测试。
 - Modify: `packages/web/tests/test_api_workspaces.py` — 手动创建工作区默认成员测试。
 - Modify: `packages/web/tests/test_scans_cross_ws.py` — 其他超管跨工作区扫描隔离测试。
 - Modify: `packages/web/tests/test_pinned_workspace.py` — 其他超管 pin 非成员工作区被拒绝测试。
@@ -196,7 +197,7 @@ def _global_admin(store: AuthStore) -> User | None:
     return user if user is not None and is_global_admin(user) else None
 
 
-def _is_safe_workspace_name(name: str) -> bool:
+def is_safe_workspace_name(name: str) -> bool:
     return bool(name) and name not in {".", ".."} and not name.startswith(".") \
         and Path(name).name == name and "/" not in name and "\\" not in name
 
@@ -207,7 +208,7 @@ def _workspace_is_real(ws_dir: Path) -> bool:
 
 def ensure_user_workspace(workspaces_dir: Path, store: AuthStore, user: User) -> Path:
     """幂等创建 username 工作区，并确保用户/admin 为 manager。"""
-    if not _is_safe_workspace_name(user.username):
+    if not is_safe_workspace_name(user.username):
         raise ValueError("unsafe workspace name")
 
     workspaces_dir.mkdir(parents=True, exist_ok=True)
@@ -422,7 +423,7 @@ Expected: 用户创建不会生成 `bob` 目录；手动工作区不会自动写
 
 在 `users.py` 中：
 
-1. 导入 `ensure_user_workspace`, `ensure_global_admin_access`, `is_global_admin`。
+1. 导入 `ensure_user_workspace`, `ensure_global_admin_access`, `is_global_admin`, `is_safe_workspace_name`。
 2. 用 `is_safe_workspace_name(body.username)` 校验工作区名，不安全名称返回 422；在用户插入前检查 `workspaces_dir / body.username` 是否已存在，冲突返回 `409 workspace already exists for username`。
 3. 创建用户后调用 `ensure_user_workspace()`；异常时删除刚创建的用户，避免留下无法 provision 的半成品，然后转换为 HTTP 409/500。
 4. 调用 `ensure_global_admin_access()`，覆盖“新建的是 canonical admin、已有工作区”的顺序。
