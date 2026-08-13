@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from supernova_web.components.scan_manager import ScanManager
+from supernova_web.components.scan_store import ScanStore
 
 
 # ── fixture / helpers ──────────────────────────────────────────────────────
@@ -120,18 +121,20 @@ async def test_resume_combined_precheck_also_resumes_whitebox(tmp_path, monkeypa
     assert call.kwargs["id"] == "WS-s1-resume-1"
 
 
-# ── resume: bb_phase=running + rerun=0 → re-attach 黑盒 -bb ──────────────────
+# ── resume: latest run running → re-attach 黑盒 -bb-{K} ──────────────────────
 
 @pytest.mark.asyncio
-async def test_resume_combined_running_rerun0_reattaches_bb_workflow(
+async def test_resume_combined_running_reattaches_bb_run_workflow(
         tmp_path, monkeypatch):
-    """bb_phase=running + bb_rerun_attempts=0 → re-attach {ws}-{scan_id}-bb（不重 submit）
+    """latest run(run-1) bb_phase=running → re-attach {ws}-{scan_id}-bb-1（不重 submit）
     + 附仅做报告的编排 task（接力已发生，不重复 submit 黑盒）。"""
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     _patch_temporal_ok(monkeypatch, mgr)
     mock_client = _patch_client(monkeypatch)
-    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="running",
-                            bb_rerun_attempts=0)
+    _make_combined_scan_dir(tmp_path, "WS", "s1")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1
+    store.update_blackbox_run("WS", "s1", "run-1", phase="running", status="running")
     scan_key = ("WS", "s1")
 
     with patch.object(mgr, "_watch", new=AsyncMock()), \
@@ -140,30 +143,33 @@ async def test_resume_combined_running_rerun0_reattaches_bb_workflow(
 
     # 不重提交（黑盒 workflow 仍在 Temporal 跑，只 re-attach handle）
     mock_client.start_workflow.assert_not_awaited()
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb")
+    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-1")
     # 报告编排 task 登记
     assert scan_key in mgr._orchestrator_tasks
     assert scan_key in mgr._handles  # re-attached handle 登记
 
 
-# ── resume: bb_phase=running + rerun=2 → re-attach 黑盒 -bb-rerun-2 ───────────
+# ── resume: latest run=run-2 running → re-attach 黑盒 -bb-2 ──────────────────
 
 @pytest.mark.asyncio
-async def test_resume_combined_running_rerun2_reattaches_bb_rerun2(
+async def test_resume_combined_running_run2_reattaches_bb_run2(
         tmp_path, monkeypatch):
-    """bb_phase=running + bb_rerun_attempts=2 → re-attach {ws}-{scan_id}-bb-rerun-2。"""
+    """latest run(run-2) running → re-attach {ws}-{scan_id}-bb-2（版本化 run K）。"""
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     _patch_temporal_ok(monkeypatch, mgr)
     mock_client = _patch_client(monkeypatch)
-    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="running",
-                            bb_rerun_attempts=2)
+    _make_combined_scan_dir(tmp_path, "WS", "s1")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1
+    store.create_blackbox_run("WS", "s1")  # run-2
+    store.update_blackbox_run("WS", "s1", "run-2", phase="running", status="running")
 
     with patch.object(mgr, "_watch", new=AsyncMock()), \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()):
         await mgr.resume("WS", "s1")
 
     mock_client.start_workflow.assert_not_awaited()
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-rerun-2")
+    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-2")
 
 
 # ── resume: _strip_trailing_scan_end（所有分支）──────────────────────────────
@@ -175,8 +181,10 @@ async def test_resume_combined_strips_trailing_scan_end(tmp_path, monkeypatch):
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     _patch_temporal_ok(monkeypatch, mgr)
     _patch_client(monkeypatch)
-    scan_dir = _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="running",
-                                       bb_rerun_attempts=0)
+    scan_dir = _make_combined_scan_dir(tmp_path, "WS", "s1")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")
+    store.update_blackbox_run("WS", "s1", "run-1", phase="running", status="running")
     (scan_dir / "events.ndjson").write_text(
         '{"type":"log","msg":"中途"}\n'
         '{"type":"scan_end","status":"interrupted"}\n')

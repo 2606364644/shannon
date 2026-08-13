@@ -30,7 +30,7 @@ from .host_profile_store import (
 )
 from .repo_manager import _resolve_repo_dir, _validate_ws_segment, resolve_linked_repo_path
 from .scan_liveness import is_scan_recently_active
-from .scan_store import ScanStore
+from .scan_store import ScanStore, _read_workflow_id_from_ndjson
 from .workspaces_indexer import _compute_status
 
 
@@ -300,21 +300,25 @@ class ScanManager:
         if data.get("combined"):
             # 续跑前剥掉旧 scan_end（所有分支共享；否则 _watch 见旧 scan_end 立即退出）。
             self._strip_trailing_scan_end(event_file)
-            bb_phase = data.get("bb_phase")
-            bb_rerun = int(data.get("bb_rerun_attempts") or 0)
             mgr.update_session(scan_dir, {"status": "running", "completed_at": None})
             # 重建 ScanRequest 供 _active_reqs（active_repo_sources 引用锁）+ 编排 task。
-            # auth 字段从 bb_auth_ref 回填（_snapshot_auth_ref 对称重建，供 _run_blackbox_phase）。
             req = self._build_combined_resume_req(data, ws)
             self._active_reqs[scan_key] = req
 
-            if bb_phase == "running":
-                # 黑盒 workflow 仍在 Temporal 跑（scan_manager 进程死了，Temporal 留活）→
-                # re-attach handle（get_workflow_handle，不重 submit——workflow_id 已固定）。
-                # workflow_id = _resolve_workflow_id + suffix（与 _reconcile_combined_scan 同口径；
-                # running 分支不递增 resumeAttempts，故 _resolve_workflow_id 算出与原提交一致的 id）。
-                suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
-                bb_wf_id = self._resolve_workflow_id(ws, scan_id) + suffix
+            # 版本化 run（spec §11.4）：bb_phase 下沉到 run 级 session——读 latest run 的 phase
+            # 分支（取代旧 task-level bb_phase/bb_rerun_attempts）。
+            runs = self._store.list_blackbox_runs(ws, scan_id)
+            latest = runs[-1] if runs else None
+            latest_phase = None
+            if latest:
+                rd = self._store.get_blackbox_run_dir(ws, scan_id, latest["run_id"])
+                if rd is not None:
+                    latest_phase = SessionManager(rd.parent).get_session_data(rd).get("bb_phase")
+
+            if latest and latest_phase == "running":
+                # run 黑盒 workflow 仍在 Temporal 跑（scan_manager 进程死了，Temporal 留活）→
+                # re-attach handle（-bb-{K}，不重 submit——workflow_id 已固定）+ 仅做报告编排 task。
+                bb_wf_id = self._resolve_run_workflow_id(ws, scan_id, latest["run_id"])
                 try:
                     client = await Client.connect(self._temporal_address())
                     handle = client.get_workflow_handle(bb_wf_id)
@@ -322,9 +326,10 @@ class ScanManager:
                     self._active_reqs.pop(scan_key, None)
                     await self._mark_submission_failed(scan_dir, event_file, exc)
                     raise
-                # 附仅做报告的编排 task（接力已发生、黑盒已 submit；只 await 完成 → 融合报告）。
+                # 附仅做报告的编排 task（接力已发生、黑盒已 submit；只 await 完成 → per-run 融合报告）。
                 orch = asyncio.create_task(
-                    self._combined_report_orchestrator(scan_key, handle, scan_dir))
+                    self._combined_report_orchestrator(
+                        scan_key, handle, scan_dir, latest["run_id"]))
                 self._orchestrator_tasks[scan_key] = orch
             else:
                 # pending/precheck（白盒阶段中断）→ 重交白盒 workflow（-resume-N，复用
@@ -1185,6 +1190,20 @@ class ScanManager:
         base = f"{ws}-{scan_id}"
         return f"{base}-resume-{n}" if n > 0 else base
 
+    def _resolve_run_workflow_id(self, ws: str, scan_id: str, run_id: str) -> str:
+        """run 黑盒 workflow_id = 白盒 base + '-bb-{K}'（spec §7.6，取代旧 -bb/-bb-rerun-N）。
+
+        优先读 run 子目录 events.ndjson 首行 WorkflowHeader.workflow_id（真实 temporal id，
+        resume re-attach 用真值）；读不到则 base + '-bb-{K}'（K 从 run_id 派生）。
+        """
+        scan_dir = self._workspaces_dir / ws / "scans" / scan_id
+        run_dir = blackbox_run_dir(scan_dir, run_id)
+        wf = _read_workflow_id_from_ndjson(run_dir)
+        if wf:
+            return wf
+        k = int(run_id.split("-")[1])
+        return self._resolve_workflow_id(ws, scan_id) + f"-bb-{k}"
+
     async def cancel(self, ws: str, scan_id: str) -> dict | None:
         """取消 scan 三轨(C1 后):
         ① _handles 有(web 自起) -> handle.cancel()(temporal 原生, 传播到 workflow + heartbeat activity).
@@ -1588,24 +1607,27 @@ class ScanManager:
             self._orchestrator_tasks.pop(scan_key, None)
 
     async def _combined_report_orchestrator(self, scan_key: tuple[str, str],
-                                            bb_handle: Any, scan_dir: Path) -> None:
-        """仅做报告的组合编排（spec §11.4，resume bb_phase=running 分支）。
+                                            bb_handle: Any, scan_dir: Path,
+                                            run_id: str) -> None:
+        """仅做报告的组合编排（spec §11.4，resume latest run running 分支）。
 
-        黑盒 workflow 已在跑（resume 前 submit 过，接力已发生），scan_manager 进程崩溃后
-        resume re-attach 了黑盒 handle。本 task 镜像 _combined_orchestrator 的「await handle →
-        生成报告」尾段，但不重 submit 黑盒（接力已完成 submit 阶段）：
+        run 的黑盒 workflow 已在跑（resume 前 submit 过），scan_manager 进程崩溃后 resume
+        re-attach 了该 run 的 handle。本 task 镜像 _combined_orchestrator 的「await handle →
+        生成报告」尾段，但不重 submit 黑盒：
 
-        await bb_handle.result() → _generate_combined_report → _mark_bb(completed)；
-        try/except/finally 经 _ensure_scan_end（幂等）收尾（与 _combined_orchestrator 同构）。
+        await bb_handle.result() → ``_generate_combined_report(scan_dir, run_id)`` →
+        ``_mark_run(scan_dir, run_id, completed)``；try/except/finally 经 _ensure_scan_end
+        （幂等）收尾（与 _combined_orchestrator 同构）。
         """
         final_status = "completed"
         try:
             await bb_handle.result()
-            await self._generate_combined_report(scan_dir)
-            await self._mark_bb(scan_dir, "completed")
+            await self._generate_combined_report(scan_dir, run_id)
+            await self._mark_run(scan_dir, run_id, "completed", status="completed")
         except Exception as exc:
             final_status = "failed"
-            await self._mark_bb(scan_dir, "failed", str(exc))
+            await self._mark_run(scan_dir, run_id, "failed",
+                                 reason=str(exc), status="failed")
         finally:
             await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
