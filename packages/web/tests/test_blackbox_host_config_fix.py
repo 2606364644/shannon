@@ -154,14 +154,17 @@ async def test_submit_failure_marks_scan_failed_and_writes_scan_end(tmp_path, mo
     with pytest.raises(RuntimeError, match="temporal down"):
         await manager.start(request)
 
-    scan = next(scan for scan in manager._store.list_scans("ws-a") if scan.scan_id != wb_id)
-    scan_dir = manager._store.get_scan_dir("ws-a", scan.scan_id)
+    # 黑盒 scan_id = {wb_id}~1（start 黑盒分支建平级 ~N；list_scans 隐藏 legacy ~N，
+    # 但 get_scan_dir 仍可定位——验证 submit 失败标记 + scan_end + 清理）。
+    bb_scan_id = f"{wb_id}~1"
+    scan_dir = manager._store.get_scan_dir("ws-a", bb_scan_id)
+    assert scan_dir is not None, "黑盒 ~N scan 应已创建"
     data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
     assert data["status"] == "failed"
     assert data.get("completed_at") is not None
     assert any(json.loads(line).get("type") == "scan_end" for line in
                (scan_dir / "events.ndjson").read_text(encoding="utf-8").splitlines())
-    key = ("ws-a", scan.scan_id)
+    key = ("ws-a", bb_scan_id)
     assert key not in manager._active_reqs
     assert key not in manager._handles
     assert key not in manager._tasks
