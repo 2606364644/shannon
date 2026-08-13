@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,6 +22,8 @@ from uuid import uuid4
 import httpx
 import yaml
 from pydantic import BaseModel, field_validator
+
+from supernova_core.utils.security import check_loopback, check_ssrf
 
 HOST_PROFILES_FILENAME = "host-profiles.yaml"
 # 保留 workspace 段:系统级档案(configs/*.yaml seed 产物)落此,所有 ws 共享。
@@ -118,8 +121,57 @@ def parse_etc_hosts(text: str) -> tuple[list[HostMapping], list[str]]:
 # 异步拉取(httpx)
 # ---------------------------------------------------------------------------
 
+def _assert_url_fetch_safe(url: str) -> None:
+    """SSRF 门控：校验「即将被拉取的 hosts-provider URL」本身安全。
+
+    仅作用于 fetch URL（/etc/hosts 来源服务地址），**不**作用于从 body 解析出的
+    target IP —— 那些内网 IP（10.0.0.1 等）是 HOST 档案的核心价值，由扫描 preflight
+    的 ``validate_target_url(host_mappings=...)`` 独立校验，不在此阻断。
+
+    拦截两类风险（复用 ``core/utils/security.py`` 的范围判定，不另立规则）：
+      - 非 http/https scheme（file:// / gopher:// / ftp:// …，绕过 httpx 语义）；
+      - hostname 解析到 SSRF 敏感段中的任一 IP（loopback 127.x/::1、unspecified
+        0.0.0.0/::、link-local 169.254/16 含云元数据 169.254.169.254）。配合
+        ``follow_redirects=True``，避免外部 URL 302 到内网。
+
+    raise ``ValueError`` —— 上游 /parse 端点包成 422，refresh best-effort 吞掉保快照，
+    scan-start 的 host_url 路径冒泡为 fail-fast（不可达 URL 属合理失败）。
+    """
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"URL 解析被 SSRF 保护拒绝: 非法 scheme {scheme!r}（仅允许 http/https）"
+        )
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL 解析被 SSRF 保护拒绝: URL 缺少 hostname")
+    # 解析全部 A/AAAA 记录，任一落入敏感段即拒（ANY → block）。
+    try:
+        addrinfos = socket.getaddrinfo(
+            hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (socket.gaierror, OSError) as e:
+        raise ValueError(
+            f"URL 解析被 SSRF 保护拒绝: 无法解析 {hostname}: {e}"
+        ) from e
+    for _family, _type, _proto, _canon, sockaddr in addrinfos:
+        if not sockaddr:
+            continue
+        ip = sockaddr[0]
+        if check_loopback(ip) or check_ssrf(ip):
+            raise ValueError(
+                f"URL 解析被 SSRF 保护拒绝: {hostname} 解析到敏感地址 {ip}"
+            )
+
+
 async def _http_get_hosts(url: str, timeout: int = 15) -> str:
-    """GET url → text(follow redirects,raise_on_status)。模块级 → 测试 mock 之。"""
+    """GET url → text(follow redirects,raise_on_status)。模块级 → 测试 mock 之。
+
+    拉取前先经 ``_assert_url_fetch_safe`` 做 SSRF 门控（scheme + loopback/link-local），
+    防止 workspace_manager 利用 web 容器探测内网 / 云元数据（follow_redirects 致外部
+    URL 也可 302 到内网，故必须在解析阶段拦截）。
+    """
+    _assert_url_fetch_safe(url)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
         r = await c.get(url)
         r.raise_for_status()

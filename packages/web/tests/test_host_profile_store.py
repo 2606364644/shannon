@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from supernova_web.components import host_profile_store as hps
 from supernova_web.components.host_profile_store import (
     AlreadyForked,
     HostMapping,
     HostProfile,
     HostProfileStore,
+    fetch_and_parse_hosts,
     parse_etc_hosts,
 )
 
@@ -294,3 +296,111 @@ def test_persisted_filename_and_plaintext(tmp_path):
     # IP 与 domain 明文落盘（非加密）
     assert "10.0.0.1" in raw
     assert "api.test" in raw
+
+
+# ---------------------------------------------------------------------------
+# SSRF 门控：_http_get_hosts 拉取前校验「被拉取的 URL」本身（scheme + loopback/link-local）
+#
+# 关键不变量：检查只作用于 fetch URL（hosts-provider 服务地址），**不**作用于从
+# /etc/hosts body 解析出的 target IP。后者（10.0.0.1 等内网 IP）是 HOST 档案的核心价值，
+# 由扫描 preflight 的 validate_target_url(host_mappings=...) 独立校验。
+# ---------------------------------------------------------------------------
+
+# 合法外部 URL 拉取成功时返回的假 hosts body（含内网 target IP —— 不应被阻断）。
+_FAKE_HOSTS_BODY = "10.0.0.1 api.test\n192.168.1.5 svc.test\n"
+
+
+class _FakeResp:
+    def __init__(self, text: str):
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+class _FakeAsyncClient:
+    """httpx.AsyncClient 替身：忽略构造参数，get 返回固定 body。"""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url):
+        return _FakeResp(_FAKE_HOSTS_BODY)
+
+
+def _mock_safe_dns(monkeypatch, ip: str = "93.184.216.34"):
+    """把 host_profile_store.socket.getaddrinfo 钉到固定 IP（避免真实 DNS）。"""
+    monkeypatch.setattr(
+        hps.socket, "getaddrinfo",
+        lambda *a, **k: [(0, 0, 0, 0, (ip, 0))],
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_loopback_literal_ip():
+    """fetch URL 直接指向 127.0.0.1 → 解析到 loopback → 拒（不发 GET）。"""
+    with pytest.raises(ValueError, match="SSRF"):
+        await fetch_and_parse_hosts("http://127.0.0.1/hosts")
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_localhost(monkeypatch):
+    """fetch URL 用 localhost → 解析到 loopback(127.0.0.1) → 拒。"""
+    monkeypatch.setattr(
+        hps.socket, "getaddrinfo",
+        lambda *a, **k: [(0, 0, 0, 0, ("127.0.0.1", 0))],
+    )
+    with pytest.raises(ValueError, match="SSRF"):
+        await fetch_and_parse_hosts("http://localhost/hosts")
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_link_local_cloud_metadata():
+    """fetch URL 指向云元数据 169.254.169.254 → link-local → 拒。"""
+    with pytest.raises(ValueError, match="SSRF"):
+        await fetch_and_parse_hosts("http://169.254.169.254/latest/meta-data/")
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_non_http_schemes():
+    """非 http(s) scheme（file:// / gopher://）→ 拒（DNS 之前）。"""
+    with pytest.raises(ValueError, match="SSRF"):
+        await fetch_and_parse_hosts("file:///etc/passwd")
+    with pytest.raises(ValueError, match="SSRF"):
+        await fetch_and_parse_hosts("gopher://attacker.test/hosts")
+
+
+@pytest.mark.asyncio
+async def test_fetch_valid_external_url_proceeds(monkeypatch):
+    """合法外部 URL（解析到公网 IP）→ 正常 fetch + 解析。"""
+    _mock_safe_dns(monkeypatch)  # 解析到 93.184.216.34（公网、非敏感段）
+    monkeypatch.setattr(hps.httpx, "AsyncClient", _FakeAsyncClient)
+    mappings, warnings = await fetch_and_parse_hosts(
+        "https://hosts.example.com/etc/hosts")
+    assert warnings == []
+    ips = {m.host: m.ip for m in mappings}
+    assert ips["api.test"] == "10.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_fetch_does_not_block_parsed_internal_target_ips(monkeypatch):
+    """关键不变量：SSRF 检查只作用于 fetch URL，不阻断 /etc/hosts 解析出的内网 target IP。
+
+    fetch URL 是合法外部地址 → 放行；body 里 10.0.0.1 / 192.168.1.5 虽是内网/私有段，
+    但它们是 HOST 档案的核心（内网映射），原样流入 mappings（由扫描 preflight 的
+    validate_target_url(host_mappings=...) 独立校验，不在此阻断）。
+    """
+    _mock_safe_dns(monkeypatch)  # fetch URL 安全
+    monkeypatch.setattr(hps.httpx, "AsyncClient", _FakeAsyncClient)
+    mappings, _warnings = await fetch_and_parse_hosts(
+        "https://hosts.example.com/etc/hosts")
+    ips = {m.host: m.ip for m in mappings}
+    # 内网 target IP 原样流入（未被 fetch-URL 的 SSRF 检查阻断）
+    assert ips["api.test"] == "10.0.0.1"
+    assert ips["svc.test"] == "192.168.1.5"
