@@ -61,6 +61,29 @@ def _write_bb_verdicts(scan_dir: Path, vt: str, verdicts: list[dict]) -> None:
     (d / f"{vt}_exploit_verdicts.json").write_text(_verdicts(verdicts), encoding="utf-8")
 
 
+def _render(scan_dir: Path) -> Path:
+    """双路径签名适配（T4）：deliverables/{whitebox,blackbox} → out deliverables/combined。
+
+    保留旧测试的产物路径（deliverables/combined/combined_report.md）；新签名让调用方
+    显式传白盒根 / 黑盒根 / 输出根，T5 的 per-run 渲染传 blackbox-runs/run-K 根。
+    """
+    return render_combined_report(
+        whitebox_root=scan_dir / "deliverables" / "whitebox",
+        blackbox_root=scan_dir / "deliverables" / "blackbox",
+        out_dir=scan_dir / "deliverables" / "combined")
+
+
+def _roots(scan_dir: Path, run: str = "run-1") -> tuple[Path, Path, Path]:
+    """per-run 双根布局（spec §4）：白盒根 deliverables/whitebox、黑盒根
+    blackbox-runs/{run}/deliverables/blackbox、输出根 combined/{run}。"""
+    wb_root = scan_dir / "deliverables" / "whitebox"
+    bb_root = scan_dir / "blackbox-runs" / run / "deliverables" / "blackbox"
+    out_dir = scan_dir / "combined" / run
+    wb_root.mkdir(parents=True, exist_ok=True)
+    bb_root.mkdir(parents=True, exist_ok=True)
+    return wb_root, bb_root, out_dir
+
+
 # ── 主路径：白盒+黑盒都有产物 → 完整交叉报告 ────────────────────────────────
 def test_render_combined_report_full_cross_reference(tmp_path: Path):
     """给定白盒 queue + 黑盒 verdicts 样例 → 报告含摘要表 + 按类详述 + 落 combined/。
@@ -89,7 +112,7 @@ def test_render_combined_report_full_cross_reference(tmp_path: Path):
          "severity": "critical", "impact": "Internal port scan"},
     ])
 
-    out = render_combined_report(scan_dir)
+    out = _render(scan_dir)
 
     # 1. 产物落 deliverables/combined/combined_report.md
     expected = scan_dir / "deliverables" / "combined" / "combined_report.md"
@@ -139,7 +162,7 @@ def test_render_combined_report_resilient_missing_blackbox(tmp_path: Path):
     scan_dir = _make_scan_dir(tmp_path)
     _write_wb_queue(scan_dir, "injection", [{"ID": "INJ-1", "title": "SQLi"}])
 
-    out = render_combined_report(scan_dir)  # 不应 raise
+    out = _render(scan_dir)  # 不应 raise
     text = out.read_text("utf-8")
     assert "## 组合摘要" in text
     # 黑盒缺失 → 黑盒列 0（不崩溃）
@@ -153,7 +176,7 @@ def test_render_combined_report_resilient_no_deliverables(tmp_path: Path):
     """白盒+黑盒 deliverables 均不存在 → 仍产报告（全 0 计数 + "无发现"）。"""
     scan_dir = _make_scan_dir(tmp_path)
 
-    out = render_combined_report(scan_dir)  # 不应 raise
+    out = _render(scan_dir)  # 不应 raise
     text = out.read_text("utf-8")
     assert "## 组合摘要" in text
     # 四类都应出现在摘要表（即使计数 0）
@@ -168,7 +191,7 @@ def test_render_combined_report_resilient_empty_verdicts(tmp_path: Path):
     _write_wb_queue(scan_dir, "xss", [])  # 空 queue
     _write_bb_verdicts(scan_dir, "xss", [])  # 空 verdicts
 
-    out = render_combined_report(scan_dir)
+    out = _render(scan_dir)
     text = out.read_text("utf-8")
     assert "## 组合摘要" in text
     xss_row = [ln for ln in text.splitlines() if ln.startswith("| xss")][0]
@@ -185,7 +208,7 @@ def test_render_combined_report_resilient_corrupt_json(tmp_path: Path):
     # 损坏的是 verdicts 文件（渲染器实际读的黑盒产物）
     (bb / "injection_exploit_verdicts.json").write_text("{not valid json", "utf-8")
 
-    out = render_combined_report(scan_dir)  # 不应 raise
+    out = _render(scan_dir)  # 不应 raise
     text = out.read_text("utf-8")
     assert "## 组合摘要" in text
     injection_row = [ln for ln in text.splitlines() if ln.startswith("| injection")][0]
@@ -209,7 +232,7 @@ def test_blackbox_count_only_exploited_verdicts(tmp_path: Path):
         {"vulnerability_id": "AU-5", "status": "false_positive"},
     ])
 
-    out = render_combined_report(scan_dir)
+    out = _render(scan_dir)
     text = out.read_text("utf-8")
     authz_row = [ln for ln in text.splitlines() if ln.startswith("| authz")][0]
     cells = [c.strip() for c in authz_row.split("|") if c.strip()]
@@ -223,3 +246,26 @@ def test_vuln_classes_matches_spec():
     """_VULN_CLASSES 必须是 injection/xss/ssrf/authz（spec §10.2，不含 auth）。"""
     assert set(_VULN_CLASSES) == {"injection", "xss", "ssrf", "authz"}, (
         f"_VULN_CLASSES 应为 injection/xss/ssrf/authz，实际: {_VULN_CLASSES}")
+
+
+# ── per-run 双路径签名（T4，spec §4/§9）──────────────────────────────────────
+def test_render_writes_to_per_run_out_dir(tmp_path: Path):
+    """双路径签名：白盒根 + 黑盒根（run-K 嵌套）+ 输出根 combined/run-K。"""
+    wb_root, bb_root, out_dir = _roots(tmp_path)
+    (wb_root / "injection_exploitation_queue.json").write_text(_queue([
+        {"ID": "INJ-1", "title": "SQLi", "source": "/login"}]))
+    (bb_root / "injection_exploit_verdicts.json").write_text(_verdicts([
+        {"vulnerability_id": "INJ-1", "status": "exploited", "severity": "high"}]))
+    out = render_combined_report(whitebox_root=wb_root, blackbox_root=bb_root, out_dir=out_dir)
+    assert out == out_dir / "combined_report.md"
+    text = out.read_text("utf-8")
+    assert "| injection | 1 | 1 |" in text
+    assert "### injection" in text
+
+
+def test_render_per_run_tolerates_missing_blackbox(tmp_path: Path):
+    """黑盒根存在但无 verdicts 文件 → 计数 0、不崩溃。"""
+    wb_root, bb_root, out_dir = _roots(tmp_path)
+    (wb_root / "xss_exploitation_queue.json").write_text(_queue([{"ID": "X1"}]))
+    out = render_combined_report(whitebox_root=wb_root, blackbox_root=bb_root, out_dir=out_dir)
+    assert "| xss | 1 | 0 |" in out.read_text("utf-8")

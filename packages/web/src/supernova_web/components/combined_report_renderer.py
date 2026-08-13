@@ -24,12 +24,6 @@ import logging
 from pathlib import Path
 
 from supernova_core.i18n import Messages
-from supernova_core.utils.paths import (
-    BLACKBOX_SUBDIR,
-    COMBINED_SUBDIR,
-    WHITEBOX_SUBDIR,
-    combined_dir,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -160,28 +154,30 @@ def _format_verdict_entry(verdict: dict) -> str:
     return _M.get("bb_entry_bullet", id=vid, extra=extra)
 
 
-def render_combined_report(scan_dir: Path) -> Path:
-    """生成组合扫描融合报告（spec §10.2）。
+def render_combined_report(*, whitebox_root: Path, blackbox_root: Path,
+                           out_dir: Path) -> Path:
+    """生成 per-run 融合报告（spec §9/§10.2）。
 
-    读 ``scan_dir/deliverables/whitebox/{vt}_exploitation_queue.json`` +
-    ``scan_dir/deliverables/blackbox/{vt}_exploit_verdicts.json``，按 ``_VULN_CLASSES``
-    交叉，写 ``scan_dir/deliverables/combined/combined_report.md``。
+    双路径签名（T4）：读 ``whitebox_root/{vt}_exploitation_queue.json`` +
+    ``blackbox_root/{vt}_exploit_verdicts.json``，按 ``_VULN_CLASSES`` 交叉，写
+    ``out_dir/combined_report.md``。
 
     Args:
-        scan_dir: workspace 根（workspaces/<session>），其下 ``deliverables/`` 三桶。
+        whitebox_root: 白盒产物根（``<wb>/deliverables/whitebox/``）。
+        blackbox_root: 黑盒产物根（``<wb>/blackbox-runs/run-K/deliverables/blackbox/``）。
+        out_dir: 输出根（``<wb>/combined/run-K/``）。
 
     Returns:
-        产物路径（``deliverables/combined/combined_report.md``）。
+        产物路径（``out_dir/combined_report.md``）。
 
-    韧性：白盒 / 黑盒任一桶缺失、产物空 / 损坏都不崩溃 —— emit 0 计数 + 无发现。
+    韧性：白盒 / 黑盒任一根缺失、产物空 / 损坏都不崩溃 —— emit 0 计数 + 无发现。
     """
-    deliverables = Path(scan_dir) / "deliverables"
-    out_dir = combined_dir(deliverables)
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / _COMBINED_REPORT_FILENAME
 
-    wb_base = deliverables / WHITEBOX_SUBDIR
-    bb_base = deliverables / BLACKBOX_SUBDIR
+    wb_base = Path(whitebox_root)
+    bb_base = Path(blackbox_root)
 
     rows: list[tuple[str, int, int]] = []
     detail_sections: list[str] = []
