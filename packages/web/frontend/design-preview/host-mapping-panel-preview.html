@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>HOST 档案 · 映射编辑面板 · supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* token 直接取自 src/styles/tokens.css（深 = :root，浅 = .light） */
+  :root{
+    --background:34 7% 10%; --foreground:36 10% 91%;
+    --card:34 5% 13%; --secondary:34 5% 16%; --muted:34 5% 16%; --muted-fg:36 5% 62%;
+    --accent:34 5% 18%; --border:34 5% 20%; --input:34 5% 20%;
+    --primary:15 60% 56%; --primary-fg:34 7% 10%;
+    --destructive:5 62% 56%; --destructive-fg:34 7% 10%;
+    --shadow-card:0 0 0 1px hsl(34 10% 100% / 0.03),0 2px 8px hsl(0 0% 0% / 0.25),0 1px 2px hsl(0 0% 0% / 0.2);
+    --shadow-cta:0 1px 2px hsl(0 0% 0% / 0.30),0 6px 16px -6px hsl(15 70% 45% / 0.35);
+  }
+  .light{
+    --background:40 32% 95%; --foreground:30 26% 18%;
+    --card:38 28% 97%; --secondary:40 32% 91%; --muted:40 32% 91%; --muted-fg:34 32% 36%;
+    --accent:40 36% 84%; --border:36 44% 76%; --input:36 44% 76%;
+    --primary:15 58% 50%; --primary-fg:0 0% 100%;
+    --destructive:5 58% 46%; --destructive-fg:0 0% 100%;
+    --shadow-card:0 1px 2px hsl(34 40% 30% / 0.10),0 4px 14px hsl(34 40% 30% / 0.06);
+    --shadow-cta:0 1px 2px hsl(34 40% 30% / 0.14),0 6px 16px -6px hsl(15 58% 45% / 0.22);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+    font-family:"IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px}
+  .stage{min-height:100vh;padding:48px 24px 88px;display:flex;flex-direction:column;align-items:center;gap:40px}
+  h1{font-size:23px;font-weight:600;letter-spacing:-0.01em;margin:0 0 6px}
+  .lede{color:hsl(var(--muted-fg));font-size:13.5px;margin:0 0 8px;line-height:1.65;max-width:620px;text-align:center}
+  .toggle{position:fixed;top:16px;right:16px;z-index:9;height:32px;padding:0 12px;border-radius:9px;
+    background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--foreground));font-size:12px;cursor:pointer;font-family:inherit}
+
+  /* ---- 对话框（对齐 shadcn DialogContent：max-w-2xl, max-h-85vh, p-6, 圆角）---- */
+  .dialog{width:100%;max-width:672px;background:hsl(var(--background));
+    border:1px solid hsl(var(--border));border-radius:12px;box-shadow:0 24px 64px -12px hsl(0 0% 0% / 0.55);
+    max-height:85vh;overflow-y:auto;padding:24px}
+  .dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .dialog-title{font-size:17px;font-weight:600;letter-spacing:-0.01em}
+  .x{width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:hsl(var(--muted-fg));cursor:pointer;font-size:16px}
+  .x:hover{background:hsl(var(--foreground)/0.08);color:hsl(var(--foreground))}
+  form{display:flex;flex-direction:column;gap:12px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  label{font-size:13px;font-weight:500}
+  .hint{font-size:11px;color:hsl(var(--muted-fg));margin:0}
+  .row-input{display:flex;gap:8px}
+  input[type=text]{flex:1;height:34px;border-radius:8px;border:1px solid hsl(var(--input));
+    background:transparent;color:hsl(var(--foreground));padding:0 10px;font-size:13px;outline:none;min-width:0}
+  input[type=text].mono{font-family:"IBM Plex Mono";font-size:12px}
+  input[type=text]:focus{border-color:hsl(var(--primary));box-shadow:0 0 0 1px hsl(var(--primary))}
+  .url-in{font-family:"IBM Plex Mono";font-size:12px}
+
+  /* ---- 映射面板（MappingRows）---- */
+  .panel{display:flex;flex-direction:column;overflow:hidden;border-radius:10px;
+    border:1px solid hsl(var(--border));background:hsl(var(--card)/0.4)}
+  .toolbar{display:flex;align-items:center;gap:8px;border-bottom:1px solid hsl(var(--border));
+    background:hsl(var(--secondary)/0.5);padding:8px 10px;flex-shrink:0}
+  .chip{flex-shrink:0;border-radius:9999px;padding:2px 8px;font-family:"IBM Plex Mono";
+    font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;background:hsl(var(--muted)/0.6);
+    color:hsl(var(--muted-fg));transition:background .25s,color .25s}
+  .chip.pulse{background:hsl(var(--primary)/0.15);color:hsl(var(--primary))}
+  .search-wrap{position:relative;flex:1;min-width:0}
+  .search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:14px;height:14px;
+    color:hsl(var(--muted-fg));pointer-events:none}
+  .search-wrap input{height:32px;padding-left:26px;font-size:12px;
+    border-color:hsl(var(--border)/0.6);background:hsl(var(--background)/0.4)}
+  .tb-btn{display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 8px;border-radius:8px;
+    border:0;background:transparent;color:hsl(var(--foreground));font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0}
+  .tb-btn:hover{background:hsl(var(--foreground)/0.07)}
+  .tb-btn svg{width:14px;height:14px}
+  .tb-btn.muted{color:hsl(var(--muted-fg))}
+  .tb-btn.muted:hover{color:hsl(var(--destructive))}
+  .tb-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+  .colhead{display:grid;grid-template-columns:1fr 1fr 2rem;gap:8px;border-bottom:1px solid hsl(var(--border));
+    background:hsl(var(--muted)/0.3);padding:6px 12px;font-size:11px;font-weight:500;
+    color:hsl(var(--muted-fg));flex-shrink:0}
+  .body{max-height:calc(85vh - 22rem);min-height:8rem;overflow-y:auto}
+  .mrow{display:grid;grid-template-columns:1fr 1fr 2rem;align-items:center;gap:8px;
+    border-bottom:1px solid hsl(var(--border)/0.5);padding:6px 12px;transition:background .15s}
+  .mrow:hover{background:hsl(var(--muted)/0.3)}
+  .mrow input{height:32px;border:1px solid transparent;background:transparent;padding:0 8px;
+    font-family:"IBM Plex Mono";font-size:12px;box-shadow:none;flex:1;min-width:0;border-radius:6px}
+  .mrow input:focus{border-color:hsl(var(--input));box-shadow:0 0 0 1px hsl(var(--input));outline:none}
+  .mrow input.invalid{box-shadow:0 0 0 1px hsl(var(--destructive)/0.5)}
+  .del{width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:hsl(var(--muted-fg));
+    cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
+  .del:hover{color:hsl(var(--destructive));background:hsl(var(--foreground)/0.06)}
+  .del svg{width:14px;height:14px}
+  .empty{padding:28px 12px;text-align:center;font-size:12px;color:hsl(var(--muted-fg))}
+
+  .footer{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+  .btn-ghost{height:36px;padding:0 14px;border-radius:9px;border:0;background:transparent;
+    color:hsl(var(--foreground));font-size:13px;cursor:pointer;font-family:inherit}
+  .btn-ghost:hover{background:hsl(var(--foreground)/0.07)}
+  .btn-cta{height:36px;padding:0 16px;border-radius:9px;border:0;background:hsl(var(--primary));
+    color:hsl(var(--primary-fg));font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;
+    box-shadow:var(--shadow-cta)}
+  .btn-cta:hover{filter:brightness(1.05)}
+  .scene-label{font-family:"IBM Plex Mono";font-size:11px;letter-spacing:0.08em;text-transform:uppercase;
+    color:hsl(var(--muted-fg));margin-bottom:6px}
+  .scene-d{font-size:12.5px;color:hsl(var(--muted-fg));margin-bottom:14px;max-width:672px;line-height:1.6}
+  .scene-d b{color:hsl(var(--foreground));font-weight:600}
+  .case{display:flex;flex-direction:column;align-items:center}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.body.classList.toggle('light')">切换 明/暗</button>
+<div class="stage">
+  <div>
+    <h1>HOST 档案 · 映射编辑面板</h1>
+    <p class="lede">从链接拉取 hosts 后，成百上千条映射不再撑爆对话框。映射区恒定高度、可滚动、可筛选。</p>
+  </div>
+
+  <!-- 场景 A：大量导入后（计数脉冲 coral） -->
+  <div class="case">
+    <div class="scene-label">A · 刚从链接拉取 1,284 条</div>
+    <div class="scene-d">面板恒高，表体内滚；计数 chip 亮 coral 表示「刚导入」。对比旧版：1,284 × 110px 卡片会把对话框撑到十几万像素高。</div>
+    <div class="dialog">
+      <div class="dialog-head">
+        <div class="dialog-title">新建档案</div>
+        <button class="x" title="关闭">✕</button>
+      </div>
+      <form onsubmit="return false">
+        <div class="field">
+          <label>档案名</label>
+          <input type="text" value="production-cluster" />
+        </div>
+        <div class="field">
+          <label>来源链接（可选）</label>
+          <div class="row-input">
+            <input type="text" class="url-in" value="https://hosts.futuoa.com/hosts/get-hosts-content?id=4000" />
+            <button class="tb-btn" style="height:34px;border:1px solid hsl(var(--border))">拉取</button>
+          </div>
+          <p class="hint">填 /etc/hosts 风格文本 URL，可点「拉取」预填下方映射；留空则手动填写。</p>
+        </div>
+        <div class="field">
+          <label>映射（IP / 域名）</label>
+          <div class="panel" id="panelA">
+            <div class="toolbar">
+              <span class="chip pulse">1,284 条</span>
+              <div class="search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" placeholder="筛选 IP 或域名…" />
+              </div>
+              <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>添加映射</button>
+              <button class="tb-btn muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 7 10 10M17 7 7 17"/></svg>清空</button>
+            </div>
+            <div class="colhead"><span>IP</span><span>域名</span><span></span></div>
+            <div class="body" id="bodyA"></div>
+          </div>
+        </div>
+        <div class="footer">
+          <button class="btn-ghost">取消</button>
+          <button class="btn-cta">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 场景 B：筛选激活 -->
+  <div class="case">
+    <div class="scene-label">B · 筛选「db」</div>
+    <div class="scene-d">上千条里定位一条的唯一办法：实时筛选。计数变为「已筛选 3 / 1,284」。</div>
+    <div class="dialog">
+      <div class="dialog-head"><div class="dialog-title">新建档案</div><button class="x">✕</button></div>
+      <form onsubmit="return false">
+        <div class="field"><label>档案名</label><input type="text" value="production-cluster" /></div>
+        <div class="field"><label>来源链接（可选）</label>
+          <div class="row-input"><input type="text" class="url-in" value="https://hosts.futuoa.com/hosts/get-hosts-content?id=4000" /><button class="tb-btn" style="height:34px;border:1px solid hsl(var(--border))">拉取</button></div>
+          <p class="hint">填 /etc/hosts 风格文本 URL，可点「拉取」预填下方映射；留空则手动填写。</p>
+        </div>
+        <div class="field"><label>映射（IP / 域名）</label>
+          <div class="panel">
+            <div class="toolbar">
+              <span class="chip">已筛选 3 / 1,284</span>
+              <div class="search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" value="db" />
+              </div>
+              <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>添加映射</button>
+              <button class="tb-btn muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 7 10 10M17 7 7 17"/></svg>清空</button>
+            </div>
+            <div class="colhead"><span>IP</span><span>域名</span><span></span></div>
+            <div class="body" id="bodyB"></div>
+          </div>
+        </div>
+        <div class="footer"><button class="btn-ghost">取消</button><button class="btn-cta">保存</button></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 场景 C：提交被拦，未填行高亮 -->
+  <div class="case">
+    <div class="scene-label">C · 提交被拦（有 2 行未填完整）</div>
+    <div class="scene-d">精确 toast「有 2 行未填完整」，未填输入框 coral ring，一眼定位。</div>
+    <div class="dialog">
+      <div class="dialog-head"><div class="dialog-title">新建档案</div><button class="x">✕</button></div>
+      <form onsubmit="return false">
+        <div class="field"><label>档案名</label><input type="text" value="production-cluster" /></div>
+        <div class="field"><label>映射（IP / 域名）</label>
+          <div class="panel">
+            <div class="toolbar">
+              <span class="chip">5 条</span>
+              <div class="search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" placeholder="筛选 IP 或域名…" />
+              </div>
+              <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>添加映射</button>
+              <button class="tb-btn muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 7 10 10M17 7 7 17"/></svg>清空</button>
+            </div>
+            <div class="colhead"><span>IP</span><span>域名</span><span></span></div>
+            <div class="body" id="bodyC"></div>
+          </div>
+        </div>
+        <div class="footer"><button class="btn-ghost">取消</button><button class="btn-cta">保存</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  const del = '<button class="del" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
+  function row(ip, host, opts={}) {
+    const ic = opts.ipBlank ? 'invalid' : '';
+    const hc = opts.hostBlank ? 'invalid' : '';
+    return `<div class="mrow"><input type="text" class="${ic}" value="${ip}" placeholder="10.0.0.1"><input type="text" class="${hc}" value="${host}" placeholder="api.example.com">${del}</div>`;
+  }
+  // 场景 A：12 条可见示例（计数展示 1,284 表明规模）
+  const hosts = [
+    ['10.0.0.1','api.internal.futuoa.com'],['10.0.0.2','db-master.internal.futuoa.com'],
+    ['10.0.0.3','db-replica-1.internal.futuoa.com'],['10.0.0.4','db-replica-2.internal.futuoa.com'],
+    ['10.0.0.5','cache-redis.internal.futuoa.com'],['10.0.0.6','mq-rabbit.internal.futuoa.com'],
+    ['10.0.0.7','grafana.internal.futuoa.com'],['10.0.0.8','prometheus.internal.futuoa.com'],
+    ['10.0.0.9','vault.internal.futuoa.com'],['10.0.0.10','gitlab.internal.futuoa.com'],
+    ['10.0.0.11','registry.internal.futuoa.com'],['10.0.0.12','kibana.internal.futuoa.com'],
+  ];
+  document.getElementById('bodyA').innerHTML = hosts.map(h=>row(h[0],h[1])).join('');
+  // 场景 B：筛选 db 的 3 条
+  document.getElementById('bodyB').innerHTML = [
+    ['10.0.0.2','db-master.internal.futuoa.com'],
+    ['10.0.0.3','db-replica-1.internal.futuoa.com'],
+    ['10.0.0.4','db-replica-2.internal.futuoa.com'],
+  ].map(h=>row(h[0],h[1])).join('');
+  // 场景 C：5 行，其中 2 行未填 -> ring
+  document.getElementById('bodyC').innerHTML = [
+    row('10.0.0.1','api.internal.futuoa.com'),
+    row('10.0.0.2','db.internal.futuoa.com'),
+    row('', '', {ipBlank:true, hostBlank:true}),
+    row('10.0.0.5','cache.internal.futuoa.com'),
+    row('10.0.0.9','', {hostBlank:true}),
+  ].join('');
+</script>
+</body>
+</html>

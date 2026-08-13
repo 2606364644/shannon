@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>仓库列表 · 单表 + 分组行 · supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* token 直接取自 src/styles/tokens.css（深 = :root，浅 = .light） */
+  :root{
+    --background:34 7% 10%; --foreground:36 10% 91%;
+    --card:34 5% 13%; --muted:34 5% 16%; --muted-fg:36 5% 62%;
+    --border:34 5% 20%; --primary:15 60% 56%; --primary-fg:34 7% 10%;
+    --destructive:5 62% 56%;
+    --c-cyan:190 70% 60%; --c-green:142 50% 56%; --c-red:5 62% 60%; --c-yellow:38 75% 60%;
+    --shadow-card:0 0 0 1px hsl(34 10% 100% / 0.03),0 2px 8px hsl(0 0% 0% / 0.25),0 1px 2px hsl(0 0% 0% / 0.2);
+    --shadow-cta:0 1px 2px hsl(0 0% 0% / 0.30),0 6px 16px -6px hsl(15 70% 45% / 0.35);
+    --overlay:hsl(0 0% 0% / 0.22);
+  }
+  .light{
+    --background:40 32% 95%; --foreground:30 26% 18%;
+    --card:38 28% 97%; --muted:40 32% 91%; --muted-fg:34 32% 36%;
+    --border:36 44% 76%; --primary:15 58% 50%; --primary-fg:0 0% 100%;
+    --destructive:5 58% 46%;
+    --c-cyan:190 65% 32%; --c-green:142 38% 35%; --c-red:5 58% 46%; --c-yellow:40 72% 36%;
+    --shadow-card:0 1px 2px hsl(34 40% 30% / 0.10),0 4px 14px hsl(34 40% 30% / 0.06);
+    --shadow-cta:0 1px 2px hsl(34 40% 30% / 0.14),0 6px 16px -6px hsl(15 58% 45% / 0.22);
+    --overlay:hsl(0 0% 0% / 0.03);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+    font-family:"IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 88px}
+  h1{font-size:23px;font-weight:600;letter-spacing:-0.01em;margin:0 0 8px}
+  .lede{color:hsl(var(--muted-fg));font-size:14px;margin:0 0 32px;line-height:1.65;max-width:780px}
+  .lede b{color:hsl(var(--foreground));font-weight:600}
+  code{font-family:"IBM Plex Mono";font-size:0.9em;background:hsl(var(--foreground) / 0.07);padding:1px 6px;border-radius:5px}
+
+  /* 场景块 */
+  .block{background:hsl(var(--card));color:hsl(var(--foreground));border:1px solid hsl(var(--border));
+    border-radius:14px;padding:24px;box-shadow:var(--shadow-card);margin-bottom:22px}
+  .tag{font-family:"IBM Plex Mono";font-size:11px;letter-spacing:0.08em;text-transform:uppercase;
+    color:hsl(var(--muted-fg));margin-bottom:18px}
+  .scene-t{font-size:13px;font-weight:600;margin-bottom:4px}
+  .scene-d{font-size:12.5px;color:hsl(var(--muted-fg));margin-bottom:16px;line-height:1.6}
+
+  /* 按钮（对齐 cta-redesign-preview） */
+  button{font-family:inherit;cursor:pointer;border:0;transition:all .18s ease;display:inline-flex;
+    align-items:center;gap:7px;white-space:nowrap;font-size:13.5px;color:hsl(var(--foreground))}
+  button:focus-visible{outline:2px solid hsl(var(--primary));outline-offset:2px}
+  .cta{height:36px;padding:0 16px;border-radius:10px;background:hsl(var(--primary));color:hsl(var(--primary-fg));
+    font-family:"IBM Plex Mono";font-weight:500;letter-spacing:0.035em;box-shadow:var(--shadow-cta)}
+  .cta::before{content:"❯";margin-right:6px;font-weight:600;opacity:0.85}
+  .ghost{height:32px;padding:0 12px;border-radius:9px;background:transparent;font-size:12.5px}
+  .ghost:hover{background:hsl(var(--foreground) / 0.07)}
+  .ghost.icon{width:32px;padding:0;justify-content:center;font-size:15px}
+  .des-sm{height:30px;padding:0 11px;border-radius:8px;background:hsl(var(--destructive));color:hsl(var(--primary-fg));font-size:12.5px;font-weight:500}
+  .light .des-sm{color:#fff}
+
+  /* 输入框 */
+  .input{height:36px;padding:0 12px;border-radius:10px;background:hsl(var(--muted));
+    border:1px solid hsl(var(--border));color:hsl(var(--foreground));font-family:inherit;font-size:13.5px;width:240px}
+  .input::placeholder{color:hsl(var(--muted-fg))}
+
+  /* 概览条 StatRow */
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .stat{flex:1;min-width:120px;background:hsl(var(--foreground) / 0.035);border:1px solid hsl(var(--border));
+    border-radius:10px;padding:10px 14px}
+  .stat .v{font-family:"IBM Plex Mono";font-size:19px;font-weight:600;letter-spacing:-0.01em}
+  .stat .v.green{color:hsl(var(--c-green))} .stat .v.cyan{color:hsl(var(--c-cyan))}
+  .stat .l{font-size:11.5px;color:hsl(var(--muted-fg));margin-top:2px}
+
+  /* 工具栏 */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+
+  /* 批量条 */
+  .bulk{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 14px;border-radius:10px;
+    background:hsl(var(--primary) / 0.10);border:1px solid hsl(var(--primary) / 0.30);margin-bottom:12px;font-size:13px}
+  .bulk .n{font-family:"IBM Plex Mono";font-weight:600;color:hsl(var(--primary))}
+
+  /* 滚动容器 —— 让 sticky 列头可见 */
+  .scroll{max-height:484px;overflow:auto;border:1px solid hsl(var(--border));border-radius:12px;
+    background:hsl(var(--card))}
+  .scroll::-webkit-scrollbar{width:10px;height:10px}
+  .scroll::-webkit-scrollbar-thumb{background:hsl(var(--border));border-radius:8px;border:2px solid hsl(var(--card))}
+
+  table.repo{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:13px}
+  .repo col.c-name{width:264px}
+  .repo col.c-src{width:auto}
+  .repo col.c-br{width:96px}
+  .repo col.c-sz{width:84px}
+  .repo col.c-st{width:150px}
+  .repo col.c-ac{width:108px}
+
+  /* sticky 列头（全表唯一） */
+  .repo thead th{position:sticky;top:0;z-index:3;background:hsl(var(--card));
+    border-bottom:1px solid hsl(var(--border));padding:9px 12px;text-align:left;
+    font-size:11px;font-weight:500;letter-spacing:0.02em;color:hsl(var(--muted-fg));
+    box-shadow:0 1px 0 hsl(var(--border))}
+  .repo thead th.sz{text-align:right} .repo thead th.ac{text-align:center}
+
+  /* 单元格 */
+  .repo td{padding:9px 12px;border-bottom:1px solid hsl(var(--border) / 0.55);vertical-align:middle}
+  .repo tbody tr.item:last-child td{border-bottom:0}
+  .repo tbody tr.item:hover td{background:hsl(var(--foreground) / 0.04)}
+  .repo tbody tr.sel td{background:hsl(var(--primary) / 0.07)}
+
+  .name-cell{position:relative}
+  .acc{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .acc.failed{background:hsl(var(--c-red))} .acc.stale{background:hsl(var(--c-yellow))}
+  .acc.cloning{background:hsl(var(--c-cyan))}
+  .nm{font-family:"IBM Plex Mono";font-size:13px;font-weight:500}
+  .row-flex{display:flex;align-items:center;gap:8px;min-width:0}
+  .src{font-family:"IBM Plex Mono";font-size:11.5px;color:hsl(var(--muted-fg));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .br{font-family:"IBM Plex Mono";font-size:11.5px;color:hsl(var(--muted-fg))}
+  .sz{font-family:"IBM Plex Mono";font-size:11.5px;color:hsl(var(--muted-fg));text-align:right;tabular-nums:1;font-variant-numeric:tabular-nums}
+  .ac-cell{text-align:center}
+  .ac-cell .row-flex{justify-content:center;gap:2px}
+
+  /* checkbox */
+  .ck{appearance:none;width:15px;height:15px;border-radius:4px;border:1.5px solid hsl(var(--border));
+    background:transparent;cursor:pointer;position:relative;flex:0 0 auto;transition:all .14s ease}
+  .ck:hover{border-color:hsl(var(--primary))}
+  .ck:checked{background:hsl(var(--primary));border-color:hsl(var(--primary))}
+  .ck:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;
+    border:solid hsl(var(--primary-fg));border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+  /* 状态徽章 */
+  .badge{display:inline-flex;align-items:center;gap:5px;font-family:"IBM Plex Mono";font-size:11px;
+    padding:2px 8px;border-radius:6px;border:1px solid;font-weight:500}
+  .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .b-ready{color:hsl(var(--c-green));border-color:hsl(var(--c-green) / 0.4);background:hsl(var(--c-green) / 0.08)}
+  .b-failed{color:hsl(var(--c-red));border-color:hsl(var(--c-red) / 0.4);background:hsl(var(--c-red) / 0.08)}
+  .b-stale{color:hsl(var(--c-yellow));border-color:hsl(var(--c-yellow) / 0.4);background:hsl(var(--c-yellow) / 0.08)}
+  .b-clone{color:hsl(var(--c-cyan));border-color:hsl(var(--c-cyan) / 0.4);background:hsl(var(--c-cyan) / 0.08)}
+
+  /* clone 进度（行内） */
+  .prog{display:flex;align-items:center;gap:8px}
+  .prog .track{flex:1;max-width:78px;height:5px;border-radius:3px;background:hsl(var(--foreground) / 0.10);overflow:hidden}
+  .prog .fill{height:100%;border-radius:3px;background:hsl(var(--c-cyan))}
+  .prog .pct{font-family:"IBM Plex Mono";font-size:10.5px;color:hsl(var(--c-cyan));font-variant-numeric:tabular-nums}
+
+  /* 分组行（group header row） —— signature */
+  .repo tr.grp td{position:sticky;z-index:2;background:hsl(var(--foreground) / 0.045);
+    border-top:1px solid hsl(var(--border));border-bottom:1px solid hsl(var(--border) / 0.6);
+    padding:8px 12px;cursor:pointer}
+  .repo tr.grp:first-child td{border-top:0}
+  .repo tr.grp:hover td{background:hsl(var(--foreground) / 0.07)}
+  .grp-inner{display:flex;align-items:center;gap:10px}
+  .tri{width:10px;height:10px;display:inline-flex;align-items:center;justify-content:center;color:hsl(var(--muted-fg));
+    transition:transform .16s ease;font-size:9px;flex:0 0 auto}
+  .repo tr.grp.collapsed .tri{transform:rotate(-90deg)}
+  .grp-name{font-weight:600;font-size:13px;font-family:"IBM Plex Mono";letter-spacing:-0.01em}
+  .grp-count{font-size:11.5px;color:hsl(var(--muted-fg));font-variant-numeric:tabular-nums}
+  .grp-spacer{flex:1}
+  .grp-sel{font-size:11px;color:hsl(var(--muted-fg));display:flex;align-items:center;gap:5px}
+
+  /* 分组折叠：隐藏其后同组 item 行 */
+  .repo tr.grp.collapsed + tr.item[data-group],
+  .repo tr.grp.collapsed + tr.item[data-group] + tr.item[data-group]{display:none}
+  /* 兜底：JS 直接 hidden 控制，更稳 */
+
+  /* 空态 */
+  .empty{padding:40px;text-align:center;color:hsl(var(--muted-fg));font-size:13px}
+
+  /* 对比区 mini */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px}
+  .cmp-card{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:12px;padding:16px;position:relative}
+  .cmp-card.rec{border-color:hsl(var(--primary) / 0.45);box-shadow:0 0 0 3px hsl(var(--primary) / 0.10)}
+  .cmp-t{font-size:12px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+  .cmp-t .pill{font-family:"IBM Plex Mono";font-size:10px;padding:1px 7px;border-radius:5px;letter-spacing:0.04em}
+  .cmp-card .pill{background:hsl(var(--c-red) / 0.15);color:hsl(var(--c-red))}
+  .cmp-card.rec .pill{background:hsl(var(--primary) / 0.16);color:hsl(var(--primary))}
+  .cmp-d{font-size:11.5px;color:hsl(var(--muted-fg));margin-top:10px;line-height:1.55}
+
+  /* mini 表缩略 */
+  .mini{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+  .mini-tab{border:1px solid hsl(var(--border));border-radius:7px;overflow:hidden}
+  .mini-h{display:flex;gap:4px;padding:5px 7px;background:hsl(var(--foreground) / 0.05);
+    font-family:"IBM Plex Mono";font-size:9px;color:hsl(var(--muted-fg));border-bottom:1px solid hsl(var(--border))}
+  .mini-h span{flex:1}
+  .mini-r{display:flex;gap:4px;padding:4px 7px;font-family:"IBM Plex Mono";font-size:9px;color:hsl(var(--muted-fg))}
+  .mini-r span{flex:1}
+  .mini-gh{display:flex;align-items:center;gap:5px;padding:4px 7px;background:hsl(var(--primary) / 0.08);
+    font-size:9.5px;font-weight:600;color:hsl(var(--primary));border-top:1px solid hsl(var(--primary) / 0.25);border-bottom:1px solid hsl(var(--primary) / 0.25)}
+  .mini-tab.single .mini-h{background:hsl(var(--c-red) / 0.10)}
+  .mini-note{font-family:"IBM Plex Mono";font-size:9px;color:hsl(var(--c-red));margin-top:3px}
+
+  .hint{margin-top:8px;padding:16px 18px;border-radius:12px;background:hsl(var(--primary) / 0.07);
+    border:1px solid hsl(var(--primary) / 0.22);font-size:12.5px;color:hsl(var(--muted-fg));line-height:1.7}
+  .hint b{color:hsl(var(--primary))}
+  .hint li{margin:3px 0}
+  .hint ul{margin:6px 0;padding-left:18px}
+
+  @media(max-width:760px){ .cmp{grid-template-columns:1fr} .repo col.c-br,.repo col.c-sz{width:64px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>仓库列表 · 单表 + 分组行 重构预览</h1>
+  <p class="lede">
+    把「每个分组一张独立表」改成<b>一张表 + 分组行 + sticky 列头</b>——对齐 AG Grid / Notion / Linear / GitHub 的通行做法。
+    列头全表唯一、滚动时粘顶；分组用<b>表内分组行</b>表达，不再用 Card 容器割裂。下面用你工作区里的真实分组数据（frontend / backend / vuln-range / 20260615）。
+    <b>表格可滚动、分组可折叠、行可勾选</b>——直接点一点试手感。
+  </p>
+
+  <!-- 对比区 -->
+  <div class="cmp">
+    <div class="cmp-card">
+      <div class="cmp-t">现状 · 每分组一张表 <span class="pill">列头 ×N</span></div>
+      <div class="mini">
+        <div class="mini-tab single">
+          <div class="mini-h"><span>NAME</span><span>SOURCE</span><span>STATE</span></div>
+          <div class="mini-r"><span>moka</span><span>…</span><span>●</span></div>
+          <div class="mini-r"><span>honor</span><span>…</span><span>●</span></div>
+        </div>
+        <div class="mini-note">↑ 列头第 1 次</div>
+        <div class="mini-tab single">
+          <div class="mini-h"><span>NAME</span><span>SOURCE</span><span>STATE</span></div>
+          <div class="mini-r"><span>honor</span><span>…</span><span>●</span></div>
+        </div>
+        <div class="mini-note">↑ 列头第 2 次（重复，且列宽独立计算、无法全局 sticky）</div>
+      </div>
+      <div class="cmp-d">分组 Card 把列表切碎，列头重复 N 次，跨组扫读对不齐，长列表无法 sticky 表头。</div>
+    </div>
+    <div class="cmp-card rec">
+      <div class="cmp-t">重构 · 单表 + 分组行 <span class="pill">推荐</span></div>
+      <div class="mini">
+        <div class="mini-tab">
+          <div class="mini-h"><span>NAME</span><span>SOURCE</span><span>STATE</span></div>
+          <div class="mini-gh">▾ frontend (4)</div>
+          <div class="mini-r"><span>　moka</span><span>…</span><span>●</span></div>
+          <div class="mini-r"><span>　honor</span><span>…</span><span>●</span></div>
+          <div class="mini-gh">▾ backend (3)</div>
+          <div class="mini-r"><span>　honor</span><span>…</span><span>●</span></div>
+          <div class="mini-gh">▸ vuln-range (7)</div>
+        </div>
+        <div class="mini-note" style="color:hsl(var(--primary))">↑ 列头唯一一次，sticky 粘顶；分组用行分隔</div>
+      </div>
+      <div class="cmp-d">一张表、一套列头、全局列宽对齐；分组靠「分组行」分隔，可折叠可整组全选，结构即信息。</div>
+    </div>
+  </div>
+
+  <!-- 深主题 · 完整可交互 -->
+  <div class="block">
+    <div class="tag">深 · 暖炭黑</div>
+    <div class="scene-t">工作区 · 仓库 tab</div>
+    <div class="scene-d">向下滚动表格，观察列头如何粘顶常驻；点分组行可折叠/展开；勾选行触发顶部批量条。</div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">16</div><div class="l">总计</div></div>
+      <div class="stat"><div class="v green">12</div><div class="l">就绪</div></div>
+      <div class="stat"><div class="v cyan">1</div><div class="l">克隆中</div></div>
+      <div class="stat"><div class="v">1.2 GB</div><div class="l">总大小</div></div>
+    </div>
+
+    <div class="toolbar">
+      <button class="cta">添加仓库</button>
+      <input class="input" placeholder="搜索仓库名 / URL…" />
+      <button class="ghost icon" aria-label="刷新">↻</button>
+    </div>
+
+    <div class="bulk" id="bulk" hidden>
+      <span>已选 <span class="n" id="bulkN">0</span> 项</span>
+      <button class="des-sm">🗑 删除选中</button>
+      <button class="ghost" id="bulkClear">清除</button>
+    </div>
+
+    <div class="scroll">
+      <table class="repo">
+        <colgroup>
+          <col class="c-name"><col class="c-src"><col class="c-br"><col class="c-sz"><col class="c-st"><col class="c-ac">
+        </colgroup>
+        <thead>
+          <tr>
+            <th><div class="row-flex"><input type="checkbox" class="ck" id="allCheck" aria-label="全选"><span>名称</span></div></th>
+            <th>来源</th><th>分支</th><th class="sz">大小</th><th>状态</th><th class="ac">操作</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 浅主题 · 配色一致性 -->
+  <div class="block light">
+    <div class="tag">浅 · 暖纸张</div>
+    <div class="scene-t">同一张表 · 浅主题</div>
+    <div class="scene-d">验证 coral / 状态色 / hairline 在暖白底下的可读性——语义色饱和度已按 tokens.css 浅色档下调，不刺眼。</div>
+    <div class="scroll" style="max-height:none">
+      <table class="repo" id="lightTable">
+        <colgroup>
+          <col class="c-name"><col class="c-src"><col class="c-br"><col class="c-sz"><col class="c-st"><col class="c-ac">
+        </colgroup>
+        <thead>
+          <tr><th><div class="row-flex"><span style="width:15px"></span><span>名称</span></div></th>
+            <th>来源</th><th>分支</th><th class="sz">大小</th><th>状态</th><th class="ac">操作</th></tr>
+        </thead>
+        <tbody id="tbodyLight"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="hint">
+    <b>设计要点</b>
+    <ul>
+      <li><b>signature = 结构即信息</b>：分组行不是装饰，是一条 <code>colspan=6</code> 的 section heading——折叠三角 + 组名（Mono）+ tabular 计数 + 右侧整组全选。比现状的 Card 头更紧凑，分组边界依然清晰。</li>
+      <li><b>sticky 列头</b>：<code>thead th { position: sticky; top: 0 }</code>，16 行滚动时列名常驻——这是现状「多表各自带列头」做不到的核心收益。分组行同样 sticky（紧跟列头下），分组多时不丢失。</li>
+      <li><b>全局列宽对齐</b>：单表 <code>table-layout: fixed</code> + <code>colgroup</code>，所有分组共用一套列宽，跨组扫读不再错位。</li>
+      <li><b>状态语义</b>：就绪 green / 失败 red / 未完成 yellow / 克隆中 cyan（含进度条）——取自 <code>STATE_BADGE</code> + <code>stateAccent</code> 左侧色条，异常态一眼定位。</li>
+      <li><b>批量操作</b>：行勾选 → 顶部批量条浮现（已选 N + 删除 + 清除）；分组行整组全选自然落在同一张表内。</li>
+      <li><b>落地成本</b>：<code>groupRepos()</code> 照用，只是渲染从「多 Card」改成「单 Table 内插 <code>&lt;tr class="grp"&gt;</code>」；现有交互（折叠/全选/批量/CloneProgress）逻辑几乎不变。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  // 真实分组数据（采样自 repos/）
+  const GROUPS = [
+    { name:"frontend", open:true, repos:[
+      { n:"act_customer_moomoo", u:"https://gitlab.futunn.com/fe/act_customer_moomoo.git", b:"main",    sz:"142 MB", st:"ready" },
+      { n:"crm-vip.futuhk.com",  u:"https://gitlab.futunn.com/fe/crm-vip.git",            b:"dev",     sz:"88 MB",  st:"ready" },
+      { n:"coupon-center",       u:"https://gitlab.futunn.com/fe/coupon-center.git",      b:"main",    sz:"36 MB",  st:"stale" },
+      { n:"boarding",            u:"https://gitlab.futunn.com/fe/boarding.git",           b:"main",    sz:null,     st:"cloning", pct:64 },
+    ]},
+    { name:"backend", open:true, repos:[
+      { n:"honor",              u:"https://gitlab.futunn.com/be/honor.git",              b:"main",   sz:"64 MB", st:"ready" },
+      { n:"coupon_service_go",  u:"https://gitlab.futunn.com/be/coupon_service_go.git",  b:"main",   sz:"52 MB", st:"failed" },
+      { n:"delivery",           u:"https://gitlab.futunn.com/be/delivery.git",           b:"dev",    sz:"28 MB", st:"ready" },
+    ]},
+    { name:"vuln-range", open:false, repos:[
+      { n:"NodeGoat",        u:"https://github.com/nickolasburr/NodeGoat.git",       b:"main", sz:"12 MB", st:"ready" },
+      { n:"juice-shop",      u:"https://github.com/juice-shop/juice-shop.git",       b:"main", sz:"48 MB", st:"ready" },
+      { n:"crAPI",           u:"https://github.com/armandogr/crAPI.git",             b:"main", sz:"21 MB", st:"ready" },
+      { n:"cve-bench",       u:"https://gitlab.futunn.com/sec/cve-bench.git",        b:"main", sz:"9 MB",  st:"ready" },
+    ]},
+    { name:"20260615", open:false, repos:[
+      { n:"futu_auth_svr",   u:"https://gitlab.futunn.com/sec/futu_auth_svr.git",     b:"main", sz:"7 MB", st:"ready" },
+      { n:"passkey_info_svr",u:"https://gitlab.futunn.com/sec/passkey_info_svr.git",  b:"main", sz:"5 MB", st:"ready" },
+    ]},
+  ];
+  const STATE = {
+    ready:   { cls:"b-ready",   label:"就绪",   acc:null },
+    failed:  { cls:"b-failed",  label:"失败",   acc:"failed" },
+    stale:   { cls:"b-stale",   label:"未完成", acc:"stale" },
+    cloning: { cls:"b-clone",   label:"克隆中", acc:"cloning" },
+  };
+
+  function badge(st, pct){
+    const s = STATE[st];
+    if(st === "cloning"){
+      return `<span class="prog"><span class="track"><span class="fill" style="width:${pct}%"></span></span><span class="pct">${pct}%</span></span>`;
+    }
+    return `<span class="badge ${s.cls}"><span class="dot"></span>${s.label}</span>`;
+  }
+  function actions(st){
+    // 克隆中：只允许删除（取消）；其余：更新 + 删除
+    if(st === "cloning") return `<button class="ghost icon des" title="取消克隆" style="color:hsl(var(--c-red))">✕</button>`;
+    return `<button class="ghost icon" title="更新 (pull)">↻</button><button class="ghost icon des" title="删除" style="color:hsl(var(--c-red))">🗑</button>`;
+  }
+  function groupRow(g){
+    return `<tr class="grp${g.open?"":" collapsed"}" data-grp="${g.name}">
+      <td colspan="6"><div class="grp-inner">
+        <span class="tri">▼</span>
+        <span class="grp-name">${g.name}</span>
+        <span class="grp-count">${g.repos.length} 项</span>
+        <span class="grp-spacer"></span>
+        <label class="grp-sel"><input type="checkbox" class="ck grp-check" data-grp="${g.name}"> 全选</label>
+      </div></td>
+    </tr>`;
+  }
+  function itemRow(g, r){
+    const s = STATE[r.st];
+    const acc = s.acc ? `<span class="acc ${s.acc}"></span>` : "";
+    const size = r.sz ? r.sz : "—";
+    return `<tr class="item" data-group="${g.name}" data-name="${r.n}">
+      <td class="name-cell">${acc}<div class="row-flex">
+        <input type="checkbox" class="ck row-check" aria-label="${r.n}">
+        <span class="nm" title="${g.name}/${r.n}">${r.n}</span>
+      </div></td>
+      <td><div class="src" title="${r.u}">${r.u}</div></td>
+      <td><span class="br">${r.b}</span></td>
+      <td class="sz">${size}</td>
+      <td>${badge(r.st, r.pct)}</td>
+      <td class="ac-cell"><div class="row-flex">${actions(r.st)}</div></td>
+    </tr>`;
+  }
+  function render(intoId, interactive){
+    const tb = document.getElementById(intoId);
+    let html = "";
+    for(const g of GROUPS){
+      html += groupRow(g);
+      for(const r of g.repos) html += itemRow(g, r);
+    }
+    tb.innerHTML = html;
+    if(!interactive) return;
+
+    // 折叠 / 展开
+    tb.querySelectorAll("tr.grp").forEach(gr=>{
+      gr.addEventListener("click", e=>{
+        if(e.target.closest(".grp-check")) return; // 点全选不折叠
+        const collapsed = gr.classList.toggle("collapsed");
+        const name = gr.dataset.grp;
+        tb.querySelectorAll(`tr.item[data-group="${name}"]`).forEach(it=>{
+          it.hidden = collapsed;
+        });
+      });
+    });
+
+    // 初始折叠态
+    tb.querySelectorAll("tr.grp.collapsed").forEach(gr=>{
+      tb.querySelectorAll(`tr.item[data-group="${gr.dataset.grp}"]`).forEach(it=> it.hidden = true);
+    });
+
+    // 选中 / 批量条 / 整组全选 / 全选
+    const bulk = document.getElementById("bulk");
+    const bulkN = document.getElementById("bulkN");
+    function refresh(){
+      const rows = tb.querySelectorAll("tr.item");
+      const checked = [...rows].filter(r=>!r.hidden && r.querySelector(".row-check").checked);
+      rows.forEach(r=> r.classList.toggle("sel", r.querySelector(".row-check").checked));
+      const n = checked.length;
+      bulk.hidden = n === 0;
+      bulkN.textContent = n;
+      // 整组全选态
+      tb.querySelectorAll("tr.grp").forEach(gr=>{
+        const items = tb.querySelectorAll(`tr.item[data-group="${gr.dataset.grp}"]`);
+        const vis = [...items].filter(r=>!r.hidden);
+        const ck = gr.querySelector(".grp-check");
+        ck.checked = vis.length>0 && vis.every(r=>r.querySelector(".row-check").checked);
+      });
+      // 全表全选
+      const vis = [...rows].filter(r=>!r.hidden);
+      document.getElementById("allCheck").checked = vis.length>0 && vis.every(r=>r.querySelector(".row-check").checked);
+    }
+    tb.addEventListener("change", e=>{
+      const t = e.target;
+      if(t.classList.contains("row-check")){ refresh(); }
+      else if(t.classList.contains("grp-check")){
+        tb.querySelectorAll(`tr.item[data-group="${t.dataset.grp}"]`).forEach(r=>{
+          if(!r.hidden) r.querySelector(".row-check").checked = t.checked;
+        });
+        refresh();
+      }
+    });
+    document.getElementById("allCheck").addEventListener("change", e=>{
+      tb.querySelectorAll("tr.item").forEach(r=>{
+        if(!r.hidden) r.querySelector(".row-check").checked = e.target.checked;
+      });
+      refresh();
+    });
+    document.getElementById("bulkClear").addEventListener("click", ()=>{
+      tb.querySelectorAll(".row-check").forEach(c=> c.checked=false);
+      refresh();
+    });
+
+    // 预选 2 项演示批量条
+    const pre = ["act_customer_moomoo","coupon-center"];
+    tb.querySelectorAll(".row-check").forEach(c=>{
+      if(pre.includes(c.closest("tr").dataset.name)){ c.checked = true; }
+    });
+    refresh();
+  }
+  render("tbody", true);
+  render("tbodyLight", false);
+</script>
+</body>
+</html>
