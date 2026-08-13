@@ -3,13 +3,15 @@
 #
 # 铁律:本脚本绝不触碰 /root/shannon(原始 TS 项目)的任何进程,
 #       也绝不触碰 gitnexus 等共享组件。所有进程匹配一律用绝对路径锁死
-#       /root/supernova / supernova_web,不会误伤 TS 的 node ./shannon / runner.js /
+#       本脚本所在仓库的绝对路径 / supernova_web,不会误伤 TS 的 node ./shannon / runner.js /
 #       claude-agent-sdk 子进程。容器按 compose project=supernova 精确过滤。
 #
 # 用法见 usage()。
 set -uo pipefail
 
-REPO=/root/supernova
+# 从脚本位置解析仓库根目录；不依赖固定的 /root/supernova 或当前工作目录。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND="$REPO/packages/web/frontend"
 DRY_RUN=0
 REMOVE=0
@@ -62,7 +64,7 @@ echo " supernova 残留清理   (dry_run=$DRY_RUN, rm=$REMOVE)"
 echo " 铁律:绝不触碰 /root/shannon(原始 TS),不碰 gitnexus"
 echo "=================================================="
 
-# ---- 1) 前端 vite + esbuild(路径锁死 /root/supernova/packages/web/frontend)----
+# ---- 1) 前端 vite + esbuild(路径锁死当前仓库/packages/web/frontend)----
 echo "[1/4] 前端进程 vite / esbuild"
 for pat in \
   "$FRONTEND/node_modules/.bin/vite" \
@@ -106,9 +108,9 @@ fi
 
 # ---- 4) 验证 ----
 echo "[4/4] 验证"
-if ps aux | grep -E 'supernova_web|supernova/packages/web' | grep -qv grep; then
+if ps aux | grep -F -e 'supernova_web' -e "$REPO/packages/web" | grep -qv grep; then
   echo "  ⚠ 仍有 supernova 进程残留:"
-  ps aux | grep -E 'supernova_web|supernova/packages/web' | grep -v grep \
+  ps aux | grep -F -e 'supernova_web' -e "$REPO/packages/web" | grep -v grep \
     | awk '{print "     ", $2, $11, $12, $13}'
 else
   echo "  ✓ 无 supernova 进程残留"

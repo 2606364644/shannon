@@ -87,7 +87,7 @@ bash scripts/cleanup-supernova.sh [选项]
 
 > **本脚本绝不触碰 `/root/shannon`（原始 TS 项目）的任何进程，也绝不触碰 gitnexus 等共享组件。**
 
-- 所有进程匹配一律用**绝对路径**锁死 `/root/supernova` / `supernova_web`，不会误伤 TS 的 `node ./shannon` / `runner.js` / claude-agent-sdk 子进程。
+- 所有进程匹配一律用**脚本所在仓库解析出的绝对路径** / `supernova_web`，不会误伤 TS 的 `node ./shannon` / `runner.js` / claude-agent-sdk 子进程；仓库移动目录无需修改清理脚本。
 - 容器按 compose `project=supernova` 精确过滤，只动本项目的。
 
 ### 注意事项

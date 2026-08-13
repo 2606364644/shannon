@@ -95,15 +95,60 @@ own_temporal_running() {
 #   1. docker compose ps 只列本项目(supernova)管辖的容器，物理上排除外部 shannon-temporal；
 #   2. 只删 state ∈ {created, exited, dead}，running / restarting / paused 一律保留。
 cleanup_stale_containers() {
-  local stale
+  local stale c
   stale=$(docker compose ps -a --format '{{.Name}}\t{{.State}}' 2>/dev/null \
           | awk -F'\t' '$2 == "created" || $2 == "exited" || $2 == "dead" {print $1}' \
           || true)
   if [ -n "$stale" ]; then
     echo ">> 清理 compose 项目内失败/空壳容器（非运行态；外部 shannon-temporal 不受影响）："
     printf '%s\n' "$stale" | sed 's/^/   - /'
-    printf '%s\n' "$stale" | xargs -r docker rm -f >/dev/null
+    while IFS= read -r c; do
+      [ -n "$c" ] || continue
+      remove_stale_container "$c"
+    done <<< "$stale"
   fi
+}
+
+# Docker 在另一条 compose up/down 或 rm 请求刚开始删除同一容器时，会返回
+# "removal of container ... is already in progress"。这只是短暂竞态：等待容器
+# 消失后再继续启动，而不是让 set -e 把整个 up.sh 提前终止。
+remove_stale_container() {
+  local c="$1"
+  local max_attempts="${SUPERNOVA_CONTAINER_REMOVE_RETRIES:-30}"
+  local interval="${SUPERNOVA_CONTAINER_REMOVE_INTERVAL:-1}"
+  local attempt err
+
+  [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=30
+  [[ "$interval" =~ ^[0-9]+([.][0-9]+)?$ ]] || interval=1
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    # 其他请求已经删掉它：视为成功。
+    if ! docker inspect "$c" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if err=$(docker rm -f "$c" 2>&1); then
+      return 0
+    fi
+
+    # rm 失败后它可能刚好被另一请求删完了。
+    if ! docker inspect "$c" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    # 只有已知的删除竞态重试；权限、名称解析等真实错误立即暴露。
+    if [[ "$err" != *"already in progress"* ]]; then
+      printf '%s\n' "$err" >&2
+      return 1
+    fi
+
+    if (( attempt < max_attempts )); then
+      sleep "$interval"
+    fi
+  done
+
+  printf '❌ 删除容器超时（Docker 仍报告 removal in progress）: %s\n' "$c" >&2
+  return 1
 }
 
 # 如果本地存在 docker-compose.override.yml，警告（会干扰自动判断）
