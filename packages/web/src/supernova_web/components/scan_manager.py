@@ -204,6 +204,32 @@ class ScanManager:
 
         try:
             if req.type == "whitebox":
+                # 组合扫描 t0 预验证（spec §7.2 D4，Task 3）：whitebox + url → 先用 scan-config.yaml
+                # 登一次目标站（复用 AuthValidationWorkflow），pass 才 submit 白盒，fail fail-fast
+                # （标 bb_phase=failed + scan_end，不提交白盒）。预验证 events 落独立文件，不污染主流。
+                if req.url:
+                    config_path = await self._dump_auth_config(req, ws, scan_dir)
+                    host_mappings = await self._resolve_host_mappings(req, ws)
+                    # 持久化组合字段供 _run_blackbox_phase（Task 4）读 bb_url/bb_host_mappings +
+                    # Task 7 重跑解析 bb_auth_ref（D2：只存 profile_id 引用，不含明文）。
+                    SessionManager(scan_dir.parent).update_session(scan_dir, {
+                        "combined": True,
+                        "bb_url": req.url,
+                        "bb_host_mappings": host_mappings,
+                        "bb_auth_ref": self._snapshot_auth_ref(req),
+                        "bb_phase": "precheck",
+                    })
+                    ok = await self._run_precheck(
+                        scan_dir, ws, scan_id, req.url, config_path)
+                    if not ok:
+                        # fail-fast：标 failed + 写 scan_end（终态标记）+ 清 _active_reqs（无 _watch
+                        # 兜底清理）→ 不提交白盒、不起编排。return 跳过 _handles/_tasks 登记。
+                        await self._mark_bb(scan_dir, "failed", "auth_failed")
+                        await self._ensure_scan_end(scan_dir)
+                        self._active_reqs.pop(scan_key, None)
+                        return ws, scan_id
+                    # pass → 转出 precheck 阶段（白盒 running 期 progress 按 pending 加权，spec §9.2）。
+                    await self._mark_bb(scan_dir, "pending")
                 handle = await self._submit_whitebox(
                     target, ws, scan_id, scan_dir, event_file, req.url or "")
                 # 持久化 repo 名（source.value，可为 group/repo）供重跑预填白盒仓库--
@@ -211,10 +237,7 @@ class ScanManager:
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"source_repo": req.source.value if req.source else None})
                 # 组合扫描接力（spec §7.2）：白盒 + url → 起 _combined_orchestrator 接力黑盒。
-                # 注：scan-config.yaml dump + session combined/bb_* 字段 + t0 预验证 由后续 task
-                # （Task 3）在同一分支补；本处仅在白盒 submit 成功后登记接力 task（fire-and-forget）。
-                # _run_blackbox_phase 读 scan-config.yaml（Task 3 dump）；未 dump 时真机会失败，
-                # 但单测在 fixture 直接建该文件。
+                # _run_blackbox_phase 读上面 dump 的 scan-config.yaml + session bb_url/bb_host_mappings。
                 if req.url:
                     orch = asyncio.create_task(
                         self._combined_orchestrator(scan_key, handle, scan_dir, req))
@@ -347,32 +370,24 @@ class ScanManager:
         self._mark_submitted_at(scan_dir)
         return handle
 
-    async def _resolve_blackbox_inputs(
-        self, req: ScanRequest, ws: str, scan_dir: Path, target: str | None,
-    ) -> tuple[str | None, str | None]:
-        """解析黑盒提交的 config_path(登录 YAML) + repo_path(复用白盒 / 指定仓库 / standalone)。
+    async def _dump_auth_config(
+        self, req: ScanRequest, ws: str, scan_dir: Path,
+    ) -> str | None:
+        """展开认证配置 → 写 scan_dir/scan-config.yaml，返 config_path（无认证返 None）。
 
-        config_path(两互斥分支,model_validator _auth_profile_xor_inline 保证二选一):
-          - req.auth_profile_id+auth_credential_id → AuthProfileStore.get 展开该角色 →
-            credential_to_authentication → dump 成 {authentication: {...}} YAML 写 scan_dir/
-            scan-config.yaml(明文,core 合流点 parse_config 直读 YAML 的约束)。档案/角色缺失 raise ValueError。
-          - req.authentication(inline dict) → Authentication.model_validate 校验 → 同样 dump 写 YAML。
-          blackbox workflow `if input.config_path:` 据此跑 run_blackbox_auth_validation。校验失败 raise ValueError。
-        repo_path: req.reuse_whitebox_scan_id → 该白盒 scan_dir 作 repo_path
-          （detect_whitebox_results 在 Path(repo_path)/deliverables 找白盒 queue；wb scan_dir/
-          deliverables 即白盒产物落点，blackbox 自身产物靠 workspace_path 另落 bb scan_dir）；
-          否则 target（req.source.repo 经 _resolve_inputs 解析）；standalone（无 reuse 无 source）→ None。
+        原 _resolve_blackbox_inputs 的 config_path 段抽出，供组合分支 t0 预验证复用（组合模式
+        无 reuse_whitebox_scan_id，不走 _resolve_blackbox_inputs 的 repo_path/reuse 段）。auth→YAML
+        展开逻辑（profile 三子模式 + inline 多角色）零改动——core 合流点 parse_config 直读明文 YAML。
+
+        三互斥子模式（model_validator _auth_profile_xor_inline 已保证互斥）：
+          - profile_id + cred_ids[] = 子集：展开选中 credentials → accounts[]；
+          - profile_id + cred_id     = 单角色（旧契约）：展开该 credential → 单 authentication；
+          - profile_id 单独          = 全角色：展开所有 credentials → accounts[]。
+          - authentication(inline)   = Authentication.model_validate → dump（+ auth_accounts 多角色）。
+        无认证字段 → None（公开目标不登录，预验证/黑盒均跳过 auth 段）。
         """
         import yaml
         from supernova_core.models.config import Authentication
-
-        config_path: str | None = None
-        # 选已保存档案：三互斥子模式（model_validator _auth_profile_xor_inline 已保证互斥）：
-        #   - profile_id + cred_ids[] = 子集（2026-08-06）：展开选中的 credentials → accounts[]；
-        #   - profile_id + cred_id     = 单角色（旧契约，向后兼容）：展开该 credential → 单 authentication；
-        #   - profile_id 单独          = 全角色（子项目2 T10）：展开所有 credentials → accounts[]。
-        # 子集与全角色共用「credentials 列表 → primary + accounts[] payload」逻辑（_expand_multi_identity）。
-        # 与下方 inline authentication 互斥。
         from .auth_profile_store import credential_to_authentication
 
         def _dump_auth_payload(payload: dict) -> str:
@@ -430,8 +445,8 @@ class ScanManager:
             selected = [c for c in profile.credentials if c.id in selected_ids]
             if not selected:
                 raise ValueError(f"选中的角色凭据不存在: {req.auth_credential_ids}")
-            config_path = _expand_multi_identity(profile, selected)
-        elif req.auth_profile_id and req.auth_credential_id:
+            return _expand_multi_identity(profile, selected)
+        if req.auth_profile_id and req.auth_credential_id:
             # 单角色模式（旧契约，向后兼容）：展开该 credential → 单 authentication。
             if self._auth_profile_store is None:
                 raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
@@ -442,17 +457,17 @@ class ScanManager:
             if cred is None:
                 raise ValueError(f"角色凭据不存在: {req.auth_credential_id}")
             auth = credential_to_authentication(profile, cred)
-            config_path = _dump_auth_payload(
+            return _dump_auth_payload(
                 {"authentication": auth.model_dump(exclude_none=True, mode="json")})
-        elif req.auth_profile_id:
+        if req.auth_profile_id:
             # 全角色模式（子项目2 T10）：展开所有 credentials → accounts[]。
             if self._auth_profile_store is None:
                 raise RuntimeError("auth_profile_store 未注入，无法展开认证档案")
             profile = self._auth_profile_store.get(ws, req.auth_profile_id)
             if profile is None:
                 raise ValueError(f"认证档案不存在: {req.auth_profile_id}")
-            config_path = _expand_multi_identity(profile, profile.credentials)
-        elif req.authentication:
+            return _expand_multi_identity(profile, profile.credentials)
+        if req.authentication:
             try:
                 auth = Authentication.model_validate(req.authentication)
             except Exception as exc:
@@ -486,8 +501,22 @@ class ScanManager:
                         "credentials": creds,
                     })
                 payload["accounts"] = accounts
-            config_path = _dump_auth_payload(payload)
+            return _dump_auth_payload(payload)
+        return None  # 无认证字段（公开目标）
 
+    async def _resolve_blackbox_inputs(
+        self, req: ScanRequest, ws: str, scan_dir: Path, target: str | None,
+    ) -> tuple[str | None, str | None]:
+        """解析黑盒提交的 config_path(登录 YAML) + repo_path(复用白盒 / 指定仓库 / standalone)。
+
+        config_path 委托 _dump_auth_config（auth→YAML 展开，profile 三子模式 + inline 多角色）；
+        blackbox workflow `if input.config_path:` 据此跑 run_blackbox_auth_validation。校验失败 raise ValueError。
+        repo_path: req.reuse_whitebox_scan_id → 该白盒 scan_dir 作 repo_path
+          （detect_whitebox_results 在 Path(repo_path)/deliverables 找白盒 queue；wb scan_dir/
+          deliverables 即白盒产物落点，blackbox 自身产物靠 workspace_path 另落 bb scan_dir）；
+          否则 target（req.source.repo 经 _resolve_inputs 解析）；standalone（无 reuse 无 source）→ None。
+        """
+        config_path = await self._dump_auth_config(req, ws, scan_dir)
         # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，无 standalone/repo 兜底。
         # model_validator 已在请求层拦 reuse 缺失；此处工作层独立兜底（不依赖 pydantic，防 model 层被误改）。
         if not req.reuse_whitebox_scan_id:
@@ -1384,6 +1413,33 @@ class ScanManager:
         await bb_handle.result()
         await self._generate_combined_report(scan_dir)  # Task 8 实现；融合报告 → deliverables/combined/
         await self._mark_bb(scan_dir, "completed")
+
+    async def _run_precheck(self, scan_dir: Path, ws: str, scan_id: str,
+                            web_url: str, config_path: str | None) -> bool:
+        """D4 t0 预验证：复用 AuthValidationWorkflow 登一次目标站，pass 返 True。
+
+        event_file 用独立文件 authcheck-events.ndjson（不写主 events——预验证 workflow finalize
+        可能写 scan_end，混入主 events 流会提前触发 _watch 退出）。黑盒 workflow 零代码改动，
+        起一个独立的 AuthValidationWorkflow（与认证管理页「测试登录」探针同源）。
+
+        config_path=None（公开目标无认证）→ 跳过预验证直接 pass（无登录可验）。
+        """
+        if not config_path:
+            return True  # 公开目标无认证 → 无需预验证
+        from supernova_blackbox.pipeline.workflows import AuthValidationWorkflow
+        from supernova_blackbox.pipeline.shared import BlackboxAuthValidationInput
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
+        client = await Client.connect(self._temporal_address())
+        inp = BlackboxAuthValidationInput(
+            web_url=web_url, config_path=config_path,
+            workspace_path=str(scan_dir),
+            event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
+            api_key=self._resolve_provider_config(ws).get("api_key"))
+        handle = await client.start_workflow(
+            AuthValidationWorkflow.run, inp,
+            id=f"{ws}-{scan_id}-authcheck", task_queue=WEB_TASK_QUEUE_BLACKBOX)
+        result = await handle.result()  # AuthValidationResult
+        return bool(result and getattr(result, "success", False))
 
     async def _generate_combined_report(self, scan_dir: Path) -> None:
         """生成组合扫描融合报告（spec §10.2）→ deliverables/combined/combined_report.md。
