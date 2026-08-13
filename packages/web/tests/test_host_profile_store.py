@@ -342,6 +342,51 @@ def _mock_safe_dns(monkeypatch, ip: str = "93.184.216.34"):
     )
 
 
+# ---------------------------------------------------------------------------
+# 302→内网 SSRF 重定向：验证 follow_redirects=False（不跟随重定向）
+# ---------------------------------------------------------------------------
+
+_EXTERNAL_URL = "https://hosts.example.com/etc/hosts"
+_REDIRECT_TARGET = "http://169.254.169.254/latest/meta-data/"
+# Simulated internal body：若经重定向泄露，会解析出可检测的 mapping。
+_INTERNAL_BODY = "169.254.169.254 metadata.leaked.test\n"
+
+
+class _RedirectAsyncClient:
+    """httpx.AsyncClient 替身：模拟 302→内网 SSRF 重定向场景。
+
+    ``.get(external_url)`` 始终返回 302（Location→云元数据内网地址）。构造参数
+    ``follow_redirects=True`` 时模拟 httpx 自动跟随：对 Location 再发一次请求并返回
+    内网 body（模拟 SSRF 泄露）；``follow_redirects=False`` 时返回 302 本身（空 body、
+    不跟随）。
+
+    ``get_calls`` 记录所有请求 URL（含被跟随的重定向目标），供断言验证「重定向未被
+    跟随」——``follow_redirects=False`` 时应仅 1 条（外部 URL）。
+    """
+
+    def __init__(self, *a, **kw):
+        self._follow_redirects = kw.get("follow_redirects", True)
+        self.get_calls: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url):
+        self.get_calls.append(url)
+        if url != _EXTERNAL_URL:
+            # 直接命中内网地址（被跟随的重定向目标）→ 返回内网 body。
+            return _FakeResp(_INTERNAL_BODY)
+        if self._follow_redirects:
+            # 模拟 httpx 自动跟随 302：对 Location 再发请求、返回内网 body。
+            self.get_calls.append(_REDIRECT_TARGET)
+            return _FakeResp(_INTERNAL_BODY)
+        # follow_redirects=False：返回 302 本身（不跟随），body 为空。
+        return _FakeResp("")
+
+
 @pytest.mark.asyncio
 async def test_fetch_rejects_loopback_literal_ip():
     """fetch URL 直接指向 127.0.0.1 → 解析到 loopback → 拒（不发 GET）。"""
@@ -404,3 +449,35 @@ async def test_fetch_does_not_block_parsed_internal_target_ips(monkeypatch):
     # 内网 target IP 原样流入（未被 fetch-URL 的 SSRF 检查阻断）
     assert ips["api.test"] == "10.0.0.1"
     assert ips["svc.test"] == "192.168.1.5"
+
+
+@pytest.mark.asyncio
+async def test_fetch_does_not_follow_redirect_to_internal(monkeypatch):
+    """302→内网 SSRF 绕过已关闭：``follow_redirects=False`` 致 httpx 不跟随重定向。
+
+    外部 URL（getaddrinfo→93.184.216.34 公网 IP）通过 ``_assert_url_fetch_safe``
+    初始门控，但响应是 302→``http://169.254.169.254/latest/meta-data/``。两层
+    保护的第二层——``follow_redirects=False``——致 httpx 不跟随，故：
+      - 内网 body 不被拉取（mappings 为空、无 metadata 泄露）；
+      - 仅发 1 次 .get（外部 URL），未对内网重定向目标发起第二次请求。
+    """
+    _mock_safe_dns(monkeypatch)  # 外部 URL 解析到公网 IP → 通过 SSRF 初始门控
+    state: dict = {"client": None}
+
+    class _CapturingClient(_RedirectAsyncClient):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            state["client"] = self
+
+    monkeypatch.setattr(hps.httpx, "AsyncClient", _CapturingClient)
+    mappings, _warnings = await fetch_and_parse_hosts(_EXTERNAL_URL)
+    # 无 metadata 泄露：mappings 为空（302 未跟随 → 空 body）
+    assert mappings == [], "internal cloud-metadata body leaked via redirect following"
+    # 重定向未被跟随：仅 1 次 .get（外部 URL），无第二次命中内网地址
+    client = state["client"]
+    assert client is not None, "AsyncClient was not constructed"
+    assert len(client.get_calls) == 1, (
+        f"redirect was followed: .get called {len(client.get_calls)} times "
+        f"({client.get_calls!r})"
+    )
+    assert client.get_calls[0] == _EXTERNAL_URL

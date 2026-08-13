@@ -131,8 +131,12 @@ def _assert_url_fetch_safe(url: str) -> None:
     拦截两类风险（复用 ``core/utils/security.py`` 的范围判定，不另立规则）：
       - 非 http/https scheme（file:// / gopher:// / ftp:// …，绕过 httpx 语义）；
       - hostname 解析到 SSRF 敏感段中的任一 IP（loopback 127.x/::1、unspecified
-        0.0.0.0/::、link-local 169.254/16 含云元数据 169.254.169.254）。配合
-        ``follow_redirects=True``，避免外部 URL 302 到内网。
+        0.0.0.0/::、link-local 169.254/16 含云元数据 169.254.169.254）。
+
+    注意：本检查**只校验初始 fetch URL 的解析地址**，不覆盖 302/301 重定向后的目标。
+    重定向由 ``_http_get_hosts`` 的 ``follow_redirects=False`` 独立关闭（双层保护第二层
+    ——见 ``_http_get_hosts`` docstring）：初始 URL 经本检查安全 AND httpx 不跟随重定向，
+    两层共同保证 302→内网（如云元数据）不可达。
 
     raise ``ValueError`` —— 上游 /parse 端点包成 422，refresh best-effort 吞掉保快照，
     scan-start 的 host_url 路径冒泡为 fail-fast（不可达 URL 属合理失败）。
@@ -165,14 +169,18 @@ def _assert_url_fetch_safe(url: str) -> None:
 
 
 async def _http_get_hosts(url: str, timeout: int = 15) -> str:
-    """GET url → text(follow redirects,raise_on_status)。模块级 → 测试 mock 之。
+    """GET url → text（**不**跟随重定向，raise_on_status）。模块级 → 测试 mock 之。
 
-    拉取前先经 ``_assert_url_fetch_safe`` 做 SSRF 门控（scheme + loopback/link-local），
-    防止 workspace_manager 利用 web 容器探测内网 / 云元数据（follow_redirects 致外部
-    URL 也可 302 到内网，故必须在解析阶段拦截）。
+    SSRF 双层保护：
+      (a) 拉取前经 ``_assert_url_fetch_safe`` 校验初始 URL（scheme + loopback/
+          link-local，见其 docstring 的「仅校验初始 URL」限制说明）；
+      (b) ``follow_redirects=False`` —— /etc/hosts 来源服务无合理重定向需求，
+          fail-closed（重定向→空/无 body→空 mappings）是安全平台拉取用户提供
+          URL 的正确姿态。故初始 URL 即使通过 (a)，302→内网（如云元数据）也**无法**
+          被到达（httpx 不跟随）。http→https 跳转的不便可接受（用户直供目标 URL）。
     """
     _assert_url_fetch_safe(url)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
         r = await c.get(url)
         r.raise_for_status()
         return r.text
