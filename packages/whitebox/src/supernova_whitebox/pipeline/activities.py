@@ -1835,7 +1835,12 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
         # 在 log_workflow_complete 关闭 workflow_logger 之前，对齐 display_lifecycle
         # finally 顺序（drain_and_detach → session.close）。
         await LogBus.drain_and_detach()
-        await session.log_workflow_complete(ws)
+        if input.combined:
+            # D1：组合扫描白盒阶段——调现有 log_phase_complete（写 PhaseEvent，非 scan_end），
+            # 不写终态 status，留 scan 非终态供编排器在同目录追加黑盒阶段。
+            await session.log_phase_complete("whitebox")
+        else:
+            await session.log_workflow_complete(ws)
     await stop_heartbeat()  # 停 heartbeat daemon(启动于 setup_display); 终态自停兜底
     clear_audit_session()
 

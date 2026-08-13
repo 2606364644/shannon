@@ -22,6 +22,9 @@ class PipelineInput(BasePipelineInput):
     # P3c 阶段 1：provider 配置穿线（dict，跨 worker 边界 serializable）。
     # None=未穿线（CLI 兜底走 env）；web 路径由 scan_manager 塞全局/阶段2 per-ws 配置。
     provider_config: dict | None = None
+    # D1 组合扫描：True=白盒阶段结束调 log_phase_complete（写 PhaseEvent，非 scan_end），
+    # 留 scan 非终态供编排器追加黑盒；False（默认）=纯白盒调 log_workflow_complete（不变）。
+    combined: bool = False
 
 
 @dataclass
@@ -59,6 +62,8 @@ class ActivityInput:
     track_statuses: dict = field(default_factory=dict)   # fail-fast: GitNexus 轨 per-class 状态(workflow->write_track_status_activity)
     # P3c 阶段 1：由 workflow 从 PipelineInput.provider_config 灌入；activity 下传 run_claude_prompt。
     provider_config: dict | None = None
+    # D1 组合扫描：由 workflow 从 PipelineInput.combined 灌入；finalize_summary 据此分支。
+    combined: bool = False
 
 
 @dataclass
