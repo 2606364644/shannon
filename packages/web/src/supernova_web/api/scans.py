@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse
 from pathlib import Path
 
 from supernova_web.auth.dependencies import current_user, workspace_member
+from supernova_web.components.workspace_provisioner import is_global_admin
 from supernova_web.auth.models import User
 from supernova_web.components.deliverables_reader import DeliverablesReader
 
@@ -40,7 +41,7 @@ async def list_all_scans(request: Request, user: User = Depends(current_user)):
     cfg = request.app.state.config
     indexer = request.app.state.indexer
     store = ScanStore(cfg.workspaces_dir)
-    if user.role == "admin":
+    if is_global_admin(user):
         ws_names = [w["name"] for w in indexer.list_workspaces()]
     else:
         ws_names = request.app.state.auth_store.list_user_workspaces(user.id)

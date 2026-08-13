@@ -9,6 +9,7 @@ from supernova_web.auth.csrf import verify_csrf
 from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
 from supernova_web.auth.passwords import NEW_PASSWORD_MIN_LEN, hash_password
+from supernova_web.components.workspace_provisioner import is_global_admin
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -27,7 +28,7 @@ async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
     # 顺序：先 403（成员检查）后 404（存在性）--非成员对任意 ws 一律 403，不泄露 ws 存在性，
     # 与 workspace_member 依赖项语义一致；admin 跳过 403 后命中 404。get_workspace_member_role
     # 对不存在的 ws 返 None -> 403，故非成员探测不到存在性。
-    if user.role != "admin":
+    if not is_global_admin(user):
         role = request.app.state.auth_store.get_workspace_member_role(body.workspace, user.id)
         if role is None:
             raise HTTPException(403, "not a workspace member")

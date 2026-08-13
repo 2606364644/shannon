@@ -80,3 +80,25 @@ def test_pin_without_csrf_rejected(admin_client):
     # 故意不带 X-CSRF-Token header（cookie 仍在，但 header 缺失 -> verify_csrf 返 False）
     r = c.put("/api/users/me/pinned-workspace", json={"workspace": "ws-a"})
     assert r.status_code == 403
+
+
+def test_noncanonical_admin_cannot_pin_nonmember_workspace(tmp_workspaces, monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    from supernova_core.utils.paths import resolve_workspaces_dir
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    assert resolve_workspaces_dir() == tmp_workspaces
+    app = create_app()
+    st = app.state.auth_store
+    st.create_user("admin", hash_password("admin-pw"), role="admin")
+    st.create_user("ops", hash_password("ops-pw"), role="admin")
+    from supernova_web.components.scan_store import write_workspace_meta
+    (tmp_workspaces / "ws-a").mkdir()
+    write_workspace_meta(tmp_workspaces / "ws-a", name="ws-a", owner="admin")
+    c = TestClient(app)
+    tok = c.get("/api/auth/csrf").json()["csrf_token"]
+    c.post("/api/auth/login", json={"username": "ops", "password": "ops-pw"},
+           headers={"X-CSRF-Token": tok})
+
+    r = c.put("/api/users/me/pinned-workspace", json={"workspace": "ws-a"},
+              headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 403

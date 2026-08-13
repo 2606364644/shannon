@@ -28,10 +28,12 @@ def setup(tmp_workspaces, monkeypatch):
     st = app.state.auth_store
     st.create_user("admin", hash_password("admin-pw"), role="admin")
     alice = st.create_user("alice", hash_password("alice-pw"), role="user")
+    ops = st.create_user("ops", hash_password("ops-pw"), role="admin")
     # ws-a：admin + alice 都是成员；ws-b：仅 admin
     for ws in ("ws-a", "ws-b"):
         (tmp_workspaces / ws).mkdir()
     st.add_workspace_member("ws-a", alice.id, "member")
+    st.add_workspace_member("ws-a", ops.id, "member")
     _seed_scan(tmp_workspaces / "ws-a", "20260727-100000", "2026-07-27T10:00:00Z", "completed")
     _seed_scan(tmp_workspaces / "ws-b", "20260727-110000", "2026-07-27T11:00:00Z", "running")
     c = TestClient(app)
@@ -72,3 +74,13 @@ def test_normal_user_sees_only_member_ws_scans(setup):
 def test_unauth_401(setup):
     c, _, _ = setup
     assert c.get("/api/scans").status_code == 401
+
+
+def test_noncanonical_admin_sees_only_member_ws_scans(setup):
+    c, _, _ = setup
+    _login(c, "ops", "ops-pw")
+    r = c.get("/api/scans")
+    assert r.status_code == 200
+    scans = r.json()
+    assert len(scans) == 1
+    assert scans[0]["workspace"] == "ws-a"

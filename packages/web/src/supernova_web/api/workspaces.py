@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from supernova_web.auth.dependencies import current_user, require_admin, workspace_manager
+from supernova_web.components.workspace_provisioner import is_global_admin
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -54,7 +55,7 @@ async def list_workspaces(request: Request, user: User = Depends(current_user)):
     idx = request.app.state.indexer
     idx.sync_active(request.app.state.scan_manager.active_pids())
     all_ws = idx.list_workspaces()
-    if user.role == "admin":
+    if is_global_admin(user):
         return all_ws
     allowed = set(request.app.state.auth_store.list_user_workspaces(user.id))
     return [w for w in all_ws if w["name"] in allowed]

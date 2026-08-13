@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from supernova_web.auth.dependencies import current_user, workspace_member
+from supernova_web.components.workspace_provisioner import is_global_admin
 from supernova_web.auth.models import User
 from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
 from supernova_web.models import ScanAccepted, ScanRequest
@@ -20,7 +21,7 @@ async def create_scan(req: ScanRequest, request: Request,
     ws_dir = request.app.state.config.workspaces_dir / ws if ws else None
     if not ws or not ws_dir.is_dir():
         raise HTTPException(422, "workspace 不存在，请先让 admin 创建")
-    if user.role != "admin" and request.app.state.auth_store.get_workspace_member_role(
+    if not is_global_admin(user) and request.app.state.auth_store.get_workspace_member_role(
             ws, user.id) is None:
         raise HTTPException(403, "非该 workspace 成员")
     sm = request.app.state.scan_manager
