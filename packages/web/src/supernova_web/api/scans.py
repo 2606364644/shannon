@@ -34,7 +34,7 @@ def _store(request: Request):
 
 @cross_ws_router.get("")
 async def list_all_scans(request: Request, user: User = Depends(current_user)):
-    """跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）。admin 见全部 ws 扫描，
+    """跨 ws 扫描聚合（IA 重设计 §3.1/§7.1）。canonical admin 见全部 ws 扫描，
     普通用户只见归属 ws（list_user_workspaces）的扫描。每条注入 workspace 字段，
     按 created_at 倒序。ws 量通常个位数到几十，每 ws list_scans 是目录扫描，可接受。"""
     from supernova_web.components.scan_store import ScanStore

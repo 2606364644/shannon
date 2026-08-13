@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     # 启动迁移序列（顺序敏感）：
     #   1) 旧全局 repos/<name> -> workspaces/__legacy__/repos/<name>（创建 __legacy__ ws 目录）
     #   2) ws 根 legacy scan（session.json）-> scans/<legacy_id>/（T5 解耦 1:N）
-    #   3) 给无成员记录的 ws（含 __legacy__）分配 admin (manager)
+    #   3) 给所有 legacy/真实 ws（含 __legacy__）补 canonical admin (manager)
     #   4) per-ws 补写仓库 meta（覆盖 __legacy__ 的搬迁仓库）
     #   5) 重建孤儿 scan 状态（遍历 ScanStore scans，含迁移后的 legacy scan）
     # purge_loop 与本序列无依赖、保持原位即可。
