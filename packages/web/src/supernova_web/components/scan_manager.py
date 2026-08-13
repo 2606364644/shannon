@@ -1531,13 +1531,18 @@ class ScanManager:
         return ScanRequest(**req_kwargs)
 
     async def _run_blackbox_phase(self, scan_dir: Path, ws: str, scan_id: str,
-                                  auth_ref: dict) -> None:
-        """组合接力公共段（spec §7.3）：预检白盒产物 → 复用 _submit_blackbox（-bb 后缀）→
+                                  auth_ref: dict,
+                                  workflow_id_suffix: str = "-bb") -> None:
+        """组合接力公共段（spec §7.3）：预检白盒产物 → 复用 _submit_blackbox（suffix 后缀）→
         等黑盒 → 融合报告。
 
         单目录接力的核心：repo_path/event_file/config_path 全指回白盒 scan_dir，黑盒产物落
         scan_dir/deliverables/blackbox/（黑盒 workflow 零代码改动，spec §5）。本方法**不直接
-        写 scan_end**——收尾交 _combined_orchestrator 的 _ensure_scan_end（幂等）。
+        写 scan_end**——收尾交 _combined_orchestrator / _rerun_blackbox_orchestrator 的
+        _ensure_scan_end（幂等）。
+
+        workflow_id_suffix（Task 7 扩展）：默认 "-bb"（Task 4 首跑，零回归）；rerun_blackbox
+        传 "-bb-rerun-N"（D5 续跑，每次起新黑盒 workflow id）。透传给 _submit_blackbox。
 
         _generate_combined_report 由 Task 8 实现；本任务仅保留调用点（单测 mock 之）。
         """
@@ -1562,16 +1567,88 @@ class ScanManager:
             except Exception:  # noqa: BLE001 - best-effort 进度分母，不阻塞接力
                 pass
         # 复用 _submit_blackbox（spec §5：不手写 _submit_blackbox_chained，原草案手写版漏传
-        # host_mappings 等字段）。workflow_id_suffix="-bb"（spec §7.6）。
+        # host_mappings 等字段）。workflow_id_suffix 透传（首跑 -bb / 续跑 -bb-rerun-N，spec §7.6）。
         bb_handle = await self._submit_blackbox(
             repo_path=str(scan_dir), ws=ws, scan_id=scan_id, scan_dir=scan_dir,
             event_file=scan_dir / "events.ndjson", web_url=bb_url,
             config_path=str(scan_dir / "scan-config.yaml"),
-            host_mappings=host_mappings, workflow_id_suffix="-bb")
+            host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
         await self._mark_bb(scan_dir, "running")
         await bb_handle.result()
         await self._generate_combined_report(scan_dir)  # Task 8 实现；融合报告 → deliverables/combined/
         await self._mark_bb(scan_dir, "completed")
+
+    async def rerun_blackbox(self, ws: str, scan_id: str,
+                             new_auth: ScanRequest | None = None) -> None:
+        """黑盒 failed 后换认证续跑（spec §11.3 / D5）：复用白盒产物，起新黑盒 workflow
+        ``{ws}-{scan_id}-bb-rerun-{N}``（N 每次 +1）。
+
+        前置守卫（零回归）：
+        - scan 存在；session.combined 真且 bb_phase=="failed"——仅失败的组合黑盒可续跑。
+        - 白盒产物完好（_whitebox_deliverables_ready）。
+
+        流程：
+        1. new_auth 非空 → 重 dump scan-config.yaml（_dump_auth_config）+ 更新 session.bb_auth_ref
+           （D2：只存 profile_id 引用）。new_auth 为空则沿用原 scan-config.yaml。
+        2. _run_precheck 预验证（新）认证——fail → _mark_bb(failed, auth_failed) + return。
+        3. bb_rerun_attempts +=1 → 持久化 + bb_phase=running。
+        4. suffix="-bb-rerun-{N}" → fire-and-forget _rerun_blackbox_orchestrator（登记
+           _orchestrator_tasks，与 _combined_orchestrator 同构：try/except/finally + 幂等
+           _ensure_scan_end）。
+
+        scan_end 不变量：_rerun_blackbox_orchestrator 的 _ensure_scan_end 幂等（成功路径黑盒
+        finalize 已写 → no-op；异常 → 补写），不重复写。
+        """
+        scan_dir = self._store.get_scan_dir(ws, scan_id)
+        if scan_dir is None:
+            raise ValueError("scan 不存在")
+        mgr = SessionManager(scan_dir.parent)
+        data = mgr.get_session_data(scan_dir)
+        if not data.get("combined") or data.get("bb_phase") != "failed":
+            raise ValueError("仅黑盒 failed 的组合扫描可续跑")
+        if not self._whitebox_deliverables_ready(scan_dir):
+            raise ValueError("白盒产物需完好才能续跑黑盒")
+        # 换认证：重 dump scan-config.yaml + 更新 bb_auth_ref（D2：只存引用）。
+        if new_auth:
+            await self._dump_auth_config(new_auth, ws, scan_dir)
+            mgr.update_session(scan_dir, {
+                "bb_auth_ref": self._snapshot_auth_ref(new_auth)})
+        # 预验证（新）认证——fail → 标 auth_failed + return（不起黑盒）。
+        cfg = scan_dir / "scan-config.yaml"
+        config_path = str(cfg) if cfg.exists() else None
+        bb_url = data.get("bb_url") or data.get("web_url") or ""
+        if not await self._run_precheck(scan_dir, ws, scan_id, bb_url, config_path):
+            await self._mark_bb(scan_dir, "failed", "auth_failed")
+            return
+        # bb_rerun_attempts 递增 + bb_phase=running。
+        bb_rer_attempts = int(data.get("bb_rerun_attempts") or 0) + 1
+        mgr.update_session(scan_dir, {
+            "bb_rerun_attempts": bb_rer_attempts, "bb_phase": "running"})
+        suffix = f"-bb-rerun-{bb_rer_attempts}"
+        # auth_ref 从 session 读（new_auth 时上面已更新；否则原值）。
+        auth_ref = mgr.get_session_data(scan_dir).get("bb_auth_ref") or {"profile_id": None}
+        scan_key = (ws, scan_id)
+        self._orchestrator_tasks[scan_key] = asyncio.create_task(
+            self._rerun_blackbox_orchestrator(
+                scan_key, scan_dir, ws, scan_id, auth_ref, suffix))
+
+    async def _rerun_blackbox_orchestrator(self, scan_key: tuple[str, str],
+                                           scan_dir: Path, ws: str, scan_id: str,
+                                           auth_ref: dict, suffix: str) -> None:
+        """黑盒续跑编排（spec §11.3，与 _combined_orchestrator 同构）：调 _run_blackbox_phase
+        （传 rerun suffix）→ try/except/finally 经 _ensure_scan_end（幂等）收尾。
+
+        成功路径黑盒 finalize 已写 scan_end → _ensure_scan_end no-op（不写第二条，核心不变量）；
+        异常 / 提交失败 → 补写 scan_end 防 _watch 永久 tail。finally 自 pop _orchestrator_tasks。
+        """
+        try:
+            await self._run_blackbox_phase(
+                scan_dir, ws, scan_id, auth_ref, workflow_id_suffix=suffix)
+        except Exception as exc:
+            await self._mark_bb(scan_dir, "failed", str(exc))
+        finally:
+            await self._ensure_scan_end(scan_dir)
+            self._orchestrator_tasks.pop(scan_key, None)
 
     async def _run_precheck(self, scan_dir: Path, ws: str, scan_id: str,
                             web_url: str, config_path: str | None) -> bool:

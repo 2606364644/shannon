@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
 
@@ -271,3 +271,31 @@ async def resume_scan(ws: str, scan_id: str, request: Request, _: User = Depends
     except TooManyScans as e:
         raise HTTPException(409, f"已有扫描在跑，并发上限 {e.limit}")
     return {"workspace": ws_name, "scan_id": scan_id_out}
+
+
+@router.post("/{ws}/scans/{scan_id}/combined/rerun-blackbox", status_code=202)
+async def rerun_blackbox(ws: str, scan_id: str, request: Request,
+                         _: User = Depends(workspace_member),
+                         body: "ScanRequest | None" = Body(default=None)):
+    """组合扫描黑盒续跑（spec §11.3 / D5）：黑盒 failed 后换认证续跑，复用白盒产物，
+    起新黑盒 workflow ``{ws}-{scan_id}-bb-rerun-{N}``。
+
+    body 可选：无 body = 沿用原认证；有 body = 换认证（须合法组合模式 ScanRequest：
+    type=whitebox + url + authentication/auth_profile，复用既有 model 校验）。
+
+    前置：scan 存在（404）+ combined 且 bb_phase=failed（422）+ 白盒产物完好（422）。
+    换认证时先 _run_precheck 预验证——fail → 仍 202 但 bb_phase=auth_failed（异步标）。
+    """
+    from supernova_web.components.scan_manager import TemporalUnavailable
+    from supernova_web.models import ScanRequest
+    sm = request.app.state.scan_manager
+    try:
+        await sm.rerun_blackbox(ws, scan_id, new_auth=body)
+    except ValueError as e:
+        msg = str(e)
+        if "不存在" in msg:
+            raise HTTPException(404, msg)
+        raise HTTPException(422, msg)
+    except TemporalUnavailable:
+        raise HTTPException(400, "Temporal 服务未运行，请先 docker-compose up -d")
+    return {"workspace": ws, "scan_id": scan_id}
