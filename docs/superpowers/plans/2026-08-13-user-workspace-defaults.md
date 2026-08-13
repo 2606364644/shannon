@@ -17,12 +17,13 @@
 - Modify: `packages/web/src/supernova_web/auth/dependencies.py` — 统一全局 admin 判定，收紧工作区成员/manager 鉴权。
 - Modify: `packages/web/src/supernova_web/app.py` — 启动 seed/bootstrap 后补齐用户工作区与 canonical admin；替换旧的“所有 admin 分配”迁移逻辑。
 - Modify: `packages/web/src/supernova_web/api/users.py` — 创建用户时同步 provision 工作区；置顶鉴权和角色变更触发 canonical admin 补偿。
+- Modify: `packages/web/src/supernova_web/auth/store.py` — 提供按用户清理全局工作区成员记录的原子操作。
 - Modify: `packages/web/src/supernova_web/api/workspaces.py` — 手动创建工作区时加入 canonical admin；列表只对 canonical admin 展示全部工作区。
 - Modify: `packages/web/src/supernova_web/api/scans.py` — 跨工作区扫描列表只对 canonical admin 展示全部。
 - Modify: `packages/web/src/supernova_web/api/scan.py` — 启动扫描时只对 canonical admin 绕过成员检查。
 - Modify: `packages/web/tests/test_users_routes.py` — 用户创建与工作区成员关系、其他超管隔离测试。
 - Modify: `packages/web/tests/test_auth_dependencies.py` — canonical admin 与其他 admin 的成员鉴权测试。
-- Modify: `packages/web/tests/test_api_workspaces.py` 或新测试文件 — 手动创建工作区默认成员测试。
+- Modify: `packages/web/tests/test_api_workspaces.py` — 手动创建工作区默认成员测试。
 - Modify: `packages/web/tests/test_scans_cross_ws.py` — 其他超管跨工作区扫描隔离测试。
 - Modify: `packages/web/tests/test_pinned_workspace.py` — 其他超管 pin 非成员工作区被拒绝测试。
 - Modify: `packages/web/tests/test_legacy_migration.py` — 历史工作区只补 canonical `admin`，即使已有其他成员也要补齐。
@@ -253,7 +254,7 @@ def ensure_all_user_workspaces(workspaces_dir: Path, store: AuthStore) -> None:
     ensure_global_admin_access(workspaces_dir, store)
 ```
 
-实现注意：`ensure_user_workspace()` 不覆盖已有 `workspace.json` 或 legacy `session.json`，只补成员；只有存在普通非工作区目录时抛出冲突。`ensure_global_admin_access()` 跳过点前缀系统目录，与 indexer 保持一致。
+实现注意：`ensure_user_workspace()` 不覆盖已有 `workspace.json` 或 legacy `session.json`，只补成员；只有存在普通非工作区目录时抛出冲突。API 层在插入用户前会拒绝任何同名已存在目录。`ensure_global_admin_access()` 跳过点前缀系统目录，与 indexer 保持一致。
 
 - [ ] **Step 2: 运行 provisioner 测试，确认通过**
 
@@ -381,7 +382,7 @@ git commit -m "fix: restrict workspace bypass to canonical admin"
 
 - [ ] **Step 1: 写创建用户和工作区默认成员的失败测试**
 
-在 `test_users_routes.py::test_create_user_success` 增加：
+在 `packages/web/tests/test_users_routes.py::test_create_user_success` 增加：
 
 ```python
 assert (app.state.config.workspaces_dir / "bob" / "workspace.json").exists()
@@ -393,7 +394,7 @@ assert app.state.auth_store.get_workspace_member_role("bob", admin.id) == "manag
 
 增加其他超管创建用户的隔离场景：创建 `ops` 为 admin，创建 `bob` 后断言 `ops` 不在 `bob` 工作区成员中。
 
-在工作区 API 测试中增加：
+在 `packages/web/tests/test_api_workspaces.py` 中增加：
 
 ```python
 # 已有 admin + ops，使用 ops 创建 ws-ops
@@ -404,6 +405,8 @@ assert store.get_workspace_member_role("ws-ops", admin.id) == "manager"
 # 其他超管没有被自动加入
 assert store.get_workspace_member_role("ws-ops", another_admin.id) is None
 ```
+
+测试 fixture 需要显式创建并登录 `ops`、`another_admin` 两个 `role="admin"` 用户；不要复用 canonical admin 的客户端。
 
 - [ ] **Step 2: 运行测试确认当前实现失败**
 
@@ -420,11 +423,11 @@ Expected: 用户创建不会生成 `bob` 目录；手动工作区不会自动写
 在 `users.py` 中：
 
 1. 导入 `ensure_user_workspace`, `ensure_global_admin_access`, `is_global_admin`。
-2. 校验工作区名安全性并在用户插入前检查 `workspaces_dir / body.username` 是否已存在，冲突返回 `409 workspace already exists for username`。
+2. 用 `is_safe_workspace_name(body.username)` 校验工作区名，不安全名称返回 422；在用户插入前检查 `workspaces_dir / body.username` 是否已存在，冲突返回 `409 workspace already exists for username`。
 3. 创建用户后调用 `ensure_user_workspace()`；异常时删除刚创建的用户，避免留下无法 provision 的半成品，然后转换为 HTTP 409/500。
 4. 调用 `ensure_global_admin_access()`，覆盖“新建的是 canonical admin、已有工作区”的顺序。
 5. 置顶接口用 `is_global_admin(user)` 替换 `user.role != "admin"` bypass。
-6. `update_role` 成功把用户名为 `admin` 的用户提升为 admin 时调用 `ensure_global_admin_access()`；降为普通用户时清除该账号的全局自动成员记录，防止已降权账号仍因历史 membership 拥有全部工作区权限。
+6. `update_role` 成功把用户名为 `admin` 的用户提升为 admin 时调用 `ensure_global_admin_access()`；降为普通用户时调用 `AuthStore.remove_user_from_workspaces(target.id)` 清除该账号的全局成员记录，防止已降权账号仍因历史 membership 拥有全部工作区权限。
 
 用户 API 的核心流程应保持原返回结构：
 
@@ -440,6 +443,15 @@ except (ValueError, OSError):
     store.delete_user(u.id)
     raise HTTPException(500, "failed to provision user workspace")
 return {"user": _user_out(u)}
+```
+
+同时在 `auth/store.py` 增加：
+
+```python
+def remove_user_from_workspaces(self, user_id: int) -> int:
+    with self._conn() as c:
+        cur = c.execute("DELETE FROM workspace_members WHERE user_id=?", (user_id,))
+        return cur.rowcount
 ```
 
 - [ ] **Step 4: 修改手动创建工作区 API**
