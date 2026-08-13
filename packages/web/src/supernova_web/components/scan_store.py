@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from supernova_core.session import SessionManager
-from supernova_core.utils.paths import blackbox_run_dir, blackbox_runs_dir
+from supernova_core.utils.paths import (
+    blackbox_run_dir, blackbox_runs_dir, combined_run_dir)
 from supernova_core.workspace import get_workspace_vuln_counts
 
 from .scan_liveness import is_scan_alive  # noqa: F401  (语义导出，便于测试 monkeypatch)
@@ -246,6 +247,9 @@ class ScanSummary:
     bb_phase: str | None = None
     bb_reason: str | None = None
     progress_pct: float = 0.0
+    # 版本化黑盒 run（spec §5.2）：任务级索引 bb_runs[] + latest_bb_run。纯白盒为 None/[]。
+    bb_runs: list[dict] | None = None
+    latest_bb_run: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -267,6 +271,8 @@ class ScanSummary:
             "bb_phase": self.bb_phase,
             "bb_reason": self.bb_reason,
             "progress_pct": self.progress_pct,
+            "bb_runs": self.bb_runs,
+            "latest_bb_run": self.latest_bb_run,
         }
 
 
@@ -361,6 +367,68 @@ class ScanStore:
         run_dir = blackbox_run_dir(wb_dir, run_id)
         return run_dir if (run_dir / "session.json").exists() else None
 
+    def list_blackbox_runs(self, ws: str, wb_scan_id: str) -> list[dict]:
+        """从任务 session bb_runs[] 读 run 列表（非扫盘发现，spec §3 铁律）。"""
+        wb_dir = self.get_scan_dir(ws, wb_scan_id)
+        if wb_dir is None:
+            return []
+        data = SessionManager(wb_dir.parent).get_session_data(wb_dir)
+        return list(data.get("bb_runs") or [])
+
+    def update_blackbox_run(self, ws: str, wb_scan_id: str, run_id: str, *,
+                            status: str | None = None, phase: str | None = None,
+                            reason: str | None = None,
+                            completed_at: str | None = None) -> None:
+        """更新 run 级 session（bb_phase/bb_reason/status/completed_at）+ 任务 bb_runs[]
+        条目状态。不改 latest_bb_run（仅 create/delete 决定 latest）。run 不存在 → ValueError。
+        """
+        run_dir = self.get_blackbox_run_dir(ws, wb_scan_id, run_id)
+        if run_dir is None:
+            raise ValueError(f"run 不存在: {run_id}")
+        patch: dict = {}
+        if phase is not None:
+            patch["bb_phase"] = phase
+        if reason is not None:
+            patch["bb_reason"] = reason
+        if status is not None:
+            patch["status"] = status
+        if completed_at is not None:
+            patch["completed_at"] = completed_at
+        if patch:
+            SessionManager(run_dir.parent).update_session(run_dir, patch)
+        # 任务索引条目状态同步（不重算 latest）
+        wb_dir = self.get_scan_dir(ws, wb_scan_id)
+        task_mgr = SessionManager(wb_dir.parent)
+        data = task_mgr.get_session_data(wb_dir)
+        runs = list(data.get("bb_runs") or [])
+        for r in runs:
+            if r.get("run_id") == run_id:
+                if status is not None:
+                    r["status"] = status
+                if completed_at is not None:
+                    r["completed_at"] = completed_at
+                if reason is not None:
+                    r["reason"] = reason
+        task_mgr.update_session(wb_dir, {"bb_runs": runs})
+
+    def delete_blackbox_run(self, ws: str, wb_scan_id: str, run_id: str) -> bool:
+        """删单 run：rmtree run 子目录 + combined/run-K + 移除 bb_runs[] 条目（spec §7.1 #4）。
+
+        删的是 latest 则 latest_bb_run 回退到上一个 run。run 不存在 → False。
+        """
+        run_dir = self.get_blackbox_run_dir(ws, wb_scan_id, run_id)
+        if run_dir is None:
+            return False
+        wb_dir = self.get_scan_dir(ws, wb_scan_id)
+        shutil.rmtree(run_dir, ignore_errors=True)
+        shutil.rmtree(combined_run_dir(wb_dir, run_id), ignore_errors=True)
+        task_mgr = SessionManager(wb_dir.parent)
+        data = task_mgr.get_session_data(wb_dir)
+        runs = [r for r in (data.get("bb_runs") or []) if r.get("run_id") != run_id]
+        latest = runs[-1]["run_id"] if runs else None
+        task_mgr.update_session(wb_dir, {"bb_runs": runs, "latest_bb_run": latest})
+        return True
+
     def _gen_scan_id(self, scans_dir: Path, repo_path: str,
                      scan_type: str = "whitebox",
                      lineage: str | None = None) -> str:
@@ -419,6 +487,10 @@ class ScanStore:
         if scans_dir.is_dir():
             mgr = SessionManager(scans_dir)
             for scan_dir in mgr.list_workspaces():
+                # legacy 平级 <wb>~N 黑盒（旧模型）隐藏：黑盒 run 已嵌套进 blackbox-runs/，
+                # 残留的 ~N 作只读遗留不进顶层 scan 列表（spec §10）。
+                if "~" in scan_dir.name and scan_dir.name.rsplit("~", 1)[-1].isdigit():
+                    continue
                 created = _to_unix(mgr.get_created_at(scan_dir)) or 0.0
                 entries.append((scan_dir.name, scan_dir, created))
         # 源 ② legacy ws 根 session.json
@@ -452,7 +524,23 @@ class ScanStore:
         combined = data.get("combined") if isinstance(data, dict) else None
         bb_phase = data.get("bb_phase") if isinstance(data, dict) else None
         bb_reason = data.get("bb_reason") if isinstance(data, dict) else None
-        progress_pct = _compute_progress_pct(status, combined, bb_phase, data)
+        bb_runs = data.get("bb_runs") if isinstance(data, dict) else None
+        latest_bb_run = data.get("latest_bb_run") if isinstance(data, dict) else None
+        # 版本化 run（spec §5.2/§5.3）：bb_phase/bb_reason/completed_agents 下沉到 run 级
+        # session；任务级进度需合并白盒(任务 session completed_agents) + latest run
+        # completed_agents，bb_phase/bb_reason 取自 latest run（_compute_progress_pct 不改）。
+        progress_data = data
+        if combined and latest_bb_run:
+            run_dir = blackbox_run_dir(scan_dir, latest_bb_run)
+            if (run_dir / "session.json").exists():
+                run_data = SessionManager(run_dir.parent).get_session_data(run_dir)
+                bb_phase = run_data.get("bb_phase", bb_phase)
+                bb_reason = run_data.get("bb_reason", bb_reason)
+                merged = dict(data) if isinstance(data, dict) else {}
+                merged["completed_agents"] = list(data.get("completed_agents") or []) + \
+                    list(run_data.get("completed_agents") or [])
+                progress_data = merged
+        progress_pct = _compute_progress_pct(status, combined, bb_phase, progress_data)
         return ScanSummary(
             scan_id=scan_id,
             scan_type=scan_type,
@@ -472,6 +560,8 @@ class ScanStore:
             bb_phase=bb_phase,
             bb_reason=bb_reason,
             progress_pct=progress_pct,
+            bb_runs=bb_runs,
+            latest_bb_run=latest_bb_run,
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

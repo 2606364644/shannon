@@ -14,6 +14,8 @@ from datetime import datetime
 
 import pytest
 
+from supernova_core.session import SessionManager
+
 from supernova_web.components.scan_store import ScanStore, ScanSummary
 
 
@@ -454,3 +456,62 @@ def test_get_blackbox_run_dir_validates_run_id(tmp_path):
     assert store.get_blackbox_run_dir("WS", wb_id, "run-9") is None  # 不存在
     assert store.get_blackbox_run_dir("WS", wb_id, "../etc") is None  # 越界
     assert store.get_blackbox_run_dir("WS", wb_id, "run-x") is None  # 非法格式
+
+
+# ── list/update/delete run + ScanSummary 透传 + 隐藏 legacy ~N ──────────────
+
+def test_list_update_delete_blackbox_run(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")
+    r1, _ = store.create_blackbox_run("WS", wb_id)
+    r2, _ = store.create_blackbox_run("WS", wb_id)
+    # list 从 session bb_runs[] 取
+    runs = store.list_blackbox_runs("WS", wb_id)
+    assert [r["run_id"] for r in runs] == ["run-1", "run-2"]
+    # update：写 run session + 任务索引条目 + latest_bb_run
+    store.update_blackbox_run("WS", wb_id, r1, status="completed", phase="completed")
+    runs = store.list_blackbox_runs("WS", wb_id)
+    assert next(r for r in runs if r["run_id"] == "run-1")["status"] == "completed"
+    run_sess = json.loads((wb_dir / "blackbox-runs" / "run-1" / "session.json").read_text())
+    assert run_sess["bb_phase"] == "completed"
+    # delete：rmtree run + combined/run-K + 移除 bb_runs[] 条目
+    assert store.delete_blackbox_run("WS", wb_id, r2) is True
+    assert not (wb_dir / "blackbox-runs" / "run-2").exists()
+    assert store.list_blackbox_runs("WS", wb_id) == [
+        {"run_id": "run-1", "status": "completed"}]
+
+
+def test_summarize_combined_progress_uses_latest_run_phase(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")
+    SessionManager(wb_dir.parent).update_session(wb_dir, {
+        "expected_agents": {"whitebox": 4, "blackbox": 2},
+        "completed_agents": ["a", "b", "c", "d"]})  # 白盒 4 完成
+    r1, run_dir = store.create_blackbox_run("WS", wb_id)
+    # run-1 跑到 running，黑盒完成 1/2
+    SessionManager(run_dir.parent).update_session(run_dir, {
+        "bb_phase": "running", "completed_agents": ["e"]})
+    summ = store.list_scans("WS")[0]
+    # combined + running 分段：55 + 45*(1/2) = 77.5
+    assert summ.combined is True
+    assert summ.bb_phase == "running"  # 取自 latest run
+    assert summ.progress_pct == 77.5
+    assert summ.latest_bb_run == "run-1"
+    assert summ.bb_runs[-1]["run_id"] == "run-1"
+    # as_dict 透传
+    d = summ.as_dict()
+    assert d["latest_bb_run"] == "run-1"
+    assert d["bb_runs"][-1]["run_id"] == "run-1"
+
+
+def test_list_scans_hides_legacy_tilde_n(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, _ = store.create_scan("WS", "http://e", "/code/x")
+    # 手造一个 legacy 平级 ~N 目录
+    legacy = tmp_path / "WS" / "scans" / f"{wb_id}~1"
+    legacy.mkdir(parents=True)
+    (legacy / "session.json").write_text(
+        '{"scan_type":"blackbox","created_at":"2026-01-01T00:00:00"}')
+    ids = [s.scan_id for s in store.list_scans("WS")]
+    assert wb_id in ids
+    assert f"{wb_id}~1" not in ids  # legacy 隐藏
