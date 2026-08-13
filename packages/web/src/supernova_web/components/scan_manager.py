@@ -1562,16 +1562,26 @@ class ScanManager:
         _write_scan_end（原草案 bug：成功路径写了第二条 scan_end）。
         """
         ws, scan_id = scan_key
+        run_id: str | None = None
         final_status = "completed"
         try:
             await wb_handle.result()
+            # 版本化多 run（spec §7.2）：白盒完成后建 run-1（与手动 _add_blackbox_run
+            # 同路径 → by-construction 一致），再 _run_blackbox_phase(run-1, -bb-1)。
+            async with self._create_scan_lock:
+                run_id, _ = self._store.create_blackbox_run(
+                    ws, scan_id, auth_ref=self._snapshot_auth_ref(req))
+            k = int(run_id.split("-")[1])
             await self._run_blackbox_phase(
-                scan_dir, ws, scan_id, self._snapshot_auth_ref(req))
+                scan_dir, ws, scan_id, self._snapshot_auth_ref(req), run_id,
+                workflow_id_suffix=f"-bb-{k}")
         except Exception as exc:
             final_status = "failed"
-            # 接力任意阶段失败（白盒 result 抛 / 预检后黑盒提交抛 / 黑盒 result 抛 / 报告生成抛）
-            # → 标 bb_phase=failed + 原因；白盒报告（已落盘）保留。
-            await self._mark_bb(scan_dir, "failed", str(exc))
+            # 接力任意阶段失败：run 已建则标该 run failed；白盒失败（run 未建）则 run_id
+            # 为 None 不标（白盒 workflow 自身终态已落 session）。
+            if run_id is not None:
+                await self._mark_run(scan_dir, run_id, "failed",
+                                     reason=str(exc), status="failed")
         finally:
             # 幂等收尾：成功路径黑盒已写 scan_end → no-op；异常/跳过 → 补写。
             await self._ensure_scan_end(scan_dir, status=final_status)

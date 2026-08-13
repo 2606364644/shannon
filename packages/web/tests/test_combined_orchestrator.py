@@ -48,37 +48,60 @@ async def test_orchestrator_success_does_not_write_second_scan_end(mgr, tmp_path
 
 # ── 跳过路径（白盒无可利用产物）──────────────────────────────────────────────
 async def test_orchestrator_skips_when_no_deliverables(mgr, tmp_path):
-    """无白盒产物（空 queue）→ _run_blackbox_phase 标 skipped + 不提交黑盒；
-    编排 finally 经 _ensure_scan_end 补写 scan_end（events 无 scan_end）。"""
-    scan_dir = tmp_path / "repo-ts"; scan_dir.mkdir()
-    (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
-    # 只建空 queue（无可利用产物）
-    (scan_dir / "deliverables" / "whitebox" / "xss_exploitation_queue.json").write_text(
-        '{"vulnerabilities":[]}')
+    """无白盒产物 → orchestrator 建 run-1，_run_blackbox_phase 内部跳过（_mark_run
+    skipped），不提交黑盒；编排 finally 经 _ensure_scan_end 补写 scan_end。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
+    # 无白盒产物（不建 recon/queue）
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent","phase":"whitebox"}\n')
     wb_handle = AsyncMock(); wb_handle.result = AsyncMock(return_value=None)
-    scan_key = ("ws", "repo-ts")
+    scan_key = ("ws", wb_id)
     req = ScanRequest(type="whitebox", url="http://t/",
                       source={"kind": "repo", "value": "r"}, workspace="ws")
     with patch.object(mgr, "_submit_blackbox", new=AsyncMock()) as sb, \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
          patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark:
+         patch.object(mgr, "_mark_run", new=AsyncMock()) as mark:
         mgr._orchestrator_tasks[scan_key] = None
         await mgr._combined_orchestrator(scan_key, wb_handle, scan_dir, req)
         sb.assert_not_awaited()                  # 预检失败 → 不提交黑盒
         gcr.assert_not_awaited()                 # 不生成报告
         marked = [c.args for c in mark.call_args_list]
-        assert any(a[1] == "skipped" for a in marked), \
-            f"期望 _mark_bb(scan_dir, 'skipped', ...)，实际: {marked}"
+        assert any(a[2] == "skipped" for a in marked), \
+            f"期望 _mark_run(scan_dir, run_id, 'skipped', ...)，实际: {marked}"
         ws_end.assert_awaited()                  # 编排 finally：无 scan_end → 补写
         assert scan_key not in mgr._orchestrator_tasks
 
 
+# ── 版本化 run-1：组合接力白盒完成后建 run-1（spec §7.2）──────────────────────
+async def test_combined_orchestrator_creates_run1_after_whitebox(mgr, tmp_path):
+    """白盒完成 → orchestrator 建 run-1（blackbox-runs/run-1/session.json）→
+    _run_blackbox_phase(run-1, -bb-1)（与手动 _add_blackbox_run 同路径）。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
+    (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
+    (scan_dir / "deliverables" / "whitebox" / "recon_deliverable.md").write_text("x")
+    (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}')
+    wb_handle = AsyncMock(); wb_handle.result = AsyncMock(return_value=None)
+    req = ScanRequest(type="whitebox", url="http://t/",
+                      source={"kind": "repo", "value": "r"}, workspace="ws")
+    with patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp:
+        await mgr._combined_orchestrator(("ws", wb_id), wb_handle, scan_dir, req)
+        rbp.assert_awaited()
+        assert rbp.call_args.args[4] == "run-1"               # 第 5 参 run_id
+        assert rbp.call_args.kwargs.get("workflow_id_suffix") == "-bb-1"
+    assert (scan_dir / "blackbox-runs" / "run-1" / "session.json").exists()
+
+
 # ── 编排成功路径幂等守卫（端到端：scan_end 已在 → 不写第二条）──────────────
 async def test_orchestrator_success_path_idempotent_scan_end(mgr, tmp_path):
-    """端到端核心守卫：黑盒 finalize 已写 scan_end → 编排 finally _ensure_scan_end no-op。"""
-    scan_dir = tmp_path / "repo-ts"; scan_dir.mkdir()
+    """端到端核心守卫：scan_end 已在 → 编排 finally _ensure_scan_end no-op。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
     (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
     (scan_dir / "deliverables" / "whitebox" / "recon_deliverable.md").write_text("x")
     (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
@@ -86,14 +109,11 @@ async def test_orchestrator_success_path_idempotent_scan_end(mgr, tmp_path):
     # 黑盒 finalize 已写 scan_end（成功路径产物）
     (scan_dir / "events.ndjson").write_text('{"type":"scan_end","status":"completed"}\n')
     wb_handle = AsyncMock(); wb_handle.result = AsyncMock(return_value=None)
-    bb_handle = MagicMock(); bb_handle.result = AsyncMock(return_value=None)
-    scan_key = ("ws", "repo-ts")
+    scan_key = ("ws", wb_id)
     req = ScanRequest(type="whitebox", url="http://t/",
                       source={"kind": "repo", "value": "r"}, workspace="ws")
-    with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)), \
-         patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
-         patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()):
+    with patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()), \
+         patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end:
         mgr._orchestrator_tasks[scan_key] = None
         await mgr._combined_orchestrator(scan_key, wb_handle, scan_dir, req)
         ws_end.assert_not_awaited()              # 核心：成功路径 scan_end 已在，不重复写
@@ -102,25 +122,22 @@ async def test_orchestrator_success_path_idempotent_scan_end(mgr, tmp_path):
 
 # ── 异常路径（白盒失败 → _ensure_scan_end 补写）─────────────────────────────
 async def test_orchestrator_exception_ensures_scan_end(mgr, tmp_path):
-    """白盒 result() 抛异常 → 编排 except 标 failed + finally _ensure_scan_end 补写 scan_end。"""
-    scan_dir = tmp_path / "repo-ts"; scan_dir.mkdir()
+    """白盒 result() 抛异常 → run 未建（run_id None）→ 不标 run；finally _ensure_scan_end
+    补写 scan_end（白盒 workflow 自身终态已落 session，此处只补 scan_end 防 tail）。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent","phase":"whitebox"}\n')  # 无 scan_end
     wb_handle = AsyncMock()
     wb_handle.result = AsyncMock(side_effect=RuntimeError("wb boom"))
-    scan_key = ("ws", "repo-ts")
+    scan_key = ("ws", wb_id)
     req = ScanRequest(type="whitebox", url="http://t/",
                       source={"kind": "repo", "value": "r"}, workspace="ws")
     with patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
-         patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark:
+         patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end:
         mgr._orchestrator_tasks[scan_key] = None  # 预登记（模拟 start 写入）
         await mgr._combined_orchestrator(scan_key, wb_handle, scan_dir, req)
-        rbp.assert_not_awaited()                  # 白盒抛 → 不进 _run_blackbox_phase
-        # 标 failed + reason（str(exc)）
-        mark.assert_awaited()
-        marked = [c.args for c in mark.call_args_list]
-        assert any(a[1] == "failed" and "wb boom" in str(a[2]) for a in marked), \
-            f"期望 _mark_bb(scan_dir, 'failed', 'wb boom')，实际: {marked}"
+        rbp.assert_not_awaited()                  # 白盒抛 → 不建 run / 不进 _run_blackbox_phase
         ws_end.assert_awaited()                    # _ensure_scan_end 补写（events 无 scan_end）
         assert scan_key not in mgr._orchestrator_tasks  # finally pop
 
