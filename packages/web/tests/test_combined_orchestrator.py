@@ -124,6 +124,128 @@ async def test_orchestrator_exception_ensures_scan_end(mgr, tmp_path):
         assert scan_key not in mgr._orchestrator_tasks  # finally pop
 
 
+async def test_orchestrator_returned_whitebox_failure_stops_blackbox(mgr, tmp_path):
+    """白盒 workflow 返回 status=failed（不抛异常）时不得继续提交黑盒。"""
+    scan_dir = tmp_path / "ws" / "scans" / "repo-ts"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "session.json").write_text(
+        '{"status":"running","combined":true,"bb_phase":"pending"}'
+    )
+    (scan_dir / "events.ndjson").write_text(
+        '{"type":"PhaseEvent","phase":"whitebox"}\n'
+    )
+    wb_handle = MagicMock()
+    wb_handle.result = AsyncMock(
+        return_value={"status": "failed", "error": "whitebox failed"}
+    )
+    scan_key = ("ws", "repo-ts")
+    req = ScanRequest(
+        type="whitebox",
+        url="http://t/",
+        source={"kind": "repo", "value": "r"},
+        workspace="ws",
+    )
+    with patch.object(mgr, "_run_blackbox_phase", new=AsyncMock()) as rbp, \
+         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark, \
+         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()):
+        mgr._orchestrator_tasks[scan_key] = None
+        await mgr._combined_orchestrator(scan_key, wb_handle, scan_dir, req)
+
+    rbp.assert_not_awaited()
+    assert any(
+        call.args[1] == "failed" and "whitebox failed" in str(call.args[2])
+        for call in mark.await_args_list
+    )
+
+
+async def test_run_blackbox_phase_returned_failure_skips_combined_report(mgr, tmp_path):
+    """黑盒 workflow 返回 status=failed 时不得生成融合报告或标记 completed。"""
+    scan_dir = tmp_path / "ws" / "scans" / "repo-ts"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "session.json").write_text(
+        '{"status":"running","combined":true,"bb_url":"http://t/"}'
+    )
+    wb = scan_dir / "deliverables" / "whitebox"
+    wb.mkdir(parents=True)
+    (wb / "recon_deliverable.md").write_text("recon")
+    (wb / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}'
+    )
+    bb_handle = MagicMock()
+    bb_handle.result = AsyncMock(
+        return_value={"status": "failed", "error": "blackbox failed"}
+    )
+    with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)), \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as report, \
+         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark:
+        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None})
+
+    report.assert_not_awaited()
+    assert any(call.args[1] == "failed" for call in mark.await_args_list)
+
+
+async def test_submit_whitebox_combined_flag_is_forwarded(mgr, tmp_path):
+    """组合白盒提交必须把 combined=True 传入 PipelineInput。"""
+    scan_dir = tmp_path / "ws" / "scans" / "repo-ts"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "session.json").write_text('{"status":"running"}')
+    captured = {}
+
+    class _FakeClient:
+        async def start_workflow(self, fn, inp, **kwargs):
+            captured["input"] = inp
+            return object()
+
+    async def _connect(_address):
+        return _FakeClient()
+
+    with patch(
+        "supernova_web.components.scan_manager.Client.connect",
+        new=_connect,
+    ), patch.object(mgr, "_resolve_provider_config", return_value={}), \
+         patch.object(mgr, "_mark_submitted_at"):
+        await mgr._submit_whitebox(
+            "/repo",
+            "ws",
+            "repo-ts",
+            scan_dir,
+            scan_dir / "events.ndjson",
+            "http://t/",
+            combined=True,
+        )
+
+    assert captured["input"].combined is True
+
+
+async def test_run_blackbox_phase_without_auth_passes_no_config_path(mgr, tmp_path):
+    """公开目标没有 scan-config.yaml 时，黑盒应收到 config_path=None。"""
+    scan_dir = tmp_path / "ws" / "scans" / "repo-ts"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "session.json").write_text(
+        '{"status":"running","combined":true,"bb_url":"http://t/"}'
+    )
+    wb = scan_dir / "deliverables" / "whitebox"
+    wb.mkdir(parents=True)
+    (wb / "recon_deliverable.md").write_text("recon")
+    (wb / "xss_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}'
+    )
+    captured = {}
+    bb_handle = MagicMock()
+    bb_handle.result = AsyncMock(return_value={"status": "completed"})
+
+    async def _submit(**kwargs):
+        captured.update(kwargs)
+        return bb_handle
+
+    with patch.object(mgr, "_submit_blackbox", new=_submit), \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
+         patch.object(mgr, "_mark_bb", new=AsyncMock()):
+        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None})
+
+    assert captured["config_path"] is None
+
+
 # ── _ensure_scan_end 幂等性直接守卫（核心 bug-fix 契约）──────────────────────
 async def test_ensure_scan_end_noop_when_scan_end_present(mgr, tmp_path):
     """幂等契约：events 已有 scan_end → _ensure_scan_end no-op（不写第二条）。"""

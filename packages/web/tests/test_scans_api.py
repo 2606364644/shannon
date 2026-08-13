@@ -497,3 +497,25 @@ def test_scan_detail_normalizes_legacy_agents(authed_client, tmp_workspaces):
     assert a["cost_usd"] == 8.79 and a["duration_ms"] == 1000
     assert a["success"] is True and a["attempt_number"] == 1
     assert "final_duration_ms" not in a and "total_cost_usd" not in a and "attempts" not in a
+
+
+def test_get_scan_detail_exposes_host_source_for_rerun(authed_client, tmp_workspaces):
+    """详情返回非敏感 HOST 来源，供新建扫描重跑预填，不泄露实时引用语义。"""
+    _make_scan(
+        tmp_workspaces,
+        "WS",
+        scan_id="bb-host",
+        scan_type="blackbox",
+        host_config={
+            "enabled": True,
+            "source": "profile",
+            "profile_id": "host_profile_1",
+            "source_url": "https://hosts.example/hosts",
+            "mappings": {"api.internal.example": "10.0.0.2", "admin.internal.example": "10.0.0.3"},
+        },
+    )
+    d = authed_client.get("/api/workspaces/WS/scans/bb-host").json()
+    assert d["host_profile_id"] == "host_profile_1"
+    assert d["host_url"] is None
+    assert d["host_source"] == "profile"
+    assert d["host_mapping_count"] == 2

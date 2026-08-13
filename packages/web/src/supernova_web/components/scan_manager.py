@@ -21,7 +21,11 @@ from supernova_core.session import SessionManager
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
-from .host_profile_store import fetch_and_parse_hosts
+from .host_profile_store import (
+    HostMapping,
+    HostProfileRefreshEmpty,
+    fetch_and_parse_hosts,
+)
 from .repo_manager import _resolve_repo_dir, _validate_ws_segment, resolve_linked_repo_path
 from .scan_liveness import is_scan_recently_active
 from .scan_store import ScanStore
@@ -162,28 +166,30 @@ class ScanManager:
     async def start(self, req: ScanRequest) -> tuple[str, str]:
         """T3: 提交新 scan -> (ws, scan_id)。
 
-        ScanStore.create_scan 建 scans/<scan_id>/session.json（不复位 resume；重扫=新 scan）。
-        event_file=scan_dir/events.ndjson 塞进 PipelineInput（worker 据其 parent 推导 scan_dir）。
+        HOST source is resolved before ``ScanStore.create_scan`` so invalid or empty
+        mappings cannot leave a ghost scan.  Once the directory exists, the immutable
+        ``host_config`` snapshot is written before auth config/workflow submission.
         """
         await self._check_temporal()
         if len(self._handles) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
 
         if req.type == "correlation":
-            # correlation 解析仍需 yaml(out_workspace), 但 C1 提交留 Phase C.
             target, yaml_path = await self._resolve_inputs(req)
             ws = self._resolve_out_workspace(yaml_path)
         else:
             target, yaml_path = await self._resolve_inputs(req)
-            # P1: ws 必须由 admin 预建 (create_scan 已校验存在 + 成员); 不再自动生成。
             ws = req.workspace
+
+        # HOST only belongs to a blackbox stage.  Resolve it before creating a scan
+        # directory; pure whitebox/correlation intentionally ignore legacy HOST fields.
+        host_config = None
+        if req.type == "blackbox" or (req.type == "whitebox" and req.url):
+            host_config = await self._resolve_host_config(req, ws)
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
 
-        # 黑盒:提前解析白盒血缘作 scan_id 前缀（<wb_scan_id>~<N>）。_resolve_blackbox_inputs
-        # 仍负责 config_path + repo_path（需 scan_dir，在 create_scan 后），此处只提前拿 lineage
-        # 喂 _gen_scan_id；reuse 校验与 _resolve_blackbox_inputs 幂等重复，可接受。
         lineage: str | None = None
         if req.type == "blackbox":
             if not req.reuse_whitebox_scan_id:
@@ -192,14 +198,11 @@ class ScanManager:
                 raise ValueError(f"要复用的白盒扫描不存在: {req.reuse_whitebox_scan_id}")
             lineage = req.reuse_whitebox_scan_id
 
-        # 黑盒 create_scan 在锁内，保证 ~<N> 序号分配原子（防并发同白盒争同序号）；
-        # 白盒无序号竞态，不加锁。
         if req.type == "blackbox":
             async with self._create_scan_lock:
                 scan_id, scan_dir = self._store.create_scan(
                     ws, req.url or "", target or "", req.type, lineage=lineage)
         else:
-            # T3: ScanStore 建 scan_id 目录 + session.json（ws 根不再写 session.json）。
             scan_id, scan_dir = self._store.create_scan(
                 ws, req.url or "", target or "", req.type)
         self._mark_owner(scan_dir, "web")
@@ -208,41 +211,36 @@ class ScanManager:
         self._active_reqs[scan_key] = req
 
         try:
+            # Snapshot before auth config and before Temporal submission.
+            if host_config is not None:
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"host_config": host_config})
+
             if req.type == "whitebox":
-                # 组合扫描 t0 预验证（spec §7.2 D4，Task 3）：whitebox + url → 先用 scan-config.yaml
-                # 登一次目标站（复用 AuthValidationWorkflow），pass 才 submit 白盒，fail fail-fast
-                # （标 bb_phase=failed + scan_end，不提交白盒）。预验证 events 落独立文件，不污染主流。
                 if req.url:
                     config_path = await self._dump_auth_config(req, ws, scan_dir)
-                    host_mappings = await self._resolve_host_mappings(req, ws)
-                    # 持久化组合字段供 _run_blackbox_phase（Task 4）读 bb_url/bb_host_mappings +
-                    # Task 7 重跑解析 bb_auth_ref（D2：只存 profile_id 引用，不含明文）。
+                    host_mappings = self._host_config_mappings(host_config)
                     SessionManager(scan_dir.parent).update_session(scan_dir, {
                         "combined": True,
                         "bb_url": req.url,
+                        # Keep the legacy field for old readers/reconcile paths.
                         "bb_host_mappings": host_mappings,
                         "bb_auth_ref": self._snapshot_auth_ref(req),
                         "bb_phase": "precheck",
                     })
                     ok = await self._run_precheck(
-                        scan_dir, ws, scan_id, req.url, config_path)
+                        scan_dir, ws, scan_id, req.url, config_path,
+                        host_mappings=host_mappings)
                     if not ok:
-                        # fail-fast：标 failed + 写 scan_end（终态标记）+ 清 _active_reqs（无 _watch
-                        # 兜底清理）→ 不提交白盒、不起编排。return 跳过 _handles/_tasks 登记。
                         await self._mark_bb(scan_dir, "failed", "auth_failed")
                         await self._ensure_scan_end(scan_dir)
                         self._active_reqs.pop(scan_key, None)
                         return ws, scan_id
-                    # pass → 转出 precheck 阶段（白盒 running 期 progress 按 pending 加权，spec §9.2）。
                     await self._mark_bb(scan_dir, "pending")
                 handle = await self._submit_whitebox(
                     target, ws, scan_id, scan_dir, event_file, req.url or "")
-                # 持久化 repo 名（source.value，可为 group/repo）供重跑预填白盒仓库--
-                # repo_path 是绝对路径，前端 listRepos 返回的 Repo 无 path 字段无法反查 name。
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"source_repo": req.source.value if req.source else None})
-                # 组合扫描接力（spec §7.2）：白盒 + url → 起 _combined_orchestrator 接力黑盒。
-                # _run_blackbox_phase 读上面 dump 的 scan-config.yaml + session bb_url/bb_host_mappings。
                 if req.url:
                     orch = asyncio.create_task(
                         self._combined_orchestrator(scan_key, handle, scan_dir, req))
@@ -250,23 +248,21 @@ class ScanManager:
             elif req.type == "blackbox":
                 config_path, repo_path = await self._resolve_blackbox_inputs(
                     req, ws, scan_dir, target)
-                # Phase 2 HOST 档案：解析 host→IP 映射（选档案 / 填 GET 链接 / 都不填），
-                # 灌入 BlackboxPipelineInput 供下游 per-scan 代理 + sandbox /etc/hosts 注入。
-                host_mappings = await self._resolve_host_mappings(req, ws)
+                host_mappings = self._host_config_mappings(host_config)
                 handle = await self._submit_blackbox(
                     repo_path, ws, scan_id, scan_dir, event_file, req.url or "",
                     config_path, host_mappings=host_mappings)
-                # 持久化 reuse_whitebox_scan_id 供 resume 重解析 wb_scan_dir（修 reuse resume
-                # fail-fast：create_scan 第三参 target="" → session.repo_path 读空，resume 需凭
-                # reuse_id 重定位白盒产物目录，不存易失的绝对路径）。
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"reuse_whitebox_scan_id": req.reuse_whitebox_scan_id})
             else:
                 raise ValueError(f"correlation 暂未 C1 化: {req.type}")
-        except BaseException:
-            # 提交失败: _watch 不会被调度, 必须在此清理 _active_reqs, 否则
-            # active_repo_sources() 持续误报引用 -> DELETE /repos 误判 409.
+        except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
+            self._handles.pop(scan_key, None)
+            self._tasks.pop(scan_key, None)
+            self._orchestrator_tasks.pop(scan_key, None)
+            # A directory was already created, so never leave it in running state.
+            await self._mark_submission_failed(scan_dir, event_file, exc)
             raise
         self._handles[scan_key] = handle
         self._tasks[scan_key] = asyncio.create_task(self._watch(scan_key, event_file, scan_dir))
@@ -320,8 +316,9 @@ class ScanManager:
                 try:
                     client = await Client.connect(self._temporal_address())
                     handle = client.get_workflow_handle(bb_wf_id)
-                except BaseException:
+                except BaseException as exc:
                     self._active_reqs.pop(scan_key, None)
+                    await self._mark_submission_failed(scan_dir, event_file, exc)
                     raise
                 # 附仅做报告的编排 task（接力已发生、黑盒已 submit；只 await 完成 → 融合报告）。
                 orch = asyncio.create_task(
@@ -342,8 +339,9 @@ class ScanManager:
                 try:
                     handle = await self._submit_whitebox(
                         repo_path, ws, scan_id, scan_dir, event_file, web_url)
-                except BaseException:
+                except BaseException as exc:
                     self._active_reqs.pop(scan_key, None)
+                    await self._mark_submission_failed(scan_dir, event_file, exc)
                     raise
                 orch = asyncio.create_task(
                     self._combined_orchestrator(scan_key, handle, scan_dir, req))
@@ -396,12 +394,14 @@ class ScanManager:
                         raise ValueError(f"要复用的白盒扫描已不存在: {reuse_whitebox_scan_id}")
                     repo_path = str(wb_scan_dir)
                 handle = await self._submit_blackbox(
-                    repo_path or None, ws, scan_id, scan_dir, event_file, web_url, config_path)
+                    repo_path or None, ws, scan_id, scan_dir, event_file, web_url, config_path,
+                    host_mappings=self._session_host_mappings(data))
             else:
                 handle = await self._submit_whitebox(
                     repo_path, ws, scan_id, scan_dir, event_file, web_url)
-        except BaseException:
+        except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
+            await self._mark_submission_failed(scan_dir, event_file, exc)
             raise
         self._handles[scan_key] = handle
         self._tasks[scan_key] = asyncio.create_task(self._watch(scan_key, event_file, scan_dir))
@@ -415,10 +415,10 @@ class ScanManager:
         workspace_name 对 web 路径仅作展示）。event_file 塞进 PipelineInput(worker 容器
         setup_display 据此挂 StructuredEventRenderer)。workflow_id 在提交时定(activity 不能改).
         """
+        # 先解析并校验 workspace-owned Provider 配置，缺配置时不要连接或提交 Temporal。
+        provider_config = self._resolve_provider_config(ws)
         client = await Client.connect(self._temporal_address())
         workflow_id = self._resolve_workflow_id(ws, scan_id)
-        # P3c 阶段 2：按 ws 解析 provider_config（ws_config_store 非None）或全局 env 兜底。
-        provider_config = self._resolve_provider_config(ws)
         inp = PipelineInput(
             repo_path=target or "",
             web_url=web_url or "",
@@ -593,43 +593,112 @@ class ScanManager:
         repo_path: str | None = str(wb_scan_dir)
         return config_path, repo_path
 
-    async def _resolve_host_mappings(
+    @staticmethod
+    def _normalize_host_mapping_dict(mappings: Any, *, allow_empty: bool = False) -> dict[str, str]:
+        """Validate and normalize either HostMapping objects, lists, or snapshot dicts."""
+        if isinstance(mappings, dict):
+            items = mappings.items()
+        elif mappings is None:
+            items = []
+        else:
+            items = (
+                (m.get("host"), m.get("ip")) if isinstance(m, dict)
+                else (getattr(m, "host", None), getattr(m, "ip", None))
+                for m in mappings
+            )
+        normalized: dict[str, str] = {}
+        for host, ip in items:
+            mapping = HostMapping(ip=str(ip), host=str(host))
+            previous = normalized.get(mapping.host)
+            if previous is not None and previous != mapping.ip:
+                raise ValueError(f"HOST host {mapping.host!r} maps to multiple IPs")
+            normalized[mapping.host] = mapping.ip
+        if not normalized and not allow_empty:
+            raise ValueError("HOST 配置没有有效 mapping，拒绝回退到默认 DNS")
+        return normalized
+
+    @staticmethod
+    def _host_config_mappings(host_config: dict | None) -> dict[str, str]:
+        if not host_config:
+            return {}
+        if not host_config.get("enabled", True):
+            return {}
+        return ScanManager._normalize_host_mapping_dict(host_config.get("mappings"))
+
+    def _session_host_mappings(self, data: dict) -> dict[str, str]:
+        """Read the immutable snapshot; only legacy combined fields are fallback."""
+        if "host_config" in data and data.get("host_config") is not None:
+            cfg = data.get("host_config")
+            if not isinstance(cfg, dict):
+                raise ValueError("HOST snapshot 损坏，无法安全恢复")
+            if not cfg.get("enabled", True):
+                return {}
+            return self._normalize_host_mapping_dict(cfg.get("mappings"))
+        # Pre-snapshot combined scans stored this field; empty means legacy no-HOST.
+        if "bb_host_mappings" in data:
+            return self._normalize_host_mapping_dict(
+                data.get("bb_host_mappings") or {}, allow_empty=True)
+        return {}
+
+    async def _resolve_host_config(
         self, req: ScanRequest, ws: str,
-    ) -> dict[str, str]:
-        """解析 HOST 档案 → {host: ip} dict（Phase 2，2026-08-12）。
+    ) -> dict | None:
+        """Resolve one HOST source into an immutable per-scan snapshot."""
+        if req.host_profile_id is None and req.host_url is None:
+            return None
 
-        两种互斥来源（ScanRequest._host_profile_xor_url model_validator 已保证互斥）：
-          - req.host_profile_id: store.get 读档;若 profile.source_url 则 best-effort refresh
-            （try/except 包：refresh 内部仅吞 fetch 异常,write 失败需本层兜底,回落快照 mappings）。
-            store 未注入 → RuntimeError（对齐 auth_profile_store guards）。
-          - req.host_url: fetch_and_parse_hosts（扫描启动时拉取;fetch 错误自然冒泡为 scan-start 失败,
-            用户给的 URL 不可达属合理 fail-fast）。
-          - 都不填 → {} （不启用 HOST 代理,向后兼容,既有扫描字节不变）。
-
-        host keys 已被 HostMapping.host field_validator 强制 strip+lowercase,与下游
-        urlparse(url).hostname（小写）一致,无大小写 MISS 风险。
-        """
-        if req.host_profile_id:
+        warnings: list[str] = []
+        if req.host_profile_id is not None:
             if self.host_profile_store is None:
                 raise RuntimeError("host_profile_store 未注入，无法解析 HOST 档案")
             profile = self.host_profile_store.get(ws, req.host_profile_id)
             if profile is None:
                 raise ValueError(f"HOST 档案不存在: {req.host_profile_id}")
-            # source_url 档案 best-effort refresh（拉最新 /etc/hosts）;refresh 内部吞 fetch
-            # 异常但未吞 write 异常,故本层再包一层 try/except,任何失败都回落快照。
             if profile.source_url:
                 try:
-                    refreshed = await self.host_profile_store.refresh(
-                        ws, req.host_profile_id)
+                    refreshed = await self.host_profile_store.refresh(ws, req.host_profile_id)
                     if refreshed is not None:
                         profile = refreshed
-                except Exception:
-                    pass  # best-effort:回落存储快照,不阻断扫描
-            return {m.host: m.ip for m in profile.mappings}
-        if req.host_url:
-            mappings, _warnings = await fetch_and_parse_hosts(req.host_url)
-            return {m.host: m.ip for m in mappings}
-        return {}
+                    get_warnings = getattr(self.host_profile_store, "refresh_warnings", None)
+                    if get_warnings is not None:
+                        warnings.extend(get_warnings(ws, req.host_profile_id))
+                except HostProfileRefreshEmpty as exc:
+                    raise ValueError(str(exc)) from exc
+                except Exception as exc:
+                    if profile.mappings:
+                        warnings.append(f"HOST profile refresh failed: {exc}")
+                    else:
+                        raise ValueError(f"HOST profile refresh failed: {exc}") from exc
+            mappings = self._normalize_host_mapping_dict(profile.mappings)
+            return {
+                "enabled": True,
+                "source": "profile",
+                "profile_id": req.host_profile_id,
+                "source_url": profile.source_url,
+                "mappings": mappings,
+                "warnings": warnings,
+                "resolved_at": time.time(),
+            }
+
+        mappings, fetch_warnings = await fetch_and_parse_hosts(req.host_url)
+        normalized = self._normalize_host_mapping_dict(mappings)
+        warnings.extend(fetch_warnings)
+        return {
+            "enabled": True,
+            "source": "url",
+            "profile_id": None,
+            "source_url": req.host_url,
+            "mappings": normalized,
+            "warnings": warnings,
+            "resolved_at": time.time(),
+        }
+
+    async def _resolve_host_mappings(
+        self, req: ScanRequest, ws: str,
+    ) -> dict[str, str]:
+        """Backward-compatible wrapper returning only the resolved mapping dict."""
+        config = await self._resolve_host_config(req, ws)
+        return self._host_config_mappings(config)
 
     async def _submit_blackbox(
         self, repo_path: str | None, ws: str, scan_id: str, scan_dir: Path,
@@ -651,9 +720,10 @@ class ScanManager:
         from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
         from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
 
+        # 与白盒路径一致：配置不完整时在连接 Temporal 前失败。
+        provider_config = self._resolve_provider_config(ws)
         client = await Client.connect(self._temporal_address())
         workflow_id = self._resolve_workflow_id(ws, scan_id) + workflow_id_suffix
-        provider_config = self._resolve_provider_config(ws)
         inp = BlackboxPipelineInput(
             web_url=web_url,
             repo_path=repo_path,
@@ -1042,8 +1112,8 @@ class ScanManager:
     def _resolve_provider_config(self, ws: str) -> dict:
         """P3c 阶段 2：per-ws 解析（ws_config_store）；None -> 全局 env 兜底（阶段1/CLI）。
 
-        ws_config_store 非None 时先 validate_ws_config fail-fast（非法 ai_provider 不提交），
-        再 resolve_provider_config 拼「全局默认 + ws 覆盖」。None（CLI/旧测试）走全局 env。
+        ws_config_store 非None 时严格使用 workspace-owned 字段并校验完整性，不从全局配置
+        补字段。None（CLI/旧测试）走全局 env。
         """
         if self._ws_config_store is not None:
             from .ws_config_store import validate_ws_config
@@ -1225,6 +1295,21 @@ class ScanManager:
                 scan_dir, {"status": "cancelled", "completed_at": time.time()})
         except Exception:  # noqa: BLE001 - 标记是 best-effort,不阻塞 cancel
             pass
+
+    async def _mark_submission_failed(
+        self, scan_dir: Path, event_file: Path, error: BaseException
+    ) -> None:
+        """Finalize a scan whose directory exists but whose workflow was not submitted."""
+        try:
+            if self._has_scan_end(event_file):
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"status": "failed", "completed_at": time.time()})
+            else:
+                await self._write_scan_end(
+                    event_file, "failed", -1, str(error),
+                    session_status="failed", scan_dir=scan_dir)
+        except Exception:  # noqa: BLE001 - cleanup must not hide the original submit error
+            _log.exception("failed to finalize scan submission failure: %s", scan_dir)
 
     # ---- 钩子（可 monkeypatch）----
     def _temporal_address(self) -> str:
@@ -1475,17 +1560,19 @@ class ScanManager:
         _write_scan_end（原草案 bug：成功路径写了第二条 scan_end）。
         """
         ws, scan_id = scan_key
+        final_status = "completed"
         try:
             await wb_handle.result()
             await self._run_blackbox_phase(
                 scan_dir, ws, scan_id, self._snapshot_auth_ref(req))
         except Exception as exc:
+            final_status = "failed"
             # 接力任意阶段失败（白盒 result 抛 / 预检后黑盒提交抛 / 黑盒 result 抛 / 报告生成抛）
             # → 标 bb_phase=failed + 原因；白盒报告（已落盘）保留。
             await self._mark_bb(scan_dir, "failed", str(exc))
         finally:
             # 幂等收尾：成功路径黑盒已写 scan_end → no-op；异常/跳过 → 补写。
-            await self._ensure_scan_end(scan_dir)
+            await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
 
     async def _combined_report_orchestrator(self, scan_key: tuple[str, str],
@@ -1499,14 +1586,16 @@ class ScanManager:
         await bb_handle.result() → _generate_combined_report → _mark_bb(completed)；
         try/except/finally 经 _ensure_scan_end（幂等）收尾（与 _combined_orchestrator 同构）。
         """
+        final_status = "completed"
         try:
             await bb_handle.result()
             await self._generate_combined_report(scan_dir)
             await self._mark_bb(scan_dir, "completed")
         except Exception as exc:
+            final_status = "failed"
             await self._mark_bb(scan_dir, "failed", str(exc))
         finally:
-            await self._ensure_scan_end(scan_dir)
+            await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
 
     def _build_combined_resume_req(self, data: dict, ws: str) -> ScanRequest:
@@ -1554,7 +1643,7 @@ class ScanManager:
         # + 写 bb_url/bb_host_mappings 到 session）。bb_url 缺失回落 web_url。
         session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
         bb_url = session.get("bb_url") or session.get("web_url") or ""
-        host_mappings = session.get("bb_host_mappings")
+        host_mappings = self._session_host_mappings(session)
         # 按白盒发现的非空 queue vuln 类补 expected_agents.blackbox（黑盒只 exploit 白盒发现的类，
         # spec §9.5）：进度分母动态化，收起态百分比更准。
         bb_expected = self._count_nonempty_queues(scan_dir)
@@ -1617,7 +1706,9 @@ class ScanManager:
         cfg = scan_dir / "scan-config.yaml"
         config_path = str(cfg) if cfg.exists() else None
         bb_url = data.get("bb_url") or data.get("web_url") or ""
-        if not await self._run_precheck(scan_dir, ws, scan_id, bb_url, config_path):
+        if not await self._run_precheck(
+            scan_dir, ws, scan_id, bb_url, config_path,
+            host_mappings=self._session_host_mappings(data)):
             await self._mark_bb(scan_dir, "failed", "auth_failed")
             return
         # bb_rerun_attempts 递增 + bb_phase=running。
@@ -1641,17 +1732,20 @@ class ScanManager:
         成功路径黑盒 finalize 已写 scan_end → _ensure_scan_end no-op（不写第二条，核心不变量）；
         异常 / 提交失败 → 补写 scan_end 防 _watch 永久 tail。finally 自 pop _orchestrator_tasks。
         """
+        final_status = "completed"
         try:
             await self._run_blackbox_phase(
                 scan_dir, ws, scan_id, auth_ref, workflow_id_suffix=suffix)
         except Exception as exc:
+            final_status = "failed"
             await self._mark_bb(scan_dir, "failed", str(exc))
         finally:
-            await self._ensure_scan_end(scan_dir)
+            await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
 
     async def _run_precheck(self, scan_dir: Path, ws: str, scan_id: str,
-                            web_url: str, config_path: str | None) -> bool:
+                            web_url: str, config_path: str | None,
+                            host_mappings: dict[str, str] | None = None) -> bool:
         """D4 t0 预验证：复用 AuthValidationWorkflow 登一次目标站，pass 返 True。
 
         event_file 用独立文件 authcheck-events.ndjson（不写主 events——预验证 workflow finalize
@@ -1670,7 +1764,8 @@ class ScanManager:
             web_url=web_url, config_path=config_path,
             workspace_path=str(scan_dir),
             event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
-            api_key=self._resolve_provider_config(ws).get("api_key"))
+            api_key=self._resolve_provider_config(ws).get("api_key"),
+            host_mappings=host_mappings or {})
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,
             id=f"{ws}-{scan_id}-authcheck", task_queue=WEB_TASK_QUEUE_BLACKBOX)
@@ -1698,8 +1793,10 @@ class ScanManager:
         """
         if self._has_scan_end(scan_dir / "events.ndjson"):
             return
+        session_status = status if status in {"completed", "failed", "cancelled", "crashed", "timeout"} else None
         await self._write_scan_end(
-            scan_dir / "events.ndjson", status, 0, f"combined {status}", scan_dir=scan_dir)
+            scan_dir / "events.ndjson", status, 0, f"combined {status}",
+            session_status=session_status, scan_dir=scan_dir)
 
     def _whitebox_deliverables_ready(self, scan_dir: Path) -> bool:
         """预检白盒产物可被黑盒利用（spec §7.3）：

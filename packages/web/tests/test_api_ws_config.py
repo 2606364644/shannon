@@ -39,11 +39,35 @@ def _csrf(c):
 # ---- GET / 基本读写 ----
 
 def test_get_config_empty_ws(authed_client, tmp_workspaces):
-    """空 ws → 空 env 文本。"""
+    """没有 config.yaml 的 ws → 默认 Provider 模板，但不包含 API key。"""
     (tmp_workspaces / "ws-a").mkdir()
     r = authed_client.get("/api/workspaces/ws-a/config")
     assert r.status_code == 200
-    assert r.json()["env_text"] == ""
+    env_text = r.json()["env_text"]
+    assert "SUPERNOVA_AI_PROVIDER=openai_compatible" in env_text
+    assert "SUPERNOVA_OPENAI_BASE_URL=https://llm-proxy.futuoa.com/v1" in env_text
+    assert "SUPERNOVA_OPENAI_LARGE_MODEL=glm-5.2-coder" in env_text
+    assert "SUPERNOVA_OPENAI_MEDIUM_MODEL=glm-5.2-coder" in env_text
+    assert "SUPERNOVA_OPENAI_SMALL_MODEL=glm-5.2-coder" in env_text
+    assert "SUPERNOVA_OPENAI_API_KEY" not in env_text
+
+
+def test_get_config_partial_ws_does_not_use_global_provider(
+    authed_client, tmp_workspaces, monkeypatch,
+):
+    """工作区未选 provider 时，配置展示也不从全局 provider 回落。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_OPENAI_BASE_URL=http://workspace.example/v1\n",
+    }, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    monkeypatch.setenv("SUPERNOVA_AI_PROVIDER", "anthropic_api")
+
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+
+    assert "SUPERNOVA_OPENAI_BASE_URL=http://workspace.example/v1" in env_text
+    assert "ANTHROPIC_BASE_URL" not in env_text
 
 
 def test_put_then_get_masks_api_key(authed_client, tmp_workspaces):

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from supernova_web.app import create_app
 from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
+from supernova_web.components.ws_config_store import default_ws_config
 
 
 class FakeSM:
@@ -45,6 +46,9 @@ def _authed_app(tmp_workspaces, monkeypatch):
     # 预建 WSX 目录, 使 create_scan 的 ws-exists 校验通过; FakeSM.start 仍返 "WSX"。
     # per-test create_app(overrides=...) 共享同一 workspaces_dir (经 env), WSX 可见。
     app.state.config.workspaces_dir.joinpath("WSX").mkdir(parents=True, exist_ok=True)
+    cfg = default_ws_config()
+    cfg.provider.api_key = "test-key"
+    app.state.ws_config_store.write("WSX", cfg)
     return app
 
 
@@ -95,6 +99,23 @@ def test_post_scan_409_concurrent(_authed_app):
     client = _authed_client(app)
     tok = _csrf(client)
     assert client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok}).status_code == 409
+
+
+def test_post_scan_422_when_workspace_provider_config_missing(_authed_app):
+    """工作区缺 API key 时，API 在调用 scan manager 前拒绝扫描。"""
+    fake = FakeSM()
+    app = create_app(overrides={"scan_manager": fake})
+    app.state.auth_store = _authed_app.state.auth_store
+    app.state.session_manager = _authed_app.state.session_manager
+    app.state.ws_config_store.write("WSX", default_ws_config())
+    client = _authed_client(app)
+    tok = _csrf(client)
+
+    response = client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok})
+
+    assert response.status_code == 422
+    assert "SUPERNOVA_OPENAI_API_KEY" in response.text
+    assert fake.started == []
 
 
 def test_post_scan_workspace_field_name_contract(_authed_app):

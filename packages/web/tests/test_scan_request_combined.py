@@ -101,3 +101,47 @@ def test_whitebox_pure_no_url_no_auth_is_valid():
     assert r.url is None
     assert r.authentication is None
     assert r.source is not None
+
+
+# ── 组合模式 HOST 互斥（与黑盒同款，2026-08-13 补全前端组合入口） ────────────
+
+def test_whitebox_combined_host_profile_xor_url_enforced():
+    """组合模式（whitebox+url）下 host_profile_id + host_url 互斥（与黑盒同款）。
+    前端组合展开区现已暴露 HOST 配置入口，须防双源冲突。"""
+    with pytest.raises(ValidationError):
+        _wb(url="http://target.example/",
+            host_profile_id="host_1", host_url="http://h/hosts.txt")
+
+
+def test_whitebox_combined_single_host_source_is_valid():
+    """组合模式单填一个 HOST 源合法（profile 或 url 二选一）。"""
+    r1 = _wb(url="http://target.example/", host_profile_id="host_1")
+    assert r1.host_profile_id == "host_1"
+    r2 = _wb(url="http://target.example/", host_url="http://h/hosts.txt")
+    assert r2.host_url == "http://h/hosts.txt"
+
+
+def test_whitebox_combined_no_host_is_valid():
+    """组合模式不填 HOST 合法（不起代理，直连目标，向后兼容）。"""
+    r = _wb(url="http://target.example/")
+    assert r.host_profile_id is None
+    assert r.host_url is None
+
+
+
+def test_pure_whitebox_ignores_legacy_host_fields():
+    """后端兼容旧调用方：纯白盒误传 HOST 不启动黑盒语义，也不因字段失败。"""
+    request = _wb(host_profile_id="", host_url="")
+    assert request.host_profile_id == ""
+    assert request.host_url == ""
+
+
+def test_correlation_ignores_legacy_host_fields():
+    request = ScanRequest(
+        type="correlation",
+        config_name="corr",
+        host_profile_id="host-old",
+        host_url="ftp://ignored.example/hosts",
+    )
+    assert request.host_profile_id == "host-old"
+    assert request.host_url == "ftp://ignored.example/hosts"

@@ -14,11 +14,15 @@ def store(tmp_path):
     return WsConfigStore(tmp_path, vault)
 
 
-def test_read_missing_ws_returns_empty(store, tmp_path):
-    """无 config.yaml → 空 WsConfig（全 None）。"""
+def test_read_missing_ws_returns_default_template(store, tmp_path):
+    """无 config.yaml → OpenAI 工作区默认模板（API key 仍为空）。"""
     (tmp_path / "ws-a").mkdir()
     cfg = store.read("ws-a")
-    assert cfg.provider.ai_provider is None
+    assert cfg.provider.ai_provider == "openai_compatible"
+    assert cfg.provider.base_url == "https://llm-proxy.futuoa.com/v1"
+    assert cfg.provider.large_model == "glm-5.2-coder"
+    assert cfg.provider.medium_model == "glm-5.2-coder"
+    assert cfg.provider.small_model == "glm-5.2-coder"
     assert cfg.provider.api_key is None
 
 
@@ -38,23 +42,65 @@ def test_write_then_read_roundtrip(store, tmp_path):
 
 
 def test_resolve_provider_config_global_default_when_unset(store, tmp_path):
-    """未填字段 → 回落全局默认（build_provider_config）。"""
+    """未填 API key → 即使全局有配置也不能回落。"""
     (tmp_path / "ws-a").mkdir()
-    pc = store.resolve_provider_config("ws-a")
-    assert pc["type"] in ("anthropic_api", "openai_compatible", "bedrock", "vertex", "litellm_router")
-    assert "api_key" in pc  # 全局默认有此键
+    with pytest.raises(ValueError, match="SUPERNOVA_OPENAI_API_KEY"):
+        store.resolve_provider_config("ws-a")
 
 
 def test_resolve_provider_config_ws_overrides(store, tmp_path):
-    """ws 显式字段覆盖全局默认（ai_provider → type 映射）。"""
+    """完整 ws 配置直接构成 ProviderConfig（ai_provider → type 映射）。"""
     (tmp_path / "ws-a").mkdir()
     store.write("ws-a", WsConfig(provider=WsProviderFields(
-        ai_provider="openai_compatible", api_key="sk-ws", max_turns=999,
+        ai_provider="openai_compatible", api_key="sk-ws",
+        base_url="https://llm-proxy.futuoa.com/v1",
+        small_model="glm-5.2-coder", medium_model="glm-5.2-coder",
+        large_model="glm-5.2-coder", max_turns=999,
     )))
     pc = store.resolve_provider_config("ws-a")
     assert pc["type"] == "openai_compatible"   # ai_provider → type
     assert pc["api_key"] == "sk-ws"
+    assert pc["base_url"] == "https://llm-proxy.futuoa.com/v1"
+    assert pc["small_model"] == "glm-5.2-coder"
+    assert pc["medium_model"] == "glm-5.2-coder"
+    assert pc["large_model"] == "glm-5.2-coder"
     assert pc["max_turns"] == 999
+
+
+def test_resolve_provider_config_requires_all_openai_fields(store, tmp_path):
+    """工作区缺 tier 模型时失败，不用全局或 Provider 默认模型补齐。"""
+    (tmp_path / "ws-a").mkdir()
+    store.write("ws-a", WsConfig(provider=WsProviderFields(
+        ai_provider="openai_compatible",
+        base_url="https://llm-proxy.futuoa.com/v1",
+        api_key="sk-ws",
+        medium_model="glm-5.2-coder",
+    )))
+    with pytest.raises(ValueError, match="SUPERNOVA_OPENAI_SMALL_MODEL"):
+        store.resolve_provider_config("ws-a")
+
+
+def test_resolve_provider_config_returns_only_workspace_values(store, tmp_path, monkeypatch):
+    """完整工作区配置不包含全局 model 或其他全局 Provider 值。"""
+    (tmp_path / "ws-a").mkdir()
+    monkeypatch.setenv("SUPERNOVA_MODEL", "global-model")
+    store.write("ws-a", WsConfig(provider=WsProviderFields(
+        ai_provider="openai_compatible",
+        base_url="https://llm-proxy.futuoa.com/v1",
+        api_key="sk-ws",
+        small_model="glm-5.2-coder",
+        medium_model="glm-5.2-coder",
+        large_model="glm-5.2-coder",
+    )))
+    resolved = store.resolve_provider_config("ws-a")
+    assert resolved["type"] == "openai_compatible"
+    assert resolved["api_key"] == "sk-ws"
+    assert resolved["base_url"] == "https://llm-proxy.futuoa.com/v1"
+    assert resolved["small_model"] == "glm-5.2-coder"
+    assert resolved["medium_model"] == "glm-5.2-coder"
+    assert resolved["large_model"] == "glm-5.2-coder"
+    assert resolved["model"] is None
+    assert "global-model" not in resolved.values()
 
 
 def test_path_traversal_rejected(store):

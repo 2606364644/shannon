@@ -9,14 +9,13 @@ PUT 语义：文本区 = ws 配置的完整定义。出现的字段=设值；未
 
 spec: docs/superpowers/specs/2026-08-10-ws-config-env-textarea-design.md
 """
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..auth.dependencies import workspace_member, workspace_manager
 from ..components.ws_config_store import (
-    WsConfig, WsProviderFields, WsGitFields, WsConfigStore,
+    DEFAULT_WS_PROVIDER, WsConfig, WsProviderFields, WsGitFields, WsConfigStore,
 )
 from ..components.ws_env_codec import parse_env_text, render_env_text, MASKED
 
@@ -32,8 +31,8 @@ def _store(request: Request) -> WsConfigStore:
 
 
 def _render_ai_provider(cfg: WsConfig) -> str:
-    """渲染 env 文本时选 provider 模板：ws ?? 全局 ?? anthropic_api。"""
-    return cfg.provider.ai_provider or os.getenv("SUPERNOVA_AI_PROVIDER") or "anthropic_api"
+    """渲染 env 文本时只选工作区 provider；缺失时使用工作区默认模板。"""
+    return cfg.provider.ai_provider or DEFAULT_WS_PROVIDER
 
 
 @router.get("/{ws}/config")

@@ -31,7 +31,16 @@ def test_admin_creates_workspace(_app):
     tok = c.get("/api/auth/csrf").json()["csrf_token"]
     r = c.post("/api/workspaces", json={"name": "ws1"}, headers={"X-CSRF-Token": tok})
     assert r.status_code == 201
-    assert (_app.state.config.workspaces_dir / "ws1").is_dir()
+    ws_dir = _app.state.config.workspaces_dir / "ws1"
+    assert ws_dir.is_dir()
+    assert (ws_dir / "config.yaml").exists()
+    cfg = _app.state.ws_config_store.read("ws1").provider
+    assert cfg.ai_provider == "openai_compatible"
+    assert cfg.base_url == "https://llm-proxy.futuoa.com/v1"
+    assert cfg.small_model == "glm-5.2-coder"
+    assert cfg.medium_model == "glm-5.2-coder"
+    assert cfg.large_model == "glm-5.2-coder"
+    assert cfg.api_key is None
     admin = _app.state.auth_store.get_user_by_username("admin")
     assert _app.state.auth_store.get_workspace_member_role("ws1", admin.id) == "manager"
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Literal, Union
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class PathSource(BaseModel):
@@ -56,6 +57,15 @@ class ScanRequest(BaseModel):
     # 都不填 = 不启用 HOST 代理（向后兼容，既有扫描字节不变）。
     host_profile_id: str | None = None   # 选 HOST 档案
     host_url: str | None = None          # 或填 GET 链接（扫描时拉取）
+
+    @field_validator("host_profile_id", "host_url", mode="before")
+    @classmethod
+    def _normalize_host_source(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TypeError("HOST source must be a string")
+        return value.strip()
 
     @model_validator(mode="after")
     def _blackbox_requires_reuse(self) -> "ScanRequest":
@@ -139,18 +149,31 @@ class ScanRequest(BaseModel):
 
     @model_validator(mode="after")
     def _host_profile_xor_url(self) -> "ScanRequest":
-        """HOST 字段互斥校验（2026-08-12 Phase 2）。
+        """HOST 字段互斥校验（2026-08-12 Phase 2；2026-08-13 扩到组合模式）。
 
         - host_profile_id + host_url 同时填 = 非法（互斥，避免双源冲突）；
         - 单填一个 = 合法；都不填 = 合法（向后兼容，无 HOST 代理）。
         与认证字段完全独立（HOST 可与任意 auth 模式组合：profile/inline/无 auth）。
-        仅对 blackbox 生效（HOST 代理只作用于黑盒扫描；whitebox/correlation 即便误填也忽略）。
+        对 blackbox 与组合模式（whitebox+url）生效--两条入口都暴露了 HOST 配置；
+        纯白盒（无 url）/correlation 即便误填也忽略（无黑盒阶段，HOST 代理无意义）。
         """
-        if self.type == "blackbox":
+        is_combined_or_bb = (
+            self.type == "blackbox"
+            or (self.type == "whitebox" and self.url)
+        )
+        if is_combined_or_bb:
+            if self.host_profile_id == "":
+                raise ValueError("host_profile_id 不能为空；启用 HOST 后必须选择档案")
+            if self.host_url == "":
+                raise ValueError("host_url 不能为空；启用 HOST 后必须填写 URL")
             if self.host_profile_id is not None and self.host_url is not None:
                 raise ValueError(
                     "host_profile_id 与 host_url 互斥，不能同时指定（HOST 档案二选一）"
                 )
+            if self.host_url is not None:
+                scheme = (urlparse(self.host_url).scheme or "").lower()
+                if scheme not in ("http", "https"):
+                    raise ValueError("host_url 仅允许 http/https URL")
         return self
 
 

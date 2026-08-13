@@ -481,3 +481,22 @@ async def test_fetch_does_not_follow_redirect_to_internal(monkeypatch):
         f"({client.get_calls!r})"
     )
     assert client.get_calls[0] == _EXTERNAL_URL
+
+
+@pytest.mark.asyncio
+async def test_refresh_empty_success_is_not_treated_as_valid_snapshot(tmp_path, monkeypatch):
+    """provider 200 but no valid mappings must fail closed for scan resolution."""
+    store = HostProfileStore(tmp_path)
+    p = HostProfile(
+        id="host-empty-refresh", name="empty", source_url="https://hosts.test/hosts",
+        mappings=[HostMapping(ip="10.0.0.2", host="old.test")],
+    )
+    store.upsert_profile("ws1", p)
+
+    async def empty_fetch(url, timeout=15):
+        return [], ["no valid mappings"]
+
+    monkeypatch.setattr(hps, "fetch_and_parse_hosts", empty_fetch)
+    from supernova_web.components.host_profile_store import HostProfileRefreshEmpty
+    with pytest.raises(HostProfileRefreshEmpty):
+        await store.refresh("ws1", "host-empty-refresh")

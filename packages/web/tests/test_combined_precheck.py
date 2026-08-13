@@ -82,6 +82,7 @@ async def test_start_combined_precheck_pass_submits_whitebox(mgr, monkeypatch):
         assert data.get("bb_url") == "http://target.example/"
         assert data.get("bb_auth_ref") == {"profile_id": None}  # inline → 无 profile_id
         assert data.get("bb_phase") != "precheck"     # pass 后转出 precheck 阶段
+        assert data["expected_agents"]["whitebox"] == mgr._compute_expected_agents(_combined_req())["whitebox"]
 
 
 # ── start 组合分支：fail 路径（fail-fast）────────────────────────────────────
@@ -105,7 +106,10 @@ async def test_start_combined_precheck_fail_skips_whitebox_and_marks_failed(mgr,
         # scan_end 落盘（_ensure_scan_end 写 events.ndjson 标记终态）
         assert (scan_dir / "events.ndjson").exists()
         end_line = (scan_dir / "events.ndjson").read_text("utf-8").strip().splitlines()[-1]
-        assert json.loads(end_line)["type"] == "scan_end"
+        end_event = json.loads(end_line)
+        assert end_event["type"] == "scan_end"
+        assert end_event["status"] == "failed"
+        assert data.get("status") == "failed"
 
 
 # ── start 组合分支：HOST 映射 + profile 引用持久化 ───────────────────────────
@@ -117,16 +121,20 @@ async def test_start_combined_persists_host_mappings_and_profile_ref(mgr, monkey
     with patch.object(mgr, "_run_precheck", new=AsyncMock(return_value=True)), \
          patch.object(mgr, "_submit_whitebox", new=AsyncMock(return_value=object())), \
          patch.object(mgr, "_combined_orchestrator", new=AsyncMock()), \
-         patch.object(mgr, "_resolve_host_mappings", new=AsyncMock(return_value=mappings)) as rhm, \
+         patch.object(mgr, "_resolve_host_config", new=AsyncMock(return_value={
+             "enabled": True, "source": "profile", "profile_id": "host-p1",
+             "source_url": None, "mappings": mappings, "warnings": [], "resolved_at": 1.0,
+         })) as rhc, \
          patch.object(mgr, "_dump_auth_config", new=AsyncMock(return_value="/cfg.yaml")):
         ws, scan_id = await mgr.start(_combined_req(
             auth_profile_id="prof_1", auth_credential_id="cred_a",
-            authentication=None))  # profile 模式（覆盖 inline 默认）
+            authentication=None, host_profile_id="host-p1"))  # profile 模式（覆盖 inline 默认）
         await _drain_bg_tasks(mgr)
-        rhm.assert_awaited()
+        rhc.assert_awaited()
         scan_dir = mgr._store.get_scan_dir(ws, scan_id)
         data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
         assert data.get("bb_host_mappings") == mappings
+        assert data.get("host_config", {}).get("mappings") == mappings
         # D2: bb_auth_ref 只存 profile_id 引用，不含明文
         assert data.get("bb_auth_ref") == {"profile_id": "prof_1",
                                            "cred_id": "cred_a",
@@ -192,3 +200,54 @@ async def test_run_precheck_returns_false_on_auth_failure(mgr, tmp_path, monkeyp
     ok = await mgr._run_precheck(scan_dir, "ws-a", "demo",
                                  "http://target.example/", "/cfg/scan-config.yaml")
     assert ok is False
+
+@pytest.mark.asyncio
+async def test_start_combined_precheck_receives_same_host_snapshot(mgr, monkeypatch):
+    """组合 auth precheck 必须接收与后续黑盒相同的 HOST snapshot。"""
+    _wire_start_mocks(mgr, monkeypatch)
+    from supernova_web.components.host_profile_store import HostMapping, HostProfileStore, HostProfile
+
+    store = HostProfileStore(mgr._workspaces_dir)
+    store.upsert_profile("ws-a", HostProfile(
+        id="host-combined", name="combined",
+        mappings=[HostMapping(ip="10.0.0.2", host="target.example")],
+    ))
+    mgr.host_profile_store = store
+    req = _combined_req(host_profile_id="host-combined")
+
+    with patch.object(mgr, "_run_precheck", new=AsyncMock(return_value=True)) as precheck, \
+         patch.object(mgr, "_submit_whitebox", new=AsyncMock(return_value=object())), \
+         patch.object(mgr, "_combined_orchestrator", new=AsyncMock()):
+        await mgr.start(req)
+
+    assert precheck.call_args.kwargs["host_mappings"] == {"target.example": "10.0.0.2"}
+
+
+@pytest.mark.asyncio
+async def test_run_precheck_builds_auth_workflow_input_with_host_snapshot(mgr, tmp_path, monkeypatch):
+    """独立组合 auth workflow 入参必须带 HOST mappings。"""
+    from supernova_core.services.validate_authentication import AuthValidationResult
+    scan_dir = tmp_path / "scans" / "demo"
+    scan_dir.mkdir(parents=True)
+    captured = {}
+
+    class _FakeHandle:
+        async def result(self):
+            return AuthValidationResult(success=True)
+
+    class _FakeClient:
+        async def start_workflow(self, fn, inp, **kw):
+            captured["inp"] = inp
+            return _FakeHandle()
+
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.Client.connect",
+        AsyncMock(return_value=_FakeClient()),
+    )
+    monkeypatch.setattr(mgr, "_resolve_provider_config", lambda ws: {"api_key": "k"})
+
+    await mgr._run_precheck(
+        scan_dir, "ws-a", "demo", "https://target.example/", "/cfg.yaml",
+        host_mappings={"target.example": "10.0.0.2"},
+    )
+    assert captured["inp"].host_mappings == {"target.example": "10.0.0.2"}

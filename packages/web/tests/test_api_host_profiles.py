@@ -28,7 +28,7 @@ class _U:
     id = 1
 
 
-def _client(tmp_path):
+def _client(tmp_path, **kwargs):
     """MINIMAL FastAPI + 只挂 host_profiles.router + dependency_overrides 绕鉴权。
 
     对齐 test_api_auth_profiles._client 范式。返回 (TestClient, store)。"""
@@ -40,7 +40,7 @@ def _client(tmp_path):
     app.dependency_overrides[current_user] = lambda: _U()
     app.dependency_overrides[workspace_member] = lambda: _U()
     app.dependency_overrides[workspace_manager] = lambda: _U()
-    return TestClient(app), store
+    return TestClient(app, **kwargs), store
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +88,31 @@ def test_delete_unknown_returns_404(tmp_path):
     r = c.delete("/api/workspaces/ws1/host-profiles/host_nope")
     assert r.status_code == 404
 
+
+
+
+def test_create_invalid_mapping_returns_422(tmp_path):
+    c, _store = _client(tmp_path, raise_server_exceptions=False)
+    r = c.post("/api/workspaces/ws1/host-profiles", json={
+        "name": "bad",
+        "mappings": [{"ip": "127.0.0.1", "host": "api.internal.example"}],
+    })
+    assert r.status_code == 422
+
+
+def test_update_conflicting_host_mappings_returns_422(tmp_path):
+    c, _store = _client(tmp_path, raise_server_exceptions=False)
+    pid = c.post("/api/workspaces/ws1/host-profiles", json={
+        "name": "good",
+        "mappings": [{"ip": "10.0.0.2", "host": "api.internal.example"}],
+    }).json()["id"]
+    r = c.put(f"/api/workspaces/ws1/host-profiles/{pid}", json={
+        "mappings": [
+            {"ip": "10.0.0.2", "host": "api.internal.example"},
+            {"ip": "10.0.0.3", "host": "API.INTERNAL.EXAMPLE"},
+        ],
+    })
+    assert r.status_code == 422
 
 # ---------------------------------------------------------------------------
 # name 唯一性:create 时 ws 内重名 → 422

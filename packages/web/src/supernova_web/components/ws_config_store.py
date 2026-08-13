@@ -1,7 +1,7 @@
 """P3c 阶段 2：per-workspace provider 配置存储。
 
 字段级配置存 workspaces/<ws>/config.yaml；凭据字段经 CredentialVault 加密。
-resolve_provider_config(ws) = 全局默认(build_provider_config) + ws 非 None 字段覆盖。
+resolve_provider_config(ws) 只使用工作区字段，并在提交前校验必填 Provider 参数。
 路径穿越双防线：_validate_ws_segment + resolve().is_relative_to。
 """
 from __future__ import annotations
@@ -11,17 +11,12 @@ from pathlib import Path
 
 import yaml
 
-from supernova_core.agents.providers import build_provider_config
 from supernova_core.config.provider_settings import PROVIDER_SETTINGS
 
 from .credential_vault import CredentialVault
 from .repo_manager import _validate_ws_segment
 
 WS_CONFIG_FILENAME = "config.yaml"
-# Provider 字段名（WsProviderFields）→ ProviderConfig 键名映射
-_PROV_FIELD_TO_PC_KEY = {
-    "ai_provider": "type",
-}
 
 
 @dataclass
@@ -49,17 +44,57 @@ class WsConfig:
     git: WsGitFields = field(default_factory=WsGitFields)
 
 
+DEFAULT_WS_PROVIDER = "openai_compatible"
+DEFAULT_WS_BASE_URL = "https://llm-proxy.futuoa.com/v1"
+DEFAULT_WS_MODEL = "glm-5.2-coder"
+
+
+def default_ws_config() -> WsConfig:
+    """返回新工作区的 Provider 默认模板（不包含 API key）。"""
+    return WsConfig(provider=WsProviderFields(
+        ai_provider=DEFAULT_WS_PROVIDER,
+        base_url=DEFAULT_WS_BASE_URL,
+        small_model=DEFAULT_WS_MODEL,
+        medium_model=DEFAULT_WS_MODEL,
+        large_model=DEFAULT_WS_MODEL,
+    ))
+
+
 def validate_ws_config(cfg: WsConfig) -> None:
     """仅校验 ws 显式选的 ai_provider 是合法 provider 名（PROVIDER_SETTINGS 键）。
 
-    未覆盖 ai_provider（None）→ 不校验（回落全局，全局已有 profile_validator）。
-    required 字段深度校验留给 ProviderConfig(**dict) 构造（resolve 后自然报错）。
+    未覆盖 ai_provider（None）允许保存，便于配置页编辑不完整表单；
+    Provider 必填字段由 resolve_provider_config() 在扫描提交前严格校验。
     """
     ap = cfg.provider.ai_provider
     if ap is None:
         return
     if ap not in PROVIDER_SETTINGS:
         raise ValueError(f"unknown ai_provider: {ap}")
+
+
+def _missing_provider_fields(provider: WsProviderFields) -> list[str]:
+    """返回工作区 Provider 配置缺失的 env 字段名。"""
+    provider_type = provider.ai_provider
+    if not provider_type:
+        return ["SUPERNOVA_AI_PROVIDER"]
+    settings = PROVIDER_SETTINGS.get(provider_type)
+    if settings is None:
+        raise ValueError(f"unknown ai_provider: {provider_type}")
+
+    missing: list[str] = []
+    for required in settings.required:
+        if required == "credential":
+            if not provider.api_key:
+                missing.append(settings.api_key or settings.auth_token or "API credential")
+            continue
+
+        value = getattr(provider, required, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            env_name = getattr(settings, required, None)
+            if env_name:
+                missing.append(env_name)
+    return missing
 
 
 class WsConfigStore:
@@ -77,7 +112,7 @@ class WsConfigStore:
     def read(self, ws: str) -> WsConfig:
         path = self._config_path(ws)
         if not path.exists():
-            return WsConfig()
+            return default_ws_config()
         data = yaml.safe_load(path.read_text("utf-8")) or {}
         prov_raw = data.get("provider") or {}
         # 凭据字段解密
@@ -112,13 +147,14 @@ class WsConfigStore:
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), "utf-8")
 
     def resolve_provider_config(self, ws: str) -> dict:
-        """全局默认 + ws 非 None 覆盖 → provider_config dict。"""
-        defaults = asdict(build_provider_config())   # 全局（含阶段0的5字段）
+        """只用工作区字段构造 provider_config，并在提交前严格校验。"""
         ws_prov = self.read(ws).provider
-        for fld in fields(WsProviderFields):
-            val = getattr(ws_prov, fld.name)
-            if val is None:
-                continue
-            key = _PROV_FIELD_TO_PC_KEY.get(fld.name, fld.name)
-            defaults[key] = val
-        return defaults
+        missing = _missing_provider_fields(ws_prov)
+        if missing:
+            raise ValueError(
+                "workspace provider config incomplete; missing: " + ", ".join(missing)
+            )
+
+        resolved = asdict(ws_prov)
+        resolved["type"] = resolved.pop("ai_provider")
+        return resolved

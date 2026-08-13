@@ -21,7 +21,7 @@ from uuid import uuid4
 
 import httpx
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from supernova_core.utils.security import check_loopback, check_ssrf
 
@@ -44,12 +44,42 @@ class HostMapping(BaseModel):
     ip: str
     host: str
 
+    @field_validator("ip", mode="before")
+    @classmethod
+    def _validate_ip(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise TypeError("ip must be a string")
+        value = v.strip()
+        try:
+            addr = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise ValueError("ip must be a valid IPv4 address") from exc
+        if addr.version != 4:
+            raise ValueError("IPv6 host mappings are not supported")
+        if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+            raise ValueError("loopback, link-local, and unspecified IPs are not allowed")
+        return value
+
     @field_validator("host")
     @classmethod
     def _normalize_host(cls, v: str) -> str:
         if not isinstance(v, str):
             raise TypeError("host must be a string")
-        return v.strip().lower()
+        value = v.strip().lower()
+        if not value or any(ch in value for ch in ("/", ":", "?", "#", "*", "@")):
+            raise ValueError("host must be a bare hostname without protocol, port, path, or wildcard")
+        if any(ch.isspace() for ch in value):
+            raise ValueError("host must not contain whitespace")
+        labels = value.rstrip(".").split(".")
+        if any(
+            not label
+            or label[0] == "-"
+            or label[-1] == "-"
+            or not all(ch.isalnum() or ch == "-" for ch in label)
+            for label in labels
+        ):
+            raise ValueError("host must be a valid hostname")
+        return value
 
 
 class HostProfile(BaseModel):
@@ -57,7 +87,22 @@ class HostProfile(BaseModel):
     id: str = ""
     name: str
     source_url: str | None = None
-    mappings: list[HostMapping] = []
+    mappings: list[HostMapping] = Field(default_factory=list)
+
+    @field_validator("source_url", mode="before")
+    @classmethod
+    def _validate_source_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise TypeError("source_url must be a string")
+        value = v.strip()
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            raise ValueError("source_url must be an absolute http(s) URL")
+        return value
     # 档案归属段:workspace(该 ws 私有)| system(.system 段,所有 ws 共享、只读,
     # 由 configs/*.yaml 启动 seed 产出)。向后兼容:旧档案默认 workspace。
     # scope 由存储位置权威决定(_read_segment 按段标记),落盘值仅供 round-trip。
@@ -65,9 +110,25 @@ class HostProfile(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
 
+    @model_validator(mode="after")
+    def _reject_conflicting_hosts(self) -> "HostProfile":
+        seen: dict[str, str] = {}
+        for mapping in self.mappings:
+            previous = seen.get(mapping.host)
+            if previous is not None and previous != mapping.ip:
+                raise ValueError(
+                    f"host {mapping.host!r} maps to multiple IPs: {previous} and {mapping.ip}"
+                )
+            seen[mapping.host] = mapping.ip
+        return self
+
 
 class AlreadyForked(Exception):
     """fork_from_system 时目标 ws 段已有同 profile.id(副本已存在),拒绝覆盖。"""
+
+
+class HostProfileRefreshEmpty(ValueError):
+    """source_url refresh succeeded but produced no usable mappings."""
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +174,18 @@ def parse_etc_hosts(text: str) -> tuple[list[HostMapping], list[str]]:
             warnings.append(f"L{lineno}: {raw!r} 非合法 IP")
             continue
         for host in parts[1:]:
-            mappings.append(HostMapping(ip=ip, host=host))
+            try:
+                mapping = HostMapping(ip=ip, host=host)
+            except (TypeError, ValueError):
+                warnings.append(f"L{lineno}: {raw!r} 主机名或 IP 不合法")
+                continue
+            previous = next((m for m in mappings if m.host == mapping.host), None)
+            if previous is not None and previous.ip != mapping.ip:
+                warnings.append(
+                    f"L{lineno}: {mapping.host!r} 重复映射到不同 IP，已跳过"
+                )
+                continue
+            mappings.append(mapping)
     return mappings, warnings
 
 
@@ -183,7 +255,10 @@ async def _http_get_hosts(url: str, timeout: int = 15) -> str:
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
         r = await c.get(url)
         r.raise_for_status()
-        return r.text
+        text = r.text
+        if len(text.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("HOST provider response exceeds 1 MiB")
+        return text
 
 
 async def fetch_and_parse_hosts(
@@ -213,6 +288,7 @@ class HostProfileStore:
 
     def __init__(self, workspaces_dir: Path):
         self._workspaces_dir = Path(workspaces_dir).resolve()
+        self._refresh_warnings: dict[tuple[str, str], list[str]] = {}
 
     def _path(self, ws: str) -> Path:
         _validate_ws_segment(ws)
@@ -327,17 +403,31 @@ class HostProfileStore:
         if profile is None:
             return None
         if not profile.source_url:
+            self._refresh_warnings.pop((ws, pid), None)
             return profile
         try:
-            mappings, _warnings = await fetch_and_parse_hosts(profile.source_url)
+            mappings, warnings = await fetch_and_parse_hosts(profile.source_url)
+            if not mappings:
+                raise HostProfileRefreshEmpty(
+                    f"HOST profile {pid} refresh returned no valid mappings"
+                )
         except Exception as e:  # noqa: BLE001 —— best-effort:任何异常都保留快照
+            if isinstance(e, HostProfileRefreshEmpty):
+                self._refresh_warnings[(ws, pid)] = [str(e)]
+                raise
+            self._refresh_warnings[(ws, pid)] = [f"refresh failed: {e}"]
             _log.warning(
                 "host-profile refresh %s/%s from %s failed: %s",
                 ws, pid, profile.source_url, e)
             return profile
+        self._refresh_warnings[(ws, pid)] = list(warnings)
         profile.mappings = mappings
         profile.updated_at = _now()
         return self.upsert_profile(ws, profile)
+
+    def refresh_warnings(self, ws: str, pid: str) -> list[str]:
+        """Return diagnostics from the most recent refresh attempt."""
+        return list(self._refresh_warnings.get((ws, pid), []))
 
     @staticmethod
     def _derive_name_from_url(url: str) -> str:

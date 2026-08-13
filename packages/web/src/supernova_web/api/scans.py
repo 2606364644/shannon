@@ -76,6 +76,10 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     status = idx._status_of(scan_dir, mgr.get_status(scan_dir))
     combined = data.get("combined")
     bb_phase = data.get("bb_phase")
+    host_config = data.get("host_config") or {}
+    host_enabled = bool(host_config.get("enabled")) if isinstance(host_config, dict) else False
+    host_source = host_config.get("source") if host_enabled else None
+    host_mappings = host_config.get("mappings") if isinstance(host_config, dict) else {}
     return {
         "web_url": mgr.get_web_url(scan_dir),
         "repo_path": data.get("repo_path"),
@@ -93,6 +97,11 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "source_repo": data.get("source_repo"),
         "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
         "authentication": _read_auth_config(scan_dir),
+        # HOST 来源仅用于新建扫描重跑预填；mapping 内容不随详情暴露。
+        "host_profile_id": host_config.get("profile_id") if host_source == "profile" else None,
+        "host_url": host_config.get("source_url") if host_source == "url" else None,
+        "host_source": host_source,
+        "host_mapping_count": len(host_mappings) if isinstance(host_mappings, dict) else 0,
         # 组合扫描字段 + 进度（spec §6.2/§9.2，2026-08-13 Task 1）：
         # combined/bb_phase/bb_reason 透传 session.json；progress_pct 三阶段加权预算；
         # expected_agents/completed_agents 是进度分母/分子（list_scans 已透传，详情一并给）。

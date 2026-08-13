@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 
 from supernova_web.auth.dependencies import workspace_member, workspace_manager
 from supernova_web.components.host_profile_store import (
     AlreadyForked,
     HostMapping,
     HostProfile,
+    HostProfileRefreshEmpty,
     HostProfileStore,
     fetch_and_parse_hosts,
 )
@@ -50,7 +52,10 @@ async def create_profile(ws: str, payload: dict, request: Request,
     # 唯一性:ws 内 name 唯一(不含 .system 段,只看 ws 自有)
     if any(p.name == payload.get("name") for p in store._read_segment(ws)):
         raise HTTPException(422, f"档案名已存在: {payload.get('name')}")
-    profile = store.upsert_profile(ws, _build_profile(payload))
+    try:
+        profile = store.upsert_profile(ws, _build_profile(payload))
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise HTTPException(422, f"HOST 档案映射无效: {exc}") from exc
     return profile.model_dump(mode="json")
 
 
@@ -91,11 +96,16 @@ async def update_profile(ws: str, pid: str, payload: dict, request: Request,
     if existing.scope == "system":
         raise HTTPException(403, "系统档案只读,请修改 configs 文件后重启")
     # 字段覆盖(局部更新兼容:payload 缺省 → 保留原值)
-    existing.name = payload.get("name", existing.name)
-    existing.source_url = payload.get("source_url", existing.source_url)
-    if "mappings" in payload:
-        existing.mappings = [HostMapping(**m) for m in payload["mappings"]]
-    store.upsert_profile(ws, existing)
+    try:
+        candidate = existing.model_dump(mode="json")
+        candidate["name"] = payload.get("name", existing.name)
+        candidate["source_url"] = payload.get("source_url", existing.source_url)
+        if "mappings" in payload:
+            candidate["mappings"] = payload["mappings"]
+        validated = HostProfile.model_validate(candidate)
+        store.upsert_profile(ws, validated)
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise HTTPException(422, f"HOST 档案映射无效: {exc}") from exc
     return {"ok": True}
 
 
@@ -148,5 +158,8 @@ async def refresh_profile(ws: str, pid: str, request: Request,
         raise HTTPException(404, "HOST 档案不存在")
     if existing.scope == "system":
         raise HTTPException(403, "系统档案只读,请 fork 后刷新副本")
-    refreshed = await store.refresh(ws, pid)
+    try:
+        refreshed = await store.refresh(ws, pid)
+    except HostProfileRefreshEmpty as exc:
+        raise HTTPException(422, f"HOST 刷新后没有有效 mapping: {exc}") from exc
     return refreshed.model_dump(mode="json")
