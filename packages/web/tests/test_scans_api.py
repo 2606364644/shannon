@@ -85,6 +85,46 @@ def test_get_scan_detail(authed_client, tmp_workspaces):
     assert d["authentication"] is None
 
 
+# ── 版本化黑盒 run 透传 + run 级路由（T12，spec §7.1 #9）──────────────────────
+
+def test_scan_detail_includes_bb_runs(authed_client, tmp_workspaces):
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="completed")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    detail = authed_client.get("/api/workspaces/WS/scans/s1").json()
+    assert detail["combined"] is True
+    assert detail["latest_bb_run"] == "run-1"
+    assert detail["bb_runs"][0]["run_id"] == "run-1"
+
+
+def test_list_blackbox_runs_route(authed_client, tmp_workspaces):
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    store.create_blackbox_run("WS", "s1")
+    runs = authed_client.get("/api/workspaces/WS/scans/s1/blackbox-runs").json()
+    assert [r["run_id"] for r in runs] == ["run-1", "run-2"]
+
+
+def test_blackbox_run_detail_route(authed_client, tmp_workspaces):
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    store.update_blackbox_run("WS", "s1", "run-1", phase="running", status="running")
+    rd = authed_client.get("/api/workspaces/WS/scans/s1/blackbox-runs/run-1").json()
+    assert rd["run_id"] == "run-1"
+    assert rd["bb_phase"] == "running"
+
+
+def test_blackbox_run_detail_404(authed_client, tmp_workspaces):
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    r = authed_client.get("/api/workspaces/WS/scans/s1/blackbox-runs/run-9")
+    assert r.status_code == 404
+
+
 def test_get_scan_detail_rerun_preset_blackbox(authed_client, tmp_workspaces):
     """黑盒 _scan_detail 返 reuse_whitebox_scan_id + authentication（读 scan-config.yaml）。"""
     bb_dir = _make_scan(tmp_workspaces, "WS", scan_id="bb1", scan_type="blackbox",

@@ -111,6 +111,9 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "progress_pct": _compute_progress_pct(status, combined, bb_phase, data),
         "expected_agents": data.get("expected_agents") or {},
         "completed_agents": data.get("completed_agents") or [],
+        # 版本化黑盒 run（spec §5.2）：任务级索引 bb_runs[] + latest_bb_run（纯白盒为 None/[]）。
+        "bb_runs": data.get("bb_runs"),
+        "latest_bb_run": data.get("latest_bb_run"),
     }
 
 
@@ -208,6 +211,26 @@ async def list_scans(ws: str, request: Request, _: User = Depends(workspace_memb
 @router.get("/{ws}/scans/{scan_id}")
 async def get_scan(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
     return _scan_detail(request, ws, scan_id, _scan_dir_or_404(request, ws, scan_id))
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs")
+async def list_blackbox_runs(ws: str, scan_id: str, request: Request,
+                             _: User = Depends(workspace_member)) -> list:
+    """列该白盒任务的版本化黑盒 run（从任务 session bb_runs[]，非扫盘）。"""
+    _scan_dir_or_404(request, ws, scan_id)  # scan 存在性 + 路径校验
+    return _store(request).list_blackbox_runs(ws, scan_id)
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}")
+async def blackbox_run_detail(ws: str, scan_id: str, run_id: str, request: Request,
+                              _: User = Depends(workspace_member)) -> dict:
+    """单个 run 详情（读 run 级 session.json：bb_phase/bb_reason/status/...）。"""
+    run_dir = _store(request).get_blackbox_run_dir(ws, scan_id, run_id)
+    if run_dir is None:
+        raise HTTPException(404, "run 不存在")
+    from supernova_core.session import SessionManager
+    data = SessionManager(run_dir.parent).get_session_data(run_dir)
+    return {"run_id": run_id, **data}
 
 
 @router.get("/{ws}/scans/{scan_id}/deliverables")
