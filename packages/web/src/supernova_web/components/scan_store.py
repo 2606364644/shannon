@@ -426,7 +426,13 @@ class ScanStore:
         data = task_mgr.get_session_data(wb_dir)
         runs = [r for r in (data.get("bb_runs") or []) if r.get("run_id") != run_id]
         latest = runs[-1]["run_id"] if runs else None
-        task_mgr.update_session(wb_dir, {"bb_runs": runs, "latest_bb_run": latest})
+        patch: dict = {"bb_runs": runs, "latest_bb_run": latest}
+        # 删光最后一个 run 时对称回滚 create_blackbox_run 设的组合标记（combined=True +
+        # bb_phase/bb_reason）：否则留 combined=True + bb_runs=[] 的名存实亡态，旧前端仍按
+        # 组合卡渲染展开按钮（spec §6.2 combined 语义＝任务下确有黑盒 run）。
+        if not runs:
+            patch.update({"combined": False, "bb_phase": None, "bb_reason": None})
+        task_mgr.update_session(wb_dir, patch)
         return True
 
     def _gen_scan_id(self, scans_dir: Path, repo_path: str,

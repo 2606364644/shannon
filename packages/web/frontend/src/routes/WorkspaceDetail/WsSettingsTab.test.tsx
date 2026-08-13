@@ -88,4 +88,79 @@ describe("WsSettingsTab", () => {
     await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
     expect(screen.queryByText("wsConfig.save")).toBeNull();
   });
+
+  it("渲染可用配置项词典（生效 + 进程级）", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    // 生效类（ws 覆盖生效）
+    expect(screen.getByText("SUPERNOVA_AI_PROVIDER")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_OPENAI_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_MAX_TURNS")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_ADAPTIVE_THINKING")).toBeInTheDocument();
+    expect(screen.getByText("GITLAB_TOKEN")).toBeInTheDocument();
+    // 进程级（仅全局生效）
+    expect(screen.getByText("SUPERNOVA_MAX_CONCURRENT")).toBeInTheDocument();
+    expect(screen.getByText("CLAUDE_CODE_MAX_OUTPUT_TOKENS")).toBeInTheDocument();
+  });
+
+  it("点击「填入模板」→ textarea 注入注释模板", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.keys.insertTemplate")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("wsConfig.keys.insertTemplate"));
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("wsConfig.keys.template"));
+  });
+
+  it("点击生效 key → 注入 KEY=默认值 到 textarea", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("SUPERNOVA_MAX_TURNS"));
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=120"));
+  });
+
+  it("点击凭据 key → 注入空值(等用户填)", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("SUPERNOVA_OPENAI_API_KEY"));
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_OPENAI_API_KEY="));
+    // 不应被填入任何默认值
+    expect(ta.value).not.toMatch(/SUPERNOVA_OPENAI_API_KEY=\S/);
+  });
+
+  it("已存在的 key 再点击 → 不重复注入", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "SUPERNOVA_MAX_TURNS=50\n" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("SUPERNOVA_MAX_TURNS"));
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    // 仍是原值，未追加第二行
+    expect(ta.value).toBe("SUPERNOVA_MAX_TURNS=50\n");
+    expect((ta.value.match(/SUPERNOVA_MAX_TURNS=/g) || []).length).toBe(1);
+  });
 });

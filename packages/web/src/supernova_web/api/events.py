@@ -8,8 +8,10 @@ api/scans.py，调本模块的 build_scan_events_response。
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
+import aiofiles
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
@@ -42,6 +44,29 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
 
     async def gen():
         queue: asyncio.Queue = asyncio.Queue()
+
+        # 组合扫描 precheck(auth-validation 预验证)事件在独立 authcheck-events.ndjson(刻意隔离,
+        # 见 scan_manager._run_precheck:预验证 finalize 会写 scan_end,混入主 events 会提前关流)。
+        # 先 dump 其历史让 precheck 过程在实时页可见(否则 precheck 失败/白盒未启动时实时页只剩
+        # scan_end → 空白)。authcheck 的 scan_end 必须**丢弃**:前端 useEventSource 见 scan_end 即
+        # 关流,而它是预验证 finalize 非主扫描结束;authcheck 事件不带 SSE id(重连重放,不污染主
+        # events 的 Last-Event-ID 续传)。
+        authcheck = scan_dir / "authcheck-events.ndjson"
+        if authcheck.exists():
+            async with aiofiles.open(authcheck, "rb") as fh:
+                content = (await fh.read()).decode("utf-8", "replace")
+            for line in content.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ac_data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ac_data.get("type") == "scan_end":
+                    continue  # 丢弃 authcheck scan_end,防提前关流
+                await queue.put(EventTailer.encode_sse(ac_data, None))
+
         tailer = EventTailer(ndjson)
 
         async def on_event(data: dict, event_id: int):

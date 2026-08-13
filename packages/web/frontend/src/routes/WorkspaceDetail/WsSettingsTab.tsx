@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { AlertTriangle, LayoutTemplate } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { getWsConfig, putWsConfig, type WsConfigWarnings } from "@/api/wsConfig";
 import { getMembers } from "@/api/members";
@@ -20,6 +21,113 @@ const PLACEHOLDER = [
   "SUPERNOVA_OPENAI_MEDIUM_MODEL=glm-5.2-coder",
   "SUPERNOVA_OPENAI_SMALL_MODEL=glm-5.2-coder",
 ].join("\n");
+
+type KeyKind = "str" | "int" | "bool";
+interface CfgKey {
+  key: string;
+  kind: KeyKind;
+  // 注入到左侧编辑框时使用的默认值；凭据类留空字符串（等用户填值）。
+  defaultValue: string;
+}
+interface CfgGroup {
+  titleKey: string;
+  keys: CfgKey[];
+}
+
+// 生效类：ws 级覆盖真生效（存 config.yaml）。与后端 ws_env_codec.ENV_TO_FIELD 对齐。
+// 默认值与后端 ws_config_store.DEFAULT_WS_* 对齐；凭据类（API key / token）留空等用户填。
+const EFFECTIVE_GROUPS: CfgGroup[] = [
+  {
+    titleKey: "wsConfig.keys.groups.engine",
+    keys: [
+      { key: "SUPERNOVA_AI_PROVIDER", kind: "str", defaultValue: "openai_compatible" },
+      { key: "SUPERNOVA_OPENAI_BASE_URL", kind: "str", defaultValue: "https://llm-proxy.futuoa.com/v1" },
+      { key: "SUPERNOVA_OPENAI_API_KEY", kind: "str", defaultValue: "" },
+    ],
+  },
+  {
+    titleKey: "wsConfig.keys.groups.models",
+    keys: [
+      { key: "SUPERNOVA_MODEL", kind: "str", defaultValue: "glm-5.2-coder" },
+      { key: "SUPERNOVA_OPENAI_SMALL_MODEL", kind: "str", defaultValue: "glm-5.2-coder" },
+      { key: "SUPERNOVA_OPENAI_MEDIUM_MODEL", kind: "str", defaultValue: "glm-5.2-coder" },
+      { key: "SUPERNOVA_OPENAI_LARGE_MODEL", kind: "str", defaultValue: "glm-5.2-coder" },
+    ],
+  },
+  {
+    titleKey: "wsConfig.keys.groups.runtime",
+    keys: [
+      { key: "SUPERNOVA_MAX_TURNS", kind: "int", defaultValue: "120" },
+      { key: "SUPERNOVA_ADAPTIVE_THINKING", kind: "bool", defaultValue: "true" },
+    ],
+  },
+  {
+    titleKey: "wsConfig.keys.groups.git",
+    keys: [
+      { key: "GITLAB_USER", kind: "str", defaultValue: "" },
+      { key: "GITLAB_TOKEN", kind: "str", defaultValue: "" },
+    ],
+  },
+];
+
+// 进程级：worker 共享 os.environ 读取，ws 覆盖不生效（需全局配）。与 INEFFECTIVE_KEYS 对齐。
+const PROCESS_KEYS: CfgKey[] = [
+  { key: "SUPERNOVA_MAX_CONCURRENT", kind: "str", defaultValue: "4" },
+  { key: "SUPERNOVA_PRICING_OVERRIDE", kind: "str", defaultValue: "" },
+  { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "str", defaultValue: "true" },
+  { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "str", defaultValue: "true" },
+  { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
+  { key: "CLAUDE_CODE_MAX_OUTPUT_TOKENS", kind: "str", defaultValue: "32000" },
+];
+
+function kindColor(kind: KeyKind): string | undefined {
+  if (kind === "int") return "hsl(var(--c-cyan))";
+  if (kind === "bool") return "hsl(var(--c-green))";
+  return undefined; // str 走 muted
+}
+
+function KeyRow({
+  cfgKey,
+  processLevel,
+  onInject,
+}: {
+  cfgKey: CfgKey;
+  processLevel?: boolean;
+  onInject: (k: CfgKey) => void;
+}) {
+  const isCredential = cfgKey.defaultValue === "";
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onInject(cfgKey)}
+        title={`${cfgKey.key}=${cfgKey.defaultValue}`}
+        className="group flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-accent"
+      >
+        <span
+          className="truncate font-mono text-xs"
+          style={processLevel ? { color: "hsl(var(--c-amber))" } : undefined}
+        >
+          {cfgKey.key}
+        </span>
+        {isCredential && (
+          <span
+            className="shrink-0 font-mono text-[10px]"
+            style={{ color: "hsl(var(--c-amber))" }}
+          >
+            ·
+          </span>
+        )}
+        <span
+          className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+          style={kindColor(cfgKey.kind) ? { color: kindColor(cfgKey.kind) } : undefined}
+        >
+          {cfgKey.kind}
+        </span>
+      </button>
+    </li>
+  );
+}
 
 export default function WsSettingsTab() {
   const { workspace: ws = "" } = useParams<{ workspace: string }>();
@@ -64,34 +172,128 @@ export default function WsSettingsTab() {
     }
   }
 
+  // 点击配置项 → 把 `KEY=默认值` 注入左侧编辑框（凭据类留空等用户填）。
+  // 已存在同名 key（含被 # 注释的行）则跳过，避免覆盖用户已填值。
+  function injectKey(k: CfgKey) {
+    setEnvText((prev) => {
+      // 行首容忍前导空白与可选 # 注释；匹配 `KEY=`。
+      const existsRe = new RegExp(`^\\s*#?\\s*${k.key}=`, "m");
+      if (existsRe.test(prev)) {
+        toast.info(t("wsConfig.keys.exists", { key: k.key }));
+        return prev;
+      }
+      const line = `${k.key}=${k.defaultValue}`;
+      toast.success(t("wsConfig.keys.inserted", { key: k.key }));
+      if (!prev.trim()) return line;
+      return `${prev.replace(/\n$/, "")}\n${line}`;
+    });
+  }
+
+  // 把完整模板以注释行（# 开头）注入文本区。注释行后端 parse 时忽略（ws_env_codec），
+  // 故不会污染配置；用户删除行首 # 并填值即生效。
+  function insertTemplate() {
+    const tpl = t("wsConfig.keys.template");
+    setEnvText((prev) => {
+      if (!prev.trim()) return tpl;
+      return `${prev.replace(/\n$/, "")}\n\n${tpl}`;
+    });
+    toast.success(t("wsConfig.keys.templateInserted"));
+  }
+
   if (!loaded) return null;
   return (
     <Card>
-      <CardHeader><CardTitle className="font-semibold tracking-tight text-base">{t("wsConfig.title")}</CardTitle></CardHeader>
-      <CardContent className="max-w-xl space-y-4">
+      <CardHeader>
+        <CardTitle className="font-semibold tracking-tight text-base">{t("wsConfig.title")}</CardTitle>
         <p className="text-sm text-muted-foreground">{t("wsConfig.subtitle")}</p>
-        <div className="space-y-2">
-          <Label htmlFor="ws-env-text">{t("wsConfig.envText")}</Label>
-          <Textarea
-            id="ws-env-text"
-            aria-label={t("wsConfig.envText")}
-            className="font-mono text-sm min-h-[280px]"
-            value={envText}
-            disabled={!canEdit}
-            placeholder={PLACEHOLDER}
-            onChange={(e) => setEnvText(e.target.value)}
-          />
-        </div>
-        {warnings && (
-          <div className="space-y-1 text-sm text-amber-600 dark:text-amber-500">
-            {warnings.ineffective.length > 0 && (
-              <p>{t("wsConfig.warnings.ineffective")}: {warnings.ineffective.join(", ")}</p>
-            )}
-            {warnings.unknown.length > 0 && (
-              <p>{t("wsConfig.warnings.unknown")}: {warnings.unknown.join(", ")}</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          {/* 编辑区 */}
+          <div className="min-w-0 space-y-2">
+            <Label htmlFor="ws-env-text">{t("wsConfig.envText")}</Label>
+            <Textarea
+              id="ws-env-text"
+              aria-label={t("wsConfig.envText")}
+              className="font-mono text-sm min-h-[460px]"
+              value={envText}
+              disabled={!canEdit}
+              placeholder={PLACEHOLDER}
+              onChange={(e) => setEnvText(e.target.value)}
+            />
+            {warnings && (
+              <div className="space-y-1 text-sm text-amber-600 dark:text-amber-500">
+                {warnings.ineffective.length > 0 && (
+                  <p>{t("wsConfig.warnings.ineffective")}: {warnings.ineffective.join(", ")}</p>
+                )}
+                {warnings.unknown.length > 0 && (
+                  <p>{t("wsConfig.warnings.unknown")}: {warnings.unknown.join(", ")}</p>
+                )}
+              </div>
             )}
           </div>
-        )}
+
+          {/* 配置词典面板：把后端 key 分类（生效 / 进程级）做成始终可见、可交互的清单 */}
+          <aside className="space-y-4 rounded-lg border bg-card/60 p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto">
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium">{t("wsConfig.keys.panelTitle")}</h3>
+              <p className="text-xs text-muted-foreground">{t("wsConfig.keys.panelDesc")}</p>
+            </div>
+            {canEdit && (
+              <Button variant="outline" size="sm" className="w-full" onClick={insertTemplate}>
+                <LayoutTemplate className="size-3.5" />
+                {t("wsConfig.keys.insertTemplate")}
+              </Button>
+            )}
+            <p className="text-xs text-muted-foreground">{t("wsConfig.keys.kindHint")}</p>
+
+            {/* 生效组 */}
+            <div className="space-y-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("wsConfig.keys.effectiveTitle")}
+              </div>
+              {EFFECTIVE_GROUPS.map((g) => (
+                <div key={g.titleKey} className="space-y-1">
+                  <div className="text-xs font-medium text-foreground/80">{t(g.titleKey)}</div>
+                  <ul>
+                    {g.keys.map((k) => (
+                      <KeyRow
+                        key={k.key}
+                        cfgKey={k}
+                        onInject={injectKey}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            {/* 进程级组：ws 级不生效，琥珀警示 */}
+            <div
+              className="space-y-2 border-t pt-3"
+              style={{ borderColor: "hsl(var(--c-amber) / 0.4)" }}
+            >
+              <div
+                className="flex items-center gap-1.5 text-xs font-semibold"
+                style={{ color: "hsl(var(--c-amber))" }}
+              >
+                <AlertTriangle className="size-3.5" />
+                {t("wsConfig.keys.processTitle")}
+              </div>
+              <p className="text-xs text-muted-foreground">{t("wsConfig.keys.processDesc")}</p>
+              <ul>
+                {PROCESS_KEYS.map((k) => (
+                  <KeyRow
+                    key={k.key}
+                    cfgKey={k}
+                    processLevel
+                    onInject={injectKey}
+                  />
+                ))}
+              </ul>
+            </div>
+          </aside>
+        </div>
         {canEdit && (
           <Button onClick={onSave} disabled={busy}>{t("wsConfig.save")}</Button>
         )}

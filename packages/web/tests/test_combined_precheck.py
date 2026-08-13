@@ -219,6 +219,8 @@ async def test_start_combined_precheck_receives_same_host_snapshot(mgr, monkeypa
          patch.object(mgr, "_submit_whitebox", new=AsyncMock(return_value=object())), \
          patch.object(mgr, "_combined_orchestrator", new=AsyncMock()):
         await mgr.start(req)
+        # 异步预验证（spec §8.2）：precheck 在后台 _combined_kickoff 里跑，drain 后再断言 call_args。
+        await _drain_bg_tasks(mgr)
 
     assert precheck.call_args.kwargs["host_mappings"] == {"target.example": "10.0.0.2"}
 

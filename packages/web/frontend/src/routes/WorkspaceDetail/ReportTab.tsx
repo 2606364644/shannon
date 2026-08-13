@@ -8,6 +8,8 @@ import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RunFailureBanner, isRunFailureStatus } from "./runStatus";
+import type { BlackboxRunSummary } from "@/api/types";
 
 type Track = "whitebox" | "blackbox" | "combined";
 
@@ -66,7 +68,10 @@ function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
   }
   if (!md) return <Empty title={t("workspaceDetail.report.emptyTitle")} hint={t("workspaceDetail.report.emptyHint")} />;
   return (
-    <div className="rounded-md border border-border bg-card p-4">
+    // 报告是长文档型页面：外壳满宽（控制台风格）后，正文需可读字宽护栏，否则 prose max-w-none
+    // 会铺到 ~2300px 行太长。max-w-5xl(1024px) 居中 = 文档阅读标准做法，与 live/logs 满宽控制台
+    // 形成有意的对比。scan header/tabs 仍满宽（在 ReportTab 之外的 ScanDetail 层）。
+    <div className="mx-auto max-w-5xl rounded-md border border-border bg-card p-4">
       <MarkdownView markdown={md} />
     </div>
   );
@@ -76,8 +81,9 @@ function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
  * 2026-08-14）切到该 run 的 blackbox-runs/run-K 报告；白盒子 tab 仍 scan 级（共享）。 */
 function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
   const { t } = useTranslation();
-  const outletCtx = useOutletContext<{ selectedRun?: string | null }>();
+  const outletCtx = useOutletContext<{ selectedRun?: string | null; runSummary?: BlackboxRunSummary | null }>();
   const selectedRun = outletCtx?.selectedRun ?? null;
+  const runSummary = outletCtx?.runSummary ?? null;
   const [track, setTrack] = useState<Track>("combined");
   const [md, setMd] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -95,8 +101,13 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
       .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
   }, [ws, scanId, track, selectedRun]);
 
+  // 选中 run 终态失败且无可用报告 → 黑盒/融合子 tab 优先展示失败原因横幅（而非通用 Empty/Error）。
+  const showRunFailure = (track === "blackbox" || track === "combined")
+    && !!runSummary && isRunFailureStatus(runSummary.status) && !!runSummary.reason;
+
   return (
-    <div className="space-y-3">
+    // 同 SingleReport：组合报告三视图 + 正文统一收进可读字宽列（max-w-5xl 居中）。
+    <div className="mx-auto max-w-5xl space-y-3">
       <Tabs value={track} onValueChange={(v) => setTrack(v as Track)}>
         <TabsList>
           <TabsTrigger value="whitebox">{t("workspaceDetail.report.combined.tabWhitebox")}</TabsTrigger>
@@ -104,7 +115,9 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
           <TabsTrigger value="combined">{t("workspaceDetail.report.combined.tabCombined")}</TabsTrigger>
         </TabsList>
       </Tabs>
-      {err ? (
+      {showRunFailure ? (
+        <RunFailureBanner reason={runSummary!.reason} ws={ws} />
+      ) : err ? (
         <ErrorState message={t("workspaceDetail.report.loadError", { error: err })} />
       ) : loading ? (
         <div className="space-y-2">

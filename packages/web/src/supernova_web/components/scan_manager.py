@@ -54,6 +54,12 @@ class ScanRunning(Exception):
         super().__init__(f"扫描正在运行，请先取消再删除：{scan_id}")
 
 
+# run 级 session status 终态集合：非此集合（pending/running/precheck/None）= 在跑/待跑，
+# 删除被拒（ScanRunning）。与 scan 级 delete 的 running 口径对齐。
+_RUN_TERMINAL_STATUSES = frozenset({
+    "completed", "done", "failed", "skipped", "cancelled", "crashed", "killed"})
+
+
 class AuthValidationPending(Exception):
     """认证验证 workflow 仍在运行，结果未就绪（块2：get_result 非阻塞查询）。
 
@@ -220,6 +226,7 @@ class ScanManager:
 
             if req.type == "whitebox":
                 if req.url:
+                    # 组合扫描（whitebox + url）：先 dump 认证配置，据 config_path 决定同步/异步。
                     config_path = await self._dump_auth_config(req, ws, scan_dir)
                     host_mappings = self._host_config_mappings(host_config)
                     SessionManager(scan_dir.parent).update_session(scan_dir, {
@@ -230,6 +237,19 @@ class ScanManager:
                         "bb_auth_ref": self._snapshot_auth_ref(req),
                         "bb_phase": "precheck",
                     })
+                    if config_path:
+                        # 带认证 → precheck 登录目标站（可达数分钟）。异步化：写完 session
+                        # （bb_phase=precheck）后把 precheck → 白盒提交 → 接力编排 fire-and-forget
+                        # 到 _combined_kickoff，start 立即返回 scan_id。否则 POST /api/scan 阻塞
+                        # 致前端 submitting 卡死、不跳转。前端据 bb_phase=precheck 显「预验证中」
+                        # + 跳 live 页跟踪进度（live 页已 merge authcheck-events.ndjson）。
+                        kickoff = asyncio.create_task(self._combined_kickoff(
+                            scan_key, scan_dir, req, config_path, host_mappings,
+                            target, event_file))
+                        self._orchestrator_tasks[scan_key] = kickoff
+                        return ws, scan_id
+                    # 公开目标（无认证）→ config_path=None → _run_precheck 立即 True。
+                    # 走原同步路径（precheck 瞬时，不阻塞；保留提交失败抛异常的契约）。
                     ok = await self._run_precheck(
                         scan_dir, ws, scan_id, req.url, config_path,
                         host_mappings=host_mappings)
@@ -1275,6 +1295,23 @@ class ScanManager:
         self._store.delete_scan(ws, scan_id)
         return {"deleted": scan_id}
 
+    async def delete_blackbox_run(self, ws: str, wb_scan_id: str, run_id: str) -> dict | None:
+        """删单个黑盒 run（spec §7.1 #4，DELETE /blackbox-runs/{run_id} 的 manager 包装）。
+
+        运行中 run（run 级 session status 非终态）-> ScanRunning（端点转 409，先 cancel 再删）；
+        run 不存在 -> None（端点 404）。终态 -> store.delete_blackbox_run（rmtree run + combined +
+        移除 bb_runs[] 条目 + latest 回退）。删的是 latest 则 store 已回退到上一个 run。
+        """
+        run_dir = self._store.get_blackbox_run_dir(ws, wb_scan_id, run_id)
+        if run_dir is None:
+            return None
+        # 运行中拒删（同 scan 级 delete 的 ScanRunning 口径）：run 级 status 非终态 = 在跑/待跑。
+        data = SessionManager(run_dir.parent).get_session_data(run_dir)
+        if data.get("status") not in _RUN_TERMINAL_STATUSES:
+            raise ScanRunning(run_id)
+        self._store.delete_blackbox_run(ws, wb_scan_id, run_id)
+        return {"deleted": run_id}
+
     def _mark_owner(self, scan_dir: Path, owner: str) -> None:
         """标 scan session.json owner(web/host)。best-effort:子进程 MetricsTracker 用
         dict(existing) 浅拷贝保留 top-level key。owner 只服务 cancel 分轨诊断。"""
@@ -1580,14 +1617,81 @@ class ScanManager:
         await self._mark_cancelled(scan_dir)
         return {"cancelled": scan_id}
 
+    async def _combined_kickoff(self, scan_key: tuple[str, str], scan_dir: Path,
+                                req: ScanRequest, config_path: str | None,
+                                host_mappings: dict[str, str] | None,
+                                target: str | None, event_file: Path) -> None:
+        """组合扫描后台启动（spec §8.2 异步预验证）：precheck → 白盒提交 → 接力编排。
+
+        start() 组合分支把 precheck（登录目标站，可达数分钟）+ 白盒提交 + orchestrator 整体
+        fire-and-forget 到本 task，自身立即返回 scan_id（否则 POST /api/scan 阻塞致前端
+        submitting 卡死、不跳转）。_orchestrator_tasks[scan_key] 登记本 task，cancel/delete
+        经 _cancel_combined 取消本 task 即终止整条链。
+
+        流程（保留原同步路径语义，零行为变更仅异步化）：
+          - precheck fail → 标 bb_phase=failed/auth_failed + scan_end（白盒不跑，fail-fast）。
+          - precheck pass → 标 pending → 提交白盒 → 登记 _handles/_watch → await orchestrator
+            （串行接力：白盒完成 → 黑盒 run-1 → 融合报告）。
+          - CancelledError（cancel 路径）：向上抛出，finally 清理 _active_reqs/_orchestrator_tasks。
+          - 其他异常：_mark_submission_failed 标终态（与 start 的 except BaseException 同口径）。
+
+        _handles/_watch 登记挪到此（白盒提交后）：start 组合分支提前返回不再走 start 末尾的
+        统一登记。_orchestrator_tasks[scan_key] 登记本 kickoff task；orchestrator（await 内联）
+        自身 finally 也 pop 同一 key（幂等——pass 路径 orchestrator 完成时摘，kickoff finally
+        再摘为 no-op；precheck-fail 路径 orchestrator 未跑，kickoff finally 摘）。cancel 一个
+        task 即取消 precheck+白盒+接力全链。
+        """
+        ws, scan_id = scan_key
+        try:
+            ok = await self._run_precheck(
+                scan_dir, ws, scan_id, req.url, config_path,
+                host_mappings=host_mappings)
+            if not ok:
+                await self._mark_bb(scan_dir, "failed", "auth_failed")
+                await self._ensure_scan_end(scan_dir)
+                return
+            await self._mark_bb(scan_dir, "pending")
+            handle = await self._submit_whitebox(
+                target, ws, scan_id, scan_dir, event_file, req.url or "")
+            SessionManager(scan_dir.parent).update_session(
+                scan_dir, {"source_repo": req.source.value if req.source else None})
+            self._handles[scan_key] = handle
+            self._tasks[scan_key] = asyncio.create_task(
+                self._watch(scan_key, event_file, scan_dir))
+            # 串行 await orchestrator（不再 create_task）：cancel 本 task 即取消接力。
+            await self._combined_orchestrator(scan_key, handle, scan_dir, req)
+        except asyncio.CancelledError:
+            # cancel 路径（_cancel_combined 取消本 task）：向上抛出，终态由 _mark_cancelled 负责。
+            raise
+        except BaseException as exc:
+            # 白盒提交/orchestrator 异常：标终态（对齐 start 的 except BaseException）。
+            # _handles/_tasks 此时通常未登记（提交前抛）或 _watch finally 会清；兜底摘防泄漏。
+            self._handles.pop(scan_key, None)
+            self._tasks.pop(scan_key, None)
+            await self._mark_submission_failed(scan_dir, event_file, exc)
+        finally:
+            # _active_reqs：precheck-fail 路径未起 _watch，须在此清；pass 路径 _watch 的 finally
+            # 也会清（幂等）。_handles/_tasks 不在此清——pass 路径它们由 _watch 的 finally 拥有
+            # （kickoff finally 早于 _watch 退出，先 pop 会让 _watch 的 describe() 查不到 handle）。
+            self._active_reqs.pop(scan_key, None)
+            # _orchestrator_tasks（本 task 自身登记）正常完成/失败/cancel 都摘（cancel 路径
+            # _cancel_combined 已 pop，此处兜底幂等）。cancel 时不在此标终态——_cancel_combined/
+            # _mark_cancelled 负责。
+            self._orchestrator_tasks.pop(scan_key, None)
+
     async def _combined_orchestrator(self, scan_key: tuple[str, str], wb_handle: Any,
                                      scan_dir: Path, req: ScanRequest) -> None:
         """组合接力编排（spec §7.2）：await 白盒完成 → _run_blackbox_phase；try/except/finally
         统一经 _ensure_scan_end（幂等）收尾。
 
         ws 取自 scan_key[0]（修原 bug #4：曾误用 scan_dir.parent.name 致跨 ws 错配；scan_dir
-        在 scans/<id>/ 下，parent.name 是 scan_id 非 ws）。fire-and-forget（start 起
-        asyncio.create_task）；finally 自 pop _orchestrator_tasks。
+        在 scans/<id>/ 下，parent.name 是 scan_id 非 ws）。
+
+        调用方：① start() 公开目标组合分支（precheck 瞬时同步后 create_task 起本协程）；
+        ② _combined_kickoff（带认证 precheck pass 后 await 本协程）。两种调用下
+        _orchestrator_tasks[scan_key] 都最终指向本协程能被 cancel 的 task（① 直接登记本协程；
+        ② 登记的是 kickoff，但本协程是 kickoff 的 await 点，cancel kickoff 即取消本协程的
+        await），故 finally 自 pop _orchestrator_tasks 在两路径都幂等正确。
 
         scan_end 不变量（spec §7.4）：成功路径黑盒 finalize 已写 scan_end → _ensure_scan_end
         no-op；异常/跳过/提交失败 → _ensure_scan_end 补写防 _watch 永久 tail。绝不在此裸调
@@ -1597,7 +1701,26 @@ class ScanManager:
         run_id: str | None = None
         final_status = "completed"
         try:
-            await wb_handle.result()
+            wb_result = await wb_handle.result()
+            # 白盒正常返回 status=failed（部分 agent 失败，workflow 未 raise）：停止接力，不建黑盒 run。
+            # 防御 dict/dataclass 访问（照搬 :1044-1046 范式；真实 PipelineState 字段为 errors(list)/
+            # error_code，测试 mock 用 error 键）。raise 路径（workflow 级崩溃）仍由下方 except 兜底。
+            wb_status = (wb_result.get("status")
+                         if isinstance(wb_result, dict)
+                         else getattr(wb_result, "status", None))
+            if wb_status == "failed":
+                if isinstance(wb_result, dict):
+                    reason = (wb_result.get("error")
+                              or "; ".join(wb_result.get("errors") or [])
+                              or "whitebox workflow failed")
+                else:
+                    errs = getattr(wb_result, "errors", None) or []
+                    reason = ("; ".join(errs) if errs
+                              else (getattr(wb_result, "error_code", None)
+                                    or "whitebox workflow failed"))
+                await self._mark_bb(scan_dir, "failed", reason)
+                final_status = "failed"
+                return  # finally 走 _ensure_scan_end(failed) + pop _orchestrator_tasks
             # 版本化多 run（spec §7.2）：白盒完成后建 run-1（与手动 _add_blackbox_run
             # 同路径 → by-construction 一致），再 _run_blackbox_phase(run-1, -bb-1)。
             async with self._create_scan_lock:

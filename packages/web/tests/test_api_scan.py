@@ -75,7 +75,11 @@ def test_post_scan_202(_authed_app):
     tok = _csrf(client)
     r = client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok})
     assert r.status_code == 202
-    assert r.json() == {"workspace": "WSX", "scan_id": "20260727-120000"}
+    # bb_phase：组合扫描透传 "precheck"；FakeSM 不建真实 scan_dir → None。
+    body = r.json()
+    assert body["workspace"] == "WSX"
+    assert body["scan_id"] == "20260727-120000"
+    assert body.get("bb_phase") is None
     assert len(fake.started) == 1
 
 
@@ -143,7 +147,12 @@ def test_post_scan_workspace_field_name_contract(_authed_app):
                "url": "http://e", "workspace": "WSX"}
     r = client.post("/api/scan", json=body_ok, headers={"X-CSRF-Token": tok})
     assert r.status_code == 202, r.text
-    assert r.json() == {"workspace": "WSX", "scan_id": "20260727-120000"}
+    # bb_phase：组合扫描（whitebox+url+认证）异步预验证时透传 "precheck"；FakeSM 不建真实
+    # scan_dir → best-effort 读返 None。此处断言核心字段（workspace/scan_id）+ bb_phase 键存在。
+    body = r.json()
+    assert body["workspace"] == "WSX"
+    assert body["scan_id"] == "20260727-120000"
+    assert "bb_phase" in body and body["bb_phase"] is None
     assert len(fake.started) == 1
     # 关键断言：经 pydantic HTTP 序列化层后，ScanRequest.workspace 真的收到了值
     assert fake.started[0].workspace == "WSX"

@@ -18,7 +18,11 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <TopBar onOpenChangePwd={() => setCpOpen(true)} />
-      <main className="mx-auto max-w-[1400px] px-7 py-5">
+      {/* 满宽控制台布局：max-w-[2400px] 在 ≤2K 屏基本铺满（旧 1400 在宽屏居中留半屏白），
+          超宽屏（4K/带鱼）优雅居中。TopBar 内层用同一 max-w + px-7 保持左右边界对齐
+          （视觉同一列）。py-5 + TopBar h-12 = 5.5rem 是 live/logs 的 h-[calc(100dvh-5.5rem)]
+          依赖，勿改。 */}
+      <main className="mx-auto w-full max-w-[2400px] px-7 py-5">
         <Outlet />
       </main>
       {mustChange && (

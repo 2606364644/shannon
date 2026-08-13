@@ -427,39 +427,37 @@ export function ScanNewPage() {
           ))}
         </div>
 
-        {/* 表单区：白盒单栏保 max-w-2xl 可读密度；黑盒双栏 grid（左 42rem + 右 1fr）需满宽，
-            卡 max-w-2xl(672px) 会让右栏核心/占位被挤没（对齐 preview HTML 表单区无宽度限制）。 */}
+        {/* 表单区：白盒/黑盒均满宽卡（白盒旧 max-w-2xl 左贴致满宽卡右半空洞，已移除——
+            白盒改由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽）。 */}
         <div className="p-5">
-          <div className={type === "whitebox" ? "max-w-2xl" : ""}>
-            {isCorrelation ? (
-              <div className="space-y-3">
-                <YamlEditor
-                  value={f.yaml}
-                  onChange={(v) => set({ yaml: v })}
-                  onError={(m) => setYamlErr(m)}
-                />
-                <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
-                  {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
-                </div>
-              </div>
-            ) : (
-              <ScanFormFields
-                type={type}
-                f={f}
-                set={set}
-                sourceErr={sourceErr}
-                reuseErr={reuseErr}
-                urlErr={urlErr}
-                authErr={authErr}
-                hostErr={hostErr}
-                workspace={workspace}
-                wsList={wsList}
-                onWorkspaceChange={setWorkspace}
-                wsLoading={wsLoading}
-                presetReuseScanId={preset.reuseScanId}
+          {isCorrelation ? (
+            <div className="space-y-3">
+              <YamlEditor
+                value={f.yaml}
+                onChange={(v) => set({ yaml: v })}
+                onError={(m) => setYamlErr(m)}
               />
-            )}
-          </div>
+              <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
+                {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
+              </div>
+            </div>
+          ) : (
+            <ScanFormFields
+              type={type}
+              f={f}
+              set={set}
+              sourceErr={sourceErr}
+              reuseErr={reuseErr}
+              urlErr={urlErr}
+              authErr={authErr}
+              hostErr={hostErr}
+              workspace={workspace}
+              wsList={wsList}
+              onWorkspaceChange={setWorkspace}
+              wsLoading={wsLoading}
+              presetReuseScanId={preset.reuseScanId}
+            />
+          )}
         </div>
 
         {/* 底部操作栏 */}

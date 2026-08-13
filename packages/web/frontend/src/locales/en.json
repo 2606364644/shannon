@@ -617,14 +617,41 @@
         "segStatusFailed": "Failed",
         "segStatusSkipped": "Skipped"
       },
+      "progress": {
+        "whitebox": "Whitebox",
+        "blackbox": "Blackbox"
+      },
       "runs": {
         "view": "View",
         "select": "Select blackbox run",
         "latest": "Latest",
+        "statusFailed": "Failed",
+        "statusRunning": "Running",
+        "statusSkipped": "Skipped",
+        "statusCompleted": "Completed",
         "addBlackbox": "Add blackbox scan",
         "addBlackboxDesc": "Create a new blackbox run for this whitebox result",
         "addedSuccess": "Blackbox run created",
-        "addedFailed": "Failed to create blackbox run: {{error}}"
+        "addedFailed": "Failed to create blackbox run: {{error}}",
+        "delete": "Delete run",
+        "deleteConfirmTitle": "Delete blackbox run",
+        "deleteConfirmDesc": "This deletes all results for this blackbox run (report, deliverables, logs) and cannot be undone. Delete {{runId}}?",
+        "deleted": "Blackbox run {{runId}} deleted",
+        "deleteFailed": "Failed to delete blackbox run: {{error}}",
+        "deleteRunningHint": "Cancel the running run before deleting",
+        "bannerWsSettings": "Go to workspace settings",
+        "bannerRerunAuth": "Retry with new auth",
+        "reasonProviderMissing": {
+          "title": "Workspace LLM credentials not configured",
+          "hint": "This workspace is missing an LLM API key, so the blackbox run cannot start. Add the credentials in workspace settings, then run blackbox again."
+        },
+        "reasonAuthFailed": {
+          "title": "Target auth pre-check failed",
+          "hint": "Login to the target site failed. Check the credentials and retry with new auth."
+        },
+        "reasonGeneric": {
+          "title": "Blackbox run failed"
+        }
       }
     },
     "errorBoundary": {
@@ -771,58 +798,24 @@
     "title": "Workspace Config",
     "subtitle": "Edit env text (KEY=value) to override global provider config; unwritten keys fall back to global defaults.",
     "envText": "AI config (env text)",
-    "fields": {
-      "aiProvider": "AI Provider",
-      "apiKey": "API Key",
-      "baseUrl": "Base URL",
-      "model": "Model",
-      "smallModel": "Small model",
-      "mediumModel": "Medium model",
-      "largeModel": "Large model",
-      "maxTurns": "Max turns",
-      "adaptiveThinking": "Adaptive thinking",
-      "gitlabUser": "GitLab User",
-      "gitlabToken": "GitLab Token"
-    },
-    "sections": {
-      "engine": { "title": "AI engine & credentials", "desc": "Pick the AI engine that drives scans, and set its auth and endpoint." },
-      "models": { "title": "Models", "desc": "Tiered by activity cost; any tier left empty falls back to the general model." },
-      "runtime": { "title": "Runtime", "desc": "Tune the agent turn budget and thinking mode." },
-      "git": { "title": "Git access", "desc": "Credentials for cloning repos; blank falls back to global." }
-    },
-    "tiers": {
-      "small": "Light · recon / indexing",
-      "medium": "Standard · analysis",
-      "large": "Heavy · deep vuln work",
-      "fallback": "General fallback model (used when a tier is unset)"
-    },
-    "provenance": {
-      "inherit": "inherits global",
-      "override": "overridden",
-      "set": "configured",
-      "unset": "not configured"
-    },
-    "providerNote": {
-      "bedrock": "Bedrock region is set via global env and cannot be overridden per workspace.",
-      "vertex": "Vertex project_id / region is set via global env and cannot be overridden per workspace."
-    },
-    "summary": {
-      "overridden": "{{count}} overridden",
-      "none": "All inheriting global defaults"
-    },
-    "reset": "Reset to inherit",
-    "readonlyBanner": "You are read-only on this workspace; admin or manager role is required to edit.",
-    "dirtyHint": "Unsaved changes",
-    "discard": "Discard changes",
-    "loadFailed": "Failed to load config",
-    "retry": "Retry",
-    "apiKey": {
-      "configured": "Configured (••••), leave blank to keep",
-      "notConfigured": "Not configured (blank = fall back to global)"
-    },
-    "gitToken": {
-      "configured": "Configured (••••), leave blank to keep",
-      "notConfigured": "Not configured (blank = fall back to global)"
+    "keys": {
+      "panelTitle": "Available keys",
+      "panelDesc": "Click a key to insert it into the editor (defaults filled; fill in API key and other credentials yourself).",
+      "insertTemplate": "Insert full template",
+      "inserted": "Inserted {{key}}",
+      "exists": "{{key}} already exists, skipped",
+      "templateInserted": "Template inserted (# lines are comments; remove # and set the value to apply)",
+      "effectiveTitle": "Overrideable per workspace",
+      "processTitle": "Global only",
+      "processDesc": "These keys are read at worker process level; per-workspace overrides have no effect. Set them in global .env / .env.profiles.",
+      "kindHint": "Key names vary by engine: anthropic uses ANTHROPIC_*, openai_compatible uses SUPERNOVA_OPENAI_*.",
+      "groups": {
+        "engine": "Engine & endpoint",
+        "models": "Models",
+        "runtime": "Runtime",
+        "git": "Git access"
+      },
+      "template": "# ===== Workspace AI config (# lines are comments; remove # and set value to apply) =====\n# --- Engine & endpoint ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=your api key\n# --- Models ---\n#SUPERNOVA_MODEL=general fallback model\n#SUPERNOVA_OPENAI_SMALL_MODEL=light tier model\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=standard tier model\n#SUPERNOVA_OPENAI_LARGE_MODEL=heavy tier model\n# --- Runtime ---\n#SUPERNOVA_MAX_TURNS=120\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Git access ---\n#GITLAB_USER=your gitlab username\n#GITLAB_TOKEN=your token"
     },
     "save": "Save",
     "saved": "Configuration saved",
@@ -835,7 +828,6 @@
       "ineffective": "Process-level keys, not effective per-workspace (set in global .env)",
       "unknown": "Ignored unknown keys"
     },
-    "fallbackHint": "Blank = fall back to global default",
     "openSettings": "Workspace config"
   },
   "users": {

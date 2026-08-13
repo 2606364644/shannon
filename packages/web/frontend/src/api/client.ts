@@ -218,6 +218,11 @@ export const addBlackboxToWhitebox = (ws: string, scanId: string, body?: Partial
   apiPost<{ workspace: string; scan_id: string; run_id: string }>(
     `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs`, body ?? {});
 
+/** 删单个黑盒 run（DELETE /blackbox-runs/{run_id}，spec §7.1 #4）。运行中 run 后端返 409。 */
+export const deleteBlackboxRun = (ws: string, scanId: string, runId: string) =>
+  apiDelete<{ deleted: string }>(
+    `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}`);
+
 /** run 级报告 path（喂 apiGetText）。track=combined 读 combined/run-K/combined_report.md。 */
 export const blackboxRunReportPath = (
   ws: string, scanId: string, runId: string, track?: "blackbox" | "combined") =>

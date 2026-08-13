@@ -201,6 +201,13 @@ async def validate_authentication(
     # 2. Delete stale auth-state file(s) from prior run
     await cleanup_auth_state(workspace_path)
 
+    # 2b. Ensure the agent's sandbox cwd exists. Auth-validation has no real repo, so
+    # repo_path is a placeholder (default /tmp/shannon-auth-check) that is never
+    # pre-created — unlike whitebox/blackbox scans whose repo_path is a real repo
+    # (always present). Without this the bash tool's chdir fails on the first command
+    # (FileNotFoundError) and the agent deadlocks (2026-08-14 NodeGoat root cause).
+    Path(repo_path or "/tmp/shannon-auth-check").mkdir(parents=True, exist_ok=True)
+
     # ── Branch A: 无 accounts → 原 byte-identical 单次登录路径，不落 manifest ──
     if not accounts:
         state_file = auth_state_path(workspace_path)

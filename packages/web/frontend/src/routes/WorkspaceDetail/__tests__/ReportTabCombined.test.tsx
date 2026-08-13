@@ -116,7 +116,7 @@ describe("ScanDetail 组合扫描 - 两段时间线", () => {
     expect(screen.getByText(/黑盒段/)).toBeInTheDocument();
   });
 
-  it("步级 PhaseEvent 推进白盒段进度（recon 2/3）", async () => {
+  it("步级 PhaseEvent 推进顶部概览进度（recon 2/3）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(combinedScan)),
     );
@@ -127,7 +127,8 @@ describe("ScanDetail 组合扫描 - 两段时间线", () => {
       lastFakeES()!.emit(stepComplete("pre-recon", "recon"));
       lastFakeES()!.emit(stepComplete("route-map", "recon"));
     });
-    await waitFor(() => expect(screen.getByText("2/3")).toBeInTheDocument());
+    // 步级进度现由顶部 ScanProgressOverview 渲染（completed/total 计数，如「进度 2/3」）
+    await waitFor(() => expect(screen.getByText(/2\/3/)).toBeInTheDocument());
   });
 });
 
@@ -239,5 +240,41 @@ describe("DeliverablesTab 组合扫描 - 三桶", () => {
     // 各桶含对应文件名
     expect(screen.getByText("xss_exploitation_queue.json")).toBeInTheDocument();
     expect(screen.getByText("combined_report.md")).toBeInTheDocument();
+  });
+});
+
+// 嵌套 ScanDetail 父：ReportTab 的 runSummary 经 Outlet context 传入（spec 2026-08-14 可见性）。
+function renderDetailReport() {
+  return render(
+    <MemoryRouter initialEntries={["/p/ws/scans/c1/report"]}>
+      <Routes>
+        <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
+          <Route path="report" element={<ReportTab />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("ReportTab 失败 run 横幅", () => {
+  it("combined + 黑盒子 tab：run failed → 显失败原因横幅（非通用 empty）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json({
+        scan_type: "whitebox", status: "failed", repo_path: "/code",
+        workflow_id: "ws-c1", combined: true, bb_phase: "failed", progress_pct: 50,
+        latest_bb_run: "run-1",
+        bb_runs: [{ run_id: "run-1", status: "failed",
+          reason: "workspace provider config incomplete; missing: SUPERNOVA_OPENAI_API_KEY" }],
+      })),
+      // run 失败 → 无报告，黑盒/融合子 tab report 请求 404。
+      http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report",
+        () => new HttpResponse("", { status: 404 })),
+    );
+    renderDetailReport();
+    // 默认 combined track → 失败横幅。
+    expect(await screen.findAllByText(/工作区 LLM 凭据未配置/)).not.toHaveLength(0);
+    // 切到黑盒子 tab 仍显横幅（runSummary 经 outlet context 透传）。
+    fireEvent.click(await screen.findByRole("tab", { name: /黑盒报告/ }));
+    expect(await screen.findAllByText(/工作区 LLM 凭据未配置/)).not.toHaveLength(0);
   });
 });

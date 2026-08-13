@@ -33,7 +33,7 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
   const items: NavItem[] = NAV;
   return (
     <header data-testid="topbar" className="sticky top-0 z-40 border-b border-border bg-card print:static">
-      <div className="mx-auto flex h-12 max-w-[1400px] items-center gap-6 px-7">
+      <div className="mx-auto flex h-12 w-full max-w-[2400px] items-center gap-6 px-7">
         <Link to="/" className="flex items-center gap-1.5 font-semibold tracking-tight text-base">
           <BrandMark className="h-[1.15em] w-[1.15em] text-foreground" />
           <span>{brand}</span>

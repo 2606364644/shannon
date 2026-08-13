@@ -181,6 +181,9 @@ class ScanAccepted(BaseModel):
     workspace: str
     # T3: 1 ws : N scans 后 POST /api/scan 返回新 scan 的 scan_id（旧前端忽略仍可用）。
     scan_id: str | None = None
+    # 组合扫描预验证态（spec §8.2 异步预验证）：start 立即返回后 precheck 在后台跑，
+    # 此时 bb_phase="precheck"；前端据此显「预验证中」+ 跳 live 页跟踪。纯白盒/黑盒为 None。
+    bb_phase: str | None = None
 
 
 class ErrorOut(BaseModel):

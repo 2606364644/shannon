@@ -61,3 +61,40 @@ async def test_sse_404_unknown_scan(_authed_cookies, tmp_workspaces):
     async with httpx.AsyncClient(transport=transport, base_url="http://t", cookies=cookies) as client:
         r = await client.get("/api/workspaces/E/scans/nope/events")
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sse_merges_authcheck_precheck_events(_authed_cookies, tmp_workspaces):
+    """组合扫描 precheck(auth-validation 预验证)事件在独立 authcheck-events.ndjson(刻意隔离,
+    scan_manager._run_precheck)。实时页合并显示 precheck 过程(authcheck 历史先 dump),但其
+    scan_end 必须丢弃——前端 useEventSource 见 scan_end 就关流,而 authcheck 的 scan_end 是预验证
+    finalize 写、非主扫描结束;主 events 的 scan_end 才正常关流。
+    (2026-08-14:precheck 失败/白盒不跑时实时页空白的可观测性修复)"""
+    app, cookies = _authed_cookies
+    scan_dir = _make_scan(tmp_workspaces)
+    # 主 events:precheck 失败场景只有 scan_end(白盒从未 submit)
+    (scan_dir / "events.ndjson").write_text(
+        json.dumps({"type": "scan_end", "ts": "t2", "category": "CONTROL", "status": "failed"}) + "\n"
+    )
+    # authcheck:precheck 全过程 + 自身 scan_end(AuthValidationWorkflow finalize 写)
+    (scan_dir / "authcheck-events.ndjson").write_text(
+        json.dumps({"type": "PhaseEvent", "ts": "t1", "category": "PHASE",
+                    "phase": "auth-validation", "event": "start"}) + "\n"
+        + json.dumps({"type": "scan_end", "ts": "t9", "category": "CONTROL", "status": "completed"}) + "\n"
+    )
+    transport = httpx.ASGITransport(app=app)
+    lines: list[str] = []
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=5, cookies=cookies) as client:
+        async with client.stream("GET", "/api/workspaces/E/scans/20260727-120000/events") as r:
+            assert r.status_code == 200
+            async for line in r.aiter_lines():
+                lines.append(line)
+                if line.startswith("data:") and '"scan_end"' in line:
+                    break
+    data_lines = [l for l in lines if l.startswith("data:")]
+    # precheck 过程事件透传到实时页(修复前:authcheck 不被读 → 空白)
+    assert any("auth-validation" in l for l in data_lines)
+    # authcheck 的 scan_end(completed)被丢弃,流里只剩主 scan_end(failed)——不提前关流
+    scan_end_lines = [l for l in data_lines if '"scan_end"' in l]
+    assert len(scan_end_lines) == 1
+    assert '"failed"' in scan_end_lines[0]

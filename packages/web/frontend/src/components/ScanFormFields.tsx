@@ -954,14 +954,17 @@ export function ScanFormFields({
   if (type === "whitebox") {
     return (
       <div className="flex flex-col gap-3.5">
-        <StepGroup step={1} title={t("scan.steps.workspace")}>
-          {workspaceField}
-        </StepGroup>
-
-        <StepGroup step={2} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
-          {repoPicker}
-          {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
-        </StepGroup>
+        {/* 宽屏 ① 工作区 / ② 代码源 并排双栏铺满卡宽（替代旧 ScanNewPage max-w-2xl 左贴致满宽卡右半空洞）；
+            窄屏(<lg)回落 2 步纵向堆叠 → 3 步顺序 ①②③ 移动端零回归。StepGroup 本体不动。 */}
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+          <StepGroup step={1} title={t("scan.steps.workspace")}>
+            {workspaceField}
+          </StepGroup>
+          <StepGroup step={2} title={t("scan.steps.source")} tag={t("scan.tags.localAudit")} tagClass="bg-secondary text-muted-foreground">
+            {repoPicker}
+            {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
+          </StepGroup>
+        </div>
 
         {/* Task 9：同时发起黑盒扫描（组合扫描）——开关 + 展开区 */}
         <StepGroup step={3} title={t("scan.combined.sectionTitle")} tag={t("scan.tags.optional")} tagClass="bg-secondary text-muted-foreground">

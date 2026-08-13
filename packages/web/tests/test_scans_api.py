@@ -33,8 +33,10 @@ class FakeSM:
         self.deleted = []
         self.rerun = []  # [(ws, scan_id, new_auth), ...]
         self.add_run = []  # [(ws, scan_id, req), ...]
+        self.deleted_runs = []  # [(ws, scan_id, run_id), ...]
         self.resume_exc = None
         self.delete_exc = None
+        self.delete_run_exc = None
 
     async def resume(self, ws, scan_id):
         if self.resume_exc:
@@ -59,6 +61,12 @@ class FakeSM:
     async def _add_blackbox_run(self, ws, scan_id, req=None):
         self.add_run.append((ws, scan_id, req))
         return "run-1"
+
+    async def delete_blackbox_run(self, ws, scan_id, run_id):
+        if self.delete_run_exc:
+            raise self.delete_run_exc
+        self.deleted_runs.append((ws, scan_id, run_id))
+        return None if run_id == "run-nope" else {"deleted": run_id}
 
     def active_pids(self):
         return {}
@@ -465,6 +473,45 @@ def test_delete_unknown_scan_404(authed_client, app_with_ws, tmp_workspaces):
     app_with_ws.state.scan_manager = fake
     tok = _csrf(authed_client)
     r = authed_client.delete("/api/workspaces/WS/scans/nope", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 404
+
+
+# ── 删单个黑盒 run（spec §7.1 #4，DELETE /blackbox-runs/{run_id}）──────────────
+
+def test_delete_blackbox_run_route(authed_client, app_with_ws, tmp_workspaces):
+    """DELETE /blackbox-runs/{run_id} 调 sm.delete_blackbox_run，返 {deleted:run_id}。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="completed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/s1/blackbox-runs/run-1",
+                             headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json() == {"deleted": "run-1"}
+    assert fake.deleted_runs == [("WS", "s1", "run-1")]
+
+
+def test_delete_blackbox_run_running_409(authed_client, app_with_ws, tmp_workspaces):
+    """运行中 run 删除 -> ScanRunning -> 409（先取消再删）。"""
+    from supernova_web.components.scan_manager import ScanRunning
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    fake = FakeSM()
+    fake.delete_run_exc = ScanRunning("run-1")
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/s1/blackbox-runs/run-1",
+                             headers={"X-CSRF-Token": tok})
+    assert r.status_code == 409
+
+
+def test_delete_blackbox_run_missing_404(authed_client, app_with_ws, tmp_workspaces):
+    """run 不存在 -> sm.delete_blackbox_run 返 None -> 404。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.delete("/api/workspaces/WS/scans/s1/blackbox-runs/run-nope",
+                             headers={"X-CSRF-Token": tok})
     assert r.status_code == 404
 
 

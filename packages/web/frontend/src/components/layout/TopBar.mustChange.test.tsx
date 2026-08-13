@@ -18,6 +18,9 @@ vi.mock("@/auth/AuthContext", () => ({
     refreshUser: vi.fn(),
   }),
 }));
+// TopBar 含 ThemeToggle（消费 useTheme）；本文件聚焦 badge 不测主题，stub useTheme
+// 避免必须 ThemeProvider（同 TopBar.test.tsx:13）。静态返回、不引用提升变量，不与 auth mock 冲突。
+vi.mock("@/lib/theme-context", () => ({ useTheme: () => ({ theme: "dark", setTheme: vi.fn() }) }));
 
 function renderTopBar() {
   return render(

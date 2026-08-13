@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, useLocation, useNavigate, Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Plus } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -11,11 +11,11 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { getScan, scanEventsUrl, rerunBlackbox, addBlackboxToWhitebox, ApiError } from "@/api/client";
-import { useEventSource } from "@/api/useEventSource";
-import type { SessionData, NdjsonEvent } from "@/api/types";
+import { getScan, rerunBlackbox, addBlackboxToWhitebox, deleteBlackboxRun, ApiError } from "@/api/client";
+import type { SessionData, BlackboxRunSummary } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { runStatusLabelKey, isRunFailureStatus, isRunTerminal, RunFailureBanner } from "./runStatus";
+import { ScanProgressOverview } from "./ScanProgressOverview";
 
 // per-scan 视图的 tab 集：只含 scan 级 tab（overview/report/deliverables/logs/live）。
 // repos/settings 是 ws 级，留在 ws 概览页入口，不进 scan tabs。
@@ -27,30 +27,10 @@ const SCAN_TABS = [
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
 ] as const;
 
-// === 组合扫描两段时间线（spec 2026-08-12 §9 / §11.3）===
-// 详情页（不同于列表卡片 Task 10 的展开态）：始终渲染白盒段 + 黑盒段两个时间段，
-// 靠 bb_phase 切段状态；步级 PhaseEvent 辅助推进（同 Task 10 derivePhaseSteps）。
-// 黑盒 failed 时段内附「续扫黑盒」按钮 → POST rerun-blackbox（spec §11.3）。
+// === 组合扫描段状态时间线（spec 2026-08-12 §9 / §11.3）===
+// 详情页：白盒段 + 黑盒段两个时间段的状态（靠 bb_phase 切段），黑盒 failed 时附「续扫黑盒」。
+// 步级 / Agent 实时进度在顶部 ScanProgressOverview（全 tab 常驻），此处不再重复渲染步级。
 // 纯白盒/纯黑盒（combined!=true）不渲染此组件——零回归。
-
-interface PhaseStepProgress { total: number; completed: number; }
-
-/** 从 events 推 phase→步级进度（保留插入顺序，同 Task 10 ScanList.derivePhaseSteps）。 */
-function derivePhaseSteps(events: NdjsonEvent[]): Array<[string, PhaseStepProgress]> {
-  const map = new Map<string, PhaseStepProgress>();
-  for (const ev of events) {
-    if (ev.type === "PhaseEvent" && ev.event === "start") {
-      if (!map.has(ev.phase)) {
-        const steps = Array.isArray(ev.steps) ? ev.steps : [];
-        map.set(ev.phase, { total: steps.length, completed: 0 });
-      }
-    } else if (ev.type === "StepEvent" && ev.event === "complete") {
-      const p = map.get(ev.phase);
-      if (p) p.completed += 1;
-    }
-  }
-  return Array.from(map.entries());
-}
 
 function segStatusKey(bbPhase: string | null | undefined, segment: "whitebox" | "blackbox"): string {
   // 白盒段：precheck/pending 进行中；之后（黑盒已起或跳过）= 已完成。
@@ -73,8 +53,6 @@ function CombinedDetailTimeline({
   ws, scanId, bbPhase, onRerunDone,
 }: { ws: string; scanId: string; bbPhase?: string | null; onRerunDone: () => void }) {
   const { t } = useTranslation();
-  const { events } = useEventSource(scanEventsUrl(ws, scanId));
-  const phases = useMemo(() => derivePhaseSteps(events), [events]);
   const [showRerun, setShowRerun] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -116,23 +94,6 @@ function CombinedDetailTimeline({
           </Button>
         )}
       </div>
-      {/* 步级 PhaseEvent 辅助（同 Task 10）*/}
-      {phases.length > 0 && (
-        <div className="space-y-1 border-t border-border/60 pt-2">
-          {phases.map(([phase, p]) => (
-            <div key={phase} className="flex items-center gap-2 text-xs">
-              <span className="font-mono text-muted-foreground">{phase}</span>
-              <span className="font-mono font-medium">{p.completed}/{p.total}</span>
-              <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                <span
-                  className="block h-full rounded-full bg-primary/80"
-                  style={{ width: `${p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0}%` }}
-                />
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
       {/* 续扫确认弹窗（simple confirm + POST，沿用原认证，spec §11.3 v1）*/}
       <Dialog open={showRerun} onOpenChange={(o) => !o && setShowRerun(false)}>
         <DialogContent>
@@ -183,8 +144,12 @@ export default function ScanDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runs = meta?.bb_runs ?? [];
   const selectedRun = searchParams.get("run") ?? meta?.latest_bb_run ?? null;
+  const selectedRunObj: BlackboxRunSummary | null =
+    runs.find((r) => r.run_id === selectedRun) ?? null;
   const [addBbOpen, setAddBbOpen] = useState(false);
   const [addBbBusy, setAddBbBusy] = useState(false);
+  const [deleteRunOpen, setDeleteRunOpen] = useState(false);
+  const [deleteRunBusy, setDeleteRunBusy] = useState(false);
   const whiteboxTerminal =
     meta?.scan_type === "whitebox" && ["completed", "done"].includes(status);
 
@@ -201,6 +166,26 @@ export default function ScanDetail() {
       toast.error(t("workspaceDetail.scans.runs.addedFailed", { error: (e as Error).message }));
     } finally {
       setAddBbBusy(false);
+    }
+  };
+
+  // 删除当前选中 run（spec §7.1 #4）：终态可删，运行中禁用（后端 409 兜底）。
+  // 删的即当前选中 → 回退 run 选择（清 ?run=，load 后 selectedRun 回落到 latest_bb_run）。
+  const submitDeleteRun = async () => {
+    if (!workspace || !scanId || !selectedRun) return;
+    setDeleteRunBusy(true);
+    try {
+      await deleteBlackboxRun(workspace, scanId, selectedRun);
+      toast.success(t("workspaceDetail.scans.runs.deleted", { runId: selectedRun }));
+      setDeleteRunOpen(false);
+      setSearchParams((prev) => { prev.delete("run"); return prev; });
+      load();
+    } catch (e) {
+      toast.error(t("workspaceDetail.scans.runs.deleteFailed", {
+        error: e instanceof ApiError ? String(e.status) : e instanceof Error ? e.message : String(e),
+      }));
+    } finally {
+      setDeleteRunBusy(false);
     }
   };
 
@@ -221,7 +206,6 @@ export default function ScanDetail() {
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-mono text-xl">{meta?.workflow_id ?? scanId}</h2>
-          <WorkspaceSwitcher currentWorkspace={workspace} />
           {loading ? (
             <Skeleton className="h-5 w-40" />
           ) : (
@@ -243,14 +227,34 @@ export default function ScanDetail() {
               value={selectedRun ?? ""}
               onChange={(e) => setSearchParams(e.target.value ? { run: e.target.value } : {})}
             >
-              {runs.map((r) => (
-                <option key={r.run_id} value={r.run_id}>
-                  {r.run_id === meta?.latest_bb_run
-                    ? `${r.run_id} · ${t("workspaceDetail.scans.runs.latest")}`
-                    : r.run_id}
-                </option>
-              ))}
+              {runs.map((r) => {
+                const labelKey = runStatusLabelKey(r.status);
+                // status 后缀优先于「最新」：终态/运行中状态比 latest 标记更有信息量。
+                const suffix = labelKey
+                  ? ` · ${t(labelKey)}`
+                  : r.run_id === meta?.latest_bb_run
+                    ? ` · ${t("workspaceDetail.scans.runs.latest")}`
+                    : "";
+                return (
+                  <option key={r.run_id} value={r.run_id}>
+                    {r.run_id}{suffix}
+                  </option>
+                );
+              })}
             </select>
+          )}
+          {/* 删除选中 run（spec §7.1 #4）：仅终态可删，运行中禁用（后端 409 兜底）。 */}
+          {isCombined && runs.length > 0 && selectedRun && selectedRunObj && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDeleteRunOpen(true)}
+              disabled={deleteRunBusy || !isRunTerminal(selectedRunObj.status)}
+              title={!isRunTerminal(selectedRunObj.status)
+                ? t("workspaceDetail.scans.runs.deleteRunningHint") : undefined}
+            >
+              <Trash2 className="size-3.5" /> {t("workspaceDetail.scans.runs.delete")}
+            </Button>
           )}
           {/* 加黑盒入口（spec §6）：终端态白盒任务可新建黑盒 run（纯白盒→首个 run；
               已 combined→下一个 run）。 */}
@@ -261,12 +265,30 @@ export default function ScanDetail() {
           )}
         </div>
       </div>
+      {/* 顶部常驻进度概览（所有 tab 可见，所有扫描类型）：当前阶段 + 步级 + 正在跑的 Agent
+          （spec 进度两层粒度 · 详情页细粒度）。组合黑盒段自动读选中 run 的 events。 */}
+      {!loading && meta && (
+        <div className={isFlexLayout ? "shrink-0" : ""}>
+          <ScanProgressOverview
+            ws={workspace!} scanId={scanId!}
+            combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
+          />
+        </div>
+      )}
       {/* 组合扫描两段时间线（spec §9/§11.3）：combined 时渲染；shrink-0 以兼容 live/logs flex 链。 */}
       {isCombined && !loading && (
         <div className={isFlexLayout ? "shrink-0" : ""}>
           <CombinedDetailTimeline
             ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase} onRerunDone={load}
           />
+        </div>
+      )}
+      {/* 选中 run 失败/跳过且有原因 → 顶部展示可读失败横幅 + 引导（spec 2026-08-14 可见性）。
+          后端 run session 的 bb_reason / 任务 bb_runs[].reason 经 API 透传到此。 */}
+      {isCombined && selectedRunObj && isRunFailureStatus(selectedRunObj.status) &&
+        selectedRunObj.reason && (
+        <div className={isFlexLayout ? "shrink-0" : ""}>
+          <RunFailureBanner reason={selectedRunObj.reason} ws={workspace ?? undefined} />
         </div>
       )}
       <Tabs value={current} onValueChange={(v) => navigate(v)}>
@@ -278,7 +300,7 @@ export default function ScanDetail() {
           </TabsList>
         </div>
       </Tabs>
-      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun }} /></ErrorBoundary></div>
+      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj }} /></ErrorBoundary></div>
 
       {/* 加黑盒确认 Dialog（空 body = 无认证直连；后续可扩认证/HOST 选择） */}
       <Dialog open={addBbOpen} onOpenChange={setAddBbOpen}>
@@ -293,6 +315,26 @@ export default function ScanDetail() {
             </Button>
             <Button onClick={submitAddBlackbox} disabled={addBbBusy}>
               {addBbBusy && <RefreshCw className="mr-1 size-3.5 animate-spin" />}
+              {t("common.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* 删除 run 确认 Dialog */}
+      <Dialog open={deleteRunOpen} onOpenChange={setDeleteRunOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workspaceDetail.scans.runs.deleteConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("workspaceDetail.scans.runs.deleteConfirmDesc", { runId: selectedRun })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteRunOpen(false)} disabled={deleteRunBusy}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={submitDeleteRun} disabled={deleteRunBusy}>
+              {deleteRunBusy && <RefreshCw className="mr-1 size-3.5 animate-spin" />}
               {t("common.confirm")}
             </Button>
           </DialogFooter>

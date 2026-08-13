@@ -43,4 +43,16 @@ async def create_scan(req: ScanRequest, request: Request,
         raise HTTPException(422, str(e))
     except ValidationError as e:  # correlation yaml 校验失败
         raise HTTPException(422, detail=e.errors())
-    return ScanAccepted(workspace=ws_name, scan_id=scan_id)
+    # 组合扫描：start 已写 bb_phase=precheck 到 session（precheck 在后台 kickoff 跑）。
+    # 读回透传给前端显「预验证中」+ 跳 live 页跟踪进度（spec §8.2）。best-effort：scan_dir
+    # 不存在 / session 无 bb_phase → None（纯白盒/黑盒）。
+    bb_phase = None
+    if scan_id:
+        from supernova_core.session import SessionManager
+        scan_dir = request.app.state.config.workspaces_dir / ws_name / "scans" / scan_id
+        if scan_dir.is_dir():
+            try:
+                bb_phase = SessionManager(scan_dir.parent).get_session_data(scan_dir).get("bb_phase")
+            except Exception:  # noqa: BLE001 - 读 session best-effort，不阻塞提交响应
+                bb_phase = None
+    return ScanAccepted(workspace=ws_name, scan_id=scan_id, bb_phase=bb_phase)

@@ -8,15 +8,6 @@ import ScanDetail from "../ScanDetail";
 import { ReportTab } from "../ReportTab";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
-vi.mock("@/auth/AuthContext", () => ({
-  useAuth: () => ({
-    user: { id: 1, username: "admin", role: "admin", must_change_password: false, pinned_workspace: null },
-    loading: false, login: vi.fn(), logout: vi.fn(), refreshUser: vi.fn(),
-  }),
-}));
-vi.mock("@/api/useWorkspaces", () => ({
-  useWorkspaces: () => ({ data: [], loading: false, lastUpdated: new Date(), error: null, refresh: vi.fn() }),
-}));
 
 class FakeES {
   onmessage: ((e: { data: string }) => void) | null = null;
@@ -96,6 +87,87 @@ describe("ScanDetail 加黑盒入口（T17）", () => {
     const confirm = await screen.findByRole("button", { name: /^确认$/ });
     fireEvent.click(confirm);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
+  });
+});
+
+// 组合详情 + 版本化 bb_runs（latest=run-1，run-1 因 provider 配置缺失失败）。
+const combinedFailedRun = {
+  scan_type: "whitebox", status: "failed", repo_path: "/root/code",
+  workflow_id: "ws-s1", combined: true, bb_phase: "failed", progress_pct: 50,
+  latest_bb_run: "run-1",
+  bb_runs: [{
+    run_id: "run-1", status: "failed",
+    reason: "workspace provider config incomplete; missing: SUPERNOVA_OPENAI_API_KEY",
+  }],
+};
+
+describe("ScanDetail 失败 run 可见性（失败原因前端可见化）", () => {
+  it("failed run：selector 显「失败」+ 顶部失败横幅 + 工作区设置链接", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json(combinedFailedRun)),
+      // run 失败 → 无报告，404（showRunFailure 优先于 ErrorState 显横幅）。
+      http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report",
+        () => new HttpResponse("", { status: 404 })),
+    );
+    renderDetail("/p/ws/scans/s1/report");
+    const sel = await screen.findByRole("combobox", { name: /选择黑盒 run/ });
+    // option 带状态后缀「失败」（status 优先于「最新」）。
+    expect((sel as HTMLSelectElement).options[0].text).toContain("失败");
+    // 失败横幅（ScanDetail 顶部；ReportTab combined tab 也可能各渲染一个 → findAll）。
+    expect(await screen.findAllByText(/工作区 LLM 凭据未配置/)).not.toHaveLength(0);
+    // 引导链接指向工作区设置。
+    const link = screen.getAllByRole("link", { name: /前往工作区设置/ })[0];
+    expect(link.getAttribute("href")).toContain("/p/ws/settings");
+  });
+
+  it("completed run：不显失败横幅", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json(combinedWithRuns)),
+      http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report",
+        () => new HttpResponse("# ok", { headers: { "content-type": "text/plain" } })),
+    );
+    renderDetail("/p/ws/scans/s1/report");
+    await screen.findByRole("combobox", { name: /选择黑盒 run/ });
+    await waitFor(() => {
+      expect(screen.queryByText(/工作区 LLM 凭据未配置/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId("run-failure-banner")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("ScanDetail 删除单个黑盒 run", () => {
+  it("终态 run 显示删除按钮，确认后 DELETE + toast 成功", async () => {
+    const { toast } = await import("sonner");
+    const deleted: string[] = [];
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json(combinedWithRuns)),
+      http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report",
+        () => new HttpResponse("# ok", { headers: { "content-type": "text/plain" } })),
+      http.delete("/api/workspaces/:ws/scans/:id/blackbox-runs/:run", ({ params }) => {
+        deleted.push(String(params.run));
+        return HttpResponse.json({ deleted: String(params.run) });
+      }),
+    );
+    renderDetail("/p/ws/scans/s1/report?run=run-1");
+    fireEvent.click(await screen.findByRole("button", { name: /删除该 run/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^确认$/ }));
+    await waitFor(() => expect(deleted).toContain("run-1"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+  });
+
+  it("运行中 run 删除按钮禁用", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json({
+        ...combinedWithRuns,
+        bb_runs: [{ run_id: "run-1", status: "running" }],
+        latest_bb_run: "run-1",
+      })),
+      http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report",
+        () => new HttpResponse("# ok", { headers: { "content-type": "text/plain" } })),
+    );
+    renderDetail("/p/ws/scans/s1/report?run=run-1");
+    const delBtn = await screen.findByRole("button", { name: /删除该 run/ });
+    expect(delBtn).toBeDisabled();
   });
 });
 

@@ -324,6 +324,26 @@ async def add_blackbox_run(ws: str, scan_id: str, request: Request,
     return {"workspace": ws, "scan_id": scan_id, "run_id": run_id}
 
 
+@router.delete("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}")
+async def delete_blackbox_run(ws: str, scan_id: str, run_id: str, request: Request,
+                              _: User = Depends(workspace_member)):
+    """删单个黑盒 run（spec §7.1 #4）。
+
+    DELETE 语义=删资源（同 delete_scan）；运行中 run -> 409（先 cancel 再删）；run 不存在 -> 404。
+    范围由 store.delete_blackbox_run 决定（rmtree run + combined + 移除 bb_runs[] + latest 回退）。
+    run_id 路径校验由 manager→store.get_blackbox_run_dir（^run-\\d+$）兜底，越界/非法 -> 404。
+    """
+    from supernova_web.components.scan_manager import ScanRunning
+    sm = request.app.state.scan_manager
+    try:
+        result = await sm.delete_blackbox_run(ws, scan_id, run_id)
+    except ScanRunning as e:
+        raise HTTPException(409, str(e))
+    if result is None:
+        raise HTTPException(404, "run 不存在")
+    return result
+
+
 @router.get("/{ws}/scans/{scan_id}/deliverables")
 async def scan_deliverables_summary(ws: str, scan_id: str, request: Request,
                                     _: User = Depends(workspace_member),

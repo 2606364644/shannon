@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -56,5 +56,31 @@ describe("ScanList 版本化黑盒 run（T15）", () => {
     renderList();
     await screen.findByText("ws-w1");
     expect(screen.queryByTestId("nested-runs")).not.toBeInTheDocument();
+  });
+});
+
+describe("ScanList 删除单个黑盒 run", () => {
+  it("终态 run 删除按钮可点 / 运行中禁用；确认后 DELETE + toast + 刷新列表", async () => {
+    const { toast } = await import("sonner");
+    const deleted: string[] = [];
+    let listCalls = 0;
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => { listCalls++; return HttpResponse.json([combinedWithRuns]); }),
+      http.delete("/api/workspaces/:ws/scans/:id/blackbox-runs/:run", ({ params }) => {
+        deleted.push(String(params.run));
+        return HttpResponse.json({ deleted: String(params.run) });
+      }),
+    );
+    renderList();
+    await screen.findByText("run-1");
+    const delBtns = screen.getAllByRole("button", { name: /删除该 run/ });
+    expect(delBtns).toHaveLength(2);          // run-1, run-2 各一个
+    expect(delBtns[0]).not.toBeDisabled();    // run-1 completed 可删
+    expect(delBtns[1]).toBeDisabled();        // run-2 running 禁用
+    fireEvent.click(delBtns[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /^确认$/ }));
+    await waitFor(() => expect(deleted).toContain("run-1"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    await waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));  // 删后刷新列表
   });
 });

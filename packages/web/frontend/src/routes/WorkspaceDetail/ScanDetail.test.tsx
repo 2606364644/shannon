@@ -6,29 +6,6 @@ import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import ScanDetail from "./ScanDetail";
 
-// Task 10：ScanDetail header 新增 WorkspaceSwitcher 入口（useAuth + useWorkspaces）。
-// scan 视图测试聚焦 header/tabs/i18n，隔离这些 hook 的真实网络与 provider 依赖
-// （其行为在 WorkspaceSwitcher.test.tsx 独立覆盖）。
-vi.mock("@/auth/AuthContext", () => ({
-  useAuth: () => ({
-    user: { id: 1, username: "admin", role: "admin", must_change_password: false, pinned_workspace: null },
-    loading: false,
-    login: vi.fn(),
-    logout: vi.fn(),
-    refreshUser: vi.fn(),
-  }),
-}));
-
-vi.mock("@/api/useWorkspaces", () => ({
-  useWorkspaces: () => ({
-    data: [],
-    loading: false,
-    lastUpdated: new Date(),
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
-
 const server = setupServer(
   http.get("/api/workspaces/:ws/scans/:scanId", () =>
     HttpResponse.json({ status: "running", scan_type: "whitebox", repo_path: "/root/code" }),

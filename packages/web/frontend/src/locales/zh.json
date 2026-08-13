@@ -617,14 +617,41 @@
         "segStatusFailed": "失败",
         "segStatusSkipped": "已跳过"
       },
+      "progress": {
+        "whitebox": "白盒",
+        "blackbox": "黑盒"
+      },
       "runs": {
         "view": "查看",
         "select": "选择黑盒 run",
         "latest": "最新",
+        "statusFailed": "失败",
+        "statusRunning": "运行中",
+        "statusSkipped": "已跳过",
+        "statusCompleted": "已完成",
         "addBlackbox": "加黑盒扫描",
         "addBlackboxDesc": "为该白盒结果新建一次黑盒 run",
         "addedSuccess": "黑盒 run 已创建",
-        "addedFailed": "创建黑盒 run 失败：{{error}}"
+        "addedFailed": "创建黑盒 run 失败：{{error}}",
+        "delete": "删除该 run",
+        "deleteConfirmTitle": "删除黑盒 run",
+        "deleteConfirmDesc": "将删除该次黑盒 run 的全部结果（报告、产物、日志），不可恢复。确定删除 {{runId}}？",
+        "deleted": "已删除黑盒 run {{runId}}",
+        "deleteFailed": "删除黑盒 run 失败：{{error}}",
+        "deleteRunningHint": "运行中的 run 请先取消再删除",
+        "bannerWsSettings": "前往工作区设置",
+        "bannerRerunAuth": "换认证重试",
+        "reasonProviderMissing": {
+          "title": "工作区 LLM 凭据未配置",
+          "hint": "该工作区缺少 LLM API Key，黑盒无法启动。请前往工作区设置补全凭据后再扫黑盒。"
+        },
+        "reasonAuthFailed": {
+          "title": "目标认证预验证失败",
+          "hint": "登录目标站点失败，请检查凭据后换认证重试。"
+        },
+        "reasonGeneric": {
+          "title": "黑盒 run 失败"
+        }
       }
     },
     "errorBoundary": {
@@ -771,58 +798,24 @@
     "title": "工作区配置",
     "subtitle": "直接填 env 文本（KEY=value）覆盖全局 provider 配置；未写的字段回落全局默认。",
     "envText": "AI 配置（env 文本）",
-    "fields": {
-      "aiProvider": "AI 引擎",
-      "apiKey": "API 密钥",
-      "baseUrl": "基础 URL",
-      "model": "模型",
-      "smallModel": "小模型",
-      "mediumModel": "中模型",
-      "largeModel": "大模型",
-      "maxTurns": "最大轮数",
-      "adaptiveThinking": "自适应思考",
-      "gitlabUser": "GitLab 用户",
-      "gitlabToken": "GitLab Token"
-    },
-    "sections": {
-      "engine": { "title": "AI 引擎与凭据", "desc": "选择驱动扫描的 AI 引擎，并配置鉴权与端点。" },
-      "models": { "title": "模型", "desc": "按活动开销分档；未设置的档位回落到通用模型。" },
-      "runtime": { "title": "运行时", "desc": "调整 agent 的最大轮数与思维模式。" },
-      "git": { "title": "Git 访问", "desc": "clone 仓库用的凭据，留空回落全局。" }
-    },
-    "tiers": {
-      "small": "轻量 · 侦察 / 索引",
-      "medium": "常规 · 分析",
-      "large": "重度 · 漏洞深挖",
-      "fallback": "通用回落模型（档位未设置时使用）"
-    },
-    "provenance": {
-      "inherit": "继承全局",
-      "override": "已覆盖",
-      "set": "已配置",
-      "unset": "未配置"
-    },
-    "providerNote": {
-      "bedrock": "Bedrock 的 region 在全局环境变量配置，工作区不可覆盖。",
-      "vertex": "Vertex 的 project_id / region 在全局环境变量配置，工作区不可覆盖。"
-    },
-    "summary": {
-      "overridden": "已覆盖 {{count}} 项",
-      "none": "全部继承全局默认"
-    },
-    "reset": "重置为继承",
-    "readonlyBanner": "你对此工作区为只读，需管理员或管理者权限才能修改。",
-    "dirtyHint": "有未保存的更改",
-    "discard": "放弃更改",
-    "loadFailed": "加载配置失败",
-    "retry": "重试",
-    "apiKey": {
-      "configured": "已配置（••••），留空不改",
-      "notConfigured": "未配置（留空回落全局）"
-    },
-    "gitToken": {
-      "configured": "已配置（••••），留空不改",
-      "notConfigured": "未配置（留空回落全局）"
+    "keys": {
+      "panelTitle": "可用配置项",
+      "panelDesc": "点击键名注入左侧配置框（默认值已填，API key 等凭据请自行填值）。",
+      "insertTemplate": "填入完整模板",
+      "inserted": "已注入 {{key}}",
+      "exists": "{{key}} 已存在，已跳过",
+      "templateInserted": "已注入配置模板（# 开头为注释，删除 # 并填值即生效）",
+      "effectiveTitle": "工作区可覆盖",
+      "processTitle": "仅全局生效",
+      "processDesc": "这些键在 worker 进程级读取，工作区覆盖不生效，请在全局 .env / .env.profiles 设置。",
+      "kindHint": "键名按引擎不同：anthropic 用 ANTHROPIC_*，openai_compatible 用 SUPERNOVA_OPENAI_*。",
+      "groups": {
+        "engine": "引擎与端点",
+        "models": "模型",
+        "runtime": "运行时",
+        "git": "Git 访问"
+      },
+      "template": "# ===== 工作区 AI 配置（# 开头为注释，删除 # 并填值即生效）=====\n# --- 引擎与端点 ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=填入 API key\n# --- 模型 ---\n#SUPERNOVA_MODEL=通用回落模型\n#SUPERNOVA_OPENAI_SMALL_MODEL=轻量档模型\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=常规档模型\n#SUPERNOVA_OPENAI_LARGE_MODEL=重度档模型\n# --- 运行时 ---\n#SUPERNOVA_MAX_TURNS=120\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Git 访问 ---\n#GITLAB_USER=你的 GitLab 用户名\n#GITLAB_TOKEN=填入 token"
     },
     "save": "保存",
     "saved": "配置已保存",
@@ -835,7 +828,6 @@
       "ineffective": "以下为进程级配置，ws 不生效（需在全局 .env 配置）",
       "unknown": "已忽略未知 key"
     },
-    "fallbackHint": "留空 = 回落全局默认",
     "openSettings": "工作区配置"
   },
   "users": {

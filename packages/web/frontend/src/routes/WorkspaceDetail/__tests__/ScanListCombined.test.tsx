@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -16,25 +16,19 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => navMock };
 });
 
-// === Fake EventSource（on-demand 展开拉 events 用）===
-// 对齐 useEventSource.test.ts：构造后暴露 last 实例，手动 emit message。
+// === Fake EventSource（运行中卡建 SSE 推 currentPhase 用）===
 const activeESUrls: string[] = [];
-
 class FakeES {
   static last?: FakeES;
   onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   onopen: (() => void) | null = null;
   closed = false;
-  constructor(public url: string) {
-    activeESUrls.push(url);
-    FakeES.last = this;
-  }
+  constructor(public url: string) { activeESUrls.push(url); FakeES.last = this; }
   emit(data: string, lastEventId?: string) { this.onmessage?.({ data, lastEventId }); }
   close() { this.closed = true; }
 }
 vi.stubGlobal("EventSource", FakeES);
-
 const lastFakeES = () => FakeES.last;
 
 // === Fixtures ===
@@ -45,7 +39,6 @@ const combinedPending = {
   is_running: true, workflow_id: "ws-c1",
   combined: true, bb_phase: "pending", progress_pct: 62,
 } as const;
-
 // 组合扫描：黑盒段中
 const combinedRunning = {
   scan_id: "c2", scan_type: "whitebox", status: "running", created_at: 2000,
@@ -53,12 +46,23 @@ const combinedRunning = {
   is_running: true, workflow_id: "ws-c2",
   combined: true, bb_phase: "running", progress_pct: 88,
 } as const;
-
-// 纯白盒：无 combined 字段（回归）
+// 纯白盒运行中（统一徽标：现在也显示进度）
 const pureWhitebox = {
   scan_id: "w1", scan_type: "whitebox", status: "running", created_at: 3000,
   completed_at: null, vuln_count: 0, total_cost_usd: 0.5, cost_currency: "USD",
-  is_running: true, workflow_id: "ws-w1",
+  is_running: true, workflow_id: "ws-w1", progress_pct: 40,
+} as const;
+// 纯黑盒运行中
+const pureBlackbox = {
+  scan_id: "b1", scan_type: "blackbox", status: "running", created_at: 4000,
+  completed_at: null, vuln_count: 0, total_cost_usd: 0.2, cost_currency: "USD",
+  is_running: true, workflow_id: "ws-b1", progress_pct: 55,
+} as const;
+// 终态白盒（完成）
+const completedWb = {
+  scan_id: "d1", scan_type: "whitebox", status: "completed", created_at: 5000,
+  completed_at: 6000, vuln_count: 3, total_cost_usd: 2, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-d1", progress_pct: 100,
 } as const;
 
 let listCalls = 0;
@@ -67,8 +71,11 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-beforeEach(() => { i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear(); activeESUrls.length = 0; FakeES.last = undefined; });
-afterEach(() => { server.resetHandlers(); cleanup(); });
+beforeEach(() => {
+  i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear();
+  activeESUrls.length = 0; FakeES.last = undefined;
+});
+afterEach(() => { server.resetHandlers(); cleanup(); vi.useRealTimers(); });
 afterAll(() => server.close());
 
 function renderList() {
@@ -79,124 +86,129 @@ function renderList() {
   );
 }
 
-// 事件 ndjson 行：PhaseEvent(start) 声明 steps；StepEvent(complete) 标记完成。
-function phaseStart(phase: string, steps: string[], intents: string[] = []) {
+function phaseStart(phase: string) {
   return JSON.stringify({
     ts: "2026-08-13T00:00:00.000Z", category: "PHASE", type: "PhaseEvent",
-    phase, event: "start", steps, step_intents: intents,
+    phase, event: "start", steps: [], step_intents: [],
   });
 }
-function stepComplete(name: string, phase: string) {
+function scanEnd(status: string) {
   return JSON.stringify({
-    ts: "2026-08-13T00:00:01.000Z", category: "STEP", type: "StepEvent",
-    name, phase, event: "complete",
+    ts: "2026-08-13T00:00:00.000Z", category: "CONTROL", type: "scan_end", status,
   });
 }
 
-describe("ScanList 组合扫描卡片 - 收起态", () => {
-  it("组合扫描显示 progress_pct% + 进度条 + 阶段名（bb_phase=pending → 白盒扫描中）", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])),
-    );
+describe("ScanList 卡片 - 统一进度徽标（所有运行中卡）", () => {
+  it("组合 pending: 62% + 白盒扫描中 + progressbar valuenow=62", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])));
     renderList();
     await waitFor(() => expect(screen.getByText("ws-c1")).toBeInTheDocument());
-    // 62%
     expect(screen.getByText("62%")).toBeInTheDocument();
-    // 阶段名（pending → 白盒扫描中）
     expect(screen.getByText("白盒扫描中")).toBeInTheDocument();
-    // 进度条（role="progressbar" 或 aria-valuenow）
     const bar = document.querySelector('[role="progressbar"]');
-    expect(bar).toBeTruthy();
     expect(bar?.getAttribute("aria-valuenow")).toBe("62");
   });
 
-  it("bb_phase=running → 阶段名「黑盒扫描中」", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedRunning])),
-    );
+  it("组合 running: 88% + 黑盒扫描中", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedRunning])));
     renderList();
     await waitFor(() => expect(screen.getByText("ws-c2")).toBeInTheDocument());
     expect(screen.getByText("88%")).toBeInTheDocument();
     expect(screen.getByText("黑盒扫描中")).toBeInTheDocument();
   });
 
-  it("组合卡片有展开按钮（步级）", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])),
-    );
-    renderList();
-    await waitFor(() => expect(screen.getByText("ws-c1")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /展开/ })).toBeInTheDocument();
-  });
-});
-
-describe("ScanList 组合扫描卡片 - 展开态（按需步级）", () => {
-  it("点展开 → 拉 SSE events → 显示步级进度（recon 4/6）", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])),
-    );
-    renderList();
-    await waitFor(() => expect(screen.getByText("ws-c1")).toBeInTheDocument());
-
-    // 展开前：未发 SSE（按需，非 eager）
-    expect(activeESUrls).toHaveLength(0);
-    // 展开前：不显示步级 "recon"
-    expect(screen.queryByText(/recon/)).not.toBeInTheDocument();
-
-    // 点展开
-    fireEvent.click(screen.getByRole("button", { name: /展开/ }));
-
-    // SSE 连接建立（scanEventsUrl 路径含 /events）
-    await waitFor(() => expect(activeESUrls.some((u) => u.includes("/events"))).toBe(true));
-    expect(lastFakeES()).toBeDefined();
-
-    // 喂 events：recon 阶段 6 steps，完成 4 个
-    act(() => {
-      lastFakeES()!.emit(phaseStart("recon", [
-        "pre-recon", "route-map", "framework-scan", "endpoint-collect",
-        "model-build", "summary",
-      ]));
-      lastFakeES()!.emit(stepComplete("pre-recon", "recon"));
-      lastFakeES()!.emit(stepComplete("route-map", "recon"));
-      lastFakeES()!.emit(stepComplete("framework-scan", "recon"));
-      lastFakeES()!.emit(stepComplete("endpoint-collect", "recon"));
-    });
-
-    // 步级显示 "recon" + 进度 "4/6"
-    await waitFor(() => {
-      expect(screen.getByText(/recon/)).toBeInTheDocument();
-      expect(screen.getByText("4/6")).toBeInTheDocument();
-    });
-  });
-
-  it("再点收起 → 关 SSE 连接", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])),
-    );
-    renderList();
-    await waitFor(() => expect(screen.getByText("ws-c1")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /展开/ }));
-    await waitFor(() => expect(lastFakeES()).toBeDefined());
-    expect(lastFakeES()!.closed).toBe(false);
-
-    // 收起
-    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
-    expect(lastFakeES()!.closed).toBe(true);
-  });
-});
-
-describe("ScanList 纯白盒/纯黑盒 - 零回归", () => {
-  it("纯白盒卡片：无 progress_pct、无进度条、无展开按钮（原单段卡片不变）", async () => {
-    server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([pureWhitebox])),
-    );
+  it("纯白盒运行中: 显示 % + 进度条 + 白盒段标签（统一徽标，不再无进度）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([pureWhitebox])));
     renderList();
     await waitFor(() => expect(screen.getByText("ws-w1")).toBeInTheDocument());
-    // 无展开按钮
-    expect(screen.queryByRole("button", { name: /展开/ })).not.toBeInTheDocument();
-    // 无进度条
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.getByText("白盒")).toBeInTheDocument();
+    expect(document.querySelector('[role="progressbar"]')).toBeTruthy();
+  });
+
+  it("纯黑盒运行中: 显示 % + 黑盒段标签", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([pureBlackbox])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-b1")).toBeInTheDocument());
+    expect(screen.getByText("55%")).toBeInTheDocument();
+    expect(screen.getByText("黑盒")).toBeInTheDocument();
+  });
+
+  it("终态(完成)卡不显示进度徽标（无 progressbar 无 %）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completedWb])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-d1")).toBeInTheDocument());
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
-    // 无 % 显示
     expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
+  });
+
+  it("组合卡无展开按钮（步级移至详情页）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedPending])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-c1")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /展开/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("ScanList 运行中卡 - 按需 SSE 推实时阶段", () => {
+  it("纯白盒运行中卡挂载即建 SSE（scanEventsUrl 含 /events）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([pureWhitebox])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-w1")).toBeInTheDocument());
+    await waitFor(() => expect(activeESUrls.some((u) => u.includes("/events"))).toBe(true));
+  });
+
+  it("SSE PhaseEvent 推 currentPhase → 纯白盒段标签带 phase（白盒 · recon）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([pureWhitebox])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-w1")).toBeInTheDocument());
+    await waitFor(() => expect(lastFakeES()).toBeDefined());
+    act(() => { lastFakeES()!.emit(phaseStart("recon")); });
+    await waitFor(() => expect(screen.getByText(/recon/)).toBeInTheDocument());
+    // 段标签含白盒 + recon（"白盒 · recon"）
+    expect(screen.getByText(/白盒/)).toBeInTheDocument();
+  });
+
+  it("终态卡不建 SSE", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completedWb])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-d1")).toBeInTheDocument());
+    expect(activeESUrls).toHaveLength(0);
+  });
+
+  it("scan_end completed → 重新 listScans 刷新（listCalls 增加）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => { listCalls++; return HttpResponse.json([pureWhitebox]); }));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-w1")).toBeInTheDocument());
+    const callsBefore = listCalls;
+    await waitFor(() => expect(lastFakeES()).toBeDefined());
+    act(() => { lastFakeES()!.emit(scanEnd("completed")); });
+    await waitFor(() => expect(listCalls).toBeGreaterThan(callsBefore));
+  });
+});
+
+describe("ScanList 运行中卡 - 定时轮询刷新（x% 实时推进）", () => {
+  it("运行中卡存在时每 10s 静默刷新 listScans（progress_pct 推进，不闪 Skeleton）", async () => {
+    vi.useFakeTimers();
+    server.use(http.get("/api/workspaces/:ws/scans", () => { listCalls++; return HttpResponse.json([pureWhitebox]); }));
+    renderList();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("ws-w1")).toBeInTheDocument();
+    const callsAfterMount = listCalls;
+    // 推进 10s → 静默 refresh（不 setLoading，SSE 不断、不闪 Skeleton）
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(listCalls).toBeGreaterThan(callsAfterMount);
+    expect(screen.getByText("ws-w1")).toBeInTheDocument();
+  });
+
+  it("无运行中卡时不轮询（终态卡 listCalls 不随时间增加）", async () => {
+    vi.useFakeTimers();
+    server.use(http.get("/api/workspaces/:ws/scans", () => { listCalls++; return HttpResponse.json([completedWb]); }));
+    renderList();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("ws-d1")).toBeInTheDocument();
+    const callsAfterMount = listCalls;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(listCalls).toBe(callsAfterMount);
   });
 });

@@ -746,3 +746,39 @@ async def test_auth_validation_forwards_proxy_url_to_executor(tmp_path):
 
     assert result.success is True
     assert executor.execute.call_args.kwargs["proxy_url"] == "http://127.0.0.1:19090"
+
+
+@pytest.mark.asyncio
+async def test_validate_authentication_creates_sandbox_cwd(tmp_path):
+    """Auth-validation 无真实 repo,用占位 repo_path 作 agent 沙箱 cwd;该目录必须在
+    agent 启动(executor.execute)前创建,否则 bash 工具 chdir 失败 FileNotFoundError →
+    所有命令死锁(2026-08-14 组合扫描 NodeGoat 白盒不跑根因)。白盒/黑盒正常扫描的
+    repo_path 是真实 repo(天然存在),唯独 auth-validation 用占位目录却没 mkdir。"""
+    repo_path = tmp_path / "shannon-auth-check"
+    assert not repo_path.exists()  # 起点:占位目录不存在
+
+    cwd_existed: dict = {}
+
+    async def fake_execute(**kwargs):
+        # agent 启动瞬间 cwd 必须已是目录(修复前:不存在 → bash 第一条命令就 FileNotFoundError)
+        cwd_existed["is_dir"] = Path(kwargs["repo_path"]).is_dir()
+        return AgentMetrics(duration_ms=1, structured_output={"login_success": True})
+
+    executor = MagicMock()
+    executor.execute = AsyncMock(side_effect=fake_execute)
+    dist_config = MagicMock(authentication={"username": "admin"}, accounts=[])
+
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=MagicMock(),
+            executor=executor,
+            repo_path=str(repo_path),
+        )
+
+    assert result.success is True
+    assert repo_path.is_dir()  # 最终也应是目录
+    assert cwd_existed["is_dir"] is True  # ← 关键:agent 跑时 cwd 已预创建
