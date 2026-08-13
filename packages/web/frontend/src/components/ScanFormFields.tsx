@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -631,6 +632,83 @@ function HostProfilePicker({ host, setHost, workspace }: {
   );
 }
 
+/** 共享认证字段块（Task 9）：白盒「同时发起黑盒扫描」组合展开区复用黑盒认证编辑能力。
+ *  受控组件——value/onChange 读写 AuthFormState；自包含堆叠布局：
+ *    1. 认证行（标题 + 状态 + 「配置登录」/「收起」按钮，单一 disclosure：展开即启用）。
+ *    2. 展开后：来源 segmented（临时填写 / 使用档案）+ 对应字段块（复用 BottomInlineBlock / BottomProfileBlock）。
+ *  黑盒分支保留其双栏布局（RightAuthCore + Bottom*），本组件服务白盒组合展开区（单栏堆叠）；
+ *  字段映射共用 ScanNewPage.assignAuthToBody，保证两条分支 buildBody 一致。 */
+export function AuthFields({ value, onChange, workspace, authErr, refreshSignal }: {
+  value: AuthFormState;
+  onChange: (patch: Partial<AuthFormState>) => void;
+  workspace: string;
+  authErr: string | null;
+  refreshSignal: number;
+}) {
+  const { t } = useTranslation();
+  // 草稿信号（折叠态按钮显「已配置」标记，折叠不丢配置）——与黑盒分支同款判定。
+  const hasDraft = !!(value.loginUrl.trim() || value.loginFlow.trim() || value.profileId
+    || value.accounts.some((a) => a.username.trim() || a.password.trim()));
+  return (
+    <div className="space-y-3">
+      {/* 认证行：标题 + 状态 + 展开/收起按钮（#1 单一 disclosure：展开即启用） */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h4>
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+              {t("scan.tags.optional")}
+            </span>
+          </div>
+          <div className="text-[11.5px] text-muted-foreground mt-0.5">
+            {value.enabled ? t("scan.auth.statusEnabled") : t("scan.auth.statusUnauth")}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onChange({ enabled: !value.enabled })}
+        >
+          {value.enabled
+            ? t("scan.auth.collapse")
+            : hasDraft ? t("scan.auth.configureDraft") : t("scan.auth.configure")}
+        </Button>
+      </div>
+
+      {/* 展开后：来源 segmented + 字段块（复用黑盒 Bottom*） */}
+      {value.enabled && (
+        <div className="space-y-3 fade-in">
+          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
+            {(["inline", "profile"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onChange({ source: s })}
+                aria-pressed={value.source === s}
+                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  value.source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t(`authProfiles.source${s === "inline" ? "Inline" : "Profile"}`)}
+              </button>
+            ))}
+          </div>
+          {value.source === "profile" ? (
+            <BottomProfileBlock auth={value} setAuth={onChange} workspace={workspace} refreshSignal={refreshSignal} />
+          ) : (
+            <BottomInlineBlock auth={value} setAuth={onChange} authErr={authErr} />
+          )}
+          {/* profile 模式校验错误贴下方档案块显；inline 模式错误由 BottomInlineBlock 内部显。 */}
+          {value.source === "profile" && authErr && (
+            <div className="text-destructive text-xs">{authErr}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ScanFormFields({
   type,
   f,
@@ -774,9 +852,17 @@ export function ScanFormFields({
     </div>
   );
 
-  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源（仅仓库）——
-  // 白盒已去动态（recon 固定静态，见 f2c64c8b）——纯离线源码审计，无目标 URL 输入；web_url 仅留作
-  // 后端兼容签名（逻辑层不再使用），前端不再采集。
+  // —— 共用：认证 patch 回写 + inline 存档回调（白盒组合展开区与黑盒分支都用） ——
+  const setAuth = (patch: Partial<AuthFormState>) => set({ auth: { ...f.auth, ...patch } });
+  // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 默认全选其角色 + 递增 refreshSignal 触发重拉。
+  const onProfileSaved = (profile: AuthProfile) => {
+    setAuth({ source: "profile", profileId: profile.id, credentialIds: profile.credentials.map((c) => c.id) });
+    setProfileRefresh((n) => n + 1);
+  };
+
+  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源（仅仓库）→ Step 3 黑盒组合（可选）——
+  // 白盒已去动态（recon 固定静态，见 f2c64c8b）——纯离线源码审计；web_url 仅留作后端兼容签名。
+  // Task 9：Step 3「同时发起黑盒扫描」组合开关——开 → 展开 URL 输入 + 共享 AuthFields。
   // IA 不变量：repo 列表按 ws 隔离（listRepos(workspace)），故「选工作区」必须在「选仓库」之上。
   if (type === "whitebox") {
     return (
@@ -789,6 +875,45 @@ export function ScanFormFields({
           {repoPicker}
           {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
         </StepGroup>
+
+        {/* Task 9：同时发起黑盒扫描（组合扫描）——开关 + 展开区 */}
+        <StepGroup step={3} title={t("scan.combined.sectionTitle")} tag={t("scan.tags.optional")} tagClass="bg-secondary text-muted-foreground">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <div className="pt-0.5">
+              <Switch
+                checked={!!f.combined}
+                onCheckedChange={(v) => set({ combined: v })}
+                aria-label={t("scan.combined.toggle")}
+              />
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-medium leading-tight">{t("scan.combined.toggle")}</span>
+              <span className="text-[11px] text-muted-foreground leading-relaxed">{t("scan.combined.hint")}</span>
+            </div>
+          </label>
+
+          {f.combined && (
+            <div className="fade-in space-y-3 mt-1 border-t border-border pt-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">{t("scan.combined.urlLabel")}</Label>
+                <Input
+                  value={f.url}
+                  onChange={(e) => set({ url: e.target.value })}
+                  placeholder={t("scan.combined.urlPlaceholder")}
+                  className="font-mono border-orange/30"
+                />
+                {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
+              </div>
+              <AuthFields
+                value={f.auth}
+                onChange={setAuth}
+                workspace={workspace}
+                authErr={authErr}
+                refreshSignal={profileRefresh}
+              />
+            </div>
+          )}
+        </StepGroup>
       </div>
     );
   }
@@ -797,14 +922,8 @@ export function ScanFormFields({
   //   折叠态：右栏虚线占位 + 认证行一行；展开态：右栏核心顶格对齐目标服务 + 下方横向铺开。
   //   认证拆两块——核心（开关/来源/入口/凭据）+ 增强（步骤/存档 或 档案摘要）。
   // IA 不变量：repo 与白盒 scan 均按工作区隔离；URL 是黑盒主输入，保持在最上。
-  const setAuth = (patch: Partial<AuthFormState>) => set({ auth: { ...f.auth, ...patch } });
   // HOST 解析（Task 13）：与 auth 独立、非互斥——setHost 只 patch host 字段，不触碰 auth。
   const setHost = (patch: Partial<HostFormState>) => set({ host: { ...f.host, ...patch } });
-  // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 默认全选其角色 + 递增 refreshSignal 触发重拉。
-  const onProfileSaved = (profile: AuthProfile) => {
-    setAuth({ source: "profile", profileId: profile.id, credentialIds: profile.credentials.map((c) => c.id) });
-    setProfileRefresh((n) => n + 1);
-  };
   // #1 单一 disclosure：收起态若有草稿（任意 inline 字段已填 / 已选档案），按钮显「已配置」标记——
   // 折叠不再清字段，标记告诉用户「配置还在、只是当前未启用」。primary 默认 role="admin" 不算草稿信号。
   const hasAuthDraft = !!(f.auth.loginUrl.trim() || f.auth.loginFlow.trim() || f.auth.profileId

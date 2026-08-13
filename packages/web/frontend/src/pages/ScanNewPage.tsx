@@ -184,6 +184,32 @@ export interface FormState {
   /** HOST 解析（仅 blackbox 用；与 auth 独立，非互斥）。disabled=不起代理，向后兼容。 */
   host: HostFormState;
   yaml: string;
+  /** 白盒「同时发起黑盒扫描」组合开关（Task 9）。可选——旧 FormState 字面量（如单测 baseF）不传 = false。
+   *  true 时 buildBody whitebox 分支附 url + 认证字段，后端 Task 1 识别为组合扫描。 */
+  combined?: boolean;
+}
+
+/** 将 AuthFormState 写入 ScanRequest 认证字段（auth-profile-vault 双来源）：
+ *    - inline 模式 → authentication（+附加角色 auth_accounts）。
+ *    - profile 模式 → auth_profile_id + auth_credential_ids（空数组=后端全选）。
+ *  黑盒与白盒组合扫描共用（Task 9），保证两条分支字段映射一致。 */
+function assignAuthToBody(body: ScanRequest, a: AuthFormState): void {
+  if (a.source === "profile") {
+    body.auth_profile_id = a.profileId || undefined;
+    body.auth_credential_ids = a.credentialIds.length ? a.credentialIds : undefined;
+  } else {
+    body.authentication = buildAuthPayload(a);
+    // 附加角色（accounts.slice(1)）→ auth_accounts（后端 scan_manager 展开成 accounts[]）。
+    // guard 用 slice(1) 后长度：accounts[0] 恒为 primary，若用 accounts.length 会发空 auth_accounts:[]。
+    const extra = a.accounts.slice(1);
+    if (extra.length) {
+      body.auth_accounts = extra.map((acc) => ({
+        role: acc.role.trim() || "role",
+        username: acc.username.trim(),
+        password: acc.password,
+      }));
+    }
+  }
 }
 
 /**
@@ -203,31 +229,21 @@ export function buildBody(type: ScanType, f: FormState, workspace: string): Scan
   const body: ScanRequest = { type, url: f.url || undefined, workspace: workspace || undefined };
   if (type === "whitebox") {
     body.source = { kind: "repo", value: f.selectedRepo };
+    // 组合扫描（Task 9）：开关开 + url → 同一 body 携带 url + 认证，后端 Task 1 validator
+    // 识别 type=whitebox + url → 组合扫描，先跑黑盒认证预验证（bb_phase=precheck）。
+    // 开关关 → 纯白盒：即便 f.url 有草稿也不发（strip 上方 line 设的 url），零回归。
+    if (f.combined && f.url) {
+      body.url = f.url;
+      if (f.auth.enabled) assignAuthToBody(body, f.auth);
+    } else {
+      body.url = undefined;
+    }
     return body;
   }
   // blackbox：恒复用白盒结果（exploitation-only）。reuseScanId 由前端校验保证非空（提交按钮 disabled）。
   body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
-  if (f.auth.enabled) {
-    // auth-profile-vault（Task 14）：profile 模式发档案+角色 ids（后端 Task 8 展开），
-    // inline 模式发 authentication（旧行为）。二者互斥（后端 Task 7 XOR 校验）。
-    // 多角色子集（2026-08-06）：credentialIds 空数组不发 = 后端全选该档案所有角色。
-    if (f.auth.source === "profile") {
-      body.auth_profile_id = f.auth.profileId || undefined;
-      body.auth_credential_ids = f.auth.credentialIds.length ? f.auth.credentialIds : undefined;
-    } else {
-      body.authentication = buildAuthPayload(f.auth);
-      // 附加角色（accounts.slice(1)）→ auth_accounts（后端 scan_manager 展开成 accounts[]）。
-      // guard 用 slice(1) 后长度：accounts[0] 恒为 primary，若用 accounts.length 会发空 auth_accounts:[]。
-      const extra = f.auth.accounts.slice(1);
-      if (extra.length) {
-        body.auth_accounts = extra.map((acc) => ({
-          role: acc.role.trim() || "role",
-          username: acc.username.trim(),
-          password: acc.password,
-        }));
-      }
-    }
-  }
+  // 认证（auth-profile-vault Task 14 双来源）：与白盒组合扫描共用 assignAuthToBody（字段映射一致）。
+  if (f.auth.enabled) assignAuthToBody(body, f.auth);
   // HOST 解析（blackbox-host-profile Task 13）：enabled 时按 mode 发对应字段（与 auth 独立、非互斥）。
   // profile 模式 → host_profile_id；url 模式 → host_url。空值兜底 || undefined（不发空串）。
   // disabled 时两者都不发（向后兼容——不起代理，直连目标）。
@@ -279,6 +295,7 @@ export function ScanNewPage() {
     auth: presetToAuthState(preset),
     host: presetToHostState(preset),
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
+    combined: false,
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
   const [workspace, setWorkspace] = useState(preset.workspace ?? presetWs ?? "");
@@ -304,13 +321,17 @@ export function ScanNewPage() {
 
   const isCorrelation = type === "correlation";
   // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + reuseScanId(必填) + ws（恒复用白盒，无 repo 模式）。
+  // 白盒组合扫描（Task 9）：combined 开时 url 变必填 + auth 纳入校验（与黑盒同款 validateAuth）。
   const needRepo = isCorrelation ? false : type === "whitebox";
   const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
   const reuseErr = type === "blackbox" && !f.reuseScanId
     ? t("scan.errors.selectReuseScan")
     : null;
-  const urlErr = validateUrl(f.url, type, t);
-  const authErr = type === "blackbox" ? validateAuth(f.auth, t) : null;
+  const combined = type === "whitebox" && !!f.combined;
+  const urlErr = combined
+    ? (f.url.trim() ? (/^https?:\/\//.test(f.url.trim()) ? null : t("scan.errors.urlScheme")) : t("scan.errors.urlEmpty"))
+    : validateUrl(f.url, type, t);
+  const authErr = (type === "blackbox" || combined) ? validateAuth(f.auth, t) : null;
   const isValid = isCorrelation
     ? !yamlErr
     : !sourceErr && !reuseErr && !urlErr && !authErr && !!workspace;
@@ -323,6 +344,9 @@ export function ScanNewPage() {
     try {
       setSubmitting(true);
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace));
+      // 组合扫描预验证态（Task 9，spec §8.2）：后端 passthrough bb_phase=precheck 表示
+      // 黑盒认证预验证先行——提示用户「预验证中」，再跳 live 页跟踪进度。
+      if (r.bb_phase === "precheck") toast.info(t("scan.precheckStatus"));
       // ws-scan 解耦：scan_id 有则跳 scan-scoped live（精确到刚建的 scan）；
       // 过渡期 Phase 1 未返 scan_id 时回退旧 ws-scoped live（LegacyWsTabRedirect 兜底）。
       nav(r.scan_id ? `/p/${r.workspace}/scans/${r.scan_id}/live` : `/p/${r.workspace}/live`);

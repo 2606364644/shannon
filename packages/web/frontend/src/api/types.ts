@@ -348,6 +348,10 @@ export interface ScanResponse {
   // ws-scan 解耦（spec §5.2）：POST /api/scan 的 ScanAccepted 增 scan_id。
   // 可选--过渡期 Phase 1 未上线时后端不返 scan_id，前端 F4 回退跳旧 ws-scoped live 路由。
   scan_id?: string;
+  // 组合扫描（Task 9，spec §8.2）：后端 passthrough 的黑盒阶段标记。白盒+url 组合提交后，
+  // 后端先跑黑盒认证预验证——此时 bb_phase="precheck"；前端据此显「预验证中」态。
+  // 纯白盒/纯黑盒不返此字段（undefined）。
+  bb_phase?: "precheck" | "running" | "done" | string;
 }
 
 export interface FsEntry {

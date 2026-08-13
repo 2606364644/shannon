@@ -379,6 +379,14 @@
       "workspace": "工作区",
       "auth": "认证登录"
     },
+    "combined": {
+      "sectionTitle": "黑盒组合",
+      "toggle": "同时发起黑盒扫描",
+      "hint": "开启后将在白盒审计的同时，对运行中的目标服务发起黑盒渗透（先预验证认证）。",
+      "urlLabel": "目标服务 URL",
+      "urlPlaceholder": "http://target.example"
+    },
+    "precheckStatus": "预验证中（认证校验）",
     "tags": {
       "localAudit": "本地审计",
       "required": "必填",

@@ -379,6 +379,14 @@
       "workspace": "Workspace",
       "auth": "Authentication"
     },
+    "combined": {
+      "sectionTitle": "Blackbox Combo",
+      "toggle": "Also start a blackbox scan",
+      "hint": "When enabled, a blackbox pentest runs alongside the whitebox audit (auth precheck first).",
+      "urlLabel": "Target service URL",
+      "urlPlaceholder": "http://target.example"
+    },
+    "precheckStatus": "Precheck (auth validation)",
     "tags": {
       "localAudit": "Local Audit",
       "required": "Required",
