@@ -70,6 +70,8 @@ interface Props {
   urlErr: string | null;
   /** 黑盒登录配置校验错误（仅 blackbox 传入）。 */
   authErr: string | null;
+  /** HOST source validation error (blackbox/combined only). */
+  hostErr?: string | null;
   /** P2: 选定的目标 workspace——驱动 listRepos(ws) / listScans(ws) 与子组件 ws 参数 */
   workspace: string;
   /** P2: 用户可见的 ws 列表（P1 后端已过滤）——供下拉选项 */
@@ -611,7 +613,7 @@ function HostProfilePicker({ host, setHost, workspace }: {
   }
   return (
     <Select value={host.profileId} onValueChange={(v) => setHost({ profileId: v })}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger className="w-full text-xs">
         <SelectValue placeholder={t("scan.host.selectProfile")} />
       </SelectTrigger>
       <SelectContent>
@@ -668,6 +670,7 @@ export function AuthFields({ value, onChange, workspace, authErr, refreshSignal 
           type="button"
           variant="outline"
           size="sm"
+          className="min-w-[5.5rem]"
           onClick={() => onChange({ enabled: !value.enabled })}
         >
           {value.enabled
@@ -709,6 +712,87 @@ export function AuthFields({ value, onChange, workspace, authErr, refreshSignal 
   );
 }
 
+/** 共享 HOST 字段块（2026-08-13）：白盒「同时发起黑盒扫描」组合展开区与黑盒分支复用。
+ *  受控组件--value/onChange 读写 HostFormState；自包含堆叠布局：
+ *    1. HOST 行（标题 + 状态 + 「配置 HOST」/「收起」按钮，单一 disclosure：展开即启用）。
+ *    2. 展开后：来源 segmented（使用档案 / 填写链接）+ 对应字段块（HostProfilePicker / URL 输入）。
+ *  字段映射共用 ScanNewPage.assignHostToBody，保证两条分支 buildBody 一致。
+ *  HOST 与认证独立、非互斥--二者各管各的：auth 管登录态，host 管 DNS 覆盖。 */
+export function HostFields({ value, onChange, workspace, error }: {
+  value: HostFormState;
+  onChange: (patch: Partial<HostFormState>) => void;
+  workspace: string;
+  error?: string | null;
+}) {
+  const { t } = useTranslation();
+  // 草稿信号（折叠态按钮显「已配置」标记，折叠不丢配置）--选了档案或填了 url 即视为已配置。
+  const hasDraft = !!(value.profileId || value.hostUrl.trim());
+  return (
+    <section className="space-y-2">
+      {/* HOST 行：标题 + 状态 + 展开/收起按钮（#1 单一 disclosure：展开即启用） */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-[13px] font-semibold">{t("scan.host.sectionLabel")}</h3>
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+              {t("scan.tags.optional")}
+            </span>
+          </div>
+          <div className="text-[11.5px] text-muted-foreground mt-0.5">
+            {value.enabled ? t("scan.host.statusOn") : t("scan.host.statusOff")}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-w-[5.5rem]"
+          onClick={() => onChange({ enabled: !value.enabled })}
+        >
+          {value.enabled
+            ? t("scan.host.collapse")
+            : hasDraft ? t("scan.host.configureDraft") : t("scan.host.configure")}
+        </Button>
+      </div>
+      {value.enabled && (
+        <div className="space-y-2.5 fade-in">
+          {/* 来源 segmented（使用档案 / 填写链接）--镜像 RightAuthCore 的 segmented toggle */}
+          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
+            {(["profile", "url"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onChange({ mode: m })}
+                aria-pressed={value.mode === m}
+                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  value.mode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m === "profile" ? t("scan.host.sourceProfile") : t("scan.host.sourceUrl")}
+              </button>
+            ))}
+          </div>
+          {value.mode === "profile" ? (
+            <HostProfilePicker host={value} setHost={onChange} workspace={workspace} />
+          ) : (
+            <Input
+              value={value.hostUrl}
+              onChange={(e) => onChange({ hostUrl: e.target.value })}
+              placeholder={t("scan.host.urlPlaceholder")}
+              className="font-mono text-xs"
+            />
+          )}
+          <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
+            <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <span>{t("scan.host.infoNote")}</span>
+          </div>
+          {error && <div className="text-destructive text-xs">{error}</div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ScanFormFields({
   type,
   f,
@@ -717,6 +801,7 @@ export function ScanFormFields({
   reuseErr,
   urlErr,
   authErr,
+  hostErr,
   workspace,
   wsList,
   onWorkspaceChange,
@@ -826,7 +911,7 @@ export function ScanFormFields({
   const wsSelectInner = (
     <>
       <Select value={workspace} onValueChange={onWorkspaceChange}>
-        <SelectTrigger className="w-full font-mono">
+        <SelectTrigger className="w-full font-mono text-xs">
           <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
@@ -854,6 +939,8 @@ export function ScanFormFields({
 
   // —— 共用：认证 patch 回写 + inline 存档回调（白盒组合展开区与黑盒分支都用） ——
   const setAuth = (patch: Partial<AuthFormState>) => set({ auth: { ...f.auth, ...patch } });
+  // HOST patch 回写（与 auth 独立、非互斥）--提前到 early return 之前，白盒组合展开区与黑盒分支共用。
+  const setHost = (patch: Partial<HostFormState>) => set({ host: { ...f.host, ...patch } });
   // inline 保存为新档案后：切 profile 模式 + 选中新建档案 + 默认全选其角色 + 递增 refreshSignal 触发重拉。
   const onProfileSaved = (profile: AuthProfile) => {
     setAuth({ source: "profile", profileId: profile.id, credentialIds: profile.credentials.map((c) => c.id) });
@@ -900,7 +987,7 @@ export function ScanFormFields({
                   value={f.url}
                   onChange={(e) => set({ url: e.target.value })}
                   placeholder={t("scan.combined.urlPlaceholder")}
-                  className="font-mono border-orange/30"
+                  className="font-mono text-xs border-orange/30"
                 />
                 {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
               </div>
@@ -910,6 +997,12 @@ export function ScanFormFields({
                 workspace={workspace}
                 authErr={authErr}
                 refreshSignal={profileRefresh}
+              />
+              <HostFields
+                value={f.host}
+                onChange={setHost}
+                workspace={workspace}
+                error={hostErr}
               />
             </div>
           )}
@@ -922,14 +1015,10 @@ export function ScanFormFields({
   //   折叠态：右栏虚线占位 + 认证行一行；展开态：右栏核心顶格对齐目标服务 + 下方横向铺开。
   //   认证拆两块——核心（开关/来源/入口/凭据）+ 增强（步骤/存档 或 档案摘要）。
   // IA 不变量：repo 与白盒 scan 均按工作区隔离；URL 是黑盒主输入，保持在最上。
-  // HOST 解析（Task 13）：与 auth 独立、非互斥——setHost 只 patch host 字段，不触碰 auth。
-  const setHost = (patch: Partial<HostFormState>) => set({ host: { ...f.host, ...patch } });
   // #1 单一 disclosure：收起态若有草稿（任意 inline 字段已填 / 已选档案），按钮显「已配置」标记——
   // 折叠不再清字段，标记告诉用户「配置还在、只是当前未启用」。primary 默认 role="admin" 不算草稿信号。
   const hasAuthDraft = !!(f.auth.loginUrl.trim() || f.auth.loginFlow.trim() || f.auth.profileId
     || f.auth.accounts.some((a) => a.username.trim() || a.password.trim()));
-  // HOST 草稿信号：选了档案或填了 url 即视为已配置（折叠态按钮显「已配置」标记，折叠不丢配置）。
-  const hasHostDraft = !!(f.host.profileId || f.host.hostUrl.trim());
   return (
     <div className="space-y-5">
       {/* 上层：左表单 + 右核心(展开时) */}
@@ -948,7 +1037,7 @@ export function ScanFormFields({
               value={f.url}
               onChange={(e) => set({ url: e.target.value })}
               placeholder={t("scan.fields.urlPlaceholder")}
-              className="font-mono border-orange/30"
+              className="font-mono text-xs border-orange/30"
             />
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
             <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>
@@ -976,7 +1065,7 @@ export function ScanFormFields({
                   </div>
                 ) : (
                   <Select value={f.reuseScanId} onValueChange={(v) => set({ reuseScanId: v })}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full text-xs">
                       <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
@@ -1022,6 +1111,7 @@ export function ScanFormFields({
                 type="button"
                 variant="outline"
                 size="sm"
+                className="min-w-[5.5rem]"
                 onClick={() => setAuth({ enabled: !f.auth.enabled })}
               >
                 {f.auth.enabled
@@ -1031,66 +1121,8 @@ export function ScanFormFields({
             </div>
           </section>
 
-          {/* HOST 解析行（可选；与认证区并列、互不影响——disabled=不起代理，向后兼容） */}
-          <section className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[13px] font-semibold">{t("scan.host.sectionLabel")}</h3>
-                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                    {t("scan.tags.optional")}
-                  </span>
-                </div>
-                <div className="text-[11.5px] text-muted-foreground mt-0.5">
-                  {f.host.enabled ? t("scan.host.statusOn") : t("scan.host.statusOff")}
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setHost({ enabled: !f.host.enabled })}
-              >
-                {f.host.enabled
-                  ? t("scan.host.collapse")
-                  : hasHostDraft ? t("scan.host.configureDraft") : t("scan.host.configure")}
-              </Button>
-            </div>
-            {f.host.enabled && (
-              <div className="space-y-2.5 fade-in">
-                {/* 来源 segmented（使用档案 / 填写链接）——镜像 RightAuthCore 的 segmented toggle */}
-                <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
-                  {(["profile", "url"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setHost({ mode: m })}
-                      aria-pressed={f.host.mode === m}
-                      className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                        f.host.mode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {m === "profile" ? t("scan.host.sourceProfile") : t("scan.host.sourceUrl")}
-                    </button>
-                  ))}
-                </div>
-                {f.host.mode === "profile" ? (
-                  <HostProfilePicker host={f.host} setHost={setHost} workspace={workspace} />
-                ) : (
-                  <Input
-                    value={f.host.hostUrl}
-                    onChange={(e) => setHost({ hostUrl: e.target.value })}
-                    placeholder={t("scan.host.urlPlaceholder")}
-                    className="font-mono text-xs"
-                  />
-                )}
-                <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
-                  <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                  <span>{t("scan.host.infoNote")}</span>
-                </div>
-              </div>
-            )}
-          </section>
+          {/* HOST 解析（Task 13）：复用共享 HostFields 组件（与认证区并列、互不影响）。 */}
+          <HostFields value={f.host} onChange={setHost} workspace={workspace} error={hostErr} />
         </div>
 
         {/* 右栏：折叠=虚线占位 / 展开=核心（顶格对齐目标服务） */}

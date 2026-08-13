@@ -208,7 +208,9 @@ describe("ScanList 操作调 API + 列表刷新", () => {
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),
       http.get("/api/workspaces/:ws/scans/:scanId", () =>
         HttpResponse.json({ scan_type: "blackbox", web_url: "http://t.example",
-          reuse_whitebox_scan_id: "wb-1", authentication: auth })),
+          reuse_whitebox_scan_id: "wb-1", authentication: auth,
+          host_profile_id: "host-profile-1", host_url: null,
+          host_source: "profile", host_mapping_count: 2 })),
     );
     renderList();
     await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
@@ -216,7 +218,7 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     await waitFor(() => expect(navMock).toHaveBeenCalled());
     expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
       state: { type: "blackbox", workspace: "ws", url: "http://t.example",
-        reuseScanId: "wb-1", auth },
+        reuseScanId: "wb-1", auth, hostProfileId: "host-profile-1" },
     });
   });
 

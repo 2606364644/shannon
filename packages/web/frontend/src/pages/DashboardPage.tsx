@@ -161,11 +161,11 @@ export function DashboardPage() {
             {filtered.map((s: ScanSummary) => (
               <TableRow key={s.scan_id}>
                 <TableCell><StatusBadge status={s.status} /></TableCell>
-                <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="hover:text-primary">{s.workflow_id ?? s.scan_id}</Link></TableCell>
+                <TableCell className="font-mono"><Link to={`/p/${s.workspace}/scans/${s.scan_id}`} className="text-sm font-medium hover:text-primary">{s.workflow_id ?? s.scan_id}</Link></TableCell>
                 <TableCell className="font-mono"><Link to={`/p/${s.workspace}`} className="hover:text-primary">{s.workspace}</Link></TableCell>
                 <TableCell><Badge variant="outline">{s.scan_type}</Badge></TableCell>
                 <TableCell>
-                  <span className={cn("font-mono", (s.vuln_count ?? 0) > 0 ? "text-red" : "text-foreground")}>
+                  <span className={cn("font-mono text-lg font-semibold leading-none", (s.vuln_count ?? 0) > 0 ? "text-red" : "text-foreground")}>
                     {s.vuln_count ?? 0}
                   </span>
                 </TableCell>

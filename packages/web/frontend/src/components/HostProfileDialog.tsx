@@ -1,7 +1,8 @@
 // HOST 档案 新建/编辑 对话框。镜像 AuthProfileDialog.tsx 范式
 // (open/onOpenChange/onSaved、busy、reset on close、<form onSubmit>)。
-// 字段: 档案名 / MappingRows(IP / 域名) + 可选 source_url + 「从链接拉取」按钮调 parseHostProfile 预填 mappings。
+// 字段: 档案名 / MappingRows(IP / 域名) + 可选 source_url + 「从链接拉取」调 parseHostProfile 预填 mappings。
 // 提交按钮文案恒为 "保存"（区别于工具栏 "新建档案"，避免测试中 within 消歧）。
+// **大列表不爆框**：DialogContent 限高 max-h-[85vh] + 加宽 sm:max-w-2xl；映射表体在 MappingRows 内 max-h-[50vh] 自滚。
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -34,11 +35,14 @@ export function HostProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   });
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
-  // 系统档案只读防御：列表已隐藏 Edit，此处兜底——万一外部直传 system editing，禁提交，与后端 403 一致。
+  const [importSignal, setImportSignal] = useState(0); // 每次「拉取」+1 -> 触发 MappingRows 计数脉冲
+  const [attempted, setAttempted] = useState(false); // 提交被拦 -> 未填行高亮
+  // 系统档案只读防御：列表已隐藏 Edit，此处兜底--万一外部直传 system editing，禁提交，与后端 403 一致。
   const readOnly = editing?.scope === "system";
 
   function reset() {
     setName(""); setSourceUrl(""); setDrafts([{ ip: "", host: "" }]);
+    setImportSignal(0); setAttempted(false);
   }
 
   async function onParse() {
@@ -52,6 +56,8 @@ export function HostProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
       const r = await parseHostProfile(ws, u);
       if (r.mappings.length) {
         setDrafts(r.mappings.map((m) => ({ ip: m.ip, host: m.host })));
+        setImportSignal((n) => n + 1); // 计数 chip coral 脉冲
+        toast.success(t("hostProfiles.parseImported", { count: new Intl.NumberFormat().format(r.mappings.length) }));
       }
       if (r.warnings.length) {
         toast.warning(r.warnings.join("\n"));
@@ -69,8 +75,15 @@ export function HostProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (readOnly) return;
-    if (!name.trim() || drafts.some((d) => !d.ip.trim() || !d.host.trim())) {
+    const incomplete = drafts.filter((d) => !d.ip.trim() || !d.host.trim()).length;
+    if (!name.trim()) {
+      setAttempted(true);
       toast.error(t(editing ? "hostProfiles.saveFailed" : "hostProfiles.createFailed"));
+      return;
+    }
+    if (incomplete > 0) {
+      setAttempted(true);
+      toast.error(t("hostProfiles.incompleteRows", { count: incomplete }));
       return;
     }
     setBusy(true);
@@ -96,11 +109,11 @@ export function HostProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? t("hostProfiles.edit") : t("hostProfiles.create")}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-3">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="hp-name">{t("hostProfiles.name")}</Label>
             <Input id="hp-name" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -121,11 +134,16 @@ export function HostProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
             </div>
             <p className="text-[11px] text-muted-foreground">{t("hostProfiles.sourceUrlHint")}</p>
           </div>
-          <div className="space-y-1.5">
-            <Label>{t("hostProfiles.mappings")}</Label>
-            <MappingRows value={drafts} onChange={setDrafts} />
+          <div className="flex flex-col">
+            <Label className="mb-1.5">{t("hostProfiles.mappings")}</Label>
+            <MappingRows
+              value={drafts}
+              onChange={setDrafts}
+              importSignal={importSignal}
+              highlightInvalid={attempted}
+            />
           </div>
-          <DialogFooter>
+          <DialogFooter className="mt-1">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
             {!readOnly && (
               <Button type="submit" disabled={busy}>{busy ? "…" : t("hostProfiles.save")}</Button>

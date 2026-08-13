@@ -260,6 +260,9 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
           state.authProfileId = (detail as SessionData).auth_profile_id ?? undefined;
           state.authCredentialIds = (detail as SessionData).auth_credential_ids ?? undefined;
         }
+        // HOST source is a rerun input, not the old resolved mapping snapshot.
+        if (detail.host_profile_id) state.hostProfileId = detail.host_profile_id;
+        else if (detail.host_url) state.hostUrl = detail.host_url;
       }
       nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });
     } catch {

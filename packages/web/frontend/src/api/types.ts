@@ -196,6 +196,11 @@ export interface SessionData {
   auth_profile_id?: string | null;
   // 多角色子集（2026-08-06）：profile 模式选多个角色，空=全选该档案所有角色。
   auth_credential_ids?: string[] | null;
+  // HOST source for new-scan rerun; resolved mappings remain scan-scoped and are not exposed.
+  host_profile_id?: string | null;
+  host_url?: string | null;
+  host_source?: "profile" | "url" | null;
+  host_mapping_count?: number;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;

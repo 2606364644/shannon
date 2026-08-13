@@ -152,6 +152,29 @@ export function presetToHostState(preset: RerunPreset): HostFormState {
   return DEFAULT_HOST;
 }
 
+function hostValidationKey(h: HostFormState): string | null {
+  if (!h.enabled) return null;
+  if (h.mode === "profile") {
+    return h.profileId.trim() ? null : "scan.errors.hostProfileRequired";
+  }
+  const url = h.hostUrl.trim();
+  if (!url) return "scan.errors.hostUrlRequired";
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? null
+      : "scan.errors.hostUrlScheme";
+  } catch {
+    return "scan.errors.hostUrlScheme";
+  }
+}
+
+/** HOST enabled state must always have a concrete, safe source. */
+export function validateHost(h: HostFormState, t: TFunction): string | null {
+  const key = hostValidationKey(h);
+  return key ? t(key) : null;
+}
+
 export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   if (!a.enabled) return null;
   // profile 模式：必须选定档案 + 至少一个角色（前端默认全选；取消全选则拦空）。
@@ -212,6 +235,18 @@ function assignAuthToBody(body: ScanRequest, a: AuthFormState): void {
   }
 }
 
+/** 将 HostFormState 写入 ScanRequest 的 HOST 字段（与 assignAuthToBody 同款共享）：
+ *    - profile 模式 -> host_profile_id；url 模式 -> host_url。
+ *    - enabled 时发；disabled 不发（向后兼容——不起代理，直连目标）。
+ *    - 空值兜底 || undefined（不发空串）。
+ *  黑盒与白盒组合扫描共用，保证两条分支字段映射一致。HOST 与认证独立、非互斥。
+ *  仅组合模式（combined && url）/黑盒调——纯白盒（无 url）不发 host（无黑盒阶段，HOST 代理无意义）。 */
+function assignHostToBody(body: ScanRequest, h: HostFormState): void {
+  if (!h.enabled) return;
+  if (h.mode === "profile") body.host_profile_id = h.profileId || undefined;
+  else body.host_url = h.hostUrl || undefined;
+}
+
 /**
  * 构造 /scan 提交 body。
  * P2 (2026-07-26): `workspace` 来自父组件显式选定的 workspace（替代 pre-P1 的
@@ -226,6 +261,11 @@ function assignAuthToBody(body: ScanRequest, a: AuthFormState): void {
  */
 export function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
+  const hostIsActive = type === "blackbox" || (type === "whitebox" && !!f.combined && !!f.url);
+  if (hostIsActive) {
+    const hostError = hostValidationKey(f.host);
+    if (hostError) throw new Error(hostError);
+  }
   const body: ScanRequest = { type, url: f.url || undefined, workspace: workspace || undefined };
   if (type === "whitebox") {
     body.source = { kind: "repo", value: f.selectedRepo };
@@ -235,6 +275,7 @@ export function buildBody(type: ScanType, f: FormState, workspace: string): Scan
     if (f.combined && f.url) {
       body.url = f.url;
       if (f.auth.enabled) assignAuthToBody(body, f.auth);
+      assignHostToBody(body, f.host);
     } else {
       body.url = undefined;
     }
@@ -247,10 +288,7 @@ export function buildBody(type: ScanType, f: FormState, workspace: string): Scan
   // HOST 解析（blackbox-host-profile Task 13）：enabled 时按 mode 发对应字段（与 auth 独立、非互斥）。
   // profile 模式 → host_profile_id；url 模式 → host_url。空值兜底 || undefined（不发空串）。
   // disabled 时两者都不发（向后兼容——不起代理，直连目标）。
-  if (f.host.enabled) {
-    if (f.host.mode === "profile") body.host_profile_id = f.host.profileId || undefined;
-    else body.host_url = f.host.hostUrl || undefined;
-  }
+  assignHostToBody(body, f.host);
   return body;
 }
 
@@ -332,9 +370,10 @@ export function ScanNewPage() {
     ? (f.url.trim() ? (/^https?:\/\//.test(f.url.trim()) ? null : t("scan.errors.urlScheme")) : t("scan.errors.urlEmpty"))
     : validateUrl(f.url, type, t);
   const authErr = (type === "blackbox" || combined) ? validateAuth(f.auth, t) : null;
+  const hostErr = (type === "blackbox" || combined) ? validateHost(f.host, t) : null;
   const isValid = isCorrelation
     ? !yamlErr
-    : !sourceErr && !reuseErr && !urlErr && !authErr && !!workspace;
+    : !sourceErr && !reuseErr && !urlErr && !authErr && !hostErr && !!workspace;
 
   async function onSubmit() {
     if (type === "correlation" && yamlErr) {
@@ -412,6 +451,7 @@ export function ScanNewPage() {
                 reuseErr={reuseErr}
                 urlErr={urlErr}
                 authErr={authErr}
+                hostErr={hostErr}
                 workspace={workspace}
                 wsList={wsList}
                 onWorkspaceChange={setWorkspace}

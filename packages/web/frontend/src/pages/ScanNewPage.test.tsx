@@ -1055,11 +1055,10 @@ describe("黑盒 HOST buildBody / presetToHostState", () => {
     expect(body.host_profile_id).toBeUndefined();
   });
 
-  it("buildBody: host enabled + profile 模式 profileId 空 → 不发（兜底 || undefined）", () => {
-    const body = buildBody("blackbox",
-      { ...baseF, host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" } }, "ws1");
-    expect(body.host_profile_id).toBeUndefined();
-    expect(body.host_url).toBeUndefined();
+  it("buildBody: host enabled + profile 模式 profileId 空 → 拒绝静默降级", () => {
+    expect(() => buildBody("blackbox",
+      { ...baseF, host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" } }, "ws1"))
+      .toThrow("scan.errors.hostProfileRequired");
   });
 
   it("buildBody: host 与 auth 独立——两者同时 enabled 各发各的字段（非互斥）", () => {
@@ -1099,5 +1098,90 @@ describe("黑盒 HOST buildBody / presetToHostState", () => {
     const state = presetToHostState({ hostProfileId: "host_1", hostUrl: "https://x/hosts.txt" } as RerunPreset);
     expect(state.mode).toBe("profile");
     expect(state.profileId).toBe("host_1");
+  });
+});
+
+// === 组合扫描 HOST 字段透传（2026-08-13：白盒组合开关展开 HOST 入口后 buildBody 须发 host） ===
+// 与黑盒分支同款 assignHostToBody：enabled 时按 mode 发 host_profile_id / host_url；
+// disabled 不发；非组合白盒（combined=false）即便 host.enabled 也不发（纯白盒无黑盒阶段）。
+describe("buildBody whitebox 组合扫描 HOST 透传", () => {
+  function wbForm(overrides: Partial<FormState> = {}): FormState {
+    return {
+      selectedRepo: "foo",
+      url: "http://target.example/",
+      reuseScanId: "",
+      auth: {
+        enabled: false, source: "inline", profileId: "", credentialIds: [],
+        loginType: "form", loginUrl: "",
+        accounts: [{ role: "admin", username: "", password: "" }], loginFlow: "",
+      },
+      host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" },
+      yaml: "",
+      combined: true,
+      ...overrides,
+    };
+  }
+
+  it("组合 + host profile 模式 -> 发 host_profile_id（不发 host_url）", () => {
+    const body = buildBody("whitebox", wbForm({
+      host: { enabled: true, mode: "profile", profileId: "host_1", hostUrl: "" },
+    }), "ws1");
+    expect(body.host_profile_id).toBe("host_1");
+    expect(body.host_url).toBeUndefined();
+  });
+
+  it("组合 + host url 模式 -> 发 host_url（不发 host_profile_id）", () => {
+    const body = buildBody("whitebox", wbForm({
+      host: { enabled: true, mode: "url", profileId: "", hostUrl: "https://x/hosts.txt" },
+    }), "ws1");
+    expect(body.host_url).toBe("https://x/hosts.txt");
+    expect(body.host_profile_id).toBeUndefined();
+  });
+
+  it("组合 + host disabled -> 不发任何 host 字段（直连目标，向后兼容）", () => {
+    const body = buildBody("whitebox", wbForm({
+      host: { enabled: false, mode: "profile", profileId: "host_1", hostUrl: "" },
+    }), "ws1");
+    expect(body.host_profile_id).toBeUndefined();
+    expect(body.host_url).toBeUndefined();
+  });
+
+  it("组合 + host profile 但 profileId 空 -> 拒绝静默降级", () => {
+    expect(() => buildBody("whitebox", wbForm({
+      host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" },
+    }), "ws1")).toThrow("scan.errors.hostProfileRequired");
+  });
+
+  it("非组合白盒（combined=false）即便 host enabled 也不发 host（纯白盒无黑盒阶段）", () => {
+    const body = buildBody("whitebox", wbForm({
+      combined: false,
+      host: { enabled: true, mode: "profile", profileId: "host_1", hostUrl: "" },
+    }), "ws1");
+    expect(body.host_profile_id).toBeUndefined();
+    expect(body.host_url).toBeUndefined();
+  });
+});
+
+
+describe("HOST enabled source validation", () => {
+  const baseF: FormState = {
+    selectedRepo: "",
+    url: "http://example.com",
+    reuseScanId: "20260731-1200",
+    auth: { enabled: false, source: "inline", profileId: "", credentialIds: [],
+      loginType: "form", loginUrl: "", accounts: [{ role: "admin", username: "", password: "" }], loginFlow: "" },
+    host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" },
+    yaml: "",
+  };
+
+  it("does not silently drop an enabled HOST source", () => {
+    expect(() => buildBody("blackbox", baseF, "ws1")).toThrow();
+  });
+
+  it("rejects an enabled HOST URL with a non-http(s) scheme", () => {
+    expect(() => buildBody("blackbox", {
+      ...baseF,
+      host: { enabled: true, mode: "url", profileId: "", hostUrl: "ftp://hosts.example/hosts" },
+    }, "ws1")).toThrow();
   });
 });

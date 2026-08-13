@@ -10,10 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatRow, type StatItem } from "@/components/StatRow";
-import { ChevronDown, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Trash2, Unlink } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Trash2, Unlink } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -28,19 +27,6 @@ function fmtSize(b?: number) {
   if (b > 1_000_000) return `${(b / 1_000_000).toFixed(1)} MB`;
   if (b > 1000) return `${(b / 1000).toFixed(0)} KB`;
   return `${b} B`;
-}
-
-interface Group { name: string; repos: Repo[]; }
-
-function groupRepos(repos: Repo[], ungrouped: string): Group[] {
-  const map = new Map<string, Repo[]>();
-  for (const r of repos) {
-    const g = r.group ?? ungrouped;
-    let arr = map.get(g);
-    if (!arr) { arr = []; map.set(g, arr); }
-    arr.push(r);
-  }
-  return Array.from(map, ([name, rs]) => ({ name, repos: rs }));
 }
 
 // 状态 -> 徽章 i18n key/色/图标（对齐 StatusBadge 的 DSF token 配色）。
@@ -104,7 +90,6 @@ export function ReposTab({ workspace: wsProp }: Props) {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,17 +139,6 @@ export function ReposTab({ workspace: wsProp }: Props) {
     });
   }
 
-  function toggleSelectGroup(g: Group) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      const names = g.repos.map((r) => r.name);
-      const allSelected = names.length > 0 && names.every((n) => next.has(n));
-      if (allSelected) names.forEach((n) => next.delete(n));
-      else names.forEach((n) => next.add(n));
-      return next;
-    });
-  }
-
   async function doBulkDelete() {
     try {
       setBusy(true);
@@ -196,22 +170,12 @@ export function ReposTab({ workspace: wsProp }: Props) {
     }
   }
 
-  function toggleGroup(g: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(g)) next.delete(g); else next.add(g);
-      return next;
-    });
-  }
-
   // 搜索：按仓库名过滤（跨分组），空分组卡片自动隐藏
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return repos;
     return repos.filter((r) => r.name.toLowerCase().includes(q));
   }, [repos, query]);
-
-  const groups = groupRepos(filtered, t("repos.ungrouped"));
 
   // 概览条：客户端聚合 repos（不动后端契约）
   const stats: StatItem[] = useMemo(() => {
@@ -230,6 +194,19 @@ export function ReposTab({ workspace: wsProp }: Props) {
     [repos, selected],
   );
   const selectedPrivateCount = selected.size - selectedLinkedCount;
+
+  // 表头全选（扁平列表后，整表全选落在列头）：三态——全选 / 部分(indeterminate) / 无。
+  const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.name));
+  const someFilteredSelected = filtered.some((r) => selected.has(r.name));
+  const selectAllChecked = allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false;
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      const allSel = filtered.length > 0 && filtered.every((r) => prev.has(r.name));
+      const next = new Set(prev);
+      filtered.forEach((r) => (allSel ? next.delete(r.name) : next.add(r.name)));
+      return next;
+    });
+  }
 
   return (
     <TooltipProvider>
@@ -266,153 +243,143 @@ export function ReposTab({ workspace: wsProp }: Props) {
             {repos.length === 0 ? t("repos.empty") : t("repos.noMatch")}
           </div>
         ) : (
-          <div className="space-y-3">
-            {groups.map((g) => {
-              const isCollapsed = collapsed.has(g.name);
-              return (
-                <Card key={g.name} className="overflow-hidden p-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(g.name)}
-                    aria-expanded={!isCollapsed}
-                    className="flex w-full items-center gap-2 border-b border-border/60 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
-                  >
-                    <span className="font-medium">{g.name}</span>
-                    <span className="text-sm tabular-nums text-muted-foreground">
-                      ({g.repos.length})
-                    </span>
-                    <ChevronDown className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", isCollapsed && "-rotate-90")} />
-                  </button>
-                  {!isCollapsed && (
-                    <>
-                    <Table className="table-fixed">
-                      <TableHeader>
-                        <TableRow className="border-t border-border hover:bg-transparent">
-                          <TableHead className="w-72 py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              <Checkbox
-                                aria-label={t("repos.bulk.selectAll")}
-                                checked={g.repos.length > 0 && g.repos.every((r) => selected.has(r.name))}
-                                onCheckedChange={() => toggleSelectGroup(g)}
-                              />
-                              {t("repos.table.name")}
-                            </div>
-                          </TableHead>
-                          <TableHead className="py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.source")}</TableHead>
-                          <TableHead className="w-28 py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.branch")}</TableHead>
-                          <TableHead className="w-20 whitespace-nowrap py-2.5 px-3 text-right text-xs font-medium text-muted-foreground">{t("repos.table.size")}</TableHead>
-                          <TableHead className="w-36 whitespace-nowrap py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.state")}</TableHead>
-                          <TableHead className="w-28 whitespace-nowrap py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {g.repos.map((r) => {
-                          const url = r.source?.url;
-                          const accent = stateAccent(r.state);
-                          return (
-                            <TableRow key={r.name} className="group border-b border-border/50 transition-colors hover:bg-muted/40">
-                              {/* 名称：basename（目录前缀已由分组头表达），hover 显完整路径 */}
-                              <TableCell className="relative py-2.5 pl-4 pr-3">
-                                {accent && <span className={cn("absolute inset-y-0 left-0 w-0.5", accent)} aria-hidden />}
-                                <div className="flex items-center gap-2">
-                                  <Checkbox
-                                    aria-label={t("repos.bulk.selectRepo", { name: r.name })}
-                                    checked={selected.has(r.name)}
-                                    onCheckedChange={() => toggleSelect(r.name)}
-                                  />
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium">
-                                        {r.name.split("/").pop() ?? r.name}
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{r.name}</TooltipContent>
-                                  </Tooltip>
-                                  {r.linked && (
-                                    <Badge variant="outline" className="shrink-0 border-cyan/40 text-cyan">
-                                      {t("repos.linkedBadge")}
-                                    </Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              {/* 来源：URL 截断 + tooltip，复制按钮 hover 浮出（去渐变蒙层） */}
-                              <TableCell className="py-2.5 px-3">
-                                {url ? (
-                                  <div className="flex items-center gap-1">
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{url}</span>
-                                      </TooltipTrigger>
-                                      <TooltipContent className="max-w-md break-all">{url}</TooltipContent>
-                                    </Tooltip>
-                                    <CopyButton
-                                      value={url}
-                                      ariaLabel={t("repos.copyUrlAria", { name: r.name })}
-                                      className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
-                                    />
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">{r.source?.kind ?? "-"}</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="py-2.5 px-3">
-                                <span className="block truncate font-mono text-xs text-muted-foreground">
-                                  {r.source?.branch ?? "-"}
-                                </span>
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap py-2.5 px-3 text-right font-mono text-xs text-muted-foreground tabular-nums">
-                                {fmtSize(r.size_bytes)}
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap py-2.5 px-3">
-                                <StateBadge ws={workspace} repo={r} />
-                              </TableCell>
-                              {/* 操作列统一 icon-only ghost 按钮（对齐 AuthProfilesPage）：
-                                  纯图标不占文字宽度，永不被 w-28 列宽截断 → 不产生横向滚动条。
-                                  clone 行：更新 + 删除；linked 行：取消关联（共享路径 pull 会跨 ws 干扰，隐藏更新）。 */}
-                              <TableCell className="py-2.5 px-3 text-center">
-                                <span className="inline-flex justify-center gap-1">
-                                  {!r.linked && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          aria-label={t("repos.updateAria", { name: r.name })}
-                                          onClick={() => doPull(r.name)}
-                                        >
-                                          <RefreshCw className="size-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>{t("common.update")}</TooltipContent>
-                                    </Tooltip>
-                                  )}
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="text-destructive hover:bg-destructive/10"
-                                        aria-label={t(r.linked ? "repos.unlinkAria" : "repos.deleteAria", { name: r.name })}
-                                        onClick={() => setPendingDelete(r.name)}
-                                      >
-                                        {/* 关联仓库：取消关联（仅移除引用，不删源文件） */}
-                                        {r.linked ? <Unlink className="size-4" /> : <Trash2 className="size-4" />}
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{r.linked ? t("repos.unlink") : t("common.delete")}</TooltipContent>
-                                  </Tooltip>
-                                </span>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                    </>
-                  )}
-                </Card>
-              );
-            })}
+          <div className="overflow-auto rounded-md border border-border" style={{ maxHeight: "60vh" }}>
+            <Table className="table-fixed">
+              {/* 列头全表唯一 + sticky 粘顶：滚动时常驻。扁平列表（不再按分组折叠），
+                  所在目录独立成列；整表全选 checkbox 落在名称列头（对齐全选入口）。 */}
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="sticky top-0 z-10 w-64 bg-card py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        aria-label={t("repos.bulk.selectAll")}
+                        checked={selectAllChecked}
+                        onCheckedChange={() => toggleSelectAll()}
+                      />
+                      {t("repos.table.name")}
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-10 w-40 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">
+                    {t("repos.table.directory")}
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-10 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.source")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-28 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.branch")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-20 whitespace-nowrap bg-card py-2.5 px-3 text-right text-xs font-medium text-muted-foreground">{t("repos.table.size")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-36 whitespace-nowrap bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.state")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-28 whitespace-nowrap bg-card py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((r) => {
+                  const url = r.source?.url;
+                  const accent = stateAccent(r.state);
+                  const slashIdx = r.name.lastIndexOf("/");
+                  const dir = slashIdx > 0 ? r.name.slice(0, slashIdx) : null;
+                  return (
+                    <TableRow key={r.name} className="group border-b border-border/50 transition-colors hover:bg-muted/40">
+                      {/* 名称：basename（目录前缀已移至独立「目录」列），hover 显完整路径 */}
+                      <TableCell className="relative py-2.5 pl-4 pr-3">
+                        {accent && <span className={cn("absolute inset-y-0 left-0 w-0.5", accent)} aria-hidden />}
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            aria-label={t("repos.bulk.selectRepo", { name: r.name })}
+                            checked={selected.has(r.name)}
+                            onCheckedChange={() => toggleSelect(r.name)}
+                          />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium">
+                                {r.name.split("/").pop() ?? r.name}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>{r.name}</TooltipContent>
+                          </Tooltip>
+                          {r.linked && (
+                            <Badge variant="outline" className="shrink-0 border-cyan/40 text-cyan">
+                              {t("repos.linkedBadge")}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      {/* 所在目录：name 的路径前缀（group/repo 的 group 段）；扁平仓库为 — */}
+                      <TableCell className="py-2.5 px-3">
+                        {dir ? (
+                          <span className="block truncate font-mono text-xs text-muted-foreground">{dir}</span>
+                        ) : (
+                          <span className="font-mono text-xs text-muted-foreground/50">—</span>
+                        )}
+                      </TableCell>
+                      {/* 来源：URL 截断 + tooltip，复制按钮 hover 浮出（去渐变蒙层） */}
+                      <TableCell className="py-2.5 px-3">
+                        {url ? (
+                          <div className="flex items-center gap-1">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{url}</span>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-md break-all">{url}</TooltipContent>
+                            </Tooltip>
+                            <CopyButton
+                              value={url}
+                              ariaLabel={t("repos.copyUrlAria", { name: r.name })}
+                              className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{r.source?.kind ?? "-"}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-2.5 px-3">
+                        <span className="block truncate font-mono text-xs text-muted-foreground">
+                          {r.source?.branch ?? "-"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap py-2.5 px-3 text-right font-mono text-xs text-muted-foreground tabular-nums">
+                        {fmtSize(r.size_bytes)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap py-2.5 px-3">
+                        <StateBadge ws={workspace} repo={r} />
+                      </TableCell>
+                      {/* 操作列统一 icon-only ghost 按钮：clone 行 更新+删除；linked 行 取消关联。 */}
+                      <TableCell className="py-2.5 px-3 text-center">
+                        <span className="inline-flex justify-center gap-1">
+                          {!r.linked && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  aria-label={t("repos.updateAria", { name: r.name })}
+                                  onClick={() => doPull(r.name)}
+                                >
+                                  <RefreshCw className="size-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("common.update")}</TooltipContent>
+                            </Tooltip>
+                          )}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="text-destructive hover:bg-destructive/10"
+                                aria-label={t(r.linked ? "repos.unlinkAria" : "repos.deleteAria", { name: r.name })}
+                                onClick={() => setPendingDelete(r.name)}
+                              >
+                                {/* 关联仓库：取消关联（仅移除引用，不删源文件） */}
+                                {r.linked ? <Unlink className="size-4" /> : <Trash2 className="size-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{r.linked ? t("repos.unlink") : t("common.delete")}</TooltipContent>
+                          </Tooltip>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
 

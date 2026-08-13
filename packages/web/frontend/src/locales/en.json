@@ -101,6 +101,7 @@
     "copyUrlAria": "Copy source URL of {{name}}",
     "table": {
       "name": "Name",
+      "directory": "Directory",
       "source": "Source",
       "branch": "Branch",
       "size": "Size",
@@ -363,7 +364,10 @@
       "authUsername": "Please fill in the username",
       "authAccountIncomplete": "Extra roles need both username and password",
       "authProfileRequired": "Please select an auth profile",
-      "authCredentialRequired": "Please select a login role"
+      "authCredentialRequired": "Please select a login role",
+      "hostProfileRequired": "Please select a HOST profile",
+      "hostUrlRequired": "Please fill in the HOST provider URL",
+      "hostUrlScheme": "HOST provider URL must start with http(s)://"
     },
     "title": "New Scan",
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
@@ -383,7 +387,7 @@
       "sectionTitle": "Blackbox Combo",
       "toggle": "Also start a blackbox scan",
       "hint": "When enabled, a blackbox pentest runs alongside the whitebox audit (auth precheck first).",
-      "urlLabel": "Target service URL",
+      "urlLabel": "Target Service",
       "urlPlaceholder": "http://target.example"
     },
     "precheckStatus": "Precheck (auth validation)",
@@ -981,6 +985,14 @@
     "parseNeedUrl": "Please fill in the source URL first",
     "parseFailed": "Fetch failed",
     "parseEmpty": "No mappings parsed from the URL",
+    "parseImported": "Imported {{count}} mappings",
+    "totalCount": "{{count}} mappings",
+    "filterCount": "{{shown}} / {{total}} filtered",
+    "filterPlaceholder": "Filter by IP or host…",
+    "clearAll": "Clear",
+    "clearConfirm": "Clear all mappings? You can re-fetch from the URL before saving.",
+    "emptyFilter": "No mappings match \"{{query}}\"",
+    "incompleteRows": "{{count}} row(s) are incomplete — fill or remove them before saving",
     "updated": "Updated",
     "refresh": "Refresh",
     "refreshed": "Refreshed from source URL",

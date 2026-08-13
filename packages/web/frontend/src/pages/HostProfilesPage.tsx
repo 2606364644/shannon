@@ -110,7 +110,8 @@ export function HostProfilesPage() {
               <TableRow key={p.id} className="group transition-colors hover:bg-muted/40">
                 <TableCell className="max-w-0">
                   <div className="flex items-start gap-2">
-                    <span className="min-w-0 break-all font-mono text-sm leading-snug" title={p.name}>{p.name}</span>
+                    {/* 档案名=身份锚点，加重+前景色高亮（区别于 来源/映射/时间 等 muted 引用数据）。 */}
+                    <span className="min-w-0 break-all font-mono text-sm font-semibold leading-snug text-foreground" title={p.name}>{p.name}</span>
                     {p.scope === "system" && (
                       <span
                         className="mt-px shrink-0 inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground"

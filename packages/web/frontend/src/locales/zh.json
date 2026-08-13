@@ -101,6 +101,7 @@
     "copyUrlAria": "复制 {{name}} 的来源 URL",
     "table": {
       "name": "名称",
+      "directory": "目录",
       "source": "来源",
       "branch": "分支",
       "size": "大小",
@@ -363,7 +364,10 @@
       "authUsername": "请填写用户名",
       "authAccountIncomplete": "附加角色的用户名和密码须填写完整",
       "authProfileRequired": "请选择认证档案",
-      "authCredentialRequired": "请选择登录角色"
+      "authCredentialRequired": "请选择登录角色",
+      "hostProfileRequired": "请选择 HOST 档案",
+      "hostUrlRequired": "请填写 HOST 来源链接",
+      "hostUrlScheme": "HOST 来源链接需以 http(s):// 开头"
     },
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
@@ -383,7 +387,7 @@
       "sectionTitle": "黑盒组合",
       "toggle": "同时发起黑盒扫描",
       "hint": "开启后将在白盒审计的同时，对运行中的目标服务发起黑盒渗透（先预验证认证）。",
-      "urlLabel": "目标服务 URL",
+      "urlLabel": "目标服务",
       "urlPlaceholder": "http://target.example"
     },
     "precheckStatus": "预验证中（认证校验）",
@@ -981,6 +985,14 @@
     "parseNeedUrl": "请先填写来源链接",
     "parseFailed": "拉取失败",
     "parseEmpty": "链接未解析到任何映射",
+    "parseImported": "已导入 {{count}} 条映射",
+    "totalCount": "{{count}} 条",
+    "filterCount": "已筛选 {{shown}} / {{total}}",
+    "filterPlaceholder": "筛选 IP 或域名…",
+    "clearAll": "清空",
+    "clearConfirm": "确定清空全部映射？未保存前可重新从链接拉取。",
+    "emptyFilter": "没有匹配「{{query}}」的映射",
+    "incompleteRows": "有 {{count}} 行未填完整，请补全或删除后再保存",
     "updated": "更新时间",
     "refresh": "刷新",
     "refreshed": "已按来源链接刷新",

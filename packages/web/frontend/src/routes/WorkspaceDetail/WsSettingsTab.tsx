@@ -14,9 +14,11 @@ import { Textarea } from "@/components/ui/textarea";
 
 const PLACEHOLDER = [
   "SUPERNOVA_AI_PROVIDER=openai_compatible",
-  "SUPERNOVA_OPENAI_API_KEY=...",
-  "SUPERNOVA_OPENAI_BASE_URL=https://...",
-  "SUPERNOVA_LARGE_MODEL=...",
+  "SUPERNOVA_OPENAI_API_KEY=填入你的 API key",
+  "SUPERNOVA_OPENAI_BASE_URL=https://llm-proxy.futuoa.com/v1",
+  "SUPERNOVA_OPENAI_LARGE_MODEL=glm-5.2-coder",
+  "SUPERNOVA_OPENAI_MEDIUM_MODEL=glm-5.2-coder",
+  "SUPERNOVA_OPENAI_SMALL_MODEL=glm-5.2-coder",
 ].join("\n");
 
 export default function WsSettingsTab() {

@@ -62,11 +62,11 @@ beforeEach(() => {
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
-function renderFields(f: FormState, set: (patch: Partial<FormState>) => void = () => {}) {
+function renderFields(f: FormState, set: (patch: Partial<FormState>) => void = () => {}, type: "whitebox" | "blackbox" = "blackbox") {
   return render(
     <MemoryRouter>
       <ScanFormFields
-        type="blackbox"
+        type={type}
         f={f}
         set={set}
         sourceErr={null}
@@ -128,5 +128,36 @@ describe("ScanFormFields HOST 解析区", () => {
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ host: expect.objectContaining({ mode: "url" }) }));
     fireEvent.click(screen.getByRole("button", { name: /使用档案/ }));
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ host: expect.objectContaining({ mode: "profile" }) }));
+  });
+});
+
+
+// === 白盒组合展开区 HOST 入口（2026-08-13：组合开关打开时展开区渲染共享 HostFields） ===
+describe("ScanFormFields 白盒组合展开区 HOST", () => {
+  it("组合开关开 + host enabled -> 展开区渲染 HOST 区块（显 segmented 切换）", () => {
+    renderFields(
+      makeForm({ combined: true, host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" } }),
+      () => {},
+      "whitebox",
+    );
+    // HostFields 展开态显 segmented（与黑盒分支同款，复用同一组件）
+    expect(screen.getByRole("button", { name: /使用档案/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /填写链接/ })).toBeInTheDocument();
+  });
+
+  it("组合开关开 + host disabled -> 显「配置 HOST」按钮（折叠态不显 segmented）", () => {
+    renderFields(
+      makeForm({ combined: true, host: { enabled: false, mode: "profile", profileId: "", hostUrl: "" } }),
+      () => {},
+      "whitebox",
+    );
+    expect(screen.getByRole("button", { name: /配置 HOST/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /使用档案/ })).toBeNull();
+  });
+
+  it("组合开关关 -> 不渲染 HOST 区块（纯白盒无 HOST 入口，零回归）", () => {
+    renderFields(makeForm({ combined: false }), () => {}, "whitebox");
+    expect(screen.queryByRole("button", { name: /配置 HOST/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /使用档案/ })).toBeNull();
   });
 });

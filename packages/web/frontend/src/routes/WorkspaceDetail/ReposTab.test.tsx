@@ -92,7 +92,7 @@ describe("ReposTab", () => {
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
     // 初始无批量删除入口
     expect(screen.queryByText("repos.bulk.deleteSelected")).toBeNull();
-    // 勾全选（分组表头 checkbox）
+    // 勾全选（名称列头 checkbox）
     fireEvent.click(screen.getByLabelText("repos.bulk.selectAll"));
     // 批量操作栏出现
     expect(screen.getByText("repos.bulk.deleteSelected")).toBeTruthy();
@@ -107,5 +107,32 @@ describe("ReposTab", () => {
     const init = batchCall?.[1] as RequestInit | undefined;
     const names: string[] = JSON.parse(init?.body as string).names;
     expect([...names].sort()).toEqual(["r1", "r2"]);
+  });
+
+  it("扁平列表：列头唯一、单个 table、所在目录独立成列", async () => {
+    const fm = vi.spyOn(window, "fetch");
+    fm.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/auth/me")) {
+        return new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 });
+      }
+      return new Response(JSON.stringify([
+        { name: "alpha/r1", group: "alpha", state: "ready" },
+        { name: "beta/r2", group: "beta", state: "ready" },
+      ]), { status: 200 });
+    });
+    const { container } = render(
+      <AuthProvider><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
+    // 列头只出现一次（重构前每个分组一张独立表，列头重复 N 次）
+    expect(screen.getAllByText("repos.table.name")).toHaveLength(1);
+    // 整页只有一个 table 元素（重构前 N 分组 = N 张表）
+    expect(container.querySelectorAll("table")).toHaveLength(1);
+    // 所在目录列头存在
+    expect(screen.getByText("repos.table.directory")).toBeTruthy();
+    // 目录名落在「目录」列（扁平列表，不再有分组行）
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByText("beta")).toBeTruthy();
   });
 });
