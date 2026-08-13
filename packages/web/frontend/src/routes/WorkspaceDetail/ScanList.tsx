@@ -18,7 +18,7 @@ import {
   listScans, cancelScan, deleteScan, resumeScan, getScan, scanEventsUrl, ApiError,
 } from "@/api/client";
 import { useEventSource } from "@/api/useEventSource";
-import type { ScanSummary, SessionData, NdjsonEvent } from "@/api/types";
+import type { BlackboxRunSummary, ScanSummary, SessionData, NdjsonEvent } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
 import { cn } from "@/lib/utils";
 
@@ -208,6 +208,30 @@ export function ScanList() {
   );
 }
 
+/** 版本化黑盒 run 嵌套列表（spec 2026-08-14 §5.2）：组合任务卡内显每个 run 的 id + 状态 +
+ *  跳转到该 run 详情/报告的链接（?run= 选中）。非组合卡不渲染（零回归）。 */
+function NestedBlackboxRuns({ ws, scanId, runs }: {
+  ws: string; scanId: string; runs: BlackboxRunSummary[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <ul className="ml-4 mt-2 space-y-1 border-l pl-3" data-testid="nested-runs">
+      {runs.map((r) => (
+        <li key={r.run_id} className="flex items-center gap-2 text-sm">
+          <span className="font-mono text-muted-foreground">{r.run_id}</span>
+          <StatusBadge status={(r.status ?? r.bb_phase ?? "unknown") as never} />
+          <Link
+            to={`/p/${ws}/scans/${scanId}?run=${r.run_id}`}
+            className="text-primary text-xs hover:underline"
+          >
+            {t("workspaceDetail.scans.runs.view")}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onChanged: () => void }) {
   const { t } = useTranslation();
   const nav = useNavigate();
@@ -373,6 +397,12 @@ function ScanCard({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCh
           useEventSource 仅此刻建 SSE，收起时卸载自动 close（on-demand，非 eager）。 */}
       {isCombined && expanded && (
         <CombinedStepTimeline ws={ws} scanId={scan.scan_id} bbPhase={scan.bb_phase} />
+      )}
+
+      {/* 版本化黑盒 run（spec 2026-08-14）：组合任务卡内嵌 run 列表。常显（不依赖 expanded），
+          让收起态也能一眼看到 run 数 + 跳转最新 run 报告。纯白盒（无 bb_runs）不渲染。 */}
+      {isCombined && scan.bb_runs && scan.bb_runs.length > 0 && (
+        <NestedBlackboxRuns ws={ws} scanId={scan.scan_id} runs={scan.bb_runs} />
       )}
 
       {/* 取消/删除确认 Dialog */}
