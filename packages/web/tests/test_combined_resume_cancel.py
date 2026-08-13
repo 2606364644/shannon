@@ -228,47 +228,53 @@ async def test_cancel_combined_pending_terminates_whitebox_and_orchestrator(
     assert orch.cancelled()
 
 
-# ── cancel: bb_phase=running + rerun=0 → 黑盒 -bb ───────────────────────────
+# ── cancel: latest run running → 黑盒 -bb-{K} ────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_cancel_combined_running_rerun0_terminates_bb(tmp_path, monkeypatch):
-    """bb_phase=running + 0 → cancel {ws}-{scan_id}-bb。"""
+async def test_cancel_combined_running_terminates_bb_run1(tmp_path, monkeypatch):
+    """latest run(run-1) running → cancel {ws}-{scan_id}-bb-1 + run-1 标 cancelled。"""
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     mock_handle = AsyncMock()
     mock_client = AsyncMock()
     mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
     monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
                        AsyncMock(return_value=mock_client))
-    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="running",
-                            bb_rerun_attempts=0, status="running")
+    _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1
+    store.update_blackbox_run("WS", "s1", "run-1", phase="running", status="running")
 
     result = await mgr.cancel("WS", "s1")
 
     assert result == {"cancelled": "s1"}
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb")
+    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-1")
     mock_handle.cancel.assert_awaited_once()
+    runs = store.list_blackbox_runs("WS", "s1")
+    assert runs[-1]["status"] == "cancelled"
 
-
-# ── cancel: bb_phase=running + rerun=2 → 黑盒 -bb-rerun-2 ────────────────────
 
 @pytest.mark.asyncio
-async def test_cancel_combined_running_rerun2_terminates_bb_rerun2(
-        tmp_path, monkeypatch):
-    """bb_phase=running + 2 → cancel {ws}-{scan_id}-bb-rerun-2。"""
+async def test_cancel_combined_running_run2_terminates_bb_run2(tmp_path, monkeypatch):
+    """latest run(run-2) running → cancel {ws}-{scan_id}-bb-2（版本化 run K）。"""
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     mock_handle = AsyncMock()
     mock_client = AsyncMock()
     mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
     monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
                        AsyncMock(return_value=mock_client))
-    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="running",
-                            bb_rerun_attempts=2, status="running")
+    _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1
+    store.create_blackbox_run("WS", "s1")  # run-2
+    store.update_blackbox_run("WS", "s1", "run-2", phase="running", status="running")
 
     result = await mgr.cancel("WS", "s1")
 
     assert result == {"cancelled": "s1"}
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-rerun-2")
+    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-2")
     mock_handle.cancel.assert_awaited_once()
+    runs = store.list_blackbox_runs("WS", "s1")
+    assert next(r for r in runs if r["run_id"] == "run-2")["status"] == "cancelled"
 
 
 # ── cancel: 标终态 cancelled（scan_end + session.status）─────────────────────

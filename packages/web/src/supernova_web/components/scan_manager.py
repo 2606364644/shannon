@@ -1542,15 +1542,21 @@ class ScanManager:
         scan_end 与 _mark_cancelled 终态竞争。_handles 同步清（白盒 handle 残留 running 阶段）。
         Temporal 连接/cancel best-effort（不可达仍标 cancelled——对齐既有 cancel ③ 轨语义）。
         """
-        data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
-        bb_phase = data.get("bb_phase")
-        bb_rerun = int(data.get("bb_rerun_attempts") or 0)
-        # 算 workflow_id（与 resume running 分支同算法）
-        if bb_phase == "running":
-            suffix = f"-bb-rerun-{bb_rerun}" if bb_rerun > 0 else "-bb"
+        # 版本化 run（spec §11.5）：按 latest run 的 bb_phase 算 workflow_id（取代旧
+        # task-level bb_phase/bb_rerun_attempts）。
+        runs = self._store.list_blackbox_runs(ws, scan_id)
+        latest = runs[-1] if runs else None
+        active_run_id: str | None = None
+        if latest:
+            rd = self._store.get_blackbox_run_dir(ws, scan_id, latest["run_id"])
+            if rd is not None and SessionManager(rd.parent).get_session_data(rd).get(
+                    "bb_phase") == "running":
+                active_run_id = latest["run_id"]
+        # 算 workflow_id（latest run running → -bb-{K}；否则白盒 base）
+        if active_run_id is not None:
+            wf_id = self._resolve_run_workflow_id(ws, scan_id, active_run_id)
         else:
-            suffix = ""
-        wf_id = self._resolve_workflow_id(ws, scan_id) + suffix
+            wf_id = self._resolve_workflow_id(ws, scan_id)
         # 取消编排 task（fire-and-forget，不再 submit 黑盒 / 不与终态竞争）
         orch = self._orchestrator_tasks.pop(scan_key, None)
         if orch is not None and not orch.done():
@@ -1562,6 +1568,13 @@ class ScanManager:
             await handle.cancel()
         except Exception:  # noqa: BLE001 - best-effort; temporal 不可达仍标 cancelled
             pass
+        # 标取消的 run cancelled（run 级 session + bb_runs[] 条目；best-effort）
+        if active_run_id is not None:
+            try:
+                self._store.update_blackbox_run(
+                    ws, scan_id, active_run_id, status="cancelled", phase="cancelled")
+            except Exception:  # noqa: BLE001
+                pass
         # 清残留 handle 登记（白盒 handle 在 running 阶段仍挂 _handles；对齐 delete 清理）
         self._handles.pop(scan_key, None)
         await self._mark_cancelled(scan_dir)
