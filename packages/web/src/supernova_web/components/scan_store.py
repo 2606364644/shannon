@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from supernova_core.session import SessionManager
+from supernova_core.utils.paths import blackbox_run_dir, blackbox_runs_dir
 from supernova_core.workspace import get_workspace_vuln_counts
 
 from .scan_liveness import is_scan_alive  # noqa: F401  (语义导出，便于测试 monkeypatch)
@@ -33,6 +34,11 @@ from .workspaces_indexer import _compute_status, _to_unix
 def _now_local() -> datetime:
     """scan_id 时间戳取本地时区 now（抽函数便于测试 monkeypatch 同秒碰撞）。"""
     return datetime.now()
+
+
+# run_id 校验：^run-\d+$（K = per-task 单调序号，从 1 起）。get/create/list run 据此
+# 拒绝越界（../）/ 非法格式（run-x），避免路径穿越读其他目录。
+_RUN_ID_RE = re.compile(r"^run-(\d+)$")
 
 
 def _compute_progress_pct(status: str, combined: bool | None,
@@ -290,6 +296,70 @@ class ScanStore:
         scan_dir = mgr.create_workspace(
             web_url=web_url, repo_path=repo_path, name=scan_id, scan_type=scan_type)
         return scan_id, scan_dir
+
+    # ---- 黑盒 run（嵌套 run-K 子目录，spec §4/§5.1）----
+    def _next_blackbox_run_seq(self, wb_dir: Path) -> int:
+        """per-task run 序号：扫 wb_dir/blackbox-runs/run-<N> 取 max+1（从 1 起）。
+
+        非扫盘发现 run——仅用于序号分配（run 的存在性/列表以任务 session 的 bb_runs[]
+        为准，spec §3 铁律）。序号并发由 ScanManager 的 _create_scan_lock 串行化。
+        """
+        runs_dir = blackbox_runs_dir(wb_dir)
+        if not runs_dir.is_dir():
+            return 1
+        seqs: list[int] = []
+        for d in runs_dir.iterdir():
+            m = _RUN_ID_RE.match(d.name)
+            if m and d.is_dir():
+                seqs.append(int(m.group(1)))
+        return (max(seqs) + 1) if seqs else 1
+
+    def create_blackbox_run(self, ws: str, wb_scan_id: str, *,
+                            auth_ref: dict | None = None,
+                            reason: str | None = None) -> tuple[str, Path]:
+        """在白盒任务根下分配 run-K 子目录（spec §4/§5.1）。
+
+        - 建 blackbox-runs/run-K/ + run 级 session.json（status=pending, bb_phase=pending）。
+        - 任务级 session 追加 bb_runs[] 条目 + 设 latest_bb_run + combined=True。
+        返回 (run_id, run_dir)。序号并发由调用方经 _create_scan_lock 串行化。
+        """
+        wb_dir = self.get_scan_dir(ws, wb_scan_id)
+        if wb_dir is None:
+            raise ValueError(f"白盒任务不存在: {wb_scan_id}")
+        k = self._next_blackbox_run_seq(wb_dir)
+        run_id = f"run-{k}"
+        run_dir = blackbox_run_dir(wb_dir, run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        # run 级 session（spec §5.3：bb_phase/bb_reason 下沉到此）
+        SessionManager(blackbox_runs_dir(wb_dir)).update_session(run_dir, {
+            "status": "pending", "bb_phase": "pending",
+            "started_at": _now_local().isoformat(),
+            "expected_agents": {}, "completed_agents": [], "host_mappings": {},
+        })
+        # 任务级索引：bb_runs[] + latest_bb_run + combined。auth_ref/reason 仅在提供时
+        # 入条目（默认 run 条目只 {run_id, status}；profile_id 非空才记 auth_ref）。
+        task_mgr = SessionManager(wb_dir.parent)
+        task_data = task_mgr.get_session_data(wb_dir)
+        runs = list(task_data.get("bb_runs") or [])
+        entry: dict = {"run_id": run_id, "status": "pending"}
+        if auth_ref:
+            entry["auth_ref"] = auth_ref
+        if reason:
+            entry["reason"] = reason
+        runs.append(entry)
+        task_mgr.update_session(wb_dir, {
+            "bb_runs": runs, "latest_bb_run": run_id, "combined": True})
+        return run_id, run_dir
+
+    def get_blackbox_run_dir(self, ws: str, wb_scan_id: str, run_id: str) -> Path | None:
+        """定位 run 子目录（spec §7.1 #1）。run_id 须 ^run-\\d+$；不存在/越界 → None。"""
+        if not run_id or not _RUN_ID_RE.match(run_id):
+            return None
+        wb_dir = self.get_scan_dir(ws, wb_scan_id)
+        if wb_dir is None:
+            return None
+        run_dir = blackbox_run_dir(wb_dir, run_id)
+        return run_dir if (run_dir / "session.json").exists() else None
 
     def _gen_scan_id(self, scans_dir: Path, repo_path: str,
                      scan_type: str = "whitebox",

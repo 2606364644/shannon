@@ -414,3 +414,43 @@ def test_create_scan_blackbox_requires_lineage(tmp_path):
     store = ScanStore(tmp_path)
     with pytest.raises(ValueError):
         store.create_scan("WS", "u", "", scan_type="blackbox", lineage=None)
+
+
+# ── create_blackbox_run（嵌套 run-K 子目录，spec §4/§5.1）──────────────────────
+
+def test_create_blackbox_run_allocates_run1_under_task(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")  # 白盒任务根
+    run_id, run_dir = store.create_blackbox_run("WS", wb_id)
+    assert run_id == "run-1"
+    assert run_dir == wb_dir / "blackbox-runs" / "run-1"
+    assert (run_dir / "session.json").exists()
+    run_sess = json.loads((run_dir / "session.json").read_text())
+    assert run_sess["status"] == "pending"
+    assert run_sess["bb_phase"] == "pending"
+    # 任务级 session 索引 bb_runs[] + latest_bb_run + combined
+    task_sess = json.loads((wb_dir / "session.json").read_text())
+    assert task_sess["combined"] is True
+    assert task_sess["latest_bb_run"] == "run-1"
+    assert task_sess["bb_runs"] == [{"run_id": "run-1", "status": "pending"}]
+
+
+def test_create_blackbox_run_monotonic_per_task(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")
+    r1, _ = store.create_blackbox_run("WS", wb_id)
+    r2, _ = store.create_blackbox_run("WS", wb_id)
+    assert (r1, r2) == ("run-1", "run-2")
+    task_sess = json.loads((wb_dir / "session.json").read_text())
+    assert [r["run_id"] for r in task_sess["bb_runs"]] == ["run-1", "run-2"]
+    assert task_sess["latest_bb_run"] == "run-2"
+
+
+def test_get_blackbox_run_dir_validates_run_id(tmp_path):
+    store = ScanStore(tmp_path)
+    wb_id, _ = store.create_scan("WS", "http://e", "/code/x")
+    store.create_blackbox_run("WS", wb_id)
+    assert store.get_blackbox_run_dir("WS", wb_id, "run-1").name == "run-1"
+    assert store.get_blackbox_run_dir("WS", wb_id, "run-9") is None  # 不存在
+    assert store.get_blackbox_run_dir("WS", wb_id, "../etc") is None  # 越界
+    assert store.get_blackbox_run_dir("WS", wb_id, "run-x") is None  # 非法格式
