@@ -108,6 +108,7 @@ def has_valid_whitebox_results(queue_file: Path) -> bool:
 
 WHITEBOX_SUBDIR: str = "whitebox"
 BLACKBOX_SUBDIR: str = "blackbox"
+COMBINED_SUBDIR: str = "combined"
 
 
 def whitebox_dir(deliverables_dir: Path) -> Path:
@@ -126,12 +127,22 @@ def blackbox_dir(deliverables_dir: Path) -> Path:
     return deliverables_dir / BLACKBOX_SUBDIR
 
 
+def combined_dir(deliverables_dir: Path) -> Path:
+    """组合产物子目录（写侧用）：deliverables_dir/combined/。
+
+    三桶布局的第三桶（whitebox/ blackbox/ combined/）。融合报告
+    ``combined_report.md`` 落此目录。deliverables_dir 是
+    workspaces/<session>/deliverables 根（非 workspace_path）。
+    """
+    return deliverables_dir / COMBINED_SUBDIR
+
+
 def resolve_track_deliverable(deliverables_dir: Path, track: str, filename: str) -> Path:
     """读侧 fallback：先 deliverables_dir/{track}/filename（新结构），无则回退
     deliverables_dir/filename（老 workspace）。两者都不存在时返回新结构路径，
     让调用方按既定 not-found 语义处理（不在这里抛错）。
 
-    track 取 WHITEBOX_SUBDIR 或 BLACKBOX_SUBDIR。
+    track 取 WHITEBOX_SUBDIR / BLACKBOX_SUBDIR / COMBINED_SUBDIR。
     """
     new = deliverables_dir / track / filename
     if new.exists():

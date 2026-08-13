@@ -1680,13 +1680,14 @@ class ScanManager:
     async def _generate_combined_report(self, scan_dir: Path) -> None:
         """生成组合扫描融合报告（spec §10.2）→ deliverables/combined/combined_report.md。
 
-        **FORWARD REFERENCE — Task 8 实现**（本任务仅占位，保证 patch.object 能找到属性；
-        单测统一 mock 本方法，真机 e2e 在 Task 8 落地真实逻辑后才跑通）。vuln_class 交叉融合
-        白盒 queue + 黑盒 finding，复用 FindingsRenderer/ReportAssembler 读 queue 逻辑。
+        按 vuln_class（injection/xss/ssrf/authz）交叉白盒 queue + 黑盒 queue，
+        产顶部摘要表 + 按类详述。实现在 ``combined_report_renderer``；本 async 入口
+        仅包装（文件读 inline，无须 offload），供 ``_run_blackbox_phase`` /
+        ``_rerun_blackbox_orchestrator`` / reconcile 在黑盒完成后 await。
         """
-        raise NotImplementedError(
-            "_generate_combined_report 由 Task 8 实现（spec §10.2）；"
-            "本占位仅为 forward-reference，单测应 mock 本方法")
+        from supernova_web.components.combined_report_renderer import (
+            render_combined_report)
+        render_combined_report(scan_dir)
 
     async def _ensure_scan_end(self, scan_dir: Path, status: str = "completed") -> None:
         """幂等收尾（spec §7.4，修原 bug）：events 无 scan_end 才补写。

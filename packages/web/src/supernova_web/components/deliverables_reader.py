@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from supernova_core.utils.paths import WHITEBOX_SUBDIR, resolve_track_deliverable
+from supernova_core.utils.paths import COMBINED_SUBDIR, WHITEBOX_SUBDIR, resolve_track_deliverable
 
 BIG_JSON_THRESHOLD = 50_000
 _EXCLUDE_DIRS = {".git", "__pycache__", "schemas"}
@@ -69,6 +69,10 @@ class DeliverablesReader:
             yield f
 
     def _infer_track(self, default: str = WHITEBOX_SUBDIR) -> str:
+        # combined 优先：融合报告 combined_report.md 存在 → track=combined（组合扫描终态）。
+        # 文件级判定（非目录）避免组合扫描期三桶均存在时误判；combined/ 无报告则回退。
+        if (self._deliverables / COMBINED_SUBDIR / "combined_report.md").is_file():
+            return COMBINED_SUBDIR
         for t in ("whitebox", "blackbox"):
             if (self._deliverables / t).is_dir():
                 return t
