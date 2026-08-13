@@ -1,6 +1,8 @@
 # packages/web/src/supernova_web/api/users.py
 from __future__ import annotations
 
+import shutil
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Literal
@@ -29,6 +31,8 @@ async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
     """per-user 置顶工作区（IA 重设计 §2.3）。只能 pin 有权限的 ws
     （canonical admin 全部、其他用户/超管需为成员）。"""
     _check_csrf(request)
+    if not is_safe_workspace_name(body.workspace):
+        raise HTTPException(422, "invalid workspace name")
     # workspace_member 依赖项的 ws 来自路径参数，此处 ws 来自 body，手动复用同款鉴权。
     # 顺序：先 403（成员检查）后 404（存在性）--非成员对任意 ws 一律 403，不泄露 ws 存在性，
     # 与 workspace_member 依赖项语义一致；canonical admin 跳过 403 后命中 404。get_workspace_member_role
@@ -89,7 +93,9 @@ async def create_user(body: CreateUserIn, request: Request, _: User = Depends(re
     if not is_safe_workspace_name(body.username):
         raise HTTPException(422, "invalid username for workspace")
     workspaces_dir = request.app.state.config.workspaces_dir
-    if (workspaces_dir / body.username).exists():
+    workspace_path = workspaces_dir / body.username
+    workspace_preexisted = workspace_path.exists() or workspace_path.is_symlink()
+    if workspace_preexisted:
         raise HTTPException(409, "workspace already exists for username")
 
     u = store.create_user(body.username, hash_password(body.password),
@@ -100,8 +106,10 @@ async def create_user(body: CreateUserIn, request: Request, _: User = Depends(re
     except FileExistsError:
         store.delete_user(u.id)
         raise HTTPException(409, "workspace already exists for username")
-    except (ValueError, OSError):
+    except Exception:
         store.delete_user(u.id)
+        if not workspace_preexisted and workspace_path.is_dir() and not workspace_path.is_symlink():
+            shutil.rmtree(workspace_path, ignore_errors=True)
         raise HTTPException(500, "failed to provision user workspace")
     return {"user": _user_out(u)}
 

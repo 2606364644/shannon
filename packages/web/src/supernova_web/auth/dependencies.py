@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from .models import User
-from supernova_web.components.workspace_provisioner import is_global_admin
+from supernova_web.components.workspace_provisioner import is_global_admin, is_safe_workspace_name
 
 
 def current_user(request: Request) -> User:
@@ -21,6 +21,8 @@ def require_admin(request: Request) -> User:
 
 
 def workspace_member(request: Request, ws: str, user: User = Depends(current_user)) -> User:
+    if not is_safe_workspace_name(ws):
+        raise HTTPException(status_code=422, detail="invalid workspace name")
     if is_global_admin(user):
         return user
     if request.app.state.auth_store.get_workspace_member_role(ws, user.id) is None:
@@ -29,6 +31,8 @@ def workspace_member(request: Request, ws: str, user: User = Depends(current_use
 
 
 def workspace_manager(request: Request, ws: str, user: User = Depends(current_user)) -> User:
+    if not is_safe_workspace_name(ws):
+        raise HTTPException(status_code=422, detail="invalid workspace name")
     if is_global_admin(user):
         return user
     if request.app.state.auth_store.get_workspace_member_role(ws, user.id) != "manager":

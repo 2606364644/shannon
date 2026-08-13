@@ -25,6 +25,7 @@ def is_safe_workspace_name(name: str) -> bool:
         and Path(name).name == name
         and "/" not in name
         and "\\" not in name
+        and all(ord(ch) >= 32 and ord(ch) != 127 for ch in name)
     )
 
 
@@ -34,7 +35,8 @@ def _global_admin(store: AuthStore) -> User | None:
 
 
 def _workspace_is_real(ws_dir: Path) -> bool:
-    return ws_dir.is_dir() and read_workspace_meta(ws_dir) is not None
+    return (ws_dir.is_dir() and not ws_dir.is_symlink()
+            and read_workspace_meta(ws_dir) is not None)
 
 
 def ensure_user_workspace(workspaces_dir: Path, store: AuthStore, user: User) -> Path:
@@ -44,7 +46,7 @@ def ensure_user_workspace(workspaces_dir: Path, store: AuthStore, user: User) ->
 
     workspaces_dir.mkdir(parents=True, exist_ok=True)
     ws_dir = workspaces_dir / user.username
-    if ws_dir.exists() and not _workspace_is_real(ws_dir):
+    if ws_dir.is_symlink() or (ws_dir.exists() and not _workspace_is_real(ws_dir)):
         raise FileExistsError(f"workspace conflict: {user.username}")
 
     created = False
@@ -58,10 +60,15 @@ def ensure_user_workspace(workspaces_dir: Path, store: AuthStore, user: User) ->
                 shutil.rmtree(ws_dir, ignore_errors=True)
             raise
 
-    store.add_workspace_member(user.username, user.id, "manager")
-    admin = _global_admin(store)
-    if admin is not None:
-        store.add_workspace_member(user.username, admin.id, "manager")
+    try:
+        store.ensure_workspace_member(user.username, user.id, "manager")
+        admin = _global_admin(store)
+        if admin is not None:
+            store.ensure_workspace_member(user.username, admin.id, "manager")
+    except Exception:
+        if created:
+            shutil.rmtree(ws_dir, ignore_errors=True)
+        raise
     return ws_dir
 
 
@@ -80,7 +87,7 @@ def ensure_global_admin_access(workspaces_dir: Path, store: AuthStore) -> None:
     for ws_dir in workspaces_dir.iterdir():
         if not ws_dir.is_dir() or ws_dir.name.startswith("."):
             continue
-        store.add_workspace_member(ws_dir.name, admin.id, "manager")
+        store.ensure_workspace_member(ws_dir.name, admin.id, "manager")
 
 
 def ensure_all_user_workspaces(workspaces_dir: Path, store: AuthStore) -> None:

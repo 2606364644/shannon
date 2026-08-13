@@ -23,7 +23,6 @@ async def lifespan(app: FastAPI):
     load_env()
     # auth: 启动 seed 预置账号 + 周期清理过期 session
     from .auth.seed import seed_users, bootstrap_default_admin
-    from .components.workspace_provisioner import ensure_all_user_workspaces
     import asyncio
     seed_users(app.state.auth_store, app.state.config.users_seed_file)
     # 全新部署（无 users.yaml / 空库）兜底：库内无 admin 时建默认 admin/123456
@@ -39,9 +38,6 @@ async def lifespan(app: FastAPI):
             "Bootstrapped default admin %r with default password — change it on first login.",
             app.state.config.default_admin_username,
         )
-    # 用户、seed/bootstrap 账号的同名工作区以及 canonical admin 成员关系都在启动时幂等补偿。
-    ensure_all_user_workspaces(app.state.config.workspaces_dir, app.state.auth_store)
-
     async def _purge_loop():
         while True:
             try:
@@ -61,6 +57,10 @@ async def lifespan(app: FastAPI):
     _migrate_legacy_repos(app)
     _migrate_legacy_scans(app)
     _migrate_legacy_workspace_members(app)
+    # 先完成 legacy scan/repo 归并，再为历史用户创建同名工作区，避免用户名与旧 scan 同名时
+    # 把旧 scan 临时当成正式 workspace。
+    from .components.workspace_provisioner import ensure_all_user_workspaces
+    ensure_all_user_workspaces(app.state.config.workspaces_dir, app.state.auth_store)
     _reconcile_repo_meta(app)
     await _reconcile_orphaned_scans(app)  # 重启后给孤儿 scan 补 scan_end，让 live 不再卡 running
     # 启动把 configs/*.yaml 的 authentication 段 seed 成全局共享系统档案（.system 段，

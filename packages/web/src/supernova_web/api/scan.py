@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from supernova_web.auth.dependencies import current_user, workspace_member
-from supernova_web.components.workspace_provisioner import is_global_admin
+from supernova_web.components.workspace_provisioner import is_global_admin, is_safe_workspace_name
 from supernova_web.auth.models import User
 from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
 from supernova_web.models import ScanAccepted, ScanRequest
@@ -18,14 +18,19 @@ async def create_scan(req: ScanRequest, request: Request,
     # P1: scan 必须在 admin 预建好的 ws 内跑 (替代原 scan 创建 manager 模型)。
     # ws 先于 scan 存在, 为 P2 repo 隔离铺路; 这里只校验, 不创建。
     ws = req.workspace
-    ws_dir = request.app.state.config.workspaces_dir / ws if ws else None
-    if not ws or not ws_dir.is_dir():
+    if not ws or not is_safe_workspace_name(ws):
+        raise HTTPException(422, "workspace 不存在，请先让 admin 创建")
+    ws_dir = request.app.state.config.workspaces_dir / ws
+    if not ws_dir.is_dir() or ws_dir.is_symlink():
         raise HTTPException(422, "workspace 不存在，请先让 admin 创建")
     if not is_global_admin(user) and request.app.state.auth_store.get_workspace_member_role(
             ws, user.id) is None:
         raise HTTPException(403, "非该 workspace 成员")
     sm = request.app.state.scan_manager
     try:
+        # Web workspace scan 必须使用完整的 workspace-owned Provider 配置，不能把全局
+        # env/model 当作缺省值。API 层先检一遍，避免 fake/替代 scan manager 绕过约束。
+        request.app.state.ws_config_store.resolve_provider_config(ws)
         ws_name, scan_id = await sm.start(req)
     except TemporalUnavailable:
         raise HTTPException(400, "Temporal 服务未运行，请先 docker-compose up -d")

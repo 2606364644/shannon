@@ -147,6 +147,20 @@ class AuthStore:
                 (ws_name, user_id, role, now),
             )
 
+    def ensure_workspace_member(self, ws_name: str, user_id: int, role: str = "member") -> None:
+        """确保成员存在并具有指定角色；不影响其他成员。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO workspace_members(workspace_name, user_id, role, created_at) VALUES(?,?,?,?)",
+                (ws_name, user_id, role, now),
+            )
+            c.execute(
+                "UPDATE workspace_members SET role=? WHERE workspace_name=? AND user_id=?",
+                (role, ws_name, user_id),
+            )
+
     def remove_workspace_member(self, ws_name: str, user_id: int) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM workspace_members WHERE workspace_name=? AND user_id=?", (ws_name, user_id))

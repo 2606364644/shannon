@@ -80,3 +80,33 @@ def test_ensure_global_admin_access_adds_only_canonical_admin_to_all_workspaces(
     assert store.get_workspace_member_role("one", other_admin.id) is None
     assert store.get_workspace_member_role("two", other_admin.id) is None
     assert store.get_workspace_member_role("one", alice.id) == "member"
+
+
+def test_ensure_user_workspace_upgrades_owner_to_manager(tmp_path):
+    store = _store(tmp_path)
+    admin = store.create_user("admin", "h", role="admin")
+    alice = store.create_user("alice", "h", role="user")
+    workspaces = tmp_path / "workspaces"
+    ws = workspaces / "alice"
+    ws.mkdir(parents=True)
+    write_workspace_meta(ws, name="alice", owner="alice")
+    store.add_workspace_member("alice", alice.id, "member")
+
+    ensure_user_workspace(workspaces, store, alice)
+
+    assert store.get_workspace_member_role("alice", alice.id) == "manager"
+    assert store.get_workspace_member_role("alice", admin.id) == "manager"
+
+
+def test_ensure_global_admin_access_upgrades_existing_admin_membership(tmp_path):
+    store = _store(tmp_path)
+    admin = store.create_user("admin", "h", role="admin")
+    workspaces = tmp_path / "workspaces"
+    ws = workspaces / "one"
+    ws.mkdir(parents=True)
+    write_workspace_meta(ws, name="one", owner="seed")
+    store.add_workspace_member("one", admin.id, "member")
+
+    ensure_global_admin_access(workspaces, store)
+
+    assert store.get_workspace_member_role("one", admin.id) == "manager"

@@ -9,15 +9,19 @@ from supernova_web.auth.dependencies import current_user, require_admin, workspa
 from supernova_web.components.workspace_provisioner import (
     ensure_global_admin_member,
     is_global_admin,
+    is_safe_workspace_name,
 )
+from supernova_web.components.ws_config_store import default_ws_config
 from supernova_web.auth.models import User
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 
 def _workspace_path(request: Request, ws: str):
+    if not is_safe_workspace_name(ws):
+        raise HTTPException(422, "invalid workspace name")
     p = request.app.state.config.workspaces_dir / ws
-    if not p.exists():
+    if p.is_symlink() or not p.exists():
         raise HTTPException(404, "workspace not found")
     return p
 
@@ -41,14 +45,15 @@ async def create_workspace(body: CreateWorkspaceIn, request: Request,
     """
     from supernova_web.components.scan_store import write_workspace_meta
     ws = body.name
-    if ws.startswith("."):
+    if not is_safe_workspace_name(ws):
         # 点前缀是系统保留段（.system 存全局共享档案），拒防路径碰撞 + UI 混淆
         raise HTTPException(422, "workspace 名不可以点开头")
     ws_dir = request.app.state.config.workspaces_dir / ws
-    if ws_dir.exists():
+    if ws_dir.exists() or ws_dir.is_symlink():
         raise HTTPException(409, "workspace already exists")
     ws_dir.mkdir(parents=True)
     write_workspace_meta(ws_dir, name=ws, owner=user.username)
+    request.app.state.ws_config_store.write(ws, default_ws_config())
     store = request.app.state.auth_store
     store.add_workspace_member(ws, user.id, "manager")
     ensure_global_admin_member(ws, store)

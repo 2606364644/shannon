@@ -65,3 +65,26 @@ def test_startup_provisions_historical_user_workspaces(tmp_workspaces, monkeypat
     assert st.get_workspace_member_role("existing", admin.id) == "manager"
     assert st.get_workspace_member_role("existing", alice.id) == "member"
     assert st.get_workspace_member_role("existing", ops.id) is None
+
+
+def test_user_named_legacy_scan_gets_fresh_workspace_after_migration(tmp_workspaces, monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
+    app = create_app()
+    st = app.state.auth_store
+    admin = st.create_user("admin", "h", role="admin")
+    alice = st.create_user("alice", "h")
+    legacy_scan = app.state.config.workspaces_dir / "alice"
+    legacy_scan.mkdir()
+    (legacy_scan / "session.json").write_text(
+        '{"status":"completed","scan_type":"whitebox","created_at":"2026-08-01T00:00:00Z"}'
+    )
+
+    with TestClient(app):
+        pass
+
+    alice_ws = app.state.config.workspaces_dir / "alice"
+    assert (alice_ws / "workspace.json").exists()
+    assert st.get_workspace_member_role("alice", alice.id) == "manager"
+    assert st.get_workspace_member_role("alice", admin.id) == "manager"
+    assert (app.state.config.workspaces_dir / "__legacy__").exists()
