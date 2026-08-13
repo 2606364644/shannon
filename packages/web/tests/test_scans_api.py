@@ -26,11 +26,12 @@ def _csrf(c):
 
 
 class FakeSM:
-    """隔离 scan_manager（免 temporal），记录 resume/cancel/delete 调用。"""
+    """隔离 scan_manager（免 temporal），记录 resume/cancel/delete/rerun 调用。"""
     def __init__(self):
         self.resumed = []
         self.cancelled = []
         self.deleted = []
+        self.rerun = []  # [(ws, scan_id, new_auth), ...]
         self.resume_exc = None
         self.delete_exc = None
 
@@ -49,6 +50,10 @@ class FakeSM:
             raise self.delete_exc
         self.deleted.append((ws, scan_id))
         return None if scan_id == "nope" else {"deleted": scan_id}
+
+    async def rerun_blackbox(self, ws, scan_id, new_auth=None):
+        self.rerun.append((ws, scan_id, new_auth))
+        return {"workspace": ws, "scan_id": scan_id}
 
     def active_pids(self):
         return {}
@@ -220,6 +225,50 @@ def test_resume_failed_422(authed_client, app_with_ws, tmp_workspaces):
     tok = _csrf(authed_client)
     assert authed_client.post("/api/workspaces/WS/scans/s1/resume",
                               headers={"X-CSRF-Token": tok}).status_code == 422
+
+
+# ── rerun-blackbox（HTTP body 边界，review Important #1）───────────────────────
+
+def test_rerun_blackbox_empty_json_body_202(authed_client, app_with_ws, tmp_workspaces):
+    """v1 续跑无新认证：前端 apiPost 恒发 Content-Type: application/json + body "{}"。
+    路由必须容忍 "{}" 为「沿用原认证」——旧 ``body: ScanRequest | None = Body(default=None)``
+    会把 "{}" 当 ScanRequest 校验（type 必填）→ 422，破坏 v1 路径。new_auth=None 透传 scan_manager。
+    """
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="failed",
+               combined=True, bb_phase="failed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.post("/api/workspaces/WS/scans/s1/combined/rerun-blackbox",
+                           json={}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 202, r.text
+    assert fake.rerun == [("WS", "s1", None)]  # new_auth=None（沿用原认证）
+
+
+def test_rerun_blackbox_truly_empty_body_202(authed_client, app_with_ws, tmp_workspaces):
+    """无 body（Content-Length 0）同样视为沿用原认证。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="failed",
+               combined=True, bb_phase="failed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.post("/api/workspaces/WS/scans/s1/combined/rerun-blackbox",
+                           headers={"X-CSRF-Token": tok})
+    assert r.status_code == 202, r.text
+    assert fake.rerun[-1] == ("WS", "s1", None)
+
+
+def test_rerun_blackbox_invalid_scanrequest_422(authed_client, app_with_ws, tmp_workspaces):
+    """非空 body 但缺 type（非法 ScanRequest）→ 422（换认证路径保留校验）。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="failed",
+               combined=True, bb_phase="failed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.post("/api/workspaces/WS/scans/s1/combined/rerun-blackbox",
+                           json={"url": "http://t"}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+    assert fake.rerun == []  # 未触 scan_manager（校验在前）
 
 
 def test_resume_unknown_scan_404(authed_client, app_with_ws, tmp_workspaces):

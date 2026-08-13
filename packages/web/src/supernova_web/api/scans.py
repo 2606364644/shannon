@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
 
@@ -292,22 +292,43 @@ async def resume_scan(ws: str, scan_id: str, request: Request, _: User = Depends
 
 @router.post("/{ws}/scans/{scan_id}/combined/rerun-blackbox", status_code=202)
 async def rerun_blackbox(ws: str, scan_id: str, request: Request,
-                         _: User = Depends(workspace_member),
-                         body: "ScanRequest | None" = Body(default=None)):
+                         _: User = Depends(workspace_member)):
     """组合扫描黑盒续跑（spec §11.3 / D5）：黑盒 failed 后换认证续跑，复用白盒产物，
     起新黑盒 workflow ``{ws}-{scan_id}-bb-rerun-{N}``。
 
-    body 可选：无 body = 沿用原认证；有 body = 换认证（须合法组合模式 ScanRequest：
-    type=whitebox + url + authentication/auth_profile，复用既有 model 校验）。
+    body 语义：空 / null / ``{}`` = 沿用原认证（v1 无新认证，前端 ``apiPost`` 恒发 JSON ``"{}"``）；
+    非空 JSON 对象 = 换认证（须合法组合模式 ScanRequest：type=whitebox + url +
+    authentication/auth_profile，复用既有 model 校验，非法 → 422）。
+
+    手动读 raw body 而非 ``body: ScanRequest | None = Body(default=None)``——后者对
+    ``Content-Type: application/json`` + ``{}`` 非空 body 强制按 ScanRequest 校验，type 必填 → 422，
+    破坏 v1 无新认证路径（review-cea7ac6b..b4ece1b1 Important #1）。
 
     前置：scan 存在（404）+ combined 且 bb_phase=failed（422）+ 白盒产物完好（422）。
     换认证时先 _run_precheck 预验证——fail → 仍 202 但 bb_phase=auth_failed（异步标）。
     """
+    import json as _json
+    from pydantic import ValidationError
     from supernova_web.components.scan_manager import TemporalUnavailable
     from supernova_web.models import ScanRequest
+
+    # 空 / null / {} = 沿用原认证；其余按 ScanRequest 校验（换认证）。
+    new_auth = None
+    raw = (await request.body()).strip()
+    if raw and raw not in (b"null", b"{}", b"[]"):
+        try:
+            payload = _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            raise HTTPException(422, f"invalid JSON body: {e}")
+        if isinstance(payload, dict) and payload:
+            try:
+                new_auth = ScanRequest.model_validate(payload)
+            except ValidationError as e:
+                raise HTTPException(422, e.errors())
+
     sm = request.app.state.scan_manager
     try:
-        await sm.rerun_blackbox(ws, scan_id, new_auth=body)
+        await sm.rerun_blackbox(ws, scan_id, new_auth=new_auth)
     except ValueError as e:
         msg = str(e)
         if "不存在" in msg:
