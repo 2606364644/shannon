@@ -120,3 +120,21 @@ def test_other_admin_creates_workspace_and_canonical_admin_is_added(_app):
     ops = st.get_user_by_username("ops")
     assert st.get_workspace_member_role("ws-ops", admin.id) == "manager"
     assert st.get_workspace_member_role("ws-ops", ops.id) == "manager"
+
+
+def test_other_admin_lists_only_workspaces_they_belong_to(_app):
+    st = _app.state.auth_store
+    st.create_user("ops", hash_password("p"), role="admin")
+
+    admin_c = _login(_app, "admin")
+    admin_tok = admin_c.get("/api/auth/csrf").json()["csrf_token"]
+    assert admin_c.post("/api/workspaces", json={"name": "ws-admin"},
+                        headers={"X-CSRF-Token": admin_tok}).status_code == 201
+
+    ops_c = _login(_app, "ops")
+    ops_tok = ops_c.get("/api/auth/csrf").json()["csrf_token"]
+    assert ops_c.post("/api/workspaces", json={"name": "ws-ops"},
+                      headers={"X-CSRF-Token": ops_tok}).status_code == 201
+
+    names = {row["name"] for row in ops_c.get("/api/workspaces").json()}
+    assert names == {"ws-ops"}
