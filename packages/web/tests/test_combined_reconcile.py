@@ -206,10 +206,11 @@ async def test_precheck_authcheck_running_no_intervention(mgr, tmp_path):
         ese.assert_not_awaited()
 
 
-# ── orphan_reconciler 接入：reconcile_orphaned 传 scan_manager → 调组合恢复 ─
+# ── orphan_reconciler 接入：reconcile_orphaned 传 scan_manager → kick 组合恢复 ─
 async def test_reconcile_orphaned_delegates_combined_to_scan_manager(tmp_path):
-    """reconcile_orphaned(scan_manager=mgr) 对组合孤儿 → 调 mgr._reconcile_combined_scan
-    （而非直接写 scan_end=interrupted，避免与组合接力 scan_end 冲突）。"""
+    """reconcile_orphaned(scan_manager=mgr) 对组合孤儿 → 调 mgr._kick_combined_reconcile
+    （fire-and-forget，非阻塞；不直接写 scan_end=interrupted）。"""
+    from unittest.mock import MagicMock
     from supernova_web.components.orphan_reconciler import reconcile_orphaned
     scan_dir = tmp_path / "ws" / "scans" / "scan-1"
     scan_dir.mkdir(parents=True)
@@ -219,17 +220,18 @@ async def test_reconcile_orphaned_delegates_combined_to_scan_manager(tmp_path):
     }))
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent"}\n')
 
-    fake_mgr = AsyncMock()  # scan_manager mock
+    fake_mgr = MagicMock()  # scan_manager mock（_kick_combined_reconcile 是 sync 方法）
     with patch("supernova_web.components.orphan_reconciler.is_scan_alive",
                return_value=False), \
          patch("supernova_web.components.orphan_reconciler._workflow_still_running",
                new=AsyncMock(return_value=False)):
         await reconcile_orphaned(scan_dir, False, scan_manager=fake_mgr)
-        fake_mgr._reconcile_combined_scan.assert_awaited_once_with(scan_dir)
+        fake_mgr._kick_combined_reconcile.assert_called_once_with(scan_dir)
 
 
 async def test_reconcile_orphaned_non_combined_writes_scan_end_as_before(tmp_path):
     """非组合孤儿 → reconcile_orphaned 原有行为不变（写 scan_end=interrupted）。"""
+    from unittest.mock import MagicMock
     from supernova_web.components.orphan_reconciler import reconcile_orphaned, _has_scan_end
     scan_dir = tmp_path / "ws" / "scans" / "scan-1"
     scan_dir.mkdir(parents=True)
@@ -238,7 +240,7 @@ async def test_reconcile_orphaned_non_combined_writes_scan_end_as_before(tmp_pat
     }))
     (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent"}\n')
 
-    fake_mgr = AsyncMock()
+    fake_mgr = MagicMock()
     with patch("supernova_web.components.orphan_reconciler.is_scan_alive",
                return_value=False), \
          patch("supernova_web.components.orphan_reconciler._workflow_still_running",
@@ -246,4 +248,56 @@ async def test_reconcile_orphaned_non_combined_writes_scan_end_as_before(tmp_pat
         result = await reconcile_orphaned(scan_dir, False, scan_manager=fake_mgr)
         assert result is True  # 写了 scan_end
         assert _has_scan_end(scan_dir / "events.ndjson")
-        fake_mgr._reconcile_combined_scan.assert_not_awaited()  # 非组合 → 不调
+        fake_mgr._kick_combined_reconcile.assert_not_called()  # 非组合 → 不调
+
+
+# ── review fix #1: reconcile 内部异常 → finally 仍补 scan_end ──────────────
+async def test_reconcile_run_blackbox_phase_raises_still_ensures_scan_end(mgr, tmp_path):
+    """_run_blackbox_phase raise → except 捕获 + finally _ensure_scan_end 补 scan_end
+    （review fix #1：_ensure_scan_end 不在 try 内被跳过）。"""
+    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending", whitebox_ready=True)
+    with patch.object(mgr, "_query_workflow_status",
+                      new=AsyncMock(return_value="completed")), \
+         patch.object(mgr, "_run_blackbox_phase",
+                      new=AsyncMock(side_effect=RuntimeError("bb boom"))), \
+         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
+        await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
+        ese.assert_awaited_once_with(scan_dir)  # finally 补 scan_end
+
+
+async def test_reconcile_generate_report_raises_still_ensures_scan_end(mgr, tmp_path):
+    """_generate_combined_report raise（如 Task-8 NotImplementedError stub）→ finally
+    仍补 scan_end（review fix #1 的核心场景：Task 8 落地前 running 分历恢复不卡死）。"""
+    scan_dir = _make_scan_dir(tmp_path, bb_phase="running")
+    with patch.object(mgr, "_query_workflow_status",
+                      new=AsyncMock(return_value="completed")), \
+         patch.object(mgr, "_generate_combined_report",
+                      new=AsyncMock(side_effect=NotImplementedError("Task 8 stub"))), \
+         patch.object(mgr, "_mark_bb", new=AsyncMock()), \
+         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
+        await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
+        ese.assert_awaited_once_with(scan_dir)  # finally 补 scan_end
+
+
+# ── review fix #2: _kick_combined_reconcile 非阻塞 + 幂等 ───────────────────
+async def test_kick_combined_reconcile_is_non_blocking_and_idempotent(mgr, tmp_path):
+    """_kick_combined_reconcile fire-and-forget（不阻塞调用方）+ 幂等（同 scan_key
+    不重复 fire）+ 完成后自清 _reconcile_tasks。"""
+    import asyncio
+    scan_dir = _make_scan_dir(tmp_path, bb_phase="pending")
+    call_count = 0
+
+    async def _slow_reconcile(sd):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)  # 模拟耗时恢复
+
+    with patch.object(mgr, "_reconcile_combined_scan", new=_slow_reconcile):
+        mgr._kick_combined_reconcile(scan_dir)   # 非阻塞，立即返回
+        mgr._kick_combined_reconcile(scan_dir)   # 幂等：不重复 fire
+        assert call_count == 0                    # background task 尚未开始调度
+        assert ("ws", "scan-1") in mgr._reconcile_tasks
+        # 等 background task 完成
+        await asyncio.gather(*mgr._reconcile_tasks.values())
+        assert call_count == 1                    # 只跑了一次（幂等）
+        assert ("ws", "scan-1") not in mgr._reconcile_tasks  # 自清

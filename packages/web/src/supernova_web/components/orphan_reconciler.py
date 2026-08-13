@@ -188,8 +188,13 @@ async def reconcile_orphaned(ws_dir: Path, is_running: bool,
             except (OSError, ValueError):
                 combined = False
             if combined:
-                await scan_manager._reconcile_combined_scan(ws_dir)  # type: ignore[attr-defined]
-                _log.info("reconcile_orphaned delegated combined scan: %s", ws_dir.name)
+                # Fire-and-forget（review fix #2）：_reconcile_combined_scan 可能调
+                # _run_blackbox_phase → await 黑盒 result（分钟~小时级）。inline await
+                # 会阻塞 app 启动 + 串行阻塞其他孤儿 scan 恢复。故 kick 为 background
+                # task（对齐 start() fire _combined_orchestrator 的 create_task 模式），
+                # 立即返回。task 内部幂等追踪 + 自清 _reconcile_tasks。
+                scan_manager._kick_combined_reconcile(ws_dir)  # type: ignore[attr-defined]
+                _log.info("reconcile_orphaned kicked combined recovery: %s", ws_dir.name)
                 return True
 
         reason = ("扫描未检测到 worker 心跳——worker 容器可能未启动或已退出"

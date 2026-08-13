@@ -111,8 +111,10 @@ class ScanManager:
         # start 组合分支 asyncio.create_task(_combined_orchestrator) 登记；orchestrator
         # finally 自 pop。用于 cancel/delete 时取消接力 + 诊断（fire-and-forget，不阻塞 start）。
         self._orchestrator_tasks: dict[tuple[str, str], asyncio.Task] = {}
-
-    # ---- 公共 API ----
+        # 组合扫描崩溃恢复 task（spec §7.5，Task 5）：key=(ws, scan_id) → asyncio.Task。
+        # orphan_reconciler 经 _kick_combined_reconcile fire-and-forget 登记；恢复完成
+        # （或异常）后 finally 自 pop。防止 re-entry 重复 fire（幂等）+ 诊断。
+        self._reconcile_tasks: dict[tuple[str, str], asyncio.Task] = {}
     def active_pids(self) -> dict[str, int]:
         # C1: web 无本机 pid(扫描跑在 worker 容器). 判活完全靠 scan_liveness.is_scan_recently_active
         # (heartbeat mtime). orphan_reconciler 的 is_scan_recently_active 门兜底(不误杀活 workflow).
@@ -1608,11 +1610,50 @@ class ScanManager:
                     await self._mark_bb(scan_dir, "completed")
 
             # failed/skipped/completed/None → 无需接力，只补 scan_end（fall-through）
-
-            # 任意状态：workflow 不活跃 + events 无 scan_end → 幂等补写（防 _watch/live
-            # 永久 tail）。workflow 仍活跃 → 跳过（让 temporal workflow 自然完成写 scan_end）。
-            if not wf_active:
-                await self._ensure_scan_end(scan_dir)
         except Exception:  # noqa: BLE001 - reconcile 是兜底增强，绝不因单 scan 异常拖垮
             _log.exception("_reconcile_combined_scan failed for %s", scan_dir)
+        finally:
+            # scan_end 不变量（review fix #1）：必须在 finally——即使 reconcile 内部
+            # raise（如 Task-8 _generate_combined_report NotImplementedError stub、或
+            # _run_blackbox_phase 提交后抛），也要确保 events 有 scan_end，否则 scan
+            # 永久卡 running（orphan_reconciler 已委托本方法、未写 interrupted 兜底）。
+            # workflow 仍活跃（wf_active=True）→ 跳过（让 temporal 自然完成写 scan_end）。
+            if not wf_active:
+                try:
+                    await self._ensure_scan_end(scan_dir)
+                except Exception:  # noqa: BLE001 - finally 内 best-effort
+                    _log.exception(
+                        "_ensure_scan_end failed in reconcile finally for %s", scan_dir)
+
+    def _kick_combined_reconcile(self, scan_dir: Path) -> None:
+        """Fire-and-forget 组合扫描恢复（review fix #2：非阻塞，防 startup 阻塞）。
+
+        _reconcile_combined_scan 可能调 _run_blackbox_phase → await bb_handle.result()
+        阻塞整个黑盒运行（分钟~小时级）。若在 orphan_reconciler.reconcile_orphaned 里
+        inline await（startup 遍历 / events 触发），会阻塞 app 启动完成 + 串行阻塞其他
+        孤儿 scan 恢复。故 reconcile_orphaned 调本方法（sync、立即返回），本方法内部
+        asyncio.create_task 在后台跑 _reconcile_combined_scan（对齐 start() fire
+        _combined_orchestrator 的 create_task 模式）。
+
+        幂等：同一 (ws, scan_id) 已有在途恢复 task → 不重复 fire（防 re-entry 多重
+        黑盒提交）。task 完成/异常后 finally 自 pop _reconcile_tasks。
+        """
+        if scan_dir.parent.name != "scans":
+            return
+        ws = scan_dir.parent.parent.name
+        scan_id = scan_dir.name
+        scan_key = (ws, scan_id)
+        if scan_key in self._reconcile_tasks:
+            return  # 已在恢复中（幂等）
+
+        async def _run() -> None:
+            try:
+                await self._reconcile_combined_scan(scan_dir)
+            except Exception:  # noqa: BLE001 - background task 必须自兜底（不崩 event loop）
+                _log.exception(
+                    "_reconcile_combined_scan background task failed for %s", scan_dir)
+            finally:
+                self._reconcile_tasks.pop(scan_key, None)
+
+        self._reconcile_tasks[scan_key] = asyncio.create_task(_run())
 
