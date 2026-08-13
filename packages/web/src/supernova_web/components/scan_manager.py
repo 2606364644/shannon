@@ -18,6 +18,7 @@ from supernova_core.session import SessionManager
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
+from .host_profile_store import fetch_and_parse_hosts
 from .repo_manager import _resolve_repo_dir, _validate_ws_segment, resolve_linked_repo_path
 from .scan_liveness import is_scan_recently_active
 from .scan_store import ScanStore
@@ -208,8 +209,12 @@ class ScanManager:
             elif req.type == "blackbox":
                 config_path, repo_path = await self._resolve_blackbox_inputs(
                     req, ws, scan_dir, target)
+                # Phase 2 HOST 档案：解析 host→IP 映射（选档案 / 填 GET 链接 / 都不填），
+                # 灌入 BlackboxPipelineInput 供下游 per-scan 代理 + sandbox /etc/hosts 注入。
+                host_mappings = await self._resolve_host_mappings(req, ws)
                 handle = await self._submit_blackbox(
-                    repo_path, ws, scan_id, scan_dir, event_file, req.url or "", config_path)
+                    repo_path, ws, scan_id, scan_dir, event_file, req.url or "",
+                    config_path, host_mappings=host_mappings)
                 # 持久化 reuse_whitebox_scan_id 供 resume 重解析 wb_scan_dir（修 reuse resume
                 # fail-fast：create_scan 第三参 target="" → session.repo_path 读空，resume 需凭
                 # reuse_id 重定位白盒产物目录，不存易失的绝对路径）。
@@ -480,9 +485,48 @@ class ScanManager:
         repo_path: str | None = str(wb_scan_dir)
         return config_path, repo_path
 
+    async def _resolve_host_mappings(
+        self, req: ScanRequest, ws: str,
+    ) -> dict[str, str]:
+        """解析 HOST 档案 → {host: ip} dict（Phase 2，2026-08-12）。
+
+        两种互斥来源（ScanRequest._host_profile_xor_url model_validator 已保证互斥）：
+          - req.host_profile_id: store.get 读档;若 profile.source_url 则 best-effort refresh
+            （try/except 包：refresh 内部仅吞 fetch 异常,write 失败需本层兜底,回落快照 mappings）。
+            store 未注入 → RuntimeError（对齐 auth_profile_store guards）。
+          - req.host_url: fetch_and_parse_hosts（扫描启动时拉取;fetch 错误自然冒泡为 scan-start 失败,
+            用户给的 URL 不可达属合理 fail-fast）。
+          - 都不填 → {} （不启用 HOST 代理,向后兼容,既有扫描字节不变）。
+
+        host keys 已被 HostMapping.host field_validator 强制 strip+lowercase,与下游
+        urlparse(url).hostname（小写）一致,无大小写 MISS 风险。
+        """
+        if req.host_profile_id:
+            if self.host_profile_store is None:
+                raise RuntimeError("host_profile_store 未注入，无法解析 HOST 档案")
+            profile = self.host_profile_store.get(ws, req.host_profile_id)
+            if profile is None:
+                raise ValueError(f"HOST 档案不存在: {req.host_profile_id}")
+            # source_url 档案 best-effort refresh（拉最新 /etc/hosts）;refresh 内部吞 fetch
+            # 异常但未吞 write 异常,故本层再包一层 try/except,任何失败都回落快照。
+            if profile.source_url:
+                try:
+                    refreshed = await self.host_profile_store.refresh(
+                        ws, req.host_profile_id)
+                    if refreshed is not None:
+                        profile = refreshed
+                except Exception:
+                    pass  # best-effort:回落存储快照,不阻断扫描
+            return {m.host: m.ip for m in profile.mappings}
+        if req.host_url:
+            mappings, _warnings = await fetch_and_parse_hosts(req.host_url)
+            return {m.host: m.ip for m in mappings}
+        return {}
+
     async def _submit_blackbox(
         self, repo_path: str | None, ws: str, scan_id: str, scan_dir: Path,
         event_file: Path, web_url: str, config_path: str | None,
+        host_mappings: dict[str, str] | None = None,
     ) -> Any:
         """提交黑盒 scan 到 supernova-bb-web queue。参照 _submit_whitebox。
 
@@ -506,6 +550,7 @@ class ScanManager:
             provider_config=provider_config,
             workspaces_root=str(self._workspaces_dir),
             exploit=True,
+            host_mappings=host_mappings or {},
         )
         handle = await client.start_workflow(
             BlackboxScanWorkflow.run, inp, id=workflow_id,

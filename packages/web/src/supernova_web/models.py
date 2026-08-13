@@ -49,6 +49,13 @@ class ScanRequest(BaseModel):
     config_name: str | None = None
     config_content: str | None = None
     save_as: str | None = None
+    # HOST 档案（Phase 2，2026-08-12）：与认证字段独立（HOST 可与任意 auth 模式组合）。
+    # 两互斥来源（model_validator _host_profile_xor_url 保证互斥）：
+    #   - host_profile_id = 选已保存 HOST 档案（scan_manager 取 store 解析 → mappings）；
+    #   - host_url        = 填 /etc/hosts GET 链接（扫描启动时拉取 → mappings，结束可选 upsert）。
+    # 都不填 = 不启用 HOST 代理（向后兼容，既有扫描字节不变）。
+    host_profile_id: str | None = None   # 选 HOST 档案
+    host_url: str | None = None          # 或填 GET 链接（扫描时拉取）
 
     @model_validator(mode="after")
     def _blackbox_requires_reuse(self) -> "ScanRequest":
@@ -92,6 +99,22 @@ class ScanRequest(BaseModel):
                 raise ValueError("blackbox 登录:不能同时指定认证档案与内联登录配置")
             if (has_cred or has_cred_ids) and not has_profile:
                 raise ValueError("选认证档案角色时必须同时指定 auth_profile_id")
+        return self
+
+    @model_validator(mode="after")
+    def _host_profile_xor_url(self) -> "ScanRequest":
+        """HOST 字段互斥校验（2026-08-12 Phase 2）。
+
+        - host_profile_id + host_url 同时填 = 非法（互斥，避免双源冲突）；
+        - 单填一个 = 合法；都不填 = 合法（向后兼容，无 HOST 代理）。
+        与认证字段完全独立（HOST 可与任意 auth 模式组合：profile/inline/无 auth）。
+        仅对 blackbox 生效（HOST 代理只作用于黑盒扫描；whitebox/correlation 即便误填也忽略）。
+        """
+        if self.type == "blackbox":
+            if self.host_profile_id is not None and self.host_url is not None:
+                raise ValueError(
+                    "host_profile_id 与 host_url 互斥，不能同时指定（HOST 档案二选一）"
+                )
         return self
 
 
