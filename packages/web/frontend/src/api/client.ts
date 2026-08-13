@@ -1,4 +1,7 @@
-import type { FsBrowseResult, Repo, RepoDetail, ScanSummary, SessionData } from "./types";
+import type {
+  BlackboxRunSummary, FsBrowseResult, Repo, RepoDetail,
+  ScanRequest, ScanSummary, SessionData,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
@@ -196,8 +199,42 @@ export const resumeScan = (ws: string, scanId: string) =>
 /** 组合扫描黑盒续跑（spec §11.3 / D5）：黑盒 failed 后换认证续跑，复用白盒产物。
  *  body 可选——无 body 沿用原认证；有 body（ScanRequest）换认证。前端只 POST 不读 body。 */
 export const rerunBlackbox = (ws: string, scanId: string) =>
-  apiPost<{ workspace: string; scan_id: string }>(
+  apiPost<{ workspace: string; scan_id: string; run_id?: string }>(
     `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/combined/rerun-blackbox`, {});
+
+// ── 版本化黑盒 run（spec 2026-08-14 §5.2/§7.1）───────────────────────────────
+/** run 列表（GET /blackbox-runs，从任务 session bb_runs[]）。 */
+export const listBlackboxRuns = (ws: string, scanId: string) =>
+  apiGet<BlackboxRunSummary[]>(
+    `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs`);
+
+/** 单 run 详情（GET /blackbox-runs/{run_id}，读 run 级 session）。 */
+export const getBlackboxRun = (ws: string, scanId: string, runId: string) =>
+  apiGet<BlackboxRunSummary & Record<string, unknown>>(
+    `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}`);
+
+/** 给已有白盒任务加一个黑盒 run（POST /blackbox-runs）。body=空对象=无认证直连。 */
+export const addBlackboxToWhitebox = (ws: string, scanId: string, body?: Partial<ScanRequest>) =>
+  apiPost<{ workspace: string; scan_id: string; run_id: string }>(
+    `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs`, body ?? {});
+
+/** run 级报告 path（喂 apiGetText）。track=combined 读 combined/run-K/combined_report.md。 */
+export const blackboxRunReportPath = (
+  ws: string, scanId: string, runId: string, track?: "blackbox" | "combined") =>
+  track === "combined"
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report?track=combined`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report`;
+
+/** run 级产物摘要（无 file）或单产物（带 file）path。 */
+export const blackboxRunDeliverablesPath = (
+  ws: string, scanId: string, runId: string, file?: string) =>
+  file
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/deliverables?path=${encodeURIComponent(file)}`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/deliverables`;
+
+/** run events SSE URL（tail run-K/events.ndjson）。 */
+export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) =>
+  `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/events`;
 
 /** 删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE）。 */
 export const deleteScan = (ws: string, scanId: string) =>

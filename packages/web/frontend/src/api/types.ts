@@ -118,6 +118,18 @@ export interface Workspace {
  * Phase 1 scan_store.ScanSummary 额外聚合了 vuln_counts/total_duration_ms/links/
  * is_correlation（供 ws 列表行从 latest scan 聚合），此处设可选兼容，前端按需用。
  */
+/** 版本化黑盒 run（spec §5.2）：白盒任务下 blackbox-runs/run-K 子目录的 run 摘要。
+ *  GET /workspaces/{ws}/scans/{id}/blackbox-runs 返该数组；ScanSummary.bb_runs 透传简化版。*/
+export interface BlackboxRunSummary {
+  run_id: string;
+  status?: string;
+  started_at?: string;
+  completed_at?: string;
+  auth_ref?: { profile_id?: string | null };
+  reason?: string | null;
+  bb_phase?: string;
+}
+
 export interface ScanSummary {
   scan_id: string;
   scan_type: "whitebox" | "blackbox" | "correlation";
@@ -145,6 +157,10 @@ export interface ScanSummary {
   bb_phase?: string;        // precheck | pending | running | completed | failed | skipped
   bb_reason?: string;       // 失败/跳过原因（precheck fail / skipped 无产物 等）
   progress_pct?: number;    // 后端预算（三阶段加权，spec §9.2）；前端只显示不重算
+  // 版本化黑盒 run（spec 2026-08-14 §5.2）：任务级索引 bb_runs[] + latest_bb_run。
+  // combined 任务透传；纯白盒/纯黑盒不返 -> 可选。
+  bb_runs?: BlackboxRunSummary[];
+  latest_bb_run?: string | null;
 }
 
 export interface SessionMetrics {
@@ -201,6 +217,9 @@ export interface SessionData {
   host_url?: string | null;
   host_source?: "profile" | "url" | null;
   host_mapping_count?: number;
+  // 版本化黑盒 run（spec 2026-08-14 §5.2）：详情透传任务级 bb_runs[] + latest_bb_run。
+  bb_runs?: BlackboxRunSummary[];
+  latest_bb_run?: string | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;

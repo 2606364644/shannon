@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler, linkReposInDir } from "./client";
+import {
+  apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler,
+  linkReposInDir, blackboxRunReportPath, blackboxRunDeliverablesPath,
+  listBlackboxRuns, addBlackboxToWhitebox,
+} from "./client";
 
 // 构造符合 fetch Response 真实契约的 mock：text() 与 json() 都在。
 function res({ ok, status, body }: { ok: boolean; status: number; body: unknown }) {
@@ -69,6 +73,42 @@ describe("api client", () => {
     expect(captured.init?.method).toBe("POST");
     expect(captured.init?.body).toBe(JSON.stringify({ path: "/app/repos/frontend" }));
     expect(r).toMatchObject({ imported: [], skipped: [] });
+  });
+
+  it("blackboxRunReportPath 编码各段", () => {
+    expect(blackboxRunReportPath("WS", "s1", "run-1"))
+      .toBe("/workspaces/WS/scans/s1/blackbox-runs/run-1/report");
+    expect(blackboxRunReportPath("WS", "s1", "run-1", "combined"))
+      .toBe("/workspaces/WS/scans/s1/blackbox-runs/run-1/report?track=combined");
+  });
+
+  it("blackboxRunDeliverablesPath 带/不带 file", () => {
+    expect(blackboxRunDeliverablesPath("WS", "s1", "run-1"))
+      .toBe("/workspaces/WS/scans/s1/blackbox-runs/run-1/deliverables");
+    expect(blackboxRunDeliverablesPath("WS", "s1", "run-1", "foo.json"))
+      .toBe("/workspaces/WS/scans/s1/blackbox-runs/run-1/deliverables?path=foo.json");
+  });
+
+  it("listBlackboxRuns GET run 列表", async () => {
+    (globalThis.fetch as any).mockResolvedValue(
+      res({ ok: true, status: 200, body: [{ run_id: "run-1" }, { run_id: "run-2" }] }));
+    const runs = await listBlackboxRuns("WS", "s1");
+    expect(runs.map((r: any) => r.run_id)).toEqual(["run-1", "run-2"]);
+    expect((globalThis.fetch as any).mock.calls.at(-1)[0])
+      .toBe("/api/workspaces/WS/scans/s1/blackbox-runs");
+  });
+
+  it("addBlackboxToWhitebox POST add-run 返 run_id", async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    (globalThis.fetch as any).mockImplementation((url: string, init: RequestInit) => {
+      captured = { url, init };
+      return Promise.resolve(res({ ok: true, status: 202,
+        body: { workspace: "WS", scan_id: "s1", run_id: "run-1" } }));
+    });
+    const r = await addBlackboxToWhitebox("WS", "s1", {});
+    expect(r.run_id).toBe("run-1");
+    expect(captured.url).toBe("/api/workspaces/WS/scans/s1/blackbox-runs");
+    expect(captured.init?.method).toBe("POST");
   });
 });
 
