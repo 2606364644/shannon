@@ -18,6 +18,8 @@ from temporalio.client import Client
 from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
 from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 from supernova_core.session import SessionManager
+from supernova_core.utils.paths import (
+    blackbox_dir, blackbox_run_dir, combined_run_dir, whitebox_dir)
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
@@ -1620,8 +1622,8 @@ class ScanManager:
         return ScanRequest(**req_kwargs)
 
     async def _run_blackbox_phase(self, scan_dir: Path, ws: str, scan_id: str,
-                                  auth_ref: dict,
-                                  workflow_id_suffix: str = "-bb") -> None:
+                                  auth_ref: dict, run_id: str,
+                                  workflow_id_suffix: str = "-bb-1") -> None:
         """组合接力公共段（spec §7.3）：预检白盒产物 → 复用 _submit_blackbox（suffix 后缀）→
         等黑盒 → 融合报告。
 
@@ -1637,9 +1639,10 @@ class ScanManager:
         """
         # 预检白盒产物（recon_deliverable.md + 至少一个非空 queue）。不全 → 跳过黑盒。
         if not self._whitebox_deliverables_ready(scan_dir):
-            await self._mark_bb(scan_dir, "skipped", "白盒无可利用产物")
+            await self._mark_run(scan_dir, run_id, "skipped",
+                                 reason="白盒无可利用产物", status="skipped")
             return
-        # 读 session 取黑盒目标 URL + HOST 映射（Task 3 在 start 组合分支 dump scan-config.yaml
+        # 读 session 取黑盒目标 URL + HOST 映射（start 组合分支 dump scan-config.yaml
         # + 写 bb_url/bb_host_mappings 到 session）。bb_url 缺失回落 web_url。
         session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
         bb_url = session.get("bb_url") or session.get("web_url") or ""
@@ -1655,17 +1658,19 @@ class ScanManager:
                     scan_dir, {"expected_agents": expected})
             except Exception:  # noqa: BLE001 - best-effort 进度分母，不阻塞接力
                 pass
-        # 复用 _submit_blackbox（spec §5：不手写 _submit_blackbox_chained，原草案手写版漏传
-        # host_mappings 等字段）。workflow_id_suffix 透传（首跑 -bb / 续跑 -bb-rerun-N，spec §7.6）。
+        # event_file 指 run 子目录（黑盒从 event_file.parent 推 workspace_path → 产物落
+        # run-K/deliverables/blackbox/，spec §4）；repo_path/config_path 仍指白盒任务根
+        # （黑盒读 deliverables/whitebox/ queue）。
+        run_dir = blackbox_run_dir(scan_dir, run_id)
         bb_handle = await self._submit_blackbox(
             repo_path=str(scan_dir), ws=ws, scan_id=scan_id, scan_dir=scan_dir,
-            event_file=scan_dir / "events.ndjson", web_url=bb_url,
+            event_file=run_dir / "events.ndjson", web_url=bb_url,
             config_path=str(scan_dir / "scan-config.yaml"),
             host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
-        await self._mark_bb(scan_dir, "running")
+        await self._mark_run(scan_dir, run_id, "running", status="running")
         await bb_handle.result()
-        await self._generate_combined_report(scan_dir)  # Task 8 实现；融合报告 → deliverables/combined/
-        await self._mark_bb(scan_dir, "completed")
+        await self._generate_combined_report(scan_dir, run_id)  # → combined/run-K/
+        await self._mark_run(scan_dir, run_id, "completed", status="completed")
 
     async def rerun_blackbox(self, ws: str, scan_id: str,
                              new_auth: ScanRequest | None = None) -> None:
@@ -1772,17 +1777,22 @@ class ScanManager:
         result = await handle.result()  # AuthValidationResult
         return bool(result and getattr(result, "success", False))
 
-    async def _generate_combined_report(self, scan_dir: Path) -> None:
-        """生成组合扫描融合报告（spec §10.2）→ deliverables/combined/combined_report.md。
+    async def _generate_combined_report(self, scan_dir: Path, run_id: str) -> None:
+        """生成 per-run 融合报告（spec §9/§10.2）→ combined/run-K/combined_report.md。
 
-        按 vuln_class（injection/xss/ssrf/authz）交叉白盒 queue + 黑盒 queue，
-        产顶部摘要表 + 按类详述。实现在 ``combined_report_renderer``；本 async 入口
-        仅包装（文件读 inline，无须 offload），供 ``_run_blackbox_phase`` /
-        ``_rerun_blackbox_orchestrator`` / reconcile 在黑盒完成后 await。
+        按 vuln_class（injection/xss/ssrf/authz）交叉白盒 queue + 黑盒 verdicts。
+        白盒根 = scan_dir/deliverables/whitebox/，黑盒根 = run 子目录 deliverables/blackbox/，
+        输出根 = scan_dir/combined/{run_id}/。实现在 ``combined_report_renderer``；本 async
+        入口仅包装（文件读 inline，无须 offload），供 ``_run_blackbox_phase`` / reconcile
+        在黑盒完成后 await。
         """
         from supernova_web.components.combined_report_renderer import (
             render_combined_report)
-        render_combined_report(scan_dir)
+        run_dir = blackbox_run_dir(scan_dir, run_id)
+        render_combined_report(
+            whitebox_root=whitebox_dir(scan_dir / "deliverables"),
+            blackbox_root=blackbox_dir(run_dir / "deliverables"),
+            out_dir=combined_run_dir(scan_dir, run_id))
 
     async def _ensure_scan_end(self, scan_dir: Path, status: str = "completed") -> None:
         """幂等收尾（spec §7.4，修原 bug）：events 无 scan_end 才补写。
@@ -1842,6 +1852,34 @@ class ScanManager:
             SessionManager(scan_dir.parent).update_session(scan_dir, data)
         except Exception:  # noqa: BLE001 - 标记 best-effort，不阻塞接力
             pass
+
+    async def _mark_run(self, scan_dir: Path, run_id: str, phase: str,
+                        reason: str | None = None,
+                        status: str | None = None) -> None:
+        """run 级 phase 写入（spec §5.2/§5.3，取代 _mark_bb 对 run 的调用）：
+        写 run 级 session（bb_phase/bb_reason/status）+ 任务 bb_runs[] 条目 + latest_bb_run。
+
+        best-effort（对齐 _mark_bb）：经 ``_store.update_blackbox_run`` 合并，标记失败不阻塞
+        接力。终态 status（completed/failed/skipped）顺带写 completed_at 时间戳。
+        """
+        try:
+            self._store.update_blackbox_run(
+                self._ws_of(scan_dir), self._scan_id_of(scan_dir), run_id,
+                status=status, phase=phase, reason=reason,
+                completed_at=_now_iso() if status in ("completed", "failed", "skipped",
+                                                      "cancelled") else None)
+        except Exception:  # noqa: BLE001 - best-effort，不阻塞接力
+            pass
+
+    @staticmethod
+    def _ws_of(scan_dir: Path) -> str:
+        """从 scan_dir 派生 ws：<workspaces>/<ws>/scans/<scan_id> → <ws>。"""
+        return scan_dir.parent.parent.name
+
+    @staticmethod
+    def _scan_id_of(scan_dir: Path) -> str:
+        """从 scan_dir 派生 scan_id：scans/<scan_id> → <scan_id>。"""
+        return scan_dir.name
 
     # ── 组合扫描崩溃恢复（spec §7.5，Task 5）────────────────────────────────
 

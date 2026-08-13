@@ -32,17 +32,18 @@ async def test_orchestrator_success_does_not_write_second_scan_end(mgr, tmp_path
     (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
         '{"vulnerabilities":[{"id":1}]}')
     (scan_dir / "events.ndjson").write_text('{"type":"scan_end","status":"completed"}\n')  # 黑盒已写
+    (scan_dir / "blackbox-runs" / "run-1").mkdir(parents=True)  # run 子目录
     wb_handle = AsyncMock(); wb_handle.result = AsyncMock(return_value=None)
     bb_handle = MagicMock(); bb_handle.result = AsyncMock(return_value=None)
     with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)) as sb, \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
          patch.object(mgr, "_write_scan_end", new=AsyncMock()) as ws_end, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()):
-        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None})
-        sb.assert_awaited()                      # 提交黑盒（带 -bb suffix）
-        assert sb.call_args.kwargs.get("workflow_id_suffix") == "-bb"
+         patch.object(mgr, "_mark_run", new=AsyncMock()):
+        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None}, "run-1")
+        sb.assert_awaited()                      # 提交黑盒（带 -bb-{K} suffix）
+        assert sb.call_args.kwargs.get("workflow_id_suffix") == "-bb-1"
         ws_end.assert_not_awaited()              # 关键：scan_end 已在，不重复写
-        gcr.assert_awaited()                     # 黑盒完成 → 融合报告
+        gcr.assert_awaited_with(scan_dir, "run-1")  # 黑盒完成 → per-run 融合报告
 
 
 # ── 跳过路径（白盒无可利用产物）──────────────────────────────────────────────
@@ -359,3 +360,49 @@ async def test_submit_blackbox_with_bb_suffix_appends(mgr, tmp_path, monkeypatch
             config_path=None, workflow_id_suffix="-bb")
         start_call = fake_client.start_workflow.call_args
         assert start_call.kwargs.get("id") == "ws-scan-1-bb"
+
+
+# ── per-run _run_blackbox_phase（T5，spec §4/§7.3）────────────────────────────
+async def test_run_blackbox_phase_event_file_points_to_run_subdir(mgr, tmp_path):
+    """_run_blackbox_phase(run_id)：event_file 指 blackbox-runs/run-K/events.ndjson，
+    repo_path 仍指白盒任务根，workflow_id_suffix=-bb-{K}，phase 经 _mark_run（非 _mark_bb）。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
+    (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
+    (scan_dir / "deliverables" / "whitebox" / "recon_deliverable.md").write_text("x")
+    (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}')
+    run_id, _ = store.create_blackbox_run("ws", wb_id)
+    bb_handle = MagicMock(); bb_handle.result = AsyncMock(return_value=None)
+    with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)) as sb, \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as gcr, \
+         patch.object(mgr, "_mark_run", new=AsyncMock()) as mr:
+        await mgr._run_blackbox_phase(scan_dir, "ws", wb_id, {"profile_id": None}, run_id)
+        kwargs = sb.call_args.kwargs
+        assert kwargs["event_file"] == scan_dir / "blackbox-runs" / "run-1" / "events.ndjson"
+        assert kwargs["repo_path"] == str(scan_dir)  # 仍指白盒任务根
+        assert kwargs["workflow_id_suffix"] == "-bb-1"
+        phases = [c.args[2] for c in mr.call_args_list]  # (scan_dir, run_id, phase)
+        assert "running" in phases and "completed" in phases
+        gcr.assert_awaited_with(scan_dir, run_id)
+
+
+async def test_generate_combined_report_writes_combined_run_dir(mgr, tmp_path):
+    """_generate_combined_report(scan_dir, run_id) → combined/run-K/combined_report.md，
+    读 deliverables/whitebox queue + blackbox-runs/run-K/deliverables/blackbox verdicts。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
+    run_id, _ = store.create_blackbox_run("ws", wb_id)
+    (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
+    (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"ID":"INJ-1"}]}')
+    (scan_dir / "blackbox-runs" / "run-1" / "deliverables" / "blackbox").mkdir(parents=True)
+    (scan_dir / "blackbox-runs" / "run-1" / "deliverables" / "blackbox"
+     / "injection_exploit_verdicts.json").write_text(
+        '{"verdicts":[{"vulnerability_id":"INJ-1","status":"exploited"}]}')
+    await mgr._generate_combined_report(scan_dir, run_id)
+    out = scan_dir / "combined" / "run-1" / "combined_report.md"
+    assert out.exists()
+    assert "| injection | 1 | 1 |" in out.read_text("utf-8")
