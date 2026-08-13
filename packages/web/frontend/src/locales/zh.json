@@ -428,6 +428,19 @@
       "selectedProfile": "已选档案",
       "expandHint": "点「配置登录」在此展开核心配置",
       "multiRoleDefaultAll": "可多选，默认全选"
+    },
+    "host": {
+      "sectionLabel": "HOST 解析",
+      "statusOff": "当前：未启用 HOST 解析（直连）",
+      "statusOn": "当前：已启用 HOST 解析",
+      "configure": "配置 HOST",
+      "configureDraft": "配置 HOST · 已配置",
+      "collapse": "收起",
+      "sourceProfile": "使用档案",
+      "sourceUrl": "填写链接",
+      "selectProfile": "选择 HOST 档案",
+      "urlPlaceholder": "https://example.com/hosts.txt",
+      "infoNote": "将目标域名重定向到指定 IP（DNS 覆盖），用于内网/灰度环境渗透测试。"
     }
   },
   "dashboard": {

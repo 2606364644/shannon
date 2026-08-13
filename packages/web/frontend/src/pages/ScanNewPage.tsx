@@ -51,6 +51,27 @@ const DEFAULT_AUTH: AuthFormState = {
   loginFlow: "",
 };
 
+/** HOST 解析表单态（blackbox-host-profile, Task 13）。镜像 AuthFormState 的双来源结构：
+ *    - enabled=false：不起代理（向后兼容，直连目标）。
+ *    - mode="profile"：复用工作区 HOST 档案（host_profile_id，Task 12 已落 backend）。
+ *    - mode="url"：临时填 /etc/hosts 风格文本 URL（host_url，后端拉取解析为 mappings）。
+ *  与 auth 独立（非互斥）——二者各管各的：auth 管登录态，host 管 DNS 覆盖。 */
+export interface HostFormState {
+  enabled: boolean;
+  mode: "profile" | "url";
+  /** profile 模式：选定的 HOST 档案 id（GET /workspaces/{ws}/host-profiles 列表中一项）。 */
+  profileId: string;
+  /** url 模式：/etc/hosts 风格文本 URL（后端 POST /parse?url=<URL> 拉取解析，不落盘）。 */
+  hostUrl: string;
+}
+
+const DEFAULT_HOST: HostFormState = {
+  enabled: false,
+  mode: "profile",
+  profileId: "",
+  hostUrl: "",
+};
+
 /** AuthFormState → ScanAuthentication（对齐后端 core Authentication schema，snake_case 字段名）。
  *  微调（2026-08-06）：inline 模式不再采集 email_login（删邮箱登录框）；role 仅用于存档不发。 */
 export function buildAuthPayload(a: AuthFormState): ScanAuthentication {
@@ -96,6 +117,10 @@ export interface RerunPreset {
    *  重跑时预填到 source=profile 分支。后端 _scan_detail 暂未返此字段（前端先就位）。 */
   authProfileId?: string;
   authCredentialIds?: string[];
+  /** HOST 解析（Task 13）：原扫描启用了 HOST 解析，重跑时预填。
+   *  hostProfileId 非空 → profile 模式；仅 hostUrl → url 模式；后端 _scan_detail 暂未返（前端先就位）。 */
+  hostProfileId?: string;
+  hostUrl?: string;
 }
 
 /** RerunPreset → AuthFormState：profile 模式（authProfileId 非空）优先于 inline（auth）。
@@ -113,6 +138,18 @@ export function presetToAuthState(preset: RerunPreset): AuthFormState {
   }
   if (preset.auth) return authFromPayload(preset.auth);
   return DEFAULT_AUTH;
+}
+
+/** RerunPreset → HostFormState：profile 模式（hostProfileId 非空）优先于 url 模式（hostUrl）。
+ *  与 buildBody 一致：profile 模式发 host_profile_id，url 模式发 host_url。 */
+export function presetToHostState(preset: RerunPreset): HostFormState {
+  if (preset.hostProfileId) {
+    return { ...DEFAULT_HOST, enabled: true, mode: "profile", profileId: preset.hostProfileId };
+  }
+  if (preset.hostUrl) {
+    return { ...DEFAULT_HOST, enabled: true, mode: "url", hostUrl: preset.hostUrl };
+  }
+  return DEFAULT_HOST;
 }
 
 export function validateAuth(a: AuthFormState, t: TFunction): string | null {
@@ -144,6 +181,8 @@ export interface FormState {
   reuseScanId: string;
   /** 黑盒登录配置（仅 blackbox 用；whitebox/correlation 忽略）。 */
   auth: AuthFormState;
+  /** HOST 解析（仅 blackbox 用；与 auth 独立，非互斥）。disabled=不起代理，向后兼容。 */
+  host: HostFormState;
   yaml: string;
 }
 
@@ -159,7 +198,7 @@ export interface FormState {
  * 入口收窄（2026-08-01，阶段 2）：黑盒 = 白盒下游 exploitation-only，恒复用白盒结果——
  *   恒发 reuse_whitebox_scan_id（必填，前端校验拦空），不再有 repo/standalone 分支。source 仅白盒用。
  */
-function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
+export function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
   if (type === "correlation") return { type, config_yaml: f.yaml };
   const body: ScanRequest = { type, url: f.url || undefined, workspace: workspace || undefined };
   if (type === "whitebox") {
@@ -188,6 +227,13 @@ function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest
         }));
       }
     }
+  }
+  // HOST 解析（blackbox-host-profile Task 13）：enabled 时按 mode 发对应字段（与 auth 独立、非互斥）。
+  // profile 模式 → host_profile_id；url 模式 → host_url。空值兜底 || undefined（不发空串）。
+  // disabled 时两者都不发（向后兼容——不起代理，直连目标）。
+  if (f.host.enabled) {
+    if (f.host.mode === "profile") body.host_profile_id = f.host.profileId || undefined;
+    else body.host_url = f.host.hostUrl || undefined;
   }
   return body;
 }
@@ -231,6 +277,7 @@ export function ScanNewPage() {
     url: preset.url ?? "",
     reuseScanId: preset.reuseScanId ?? "",
     auth: presetToAuthState(preset),
+    host: presetToHostState(preset),
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
   });
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）

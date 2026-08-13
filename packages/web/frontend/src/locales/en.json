@@ -428,6 +428,19 @@
       "selectedProfile": "Selected profile",
       "expandHint": "Click \"Configure login\" to expand core config here",
       "multiRoleDefaultAll": "multi-select, all by default"
+    },
+    "host": {
+      "sectionLabel": "HOST resolution",
+      "statusOff": "Currently: HOST resolution off (direct connection)",
+      "statusOn": "Currently: HOST resolution enabled",
+      "configure": "Configure HOST",
+      "configureDraft": "Configure HOST · configured",
+      "collapse": "Collapse",
+      "sourceProfile": "Use profile",
+      "sourceUrl": "Enter URL",
+      "selectProfile": "Select HOST profile",
+      "urlPlaceholder": "https://example.com/hosts.txt",
+      "infoNote": "Redirect target domains to specified IPs (DNS override) for intranet/canary pentest."
     }
   },
   "dashboard": {

@@ -5,7 +5,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import i18n from "@/i18n";
-import { ScanNewPage, buildAuthPayload, validateAuth, presetToAuthState, type AuthFormState } from "./ScanNewPage";
+import { ScanNewPage, buildBody, buildAuthPayload, validateAuth, presetToAuthState, presetToHostState, type AuthFormState, type FormState, type RerunPreset } from "./ScanNewPage";
 
 // Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
 vi.mock("@monaco-editor/react", () => ({
@@ -1017,5 +1017,87 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
     const state = presetToAuthState({});
     expect(state.enabled).toBe(false);
     expect(state.source).toBe("inline");
+  });
+});
+
+// === Task 13: HOST 解析（host_profile_id / host_url）buildBody + presetToHostState ===
+// 镜像 auth 的 buildBody/presetToAuthState 单测范式——纯函数断言字段映射，不渲染。
+// HOST 与 auth 独立（非互斥）：enabled 才发对应字段，disabled 不发（向后兼容，不起代理）。
+describe("黑盒 HOST buildBody / presetToHostState", () => {
+  // 最小可用 blackbox FormState（reuseScanId + url 齐以过校验；auth/host 默认 disabled）。
+  const baseF: FormState = {
+    selectedRepo: "",
+    url: "http://example.com",
+    reuseScanId: "20260731-1200",
+    auth: { enabled: false, source: "inline", profileId: "", credentialIds: [],
+      loginType: "form", loginUrl: "", accounts: [{ role: "admin", username: "", password: "" }], loginFlow: "" },
+    host: { enabled: false, mode: "profile", profileId: "", hostUrl: "" },
+    yaml: "",
+  };
+
+  it("buildBody: host disabled → 不发 host_profile_id / host_url（向后兼容）", () => {
+    const body = buildBody("blackbox", baseF, "ws1");
+    expect(body.host_profile_id).toBeUndefined();
+    expect(body.host_url).toBeUndefined();
+  });
+
+  it("buildBody: host enabled + profile 模式 → 发 host_profile_id（无 host_url）", () => {
+    const body = buildBody("blackbox",
+      { ...baseF, host: { enabled: true, mode: "profile", profileId: "host_1", hostUrl: "" } }, "ws1");
+    expect(body.host_profile_id).toBe("host_1");
+    expect(body.host_url).toBeUndefined();
+  });
+
+  it("buildBody: host enabled + url 模式 → 发 host_url（无 host_profile_id）", () => {
+    const body = buildBody("blackbox",
+      { ...baseF, host: { enabled: true, mode: "url", profileId: "", hostUrl: "https://x/hosts.txt" } }, "ws1");
+    expect(body.host_url).toBe("https://x/hosts.txt");
+    expect(body.host_profile_id).toBeUndefined();
+  });
+
+  it("buildBody: host enabled + profile 模式 profileId 空 → 不发（兜底 || undefined）", () => {
+    const body = buildBody("blackbox",
+      { ...baseF, host: { enabled: true, mode: "profile", profileId: "", hostUrl: "" } }, "ws1");
+    expect(body.host_profile_id).toBeUndefined();
+    expect(body.host_url).toBeUndefined();
+  });
+
+  it("buildBody: host 与 auth 独立——两者同时 enabled 各发各的字段（非互斥）", () => {
+    const body = buildBody("blackbox", {
+      ...baseF,
+      auth: { enabled: true, source: "inline", profileId: "", credentialIds: [],
+        loginType: "form", loginUrl: "http://t/login",
+        accounts: [{ role: "admin", username: "u", password: "p" }], loginFlow: "" },
+      host: { enabled: true, mode: "url", profileId: "", hostUrl: "https://x/hosts.txt" },
+    }, "ws1");
+    expect(body.authentication).toBeDefined(); // auth inline 仍发
+    expect(body.host_url).toBe("https://x/hosts.txt"); // host 同时发
+  });
+
+  it("presetToHostState: hostProfileId 非空 → enabled + profile 模式", () => {
+    const state = presetToHostState({ hostProfileId: "host_1" } as RerunPreset);
+    expect(state.enabled).toBe(true);
+    expect(state.mode).toBe("profile");
+    expect(state.profileId).toBe("host_1");
+    expect(state.hostUrl).toBe("");
+  });
+
+  it("presetToHostState: 仅 hostUrl → enabled + url 模式", () => {
+    const state = presetToHostState({ hostUrl: "https://x/hosts.txt" } as RerunPreset);
+    expect(state.enabled).toBe(true);
+    expect(state.mode).toBe("url");
+    expect(state.hostUrl).toBe("https://x/hosts.txt");
+  });
+
+  it("presetToHostState: 空 preset → DEFAULT_HOST（disabled）", () => {
+    const state = presetToHostState({} as RerunPreset);
+    expect(state.enabled).toBe(false);
+    expect(state.mode).toBe("profile");
+  });
+
+  it("presetToHostState: hostProfileId 优先于 hostUrl（profile 优先）", () => {
+    const state = presetToHostState({ hostProfileId: "host_1", hostUrl: "https://x/hosts.txt" } as RerunPreset);
+    expect(state.mode).toBe("profile");
+    expect(state.profileId).toBe("host_1");
   });
 });
