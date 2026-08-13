@@ -233,6 +233,97 @@ async def blackbox_run_detail(ws: str, scan_id: str, run_id: str, request: Reque
     return {"run_id": run_id, **data}
 
 
+def _run_dir_or_404(request: Request, ws: str, scan_id: str, run_id: str) -> Path:
+    run_dir = _store(request).get_blackbox_run_dir(ws, scan_id, run_id)
+    if run_dir is None:
+        raise HTTPException(404, "run 不存在")
+    return run_dir
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/deliverables")
+async def run_deliverables_summary(ws: str, scan_id: str, run_id: str, request: Request,
+                                   _: User = Depends(workspace_member),
+                                   path: str | None = Query(None)):
+    return deliverables_summary_for(_run_dir_or_404(request, ws, scan_id, run_id), path)
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/deliverables/{filename}")
+async def run_deliverables_file(ws: str, scan_id: str, run_id: str, filename: str,
+                                request: Request, _: User = Depends(workspace_member)):
+    return deliverables_file_for(
+        _run_dir_or_404(request, ws, scan_id, run_id), filename, track="blackbox")
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/report",
+            response_class=PlainTextResponse)
+async def run_report(ws: str, scan_id: str, run_id: str, request: Request,
+                     _: User = Depends(workspace_member),
+                     track: str | None = Query(None)) -> str:
+    """run 级报告：track=combined 读 combined/run-K/combined_report.md；否则读 run 黑盒报告。"""
+    store = _store(request)
+    wb_dir = store.get_scan_dir(ws, scan_id)
+    if wb_dir is None:
+        raise HTTPException(404, "scan not found")
+    if track == "combined":
+        from supernova_core.utils.paths import combined_run_dir
+        p = combined_run_dir(wb_dir, run_id) / "combined_report.md"
+        if not p.is_file():
+            raise HTTPException(404, "融合报告未生成")
+        return p.read_text("utf-8")
+    return report_for(_run_dir_or_404(request, ws, scan_id, run_id), track="blackbox")
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/logs")
+async def run_logs(ws: str, scan_id: str, run_id: str, request: Request,
+                   _: User = Depends(workspace_member),
+                   file: str | None = Query(None)):
+    return logs_for(_run_dir_or_404(request, ws, scan_id, run_id), file)
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/events")
+async def run_events(ws: str, scan_id: str, run_id: str, request: Request,
+                     _: User = Depends(workspace_member)):
+    run_dir = _run_dir_or_404(request, ws, scan_id, run_id)
+    from .events import build_scan_events_response
+    return await build_scan_events_response(request, run_dir)
+
+
+@router.post("/{ws}/scans/{scan_id}/blackbox-runs", status_code=202)
+async def add_blackbox_run(ws: str, scan_id: str, request: Request,
+                           _: User = Depends(workspace_member)) -> dict:
+    """给已有白盒任务加一个黑盒 run（spec §6/§7.1 #8 手动入口）。
+
+    body：空 / null / {} = 无新认证（沿用现盘 scan-config.yaml，公开目标则直连）；
+    非空 JSON = 合法组合模式 ScanRequest（type=whitebox + url + 认证）。返新 run_id。
+    """
+    import json as _json
+    from pydantic import ValidationError
+    from supernova_web.models import ScanRequest
+
+    new_req = None
+    raw = (await request.body()).strip()
+    if raw and raw not in (b"null", b"{}", b"[]"):
+        try:
+            payload = _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            raise HTTPException(422, f"invalid JSON body: {e}")
+        if isinstance(payload, dict) and payload:
+            try:
+                new_req = ScanRequest.model_validate(payload)
+            except ValidationError as e:
+                raise HTTPException(422, e.errors())
+
+    sm = request.app.state.scan_manager
+    try:
+        run_id = await sm._add_blackbox_run(ws, scan_id, new_req)
+    except ValueError as e:
+        msg = str(e)
+        if "不存在" in msg:
+            raise HTTPException(404, msg)
+        raise HTTPException(422, msg)
+    return {"workspace": ws, "scan_id": scan_id, "run_id": run_id}
+
+
 @router.get("/{ws}/scans/{scan_id}/deliverables")
 async def scan_deliverables_summary(ws: str, scan_id: str, request: Request,
                                     _: User = Depends(workspace_member),
@@ -361,7 +452,7 @@ async def rerun_blackbox(ws: str, scan_id: str, request: Request,
 
     sm = request.app.state.scan_manager
     try:
-        await sm.rerun_blackbox(ws, scan_id, new_auth=new_auth)
+        run_id = await sm.rerun_blackbox(ws, scan_id, new_auth=new_auth)
     except ValueError as e:
         msg = str(e)
         if "不存在" in msg:
@@ -369,4 +460,4 @@ async def rerun_blackbox(ws: str, scan_id: str, request: Request,
         raise HTTPException(422, msg)
     except TemporalUnavailable:
         raise HTTPException(400, "Temporal 服务未运行，请先 docker-compose up -d")
-    return {"workspace": ws, "scan_id": scan_id}
+    return {"workspace": ws, "scan_id": scan_id, "run_id": run_id}

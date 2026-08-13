@@ -32,6 +32,7 @@ class FakeSM:
         self.cancelled = []
         self.deleted = []
         self.rerun = []  # [(ws, scan_id, new_auth), ...]
+        self.add_run = []  # [(ws, scan_id, req), ...]
         self.resume_exc = None
         self.delete_exc = None
 
@@ -53,7 +54,11 @@ class FakeSM:
 
     async def rerun_blackbox(self, ws, scan_id, new_auth=None):
         self.rerun.append((ws, scan_id, new_auth))
-        return {"workspace": ws, "scan_id": scan_id}
+        return "run-2"  # 新模型：续跑返下一个 run_id（run-K+1）
+
+    async def _add_blackbox_run(self, ws, scan_id, req=None):
+        self.add_run.append((ws, scan_id, req))
+        return "run-1"
 
     def active_pids(self):
         return {}
@@ -123,6 +128,78 @@ def test_blackbox_run_detail_404(authed_client, tmp_workspaces):
     _make_scan(tmp_workspaces, "WS", scan_id="s1")
     r = authed_client.get("/api/workspaces/WS/scans/s1/blackbox-runs/run-9")
     assert r.status_code == 404
+
+
+# ── run 级报告/产物 + POST add-run（T13，spec §7.1 #10/#8）────────────────────
+
+def test_blackbox_run_report_route(authed_client, tmp_workspaces):
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    run_dir = tmp_workspaces / "WS" / "scans" / "s1" / "blackbox-runs" / "run-1"
+    (run_dir / "deliverables" / "blackbox").mkdir(parents=True)
+    (run_dir / "deliverables" / "blackbox" / "comprehensive_security_assessment_report.md").write_text(
+        "# 黑盒报告")
+    txt = authed_client.get(
+        "/api/workspaces/WS/scans/s1/blackbox-runs/run-1/report").text
+    assert txt == "# 黑盒报告"
+
+
+def test_blackbox_run_combined_report_route(authed_client, tmp_workspaces):
+    """run report ?track=combined 读 combined/run-K/combined_report.md。"""
+    from supernova_core.utils.paths import combined_run_dir
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    scan_dir = tmp_workspaces / "WS" / "scans" / "s1"
+    out = combined_run_dir(scan_dir, "run-1")
+    out.mkdir(parents=True)
+    (out / "combined_report.md").write_text("# 融合报告")
+    txt = authed_client.get(
+        "/api/workspaces/WS/scans/s1/blackbox-runs/run-1/report?track=combined").text
+    assert txt == "# 融合报告"
+
+
+def test_blackbox_run_deliverables_route(authed_client, tmp_workspaces):
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    run_dir = tmp_workspaces / "WS" / "scans" / "s1" / "blackbox-runs" / "run-1"
+    (run_dir / "deliverables" / "blackbox").mkdir(parents=True)
+    (run_dir / "deliverables" / "blackbox" / "injection_exploit_verdicts.json").write_text(
+        '{"verdicts":[]}')
+    r = authed_client.get(
+        "/api/workspaces/WS/scans/s1/blackbox-runs/run-1/deliverables")
+    assert r.status_code == 200
+
+
+def test_post_add_blackbox_run(authed_client, app_with_ws, tmp_workspaces):
+    """POST /blackbox-runs（空 body=无认证）→ 202 + run_id（调 _add_blackbox_run）。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="completed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.post("/api/workspaces/WS/scans/s1/blackbox-runs",
+                           json={}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 202, r.text
+    assert r.json()["run_id"] == "run-1"
+    assert fake.add_run == [("WS", "s1", None)]
+
+
+def test_rerun_blackbox_returns_run_id(authed_client, app_with_ws, tmp_workspaces):
+    """rerun-blackbox 响应含 run_id（新模型返下一个 run）。"""
+    _make_scan(tmp_workspaces, "WS", scan_id="s1", status="failed",
+               combined=True, bb_phase="failed")
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    tok = _csrf(authed_client)
+    r = authed_client.post("/api/workspaces/WS/scans/s1/combined/rerun-blackbox",
+                           json={}, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 202
+    assert r.json()["run_id"] == "run-2"
 
 
 def test_get_scan_detail_rerun_preset_blackbox(authed_client, tmp_workspaces):
