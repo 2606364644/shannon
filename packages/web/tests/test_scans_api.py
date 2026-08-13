@@ -149,6 +149,28 @@ def test_scan_report_blackbox_track(authed_client, tmp_workspaces):
     assert authed_client.get("/api/workspaces/WS/scans/s1/report").text == "# 黑盒综合报告"
 
 
+def test_scan_report_track_param_three_view(authed_client, tmp_workspaces):
+    """组合扫描三视图（spec §10.1）：?track=whitebox/blackbox/combined 各取该桶报告。
+    track=None auto-infer 到 combined（_infer_track 优先 combined_report.md）。
+    无 track 参数时跨桶 list_reports + auto-infer 对组合扫描会错桶 -> 故三视图必须显式 track。"""
+    scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="c1", scan_type="whitebox")
+    d = scan_dir / "deliverables"
+    for t, body in [("whitebox", "# 白盒报告"), ("blackbox", "# 黑盒报告"),
+                    ("combined", "# 融合报告")]:
+        sd = d / t
+        sd.mkdir(parents=True)
+        (sd / "comprehensive_security_assessment_report.md" if t != "combined"
+         else sd / "combined_report.md").write_text(body)
+    # 显式 track：各桶各取各的报告。
+    assert authed_client.get("/api/workspaces/WS/scans/c1/report?track=whitebox").text == "# 白盒报告"
+    assert authed_client.get("/api/workspaces/WS/scans/c1/report?track=blackbox").text == "# 黑盒报告"
+    assert authed_client.get("/api/workspaces/WS/scans/c1/report?track=combined").text == "# 融合报告"
+    # 无 track 仍 auto-infer（零回归）：combined_report.md 存在 -> combined 桶。
+    assert authed_client.get("/api/workspaces/WS/scans/c1/report").text == "# 融合报告"
+    # 不存在的桶 -> 200 空文本（不 500）。
+    assert authed_client.get("/api/workspaces/WS/scans/c1/report?track=nonexistent").text == ""
+
+
 def test_scan_logs(authed_client, tmp_workspaces):
     scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1")
     (scan_dir / "workflow.log").write_text("wf")

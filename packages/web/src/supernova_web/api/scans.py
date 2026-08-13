@@ -151,16 +151,30 @@ def deliverables_file_for(scan_dir, filename: str, track: str = "whitebox"):
         raise HTTPException(404, "file not found")
 
 
-def report_for(scan_dir) -> str:
+def report_for(scan_dir, track: str | None = None) -> str:
+    """读 scan_dir 的综合报告 md（+ PoC 拼接）。
+
+    track 解析：显式传入 > auto-infer（``DeliverablesReader._infer_track``，combined_report.md
+    存在时优先 combined）。统一在 ``deliverables/{resolved}/`` 桶内挑报告（comprehensive 优先，
+    否则首个 md）——不跨桶，跨桶 list_reports 会按错桶 read -> FileNotFoundError（regression）。
+    PoC 拼接仅 whitebox 桶（PoC 集合是白盒产物；blackbox/combined 自含）。
+
+    零回归：显式 track=None 时等价 auto-infer 单桶读——纯白盒/纯黑盒行为与旧 list_reports 一致
+    （单桶时 comprehensive 挑选结果相同）。
+    """
+    from pathlib import Path
     reader = DeliverablesReader(scan_dir)
-    reports = reader.list_reports()
-    chosen = next((x for x in reports if "comprehensive" in x.lower()), reports[0] if reports else None)
+    resolved = reader._infer_track() if track is None else track
+    track_dir = Path(scan_dir) / "deliverables" / resolved
+    mds = sorted(f.name for f in track_dir.glob("*.md")) if track_dir.is_dir() else []
+    chosen = next((x for x in mds if "comprehensive" in x.lower()), mds[0] if mds else None)
     if not chosen:
-        return ""  # 无报告产物 -> 200 空文本
-    body = reader.read(chosen)
-    poc = reader.read_poc()
-    if poc:
-        return f"{body.rstrip()}\n\n---\n\n{poc.lstrip()}"
+        return ""  # 该桶无报告产物 -> 200 空文本
+    body = reader.read(chosen, resolved)
+    if resolved == "whitebox":
+        poc = reader.read_poc()
+        if poc:
+            return f"{body.rstrip()}\n\n---\n\n{poc.lstrip()}"
     return body
 
 
@@ -201,8 +215,11 @@ async def scan_deliverables_file(ws: str, scan_id: str, filename: str, request: 
 
 
 @router.get("/{ws}/scans/{scan_id}/report", response_class=PlainTextResponse)
-async def scan_report(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
-    return report_for(_scan_dir_or_404(request, ws, scan_id))
+async def scan_report(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member),
+                      track: str | None = Query(None)):
+    """综合报告（text/plain）。track 可选（spec §10.1 三视图）：whitebox/blackbox/combined
+    取该桶报告；不传则 auto-infer（纯白盒/纯黑盒零回归）。"""
+    return report_for(_scan_dir_or_404(request, ws, scan_id), track)
 
 
 @router.get("/{ws}/scans/{scan_id}/logs")

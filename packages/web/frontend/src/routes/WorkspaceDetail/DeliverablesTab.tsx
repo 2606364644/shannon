@@ -11,6 +11,12 @@ import { Empty } from "../../components/Empty";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
+/**
+ * 产物 tab。
+ * 非组合（track != combined）：原单 FileTree 视图——零回归。
+ * 组合（spec §10 三桶）：summary.track==="combined" 或存在 combined/ 桶时，按
+ *   白盒/黑盒/融合三桶分组渲染（每桶 header + 文件列表）。
+ */
 export function DeliverablesTab() {
   const { t } = useTranslation();
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
@@ -40,6 +46,10 @@ export function DeliverablesTab() {
   }
   if (!data) return null;
 
+  // 组合三桶判定：summary.track==="combined"（backend _infer_track 在 combined_report.md 存在时返此）。
+  const isCombined = data.track === "combined" ||
+    data.files.some((f) => f.path.startsWith("combined/"));
+
   return (
     <div className="grid grid-cols-[1fr_360px] items-start gap-5">
       <div className="space-y-2">
@@ -68,9 +78,57 @@ export function DeliverablesTab() {
         {data.aggregated_vulnerabilities.map((v) => <VulnCard key={v.ID} v={v} />)}
       </div>
       <div className="max-h-[calc(100vh-200px)] overflow-auto border-l border-border pl-4">
-        <FileTree files={data.files} onSelect={setSel} />
+        {isCombined ? (
+          <CombinedBuckets files={data.files} onSelect={setSel} />
+        ) : (
+          <FileTree files={data.files} onSelect={setSel} />
+        )}
         {sel && <FilePreview ws={workspace!} scanId={scanId!} file={sel} />}
       </div>
+    </div>
+  );
+}
+
+/** 组合三桶：白盒/黑盒/融合，按 track 前缀分组，每桶 header + 扁平文件列表。 */
+function CombinedBuckets({
+  files, onSelect,
+}: { files: DeliverablesFile[]; onSelect: (f: DeliverablesFile) => void }) {
+  const { t } = useTranslation();
+  const buckets: Array<{ track: "whitebox" | "blackbox" | "combined"; labelKey: string }> = [
+    { track: "whitebox", labelKey: "workspaceDetail.deliverables.combined.bucketWhitebox" },
+    { track: "blackbox", labelKey: "workspaceDetail.deliverables.combined.bucketBlackbox" },
+    { track: "combined", labelKey: "workspaceDetail.deliverables.combined.bucketCombined" },
+  ];
+  return (
+    <div className="space-y-4">
+      {buckets.map(({ track, labelKey }) => {
+        const items = files.filter((f) => f.path.startsWith(track + "/"));
+        return (
+          <div key={track} data-testid={`combined-bucket-${track}`}>
+            <h4 className="mb-1 text-sm font-semibold tracking-tight">{t(labelKey)}</h4>
+            {items.length === 0 ? (
+              <div className="text-xs text-muted-foreground">{t("workspaceDetail.deliverables.combined.bucketEmpty")}</div>
+            ) : (
+              <ul className="list-none p-0 text-sm">
+                {items.map((f) => {
+                  const name = f.path.split("/").pop() ?? f.path;
+                  return (
+                    <li key={f.path} className="py-px">
+                      <button
+                        className="flex items-center gap-1 bg-transparent p-0 text-left font-mono hover:text-primary"
+                        onClick={() => onSelect(f)}
+                      >
+                        <span aria-hidden>📄</span>
+                        <span>{name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

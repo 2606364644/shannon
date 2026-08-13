@@ -164,9 +164,13 @@ export const setPinnedWorkspace = (ws: string) =>
 export const getScan = (ws: string, scanId: string) =>
   apiGet<SessionData>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
 
-/** 综合报告 + PoC（text/plain）path--喂 apiGetText。 */
-export const scanReportPath = (ws: string, scanId: string) =>
-  `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/report`;
+/** 综合报告 + PoC（text/plain）path--喂 apiGetText。
+ *  track 可选（spec 2026-08-12 §10.1 三视图）：组合扫描传 whitebox/blackbox/combined
+ *  分别取该桶报告；不传（纯白盒/纯黑盒）走 backend auto-infer（零回归）。 */
+export const scanReportPath = (ws: string, scanId: string, track?: "whitebox" | "blackbox" | "combined") =>
+  track
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/report?track=${track}`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/report`;
 
 /** 产物摘要（无 file）或单产物文件内容（带 file path）--摘要喂 apiGet，文件喂 apiGetText。 */
 export const scanDeliverablesPath = (ws: string, scanId: string, file?: string) =>
@@ -188,6 +192,12 @@ export const scanEventsUrl = (ws: string, scanId: string) =>
 export type ResumeResult = { workspace: string; scan_id: string };
 export const resumeScan = (ws: string, scanId: string) =>
   apiPost<ResumeResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/resume`, {});
+
+/** 组合扫描黑盒续跑（spec §11.3 / D5）：黑盒 failed 后换认证续跑，复用白盒产物。
+ *  body 可选——无 body 沿用原认证；有 body（ScanRequest）换认证。前端只 POST 不读 body。 */
+export const rerunBlackbox = (ws: string, scanId: string) =>
+  apiPost<{ workspace: string; scan_id: string }>(
+    `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/combined/rerun-blackbox`, {});
 
 /** 删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE）。 */
 export const deleteScan = (ws: string, scanId: string) =>

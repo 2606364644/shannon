@@ -1,14 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { getScan } from "@/api/client";
-import type { SessionData } from "@/api/types";
+import { getScan, scanEventsUrl, rerunBlackbox, ApiError } from "@/api/client";
+import { useEventSource } from "@/api/useEventSource";
+import type { SessionData, NdjsonEvent } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // per-scan 视图的 tab 集：只含 scan 级 tab（overview/report/deliverables/logs/live）。
@@ -21,10 +27,134 @@ const SCAN_TABS = [
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
 ] as const;
 
+// === 组合扫描两段时间线（spec 2026-08-12 §9 / §11.3）===
+// 详情页（不同于列表卡片 Task 10 的展开态）：始终渲染白盒段 + 黑盒段两个时间段，
+// 靠 bb_phase 切段状态；步级 PhaseEvent 辅助推进（同 Task 10 derivePhaseSteps）。
+// 黑盒 failed 时段内附「续扫黑盒」按钮 → POST rerun-blackbox（spec §11.3）。
+// 纯白盒/纯黑盒（combined!=true）不渲染此组件——零回归。
+
+interface PhaseStepProgress { total: number; completed: number; }
+
+/** 从 events 推 phase→步级进度（保留插入顺序，同 Task 10 ScanList.derivePhaseSteps）。 */
+function derivePhaseSteps(events: NdjsonEvent[]): Array<[string, PhaseStepProgress]> {
+  const map = new Map<string, PhaseStepProgress>();
+  for (const ev of events) {
+    if (ev.type === "PhaseEvent" && ev.event === "start") {
+      if (!map.has(ev.phase)) {
+        const steps = Array.isArray(ev.steps) ? ev.steps : [];
+        map.set(ev.phase, { total: steps.length, completed: 0 });
+      }
+    } else if (ev.type === "StepEvent" && ev.event === "complete") {
+      const p = map.get(ev.phase);
+      if (p) p.completed += 1;
+    }
+  }
+  return Array.from(map.entries());
+}
+
+function segStatusKey(bbPhase: string | null | undefined, segment: "whitebox" | "blackbox"): string {
+  // 白盒段：precheck/pending 进行中；之后（黑盒已起或跳过）= 已完成。
+  // 黑盒段：直接映射 bb_phase；未到 running 为待接力。
+  if (segment === "whitebox") {
+    return bbPhase === "precheck" || bbPhase === "pending"
+      ? "workspaceDetail.scans.combined.segStatusInProgress"
+      : "workspaceDetail.scans.combined.segStatusDone";
+  }
+  switch (bbPhase) {
+    case "running": return "workspaceDetail.scans.combined.segStatusInProgress";
+    case "completed": return "workspaceDetail.scans.combined.segStatusDone";
+    case "failed": return "workspaceDetail.scans.combined.segStatusFailed";
+    case "skipped": return "workspaceDetail.scans.combined.segStatusSkipped";
+    default: return "workspaceDetail.scans.combined.segStatusPending"; // precheck/pending/unknown
+  }
+}
+
+function CombinedDetailTimeline({
+  ws, scanId, bbPhase, onRerunDone,
+}: { ws: string; scanId: string; bbPhase?: string | null; onRerunDone: () => void }) {
+  const { t } = useTranslation();
+  const { events } = useEventSource(scanEventsUrl(ws, scanId));
+  const phases = useMemo(() => derivePhaseSteps(events), [events]);
+  const [showRerun, setShowRerun] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const blackboxFailed = bbPhase === "failed";
+
+  async function doRerun() {
+    setBusy(true);
+    try {
+      await rerunBlackbox(ws, scanId);
+      toast.success(t("workspaceDetail.scans.combined.rerunSuccess"));
+      setShowRerun(false);
+      onRerunDone(); // 刷新 summary：bb_phase failed → running
+    } catch (e) {
+      toast.error(t("workspaceDetail.scans.combined.rerunFailed", {
+        error: e instanceof ApiError ? String(e.status) : e instanceof Error ? e.message : String(e),
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card p-3 space-y-2">
+      <div className="text-xs font-medium text-muted-foreground">
+        {t("workspaceDetail.scans.combined.detailTimelineTitle")}
+      </div>
+      {/* 白盒段 */}
+      <div className="flex items-center gap-2 text-sm" data-testid="combined-segment-whitebox">
+        <span className="font-medium">{t("workspaceDetail.scans.combined.segmentWhitebox")}</span>
+        <span className="text-xs text-muted-foreground">{t(segStatusKey(bbPhase, "whitebox"))}</span>
+      </div>
+      {/* 黑盒段（+ 失败时续扫按钮）*/}
+      <div className="flex items-center gap-2 text-sm" data-testid="combined-segment-blackbox">
+        <span className="font-medium">{t("workspaceDetail.scans.combined.segmentBlackbox")}</span>
+        <span className="text-xs text-muted-foreground">{t(segStatusKey(bbPhase, "blackbox"))}</span>
+        {blackboxFailed && (
+          <Button size="sm" variant="outline" onClick={() => setShowRerun(true)} disabled={busy}>
+            <RefreshCw className="size-3.5" /> {t("workspaceDetail.scans.combined.rerunBlackbox")}
+          </Button>
+        )}
+      </div>
+      {/* 步级 PhaseEvent 辅助（同 Task 10）*/}
+      {phases.length > 0 && (
+        <div className="space-y-1 border-t border-border/60 pt-2">
+          {phases.map(([phase, p]) => (
+            <div key={phase} className="flex items-center gap-2 text-xs">
+              <span className="font-mono text-muted-foreground">{phase}</span>
+              <span className="font-mono font-medium">{p.completed}/{p.total}</span>
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                <span
+                  className="block h-full rounded-full bg-primary/80"
+                  style={{ width: `${p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0}%` }}
+                />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* 续扫确认弹窗（simple confirm + POST，沿用原认证，spec §11.3 v1）*/}
+      <Dialog open={showRerun} onOpenChange={(o) => !o && setShowRerun(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workspaceDetail.scans.combined.rerunConfirmTitle")}</DialogTitle>
+            <DialogDescription>{t("workspaceDetail.scans.combined.rerunConfirmDesc")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowRerun(false)}>{t("common.cancel")}</Button>
+            <Button onClick={doRerun} disabled={busy}>{t("common.confirm")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 /**
  * per-scan 布局：scan header（scan_id + status + scan_type + 返回 ws）+ scan tabs + Outlet。
  * 数据源全 scan-scoped（getScan / scanReportPath / scanEventsUrl ...），见各 Tab 组件。
  * scan 操作（取消/删除/恢复/重跑）在 ws 概览页扫描卡片，此处只展示。
+ * 组合扫描（combined=true）：header 下渲染两段时间线 + 黑盒失败续跑入口。
  */
 export default function ScanDetail() {
   const { t } = useTranslation();
@@ -37,15 +167,17 @@ export default function ScanDetail() {
   const [meta, setMeta] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = () => {
     if (!workspace || !scanId) return;
     setLoading(true);
     getScan(workspace, scanId)
       .then((s) => { setMeta(s); setLoading(false); })
       .catch(() => { setMeta(null); setLoading(false); });
-  }, [workspace, scanId]);
+  };
+  useEffect(load, [workspace, scanId]);
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
+  const isCombined = meta?.combined === true;
 
   // live/logs tab：根容器走 flex 链，高度 = 视口 - 固定的 TopBar(h-12=3rem) + main(py-5=2.5rem) = 5.5rem
   // （这俩不换行、精确可靠，非对 header 的估值）；header/tabs 用 shrink-0 保持自然高（窄屏 flex-wrap 换行
@@ -80,6 +212,14 @@ export default function ScanDetail() {
           )}
         </div>
       </div>
+      {/* 组合扫描两段时间线（spec §9/§11.3）：combined 时渲染；shrink-0 以兼容 live/logs flex 链。 */}
+      {isCombined && !loading && (
+        <div className={isFlexLayout ? "shrink-0" : ""}>
+          <CombinedDetailTimeline
+            ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase} onRerunDone={load}
+          />
+        </div>
+      )}
       <Tabs value={current} onValueChange={(v) => navigate(v)}>
         <div data-testid="scan-tabs-sticky" className={`sticky top-12 z-30 print:static${isFlexLayout ? " shrink-0" : ""}`}>
           <TabsList>

@@ -600,7 +600,18 @@
         "segmentBlackbox": "黑盒段",
         "segmentBlackboxPending": "黑盒段（待接力）",
         "stepLevelTitle": "步级进度",
-        "noSteps": "暂无步级事件"
+        "noSteps": "暂无步级事件",
+        "detailTimelineTitle": "组合扫描进度",
+        "rerunBlackbox": "续扫黑盒",
+        "rerunConfirmTitle": "续扫黑盒",
+        "rerunConfirmDesc": "将复用白盒产物、沿用原认证重新发起黑盒扫描。",
+        "rerunSuccess": "已发起黑盒续扫",
+        "rerunFailed": "续扫失败：{{error}}",
+        "segStatusInProgress": "进行中",
+        "segStatusDone": "已完成",
+        "segStatusPending": "待接力",
+        "segStatusFailed": "失败",
+        "segStatusSkipped": "已跳过"
       }
     },
     "errorBoundary": {
@@ -630,7 +641,12 @@
     "report": {
       "loadError": "报告加载失败：{{error}}",
       "emptyTitle": "报告尚未生成",
-      "emptyHint": "扫描完成后将在此呈现"
+      "emptyHint": "扫描完成后将在此呈现",
+      "combined": {
+        "tabWhitebox": "白盒报告",
+        "tabBlackbox": "黑盒报告",
+        "tabCombined": "融合报告"
+      }
     },
     "deliverables": {
       "loadError": "产物加载失败：{{error}}",
@@ -642,7 +658,13 @@
       "fileLoadError": "文件加载失败：{{error}}",
       "emptyJson": "无数据（常态空）",
       "bigJson": "⚠ 文件过大（{{size}} 字节），请在产物目录查看",
-      "loadingPreview": "加载…"
+      "loadingPreview": "加载…",
+      "combined": {
+        "bucketWhitebox": "白盒产物",
+        "bucketBlackbox": "黑盒产物",
+        "bucketCombined": "融合产物",
+        "bucketEmpty": "（无）"
+      }
     },
     "logs": {
       "listLoadError": "加载日志文件列表失败",

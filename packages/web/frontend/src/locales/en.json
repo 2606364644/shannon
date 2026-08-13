@@ -600,7 +600,18 @@
         "segmentBlackbox": "Blackbox",
         "segmentBlackboxPending": "Blackbox (pending)",
         "stepLevelTitle": "Step progress",
-        "noSteps": "No step events yet"
+        "noSteps": "No step events yet",
+        "detailTimelineTitle": "Combined scan progress",
+        "rerunBlackbox": "Re-scan blackbox",
+        "rerunConfirmTitle": "Re-scan blackbox",
+        "rerunConfirmDesc": "Reuses whitebox deliverables and the original credentials to restart the blackbox scan.",
+        "rerunSuccess": "Blackbox re-scan started",
+        "rerunFailed": "Re-scan failed: {{error}}",
+        "segStatusInProgress": "In progress",
+        "segStatusDone": "Done",
+        "segStatusPending": "Pending",
+        "segStatusFailed": "Failed",
+        "segStatusSkipped": "Skipped"
       }
     },
     "errorBoundary": {
@@ -630,7 +641,12 @@
     "report": {
       "loadError": "Report load failed: {{error}}",
       "emptyTitle": "Report not generated yet",
-      "emptyHint": "Will appear here once the scan completes"
+      "emptyHint": "Will appear here once the scan completes",
+      "combined": {
+        "tabWhitebox": "Whitebox report",
+        "tabBlackbox": "Blackbox report",
+        "tabCombined": "Fusion report"
+      }
     },
     "deliverables": {
       "loadError": "Deliverables load failed: {{error}}",
@@ -642,7 +658,13 @@
       "fileLoadError": "File load failed: {{error}}",
       "emptyJson": "No data (normal empty)",
       "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
-      "loadingPreview": "Loading…"
+      "loadingPreview": "Loading…",
+      "combined": {
+        "bucketWhitebox": "Whitebox",
+        "bucketBlackbox": "Blackbox",
+        "bucketCombined": "Combined",
+        "bucketEmpty": "(none)"
+      }
     },
     "logs": {
       "listLoadError": "Failed to load log file list",

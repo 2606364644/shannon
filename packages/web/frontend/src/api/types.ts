@@ -181,6 +181,12 @@ export interface SessionData {
   metrics?: SessionMetrics;
   session?: { status?: string; createdAt?: string; id?: string };  // 嵌套旧格式
   workflow_id?: string;  // temporal workflow 标识（ScanDetail header 任务名展示）
+  // 组合扫描字段（_scan_detail 透传 session.json，spec 2026-08-12 §6.2/§9.2）：
+  // ScanDetail 据此渲染两段时间线 + 黑盒失败续跑入口。纯白盒/纯黑盒不返（undefined）。
+  combined?: boolean | null;
+  bb_phase?: string | null;        // precheck | pending | running | completed | failed | skipped
+  bb_reason?: string | null;
+  progress_pct?: number | null;
   // 重跑预填用（_scan_detail 补返）：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
   source_repo?: string | null;
   reuse_whitebox_scan_id?: string | null;
@@ -249,7 +255,8 @@ export interface DeliverablesFile {
 }
 
 export interface DeliverablesSummary {
-  track: "whitebox" | "blackbox";
+  // 组合扫描三桶（spec §10）：combined_report.md 存在时 backend _infer_track 返 "combined"。
+  track: "whitebox" | "blackbox" | "combined";
   files: DeliverablesFile[];
   // 聚合用：跨所有 *_exploitation_queue.json 的 vulnerabilities
   aggregated_vulnerabilities: Vulnerability[];
