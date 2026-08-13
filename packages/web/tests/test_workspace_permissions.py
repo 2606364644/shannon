@@ -124,3 +124,16 @@ def test_manager_delete_clears_members(_prod_app):
     r = alice.delete("/api/workspaces/ws_alice", headers={"X-CSRF-Token": tok})
     assert r.status_code == 200
     assert st.list_workspace_members("ws_alice") == []  # 成员关系已清
+
+
+def test_noncanonical_admin_must_be_workspace_member():
+    ops = User(id=2, username="ops", role="admin")
+    with pytest.raises(HTTPException) as exc:
+        workspace_member(_req(ops, _FakeStore({})), "ws1", ops)
+    assert exc.value.status_code == 403
+
+
+def test_canonical_admin_bypasses_workspace_membership():
+    admin = User(id=1, username="admin", role="admin")
+    assert workspace_member(_req(admin, _FakeStore({})), "ws1", admin).id == 1
+    assert workspace_manager(_req(admin, _FakeStore({})), "ws1", admin).id == 1
