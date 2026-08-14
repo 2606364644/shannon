@@ -57,3 +57,44 @@
 .card-reachable {
   border-left: 3px solid hsl(var(--c-red));
 }
+
+/* ===== 概览 Dashboard 猎杀特效带（重设计 2026-08-14）=====
+   两种可切换特效：信号轨迹（脉冲线周期横扫）+ 污点流光（source→sink 泳道流动）。
+   仅「有扫描在跑」时渲染（一切正常=隐藏特效，回归安静）；reduced-motion 全部静止。 */
+@keyframes dash-trace-draw {
+  0% { stroke-dashoffset: 2400; }
+  60% { stroke-dashoffset: -400; opacity: 1; }
+  100% { stroke-dashoffset: -2400; opacity: 0; }
+}
+@keyframes dash-lane-flow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -115; }
+}
+@keyframes dash-live-pulse {
+  0% { box-shadow: 0 0 0 0 hsl(var(--c-cyan) / 0.5); }
+  70% { box-shadow: 0 0 0 7px hsl(var(--c-cyan) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--c-cyan) / 0); }
+}
+.dash-trace-pulse {
+  stroke: hsl(var(--primary)); stroke-width: 1.75; fill: none;
+  stroke-dasharray: 2400; stroke-dashoffset: 2400;
+  animation: dash-trace-draw 3.6s linear infinite;
+  filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.55));
+}
+.dash-flow-lane {
+  fill: none; stroke: hsl(var(--primary) / 0.75); stroke-width: 1.5;
+  stroke-linecap: round; stroke-dasharray: 5 110;
+  animation: dash-lane-flow 3s linear infinite;
+}
+.dash-flow-lane.l2 { stroke: hsl(var(--c-cyan) / 0.55); animation-duration: 4.2s; }
+.dash-flow-lane.l3 { stroke: hsl(var(--c-red) / 0.6); animation-duration: 2.4s; }
+.dash-live-dot {
+  width: 9px; height: 9px; border-radius: 9999px; flex: none;
+  background: hsl(var(--c-cyan));
+  animation: dash-live-pulse 1.9s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-trace-pulse, .dash-flow-lane, .dash-live-dot { animation: none; }
+  .dash-trace-pulse { stroke-dashoffset: 0; opacity: 0.4; }
+  .dash-flow-lane { opacity: 0.4; }
+}

@@ -235,8 +235,10 @@ main { max-width: 2400px; margin: 0 auto; padding: 22px 28px 140px; }
 /* —— table —— */
 .table-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: hidden; }
 table { width: 100%; border-collapse: collapse; }
-thead th { text-align: left; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; padding: 11px 16px; background: hsl(var(--muted) / 0.45); border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
-tbody td { padding: 11px 16px; border-bottom: 1px solid hsl(var(--border-soft)); font-size: 13px; vertical-align: middle; }
+thead th { text-align: left; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; padding: 10px 12px; background: hsl(var(--muted) / 0.45); border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+tbody td { padding: 11px 12px; border-bottom: 1px solid hsl(var(--border-soft)); font-size: 13px; vertical-align: middle; }
+thead th:first-child, tbody td:first-child { padding-left: 16px; }
+thead th:last-child, tbody td:last-child { padding-right: 16px; }
 th.r, td.r { text-align: right; }
 .td-clamp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .td-clamp a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

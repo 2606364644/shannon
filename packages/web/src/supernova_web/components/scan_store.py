@@ -250,6 +250,11 @@ class ScanSummary:
     # 版本化黑盒 run（spec §5.2）：任务级索引 bb_runs[] + latest_bb_run。纯白盒为 None/[]。
     bb_runs: list[dict] | None = None
     latest_bb_run: str | None = None
+    # 仓库维度（概览重设计 2026-08-14）：repo=仓库名标签（_repo_label(repo_path)，与
+    # scan_id 前缀同源）；repo_url=git 来源地址（session.web_url）。黑盒/旧 session 缺失
+    # -> None，前端 '—' 兜底。
+    repo: str | None = None
+    repo_url: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -273,6 +278,8 @@ class ScanSummary:
             "progress_pct": self.progress_pct,
             "bb_runs": self.bb_runs,
             "latest_bb_run": self.latest_bb_run,
+            "repo": self.repo,
+            "repo_url": self.repo_url,
         }
 
 
@@ -568,6 +575,8 @@ class ScanStore:
             progress_pct=progress_pct,
             bb_runs=bb_runs,
             latest_bb_run=latest_bb_run,
+            repo=(_repo_label(rp) or None) if (rp := (data.get("repo_path") if isinstance(data, dict) else None)) else None,
+            repo_url=mgr.get_web_url(scan_dir),
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

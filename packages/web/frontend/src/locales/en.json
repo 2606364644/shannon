@@ -461,11 +461,32 @@
     "subtitle": "Scan overview and recent activity",
     "newScan": "New scan",
     "summaryAria": "Summary",
+    "hero": {
+      "eyebrow": "FINDINGS · TOTAL",
+      "allClearEyebrow": "SURFACE CLEAR",
+      "unit": "exploitable taint paths",
+      "allClearUnit": "No exploitable taint paths",
+      "context": "across {{scans}} scans · {{workspaces}} workspaces · {{live}} live",
+      "composition": "By class",
+      "other": "Other"
+    },
+    "fx": {
+      "signal": "Signal trace",
+      "flow": "Taint flow",
+      "toggle": "Switch effect"
+    },
+    "elapsed": "Running {{dur}}",
+    "fresh": {
+      "ago": "Updated {{sec}}s ago",
+      "justNow": "Just updated",
+      "refresh": "Refresh"
+    },
     "stats": {
       "running": "Running",
       "completedToday": "Completed today",
       "totalVulns": "Total vulns",
-      "totalCost": "Total cost"
+      "totalCost": "Total cost",
+      "totalScans": "Total scans"
     },
     "runningTitle": "Running",
     "viewLive": "View live",
@@ -495,7 +516,9 @@
       "status": "Status",
       "scanId": "Scan",
       "workspace": "Workspace",
+      "repo": "Repo",
       "type": "Type",
+      "progress": "Progress",
       "vulns": "Vulns",
       "cost": "Cost",
       "time": "Time",

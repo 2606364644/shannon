@@ -161,6 +161,10 @@ export interface ScanSummary {
   // combined 任务透传；纯白盒/纯黑盒不返 -> 可选。
   bb_runs?: BlackboxRunSummary[];
   latest_bb_run?: string | null;
+  // 仓库维度（概览重设计 2026-08-14）：repo=仓库名标签（scan_id 前缀同源）、
+  // repo_url=git 来源地址（session.web_url）。旧后端不返 -> 可选，消费方 '—' 兜底。
+  repo?: string | null;
+  repo_url?: string | null;
 }
 
 export interface SessionMetrics {

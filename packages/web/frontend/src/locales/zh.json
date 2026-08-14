@@ -461,11 +461,32 @@
     "subtitle": "扫描概览与最近活动",
     "newScan": "新建扫描",
     "summaryAria": "汇总",
+    "hero": {
+      "eyebrow": "累计发现 · FINDINGS",
+      "allClearEyebrow": "一切正常 · SURFACE CLEAR",
+      "unit": "条可利用污点路径",
+      "allClearUnit": "未发现可利用污点路径",
+      "context": "跨 {{scans}} 次扫描 · {{workspaces}} 个工作区 · {{live}} 个进行中",
+      "composition": "发现构成",
+      "other": "其他"
+    },
+    "fx": {
+      "signal": "信号轨迹",
+      "flow": "污点流光",
+      "toggle": "切换特效"
+    },
+    "elapsed": "已运行 {{dur}}",
+    "fresh": {
+      "ago": "{{sec}} 秒前更新",
+      "justNow": "刚刚更新",
+      "refresh": "刷新"
+    },
     "stats": {
       "running": "运行中",
       "completedToday": "今日完成",
       "totalVulns": "累计漏洞",
-      "totalCost": "累计成本"
+      "totalCost": "累计成本",
+      "totalScans": "扫描总数"
     },
     "runningTitle": "正在运行",
     "viewLive": "查看实时",
@@ -495,7 +516,9 @@
       "status": "状态",
       "scanId": "扫描",
       "workspace": "工作区",
+      "repo": "仓库",
       "type": "类型",
+      "progress": "进度",
       "vulns": "漏洞",
       "cost": "花费",
       "time": "时间",
