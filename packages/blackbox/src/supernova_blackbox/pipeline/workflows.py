@@ -112,6 +112,7 @@ class BlackboxScanWorkflow:
             correlated_workspace=input.correlated_workspace,
             event_file=input.event_file,
             host_mappings=input.host_mappings or {},
+            env_overrides=input.env_overrides,
         )
 
         retry_policy = retry_for(
@@ -649,6 +650,7 @@ class AuthValidationWorkflow:
             api_key=input.api_key,
             event_file=input.event_file,
             host_mappings=input.host_mappings or {},
+            env_overrides=input.env_overrides,
         )
         # 块1（认证验证可观测性）：setup_display 挂 AuditSession + StructuredEventRenderer 写
         # events.ndjson（agent 登录每步落盘）。event_file=None（CLI 直调）则不挂 renderer，setup_display
@@ -750,6 +752,8 @@ class BatchAuthValidationWorkflow:
                 workspace_path=item.workspace_path,
                 api_key=input.api_key,
                 event_file=item.event_file,
+                env_overrides=input.env_overrides,
+                host_mappings=item.host_mappings or {},
             )
             # setup_display best-effort（失败不阻塞，降级无 events，NullAuditSession 兜底）；成功后
             # finalize 必跑（停 heartbeat，否则 daemon 线程泄漏）。
@@ -764,7 +768,18 @@ class BatchAuthValidationWorkflow:
             except Exception:
                 pass
             result = None
+            proxy_url = ""
             try:
+                # HOST 档案：item 带 mappings → 起 per-cred host proxy，proxy_url 注入 act_input
+                # （probe 经代理落点）；不带 → 空 → 直连（零回归）。镜像单 cred AuthValidationWorkflow。
+                if act_input.host_mappings:
+                    proxy_url = await workflow.execute_activity(
+                        activities.run_host_proxy_setup, act_input,
+                        start_to_close_timeout=timedelta(seconds=60),
+                        retry_policy=RetryPolicy(maximum_attempts=1),
+                    )
+                    if proxy_url:
+                        act_input.proxy_url = proxy_url
                 # 声明 4 步 PhaseEvent（步骤条）：step key 与 log_milestone 工具同源。
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
@@ -790,6 +805,15 @@ class BatchAuthValidationWorkflow:
                     success=False, failure_point="out_of_band",
                     failure_detail=f"{type(e).__name__}: {e}")
             finally:
+                if proxy_url:
+                    try:
+                        await workflow.execute_activity(
+                            activities.stop_host_proxy, proxy_url,
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=RetryPolicy(maximum_attempts=1),
+                        )
+                    except Exception:
+                        pass  # proxy 收尾 best-effort，失败不阻断下一 cred
                 if display_ok:
                     try:
                         await workflow.execute_activity(

@@ -39,6 +39,9 @@ const server = setupServer(
   http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([])),
   // 黑盒复用候选：默认该 ws 无 whitebox 扫描（驱动智能默认退到 repo 模式）。
   http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([])),
+  // 认证展开默认 source=profile（2026-08-14）→ BottomProfileBlock mount 即拉 auth-profiles；
+  // 默认空列表，需具体档案的用例各自 server.use 注入。
+  http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -90,6 +93,11 @@ async function selectWorkspace(name: string) {
 // （statusEnabled=「当前：已启用登录」/ statusUnauth=「当前：以未登录状态扫描」随 enabled 翻转）。
 async function expectAuthEnabled() {
   await waitFor(() => expect(screen.getByText(/已启用登录/)).toBeInTheDocument());
+}
+
+// 默认 source=profile（2026-08-14 起，认证展开默认「使用档案」）；inline 类用例显式切「临时填写」进 inline 模式。
+function switchAuthInline() {
+  fireEvent.click(screen.getByRole("button", { name: /临时填写/ }));
 }
 
 // RepoCombobox 在某 StepGroup 内：白盒 Step2="代码源"，黑盒 repo 模式 Step3="代码上下文"。
@@ -216,6 +224,25 @@ describe("ScanNewPage", () => {
     const arg = (spy.mock.calls[0] as string[])[0];
     expect(arg).toContain("yaml 校验失败");
     expect(arg).not.toContain("{");
+  });
+
+  it("提交 422 provider_incomplete → toast 提示工作区需配置 LLM 凭据（非 yaml 校验失败）", async () => {
+    server.use(
+      http.post("/api/scan", () =>
+        HttpResponse.json(
+          { detail: { code: "provider_incomplete", missing: ["SUPERNOVA_OPENAI_API_KEY"] } },
+          { status: 422 },
+        ),
+      ),
+    );
+    const spy = vi.spyOn(toast, "error");
+    renderPage();
+    await fillValidRepo();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const arg = (spy.mock.calls[0] as string[])[0];
+    expect(arg).toContain("工作区");
+    expect(arg).not.toContain("yaml 校验失败");
   });
 
   it("未选 ws + repo 默认未选 → 提交 disabled；选 ws + repo → enabled", async () => {
@@ -574,8 +601,9 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     expect(posted!.auth_credential_ids).toEqual(["cred_user"]); // 子集：仅 user
   });
 
-  // inline 模式（默认）打开 auth 后仍能正常展开既有字段——回归保底（不破坏旧流程）。
-  it("inline 模式（默认 source）：启用后显既有 login_url 输入（不破坏旧流程）", async () => {
+  // inline 模式打开 auth 后仍能正常展开既有字段——回归保底（不破坏旧流程）。
+  // 默认 source=profile（2026-08-14），故显式切「临时填写」再断言 inline 字段。
+  it("inline 模式：切临时填写后显既有 login_url 输入（不破坏旧流程）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
     );
@@ -586,7 +614,8 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
-    // 默认 source=inline → 下方块显既有 inline 字段（login_url placeholder https://example.com/login）
+    switchAuthInline();
+    // 下方块显既有 inline 字段（login_url placeholder https://example.com/login）
     expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
     // inline 模式不显 ProfilePicker 的「选择档案」标题
     expect(screen.queryByText("选择档案")).toBeNull();
@@ -603,7 +632,8 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
-    // inline 模式（默认 source）-> 下方块标题 + 凭据卡 eyebrow 都含「登录入口」（getAllByText 多处命中）
+    switchAuthInline();
+    // inline 模式 -> 下方块标题 + 凭据卡 eyebrow 都含「登录入口」（getAllByText 多处命中）
     expect(screen.getAllByText("登录入口").length).toBeGreaterThan(0);
     // 既有 inline 字段仍在（loginUrl placeholder）
     expect(screen.getByPlaceholderText("https://example.com/login")).toBeInTheDocument();
@@ -633,6 +663,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     // 认证默认折叠——点「配置登录」展开即开启
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("角色"), { target: { value: "admin" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
@@ -698,6 +729,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     // 未填 loginUrl/username -> 保存按钮 disabled + 显「请先填写登录地址和用户名」提示
     const saveBtn = screen.getByRole("button", { name: "保存为认证档案" });
     expect(saveBtn).toBeDisabled();
@@ -730,6 +762,7 @@ describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", ()
     // 展开 + 填 loginUrl（产生草稿）
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     // 收起 → enabled=false：状态回未登录、凭据块隐藏
     fireEvent.click(screen.getByRole("button", { name: /收起/ }));
@@ -758,6 +791,7 @@ describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", ()
     // 展开 + 填有效 inline 凭据（loginUrl + username 使 validateAuth 通过——否则提交 disabled 测不到「发了」）
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
     // 收起（停用）→ 提交：enabled=false 故 buildBody 不带 auth
@@ -772,6 +806,7 @@ describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", ()
     await setupBlackbox();
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     // 收起 → 草稿仍在 → 按钮显「已配置」标记
     fireEvent.click(screen.getByRole("button", { name: /收起/ }));
@@ -813,6 +848,7 @@ describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_account
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     // 主账号（add 之前只有主账号「用户名」标签，inputByLabel 安全不歧义）
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "admin" } });
@@ -847,6 +883,7 @@ describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_account
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await expectAuthEnabled();
+    switchAuthInline();
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(screen.getByText("用户名").parentElement!.querySelector("input")!, { target: { value: "admin" } });
     fireEvent.change(screen.getByText("密码").parentElement!.querySelector("input")!, { target: { value: "pw" } });
@@ -1013,10 +1050,10 @@ describe("黑盒登录 buildAuthPayload / validateAuth", () => {
     expect(state.accounts[0]?.username).toBe("u");
   });
 
-  it("presetToAuthState: 空 preset → DEFAULT_AUTH（disabled, inline）", () => {
+  it("presetToAuthState: 空 preset → DEFAULT_AUTH（disabled, profile 默认）", () => {
     const state = presetToAuthState({});
     expect(state.enabled).toBe(false);
-    expect(state.source).toBe("inline");
+    expect(state.source).toBe("profile");
   });
 });
 

@@ -143,9 +143,14 @@ async def fork_profile(ws: str, pid: str, request: Request,
 
 @router.post("/{ws}/auth-profiles/{pid}/credentials/{cid}/test")
 async def test_credential(ws: str, pid: str, cid: str, request: Request,
+                          host_profile_id: str | None = None,
+                          host_url: str | None = None,
                           user=Depends(workspace_member)):
-    """触发真实登录验证 → 起 AuthValidationWorkflow,返 {workflow_id, probe_dir}(前端轮询)。"""
-    return await request.app.state.scan_manager.start_auth_validation(ws, pid, cid)
+    """触发真实登录验证 → 起 AuthValidationWorkflow,返 {workflow_id, probe_dir}(前端轮询)。
+
+    host_profile_id/host_url(query)：选中 HOST → 走代理；都不传 → 直连（复用黑盒 HOST 能力）。"""
+    return await request.app.state.scan_manager.start_auth_validation(
+        ws, pid, cid, host_profile_id=host_profile_id, host_url=host_url)
 
 
 @router.post("/{ws}/auth-profiles/{pid}/test-batch")
@@ -158,9 +163,11 @@ async def test_batch(ws: str, pid: str, request: Request,
     守护已放宽接受 authval-batch-{ws}- 前缀)。cred_id 越界 / profile 不存在等 ValueError → 422。
     """
     cred_ids = (body or {}).get("cred_ids")
+    host_profile_id = (body or {}).get("host_profile_id")
+    host_url = (body or {}).get("host_url")
     try:
         return await request.app.state.scan_manager.start_batch_auth_validation(
-            ws, pid, cred_ids)
+            ws, pid, cred_ids, host_profile_id=host_profile_id, host_url=host_url)
     except ValueError as e:
         raise HTTPException(422, str(e))
 

@@ -1800,6 +1800,8 @@ async def setup_display(input: ActivityInput) -> None:
     重启后可观测恢复）共用--见 session_recovery.py。
     """
     await build_headless_audit_session(input)
+    from supernova_core.config.scan_env import set_scan_env
+    set_scan_env(input.env_overrides)
 
 
 @activity.defn
@@ -1843,6 +1845,8 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
             await session.log_workflow_complete(ws)
     await stop_heartbeat()  # 停 heartbeat daemon(启动于 setup_display); 终态自停兜底
     clear_audit_session()
+    from supernova_core.config.scan_env import clear_scan_env
+    clear_scan_env()
 
 
 @activity.defn

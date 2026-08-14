@@ -98,7 +98,7 @@ export function WorkspaceSwitcher({ currentWorkspace }: { currentWorkspace?: str
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)} aria-label={t("workspaceSwitcher.title")}>
+      <Button variant="toolbar" onClick={() => setOpen(true)} aria-label={t("workspaceSwitcher.title")}>
         <ArrowLeftRight className="size-4" /> {t("workspaceSwitcher.title")}
       </Button>
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>

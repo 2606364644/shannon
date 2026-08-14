@@ -315,3 +315,148 @@ async def test_workflow_auth_precheck_starts_and_cleans_host_proxy():
     assert ("stop_proxy", "http://127.0.0.1:19090") in calls
     assert calls.index(next(c for c in calls if c[0] == "setup_proxy")) < \
         calls.index(next(c for c in calls if c[0] == "probe"))
+
+
+def test_batch_item_carries_host_mappings_default_and_set():
+    """BlackboxAuthValidationBatchItem 透传 host_mappings（对齐单 cred
+    BlackboxAuthValidationInput.host_mappings），供 BatchAuthValidationWorkflow
+    为每个 cred 起 per-cred host proxy。默认空 = 直连；可设 mappings = 走代理。"""
+    from supernova_blackbox.pipeline.shared import BlackboxAuthValidationBatchItem
+
+    # 默认空（直连，零回归）
+    assert BlackboxAuthValidationBatchItem(cred_id="c1").host_mappings == {}
+    # 可设 mappings（走代理）
+    item = BlackboxAuthValidationBatchItem(
+        cred_id="c1", host_mappings={"target.internal": "10.0.0.2"})
+    assert item.host_mappings == {"target.internal": "10.0.0.2"}
+
+
+@pytest.mark.asyncio
+async def test_batch_workflow_starts_and_cleans_host_proxy_per_cred():
+    """BatchAuthValidationWorkflow：item 带 host_mappings → 每个 cred 起 host proxy
+    （run_host_proxy_setup）+ proxy_url 透传到 probe + finally stop_host_proxy。
+    镜像单 cred test_workflow_auth_precheck_starts_and_cleans_host_proxy（认证测试复用黑盒 HOST）。"""
+    from supernova_blackbox.pipeline.workflows import BatchAuthValidationWorkflow
+    from supernova_blackbox.pipeline.shared import (
+        BlackboxAuthValidationBatchInput, BlackboxAuthValidationBatchItem)
+
+    calls = []
+
+    def get(iv, key):
+        return iv.get(key) if isinstance(iv, dict) else getattr(iv, key, None)
+
+    @activity.defn
+    async def setup_display(i):
+        pass
+
+    @activity.defn
+    async def run_host_proxy_setup(i):
+        calls.append(("setup_proxy", dict(get(i, "host_mappings"))))
+        return "http://127.0.0.1:19090"
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        pass
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        calls.append(("probe", get(i, "proxy_url")))
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def stop_host_proxy(proxy_url):
+        calls.append(("stop_proxy", proxy_url))
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        pass
+
+    inp = BlackboxAuthValidationBatchInput(items=[
+        BlackboxAuthValidationBatchItem(
+            cred_id="c1", web_url="https://target.internal/",
+            config_path="/c.yaml", workspace_path="/wp1",
+            host_mappings={"target.internal": "10.0.0.2"}),
+        BlackboxAuthValidationBatchItem(
+            cred_id="c2", web_url="https://target.internal/",
+            config_path="/c.yaml", workspace_path="/wp2",
+            host_mappings={"target.internal": "10.0.0.2"}),
+    ])
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client, task_queue="tq-batch-host",
+            workflows=[BatchAuthValidationWorkflow],
+            activities=[setup_display, run_host_proxy_setup,
+                        log_phase_start_activity, run_auth_validation_probe,
+                        stop_host_proxy, finalize_summary],
+        ):
+            results = await env.client.execute_workflow(
+                BatchAuthValidationWorkflow.run, inp, id="w-batch-host",
+                task_queue="tq-batch-host",
+            )
+
+    # 两个 cred 都成功
+    assert [r["state"] for r in results] == ["success", "success"]
+    # 每个 cred 都起 proxy（per-cred host proxy）+ mappings 透传到 setup
+    assert calls.count(("setup_proxy", {"target.internal": "10.0.0.2"})) == 2
+    # proxy_url 透传到 probe
+    probes = [c for c in calls if c[0] == "probe"]
+    assert all(c[1] == "http://127.0.0.1:19090" for c in probes)
+    # 每个 cred 都 stop（finally 收尾，best-effort）
+    assert calls.count(("stop_proxy", "http://127.0.0.1:19090")) == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_workflow_no_mappings_skips_proxy():
+    """item 不带 host_mappings → 不调 run_host_proxy_setup / stop_host_proxy（直连，零回归）。"""
+    from supernova_blackbox.pipeline.workflows import BatchAuthValidationWorkflow
+    from supernova_blackbox.pipeline.shared import (
+        BlackboxAuthValidationBatchInput, BlackboxAuthValidationBatchItem)
+
+    calls = []
+
+    @activity.defn
+    async def setup_display(i):
+        pass
+
+    @activity.defn
+    async def run_host_proxy_setup(i):
+        calls.append("setup_proxy")
+        return ""
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        pass
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def stop_host_proxy(proxy_url):
+        calls.append("stop_proxy")
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        pass
+
+    inp = BlackboxAuthValidationBatchInput(items=[
+        BlackboxAuthValidationBatchItem(  # 无 host_mappings = 直连
+            cred_id="c1", web_url="https://target/", config_path="/c.yaml",
+            workspace_path="/wp1"),
+    ])
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client, task_queue="tq-batch-noproxy",
+            workflows=[BatchAuthValidationWorkflow],
+            activities=[setup_display, run_host_proxy_setup,
+                        log_phase_start_activity, run_auth_validation_probe,
+                        stop_host_proxy, finalize_summary],
+        ):
+            await env.client.execute_workflow(
+                BatchAuthValidationWorkflow.run, inp, id="w-batch-noproxy",
+                task_queue="tq-batch-noproxy",
+            )
+
+    # 不带 mappings → 不起 proxy、不 stop（直连，零回归）
+    assert "setup_proxy" not in calls
+    assert "stop_proxy" not in calls

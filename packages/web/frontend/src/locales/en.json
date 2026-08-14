@@ -352,6 +352,7 @@
       "yamlRuntimeError": "yaml has errors; cannot run",
       "temporal": "Temporal not ready (localhost:7233). Start it first: docker-compose up temporal",
       "concurrent": "Concurrent scan limit reached; wait for the current scan to finish or cancel one",
+      "providerMissing": "Workspace LLM credentials (e.g. model API key) are not configured. Add them in workspace settings, then scan again.",
       "yamlInvalid": "yaml validation failed",
       "yamlInvalidWithMsg": "yaml validation failed: {{msg}}",
       "submitFailed": "Submit failed ({{status}})",
@@ -806,16 +807,18 @@
       "exists": "{{key}} already exists, skipped",
       "templateInserted": "Template inserted (# lines are comments; remove # and set the value to apply)",
       "effectiveTitle": "Overrideable per workspace",
-      "processTitle": "Global only",
-      "processDesc": "These keys are read at worker process level; per-workspace overrides have no effect. Set them in global .env / .env.profiles.",
+      "processTitle": "Global only (startup)",
+      "processDesc": "These keys are read once at worker startup; per-workspace overrides have no effect. Set them in global .env / .env.profiles.",
       "kindHint": "Key names vary by engine: anthropic uses ANTHROPIC_*, openai_compatible uses SUPERNOVA_OPENAI_*.",
+      "prefillHint": "Recommended defaults are pre-filled — save as-is to apply. For #-prefixed credential lines (e.g. API key, GitLab token), remove the # and fill in the value before saving.",
       "groups": {
         "engine": "Engine & endpoint",
         "models": "Models",
         "runtime": "Runtime",
-        "git": "Git access"
+        "scanSwitches": "Scan-time switches",
+        "git": "Git access (optional, falls back to global)"
       },
-      "template": "# ===== Workspace AI config (# lines are comments; remove # and set value to apply) =====\n# --- Engine & endpoint ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=your api key\n# --- Models ---\n#SUPERNOVA_MODEL=general fallback model\n#SUPERNOVA_OPENAI_SMALL_MODEL=light tier model\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=standard tier model\n#SUPERNOVA_OPENAI_LARGE_MODEL=heavy tier model\n# --- Runtime ---\n#SUPERNOVA_MAX_TURNS=120\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Git access ---\n#GITLAB_USER=your gitlab username\n#GITLAB_TOKEN=your token"
+      "template": "# ===== Workspace AI config (# lines are comments; remove # and set value to apply) =====\n# --- Engine & endpoint ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=your api key\n# --- Models ---\n#SUPERNOVA_MODEL=general fallback model\n#SUPERNOVA_OPENAI_SMALL_MODEL=light tier model\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=standard tier model\n#SUPERNOVA_OPENAI_LARGE_MODEL=heavy tier model\n# --- Runtime ---\n#SUPERNOVA_MAX_TURNS=10000\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Scan-time switches (workspace-overridable) ---\n#SUPERNOVA_LLM_TRACK_ENABLED=0\n#SUPERNOVA_GITNEXUS_LLM_ENABLED=1\n#SUPERNOVA_BROWSER_ENGINE=agent-browser\n#SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json\n#SUPERNOVA_AGENT_NARRATION_LANG=zh"
     },
     "save": "Save",
     "saved": "Configuration saved",

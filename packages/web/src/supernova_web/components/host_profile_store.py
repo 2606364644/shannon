@@ -21,7 +21,7 @@ from uuid import uuid4
 
 import httpx
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from supernova_core.utils.security import check_loopback, check_ssrf
 
@@ -300,15 +300,31 @@ class HostProfileStore:
     def _read_segment(self, ws: str) -> list[HostProfile]:
         """纯段读取(不合并):该 ws 文件内的档案,scope 按存储位置标记
         (.system 段 → system,其余 → workspace)。所有写方法用本方法,避免合并版
-        把系统档案错误持久化到 ws 文件。"""
+        把系统档案错误持久化到 ws 文件。
+
+        脏数据容错:校验规则随版本收紧(如 1828e98f「同 host 不允许多 IP」),历史
+        版本写入的档案可能已不合法。逐条 validate,不合法条目**跳过 + warning**
+        (单条脏数据不得毒死整个 list API → 页面「加载失败」);后续任意 write 经
+        read-modify-write 自然淘汰被跳过的脏条。yaml 语法级损坏仍抛错——此时若
+        返回 [] 会让下次 write 整文件覆盖,静默清空全部数据,宁可 500 让人来看。
+        """
         path = self._path(ws)
         if not path.exists():
             return []
         data = yaml.safe_load(path.read_text("utf-8")) or []
-        profiles = [HostProfile.model_validate(p) for p in data]
         seg_scope = "system" if ws == SYSTEM_WS else "workspace"
-        for p in profiles:
-            p.scope = seg_scope
+        profiles: list[HostProfile] = []
+        for i, raw in enumerate(data):
+            try:
+                profile = HostProfile.model_validate(raw)
+            except ValidationError as exc:
+                ident = (raw.get("id") or raw.get("name")) if isinstance(raw, dict) else None
+                _log.warning(
+                    "host-profile %s[%s] 数据不合法，已跳过: %s",
+                    ws, ident if ident is not None else f"#{i}", exc)
+                continue
+            profile.scope = seg_scope
+            profiles.append(profile)
         return profiles
 
     def read(self, ws: str) -> list[HostProfile]:

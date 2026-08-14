@@ -46,13 +46,24 @@ ENV_TO_FIELD: dict[str, tuple[str, str]] = {
     "GITLAB_TOKEN": ("gitlab_token", _STR),
 }
 
-# 进程级开关（worker 共享 os.environ，ws 覆盖会踩并发扫描）→ 警告不阻塞，不进 fields。
-INEFFECTIVE_KEYS: frozenset[str] = frozenset({
-    "SUPERNOVA_MAX_CONCURRENT",
-    "SUPERNOVA_PRICING_OVERRIDE",
+# 扫描期开关（worker activity 执行期间读、语义 per-workspace 有意义）→ 进 env 段，
+# 经 scan_env.ws_getenv 支持 per-workspace 覆盖。新增扫描期配置并把其读取点改用
+# ws_getenv 后，把键加进此集合即自动支持 ws 覆盖。
+SCAN_ENV_KEYS: frozenset[str] = frozenset({
     "SUPERNOVA_LLM_TRACK_ENABLED",
     "SUPERNOVA_GITNEXUS_LLM_ENABLED",
+    "SUPERNOVA_PRICING_OVERRIDE",
+    "SUPERNOVA_BROWSER_ENGINE",
     "SUPERNOVA_AGENT_NARRATION_LANG",
+    "SUPERNOVA_LLM_PER_CALL_TIMEOUT",
+    "SUPERNOVA_CHUNK_MAX_CALLS",
+    "SUPERNOVA_MODEL_CONTEXT_OVERRIDE",
+    "SUPERNOVA_CHUNK_TOKEN_THRESHOLD",
+})
+
+# 启动期配置（worker main() 启动时读一次，ws 覆盖不生效）→ 警告不阻塞，不进 fields/env。
+INEFFECTIVE_KEYS: frozenset[str] = frozenset({
+    "SUPERNOVA_MAX_CONCURRENT",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
 })
 
@@ -65,10 +76,12 @@ class ParsedEnv:
     """parse_env_text 的结果。
 
     fields: config 字段 → 强类型值（仅含文本里出现的生效字段）。
-    ineffective: 进程级 key（警告，不存 config）。
+    env: 扫描期 env 覆盖 → 原始 str（KEY→value，存 config.yaml 的 env 段）。
+    ineffective: 启动期 key（警告，ws 覆盖不生效，不存 config）。
     unknown: 未知 key（警告，可能拼写错误）。
     """
     fields: dict[str, str | int | bool] = dc_field(default_factory=dict)
+    env: dict[str, str] = dc_field(default_factory=dict)
     ineffective: list[str] = dc_field(default_factory=list)
     unknown: list[str] = dc_field(default_factory=list)
 
@@ -96,6 +109,7 @@ def parse_env_text(text: str) -> ParsedEnv:
         ValueError: 某行无 '='，或 int/bool 字段值非法（API 层转 422）。
     """
     fields: dict[str, str | int | bool] = {}
+    env: dict[str, str] = {}
     ineffective: list[str] = []
     unknown: list[str] = []
     for raw_line in text.splitlines():
@@ -110,11 +124,13 @@ def parse_env_text(text: str) -> ParsedEnv:
         if key in ENV_TO_FIELD:
             fld, kind = ENV_TO_FIELD[key]
             fields[fld] = _convert(value, kind, key)
+        elif key in SCAN_ENV_KEYS:
+            env[key] = value
         elif key in INEFFECTIVE_KEYS:
             ineffective.append(key)
         else:
             unknown.append(key)
-    return ParsedEnv(fields=fields, ineffective=ineffective, unknown=unknown)
+    return ParsedEnv(fields=fields, env=env, ineffective=ineffective, unknown=unknown)
 
 
 # ---- render: WsConfig → env 文本 ----
@@ -174,4 +190,7 @@ def render_env_text(cfg, ai_provider: str = "anthropic_api") -> str:
         lines.append(f"GITLAB_USER={g.gitlab_user}")
     if g.gitlab_token is not None:
         lines.append(f"GITLAB_TOKEN={MASKED}")
+    # env 段（扫描期 per-workspace 覆盖，原样 KEY=value，按 key 排序稳定输出）。
+    for key in sorted(cfg.env):
+        lines.append(f"{key}={cfg.env[key]}")
     return "\n".join(lines) + ("\n" if lines else "")

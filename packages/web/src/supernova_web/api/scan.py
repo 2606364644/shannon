@@ -7,6 +7,7 @@ from supernova_web.auth.dependencies import current_user, workspace_member
 from supernova_web.components.workspace_provisioner import is_global_admin, is_safe_workspace_name
 from supernova_web.auth.models import User
 from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans
+from supernova_web.components.ws_config_store import ProviderConfigIncomplete
 from supernova_web.models import ScanAccepted, ScanRequest
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
@@ -30,7 +31,13 @@ async def create_scan(req: ScanRequest, request: Request,
     try:
         # Web workspace scan 必须使用完整的 workspace-owned Provider 配置，不能把全局
         # env/model 当作缺省值。API 层先检一遍，避免 fake/替代 scan manager 绕过约束。
-        request.app.state.ws_config_store.resolve_provider_config(ws)
+        try:
+            request.app.state.ws_config_store.resolve_provider_config(ws)
+        except ProviderConfigIncomplete as e:
+            # 工作区缺 LLM 凭据等必填字段 → 结构化错误，让前端区分于真正的 yaml 校验失败，
+            # 显示「请前往工作区设置补全凭据」而非「yaml 校验失败」（HTTPException 穿透下方
+            # 通用 except ValueError）。
+            raise HTTPException(422, detail={"code": "provider_incomplete", "missing": e.missing})
         ws_name, scan_id = await sm.start(req)
     except TemporalUnavailable:
         raise HTTPException(400, "Temporal 服务未运行，请先 docker-compose up -d")

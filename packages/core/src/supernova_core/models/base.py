@@ -16,3 +16,6 @@ class BasePipelineInput:
     pipeline_testing_mode: bool = False
     api_key: str | None = None
     deliverables_subdir: str = field(default_factory=get_default_deliverables_subdir)
+    # 扫描期 per-workspace env 覆盖（scan_env 覆盖层用）。
+    # web 路径由 scan_manager 塞 ws config 的 env 段；空 dict=未注入（CLI 兜底走 os.environ）。
+    env_overrides: dict[str, str] = field(default_factory=dict)

@@ -4,7 +4,8 @@ from pathlib import Path
 
 from supernova_web.components.credential_vault import CredentialVault
 from supernova_web.components.ws_config_store import (
-    WsConfig, WsProviderFields, WsConfigStore, validate_ws_config,
+    WsConfig, WsProviderFields, WsConfigStore, ProviderConfigIncomplete,
+    validate_ws_config,
 )
 
 
@@ -42,10 +43,11 @@ def test_write_then_read_roundtrip(store, tmp_path):
 
 
 def test_resolve_provider_config_global_default_when_unset(store, tmp_path):
-    """未填 API key → 即使全局有配置也不能回落。"""
+    """未填 API key → 即使全局有配置也不能回落；抛 ProviderConfigIncomplete 带 missing 列表。"""
     (tmp_path / "ws-a").mkdir()
-    with pytest.raises(ValueError, match="SUPERNOVA_OPENAI_API_KEY"):
+    with pytest.raises(ProviderConfigIncomplete) as ei:
         store.resolve_provider_config("ws-a")
+    assert "SUPERNOVA_OPENAI_API_KEY" in ei.value.missing
 
 
 def test_resolve_provider_config_ws_overrides(store, tmp_path):
@@ -76,8 +78,9 @@ def test_resolve_provider_config_requires_all_openai_fields(store, tmp_path):
         api_key="sk-ws",
         medium_model="glm-5.2-coder",
     )))
-    with pytest.raises(ValueError, match="SUPERNOVA_OPENAI_SMALL_MODEL"):
+    with pytest.raises(ProviderConfigIncomplete) as ei:
         store.resolve_provider_config("ws-a")
+    assert "SUPERNOVA_OPENAI_SMALL_MODEL" in ei.value.missing
 
 
 def test_resolve_provider_config_returns_only_workspace_values(store, tmp_path, monkeypatch):

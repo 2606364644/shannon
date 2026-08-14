@@ -57,6 +57,11 @@
   --shadow-cta: 0 1px 2px hsl(0 0% 0% / 0.30), 0 6px 16px -6px hsl(15 70% 45% / 0.35);
   --shadow-cta-hover: 0 2px 4px hsl(0 0% 0% / 0.30), 0 12px 24px -6px hsl(15 75% 50% / 0.45);
 
+  /* toolbar 按钮专用（工作区页操作条）：静止贴微落影；hover 上浮 -2px 配暖黑柔阴影
+     （button.tsx toolbar 变体，与 cta 同一浮动语言）。 */
+  --shadow-toolbar: 0 1px 2px hsl(0 0% 0% / 0.18);
+  --shadow-toolbar-hover: 0 1px 2px hsl(0 0% 0% / 0.25), 0 10px 24px -8px hsl(0 0% 0% / 0.55);
+
   /* 层 D · @tailwindcss/typography prose 主题（深 · 暖黑；links 用 coral） */
   --prose-body: 40 14% 90%;
   --prose-headings: 40 16% 94%;
@@ -120,4 +125,8 @@
   /* cta 按钮专用（浅 · 柔和暖棕落影 + 微 coral 光晕）*/
   --shadow-cta: 0 1px 2px hsl(34 40% 30% / 0.14), 0 6px 16px -6px hsl(15 58% 45% / 0.22);
   --shadow-cta-hover: 0 2px 4px hsl(34 40% 30% / 0.18), 0 12px 24px -6px hsl(15 58% 50% / 0.30);
+
+  /* toolbar 按钮专用（浅 · 暖棕柔阴影） */
+  --shadow-toolbar: 0 1px 2px hsl(34 40% 30% / 0.08);
+  --shadow-toolbar-hover: 0 2px 4px hsl(34 40% 30% / 0.10), 0 10px 24px -8px hsl(34 40% 30% / 0.24);
 }

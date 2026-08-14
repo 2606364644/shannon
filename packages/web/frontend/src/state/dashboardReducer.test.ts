@@ -263,6 +263,60 @@ describe("dashboardReducer — 对齐 core DashboardState.apply", () => {
     expect(s.running_units.sort()).toEqual(["code-index", "pre-recon"]);
     expect(s.completed_units).toBe(0);
   });
+
+  // === 终态收敛（修报告页已完成扫描常驻显示 2/5）===
+  // 真实现场：reporting phase 声明 5 个 step，仅前 2 个发 StepEvent complete（run-report-agent /
+  // inject-* 后处理步骤直接执行、不发 step 事件）→ phase complete 保留 units → 扫描 SummaryEvent
+  // completed 终态。修复前 reducer 在终态不做收敛，completed_units 永久卡在 2，详情页常驻显示 2/5。
+  it("SummaryEvent(status=completed) 终态收敛：未发事件的声明 step 标 done", () => {
+    let s = dashboardReducer(emptyState(), ev({
+      type: "PhaseEvent", phase: "reporting", event: "start",
+      steps: ["render-findings", "assemble-report", "run-report-agent",
+              "inject-attack-chains", "inject-gitnexus-track-status"],
+      step_intents: ["", "", "", "", ""],
+    }));
+    s = dashboardReducer(s, ev({ type: "StepEvent", name: "render-findings", phase: "reporting", event: "complete" }));
+    s = dashboardReducer(s, ev({ type: "StepEvent", name: "assemble-report", phase: "reporting", event: "complete" }));
+    s = dashboardReducer(s, ev({ type: "PhaseEvent", phase: "reporting", event: "complete" }));
+    // 收敛前：5 声明 / 2 完成（bug 现场）
+    expect(s.total_units).toBe(5);
+    expect(s.completed_units).toBe(2);
+    // 扫描成功结束 → 收敛
+    s = dashboardReducer(s, ev({ type: "SummaryEvent", category: "SUMMARY", status: "completed" }));
+    expect(s.completed_units).toBe(5); // 终态收敛 → N/N
+    expect(s.unit_status["inject-gitnexus-track-status"]).toBe("done");
+  });
+
+  it("scan_end(status=completed) 同样终态收敛 unit_status", () => {
+    let s = dashboardReducer(emptyState(), ev({
+      type: "PhaseEvent", phase: "reporting", event: "start",
+      steps: ["a", "b"], step_intents: ["", ""],
+    }));
+    s = dashboardReducer(s, ev({ type: "StepEvent", name: "a", phase: "reporting", event: "complete" }));
+    s = dashboardReducer(s, ev({ type: "scan_end", category: "CONTROL", status: "completed" }));
+    expect(s.completed_units).toBe(2);
+    expect(s.total_units).toBe(2);
+  });
+
+  it("终态失败(scan_end failed)不收敛：未发事件的 step 保持空（保留失败现场）", () => {
+    let s = dashboardReducer(emptyState(), ev({
+      type: "PhaseEvent", phase: "reporting", event: "start",
+      steps: ["a", "b", "c"], step_intents: ["", "", ""],
+    }));
+    s = dashboardReducer(s, ev({ type: "StepEvent", name: "a", phase: "reporting", event: "complete" }));
+    // b、c 未发 step 事件
+    s = dashboardReducer(s, ev({ type: "scan_end", category: "CONTROL", status: "failed" }));
+    expect(s.unit_status["b"]).toBeUndefined();
+    expect(s.unit_status["c"]).toBeUndefined();
+    expect(s.completed_units).toBe(1);
+    expect(s.total_units).toBe(3);
+  });
+
+  it("终态收敛对 emptyState（无 phase_units）无副作用", () => {
+    const s = dashboardReducer(emptyState(), ev({ type: "SummaryEvent", category: "SUMMARY", status: "completed" }));
+    expect(s.total_units).toBe(0);
+    expect(s.completed_units).toBe(0);
+  });
 });
 
 describe("formatters — 对齐 core formatters.py", () => {

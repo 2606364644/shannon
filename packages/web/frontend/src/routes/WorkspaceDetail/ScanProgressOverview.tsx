@@ -9,7 +9,8 @@ import { dashboardReducer, emptyState } from "@/state/dashboardReducer";
 /**
  * 详情页进度概览（spec 2026-08-14 进度两层粒度 · 详情页细粒度）。
  *
- * 顶部全 tab 常驻：当前阶段 + 步级列表 + 正在跑的 Agent + 进度计数 + 连接态。
+ * 顶部全 tab 常驻且随页 sticky 固定（ScanDetail 里与 tabs 同块）：当前阶段 + 步级列表 +
+ * 正在跑的 Agent + 进度计数 + 连接态。长内容（report/overview）滚动时进度不离开视口。
  * 建单条 SSE（按段切换 eventsUrl：组合黑盒段读 run 级 ndjson，其余读任务根），events 经
  * dashboardReducer fold 成 DashboardState（1:1 复刻 core），渲染其 phase/agents/units 核心。
  * 精简于 DashboardPanel（不含耗时/花费指标——那些在 overview tab 的 metrics）。

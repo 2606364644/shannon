@@ -19,6 +19,22 @@ from .repo_manager import _validate_ws_segment
 WS_CONFIG_FILENAME = "config.yaml"
 
 
+class ProviderConfigIncomplete(ValueError):
+    """工作区 Provider 配置缺必填字段（如 LLM API Key）。
+
+    携带 ``missing``（缺失的 env 字段名列表，如 ``["SUPERNOVA_OPENAI_API_KEY"]``）。
+    继承 ValueError 以兼容既有 ``except ValueError``；scan API 单独 catch 它，返回结构化
+    错误（code=provider_incomplete + missing），让前端显示「请前往工作区设置补全 LLM 凭据」
+    而非误导性的「yaml 校验失败」。
+    """
+
+    def __init__(self, missing: list[str]):
+        self.missing = list(missing)
+        super().__init__(
+            "workspace provider config incomplete; missing: " + ", ".join(self.missing)
+        )
+
+
 @dataclass
 class WsProviderFields:
     ai_provider: str | None = None
@@ -42,6 +58,8 @@ class WsGitFields:
 class WsConfig:
     provider: WsProviderFields = field(default_factory=WsProviderFields)
     git: WsGitFields = field(default_factory=WsGitFields)
+    # 扫描期 env 覆盖（KEY→value，原始 str；非凭据，不加密）。
+    env: dict[str, str] = field(default_factory=dict)
 
 
 DEFAULT_WS_PROVIDER = "openai_compatible"
@@ -109,6 +127,10 @@ class WsConfigStore:
             raise ValueError("invalid workspace name")
         return p
 
+    def config_exists(self, ws: str) -> bool:
+        """工作区是否已有保存的 config.yaml（前端据此判断是否预填默认模板）。"""
+        return self._config_path(ws).exists()
+
     def read(self, ws: str) -> WsConfig:
         path = self._config_path(ws)
         if not path.exists():
@@ -126,9 +148,12 @@ class WsConfigStore:
             git_raw["gitlab_token"] = self._vault.decrypt(git_raw["gitlab_token"])
         known_git = {f.name for f in fields(WsGitFields)}
         git_kwargs = {k: git_raw.get(k) for k in known_git}
+        env_raw = data.get("env") or {}
+        env = {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else {}
         return WsConfig(
             provider=WsProviderFields(**prov_kwargs),
             git=WsGitFields(**git_kwargs),
+            env=env,
         )
 
     def write(self, ws: str, cfg: WsConfig) -> None:
@@ -144,6 +169,8 @@ class WsConfigStore:
         if git.get("gitlab_token") is not None:
             git["gitlab_token"] = self._vault.encrypt(git["gitlab_token"])
         data = {"provider": prov, "git": git}
+        if cfg.env:
+            data["env"] = cfg.env
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), "utf-8")
 
     def resolve_provider_config(self, ws: str) -> dict:
@@ -151,10 +178,12 @@ class WsConfigStore:
         ws_prov = self.read(ws).provider
         missing = _missing_provider_fields(ws_prov)
         if missing:
-            raise ValueError(
-                "workspace provider config incomplete; missing: " + ", ".join(missing)
-            )
+            raise ProviderConfigIncomplete(missing)
 
         resolved = asdict(ws_prov)
         resolved["type"] = resolved.pop("ai_provider")
         return resolved
+
+    def resolve_env_overrides(self, ws: str) -> dict[str, str]:
+        """返回工作区的扫描期 env 覆盖（供 scan_env 覆盖层用）；空配置返空 dict。"""
+        return dict(self.read(ws).env)

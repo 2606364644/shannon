@@ -24,6 +24,11 @@ const buttonVariants = cva(
         // 靠质感（阴影 + hover 浮起）区分主次，尺寸同 default(h-9)，不加大。
         cta:
           "bg-primary text-primary-foreground font-medium shadow-[var(--shadow-cta)] hover:shadow-[var(--shadow-cta-hover)] hover:-translate-y-px active:translate-y-0 transition-all",
+        // toolbar · 工作区页操作条按钮（切换工作区/成员/仓库/认证/HOST/置顶）：card 表面
+        // 浮于页面 + hover 上浮 -2px + 暖色柔阴影 + 图标染 coral（与 cta 同一浮动语言）。
+        // 图标默认 muted，hover 跟随按钮整体上浮后点亮，给出可点击反馈。
+        toolbar:
+          "border border-input bg-card text-foreground shadow-[var(--shadow-toolbar)] hover:-translate-y-0.5 hover:border-primary/45 hover:shadow-[var(--shadow-toolbar-hover)] active:translate-y-0 [&_svg]:text-muted-foreground [&_svg]:transition-colors hover:[&_svg]:text-primary",
       },
       size: {
         default: "h-9 px-4 py-2",

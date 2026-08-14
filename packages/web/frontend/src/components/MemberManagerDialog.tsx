@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Users } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -51,7 +52,9 @@ export function MemberManagerDialog({ ws }: { ws: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" onClick={() => setOpen(true)} data-testid="member-manager">{t("members.manage")}</Button>
+        <Button variant="toolbar" onClick={() => setOpen(true)} data-testid="member-manager">
+          <Users className="size-4" /> {t("members.manage")}
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{t("members.title")}</DialogTitle></DialogHeader>

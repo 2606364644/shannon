@@ -352,6 +352,7 @@
       "yamlRuntimeError": "yaml 有错，无法运行",
       "temporal": "Temporal 未就绪（localhost:7233）。先启动：docker-compose up temporal",
       "concurrent": "并发扫描超限，请等当前扫描完成或取消一个",
+      "providerMissing": "工作区未配置 LLM 凭据（如模型 API Key），请前往工作区设置补全后再扫描",
       "yamlInvalid": "yaml 校验失败",
       "yamlInvalidWithMsg": "yaml 校验失败：{{msg}}",
       "submitFailed": "提交失败（{{status}}）",
@@ -806,16 +807,18 @@
       "exists": "{{key}} 已存在，已跳过",
       "templateInserted": "已注入配置模板（# 开头为注释，删除 # 并填值即生效）",
       "effectiveTitle": "工作区可覆盖",
-      "processTitle": "仅全局生效",
-      "processDesc": "这些键在 worker 进程级读取，工作区覆盖不生效，请在全局 .env / .env.profiles 设置。",
+      "processTitle": "仅全局生效（启动期）",
+      "processDesc": "这些键在 worker 启动时读一次，工作区覆盖不生效，请在全局 .env / .env.profiles 设置。",
       "kindHint": "键名按引擎不同：anthropic 用 ANTHROPIC_*，openai_compatible 用 SUPERNOVA_OPENAI_*。",
+      "prefillHint": "已预填推荐默认配置，可直接保存。以 # 开头的凭据行（如 API key、GitLab token）需删除 # 并填值后保存才生效。",
       "groups": {
         "engine": "引擎与端点",
         "models": "模型",
         "runtime": "运行时",
-        "git": "Git 访问"
+        "scanSwitches": "扫描期开关",
+        "git": "Git 访问（可选，未填回落全局）"
       },
-      "template": "# ===== 工作区 AI 配置（# 开头为注释，删除 # 并填值即生效）=====\n# --- 引擎与端点 ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=填入 API key\n# --- 模型 ---\n#SUPERNOVA_MODEL=通用回落模型\n#SUPERNOVA_OPENAI_SMALL_MODEL=轻量档模型\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=常规档模型\n#SUPERNOVA_OPENAI_LARGE_MODEL=重度档模型\n# --- 运行时 ---\n#SUPERNOVA_MAX_TURNS=120\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Git 访问 ---\n#GITLAB_USER=你的 GitLab 用户名\n#GITLAB_TOKEN=填入 token"
+      "template": "# ===== 工作区 AI 配置（# 开头为注释，删除 # 并填值即生效）=====\n# --- 引擎与端点 ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=填入 API key\n# --- 模型 ---\n#SUPERNOVA_MODEL=通用回落模型\n#SUPERNOVA_OPENAI_SMALL_MODEL=轻量档模型\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=常规档模型\n#SUPERNOVA_OPENAI_LARGE_MODEL=重度档模型\n# --- 运行时 ---\n#SUPERNOVA_MAX_TURNS=10000\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- 扫描期开关（工作区可覆盖）---\n#SUPERNOVA_LLM_TRACK_ENABLED=0\n#SUPERNOVA_GITNEXUS_LLM_ENABLED=1\n#SUPERNOVA_BROWSER_ENGINE=agent-browser\n#SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json\n#SUPERNOVA_AGENT_NARRATION_LANG=zh"
     },
     "save": "保存",
     "saved": "配置已保存",

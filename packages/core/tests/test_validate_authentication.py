@@ -223,13 +223,22 @@ async def test_auth_validation_cleans_up_stale_state(tmp_path):
 
 @pytest.mark.asyncio
 async def test_auth_validation_detects_missing_state_file(tmp_path):
-    """D3: no structured output → failure (fail-fast, no auth-state fallback)."""
+    """D3: no structured output → failure (fail-fast, no auth-state fallback).
+
+    failure_point="no_verdict" makes this distinguishable from a deterministic
+    login rejection (username_or_password/totp_secret/out_of_band): the combined
+    t0 precheck lets no_verdict pass through instead of killing the whole scan
+    (2026-08-14 NodeGoat: GLM logged in successfully but emitted Markdown, the
+    missing verdict was misread as auth_failed and the combined scan fail-fasted
+    before whitebox even started)."""
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(return_value=AgentMetrics(duration_ms=5000))
     mock_pm = MagicMock()
 
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
+    mock_dist_config.accounts = []  # Branch A (single-identity) — this test's intent;
+    # an unmocked MagicMock accounts attr is truthy and silently routes to Branch B.
 
     with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
          patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
@@ -242,7 +251,7 @@ async def test_auth_validation_detects_missing_state_file(tmp_path):
         )
 
     assert result.success is False
-    assert result.failure_point == "out_of_band"
+    assert result.failure_point == "no_verdict"
 
 
 @pytest.mark.asyncio
@@ -497,6 +506,7 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
     mock_pm = MagicMock()
     mock_dist_config = MagicMock()
     mock_dist_config.authentication = {"username": "admin"}
+    mock_dist_config.accounts = []  # Branch A (single-identity) — this test's intent
 
     with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
          patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
@@ -508,9 +518,10 @@ async def test_auth_validation_fallback_when_no_structured_output(tmp_path):
             executor=mock_executor,
         )
 
-    # D3: no structured output is a provider anomaly → fail-fast (no cookie fallback)
+    # D3: no structured output is a provider anomaly → fail-fast (no cookie fallback),
+    # marked "no_verdict" so callers can tell it apart from a deterministic rejection
     assert result.success is False
-    assert result.failure_point == "out_of_band"
+    assert result.failure_point == "no_verdict"
 
 
 @pytest.mark.asyncio
@@ -689,6 +700,29 @@ async def test_primary_failure_is_fail_fast(tmp_path):
             workspace_path=str(tmp_path), prompt_manager=mp, executor=me)
     assert r.success is False
     assert me.execute.call_count == 1  # primary 一失败就停，不登 victim
+
+
+@pytest.mark.asyncio
+async def test_primary_no_verdict_marked_no_verdict(tmp_path):
+    """Branch B: primary 无结构化判定（provider 异常，非确定性登录拒绝）→
+    failure_point="no_verdict"（对齐 Branch A；t0 组合预验证据此放行，不再把
+    "agent 跑完但没 verdict" 误读成 auth_failed 误杀组合扫描）。"""
+    from supernova_core.models.config import Config, Authentication, Credentials, Account
+    async def fake_execute(**kwargs):
+        from supernova_core.models.metrics import AgentMetrics
+        return AgentMetrics(duration_ms=10)  # structured_output=None
+    me = MagicMock(); me.execute = AsyncMock(side_effect=fake_execute); mp = MagicMock()
+    cfg = Config(authentication=Authentication(login_type="form", login_url="https://x/l",
+        credentials=Credentials(username="u")), accounts=[
+        Account(id="v", role="user", tier="low", credentials=Credentials(username="v2"))])
+    with patch("supernova_core.config.parser.parse_config", return_value=cfg), \
+         patch("supernova_core.config.parser.distribute_config",
+               return_value=MagicMock(authentication=cfg.authentication, accounts=cfg.accounts)):
+        r = await validate_authentication(web_url="https://x", config_path="/c.yaml",
+            workspace_path=str(tmp_path), prompt_manager=mp, executor=me)
+    assert r.success is False
+    assert r.failure_point == "no_verdict"
+    assert me.execute.call_count == 1  # primary fail-fast，不登 victim
 
 
 @pytest.mark.asyncio

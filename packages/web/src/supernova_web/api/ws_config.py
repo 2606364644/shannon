@@ -39,7 +39,12 @@ def _render_ai_provider(cfg: WsConfig) -> str:
 async def get_ws_config(ws: str, request: Request, user=Depends(workspace_member)):
     store = _store(request)
     cfg = store.read(ws)
-    return {"env_text": render_env_text(cfg, ai_provider=_render_ai_provider(cfg))}
+    # is_default：工作区尚无 config.yaml（未保存过）→ 前端据此预填完整推荐模板，
+    # 让用户打开即见一套可用的默认配置（凭据行留空等填），而非空白或残缺默认。
+    return {
+        "env_text": render_env_text(cfg, ai_provider=_render_ai_provider(cfg)),
+        "is_default": not store.config_exists(ws),
+    }
 
 
 @router.put("/{ws}/config")
@@ -73,6 +78,7 @@ async def put_ws_config(ws: str, body: EnvTextIn, request: Request,
             gitlab_user=f.get("gitlab_user"),
             gitlab_token=gitlab_token,
         ),
+        env=parsed.env,
     )
     try:
         store.write(ws, cfg)  # write 内 validate_ws_config（非法 ai_provider → ValueError → 422）

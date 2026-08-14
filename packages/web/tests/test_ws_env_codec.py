@@ -70,22 +70,61 @@ def test_parse_strips_whitespace_around_kv():
 # ---- parse: warnings（进程级 ineffective / 未知 unknown）----
 
 def test_parse_collects_ineffective_keys():
+    """启动期键（MAX_CONCURRENT）仍 ineffective；扫描期键（LLM_TRACK）进 env 段。"""
     parsed = parse_env_text("SUPERNOVA_MAX_CONCURRENT=8\nSUPERNOVA_LLM_TRACK_ENABLED=0\n")
-    assert parsed.ineffective == ["SUPERNOVA_MAX_CONCURRENT", "SUPERNOVA_LLM_TRACK_ENABLED"]
+    assert parsed.ineffective == ["SUPERNOVA_MAX_CONCURRENT"]
+    assert parsed.env == {"SUPERNOVA_LLM_TRACK_ENABLED": "0"}
     assert "max_turns" not in parsed.fields  # 不进 fields
 
 
-def test_parse_collects_unknown_keys_and_keeps_pricing_ineffective():
+def test_parse_scan_env_keys_to_env_section():
+    """扫描期开关进 env 段（不再 ineffective）。"""
+    text = ("SUPERNOVA_LLM_TRACK_ENABLED=0\n"
+            "SUPERNOVA_GITNEXUS_LLM_ENABLED=1\n"
+            "SUPERNOVA_BROWSER_ENGINE=agent-browser\n"
+            "SUPERNOVA_PRICING_OVERRIDE=p.json\n")
+    parsed = parse_env_text(text)
+    assert parsed.env == {
+        "SUPERNOVA_LLM_TRACK_ENABLED": "0",
+        "SUPERNOVA_GITNEXUS_LLM_ENABLED": "1",
+        "SUPERNOVA_BROWSER_ENGINE": "agent-browser",
+        "SUPERNOVA_PRICING_OVERRIDE": "p.json",
+    }
+    assert parsed.ineffective == []
+
+
+def test_parse_collects_unknown_keys_and_pricing_to_env():
+    """未知键 → unknown；PRICING_OVERRIDE 扫描期键 → env 段（不再 ineffective）。"""
     parsed = parse_env_text("TOTALLY_UNKNOWN_KEY=x\nSUPERNOVA_PRICING_OVERRIDE=p.json\n")
     assert parsed.unknown == ["TOTALLY_UNKNOWN_KEY"]
-    assert parsed.ineffective == ["SUPERNOVA_PRICING_OVERRIDE"]
+    assert parsed.env == {"SUPERNOVA_PRICING_OVERRIDE": "p.json"}
+    assert parsed.ineffective == []
 
 
 def test_parse_empty_text_returns_empty():
     parsed = parse_env_text("")
     assert parsed.fields == {}
+    assert parsed.env == {}
     assert parsed.ineffective == []
     assert parsed.unknown == []
+
+
+def test_render_env_section_sorted():
+    """env 段按 key 排序稳定输出（原样 KEY=value）。"""
+    cfg = WsConfig(env={"SUPERNOVA_BROWSER_ENGINE": "agent-browser",
+                        "SUPERNOVA_LLM_TRACK_ENABLED": "0"})
+    text = render_env_text(cfg, ai_provider="openai_compatible")
+    assert "SUPERNOVA_BROWSER_ENGINE=agent-browser" in text
+    assert "SUPERNOVA_LLM_TRACK_ENABLED=0" in text
+    # 按 key 排序：BROWSER_ENGINE 在 LLM_TRACK 之前
+    assert text.index("SUPERNOVA_BROWSER_ENGINE=") < text.index("SUPERNOVA_LLM_TRACK_ENABLED=")
+
+
+def test_render_empty_env_section_omitted():
+    cfg = WsConfig()
+    text = render_env_text(cfg, ai_provider="openai_compatible")
+    assert "LLM_TRACK" not in text
+    assert "BROWSER_ENGINE" not in text
 
 
 # ---- parse: 格式错误 → ValueError（API 层转 422）----

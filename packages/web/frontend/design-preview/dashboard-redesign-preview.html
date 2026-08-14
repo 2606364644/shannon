@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>概览页重设计 — Supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============ DSF tokens (mirror src/styles/tokens.css) ============ */
+:root, .dark {
+  --background: 34 7% 10%;
+  --foreground: 36 10% 91%;
+  --card: 34 5% 13%;
+  --card-2: 34 6% 15.5%;
+  --primary: 15 60% 56%;
+  --primary-fg: 34 7% 10%;
+  --secondary: 34 5% 16%;
+  --muted: 34 5% 16%;
+  --muted-fg: 36 5% 62%;
+  --accent: 34 5% 18%;
+  --destructive: 5 62% 56%;
+  --border: 34 5% 21%;
+  --border-soft: 34 5% 18%;
+  --cyan: 190 70% 60%;
+  --green: 142 50% 56%;
+  --red: 5 62% 60%;
+  --amber: 38 75% 60%;
+  --orange: 24 75% 62%;
+  --radius: 12px;
+  --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
+  --shadow-cta: 0 1px 2px hsl(15 60% 30% / 0.30), 0 6px 20px hsl(15 60% 40% / 0.22);
+  color-scheme: dark;
+}
+.light {
+  --background: 40 32% 95%;
+  --foreground: 30 26% 18%;
+  --card: 38 28% 97%;
+  --card-2: 39 30% 94%;
+  --primary: 15 58% 50%;
+  --primary-fg: 0 0% 100%;
+  --secondary: 40 32% 91%;
+  --muted: 40 32% 91%;
+  --muted-fg: 34 30% 38%;
+  --accent: 40 36% 84%;
+  --destructive: 5 58% 46%;
+  --border: 36 44% 78%;
+  --border-soft: 36 40% 84%;
+  --cyan: 190 65% 32%;
+  --green: 142 40% 32%;
+  --red: 5 58% 44%;
+  --amber: 36 70% 36%;
+  --orange: 26 74% 45%;
+  --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
+  --shadow-cta: 0 1px 2px hsl(15 58% 26% / 0.28), 0 6px 20px hsl(15 58% 40% / 0.20);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background .25s ease, color .25s ease;
+}
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+a { color: inherit; text-decoration: none; }
+code { font-family: "IBM Plex Mono", monospace; font-size: 0.92em; background: hsl(var(--muted)/0.6); padding: 1px 5px; border-radius: 5px; }
+
+/* —— top bar —— */
+.topbar { position: sticky; top: 0; z-index: 40; background: hsl(var(--card)); border-bottom: 1px solid hsl(var(--border)); }
+.topbar-in { max-width: 2400px; margin: 0 auto; height: 48px; padding: 0 28px; display: flex; align-items: center; gap: 28px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; letter-spacing: -0.01em; }
+.brand-name { font-size: 15px; }
+.nav { display: flex; gap: 4px; height: 100%; }
+.nav a { display: flex; align-items: center; height: 100%; padding: 0 4px; font-size: 13.5px; color: hsl(var(--muted-fg)); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.nav a:hover { color: hsl(var(--foreground)); }
+.nav a.active { color: hsl(var(--primary)); border-bottom-color: hsl(var(--primary)); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-fg)); cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s; }
+.icon-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+main { max-width: 2400px; margin: 0 auto; padding: 22px 28px 140px; }
+
+/* —— HERO (signature) —— */
+.hero { position: relative; overflow: hidden; background: radial-gradient(120% 130% at 88% -10%, hsl(var(--primary) / 0.10), transparent 55%), hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 26px 28px 0; }
+.hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.eyebrow { display: inline-flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; }
+.eyebrow .bar { width: 3px; height: 13px; background: hsl(var(--primary)); border-radius: 2px; }
+.glyph { display: inline-flex; align-items: center; }
+.findings { display: flex; align-items: baseline; gap: 14px; margin: 14px 0 6px; }
+.findings-num { font-family: "IBM Plex Mono", monospace; font-size: 68px; font-weight: 600; line-height: 0.95; letter-spacing: -0.03em; color: hsl(var(--red)); font-variant-numeric: tabular-nums; }
+.findings.calm .findings-num { color: hsl(var(--green)); }
+.findings-tag { font-size: 12px; color: hsl(var(--muted-fg)); border: 1px solid hsl(var(--border)); padding: 3px 8px; border-radius: 99px; }
+.context { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: hsl(var(--muted-fg)); margin-bottom: 18px; }
+.context b { color: hsl(var(--foreground)); font-weight: 500; }
+.context .sep { opacity: 0.4; margin: 0 7px; }
+
+/* —— signal trace —— */
+.trace-wrap { margin: 0 -28px; padding-top: 4px; }
+.trace { position: relative; height: 34px; border-top: 1px solid hsl(var(--border-soft)); }
+.trace svg { display: block; width: 100%; height: 100%; }
+.trace .baseline { stroke: hsl(var(--border)); stroke-width: 1.5; fill: none; }
+.trace .pulse-line { stroke: hsl(var(--primary)); stroke-width: 1.75; fill: none; stroke-dasharray: 2400; stroke-dashoffset: 2400; animation: draw 3.6s linear infinite; filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.55)); }
+.trace.idle .pulse-line { animation: none; stroke-dashoffset: 0; opacity: 0.35; filter: none; stroke: hsl(var(--muted-fg)); }
+@keyframes draw { 0% { stroke-dashoffset: 2400; } 60% { stroke-dashoffset: -400; opacity: 1; } 100% { stroke-dashoffset: -2400; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .trace .pulse-line { animation: none; stroke-dashoffset: 0; opacity: 0.4; } .dot-live { animation: none !important; } }
+
+/* —— hunting FX band（共享容器）—— */
+.fx-band { margin: 0 -28px; padding-top: 4px; }
+.fx-band > div { border-top: 1px solid hsl(var(--border-soft)); }
+
+/* FX B: 雷达扫描 */
+.fx-radar { display: flex; align-items: center; gap: 16px; height: 48px; padding: 0 28px; }
+.radar { position: relative; width: 36px; height: 36px; border-radius: 50%; border: 1px solid hsl(var(--border)); flex: none; overflow: hidden;
+  background: radial-gradient(circle, transparent 58%, hsl(var(--border-soft)) 59%, transparent 61%), radial-gradient(circle, transparent 28%, hsl(var(--border-soft)) 29%, transparent 31%); }
+.radar .sweep { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, hsl(var(--primary) / 0.40), transparent 70deg); animation: radar-spin 3.4s linear infinite; }
+@keyframes radar-spin { to { transform: rotate(1turn); } }
+.radar .blip { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--cyan)); animation: blip-fade 3.4s ease-out infinite; }
+.radar .blip.b2 { background: hsl(var(--red)); animation-delay: 1.2s; }
+.radar .blip.b3 { background: hsl(var(--cyan)); animation-delay: 2.1s; }
+@keyframes blip-fade { 0% { opacity: 0; } 6% { opacity: 1; box-shadow: 0 0 6px currentColor; } 55% { opacity: .25; } 100% { opacity: 0; } }
+.fx-radar .fx-note { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); }
+.fx-radar .fx-note b { color: hsl(var(--foreground)); font-weight: 500; }
+.fx-radar.idle .sweep { animation: none; opacity: .12; }
+.fx-radar.idle .blip { display: none; }
+
+/* FX C: 污点流光（source→sink 数据流动） */
+.fx-flow { height: 48px; padding: 5px 0 3px; }
+.fx-flow svg { display: block; width: 100%; height: 100%; }
+.flow-lane { fill: none; stroke: hsl(var(--primary) / 0.75); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 5 110; animation: lane-flow 3s linear infinite; }
+.flow-lane.l2 { stroke: hsl(var(--cyan) / 0.55); animation-duration: 4.2s; }
+.flow-lane.l3 { stroke: hsl(var(--red) / 0.60); animation-duration: 2.4s; }
+@keyframes lane-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -115; } }
+.fx-flow.idle .flow-lane { animation: none; stroke: hsl(var(--muted-fg)); opacity: .3; }
+
+/* FX D: 表面扫描线（扫描束掠过点阵，命中点亮） */
+.fx-scan { position: relative; height: 48px; overflow: hidden;
+  background-image: radial-gradient(hsl(var(--muted-fg) / 0.30) 1px, transparent 1.2px);
+  background-size: 13px 13px; background-position: 7px 7px; }
+.fx-scan .beam { position: absolute; top: 0; bottom: 0; width: 110px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.16) 45%, hsl(var(--primary) / 0.5) 50%, hsl(var(--primary) / 0.16) 55%, transparent);
+  animation: beam-sweep 3.8s linear infinite; }
+@keyframes beam-sweep { 0% { left: -12%; opacity: 0; } 8% { opacity: 1; } 78% { left: 102%; opacity: 1; } 100% { left: 102%; opacity: 0; } }
+.fx-scan .hit { position: absolute; width: 6px; height: 6px; border-radius: 50%; color: hsl(var(--cyan)); background: currentColor; animation: hit-glow 3.8s linear infinite; }
+.fx-scan .hit.h-red { color: hsl(var(--red)); }
+@keyframes hit-glow { 0% { opacity: .3; } 4% { opacity: 1; box-shadow: 0 0 8px currentColor; } 30% { opacity: .45; box-shadow: none; } 100% { opacity: .3; } }
+.fx-scan.idle .beam, .fx-scan.idle .hit { display: none; }
+.fx-scan.idle { background-image: radial-gradient(hsl(var(--muted-fg) / 0.16) 1px, transparent 1.2px); }
+
+@media (prefers-reduced-motion: reduce) { .radar .sweep, .blip, .flow-lane, .fx-scan .beam, .fx-scan .hit { animation: none !important; } }
+
+/* —— severity spectrum（Hero 严重度谱带）—— */
+.sev { margin: 10px 0 12px; max-width: 420px; }
+.sev-bar { display: flex; height: 6px; border-radius: 99px; overflow: hidden; background: hsl(var(--border)); }
+.sev-seg { height: 100%; min-width: 3px; }
+.sev-seg.s-crit { background: hsl(var(--red)); }
+.sev-seg.s-high { background: hsl(var(--orange)); }
+.sev-seg.s-med  { background: hsl(var(--yellow)); }
+.sev-seg.s-low  { background: hsl(var(--amber) / 0.55); }
+.sev-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 7px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: hsl(var(--muted-fg)); }
+.sev-legend i { font-style: normal; display: inline-flex; align-items: center; gap: 5px; }
+.sev-legend .sw { width: 7px; height: 7px; border-radius: 2px; }
+
+/* —— section row + 数据新鲜度 —— */
+.sec-row { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 13px; }
+.sec-row h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); }
+.fresh { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); display: inline-flex; gap: 12px; align-items: center; }
+.refresh-link { color: hsl(var(--muted-fg)); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.refresh-link:hover { color: hsl(var(--primary)); }
+
+/* —— CTA —— */
+.btn-cta { display: inline-flex; align-items: center; gap: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-fg)); font-weight: 600; font-size: 13.5px; padding: 9px 15px; border-radius: 9px; border: none; cursor: pointer; box-shadow: var(--shadow-cta); transition: transform .12s ease, box-shadow .15s ease; white-space: nowrap; font-family: inherit; }
+.btn-cta:hover { transform: translateY(-1px); }
+.btn-cta:active { transform: translateY(0); }
+
+/* —— stat strip (quiet) —— */
+.stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); margin-top: 16px; overflow: hidden; }
+.stat { padding: 16px 20px; border-right: 1px solid hsl(var(--border-soft)); }
+.stat:last-child { border-right: none; }
+.stat .v { font-family: "IBM Plex Mono", monospace; font-size: 24px; font-weight: 600; line-height: 1; color: hsl(var(--foreground)); font-variant-numeric: tabular-nums; }
+.stat .v.accent { color: hsl(var(--primary)); }
+.stat .l { margin-top: 7px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 500; }
+
+/* —— section heading —— */
+.section-head { display: flex; align-items: center; gap: 9px; margin: 30px 0 13px; }
+.section-head h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); }
+.section-head .live-dot { width: 8px; height: 8px; border-radius: 99px; background: hsl(var(--cyan)); }
+
+/* —— live cards —— */
+.live-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.live-card { position: relative; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 15px 17px; cursor: pointer; transition: border-color .15s, transform .12s; box-shadow: var(--shadow-card); }
+.live-card:hover { border-color: hsl(var(--primary)); transform: translateY(-1px); }
+.live-card .lc-top { display: flex; align-items: center; gap: 10px; }
+.dot-live { width: 9px; height: 9px; border-radius: 99px; background: hsl(var(--cyan)); flex: none; box-shadow: 0 0 0 0 hsl(var(--cyan) / 0.5); animation: pulse 1.9s ease-out infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 hsl(var(--cyan) / 0.5); } 70% { box-shadow: 0 0 0 7px hsl(var(--cyan) / 0); } 100% { box-shadow: 0 0 0 0 hsl(var(--cyan) / 0); } }
+.live-card .lc-id { font-family: "IBM Plex Mono", monospace; font-size: 14.5px; font-weight: 500; color: hsl(var(--foreground)); }
+.live-card .lc-type { margin-left: auto; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: hsl(var(--muted-fg)); border: 1px solid hsl(var(--border)); padding: 2px 7px; border-radius: 6px; }
+.live-card .lc-meta { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: hsl(var(--muted-fg)); margin: 9px 0 11px 19px; }
+.live-card .lc-prog { display: flex; align-items: center; gap: 10px; margin-left: 19px; }
+.prog-track { flex: 1; height: 4px; background: hsl(var(--border)); border-radius: 99px; overflow: hidden; }
+.prog-fill { height: 100%; background: hsl(var(--primary)); border-radius: 99px; }
+.prog-pct { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); min-width: 30px; }
+.live-card .lc-view { margin: 10px 0 0 19px; font-size: 12.5px; color: hsl(var(--primary)); font-weight: 500; }
+
+/* —— filters (对齐 ScanFilters: input + 状态/类型/时间 三个 select) —— */
+.sf { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 26px 0 14px; }
+.sf-input {
+  height: 36px; width: 100%; max-width: 320px; padding: 0 12px;
+  border-radius: 10px; border: 1px solid hsl(var(--border)); background: transparent;
+  color: hsl(var(--foreground)); font-family: inherit; font-size: 13px;
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.05); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sf-input::placeholder { color: hsl(var(--muted-fg)); }
+.sf-input:focus { border-color: hsl(var(--primary)); box-shadow: 0 0 0 1px hsl(var(--primary)); }
+.sf-select-wrap { position: relative; width: 128px; }
+.sf-select {
+  width: 100%; height: 36px; padding: 0 30px 0 12px;
+  border-radius: 10px; border: 1px solid hsl(var(--border)); background: transparent;
+  color: hsl(var(--foreground)); font-family: inherit; font-size: 13px;
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.05); outline: none; cursor: pointer;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sf-select:focus { border-color: hsl(var(--primary)); box-shadow: 0 0 0 1px hsl(var(--primary)); }
+.sf-chevron { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: hsl(var(--muted-fg)); }
+
+/* —— table —— */
+.table-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+thead th { text-align: left; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; padding: 11px 16px; background: hsl(var(--muted) / 0.45); border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+tbody td { padding: 11px 16px; border-bottom: 1px solid hsl(var(--border-soft)); font-size: 13px; vertical-align: middle; }
+th.r, td.r { text-align: right; }
+.td-clamp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.td-clamp a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 仓库两行格：名 + 紧凑地址（悬停见完整 URL） */
+.repo-cell { line-height: 1.35; display: block; }
+.repo-cell .rc-name { display: block; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: hsl(var(--muted-fg)); }
+.repo-cell .rc-url { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: hsl(var(--muted-fg) / 0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background .12s; }
+tbody tr:hover { background: hsl(var(--muted) / 0.5); }
+.td-mono { font-family: "IBM Plex Mono", monospace; }
+a.lnk:hover { color: hsl(var(--primary)); }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2.5px 8px; border-radius: 6px; border: 1px solid hsl(var(--border)); }
+.badge.outline { color: hsl(var(--muted-fg)); }
+.stbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+.stbadge::before { content: ""; width: 7px; height: 7px; border-radius: 99px; }
+.stbadge.running { color: hsl(var(--cyan)); }
+.stbadge.running::before { background: hsl(var(--cyan)); box-shadow: 0 0 6px hsl(var(--cyan)/.6); }
+.stbadge.completed { color: hsl(var(--green)); }
+.stbadge.completed::before { background: hsl(var(--green)); }
+.stbadge.failed { color: hsl(var(--red)); }
+.stbadge.failed::before { background: hsl(var(--red)); }
+.stbadge.queued { color: hsl(var(--muted-fg)); }
+.stbadge.queued::before { background: hsl(var(--muted-fg)); }
+.vuln { font-family: "IBM Plex Mono", monospace; font-size: 16px; font-weight: 600; }
+.vuln.hi { color: hsl(var(--red)); }
+.vuln.zero { color: hsl(var(--muted-fg)); }
+.cancel-link { font-size: 12px; color: hsl(var(--red)); cursor: pointer; }
+.cancel-link:hover { text-decoration: underline; }
+
+/* —— variant A: 分层行 (primary + secondary meta) —— */
+.slist { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: hidden; }
+.sgroup { display: grid; grid-template-columns: 84px minmax(0,1fr) auto auto; column-gap: 12px; row-gap: 6px; align-items: center; padding: 12px 16px; border-bottom: 1px solid hsl(var(--border-soft)); transition: background .12s; }
+.sgroup:last-child { border-bottom: none; }
+.sgroup:hover { background: hsl(var(--muted) / 0.5); }
+.sg-status { align-self: start; padding-top: 1px; }
+.sg-id { font-family: "IBM Plex Mono", monospace; font-size: 13.5px; font-weight: 500; color: hsl(var(--foreground)); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-id:hover { color: hsl(var(--primary)); }
+.sg-find { font-family: "IBM Plex Mono", monospace; font-size: 14px; font-weight: 600; display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.sg-find.hi { color: hsl(var(--red)); }
+.sg-find.zero { color: hsl(var(--muted-fg)); }
+.sg-find small { font-size: 11px; font-weight: 500; color: hsl(var(--muted-fg)); }
+.sg-act { margin-left: 6px; white-space: nowrap; }
+.sg-meta { grid-column: 2 / -1; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); }
+.sg-meta .sep { opacity: .4; margin: 0 6px; }
+
+/* —— variant B: 内容宽度网格 —— */
+.table-card.fit { width: fit-content; max-width: 100%; }
+
+/* —— variant C: 满宽 + 富信息 —— */
+.table-card.rich table { table-layout: fixed; }
+.cell-stack { line-height: 1.3; }
+.cell-stack .cs-id { display: block; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: hsl(var(--foreground)); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-stack .cs-id:hover { color: hsl(var(--primary)); }
+.cell-stack .cs-ws { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); margin-top: 2px; }
+.bar-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bar-track { flex: 1; height: 6px; background: hsl(var(--border)); border-radius: 99px; overflow: hidden; min-width: 60px; }
+.bar-fill { height: 100%; border-radius: 99px; }
+.bar-fill.live { background: hsl(var(--primary)); }
+.bar-fill.vuln { background: hsl(var(--red)); }
+.bar-fill.muted { background: hsl(var(--muted-fg)); }
+.bar-label { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); white-space: nowrap; }
+
+/* —— empty —— */
+.empty { background: hsl(var(--card)); border: 1px dashed hsl(var(--border)); border-radius: var(--radius); padding: 64px 24px; text-align: center; }
+.empty .glyph-big { display: flex; justify-content: center; margin-bottom: 18px; opacity: 0.85; }
+.empty h3 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+.empty p { margin: 0 0 20px; color: hsl(var(--muted-fg)); font-size: 13.5px; }
+
+/* —— preview control panel —— */
+.pcp { position: fixed; right: 22px; bottom: 22px; z-index: 60; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: var(--shadow-card); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 240px; }
+.pcp .t { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; }
+.pcp .row { display: flex; gap: 6px; }
+.seg { flex: 1; font-size: 12px; padding: 6px 8px; border-radius: 7px; cursor: pointer; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-fg)); transition: all .14s; font-family: inherit; }
+.seg:hover { color: hsl(var(--foreground)); }
+.seg.on { background: hsl(var(--primary)); color: hsl(var(--primary-fg)); border-color: hsl(var(--primary)); }
+
+.note { margin-top: 26px; font-size: 12px; color: hsl(var(--muted-fg)); border-top: 1px solid hsl(var(--border-soft)); padding-top: 14px; max-width: 680px; line-height: 1.6; }
+
+@media (max-width: 720px) {
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(2) { border-right: none; }
+  .stat:nth-child(-n+2) { border-bottom: 1px solid hsl(var(--border-soft)); }
+  .live-grid { grid-template-columns: 1fr; }
+  .findings-num { font-size: 54px; }
+  .nav { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ TOP BAR ============ -->
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="5" cy="6" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <circle cx="5" cy="18" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <path d="M7.4 7.2 C 11 9, 13 9, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <path d="M7.4 16.8 C 11 15, 13 15, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <circle cx="17" cy="12" r="3.2" fill="hsl(var(--primary))"/>
+      </svg>
+      <span class="brand-name">Supernova</span>
+    </div>
+    <nav class="nav">
+      <a class="active" href="#">概览</a>
+      <a href="#">工作区</a>
+      <a href="#">扫描</a>
+      <a href="#">设置</a>
+    </nav>
+    <div class="topbar-right">
+      <button class="icon-btn" onclick="toggleTheme()" title="切换主题" aria-label="切换主题">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<main id="main"></main>
+
+<!-- ============ preview control panel ============ -->
+<div class="pcp">
+  <div class="t">预览控制</div>
+  <div class="row">
+    <button class="seg on" data-theme="dark" onclick="setTheme('dark')">深色</button>
+    <button class="seg" data-theme="light" onclick="setTheme('light')">浅色</button>
+  </div>
+  <div class="t">场景</div>
+  <div class="row">
+    <button class="seg on" data-scn="hunting" onclick="setScenario('hunting')">猎杀中</button>
+    <button class="seg" data-scn="calm" onclick="setScenario('calm')">一切正常</button>
+    <button class="seg" data-scn="empty" onclick="setScenario('empty')">空状态</button>
+  </div>
+  <div class="t">表格样式</div>
+  <div class="row">
+    <button class="seg on" data-tbl="grid" onclick="setTable('grid')">经典网格</button>
+    <button class="seg" data-tbl="rows" onclick="setTable('rows')">分层行</button>
+  </div>
+  <div class="row">
+    <button class="seg" data-tbl="fit" onclick="setTable('fit')">紧凑网格</button>
+    <button class="seg" data-tbl="rich" onclick="setTable('rich')">富信息</button>
+  </div>
+  <div class="t">猎杀特效</div>
+  <div class="row">
+    <button class="seg on" data-fx="signal" onclick="setFx('signal')">信号轨迹</button>
+    <button class="seg" data-fx="radar" onclick="setFx('radar')">雷达</button>
+  </div>
+  <div class="row">
+    <button class="seg" data-fx="flow" onclick="setFx('flow')">污点流光</button>
+    <button class="seg" data-fx="scan" onclick="setFx('scan')">扫描线</button>
+  </div>
+</div>
+
+<script>
+const fmtInt = (n) => n.toLocaleString("en-US");
+const TABLE_ROWS = [
+  ["running","payments-svc-a9f3","ws-payments","whitebox",47,"$8.42","2 分钟前",true],
+  ["running","auth-gw-2c1d","ws-auth","blackbox",0,"$3.10","5 分钟前",true],
+  ["completed","checkout-api-77","ws-checkout","correlation",128,"$12.05","今天 14:22",false],
+  ["failed","inventory-svc-0e","ws-platform","whitebox",0,"$1.87","今天 11:03",false],
+  ["completed","orders-gql-44b","ws-commerce","whitebox",63,"$9.31","今天 09:48",false],
+  ["completed","billing-rpc-91","ws-finance","blackbox",12,"$4.66","昨天 22:10",false],
+  ["completed","search-svc-5d","ws-platform","correlation",31,"$2.74","昨天 18:55",false],
+];
+function statusBadge(s){ const m={running:"运行中",completed:"已完成",failed:"失败",queued:"已排队"}; return `<span class="stbadge ${s}">${m[s]}</span>`; }
+// 严重度分布（真实 API：ScanSummary.vuln_counts 可聚合出）+ 运行中已耗时
+const SEV = [["严重",12,"s-crit","--red"],["高",47,"s-high","--orange"],["中",118,"s-med","--yellow"],["低",1107,"s-low","--amber"]];
+const SEV_TOTAL = SEV.reduce((a,s)=>a+s[1],0);
+const ELAPSED = { "payments-svc-a9f3": "12m", "auth-gw-2c1d": "5m" };
+// 仓库映射（真实落地：ScanSummary 补 repo 字段，_summarize 已读 session.repo_path）
+const REPO = {
+  "payments-svc-a9f3": "payments-api",
+  "auth-gw-2c1d": "auth-gateway",
+  "checkout-api-77": "checkout-service",
+  "inventory-svc-0e": "inventory-svc",
+  "orders-gql-44b": "orders-graphql",
+  "orders-gql-44b-retry": "orders-graphql",
+  "billing-rpc-91": "billing-rpc",
+  "search-svc-5d": "search-service",
+};
+// 仓库来源 URL（真实落地：session.web_url / 仓库表 source 字段）
+const REPO_URL = {
+  "payments-svc-a9f3": "https://gitlab.acme.dev/payments/payments-api.git",
+  "auth-gw-2c1d": "git@gitlab.acme.dev:platform/auth-gateway.git",
+  "checkout-api-77": "https://gitlab.acme.dev/commerce/checkout-service.git",
+  "inventory-svc-0e": "https://github.com/acme-platform/inventory-svc.git",
+  "orders-gql-44b": "https://gitlab.acme.dev/commerce/orders-graphql.git",
+  "orders-gql-44b-retry": "https://gitlab.acme.dev/commerce/orders-graphql.git",
+  "billing-rpc-91": "git@gitlab.acme.dev:finance/billing-rpc.git",
+  "search-svc-5d": "https://github.com/acme-platform/search-service.git",
+};
+const compactUrl = (u) => u ? u.replace(/^https?:\/\//, "").replace(/^git@/, "").replace(/\.git$/, "") : "—";
+function sevHTML(){
+  const segs = SEV.map(s=>`<span class="sev-seg ${s[2]}" style="width:${(s[1]/SEV_TOTAL*100).toFixed(1)}%"></span>`).join("");
+  const legend = SEV.map(s=>`<i><span class="sw" style="background:hsl(var(${s[3]}))"></span>${s[0]} ${fmtInt(s[1])}</i>`).join("");
+  return `<div class="sev"><div class="sev-bar">${segs}</div><div class="sev-legend">${legend}</div></div>`;
+}
+function secRowHTML(){
+  return `<div class="sec-row"><h2>最近扫描 · Recent</h2><span class="fresh"><span id="freshTxt">12 秒前更新</span><span class="refresh-link" onclick="refreshTick()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>刷新</span></span></div>`;
+}
+function refreshTick(){
+  const el = document.getElementById("freshTxt");
+  if (!el) return;
+  el.textContent = "已刷新 ✓";
+  setTimeout(() => { el.textContent = "刚刚更新"; }, 1400);
+}
+function signalTrace(idle){
+  const pts = "0,17 90,17 110,17 118,17 126,9 134,25 142,4 150,30 158,17 210,17 260,17 280,17 296,17 306,12 314,22 322,17 380,17 440,17 470,17 486,17 498,10 510,24 522,17 580,17 640,17 680,17 720,17 740,17 752,13 762,21 772,17 840,17 920,17 1000,17 1100,17 1200,17";
+  return `<div class="trace-wrap"><div class="trace ${idle?'idle':''}"><svg viewBox="0 0 1200 34" preserveAspectRatio="none"><polyline class="baseline" points="0,17 1200,17" /><polyline class="pulse-line" points="${pts}" /></svg></div></div>`;
+}
+function huntingFX(idle){
+  if (fx==="radar") return radarFX(idle);
+  if (fx==="flow") return flowFX(idle);
+  if (fx==="scan") return scanFX(idle);
+  return signalTrace(idle);
+}
+// FX B: 雷达扫描 —— 扇形掠过，命中点按序亮起
+function radarFX(idle){
+  return `<div class="fx-band"><div class="fx-radar ${idle?'idle':''}">
+    <span class="radar"><span class="sweep"></span>
+      <span class="blip" style="left:23px;top:7px"></span>
+      <span class="blip b2" style="left:9px;top:21px"></span>
+      <span class="blip b3" style="left:25px;top:23px"></span>
+    </span>
+    <span class="fx-note">${idle?'空闲 · 无信号':'扫描中 · <b>3</b> 个信号源'}</span>
+  </div></div>`;
+}
+// FX C: 污点流光 —— source→sink 数据沿泳道流动
+function flowFX(idle){
+  return `<div class="fx-band"><div class="fx-flow ${idle?'idle':''}">
+    <svg viewBox="0 0 1200 48" preserveAspectRatio="none">
+      <path class="flow-lane" d="M0,14 C150,8 300,20 450,14 S750,8 900,14 S1100,20 1200,14"/>
+      <path class="flow-lane l2" d="M0,26 C200,32 400,20 600,26 S1000,32 1200,26"/>
+      <path class="flow-lane l3" d="M0,38 C150,42 350,34 550,38 S950,42 1200,38"/>
+    </svg>
+  </div></div>`;
+}
+// FX D: 表面扫描线 —— 光束掠过点阵，命中点随束点亮
+function scanFX(idle){
+  return `<div class="fx-band"><div class="fx-scan ${idle?'idle':''}">
+    <span class="beam"></span>
+    <span class="hit" style="left:22%;top:13px;animation-delay:.9s"></span>
+    <span class="hit h-red" style="left:48%;top:27px;animation-delay:2s"></span>
+    <span class="hit" style="left:70%;top:9px;animation-delay:2.9s"></span>
+    <span class="hit h-red" style="left:86%;top:31px;animation-delay:3.4s"></span>
+  </div></div>`;
+}
+function heroHTML(scn){
+  const calm = scn==="calm";
+  const findings = scn==="hunting"?1284:0;
+  return `
+  <section class="hero">
+    <div class="hero-top">
+      <div>
+        <span class="eyebrow"><span class="bar"></span>
+          <span class="glyph">
+            <svg width="40" height="16" viewBox="0 0 40 18" fill="none">
+              <circle cx="4" cy="4" r="2.6" stroke="hsl(var(--muted-fg))" stroke-width="1.2"/>
+              <circle cx="4" cy="14" r="2.6" stroke="hsl(var(--muted-fg))" stroke-width="1.2"/>
+              <path d="M6.6 5 C 12 7, 16 7, 19 9" stroke="hsl(var(--muted-fg))" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+              <path d="M6.6 13 C 12 11, 16 11, 19 9" stroke="hsl(var(--muted-fg))" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+              <path d="M21 9 L 30 9" stroke="hsl(var(--primary))" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="2 2"/>
+              <circle cx="34" cy="9" r="3.4" fill="hsl(var(--primary))"/>
+            </svg>
+          </span>
+          ${calm?'一切正常 · SURFACE CLEAR':'累计发现 · FINDINGS'}
+        </span>
+        <div class="findings ${calm?'calm':''}">
+          <span class="findings-num">${fmtInt(findings)}</span>
+          <span class="findings-tag">${calm?'未发现可利用污点路径':'条可利用污点路径'}</span>
+        </div>
+        ${findings>0?sevHTML():''}
+        <div class="context">
+          跨 <b>${scn==='hunting'?12:8}</b> 次扫描<span class="sep">·</span><b>5</b> 个工作区<span class="sep">·</span>
+          <b style="color:hsl(var(--cyan))">${scn==='hunting'?3:0}</b> 个进行中
+        </div>
+      </div>
+      <button class="btn-cta">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        新建扫描
+      </button>
+    </div>
+    ${huntingFX(scn!=='hunting')}
+  </section>`;
+}
+function statStripHTML(scn){
+  const h = scn==="hunting";
+  return `
+  <div class="stat-strip">
+    <div class="stat"><div class="v accent">${h?3:0}</div><div class="l">运行中</div></div>
+    <div class="stat"><div class="v">${h?7:5}</div><div class="l">今日完成</div></div>
+    <div class="stat"><div class="v">$${h?'42.10':'31.40'}</div><div class="l">累计成本</div></div>
+    <div class="stat"><div class="v">${h?12:8}</div><div class="l">扫描总数</div></div>
+  </div>`;
+}
+function liveCardsHTML(){
+  const cards=[
+    ["payments-svc-a9f3","ws-payments","whitebox",64,"precheck ✓ · 黑盒运行中"],
+    ["auth-gw-2c1d","ws-auth","blackbox",31,"凭证预检中"],
+    ["orders-gql-44b-retry","ws-commerce","correlation",88,"关联分析中"],
+  ];
+  return `
+  <div class="section-head"><span class="live-dot"></span><h2>进行中 · Live now</h2></div>
+  <div class="live-grid">
+    ${cards.map(c=>`
+      <div class="live-card">
+        <div class="lc-top"><span class="dot-live"></span><span class="lc-id">${c[0]}</span><span class="lc-type">${c[2]}</span></div>
+        <div class="lc-meta">工作区 ${c[1]} / ${compactUrl(REPO_URL[c[0]])} · ${c[4]} · 已运行 ${ELAPSED[c[0]]??'—'}</div>
+        <div class="lc-prog"><span class="prog-track"><span class="prog-fill" style="width:${c[3]}%"></span></span><span class="prog-pct">${c[3]}%</span></div>
+        <div class="lc-view">查看实时 →</div>
+      </div>`).join("")}
+  </div>`;
+}
+function filtersHTML(){
+  const chev = '<svg class="sf-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  return `
+  <div class="sf">
+    <input class="sf-input" placeholder="搜索 scan_id 或工作区名…" />
+    <div class="sf-select-wrap">
+      <select class="sf-select" aria-label="状态筛选">
+        <option value="all">全部状态</option>
+        <option value="running">运行中</option>
+        <option value="completed">已完成</option>
+        <option value="failed">失败</option>
+        <option value="killed">已终止</option>
+        <option value="crashed">已崩溃</option>
+        <option value="interrupted">已中断</option>
+      </select>${chev}
+    </div>
+    <div class="sf-select-wrap">
+      <select class="sf-select" aria-label="类型筛选">
+        <option value="all">全部类型</option>
+        <option value="whitebox">白盒</option>
+        <option value="blackbox">黑盒</option>
+        <option value="correlation">关联</option>
+      </select>${chev}
+    </div>
+    <div class="sf-select-wrap">
+      <select class="sf-select" aria-label="时间筛选">
+        <option value="all">全部时间</option>
+        <option value="today">今天</option>
+        <option value="7d">近7天</option>
+        <option value="30d">近30天</option>
+      </select>${chev}
+    </div>
+  </div>`;
+}
+const PROGRESS = { "payments-svc-a9f3": 64, "auth-gw-2c1d": 31 };
+const MAX_VULN = Math.max(...TABLE_ROWS.map(r => r[4]));
+function tableHTML(){
+  if (tableStyle === "rows") return rowsTableHTML();
+  if (tableStyle === "fit") return fitGridHTML();
+  if (tableStyle === "rich") return richGridHTML();
+  return gridTableHTML();
+}
+// 经典网格 —— 此前逐轮调优定稿的满宽表格：colgroup 收窄列 + 数字右对齐 + 超长省略
+function gridTableHTML(){
+  const colgroup = `
+  <colgroup>
+    <col style="width:112px"><col><col><col style="width:170px"><col style="width:116px"><col style="width:150px">
+    <col style="width:76px"><col style="width:100px"><col style="width:140px"><col style="width:72px">
+  </colgroup>`;
+  return `
+  <div class="table-card">
+    <table>
+      ${colgroup}
+      <thead><tr>
+        <th>状态</th><th>扫描</th><th>工作区</th><th>仓库</th><th>类型</th><th>进度</th>
+        <th class="r">漏洞</th><th class="r">花费</th><th>时间</th><th class="r">操作</th>
+      </tr></thead>
+      <tbody>
+        ${TABLE_ROWS.map(r=>{ const v=r[4]; return `<tr>
+          <td>${statusBadge(r[0])}</td>
+          <td class="td-mono td-clamp"><a class="lnk" href="#" title="${r[1]}">${r[1]}</a></td>
+          <td class="td-mono td-clamp"><a class="lnk" href="#" title="${r[2]}">${r[2]}</a></td>
+          <td class="td-clamp" title="${REPO_URL[r[1]]??''}"><span class="repo-cell"><span class="rc-name">${REPO[r[1]]??'—'}</span><span class="rc-url">${compactUrl(REPO_URL[r[1]])}</span></span></td>
+          <td><span class="badge outline">${r[3]}</span></td>
+          <td>${r[0]==="running"
+            ?`<span class="bar-cell"><span class="bar-track"><span class="bar-fill live" style="width:${PROGRESS[r[1]]??0}%"></span></span><span class="bar-label">${PROGRESS[r[1]]??0}% · ${ELAPSED[r[1]]??''}</span></span>`
+            :`<span style="color:hsl(var(--muted-fg));font-size:12px">—</span>`}</td>
+          <td class="r"><span class="vuln ${v>0?'hi':'zero'}">${fmtInt(v)}</span></td>
+          <td class="td-mono r">${r[5]}</td>
+          <td style="font-size:12px;color:hsl(var(--muted-fg));white-space:nowrap">${r[6]}</td>
+          <td class="r">${r[7]?`<span class="cancel-link">取消</span>`:`<span style="color:hsl(var(--muted-fg));font-size:12px">—</span>`}</td>
+        </tr>`; }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+// Variant A — 两行分层：主行(状态/扫描/漏洞/操作) + 副行(muted 元信息)
+function rowsTableHTML(){
+  return `<div class="slist">${TABLE_ROWS.map(r=>{
+    const v=r[4];
+    return `<div class="sgroup">
+      <span class="sg-status">${statusBadge(r[0])}</span>
+      <a class="sg-id" href="#" title="${r[1]}">${r[1]}</a>
+      <span class="sg-find ${v>0?'hi':'zero'}">${fmtInt(v)}<small>漏洞</small></span>
+      <span class="sg-act">${r[7]?`<span class="cancel-link">取消</span>`:`<span style="color:hsl(var(--muted-fg));font-size:12px">—</span>`}</span>
+      <span class="sg-meta">${r[2]} / ${compactUrl(REPO_URL[r[1]])}<span class="sep">·</span>${r[3]}<span class="sep">·</span>${r[5]}<span class="sep">·</span>${r[6]}${r[0]==="running"?`<span class="sep">·</span>已运行 ${ELAPSED[r[1]]??'—'}`:''}</span>
+    </div>`;
+  }).join("")}</div>`;
+}
+// Variant B — 内容宽度网格：8 列，表宽=内容宽，无内部留白
+function fitGridHTML(){
+  return `<div class="table-card fit"><table>
+    <thead><tr><th>状态</th><th>扫描</th><th>工作区</th><th>类型</th><th class="r">漏洞</th><th class="r">花费</th><th>时间</th><th class="r">操作</th></tr></thead>
+    <tbody>${TABLE_ROWS.map(r=>{ const v=r[4]; return `<tr>
+      <td>${statusBadge(r[0])}</td>
+      <td class="td-mono"><a class="lnk" href="#">${r[1]}</a></td>
+      <td class="td-mono"><a class="lnk" href="#">${r[2]}</a></td>
+      <td><span class="badge outline">${r[3]}</span></td>
+      <td class="r"><span class="vuln ${v>0?'hi':'zero'}">${fmtInt(v)}</span></td>
+      <td class="td-mono r">${r[5]}</td>
+      <td style="font-size:12px;color:hsl(var(--muted-fg));white-space:nowrap">${r[6]}</td>
+      <td class="r">${r[7]?`<span class="cancel-link">取消</span>`:`<span style="color:hsl(var(--muted-fg));font-size:12px">—</span>`}</td>
+    </tr>`; }).join("")}</tbody>
+  </table></div>`;
+}
+// Variant C — 满宽富信息：扫描/工作区合并两行 + 进度/漏洞条把宽度用起来
+function richGridHTML(){
+  return `<div class="table-card rich"><table>
+    <colgroup><col style="width:100px"><col style="width:230px"><col style="width:104px"><col><col style="width:92px"><col style="width:118px"><col style="width:64px"></colgroup>
+    <thead><tr><th>状态</th><th>扫描</th><th>类型</th><th>进度 / 漏洞</th><th class="r">花费</th><th>时间</th><th class="r">操作</th></tr></thead>
+    <tbody>${TABLE_ROWS.map(r=>{
+      const v=r[4]; let bar;
+      if (r[0]==="running"){ const p=PROGRESS[r[1]]??0; bar=`<div class="bar-cell"><span class="bar-track"><span class="bar-fill live" style="width:${p}%"></span></span><span class="bar-label">${p}%</span></div>`; }
+      else if (r[0]==="failed"){ bar=`<span class="bar-label" style="color:hsl(var(--red))">失败 · 无产物</span>`; }
+      else { const pct = MAX_VULN ? Math.round(v/MAX_VULN*100) : 0; bar=`<div class="bar-cell"><span class="bar-track"><span class="bar-fill ${v>0?'vuln':'muted'}" style="width:${Math.max(pct,5)}%"></span></span><span class="bar-label">${fmtInt(v)} 漏洞</span></div>`; }
+      return `<tr>
+        <td>${statusBadge(r[0])}</td>
+        <td><div class="cell-stack"><a class="cs-id" href="#" title="${r[1]}">${r[1]}</a><span class="cs-ws">${r[2]} · ${compactUrl(REPO_URL[r[1]])}</span></div></td>
+        <td><span class="badge outline">${r[3]}</span></td>
+        <td>${bar}</td>
+        <td class="td-mono r">${r[5]}</td>
+        <td style="font-size:12px;color:hsl(var(--muted-fg));white-space:nowrap">${r[6]}</td>
+        <td class="r">${r[7]?`<span class="cancel-link">取消</span>`:`<span style="color:hsl(var(--muted-fg));font-size:12px">—</span>`}</td>
+      </tr>`;
+    }).join("")}</tbody>
+  </table></div>`;
+}
+function emptyHTML(){
+  return `
+  <div class="empty">
+    <div class="glyph-big">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none">
+        <circle cx="5" cy="6" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <circle cx="5" cy="18" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <path d="M7.4 7.2 C 11 9, 13 9, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <path d="M7.4 16.8 C 11 15, 13 15, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <circle cx="17" cy="12" r="3.2" fill="hsl(var(--primary) / 0.5)"/>
+      </svg>
+    </div>
+    <h3>还没有扫描</h3>
+    <p>新建一个扫描，Supernova 将开始追踪 source → sink 污点路径。</p>
+    <button class="btn-cta"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>新建扫描</button>
+  </div>`;
+}
+function render(scn){
+  const main=document.getElementById("main");
+  if(scn==="empty"){ main.innerHTML = `<div style="padding-top:40px">${emptyHTML()}</div>`; return; }
+  main.innerHTML = `
+    ${heroHTML(scn)}
+    ${statStripHTML(scn)}
+    ${scn==="hunting"?liveCardsHTML():""}
+    ${filtersHTML()}
+    ${secRowHTML()}
+    ${tableHTML()}
+    <p class="note">独立 HTML 预览（<code>design-preview/dashboard-redesign-preview.html</code>），使用与正式应用相同的 DSF token、IBM Plex 字体与珊瑚色主色。右下角可切换 <b>主题</b>、<b>场景</b> 与 <b>表格样式</b>（分层行 / 紧凑网格 / 富信息）。落地实现时将复用现有 <code>Card / Button / StatusBadge / ScanFilters</code> 与 <code>listAllScans</code> 数据，保留筛选、管理员取消与全部链接。</p>
+  `;
+}
+let theme="dark", scenario="hunting", tableStyle="grid", fx="signal";
+function apply(){ document.documentElement.className=theme; render(scenario); }
+function setTheme(t){ theme=t; document.querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('on',b.dataset.theme===t)); apply(); }
+function setScenario(s){ scenario=s; document.querySelectorAll('[data-scn]').forEach(b=>b.classList.toggle('on',b.dataset.scn===s)); apply(); }
+function setTable(s){ tableStyle=s; document.querySelectorAll('[data-tbl]').forEach(b=>b.classList.toggle('on',b.dataset.tbl===s)); apply(); }
+function setFx(f){ fx=f; document.querySelectorAll('[data-fx]').forEach(b=>b.classList.toggle('on',b.dataset.fx===f)); apply(); }
+function toggleTheme(){ setTheme(theme==="dark"?"light":"dark"); }
+apply();
+</script>
+</body>
+</html>

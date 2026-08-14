@@ -24,6 +24,7 @@ import logging
 import os
 
 from .pricing import normalize_model
+from supernova_core.config.scan_env import ws_getenv
 
 _log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def _load_context_override() -> dict[str, int]:
     schema: {"models": {model: ctx_int}}。顶层非 object / models 非 dict / 值非正 int
     -> 返回 {} + warning(容错, 不崩)。未设 env -> {}。
     """
-    path = os.environ.get("SUPERNOVA_MODEL_CONTEXT_OVERRIDE")
+    path = ws_getenv("SUPERNOVA_MODEL_CONTEXT_OVERRIDE")
     if not path:
         return {}
     try:
@@ -83,7 +84,7 @@ def get_model_context_window(model: str | None) -> int:
 
 def _hard_override_threshold() -> int | None:
     """读 SUPERNOVA_CHUNK_TOKEN_THRESHOLD env(hard override, 调试用)。非法 -> None。"""
-    raw = os.environ.get("SUPERNOVA_CHUNK_TOKEN_THRESHOLD")
+    raw = ws_getenv("SUPERNOVA_CHUNK_TOKEN_THRESHOLD")
     if raw is None:
         return None
     try:

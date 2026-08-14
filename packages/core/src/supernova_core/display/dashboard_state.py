@@ -133,5 +133,16 @@ class DashboardState:
                     last_turn_text=line or cur.last_turn_text)
             return replace(self, agents=agents)
 
-        # ErrorEvent, SummaryEvent, WorkflowHeader -> no dashboard-state change
+        if isinstance(event, SummaryEvent):
+            # 终态收敛（对齐前端 dashboardReducer；修已完成扫描常驻显示 N/M<N）：扫描成功结束时，
+            # 最后一个 phase 声明却未发 StepEvent 的 step（如 reporting 的 run-report-agent /
+            # inject-* 后处理步骤直接执行、不走 step 事件协议）应视为完成，否则详情页常驻一个未
+            # 收敛的中间计数，与 status=completed 矛盾。仅 status=completed 收敛；failed 等保留
+            # 失败现场不动。无 phase_units（空态）则无副作用。
+            if event.status == "completed" and self.phase_units:
+                units = {u: "done" for u in self.phase_units}
+                return replace(self, unit_status=units)
+            return self
+
+        # ErrorEvent, WorkflowHeader -> no dashboard-state change
         return self

@@ -22,6 +22,8 @@ import os
 import re
 from dataclasses import dataclass
 
+from supernova_core.config.scan_env import ws_getenv
+
 _log = logging.getLogger(__name__)
 
 # 单位：本币（CNY）/ 百万 token。2026-07-09 已按智谱官网核对（bigmodel.cn/pricing）。
@@ -83,7 +85,7 @@ def _rate() -> float:
 
 
 def _load_override() -> dict:
-    path = os.environ.get("SUPERNOVA_PRICING_OVERRIDE")
+    path = ws_getenv("SUPERNOVA_PRICING_OVERRIDE")
     if not path:
         return {}
     try:

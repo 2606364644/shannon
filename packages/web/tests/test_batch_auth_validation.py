@@ -341,3 +341,101 @@ async def test_events_path_rejects_batch_prefix_other_ws(tmp_path):
     with pytest.raises(ValueError, match="workflow_id 越界"):
         await mgr.auth_validation_events_path(
             "ws1", workflow_id="authval-batch-ws2-deadbeef", probe_dir=str(probe))
+
+
+# ---------------------------------------------------------------------------
+# HOST 档案透传（2026-08-14：认证测试复用黑盒 HOST 能力——选中 HOST 才走代理、不选直连）
+# ---------------------------------------------------------------------------
+
+def _host_store(tmp_path):
+    """HOST 档案 store：1 个档案 host_p1（x.test→10.0.0.1）。"""
+    from supernova_web.components.host_profile_store import (
+        HostProfileStore, HostProfile, HostMapping)
+    store = HostProfileStore(tmp_path / "hosts")
+    store.upsert_profile("ws1", HostProfile(
+        id="host_p1", name="P1",
+        mappings=[HostMapping(ip="10.0.0.1", host="x.test")]))
+    return store
+
+
+@pytest.mark.asyncio
+async def test_start_batch_threads_host_profile_to_each_item(tmp_path):
+    """start_batch(host_profile_id=...) → 解析 HOST 档案 → 每个 BatchItem.host_mappings 同值
+    （batch workflow 据此为每个 cred 起 host proxy）。"""
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    mgr.host_profile_store = _host_store(tmp_path)
+    client, _ = _patch_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(mgr, "_watch_batch_progress", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr.start_batch_auth_validation(
+            "ws1", "prof_1", None, host_profile_id="host_p1")
+    sent_input = client.start_workflow.call_args.args[1]
+    assert len(sent_input.items) == 3
+    assert all(it.host_mappings == {"x.test": "10.0.0.1"} for it in sent_input.items)
+
+
+@pytest.mark.asyncio
+async def test_start_batch_no_host_empty_mappings_per_item(tmp_path):
+    """不传 host_profile_id/host_url → 每个 BatchItem.host_mappings == {}（直连，零回归）。"""
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    client, _ = _patch_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(mgr, "_watch_batch_progress", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr.start_batch_auth_validation("ws1", "prof_1", None)
+    sent_input = client.start_workflow.call_args.args[1]
+    assert all(it.host_mappings == {} for it in sent_input.items)
+
+
+@pytest.mark.asyncio
+async def test_start_batch_threads_host_url_to_each_item(tmp_path, monkeypatch):
+    """host_url → fetch_and_parse_hosts → 每个 item.host_mappings 同值（URL 来源，对齐黑盒）。"""
+    from supernova_web.components.host_profile_store import HostMapping
+
+    async def fake_fetch(url, timeout=15):
+        return ([HostMapping(ip="10.0.0.2", host="y.test")], [])
+
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.fetch_and_parse_hosts", fake_fetch)
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    client, _ = _patch_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(mgr, "_watch_batch_progress", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr.start_batch_auth_validation(
+            "ws1", "prof_1", None, host_url="https://h.test/get?id=1")
+    sent_input = client.start_workflow.call_args.args[1]
+    assert all(it.host_mappings == {"y.test": "10.0.0.2"} for it in sent_input.items)
+
+
+@pytest.mark.asyncio
+async def test_start_auth_validation_threads_host_profile_to_input(tmp_path):
+    """start_auth_validation(host_profile_id=...) → 解析 → BlackboxAuthValidationInput.host_mappings。
+    单 cred AuthValidationWorkflow 已有 proxy 编排，故只需把 mappings 灌进 input。"""
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    mgr.host_profile_store = _host_store(tmp_path)
+    client, _ = _patch_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr.start_auth_validation(
+            "ws1", "prof_1", "cred_a", host_profile_id="host_p1")
+    sent_input = client.start_workflow.call_args.args[1]
+    assert sent_input.host_mappings == {"x.test": "10.0.0.1"}
+
+
+@pytest.mark.asyncio
+async def test_start_auth_validation_no_host_empty_mappings(tmp_path):
+    """不传 host → host_mappings == {}（直连，零回归）。"""
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    client, _ = _patch_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr.start_auth_validation("ws1", "prof_1", "cred_a")
+    sent_input = client.start_workflow.call_args.args[1]
+    assert sent_input.host_mappings == {}

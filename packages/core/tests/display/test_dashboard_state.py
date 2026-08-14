@@ -1,6 +1,7 @@
 from supernova_core.display.dashboard_state import DashboardState, AgentRow
 from supernova_core.display.events import (
     PhaseEvent, AgentEvent, ToolCallEvent, LlmTurnEvent, ErrorEvent, ResumeEvent,
+    StepEvent, SummaryEvent,
 )
 
 
@@ -209,3 +210,32 @@ def test_llm_turn_records_last_turn_text():
     row = s.agents["pre-recon"]
     assert row.turn == 5
     assert row.last_turn_text == "🔄 Read router.ts"
+
+
+def test_summary_completed_converges_unit_status():
+    # 修报告页已完成扫描常驻显示 N/M<N：reporting phase 声明 3 step，仅 1 个发 complete（其余后处理
+    # 步骤直接执行、不发 step 事件）→ SummaryEvent completed 终态应把所有声明 step 收敛为 done，
+    # 否则详情页常驻一个未收敛的中间计数，与 status=completed 矛盾。对齐前端 dashboardReducer。
+    s = (DashboardState()
+         .apply(_phase_with_steps("reporting", ["a", "b", "c"]))
+         .apply(_step("a", "reporting", "complete")))
+    assert s.total_units == 3
+    assert s.completed_units == 1  # 收敛前
+    summ = SummaryEvent(timestamp="t", category="SUMMARY", status="completed",
+                        total_duration_ms=100, total_cost_usd=0.0)
+    s2 = s.apply(summ)
+    assert s2.completed_units == 3  # 终态收敛 → N/N
+    assert s2.unit_status["b"] == "done"
+    assert s2.unit_status["c"] == "done"
+
+
+def test_summary_failed_does_not_converge():
+    # failed 终态不收敛：未发事件的 step 保持空，保留失败现场（对齐前端）。
+    s = (DashboardState()
+         .apply(_phase_with_steps("reporting", ["a", "b", "c"]))
+         .apply(_step("a", "reporting", "complete")))
+    summ = SummaryEvent(timestamp="t", category="SUMMARY", status="failed",
+                        total_duration_ms=100, total_cost_usd=0.0)
+    s2 = s.apply(summ)
+    assert "b" not in s2.unit_status
+    assert s2.completed_units == 1

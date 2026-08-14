@@ -195,11 +195,12 @@ async def test_run_blackbox_phase_returned_failure_skips_combined_report(mgr, tm
     )
     with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)), \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()) as report, \
-         patch.object(mgr, "_mark_bb", new=AsyncMock()) as mark:
-        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None})
+         patch.object(mgr, "_mark_run", new=AsyncMock()) as mark:
+        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None}, "run-1")
 
     report.assert_not_awaited()
-    assert any(call.args[1] == "failed" for call in mark.await_args_list)
+    # _mark_run(scan_dir, run_id, phase, ...) — phase 是第 3 个位置参数
+    assert any(call.args[2] == "failed" for call in mark.await_args_list)
 
 
 async def test_submit_whitebox_combined_flag_is_forwarded(mgr, tmp_path):
@@ -259,7 +260,8 @@ async def test_run_blackbox_phase_without_auth_passes_no_config_path(mgr, tmp_pa
     with patch.object(mgr, "_submit_blackbox", new=_submit), \
          patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
          patch.object(mgr, "_mark_bb", new=AsyncMock()):
-        await mgr._run_blackbox_phase(scan_dir, "ws", "repo-ts", {"profile_id": None})
+        await mgr._run_blackbox_phase(
+            scan_dir, "ws", "repo-ts", {"profile_id": None}, "run-1")
 
     assert captured["config_path"] is None
 

@@ -140,6 +140,7 @@ class WhiteboxScanWorkflow:
             event_file=input.event_file,
             provider_config=input.provider_config,   # P3c 阶段 1：一处灌入，全链 **act_input.__dict__ 继承
             combined=input.combined,   # D1 组合扫描：透传到 finalize_summary 做阶段分支
+            env_overrides=input.env_overrides,
         )
         # C1 Phase B: worker 路径前导 setup_display(注入 AuditSession + event_file) + 并行
         # run_heartbeat(长驻写 heartbeat). CLI 路径跳过(外层 run_scan 已做).

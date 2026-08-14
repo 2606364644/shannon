@@ -175,8 +175,25 @@ export function dashboardReducer(state: DashboardState, event: NdjsonEvent): Das
       break;
     }
 
-    // ErrorEvent / SummaryEvent / WorkflowHeader / InfoEvent / GitnexusLlmEvent /
-    // ScanEndEvent / CorrelationProgressEvent → 无 dashboard 状态变化（对齐 core default）。
+    case "SummaryEvent":
+    case "scan_end": {
+      // 终态收敛（修报告页已完成扫描常驻显示 N/M<N）：扫描成功结束时，最后一个 phase 声明却
+      // 未发 StepEvent 的 step（如 reporting 的 run-report-agent / inject-* 后处理步骤直接执行、
+      // 不走 step 事件协议）应视为完成，否则详情页常驻一个未收敛的中间计数，与 status=completed
+      // 矛盾。仅 status=completed 收敛；failed/killed/crashed 保留失败现场不动。对齐 core。无
+      // phase_units（emptyState）则无副作用。
+      if (event.status === "completed" && state.phase_units.length > 0) {
+        const unit_status: Record<string, string> = {};
+        for (const u of state.phase_units) unit_status[u] = "done";
+        next = { ...state, unit_status };
+      } else {
+        next = state;
+      }
+      break;
+    }
+
+    // ErrorEvent / WorkflowHeader / InfoEvent / GitnexusLlmEvent /
+    // CorrelationProgressEvent → 无 dashboard 状态变化（对齐 core default）。
     default:
       next = state;
   }

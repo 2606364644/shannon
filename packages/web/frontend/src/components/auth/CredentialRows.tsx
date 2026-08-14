@@ -48,15 +48,15 @@ export function CredentialRows({ value, onChange, allowMulti, lockFirstRow }: Pr
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
               <Label htmlFor={`cr-role-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.role")}</Label>
-              <Input id={`cr-role-${i}`} value={d.role} onChange={(e) => update(i, { role: e.target.value })} className="text-xs" />
+              <Input id={`cr-role-${i}`} value={d.role} onChange={(e) => update(i, { role: e.target.value })} size="sm" />
             </div>
             <div className="space-y-1">
               <Label htmlFor={`cr-user-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
-              <Input id={`cr-user-${i}`} value={d.username} onChange={(e) => update(i, { username: e.target.value })} className="text-xs" />
+              <Input id={`cr-user-${i}`} value={d.username} onChange={(e) => update(i, { username: e.target.value })} size="sm" />
             </div>
             <div className="space-y-1">
               <Label htmlFor={`cr-pw-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-              <Input id={`cr-pw-${i}`} type="password" value={d.password} onChange={(e) => update(i, { password: e.target.value })} className="text-xs" />
+              <Input id={`cr-pw-${i}`} type="password" value={d.password} onChange={(e) => update(i, { password: e.target.value })} size="sm" />
             </div>
           </div>
           {allowMulti && value.length > 1 && !(lockFirstRow && i === 0) && (

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from supernova_core.i18n import current_lang
+from supernova_core.config.scan_env import ws_getenv
 
 DIRECTIVE_ZH = """<language>
 - 用中文进行所有口述、推理过程与每轮总结（narration）。
@@ -46,7 +47,7 @@ def narration_directive() -> str | None:
       - 其它 → 回落 zh（默认中文）
     语言 zh/en 由 i18n.current_lang() 单一决定；本函数仅额外判定显式关闭。
     """
-    raw = os.getenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh").strip().lower()
+    raw = ws_getenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh").strip().lower()
     if raw in _DISABLE_VALUES:
         return None
     return DIRECTIVE_ZH if current_lang() == "zh" else DIRECTIVE_EN

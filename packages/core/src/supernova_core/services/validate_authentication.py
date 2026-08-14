@@ -35,7 +35,10 @@ AUTH_VALIDATION_SCHEMA: dict = {
 @dataclass
 class AuthValidationResult:
     success: bool
-    failure_point: str | None = None  # "username_or_password" | "totp_secret" | "out_of_band"
+    # "username_or_password" | "totp_secret" | "out_of_band" (LLM-facing enum values)
+    # | "no_verdict" (internal-only: agent ran but produced no structured verdict —
+    # provider anomaly, not a deterministic login rejection)
+    failure_point: str | None = None
     failure_detail: str | None = None
 
 
@@ -241,10 +244,15 @@ async def validate_authentication(
             )
 
         # 5. No structured output → provider anomaly. Fail-fast rather than guessing via
-        # cookies (rare; 0 occurrences across 72 probe runs on both engines).
+        # cookies (rare; 0 occurrences across 72 probe runs on both engines — until
+        # 2026-08-14: GLM logged in successfully but emitted a Markdown summary; the
+        # missing verdict was misread as auth_failed and the combined scan fail-fasted
+        # before whitebox started). failure_point="no_verdict" (≠ the LLM-facing enum,
+        # internal-only) lets callers distinguish "agent ran but produced no verdict"
+        # from a deterministic login rejection and degrade accordingly.
         return AuthValidationResult(
             success=False,
-            failure_point="out_of_band",
+            failure_point="no_verdict",
             failure_detail="Auth agent returned no structured login_success verdict",
         )
 
@@ -292,6 +300,12 @@ async def validate_authentication(
             if so:
                 primary_failure_point = so.get("failure_point", "out_of_band")
                 primary_failure_detail = so.get("failure_detail", "primary attacker login failed")
+            else:
+                # no structured verdict (provider anomaly) — align with Branch A: mark
+                # "no_verdict" so callers can distinguish it from a deterministic
+                # login rejection (combined t0 precheck passes this through).
+                primary_failure_point = "no_verdict"
+                primary_failure_detail = "Auth agent returned no structured login_success verdict"
             break  # attacker 必须，fail-fast
 
     IdentityManifest(identities=identities).write(workspace_path)

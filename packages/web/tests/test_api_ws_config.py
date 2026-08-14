@@ -38,6 +38,25 @@ def _csrf(c):
 
 # ---- GET / 基本读写 ----
 
+def test_get_new_ws_is_default_true(authed_client, tmp_workspaces):
+    """新工作区（无 config.yaml）→ GET 返回 is_default=True（前端据此预填完整模板）。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    r = authed_client.get("/api/workspaces/ws-a/config")
+    assert r.status_code == 200
+    assert r.json()["is_default"] is True
+
+
+def test_get_existing_ws_is_default_false(authed_client, tmp_workspaces):
+    """已保存配置的工作区 → GET 返回 is_default=False（前端显示实际配置，不预填）。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_AI_PROVIDER=openai_compatible\n",
+    }, headers={"X-CSRF-Token": tok})
+    r = authed_client.get("/api/workspaces/ws-a/config")
+    assert r.json()["is_default"] is False
+
+
 def test_get_config_empty_ws(authed_client, tmp_workspaces):
     """没有 config.yaml 的 ws → 默认 Provider 模板，但不包含 API key。"""
     (tmp_workspaces / "ws-a").mkdir()
@@ -203,3 +222,44 @@ def test_put_then_get_masks_gitlab_token(authed_client, tmp_workspaces):
     assert "GITLAB_USER=bot-a" in env_text
     assert "GITLAB_TOKEN=••••" in env_text
     assert "glpat-secret" not in env_text
+
+
+# ---- env 段（扫描期 per-workspace 覆盖）----
+
+def test_put_then_get_env_section_roundtrip(authed_client, app_with_ws, tmp_workspaces):
+    """扫描期键写 env 段 → GET 原样回显 + store 读到 env dict。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    r = authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": ("SUPERNOVA_LLM_TRACK_ENABLED=0\n"
+                     "SUPERNOVA_BROWSER_ENGINE=agent-browser\n"
+                     "SUPERNOVA_PRICING_OVERRIDE=p.json\n"),
+    }, headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json()["warnings"]["ineffective"] == []  # 扫描期键不再 ineffective
+
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "SUPERNOVA_LLM_TRACK_ENABLED=0" in env_text
+    assert "SUPERNOVA_BROWSER_ENGINE=agent-browser" in env_text
+    assert "SUPERNOVA_PRICING_OVERRIDE=p.json" in env_text
+
+    store = app_with_ws.state.ws_config_store
+    cfg = store.read("ws-a")
+    assert cfg.env["SUPERNOVA_LLM_TRACK_ENABLED"] == "0"
+    assert cfg.env["SUPERNOVA_BROWSER_ENGINE"] == "agent-browser"
+    assert store.resolve_env_overrides("ws-a")["SUPERNOVA_PRICING_OVERRIDE"] == "p.json"
+
+
+def test_put_env_section_full_overwrite(authed_client, tmp_workspaces):
+    """env 段全量覆盖：第二次不写 LLM_TRACK → 清空。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_LLM_TRACK_ENABLED=0\n",
+    }, headers={"X-CSRF-Token": tok})
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_BROWSER_ENGINE=agent-browser\n",
+    }, headers={"X-CSRF-Token": tok})
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "LLM_TRACK" not in env_text  # 全量覆盖清空
+    assert "SUPERNOVA_BROWSER_ENGINE=agent-browser" in env_text

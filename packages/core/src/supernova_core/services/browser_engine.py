@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from typing import Protocol, runtime_checkable
 
+from supernova_core.config.scan_env import ws_getenv
+
 
 @runtime_checkable
 class BrowserEngine(Protocol):
@@ -157,7 +159,7 @@ class BrowserEngineFactory:
         2. ``browser_engine`` field parsed from *config_path* (when provided)
         3. Default ``"agent-browser"``
         """
-        env_engine = os.environ.get("SUPERNOVA_BROWSER_ENGINE")
+        env_engine = ws_getenv("SUPERNOVA_BROWSER_ENGINE")
         if env_engine:
             return env_engine.strip()
         if config_path:

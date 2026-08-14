@@ -27,15 +27,23 @@ export const deleteAuthProfile = (ws: string, pid: string) =>
   apiDelete<{ ok: true }>(`/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}`);
 export const forkProfile = (ws: string, pid: string) =>
   apiPost<AuthProfile>(`/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/fork`, {});
-export const testCredential = (ws: string, pid: string, cid: string) =>
-  apiPost<{ workflow_id: string; probe_dir: string }>(
-    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/test`, {});
+export const testCredential = (ws: string, pid: string, cid: string,
+                               hostProfileId?: string, hostUrl?: string) => {
+  const qs = hostProfileId ? `?host_profile_id=${enc(hostProfileId)}`
+    : hostUrl ? `?host_url=${enc(hostUrl)}` : "";
+  return apiPost<{ workflow_id: string; probe_dir: string }>(
+    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/credentials/${enc(cid)}/test${qs}`, {});
+};
 // 档案级批量测试登录（多选角色 → 串行逐个独立验证）。credIds 省略/空 = 全选。返 batch workflow_id。
-export const testBatch = (ws: string, pid: string, credIds?: string[]) =>
-  apiPost<{ workflow_id: string }>(
-    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/test-batch`,
-    { cred_ids: credIds },
-  );
+export const testBatch = (ws: string, pid: string, credIds?: string[],
+                          hostProfileId?: string, hostUrl?: string) => {
+  const body: Record<string, unknown> = {};
+  if (credIds) body.cred_ids = credIds;
+  if (hostProfileId) body.host_profile_id = hostProfileId;
+  if (hostUrl) body.host_url = hostUrl;
+  return apiPost<{ workflow_id: string }>(
+    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/test-batch`, body);
+};
 export const getVerifyStatus = (
   ws: string, pid: string, cid: string, workflowId: string, probeDir: string,
 ) =>

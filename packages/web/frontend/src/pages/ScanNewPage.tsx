@@ -42,7 +42,8 @@ export interface AuthFormState {
 
 const DEFAULT_AUTH: AuthFormState = {
   enabled: false,
-  source: "inline",
+  // 默认使用档案（profile）——展开认证配置时优先复用工作区已验证档案，与 segmented 顺序一致（使用档案居左）。
+  source: "profile",
   profileId: "",
   credentialIds: [],
   loginType: "form",
@@ -65,7 +66,7 @@ export interface HostFormState {
   hostUrl: string;
 }
 
-const DEFAULT_HOST: HostFormState = {
+export const DEFAULT_HOST: HostFormState = {
   enabled: false,
   mode: "profile",
   profileId: "",
@@ -296,8 +297,15 @@ function renderError(e: ApiError, t: TFunction): string {
   if (e.status === 400) return t("scan.errors.temporal");
   if (e.status === 409) return t("scan.errors.concurrent");
   if (e.status === 422) {
-    const detail = (e.body as { detail?: { msg?: string }[] })?.detail;
-    const msg = Array.isArray(detail) && detail.length > 0 ? detail[0]?.msg : undefined;
+    const detail = (e.body as { detail?: unknown })?.detail;
+    // 工作区缺 LLM 凭据（后端 ProviderConfigIncomplete）→ 结构化错误 code=provider_incomplete。
+    // 友好提示去工作区设置补全凭据，不误报「yaml 校验失败」（detail 是 dict 而非 array）。
+    if (detail && typeof detail === "object" && !Array.isArray(detail)
+        && (detail as { code?: string }).code === "provider_incomplete") {
+      return t("scan.errors.providerMissing");
+    }
+    const detailArr = Array.isArray(detail) ? detail : undefined;
+    const msg = detailArr && detailArr.length > 0 ? detailArr[0]?.msg : undefined;
     return msg ? t("scan.errors.yamlInvalidWithMsg", { msg }) : t("scan.errors.yamlInvalid");
   }
   return t("scan.errors.submitFailed", { status: e.status });

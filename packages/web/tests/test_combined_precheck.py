@@ -201,6 +201,37 @@ async def test_run_precheck_returns_false_on_auth_failure(mgr, tmp_path, monkeyp
                                  "http://target.example/", "/cfg/scan-config.yaml")
     assert ok is False
 
+
+async def test_run_precheck_passes_through_no_verdict(mgr, tmp_path, monkeypatch):
+    """no_verdict（agent 跑完但无结构化判定，provider 异常 ≠ 确定性登录拒绝）→
+    放行 True + session 记 bb_precheck_warning，不误杀组合扫描
+    （2026-08-14 NodeGoat 假阴性：登录成功但 GLM 输出 Markdown 总结，verdict 缺失
+    被当 auth_failed fail-fast，白盒/黑盒都没跑）。认证风险延后给 t2 黑盒 auth
+    （失败有 D5 续跑兜底）。确定性拒绝仍 False（上一测试守）。"""
+    from supernova_core.services.validate_authentication import AuthValidationResult
+    scan_dir = tmp_path / "scans" / "demo"; scan_dir.mkdir(parents=True)
+
+    class _FakeHandle:
+        async def result(self):
+            return AuthValidationResult(
+                success=False, failure_point="no_verdict",
+                failure_detail="Auth agent returned no structured login_success verdict")
+
+    class _FakeClient:
+        async def start_workflow(self, fn, inp, **kw):
+            return _FakeHandle()
+
+    async def fake_connect(addr):
+        return _FakeClient()
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect", fake_connect)
+    monkeypatch.setattr(mgr, "_resolve_provider_config", lambda ws: {"api_key": "k"})
+
+    ok = await mgr._run_precheck(scan_dir, "ws-a", "demo",
+                                 "http://target.example/", "/cfg/scan-config.yaml")
+    assert ok is True
+    data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+    assert data.get("bb_precheck_warning")  # 用户可见的放行痕迹
+
 @pytest.mark.asyncio
 async def test_start_combined_precheck_receives_same_host_snapshot(mgr, monkeypatch):
     """组合 auth precheck 必须接收与后续黑盒相同的 HOST snapshot。"""

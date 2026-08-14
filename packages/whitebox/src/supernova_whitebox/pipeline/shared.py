@@ -64,6 +64,8 @@ class ActivityInput:
     provider_config: dict | None = None
     # D1 组合扫描：由 workflow 从 PipelineInput.combined 灌入；finalize_summary 据此分支。
     combined: bool = False
+    # 扫描期 per-workspace env 覆盖（scan_env 覆盖层用）；由 workflow 从 PipelineInput 灌入。
+    env_overrides: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

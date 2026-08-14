@@ -50,12 +50,16 @@ class BlackboxAuthValidationBatchItem:
     cred_id 是 web 层概念（回填 verify_status 的 key），透传到 workflow 供 batch_progress
     query 返回 per-cred 进度；web_url/config_path/workspace_path/event_file 同单 cred 探针。
     role 不入此结构（认证测试的 role 仅前端展示元数据，不影响 core 登录链路，spec §2）。
+
+    host_mappings（2026-08-14）：认证测试复用黑盒 HOST 档案能力——选中 HOST 才走代理、不选直连。
+    对齐单 cred BlackboxAuthValidationInput.host_mappings：空=直连，非空=起 per-cred host proxy。
     """
     cred_id: str
     web_url: str = ""
     config_path: str | None = None
     workspace_path: str | None = None
     event_file: str | None = None
+    host_mappings: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -110,6 +114,8 @@ class BlackboxActivityInput:
     # 由 workflow 从 BlackboxPipelineInput.host_mappings 透传；proxy_url 来自 scan_manager。
     host_mappings: dict[str, str] = field(default_factory=dict)
     proxy_url: str | None = None
+    # 扫描期 per-workspace env 覆盖（scan_env 覆盖层用）；由 workflow 从 BlackboxPipelineInput 灌入。
+    env_overrides: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

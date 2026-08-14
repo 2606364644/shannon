@@ -236,6 +236,9 @@ class ScanManager:
                         "bb_host_mappings": host_mappings,
                         "bb_auth_ref": self._snapshot_auth_ref(req),
                         "bb_phase": "precheck",
+                        # 进度分母（spec §9.5）：白盒部分提交时写；blackbox 部分由
+                        # _run_blackbox_phase 在白盒 queue 已知后补（按发现的 vuln 类）。
+                        "expected_agents": self._compute_expected_agents(req),
                     })
                     if config_path:
                         # 带认证 → precheck 登录目标站（可达数分钟）。异步化：写完 session
@@ -255,12 +258,13 @@ class ScanManager:
                         host_mappings=host_mappings)
                     if not ok:
                         await self._mark_bb(scan_dir, "failed", "auth_failed")
-                        await self._ensure_scan_end(scan_dir)
+                        await self._ensure_scan_end(scan_dir, status="failed")
                         self._active_reqs.pop(scan_key, None)
                         return ws, scan_id
                     await self._mark_bb(scan_dir, "pending")
                 handle = await self._submit_whitebox(
-                    target, ws, scan_id, scan_dir, event_file, req.url or "")
+                    target, ws, scan_id, scan_dir, event_file, req.url or "",
+                    combined=bool(req.url))
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"source_repo": req.source.value if req.source else None})
                 if req.url:
@@ -365,7 +369,8 @@ class ScanManager:
                 web_url = data.get("web_url") or ""
                 try:
                     handle = await self._submit_whitebox(
-                        repo_path, ws, scan_id, scan_dir, event_file, web_url)
+                        repo_path, ws, scan_id, scan_dir, event_file, web_url,
+                        combined=True)
                 except BaseException as exc:
                     self._active_reqs.pop(scan_key, None)
                     await self._mark_submission_failed(scan_dir, event_file, exc)
@@ -435,12 +440,17 @@ class ScanManager:
         return ws, scan_id
 
     async def _submit_whitebox(self, target: str | None, ws: str, scan_id: str,
-                               scan_dir: Path, event_file: Path, web_url: str) -> Any:
+                               scan_dir: Path, event_file: Path, web_url: str,
+                               combined: bool = False) -> Any:
         """算 workflow_id(读 resumeAttempts) + Client.connect + start_workflow 到固定 queue.
 
         T3: workspace_name=scan_id（worker 据此 + event_file.parent 推导 scan_dir 产物目录，
         workspace_name 对 web 路径仅作展示）。event_file 塞进 PipelineInput(worker 容器
         setup_display 据此挂 StructuredEventRenderer)。workflow_id 在提交时定(activity 不能改).
+
+        combined=True（组合扫描）：白盒 finalize_summary 走 log_phase_complete 分支（写
+        PhaseEvent 阶段边界，不写终态 scan_end），终态留给黑盒段——漏传会让白盒 finalize
+        提前写 scan_end 把整条组合扫描收掉（黑盒接不上）。
         """
         # 先解析并校验 workspace-owned Provider 配置，缺配置时不要连接或提交 Temporal。
         provider_config = self._resolve_provider_config(ws)
@@ -452,6 +462,9 @@ class ScanManager:
             workspace_name=scan_id,
             event_file=str(event_file),
             provider_config=provider_config,
+            env_overrides=self._resolve_env_overrides(ws),
+            enable_llm_track=self._resolve_llm_track(ws),
+            combined=combined,
         )
         handle = await client.start_workflow(
             WhiteboxScanWorkflow.run, inp, id=workflow_id,
@@ -667,28 +680,33 @@ class ScanManager:
                 data.get("bb_host_mappings") or {}, allow_empty=True)
         return {}
 
-    async def _resolve_host_config(
-        self, req: ScanRequest, ws: str,
+    async def _resolve_host_config_sources(
+        self, host_profile_id: str | None, host_url: str | None, ws: str,
     ) -> dict | None:
-        """Resolve one HOST source into an immutable per-scan snapshot."""
-        if req.host_profile_id is None and req.host_url is None:
+        """Resolve one HOST source (profile_id xor url) into an immutable snapshot.
+
+        核心解析逻辑，扫描启动（经 ``_resolve_host_config`` 从 ScanRequest 取字段）
+        与认证测试（选中 HOST → per-cred proxy；都不选 → 直连）共用——复用同一套
+        refresh / warnings / fetch_and_parse_hosts，避免重复造轮子。
+        """
+        if host_profile_id is None and host_url is None:
             return None
 
         warnings: list[str] = []
-        if req.host_profile_id is not None:
+        if host_profile_id is not None:
             if self.host_profile_store is None:
                 raise RuntimeError("host_profile_store 未注入，无法解析 HOST 档案")
-            profile = self.host_profile_store.get(ws, req.host_profile_id)
+            profile = self.host_profile_store.get(ws, host_profile_id)
             if profile is None:
-                raise ValueError(f"HOST 档案不存在: {req.host_profile_id}")
+                raise ValueError(f"HOST 档案不存在: {host_profile_id}")
             if profile.source_url:
                 try:
-                    refreshed = await self.host_profile_store.refresh(ws, req.host_profile_id)
+                    refreshed = await self.host_profile_store.refresh(ws, host_profile_id)
                     if refreshed is not None:
                         profile = refreshed
                     get_warnings = getattr(self.host_profile_store, "refresh_warnings", None)
                     if get_warnings is not None:
-                        warnings.extend(get_warnings(ws, req.host_profile_id))
+                        warnings.extend(get_warnings(ws, host_profile_id))
                 except HostProfileRefreshEmpty as exc:
                     raise ValueError(str(exc)) from exc
                 except Exception as exc:
@@ -700,25 +718,32 @@ class ScanManager:
             return {
                 "enabled": True,
                 "source": "profile",
-                "profile_id": req.host_profile_id,
+                "profile_id": host_profile_id,
                 "source_url": profile.source_url,
                 "mappings": mappings,
                 "warnings": warnings,
                 "resolved_at": time.time(),
             }
 
-        mappings, fetch_warnings = await fetch_and_parse_hosts(req.host_url)
+        mappings, fetch_warnings = await fetch_and_parse_hosts(host_url)
         normalized = self._normalize_host_mapping_dict(mappings)
         warnings.extend(fetch_warnings)
         return {
             "enabled": True,
             "source": "url",
             "profile_id": None,
-            "source_url": req.host_url,
+            "source_url": host_url,
             "mappings": normalized,
             "warnings": warnings,
             "resolved_at": time.time(),
         }
+
+    async def _resolve_host_config(
+        self, req: ScanRequest, ws: str,
+    ) -> dict | None:
+        """ScanRequest → source fields → 核心解析（薄封装，保签名兼容既有调用/测试）。"""
+        return await self._resolve_host_config_sources(
+            req.host_profile_id, req.host_url, ws)
 
     async def _resolve_host_mappings(
         self, req: ScanRequest, ws: str,
@@ -758,6 +783,7 @@ class ScanManager:
             config_path=config_path,
             event_file=str(event_file),
             provider_config=provider_config,
+            env_overrides=self._resolve_env_overrides(ws),
             workspaces_root=str(self._workspaces_dir),
             exploit=True,
             host_mappings=host_mappings or {},
@@ -770,7 +796,9 @@ class ScanManager:
         self._mark_submitted_at(scan_dir)
         return handle
 
-    async def start_auth_validation(self, ws: str, profile_id: str, cred_id: str) -> dict:
+    async def start_auth_validation(self, ws: str, profile_id: str, cred_id: str,
+                                    *, host_profile_id: str | None = None,
+                                    host_url: str | None = None) -> dict:
         """认证管理页"测试登录":写 probe scan-config.yaml + 起 AuthValidationWorkflow。
 
         probe 目录 = workspaces/<ws>/auth-probes/probe-<uuid8>，内含明文 scan-config.yaml
@@ -819,14 +847,19 @@ class ScanManager:
             api_key = self._resolve_provider_config(ws).get("api_key")
         except Exception:
             api_key = None
+        # HOST 档案：选中 → mappings（单 cred workflow 据此起 host proxy）；都不传 → {} 直连。
+        host_mappings = self._host_config_mappings(
+            await self._resolve_host_config_sources(host_profile_id, host_url, ws))
         inp = BlackboxAuthValidationInput(
             web_url=profile.login_url,
             config_path=str(cfg_file),
             workspace_path=str(probe_dir),
             api_key=api_key,
+            host_mappings=host_mappings,
             # 块1c：event_file 落点 = probe_dir/events.ndjson。workflow 经 setup_display 把
             # agent 登录每步写此文件（验证过程可见），verify-log 端点读它回看/实时观看。
             event_file=str(probe_dir / "events.ndjson"),
+            env_overrides=self._resolve_env_overrides(ws),
         )
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,
@@ -844,7 +877,9 @@ class ScanManager:
         return {"workflow_id": handle.id, "probe_dir": str(probe_dir)}
 
     async def start_batch_auth_validation(self, ws: str, profile_id: str,
-                                          cred_ids: list[str] | None) -> dict:
+                                          cred_ids: list[str] | None, *,
+                                          host_profile_id: str | None = None,
+                                          host_url: str | None = None) -> dict:
         """档案级批量认证验证(认证管理页"测试登录"多选角色):逐个独立验证每个选中角色能否登录。
 
         语义(对齐 spec §2):串行 N 次 Branch A 单次登录(非越权对比)。为每个选中 cred 建独立
@@ -880,6 +915,10 @@ class ScanManager:
         if not selected:
             raise ValueError("未选择任何角色凭据")
         # 各 cred 覆盖清旧 probe + 建 probe_dir + 写 scan-config.yaml(role 不入 YAML)
+        # HOST 档案：选中 → mappings（每个 cred item 同值，batch workflow 据此起 per-cred
+        # host proxy）；都不传 → {} 直连。解析一次复用到所有 item（同一不可变快照）。
+        host_mappings = self._host_config_mappings(
+            await self._resolve_host_config_sources(host_profile_id, host_url, ws))
         allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
         items: list = []
         cred_probe_map: dict[str, dict] = {}
@@ -904,13 +943,16 @@ class ScanManager:
                 config_path=str(cfg_file),
                 workspace_path=str(probe_dir),
                 event_file=str(probe_dir / "events.ndjson"),
+                host_mappings=host_mappings,
             ))
             cred_probe_map[cred.id] = {"probe_dir": str(probe_dir)}
         try:
             api_key = self._resolve_provider_config(ws).get("api_key")
         except Exception:
             api_key = None
-        inp = BlackboxAuthValidationBatchInput(items=items, api_key=api_key)
+        inp = BlackboxAuthValidationBatchInput(
+            items=items, api_key=api_key,
+            env_overrides=self._resolve_env_overrides(ws))
         client = await Client.connect(self._temporal_address())
         batch_wf_id = f"authval-batch-{ws}-{uuid4().hex[:8]}"
         handle = await client.start_workflow(
@@ -1149,6 +1191,24 @@ class ScanManager:
         from dataclasses import asdict
         from supernova_core.agents.providers import build_provider_config
         return asdict(build_provider_config())
+
+    def _resolve_env_overrides(self, ws: str) -> dict[str, str]:
+        """per-ws 扫描期 env 覆盖（scan_env 覆盖层用）；无 ws_config_store 或空配置返 {}。"""
+        if self._ws_config_store is not None:
+            return self._ws_config_store.resolve_env_overrides(ws)
+        return {}
+
+    def _resolve_llm_track(self, ws: str) -> bool:
+        """enable_llm_track: ws env_overrides 的 LLM_TRACK 优先，否则全局 is_llm_track_enabled()。
+
+        web 路径不经 CLI main.py（那里读 env 注入 input），故在此显式定型，使全局 .env 的
+        LLM_TRACK 对 web 扫描也生效，且 ws 覆盖优先。
+        """
+        env_ov = self._resolve_env_overrides(ws)
+        if "SUPERNOVA_LLM_TRACK_ENABLED" in env_ov:
+            return env_ov["SUPERNOVA_LLM_TRACK_ENABLED"].strip().lower() not in {"0", "false", "no", "off"}
+        from supernova_core.config.concurrency import is_llm_track_enabled
+        return is_llm_track_enabled()
 
     def _snapshot_auth_ref(self, req: ScanRequest) -> dict:
         """认证明文不进 session.json（D2）。只存 profile_id（非敏感引用）；
@@ -1648,11 +1708,12 @@ class ScanManager:
                 host_mappings=host_mappings)
             if not ok:
                 await self._mark_bb(scan_dir, "failed", "auth_failed")
-                await self._ensure_scan_end(scan_dir)
+                await self._ensure_scan_end(scan_dir, status="failed")
                 return
             await self._mark_bb(scan_dir, "pending")
             handle = await self._submit_whitebox(
-                target, ws, scan_id, scan_dir, event_file, req.url or "")
+                target, ws, scan_id, scan_dir, event_file, req.url or "",
+                combined=True)
             SessionManager(scan_dir.parent).update_session(
                 scan_dir, {"source_repo": req.source.value if req.source else None})
             self._handles[scan_key] = handle
@@ -1828,15 +1889,26 @@ class ScanManager:
                 pass
         # event_file 指 run 子目录（黑盒从 event_file.parent 推 workspace_path → 产物落
         # run-K/deliverables/blackbox/，spec §4）；repo_path/config_path 仍指白盒任务根
-        # （黑盒读 deliverables/whitebox/ queue）。
+        # （黑盒读 deliverables/whitebox/ queue）。公开目标（无认证）没有 scan-config.yaml
+        # → config_path=None（黑盒 workflow 据 None 跳过 auth 阶段；传不存在路径会误触
+        # 登录活动）。
+        scan_config = scan_dir / "scan-config.yaml"
         run_dir = blackbox_run_dir(scan_dir, run_id)
         bb_handle = await self._submit_blackbox(
             repo_path=str(scan_dir), ws=ws, scan_id=scan_id, scan_dir=scan_dir,
             event_file=run_dir / "events.ndjson", web_url=bb_url,
-            config_path=str(scan_dir / "scan-config.yaml"),
+            config_path=str(scan_config) if scan_config.exists() else None,
             host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
         await self._mark_run(scan_dir, run_id, "running", status="running")
-        await bb_handle.result()
+        bb_result = await bb_handle.result()
+        # 黑盒 workflow 正常返回 status=failed（未 raise）：不生成融合报告，run 标
+        # failed（融合报告仅成功路径产出 → combined/run-K/；raise 路径由编排层
+        # except 兜底）。
+        if isinstance(bb_result, dict) and bb_result.get("status") == "failed":
+            await self._mark_run(scan_dir, run_id, "failed",
+                                 reason=str(bb_result.get("error") or "blackbox failed"),
+                                 status="failed")
+            return
         await self._generate_combined_report(scan_dir, run_id)  # → combined/run-K/
         await self._mark_run(scan_dir, run_id, "completed", status="completed")
 
@@ -1954,12 +2026,32 @@ class ScanManager:
             workspace_path=str(scan_dir),
             event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
             api_key=self._resolve_provider_config(ws).get("api_key"),
+            env_overrides=self._resolve_env_overrides(ws),
             host_mappings=host_mappings or {})
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,
             id=f"{ws}-{scan_id}-authcheck", task_queue=WEB_TASK_QUEUE_BLACKBOX)
         result = await handle.result()  # AuthValidationResult
-        return bool(result and getattr(result, "success", False))
+        if result and getattr(result, "success", False):
+            return True
+        # no_verdict = agent ran but produced no structured login_success verdict
+        # (provider anomaly), NOT a deterministic login rejection. Kill-the-scan here
+        # mislabels it auth_failed — 2026-08-14 NodeGoat: GLM logged in successfully
+        # but emitted a Markdown summary, the missing verdict fail-fasted the whole
+        # combined scan before whitebox started. Pass through instead: auth is
+        # re-validated by the t2 blackbox auth phase (fail → D5 rerun, whitebox
+        # results survive). Deterministic rejections still fail-fast below.
+        if result and getattr(result, "failure_point", None) == "no_verdict":
+            _log.warning(
+                "combined precheck %s/%s: auth agent produced no structured verdict "
+                "(%s); proceeding — auth deferred to blackbox phase",
+                ws, scan_id, getattr(result, "failure_detail", ""))
+            SessionManager(scan_dir.parent).update_session(scan_dir, {
+                "bb_precheck_warning": (
+                    "auth agent produced no structured login verdict; proceeding — "
+                    "authentication will be re-validated by the blackbox phase")})
+            return True
+        return False
 
     async def _generate_combined_report(self, scan_dir: Path, run_id: str) -> None:
         """生成 per-run 融合报告（spec §9/§10.2）→ combined/run-K/combined_report.md。

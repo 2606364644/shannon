@@ -123,7 +123,7 @@ function StepGroup({ step, title, tag, tagClass, className, children }: {
 }
 
 /** 右栏认证核心（仅在 f.auth.enabled=展开 时挂载；#1 单一 disclosure：展开即启用）：
- *    coral 竖条标题 + 来源 segmented（临时填写 / 使用档案）+ 模式右栏内容。
+ *    coral 竖条标题 + 来源 segmented（使用档案 / 临时填写）+ 模式右栏内容。
  *  - inline 模式右栏：登录步骤（textarea）+ 存为档案（档案名+保存一行）。
  *  - profile 模式右栏：已选档案摘要卡 + 提示。
  *  顶格对齐左栏「目标服务」（grid items-start，折叠态占位与展开态核心互斥显隐）。 */
@@ -142,9 +142,9 @@ function RightAuthCore({ auth, setAuth, authErr, workspace, refreshSignal, onPro
         <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
         <h4 className="text-[13px] font-semibold">{t("scan.steps.auth")}</h4>
       </div>
-      {/* 来源 segmented（临时填写 / 使用档案） */}
+      {/* 来源 segmented（使用档案 / 临时填写） */}
       <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
-        {(["inline", "profile"] as const).map((s) => (
+        {(["profile", "inline"] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -196,7 +196,8 @@ function InlineRightEnhance({ auth, setAuth, ws, onProfileSaved }: {
           onChange={(e) => setAuth({ loginFlow: e.target.value })}
           rows={3}
           placeholder={t("scan.auth.loginFlowHint")}
-          className="font-mono text-xs"
+          size="sm"
+          className="font-mono"
         />
       </div>
       {ws ? (
@@ -309,7 +310,8 @@ function SaveAsProfileInline({ auth, ws, onSaved }: {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={t("scan.auth.profileNamePlaceholder")}
-          className="flex-1 min-w-0 text-xs"
+          size="sm"
+          className="flex-1 min-w-0"
           required
         />
         <Button type="submit" size="sm" variant="outline" disabled={!canSave || busy} className="shrink-0 text-xs">
@@ -362,7 +364,8 @@ function BottomInlineBlock({ auth, setAuth, authErr }: {
             value={auth.loginUrl}
             onChange={(e) => setAuth({ loginUrl: e.target.value })}
             placeholder="https://example.com/login"
-            className="font-mono text-xs"
+            size="sm"
+            className="font-mono"
           />
         </div>
       </div>
@@ -637,7 +640,7 @@ function HostProfilePicker({ host, setHost, workspace }: {
 /** 共享认证字段块（Task 9）：白盒「同时发起黑盒扫描」组合展开区复用黑盒认证编辑能力。
  *  受控组件——value/onChange 读写 AuthFormState；自包含堆叠布局：
  *    1. 认证行（标题 + 状态 + 「配置登录」/「收起」按钮，单一 disclosure：展开即启用）。
- *    2. 展开后：来源 segmented（临时填写 / 使用档案）+ 对应字段块（复用 BottomInlineBlock / BottomProfileBlock）。
+ *    2. 展开后：来源 segmented（使用档案 / 临时填写）+ 对应字段块（复用 BottomInlineBlock / BottomProfileBlock）。
  *  黑盒分支保留其双栏布局（RightAuthCore + Bottom*），本组件服务白盒组合展开区（单栏堆叠）；
  *  字段映射共用 ScanNewPage.assignAuthToBody，保证两条分支 buildBody 一致。 */
 export function AuthFields({ value, onChange, workspace, authErr, refreshSignal }: {
@@ -683,7 +686,7 @@ export function AuthFields({ value, onChange, workspace, authErr, refreshSignal 
       {value.enabled && (
         <div className="space-y-3 fade-in">
           <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
-            {(["inline", "profile"] as const).map((s) => (
+            {(["profile", "inline"] as const).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -779,7 +782,8 @@ export function HostFields({ value, onChange, workspace, error }: {
               value={value.hostUrl}
               onChange={(e) => onChange({ hostUrl: e.target.value })}
               placeholder={t("scan.host.urlPlaceholder")}
-              className="font-mono text-xs"
+              size="sm"
+              className="font-mono"
             />
           )}
           <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-relaxed">
@@ -990,7 +994,8 @@ export function ScanFormFields({
                   value={f.url}
                   onChange={(e) => set({ url: e.target.value })}
                   placeholder={t("scan.combined.urlPlaceholder")}
-                  className="font-mono text-xs border-orange/30"
+                  size="sm"
+                  className="font-mono border-orange/30"
                 />
                 {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
               </div>
@@ -1040,7 +1045,8 @@ export function ScanFormFields({
               value={f.url}
               onChange={(e) => set({ url: e.target.value })}
               placeholder={t("scan.fields.urlPlaceholder")}
-              className="font-mono text-xs border-orange/30"
+              size="sm"
+              className="font-mono border-orange/30"
             />
             {urlErr && <div className="text-destructive text-xs">{urlErr}</div>}
             <div className="text-xs text-muted-foreground">{t("scan.fields.blackboxUrlHint")}</div>

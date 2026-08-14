@@ -6,8 +6,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
-import { AuthProfileTestPage } from "./AuthProfileTestPage";
+import { AuthProfileTestPage, hostToParams } from "./AuthProfileTestPage";
 import type { AuthProfile } from "@/api/types";
+import type { HostFormState } from "./ScanNewPage";
 
 // 恢复/发起后订阅 VerifyLivePanel → useEventSource → new EventSource；jsdom 无原生 EventSource，
 // mock 返空流（只验"识别 running → 进 live 态/发起成功"，不验 SSE 事件本身）。
@@ -58,6 +59,21 @@ function renderPage() {
     </MemoryRouter>,
   );
 }
+
+describe("hostToParams", () => {
+  const base: HostFormState = { enabled: false, mode: "profile", profileId: "", hostUrl: "" };
+  it("未启用 → 空（直连）", () => {
+    expect(hostToParams(base)).toEqual({});
+  });
+  it("profile 模式 → hostProfileId", () => {
+    expect(hostToParams({ ...base, enabled: true, mode: "profile", profileId: "host_p1" }))
+      .toEqual({ hostProfileId: "host_p1" });
+  });
+  it("url 模式 → hostUrl", () => {
+    expect(hostToParams({ ...base, enabled: true, mode: "url", hostUrl: "https://h.test/get" }))
+      .toEqual({ hostUrl: "https://h.test/get" });
+  });
+});
 
 describe("AuthProfileTestPage", () => {
   it("加载档案: 默认全选 + 计数 3/3 + 角色列表 + 开始按钮", async () => {
@@ -123,5 +139,12 @@ describe("AuthProfileTestPage", () => {
     // 恢复 effect 识别 running → setPolling + setTesting → 按钮变"测试中…"并 disabled。
     // 核心：重载页面发现批次进行中不落空态、自动恢复轮询。
     await waitFor(() => expect(screen.getByRole("button", { name: /测试中/ })).toBeDisabled());
+  });
+
+  it("渲染 HOST 解析入口（复用黑盒 HOST 能力：选 HOST 走代理、不选直连）", async () => {
+    currentProf = prof;
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    expect(screen.getByText("HOST 解析")).toBeInTheDocument();
   });
 });

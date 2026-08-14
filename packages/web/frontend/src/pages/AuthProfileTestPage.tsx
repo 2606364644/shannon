@@ -15,6 +15,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VerifyLivePanel } from "./VerifyLivePanel";
+import { HostFields } from "@/components/ScanFormFields";
+import { DEFAULT_HOST } from "./ScanNewPage";
+import type { HostFormState } from "./ScanNewPage";
 
 function credState(c: AuthProfileCredential): VerifyState {
   return c.verify_status?.state ?? "unverified";
@@ -38,6 +41,18 @@ function verifyBadge(st: VerifyState): { cls: string; icon: string } {
     : { cls: "border-yellow/40 text-yellow", icon: "●" };
 }
 
+/** HostFormState → 测试请求参数（profile 模式 → hostProfileId / url 模式 → hostUrl）。
+ *  对齐 ScanNewPage.assignHostToBody：未启用 → 空（直连）。供 AuthProfileTestPage 发起测试透传。 */
+export function hostToParams(h: HostFormState): { hostProfileId?: string; hostUrl?: string } {
+  if (!h.enabled) return {};
+  if (h.mode === "profile") {
+    const id = h.profileId.trim();
+    return id ? { hostProfileId: id } : {};
+  }
+  const url = h.hostUrl.trim();
+  return url ? { hostUrl: url } : {};
+}
+
 interface LiveRun { cid: string; workflowId: string; probeDir: string; runKey: number; }
 
 export function AuthProfileTestPage() {
@@ -52,6 +67,7 @@ export function AuthProfileTestPage() {
   const [testing, setTesting] = useState(false);
   const [polling, setPolling] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [host, setHost] = useState<HostFormState>(DEFAULT_HOST);
 
   // ref 同步：拉 profile effect 依赖 refreshTick（不含 polling/selectedIds），闭包经 ref 读最新值，
   // 避免 toggle role 触发多余 profile 请求。
@@ -129,9 +145,11 @@ export function AuthProfileTestPage() {
     try {
       const ids = profile.credentials.filter((c) => selectedIds.includes(c.id)).map((c) => c.id);
       const allIds = profile.credentials.map((c) => c.id);
-      // 全选时省略 cred_ids（后端 None=全选语义）
+      const hp = hostToParams(host);
+      // 全选时省略 cred_ids（后端 None=全选语义）；HOST 选中 → 走代理，未选 → 直连
       const { workflow_id } = await testBatch(
-        workspace, pid, ids.length === allIds.length ? undefined : ids);
+        workspace, pid, ids.length === allIds.length ? undefined : ids,
+        hp.hostProfileId, hp.hostUrl);
       setBatchWfId(workflow_id);
       setPolling(true);
       setRefreshTick((n) => n + 1);  // 立即重拉（拿首 cred running）
@@ -236,6 +254,15 @@ export function AuthProfileTestPage() {
             <div className="mt-2 text-[10.5px] text-muted-foreground">
               {t("authProfiles.testPage.selected", { n: selectedIds.length, m: profile.credentials.length })}
             </div>
+          </Card>
+
+          {/* HOST 解析（复用黑盒 HOST 能力）：选 HOST 走代理、不选直连。与扫描表单同款 HostFields。 */}
+          <Card className="p-4">
+            <HostFields
+              value={host}
+              onChange={(patch) => setHost({ ...host, ...patch })}
+              workspace={workspace}
+            />
           </Card>
 
           {/* 进度区：发起后 / 有已测角色时显示，每选中角色一行 */}

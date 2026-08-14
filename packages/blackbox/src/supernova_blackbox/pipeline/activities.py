@@ -78,6 +78,8 @@ async def setup_display(input: BlackboxActivityInput) -> None:
     重启后可观测恢复）共用--见 session_recovery.py。
     """
     await build_headless_audit_session(input)
+    from supernova_core.config.scan_env import set_scan_env
+    set_scan_env(input.env_overrides)
 
 
 @activity.defn
@@ -113,6 +115,8 @@ async def finalize_summary(input: BlackboxActivityInput, summary: dict) -> None:
         await session.log_workflow_complete(ws)
     await stop_heartbeat()  # 停 heartbeat daemon（启动于 setup_display）；终态自停兜底
     clear_audit_session()
+    from supernova_core.config.scan_env import clear_scan_env
+    clear_scan_env()
 
 
 @activity.defn
@@ -234,18 +238,6 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             tool_audit_logger=tool_audit_logger,
             proxy_url=input.proxy_url,
         )
-        await tool_audit_logger.close(
-            success=True, duration_ms=int((time.monotonic() - agent_start) * 1000))
-        await session.end_agent(agent_name.value, AgentEndResult(
-            success=True, duration_ms=int((time.monotonic() - agent_start) * 1000),
-            cost_usd=0.0, attempt_number=attempt))
-        if not result.success:
-            raise PentestError(
-                f"Authentication validation failed: {result.failure_detail or 'unknown'}",
-                category="preflight",
-                retryable=False,
-                error_code=ErrorCode.AUTH_LOGIN_FAILED,
-            )
     except PentestError as e:
         dur_ms = int((time.monotonic() - agent_start) * 1000)
         await tool_audit_logger.close(success=False, duration_ms=dur_ms)
@@ -266,6 +258,27 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+    # validate_authentication 正常返回（未 raise）：可观测收尾按真实 verdict 记录，
+    # 恰一次（旧版先记 success=True 再 raise PentestError 进 except 双记，黑盒 auth
+    # 失败时 events 里 agent 显示成功——2026-08-14 修正）。fail-fast 直接 raise
+    # ApplicationFailure（不再经 PentestError→except，避免双记）。
+    dur_ms = int((time.monotonic() - agent_start) * 1000)
+    await tool_audit_logger.close(success=result.success, duration_ms=dur_ms)
+    await session.end_agent(agent_name.value, AgentEndResult(
+        success=result.success, duration_ms=dur_ms, cost_usd=0.0, attempt_number=attempt))
+    if not result.success:
+        err = PentestError(
+            f"Authentication validation failed: {result.failure_detail or 'unknown'}",
+            category="preflight",
+            retryable=False,
+            error_code=ErrorCode.AUTH_LOGIN_FAILED,
+        )
+        await session.log_error(err, context=agent_name.value, attempt=attempt,
+                                max_attempts=max_attempts)
+        error_type, retryable = classify_error_for_temporal(err)
+        raise ApplicationFailure(str(err), type=error_type,
+                                 non_retryable=not retryable) from err
 
 
 @activity.defn

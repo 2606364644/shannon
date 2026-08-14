@@ -29,6 +29,45 @@ function renderAt(ws: string) {
 }
 
 describe("WsSettingsTab", () => {
+  it("is_default=true → 预填完整推荐模板（默认值 + 凭据注释行）", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () =>
+        HttpResponse.json({ env_text: "SUPERNOVA_AI_PROVIDER=openai_compatible\n", is_default: true })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    // 非凭据默认值已预填（保存即生效）
+    expect(ta.value).toContain("SUPERNOVA_AI_PROVIDER=openai_compatible");
+    expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=10000");
+    expect(ta.value).toContain("SUPERNOVA_ADAPTIVE_THINKING=true");
+    expect(ta.value).toContain("SUPERNOVA_LLM_TRACK_ENABLED=0");
+    expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=1");
+    expect(ta.value).toContain("SUPERNOVA_BROWSER_ENGINE=agent-browser");
+    expect(ta.value).toContain("SUPERNOVA_AGENT_NARRATION_LANG=zh");
+    // 凭据行以 # 注释出现（不落盘空串、删 # 填值才生效）
+    expect(ta.value).toContain("#SUPERNOVA_OPENAI_API_KEY=");
+    // git 段默认不进入预填模板（prefill=false）；需要时在右侧词典点击注入
+    expect(ta.value).not.toContain("GITLAB_TOKEN");
+    expect(ta.value).not.toContain("GITLAB_USER");
+  });
+
+  it("is_default=false → 显示后端 env_text，不预填模板", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () =>
+        HttpResponse.json({ env_text: "SUPERNOVA_AI_PROVIDER=anthropic_api\n", is_default: false })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    expect(ta.value).toBe("SUPERNOVA_AI_PROVIDER=anthropic_api\n");
+    expect(ta.value).not.toContain("SUPERNOVA_MAX_TURNS");
+  });
+
   it("GET env_text → textarea 显示 env 文本", async () => {
     server.use(
       http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
@@ -131,7 +170,7 @@ describe("WsSettingsTab", () => {
     await waitFor(() => expect(screen.getByText("wsConfig.title")).toBeInTheDocument());
     fireEvent.click(screen.getByText("SUPERNOVA_MAX_TURNS"));
     const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
-    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=120"));
+    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=10000"));
   });
 
   it("点击凭据 key → 注入空值(等用户填)", async () => {

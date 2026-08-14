@@ -106,7 +106,8 @@ def test_post_scan_409_concurrent(_authed_app):
 
 
 def test_post_scan_422_when_workspace_provider_config_missing(_authed_app):
-    """工作区缺 API key 时，API 在调用 scan manager 前拒绝扫描。"""
+    """工作区缺 API key 时返回结构化错误（code=provider_incomplete + missing 字段列表），
+    让前端能把它和真正的 yaml 校验失败区分开，显示「请前往工作区设置补全凭据」而非「yaml 校验失败」。"""
     fake = FakeSM()
     app = create_app(overrides={"scan_manager": fake})
     app.state.auth_store = _authed_app.state.auth_store
@@ -118,7 +119,10 @@ def test_post_scan_422_when_workspace_provider_config_missing(_authed_app):
     response = client.post("/api/scan", json=_BODY, headers={"X-CSRF-Token": tok})
 
     assert response.status_code == 422
-    assert "SUPERNOVA_OPENAI_API_KEY" in response.text
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["code"] == "provider_incomplete"
+    assert "SUPERNOVA_OPENAI_API_KEY" in detail["missing"]
     assert fake.started == []
 
 

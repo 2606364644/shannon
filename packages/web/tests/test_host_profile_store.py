@@ -158,6 +158,57 @@ def test_read_system_segment_not_self_merged(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 脏数据容错：read 跳过不合法档案（单条脏数据不得毒死整个列表/页面）
+#
+# 背景：校验规则会随版本收紧（如 1828e98f 新增「同 host 不允许多 IP」），历史
+# 版本写入 / 手改文件可能已含现在不合法的档案。_read_segment 逐条 model_validate
+# 一条炸全部（list API 500 → 页面「加载失败」）。契约：跳过脏条 + warning 日志，
+# 合法条目照常返回；后续任意 write 自然淘汰被跳过的脏条（read-modify-write）。
+# 注意：仅容错「条目不合法」；yaml 语法级损坏仍抛错（此时返回 [] 会让下次 write
+# 整文件覆盖，静默清空全部数据——宁可 500 让人来看）。
+# ---------------------------------------------------------------------------
+
+_CORRUPT_SEGMENT_YAML = """\
+- id: host_good
+  name: good
+  mappings:
+  - ip: 10.0.0.1
+    host: a.test
+- id: host_bad
+  name: bad
+  mappings:
+  - ip: 10.254.50.10
+    host: dup.test
+  - ip: 10.10.10.2
+    host: dup.test
+"""
+
+
+def test_read_skips_corrupt_profile_entries(tmp_path, caplog):
+    """单条脏档案（同 host 双 IP，历史数据）→ 跳过 + warning，好档案照常返回。"""
+    ws_dir = tmp_path / "ws1"
+    ws_dir.mkdir()
+    (ws_dir / "host-profiles.yaml").write_text(_CORRUPT_SEGMENT_YAML, "utf-8")
+    store = HostProfileStore(tmp_path)
+    with caplog.at_level("WARNING", logger="supernova_web"):
+        profiles = store.read("ws1")
+    assert [p.id for p in profiles] == ["host_good"]
+    assert any("host_bad" in r.message for r in caplog.records)
+
+
+def test_read_skips_corrupt_system_entries(tmp_path):
+    """.system 段脏档案不拖垮 ws 读取（read 合并 ws + .system 两段）。"""
+    sys_dir = tmp_path / ".system"
+    sys_dir.mkdir()
+    (sys_dir / "host-profiles.yaml").write_text(_CORRUPT_SEGMENT_YAML, "utf-8")
+    store = HostProfileStore(tmp_path)
+    store.upsert_profile("ws1", HostProfile(id="host_ws", name="ws", mappings=[]))
+    profiles = store.read("ws1")
+    # host_bad(.system 段脏条)被跳过;host_good(.system 段合法条)照常合并进来
+    assert [p.id for p in profiles] == ["host_ws", "host_good"]
+
+
+# ---------------------------------------------------------------------------
 # fork_from_system —— 系统档案 fork 成 ws 可编辑副本
 # ---------------------------------------------------------------------------
 

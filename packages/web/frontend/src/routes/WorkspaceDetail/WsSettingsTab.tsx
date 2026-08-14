@@ -32,6 +32,9 @@ interface CfgKey {
 interface CfgGroup {
   titleKey: string;
   keys: CfgKey[];
+  // 是否进入默认预填模板（is_default 时自动预填）。git 段默认不预填——多数扫描不依赖 GitLab，
+  // 需要时可在右侧词典点击注入；词典渲染不受此标记影响（EFFECTIVE_GROUPS.map 仍渲染全部组）。
+  prefill?: boolean;
 }
 
 // 生效类：ws 级覆盖真生效（存 config.yaml）。与后端 ws_env_codec.ENV_TO_FIELD 对齐。
@@ -57,12 +60,24 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
   {
     titleKey: "wsConfig.keys.groups.runtime",
     keys: [
-      { key: "SUPERNOVA_MAX_TURNS", kind: "int", defaultValue: "120" },
+      { key: "SUPERNOVA_MAX_TURNS", kind: "int", defaultValue: "10000" },
       { key: "SUPERNOVA_ADAPTIVE_THINKING", kind: "bool", defaultValue: "true" },
     ],
   },
   {
+    titleKey: "wsConfig.keys.groups.scanSwitches",
+    keys: [
+      { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "bool", defaultValue: "0" },
+      { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "bool", defaultValue: "1" },
+      { key: "SUPERNOVA_BROWSER_ENGINE", kind: "str", defaultValue: "agent-browser" },
+      { key: "SUPERNOVA_PRICING_OVERRIDE", kind: "str", defaultValue: ".env.profiles/glm.pricing.json" },
+      { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
+    ],
+  },
+  {
     titleKey: "wsConfig.keys.groups.git",
+    // 默认不进入预填模板（多数扫描不依赖 GitLab）；词典仍显示，需要时点击注入。
+    prefill: false,
     keys: [
       { key: "GITLAB_USER", kind: "str", defaultValue: "" },
       { key: "GITLAB_TOKEN", kind: "str", defaultValue: "" },
@@ -70,15 +85,26 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
   },
 ];
 
-// 进程级：worker 共享 os.environ 读取，ws 覆盖不生效（需全局配）。与 INEFFECTIVE_KEYS 对齐。
+// 启动期：worker main() 启动时读一次，ws 覆盖不生效（需全局配）。与 INEFFECTIVE_KEYS 对齐。
 const PROCESS_KEYS: CfgKey[] = [
   { key: "SUPERNOVA_MAX_CONCURRENT", kind: "str", defaultValue: "4" },
-  { key: "SUPERNOVA_PRICING_OVERRIDE", kind: "str", defaultValue: "" },
-  { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "str", defaultValue: "true" },
-  { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "str", defaultValue: "true" },
-  { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
   { key: "CLAUDE_CODE_MAX_OUTPUT_TOKENS", kind: "str", defaultValue: "32000" },
 ];
+
+// 新工作区默认预填模板：遍历生效配置组（prefill!==false），非凭据/空值键填真实默认值（保存即生效），
+// 凭据类（defaultValue=""）用 # 注释行（不落盘空串、用户删 # 填值才生效）。
+// 不预填：进程级键（PROCESS_KEYS，ws 不生效）+ git 段（prefill=false，多数扫描不依赖 GitLab）。
+// 词典渲染仍显示全部组（EFFECTIVE_GROUPS.map），需要时点击注入。
+function buildDefaultTemplate(t: (k: string) => string): string {
+  const blocks = EFFECTIVE_GROUPS.filter((g) => g.prefill !== false).map((g) => {
+    const lines = [`# --- ${t(g.titleKey)} ---`];
+    for (const k of g.keys) {
+      lines.push(k.defaultValue === "" ? `#${k.key}=` : `${k.key}=${k.defaultValue}`);
+    }
+    return lines.join("\n");
+  });
+  return blocks.join("\n\n") + "\n";
+}
 
 function kindColor(kind: KeyKind): string | undefined {
   if (kind === "int") return "hsl(var(--c-cyan))";
@@ -138,9 +164,15 @@ export default function WsSettingsTab() {
   const [members, setMembers] = useState<Member[]>([]);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [isDefault, setIsDefault] = useState(false);
 
   useEffect(() => {
-    getWsConfig(ws).then((r) => { setEnvText(r.env_text); setLoaded(true); })
+    getWsConfig(ws).then((r) => {
+      // 新工作区（is_default）→ 预填完整推荐模板；否则显示后端实际配置。
+      setIsDefault(r.is_default);
+      setEnvText(r.is_default ? buildDefaultTemplate(t) : r.env_text);
+      setLoaded(true);
+    })
       .catch(() => setLoaded(true));
     getMembers(ws).then((r) => setMembers(r.members)).catch(() => {});
   }, [ws]);
@@ -221,6 +253,9 @@ export default function WsSettingsTab() {
               placeholder={PLACEHOLDER}
               onChange={(e) => setEnvText(e.target.value)}
             />
+            {isDefault && canEdit && (
+              <p className="text-xs text-muted-foreground">{t("wsConfig.keys.prefillHint")}</p>
+            )}
             {warnings && (
               <div className="space-y-1 text-sm text-amber-600 dark:text-amber-500">
                 {warnings.ineffective.length > 0 && (

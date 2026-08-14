@@ -36,6 +36,8 @@ const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json(WS_LIST)),
   http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([])),
   http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([])),
+  // 认证展开默认 source=profile（2026-08-14）→ BottomProfileBlock mount 即拉 auth-profiles；默认空列表。
+  http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -206,6 +208,8 @@ describe("ScanNewPage 白盒组合开关（UI）", () => {
     // 启用认证 + 填 inline 凭据（共享 AuthFields → BottomInlineBlock）
     fireEvent.click(screen.getByRole("button", { name: /配置登录/ }));
     await waitFor(() => expect(screen.getByText(/已启用登录/)).toBeInTheDocument());
+    // 默认 source=profile（2026-08-14）→ 切「临时填写」进 inline 模式
+    fireEvent.click(screen.getByRole("button", { name: /临时填写/ }));
     fireEvent.change(screen.getByPlaceholderText("https://example.com/login"), { target: { value: "http://t/login" } });
     fireEvent.change(inputByLabel("用户名"), { target: { value: "alice" } });
     // 提交

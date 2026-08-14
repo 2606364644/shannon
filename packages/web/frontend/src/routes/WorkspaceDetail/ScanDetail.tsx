@@ -190,9 +190,10 @@ export default function ScanDetail() {
   };
 
   // live/logs tab：根容器走 flex 链，高度 = 视口 - 固定的 TopBar(h-12=3rem) + main(py-5=2.5rem) = 5.5rem
-  // （这俩不换行、精确可靠，非对 header 的估值）；header/tabs 用 shrink-0 保持自然高（窄屏 flex-wrap 换行
-  // 也由 flex 自动吸收），Outlet 容器 flex-1 min-h-0 吃剩余空间 -> tab 内容动态填满、不溢出视口、无外层滚动条。
-  // 其余 tab（overview/report/deliverables）保持 space-y-4 流式（依赖 window 滚，如 ReportTab TOC scroll-spy）。
+  // （这俩不换行、精确可靠，非对 header 的估值）；header/时间线/sticky 进度块用 shrink-0 保持自然高
+  // （窄屏 flex-wrap 换行也由 flex 自动吸收），Outlet 容器 flex-1 min-h-0 吃剩余空间 -> tab 内容动态
+  // 填满、不溢出视口、无外层滚动条。其余 tab（overview/report/deliverables）保持 space-y-4 流式
+  // （依赖 window 滚，如 ReportTab TOC scroll-spy），进度概览+tabs 走 sticky 固定（见下）。
   const isFlexLayout = current === "live" || current === "logs";
 
   return (
@@ -265,17 +266,8 @@ export default function ScanDetail() {
           )}
         </div>
       </div>
-      {/* 顶部常驻进度概览（所有 tab 可见，所有扫描类型）：当前阶段 + 步级 + 正在跑的 Agent
-          （spec 进度两层粒度 · 详情页细粒度）。组合黑盒段自动读选中 run 的 events。 */}
-      {!loading && meta && (
-        <div className={isFlexLayout ? "shrink-0" : ""}>
-          <ScanProgressOverview
-            ws={workspace!} scanId={scanId!}
-            combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
-          />
-        </div>
-      )}
-      {/* 组合扫描两段时间线（spec §9/§11.3）：combined 时渲染；shrink-0 以兼容 live/logs flex 链。 */}
+      {/* 组合扫描两段时间线（spec §9/§11.3）+ 选中 run 失败横幅（spec 2026-08-14 可见性）：
+          静态上下文，随页滚动；shrink-0 以兼容 live/logs flex 链。 */}
       {isCombined && !loading && (
         <div className={isFlexLayout ? "shrink-0" : ""}>
           <CombinedDetailTimeline
@@ -283,23 +275,36 @@ export default function ScanDetail() {
           />
         </div>
       )}
-      {/* 选中 run 失败/跳过且有原因 → 顶部展示可读失败横幅 + 引导（spec 2026-08-14 可见性）。
-          后端 run session 的 bb_reason / 任务 bb_runs[].reason 经 API 透传到此。 */}
       {isCombined && selectedRunObj && isRunFailureStatus(selectedRunObj.status) &&
         selectedRunObj.reason && (
-        <div className={isFlexLayout ? "shrink-0" : ""}>
+        <div className={isFlexLayout ? " shrink-0" : ""}>
           <RunFailureBanner reason={selectedRunObj.reason} ws={workspace ?? undefined} />
         </div>
       )}
-      <Tabs value={current} onValueChange={(v) => navigate(v)}>
-        <div data-testid="scan-tabs-sticky" className={`sticky top-12 z-30 print:static${isFlexLayout ? " shrink-0" : ""}`}>
-          <TabsList>
-            {SCAN_TABS.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      </Tabs>
+      {/* 进度概览 + scan tabs 合成一个 sticky 块固定在 TopBar 下沿（top-12）：overview/report/
+          deliverables 靠 window 滚动，固定后长内容滚动时当前阶段/步级/Agent 进度始终可见
+          （spec 进度两层粒度 · 详情页细粒度；组合黑盒段自动读选中 run 的 events）。
+          bg-background 遮住从块底滚过的内容。live/logs 走 flex 链、无页面滚动，sticky 不触发，
+          shrink-0 保持自然高。 */}
+      <div
+        className={`sticky top-12 z-30 space-y-4 bg-background pb-2 print:static${isFlexLayout ? " shrink-0" : ""}`}
+      >
+        {!loading && meta && (
+          <ScanProgressOverview
+            ws={workspace!} scanId={scanId!}
+            combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
+          />
+        )}
+        <Tabs value={current} onValueChange={(v) => navigate(v)}>
+          <div data-testid="scan-tabs-sticky">
+            <TabsList>
+              {SCAN_TABS.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+        </Tabs>
+      </div>
       <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj }} /></ErrorBoundary></div>
 
       {/* 加黑盒确认 Dialog（空 body = 无认证直连；后续可扩认证/HOST 选择） */}

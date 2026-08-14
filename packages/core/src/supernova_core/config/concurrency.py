@@ -3,6 +3,8 @@
 import logging
 import os
 
+from .scan_env import ws_getenv
+
 _DEFAULT = 3
 _PER_CALL_TIMEOUT_DEFAULT = 60.0
 _CHUNK_MAX_CALLS_DEFAULT = 100
@@ -30,8 +32,11 @@ def get_max_concurrent() -> int:
 
 
 def _is_truthy_env(name: str, default: bool) -> bool:
-    """读布尔 env: '0'/'false'/'no' → False, 其余非空 → True, 未设 → default。"""
-    raw = os.environ.get(name)
+    """读布尔 env: '0'/'false'/'no' → False, 其余非空 → True, 未设 → default。
+
+    经 ws_getenv 支持 per-workspace 覆盖（is_llm_track_enabled / is_gitnexus_llm_enabled）。
+    """
+    raw = ws_getenv(name)
     if raw is None:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
@@ -65,7 +70,7 @@ def get_chunk_max_calls() -> int:
     返回 env 值(int>=1); 未设 / 畸形 / <=0 回退默认(100)并 warning。
     畸形值绝不崩 scan(对齐 get_max_concurrent / get_per_call_timeout 的容错契约)。
     """
-    raw = os.environ.get("SUPERNOVA_CHUNK_MAX_CALLS")
+    raw = ws_getenv("SUPERNOVA_CHUNK_MAX_CALLS")
     if raw is None:
         return _CHUNK_MAX_CALLS_DEFAULT
     try:
@@ -94,7 +99,7 @@ def get_per_call_timeout() -> float:
     提高此值(如 180)给单次调用更多时间(含 provider 内部 retry), 代价是大仓
     N 个函数的总耗时上升——需与 activity 的 start_to_close_timeout 平衡。
     """
-    raw = os.environ.get("SUPERNOVA_LLM_PER_CALL_TIMEOUT")
+    raw = ws_getenv("SUPERNOVA_LLM_PER_CALL_TIMEOUT")
     if raw is None:
         return _PER_CALL_TIMEOUT_DEFAULT
     try:

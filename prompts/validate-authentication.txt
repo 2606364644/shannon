@@ -35,10 +35,21 @@ After verification confirms login_success, save the authenticated browser sessio
   Run this exact command (substituting the session flag you've been using):
     {{AUTH_SAVE_COMMAND}}
 
-This writes the portable auth-state JSON to {{AUTH_STATE_FILE}}. Run it only when login_success is true. Skip it on failure. Do NOT hand-write a summary JSON — run the command verbatim so downstream agents can load the real cookies/localStorage.
+This writes the portable auth-state JSON to {{AUTH_STATE_FILE}}. Run it only when login_success is true. Skip it on failure. Do NOT hand-write the auth-state file yourself — run the command verbatim so downstream agents can load the real cookies/localStorage.
 </publish_session>
 
 <critical>
 - Submit each field (username, password, captcha, TOTP) exactly once.
 - Any rejection = auth error: return `login_success: false` and stop. Do not retry.
 </critical>
+
+<final_output>
+Your FINAL reply must be exactly one JSON object and nothing else — no Markdown, no code fences, no tables, no surrounding prose:
+
+  {"login_success": true|false, "failure_point": "username_or_password"|"totp_secret"|"out_of_band"|null, "failure_detail": "<brief reason, max 250 chars>"}
+
+- Login confirmed: {"login_success": true, "failure_point": null, "failure_detail": null}
+- Login rejected: set login_success to false, name the failure_point, keep failure_detail short.
+
+The pipeline parses this JSON as the authoritative login verdict. If it is missing, validation fails even when the login itself succeeded.
+</final_output>

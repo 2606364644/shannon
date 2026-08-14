@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 
+from supernova_core.config.scan_env import ws_getenv
+
 # 归一化为英文的取值；其余一切（zh/cn/中文/chinese/空/未知）回落中文（默认）。
 _EN_VALUES = {"en", "english"}
 
@@ -19,7 +21,7 @@ def current_lang() -> str:
     ``SUPERNOVA_AGENT_NARRATION_LANG`` 为 ``en``/``english`` → ``"en"``；
     其它（含 ``zh``/``cn``/``中文``/未设/未知）→ ``"zh"``。
     """
-    raw = os.getenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh").strip().lower()
+    raw = ws_getenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh").strip().lower()
     return "en" if raw in _EN_VALUES else "zh"
 
 
