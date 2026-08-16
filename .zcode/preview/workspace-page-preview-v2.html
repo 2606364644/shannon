@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作区页 · 就绪度方向预览 v2（/p/:workspace）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== DSF tokens（对齐 tokens.css；深色默认 + .light）===== */
+:root{
+  --background:34 7% 10%; --foreground:36 10% 91%;
+  --card:34 5% 13%; --card-foreground:36 10% 91%;
+  --primary:15 60% 56%; --primary-foreground:34 7% 10%;
+  --secondary:34 5% 16%; --muted:34 5% 16%; --muted-foreground:36 5% 62%;
+  --border:34 5% 20%; --destructive:5 62% 56%;
+  --c-cyan:190 70% 60%; --c-green:142 50% 56%; --c-red:5 62% 60%;
+  --c-yellow:38 75% 60%;
+  --shadow-card:0 0 0 1px hsl(34 10% 100%/.03),0 2px 8px hsl(0 0% 0%/.25),0 1px 2px hsl(0 0% 0%/.2);
+  --shadow-cta:0 1px 2px hsl(0 0% 0%/.30),0 6px 16px -6px hsl(15 70% 45%/.35);
+  --shadow-toolbar:0 1px 2px hsl(0 0% 0%/.18);
+}
+.light{
+  --background:40 32% 95%; --foreground:30 26% 18%;
+  --card:38 28% 97%; --card-foreground:30 26% 18%;
+  --primary:15 58% 50%; --primary-foreground:0 0% 100%;
+  --secondary:40 32% 91%; --muted:40 32% 91%; --muted-foreground:34 32% 36%;
+  --border:36 44% 76%; --destructive:5 58% 46%;
+  --c-cyan:190 65% 32%; --c-green:142 38% 35%; --c-red:5 58% 46%;
+  --c-yellow:40 72% 36%;
+  --shadow-card:0 1px 2px hsl(34 40% 30%/.10),0 4px 14px hsl(34 40% 30%/.06);
+  --shadow-cta:0 1px 2px hsl(34 40% 30%/.14),0 6px 16px -6px hsl(15 58% 45%/.22);
+  --shadow-toolbar:0 1px 2px hsl(34 40% 30%/.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:hsl(var(--background));color:hsl(var(--foreground));
+  font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.5;padding:24px 32px 64px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer;background:none;border:none;color:inherit}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.back{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:hsl(var(--muted-foreground))}
+.back:hover{color:hsl(var(--primary))}
+.back svg{width:13px;height:13px}
+
+/* ===== 工作区健康卡（就绪度，非威胁 hero）===== */
+.health{background:hsl(var(--card));border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
+.health-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:20px 22px 0}
+.eyebrow{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:hsl(var(--muted-foreground))}
+.eyebrow::before{content:"";width:3px;height:13px;border-radius:2px;background:hsl(var(--primary))}
+.ws-title{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-top:7px}
+.ws-title h1{font-family:"IBM Plex Mono",monospace;font-size:22px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.badge{display:inline-flex;align-items:center;gap:5px;border:1px solid hsl(var(--border));border-radius:999px;
+  padding:2px 9px;font-family:"IBM Plex Mono",monospace;font-size:11px;white-space:nowrap}
+.badge.s-running{border-color:hsl(var(--c-cyan)/.4);color:hsl(var(--c-cyan))}
+.badge .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.badge.s-running .dot{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.3}}
+.badge.type{color:hsl(var(--muted-foreground))}
+.badge.count{background:hsl(var(--secondary));border-color:transparent;color:hsl(var(--foreground))}
+
+/* 命令栏（toolbar 变体语言）*/
+.cmd{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.tbtn{display:inline-flex;align-items:center;gap:6px;background:hsl(var(--card));font-size:12.5px;
+  border:1px solid hsl(var(--border));border-radius:9px;padding:6px 11px;box-shadow:var(--shadow-toolbar);
+  color:hsl(var(--foreground));transition:transform .12s ease}
+.tbtn:hover{transform:translateY(-2px)}
+.tbtn.icon{padding:6px 8px;color:hsl(var(--muted-foreground))}
+.tbtn.pinned{background:hsl(var(--secondary));color:hsl(var(--primary))}
+.tbtn svg{width:14px;height:14px}
+.tbtn .caret-d{width:10px;height:10px;color:hsl(var(--muted-foreground))}
+.cmd-sep{width:1px;height:18px;background:hsl(var(--border));margin:0 2px}
+
+/* 运行状态行（有 running 才出现）*/
+.running-line{display:flex;align-items:center;gap:8px;padding:12px 22px 0;
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:hsl(var(--muted-foreground))}
+.running-line b{color:hsl(var(--c-cyan));font-weight:600}
+.running-line a{color:hsl(var(--foreground))}
+.running-line a:hover{color:hsl(var(--primary))}
+
+/* 就绪度检查行：可点 pill，✓=就绪 / ⚠=缺失（点入对应 tab）*/
+.readiness{display:flex;flex-wrap:wrap;gap:8px;padding:12px 22px 18px}
+.check{display:inline-flex;align-items:center;gap:7px;border-radius:9px;padding:6px 12px;font-size:12.5px;
+  border:1px solid hsl(var(--border));color:hsl(var(--foreground));background:hsl(var(--card));cursor:pointer}
+.check:hover{border-color:hsl(var(--primary)/.5)}
+.check .k{color:hsl(var(--muted-foreground))}
+.check .v{font-family:"IBM Plex Mono",monospace;font-weight:500}
+.check.ok .v{color:hsl(var(--c-green))}
+.check.warn{border-color:hsl(var(--c-yellow)/.45)}
+.check.warn .v{color:hsl(var(--c-yellow))}
+.check .arrow{width:11px;height:11px;color:hsl(var(--muted-foreground));opacity:0;transition:opacity .12s}
+.check:hover .arrow{opacity:1}
+.check .hint{font-size:11px;color:hsl(var(--c-yellow))}
+
+/* FX 细带：running 时健康卡底部脉冲轨迹 */
+.fx{height:22px;border-top:1px solid hsl(var(--border)/.6);position:relative;overflow:hidden}
+.fx svg{position:absolute;inset:0;width:100%;height:100%}
+.fx .trace{stroke:hsl(var(--primary));stroke-width:1.5;fill:none;stroke-dasharray:6 10;
+  animation:dash 2.4s linear infinite;opacity:.8}
+@keyframes dash{to{stroke-dashoffset:-64}}
+
+/* CTA */
+.btn-cta{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;background:hsl(var(--primary));
+  color:hsl(var(--primary-foreground));border-radius:10px;padding:8px 16px;font-weight:500;font-size:13.5px;
+  box-shadow:var(--shadow-cta);transition:transform .12s ease}
+.btn-cta:hover{transform:translateY(-1px)}
+.btn-cta svg{width:14px;height:14px}
+
+/* ===== 扫描列表 ===== */
+.list-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px}
+.list-head h3{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.list-head .more{font-size:12px;color:hsl(var(--muted-foreground));font-family:"IBM Plex Mono",monospace}
+.filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.search{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;background:hsl(var(--card));
+  border:1px solid hsl(var(--border));border-radius:10px;padding:7px 12px}
+.search svg{width:14px;height:14px;color:hsl(var(--muted-foreground));flex-shrink:0}
+.search input{border:none;outline:none;background:transparent;color:inherit;width:100%;font-size:13px;font-family:inherit}
+.seg{display:inline-flex;background:hsl(var(--muted));border-radius:10px;padding:3px}
+.seg button{padding:5px 12px;border-radius:7px;font-size:12.5px;color:hsl(var(--muted-foreground));font-weight:500}
+.seg button.on{background:hsl(var(--card));color:hsl(var(--foreground));box-shadow:0 1px 2px hsl(0 0% 0%/.2)}
+.seg button .n{font-family:"IBM Plex Mono",monospace;font-size:11px;margin-left:4px;opacity:.7}
+
+.table-card{background:hsl(var(--card));border-radius:12px;overflow:hidden;box-shadow:var(--shadow-card)}
+table{width:100%;border-collapse:collapse}
+thead th{white-space:nowrap;text-align:left;padding:11px 14px;font-size:11px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;color:hsl(var(--muted-foreground));border-bottom:1px solid hsl(var(--border))}
+thead th.r{text-align:right}
+tbody td{padding:12px 14px;border-bottom:1px solid hsl(var(--border)/.55);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.main:hover{background:hsl(var(--muted)/.4)}
+.id-cell{max-width:0;overflow:hidden;text-overflow:ellipsis;font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:500}
+.id-cell a:hover{color:hsl(var(--primary))}
+.repo-cell .r1{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.repo-cell .r2{font-size:10.5px;color:hsl(var(--muted-foreground)/.8);font-family:"IBM Plex Mono",monospace}
+.prog{display:flex;flex-direction:column;gap:5px;min-width:110px}
+.prog .p1{display:flex;align-items:baseline;gap:6px}
+.prog .pct{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600}
+.prog .ph{font-size:11px;color:hsl(var(--muted-foreground))}
+.prog .bar{height:4px;border-radius:999px;background:hsl(var(--muted));overflow:hidden}
+.prog .bar i{display:block;height:100%;border-radius:999px;background:hsl(var(--primary));transition:width .4s ease}
+.vuln{font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:600;line-height:1;text-align:right}
+.vuln.hot{color:hsl(var(--c-red))}
+.cost{font-family:"IBM Plex Mono",monospace;font-size:13px;text-align:right;white-space:nowrap}
+.time{font-family:"IBM Plex Mono",monospace;font-size:12px;color:hsl(var(--muted-foreground));white-space:nowrap}
+.dim{color:hsl(var(--muted-foreground))}
+.acts{display:flex;justify-content:flex-end;gap:2px;white-space:nowrap}
+.ibtn{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:7px;font-size:12px;
+  color:hsl(var(--muted-foreground));transition:background .12s,color .12s}
+.ibtn:hover{background:hsl(var(--muted));color:hsl(var(--foreground))}
+.ibtn.danger:hover{background:hsl(var(--destructive)/.1);color:hsl(var(--destructive))}
+.ibtn svg{width:13.5px;height:13.5px}
+tr.nested td{padding:0;border-bottom:1px solid hsl(var(--border)/.55)}
+.nested-in{margin:0 14px 12px 46px;border-left:2px solid hsl(var(--border));padding-left:14px;
+  display:flex;flex-direction:column;gap:7px}
+.run{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.run .rid{font-family:"IBM Plex Mono",monospace;color:hsl(var(--muted-foreground))}
+.run a{color:hsl(var(--primary));font-size:12px}
+.run a:hover{text-decoration:underline}
+.run .tag{font-size:10px;border:1px solid hsl(var(--primary)/.35);color:hsl(var(--primary));border-radius:999px;padding:1px 6px}
+.caret{display:inline-block;width:14px;text-align:center;color:hsl(var(--muted-foreground));font-size:10px;transition:transform .15s}
+tr.main.open .caret{transform:rotate(90deg)}
+
+.theme-toggle{position:fixed;top:14px;right:16px;z-index:9;font-size:12px;color:hsl(var(--muted-foreground));
+  border:1px solid hsl(var(--border));border-radius:8px;padding:4px 10px;background:hsl(var(--card))}
+.note{font-size:11.5px;color:hsl(var(--muted-foreground));line-height:1.8}
+.note b{color:hsl(var(--foreground));font-weight:600}
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="document.documentElement.classList.toggle('light')">◐ 深浅切换</button>
+
+<div class="wrap">
+
+  <a class="back" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>返回工作区入口</a>
+
+  <!-- ===== 工作区健康卡：身份 + 就绪度（不做威胁 hero）===== -->
+  <div class="health">
+    <div class="health-top">
+      <div>
+        <div class="eyebrow">工作区 · workspace</div>
+        <div class="ws-title">
+          <h1>acme-prod</h1>
+          <span class="badge s-running"><span class="dot"></span>running</span>
+          <span class="badge type">correlation</span>
+          <span class="badge count">扫描任务 · 6</span>
+        </div>
+      </div>
+      <div class="cmd">
+        <button class="tbtn icon pinned" title="取消置顶"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3 1-7Z"/></svg></button>
+        <button class="tbtn">acme-prod <svg class="caret-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="tbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>成员</button>
+        <span class="cmd-sep"></span>
+        <button class="tbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6l2 6-3 2a12 12 0 0 0 5 5l2-3 6 2v6H3z"/></svg>仓库</button>
+        <button class="tbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>认证</button>
+        <button class="tbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>主机</button>
+        <button class="tbtn icon" title="工作区设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 运行状态行：仅 running 时出现 -->
+    <div class="running-line">
+      <b>2 running</b> · 最新 <a href="#">acme-prod-8f3d2a</a> 黑盒段 62% · SSE 推阶段中
+    </div>
+
+    <!-- 就绪度检查：可点 pill，点入对应 tab；⚠ 缺项黄标 -->
+    <div class="readiness">
+      <button class="check ok" title="工作区设置 → LLM 凭据">
+        <span class="k">LLM 凭据</span><span class="v">✓ 已配置</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+      <button class="check ok" title="仓库 tab">
+        <span class="k">仓库</span><span class="v">3 已连接</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+      <button class="check warn" title="认证档案 tab">
+        <span class="k">认证档案</span><span class="v">0</span>
+        <span class="hint">黑盒未就绪 →</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+      <button class="check ok" title="主机档案 tab">
+        <span class="k">主机档案</span><span class="v">1</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+      <button class="check ok" title="工作区设置 → 扫描环境变量">
+        <span class="k">环境变量</span><span class="v">2 覆盖</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </div>
+
+    <!-- FX 细带：running 时出现 -->
+    <div class="fx">
+      <svg preserveAspectRatio="none" viewBox="0 0 1200 22">
+        <polyline class="trace" points="0,16 60,16 90,6 130,19 180,11 240,16 300,5 360,18 430,10 500,16 560,6 620,19 690,11 760,16 830,5 900,18 970,10 1040,16 1100,6 1160,18 1200,13"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ===== 扫描任务（Outlet index = ScanList，表格化）===== -->
+  <div class="list-head">
+    <h3>扫描任务</h3>
+    <span class="more">10s 静默轮询 · running 卡 SSE</span>
+  </div>
+  <div class="filters">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input placeholder="搜索 scan / workflow / repo…">
+    </div>
+    <div class="seg">
+      <button class="on">全部<span class="n">6</span></button>
+      <button>运行中<span class="n">2</span></button>
+      <button>已完成<span class="n">3</span></button>
+      <button>失败<span class="n">1</span></button>
+    </div>
+    <button class="btn-cta" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建扫描</button>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <colgroup>
+        <col style="width:26px"><col style="width:118"><col style="width:170"><col style="width:180"><col style="width:96"><col style="width:140"><col style="width:80"><col style="width:86"><col style="width:110"><col style="width:196">
+      </colgroup>
+      <thead>
+        <tr><th></th><th>状态</th><th>任务</th><th>仓库 / 目标</th><th>类型</th><th>进度</th><th class="r">漏洞</th><th class="r">花费</th><th>创建时间</th><th style="text-align:right">操作</th></tr>
+      </thead>
+      <tbody>
+        <tr class="main open" onclick="this.classList.toggle('open');document.getElementById('nr1').style.display=this.classList.contains('open')?'':'none'">
+          <td><span class="caret">▶</span></td>
+          <td><span class="badge s-running"><span class="dot"></span>running</span></td>
+          <td class="id-cell"><a href="#">acme-prod-8f3d2a…</a></td>
+          <td class="repo-cell"><div class="r1">shannon-web</div><div class="r2">github.com/acme/shannon-web</div></td>
+          <td><span class="badge type">correlation</span></td>
+          <td><div class="prog"><div class="p1"><span class="pct">62%</span><span class="ph">黑盒段</span></div><div class="bar"><i style="width:62%"></i></div></div></td>
+          <td><div class="vuln hot">4</div></td>
+          <td><div class="cost">$6.31</div></td>
+          <td><div class="time">08-15 14:22</div></td>
+          <td><div class="acts">
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.5 7.5h13l-1 4h-11z"/></svg>取消</button>
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>查看</button>
+            <button class="ibtn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+          </div></td>
+        </tr>
+        <tr class="nested" id="nr1">
+          <td colspan="10"><div class="nested-in">
+            <div class="run"><span class="rid">run_c41e9b</span><span class="badge s-running"><span class="dot"></span>running</span><span class="tag">最新</span><a href="#">查看报告</a></div>
+            <div class="run"><span class="rid">run_a07f22</span><span class="badge s-completed" style="border-color:hsl(var(--c-green)/.4);color:hsl(var(--c-green))">✓ completed</span><a href="#">查看</a>
+              <button class="ibtn danger" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>删除</button></div>
+          </div></td>
+        </tr>
+
+        <tr class="main">
+          <td></td>
+          <td><span class="badge s-running"><span class="dot"></span>running</span></td>
+          <td class="id-cell"><a href="#">acme-prod-b2e77c…</a></td>
+          <td class="repo-cell"><div class="r1">payments-api</div><div class="r2">git@acme.dev:payments/api.git</div></td>
+          <td><span class="badge type">whitebox</span></td>
+          <td><div class="prog"><div class="p1"><span class="pct">34%</span><span class="ph">白盒 · recon</span></div><div class="bar"><i style="width:34%"></i></div></div></td>
+          <td><div class="vuln hot">2</div></td>
+          <td><div class="cost">$3.18</div></td>
+          <td><div class="time">08-15 13:05</div></td>
+          <td><div class="acts">
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.5 7.5h13l-1 4h-11z"/></svg>取消</button>
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>查看</button>
+            <button class="ibtn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+          </div></td>
+        </tr>
+
+        <tr class="main">
+          <td></td>
+          <td><span class="badge" style="border-color:hsl(var(--c-green)/.4);color:hsl(var(--c-green))">✓ completed</span></td>
+          <td class="id-cell"><a href="#">acme-prod-5c1f80…</a></td>
+          <td class="repo-cell"><div class="r1">shannon-web</div><div class="r2">github.com/acme/shannon-web</div></td>
+          <td><span class="badge type">whitebox</span></td>
+          <td><div class="time">100% · 42m</div></td>
+          <td><div class="vuln hot">5</div></td>
+          <td><div class="cost">$5.02</div></td>
+          <td><div class="time">08-14 19:40</div></td>
+          <td><div class="acts">
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>查看</button>
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>重跑</button>
+            <button class="ibtn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+          </div></td>
+        </tr>
+
+        <tr class="main">
+          <td></td>
+          <td><span class="badge" style="border-color:hsl(var(--c-red)/.4);color:hsl(var(--c-red))">✗ failed</span></td>
+          <td class="id-cell"><a href="#">acme-prod-77aa02…</a></td>
+          <td class="repo-cell"><div class="r1">https://portal.acme.io</div><div class="r2">blackbox · auth failed</div></td>
+          <td><span class="badge type">blackbox</span></td>
+          <td><div class="time dim">—</div></td>
+          <td><div class="vuln">0</div></td>
+          <td><div class="cost">$0.84</div></td>
+          <td><div class="time">08-12 10:03</div></td>
+          <td><div class="acts">
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>查看</button>
+            <button class="ibtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>重跑</button>
+            <button class="ibtn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+          </div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note">
+    <b>v2 要点（与 Dashboard 概览页解耦）：</b><br>
+    ① 不做威胁 hero / 大数字 / 谱带 / 指标条 —— 威胁总量叙事归 Dashboard；工作区页头部改为<b>健康卡</b>：身份（名+状态+类型+扫描数）+ 运行状态一行（仅 running 时）+ <b>就绪度检查 pill</b>；<br>
+    ② 就绪度检查可点，直达对应 tab（LLM 凭据/环境变量→settings，仓库→repos，认证→auth-profiles，主机→host-profiles）；缺项黄标 + 「黑盒未就绪 →」，把 <span class="mono">reasonProviderMissing / reasonAuthFailed</span> 这类发起后才暴露的失败前置到进页即见；<br>
+    ③ 扫描列表表格化 + 嵌套黑盒 run 展开子行（与 Dashboard 共用表格语言，但无 workspace 列、多嵌套 run 与 Resume/Cancel）；<br>
+    ④ 命令栏保留 toolbar 语言右移分组；FX 细带仅 running 时出现。
+  </p>
+</div>
+</body>
+</html>
