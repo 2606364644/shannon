@@ -116,7 +116,7 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
         </TabsList>
       </Tabs>
       {showRunFailure ? (
-        <RunFailureBanner reason={runSummary!.reason} ws={ws} />
+        <RunFailureBanner reason={runSummary!.reason} ws={ws} detail={runSummary!.bb_failure_detail} />
       ) : err ? (
         <ErrorState message={t("workspaceDetail.report.loadError", { error: err })} />
       ) : loading ? (

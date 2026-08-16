@@ -128,6 +128,10 @@ export interface BlackboxRunSummary {
   auth_ref?: { profile_id?: string | null };
   reason?: string | null;
   bb_phase?: string;
+  // precheck 失败详情（scan_manager 落 session + update_blackbox_run extra 并入）：
+  // RunFailureBanner 展示原始 verdict（如 "Target unreachable: ..."）。历史 run 无 -> 可选。
+  bb_failure_point?: string | null;
+  bb_failure_detail?: string | null;
 }
 
 export interface ScanSummary {
@@ -206,6 +210,10 @@ export interface SessionData {
   combined?: boolean | null;
   bb_phase?: string | null;        // precheck | pending | running | completed | failed | skipped
   bb_reason?: string | null;
+  // precheck/编排失败详情（_scan_detail 透传 session.json）：任务级失败横幅展示。
+  // 历史扫描无此键 -> null，横幅降级为只显示 reason 分类。
+  bb_failure_point?: string | null;
+  bb_failure_detail?: string | null;
   progress_pct?: number | null;
   // 重跑预填用（_scan_detail 补返）：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
   source_repo?: string | null;

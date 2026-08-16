@@ -235,9 +235,7 @@
     "filter": {
       "allStatus": "All status",
       "allType": "All type",
-      "whitebox": "whitebox",
-      "blackbox": "blackbox",
-      "correlation": "correlation"
+      "whitebox": "whitebox"
     },
     "newScan": "New scan",
     "lastRefresh": "Last updated {{time}}",
@@ -301,11 +299,6 @@
     }
   },
   "scan": {
-    "tabs": {
-      "whitebox": "whitebox",
-      "blackbox": "blackbox",
-      "correlation": "correlation"
-    },
     "cardTitle": {
       "whitebox": "Whitebox scan",
       "blackbox": "Blackbox scan",
@@ -347,7 +340,6 @@
       "noMatch": "No matching repositories"
     },
     "submit": "Start scan",
-    "submitHint": "→ 202 → redirect /p/{ws}/live · errors: 400(Temporal)/409(concurrent)/422(yaml)",
     "errors": {
       "yamlRuntimeError": "yaml has errors; cannot run",
       "temporal": "Temporal not ready (localhost:7233). Start it first: docker-compose up temporal",
@@ -373,7 +365,6 @@
     "title": "New Scan",
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
     "subtitleBlackbox": "Launch a blackbox penetration test against a running target",
-    "subtitleCorrelation": "Merge multiple scan results into a correlation report",
     "submitBlackbox": "Start Pentest",
     "footerHintWhitebox": "⌘+Enter to submit",
     "footerHintBlackbox": "Verify the target URL before submitting",
@@ -432,6 +423,13 @@
       "selectRole": "Log in as which role",
       "profileRoleHint": "Will actually log in once with the selected role to persist the session; verification status comes from the profile library's latest test login.",
       "role": "Role",
+      "rolePlaceholder": "Pick or type a role",
+      "rolePresetsHint": "Click a built-in role to fill in; type custom roles (e.g. audit admin) directly",
+      "rolePresets": {
+        "superadmin": "Super admin",
+        "admin": "Admin",
+        "user": "User"
+      },
       "addRole": "+ Add role",
       "removeRole": "Remove role",
       "selectAllRoles": "Select all",
@@ -458,9 +456,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "subtitle": "Scan overview and recent activity",
     "newScan": "New scan",
-    "summaryAria": "Summary",
     "hero": {
       "eyebrow": "FINDINGS · TOTAL",
       "allClearEyebrow": "SURFACE CLEAR",
@@ -475,7 +471,6 @@
       "flow": "Taint flow",
       "toggle": "Switch effect"
     },
-    "elapsed": "Running {{dur}}",
     "fresh": {
       "ago": "Updated {{sec}}s ago",
       "justNow": "Just updated",
@@ -484,14 +479,10 @@
     "stats": {
       "running": "Running",
       "completedToday": "Completed today",
-      "totalVulns": "Total vulns",
       "totalCost": "Total cost",
-      "totalScans": "Total scans"
+      "totalScans": "Total scans",
+      "needsAttention": "Needs attention"
     },
-    "runningTitle": "Running",
-    "viewLive": "View live",
-    "noRunning": "No running scans",
-    "noRunningAgents": "No running agents",
     "startedAt": "Start time",
     "totalDuration": "Total time",
     "phaseDuration": "Phase time",
@@ -502,31 +493,22 @@
     "lastEventJustNow": "just now",
     "progress": "Progress",
     "cost": "Cost",
-    "recentTitle": "Recent scans",
-    "viewAll": "View all →",
     "empty": {
       "title": "No scans yet",
       "hint": "Create a scan to start",
       "noWorkspaceHint": "No workspaces yet — create one to start scanning"
     },
     "errors": {
-      "loadFailed": "Dashboard load failed: {{error}}"
+      "title": "Failed to load",
+      "loadFailed": "Dashboard load failed: {{error}}",
+      "stale": "Refresh failed — showing cached data"
     },
-    "scanTable": {
-      "status": "Status",
-      "scanId": "Scan",
-      "workspace": "Workspace",
-      "repo": "Repo",
-      "type": "Type",
-      "progress": "Progress",
-      "vulns": "Vulns",
-      "cost": "Cost",
-      "time": "Time",
-      "actions": "Actions"
-    },
-    "noWorkspace": {
-      "title": "No workspace assigned",
-      "hint": "Contact your admin to assign a workspace"
+    "tiles": {
+      "title": "Workspaces",
+      "manageAll": "Manage workspaces",
+      "findings": "findings",
+      "allClear": "no findings",
+      "scansUnit": "{{n}} scans"
     }
   },
   "settings": {
@@ -573,21 +555,55 @@
     "unpin": "Unpin",
     "pinPinned": "Pinned",
     "pinFailed": "Pin failed: {{error}}",
+    "hero": {
+      "eyebrow": "Workspace · WORKSPACE",
+      "totalFindings": "Total findings",
+      "allClear": "All clear",
+      "notScanned": "Not scanned yet",
+      "emptyGuide": "Run the first scan to establish a security baseline · Whitebox audits the code repo; blackbox probes the running target",
+      "ctxLatest": "Latest",
+      "ctxTarget": "Target"
+    },
+    "stats": {
+      "cost": "Total cost",
+      "needsAttention": "Needs attention",
+      "needsAttentionCtx": "{{failed}} failed · {{interrupted}} interrupted"
+    },
     "tabs": {
       "overview": "Overview",
       "report": "Report",
       "deliverables": "Deliverables",
       "logs": "Logs",
       "live": "Live",
-      "repos": "Repositories"
+      "repos": "Repositories",
+      "scans": "Scans"
     },
     "notFound": {
       "message": "Workspace does not exist or has been deleted; live progress is unavailable. The scan may have been cleaned up or lost after a service restart."
     },
     "scans": {
       "listTitle": "Scan jobs",
+      "searchPlaceholder": "Search scan / workflow / repo…",
+      "seg": {
+        "all": "All"
+      },
+      "table": {
+        "status": "Status",
+        "scan": "Scan",
+        "repo": "Repo / target",
+        "type": "Type",
+        "progress": "Progress",
+        "vulns": "Vulns",
+        "cost": "Cost",
+        "created": "Created",
+        "actions": "Actions"
+      },
+      "stoppedAt": "Stopped at {{pct}}%",
+      "duration": "Took {{dur}}",
       "empty": "No scan jobs yet",
-      "emptyHint": "Start a new scan to begin auditing",
+      "emptyHint": "Start a new scan to begin auditing; set up repositories first for whitebox, or auth / host profiles first for blackbox",
+      "setupRepos": "Set up repositories →",
+      "setupAuth": "Configure auth profiles →",
       "newScan": "New scan",
       "view": "View",
       "resume": "Resume",
@@ -647,6 +663,8 @@
       },
       "runs": {
         "view": "View",
+        "toggleExpand": "Expand blackbox runs",
+        "toggleCollapse": "Collapse blackbox runs",
         "select": "Select blackbox run",
         "latest": "Latest",
         "statusFailed": "Failed",
@@ -657,6 +675,8 @@
         "addBlackboxDesc": "Create a new blackbox run for this whitebox result",
         "addedSuccess": "Blackbox run created",
         "addedFailed": "Failed to create blackbox run: {{error}}",
+        "addNoUrlHint": "This task has no target URL (pure whitebox); start a combined scan with a target URL instead",
+        "addRunningHint": "A blackbox run is in progress; wait for it to finish or cancel it first",
         "delete": "Delete run",
         "deleteConfirmTitle": "Delete blackbox run",
         "deleteConfirmDesc": "This deletes all results for this blackbox run (report, deliverables, logs) and cannot be undone. Delete {{runId}}?",
@@ -665,18 +685,22 @@
         "deleteRunningHint": "Cancel the running run before deleting",
         "bannerWsSettings": "Go to workspace settings",
         "bannerRerunAuth": "Retry with new auth",
+        "bannerAuthProfiles": "Manage auth profiles",
         "reasonProviderMissing": {
           "title": "Workspace LLM credentials not configured",
           "hint": "This workspace is missing an LLM API key, so the blackbox run cannot start. Add the credentials in workspace settings, then run blackbox again."
         },
         "reasonAuthFailed": {
           "title": "Target auth pre-check failed",
-          "hint": "Login to the target site failed. Check the credentials and retry with new auth."
+          "hint": "Login to the target site failed. Open auth profiles, make sure the login URL is reachable (target service is up and the address has not changed) and the credentials are valid, then start the scan again."
         },
         "reasonGeneric": {
           "title": "Blackbox run failed"
         }
-      }
+      },
+      "typeCombined": "Combined",
+      "typeFilterCombined": "Combined (whitebox + blackbox)",
+      "avgCtx": "avg {{avg}} · max {{max}} · min {{min}}"
     },
     "errorBoundary": {
       "title": "This section failed to load",
@@ -743,6 +767,7 @@
       "statusOpen": "Connected",
       "statusError": "Reconnecting",
       "statusClosed": "Ended",
+      "progressDetails": "Progress details",
       "endFailed": "Scan failed",
       "endInterrupted": "Scan interrupted",
       "endKilled": "Scan killed",

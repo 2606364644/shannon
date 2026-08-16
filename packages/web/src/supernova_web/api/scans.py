@@ -69,13 +69,17 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     from supernova_web.components.metrics_normalizer import normalize_metrics
     from supernova_web.components.workspaces_indexer import _to_unix
     from supernova_web.components.scan_store import (
-        resolve_workflow_id, _compute_progress_pct)
+        resolve_workflow_id, _compute_progress_pct, merge_latest_run_view)
     mgr = SessionManager(scan_dir.parent)
     data = mgr.get_session_data(scan_dir)
     idx = request.app.state.indexer
     status = idx._status_of(scan_dir, mgr.get_status(scan_dir))
     combined = data.get("combined")
-    bb_phase = data.get("bb_phase")
+    # 版本化 run（spec §5.2/§5.3）：bb_phase/bb_reason 合并 latest run（与 list 同视图）——
+    # 任务级 phase 停在 precheck/pending，前端时间线/进度概览的 eventsUrl 切换都按 run
+    # phase 消费（ScanProgressOverview.resolveActiveEventsUrl），不合并则黑盒段永显「待
+    # 接力」、run 级实时进度不可见（list/detail 口径一致，修 run 版本化重构遗留）。
+    bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
     host_config = data.get("host_config") or {}
     host_enabled = bool(host_config.get("enabled")) if isinstance(host_config, dict) else False
     host_source = host_config.get("source") if host_enabled else None
@@ -103,12 +107,17 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "host_source": host_source,
         "host_mapping_count": len(host_mappings) if isinstance(host_mappings, dict) else 0,
         # 组合扫描字段 + 进度（spec §6.2/§9.2，2026-08-13 Task 1）：
-        # combined/bb_phase/bb_reason 透传 session.json；progress_pct 三阶段加权预算；
+        # combined 透传 session.json；bb_phase/bb_reason/completed_agents 经
+        # merge_latest_run_view 合并 latest run（见上）；progress_pct 三阶段加权预算；
         # expected_agents/completed_agents 是进度分母/分子（list_scans 已透传，详情一并给）。
         "combined": bool(combined) if combined is not None else None,
         "bb_phase": bb_phase,
-        "bb_reason": data.get("bb_reason"),
-        "progress_pct": _compute_progress_pct(status, combined, bb_phase, data),
+        "bb_reason": bb_reason,
+        # precheck/编排失败详情（bb_failure_detail 如 "Target unreachable: ..."）：
+        # 供前端失败横幅展示，历史扫描无此键 → null 自然降级为只显示 reason。
+        "bb_failure_point": data.get("bb_failure_point"),
+        "bb_failure_detail": data.get("bb_failure_detail"),
+        "progress_pct": _compute_progress_pct(status, combined, bb_phase, progress_data),
         "expected_agents": data.get("expected_agents") or {},
         "completed_agents": data.get("completed_agents") or [],
         # 版本化黑盒 run（spec §5.2）：任务级索引 bb_runs[] + latest_bb_run（纯白盒为 None/[]）。

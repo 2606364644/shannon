@@ -66,11 +66,6 @@ function renderPage(initialPath = "/scan/new", state?: unknown) {
   );
 }
 
-// 自定义 tab 按钮用 onClick（非 Radix 的 onMouseDown），故用 fireEvent.click。
-function clickTab(name: string) {
-  fireEvent.click(screen.getByRole("tab", { name }));
-}
-
 // Radix Select Trigger 在 jsdom 里走 fireEvent.click 打开下拉（与 WorkspaceListPage
 // 一致）。brief 推荐的 mouseDown 在本 jsdom 版本会触发 pointerCapture 未实现错误,
 // click 是已验证可复现的姿势——见 task-web-10 报告。
@@ -164,14 +159,6 @@ describe("ScanNewPage", () => {
     fireEvent.click(screen.getByText("ws1").closest("button")!);
     fireEvent.click(await screen.findByRole("option", { name: "ws2" }));
     await waitFor(() => expect(repoCalls).toContain("ws2"));
-  });
-
-  it("切联动：显示 yaml 编辑器，隐藏白盒字段", () => {
-    renderPage();
-    clickTab("联动");
-    expect(screen.getByTestId("monaco")).toBeInTheDocument();
-    // 联动页不显示「选择仓库」fieldset
-    expect(screen.queryByText(/\+ 添加新仓库/)).toBeNull();
   });
 
   it("提交 400 → toast 提示 Temporal 未就绪", async () => {
@@ -414,8 +401,7 @@ describe("ScanNewPage 黑盒代码上下文（恒复用白盒）", () => {
         return HttpResponse.json({ workspace: "ws1" }, { status: 202 });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     // 有白盒扫描 → 自动选最新一条 → trigger 显其 workflow_id
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
@@ -430,8 +416,7 @@ describe("ScanNewPage 黑盒代码上下文（恒复用白盒）", () => {
   });
 
   it("ws 无白盒扫描 → 显复用空态引导 + 不显仓库选择器；填 url 仍 disabled（reuseScanId 必填）", async () => {
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     // 默认 /scans 空 → 黑盒恒复用白盒，无白盒则显空态（不退到 repo）
     expect(await screen.findByText(/还没有白盒扫描结果/)).toBeInTheDocument();
@@ -468,8 +453,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
         return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     // wbScans 已 fixture → 等待 reuse 自动选最新（说明 listScans 已返回，ws 已选定）
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
@@ -504,8 +488,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
       http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -525,8 +508,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
       http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -546,8 +528,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
       http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json(PROFILE_FIXTURE)),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -581,8 +562,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
         return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -607,8 +587,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -625,8 +604,7 @@ describe("ScanNewPage 黑盒认证档案库（profile 模式）", () => {
   // 右栏显「登录步骤」+「存为档案」（字段不再纵向堆叠撑高，一屏装下）。
   it("inline 模式：下方横向铺开（显「登录入口」eyebrow + 右栏登录步骤）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -655,8 +633,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
 
   // 通用：黑盒 + 选 ws1 + 填 url + 启用登录（inline 默认）+ 填 loginUrl/role/username/password
   async function fillInlineAuth() {
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -722,8 +699,7 @@ describe("ScanNewPage 黑盒 inline 保存为认证档案", () => {
 
   it("保存：未填登录地址/用户名 -> 保存按钮 disabled + 常驻提示（不发请求）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -750,8 +726,7 @@ describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", ()
   // 通用前置：黑盒 + 选 ws1 + 填 url + 等 reuse 候选就绪。
   async function setupBlackbox() {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)));
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -783,8 +758,7 @@ describe("ScanNewPage 黑盒认证区单一 disclosure（展开即启用）", ()
         return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -841,8 +815,7 @@ describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_account
         return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -876,8 +849,7 @@ describe("ScanNewPage 黑盒 inline 多角色（#2 附加角色 → auth_account
         return HttpResponse.json({ workspace: "ws1", scan_id: "s1" });
       }),
     );
-    renderPage();
-    clickTab("黑盒");
+    renderPage("/scan/new", { type: "blackbox" });
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText(/http:\/\/example\.com/), { target: { value: "http://example.com" } });
@@ -904,7 +876,6 @@ describe("ScanNewPage 重跑预填（location.state）", () => {
       ])),
     );
     renderPage("/scan/new", { type: "whitebox", workspace: "ws1", repo: "foo" });
-    expect(screen.getByRole("tab", { name: "白盒" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText("foo")).toBeInTheDocument());
   });
@@ -917,7 +888,8 @@ describe("ScanNewPage 重跑预填（location.state）", () => {
     };
     renderPage("/scan/new", { type: "blackbox", workspace: "ws1", url: "http://t.example",
       reuseScanId: "20260731-1200", auth });
-    expect(screen.getByRole("tab", { name: "黑盒" })).toHaveAttribute("aria-selected", "true");
+    // 类型 tab 已移除：黑盒（仅重跑预填可达）经 PageHeader subtitle 生效
+    expect(screen.getByText(/对运行中的目标服务发起黑盒渗透测试/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
     expect(screen.getByDisplayValue("http://t.example")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/ws1-foo-20260731-1200/)).toBeInTheDocument());
@@ -945,9 +917,8 @@ describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调
   beforeEach(() => i18n.changeLanguage("zh"));
 
   it("右侧信息侧栏已移除（白盒无「审计范围」，黑盒无「攻击面」）", () => {
-    renderPage();
+    renderPage("/scan/new", { type: "blackbox" });
     expect(screen.queryByText("审计范围")).toBeNull();
-    clickTab("黑盒");
     expect(screen.queryByText("攻击面")).toBeNull();
   });
 

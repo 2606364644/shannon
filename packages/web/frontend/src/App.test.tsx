@@ -13,6 +13,9 @@ import i18n from "@/i18n";
 // 否则 RequireAuth 跳 /login，根路由不再渲染 DashboardPage。
 const server = setupServer(
   http.get("/api/workspaces", () => HttpResponse.json([])),
+  // /api/scans 必须显式 mock：DashboardPage 此前把加载失败静默吞掉才落到空态，
+  // 错误态分支上线后未 mock 的请求会正确显示「加载失败」而非「还没有扫描」。
+  http.get("/api/scans", () => HttpResponse.json([])),
   http.get("/api/system-status", () => HttpResponse.json({ brand_name: "Supernova" })),
   http.get("/api/auth/me", () =>
     HttpResponse.json({ user: { id: 1, username: "tester", role: "user" } }),

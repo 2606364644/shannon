@@ -42,6 +42,35 @@ def _now_local() -> datetime:
 _RUN_ID_RE = re.compile(r"^run-(\d+)$")
 
 
+def merge_latest_run_view(scan_dir: Path, data: dict) -> tuple[str | None, str | None, dict]:
+    """组合任务的任务级视图合并：bb_phase/bb_reason 取 latest run，completed_agents 拼接。
+
+    run 版本化重构（spec 2026-08-14 §5.2）把 bb_phase/bb_reason 下沉到 run 级 session 后，
+    任务级 bb_phase 停在 precheck/pending（仅启动编排写）；而消费方（列表徽章/详情两段
+    时间线/进度概览的 eventsUrl 切换/progress_pct）都需要「当前 run 的 phase」。list
+    （_summarize）与 detail（api/scans._scan_detail）共用本视图，保证两端口径一致。
+
+    非组合 / 无 run / run session 缺失 → 原值透传（零回归）。返回
+    (bb_phase, bb_reason, progress_data)；progress_data 仅在合并时替换（浅拷贝 +
+    completed_agents 拼接），供 _compute_progress_pct 用白盒+黑盒累积分子。
+    """
+    if not isinstance(data, dict) or not data.get("combined"):
+        return (data.get("bb_phase") if isinstance(data, dict) else None,
+                data.get("bb_reason") if isinstance(data, dict) else None, data)
+    latest = data.get("latest_bb_run")
+    if not latest:
+        return data.get("bb_phase"), data.get("bb_reason"), data
+    run_dir = blackbox_run_dir(scan_dir, latest)
+    if not (run_dir / "session.json").exists():
+        return data.get("bb_phase"), data.get("bb_reason"), data
+    run_data = SessionManager(run_dir.parent).get_session_data(run_dir)
+    merged = dict(data)
+    merged["completed_agents"] = list(data.get("completed_agents") or []) + \
+        list(run_data.get("completed_agents") or [])
+    return run_data.get("bb_phase", data.get("bb_phase")), \
+        run_data.get("bb_reason", data.get("bb_reason")), merged
+
+
 def _compute_progress_pct(status: str, combined: bool | None,
                           bb_phase: str | None, data: dict) -> float:
     """收起态粗略进度 0-100（spec §9.2 三阶段加权）。
@@ -385,9 +414,11 @@ class ScanStore:
     def update_blackbox_run(self, ws: str, wb_scan_id: str, run_id: str, *,
                             status: str | None = None, phase: str | None = None,
                             reason: str | None = None,
-                            completed_at: str | None = None) -> None:
+                            completed_at: str | None = None,
+                            extra: dict | None = None) -> None:
         """更新 run 级 session（bb_phase/bb_reason/status/completed_at）+ 任务 bb_runs[]
         条目状态。不改 latest_bb_run（仅 create/delete 决定 latest）。run 不存在 → ValueError。
+        extra：附加键值（如 bb_failure_point/detail）同时并入 run session 与 bb_runs[] 条目。
         """
         run_dir = self.get_blackbox_run_dir(ws, wb_scan_id, run_id)
         if run_dir is None:
@@ -401,6 +432,8 @@ class ScanStore:
             patch["status"] = status
         if completed_at is not None:
             patch["completed_at"] = completed_at
+        if extra:
+            patch.update(extra)
         if patch:
             SessionManager(run_dir.parent).update_session(run_dir, patch)
         # 任务索引条目状态同步（不重算 latest）
@@ -416,6 +449,8 @@ class ScanStore:
                     r["completed_at"] = completed_at
                 if reason is not None:
                     r["reason"] = reason
+                if extra:
+                    r.update(extra)
         task_mgr.update_session(wb_dir, {"bb_runs": runs})
 
     def delete_blackbox_run(self, ws: str, wb_scan_id: str, run_id: str) -> bool:
@@ -535,24 +570,13 @@ class ScanStore:
         links = data.get("links", {}) if isinstance(data, dict) else {}
         # 组合扫描字段（spec §6.2）：从 session.json 读 combined/bb_phase/bb_reason。
         combined = data.get("combined") if isinstance(data, dict) else None
-        bb_phase = data.get("bb_phase") if isinstance(data, dict) else None
-        bb_reason = data.get("bb_reason") if isinstance(data, dict) else None
         bb_runs = data.get("bb_runs") if isinstance(data, dict) else None
         latest_bb_run = data.get("latest_bb_run") if isinstance(data, dict) else None
         # 版本化 run（spec §5.2/§5.3）：bb_phase/bb_reason/completed_agents 下沉到 run 级
-        # session；任务级进度需合并白盒(任务 session completed_agents) + latest run
-        # completed_agents，bb_phase/bb_reason 取自 latest run（_compute_progress_pct 不改）。
-        progress_data = data
-        if combined and latest_bb_run:
-            run_dir = blackbox_run_dir(scan_dir, latest_bb_run)
-            if (run_dir / "session.json").exists():
-                run_data = SessionManager(run_dir.parent).get_session_data(run_dir)
-                bb_phase = run_data.get("bb_phase", bb_phase)
-                bb_reason = run_data.get("bb_reason", bb_reason)
-                merged = dict(data) if isinstance(data, dict) else {}
-                merged["completed_agents"] = list(data.get("completed_agents") or []) + \
-                    list(run_data.get("completed_agents") or [])
-                progress_data = merged
+        # session；任务级进度经 merge_latest_run_view 合并白盒(任务 session
+        # completed_agents) + latest run completed_agents，bb_phase/bb_reason 取自 latest
+        # run（与 api/scans._scan_detail 同一视图，list/detail 口径一致）。
+        bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
         progress_pct = _compute_progress_pct(status, combined, bb_phase, progress_data)
         return ScanSummary(
             scan_id=scan_id,

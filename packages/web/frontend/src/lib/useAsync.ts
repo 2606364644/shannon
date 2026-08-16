@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
  *
  * 设计取舍(对齐 DashboardPage 跨 ws 扫描聚合的消费场景):
  * - `data` 初值用 `[] as unknown as T` -- 调用方(DashboardPage)按数组语义消费
- *   (`data.length` / `data.filter` / `useScanFilters(data, ...)`),初值空数组避免
+ *   (`data.length` / `data.filter` / 磁贴分组等),初值空数组避免
  *   `data is possibly undefined` 的 null 守卫噪音;非数组 T 由调用方自行兜底。
  * - `refresh` 经 `useCallback(deps)` 稳定化,`useEffect([refresh])` 仅 mount 触发一次;
  *   deps 透传调用方依赖(如 listAllScans 这类 import 稳定的传 [] 即可)。

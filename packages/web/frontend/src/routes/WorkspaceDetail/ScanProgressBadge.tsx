@@ -26,6 +26,23 @@ const BB_PHASE_LABEL_KEY: Record<string, string> = {
   running: `${RUNS}.combined.phaseRunning`,
 };
 
+/** 运行中扫描的段标签（组合按 bb_phase 映射；纯白盒/黑盒 = 段名 + 可选 SSE 实时 phase）。
+ *  徽标（ScanProgressBadge）与 ScanList 表格进度格共用，避免两处口径漂移。 */
+export function scanSegmentLabel(
+  scan: Pick<ScanSummary, "combined" | "bb_phase" | "scan_type">,
+  currentPhase: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (scan.combined === true) {
+    const key = BB_PHASE_LABEL_KEY[scan.bb_phase ?? ""] ?? `${RUNS}.combined.phaseUnknown`;
+    return t(key);
+  }
+  const track = scan.scan_type === "blackbox"
+    ? t(`${RUNS}.progress.blackbox`)
+    : t(`${RUNS}.progress.whitebox`);
+  return currentPhase ? `${track} · ${currentPhase}` : track;
+}
+
 export interface ScanProgressBadgeProps {
   scan: ScanSummary;
   /** 运行中卡的实时当前阶段（来自 SSE 最后一条 PhaseEvent.phase），可选；纯白盒/纯黑盒段标签后缀。 */
@@ -40,18 +57,7 @@ export function ScanProgressBadge({ scan, currentPhase }: ScanProgressBadgeProps
 
   const pct = Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
 
-  let segmentText: string;
-  if (scan.combined === true) {
-    // 组合扫描：按 bb_phase 映射段状态（预验证/白盒扫描中/黑盒扫描中）。
-    const key = BB_PHASE_LABEL_KEY[scan.bb_phase ?? ""] ?? `${RUNS}.combined.phaseUnknown`;
-    segmentText = t(key);
-  } else {
-    // 纯白盒/纯黑盒：「白盒」/「黑盒」+ 可选实时 phase 后缀。
-    const track = scan.scan_type === "blackbox"
-      ? t(`${RUNS}.progress.blackbox`)
-      : t(`${RUNS}.progress.whitebox`);
-    segmentText = currentPhase ? `${track} · ${currentPhase}` : track;
-  }
+  const segmentText = scanSegmentLabel(scan, currentPhase, t);
 
   return (
     <span className="inline-flex items-center gap-2" data-testid="scan-progress">

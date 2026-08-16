@@ -27,6 +27,21 @@ const SCAN_TABS = [
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
 ] as const;
 
+/** ApiError → 可读文案：优先 body.detail（后端 ValueError 的 str，如「白盒产物未就绪」），
+ *  pydantic 校验数组取首条 msg；兜底 HTTP 状态码（ApiError.message 只是 "API 422"）。 */
+function apiErrMsg(e: unknown): string {
+  if (e instanceof ApiError) {
+    const d = (e.body as { detail?: unknown } | null)?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d) && d.length) {
+      const first = d[0] as { msg?: unknown } | undefined;
+      return String(first?.msg ?? e.status);
+    }
+    return String(e.status);
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
 // === 组合扫描段状态时间线（spec 2026-08-12 §9 / §11.3）===
 // 详情页：白盒段 + 黑盒段两个时间段的状态（靠 bb_phase 切段），黑盒 failed 时附「续扫黑盒」。
 // 步级 / Agent 实时进度在顶部 ScanProgressOverview（全 tab 常驻），此处不再重复渲染步级。
@@ -128,9 +143,12 @@ export default function ScanDetail() {
   const [meta, setMeta] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = () => {
+  // silent=true 不翻 loading：loading 翻转会卸载 ScanProgressOverview，其 endedFor
+  // （scan_end 只通知一次）ref 随卸载销毁，重挂载后 SSE 历史回放的 scan_end 会再次
+  // 触发 onScanEnd → 死循环刷新。终态扫描（report 页）必中，见 ScanProgressOverview。
+  const load = (silent = false) => {
     if (!workspace || !scanId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     getScan(workspace, scanId)
       .then((s) => { setMeta(s); setLoading(false); })
       .catch(() => { setMeta(null); setLoading(false); });
@@ -152,6 +170,14 @@ export default function ScanDetail() {
   const [deleteRunBusy, setDeleteRunBusy] = useState(false);
   const whiteboxTerminal =
     meta?.scan_type === "whitebox" && ["completed", "done"].includes(status);
+  // 加黑盒前置门（后端 422 兜底，前端先拦免空跑）：无目标 URL（纯白盒任务，黑盒无目标
+  // 可打）不可加；任一 run 非终态不可叠加——任务级 status 停留 completed，按钮不会因
+  // run 在跑而自动消失，须显式禁用。
+  const addBbBlockedBy = !meta?.web_url
+    ? t("workspaceDetail.scans.runs.addNoUrlHint")
+    : runs.some((r) => !isRunTerminal(r.status))
+      ? t("workspaceDetail.scans.runs.addRunningHint")
+      : null;
 
   const submitAddBlackbox = async () => {
     if (!workspace || !scanId) return;
@@ -163,7 +189,7 @@ export default function ScanDetail() {
       setSearchParams({ run: r.run_id });
       load();
     } catch (e) {
-      toast.error(t("workspaceDetail.scans.runs.addedFailed", { error: (e as Error).message }));
+      toast.error(t("workspaceDetail.scans.runs.addedFailed", { error: apiErrMsg(e) }));
     } finally {
       setAddBbBusy(false);
     }
@@ -258,9 +284,10 @@ export default function ScanDetail() {
             </Button>
           )}
           {/* 加黑盒入口（spec §6）：终端态白盒任务可新建黑盒 run（纯白盒→首个 run；
-              已 combined→下一个 run）。 */}
+              已 combined→下一个 run）。无目标 URL / run 在跑时禁用（后端 422 兜底）。 */}
           {whiteboxTerminal && (
-            <Button size="sm" variant="outline" onClick={() => setAddBbOpen(true)}>
+            <Button size="sm" variant="outline" onClick={() => setAddBbOpen(true)}
+              disabled={!!addBbBlockedBy} title={addBbBlockedBy ?? undefined}>
               <Plus className="size-3.5" /> {t("workspaceDetail.scans.runs.addBlackbox")}
             </Button>
           )}
@@ -278,7 +305,21 @@ export default function ScanDetail() {
       {isCombined && selectedRunObj && isRunFailureStatus(selectedRunObj.status) &&
         selectedRunObj.reason && (
         <div className={isFlexLayout ? " shrink-0" : ""}>
-          <RunFailureBanner reason={selectedRunObj.reason} ws={workspace ?? undefined} />
+          <RunFailureBanner
+            reason={selectedRunObj.reason} ws={workspace ?? undefined}
+            detail={selectedRunObj.bb_failure_detail} />
+        </div>
+      )}
+      {/* 任务级失败横幅：precheck（t0 认证预验证）失败没有 bb_runs，run 级横幅不触发，
+          用户只看到「失败」徽章 + "combined failed"。有 bb_reason 即展示（分类 + 原始
+          detail），run 级横幅已在展示时跳过避免重复。 */}
+      {!loading && ["failed", "crashed", "killed"].includes(status) && meta?.bb_reason &&
+        !(isCombined && selectedRunObj && isRunFailureStatus(selectedRunObj.status) &&
+          selectedRunObj.reason) && (
+        <div className={isFlexLayout ? " shrink-0" : ""}>
+          <RunFailureBanner
+            reason={meta.bb_reason} ws={workspace ?? undefined}
+            detail={meta.bb_failure_detail} />
         </div>
       )}
       {/* 进度概览 + scan tabs 合成一个 sticky 块固定在 TopBar 下沿（top-12）：overview/report/
@@ -293,6 +334,7 @@ export default function ScanDetail() {
           <ScanProgressOverview
             ws={workspace!} scanId={scanId!}
             combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
+            onScanEnd={() => load(true)}
           />
         )}
         <Tabs value={current} onValueChange={(v) => navigate(v)}>

@@ -683,3 +683,30 @@ def test_get_scan_detail_exposes_host_source_for_rerun(authed_client, tmp_worksp
     assert d["host_url"] is None
     assert d["host_source"] == "profile"
     assert d["host_mapping_count"] == 2
+
+
+def test_scan_detail_bb_phase_merged_from_latest_run(authed_client, tmp_workspaces):
+    """detail 的 bb_phase/bb_reason/progress 合并 latest run（与 list 同视图）。
+
+    run 版本化（spec 2026-08-14 §5.2）后 bb_phase 下沉到 run 级 session，任务级停在
+    precheck/pending；详情消费方（两段时间线 / ScanProgressOverview 的 eventsUrl 切换）
+    按 run phase 消费——不合并则黑盒段永显「待接力」、run 级实时进度在详情页不可见。
+    """
+    from supernova_core.session import SessionManager
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_workspaces)
+    wb_id, scan_dir = store.create_scan("WS", "http://e", "/code/x")
+    SessionManager(scan_dir.parent).update_session(scan_dir, {
+        "expected_agents": {"whitebox": 4, "blackbox": 2},
+        "completed_agents": ["a", "b", "c", "d"]})  # 白盒 4 完成
+    _, run_dir = store.create_blackbox_run("WS", wb_id)  # 任务 combined=True + run-1 pending
+    SessionManager(run_dir.parent).update_session(run_dir, {
+        "bb_phase": "running", "completed_agents": ["e"]})  # run-1 黑盒 1/2
+    d = authed_client.get(f"/api/workspaces/WS/scans/{wb_id}").json()
+    assert d["combined"] is True
+    assert d["bb_phase"] == "running"  # 取自 latest run（任务级停在 pending）
+    assert d["progress_pct"] == 77.5  # 与 list 同口径：55 + 45 × (5-4)/2
+    # list/detail 一致（同 merge_latest_run_view 视图）
+    lst = authed_client.get("/api/workspaces/WS/scans").json()
+    row = next(s for s in lst if s["scan_id"] == wb_id)
+    assert row["bb_phase"] == "running" and row["progress_pct"] == 77.5

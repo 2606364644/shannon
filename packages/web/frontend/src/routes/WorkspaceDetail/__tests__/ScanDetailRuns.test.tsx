@@ -75,7 +75,7 @@ describe("ScanDetail 加黑盒入口（T17）", () => {
     server.use(
       http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json(
         { scan_type: "whitebox", status: "completed", repo_path: "/code",
-          workflow_id: "ws-w1" })),
+          workflow_id: "ws-w1", web_url: "http://t" })),
       http.get("/api/workspaces/:ws/scans/:id/report",
         () => new HttpResponse("# 白盒报告", { headers: { "content-type": "text/plain" } })),
       http.post("/api/workspaces/:ws/scans/:id/blackbox-runs",

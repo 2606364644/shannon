@@ -63,7 +63,7 @@ describe("ScanList 扫描列表", () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([])));
     renderList();
     await waitFor(() => expect(screen.getByText(/尚无扫描任务/)).toBeInTheDocument());
-    // 空态：顶部 + Empty 内各一个「新建扫描」link
+    // v4：列表头 CTA 隐藏，空态卡是唯一「新建扫描」link
     expect(screen.getAllByRole("link", { name: /新建扫描/ }).length).toBeGreaterThanOrEqual(1);
   });
 
@@ -224,12 +224,16 @@ describe("ScanList 操作调 API + 列表刷新", () => {
 
   it("重跑（白盒）-> 预填 source_repo", async () => {
     server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([interrupted])),
+      // 重跑仅终态行有（interrupted 走「恢复」）——用已完成的白盒扫描做 fixture。
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+        { scan_id: "s3", scan_type: "whitebox", status: "completed", created_at: 3000,
+          completed_at: 4000, vuln_count: 1, total_cost_usd: 0.5, cost_currency: "USD",
+          is_running: false, workflow_id: "ws-s3" }])),
       http.get("/api/workspaces/:ws/scans/:scanId", () =>
         HttpResponse.json({ scan_type: "whitebox", source_repo: "group/repo-a" })),
     );
     renderList();
-    await waitFor(() => expect(screen.getByText("s3")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("ws-s3")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
     await waitFor(() => expect(navMock).toHaveBeenCalled());
     expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
@@ -254,35 +258,81 @@ describe("ScanList 操作调 API + 列表刷新", () => {
   });
 });
 
-describe("ScanCard 指标带设计不变量（concern 1：漏洞/花花费 hero）", () => {
-  it("vuln_count > 0：漏洞数以大号 mono + 红色 hero 呈现（醒目）", async () => {
+describe("ScanList 表格设计不变量（重设计 2026-08-15：漏洞数 hero 呈现）", () => {
+  it("vuln_count > 0：漏洞数以 mono + 红色呈现（醒目）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
     renderList();
     await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
-    // 找「漏洞数」标签，其后的值应为 3，且 className 含 text-lg + text-red（hero + 危险色）
-    const label = screen.getByText("漏洞数");
-    const value = label.parentElement?.querySelector(".font-mono.text-lg");
-    expect(value?.textContent).toBe("3");
-    expect(value?.className).toMatch(/text-lg/);
-    expect(value?.className).toMatch(/text-red/);
+    // 漏洞单元格：mono 大号 + text-red
+    const v = screen.getByTestId("row-vulns-s2");
+    expect(v.textContent).toBe("3");
+    expect(v.className).toMatch(/font-mono/);
+    expect(v.className).toMatch(/text-red/);
   });
 
   it("vuln_count = 0：漏洞值中性色（不染红，避免空扫描虚警）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
     renderList();
     await waitFor(() => expect(screen.getByText("s1")).toBeInTheDocument());
-    const label = screen.getByText("漏洞数");
-    const value = label.parentElement?.querySelector(".font-mono.text-lg");
-    expect(value?.textContent).toBe("0");
-    expect(value?.className).not.toMatch(/text-red/);
+    const v = screen.getByTestId("row-vulns-s1");
+    expect(v.textContent).toBe("0");
+    expect(v.className).toMatch(/font-mono/);
+    expect(v.className).not.toMatch(/text-red/);
+    // v4：0 进一步弱化为 muted（低于正文亮度，视觉降噪）
+    expect(v.className).toMatch(/text-muted-foreground/);
   });
 
-  it("花费以 hero（大号 mono）呈现", async () => {
+  it("花费以 mono 呈现", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
     renderList();
     await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
-    const label = screen.getByText("花费");
-    const value = label.parentElement?.querySelector(".font-mono.text-lg");
-    expect(value).toBeTruthy();
+    expect(screen.getByText("$2.00")).toBeInTheDocument();
+  });
+
+  it("状态分段过滤：点「已完成」只剩 completed 行", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running, completed])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s1")).toBeInTheDocument());
+    // 分段计数：全部按钮 textContent = 「全部2」（直接文本 + 计数 span）
+    const allBtn = screen.getByText("全部", { selector: "button" });
+    expect(allBtn.textContent).toBe("全部2");
+    fireEvent.click(screen.getByText("已完成", { selector: "button" }));
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
+    expect(screen.getByText("s2")).toBeInTheDocument();
+  });
+});
+
+// v4（workspace-page-preview-v4.html）：整行可点 + 空工作区收敛。
+describe("ScanList v4：整行可点 + 空态收敛", () => {
+  it("点击行非交互区 -> 导航到默认 tab（completed -> report）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    // 点花费单元格（非交互且文案唯一——「已完成」会同时命中状态徽标与过滤分段按钮）
+    fireEvent.click(screen.getByText("$2.00"));
+    await waitFor(() => expect(navMock).toHaveBeenCalledWith("/p/ws/scans/s2/report"));
+  });
+
+  it("操作按钮点击不触发行导航（stopPropagation）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
+    expect(await screen.findByText(/删除扫描 s2/)).toBeInTheDocument();
+    expect(navMock).not.toHaveBeenCalled();
+  });
+
+  it("空态：过滤器 + 列表头 CTA 隐藏；空态卡唯一 CTA + 仓库/认证次级入口", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([])));
+    renderList();
+    await waitFor(() => expect(screen.getByText(/尚无扫描任务/)).toBeInTheDocument());
+    // 过滤器整体隐藏（无对象可过滤）
+    expect(screen.queryByText("全部", { selector: "button" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("搜索 scan / workflow / repo…")).not.toBeInTheDocument();
+    // CTA 唯一化：列表头 CTA 移除，仅空态卡一个「新建扫描」
+    expect(screen.getAllByRole("link", { name: /新建扫描/ })).toHaveLength(1);
+    // 次级入口：先配置仓库 / 配置认证档案（对应命令栏入口）
+    expect(screen.getByRole("link", { name: /先配置仓库/ })).toHaveAttribute("href", "/p/ws/repos");
+    expect(screen.getByRole("link", { name: /配置认证档案/ })).toHaveAttribute("href", "/p/ws/auth-profiles");
   });
 });

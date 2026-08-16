@@ -5,7 +5,6 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
-import { YamlEditor } from "../components/YamlEditor";
 import { ScanFormFields } from "../components/ScanFormFields";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { Button } from "@/components/ui/button";
@@ -333,7 +332,11 @@ export function ScanNewPage() {
   const presetWs = params.get("workspace");
   // 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置（优先于 query param）。
   const preset = (useLocation().state ?? {}) as RerunPreset;
-  const [type, setType] = useState<ScanType>(preset.type ?? "whitebox");
+  // 类型模型收窄（重设计 2026-08-16）：只有白盒 + 组合——组合是白盒表单里的开关
+  // （combined + url）；黑盒一律是组合任务的嵌套 run，无独立创建入口（往白盒任务追加
+  // 黑盒走 ScanDetail 的 addBlackboxToWhitebox）。type 不再可切换：白盒恒定；
+  // blackbox 仅历史扫描经重跑预填（location.state）到达，保留只读渲染。
+  const type: ScanType = preset.type === "blackbox" ? "blackbox" : "whitebox";
   const [f, setF] = useState<FormState>({
     selectedRepo: preset.repo ?? presetRepo ?? "",
     url: preset.url ?? "",
@@ -349,7 +352,6 @@ export function ScanNewPage() {
   // ws 列表加载中标志：初始 [] 与"加载完真的为空"都表现为 wsList=[]，需区分以防空态提示闪现
   const [wsLoading, setWsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [yamlErr, setYamlErr] = useState("");
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
 
   useEffect(() => {
@@ -365,10 +367,9 @@ export function ScanNewPage() {
       .finally(() => setWsLoading(false));
   }, []);
 
-  const isCorrelation = type === "correlation";
-  // 校验：白盒 = repo + url(可选) + ws；黑盒 = url + reuseScanId(必填) + ws（恒复用白盒，无 repo 模式）。
+  // 校验：白盒 = repo + url(可选) + ws；黑盒（仅历史重跑预填）= url + reuseScanId(必填) + ws。
   // 白盒组合扫描（Task 9）：combined 开时 url 变必填 + auth 纳入校验（与黑盒同款 validateAuth）。
-  const needRepo = isCorrelation ? false : type === "whitebox";
+  const needRepo = type === "whitebox";
   const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
   const reuseErr = type === "blackbox" && !f.reuseScanId
     ? t("scan.errors.selectReuseScan")
@@ -379,15 +380,9 @@ export function ScanNewPage() {
     : validateUrl(f.url, type, t);
   const authErr = (type === "blackbox" || combined) ? validateAuth(f.auth, t) : null;
   const hostErr = (type === "blackbox" || combined) ? validateHost(f.host, t) : null;
-  const isValid = isCorrelation
-    ? !yamlErr
-    : !sourceErr && !reuseErr && !urlErr && !authErr && !hostErr && !!workspace;
+  const isValid = !sourceErr && !reuseErr && !urlErr && !authErr && !hostErr && !!workspace;
 
   async function onSubmit() {
-    if (type === "correlation" && yamlErr) {
-      toast.error(t("scan.errors.yamlRuntimeError"));
-      return;
-    }
     try {
       setSubmitting(true);
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace));
@@ -404,7 +399,7 @@ export function ScanNewPage() {
     }
   }
 
-  const subtitleKey = type === "whitebox" ? "scan.subtitleWhitebox" : type === "blackbox" ? "scan.subtitleBlackbox" : "scan.subtitleCorrelation";
+  const subtitleKey = type === "blackbox" ? "scan.subtitleBlackbox" : "scan.subtitleWhitebox";
   const submitLabel = type === "blackbox" ? t("scan.submitBlackbox") : t("scan.submit");
   const footerHint = type === "blackbox" ? t("scan.footerHintBlackbox") : t("scan.footerHintWhitebox");
 
@@ -413,81 +408,35 @@ export function ScanNewPage() {
       {/* 页面标题 */}
       <PageHeader title={t("scan.title")} subtitle={t(subtitleKey)} />
 
-      {/* 整张卡片：Tabs + 单栏表单 + 底部操作（侧栏已移除——信息内化进步骤） */}
+      {/* 整张卡片：单栏表单 + 底部操作（类型 tab 已移除——只有白盒/组合，黑盒无独立入口） */}
       <Card className="overflow-hidden">
-        {/* 自定义 Tabs 条（替换 shadcn Tabs，融入卡片） */}
-        <div className="flex border-b border-border bg-secondary">
-          {(["whitebox", "blackbox", "correlation"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="tab"
-              aria-selected={type === v}
-              onClick={() => setType(v)}
-              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                type === v
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(`scan.tabs.${v}`)}
-            </button>
-          ))}
-        </div>
-
-        {/* 表单区：白盒/黑盒均满宽卡（白盒旧 max-w-2xl 左贴致满宽卡右半空洞，已移除——
-            白盒改由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽）。 */}
+        {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽。 */}
         <div className="p-5">
-          {isCorrelation ? (
-            <div className="space-y-3">
-              <YamlEditor
-                value={f.yaml}
-                onChange={(v) => set({ yaml: v })}
-                onError={(m) => setYamlErr(m)}
-              />
-              <div className={yamlErr ? "text-sm text-destructive" : "text-xs text-muted-foreground"}>
-                {yamlErr ? t("scan.fields.yamlInvalid", { error: yamlErr }) : t("scan.fields.yamlValid")}
-              </div>
-            </div>
-          ) : (
-            <ScanFormFields
-              type={type}
-              f={f}
-              set={set}
-              sourceErr={sourceErr}
-              reuseErr={reuseErr}
-              urlErr={urlErr}
-              authErr={authErr}
-              hostErr={hostErr}
-              workspace={workspace}
-              wsList={wsList}
-              onWorkspaceChange={setWorkspace}
-              wsLoading={wsLoading}
-              presetReuseScanId={preset.reuseScanId}
-            />
-          )}
+          <ScanFormFields
+            type={type}
+            f={f}
+            set={set}
+            sourceErr={sourceErr}
+            reuseErr={reuseErr}
+            urlErr={urlErr}
+            authErr={authErr}
+            hostErr={hostErr}
+            workspace={workspace}
+            wsList={wsList}
+            onWorkspaceChange={setWorkspace}
+            wsLoading={wsLoading}
+            presetReuseScanId={preset.reuseScanId}
+          />
         </div>
 
         {/* 底部操作栏 */}
-        {!isCorrelation && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
-            <Button variant="cta" onClick={onSubmit} disabled={!isValid || submitting}>
-              {submitLabel}
-            </Button>
-            <span className="text-xs text-muted-foreground">{footerHint}</span>
-          </div>
-        )}
-      </Card>
-
-      {/* correlation 提交按钮（不在卡片底部栏内，因为无侧栏） */}
-      {isCorrelation && (
-        <>
-          <Button variant="cta" className="w-full" onClick={onSubmit} disabled={!isValid || submitting}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-card">
+          <Button variant="cta" onClick={onSubmit} disabled={!isValid || submitting}>
             {submitLabel}
           </Button>
-          <div className="text-xs text-muted-foreground text-center">{t("scan.submitHint")}</div>
-        </>
-      )}
+          <span className="text-xs text-muted-foreground">{footerHint}</span>
+        </div>
+      </Card>
     </div>
   );
 }

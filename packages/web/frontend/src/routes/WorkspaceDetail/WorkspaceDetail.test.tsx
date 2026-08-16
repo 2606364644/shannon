@@ -48,22 +48,29 @@ function renderAt(path: string) {
 }
 
 describe("WorkspaceDetail header", () => {
-  it("显返回链接 + workspace 名 + 元信息（status/scan_type）", async () => {
+  it("显返回链接 + workspace 名 + 元信息（latest status/scan_type 徽标）", async () => {
     server.use(
-      http.get("/api/workspaces/:ws", () =>
-        HttpResponse.json({ status: "completed", scan_type: "whitebox", scans: [] }),
+      http.get("/api/workspaces/:ws/scans", () =>
+        HttpResponse.json([
+          { scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 1000,
+            completed_at: 2000, vuln_count: 0, is_running: false },
+          // latest（created_at 最新）→ 状态/类型徽标取这条
+          { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 3000,
+            vuln_count: 0, is_running: true },
+        ]),
       ),
     );
     const { container } = renderAt("/p/ws1");
     expect(screen.getByText("返回列表")).toBeInTheDocument();
     expect(screen.getByText("ws1")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("whitebox")).toBeInTheDocument());
-    // StatusBadge 兜底显 completed（title 属性保留原 status，不受 i18n 标签本地化影响）
-    expect(container.querySelector("[title='completed']")).toBeInTheDocument();
+    // Hero 类型徽标 + 指标条「运行中」ctx 都会出现 whitebox —— 至少一处即证明 latest 元信息渲染
+    await waitFor(() => expect(screen.getAllByText("whitebox").length).toBeGreaterThan(0));
+    // latest = s1(running) → StatusBadge 兜底显 running（title 属性保留原 status）
+    expect(container.querySelector("[title='running']")).toBeInTheDocument();
   });
 
   it("fetch 失败降级显 workspace 名（不阻塞 Outlet）", async () => {
-    server.use(http.get("/api/workspaces/:ws", () => new HttpResponse(null, { status: 500 })));
+    server.use(http.get("/api/workspaces/:ws/scans", () => new HttpResponse(null, { status: 500 })));
     renderAt("/p/ws1");
     await waitFor(() => expect(screen.getByText("ws1")).toBeInTheDocument());
     expect(screen.getByText("返回列表")).toBeInTheDocument();
@@ -72,7 +79,7 @@ describe("WorkspaceDetail header", () => {
   });
 
   it("404 显工作区不存在/已删除", async () => {
-    server.use(http.get("/api/workspaces/:ws", () =>
+    server.use(http.get("/api/workspaces/:ws/scans", () =>
       HttpResponse.json({ detail: "workspace not found" }, { status: 404 }),
     ));
     renderAt("/p/ws1");

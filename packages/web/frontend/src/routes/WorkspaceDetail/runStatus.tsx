@@ -77,14 +77,18 @@ export function isRunTerminal(status: string | null | undefined): boolean {
     || status === "crashed" || status === "killed" || status === "skipped";
 }
 
-/** run 失败横幅：标题 + hint + 引导动作（providerMissing → 工作区设置链接）。
- *  reason 空 → 不渲染（调用方通常还需配合 status 终态判断）。复用 ErrorState 的 destructive class 口径。 */
+/** run/任务失败横幅：标题 + hint + 原始详情 + 引导动作（providerMissing → 工作区设置；
+ *  authFailed → 认证配置）。reason 空 → 不渲染（调用方通常还需配合 status 终态判断）。
+ *  detail 是后端 verdict 原文（如 "Target unreachable: ..."），mono 小字块展示，可缺省。
+ *  复用 ErrorState 的 destructive class 口径。 */
 export function RunFailureBanner({
   reason,
   ws,
+  detail,
 }: {
   reason: string | null | undefined;
   ws?: string;
+  detail?: string | null;
 }): ReactElement | null {
   const { t } = useTranslation();
   if (!reason) return null;
@@ -99,12 +103,28 @@ export function RunFailureBanner({
     >
       <div className="font-medium">{t(meta.titleKey)}</div>
       {hint && <div className="mt-0.5 text-xs opacity-90">{hint}</div>}
+      {detail && (
+        <pre
+          data-testid="run-failure-detail"
+          className="mt-2 whitespace-pre-wrap break-all rounded bg-muted/40 p-2 text-xs text-muted-foreground"
+        >
+          {detail}
+        </pre>
+      )}
       {meta.action === "wsSettings" && ws && (
         <Link
           to={`/p/${ws}/settings`}
           className="mt-2 inline-flex h-8 items-center rounded-md border border-destructive/40 bg-background px-3 text-xs font-medium text-destructive hover:bg-destructive/5"
         >
           {t(`${RUNS}.bannerWsSettings`)}
+        </Link>
+      )}
+      {meta.action === "rerunAuth" && ws && (
+        <Link
+          to={`/p/${ws}/auth-profiles`}
+          className="mt-2 inline-flex h-8 items-center rounded-md border border-destructive/40 bg-background px-3 text-xs font-medium text-destructive hover:bg-destructive/5"
+        >
+          {t(`${RUNS}.bannerAuthProfiles`)}
         </Link>
       )}
     </div>

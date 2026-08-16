@@ -1985,7 +1985,19 @@ class ScanManager:
             data = mgr.get_session_data(scan_dir)  # 刷新（bb_url/bb_auth_ref 已写）
         config_path = str(cfg) if cfg.exists() else None
         bb_url = data.get("bb_url") or data.get("web_url") or ""
+        # 空 bb_url 守卫：纯白盒任务（未填 url）无黑盒目标。黑盒 workflow 不 fail-fast
+        # （preflight 仅在有 URL 时校验可达性，exploit agent 拿空 web_url 也照跑一轮 LLM），
+        # 会产出一个无意义 run。此处 422 拦截（rerun_blackbox 委托本方法，同样受护）。
+        if not bb_url:
+            raise ValueError("该白盒任务没有目标 URL，无法加黑盒（纯白盒任务请用组合扫描提供 url）")
         auth_ref = data.get("bb_auth_ref") or {"profile_id": None}
+        # 在跑守卫（对齐 rerun_blackbox 的 latest 状态门）：latest run 非终态（pending/
+        # running/precheck）时叠加新 run 会并发打同一目标，且 _orchestrator_tasks[key] 被
+        # 新 run 覆盖（cancel 只能取消 latest）。终态（含 failed/skipped/cancelled）→ 放行。
+        runs = self._store.list_blackbox_runs(ws, wb_scan_id)
+        if runs and runs[-1].get("status") not in _RUN_TERMINAL_STATUSES:
+            raise ValueError(
+                f"黑盒 run {runs[-1].get('run_id')} 仍在进行，请等待完成或先取消再新增")
         # 序号分配须串行（与 create_scan 同 lock 口径，防并发同序号）。
         async with self._create_scan_lock:
             run_id, _run_dir = self._store.create_blackbox_run(
@@ -1994,8 +2006,15 @@ class ScanManager:
         if config_path and not await self._run_precheck(
                 scan_dir, ws, wb_scan_id, bb_url, config_path,
                 host_mappings=self._session_host_mappings(data)):
-            await self._mark_run(scan_dir, run_id, "failed",
-                                 reason="auth_failed", status="failed")
+            # precheck 失败详情已由 _run_precheck 落任务 session，读回并入 run（横幅用）。
+            try:
+                pdata = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+            except Exception:  # noqa: BLE001 - 读不到就只标笼统 auth_failed
+                pdata = {}
+            await self._mark_run(
+                scan_dir, run_id, "failed", reason="auth_failed", status="failed",
+                extra={"bb_failure_point": pdata.get("bb_failure_point"),
+                       "bb_failure_detail": pdata.get("bb_failure_detail")})
             await self._ensure_scan_end(scan_dir, status="failed")
             return run_id
         scan_key = (ws, wb_scan_id)
@@ -2014,6 +2033,12 @@ class ScanManager:
         起一个独立的 AuthValidationWorkflow（与认证管理页「测试登录」探针同源）。
 
         config_path=None（公开目标无认证）→ 跳过预验证直接 pass（无登录可验）。
+
+        workspace_path 必须同样隔离到 .authcheck scratch 目录：finalize_summary 成功收尾会往
+        <workspace_path>/session.json 写终态 status=completed，且 heartbeat daemon 有「见终态
+        自停」。若指向 scan_dir，白盒尚未提交主扫描 session.json 就被标 completed（2026-08-16
+        NodeGoat：白盒进行中却显示已完成 + 白盒 heartbeat 自停成 stale），event_file 的隔离
+        只挡住了 scan_end 这一半副作用。
         """
         if not config_path:
             return True  # 公开目标无认证 → 无需预验证
@@ -2021,9 +2046,11 @@ class ScanManager:
         from supernova_blackbox.pipeline.shared import BlackboxAuthValidationInput
         from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
         client = await Client.connect(self._temporal_address())
+        probe_dir = scan_dir / ".authcheck"
+        probe_dir.mkdir(parents=True, exist_ok=True)
         inp = BlackboxAuthValidationInput(
             web_url=web_url, config_path=config_path,
-            workspace_path=str(scan_dir),
+            workspace_path=str(probe_dir),
             event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
             api_key=self._resolve_provider_config(ws).get("api_key"),
             env_overrides=self._resolve_env_overrides(ws),
@@ -2051,6 +2078,16 @@ class ScanManager:
                     "auth agent produced no structured login verdict; proceeding — "
                     "authentication will be re-validated by the blackbox phase")})
             return True
+        # 确定性拒绝（登录失败/目标不可达）：把 verdict 落 session 供 API/横幅展示，
+        # 调用方只拿到 False + 笼统 bb_reason="auth_failed"，详情丢了用户无从排查。
+        point = getattr(result, "failure_point", None) if result else None
+        detail = getattr(result, "failure_detail", None) if result else None
+        try:
+            SessionManager(scan_dir.parent).update_session(scan_dir, {
+                "bb_failure_point": point,
+                "bb_failure_detail": detail[:500] if detail else detail})
+        except Exception:  # noqa: BLE001 - best-effort，不阻塞 fail-fast
+            pass
         return False
 
     async def _generate_combined_report(self, scan_dir: Path, run_id: str) -> None:
@@ -2080,8 +2117,19 @@ class ScanManager:
         if self._has_scan_end(scan_dir / "events.ndjson"):
             return
         session_status = status if status in {"completed", "failed", "cancelled", "crashed", "timeout"} else None
+        tail = f"combined {status}"
+        if status == "failed":
+            # 失败详情透出（precheck 落的 bb_failure_detail / 编排器落的 bb_reason）：
+            # 裸 "combined failed" 无信息量，live 页 stderr_tail 块即刻变可读。
+            try:
+                data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+            except Exception:  # noqa: BLE001 - 读不到就退回默认 tail
+                data = {}
+            extra = data.get("bb_failure_detail") or data.get("bb_reason")
+            if extra:
+                tail = f"{tail}: {str(extra)[:300]}"
         await self._write_scan_end(
-            scan_dir / "events.ndjson", status, 0, f"combined {status}",
+            scan_dir / "events.ndjson", status, 0, tail,
             session_status=session_status, scan_dir=scan_dir)
 
     def _whitebox_deliverables_ready(self, scan_dir: Path) -> bool:
@@ -2131,9 +2179,11 @@ class ScanManager:
 
     async def _mark_run(self, scan_dir: Path, run_id: str, phase: str,
                         reason: str | None = None,
-                        status: str | None = None) -> None:
+                        status: str | None = None,
+                        extra: dict | None = None) -> None:
         """run 级 phase 写入（spec §5.2/§5.3，取代 _mark_bb 对 run 的调用）：
         写 run 级 session（bb_phase/bb_reason/status）+ 任务 bb_runs[] 条目 + latest_bb_run。
+        extra 并入 run session 与 bb_runs[] 条目（如 precheck 失败详情 bb_failure_*）。
 
         best-effort（对齐 _mark_bb）：经 ``_store.update_blackbox_run`` 合并，标记失败不阻塞
         接力。终态 status（completed/failed/skipped）顺带写 completed_at 时间戳。
@@ -2141,7 +2191,7 @@ class ScanManager:
         try:
             self._store.update_blackbox_run(
                 self._ws_of(scan_dir), self._scan_id_of(scan_dir), run_id,
-                status=status, phase=phase, reason=reason,
+                status=status, phase=phase, reason=reason, extra=extra,
                 completed_at=_now_iso() if status in ("completed", "failed", "skipped",
                                                       "cancelled") else None)
         except Exception:  # noqa: BLE001 - best-effort，不阻塞接力

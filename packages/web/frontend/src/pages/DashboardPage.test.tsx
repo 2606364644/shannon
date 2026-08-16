@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
 
-// mock listAllScans（跨 ws 聚合）+ cancelScan（admin 操作列）+ useAuth（admin/user gate）
-// + apiGet（DashboardPage 拉 /workspaces 判 admin 无 ws 空态）。apiGetMock hoisted 供 beforeEach 默认 []。
+// mock listAllScans（跨 ws 聚合）+ useAuth（admin/user gate）+ apiGet（admin 无 ws 空态判定）。
+// v2 重设计（2026-08-16）：概览 = 只读态势大屏（横幅 + 磁贴），取消等操作全部在工作区页，
+// cancelScan 不再被 Dashboard 引用（mock 保留供 CreateWorkspaceDialog 链路）。
 const { mockUseAuth, apiGetMock } = vi.hoisted(() => ({ mockUseAuth: vi.fn(), apiGetMock: vi.fn() }));
 vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
 vi.mock("@/api/client", () => ({
@@ -16,8 +17,12 @@ vi.mock("@/api/client", () => ({
 }));
 
 const mockScans = [
-  { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 100, vuln_count: 1, is_running: true, workspace: "ws-a", total_cost_usd: 0.1 },
-  { scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 200, vuln_count: 2, is_running: false, workspace: "ws-b", total_cost_usd: 0.2 },
+  { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 100, vuln_count: 1,
+    is_running: true, workspace: "ws-a", total_cost_usd: 0.1, progress_pct: 42 },
+  { scan_id: "s2", scan_type: "whitebox", status: "completed", created_at: 200, vuln_count: 2,
+    is_running: false, workspace: "ws-b", total_cost_usd: 0.2, completed_at: Math.floor(Date.now() / 1000) },
+  { scan_id: "s3", scan_type: "whitebox", status: "failed", created_at: 300, vuln_count: 0,
+    is_running: false, workspace: "ws-b", total_cost_usd: 0.3 },
 ];
 const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
 const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
@@ -26,90 +31,115 @@ function renderPage() {
   return render(<MemoryRouter><DashboardPage /></MemoryRouter>);
 }
 
-describe("DashboardPage", () => {
+describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // apiGet 默认无工作区（admin 无 ws 空态测试在此默认上跑；有 ws 场景逐测试覆写）。
     apiGetMock.mockResolvedValue([]);
-    // 默认普通用户（admin 操作列不渲染）；admin describe 内 beforeEach 覆写为 admin。
     mockUseAuth.mockReturnValue({ user: userUser });
-    // jsdom navigator.language 默认 en,LanguageDetector 把 i18n 切到 en;
-    // 状态筛选选项断言用中文「已完成」,逐测试钉回 zh。
     return i18n.changeLanguage("zh");
   });
   afterEach(() => cleanup());
 
-  it("renders scan table with workspace column", async () => {
+  it("横幅：累计发现大数字 + 运营指标（运行中/今日完成/累计成本/需关注）", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue(mockScans);
     renderPage();
-    // s1 是 running,同时出现在顶部 running 卡片和表格中 -> getAllByText
-    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
-    // 工作区列:ws-a / ws-b 都在表格的 Link 文本里(running 卡片里是「工作区: ws-a」整段,不撞 exact 匹配)
-    expect(screen.getByText("ws-a")).toBeInTheDocument();
-    expect(screen.getByText("ws-b")).toBeInTheDocument();
+    // 累计发现 1+2+0 = 3（红色大数字）
+    const num = await screen.findByTestId("dash-total-vulns");
+    expect(num.textContent).toBe("3");
+    expect(num.className).toMatch(/text-red/);
+    // 横幅运营指标四格（「运行中」也出现在 running 磁贴状态字 → 多元素用 getAllByText）
+    expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
+    expect(screen.getByText("今日完成")).toBeInTheDocument();
+    expect(screen.getByText("累计成本")).toBeInTheDocument();
+    expect(screen.getByText("需关注")).toBeInTheDocument();
   });
 
-  it("status filter narrows results", async () => {
+  it("磁贴：按工作区分组渲染（ws-a/ws-b），运行中扫描进度融进磁贴", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue(mockScans);
     renderPage();
-    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
+    expect(await screen.findByTestId("ws-tile-ws-a")).toBeInTheDocument();
+    expect(screen.getByTestId("ws-tile-ws-b")).toBeInTheDocument();
+    // ws-a 有运行中 s1：mini 行显 42% + 白盒段标签
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByTestId("tile-run-meta-s1").textContent).toContain("白盒");
+    // 磁贴 meta：扫描数
+    expect(screen.getByText("1 扫描")).toBeInTheDocument();
+    expect(screen.getByText("2 扫描")).toBeInTheDocument();
+  });
 
-    // ScanFilters 的 combobox 顺序 = status[0] / type[1] / time[2](keyword 是 Input 非 combobox)。
-    // brief 原写 statusSelects[1] 实际命中 type,错误;改用 aria-label 精确定位 status 筛选。
-    // 用 fireEvent.click 而非 mouseDown:本 jsdom 版本 mouseDown 触发 pointerCapture 未实现错误
-    // (见 ScanNewPage.test 同款注释)。click 是已验证可复现的姿势。
-    const statusTrigger = screen.getByRole("combobox", { name: /状态筛选/ });
-    fireEvent.click(statusTrigger);
-    const opt = await screen.findByRole("option", { name: "已完成" }, { timeout: 1000 });
-    fireEvent.click(opt);
+  it("无扫描表格（明细与操作全部在工作区页，两页零结构重叠）", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue(mockScans);
+    renderPage();
+    await screen.findByTestId("ws-tile-ws-a");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
 
-    // 选 completed -> 只剩 s2(completed);s1(running) 从 running 卡片 + 表格整体消失
-    await waitFor(() => {
-      expect(screen.queryByText("s1")).not.toBeInTheDocument();
-      expect(screen.getByText("s2")).toBeInTheDocument();
-    });
+  it("全部完成 + 0 发现 → 绿色 all-clear", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([{ ...mockScans[1], vuln_count: 0 }]);
+    renderPage();
+    const num = await screen.findByTestId("dash-total-vulns");
+    expect(num.className).toMatch(/text-green/);
+    expect(screen.getByText("未发现可利用污点路径")).toBeInTheDocument();
   });
 
   it("empty state when no scans", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue([]);
     renderPage();
-    // Empty 空态:title「还没有扫描」+ 新建扫描按钮。用 exact 标题断言空态渲染
-    // (brief 原正则 /还没有扫描|新建扫描/ 同时命中 title 和按钮文本 -> getByText 多元素抛错,
-    //  改 exact 单匹配)。
     await waitFor(() => expect(screen.getByText("还没有扫描")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: /新建扫描/ })).toHaveAttribute("href", "/scan/new");
   });
+
+  it("首次加载失败渲染错误态而非空态，重试后恢复", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockRejectedValueOnce(new Error("boom"));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("加载失败")).toBeInTheDocument());
+    expect(screen.getByText(/Dashboard 加载失败：boom/)).toBeInTheDocument();
+    expect(screen.queryByText("还没有扫描")).not.toBeInTheDocument();
+    // 点重试 -> 重新拉取并渲染磁贴
+    (listAllScans as any).mockResolvedValue(mockScans);
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.getByTestId("ws-tile-ws-a")).toBeInTheDocument());
+  });
+
+  it("有运行中扫描时每 10s 自动轮询；全部完成后停止", async () => {
+    vi.useFakeTimers();
+    try {
+      const { listAllScans } = await import("@/api/client");
+      // s1 running → 轮询持续；之后 s1 完成 → 轮询停
+      (listAllScans as any)
+        .mockResolvedValueOnce(mockScans)
+        .mockResolvedValueOnce(mockScans)
+        .mockResolvedValue([{ ...mockScans[1] }]);
+      renderPage();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("42%")).toBeInTheDocument();
+      expect(listAllScans).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(listAllScans).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("42%")).toBeInTheDocument();
+      // 第三次返回 s1 已完成 → hasRunning 翻 false，轮询清除
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(listAllScans).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(listAllScans).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText("42%")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-describe("DashboardPage admin 操作列（spec 2026-07-27 下线 WorkspaceListPage：取消并入 Dashboard）", () => {
+describe("DashboardPage admin 空态", () => {
   beforeEach(() => {
     mockUseAuth.mockReturnValue({ user: userAdmin });
-  });
-
-  it("admin: running 行渲染操作列取消按钮，completed 行无按钮", async () => {
-    const { listAllScans } = await import("@/api/client");
-    (listAllScans as any).mockResolvedValue(mockScans);
-    renderPage();
-    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
-    // s1(running, ws-a)有取消按钮；s2(completed)操作列无按钮
-    expect(screen.queryByTestId("dashboard-cancel-scan-s1")).toBeInTheDocument();
-    expect(screen.queryByTestId("dashboard-cancel-scan-s2")).not.toBeInTheDocument();
-  });
-
-  it("admin: 点取消→确认 Dialog→调 cancelScan(ws, scanId) per-scan", async () => {
-    const { listAllScans, cancelScan } = await import("@/api/client");
-    (listAllScans as any).mockResolvedValue(mockScans);
-    (cancelScan as any).mockResolvedValue({ cancelled: "s1", via: "signal" });
-    renderPage();
-    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByTestId("dashboard-cancel-scan-s1"));
-    // Dialog 确认按钮（common.confirm = 确认）
-    const confirm = await screen.findByRole("button", { name: /^确认$/ });
-    fireEvent.click(confirm);
-    await waitFor(() => expect(cancelScan).toHaveBeenCalledWith("ws-a", "s1"));
   });
 
   it("admin 无任何工作区：空态渲染「新建工作区」入口（解锁创建——入口原本只在 ws 内 Switcher，无 ws 时进不去）", async () => {
@@ -117,9 +147,7 @@ describe("DashboardPage admin 操作列（spec 2026-07-27 下线 WorkspaceListPa
     (listAllScans as any).mockResolvedValue([]); // 无扫描
     (apiGet as any).mockResolvedValue([]); // 无工作区
     renderPage();
-    // workspace.create.button = 「新建工作区」
     await waitFor(() => expect(screen.getByRole("button", { name: /新建工作区/ })).toBeInTheDocument());
-    // 不显示「新建扫描」死按钮（admin 无 ws 点了也选不了 ws → 死锁）
     expect(screen.queryByRole("link", { name: /新建扫描/ })).not.toBeInTheDocument();
   });
 
@@ -130,14 +158,5 @@ describe("DashboardPage admin 操作列（spec 2026-07-27 下线 WorkspaceListPa
     renderPage();
     await waitFor(() => expect(screen.getByRole("link", { name: /新建扫描/ })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /新建工作区/ })).not.toBeInTheDocument();
-  });
-
-  it("普通用户:无操作列（admin gate，体验不降级）", async () => {
-    mockUseAuth.mockReturnValue({ user: userUser });
-    const { listAllScans } = await import("@/api/client");
-    (listAllScans as any).mockResolvedValue(mockScans);
-    renderPage();
-    await waitFor(() => expect(screen.getAllByText("s1").length).toBeGreaterThan(0));
-    expect(screen.queryByTestId("dashboard-cancel-scan-s1")).not.toBeInTheDocument();
   });
 });

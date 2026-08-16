@@ -92,34 +92,39 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
-      <DialogContent>
-        <DialogHeader>
+      {/* flex 覆写 DialogContent 默认 grid+整窗滚动：头部/底部固定，仅表单区滚动——
+          多角色凭据行再多，保存按钮也常驻可视（用户反馈：加几个角色后看不到保存）。 */}
+      <DialogContent className="flex max-h-[88dvh] flex-col overflow-y-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{editing ? t("authProfiles.edit") : t("authProfiles.create")}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-name">{t("authProfiles.name")}</Label>
-            <Input id="ap-name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          {/* 字段滚动区（含角色行）；pr-1 防滚动条贴边。 */}
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-name">{t("authProfiles.name")}</Label>
+              <Input id="ap-name" value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-url">{t("authProfiles.loginUrl")}</Label>
+              <Input id="ap-url" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t("authProfiles.loginType")}</Label>
+              <Select value={loginType} onValueChange={(v) => setLoginType(v as LoginType)}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {LOGIN_TYPES.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-flow">{t("authProfiles.loginFlow")}</Label>
+              <Textarea id="ap-flow" value={loginFlow} onChange={(e) => setLoginFlow(e.target.value)} rows={3} />
+            </div>
+            <CredentialRows value={drafts} onChange={setDrafts} allowMulti />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-url">{t("authProfiles.loginUrl")}</Label>
-            <Input id="ap-url" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} required />
-          </div>
-          <div className="space-y-1.5">
-            <Label>{t("authProfiles.loginType")}</Label>
-            <Select value={loginType} onValueChange={(v) => setLoginType(v as LoginType)}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {LOGIN_TYPES.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-flow">{t("authProfiles.loginFlow")}</Label>
-            <Textarea id="ap-flow" value={loginFlow} onChange={(e) => setLoginFlow(e.target.value)} rows={3} />
-          </div>
-          <CredentialRows value={drafts} onChange={setDrafts} allowMulti />
-          <DialogFooter>
+          <DialogFooter className="mt-4 shrink-0 border-t border-border pt-3">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
             {!readOnly && (
               <Button type="submit" disabled={busy}>{busy ? "…" : t(editing ? "authProfiles.save" : "authProfiles.create")}</Button>

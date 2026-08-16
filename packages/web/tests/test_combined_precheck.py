@@ -5,11 +5,14 @@
 - fail → _submit_whitebox 未调 + session bb_phase=failed/bb_reason=auth_failed
   + scan_end 落盘（fail-fast，不提交白盒）。
 - _run_precheck 复用 AuthValidationWorkflow，独立 events 文件 authcheck-events.ndjson
-  （不污染主 events 流——预验证 finalize 可能写 scan_end，混入主 events 会提前触发 _watch 退出）。
+  （不污染主 events 流——预验证 finalize 可能写 scan_end，混入主 events 会提前触发 _watch 退出）；
+  workspace_path 亦隔离到 .authcheck scratch（finalize 会写 <workspace_path>/session.json
+  终态 completed，指 scan_dir 会把主扫描提前标完成 + 白盒 heartbeat 见终态自停）。
 - session 持久化 combined/bb_url/bb_host_mappings/bb_auth_ref/bb_phase（Task 4 _run_blackbox_phase
   读 bb_url/bb_host_mappings；Task 7 重跑解析 bb_auth_ref）。D2：bb_auth_ref 只存 profile_id 引用。
 """
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -177,6 +180,58 @@ async def test_run_precheck_returns_true_on_auth_success(mgr, tmp_path, monkeypa
     assert captured["inp"].event_file == str(scan_dir / "authcheck-events.ndjson")
     assert captured["inp"].web_url == "http://target.example/"
     assert captured["inp"].config_path == "/cfg/scan-config.yaml"
+    # workspace_path 隔离到 .authcheck scratch（不指 scan_dir）
+    assert captured["inp"].workspace_path == str(scan_dir / ".authcheck")
+    assert (scan_dir / ".authcheck").is_dir()
+
+
+async def test_run_precheck_session_side_effects_stay_out_of_scan_dir(
+        mgr, tmp_path, monkeypatch):
+    """precheck 副作用隔离（2026-08-16 NodeGoat 回归）：AuthValidationWorkflow finalize 会往
+    <workspace_path>/session.json 写终态 status=completed。若 workspace_path=scan_dir，白盒
+    尚未提交主扫描就被标 completed（UI 显示已完成 + 白盒 heartbeat daemon 见终态自停）。
+    本测试模拟 finalize 的 update_session_status 落盘，钉死毒化只进 .authcheck scratch、
+    scan_dir/session.json 顶层 status 不变。"""
+    from supernova_core.services.validate_authentication import AuthValidationResult
+    scan_dir = tmp_path / "scans" / "demo"; scan_dir.mkdir(parents=True)
+    # 主扫描 session.json（web create_scan 模板：status=running）
+    (scan_dir / "session.json").write_text(
+        json.dumps({"status": "running", "scan_type": "whitebox"}), encoding="utf-8")
+
+    async def fake_finalize_side_effect(inp):
+        # 模拟 worker 侧 finalize_summary → MetricsTracker.update_session_status("completed")
+        probe_session = Path(inp.workspace_path) / "session.json"
+        data = json.loads(probe_session.read_text("utf-8")) if probe_session.exists() else {}
+        data["status"] = "completed"
+        data["completed_at"] = 1786908162.0
+        probe_session.parent.mkdir(parents=True, exist_ok=True)
+        probe_session.write_text(json.dumps(data), encoding="utf-8")
+
+    class _FakeHandle:
+        async def result(self):
+            # workflow 真实链路里 finalize 在 result 前的 activity 里跑；此处直接内联模拟
+            await fake_finalize_side_effect(captured["inp"])
+            return AuthValidationResult(success=True)
+
+    captured = {}
+
+    class _FakeClient:
+        async def start_workflow(self, fn, inp, **kw):
+            captured["inp"] = inp
+            return _FakeHandle()
+
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                        AsyncMock(return_value=_FakeClient()))
+    monkeypatch.setattr(mgr, "_resolve_provider_config", lambda ws: {"api_key": "k"})
+
+    ok = await mgr._run_precheck(scan_dir, "ws-a", "demo",
+                                 "http://target.example/", "/cfg/scan-config.yaml")
+    assert ok is True
+    # 毒化终态只落在 scratch，主 session.json 顶层保持 running
+    probe = json.loads((scan_dir / ".authcheck" / "session.json").read_text("utf-8"))
+    assert probe["status"] == "completed"
+    main = json.loads((scan_dir / "session.json").read_text("utf-8"))
+    assert main["status"] == "running"
 
 
 async def test_run_precheck_returns_false_on_auth_failure(mgr, tmp_path, monkeypatch):

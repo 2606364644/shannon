@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -134,12 +134,12 @@ describe("ScanList 卡片 - 统一进度徽标（所有运行中卡）", () => {
     expect(screen.getByText("黑盒")).toBeInTheDocument();
   });
 
-  it("终态(完成)卡不显示进度徽标（无 progressbar 无 %）", async () => {
+  it("终态(完成)行不显进度条（表格口径：静态 100% 文本，无 progressbar）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completedWb])));
     renderList();
     await waitFor(() => expect(screen.getByText("ws-d1")).toBeInTheDocument());
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
-    expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
+    expect(screen.getByText(/100%/)).toBeInTheDocument();
   });
 
   it("组合卡无展开按钮（步级移至详情页）", async () => {
@@ -184,6 +184,61 @@ describe("ScanList 运行中卡 - 按需 SSE 推实时阶段", () => {
     await waitFor(() => expect(lastFakeES()).toBeDefined());
     act(() => { lastFakeES()!.emit(scanEnd("completed")); });
     await waitFor(() => expect(listCalls).toBeGreaterThan(callsBefore));
+  });
+});
+
+// 类型模型收窄（重设计 2026-08-16）：只有白盒 + 组合——组合 scan_type 仍为 whitebox、
+// 靠 combined 标记识别；黑盒一律是组合任务的嵌套 run，无独立行/过滤器选项。
+describe("ScanList 类型模型（白盒 + 组合）", () => {
+  const combinedDone = {
+    scan_id: "c9", scan_type: "whitebox", status: "completed", created_at: 6000,
+    completed_at: 7000, vuln_count: 2, total_cost_usd: 1, cost_currency: "USD",
+    is_running: false, workflow_id: "ws-c9", combined: true,
+  } as const;
+
+  function clickTypeOption(optionName: RegExp) {
+    const trigger = screen.getByText("全部类型").closest("button")!;
+    fireEvent.click(trigger);
+    return screen.findByRole("option", { name: optionName }).then((opt) => {
+      fireEvent.click(opt);
+    });
+  }
+
+  it("组合行类型格只显「组合」徽标（底层 whitebox 不再双显）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedDone])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-c9")).toBeInTheDocument());
+    // 组合单显；scan_type（whitebox）不再与组合徽标并列
+    expect(screen.getByText("组合")).toBeInTheDocument();
+    expect(screen.queryByText("whitebox")).not.toBeInTheDocument();
+  });
+
+  it("类型过滤器选项收窄：全部类型 / 白盒 / 组合（无黑盒、无关联）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedDone])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-c9")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("全部类型").closest("button")!);
+    expect(await screen.findByRole("option", { name: "全部类型" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "白盒" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /组合（白盒\+黑盒）/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "黑盒" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "关联" })).not.toBeInTheDocument();
+  });
+
+  it("选「组合」只剩 combined 行；选「白盒」只剩纯白盒行", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedDone, completedWb])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-c9")).toBeInTheDocument());
+    expect(screen.getByText("ws-d1")).toBeInTheDocument();
+    // 选「组合」→ 只剩 c9（combined）
+    await clickTypeOption(/组合（白盒\+黑盒）/);
+    await waitFor(() => expect(screen.queryByText("ws-d1")).not.toBeInTheDocument());
+    expect(screen.getByText("ws-c9")).toBeInTheDocument();
+    // 切回「白盒」（纯白盒）→ 只剩 d1（combined 被排除）
+    fireEvent.click(screen.getByText("组合（白盒+黑盒）").closest("button")!);
+    await screen.findByRole("option", { name: "白盒" }).then((opt) => fireEvent.click(opt));
+    await waitFor(() => expect(screen.queryByText("ws-c9")).not.toBeInTheDocument());
+    expect(screen.getByText("ws-d1")).toBeInTheDocument();
   });
 });
 

@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="zh" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>概览 × 工作区 重设计 v2（激进版） — Supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============ DSF tokens (mirror src/styles/tokens.css) ============ */
+:root, .dark {
+  --background: 34 7% 10%;
+  --foreground: 36 10% 91%;
+  --card: 34 5% 13%;
+  --card-2: 34 6% 15.5%;
+  --primary: 15 60% 56%;
+  --primary-fg: 34 7% 10%;
+  --secondary: 34 5% 16%;
+  --muted: 34 5% 16%;
+  --muted-fg: 36 5% 62%;
+  --accent: 34 5% 18%;
+  --destructive: 5 62% 56%;
+  --border: 34 5% 21%;
+  --border-soft: 34 5% 18%;
+  --cyan: 190 70% 60%;
+  --green: 142 50% 56%;
+  --red: 5 62% 60%;
+  --amber: 38 75% 60%;
+  --orange: 24 75% 62%;
+  --radius: 12px;
+  --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
+  --shadow-cta: 0 1px 2px hsl(15 60% 30% / 0.30), 0 6px 20px hsl(15 60% 40% / 0.22);
+  color-scheme: dark;
+}
+.light {
+  --background: 40 32% 95%;
+  --foreground: 30 26% 18%;
+  --card: 38 28% 97%;
+  --card-2: 39 30% 94%;
+  --primary: 15 58% 50%;
+  --primary-fg: 0 0% 100%;
+  --secondary: 40 32% 91%;
+  --muted: 40 32% 91%;
+  --muted-fg: 34 30% 38%;
+  --accent: 40 36% 84%;
+  --destructive: 5 58% 46%;
+  --border: 36 44% 78%;
+  --border-soft: 36 40% 84%;
+  --cyan: 190 65% 32%;
+  --green: 142 40% 32%;
+  --red: 5 58% 44%;
+  --amber: 36 70% 36%;
+  --orange: 26 74% 45%;
+  --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
+  --shadow-cta: 0 1px 2px hsl(15 58% 26% / 0.28), 0 6px 20px hsl(15 58% 40% / 0.20);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background .25s ease, color .25s ease;
+}
+a { color: inherit; text-decoration: none; }
+code { font-family: "IBM Plex Mono", monospace; font-size: 0.92em; background: hsl(var(--muted)/0.6); padding: 1px 5px; border-radius: 5px; }
+::selection { background: hsl(var(--primary) / 0.35); }
+
+/* ============ top bar ============ */
+.topbar { position: sticky; top: 0; z-index: 40; background: hsl(var(--card)); border-bottom: 1px solid hsl(var(--border)); }
+.topbar-in { max-width: 2400px; margin: 0 auto; height: 48px; padding: 0 28px; display: flex; align-items: center; gap: 28px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; letter-spacing: -0.01em; }
+.brand-name { font-size: 15px; }
+.nav { display: flex; gap: 4px; height: 100%; }
+.nav a { display: flex; align-items: center; height: 100%; padding: 0 4px; font-size: 13.5px; color: hsl(var(--muted-fg)); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.nav a:hover { color: hsl(var(--foreground)); }
+.nav a.active { color: hsl(var(--primary)); border-bottom-color: hsl(var(--primary)); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-fg)); cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s; }
+.icon-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+main { max-width: 2400px; margin: 0 auto; padding: 20px 28px 140px; }
+
+/* ============ 通用 ============ */
+.btn-cta { display: inline-flex; align-items: center; gap: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-fg)); font-weight: 600; font-size: 13.5px; padding: 9px 15px; border-radius: 9px; border: none; cursor: pointer; box-shadow: var(--shadow-cta); transition: transform .12s ease; white-space: nowrap; font-family: inherit; }
+.btn-cta:hover { transform: translateY(-1px); }
+.sec-row { display: flex; align-items: baseline; justify-content: space-between; margin: 26px 0 12px; gap: 12px; flex-wrap: wrap; }
+.sec-row h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); display: flex; align-items: center; gap: 9px; }
+.sec-row .side { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.sec-link { font-size: 12.5px; color: hsl(var(--muted-fg)); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.sec-link:hover { color: hsl(var(--primary)); }
+.dot-live { width: 8px; height: 8px; border-radius: 99px; background: hsl(var(--cyan)); flex: none; animation: pulse 1.9s ease-out infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 hsl(var(--cyan) / 0.5); } 70% { box-shadow: 0 0 0 7px hsl(var(--cyan) / 0); } 100% { box-shadow: 0 0 0 0 hsl(var(--cyan) / 0); } }
+@media (prefers-reduced-motion: reduce) { .dot-live, .trace .pulse-line { animation: none !important; } }
+
+/* ================================================================
+ * 概览页 = 态势大屏：威胁横幅 + 工作区磁贴网格 + 终端日志流
+ * （无 Hero 大卡 / 无四格指标条 / 无扫描表格 —— 与工作区页零结构重叠）
+ * ================================================================ */
+
+/* —— 威胁横幅：一行装下 全局威胁 + 构成 + 运营指标 + CTA —— */
+.banner { position: relative; overflow: hidden; background: radial-gradient(90% 160% at 8% -20%, hsl(var(--primary) / 0.08), transparent 50%), hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); display: flex; align-items: stretch; flex-wrap: wrap; }
+.bn-threat { padding: 18px 26px 14px 24px; min-width: 250px; }
+.bn-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; }
+.bn-eyebrow .bar { width: 3px; height: 12px; background: hsl(var(--primary)); border-radius: 2px; }
+.bn-num-row { display: flex; align-items: baseline; gap: 11px; margin-top: 8px; }
+.bn-num { font-family: "IBM Plex Mono", monospace; font-size: 46px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; color: hsl(var(--red)); font-variant-numeric: tabular-nums; }
+.banner.calm .bn-num { color: hsl(var(--green)); }
+.bn-pill { font-size: 11.5px; color: hsl(var(--muted-fg)); border: 1px solid hsl(var(--border)); padding: 2.5px 8px; border-radius: 99px; white-space: nowrap; }
+.bn-mid { flex: 1; min-width: 260px; padding: 18px 22px 14px 6px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.bn-sevbar { display: flex; height: 5px; border-radius: 99px; overflow: hidden; background: hsl(var(--border)); }
+.bn-sevbar span { height: 100%; min-width: 3px; }
+.bn-legend { display: flex; flex-wrap: wrap; gap: 3px 13px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: hsl(var(--muted-fg)); }
+.bn-legend i { font-style: normal; display: inline-flex; align-items: center; gap: 5px; }
+.bn-legend .sw { width: 6px; height: 6px; border-radius: 2px; }
+.bn-ctx { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); }
+.bn-ctx b { color: hsl(var(--foreground)); font-weight: 500; }
+.bn-ctx .live-n { color: hsl(var(--cyan)); }
+.bn-stats { display: flex; align-items: stretch; border-left: 1px solid hsl(var(--border-soft)); }
+.bn-stat { padding: 15px 18px; border-right: 1px solid hsl(var(--border-soft)); display: flex; flex-direction: column; justify-content: center; min-width: 86px; }
+.bn-stat:last-of-type { border-right: none; }
+.bn-stat .v { font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bn-stat .v.live { color: hsl(var(--cyan)); }
+.bn-stat .v.warn { color: hsl(var(--amber)); }
+.bn-stat .l { margin-top: 4px; font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 500; }
+.bn-cta { display: flex; align-items: center; padding: 0 22px 0 18px; }
+/* FX 线贴横幅底部（有运行中才脉冲） */
+.trace-wrap { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid hsl(var(--border-soft)); }
+.trace { position: relative; height: 22px; }
+.trace svg { display: block; width: 100%; height: 100%; }
+.trace .baseline { stroke: hsl(var(--border)); stroke-width: 1.2; fill: none; }
+.trace .pulse-line { stroke: hsl(var(--primary)); stroke-width: 1.4; fill: none; stroke-dasharray: 2400; stroke-dashoffset: 2400; animation: draw 3.6s linear infinite; filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.5)); }
+.trace.idle .pulse-line { animation: none; stroke-dashoffset: 0; opacity: 0.3; filter: none; stroke: hsl(var(--muted-fg)); }
+@keyframes draw { 0% { stroke-dashoffset: 2400; } 60% { stroke-dashoffset: -400; opacity: 1; } 100% { stroke-dashoffset: -2400; opacity: 0; } }
+.banner .bn-threat, .banner .bn-mid, .banner .bn-stats, .banner .bn-cta { padding-bottom: 30px; }
+
+/* —— 工作区磁贴网格 —— */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tile { position: relative; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 14px 16px 13px 18px; cursor: pointer; overflow: hidden; transition: transform .13s, border-color .15s; display: flex; flex-direction: column; gap: 9px; }
+.tile:hover { transform: translateY(-2px); border-color: hsl(var(--primary) / 0.55); }
+.tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+.tile.st-running::before { background: hsl(var(--cyan)); box-shadow: 0 0 8px hsl(var(--cyan) / 0.5); }
+.tile.st-failed::before { background: hsl(var(--red)); }
+.tile.st-warn::before { background: hsl(var(--amber)); }
+.tile.st-clear::before { background: hsl(var(--green) / 0.7); }
+.tile-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tile-ws { font-family: "IBM Plex Mono", monospace; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-st { margin-left: auto; flex: none; font-size: 10.5px; font-weight: 500; color: hsl(var(--muted-fg)); display: inline-flex; align-items: center; gap: 5px; }
+.tile-st::before { content: ""; width: 6px; height: 6px; border-radius: 99px; background: hsl(var(--muted-fg)); }
+.tile-st.running { color: hsl(var(--cyan)); } .tile-st.running::before { background: hsl(var(--cyan)); box-shadow: 0 0 5px hsl(var(--cyan)/.6); }
+.tile-st.completed { color: hsl(var(--green)); } .tile-st.completed::before { background: hsl(var(--green)); }
+.tile-st.failed { color: hsl(var(--red)); } .tile-st.failed::before { background: hsl(var(--red)); }
+.tile-st.interrupted { color: hsl(var(--amber)); } .tile-st.interrupted::before { background: hsl(var(--amber)); }
+.tile-num-row { display: flex; align-items: baseline; gap: 8px; }
+.tile-num { font-family: "IBM Plex Mono", monospace; font-size: 27px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.tile-num.hi { color: hsl(var(--red)); }
+.tile-num.zero { color: hsl(var(--muted-fg) / 0.7); }
+.tile-num-l { font-size: 10.5px; color: hsl(var(--muted-fg)); letter-spacing: 0.05em; text-transform: uppercase; }
+.tile-sev { display: flex; height: 4px; border-radius: 99px; overflow: hidden; background: hsl(var(--border)); }
+.tile-sev span { height: 100%; min-width: 2px; }
+.tile-sev-legend { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: hsl(var(--muted-fg) / 0.9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 运行中扫描 mini 行（磁贴内，可点直达实时） */
+.tile-runs { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed hsl(var(--border-soft)); padding-top: 8px; }
+.trun { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; }
+.trun .tid { color: hsl(var(--foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trun .tid:hover { color: hsl(var(--primary)); }
+.trun .tpct { color: hsl(var(--muted-fg)); }
+.trun .ttrack { grid-column: 1 / -1; height: 3px; border-radius: 99px; background: hsl(var(--border)); overflow: hidden; }
+.trun .tfill { display: block; height: 100%; background: hsl(var(--primary)); border-radius: 99px; }
+.tile-meta { margin-top: auto; display: flex; align-items: center; gap: 6px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: hsl(var(--muted-fg)); }
+.tile-meta .sep { opacity: 0.4; }
+.tile-meta .go { margin-left: auto; color: hsl(var(--muted-fg) / 0.7); transition: color .14s, transform .14s; }
+.tile:hover .tile-meta .go { color: hsl(var(--primary)); transform: translateX(2px); }
+.fresh { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); display: inline-flex; gap: 12px; align-items: center; }
+.refresh-link { color: hsl(var(--muted-fg)); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.refresh-link:hover { color: hsl(var(--primary)); }
+
+/* ================================================================
+ * 工作区页 = 操作台：紧凑工作台头（无大 Hero / 无四格指标条）+ 密表格
+ * ================================================================ */
+.back { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: hsl(var(--muted-fg)); margin-bottom: 12px; cursor: pointer; }
+.back:hover { color: hsl(var(--primary)); }
+
+/* 工作台头：两行紧凑卡 */
+.wb { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 14px 18px 13px; }
+.wb-r1 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wb-name { font-family: "IBM Plex Mono", monospace; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 10px; }
+.wb-badges { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.hbadge { display: inline-flex; align-items: center; gap: 5px; border: 1px solid hsl(var(--border)); border-radius: 7px; padding: 2px 9px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: hsl(var(--muted-fg)); white-space: nowrap; }
+.hbadge.dashed { border-style: dashed; }
+/* 命令栏 */
+.cmdbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.tb { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid hsl(var(--border)); font-size: 12px; color: hsl(var(--muted-fg)); background: transparent; cursor: pointer; font-family: inherit; transition: color .14s, background .14s; white-space: nowrap; }
+.tb:hover { color: hsl(var(--foreground)); background: hsl(var(--accent)); }
+.tb.icon { width: 30px; padding: 0; justify-content: center; }
+.tb.pinned { color: hsl(var(--primary)); border-color: hsl(var(--primary) / 0.4); background: hsl(var(--primary) / 0.10); }
+.cmdbar .vr { width: 1px; height: 18px; background: hsl(var(--border)); margin: 0 3px; }
+/* 统计摘要行（替代四格指标条）：谱带 + inline mono 数字 */
+.wb-r2 { display: flex; align-items: center; gap: 14px 22px; flex-wrap: wrap; margin-top: 11px; padding-top: 11px; border-top: 1px solid hsl(var(--border-soft)); font-family: "IBM Plex Mono", monospace; font-size: 12px; color: hsl(var(--muted-fg)); }
+.wb-r2 b { color: hsl(var(--foreground)); font-weight: 600; }
+.wb-r2 .findings b { font-size: 15px; color: hsl(var(--red)); }
+.wb-r2 .findings.clear b { color: hsl(var(--green)); font-size: 12px; }
+.wb-minisev { display: inline-flex; align-items: center; gap: 8px; }
+.wb-minisev .bar { display: flex; width: 120px; height: 4px; border-radius: 99px; overflow: hidden; background: hsl(var(--border)); }
+.wb-minisev .bar span { height: 100%; min-width: 2px; }
+.wb-r2 .sep { opacity: 0.35; }
+.wb-r2 .attn b { color: hsl(var(--amber)); }
+.wb-r2 a { color: hsl(var(--muted-fg)); }
+.wb-r2 a:hover { color: hsl(var(--primary)); }
+
+/* —— 过滤器 —— */
+.ops-head { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 12px; gap: 12px; flex-wrap: wrap; }
+.ops-head h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); }
+.ops-head h2 .cnt { font-family: "IBM Plex Mono", monospace; color: hsl(var(--foreground)); }
+.ops-head .avg { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: hsl(var(--muted-fg)); margin-left: 10px; letter-spacing: 0; text-transform: none; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 13px; }
+.f-search { position: relative; flex: 1; min-width: 200px; max-width: 320px; }
+.f-search input { width: 100%; height: 34px; padding: 0 12px 0 32px; border-radius: 10px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--foreground)); font-family: inherit; font-size: 13px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.f-search input::placeholder { color: hsl(var(--muted-fg)); }
+.f-search input:focus { border-color: hsl(var(--primary)); box-shadow: 0 0 0 1px hsl(var(--primary)); }
+.f-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: hsl(var(--muted-fg)); pointer-events: none; }
+.segctrl { display: inline-flex; background: hsl(var(--muted)); border-radius: 10px; padding: 3px; gap: 2px; }
+.segbtn { padding: 4.5px 11px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: hsl(var(--muted-fg)); background: transparent; border: none; cursor: pointer; font-family: inherit; transition: color .13s; white-space: nowrap; }
+.segbtn:hover { color: hsl(var(--foreground)); }
+.segbtn.on { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px hsl(0 0% 0% / 0.25); }
+.segbtn .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; opacity: 0.7; margin-left: 4px; }
+.f-select-wrap { position: relative; width: 118px; }
+.f-select { width: 100%; height: 34px; padding: 0 28px 0 12px; border-radius: 10px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--foreground)); font-family: inherit; font-size: 13px; outline: none; cursor: pointer; appearance: none; transition: border-color .15s; }
+.f-select:focus { border-color: hsl(var(--primary)); }
+.f-select-wrap svg { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; color: hsl(var(--muted-fg)); }
+
+/* —— 表格（工作区页主体） —— */
+.table-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+thead th { text-align: left; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; padding: 10px 12px; background: hsl(var(--muted) / 0.45); border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+tbody td { padding: 11px 12px; border-bottom: 1px solid hsl(var(--border-soft)); font-size: 13px; vertical-align: middle; }
+thead th:first-child, tbody td:first-child { padding-left: 16px; }
+thead th:last-child, tbody td:last-child { padding-right: 16px; }
+th.r, td.r { text-align: right; }
+.td-clamp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+.td-mono { font-family: "IBM Plex Mono", monospace; }
+a.lnk:hover { color: hsl(var(--primary)); }
+.repo-cell { line-height: 1.35; display: block; }
+.repo-cell .rc-name { display: block; font-size: 13px; font-weight: 500; }
+.repo-cell .rc-url { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: hsl(var(--muted-fg) / 0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.rowmain { transition: background .12s; cursor: pointer; }
+tbody tr.rowmain:hover { background: hsl(var(--muted) / 0.5); }
+.badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2.5px 8px; border-radius: 6px; border: 1px solid hsl(var(--border)); color: hsl(var(--muted-fg)); font-family: "IBM Plex Mono", monospace; }
+.stbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.stbadge::before { content: ""; width: 7px; height: 7px; border-radius: 99px; flex: none; }
+.stbadge.running { color: hsl(var(--cyan)); }
+.stbadge.running::before { background: hsl(var(--cyan)); box-shadow: 0 0 6px hsl(var(--cyan)/.6); }
+.stbadge.completed { color: hsl(var(--green)); }
+.stbadge.completed::before { background: hsl(var(--green)); }
+.stbadge.failed { color: hsl(var(--red)); }
+.stbadge.failed::before { background: hsl(var(--red)); }
+.stbadge.interrupted { color: hsl(var(--amber)); }
+.stbadge.interrupted::before { background: hsl(var(--amber)); }
+.vuln { font-family: "IBM Plex Mono", monospace; font-size: 16px; font-weight: 600; }
+.vuln.hi { color: hsl(var(--red)); }
+.vuln.zero { color: hsl(var(--muted-fg) / 0.7); }
+.pcell { display: flex; flex-direction: column; gap: 5px; min-width: 128px; }
+.pcell .pl { display: flex; align-items: baseline; gap: 7px; }
+.pcell .pct { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; }
+.pcell .phase { font-size: 11px; color: hsl(var(--muted-fg)); white-space: nowrap; }
+.pcell .ptrack { height: 4px; border-radius: 99px; background: hsl(var(--border)); overflow: hidden; }
+.pcell .pfill { display: block; height: 100%; border-radius: 99px; background: hsl(var(--primary)); }
+.pdone { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: hsl(var(--muted-fg)); white-space: nowrap; }
+.pstop { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: hsl(var(--amber) / 0.9); white-space: nowrap; }
+.exp { width: 22px; height: 22px; border: none; background: transparent; color: hsl(var(--muted-fg)); cursor: pointer; display: grid; place-items: center; border-radius: 6px; }
+.exp:hover { color: hsl(var(--foreground)); background: hsl(var(--accent)); }
+.exp svg { transition: transform .15s; }
+.exp.open svg { transform: rotate(90deg); }
+.ops { display: inline-flex; gap: 2px; justify-content: flex-end; }
+.op-btn { display: inline-flex; align-items: center; gap: 4.5px; font-size: 12px; color: hsl(var(--muted-fg)); background: transparent; border: none; border-radius: 7px; padding: 4.5px 8px; cursor: pointer; font-family: inherit; transition: color .13s, background .13s; white-space: nowrap; }
+.op-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--accent)); }
+.op-btn.danger:hover { color: hsl(var(--red)); background: hsl(var(--red) / 0.10); }
+.nested { margin: 2px 0 12px 46px; border-left: 2px solid hsl(var(--border)); padding: 7px 0 7px 16px; display: flex; flex-direction: column; gap: 7px; }
+.nrun { display: flex; align-items: center; gap: 11px; font-size: 12.5px; }
+.nrun .rid { font-family: "IBM Plex Mono", monospace; color: hsl(var(--muted-fg)); }
+.nrun .latest { font-size: 10px; color: hsl(var(--primary)); border: 1px solid hsl(var(--primary) / 0.35); border-radius: 99px; padding: 1px 7px; }
+.nrun .rv { font-size: 12px; color: hsl(var(--primary)); cursor: pointer; }
+.nrun .rv:hover { text-decoration: underline; }
+.nrun .del { margin-left: 2px; width: 24px; height: 24px; border: none; background: transparent; color: hsl(var(--muted-fg)); border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+.nrun .del:hover { color: hsl(var(--red)); background: hsl(var(--red) / 0.10); }
+.nested-cap { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: hsl(var(--muted-fg) / 0.7); }
+
+/* —— 空态 —— */
+.empty { background: hsl(var(--card)); border: 1px dashed hsl(var(--border)); border-radius: var(--radius); padding: 64px 24px; text-align: center; }
+.empty .glyph-big { display: flex; justify-content: center; margin-bottom: 18px; opacity: 0.85; }
+.empty h3 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+.empty p { margin: 0 0 20px; color: hsl(var(--muted-fg)); font-size: 13.5px; }
+.empty .sublinks { display: flex; justify-content: center; gap: 18px; margin-top: 16px; font-size: 12.5px; }
+.empty .sublinks a { color: hsl(var(--primary)); cursor: pointer; }
+.empty .sublinks a:hover { text-decoration: underline; }
+
+/* —— note / pcp —— */
+.pcp { position: fixed; right: 22px; bottom: 22px; z-index: 60; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: var(--shadow-card); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; width: 248px; }
+.pcp .t { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--muted-fg)); font-weight: 600; }
+.pcp .row { display: flex; gap: 6px; }
+.seg { flex: 1; font-size: 12px; padding: 6px 8px; border-radius: 7px; cursor: pointer; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-fg)); transition: all .14s; font-family: inherit; white-space: nowrap; }
+.seg:hover { color: hsl(var(--foreground)); }
+.seg.on { background: hsl(var(--primary)); color: hsl(var(--primary-fg)); border-color: hsl(var(--primary)); }
+.note { margin-top: 28px; font-size: 12px; color: hsl(var(--muted-fg)); border-top: 1px solid hsl(var(--border-soft)); padding-top: 14px; max-width: 760px; line-height: 1.7; }
+.note b { color: hsl(var(--foreground)); font-weight: 600; }
+.note .ia { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 4px; }
+.note .ia > div { background: hsl(var(--card)); border: 1px solid hsl(var(--border-soft)); border-radius: 10px; padding: 11px 14px; }
+.note .ia h4 { margin: 0 0 5px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+.note .ia ul { margin: 0; padding-left: 16px; }
+.note .ia li { margin: 2px 0; }
+
+@media (max-width: 1280px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 980px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) {
+  .tiles { grid-template-columns: 1fr; }
+  .bn-num { font-size: 36px; }
+  .nav { display: none; }
+  .note .ia { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ TOP BAR ============ -->
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="5" cy="6" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <circle cx="5" cy="18" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <path d="M7.4 7.2 C 11 9, 13 9, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <path d="M7.4 16.8 C 11 15, 13 15, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <circle cx="17" cy="12" r="3.2" fill="hsl(var(--primary))"/>
+      </svg>
+      <span class="brand-name">Supernova</span>
+    </div>
+    <nav class="nav">
+      <a id="nav-overview" class="active" onclick="setPage('overview')">概览</a>
+      <a id="nav-workspace" onclick="setPage('workspace')">工作区</a>
+    </nav>
+    <div class="topbar-right">
+      <button class="icon-btn" onclick="toggleTheme()" title="切换主题" aria-label="切换主题">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<main id="main"></main>
+
+<!-- ============ preview control panel ============ -->
+<div class="pcp">
+  <div class="t">页面</div>
+  <div class="row">
+    <button class="seg on" data-page="overview" onclick="setPage('overview')">概览页</button>
+    <button class="seg" data-page="workspace" onclick="setPage('workspace')">工作区页</button>
+  </div>
+  <div class="t">场景</div>
+  <div class="row">
+    <button class="seg on" data-scn="hunting" onclick="setScenario('hunting')">猎杀中</button>
+    <button class="seg" data-scn="calm" onclick="setScenario('calm')">一切正常</button>
+    <button class="seg" data-scn="empty" onclick="setScenario('empty')">空状态</button>
+  </div>
+  <div class="t">主题</div>
+  <div class="row">
+    <button class="seg on" data-theme="dark" onclick="setTheme('dark')">深色</button>
+    <button class="seg" data-theme="light" onclick="setTheme('light')">浅色</button>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+ * v2 激进版：两页零结构重叠
+ *   概览页  = 态势大屏：威胁横幅（横排）+ 工作区磁贴网格（单屏、只读）
+ *   工作区页 = 操作台：两行紧凑工作台头（数字降级为摘要行）+ 密表格
+ * ================================================================ */
+const fmtInt = (n) => n.toLocaleString("en-US");
+const compactUrl = (u) => u ? u.replace(/^https?:\/\//, "").replace(/^git@/, "").replace(/\.git$/, "") : "—";
+const SEV_CLS = ["crit", "high", "med", "low"];
+const SEV_TOK = ["--red", "--orange", "--amber", "--amber"];
+const SEV_NAME = { hunting: ["严重", "高", "中", "低"], calm: null };
+function sevSegs(sev) {
+  const total = sev.reduce((a, s) => a + s, 0);
+  return sev.map((n, i) => `<span class="s-${SEV_CLS[i]}" style="width:${(n / total * 100).toFixed(1)}%;background:hsl(var(${SEV_TOK[i]})${i === 3 ? " / 0.55" : ""})"></span>`).join("");
+}
+
+/* ---------- mock 数据 ---------- */
+const OV = {
+  hunting: {
+    total: 1284, sev: [12, 47, 118, 1107], scanCount: 47, wsCount: 5, live: 3,
+    stats: [ { l: "进行中", v: 3, cls: "live" }, { l: "今日完成", v: 4 }, { l: "累计成本", v: "$142.86" }, { l: "需关注", v: 1, cls: "warn" } ],
+    tiles: [
+      { ws: "ws-payments", find: 640, sev: [8, 28, 61, 543], scans: 18, cost: "$18.20", time: "2 分钟前", latest: "running",
+        runs: [ { id: "payments-svc-a9f3", pct: 64, phase: "recon", elapsed: "12m" } ] },
+      { ws: "ws-commerce", find: 412, sev: [3, 14, 40, 355], scans: 12, cost: "$31.07", time: "今天 14:22", latest: "completed" },
+      { ws: "ws-auth", find: 158, sev: [1, 6, 13, 138], scans: 8, cost: "$22.94", time: "今天 10:05", latest: "completed" },
+      { ws: "ws-finance", find: 62, sev: [0, 2, 4, 56], scans: 6, cost: "$9.61", time: "昨天 22:10", latest: "completed" },
+      { ws: "ws-platform", find: 12, sev: [0, 1, 3, 8], scans: 3, cost: "$61.04", time: "5 分钟前", latest: "failed",
+        runs: [ { id: "ci-fleet-7a", pct: 18, phase: "recon", elapsed: "4m" }, { id: "fleet-cmb-8d", pct: 31, phase: "黑盒预验证", elapsed: "2m" } ] },
+    ],
+  },
+  calm: {
+    total: 0, sev: null, scanCount: 9, wsCount: 3, live: 0,
+    stats: [ { l: "进行中", v: 0 }, { l: "今日完成", v: 6 }, { l: "累计成本", v: "$31.40" }, { l: "需关注", v: 0 } ],
+    tiles: [
+      { ws: "ws-payments", find: 0, sev: null, scans: 4, cost: "$6.20", time: "12 分钟前", latest: "completed" },
+      { ws: "ws-commerce", find: 0, sev: null, scans: 3, cost: "$4.07", time: "1 小时前", latest: "completed" },
+      { ws: "ws-auth", find: 0, sev: null, scans: 2, cost: "$2.94", time: "3 小时前", latest: "completed" },
+    ],
+  },
+};
+
+const WS_SCANS = {
+  hunting: [
+    { id: "payments-svc-a9f3", status: "running",     type: "whitebox", repo: "payments-api",   url: "https://gitlab.acme.dev/payments/payments-api.git",   vulns: null, cost: "$8.42", time: "2 分钟前",  pct: 64, phase: "recon · 资产清点", elapsed: "12m" },
+    { id: "payments-cmb-2f",   status: "completed",   type: "whitebox", repo: "payments-api",   url: "https://gitlab.acme.dev/payments/payments-api.git",   vulns: 156,  cost: "$12.05", time: "今天 14:22", dur: "18m", combined: true,
+      runs: [ { rid: "bb-9f2", st: "completed", latest: true }, { rid: "bb-8a1", st: "completed" } ] },
+    { id: "orders-gql-44b",    status: "failed",      type: "whitebox", repo: "orders-graphql", url: "https://gitlab.acme.dev/payments/orders-graphql.git", vulns: 0,    cost: "$1.87",  time: "今天 11:03" },
+  ],
+  calm: [
+    { id: "orders-gql-44b", status: "completed", type: "whitebox", repo: "orders-graphql", url: "https://gitlab.acme.dev/payments/orders-graphql.git", vulns: 0, cost: "$5.31", time: "12 分钟前", dur: "11m" },
+    { id: "payments-cmb-2f", status: "completed", type: "whitebox", repo: "payments-api",   url: "https://gitlab.acme.dev/payments/payments-api.git",   vulns: 0, cost: "$0.89", time: "今天 14:22", dur: "9m" },
+    { id: "billing-rpc-91", status: "completed", type: "whitebox", repo: "billing-rpc",    url: "git@gitlab.acme.dev:finance/billing-rpc.git",         vulns: 0, cost: "$0.00", time: "昨天 22:10", dur: "6m" },
+  ],
+};
+const WB_SUM = {
+  hunting: { find: 640, sev: [8, 28, 61, 543], scans: 18, live: 1, attn: 1, attnTxt: "1 失败", cost: "¥102.40 + $18.20", latest: "payments-svc-a9f3 · 64%", latestT: "进行中", type: "whitebox", avg: "12m" },
+  calm:    { find: 0, sev: null, scans: 3, live: 0, attn: 0, attnTxt: "无异常", cost: "¥21.30 + $6.20", latest: "orders-gql-44b", latestT: "已完成", type: "whitebox", avg: "8m" },
+};
+
+/* ---------- icons ---------- */
+const icon = {
+  plus: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  refresh: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>',
+  chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+  search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+  pin: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg>',
+  users: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  repo: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M15 2v5h5"/></svg>',
+  key: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>',
+  globe: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>',
+  gear: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+  ban: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></svg>',
+  play: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>',
+  eye: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  redo: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>',
+  trash: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  arrl: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>',
+};
+const chevS = icon.chev.replace('width="14" height="14"', 'width="12" height="12"');
+
+function traceHTML(idle) {
+  const pts = "0,11 90,11 118,11 126,5 134,17 142,3 150,19 158,11 260,11 306,8 314,14 322,11 480,11 540,11 606,11 614,7 622,15 630,11 800,11 880,11 940,11 998,11 1010,6 1022,16 1034,11 1200,11";
+  return `<div class="trace-wrap"><div class="trace ${idle ? "idle" : ""}"><svg viewBox="0 0 1200 22" preserveAspectRatio="none"><polyline class="baseline" points="0,11 1200,11"/><polyline class="pulse-line" points="${pts}"/></svg></div></div>`;
+}
+function statusBadge(s) {
+  const m = { running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" };
+  return `<span class="stbadge ${s}">${m[s]}</span>`;
+}
+
+/* ================= 概览页：态势大屏 ================= */
+function overviewHTML(scn) {
+  if (scn === "empty") return `
+    <div style="padding-top:44px">${emptyHTML({
+      title: "还没有扫描",
+      text: "新建一个扫描，Supernova 将开始追踪 source → sink 污点路径。",
+      cta: "新建扫描",
+    })}</div>`;
+
+  const d = OV[scn];
+  const h = scn === "hunting";
+  const calm = d.total === 0;
+  const names = SEV_NAME[scn];
+
+  return `
+  <!-- 威胁横幅：全局威胁 + 构成 + 运营指标 + CTA 一行装下（替代 Hero 大卡 + 四格指标条） -->
+  <section class="banner ${calm ? "calm" : ""}">
+    <div class="bn-threat">
+      <span class="bn-eyebrow"><span class="bar"></span>${calm ? "一切正常 · Surface Clear" : "累计发现 · Findings"}</span>
+      <div class="bn-num-row">
+        <span class="bn-num">${fmtInt(d.total)}</span>
+        <span class="bn-pill">${calm ? "未发现可利用污点路径" : "条可利用污点路径"}</span>
+      </div>
+    </div>
+    <div class="bn-mid">
+      ${d.sev ? `<div class="bn-sevbar">${sevSegs(d.sev)}</div>
+      <div class="bn-legend">${d.sev.map((n, i) => `<i><span class="sw" style="background:hsl(var(${SEV_TOK[i]})${i === 3 ? " / 0.55" : ""})"></span>${names[i]} ${fmtInt(n)}</i>`).join("")}</div>` : ""}
+      <div class="bn-ctx">跨 <b>${d.scanCount}</b> 次扫描 · <b>${d.wsCount}</b> 个工作区 · <b class="live-n">${d.live}</b> 个进行中</div>
+    </div>
+    <div class="bn-stats">
+      ${d.stats.map(s => `<div class="bn-stat"><div class="v ${s.cls || ""}">${s.v}</div><div class="l">${s.l}</div></div>`).join("")}
+    </div>
+    <div class="bn-cta"><button class="btn-cta">${icon.plus}新建扫描</button></div>
+    ${traceHTML(!h)}
+  </section>
+
+  <!-- 工作区磁贴：跨 ws 态势一目了然，运行中进度直接融进磁贴（单屏完成，无滚动长列表） -->
+  <div class="sec-row">
+    <h2>工作区态势 · Workspaces</h2>
+    <span class="side">
+      <span class="fresh"><span id="freshTxt">12 秒前更新</span><span class="refresh-link" onclick="refreshTick()">${icon.refresh}刷新</span></span>
+      <span class="sec-link" onclick="setPage('workspace')">管理全部工作区 ${chevS}</span>
+    </span>
+  </div>
+  <div class="tiles">
+    ${d.tiles.map(tileHTML).join("")}
+  </div>
+
+  ${noteHTML()}`;
+}
+
+function tileHTML(t) {
+  const stCls = t.latest === "running" ? "st-running" : t.latest === "failed" ? "st-failed" : t.latest === "interrupted" ? "st-warn" : (t.find === 0 ? "st-clear" : "");
+  const stTxt = { running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" }[t.latest];
+  const names = SEV_NAME.hunting;
+  return `
+  <div class="tile ${stCls}" onclick="setPage('workspace')">
+    <div class="tile-top">
+      ${t.latest === "running" ? '<span class="dot-live" style="width:7px;height:7px"></span>' : ""}
+      <span class="tile-ws">${t.ws}</span>
+      <span class="tile-st ${t.latest}">${stTxt}</span>
+    </div>
+    <div class="tile-num-row">
+      <span class="tile-num ${t.find > 0 ? "hi" : "zero"}">${fmtInt(t.find)}</span>
+      <span class="tile-num-l">发现</span>
+    </div>
+    ${t.sev ? `<div class="tile-sev">${sevSegs(t.sev)}</div>
+    <div class="tile-sev-legend">${t.sev.map((n, i) => `${names[i]} ${fmtInt(n)}`).join(" · ")}</div>` : `<div class="tile-sev-legend" style="color:hsl(var(--green)/.8)">all clear · 无发现</div>`}
+    ${t.runs ? `<div class="tile-runs">${t.runs.map(r => `
+      <div class="trun">
+        <span class="tid">${r.id}</span>
+        <span class="tpct">${r.pct}% · ${r.phase} · ${r.elapsed}</span>
+        <span class="ttrack"><span class="tfill" style="width:${r.pct}%"></span></span>
+      </div>`).join("")}</div>` : ""}
+    <div class="tile-meta">
+      <span>${t.scans} 扫描</span><span class="sep">·</span><span>${t.cost}</span><span class="sep">·</span><span>${t.time}</span>
+      <span class="go">${icon.chev.replace('width="14" height="14"', 'width="12" height="12"')}</span>
+    </div>
+  </div>`;
+}
+
+/* ================= 工作区页：操作台 ================= */
+function workspaceHTML(scn) {
+  if (scn === "empty") {
+    // 空工作区：同样紧凑工作台头（中性「尚未扫描」）+ 空态卡
+    return `
+    <div><span class="back" onclick="setPage('overview')">${icon.arrl} 返回工作区列表</span></div>
+    <div class="wb">
+      <div class="wb-r1">
+        <span class="wb-name">ws-payments <span class="hbadge dashed">尚未扫描</span></span>
+        ${cmdbarHTML()}
+      </div>
+      <div class="wb-r2">
+        <span>先配置仓库与认证，或直接发起首次扫描</span>
+      </div>
+    </div>
+    <div style="margin-top:24px">${emptyHTML({
+      title: "这个工作区还没有扫描",
+      text: "配置扫描目标后发起首次扫描；白盒需要仓库，黑盒需要目标地址与认证。",
+      cta: "新建扫描",
+      subs: ["配置仓库 →", "认证档案 →"],
+    })}</div>
+    ${noteHTML()}`;
+  }
+
+  const s = WB_SUM[scn];
+  const scans = WS_SCANS[scn];
+  const running = scans.filter(x => x.status === "running").length;
+  const names = SEV_NAME.hunting;
+
+  return `
+  <div><span class="back" onclick="setPage('overview')">${icon.arrl} 返回工作区列表</span></div>
+
+  <!-- 工作台头：ws 名 + 徽标 + 命令栏；数字降级为一行 mono 摘要（无大 Hero / 无四格指标条） -->
+  <div class="wb">
+    <div class="wb-r1">
+      <span class="wb-name">${running ? '<span class="dot-live"></span>' : ""}ws-payments</span>
+      <span class="wb-badges">
+        ${statusBadge(scn === "hunting" ? "running" : "completed")}
+        <span class="hbadge">${s.type}</span>
+        <span class="hbadge">扫描 · ${s.scans}</span>
+      </span>
+      ${cmdbarHTML()}
+    </div>
+    <div class="wb-r2">
+      <span class="findings ${s.find === 0 ? "clear" : ""}"><b>${fmtInt(s.find)}</b> 累计发现</span>
+      ${s.sev ? `<span class="wb-minisev"><span class="bar">${sevSegs(s.sev)}</span>${s.sev.map((n, i) => `${names[i]} ${fmtInt(n)}`).join(" · ")}</span>` : ""}
+      <span class="sep">|</span>
+      <span><b>${s.live}</b> 运行中</span>
+      <span class="sep">|</span>
+      <span class="attn">需关注 <b>${s.attn}</b>（${s.attnTxt}）</span>
+      <span class="sep">|</span>
+      <span>花费 <b>${s.cost}</b></span>
+      <span class="sep">|</span>
+      <span>最新 <a>${s.latest}</a> · ${s.latestT}</span>
+    </div>
+  </div>
+
+  <!-- 操作台主体：过滤器 + 唯一的完整扫描表格 -->
+  <div class="ops-head">
+    <h2>扫描 · <span class="cnt">${scans.length}</span><span class="avg">平均用时 ${s.avg} · 最长 18m · 最短 6m</span></h2>
+    <button class="btn-cta">${icon.plus}新建扫描</button>
+  </div>
+  <div class="filters">
+    <div class="f-search">${icon.search}<input placeholder="搜索 scan_id / 仓库…" /></div>
+    <div class="segctrl">
+      <button class="segbtn on">全部<span class="n">${scans.length}</span></button>
+      <button class="segbtn">运行中<span class="n">${running}</span></button>
+      <button class="segbtn">已完成<span class="n">${scans.filter(x => x.status === "completed").length}</span></button>
+      <button class="segbtn">失败<span class="n">${scans.filter(x => x.status === "failed").length}</span></button>
+    </div>
+    <div class="f-select-wrap">
+      <select class="f-select"><option>全部类型</option><option>whitebox</option><option>组合（白盒+黑盒）</option></select>
+      ${chevS}
+    </div>
+  </div>
+  <div class="table-card">
+    <table>
+      <colgroup>
+        <col style="width:34px"><col style="width:112px"><col><col style="width:190px"><col style="width:106px"><col style="width:176px">
+        <col style="width:72px"><col style="width:90px"><col style="width:126px"><col style="width:196px">
+      </colgroup>
+      <thead><tr>
+        <th></th><th>状态</th><th>扫描</th><th>仓库</th><th>类型</th><th>进度</th>
+        <th class="r">漏洞</th><th class="r">花费</th><th>时间</th><th class="r">操作</th>
+      </tr></thead>
+      <tbody>${scans.map(scanRowHTML).join("")}</tbody>
+    </table>
+  </div>
+
+  ${noteHTML()}`;
+}
+
+function cmdbarHTML() {
+  return `
+  <div class="cmdbar">
+    <button class="tb icon pinned" title="已固定">${icon.pin}</button>
+    <button class="tb">${chevS} 切换</button>
+    <button class="tb">${icon.users} 成员</button>
+    <span class="vr"></span>
+    <button class="tb">${icon.repo} 仓库</button>
+    <button class="tb">${icon.key} 认证</button>
+    <button class="tb">${icon.globe} Host</button>
+    <button class="tb icon" title="设置">${icon.gear}</button>
+  </div>`;
+}
+
+function scanRowHTML(s) {
+  const expCell = s.runs
+    ? `<td><button class="exp open" title="展开黑盒 run">${chevS}</button></td>`
+    : `<td></td>`;
+  let prog;
+  if (s.status === "running") {
+    prog = `<div class="pcell"><div class="pl"><span class="pct">${s.pct}%</span><span class="phase">${s.phase}</span></div><span class="ptrack"><span class="pfill" style="width:${s.pct}%"></span></span></div>`;
+  } else if (s.status === "completed") {
+    prog = `<span class="pdone">100%${s.dur ? ` · 用时 ${s.dur}` : ""}</span>`;
+  } else if (s.status === "interrupted") {
+    prog = `<span class="pstop">停在 ${s.stopPct}%</span>`;
+  } else {
+    prog = `<span style="font-size:12px;color:hsl(var(--muted-fg))">—</span>`;
+  }
+  const v = s.vulns ?? 0;
+  const ops = [];
+  if (s.status === "running") ops.push(`<button class="op-btn">${icon.ban} 取消</button>`);
+  if (s.status === "interrupted") ops.push(`<button class="op-btn">${icon.play} 恢复</button>`);
+  ops.push(`<button class="op-btn">${icon.eye} 查看</button>`);
+  if (s.status === "completed" || s.status === "failed") ops.push(`<button class="op-btn">${icon.redo} 重跑</button>`);
+  ops.push(`<button class="op-btn danger" title="删除">${icon.trash}</button>`);
+  const main = `
+  <tr class="rowmain">
+    ${expCell}
+    <td>${statusBadge(s.status)}</td>
+    <td class="td-mono td-clamp"><a class="lnk" title="${s.id}">${s.id}</a></td>
+    <td class="td-clamp" title="${s.url}"><span class="repo-cell"><span class="rc-name">${s.repo}</span><span class="rc-url">${compactUrl(s.url)}</span></span></td>
+    <td><span style="display:inline-flex;gap:5px"><span class="badge">${s.type}</span>${s.combined ? '<span class="badge" style="color:hsl(var(--primary));border-color:hsl(var(--primary)/.35)">组合</span>' : ""}</span></td>
+    <td>${prog}</td>
+    <td class="r"><span class="vuln ${v > 0 ? "hi" : "zero"}">${s.vulns == null ? "—" : fmtInt(v)}</span></td>
+    <td class="td-mono r">${s.cost}</td>
+    <td style="font-size:12px;color:hsl(var(--muted-fg));white-space:nowrap">${s.time}</td>
+    <td class="r"><span class="ops">${ops.join("")}</span></td>
+  </tr>`;
+  if (!s.runs) return main;
+  return main + `
+  <tr>
+    <td colspan="10" style="padding:0;border-bottom:none">
+      <div class="nested">
+        <span class="nested-cap">黑盒 run · ${s.runs.length}</span>
+        ${s.runs.map(r => `
+        <div class="nrun">
+          <span class="rid">${r.rid}</span>${statusBadge(r.st)}
+          ${r.latest ? '<span class="latest">最新</span>' : ""}
+          <span class="rv" style="margin-left:4px">查看</span>
+          <button class="del" title="删除 run">${icon.trash}</button>
+        </div>`).join("")}
+      </div>
+    </td>
+  </tr>`;
+}
+
+/* ================= 空态 / note ================= */
+function emptyHTML({ title, text, cta, subs }) {
+  return `
+  <div class="empty">
+    <div class="glyph-big">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none">
+        <circle cx="5" cy="6" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <circle cx="5" cy="18" r="2.4" stroke="hsl(var(--muted-fg))" stroke-width="1.4"/>
+        <path d="M7.4 7.2 C 11 9, 13 9, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <path d="M7.4 16.8 C 11 15, 13 15, 14.5 12" stroke="hsl(var(--muted-fg))" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <circle cx="17" cy="12" r="3.2" fill="hsl(var(--primary) / 0.5)"/>
+      </svg>
+    </div>
+    <h3>${title}</h3>
+    <p>${text}</p>
+    <button class="btn-cta">${icon.plus}${cta}</button>
+    ${subs ? `<div class="sublinks">${subs.map(x => `<a>${x}</a>`).join("")}</div>` : ""}
+  </div>`;
+}
+function noteHTML() {
+  return `
+  <div class="note">
+    <b>v2 激进版</b> —— 两页在布局骨架层面零重叠（v1 只换了内容、骨架仍是「Hero + 指标条 + 列表」，所以还像）：
+    <div class="ia">
+      <div>
+        <h4 style="color:hsl(var(--cyan))">概览页 = 态势大屏（监控语言）</h4>
+        <ul>
+          <li><b>威胁横幅</b>：全局数字 + 构成谱带 + 运营指标 + CTA 压成一行，替代 Hero 大卡与四格指标条</li>
+          <li><b>工作区磁贴</b>：等宽 tile 网格，运行中扫描的进度直接融进磁贴（左侧状态色条：cyan=运行 / red=失败 / green=清）；数据刷新入口在标题行</li>
+          <li>单屏完成、只读无列表——扫描明细与操作全部在工作区页</li>
+        </ul>
+      </div>
+      <div>
+        <h4 style="color:hsl(var(--primary))">工作区页 = 操作台（工作台语言）</h4>
+        <ul>
+          <li><b>砍掉 Hero 大卡与四格指标条</b>：换成两行紧凑工作台头（ws 名 + 命令栏 / 一行 mono 统计摘要 + mini 谱带）</li>
+          <li>态势震撼感让给概览大屏；这里数字只是干活要看的上下文</li>
+          <li>主体就是过滤器 + 全应用唯一的完整扫描表格（行操作 / 嵌套黑盒 run）；平均耗时等运营数据收进表格标题行</li>
+          <li><b>类型模型：只有白盒 + 组合</b>——黑盒一律是组合扫描的嵌套 run（bb_runs 版本化），无独立黑盒行与入口</li>
+        </ul>
+      </div>
+    </div>
+    落地映射：概览聚合沿用 <code>listAllScans</code> 按 ws 分组；工作区页维持 <code>listScans</code>。<code>fmtTime / fmtDur / compactUrl</code> 三处拷贝抽到 utils。
+  </div>`;
+}
+
+/* ================= 渲染 & 控制 ================= */
+function refreshTick() {
+  const el = document.getElementById("freshTxt");
+  if (!el) return;
+  el.textContent = "已刷新 ✓";
+  setTimeout(() => { el.textContent = "刚刚更新"; }, 1400);
+}
+let theme = "dark", scn = "hunting", page = "overview";
+function render() {
+  document.getElementById("main").innerHTML = page === "overview" ? overviewHTML(scn) : workspaceHTML(scn);
+  window.scrollTo({ top: 0 });
+}
+function apply() {
+  document.documentElement.className = theme;
+  document.getElementById("nav-overview").classList.toggle("active", page === "overview");
+  document.getElementById("nav-workspace").classList.toggle("active", page === "workspace");
+  render();
+}
+function setTheme(t) { theme = t; document.querySelectorAll("[data-theme]").forEach(b => b.classList.toggle("on", b.dataset.theme === t)); apply(); }
+function setScenario(s) { scn = s; document.querySelectorAll("[data-scn]").forEach(b => b.classList.toggle("on", b.dataset.scn === s)); apply(); }
+function setPage(p) { page = p; document.querySelectorAll("[data-page]").forEach(b => b.classList.toggle("on", b.dataset.page === p)); apply(); }
+function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
+apply();
+</script>
+</body>
+</html>

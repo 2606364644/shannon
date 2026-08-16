@@ -24,6 +24,36 @@ describe("CredentialRows", () => {
     expect(onChange).toHaveBeenCalledWith([{ ...one[0], username: "b" }]);
   });
 
+  it("内置角色 chips：渲染 超管/管理员/用户；当前角色命中时 aria-pressed", () => {
+    render(<CredentialRows value={one} onChange={() => {}} allowMulti={false} />);
+    expect(screen.getByRole("button", { name: "超管" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "管理员" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "用户" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("点内置角色 chip → onChange 填入对应 role 值（可多次切换）", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<CredentialRows value={one} onChange={onChange} allowMulti={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "超管" }));
+    expect(onChange).toHaveBeenCalledWith([{ ...one[0], role: "superadmin" }]);
+    // 受控组件：chip 高亮跟随 value（rerender 模拟父级回填）
+    rerender(<CredentialRows
+      value={[{ ...one[0], role: "superadmin" }]} onChange={() => {}} allowMulti={false} />);
+    expect(screen.getByRole("button", { name: "超管" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("特殊角色（如审计管理员）不走预设：输入框手输仍可改 role", () => {
+    const onChange = vi.fn();
+    const audit: CredentialDraft[] = [{ role: "auditor", username: "a", password: "pw" }];
+    render(<CredentialRows value={audit} onChange={onChange} allowMulti={false} />);
+    // 无 chip 命中 + 输入框保留原值可继续编辑
+    expect((screen.getByLabelText("角色") as HTMLInputElement).value).toBe("auditor");
+    ["超管", "管理员", "用户"].forEach((n) =>
+      expect(screen.getByRole("button", { name: n })).toHaveAttribute("aria-pressed", "false"));
+    fireEvent.change(screen.getByLabelText("角色"), { target: { value: "审计管理员" } });
+    expect(onChange).toHaveBeenCalledWith([{ ...audit[0], role: "审计管理员" }]);
+  });
+
   it("allowMulti：点「+ 添加角色」追加一行空 draft", () => {
     const onChange = vi.fn();
     render(<CredentialRows value={one} onChange={onChange} allowMulti />);

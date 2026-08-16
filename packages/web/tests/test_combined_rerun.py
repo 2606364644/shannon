@@ -150,7 +150,8 @@ async def test_rerun_precheck_fail_marks_run_failed(mgr, tmp_path):
     sb.assert_not_awaited()
     mr.assert_awaited_with(
         store.get_scan_dir(ws, scan_id), "run-2", "failed",
-        reason="auth_failed", status="failed")
+        reason="auth_failed", status="failed",
+        extra={"bb_failure_point": None, "bb_failure_detail": None})
 
 
 # ── 守卫：latest 非 failed/skipped 拒续跑（零回归）────────────────────────────

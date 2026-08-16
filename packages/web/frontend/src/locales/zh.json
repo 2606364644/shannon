@@ -235,9 +235,7 @@
     "filter": {
       "allStatus": "全部状态",
       "allType": "全部类型",
-      "whitebox": "白盒",
-      "blackbox": "黑盒",
-      "correlation": "关联"
+      "whitebox": "白盒"
     },
     "newScan": "新建扫描",
     "lastRefresh": "上次刷新 {{time}}",
@@ -301,11 +299,6 @@
     }
   },
   "scan": {
-    "tabs": {
-      "whitebox": "白盒",
-      "blackbox": "黑盒",
-      "correlation": "联动"
-    },
     "cardTitle": {
       "whitebox": "白盒扫描",
       "blackbox": "黑盒扫描",
@@ -347,7 +340,6 @@
       "noMatch": "无匹配仓库"
     },
     "submit": "开始扫描",
-    "submitHint": "→ 202 → 跳 /p/{ws}/live · 错误：400(Temporal)/409(并发)/422(yaml)",
     "errors": {
       "yamlRuntimeError": "yaml 有错，无法运行",
       "temporal": "Temporal 未就绪（localhost:7233）。先启动：docker-compose up temporal",
@@ -373,7 +365,6 @@
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
     "subtitleBlackbox": "对运行中的目标服务发起黑盒渗透测试",
-    "subtitleCorrelation": "合并多份扫描结果，生成关联分析报告",
     "submitBlackbox": "开始渗透",
     "footerHintWhitebox": "⌘+Enter 快速提交",
     "footerHintBlackbox": "确认目标 URL 正确后提交",
@@ -432,6 +423,13 @@
       "selectRole": "以哪个角色登录",
       "profileRoleHint": "将以所选角色真实登录一次以持久化会话；验证状态来自档案库最近一次「测试登录」。",
       "role": "角色",
+      "rolePlaceholder": "选择或输入角色",
+      "rolePresetsHint": "点击内置角色快速填入；特殊角色（如审计管理员）直接输入",
+      "rolePresets": {
+        "superadmin": "超管",
+        "admin": "管理员",
+        "user": "用户"
+      },
       "addRole": "+ 添加角色",
       "removeRole": "删除该角色",
       "selectAllRoles": "全选",
@@ -458,9 +456,7 @@
   },
   "dashboard": {
     "title": "仪表盘",
-    "subtitle": "扫描概览与最近活动",
     "newScan": "新建扫描",
-    "summaryAria": "汇总",
     "hero": {
       "eyebrow": "累计发现 · FINDINGS",
       "allClearEyebrow": "一切正常 · SURFACE CLEAR",
@@ -475,7 +471,6 @@
       "flow": "污点流光",
       "toggle": "切换特效"
     },
-    "elapsed": "已运行 {{dur}}",
     "fresh": {
       "ago": "{{sec}} 秒前更新",
       "justNow": "刚刚更新",
@@ -484,14 +479,10 @@
     "stats": {
       "running": "运行中",
       "completedToday": "今日完成",
-      "totalVulns": "累计漏洞",
       "totalCost": "累计成本",
-      "totalScans": "扫描总数"
+      "totalScans": "扫描总数",
+      "needsAttention": "需关注"
     },
-    "runningTitle": "正在运行",
-    "viewLive": "查看实时",
-    "noRunning": "当前无运行中扫描",
-    "noRunningAgents": "无运行中 agent",
     "startedAt": "开始时间",
     "totalDuration": "总耗时",
     "phaseDuration": "阶段耗时",
@@ -502,31 +493,22 @@
     "lastEventJustNow": "刚刚",
     "progress": "进度",
     "cost": "费用",
-    "recentTitle": "最近扫描",
-    "viewAll": "查看全部 →",
     "empty": {
       "title": "还没有扫描",
       "hint": "新建一个扫描开始",
       "noWorkspaceHint": "还没有工作区，先创建一个工作区再开始扫描"
     },
     "errors": {
-      "loadFailed": "Dashboard 加载失败：{{error}}"
+      "title": "加载失败",
+      "loadFailed": "Dashboard 加载失败：{{error}}",
+      "stale": "刷新失败 · 展示缓存数据"
     },
-    "scanTable": {
-      "status": "状态",
-      "scanId": "扫描",
-      "workspace": "工作区",
-      "repo": "仓库",
-      "type": "类型",
-      "progress": "进度",
-      "vulns": "漏洞",
-      "cost": "花费",
-      "time": "时间",
-      "actions": "操作"
-    },
-    "noWorkspace": {
-      "title": "尚未分配工作区",
-      "hint": "请联系管理员为你分配工作区"
+    "tiles": {
+      "title": "工作区态势",
+      "manageAll": "管理全部工作区",
+      "findings": "发现",
+      "allClear": "无发现",
+      "scansUnit": "{{n}} 扫描"
     }
   },
   "settings": {
@@ -573,21 +555,55 @@
     "unpin": "取消置顶",
     "pinPinned": "已置顶",
     "pinFailed": "置顶失败：{{error}}",
+    "hero": {
+      "eyebrow": "工作区 · WORKSPACE",
+      "totalFindings": "累计发现",
+      "allClear": "一切正常",
+      "notScanned": "尚未扫描",
+      "emptyGuide": "开始第一次扫描以建立安全基线 · 白盒审计代码仓库，黑盒验证运行中的目标",
+      "ctxLatest": "最近扫描",
+      "ctxTarget": "目标"
+    },
+    "stats": {
+      "cost": "累计花费",
+      "needsAttention": "需关注",
+      "needsAttentionCtx": "失败 {{failed}} · 中断 {{interrupted}}"
+    },
     "tabs": {
       "overview": "概览",
       "report": "报告",
       "deliverables": "产物",
       "logs": "日志",
       "live": "实时",
-      "repos": "仓库"
+      "repos": "仓库",
+      "scans": "扫描"
     },
     "notFound": {
       "message": "工作区不存在或已被删除，无法显示实时进度。可能扫描已被清理或服务重启后丢失。"
     },
     "scans": {
       "listTitle": "扫描任务",
+      "searchPlaceholder": "搜索 scan / workflow / repo…",
+      "seg": {
+        "all": "全部"
+      },
+      "table": {
+        "status": "状态",
+        "scan": "任务",
+        "repo": "仓库 / 目标",
+        "type": "类型",
+        "progress": "进度",
+        "vulns": "漏洞",
+        "cost": "花费",
+        "created": "创建时间",
+        "actions": "操作"
+      },
+      "stoppedAt": "停在 {{pct}}%",
+      "duration": "用时 {{dur}}",
       "empty": "尚无扫描任务",
-      "emptyHint": "新建一个扫描开始审计",
+      "emptyHint": "新建一个扫描开始审计；白盒扫描可先配置仓库，黑盒扫描可先配置认证 / 主机档案",
+      "setupRepos": "先配置仓库 →",
+      "setupAuth": "配置认证档案 →",
       "newScan": "新建扫描",
       "view": "查看",
       "resume": "恢复",
@@ -647,6 +663,8 @@
       },
       "runs": {
         "view": "查看",
+        "toggleExpand": "展开黑盒 run",
+        "toggleCollapse": "收起黑盒 run",
         "select": "选择黑盒 run",
         "latest": "最新",
         "statusFailed": "失败",
@@ -657,6 +675,8 @@
         "addBlackboxDesc": "为该白盒结果新建一次黑盒 run",
         "addedSuccess": "黑盒 run 已创建",
         "addedFailed": "创建黑盒 run 失败：{{error}}",
+        "addNoUrlHint": "该任务没有目标 URL（纯白盒），无法加黑盒——请新建组合扫描提供目标服务地址",
+        "addRunningHint": "黑盒 run 进行中，请等待完成或先取消再新增",
         "delete": "删除该 run",
         "deleteConfirmTitle": "删除黑盒 run",
         "deleteConfirmDesc": "将删除该次黑盒 run 的全部结果（报告、产物、日志），不可恢复。确定删除 {{runId}}？",
@@ -665,18 +685,22 @@
         "deleteRunningHint": "运行中的 run 请先取消再删除",
         "bannerWsSettings": "前往工作区设置",
         "bannerRerunAuth": "换认证重试",
+        "bannerAuthProfiles": "前往认证配置",
         "reasonProviderMissing": {
           "title": "工作区 LLM 凭据未配置",
           "hint": "该工作区缺少 LLM API Key，黑盒无法启动。请前往工作区设置补全凭据后再扫黑盒。"
         },
         "reasonAuthFailed": {
           "title": "目标认证预验证失败",
-          "hint": "登录目标站点失败，请检查凭据后换认证重试。"
+          "hint": "登录目标站点失败。请前往认证配置，确认登录地址可访问（目标服务在线、地址未变更）且凭据有效，修正后重新发起扫描。"
         },
         "reasonGeneric": {
           "title": "黑盒 run 失败"
         }
-      }
+      },
+      "typeCombined": "组合",
+      "typeFilterCombined": "组合（白盒+黑盒）",
+      "avgCtx": "平均耗时 {{avg}} · 最长 {{max}} · 最短 {{min}}"
     },
     "errorBoundary": {
       "title": "该模块加载出错",
@@ -743,6 +767,7 @@
       "statusOpen": "已连接",
       "statusError": "重连中",
       "statusClosed": "已结束",
+      "progressDetails": "进度详情",
       "endFailed": "扫描失败",
       "endInterrupted": "扫描已中断",
       "endKilled": "扫描被终止",

@@ -2,6 +2,11 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+/** 内置角色预设（值即存档的 role 字符串；标签走 i18n scan.auth.rolePresets.*）。
+ *  覆盖最常见的两类（超管/管理员）+ 低权用户；审计管理员等特殊角色不预设，直接输入即可。 */
+export const ROLE_PRESETS = ["superadmin", "admin", "user"] as const;
 
 /** 多角色凭据录入草稿（前端内部态，scan 页 inline + 档案 dialog 共用）。
  *  - 新建 id 空（后端分配）；编辑 id 透传原值。
@@ -48,7 +53,33 @@ export function CredentialRows({ value, onChange, allowMulti, lockFirstRow }: Pr
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
               <Label htmlFor={`cr-role-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.role")}</Label>
-              <Input id={`cr-role-${i}`} value={d.role} onChange={(e) => update(i, { role: e.target.value })} size="sm" />
+              <Input
+                id={`cr-role-${i}`}
+                value={d.role}
+                onChange={(e) => update(i, { role: e.target.value })}
+                placeholder={t("scan.auth.rolePlaceholder")}
+                size="sm"
+              />
+              {/* 内置角色快选：点 chip 即填入对应 role 值；当前值命中时高亮。
+                  特殊角色（如审计管理员）不内置，直接在输入框填写。 */}
+              <div className="flex flex-wrap gap-1 pt-0.5" title={t("scan.auth.rolePresetsHint")}>
+                {ROLE_PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={d.role === p}
+                    onClick={() => update(i, { role: p })}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10.5px] transition-colors",
+                      d.role === p
+                        ? "border-primary/60 bg-primary/10 font-medium text-foreground"
+                        : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/70",
+                    )}
+                  >
+                    {t(`scan.auth.rolePresets.${p}`)}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="space-y-1">
               <Label htmlFor={`cr-user-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.username")}</Label>
