@@ -670,6 +670,7 @@
         "statusFailed": "Failed",
         "statusRunning": "Running",
         "statusSkipped": "Skipped",
+        "statusCancelled": "Cancelled",
         "statusCompleted": "Completed",
         "addBlackbox": "Add blackbox scan",
         "addBlackboxDesc": "Create a new blackbox run for this whitebox result",

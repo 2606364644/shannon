@@ -220,9 +220,11 @@ async def test_cancel_combined_pending_terminates_whitebox_and_orchestrator(
     result = await mgr.cancel("WS", "s1")
 
     assert result == {"cancelled": "s1"}
-    # 白盒 workflow_id（resumeAttempts=0 → {ws}-{scan_id}）
-    mock_client.get_workflow_handle.assert_called_with("WS-s1")
-    mock_handle.cancel.assert_awaited_once()
+    # 白盒 workflow_id（resumeAttempts=0 → {ws}-{scan_id}）+ authcheck 无条件 best-effort 取消
+    handled = [c.args[0] for c in mock_client.get_workflow_handle.call_args_list]
+    assert "WS-s1" in handled
+    assert "WS-s1-authcheck" in handled
+    assert mock_handle.cancel.await_count >= 1
     # 编排 task 取消 + 出栈
     assert scan_key not in mgr._orchestrator_tasks
     assert orch.cancelled()
@@ -247,8 +249,9 @@ async def test_cancel_combined_running_terminates_bb_run1(tmp_path, monkeypatch)
     result = await mgr.cancel("WS", "s1")
 
     assert result == {"cancelled": "s1"}
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-1")
-    mock_handle.cancel.assert_awaited_once()
+    handled = [c.args[0] for c in mock_client.get_workflow_handle.call_args_list]
+    assert "WS-s1-bb-1" in handled
+    assert mock_handle.cancel.await_count >= 1
     runs = store.list_blackbox_runs("WS", "s1")
     assert runs[-1]["status"] == "cancelled"
 
@@ -271,10 +274,39 @@ async def test_cancel_combined_running_run2_terminates_bb_run2(tmp_path, monkeyp
     result = await mgr.cancel("WS", "s1")
 
     assert result == {"cancelled": "s1"}
-    mock_client.get_workflow_handle.assert_called_with("WS-s1-bb-2")
-    mock_handle.cancel.assert_awaited_once()
+    handled = [c.args[0] for c in mock_client.get_workflow_handle.call_args_list]
+    assert "WS-s1-bb-2" in handled
+    assert mock_handle.cancel.await_count >= 1
     runs = store.list_blackbox_runs("WS", "s1")
     assert next(r for r in runs if r["run_id"] == "run-2")["status"] == "cancelled"
+
+
+# ── cancel: latest run pending（手动加 run 的 precheck 段）───────────────────
+
+@pytest.mark.asyncio
+async def test_cancel_combined_run_pending_cancels_authcheck_and_marks_run(
+        tmp_path, monkeypatch):
+    """latest run(run-1) pending（黑盒未提交，precheck 段）→ 取消 authcheck workflow +
+    run 标 cancelled（否则永久 pending，删除/新增的非终态门永久禁用）+ 任务级 cancelled。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    scan_dir = _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1（status=pending）
+
+    result = await mgr.cancel("WS", "s1")
+
+    assert result == {"cancelled": "s1"}
+    handled = [c.args[0] for c in mock_client.get_workflow_handle.call_args_list]
+    assert "WS-s1-authcheck" in handled, "pending 段唯一在跑的是 precheck workflow"
+    runs = store.list_blackbox_runs("WS", "s1")
+    assert runs[-1]["status"] == "cancelled"
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
 
 
 # ── cancel: 标终态 cancelled（scan_end + session.status）─────────────────────

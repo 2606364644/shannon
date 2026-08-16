@@ -154,6 +154,23 @@ async def test_reconcile_skips_terminal_runs(mgr, tmp_path):
     gcr.assert_not_awaited()
 
 
+# ── run workflow 不存在（编排随 web 重启丢失）→ run 标 failed 收口 ──────────
+async def test_reconcile_not_found_run_marked_failed(mgr, tmp_path):
+    """run-1 非终态 + 其 -bb-1 workflow 不存在（None）→ run 标 failed。否则 bb_runs 永久
+    卡非终态，delete 的 bb_runs 门与加 run 的在跑守卫被永久禁用（2026-08-17 根因修）。"""
+    scan_dir = _make_combined(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run("ws", "scan-1")  # run-1 非终态
+    with patch.object(mgr, "_query_workflow_status",
+                      new=AsyncMock(return_value=None)), \
+         patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
+        await mgr._reconcile_combined_scan(scan_dir)
+    runs = store.list_blackbox_runs("ws", "scan-1")
+    assert runs[-1]["status"] == "failed"
+    assert runs[-1].get("reason") == "编排中断（web 重启），run 未完成"
+    ese.assert_awaited_once_with(scan_dir)  # 无活跃 workflow → 补 scan_end
+
+
 # ── orphan_reconciler 接入：reconcile_orphaned → kick 组合恢复 ──────────────
 async def test_reconcile_orphaned_delegates_combined_to_scan_manager(tmp_path):
     from supernova_web.components.orphan_reconciler import reconcile_orphaned

@@ -29,6 +29,12 @@ const interrupted = {
   scan_id: "s3", scan_type: "whitebox", status: "interrupted", created_at: 3000,
   completed_at: null, vuln_count: 1, total_cost_usd: 0.5, cost_currency: "USD", is_running: false,
 } as const;
+// cancelled（2026-08-17 根因修）：取消手动黑盒 run 后任务级落 cancelled——终态口径
+// （后端 resume 拒 422），显 查看/重跑/删除，不显恢复/取消。
+const cancelled = {
+  scan_id: "s4", scan_type: "whitebox", status: "cancelled", created_at: 4000,
+  completed_at: 5000, vuln_count: 0, total_cost_usd: 1, cost_currency: "USD", is_running: false,
+} as const;
 
 let listCalls = 0;
 const server = setupServer(
@@ -124,6 +130,17 @@ describe("ScanList 卡片操作按钮按 status 显隐", () => {
     expect(screen.getByRole("button", { name: /重跑/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /删除/ })).toBeInTheDocument();
     // 查看是 Link（role=link）
+    expect(screen.getByRole("link", { name: /查看/ })).toBeInTheDocument();
+  });
+
+  it("cancelled scan：不显恢复/取消，显删除/重跑/查看（终态口径）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([cancelled])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s4")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /重跑/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /删除/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看/ })).toBeInTheDocument();
   });
 

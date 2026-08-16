@@ -63,6 +63,54 @@ async def test_delete_blackbox_run_pending_raises(tmp_path):
         await mgr.delete_blackbox_run("ws", wb_id, "run-1")
 
 
+# ── 任务级 delete 的 bb_runs 防御（2026-08-17 根因修）───────────────────────
+# run 在跑而任务级停终态（race/legacy 状态）时，delete 只查任务级 running 会整目录删掉
+# 在跑 run（workflow 还在写产物）。bb_runs 任一非终态 → ScanRunning（先 cancel 再删）。
+
+async def test_delete_scan_with_active_run_raises(tmp_path):
+    """任务级 status=completed（legacy：run 在跑不反映）+ run-1 running → 任务级 delete 拒。"""
+    mgr = _mgr(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = _make_run(store)
+    store.update_blackbox_run("ws", wb_id, "run-1", status="running")
+    from supernova_core.session import SessionManager
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"status": "completed", "completed_at": 1750000000.0})
+
+    with pytest.raises(ScanRunning):
+        await mgr.delete("ws", wb_id)
+    assert scan_dir.exists(), "在跑 run 的任务目录不得删除"
+
+
+async def test_delete_scan_after_run_cancelled_succeeds(tmp_path):
+    """run 标 cancelled（终态）→ 任务级 delete 放行：cancel → delete 链路闭环。"""
+    mgr = _mgr(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = _make_run(store)
+    store.update_blackbox_run("ws", wb_id, "run-1", status="cancelled")
+    from supernova_core.session import SessionManager
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"status": "cancelled", "completed_at": 1750000000.0})
+
+    result = await mgr.delete("ws", wb_id)
+    assert result == {"deleted": wb_id}
+    assert not scan_dir.exists()
+
+
+async def test_delete_scan_all_runs_terminal_succeeds(tmp_path):
+    """全 run 终态（completed）→ 任务级 delete 正常（零回归）。"""
+    mgr = _mgr(tmp_path)
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = _make_run(store)
+    store.update_blackbox_run("ws", wb_id, "run-1", status="completed")
+    from supernova_core.session import SessionManager
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"status": "completed", "completed_at": 1750000000.0})
+
+    assert await mgr.delete("ws", wb_id) == {"deleted": wb_id}
+    assert not scan_dir.exists()
+
+
 async def test_delete_blackbox_run_missing_returns_none(tmp_path):
     mgr = _mgr(tmp_path)
     store = ScanStore(tmp_path); mgr._store = store

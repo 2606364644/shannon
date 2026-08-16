@@ -118,8 +118,10 @@ describe("ScanDetail onScanEnd 静默刷新", () => {
 });
 
 // === 加黑盒入口门控（后端 422 兜底，前端先拦免空跑）===
-// 纯白盒任务无目标 URL（黑盒无目标可打，workflow 不 fail-fast 会空跑一轮 LLM）；
-// run 非终态时任务级 status 停留 completed，按钮须显式禁用防并发叠加 run。
+// 纯白盒任务无目标 URL（黑盒无目标可打，workflow 不 fail-fast 会空跑一轮 LLM）。
+// 2026-08-17 根因修后：run 在跑期间任务级 status=running（后端 _add_blackbox_run 上浮），
+// 按钮随 status 自然隐藏；「status=completed + run 在跑」只作为 legacy 状态兜底（禁用）。
+// cancelled（取消过手动 run，白盒产物完好）→ 按钮仍可用（后端 deliverables_ready 兜底）。
 describe("ScanDetail 加黑盒入口门控", () => {
   it("纯白盒（无 web_url）→ 按钮禁用 + title 提示无目标 URL", async () => {
     server.use(
@@ -132,7 +134,21 @@ describe("ScanDetail 加黑盒入口门控", () => {
     expect(btn.getAttribute("title")).toContain("目标 URL");
   });
 
-  it("run 进行中 → 按钮禁用 + title 提示等待", async () => {
+  it("run 进行中（任务级 status=running，新口径）→ 按钮隐藏", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({
+          status: "running", scan_type: "whitebox", web_url: "http://t",
+          combined: true, latest_bb_run: "run-1",
+          bb_runs: [{ run_id: "run-1", status: "running" }],
+        })),
+    );
+    renderAt("/p/ws/scans/s1/report");
+    await screen.findByText("s1"); // header 就绪
+    expect(screen.queryByRole("button", { name: /加黑盒扫描/ })).not.toBeInTheDocument();
+  });
+
+  it("run 进行中 + 任务级停在 completed（legacy 状态）→ 按钮禁用 + title 提示等待", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans/:scanId", () =>
         HttpResponse.json({
@@ -154,6 +170,20 @@ describe("ScanDetail 加黑盒入口门控", () => {
           status: "completed", scan_type: "whitebox", web_url: "http://t",
           combined: true, latest_bb_run: "run-1",
           bb_runs: [{ run_id: "run-1", status: "completed" }],
+        })),
+    );
+    renderAt("/p/ws/scans/s1/report");
+    const btn = await screen.findByRole("button", { name: /加黑盒扫描/ });
+    await waitFor(() => expect(btn).toBeEnabled());
+  });
+
+  it("任务级 cancelled（取消过手动 run，白盒产物完好）→ 按钮可点（可再加黑盒）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({
+          status: "cancelled", scan_type: "whitebox", web_url: "http://t",
+          combined: true, latest_bb_run: "run-1",
+          bb_runs: [{ run_id: "run-1", status: "cancelled" }],
         })),
     );
     renderAt("/p/ws/scans/s1/report");

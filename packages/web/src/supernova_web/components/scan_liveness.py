@@ -7,7 +7,9 @@ web 容器非 host PID namespace,看不到 host 上 CLI 起的 scan 进程;scan_
 pid(见 kol_mapping_service_20260708-193139 被误判 interrupted 回归)。唯一可靠的跨边界存活信号
 是 workspaces bind mount 上的文件:scan worker 以**进程级 HeartbeatManager 每 interval 秒原子写
 <ws>/heartbeat**(独立于 Temporal workflow/activity 调度,不受 LLM 卡顿影响),worker 活就跳、
-worker 死(退出/崩溃/容器重启)就停写、mtime 转 stale。
+worker 死(退出/崩溃/容器重启)就停写、mtime 转 stale。组合扫描的黑盒 run 阶段 worker 的
+workspace_path 是 run 子目录,heartbeat 落 blackbox-runs/run-K/heartbeat(预验证阶段落
+.authcheck/heartbeat)——判活候选覆盖这些子目录,任一 fresh 即活。
 
 窗口默认 90s(=心跳周期 30s × 3 容差),可用 SUPERNOVA_SCAN_LIVENESS_SECONDS 覆盖。取代旧实现
 靠 workflow.log mtime(写入频率受 LLM 影响、窗口 900s 过宽致「卡 Running」15min)。
@@ -24,6 +26,22 @@ from pathlib import Path
 
 HEARTBEAT_FILENAME = "heartbeat"
 
+# 除任务根 heartbeat 外，组合扫描的活信号还可能落在子目录（run 级 heartbeat）：
+# - blackbox-runs/run-K/heartbeat：黑盒 run 阶段 worker 的 workspace_path=run 子目录
+#   （按 event_file.parent 推导），任务根 heartbeat 已随白盒 finalize stop 而 stale；
+# - .authcheck/heartbeat：t0 认证预验证 workflow 的隔离 scratch 目录。
+# 任一 fresh 即活——否则黑盒阶段 > 提交宽限(120s) 后任务被误判 interrupted。
+_SUB_HEARTBEAT_GLOBS = ("blackbox-runs/*/heartbeat", ".authcheck/heartbeat")
+
+
+def _heartbeat_candidates(ws_dir: Path) -> list[Path]:
+    """scan 判活的 heartbeat 候选集：任务根 + run 级 + 预验证 scratch。"""
+    ws_dir = Path(ws_dir)
+    candidates = [ws_dir / HEARTBEAT_FILENAME]
+    for pattern in _SUB_HEARTBEAT_GLOBS:
+        candidates.extend(ws_dir.glob(pattern))
+    return candidates
+
 
 def _liveness_seconds() -> float:
     """判活窗口从 env 函数内读(非 import 时求值),使 monkeypatch env / per-profile 配置生效。"""
@@ -33,19 +51,23 @@ def _liveness_seconds() -> float:
 def is_scan_recently_active(
     ws_dir: Path, threshold_seconds: float | None = None
 ) -> bool:
-    """workspace 的 heartbeat 是否在窗口内被写(= scan worker 进程存活)。
+    """scan 的任一 heartbeat 是否在窗口内被写(= scan worker 进程存活)。
+
+    候选含任务根 heartbeat + 黑盒 run 级(blackbox-runs/*/heartbeat) + 认证预验证
+    scratch(.authcheck/heartbeat)：组合扫描的黑盒阶段 worker 落在 run 子目录，任务根
+    heartbeat 不再刷新，须看子目录才不误判 interrupted。
 
     True = scan 大概率仍存活(heartbeat 被 HeartbeatManager 周期刷新)。
     False = 长时间无心跳(worker 已退出/崩溃,或容器重启杀掉子进程;或非 scan 工作区)。
     """
     if threshold_seconds is None:
         threshold_seconds = _liveness_seconds()
-    hb = Path(ws_dir) / HEARTBEAT_FILENAME
-    try:
-        if hb.exists() and (time.time() - hb.stat().st_mtime) <= threshold_seconds:
-            return True
-    except OSError:
-        return False
+    for hb in _heartbeat_candidates(ws_dir):
+        try:
+            if hb.exists() and (time.time() - hb.stat().st_mtime) <= threshold_seconds:
+                return True
+        except OSError:
+            continue
     return False
 
 

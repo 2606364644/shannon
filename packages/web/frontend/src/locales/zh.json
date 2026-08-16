@@ -670,6 +670,7 @@
         "statusFailed": "失败",
         "statusRunning": "运行中",
         "statusSkipped": "已跳过",
+        "statusCancelled": "已取消",
         "statusCompleted": "已完成",
         "addBlackbox": "加黑盒扫描",
         "addBlackboxDesc": "为该白盒结果新建一次黑盒 run",
