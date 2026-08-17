@@ -18,13 +18,6 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { ScanNewPage, buildBody, type FormState, type AuthFormState } from "../../pages/ScanNewPage";
 
-// Monaco 在测试里替换成 textarea（同 ScanNewPage.test 模式）。
-vi.mock("@monaco-editor/react", () => ({
-  default: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (
-    <textarea data-testid="monaco" value={value} onChange={(e) => onChange?.(e.target.value)} />
-  ),
-}));
-
 const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
 vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
 

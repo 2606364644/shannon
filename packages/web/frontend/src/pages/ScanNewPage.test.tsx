@@ -7,13 +7,6 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { ScanNewPage, buildBody, buildAuthPayload, validateAuth, presetToAuthState, presetToHostState, type AuthFormState, type FormState, type RerunPreset } from "./ScanNewPage";
 
-// Monaco 在测试里替换成 textarea（data-testid="monaco"），同 YamlEditor.test 模式
-vi.mock("@monaco-editor/react", () => ({
-  default: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (
-    <textarea data-testid="monaco" value={value} onChange={(e) => onChange?.(e.target.value)} />
-  ),
-}));
-
 // 空态提示按 role 切文案 → useAuth 可控（同 DashboardPage.test 模式）。
 const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
 vi.mock("@/auth/AuthContext", () => ({ useAuth: () => mockUseAuth() }));
