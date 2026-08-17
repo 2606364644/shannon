@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatRow, type StatItem } from "@/components/StatRow";
-import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Trash2, Unlink } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Trash2, Unlink, FolderX } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -39,6 +39,8 @@ const STATE_BADGE: Record<RepoState, { key: string; cls: string; Icon: LucideIco
   stale:   { key: "repos.states.stale",   cls: "border-yellow/40 text-yellow", Icon: AlertTriangle },
   cloning: { key: "repos.states.cloning", cls: "border-cyan/40 text-cyan",     Icon: AlertTriangle },
   pulling: { key: "repos.states.pulling", cls: "border-cyan/40 text-cyan",     Icon: AlertTriangle },
+  // 空壳目录（占名挡 clone 的空目录残留）：安静的中性配色——非异常、非就绪，仅待清理
+  empty:   { key: "repos.states.empty",   cls: "border-border text-muted-foreground", Icon: FolderX },
 };
 
 function StateBadge({ ws, repo }: { ws: string; repo: Repo }) {
@@ -333,7 +335,9 @@ export function ReposTab({ workspace: wsProp }: Props) {
                       {/* 操作列统一 icon-only ghost 按钮：clone 行 更新+删除；linked 行 取消关联。 */}
                       <TableCell className="py-2.5 px-3 text-center">
                         <span className="inline-flex justify-center gap-1">
-                          {!r.linked && (
+                          {/* 空壳目录（empty）无更新入口——pull 对其必报"仓库不存在"；
+                              残留清理走删除 */}
+                          {!r.linked && r.state !== "empty" && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button

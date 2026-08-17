@@ -75,6 +75,34 @@ def _is_repo(d: Path) -> bool:
     return (d / ".git").exists() or (d / ".supernova-repo.json").exists()
 
 
+def _shell_kind(d: Path) -> str | None:
+    """空壳目录分类：占住 clone 目标路径（``target.exists()`` 挡 re-clone 报
+    "仓库已存在"）但顶层列表不可见（无 ``.git``）的目录。
+
+    返回值：
+      - ``"meta"``：无 ``.git`` 但有 meta——失败 clone 残留（``_mark_failed`` 落的
+        state=failed meta + clone.ndjson，部分 git 版本还会留半成品工作区文件）。
+        列表按 meta 状态显示（通常 failed），delete 走 ``_is_repo`` 的 rmtree 既有路径。
+      - ``"empty"``：完全空目录（删分组仓库后残留的空分组目录 / 手建占位）。
+        列表显示 state=empty，delete 走 rmdir（仅空目录可删，非空 OSError 天然防误删）。
+      - ``None``：非空壳——``.git`` 真仓库 / 其下有子仓库的分组目录 / 无 meta 的
+        非空普通目录（用户自放数据，不列出：rmtree 未知内容危险，可见化但删不掉更糟）。
+    """
+    if (d / ".git").exists():
+        return None
+    try:
+        children = list(d.iterdir())
+    except OSError:
+        return None
+    # 分组目录（其下有真仓库）不是空壳——二层扫描负责其子仓库（2026-07-08 回归守卫：
+    # 分组目录即便被误写 meta 也不得当仓库列出，否则 continue 吞掉二层扫描）
+    if any(c.is_dir() and (c / ".git").exists() for c in children):
+        return None
+    if (d / ".supernova-repo.json").exists():
+        return "meta"
+    return "empty" if not children else None
+
+
 class TooManyClones(Exception):
     def __init__(self, limit: int) -> None:
         self.limit = limit
@@ -209,6 +237,20 @@ class RepoManager:
                 except ValueError:
                     continue
                 continue
+            # 无 .git 的顶层目录：先判空壳（占名挡 re-clone 但不可见——失败 clone 残留 /
+            # 空目录占位），可见化才能从 UI 删除（消灭"看不见也删不掉"死锁）。
+            # busy（clone 进行中，target 已建但 .git 未落）不列——_repo_view 的 busy
+            # 覆盖在 .git 出现后才生效，此处避免把 cloning 误显成 empty。
+            shell = _shell_kind(sub)
+            if shell == "meta":
+                try:
+                    out.append(self._repo_view(ws, sub.name))  # 按 meta 状态显示（failed）
+                except ValueError:
+                    continue
+                continue
+            if shell == "empty" and not self.is_busy(ws, sub.name):
+                out.append(self._empty_shell_view(sub.name))
+                continue
             # 非仓库目录 → 可能是分组目录，深入一层找 repos/<group>/<repo>
             for sub2 in sorted(sub.iterdir()):
                 if not sub2.is_dir() or sub2.name.startswith("."):
@@ -218,6 +260,8 @@ class RepoManager:
                         out.append(self._repo_view(ws, f"{sub.name}/{sub2.name}"))
                     except ValueError:
                         continue
+                elif _shell_kind(sub2) == "empty" and not self.is_busy(ws, f"{sub.name}/{sub2.name}"):
+                    out.append(self._empty_shell_view(f"{sub.name}/{sub2.name}"))
         # 关联仓库并入（私有克隆 ∪ 关联；关联项 linked=True）
         for link in read_linked_repos(self._ws_dir(ws)):
             try:
@@ -240,7 +284,17 @@ class RepoManager:
         for link in read_linked_repos(self._ws_dir(ws)):
             if link.get("name") == name:
                 return self._linked_repo_view(name, link["path"], link.get("linked_at", ""))
+        # 空壳目录（空目录占位）→ empty view（与列表同口径，列表可见详情不 404）
+        if d is not None and d.is_dir() and _shell_kind(d) == "empty":
+            return self._empty_shell_view(name)
         return None
+
+    def _empty_shell_view(self, name: str) -> dict:
+        """空壳目录（占名挡 clone 的空目录）的 view：state=empty、来源未知、无大小/
+        时间戳（目录为空，无可统计）。恒非 busy——clone job 只挂在有 target 的
+        clone 流程上，空壳是残留而非在跑。"""
+        group = name.split("/", 1)[0] if "/" in name else None
+        return {"name": name, "group": group, "source": {"kind": "unknown"}, "state": "empty"}
 
     def _repo_view(self, ws: str, name: str) -> dict:
         busy = self.is_busy(ws, name)
@@ -334,6 +388,8 @@ class RepoManager:
             final_name = name
         target = self._repo_dir(ws, final_name)
         if target.exists():
+            if _shell_kind(target) == "empty":
+                raise ValueError(f"仓库已存在：{final_name}（空目录占位，请先在列表中删除）")
             raise ValueError(f"仓库已存在：{final_name}（可改用更新 pull）")
         if len(self._jobs) >= self._max_concurrent:
             raise TooManyClones(self._max_concurrent)
@@ -443,6 +499,26 @@ class RepoManager:
         # 仅删除真仓库目录（有 .git 或 meta），绝不 rmtree 分组目录（含多个子仓库）
         if target.is_dir() and _is_repo(target):
             shutil.rmtree(target, ignore_errors=False)
+            self._rmdir_group_if_empty(ws, target)
+            return
+        # 空壳目录（空目录占位）→ rmdir 清理。rmdir 仅空目录可删（非空 OSError），
+        # 天然防误删——非空无 meta 的普通目录仍走不删（内容归属未知）
+        if target.is_dir() and _shell_kind(target) == "empty":
+            target.rmdir()
+
+    def _rmdir_group_if_empty(self, ws: str, repo_dir: Path) -> None:
+        """删分组仓库后清理空分组目录：repos/<g>/<repo> 删掉后 <g> 若空 → rmdir。
+        避免留下占名空壳（下次 clone 同名顶层仓库会被 target.exists() 挡住报
+        "仓库已存在"）。<g> 非空（还有兄弟仓库）→ rmdir 抛 OSError → 忽略保留。
+        顶层仓库父目录即 repos 根——绝不动根。
+        """
+        parent = repo_dir.parent
+        if parent == self._repos_root(ws):
+            return
+        try:
+            parent.rmdir()
+        except OSError:
+            pass
 
     async def delete_one(self, ws: str, name: str) -> str:
         """批量删除的逐项归类器：复用 ``delete`` 的分叉（linked→unlink 不删源、私有→rmtree），
@@ -459,7 +535,9 @@ class RepoManager:
         target_exists = False
         try:
             target = self._repo_dir(ws, name)
-            target_exists = target.is_dir() and _is_repo(target)
+            # 空壳（空目录占位）视同存在 → 'deleted'（delete 走 rmdir），
+            # 批量删除可清理占位目录
+            target_exists = target.is_dir() and (_is_repo(target) or _shell_kind(target) == "empty")
         except ValueError:
             target_exists = False
         if not linked and not target_exists:

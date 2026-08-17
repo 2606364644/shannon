@@ -138,4 +138,24 @@ describe("ReposTab", () => {
     expect(screen.getByText("alpha")).toBeTruthy();
     expect(screen.getByText("beta")).toBeTruthy();
   });
+
+  it("空壳目录：显示 empty 徽标、无更新按钮、有删除按钮（占位可清理）", async () => {
+    const fm = vi.spyOn(window, "fetch");
+    fm.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/auth/me")) {
+        return new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 });
+      }
+      return new Response(JSON.stringify([
+        { name: "frontend", state: "empty", source: { kind: "unknown" } },
+      ]), { status: 200 });
+    });
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("frontend")).toBeTruthy());
+    expect(screen.getByText("repos.states.empty")).toBeTruthy();     // 空目录徽标（i18n mock → key）
+    expect(screen.queryByLabelText("repos.updateAria")).toBeNull(); // 无更新(pull)按钮——空壳 pull 必 409
+    expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy(); // 有删除按钮（icon-only）
+  });
 });

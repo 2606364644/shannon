@@ -113,7 +113,8 @@
       "failed": "失败",
       "stale": "未完成",
       "cloning": "clone 中",
-      "pulling": "pull 中"
+      "pulling": "pull 中",
+      "empty": "空目录"
     },
     "deleteDialog": {
       "title": "删除仓库",

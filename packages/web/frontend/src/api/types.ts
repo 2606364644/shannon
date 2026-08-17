@@ -419,7 +419,7 @@ export interface FsBrowseResult {
   truncated?: boolean;
 }
 
-export type RepoState = "ready" | "cloning" | "pulling" | "failed" | "stale";
+export type RepoState = "ready" | "cloning" | "pulling" | "failed" | "stale" | "empty";
 
 export interface Repo {
   name: string;

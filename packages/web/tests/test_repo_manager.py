@@ -673,3 +673,118 @@ async def test_delete_one_busy(tmp_path, monkeypatch):
         t = rm._jobs.pop((WS, "foo"), None)
         if t:
             t.cancel()
+
+
+# ---- 空壳目录（shell dirs）可见化 + 可删除 ----
+# 空壳 = 占住 clone 目标路径（target.exists() 挡 re-clone 报"仓库已存在"）但列表不可见
+# （顶层无 .git 不显示）的目录。两种形态：
+#   1) 失败 clone 残留：_mark_failed 落的 state=failed meta + clone.ndjson，无 .git
+#      （git clone 失败不留完整 .git）——QC-GZ 机器 2026-08-17 实报：clone rc=128 失败后
+#      列表看不到 backend，re-clone 报已存在。
+#   2) 空目录占位：删分组仓库后残留的空分组目录 / 手建目录。
+# 目标：列表显示（残留→failed 态、空目录→empty 态）、delete 可删（rmtree / rmdir），
+# 消灭"看不见也删不掉"的死锁。
+
+
+@pytest.mark.asyncio
+async def test_clone_failed_residue_visible_in_list(tmp_path, monkeypatch):
+    """失败 clone 残留（meta+ndjson、无 .git）必须在列表可见且 state=failed。"""
+    crash = tmp_path / "crash.py"
+    crash.write_text("import sys; sys.exit(128)")
+    rm = _rm(tmp_path, monkeypatch)
+    monkeypatch.setattr(rm, "_build_clone_argv",
+                        lambda url, target, branch: [sys.executable, str(crash)])
+    await rm.clone(WS, "https://gitlab.example/backend.git", None, None, None)
+    await asyncio.sleep(0.3)
+    views = {r["name"]: r for r in rm.list_repos(WS)}
+    assert "backend" in views
+    assert views["backend"]["state"] == "failed"
+
+
+def test_list_repos_shows_empty_shell_dirs(tmp_path, monkeypatch):
+    """空目录占位（顶层 + 二层）→ state=empty 显示；get_repo 同口径（列表可见详情不 404）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    (base / "frontend").mkdir(parents=True)          # 顶层空壳
+    (base / "grp" / "leftover").mkdir(parents=True)  # 二层空壳
+    views = {r["name"]: r for r in rm.list_repos(WS)}
+    assert views["frontend"]["state"] == "empty"
+    assert views["grp/leftover"]["state"] == "empty"
+    assert views["grp/leftover"]["group"] == "grp"
+    assert rm.get_repo(WS, "frontend") is not None
+    assert rm.get_repo(WS, "frontend")["state"] == "empty"
+
+
+def test_group_dir_with_miswritten_meta_not_listed_as_repo(tmp_path, monkeypatch):
+    """2026-07-08 回归守卫：分组目录（其下有真仓库）即便被误写 meta 也不得当仓库列出，
+    否则 continue 会吞掉二层子仓库扫描。空壳可见化不得重新引入此 bug。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    child = base / "grp" / "real"
+    child.mkdir(parents=True)
+    (child / ".git").mkdir()
+    (base / "grp" / ".supernova-repo.json").write_text('{"name": "grp", "state": "ready"}')
+    names = [r["name"] for r in rm.list_repos(WS)]
+    assert "grp" not in names
+    assert "grp/real" in names
+
+
+def test_nonempty_plain_dir_stays_hidden(tmp_path, monkeypatch):
+    """非空且无 .git/meta 的目录（用户自放数据）不列出——rmtree 删未知内容危险，
+    可见化但删不掉比不可见更糟。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    (base / "data").mkdir(parents=True)
+    (base / "data" / "file.txt").write_text("x")
+    assert all(r["name"] != "data" for r in rm.list_repos(WS))
+
+
+@pytest.mark.asyncio
+async def test_delete_empty_shell_dir(tmp_path, monkeypatch):
+    """delete 空壳目录 → rmdir 删除；delete_one 归类 'deleted'（批量删除可清理）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    (base / "frontend").mkdir(parents=True)
+    await rm.delete(WS, "frontend")
+    assert not (base / "frontend").exists()
+    (base / "test").mkdir()
+    assert await rm.delete_one(WS, "test") == "deleted"
+    assert not (base / "test").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_grouped_repo_cleans_empty_group_dir(tmp_path, monkeypatch):
+    """删分组仓库后：分组目录仍有兄弟仓库 → 保留；空了 → 一并清理（不留占名空壳）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    for n in ("g/a", "g/b"):
+        d = base / n
+        d.mkdir(parents=True)
+        (d / ".git").mkdir()
+    await rm.delete(WS, "g/a")
+    assert (base / "g" / "b").exists()
+    assert (base / "g").is_dir()  # 仍有 b → 分组目录保留
+    await rm.delete(WS, "g/b")
+    assert not (base / "g").exists()  # 空了 → 分组目录一并清理
+
+
+@pytest.mark.asyncio
+async def test_delete_top_level_repo_keeps_repos_root(tmp_path, monkeypatch):
+    """删顶层仓库绝不波及 repos 根目录本身（父目录即根，必须跳过清理）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    base = _repos_base(tmp_path)
+    d = base / "solo"
+    d.mkdir(parents=True)
+    (d / ".git").mkdir()
+    await rm.delete(WS, "solo")
+    assert base.is_dir()  # 根目录仍在
+
+
+@pytest.mark.asyncio
+async def test_clone_into_empty_shell_hints_delete(tmp_path, monkeypatch):
+    """对空壳占位 clone：409 信息指向"先删除"而非误导性的"改用更新 pull"
+    （pull 对空壳会报"仓库不存在"）。"""
+    rm = _rm(tmp_path, monkeypatch)
+    (_repos_base(tmp_path) / "frontend").mkdir(parents=True)
+    with pytest.raises(ValueError, match="空目录占位"):
+        await rm.clone(WS, "https://gitlab.example/frontend.git", None, None, None)

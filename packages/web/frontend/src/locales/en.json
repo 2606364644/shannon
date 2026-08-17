@@ -113,7 +113,8 @@
       "failed": "Failed",
       "stale": "Incomplete",
       "cloning": "Cloning",
-      "pulling": "Pulling"
+      "pulling": "Pulling",
+      "empty": "Empty"
     },
     "deleteDialog": {
       "title": "Delete repository",
