@@ -241,6 +241,37 @@ export const blackboxRunDeliverablesPath = (
 export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) =>
   `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/events`;
 
+// ── 组合扫描活跃段判定（spec 2026-08-14 进度两层粒度）────────────────────────
+// 白盒/组合预检段读任务根 events.ndjson；进入黑盒段（bb_phase ∈ running/终态）且选中了
+// run → 读 run 级 ndjson。LiveTab 与 ScanProgressOverview 共用此决策（单一事实来源）。
+const BLACKBOX_PHASES = new Set(["running", "completed", "failed", "skipped"]);
+
+export interface ActiveSegmentOpts {
+  ws: string;
+  scanId: string;
+  combined?: boolean | null;
+  bbPhase?: string | null;
+  selectedRun?: string | null;
+}
+
+/** 组合扫描是否已进入黑盒段（live 流应读 run 级 events）。 */
+export function isBlackboxSegmentActive(opts: {
+  combined?: boolean | null;
+  bbPhase?: string | null;
+  selectedRun?: string | null;
+}): boolean {
+  const { combined, bbPhase, selectedRun } = opts;
+  return combined === true && !!selectedRun && !!bbPhase && BLACKBOX_PHASES.has(bbPhase);
+}
+
+/** 算当前活跃段的 SSE events URL（组合黑盒段 + 选中 run → run 级；其余 → 任务根）。 */
+export function resolveActiveEventsUrl(opts: ActiveSegmentOpts): string {
+  const { ws, scanId, selectedRun } = opts;
+  return isBlackboxSegmentActive(opts) && selectedRun
+    ? blackboxRunEventsUrl(ws, scanId, selectedRun)
+    : scanEventsUrl(ws, scanId);
+}
+
 /** 删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE）。 */
 export const deleteScan = (ws: string, scanId: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);

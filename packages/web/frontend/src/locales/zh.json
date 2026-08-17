@@ -777,7 +777,9 @@
       "stalledHint": "正在重连实时通道，或扫描暂无进度数据。若长时间无更新，扫描可能已因服务重启或进程退出被中断。",
       "endedTitle": "扫描结束",
       "endedHint": "可查看完整报告",
-      "viewReport": "查看报告"
+      "viewReport": "查看报告",
+      "phaseWhitebox": "白盒阶段",
+      "phaseBlackbox": "黑盒 · {{run}}"
     }
   },
   "vuln": {

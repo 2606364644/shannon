@@ -6,9 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { scanEventsUrl, blackboxRunEventsUrl } from "@/api/client";
+import { resolveActiveEventsUrl } from "@/api/client";
 import { useEventSource } from "@/api/useEventSource";
 import { dashboardReducer, emptyState, type DashboardState } from "@/state/dashboardReducer";
+
+// 活跃段 URL 决策已下沉 api/client.ts（LiveTab 复用同一逻辑）；re-export 保住既有 import 路径。
+export { resolveActiveEventsUrl };
 
 /**
  * 详情页进度概览（spec 2026-08-14 进度两层粒度 · 详情页细粒度）。
@@ -21,23 +24,6 @@ import { dashboardReducer, emptyState, type DashboardState } from "@/state/dashb
  * dashboardReducer fold 成 DashboardState（1:1 复刻 core）。精简于 DashboardPanel
  * （不含耗时/花费指标——那些在 overview tab 的 metrics）。
  */
-
-const BLACKBOX_PHASES = new Set(["running", "completed", "failed", "skipped"]);
-
-/** 算当前活跃段的 SSE events URL（组合黑盒段 + 选中 run → run 级；其余 → 任务根）。 */
-export function resolveActiveEventsUrl(opts: {
-  ws: string;
-  scanId: string;
-  combined?: boolean | null;
-  bbPhase?: string | null;
-  selectedRun?: string | null;
-}): string {
-  const { ws, scanId, combined, bbPhase, selectedRun } = opts;
-  if (combined === true && selectedRun && bbPhase && BLACKBOX_PHASES.has(bbPhase)) {
-    return blackboxRunEventsUrl(ws, scanId, selectedRun);
-  }
-  return scanEventsUrl(ws, scanId);
-}
 
 // 连接态徽章（复用 live tab 的 status key）。
 const STATUS_MAP: Record<string, { labelKey: string; cls: string }> = {
