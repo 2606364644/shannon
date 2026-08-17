@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作区磁贴重设计 · before / after</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== DSF tokens（对齐 tokens.css；深色默认 + .light）===== */
+:root{
+  --background:34 7% 10%; --foreground:36 10% 91%;
+  --card:34 5% 13%; --card-foreground:36 10% 91%;
+  --primary:15 60% 56%; --primary-foreground:34 7% 10%;
+  --secondary:34 5% 16%; --muted:34 5% 16%; --muted-foreground:36 5% 62%;
+  --accent:34 5% 18%; --border:34 5% 20%;
+  --destructive:5 62% 56%;
+  --c-cyan:190 70% 60%; --c-green:142 50% 56%; --c-red:5 62% 60%;
+  --c-orange:24 75% 62%; --c-yellow:38 75% 60%; --c-amber:36 78% 58%;
+  --shadow-card:0 0 0 1px hsl(34 10% 100%/.03),0 2px 8px hsl(0 0% 0%/.25),0 1px 2px hsl(0 0% 0%/.2);
+  --shadow-cta:0 1px 2px hsl(0 0% 0%/.30),0 6px 16px -6px hsl(15 70% 45%/.35);
+  --radius:12px;
+}
+.light{
+  --background:40 32% 95%; --foreground:30 26% 18%;
+  --card:38 28% 97%; --card-foreground:30 26% 18%;
+  --primary:15 58% 50%; --primary-foreground:0 0% 100%;
+  --secondary:40 32% 91%; --muted:40 32% 91%; --muted-foreground:34 32% 36%;
+  --accent:40 36% 84%; --border:36 44% 76%;
+  --destructive:5 58% 46%;
+  --c-cyan:190 65% 32%; --c-green:142 38% 35%; --c-red:5 58% 46%;
+  --c-orange:26 74% 45%; --c-yellow:40 72% 36%; --c-amber:36 73% 40%;
+  --shadow-card:0 1px 2px hsl(34 40% 30%/.10),0 4px 14px hsl(34 40% 30%/.06);
+  --shadow-cta:0 1px 2px hsl(34 40% 30%/.14),0 6px 16px -6px hsl(15 58% 45%/.22);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:hsl(var(--background));color:hsl(var(--foreground));
+  font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.5;padding:24px 36px 72px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+.plate{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.stage-label{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:10px}
+.stage-label::after{content:"";flex:1;height:1px;background:hsl(var(--border))}
+.stage-label b{color:hsl(var(--primary));font-weight:600}
+
+/* ===== 上下文：威胁横幅（复刻现版，静态）+ 小节头 ===== */
+.banner{position:relative;background:hsl(var(--card));border-radius:var(--radius);box-shadow:var(--shadow-card);overflow:hidden}
+.banner-row{display:flex;flex-wrap:wrap;align-items:stretch}
+.bn-main{min-width:240px;padding:16px 0 16px 24px}
+.bn-eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:hsl(var(--muted-foreground))}
+.bn-eyebrow::before{content:"";width:3px;height:13px;border-radius:2px;background:hsl(var(--primary))}
+.bn-num-row{margin-top:8px;display:flex;flex-wrap:wrap;align-items:baseline;gap:12px}
+.bn-num{font-family:"IBM Plex Mono",monospace;font-size:46px;font-weight:600;line-height:1;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:hsl(var(--c-red))}
+.bn-unit{white-space:nowrap;border:1px solid hsl(var(--border));border-radius:999px;padding:2px 8px;
+  font-size:11.5px;color:hsl(var(--muted-foreground))}
+.bn-mid{flex:1;min-width:260px;display:flex;flex-direction:column;justify-content:center;gap:8px;
+  padding:16px 24px 16px 8px}
+.bn-band{display:flex;height:6px;gap:1px;overflow:hidden;border-radius:999px;background:hsl(var(--border));max-width:460px}
+.bn-band i{background:hsl(var(--primary))}
+.bn-legend{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 14px;font-family:"IBM Plex Mono",monospace;
+  font-size:11px;color:hsl(var(--muted-foreground))}
+.bn-ctx{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:hsl(var(--muted-foreground))}
+.bn-stats{display:flex;flex-wrap:wrap;align-items:stretch;border-left:1px solid hsl(var(--border))}
+.bn-stat{min-width:86px;display:flex;flex-direction:column;justify-content:center;
+  border-left:1px solid hsl(var(--border));padding:12px 18px}
+.bn-stat:first-child{border-left:none}
+.bn-stat .v{font-family:"IBM Plex Mono",monospace;font-size:20px;font-weight:600;line-height:1;
+  font-variant-numeric:tabular-nums}
+.bn-stat .v.live{color:hsl(var(--c-cyan))}
+.bn-stat .v.warn{color:hsl(var(--c-amber))}
+.bn-stat .l{margin-top:4px;font-size:10px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;
+  color:hsl(var(--muted-foreground))}
+.bn-cta{display:flex;align-items:center;padding:16px 20px}
+.cta{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;background:hsl(var(--primary));
+  color:hsl(var(--primary-foreground));border-radius:10px;padding:8px 16px;font-weight:500;font-size:13.5px;
+  box-shadow:var(--shadow-cta)}
+.sec-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:12px}
+.sec-head h2{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:hsl(var(--muted-foreground))}
+.sec-fresh{display:flex;align-items:center;gap:10px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+  color:hsl(var(--muted-foreground))}
+.sec-manage{display:inline-flex;align-items:center;gap:2px;font-size:12.5px;color:hsl(var(--muted-foreground))}
+
+/* ===== BEFORE：现版磁贴（逐类名复刻）===== */
+.grid{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(0,1fr))}
+.tile-b{position:relative;display:flex;flex-direction:column;gap:10px;overflow:hidden;border-radius:12px;
+  background:hsl(var(--card));padding:16px 16px 16px 18px;box-shadow:var(--shadow-card);
+  transition:all .15s ease;cursor:pointer}
+.tile-b:hover{transform:translateY(-2px);border-color:hsl(var(--primary)/.55)}
+.tile-b .edge{position:absolute;inset:0 auto 0 0;width:3px;background:hsl(var(--c-cyan));
+  box-shadow:0 0 8px hsl(var(--c-cyan)/.5)}
+.tb-id{display:flex;min-width:0;align-items:center;gap:8px}
+.live-dot{width:9px;height:9px;border-radius:999px;background:hsl(var(--c-cyan));flex:none}
+.tb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:"IBM Plex Mono",monospace;
+  font-size:13.5px;font-weight:600}
+.tb-run-tag{margin-left:auto;display:flex;flex-shrink:0;align-items:center;gap:6px;font-size:10.5px;
+  font-weight:500;color:hsl(var(--c-cyan))}
+.tb-run-tag i{width:6px;height:6px;border-radius:999px;background:currentColor}
+.tb-num-row{display:flex;align-items:baseline;gap:8px}
+.tb-num{font-family:"IBM Plex Mono",monospace;font-size:27px;font-weight:600;line-height:1;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:hsl(var(--c-red))}
+.tb-num.zero{color:hsl(var(--muted-foreground)/.7)}
+.tb-unit{font-size:10.5px;letter-spacing:.05em;color:hsl(var(--muted-foreground))}
+.tb-band{display:flex;height:4px;gap:1px;overflow:hidden;border-radius:999px;background:hsl(var(--border))}
+.tb-band i{background:hsl(var(--primary))}
+.tb-legend{margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:hsl(var(--muted-foreground)/.9)}
+.tb-clear{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:hsl(var(--c-green)/.8)}
+.tb-runs{display:flex;flex-direction:column;gap:6px;border-top:1px dashed hsl(var(--border));padding-top:8px}
+.tb-run{display:grid;gap:4px;font-family:"IBM Plex Mono",monospace;font-size:11.5px}
+.tb-run-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tb-run-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-run-meta{flex-shrink:0;color:hsl(var(--muted-foreground))}
+.tb-pbar{display:block;height:3px;overflow:hidden;border-radius:999px;background:hsl(var(--border))}
+.tb-pbar i{display:block;height:100%;border-radius:999px;background:hsl(var(--primary))}
+.tb-meta{margin-top:auto;display:flex;align-items:center;gap:6px;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;color:hsl(var(--muted-foreground))}
+.tb-meta .dot{opacity:.4}
+.chev{margin-left:auto;width:12px;height:12px;flex-shrink:0;color:hsl(var(--muted-foreground)/.7)}
+
+/* ===== AFTER：重设计磁贴 ===== */
+.tile{position:relative;display:flex;flex-direction:column;overflow:hidden;border-radius:12px;
+  background:hsl(var(--card));box-shadow:var(--shadow-card);cursor:pointer;
+  transition:transform .16s ease,box-shadow .16s ease}
+.tile:hover{transform:translateY(-2px)}
+.tile>*{padding-left:16px;padding-right:16px}
+/* 目标锁定角括线：TL + BR 两角，hover/focus 显 coral；运行中常显 cyan（正在被扫描） */
+.tile::before,.tile::after{content:"";position:absolute;width:14px;height:14px;pointer-events:none;
+  opacity:0;transition:opacity .16s ease;z-index:1}
+.tile::before{top:6px;left:6px;border-top:1.5px solid hsl(var(--primary));border-left:1.5px solid hsl(var(--primary));
+  border-top-left-radius:3px}
+.tile::after{bottom:6px;right:6px;border-bottom:1.5px solid hsl(var(--primary));border-right:1.5px solid hsl(var(--primary));
+  border-bottom-right-radius:3px}
+.tile:hover::before,.tile:hover::after{opacity:.85}
+.tile.running::before,.tile.running::after{opacity:1;
+  border-color:hsl(var(--c-cyan))}
+.tile.running:hover::before,.tile.running:hover::after{border-color:hsl(var(--c-cyan))}
+/* 运行态左侧 cyan 窄条保留（与角括线同语义：正在扫描） */
+.tile .edge{position:absolute;inset:0 auto 0 0;width:3px;display:none}
+.tile.running .edge{display:block;background:hsl(var(--c-cyan));box-shadow:0 0 8px hsl(var(--c-cyan)/.5)}
+
+/* 身份区 */
+.t-id{display:flex;min-width:0;align-items:center;gap:8px;padding-top:13px;padding-bottom:11px}
+.t-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:"IBM Plex Mono",monospace;
+  font-size:13px;font-weight:600;letter-spacing:-.01em}
+.t-run-chip{margin-left:auto;display:flex;flex-shrink:0;align-items:center;gap:5px;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;letter-spacing:.06em;
+  color:hsl(var(--c-cyan));border:1px solid hsl(var(--c-cyan)/.5);border-radius:999px;padding:1px 8px}
+.t-run-chip i{width:5px;height:5px;border-radius:999px;background:currentColor}
+/* 预览专用：静态演示 hover 锁定态（与 :hover 同样式） */
+.tile.locked::before,.tile.locked::after{opacity:.85}
+
+/* 信号区：数字 + 分段谱带 */
+.t-sig{padding-top:2px;padding-bottom:12px;display:flex;align-items:flex-end;gap:12px}
+.t-num-col{display:flex;flex-direction:column;gap:2px;flex:none}
+.t-num{font-family:"IBM Plex Mono",monospace;font-size:30px;font-weight:600;line-height:.95;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:hsl(var(--c-red))}
+.t-num.zero{color:hsl(var(--c-green))}
+.t-num-l{font-size:10px;letter-spacing:.08em;color:hsl(var(--muted-foreground))}
+.t-band-col{flex:1;min-width:0;padding-bottom:4px}
+.t-band{display:flex;height:5px;gap:2px}
+.t-band i{border-radius:2px;background:hsl(var(--primary))}
+.t-legend{margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:hsl(var(--muted-foreground))}
+/* 空态：正向时刻（无发现=绿色语义） */
+.t-clear{display:flex;align-items:center;gap:7px;padding-top:6px;padding-bottom:14px}
+.t-clear svg{width:15px;height:15px;color:hsl(var(--c-green));flex:none}
+.t-clear .n{font-family:"IBM Plex Mono",monospace;font-size:30px;font-weight:600;line-height:.95;
+  letter-spacing:-.02em;color:hsl(var(--c-green))}
+.t-clear .l{font-size:10px;letter-spacing:.08em;color:hsl(var(--muted-foreground));padding-bottom:3px}
+
+/* 活动区：运行中扫描 */
+.t-runs{border-top:1px solid hsl(var(--border)/.7);padding-top:9px;padding-bottom:10px;
+  display:flex;flex-direction:column;gap:8px}
+.t-run{display:grid;gap:5px;font-family:"IBM Plex Mono",monospace;font-size:11px}
+.t-run-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.t-run-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t-run-meta{flex-shrink:0;color:hsl(var(--muted-foreground))}
+.t-pbar{display:block;height:3px;overflow:hidden;border-radius:999px;background:hsl(var(--border))}
+.t-pbar i{display:block;height:100%;border-radius:999px;background:hsl(var(--c-cyan))}
+
+/* meta 区：图标统计（与切换器抽屉同语言） */
+.t-meta{margin-top:auto;border-top:1px solid hsl(var(--border)/.7);padding-top:9px;padding-bottom:11px;
+  display:flex;align-items:center;gap:12px}
+.t-stat{display:inline-flex;align-items:center;gap:4.5px;font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;color:hsl(var(--muted-foreground));font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-stat svg{width:11.5px;height:11.5px;flex:none;opacity:.75}
+.t-stat.main{color:hsl(var(--foreground)/.8)}
+.t-chev{margin-left:auto;width:12px;height:12px;flex-shrink:0;color:hsl(var(--muted-foreground)/.6);
+  transition:transform .16s ease,color .16s ease}
+.tile:hover .t-chev{transform:translateX(2px);color:hsl(var(--primary))}
+
+.note{font-size:12px;color:hsl(var(--muted-foreground));line-height:1.6;max-width:860px}
+.note b{color:hsl(var(--foreground));font-weight:600}
+</style>
+</head>
+<body>
+<div class="plate">
+
+  <!-- 上下文复刻：威胁横幅（静态，非本次改动） -->
+  <div class="banner">
+    <div class="banner-row">
+      <div class="bn-main">
+        <div class="bn-eyebrow">累计发现 · FINDINGS</div>
+        <div class="bn-num-row">
+          <span class="bn-num mono">674</span>
+          <span class="bn-unit">条可利用污点路径</span>
+        </div>
+      </div>
+      <div class="bn-mid">
+        <div>
+          <div class="bn-band">
+            <i style="width:46%;opacity:1"></i><i style="width:26%;opacity:.78"></i>
+            <i style="width:14%;opacity:.56"></i><i style="width:8%;opacity:.34"></i>
+            <i style="width:6%;opacity:.25"></i>
+          </div>
+          <div class="bn-legend"><span>sqli 310</span><span>xss 175</span><span>ssrf 94</span><span>deser 54</span><span>其他 41</span></div>
+        </div>
+        <div class="bn-ctx">跨 38 次扫描 · 9 个仓库 · 5 个工作区 · 2 个进行中</div>
+      </div>
+      <div class="bn-stats">
+        <div class="bn-stat"><span class="v live">2</span><span class="l">运行中</span></div>
+        <div class="bn-stat"><span class="v">6</span><span class="l">今日完成</span></div>
+        <div class="bn-stat"><span class="v">¥1,842</span><span class="l">累计成本</span></div>
+        <div class="bn-stat"><span class="v warn">3</span><span class="l">需关注</span></div>
+      </div>
+      <div class="bn-cta"><span class="cta"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5v14"/></svg>新建扫描</span></div>
+    </div>
+  </div>
+
+  <div class="sec-head">
+    <h2><span class="live-dot"></span>工作区态势</h2>
+    <div class="sec-fresh"><span>12 秒前更新</span><span>· 刷新</span></div>
+  </div>
+
+  <!-- ============ BEFORE ============ -->
+  <div class="stage-label">BEFORE · <b>现版磁贴</b></div>
+  <div class="grid">
+    <!-- running tile -->
+    <div class="tile-b">
+      <span class="edge"></span>
+      <div class="tb-id"><span class="live-dot"></span><span class="tb-name">shop-api</span>
+        <span class="tb-run-tag"><i></i>运行中</span></div>
+      <div class="tb-num-row"><span class="tb-num">128</span><span class="tb-unit" style="text-transform:uppercase">发现</span></div>
+      <div>
+        <div class="tb-band">
+          <i style="width:48%;opacity:1"></i><i style="width:27%;opacity:.78"></i>
+          <i style="width:14%;opacity:.56"></i><i style="width:7%;opacity:.34"></i>
+          <i style="width:4%;opacity:.25"></i>
+        </div>
+        <div class="tb-legend">sqli 62 · xss 34 · ssrf 18 · deser 9 · 其他 5</div>
+      </div>
+      <div class="tb-runs">
+        <div class="tb-run">
+          <span class="tb-run-top"><span class="tb-run-id">c-20260817-093012</span>
+            <span class="tb-run-meta"><span>42%</span> · 预验证中 · 12m</span></span>
+          <span class="tb-pbar"><i style="width:42%"></i></span>
+        </div>
+        <div class="tb-run">
+          <span class="tb-run-top"><span class="tb-run-id">wb-20260817-092844</span>
+            <span class="tb-run-meta"><span>71%</span> · 白盒 · 26m</span></span>
+          <span class="tb-pbar"><i style="width:71%"></i></span>
+        </div>
+      </div>
+      <div class="tb-meta"><span>14 扫描</span><span class="dot">·</span><span>¥486.20</span><span class="dot">·</span><span>08-17 09:30</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+    </div>
+    <!-- idle with findings -->
+    <div class="tile-b">
+      <div class="tb-id"><span class="tb-name">nodegoat-prod</span></div>
+      <div class="tb-num-row"><span class="tb-num">34</span><span class="tb-unit" style="text-transform:uppercase">发现</span></div>
+      <div>
+        <div class="tb-band">
+          <i style="width:59%;opacity:1"></i><i style="width:29%;opacity:.78"></i><i style="width:12%;opacity:.56"></i>
+        </div>
+        <div class="tb-legend">sqli 20 · xss 10 · ssrf 4</div>
+      </div>
+      <div class="tb-meta"><span>8 扫描</span><span class="dot">·</span><span>¥102.40</span><span class="dot">·</span><span>08-16 21:40</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+    </div>
+    <!-- all clear -->
+    <div class="tile-b">
+      <div class="tb-id"><span class="tb-name">payment-gw</span></div>
+      <div class="tb-num-row"><span class="tb-num zero">0</span><span class="tb-unit" style="text-transform:uppercase">发现</span></div>
+      <div class="tb-clear">all clear · 无发现</div>
+      <div class="tb-meta"><span>3 扫描</span><span class="dot">·</span><span>¥58.10</span><span class="dot">·</span><span>08-15 18:02</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+    </div>
+    <!-- heavy -->
+    <div class="tile-b">
+      <div class="tb-id"><span class="tb-name">legacy-portal</span></div>
+      <div class="tb-num-row"><span class="tb-num">512</span><span class="tb-unit" style="text-transform:uppercase">发现</span></div>
+      <div>
+        <div class="tb-band">
+          <i style="width:52%;opacity:1"></i><i style="width:22%;opacity:.78"></i>
+          <i style="width:12%;opacity:.56"></i><i style="width:8%;opacity:.34"></i>
+          <i style="width:6%;opacity:.25"></i>
+        </div>
+        <div class="tb-legend">sqli 266 · xss 113 · ssrf 62 · race 41 · 其他 30</div>
+      </div>
+      <div class="tb-meta"><span>13 扫描</span><span class="dot">·</span><span>¥1,204</span><span class="dot">·</span><span>08-14 15:11</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+    </div>
+  </div>
+
+  <!-- ============ AFTER ============ -->
+  <div class="stage-label">AFTER · <b>重设计</b>（角括线=目标锁定：hover coral / 运行中 cyan；进度条 cyan 统一运行语义；meta 图标统计对齐切换器）</div>
+  <div class="grid">
+    <!-- running tile -->
+    <div class="tile running">
+      <span class="edge"></span>
+      <div class="t-id"><span class="live-dot"></span><span class="t-name">shop-api</span>
+        <span class="t-run-chip"><i></i>运行中</span></div>
+      <div class="t-sig">
+        <div class="t-num-col"><span class="t-num">128</span><span class="t-num-l">发现</span></div>
+        <div class="t-band-col">
+          <div class="t-band">
+            <i style="width:48%;opacity:1"></i><i style="width:27%;opacity:.78"></i>
+            <i style="width:14%;opacity:.56"></i><i style="width:7%;opacity:.34"></i>
+            <i style="width:4%;opacity:.25"></i>
+          </div>
+          <div class="t-legend">sqli 62 · xss 34 · ssrf 18 · deser 9 · 其他 5</div>
+        </div>
+      </div>
+      <div class="t-runs">
+        <div class="t-run">
+          <span class="t-run-top"><span class="t-run-id">c-20260817-093012</span>
+            <span class="t-run-meta"><span>42%</span> · 预验证中 · 12m</span></span>
+          <span class="t-pbar"><i style="width:42%"></i></span>
+        </div>
+        <div class="t-run">
+          <span class="t-run-top"><span class="t-run-id">wb-20260817-092844</span>
+            <span class="t-run-meta"><span>71%</span> · 白盒 · 26m</span></span>
+          <span class="t-pbar"><i style="width:71%"></i></span>
+        </div>
+      </div>
+      <div class="t-meta">
+        <span class="t-stat main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 6.09a3 3 0 0 0-2.12 4.61L4 17.41V20h2.59l6.71-6.71a3 3 0 0 0 4.61-2.12l-1.7-1.7-1.5 1.44.01.01-2.1-2.1.01.01z"/></svg>14</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" stroke="none" fill="currentColor"/><path d="M7 21h10M12 11v10M8.5 21a7.5 7.5 0 1 1 7 0"/></svg>¥486</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>08-17 09:30</span>
+        <svg class="t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+    </div>
+    <!-- idle with findings（.locked = 演示 hover 目标锁定态） -->
+    <div class="tile locked">
+      <div class="t-id"><span class="t-name">nodegoat-prod</span></div>
+      <div class="t-sig">
+        <div class="t-num-col"><span class="t-num">34</span><span class="t-num-l">发现</span></div>
+        <div class="t-band-col">
+          <div class="t-band">
+            <i style="width:59%;opacity:1"></i><i style="width:29%;opacity:.78"></i><i style="width:12%;opacity:.56"></i>
+          </div>
+          <div class="t-legend">sqli 20 · xss 10 · ssrf 4</div>
+        </div>
+      </div>
+      <div class="t-meta">
+        <span class="t-stat main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 6.09a3 3 0 0 0-2.12 4.61L4 17.41V20h2.59l6.71-6.71a3 3 0 0 0 4.61-2.12l-1.7-1.7-1.5 1.44.01.01-2.1-2.1.01.01z"/></svg>8</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" stroke="none" fill="currentColor"/><path d="M7 21h10M12 11v10M8.5 21a7.5 7.5 0 1 1 7 0"/></svg>¥102</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>08-16 21:40</span>
+        <svg class="t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+    </div>
+    <!-- all clear：正向时刻 -->
+    <div class="tile">
+      <div class="t-id"><span class="t-name">payment-gw</span></div>
+      <div class="t-clear">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span class="n">0</span>
+        <span class="l">无发现</span>
+      </div>
+      <div class="t-meta">
+        <span class="t-stat main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 6.09a3 3 0 0 0-2.12 4.61L4 17.41V20h2.59l6.71-6.71a3 3 0 0 0 4.61-2.12l-1.7-1.7-1.5 1.44.01.01-2.1-2.1.01.01z"/></svg>3</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" stroke="none" fill="currentColor"/><path d="M7 21h10M12 11v10M8.5 21a7.5 7.5 0 1 1 7 0"/></svg>¥58</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>08-15 18:02</span>
+        <svg class="t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+    </div>
+    <!-- heavy -->
+    <div class="tile">
+      <div class="t-id"><span class="t-name">legacy-portal</span></div>
+      <div class="t-sig">
+        <div class="t-num-col"><span class="t-num">512</span><span class="t-num-l">发现</span></div>
+        <div class="t-band-col">
+          <div class="t-band">
+            <i style="width:52%;opacity:1"></i><i style="width:22%;opacity:.78"></i>
+            <i style="width:12%;opacity:.56"></i><i style="width:8%;opacity:.34"></i>
+            <i style="width:6%;opacity:.25"></i>
+          </div>
+          <div class="t-legend">sqli 266 · xss 113 · ssrf 62 · race 41 · 其他 30</div>
+        </div>
+      </div>
+      <div class="t-meta">
+        <span class="t-stat main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 6.09a3 3 0 0 0-2.12 4.61L4 17.41V20h2.59l6.71-6.71a3 3 0 0 0 4.61-2.12l-1.7-1.7-1.5 1.44.01.01-2.1-2.1.01.01z"/></svg>13</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" stroke="none" fill="currentColor"/><path d="M7 21h10M12 11v10M8.5 21a7.5 7.5 0 1 1 7 0"/></svg>¥1,204</span>
+        <span class="t-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>08-14 15:11</span>
+        <svg class="t-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <p class="note"><b>变更点</b>：① 磁贴内部 hairline 分区（身份 / 信号 / 活动 / meta），对齐威胁横幅竖切语言；
+  ② 目标锁定角括线（TL+BR）：hover=coral 锁定，运行中=cyan 常显「正在被扫描」；
+  ③ 运行进度条 fill coral→cyan，全局「运行=cyan」语义统一；④ 组成谱带 4px→5px 分段化（2px 间隙）；
+  ⑤ 空态升级为绿色盾形对勾的正向时刻；⑥ meta 行改图标统计（Layers/成本/时钟），与切换器抽屉同语言；
+  ⑦ 运行徽标改描边 chip（RUNNING）。</p>
+</div>
+</body>
+</html>

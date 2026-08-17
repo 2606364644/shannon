@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>工作区页 · 操作按钮统一方案预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ===== 设计令牌：与应用 styles/tokens.css 一致（深色默认 / .light 浅色） ===== */
+  .dark {
+    --background: hsl(34 7% 10%);
+    --foreground: hsl(36 10% 91%);
+    --card: hsl(34 5% 13%);
+    --secondary: hsl(34 5% 16%);
+    --muted-fg: hsl(36 5% 62%);
+    --accent: hsl(34 5% 18%);
+    --border: hsl(34 5% 20%);
+    --input: hsl(34 5% 20%);
+    --primary: hsl(15 60% 56%);
+    --cyan: hsl(190 70% 60%);
+    --rest-shadow: 0 1px 2px hsl(0 0% 0% / .18);
+    --lift-shadow: 0 1px 2px hsl(0 0% 0% / .25), 0 10px 24px -8px hsl(0 0% 0% / .55);
+    --panel-shadow: 0 0 0 1px hsl(34 10% 100% / .03), 0 2px 8px hsl(0 0% 0% / .25), 0 1px 2px hsl(0 0% 0% / .2);
+  }
+  .light {
+    --background: hsl(40 32% 95%);
+    --foreground: hsl(30 26% 18%);
+    --card: hsl(38 28% 97%);
+    --secondary: hsl(40 32% 91%);
+    --muted-fg: hsl(34 32% 36%);
+    --accent: hsl(40 36% 84%);
+    --border: hsl(36 44% 76%);
+    --input: hsl(36 44% 76%);
+    --primary: hsl(15 58% 50%);
+    --cyan: hsl(190 65% 32%);
+    --rest-shadow: 0 1px 2px hsl(34 40% 30% / .08);
+    --lift-shadow: 0 2px 4px hsl(34 40% 30% / .10), 0 10px 24px -8px hsl(34 40% 30% / .24);
+    --panel-shadow: 0 1px 2px hsl(34 40% 30% / .10), 0 4px 14px hsl(34 40% 30% / .06);
+  }
+
+  * { box-sizing: border-box; border-color: var(--border); }
+  body {
+    margin: 0; background: var(--background); color: var(--foreground);
+    font: 400 14px/1.6 "IBM Plex Sans", system-ui, sans-serif;
+    padding: 32px 24px 64px;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  .page { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+  /* ===== 页头 ===== */
+  .pv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .pv-head h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  .pv-head .sub { color: var(--muted-fg); font-size: 13px; }
+  .pv-head .grow { flex: 1; }
+  #themeToggle {
+    height: 32px; padding: 0 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--input); background: var(--card); color: var(--foreground);
+    font: 500 13px/1 "IBM Plex Sans", sans-serif;
+  }
+  #themeToggle:hover { border-color: hsl(var(--primary) / .5); }
+
+  /* ===== 对比面板 ===== */
+  .panel { background: var(--card); border-radius: 12px; box-shadow: var(--panel-shadow); padding: 20px 24px 24px; }
+  .panel-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 600 11px/1 "IBM Plex Mono", monospace; letter-spacing: .08em;
+    padding: 5px 10px; border-radius: 6px; margin-bottom: 6px;
+  }
+  .tag-cur { color: var(--muted-fg); border: 1px dashed var(--border); }
+  .tag-new { color: var(--primary); border: 1px solid hsl(var(--primary) / .4); background: hsl(var(--primary) / .08); }
+  .panel h2 { font-size: 16px; font-weight: 600; margin: 4px 0 2px; }
+  .panel .desc { color: var(--muted-fg); font-size: 13px; margin: 0 0 18px; }
+
+  /* ===== 还原工作区页 header 行 ===== */
+  .ws-header { display: flex; flex-direction: column; gap: 10px; }
+  .backlink { color: var(--muted-fg); font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .backlink:hover { color: var(--primary); }
+  .ws-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .ws-name { font: 500 20px/1.2 "IBM Plex Mono", monospace; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 6px; padding: 2.5px 10px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .badge.secondary { background: var(--secondary); border-color: transparent; }
+  .badge.status { color: var(--cyan); border-color: hsl(var(--cyan) / .4); }
+
+  /* ===== 图标（lucide 同款 path） ===== */
+  .ic { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* ===== 现状按钮：shadcn outline 复刻 ===== */
+  .btn-cur {
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    height: 36px; padding: 8px 16px; border-radius: 8px;
+    border: 1px solid var(--input); background: var(--background);
+    color: var(--foreground); font: 500 14px/1 "IBM Plex Sans", sans-serif;
+    box-shadow: 0 1px 2px hsl(0 0% 0% / .05); cursor: pointer;
+  }
+  .btn-cur:hover { background: var(--accent); }
+
+  /* ===== 方案按钮：统一「工具条按钮」 —— 表面浮起 + hover 上浮 ===== */
+  .btn-new {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
+    height: 36px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--input); background: var(--card);
+    color: var(--foreground); font: 500 14px/1 "IBM Plex Sans", sans-serif;
+    box-shadow: var(--rest-shadow); cursor: pointer; text-decoration: none;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .btn-new .ic { color: var(--muted-fg); transition: color .15s ease; }
+  .btn-new:hover, .btn-new.is-hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--primary) / .45);
+    box-shadow: var(--lift-shadow);
+  }
+  .btn-new:hover .ic, .btn-new.is-hover .ic { color: var(--primary); }
+  .btn-new:active, .btn-new.is-active {
+    transform: translateY(0);
+    box-shadow: 0 0 1px hsl(0 0% 0% / .15);
+  }
+  .btn-new:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .btn-new.icon-only { width: 36px; padding: 0; }
+
+  /* ===== 标注 ===== */
+  .notes { margin: 18px 0 0; padding: 14px 18px; border: 1px dashed var(--border); border-radius: 10px; }
+  .notes ol, .notes ul { margin: 6px 0 0; padding-left: 20px; }
+  .notes li { font-size: 13px; color: var(--foreground); margin: 4px 0; }
+  .notes .bad li::marker { color: hsl(5 62% 60%); font-weight: 600; }
+  .notes li em { color: var(--muted-fg); font-style: normal; }
+  .state-strip { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px; margin-top: 14px; }
+  .state-cell { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .state-cell .lab { font: 500 12px "IBM Plex Mono", monospace; color: var(--muted-fg); }
+  .icon-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .icon-cell {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; color: var(--muted-fg);
+  }
+  .icon-cell .ic { color: var(--primary); }
+  @media (prefers-reduced-motion: reduce) {
+    .btn-new, .btn-new .ic { transition: none; }
+    .btn-new:hover, .btn-new.is-hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<!-- lucide 图标（path 与应用 lucide-react 一致） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-arrow-left-right" viewBox="0 0 24 24">
+      <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
+    </symbol>
+    <symbol id="i-users" viewBox="0 0 24 24">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      <circle cx="9" cy="7" r="4"/>
+    </symbol>
+    <symbol id="i-folder-git-2" viewBox="0 0 24 24">
+      <path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5"/>
+      <path d="M18 19c-2.8 0-5-2.2-5-5v8"/>
+      <circle cx="13" cy="12" r="2"/><circle cx="20" cy="19" r="2"/>
+    </symbol>
+    <symbol id="i-key-round" viewBox="0 0 24 24">
+      <path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/>
+      <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24">
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
+      <circle cx="12" cy="12" r="10"/>
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24">
+      <path d="M12 17v5"/>
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>
+    </symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+  <div class="pv-head">
+    <h1>工作区页 · 操作按钮统一方案</h1>
+    <span class="sub">切换工作区 / 管理成员 / 仓库 / 认证 / HOST —— 把鼠标悬停在「优化后」的按钮上感受浮动</span>
+    <span class="grow"></span>
+    <button id="themeToggle">切换浅色 ☀</button>
+  </div>
+
+  <!-- ============ 现状还原 ============ -->
+  <section class="panel">
+    <span class="panel-tag tag-cur">BEFORE · 现状</span>
+    <h2>现状还原</h2>
+    <p class="desc">按当前 WorkspaceDetail header 的实际样式复刻（shadcn outline：bg-background + shadow-sm，hover 只变底色）。</p>
+    <div class="ws-header">
+      <a class="backlink" href="#"><svg class="ic" style="width:14px;height:14px"><use href="#i-arrow-left"/></svg> 返回列表</a>
+      <div class="ws-row">
+        <span class="ws-name">acme-prod</span>
+        <span class="badge status mono">● 运行中</span>
+        <span class="badge secondary mono">扫描任务 · 4</span>
+        <span style="flex:1"></span>
+        <button class="btn-cur" style="width:36px;padding:0;justify-content:center" title="置顶"><svg class="ic"><use href="#i-pin"/></svg></button>
+        <button class="btn-cur"><svg class="ic"><use href="#i-arrow-left-right"/></svg> 切换工作区</button>
+        <button class="btn-cur">管理成员</button>
+        <button class="btn-cur"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库</button>
+        <button class="btn-cur"><svg class="ic"><use href="#i-key-round"/></svg> 认证</button>
+        <button class="btn-cur"><svg class="ic"><use href="#i-globe"/></svg> HOST</button>
+      </div>
+    </div>
+    <div class="notes bad">
+      <ol>
+        <li><strong>管理成员没有图标</strong>，其余四个按钮都是「图标 + 文字」，视觉节奏断一拍；</li>
+        <li>按钮底色与页面背景相同（bg-background），平贴在页面上，<em>「操作区」与「内容区」没有分层</em>；</li>
+        <li>hover 只有底色微变，没有浮起/边界反馈，<em>可点击感弱</em>。</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ============ 优化方案 ============ -->
+  <section class="panel">
+    <span class="panel-tag tag-new">AFTER · 方案</span>
+    <h2>优化后：统一「工具条按钮」</h2>
+    <p class="desc">五个按钮全部「图标 + 文字」；表面换成卡片色 + 发丝边框，天然浮在页面上；hover 上浮 2px + 暖色柔阴影 + 图标染 coral（复用现有 cta 主按钮的浮动语言，不引入新视觉）。</p>
+    <div class="ws-header">
+      <a class="backlink" href="#"><svg class="ic" style="width:14px;height:14px"><use href="#i-arrow-left"/></svg> 返回列表</a>
+      <div class="ws-row">
+        <span class="ws-name">acme-prod</span>
+        <span class="badge status mono">● 运行中</span>
+        <span class="badge secondary mono">扫描任务 · 4</span>
+        <span style="flex:1"></span>
+        <button class="btn-new icon-only" title="置顶"><svg class="ic"><use href="#i-pin"/></svg></button>
+        <button class="btn-new"><svg class="ic"><use href="#i-arrow-left-right"/></svg> 切换工作区</button>
+        <button class="btn-new"><svg class="ic"><use href="#i-users"/></svg> 管理成员</button>
+        <button class="btn-new"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库</button>
+        <button class="btn-new"><svg class="ic"><use href="#i-key-round"/></svg> 认证</button>
+        <button class="btn-new"><svg class="ic"><use href="#i-globe"/></svg> HOST</button>
+      </div>
+    </div>
+    <div class="notes">
+      <ul>
+        <li><strong>管理成员补 Users 图标</strong> —— 五个按钮同为「16px 图标 + 14px 文字」，等高 h-9、圆角 10px；</li>
+        <li>表面 <em>bg-card + 发丝边框 + 微落影</em>，与页面背景拉开一层，操作区自成一列；</li>
+        <li>hover <em>上浮 2px + 暖色柔阴影 + 图标染 coral</em>，按下落回 —— 与「新建扫描」cta 按钮同一套浮动语言；</li>
+        <li>置顶按钮同步该语言（icon-only 同尺寸），点亮的置顶态用 secondary 底色区分。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 细节拆解 ============ -->
+  <section class="panel">
+    <span class="panel-tag tag-new">DETAIL</span>
+    <h2>状态拆解与图标语义</h2>
+    <p class="desc">上排为静态展示的三态（实际页面里由 CSS 过渡衔接，150ms ease）；下排为每个按钮的图标语义。</p>
+    <div class="state-strip">
+      <div class="state-cell">
+        <button class="btn-new"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库</button>
+        <span class="lab">静止 · card 底 + 微落影</span>
+      </div>
+      <div class="state-cell">
+        <button class="btn-new is-hover"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库</button>
+        <span class="lab">悬停 · -2px + 柔阴影 + coral 图标</span>
+      </div>
+      <div class="state-cell">
+        <button class="btn-new is-active"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库</button>
+        <span class="lab">按下 · 落回 + 阴影收回</span>
+      </div>
+      <div class="state-cell">
+        <button class="btn-new is-hover icon-only" title="置顶"><svg class="ic"><use href="#i-pin"/></svg></button>
+        <span class="lab">icon-only（置顶）</span>
+      </div>
+    </div>
+    <div class="icon-grid">
+      <span class="icon-cell"><svg class="ic"><use href="#i-arrow-left-right"/></svg> 切换工作区 · 左右互换</span>
+      <span class="icon-cell"><svg class="ic"><use href="#i-users"/></svg> 管理成员 · 多人（新增）</span>
+      <span class="icon-cell"><svg class="ic"><use href="#i-folder-git-2"/></svg> 仓库 · 代码目录</span>
+      <span class="icon-cell"><svg class="ic"><use href="#i-key-round"/></svg> 认证 · 凭据密钥</span>
+      <span class="icon-cell"><svg class="ic"><use href="#i-globe"/></svg> HOST · 网络地址</span>
+      <span class="icon-cell"><svg class="ic"><use href="#i-pin"/></svg> 置顶 · 图钉</span>
+    </div>
+  </section>
+</div>
+
+<script>
+  var btn = document.getElementById("themeToggle");
+  btn.addEventListener("click", function () {
+    var el = document.documentElement;
+    var toLight = el.classList.contains("dark");
+    el.classList.remove("dark", "light");
+    el.classList.add(toLight ? "light" : "dark");
+    btn.textContent = toLight ? "切换深色 ☾" : "切换浅色 ☀";
+  });
+</script>
+</body>
+</html>
