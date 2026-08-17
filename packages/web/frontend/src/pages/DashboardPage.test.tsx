@@ -18,11 +18,11 @@ vi.mock("@/api/client", () => ({
 
 const mockScans = [
   { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 100, vuln_count: 1,
-    is_running: true, workspace: "ws-a", total_cost_usd: 0.1, progress_pct: 42 },
+    is_running: true, workspace: "ws-a", repo: "frontend", total_cost_usd: 0.1, progress_pct: 42 },
   { scan_id: "s2", scan_type: "whitebox", status: "completed", created_at: 200, vuln_count: 2,
-    is_running: false, workspace: "ws-b", total_cost_usd: 0.2, completed_at: Math.floor(Date.now() / 1000) },
+    is_running: false, workspace: "ws-b", repo: "backend", total_cost_usd: 0.2, completed_at: Math.floor(Date.now() / 1000) },
   { scan_id: "s3", scan_type: "whitebox", status: "failed", created_at: 300, vuln_count: 0,
-    is_running: false, workspace: "ws-b", total_cost_usd: 0.3 },
+    is_running: false, workspace: "ws-b", repo: "backend", total_cost_usd: 0.3 },
 ];
 const userUser = { id: 1, username: "alice", role: "user", must_change_password: false };
 const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
@@ -48,6 +48,8 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
     const num = await screen.findByTestId("dash-total-vulns");
     expect(num.textContent).toBe("3");
     expect(num.className).toMatch(/text-red/);
+    // context 行含仓库数：repo 标签去重（frontend+backend=2；s3 复用 backend 不重复计）
+    expect(screen.getByText("跨 3 次扫描 · 2 个仓库 · 2 个工作区 · 1 个进行中")).toBeInTheDocument();
     // 横幅运营指标四格（「运行中」也出现在 running 磁贴状态字 → 多元素用 getAllByText）
     expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
     expect(screen.getByText("今日完成")).toBeInTheDocument();

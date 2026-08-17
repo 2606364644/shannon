@@ -107,6 +107,8 @@ export function DashboardPage() {
   const totalCost = data.reduce((a, s) => a + (s.total_cost_usd ?? 0), 0);
   const currency = data.find((s) => s.cost_currency)?.cost_currency;
   const wsCount = new Set(data.map((s) => s.workspace).filter(Boolean)).size;
+  // 累计扫描仓库数：repo 标签去重（同一 repo 多次扫描/跨 ws 同名只计一；黑盒旧 session repo=None 不计）。
+  const repoCount = new Set(data.map((s) => s.repo).filter(Boolean)).size;
   const attention = data.filter((s) => !isRun(s)
     && !["completed", "done"].includes(s.status)).length;
   const composition = useMemo(() => vulnComposition(data), [data]);
@@ -212,6 +214,7 @@ export function DashboardPage() {
             <div className="font-mono text-[11.5px] text-muted-foreground">
               {t("dashboard.hero.context", {
                 scans: data.length.toLocaleString(),
+                repos: repoCount,
                 workspaces: wsCount,
                 live: running.length,
               })}
