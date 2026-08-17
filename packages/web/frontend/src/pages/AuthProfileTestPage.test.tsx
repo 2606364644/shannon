@@ -132,13 +132,13 @@ describe("AuthProfileTestPage", () => {
     expect(batchBody).toEqual({ cred_ids: ["c1", "c3"] });  // c2 被取消
   });
 
-  it("重载发现 running cred → 恢复（按钮显示测试中、不落空态）", async () => {
+  it("重载发现 running cred → 恢复（按钮变「停止测试」可用、不落空态）", async () => {
     currentProf = runningProf;
     renderPage();
     await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
-    // 恢复 effect 识别 running → setPolling + setTesting → 按钮变"测试中…"并 disabled。
-    // 核心：重载页面发现批次进行中不落空态、自动恢复轮询。
-    await waitFor(() => expect(screen.getByRole("button", { name: /测试中/ })).toBeDisabled());
+    // 恢复 effect 识别 running → setPolling + setTesting；wf id 取自 running cred 的
+    // verify_status.workflow_id → 按钮为「停止测试」且可点。核心：重载不落空态、自动恢复轮询。
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止测试" })).toBeEnabled());
   });
 
   it("渲染 HOST 解析入口（复用黑盒 HOST 能力：选 HOST 走代理、不选直连）", async () => {
@@ -196,5 +196,66 @@ describe("AuthProfileTestPage 失败提示（VerifyFailureNote）", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("登录失败：用户名或密码错误")).toBeInTheDocument());
     expect(screen.queryByText(/验证引擎调用失败/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AuthProfileTestPage 停止测试（auth-test-cancel）", () => {
+  // cancel-test 捕获（body.workflow_id 断言）
+  let cancelCalls = 0;
+  let cancelBody: unknown;
+  beforeEach(() => {
+    cancelCalls = 0; cancelBody = undefined;
+    server.use(
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/cancel-test", async ({ request }) => {
+        cancelCalls++;
+        cancelBody = await request.json();
+        return HttpResponse.json({ cancelled: "ok" });
+      }),
+    );
+  });
+
+  it("恢复 running 态 → 显示停止按钮；点停止 → POST cancel-test 用 running cred 的 workflow_id", async () => {
+    currentProf = runningProf;  // c1 running（wf=authval-batch-ws1-running1），batchWfId 为 null（恢复态）
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止测试" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "停止测试" }));
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    expect(cancelBody).toEqual({ workflow_id: "authval-batch-ws1-running1" });
+  });
+
+  it("发起后点停止 → 用 test-batch 返回的 workflow_id（batchWfId 优先于 profile）", async () => {
+    currentProf = prof;
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/3\/3/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "开始测试" }));
+    await waitFor(() => expect(batchCalls).toBe(1));
+    // 发起后按钮换"停止测试"（batchWfId 来自 test-batch response=authval-batch-ws1-abc，
+    // 而 profile 里 c1 unverified 无 wf——验证取的是 batchWfId）
+    const stop = await screen.findByRole("button", { name: "停止测试" });
+    await waitFor(() => expect(stop).toBeEnabled());
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    expect(cancelBody).toEqual({ workflow_id: "authval-batch-ws1-abc" });
+  });
+
+  it("停止成功 → 重拉 profile 落终态 → 轮询停、按钮回「开始测试」", async () => {
+    // 停止后后端已回填：c1 failed(cancelled)、其余 unverified → 批次结束
+    const cancelledProf: AuthProfile = {
+      ...runningProf,
+      credentials: [
+        { id: "c1", role: "admin", username: "admin",
+          verify_status: { state: "failed", failure_point: "cancelled", workflow_id: "authval-batch-ws1-running1" } },
+        { id: "c2", role: "user", username: "u1", verify_status: { state: "unverified" } },
+        { id: "c3", role: "guest", username: "g1", verify_status: { state: "unverified" } },
+      ],
+    };
+    currentProf = runningProf;
+    renderPage();
+    const stop = await screen.findByRole("button", { name: "停止测试" });
+    await waitFor(() => expect(stop).toBeEnabled());
+    currentProf = cancelledProf;   // 点停止后 msw 返回新终态
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "开始测试" })).toBeEnabled());
   });
 });

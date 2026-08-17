@@ -241,20 +241,12 @@ export const blackboxRunDeliverablesPath = (
 export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) =>
   `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/events`;
 
-// ── 组合扫描活跃段判定（spec 2026-08-14 进度两层粒度）────────────────────────
-// 白盒/组合预检段读任务根 events.ndjson；进入黑盒段（bb_phase ∈ running/终态）且选中了
-// run → 读 run 级 ndjson。LiveTab 与 ScanProgressOverview 共用此决策（单一事实来源）。
+// ── 组合扫描阶段判定（live 阶段徽章 / report ?run= 用；events 流已全量归并）──────
+// 2026-08-18 起 events 端点在后端按 ts 归并 认证/白盒/所有 run-K 为一条流，前端不再
+// 按段切 URL；本集合仅回答「当前处于哪个段」（徽章文案 / 查看报告带 ?run=）。
 const BLACKBOX_PHASES = new Set(["running", "completed", "failed", "skipped"]);
 
-export interface ActiveSegmentOpts {
-  ws: string;
-  scanId: string;
-  combined?: boolean | null;
-  bbPhase?: string | null;
-  selectedRun?: string | null;
-}
-
-/** 组合扫描是否已进入黑盒段（live 流应读 run 级 events）。 */
+/** 组合扫描是否已进入黑盒段（徽章/报告入口按 run 维度展示）。 */
 export function isBlackboxSegmentActive(opts: {
   combined?: boolean | null;
   bbPhase?: string | null;
@@ -264,13 +256,11 @@ export function isBlackboxSegmentActive(opts: {
   return combined === true && !!selectedRun && !!bbPhase && BLACKBOX_PHASES.has(bbPhase);
 }
 
-/** 算当前活跃段的 SSE events URL（组合黑盒段 + 选中 run → run 级；其余 → 任务根）。 */
-export function resolveActiveEventsUrl(opts: ActiveSegmentOpts): string {
-  const { ws, scanId, selectedRun } = opts;
-  return isBlackboxSegmentActive(opts) && selectedRun
-    ? blackboxRunEventsUrl(ws, scanId, selectedRun)
-    : scanEventsUrl(ws, scanId);
-}
+/** 全量归并流 SSE URL（认证/白盒/黑盒 run-K 按 ts 归并，单一事实来源）。
+ *  rev 仅用于强制重开流：服务端在「任务终态 + 全 run 终态 + 宽限」后关流，之后新增
+ *  run（续跑/叠加）靠 rev 变化换 URL 重连，重放部分由前端 id 去重吸收。 */
+export const mergedScanEventsUrl = (ws: string, scanId: string, rev?: number | string) =>
+  scanEventsUrl(ws, scanId) + (rev !== undefined ? `?rev=${rev}` : "");
 
 /** 删除单个 scan（删 scan 不删 ws，spec §5.1 DELETE）。 */
 export const deleteScan = (ws: string, scanId: string) =>

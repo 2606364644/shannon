@@ -2,7 +2,7 @@
 // 回看面板(DashboardPanel/LogStream)渲染依赖 react-window 虚拟列表, jsdom 下只验"不崩 + 被触发",
 // 不验像素布局(对齐 LogStream 注释约定)。核心断言落在页面自渲染的 header/状态/按钮上。
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -96,9 +96,10 @@ describe("VerifyProcessPage", () => {
     currentProf = runningProf;
     renderPage();
     await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
-    // 恢复 effect 识别 running → setTesting(true) 按钮 disable + setLiveRun 挂 VerifyLivePanel（重连 SSE）。
+    // 恢复 effect 识别 running → setTesting(true) + setLiveRun 挂 VerifyLivePanel（重连 SSE）；
+    // wf id 已知 → 按钮为「停止」且可点（auth-test-cancel 起不再显示禁用的登录中占位）。
     // 不显示空态"尚未测试登录"（核心 bug：测试进行中离开再回来不该落空态）。
-    await waitFor(() => expect(screen.getByRole("button", { name: /正在登录/ })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止" })).toBeEnabled());
     expect(screen.queryByText(/尚未测试登录/)).not.toBeInTheDocument();
     // 状态徽章显示「验证中…」
     expect(screen.getByText("验证中…")).toBeInTheDocument();
@@ -145,5 +146,61 @@ describe("VerifyProcessPage 失败提示（VerifyFailureNote）", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("登录失败：表单提交之外的问题")).toBeInTheDocument());
     expect(screen.queryByText(/验证引擎调用失败/)).not.toBeInTheDocument();
+  });
+});
+
+describe("VerifyProcessPage 停止测试（auth-test-cancel）", () => {
+  let cancelCalls = 0;
+  let cancelBody: unknown;
+  let testCalls = 0;
+  beforeEach(() => {
+    cancelCalls = 0; cancelBody = undefined; testCalls = 0;
+    server.use(
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/cancel-test", async ({ request }) => {
+        cancelCalls++;
+        cancelBody = await request.json();
+        return HttpResponse.json({ cancelled: "ok" });
+      }),
+      http.post("/api/workspaces/:ws/auth-profiles/:pid/credentials/:cid/test", () => {
+        testCalls++;
+        return HttpResponse.json({ workflow_id: "authval-ws1-newrun", probe_dir: "/p/probe-new" });
+      }),
+    );
+  });
+
+  it("恢复 running 态 → 显示停止按钮；点停止 → POST cancel-test 用该 cred 的 workflow_id", async () => {
+    currentProf = runningProf;  // running, wf=authval-ws1-probe-running1
+    renderPage();
+    const stop = await screen.findByRole("button", { name: "停止" });
+    await waitFor(() => expect(stop).toBeEnabled());
+    // 停止后后端已回填 failed/cancelled
+    currentProf = {
+      ...runningProf,
+      credentials: [{
+        id: "cred_a", role: "admin", username: "admin",
+        verify_status: {
+          state: "failed", failure_point: "cancelled", failure_detail: "用户取消测试",
+          workflow_id: "authval-ws1-probe-running1", probe_dir: "/p/probe-running1",
+        },
+      }],
+    };
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    expect(cancelBody).toEqual({ workflow_id: "authval-ws1-probe-running1" });
+    // 停止 → 退出 live 态（SSE 面板卸载）、按钮回「测试登录」
+    await waitFor(() => expect(screen.getByRole("button", { name: "测试登录" })).toBeEnabled());
+  });
+
+  it("发起单测后点停止 → 用 test 返回的 workflow_id", async () => {
+    currentProf = unverifiedProf;
+    renderPage("cred_b");
+    await waitFor(() => expect(screen.getByRole("button", { name: "测试登录" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "测试登录" }));
+    await waitFor(() => expect(testCalls).toBe(1));
+    const stop = await screen.findByRole("button", { name: "停止" });
+    await waitFor(() => expect(stop).toBeEnabled());
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    expect(cancelBody).toEqual({ workflow_id: "authval-ws1-newrun" });
   });
 });

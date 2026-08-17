@@ -432,6 +432,10 @@
       },
       "addRole": "+ Add role",
       "removeRole": "Remove role",
+      "changePassword": "Change",
+      "passwordSavedHint": "Password is stored encrypted and never echoed back; saving without changing keeps it",
+      "newPasswordPlaceholder": "New password",
+      "passwordUnset": "Not set",
       "selectAllRoles": "Select all",
       "deselectAllRoles": "Deselect all",
       "rolesSelected": "{{n}} / {{m}} roles selected; scan will validate with each role's credentials.",
@@ -747,13 +751,11 @@
       "fileLoadError": "File load failed: {{error}}",
       "emptyJson": "No data (normal empty)",
       "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
-      "loadingPreview": "Loading…",
-      "combined": {
-        "bucketWhitebox": "Whitebox",
-        "bucketBlackbox": "Blackbox",
-        "bucketCombined": "Combined",
-        "bucketEmpty": "(none)"
-      }
+      "backToAgg": "Back to vulnerability aggregation",
+      "loadAnyway": "Load anyway",
+      "truncated": "…Content too long; showing first {{size}} characters",
+      "unsupportedKind": "This file type cannot be previewed",
+      "copyContent": "Copy file content"
     },
     "logs": {
       "listLoadError": "Failed to load log file list",
@@ -844,7 +846,10 @@
   },
   "fileTree": {
     "empty": "(empty)",
-    "large": "(large)"
+    "large": "(large)",
+    "trackWhitebox": "Whitebox",
+    "trackBlackbox": "Blackbox",
+    "trackCombined": "Combined"
   },
   "wsConfig": {
     "title": "Workspace Config",
@@ -975,6 +980,7 @@
       "process": "Login process",
       "noLog": "No process log yet",
       "alreadyRunning": "Verification in progress, please wait…",
+      "stop": "Stop",
       "failure": {
         "username_or_password": {
           "title": "Login failed: wrong username or password",
@@ -1023,6 +1029,9 @@
       "selected": "{{n}}/{{m}} roles selected",
       "seeDetail": "View details",
       "allDone": "All done",
+      "stop": "Stop test",
+      "stopFailed": "Failed to stop test",
+      "stopped": "Test stopped",
       "runningHint": "Verifying {{role}}·{{user}}…"
     },
     "createFailed": "Create failed",

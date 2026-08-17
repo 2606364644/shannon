@@ -90,28 +90,28 @@ describe("LiveTab", () => {
   });
 });
 
-describe("LiveTab 组合扫描按段切流", () => {
-  it("无 context（非组合/单测直挂）→ 任务根 events，无阶段徽章", () => {
+describe("LiveTab 全量归并流（单流，不切段）", () => {
+  it("无 context（非组合/单测直挂）→ 归并流 URL 无 rev，无阶段徽章", () => {
     renderLive();
     expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events");
     expect(screen.queryByTestId("live-phase-badge")).not.toBeInTheDocument();
   });
 
-  it("组合 bbPhase=running + selectedRun → run 级 events + 黑盒阶段徽章", () => {
-    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-1" });
-    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/blackbox-runs/run-1/events");
+  it("组合 bbPhase=running + selectedRun → 仍归并流（带 rev），黑盒阶段徽章", () => {
+    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-1", runsCount: 1 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=1");
     expect(screen.getByTestId("live-phase-badge")).toHaveTextContent("黑盒 · run-1");
   });
 
-  it("组合 bbPhase=precheck（白盒/预检段）→ 任务根 events + 白盒阶段徽章", () => {
-    renderLiveCtx({ combined: true, bbPhase: "precheck", selectedRun: "run-1" });
-    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events");
-    expect(screen.getByTestId("live-phase-badge")).toHaveTextContent("白盒阶段");
+  it("runsCount 变化 → rev 变化（强制重开流：关流后新增 run 仍可续看）", () => {
+    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-2", runsCount: 2 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=2");
   });
 
-  it("组合 bbPhase=completed → 仍读选中 run（看历史 run 日志）", () => {
-    renderLiveCtx({ combined: true, bbPhase: "completed", selectedRun: "run-2" });
-    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/blackbox-runs/run-2/events");
+  it("组合 bbPhase=precheck（认证/白盒段）→ 归并流 + 白盒阶段徽章", () => {
+    renderLiveCtx({ combined: true, bbPhase: "precheck", selectedRun: "run-1", runsCount: 1 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=1");
+    expect(screen.getByTestId("live-phase-badge")).toHaveTextContent("白盒阶段");
   });
 
   it("黑盒段 scan_end completed → 查看报告跳选中 run 的报告（?run=）", () => {

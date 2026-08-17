@@ -327,8 +327,7 @@ export default function ScanDetail() {
       >
         {!loading && meta && (
           <ScanProgressOverview
-            ws={workspace!} scanId={scanId!}
-            combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
+            ws={workspace!} scanId={scanId!} runsCount={runs.length}
             onScanEnd={() => load()}
           />
         )}
@@ -342,7 +341,7 @@ export default function ScanDetail() {
           </div>
         </Tabs>
       </div>
-      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj }} /></ErrorBoundary></div>
+      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj, combined: meta?.combined ?? null, bbPhase: meta?.bb_phase ?? null, runsCount: runs.length }} /></ErrorBoundary></div>
 
       {/* 加黑盒确认 Dialog（空 body = 无认证直连；后续可扩认证/HOST 选择） */}
       <Dialog open={addBbOpen} onOpenChange={setAddBbOpen}>

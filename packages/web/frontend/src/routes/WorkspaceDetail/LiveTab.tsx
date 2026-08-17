@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEventSource } from "../../api/useEventSource";
-import { isBlackboxSegmentActive, resolveActiveEventsUrl } from "../../api/client";
+import { isBlackboxSegmentActive, mergedScanEventsUrl } from "../../api/client";
 import type { ScanEndEvent } from "../../api/types";
 import { LogStream } from "../../components/LogStream";
 import { Button } from "@/components/ui/button";
@@ -27,30 +27,34 @@ interface LiveTabCtx {
   selectedRun?: string | null;
   combined?: boolean | null;
   bbPhase?: string | null;
+  /** bb_runs 数量：变化即换 rev 重开流（服务端关流后新增 run 仍能续看实时日志）。 */
+  runsCount?: number | null;
 }
 
 /**
- * live tab：实时日志流（LogStream）+ 连接态徽章 + 结束态提示。
+ * live tab：实时日志流（LogStream）+ 连接态徽章 + 阶段徽章 + 结束态提示。
  *
  * 实时「当前阶段 / 步级 / 正在跑的 Agent」在详情页顶部 ScanProgressOverview（全 tab 常驻），
  * 本 tab 聚焦实时日志流（spec 进度两层粒度 · 详情页）。瘦身后移除了 DashboardPanel 及其
  * 时钟/getScan 逻辑（耗时/花费在 overview tab 的 metrics）。
  *
- * 组合扫描按段切流（与 ScanProgressOverview 同一 resolveActiveEventsUrl 决策）：白盒/
- * 预检段读任务根 events；bb_phase 进入黑盒段后切选中 run 的 run 级 events。useEventSource
- * 换 URL 不清 events state，白盒日志保留在页面上、黑盒日志接着追加。切段时机由 ScanDetail
- * 的非终态 meta 轮询驱动（白盒收尾只写 PhaseEvent、无 scan_end 可依托）。
+ * 单一归并流：后端把 认证(authcheck)/白盒(任务根)/黑盒(所有 run-K) 按 ts 归并为一条
+ * SSE（任意时刻打开/刷新都是全量日志，Last-Event-ID 按源断点续传）。wb 的 scan_end 由
+ * 后端扣到「全 run 终态」后才作为流末条发出，因此此处见 scan_end 即真终态。rev（run 数）
+ * 变化换 URL 重开流，续跑/叠加新 run 的日志继续可看。
  */
 export default function LiveTab() {
   const { t } = useTranslation();
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const navigate = useNavigate();
-  // 无 Outlet 父级（单测直挂）时 context 为 null——兜底空对象退回任务根流。
+  // 无 Outlet 父级（单测直挂）时 context 为 null——兜底空对象退回归并流（无 rev）。
   const ctx = useOutletContext<LiveTabCtx | null>() ?? {};
   const seg = { combined: ctx.combined ?? null, bbPhase: ctx.bbPhase ?? null, selectedRun: ctx.selectedRun ?? null };
   const inBlackboxSegment = isBlackboxSegmentActive(seg);
   const { events, status } = useEventSource(
-    workspace && scanId ? resolveActiveEventsUrl({ ws: workspace, scanId, ...seg }) : "",
+    workspace && scanId
+      ? mergedScanEventsUrl(workspace, scanId, ctx.runsCount ?? undefined)
+      : "",
   );
 
   // scan_end 真实信号是 events 出现 scan_end 事件（status==="closed" 既能是 scan_end 也能是初始未连接，不可靠）

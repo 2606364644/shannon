@@ -13,9 +13,9 @@ const files: DeliverablesFile[] = [
 describe("FileTree", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
   afterEach(() => i18n.changeLanguage("zh"));
-  it("渲染嵌套目录 + 文件", () => {
+  it("渲染嵌套目录 + 文件（track 目录显示友好名）", () => {
     render(<FileTree files={files} onSelect={() => {}} />);
-    expect(screen.getByText("whitebox")).toBeInTheDocument();
+    expect(screen.getByText("白盒")).toBeInTheDocument();
     expect(screen.getByText("comprehensive_report.md")).toBeInTheDocument();
   });
   it("点击文件回调", () => {
@@ -50,7 +50,7 @@ describe("FileTree", () => {
   });
   it("目录展开/收起切换", () => {
     render(<FileTree files={files} onSelect={() => {}} />);
-    const toggle = screen.getByRole("button", { name: /whitebox/ });
+    const toggle = screen.getByRole("button", { name: /白盒/ });
     // 默认 depth<1 展开，子文件可见
     expect(screen.getByText("comprehensive_report.md")).toBeInTheDocument();
     fireEvent.click(toggle);
@@ -133,6 +133,36 @@ describe("FileTree", () => {
     );
     expect(row).toBeDefined();
     expect(row!.textContent).toContain("大");
+  });
+
+  it("组合扫描三 track 目录各显示友好名（黑盒/融合），非 track 目录保留原名", () => {
+    render(
+      <FileTree
+        files={[
+          { path: "whitebox/a.md", size: 1, kind: "md" },
+          { path: "blackbox/b.json", size: 1, kind: "other_json" },
+          { path: "combined/c.md", size: 1, kind: "md" },
+          { path: "agents/d.log", size: 1, kind: "other" },
+        ]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("白盒")).toBeInTheDocument();
+    expect(screen.getByText("黑盒")).toBeInTheDocument();
+    expect(screen.getByText("融合")).toBeInTheDocument();
+    // 非 track 目录（agents）不受友好名映射影响
+    expect(screen.getByRole("button", { name: /^agents$/ })).toBeInTheDocument();
+  });
+
+  it("selectedPath 命中文件行高亮（aria-current），未命中行无", () => {
+    render(
+      <FileTree files={files} onSelect={() => {}} selectedPath="whitebox/comprehensive_report.md" />,
+    );
+    const selected = screen.getByRole("button", { name: /comprehensive_report\.md/ });
+    expect(selected).toHaveAttribute("aria-current", "true");
+    expect(selected.className).toContain("bg-accent");
+    const other = screen.getByRole("button", { name: /ssrf_exploitation_queue\.json/ });
+    expect(other).not.toHaveAttribute("aria-current");
   });
 
   describe("i18n", () => {

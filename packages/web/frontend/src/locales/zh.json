@@ -432,6 +432,10 @@
       },
       "addRole": "+ 添加角色",
       "removeRole": "删除该角色",
+      "changePassword": "修改",
+      "passwordSavedHint": "密码已加密保存，不会回显；不点「修改」直接保存即保持原值",
+      "newPasswordPlaceholder": "输入新密码",
+      "passwordUnset": "未设置",
       "selectAllRoles": "全选",
       "deselectAllRoles": "取消全选",
       "rolesSelected": "已选 {{n}} / {{m}} 个角色，扫描将以各角色凭据分别验证。",
@@ -747,13 +751,11 @@
       "fileLoadError": "文件加载失败：{{error}}",
       "emptyJson": "无数据（常态空）",
       "bigJson": "⚠ 文件过大（{{size}} 字节），请在产物目录查看",
-      "loadingPreview": "加载…",
-      "combined": {
-        "bucketWhitebox": "白盒产物",
-        "bucketBlackbox": "黑盒产物",
-        "bucketCombined": "融合产物",
-        "bucketEmpty": "（无）"
-      }
+      "backToAgg": "返回漏洞聚合",
+      "loadAnyway": "仍要加载",
+      "truncated": "…内容过长，仅显示前 {{size}} 字符",
+      "unsupportedKind": "该文件类型不支持在线预览",
+      "copyContent": "复制文件内容"
     },
     "logs": {
       "listLoadError": "加载日志文件列表失败",
@@ -844,7 +846,10 @@
   },
   "fileTree": {
     "empty": "（空）",
-    "large": "（大）"
+    "large": "（大）",
+    "trackWhitebox": "白盒",
+    "trackBlackbox": "黑盒",
+    "trackCombined": "融合"
   },
   "wsConfig": {
     "title": "工作区配置",
@@ -975,6 +980,7 @@
       "process": "登录过程",
       "noLog": "暂无过程记录",
       "alreadyRunning": "正在验证中，请稍候…",
+      "stop": "停止",
       "failure": {
         "username_or_password": {
           "title": "登录失败：用户名或密码错误",
@@ -1023,6 +1029,9 @@
       "selected": "已选 {{n}}/{{m}} 个角色",
       "seeDetail": "看详情",
       "allDone": "全部测完",
+      "stop": "停止测试",
+      "stopFailed": "停止测试失败",
+      "stopped": "已停止测试",
       "runningHint": "正在验证 {{role}}·{{user}}…"
     },
     "createFailed": "新建失败",

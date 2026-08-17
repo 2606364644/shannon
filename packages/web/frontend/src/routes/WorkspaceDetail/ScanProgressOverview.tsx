@@ -6,12 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { resolveActiveEventsUrl } from "@/api/client";
+import { mergedScanEventsUrl } from "@/api/client";
 import { useEventSource } from "@/api/useEventSource";
 import { dashboardReducer, emptyState, type DashboardState } from "@/state/dashboardReducer";
-
-// 活跃段 URL 决策已下沉 api/client.ts（LiveTab 复用同一逻辑）；re-export 保住既有 import 路径。
-export { resolveActiveEventsUrl };
 
 /**
  * 详情页进度概览（spec 2026-08-14 进度两层粒度 · 详情页细粒度）。
@@ -20,9 +17,10 @@ export { resolveActiveEventsUrl };
  * 当前阶段 + 分段迷你进度条（每步一段，悬停看步骤名/intent）+ 进度计数 + 运行中
  * Agent 芯片（悬停看在调什么工具）+ 连接态；完整步级列表与 Agent 详情收进 chevron
  * Popover 浮层（悬浮不挤压布局——logs/live 是定高 flex 链，平铺列表会吃掉日志区）。
- * 建单条 SSE（按段切换 eventsUrl：组合黑盒段读 run 级 ndjson，其余读任务根），events 经
- * dashboardReducer fold 成 DashboardState（1:1 复刻 core）。精简于 DashboardPanel
- * （不含耗时/花费指标——那些在 overview tab 的 metrics）。
+ * 建单条 SSE（全量归并流：认证/白盒/黑盒 run-K 按 ts 归并，与 LiveTab 同 URL 共享
+ * 同一 store），events 经 dashboardReducer fold 成 DashboardState（1:1 复刻 core；
+ * 各段 phase 依时序覆盖，「当前阶段」即最新段）。精简于 DashboardPanel（不含耗时/
+ * 花费指标——那些在 overview tab 的 metrics）。
  */
 
 // 连接态徽章（复用 live tab 的 status key）。
@@ -75,19 +73,18 @@ function ProgressCounts({
 export interface ScanProgressOverviewProps {
   ws: string;
   scanId: string;
-  combined?: boolean | null;
-  bbPhase?: string | null;
-  selectedRun?: string | null;
+  /** bb_runs 数量：变化即换 rev 重开流（与 LiveTab 的 rev 同源，URL 一致共享 store）。 */
+  runsCount?: number;
   /** events 流出现 scan_end 时回调一次（ScanDetail 用于重拉 meta——失败横幅/状态徽章
    *  随失败实时出现，不必等用户刷新）。复用本组件已有 SSE，不再开第三条连接。 */
   onScanEnd?: () => void;
 }
 
 export function ScanProgressOverview({
-  ws, scanId, combined, bbPhase, selectedRun, onScanEnd,
+  ws, scanId, runsCount, onScanEnd,
 }: ScanProgressOverviewProps): ReactElement {
   const { t } = useTranslation();
-  const eventsUrl = resolveActiveEventsUrl({ ws, scanId, combined, bbPhase, selectedRun });
+  const eventsUrl = mergedScanEventsUrl(ws, scanId, runsCount);
   const { events, status } = useEventSource(eventsUrl);
   const state = useMemo(() => events.reduce(dashboardReducer, emptyState()), [events]);
   // 同一 eventsUrl 只通知一次（切换 run 换 URL 后重新通知）；历史回放里的 scan_end 也会

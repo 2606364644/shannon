@@ -34,12 +34,14 @@ export function AuthProfileDialog({ ws, open, onOpenChange, onSaved, editing }: 
   const [loginUrl, setLoginUrl] = useState(editing?.login_url ?? "");
   const [loginType, setLoginType] = useState<LoginType>(editing?.login_type ?? "form");
   const [loginFlow, setLoginFlow] = useState((editing?.login_flow ?? []).join("\n"));
-  // 多角色凭据草稿：编辑态加载全量 credentials（password 留空=保留原值，不回显脱敏密文）；
+  // 多角色凭据草稿：编辑态加载全量 credentials——password 不回显（后端只给脱敏 "••••"），
+  // 由脱敏值推出 hasPassword，CredentialRows 显示「•••• + 修改」，留空/不动 = 保留原密文；
   // 新建态一行默认 admin。
   const [drafts, setDrafts] = useState<CredentialDraft[]>(() => {
     if (editing && editing.credentials.length) {
       return editing.credentials.map((c) => ({
         id: c.id, role: c.role, username: c.username, password: "",
+        hasPassword: !!c.password,
       }));
     }
     return [{ role: "admin", username: "", password: "" }];

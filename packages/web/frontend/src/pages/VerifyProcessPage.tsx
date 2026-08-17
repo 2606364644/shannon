@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
-import { getAuthProfile, testCredential, getVerifyStatus, getVerifyLog } from "@/api/authProfiles";
+import { ArrowLeft, Loader2, Square } from "lucide-react";
+import { getAuthProfile, testCredential, getVerifyStatus, getVerifyLog, cancelTest } from "@/api/authProfiles";
 import { apiErrorMessage, providerIncompleteMissing } from "@/lib/apiError";
 import type { AuthProfileCredential, NdjsonEvent, VerifyState } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,8 @@ export function VerifyProcessPage() {
   const wfId = vs?.workflow_id;
   const pd = vs?.probe_dir;
   const hasHistory = !!(wfId && pd);
+  // 停止目标 workflow：live 态用本次 run 的 id；恢复态（重进页面）用 profile 里的 id。
+  const stopWfId = liveRun?.workflowId ?? wfId ?? null;
 
   // 回看: 无 liveRun + 有历史 run → 拉 verify-log 持久化日志（最近一次完整过程）
   useEffect(() => {
@@ -113,6 +115,21 @@ export function VerifyProcessPage() {
         ? t("authProfiles.verify.providerMissing")
         : apiErrorMessage(e, t("authProfiles.verify.failed")));
       setTesting(false);
+    }
+  }
+
+  // 停止单次测试登录（auth-test-cancel）：后端回填 failed/cancelled + handle.cancel()。
+  // 取消不会产生 scan_end（finalize 不跑）→ 不等 onComplete，主动卸载 SSE 面板 + 重拉落终态。
+  async function onStop() {
+    if (!workspace || !pid || !stopWfId) return;
+    try {
+      await cancelTest(workspace, pid, stopWfId);
+      toast.success(t("authProfiles.testPage.stopped"));
+      setTesting(false);
+      setLiveRun(null);
+      setRefreshTick((n) => n + 1);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, t("authProfiles.testPage.stopFailed")));
     }
   }
 
@@ -167,11 +184,20 @@ export function VerifyProcessPage() {
                   )}
                 </div>
               </div>
-              <Button variant="cta" onClick={onTest} disabled={testing} className="shrink-0">
-                {testing
-                  ? <><Loader2 className="size-4 animate-spin" /> {t("authProfiles.testing")}</>
-                  : t("authProfiles.test")}
-              </Button>
+              {/* testing（wf id 已知）→ 停止按钮；wf id 未就绪/瞬态 → 登录中占位 */}
+              {testing && stopWfId ? (
+                <Button variant="destructive" onClick={onStop} className="shrink-0">
+                  <Square className="size-3.5" /> {t("authProfiles.verify.stop")}
+                </Button>
+              ) : testing ? (
+                <Button variant="cta" disabled className="shrink-0">
+                  <Loader2 className="size-4 animate-spin" /> {t("authProfiles.testing")}
+                </Button>
+              ) : (
+                <Button variant="cta" onClick={onTest} disabled={testing} className="shrink-0">
+                  {t("authProfiles.test")}
+                </Button>
+              )}
             </div>
             {st === "failed" && (vs?.failure_point || vs?.failure_detail) && (
               <div className="mt-3">

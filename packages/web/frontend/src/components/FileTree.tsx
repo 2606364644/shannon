@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDown, ChevronRight, File, FileJson, FileText, Folder } from "lucide-react";
 import type { DeliverablesFile } from "../api/types";
 
 interface TreeNode {
@@ -24,18 +25,34 @@ function buildTree(files: DeliverablesFile[]): TreeNode {
   return root;
 }
 
+// 顶层 track 目录 → 本地化友好名（组合扫描三桶语义融入一棵树）；其余目录显示原名。
+const TRACK_LABEL_KEYS: Record<string, string> = {
+  whitebox: "fileTree.trackWhitebox",
+  blackbox: "fileTree.trackBlackbox",
+  combined: "fileTree.trackCombined",
+};
+
+function fileIcon(kind: DeliverablesFile["kind"]) {
+  const cls = "size-3.5 shrink-0 text-muted-foreground";
+  if (kind === "md") return <FileText className={cls} aria-hidden />;
+  if (kind === "other") return <File className={cls} aria-hidden />;
+  return <FileJson className={cls} aria-hidden />;
+}
+
 export function FileTree({
   files,
   onSelect,
+  selectedPath,
 }: {
   files: DeliverablesFile[];
   onSelect: (f: DeliverablesFile) => void;
+  selectedPath?: string | null;
 }) {
   const root = buildTree(files);
   return (
     <ul className="list-none p-0 text-sm">
       {Array.from(root.children.values()).map((n) => (
-        <NodeView key={n.path} node={n} depth={0} onSelect={onSelect} />
+        <NodeView key={n.path} node={n} depth={0} onSelect={onSelect} selectedPath={selectedPath ?? null} />
       ))}
     </ul>
   );
@@ -45,34 +62,43 @@ function NodeView({
   node,
   depth,
   onSelect,
+  selectedPath,
 }: {
   node: TreeNode;
   depth: number;
   onSelect: (f: DeliverablesFile) => void;
+  selectedPath: string | null;
 }) {
   const [open, setOpen] = useState(depth < 1);
   const { t } = useTranslation();
   const isDir = node.children.size > 0;
+  const selected = !isDir && selectedPath === node.path;
+  const trackLabelKey = depth === 0 && isDir ? TRACK_LABEL_KEYS[node.name] : undefined;
   return (
     <li>
       <div style={{ paddingLeft: depth * 14 }} className="py-px">
         {isDir ? (
           <button
-            className="flex items-center gap-1 bg-transparent p-0 font-inherit text-foreground hover:text-primary"
+            className="flex w-full items-center gap-1 bg-transparent p-0 font-inherit text-foreground hover:text-primary"
             aria-expanded={open}
             onClick={() => setOpen((o) => !o)}
           >
-            <span className="text-muted-foreground" aria-hidden>{open ? "▾" : "▸"}</span>
-            <span aria-hidden>📂</span>
-            <span>{node.name}</span>
+            <span className="text-muted-foreground" aria-hidden>
+              {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </span>
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="truncate">{trackLabelKey ? t(trackLabelKey) : node.name}</span>
           </button>
         ) : (
           <button
-            className="flex items-center gap-1 bg-transparent p-0 text-left font-mono hover:text-primary"
+            className={`flex w-full items-center gap-1 rounded-sm p-0 text-left font-mono hover:text-primary ${
+              selected ? "bg-accent text-accent-foreground" : "bg-transparent"
+            }`}
+            aria-current={selected ? "true" : undefined}
             onClick={() => onSelect(node.file!)}
           >
-            <span aria-hidden>📄</span>
-            <span>{node.name}</span>
+            {fileIcon(node.file!.kind)}
+            <span className="truncate">{node.name}</span>
             {node.file?.kind === "empty_json" && <span className="text-xs text-muted-foreground">{t("fileTree.empty")}</span>}
             {node.file?.kind === "big_json" && <span className="text-xs text-muted-foreground">{t("fileTree.large")}</span>}
           </button>
@@ -80,7 +106,7 @@ function NodeView({
       </div>
       {isDir && open && Array.from(node.children.values()).map((c) => (
         <ul key={c.path} className="list-none p-0">
-          <NodeView node={c} depth={depth + 1} onSelect={onSelect} />
+          <NodeView node={c} depth={depth + 1} onSelect={onSelect} selectedPath={selectedPath} />
         </ul>
       ))}
     </li>

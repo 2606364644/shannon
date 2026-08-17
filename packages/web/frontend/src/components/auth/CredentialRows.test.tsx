@@ -97,3 +97,59 @@ describe("CredentialRows", () => {
     expect(screen.queryByRole("button", { name: /删除该角色/ })).toBeNull();
   });
 });
+
+describe("CredentialRows 编辑态密码（hasPassword 折叠交互）", () => {
+  const saved: CredentialDraft[] = [
+    { id: "cred_1", role: "admin", username: "a", password: "", hasPassword: true },
+  ];
+
+  it("已存密码：不渲染密码输入框，显示 •••• 与「修改」按钮", () => {
+    render(<CredentialRows value={saved} onChange={() => {}} allowMulti />);
+    expect(screen.queryByLabelText("密码")).toBeNull();
+    expect(screen.getByText("••••")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "修改" })).toBeInTheDocument();
+  });
+
+  it("点「修改」→ onChange 置 pwEditing；展开后占位「输入新密码」+「取消」", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<CredentialRows value={saved} onChange={onChange} allowMulti />);
+    fireEvent.click(screen.getByRole("button", { name: "修改" }));
+    expect(onChange).toHaveBeenCalledWith([{ ...saved[0], pwEditing: true }]);
+    // 受控组件：rerender 模拟父级回填展开态
+    const expanded: CredentialDraft[] = [{ ...saved[0], pwEditing: true }];
+    rerender(<CredentialRows value={expanded} onChange={onChange} allowMulti />);
+    const pw = screen.getByLabelText("密码") as HTMLInputElement;
+    expect(pw.placeholder).toBe("输入新密码");
+    expect(pw.value).toBe("");
+    expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
+    fireEvent.change(pw, { target: { value: "newpw" } });
+    expect(onChange).toHaveBeenCalledWith([{ ...saved[0], pwEditing: true, password: "newpw" }]);
+  });
+
+  it("展开后点「取消」→ 收回输入框并清空已输入（回到 •••• 折叠态）", () => {
+    const onChange = vi.fn();
+    const typed: CredentialDraft[] = [{ ...saved[0], pwEditing: true, password: "newpw" }];
+    const { rerender } = render(<CredentialRows value={typed} onChange={onChange} allowMulti />);
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(onChange).toHaveBeenCalledWith([{ ...saved[0], pwEditing: false, password: "" }]);
+    rerender(<CredentialRows value={saved} onChange={() => {}} allowMulti />);
+    expect(screen.queryByLabelText("密码")).toBeNull();
+    expect(screen.getByRole("button", { name: "修改" })).toBeInTheDocument();
+  });
+
+  it("编辑行从未存过密码（hasPassword 缺省）：正常输入框，占位「未设置」且无取消按钮", () => {
+    const unset: CredentialDraft[] = [{ id: "cred_2", role: "user", username: "u", password: "" }];
+    render(<CredentialRows value={unset} onChange={() => {}} allowMulti />);
+    const pw = screen.getByLabelText("密码") as HTMLInputElement;
+    expect(pw.placeholder).toBe("未设置");
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
+
+  it("新建行（无 id 无 hasPassword）：输入框无占位无取消——扫描页/新建不受影响", () => {
+    render(<CredentialRows value={one} onChange={() => {}} allowMulti />);
+    const pw = screen.getByLabelText("密码") as HTMLInputElement;
+    expect(pw.value).toBe("pw");
+    expect(pw.placeholder).toBe("");
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
+});
