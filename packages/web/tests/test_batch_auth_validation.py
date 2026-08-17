@@ -418,11 +418,16 @@ async def test_watcher_survives_transient_query_error_while_running(tmp_path):
 
 @pytest.mark.asyncio
 async def test_watcher_marks_failed_when_result_raises(tmp_path):
-    """describe=COMPLETED 但 result() 抛（workflow 带失败终态收尾）→ 未回填 cred 全记
-    failed/out_of_band，不留 running。"""
+    """describe 终态 但 result() 抛（workflow 失败终态收尾）→ 当前仍 running 的 cred 记
+    failed/out_of_band（failure_detail 带底层错误），不留 running。
+    （2026-08-17 auth-test-cancel 起未开始的 cred 不再连带标 failed，另见
+    test_watcher_backfill_abnormal_terminal_marks_only_running_creds。）"""
     from temporalio.client import WorkflowExecutionStatus
+    from supernova_web.components.auth_profile_store import VerifyStatus
     store = _multi_store(tmp_path)
     probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
     mgr = _mgr(tmp_path, store)
     client, _ = _mock_recovery_client(
         desc_status=_desc(WorkflowExecutionStatus.COMPLETED),
@@ -437,6 +442,67 @@ async def test_watcher_marks_failed_when_result_raises(tmp_path):
     assert vs.state == "failed"
     assert vs.failure_point == "out_of_band"
     assert "workflow execution failed" in (vs.failure_detail or "")
+
+
+# ---- 取消/崩溃等非 COMPLETED 终态的回填语义（2026-08-17 auth-test-cancel）----
+# 未开始（unverified）的 cred 不该被连带标 failed：没测 ≠ 失败。回填只写 store 中当前仍
+# running 的 cred；未开始的仅删 scan-config（密码卫生，对齐 reap_stale_probes 启动期清理）。
+
+
+@pytest.mark.asyncio
+async def test_watcher_backfill_abnormal_terminal_marks_only_running_creds(tmp_path):
+    """非 COMPLETED 终态（取消/崩溃，result() 抛）→ 只回填当前仍 running 的 cred
+    （failed/out_of_band），未开始（unverified）的保持 unverified；两者 scan-config 都删
+    （密码卫生），events.ndjson 保留供回看。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    probe_b = _prep_probe(tmp_path, "cred_b")
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, _ = _mock_recovery_client(
+        desc_status=_desc(WorkflowExecutionStatus.CANCELED),
+        result=Exception("workflow cancelled"))
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(asyncio, "sleep", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr._watch_batch_progress(
+            "ws1", "prof_1", "authval-batch-ws1-x",
+            {"cred_a": {"probe_dir": str(probe_a)}, "cred_b": {"probe_dir": str(probe_b)}})
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "failed"       # 在跑的 → failed
+    assert by_id["cred_a"].verify_status.failure_point == "out_of_band"
+    assert by_id["cred_b"].verify_status.state == "unverified"   # 未开始的 → 不动
+    # 密码卫生：两个 probe 的 scan-config 都删，events 保留
+    assert not (probe_a / "scan-config.yaml").exists()
+    assert (probe_a / "events.ndjson").exists()
+    assert not (probe_b / "scan-config.yaml").exists()
+    assert (probe_b / "events.ndjson").exists()
+
+
+@pytest.mark.asyncio
+async def test_watcher_backfill_abnormal_terminal_skips_already_terminal_creds(tmp_path):
+    """已终态（success/failed，watcher 正常轮询已回填）的 cred 不被异常终态回填覆盖——
+    幂等：谁先到谁写，后到者不重写。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="success", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, _ = _mock_recovery_client(
+        desc_status=_desc(WorkflowExecutionStatus.CANCELED),
+        result=Exception("workflow cancelled"))
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(asyncio, "sleep", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr._watch_batch_progress(
+            "ws1", "prof_1", "authval-batch-ws1-x", {"cred_a": {"probe_dir": str(probe_a)}})
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "success"  # 不被覆盖成 failed
 
 
 @pytest.mark.asyncio
@@ -595,3 +661,136 @@ async def test_start_auth_validation_no_host_empty_mappings(tmp_path):
         await mgr.start_auth_validation("ws1", "prof_1", "cred_a")
     sent_input = client.start_workflow.call_args.args[1]
     assert sent_input.host_mappings == {}
+
+
+# ---------------------------------------------------------------------------
+# 用户停止认证测试 cancel_auth_validation（2026-08-17 auth-test-cancel spec §3）
+# 顺序：先回填状态后 cancel workflow（Temporal 不可达也不卡 running）。
+# unverified cred 不动（其残留 scan-config 由 watcher 终态回填时清理——probe_dir 不在 store）。
+# ---------------------------------------------------------------------------
+
+
+def _mock_cancel_client():
+    """Client.connect → client；get_workflow_handle → handle（cancel AsyncMock 可断言）。"""
+    handle = MagicMock()
+    handle.cancel = AsyncMock()
+    client = MagicMock()
+    client.get_workflow_handle = MagicMock(return_value=handle)
+    return client, handle
+
+
+@pytest.mark.asyncio
+async def test_cancel_marks_running_cred_failed_and_cancels_workflow(tmp_path):
+    """停止：绑此 wf 且 running 的 cred → failed/cancelled + 删 scan-config（保留 events）；
+    unverified 的兄弟不动；handle.cancel() 被调。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_cancel_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        result = await mgr.cancel_auth_validation("ws1", "prof_1", "authval-batch-ws1-x")
+    assert result == {"cancelled": "authval-batch-ws1-x"}
+    handle.cancel.assert_awaited_once()
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    vs = by_id["cred_a"].verify_status
+    assert vs.state == "failed"
+    assert vs.failure_point == "cancelled"
+    assert vs.last_verified_at is not None
+    assert not (probe_a / "scan-config.yaml").exists()   # 密码卫生
+    assert (probe_a / "events.ndjson").exists()          # 过程证据保留
+    assert by_id["cred_b"].verify_status.state == "unverified"  # 未开始的不动
+
+
+@pytest.mark.asyncio
+async def test_cancel_supports_single_cred_workflow_prefix(tmp_path):
+    """单 cred 测试（authval-{ws}- 前缀）同走取消——同一端点覆盖两个页面。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-ws1-y"))
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_cancel_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        result = await mgr.cancel_auth_validation("ws1", "prof_1", "authval-ws1-y")
+    assert result["cancelled"] == "authval-ws1-y"
+    handle.cancel.assert_awaited_once()
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejects_out_of_bounds_workflow_id(tmp_path):
+    """前缀越界（他 ws / 任意串）→ ValueError，不写状态不调 cancel。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_cancel_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        with pytest.raises(ValueError, match="越界"):
+            await mgr.cancel_auth_validation("ws1", "prof_1", "authval-batch-ws2-x")
+        with pytest.raises(ValueError, match="越界"):
+            await mgr.cancel_auth_validation("ws1", "prof_1", "scan-ws1-evil")
+    handle.cancel.assert_not_awaited()
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "running"  # 状态不动
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejects_workflow_not_bound_to_profile(tmp_path):
+    """前缀合法但未绑该档案任何 cred → ValueError（防取消同 ws 其他档案的测试）。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_cancel_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        with pytest.raises(ValueError, match="未绑定"):
+            await mgr.cancel_auth_validation("ws1", "prof_1", "authval-batch-ws1-other")
+    handle.cancel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_idempotent_when_no_running_cred(tmp_path):
+    """无 running（已结束）→ 幂等返 already_finished=True，不再调 handle.cancel。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="failed", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_cancel_client()
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        result = await mgr.cancel_auth_validation("ws1", "prof_1", "authval-batch-ws1-x")
+    assert result["already_finished"] is True
+    handle.cancel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_finalizes_state_even_when_temporal_unreachable(tmp_path):
+    """Temporal 连不上 → 状态仍回填（先写状态后 cancel），异常吞掉不抛（best-effort）。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="running", probe_dir=str(probe_a), workflow_id="authval-batch-ws1-x"))
+    mgr = _mgr(tmp_path, store)
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(side_effect=Exception("temporal down"))
+        result = await mgr.cancel_auth_validation("ws1", "prof_1", "authval-batch-ws1-x")
+    assert result["cancelled"] == "authval-batch-ws1-x"
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "failed"  # 不卡 running

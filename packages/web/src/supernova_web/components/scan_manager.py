@@ -523,7 +523,7 @@ class ScanManager:
             子集模式与全角色模式共用：调用方负责筛 creds 子集（子集）或传全量（全角色）。
             primary = 首个 low（无 low 回落首个，兜底防全 high 时无 primary）。
             """
-            from supernova_core.utils.authz_identity import derive_privilege_tier
+            from supernova_core.utils.authz_identity import derive_privilege_tier, slugify_account_id
             # high_priv_names 硬编码（plan 作者认可简化；env 化推迟）。
             high_priv_names = ["admin"]
 
@@ -536,6 +536,7 @@ class ScanManager:
                 raise ValueError(f"认证档案无凭据: {req.auth_profile_id}")
             primary_auth = credential_to_authentication(profile, primary)
             accounts = []
+            used_ids: set[str] = set()
             for c in creds:
                 if c.id == primary.id:
                     continue
@@ -543,7 +544,8 @@ class ScanManager:
                 if getattr(c, "totp_secret", None):
                     creds_d["totp_secret"] = c.totp_secret
                 accounts.append({
-                    "id": c.id,
+                    # 存量凭据 ID 含下划线（cred_xxx），须清洗成 core 认可的 slug
+                    "id": slugify_account_id(c.id, used_ids),
                     "role": c.role,
                     "tier": _tier_of(c),
                     "credentials": creds_d,
@@ -596,26 +598,16 @@ class ScanManager:
             # inline 多角色（2026-08-07）：auth_accounts 非空 → 展开 accounts[]（id=角色 slug 去重、
             # tier=derive_privilege_tier、totp_secret 透传）。形状对齐 profile 模式 _expand_multi_identity。
             if req.auth_accounts:
-                from supernova_core.utils.authz_identity import derive_privilege_tier
+                from supernova_core.utils.authz_identity import derive_privilege_tier, slugify_account_id
                 used_ids: set[str] = set()
                 accounts = []
                 for acc in req.auth_accounts:
                     role = (acc.get("role") or "").strip() or "role"
-                    base = "".join(ch if ch.isalnum() else "-" for ch in role.lower())
-                    while "--" in base:
-                        base = base.replace("--", "-")
-                    base = base.strip("-") or "role"
-                    slug = base
-                    n = 2
-                    while slug in used_ids:
-                        slug = f"{base}-{n}"
-                        n += 1
-                    used_ids.add(slug)
                     creds = {"username": acc.get("username", ""), "password": acc.get("password", "")}
                     if acc.get("totp_secret"):
                         creds["totp_secret"] = acc["totp_secret"]
                     accounts.append({
-                        "id": slug,
+                        "id": slugify_account_id(role, used_ids),
                         "role": role,
                         "tier": derive_privilege_tier(role, ["admin"]),
                         "credentials": creds,
@@ -1062,16 +1054,23 @@ class ScanManager:
                                           allowed_parent: Path, backfilled: set[str]) -> None:
         """workflow 终态后从 result() 回填(query 观测不到最后 cred 的终态,见 watcher 注释)。
 
-        result=per-cred dict list;result() 抛(FAILED 等非 COMPLETED 终态)→ 未回填 cred 全记
-        failed/out_of_band,不留 running。幂等:backfilled 记录已回填 cred 不重写。"""
-        from .auth_profile_store import VerifyStatus
+        result=per-cred dict list;result() 抛(FAILED/CANCELED 等非 COMPLETED 终态)→ 无 per-cred
+        结果可依:只把 store 中当前仍 running 的 cred 标 failed/out_of_band;unverified(从未开始,
+        没测≠失败)与已终态(幂等不覆盖)不写状态,仅删其 scan-config(密码卫生,对齐
+        reap_stale_probes 启动期清理)。幂等:backfilled 记录已回填 cred 不重写。"""
         try:
             raw = await handle.result()
         except Exception as e:
             raw = None
             fail_detail = f"{type(e).__name__}: {e}"
+        profile = self._auth_profile_store.get(ws, profile_id) if self._auth_profile_store else None
+        states = {c.id: c.verify_status.state for c in profile.credentials} if profile else {}
         for cred_id, entry in cred_probe_map.items():
             if cred_id in backfilled:
+                continue
+            if raw is None and states.get(cred_id) != "running":
+                # 异常终态(取消/崩溃)且该 cred 不在跑:未开始或已终态 → 状态不动,只删明文配置
+                self._delete_probe_scan_config(entry["probe_dir"], allowed_parent)
                 continue
             item = next(
                 (r for r in raw if isinstance(r, dict) and r.get("cred_id") == cred_id), None) \
@@ -1083,6 +1082,67 @@ class ScanManager:
             self._apply_batch_cred_terminal(
                 ws, profile_id, cred_id, item, entry["probe_dir"], workflow_id, allowed_parent)
             backfilled.add(cred_id)
+
+    def _delete_probe_scan_config(self, probe_dir: str, allowed_parent: Path) -> None:
+        """删 probe 的明文 scan-config.yaml(密码卫生,保留 events.ndjson)。越界 probe_dir 不动。"""
+        resolved = Path(probe_dir).resolve()
+        if not resolved.is_relative_to(allowed_parent):
+            return  # 越界守护(防任意路径删除)
+        cfg = resolved / "scan-config.yaml"
+        if cfg.exists():
+            try:
+                cfg.unlink()
+            except OSError:
+                pass
+
+    async def cancel_auth_validation(self, ws: str, profile_id: str,
+                                     workflow_id: str) -> dict:
+        """用户停止认证测试(批量/单 cred 通用,auth-test-cancel spec §3)。
+
+        顺序:先回填状态后 cancel(Temporal 不可达也不卡 running)。
+        1) 守护:workflow_id 须 authval-{ws}-/authval-batch-{ws}- 前缀且绑该档案某 cred;
+        2) 绑此 wf 且 running 的 cred → failed/cancelled + 删 scan-config(保留 events);
+           unverified 不动(没测≠失败;其残留 scan-config 由 watcher 终态回填时清理——
+           probe_dir 不在 store,只有 running 过的 cred 才写);
+        3) handle.cancel() best-effort(吞异常)。无 running → 幂等 already_finished,不 cancel。"""
+        from .auth_profile_store import VerifyStatus
+        if self._auth_profile_store is None:
+            raise RuntimeError("auth_profile_store 未注入，无法取消认证验证")
+        if not workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
+            raise ValueError(
+                f"workflow_id 越界(必须以 authval-{ws}- 或 authval-batch-{ws}- 开头): {workflow_id}")
+        profile = self._auth_profile_store.get(ws, profile_id)
+        if profile is None:
+            raise ValueError(f"认证档案不存在: {profile_id}")
+        bound = [c for c in profile.credentials
+                 if c.verify_status.workflow_id == workflow_id]
+        if not bound:
+            raise ValueError(f"workflow 未绑定该档案任何凭据: {workflow_id}")
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        running = [c for c in bound if c.verify_status.state == "running"]
+        for cred in running:
+            if cred.verify_status.probe_dir:
+                self._apply_batch_cred_terminal(
+                    ws, profile_id, cred.id,
+                    {"cred_id": cred.id, "state": "failed", "failure_point": "cancelled",
+                     "failure_detail": "用户取消测试"},
+                    cred.verify_status.probe_dir, workflow_id, allowed_parent)
+            else:  # 无 probe_dir(防御):直接写状态,无配置可删
+                self._auth_profile_store.set_verify_status(
+                    ws, profile_id, cred.id,
+                    VerifyStatus(state="failed", failure_point="cancelled",
+                                 failure_detail="用户取消测试",
+                                 last_verified_at=datetime.now(timezone.utc).isoformat(),
+                                 workflow_id=workflow_id))
+        if not running:
+            return {"cancelled": workflow_id, "already_finished": True}
+        try:
+            client = await Client.connect(self._temporal_address())
+            await client.get_workflow_handle(workflow_id).cancel()
+        except Exception:
+            _log.warning("auth validation cancel %s: temporal 取消失败(best-effort,状态已回填)",
+                         workflow_id, exc_info=True)
+        return {"cancelled": workflow_id}
 
     def _iter_ws_names(self) -> list[str]:
         """workspaces/ 下用户 ws 名(跳点目录/文件;.system 档案只读 seed,无验证生命周期)。"""
@@ -1677,6 +1737,36 @@ class ScanManager:
         port = int(os.environ.get("SUPERNOVA_TEMPORAL_PORT", "7233"))
         return f"{host}:{port}"
 
+    async def _await_workflow_result(self, handle: Any,
+                                     attempts: int = 5,
+                                     backoff_base: float = 2.0) -> Any:
+        """await workflow 终态，对长轮询瞬态 RPC 错误重取 handle 续等。
+
+        temporalio 的 handle.result() 走 GetWorkflowExecutionHistory 长轮询，core 对
+        UserLongPoll 每次 poll 有 70s 硬 gRPC 超时且 DeadlineExceeded 不重试（对比
+        TaskLongPoll 放行）——一次网络抖动即抛 "context deadline exceeded"，曾致组合
+        扫描黑盒 run 被误标 failed（workflow 服务端仍在跑，NodeGoat-20260817-132940）。
+        DEADLINE_EXCEEDED / UNAVAILABLE 视为瞬态：退避后重取 handle 继续 result()（新
+        handle 从头拉 history 再续等，语义无损）。其余错误（含 WorkflowFailureError，
+        非 RPCError）原样上抛。"""
+        from temporalio.service import RPCError, RPCStatusCode
+        workflow_id = handle.id
+        for attempt in range(attempts):
+            try:
+                return await handle.result()
+            except RPCError as exc:
+                transient = exc.status in (
+                    RPCStatusCode.DEADLINE_EXCEEDED, RPCStatusCode.UNAVAILABLE)
+                if not transient or attempt == attempts - 1:
+                    raise
+                _log.warning(
+                    "workflow %s result() 瞬态 RPC 错误(%s)，第 %d/%d 次重试",
+                    workflow_id, exc.status.name, attempt + 2, attempts)
+                await asyncio.sleep(backoff_base ** attempt)
+                client = await Client.connect(self._temporal_address())
+                handle = client.get_workflow_handle(workflow_id)
+        raise AssertionError("unreachable")
+
     async def _check_temporal(self) -> None:
         import socket
 
@@ -2014,7 +2104,7 @@ class ScanManager:
         run_id: str | None = None
         final_status = "completed"
         try:
-            wb_result = await wb_handle.result()
+            wb_result = await self._await_workflow_result(wb_handle)
             # 白盒正常返回 status=failed（部分 agent 失败，workflow 未 raise）：停止接力，不建黑盒 run。
             # 防御 dict/dataclass 访问（照搬 :1044-1046 范式；真实 PipelineState 字段为 errors(list)/
             # error_code，测试 mock 用 error 键）。raise 路径（workflow 级崩溃）仍由下方 except 兜底。
@@ -2070,7 +2160,7 @@ class ScanManager:
         """
         final_status = "completed"
         try:
-            await bb_handle.result()
+            await self._await_workflow_result(bb_handle)
             await self._generate_combined_report(scan_dir, run_id)
             await self._mark_run(scan_dir, run_id, "completed", status="completed")
         except Exception as exc:
@@ -2152,7 +2242,7 @@ class ScanManager:
             config_path=str(scan_config) if scan_config.exists() else None,
             host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
         await self._mark_run(scan_dir, run_id, "running", status="running")
-        bb_result = await bb_handle.result()
+        bb_result = await self._await_workflow_result(bb_handle)
         # 黑盒 workflow 正常返回 status=failed（未 raise）：不生成融合报告，run 标
         # failed（融合报告仅成功路径产出 → combined/run-K/；raise 路径由编排层
         # except 兜底）。

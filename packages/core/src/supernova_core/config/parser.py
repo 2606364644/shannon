@@ -16,6 +16,7 @@ from supernova_core.models.config import (
     VulnClass,
 )
 from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.utils.authz_identity import ACCOUNT_ID_RE
 
 DANGEROUS_PATTERNS: list[re.Pattern] = [
     re.compile(r"\.\./"),
@@ -24,8 +25,6 @@ DANGEROUS_PATTERNS: list[re.Pattern] = [
     re.compile(r"data:", re.IGNORECASE),
     re.compile(r"file:", re.IGNORECASE),
 ]
-
-_ACCOUNT_ID_RE = re.compile(r"^[a-z0-9-]+$")
 
 def _check_dangerous_patterns(value: str, field: str) -> None:
     for pattern in DANGEROUS_PATTERNS:
@@ -62,7 +61,7 @@ def _validate_accounts(config: Config) -> None:
             error_code=ErrorCode.CONFIG_VALIDATION_FAILED,
         )
     for i, acct in enumerate(config.accounts):
-        if not _ACCOUNT_ID_RE.match(acct.id):
+        if not ACCOUNT_ID_RE.match(acct.id):
             raise PentestError(
                 f"accounts[{i}].id '{acct.id}' must match ^[a-z0-9-]+$",
                 "config",
