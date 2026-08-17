@@ -11,8 +11,11 @@ import pytest
 
 @pytest.fixture
 def _authed_cookies(app_with_ws, monkeypatch):
-    """返 (app, cookies) 供 ASGITransport 用（canonical admin，注入 session cookie）。"""
+    """返 (app, cookies) 供 ASGITransport 用（canonical admin，注入 session cookie）。
+
+    归并流 wb scan_end 扣发宽限调小：SSE 测试等关流信号，默认 10s 会撞 httpx timeout。"""
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SUPERNOVA_EVENTS_CLOSE_GRACE_SECONDS", "0.1")
     app = app_with_ws
     store = app.state.auth_store
     if store.get_user_by_username("admin") is None:
