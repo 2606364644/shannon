@@ -835,8 +835,16 @@ class ScanManager:
         cred = next((c for c in profile.credentials if c.id == cred_id), None)
         if cred is None:
             raise ValueError(f"角色凭据不存在: {cred_id}")
+        # 完整 provider 配置（base_url+key+模型）穿线——与黑盒/白盒扫描提交一致。
+        # 仅传 api_key 会让 base_url/模型回落 worker env profile，key 与端点来自两套
+        # 配置时 LLM 401（2026-08-17 NodeGoat 探针根因）。
+        # 测试登录不降级（2026-08-17 决策）：工作区模型配置缺失/错误 → 直接抛（API 层
+        # 转 422 provider_incomplete 指引去工作区设置）——没有可用模型就驱动不了登录
+        # agent。原 except→None env 兜底会静默换一套 LLM 跑，掩盖配置问题。
+        # 解析放在删旧 probe/写新 probe 之前：失败时不留明文 scan-config.yaml、不破坏回看产物。
+        provider_config = self._resolve_provider_config(ws)
         # 块3c：覆盖清理——同 (profile,cred) 上次验证留的旧 probe（VerifyStatus.probe_dir）删掉，
-        # 防 auth-probes/ 无限堆积（每次验证一个 probe-<uuid8>）。越界守护：只删 auth-probes 下的
+        # 防 auth-probes/ 无限堆积（每次验证一个 probe-<uuid8>）。越界守护：只删 auth-probes/ 下的
         # （VerifyStatus 若被污染指向任意路径，不删——容器以 root 跑，防任意路径删除）。
         if cred.verify_status.probe_dir:
             import shutil
@@ -855,14 +863,6 @@ class ScanManager:
             encoding="utf-8",
         )
         client = await Client.connect(self._temporal_address())
-        # 完整 provider 配置（base_url+key+模型）穿线——与黑盒/白盒扫描提交一致。
-        # 仅传 api_key 会让 base_url/模型回落 worker env profile，key 与端点来自两套
-        # 配置时 LLM 401（2026-08-17 NodeGoat 探针根因）。解析失败（配置不完整）→
-        # None 降级 env 兜底（原 api_key 语义），探针不因 provider 配置异常阻塞。
-        try:
-            provider_config = self._resolve_provider_config(ws)
-        except Exception:
-            provider_config = None
         # HOST 档案：选中 → mappings（单 cred workflow 据此起 host proxy）；都不传 → {} 直连。
         host_mappings = self._host_config_mappings(
             await self._resolve_host_config_sources(host_profile_id, host_url, ws))
@@ -931,6 +931,10 @@ class ScanManager:
             selected = list(profile.credentials)
         if not selected:
             raise ValueError("未选择任何角色凭据")
+        # 同单 cred 探针：完整 provider 配置穿线；测试登录不降级（2026-08-17 决策）——
+        # 工作区模型配置缺失/错误 → 直接抛（API 层转 422 provider_incomplete），不 env 兜底。
+        # 解析放在删旧 probe/写新 probe 之前：失败时不留明文 scan-config.yaml、不破坏回看产物。
+        provider_config = self._resolve_provider_config(ws)
         # 各 cred 覆盖清旧 probe + 建 probe_dir + 写 scan-config.yaml(role 不入 YAML)
         # HOST 档案：选中 → mappings（每个 cred item 同值，batch workflow 据此起 per-cred
         # host proxy）；都不传 → {} 直连。解析一次复用到所有 item（同一不可变快照）。
@@ -963,11 +967,6 @@ class ScanManager:
                 host_mappings=host_mappings,
             ))
             cred_probe_map[cred.id] = {"probe_dir": str(probe_dir)}
-        # 同单 cred 探针：完整 provider 配置穿线；解析失败 → None 降级 env 兜底。
-        try:
-            provider_config = self._resolve_provider_config(ws)
-        except Exception:
-            provider_config = None
         inp = BlackboxAuthValidationBatchInput(
             items=items,
             api_key=provider_config.get("api_key") if provider_config else None,

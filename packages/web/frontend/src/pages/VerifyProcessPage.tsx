@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { getAuthProfile, testCredential, getVerifyStatus, getVerifyLog } from "@/api/authProfiles";
-import { apiErrorMessage } from "@/lib/apiError";
+import { apiErrorMessage, providerIncompleteMissing } from "@/lib/apiError";
 import type { AuthProfileCredential, NdjsonEvent, VerifyState } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -108,7 +108,10 @@ export function VerifyProcessPage() {
       const { workflow_id, probe_dir } = await testCredential(workspace, pid, cid);
       setLiveRun({ workflowId: workflow_id, probeDir: probe_dir, runKey: Date.now() });
     } catch (e) {
-      toast.error(apiErrorMessage(e, t("authProfiles.verify.failed")));
+      // 工作区模型配置缺失/错误（测试登录不降级）→ 指引去工作区设置，而非通用失败文案。
+      toast.error(providerIncompleteMissing(e)
+        ? t("authProfiles.verify.providerMissing")
+        : apiErrorMessage(e, t("authProfiles.verify.failed")));
       setTesting(false);
     }
   }

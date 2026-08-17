@@ -27,9 +27,11 @@ def _multi_store(tmp_path):
 
 
 def _mgr(tmp_path, store):
+    # ws_config_store 不传（None → _resolve_provider_config 走全局 env 兜底构造，
+    # 测试关注 batch 编排而非 provider 解析——不降级行为另有专测）。
     return ScanManager(
         workspaces_dir=tmp_path, repos_dir=tmp_path / "repos", config_store=MagicMock(),
-        max_concurrent=1, scan_timeout=0.0, ws_config_store=MagicMock(),
+        max_concurrent=1, scan_timeout=0.0,
         auth_profile_store=store,
     )
 
@@ -81,6 +83,39 @@ async def test_start_batch_subset_only_selected_creds(tmp_path):
     assert "admin" in bodies and "guest" in bodies and "user1" not in bodies
     sent_input = client.start_workflow.call_args.args[1]
     assert [it.cred_id for it in sent_input.items] == ["cred_a", "cred_c"]
+
+
+@pytest.mark.asyncio
+async def test_start_batch_provider_incomplete_no_degrade(tmp_path):
+    """测试登录不降级（2026-08-17）：工作区模型配置缺失/错误 → 直接抛 ProviderConfigIncomplete，
+    不 env 兜底、不起 batch workflow、不删旧 probe、不写任何明文 scan-config.yaml。"""
+    from supernova_web.components.auth_profile_store import VerifyStatus
+    from supernova_web.components.ws_config_store import ProviderConfigIncomplete
+
+    store = _multi_store(tmp_path)
+    old_probe = tmp_path / "ws1" / "auth-probes" / "probe-old"
+    old_probe.mkdir(parents=True)
+    (old_probe / "events.ndjson").write_text('{"old":1}', "utf-8")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="failed", probe_dir=str(old_probe), workflow_id="authval-batch-ws1-old"))
+    mgr = _mgr(tmp_path, store)
+    client, _ = _patch_client()
+
+    def _raise(ws):
+        raise ProviderConfigIncomplete(["SUPERNOVA_OPENAI_API_KEY"])
+
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(mgr, "_resolve_provider_config", side_effect=_raise), \
+         patch.object(mgr, "_watch_batch_progress", new=AsyncMock()) as watch:
+        ClientCls.connect = AsyncMock(return_value=client)
+        with pytest.raises(ProviderConfigIncomplete):
+            await mgr.start_batch_auth_validation("ws1", "prof_1", None)
+
+    client.start_workflow.assert_not_awaited(), "配置错误时不应起 batch workflow"
+    assert not watch.called, "配置错误时不应起 watcher"
+    assert old_probe.exists(), "配置错误时不应删旧 probe"
+    assert not list((tmp_path / "ws1" / "auth-probes").glob("probe-*/scan-config.yaml")), \
+        "配置错误时不应写任何明文 scan-config.yaml"
 
 
 @pytest.mark.asyncio

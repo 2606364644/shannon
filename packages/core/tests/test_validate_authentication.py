@@ -143,6 +143,62 @@ async def test_cleanup_auth_state_removes_all_identity_files(tmp_path):
 # --- validate_authentication integration tests ---
 
 @pytest.mark.asyncio
+async def test_auth_validation_config_parse_failure_returns_config_failure(tmp_path):
+    """parse_config/distribute_config 抛错（非法 YAML/校验失败）→ 失败(config)，绝不 success。
+
+    2026-08-17 真机 bug：原实现 except Exception → success=True，probe scan-config.yaml
+    任何解析失败都让「测试登录」2ms 秒过显示已认证（浏览器根本没登录）。锁死该回归。"""
+    mock_pm = MagicMock()
+    mock_executor = MagicMock()
+
+    cfg = tmp_path / "scan-config.yaml"
+    cfg.write_text("authentication: 42\n", encoding="utf-8")
+
+    result = await validate_authentication(
+        web_url="https://example.com",
+        config_path=str(cfg),
+        workspace_path=str(tmp_path),
+        prompt_manager=mock_pm,
+        executor=mock_executor,
+    )
+
+    assert result.success is False
+    assert result.failure_point == "config"
+    assert result.failure_detail and "parse failed" in result.failure_detail
+    mock_executor.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_invalid_browser_engine_env_returns_config_failure(tmp_path, monkeypatch):
+    """worker env 注入非法 SUPERNOVA_BROWSER_ENGINE → Config 校验失败 → 失败(config)。
+
+    真机触发面：parse_config 把 env 值写进 raw（BrowserEngineType 只接受
+    playwright/agent-browser），env 填错值即抛 PentestError——不能被吞成 success。"""
+    mock_pm = MagicMock()
+    mock_executor = MagicMock()
+
+    cfg = tmp_path / "scan-config.yaml"
+    cfg.write_text(
+        "authentication:\n  login_type: form\n  login_url: https://example.com/l\n"
+        "  credentials:\n    username: u\n    password: p\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "chrome")
+
+    result = await validate_authentication(
+        web_url="https://example.com",
+        config_path=str(cfg),
+        workspace_path=str(tmp_path),
+        prompt_manager=mock_pm,
+        executor=mock_executor,
+    )
+
+    assert result.success is False
+    assert result.failure_point == "config"
+    mock_executor.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_auth_validation_no_config():
     """When config_path is None, skip validation and return success."""
     mock_pm = MagicMock()

@@ -15,3 +15,19 @@ export function apiErrorMessage(e: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+/** 422 detail 为 {code:"provider_incomplete", missing:[...]}（工作区模型配置缺失/错误；
+ *  /api/scan 与认证「测试登录」共用契约）→ 返回 missing 字段列表，否则 null。
+ *  调用方据此展示「前往工作区设置补全 LLM 配置」指引，而非通用失败文案。 */
+export function providerIncompleteMissing(e: unknown): string[] | null {
+  if (!(e instanceof ApiError)) return null;
+  const detail = (e.body as { detail?: unknown } | null | undefined)?.detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const d = detail as { code?: unknown; missing?: unknown };
+    if (d.code === "provider_incomplete" && Array.isArray(d.missing)) {
+      const missing = d.missing.filter((m): m is string => typeof m === "string");
+      if (missing.length > 0) return missing;
+    }
+  }
+  return null;
+}

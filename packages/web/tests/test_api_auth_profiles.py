@@ -148,6 +148,37 @@ async def test_test_batch_endpoint_value_error_is_422(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_test_endpoint_provider_incomplete_is_structured_422(tmp_path):
+    """测试登录不降级(2026-08-17)：工作区模型配置缺失 → 422 code=provider_incomplete
+    (对齐 /api/scan 契约,前端显示「前往工作区设置补全 LLM 凭据」)。"""
+    from supernova_web.components.ws_config_store import ProviderConfigIncomplete
+
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.start_auth_validation = AsyncMock(
+        side_effect=ProviderConfigIncomplete(["SUPERNOVA_OPENAI_API_KEY"]))
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/credentials/cred_1/test")
+    assert r.status_code == 422
+    assert r.json()["detail"] == {
+        "code": "provider_incomplete", "missing": ["SUPERNOVA_OPENAI_API_KEY"]}
+
+
+@pytest.mark.asyncio
+async def test_test_batch_endpoint_provider_incomplete_is_structured_422(tmp_path):
+    """批量测试登录同样不降级：工作区模型配置缺失 → 422 code=provider_incomplete。"""
+    from supernova_web.components.ws_config_store import ProviderConfigIncomplete
+
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.start_batch_auth_validation = AsyncMock(
+        side_effect=ProviderConfigIncomplete(["SUPERNOVA_OPENAI_API_KEY"]))
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/test-batch", json={})
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "provider_incomplete"
+    assert r.json()["detail"]["missing"] == ["SUPERNOVA_OPENAI_API_KEY"]
+
+
+@pytest.mark.asyncio
 async def test_test_endpoint_threads_host_profile_id(tmp_path):
     """POST test?host_profile_id=... → start_auth_validation 透传 host_profile_id（query 参数）。"""
     c, store = _client(tmp_path)

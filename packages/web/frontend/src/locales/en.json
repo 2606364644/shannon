@@ -995,8 +995,13 @@
           "title": "Validation finished without a verdict",
           "hint": "The agent completed the login flow but produced no structured verdict (abnormal model output). Check the process log or retry."
         },
+        "config": {
+          "title": "Auth config failed to parse (login never started)",
+          "hint": "The auth config for this verification failed validation, so the browser never started logging in. Check the profile's login type, credential fields and login steps, or expand the technical details."
+        },
         "detailLabel": "Technical details"
-      }
+      },
+      "providerMissing": "Workspace model (LLM) config is missing or invalid, so login cannot be tested. Complete it in Workspace Settings → LLM config first, then retry."
     },
     "loadFailed": "Load failed",
     "process": {

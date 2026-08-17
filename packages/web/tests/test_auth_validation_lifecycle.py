@@ -21,10 +21,12 @@ def _store(tmp_path):
 
 
 def _mgr(tmp_path, store):
-    # 最小构造:scan_manager 只用到 _workspaces_dir / auth_profile_store / _temporal_address
+    # 最小构造:scan_manager 只用到 _workspaces_dir / auth_profile_store / _temporal_address。
+    # ws_config_store 不传（None → _resolve_provider_config 走全局 env 兜底构造，
+    # 测试关注探针生命周期而非 provider 解析——不降级行为另有专测）。
     return ScanManager(
         workspaces_dir=tmp_path, repos_dir=tmp_path / "repos", config_store=MagicMock(),
-        max_concurrent=1, scan_timeout=0.0, ws_config_store=MagicMock(),
+        max_concurrent=1, scan_timeout=0.0,
         auth_profile_store=store,
     )
 
@@ -77,6 +79,38 @@ async def test_start_auth_validation_cleans_previous_probe(tmp_path):
     # 只剩新 probe（新 probe-<uuid8>）
     new_probes = [p for p in (tmp_path / "ws1" / "auth-probes").iterdir() if p.is_dir()]
     assert len(new_probes) == 1, "应只剩新 probe（旧的已清）"
+
+
+@pytest.mark.asyncio
+async def test_start_auth_validation_provider_incomplete_no_degrade(tmp_path):
+    """测试登录不降级（2026-08-17）：工作区模型配置缺失/错误 → 直接抛 ProviderConfigIncomplete，
+    不 env 兜底、不起 workflow、不删旧 probe、不写明文 scan-config.yaml。"""
+    from supernova_web.components.ws_config_store import ProviderConfigIncomplete
+
+    store = _store(tmp_path)
+    old_probe = tmp_path / "ws1" / "auth-probes" / "probe-old"
+    old_probe.mkdir(parents=True)
+    (old_probe / "events.ndjson").write_text('{"old":1}', "utf-8")
+    store.set_verify_status("ws1", "prof_1", "cred_a", VerifyStatus(
+        state="failed", probe_dir=str(old_probe), workflow_id="authval-ws1-probe-old"))
+    mgr = _mgr(tmp_path, store)
+
+    def _raise(ws):
+        raise ProviderConfigIncomplete(["SUPERNOVA_OPENAI_API_KEY"])
+
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(mgr, "_resolve_provider_config", side_effect=_raise):
+        ClientCls.connect = AsyncMock()
+        with pytest.raises(ProviderConfigIncomplete):
+            await mgr.start_auth_validation("ws1", "prof_1", "cred_a")
+
+    ClientCls.connect.assert_not_awaited(), "配置错误时不应连 Temporal 起 workflow"
+    assert old_probe.exists(), "配置错误时不应删旧 probe（回看产物保留）"
+    assert not list(old_probe.parent.glob("probe-*/scan-config.yaml")), \
+        "配置错误时不应写明文 scan-config.yaml"
+    cred = store.read("ws1")[0].credentials[0]
+    assert cred.verify_status.workflow_id == "authval-ws1-probe-old", \
+        "verify_status 不应被改写"
 
 
 @pytest.mark.asyncio

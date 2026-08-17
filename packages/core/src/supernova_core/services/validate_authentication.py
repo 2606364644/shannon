@@ -38,6 +38,8 @@ class AuthValidationResult:
     # "username_or_password" | "totp_secret" | "out_of_band" (LLM-facing enum values)
     # | "no_verdict" (internal-only: agent ran but produced no structured verdict —
     # provider anomaly, not a deterministic login rejection)
+    # | "config" (internal-only: auth config parse/validation failed — never ran)
+    # | "engine" (internal-only, classified by callers: LLM engine failure)
     failure_point: str | None = None
     failure_detail: str | None = None
 
@@ -200,8 +202,16 @@ async def validate_authentication(
         from supernova_core.config.parser import parse_config, distribute_config
         config = parse_config(config_path)
         dist_config = distribute_config(config)
-    except Exception:
-        return AuthValidationResult(success=True)
+    except Exception as e:
+        # 认证配置解析失败 ≠ 验证通过。原实现吞异常返 success=True，probe scan-config.yaml
+        # 任何校验失败（非法枚举/env 注入的非法 browser_engine/危险字符/超长 login_flow）
+        # 都让「测试登录」2ms 秒过显示已认证（2026-08-17 真机复现）。解析失败时浏览器根本
+        # 没登录，成功会让扫描带着未认证会话静默跑完。分类 config 让前端指向配置排查。
+        return AuthValidationResult(
+            success=False,
+            failure_point="config",
+            failure_detail=f"auth config parse failed: {type(e).__name__}: {e}",
+        )
 
     if not dist_config.authentication:
         return AuthValidationResult(success=True)

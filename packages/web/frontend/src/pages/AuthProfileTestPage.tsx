@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { getAuthProfile, testBatch } from "@/api/authProfiles";
-import { apiErrorMessage } from "@/lib/apiError";
+import { apiErrorMessage, providerIncompleteMissing } from "@/lib/apiError";
 import type { AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -155,7 +155,10 @@ export function AuthProfileTestPage() {
       setPolling(true);
       setRefreshTick((n) => n + 1);  // 立即重拉（拿首 cred running）
     } catch (e) {
-      toast.error(apiErrorMessage(e, t("authProfiles.verify.failed")));
+      // 工作区模型配置缺失/错误（测试登录不降级）→ 指引去工作区设置，而非通用失败文案。
+      toast.error(providerIncompleteMissing(e)
+        ? t("authProfiles.verify.providerMissing")
+        : apiErrorMessage(e, t("authProfiles.verify.failed")));
       setTesting(false);
     }
   }
